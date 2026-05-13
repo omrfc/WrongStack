@@ -1,0 +1,55 @@
+# Source — only dist/ ships
+src/
+tests/
+test/
+__tests__/
+*.test.ts
+*.test.js
+*.spec.ts
+*.spec.js
+
+# Build / tooling config
+tsconfig*.json
+tsup.config.ts
+tsup.config.js
+tsup.config.mjs
+vitest.config.ts
+vitest.config.js
+.eslintrc*
+.biome*
+biome.json
+
+# CI / repo metadata
+.github/
+.gitignore
+.gitattributes
+.editorconfig
+
+# Coverage and caches
+coverage/
+.nyc_output/
+.turbo/
+.cache/
+.tsbuildinfo
+*.tsbuildinfo
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs and env
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env
+.env.*
+
+# Local notes
+TODO.md
+NOTES.md
+SCRATCH.md
