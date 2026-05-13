@@ -305,15 +305,16 @@ export async function main(argv: string[]): Promise<number> {
         // Otherwise honor the cancel by keeping the config defaults.
       } else {
         // Persist as the new default so next launch pre-selects this pair.
-        // Read-before-mutate so we can tell whether anything actually
+        // Read-before-replace so we can tell whether anything actually
         // changed — re-saving the same pair every launch is just noise.
         const prevProvider = config.provider;
         const prevModel = config.model;
-        // Apply the selection to the mutable config object so the rest of
-        // the boot sequence sees it. config is frozen by the loader, so
-        // we cast through `{ ... }` to patch in place.
-        (config as { provider: string }).provider = picked.provider;
-        (config as { model: string }).model = picked.model;
+
+        // The loader hands back a frozen Config. Rebuild a fresh object
+        // with the picked pair patched in (and re-freeze) instead of
+        // mutating in place — Object.freeze blocks runtime writes even
+        // when a TS cast hides it from the compiler.
+        config = Object.freeze({ ...config, provider: picked.provider, model: picked.model });
 
         if (picked.provider !== prevProvider || picked.model !== prevModel) {
           const saved = await saveToGlobalConfig(
@@ -793,7 +794,8 @@ export async function main(argv: string[]): Promise<number> {
         };
         const newProvider = providerRegistry.create({ ...newCfg, type: name });
         context.provider = newProvider;
-        (config as { provider?: string }).provider = name;
+        // Config is frozen — rebuild rather than assign.
+        config = Object.freeze({ ...config, provider: name });
       } catch (err) {
         renderer.writeError(
           `Cannot switch to "${name}": ${err instanceof Error ? err.message : err}`,
