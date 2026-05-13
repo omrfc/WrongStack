@@ -294,7 +294,7 @@ describe('tool-format conversions', () => {
     });
   });
 
-  it('contentFromAnthropic preserves structured tool_result content arrays', () => {
+  it('contentFromAnthropic normalizes structured tool_result content to string', () => {
     const blocks = contentFromAnthropic([
       {
         type: 'tool_result',
@@ -305,15 +305,13 @@ describe('tool-format conversions', () => {
         ],
       },
     ]);
-    const result = blocks[0] as {
-      type: 'tool_result';
-      content: Array<{ type: string }>;
-    };
+    const result = blocks[0] as { type: 'tool_result'; content: string };
     expect(result.type).toBe('tool_result');
-    expect(Array.isArray(result.content)).toBe(true);
-    expect(result.content).toHaveLength(2);
-    expect(result.content[0]?.type).toBe('text');
-    expect(result.content[1]?.type).toBe('image');
+    // Sub-blocks are flattened to a string with text extracted and
+    // non-text blocks replaced with their type marker.
+    expect(typeof result.content).toBe('string');
+    expect(result.content).toContain('see below:');
+    expect(result.content).toContain('[image]');
   });
 
   it('contentFromAnthropic invokes onUnsupported for unknown block types', () => {

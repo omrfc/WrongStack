@@ -139,8 +139,13 @@ export class DefaultConfigLoader implements ConfigLoader {
       if (v) fn(cfg, v);
     }
 
-    // Layer 5: extra sources — sorted by priority (lowest first)
-    const sorted = [...this.extraSources].sort((a, b) => (a.priority ?? 50) - (b.priority ?? 50));
+    // Layer 5: extra sources — sorted by priority (lowest first).
+    // When priorities tie, sort by name for deterministic order.
+    const sorted = [...this.extraSources].sort((a, b) => {
+      const pd = (a.priority ?? 50) - (b.priority ?? 50);
+      if (pd !== 0) return pd;
+      return a.name.localeCompare(b.name);
+    });
     for (const src of sorted) {
       try {
         const patch = await src.read();

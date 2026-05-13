@@ -1,8 +1,25 @@
 import type { Provider } from '../types/provider.js';
 import type { ProviderConfig } from '../types/config.js';
+import type { WireFamily } from '../types/models-registry.js';
 
+/**
+ * Factory for constructing a Provider instance. The `family` field
+ * declares the wire protocol so callers can route without inspecting
+ * the returned instance. The `type` is the registry key (e.g. a
+ * provider's models.dev id or a user-chosen alias).
+ */
 export interface ProviderFactory {
+  /**
+   * Unique identifier used as the registry key. When registered via
+   * a plugin, this becomes `cfg.type` in `ProviderRegistry.create(cfg)`.
+   */
   type: string;
+  /**
+   * Declares the wire protocol family so consumers can route based on
+   * capability (e.g. which tool-format converter to use) without
+   * instantiating the provider.
+   */
+  family: WireFamily;
   create(cfg: ProviderConfig): Provider;
 }
 

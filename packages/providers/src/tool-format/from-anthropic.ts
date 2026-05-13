@@ -69,19 +69,27 @@ export function contentFromAnthropic(
 }
 
 /**
- * Anthropic's tool_result `content` may be a plain string OR an array of
- * `{ type: 'text', text }` / `{ type: 'image', source }` sub-blocks. Keep
- * the array shape when present — flattening it to a string would lose
- * embedded images and structure that downstream code may want to preserve.
+ * Convert Anthropic's tool_result content to our canonical string format.
+ * Anthropic ships tool_result.content as either a plain string or an array
+ * of `{ type: 'text', text }` / `{ type: 'image', source }` sub-blocks.
+ * We flatten sub-block arrays to a string so the canonical type stays `string`.
+ * If the caller needs the raw array structure (e.g. for image preservation),
+ * they should call `contentFromAnthropic` directly on the raw Anthropic block
+ * instead of going through a ToolResultBlock.
  */
 function normalizeToolResultContent(
   raw: unknown,
   opts: FromAnthropicOptions,
-): string | ContentBlock[] {
+): string {
   if (typeof raw === 'string') return raw;
-  if (Array.isArray(raw)) return contentFromAnthropic(raw as AnthropicBlock[], opts);
+  if (Array.isArray(raw)) {
+    // Flatten sub-block structure to a text representation.
+    // Callers who need the full structure should use contentFromAnthropic
+    // directly on the raw Anthropic block before constructing a ToolResultBlock.
+    const blocks = contentFromAnthropic(raw as AnthropicBlock[], opts);
+    return blocks.map((b) => (b.type === 'text' ? b.text : `[${b.type}]`)).join('');
+  }
   if (raw === undefined || raw === null) return '';
-  // Unknown shape — stringify to avoid silent loss, but keep it salvageable.
   return JSON.stringify(raw);
 }
 

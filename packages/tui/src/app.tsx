@@ -19,6 +19,7 @@ import { FilePicker } from './components/file-picker.js';
 import { searchFiles } from './file-search.js';
 import { readClipboardImage } from './clipboard.js';
 import { createQueueSlashCommand } from './queue-slash.js';
+import { readGitInfo, type GitInfo } from './git-info.js';
 
 export interface QueueItem {
   id: number;
@@ -36,6 +37,8 @@ export interface AppProps {
   banner?: boolean;
   /** Persists the queue across crashes; rehydrated on mount, written on every mutation. */
   queueStore?: QueueStore;
+  /** Reflects the policy's --yolo flag for the status bar's "⚠ YOLO" chip. */
+  yolo?: boolean;
   onExit: (code: number) => void;
 }
 
@@ -212,6 +215,7 @@ export function App({
   model,
   banner = true,
   queueStore,
+  yolo = false,
   onExit,
 }: AppProps): React.ReactElement {
   const { exit } = useApp();
@@ -251,6 +255,79 @@ export function App({
   // closures) read this instead of capturing `state` to avoid stale closures.
   const stateRef = useRef<State>(state);
   stateRef.current = state;
+
+  // Session-elapsed clock. Mount time is fixed; we re-render once per
+  // second to refresh the "⏱ 12:34" chip. The interval is cheap — one
+  // dispatch per tick into the same `tick` action — and stops cleanly
+  // on unmount.
+  const startedAtRef = useRef<number>(Date.now());
+  const [nowTick, setNowTick] = React.useState<number>(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const elapsedMs = nowTick - startedAtRef.current;
+
+  // Git branch + change counts. Polled every 5s (cheap, two short-lived
+  // `git` subprocesses). Skipped silently when the cwd isn't a repo or
+  // git isn't installed — the chip just doesn't render.
+  const [gitInfo, setGitInfo] = React.useState<GitInfo | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      readGitInfo(agent.ctx.cwd)
+        .then((info) => {
+          if (!cancelled) setGitInfo(info);
+        })
+        .catch(() => undefined);
+    };
+    refresh();
+    const t = setInterval(refresh, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [agent.ctx.cwd]);
+
+  // Latest provider request's input-token count. Tracked separately
+  // from `tokenCounter` (which is cumulative) because for the context
+  // fullness bar we want the live size of the conversation as it sat
+  // on the wire — that's what determines how close we are to the
+  // model's max context window.
+  const [lastInputTokens, setLastInputTokens] = React.useState<number>(0);
+  useEffect(() => {
+    const off = events.on('provider.response', (e) => {
+      setLastInputTokens(e.usage.input);
+    });
+    return () => {
+      off();
+    };
+  }, [events]);
+
+  const maxContext = agent.ctx.provider.capabilities.maxContext;
+  const contextWindow = useMemo(
+    () =>
+      lastInputTokens > 0 && maxContext > 0
+        ? { used: lastInputTokens, max: maxContext }
+        : undefined,
+    [lastInputTokens, maxContext],
+  );
+
+  // Todo counts come from the agent's context, which is mutated by
+  // the `todo` tool. Re-read on each render — array access is O(N) on
+  // a list that's typically < 20 items.
+  const todos = useMemo(() => {
+    const counts = { pending: 0, inProgress: 0, completed: 0 };
+    for (const t of agent.ctx.todos) {
+      if (t.status === 'pending') counts.pending++;
+      else if (t.status === 'in_progress') counts.inProgress++;
+      else if (t.status === 'completed') counts.completed++;
+    }
+    return counts;
+    // Tick on `nowTick` so we pick up todo changes even though
+    // agent.ctx.todos isn't React state — the 1s clock doubles as a
+    // poll for ctx-side state.
+  }, [nowTick, agent.ctx.todos]);
 
   // Detect an active `@<query>` token at the cursor and drive the picker.
   // Reruns whenever buffer/cursor changes — guards against stale results.
@@ -744,6 +821,11 @@ export function App({
         tokenCounter={tokenCounter}
         hint={renderRunningTools(state.runningTools) || state.hint}
         queueCount={state.queue.length}
+        yolo={yolo}
+        elapsedMs={elapsedMs}
+        todos={todos}
+        git={gitInfo}
+        context={contextWindow}
       />
     </Box>
   );

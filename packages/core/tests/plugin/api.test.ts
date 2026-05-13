@@ -64,6 +64,7 @@ describe('DefaultPluginAPI', () => {
     const { api } = mkApi();
     const factory: ProviderFactory = {
       type: 'mock',
+      family: 'openai-compatible',
       create: () => ({
         id: 'mock',
         capabilities: {} as never,
@@ -77,7 +78,7 @@ describe('DefaultPluginAPI', () => {
   it('providers.create dispatches to registered factory', () => {
     const { api } = mkApi();
     const create = vi.fn().mockReturnValue({ id: 'mock' });
-    api.providers.register({ type: 'mock', create });
+    api.providers.register({ type: 'mock', family: 'openai', create });
     api.providers.create({ type: 'mock', apiKey: 'k' });
     expect(create).toHaveBeenCalled();
   });

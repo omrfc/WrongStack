@@ -69,6 +69,7 @@ const BOOLEAN_FLAGS = new Set([
   'no-tui',
   'no-recovery',
   'recover',
+  'no-alt-screen',
 ]);
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -699,16 +700,43 @@ export async function main(argv: string[]): Promise<number> {
     } else if (flags.tui && !flags['no-tui']) {
       // Lazy-load to avoid pulling React/Ink into the cold path for non-TUI usage.
       const { runTui } = await import('@wrongstack/tui');
-      code = await runTui({
-        agent,
-        events,
-        slashRegistry,
-        attachments,
-        tokenCounter,
-        model: context.model,
-        banner: !flags['no-banner'],
-        queueStore,
-      });
+      // Silence stdout writes from the renderer while Ink owns the
+      // terminal. The tool executor calls renderer.writeToolCall /
+      // writeToolResult on every tool execution; if those raw writes
+      // land in stdout alongside Ink's redraws, the cursor math
+      // breaks and the input + status bar end up duplicated in
+      // scrollback (and in alt-screen, smeared across the buffer).
+      // The TUI shows tool calls via the `tool.executed` event in
+      // its own <History> component, so the renderer has nothing
+      // useful to add here anyway.
+      renderer.setSilent(true);
+      try {
+        code = await runTui({
+          agent,
+          events,
+          slashRegistry,
+          attachments,
+          tokenCounter,
+          model: context.model,
+          banner: !flags['no-banner'],
+          queueStore,
+          yolo: !!config.yolo,
+          altScreen: !flags['no-alt-screen'],
+          // Alt-screen exit erases the TUI view. Print a one-line hint
+          // into the user's normal terminal so they know the session is
+          // preserved and can resume it. Skipped automatically when
+          // alt-screen is off — runTui only fires onAfterExit then.
+          onAfterExit: () => {
+            process.stdout.write(
+              color.dim(`Session saved: ${session.id} — resume with `) +
+                color.cyan(`wstack resume ${session.id}`) +
+                '\n',
+            );
+          },
+        });
+      } finally {
+        renderer.setSilent(false);
+      }
     } else {
       code = await runRepl({
         agent,

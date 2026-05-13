@@ -62,6 +62,7 @@ export async function buildProviderFactoriesFromRegistry(
     }
     factories.push({
       type: p.id,
+      family: p.family,
       create: (cfg: ProviderConfig) => makeProvider(p, cfg),
     });
   }
@@ -69,6 +70,7 @@ export async function buildProviderFactoriesFromRegistry(
   // Generic factories so users can hand-roll a provider not in models.dev.
   factories.push({
     type: 'openai-compatible',
+    family: 'openai-compatible',
     create: (cfg) =>
       new OpenAICompatibleProvider({
         id: 'openai-compatible',

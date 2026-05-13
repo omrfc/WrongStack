@@ -116,9 +116,9 @@ export class OpenAIProvider extends WireAdapter {
   private stripCacheControl(req: Request): typeof req.system {
     if (!req.system) return undefined;
     return req.system.map((b) => {
-      const copy = { ...b };
-      delete (copy as { cache_control?: unknown }).cache_control;
-      return copy;
+      // Omit cache_control without mutating a copy — rest spread is cleaner.
+      const { cache_control: _cc, ...rest } = b;
+      return rest;
     });
   }
 }

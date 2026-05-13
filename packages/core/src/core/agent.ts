@@ -557,14 +557,7 @@ function safeJsonOrRaw(s: string): unknown {
  * preview line, so cap at ~400 chars with an ellipsis marker. Structured
  * content blocks are flattened to their text portions.
  */
-function truncateForEvent(content: string | ToolResultBlock['content'], max = 400): string {
-  const s = typeof content === 'string'
-    ? content
-    : Array.isArray(content)
-      ? content
-          .map((b) => (b.type === 'text' ? b.text : `[${b.type}]`))
-          .join('')
-      : '';
-  if (!s) return '';
-  return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+function truncateForEvent(content: ToolResultBlock['content'], max = 400): string {
+  if (!content) return '';
+  return content.length <= max ? content : `${content.slice(0, max - 1)}…`;
 }

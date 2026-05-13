@@ -43,6 +43,18 @@ export class Pipeline<T> {
   }
 
   /**
+   * Insert middleware at an explicit index. Out-of-range indices are clamped.
+   * Use this when insertBefore/insertAfter are insufficient (e.g. to place
+   * a middleware at a known position regardless of named targets).
+   */
+  insertAt(index: number, mw: Middleware<T>): this {
+    this.ensureUnique(mw.name);
+    const idx = Math.max(0, Math.min(index, this.chain.length));
+    this.chain.splice(idx, 0, mw);
+    return this;
+  }
+
+  /**
    * Insert mw immediately before the first occurrence of target.
    * If called multiple times with the same target, each call inserts
    * before the target's current position — so after insertBefore('B', X)
@@ -96,7 +108,7 @@ export class Pipeline<T> {
   /** Return a read-only view suitable for passing to plugins. */
   asReadonly(): ReadonlyPipeline<T> {
     // The returned object's methods close over `this`, so it always sees the live chain.
-    // list() returns Object.freeze to prevent external mutation of the returned array.
+    // `list()` returns a frozen snapshot to prevent external mutation of the chain.
     const self = this;
     return Object.freeze({
       get size() { return self.size(); },

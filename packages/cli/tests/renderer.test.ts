@@ -150,6 +150,44 @@ describe('TerminalRenderer', () => {
   });
 });
 
+describe('TerminalRenderer.setSilent', () => {
+  it('suppresses all stdout-bound writes once enabled', () => {
+    const r = mkRenderer();
+    r.renderer.setSilent(true);
+    expect(r.renderer.isSilent()).toBe(true);
+    r.renderer.write('hello');
+    r.renderer.writeLine('line');
+    r.renderer.writeToolCall('read', { path: '/x' });
+    r.renderer.writeToolResult('read', 'big output', false);
+    r.renderer.writeDiff('--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new');
+    r.renderer.writeBlock({ type: 'text', text: 'block' });
+    r.renderer.clear();
+    expect(r.out()).toBe('');
+  });
+
+  it('still routes writeInfo/writeWarning/writeError through stderr while silent', () => {
+    const r = mkRenderer();
+    r.renderer.setSilent(true);
+    r.renderer.writeInfo('hello');
+    r.renderer.writeWarning('warn');
+    r.renderer.writeError('boom');
+    expect(r.err()).toContain('hello');
+    expect(r.err()).toContain('warn');
+    expect(r.err()).toContain('boom');
+    expect(r.out()).toBe('');
+  });
+
+  it('resumes stdout writes after setSilent(false)', () => {
+    const r = mkRenderer();
+    r.renderer.setSilent(true);
+    r.renderer.write('hidden');
+    r.renderer.setSilent(false);
+    r.renderer.write('visible');
+    expect(r.out()).not.toContain('hidden');
+    expect(r.out()).toContain('visible');
+  });
+});
+
 describe('renderDiff', () => {
   it('returns empty for empty diff', () => {
     expect(renderDiff('')).toBe('');

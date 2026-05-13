@@ -136,6 +136,7 @@ export class ToolExecutor {
     return {
       type: 'tool_result',
       tool_use_id: use.id,
+      name: tool.name,
       content: capped,
       is_error: false,
     };

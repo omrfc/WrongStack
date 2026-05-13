@@ -12,13 +12,36 @@ export class TerminalRenderer implements Renderer {
   private readonly out: NodeJS.WriteStream;
   private readonly err: NodeJS.WriteStream;
   private lineStart = true;
+  /**
+   * When true, every stdout-bound method is a no-op. This is the only
+   * safe state to be in while Ink owns the terminal (TUI mode):
+   * raw writes to stdout interleave with Ink's cursor math and cause
+   * the input + status bar to be reprinted as scrollback junk.
+   * Stderr-bound methods (writeInfo/Warning/Error) still flow — they
+   * go to a different stream Ink does not manage.
+   */
+  private silent = false;
 
   constructor(opts: TerminalRendererOptions = {}) {
     this.out = opts.out ?? process.stdout;
     this.err = opts.err ?? process.stderr;
   }
 
+  /**
+   * Toggle stdout suppression. Call `setSilent(true)` right before
+   * handing the terminal to Ink, and `setSilent(false)` after Ink
+   * exits. Idempotent.
+   */
+  setSilent(silent: boolean): void {
+    this.silent = silent;
+  }
+
+  isSilent(): boolean {
+    return this.silent;
+  }
+
   write(input: string | TextBlock): void {
+    if (this.silent) return;
     const text = typeof input === 'string' ? input : input.text;
     if (!text) return;
     const rendered = renderMarkdown(text);
@@ -27,6 +50,7 @@ export class TerminalRenderer implements Renderer {
   }
 
   writeLine(text = ''): void {
+    if (this.silent) return;
     if (!this.lineStart) this.out.write('\n');
     if (text) this.out.write(`${text}\n`);
     else this.out.write('\n');
@@ -34,6 +58,7 @@ export class TerminalRenderer implements Renderer {
   }
 
   writeBlock(block: ContentBlock): void {
+    if (this.silent) return;
     if (block.type === 'text') {
       this.write(block);
     } else if (block.type === 'tool_use') {
@@ -45,6 +70,7 @@ export class TerminalRenderer implements Renderer {
   }
 
   writeToolCall(name: string, input: unknown): void {
+    if (this.silent) return;
     if (!this.lineStart) this.out.write('\n');
     const arrow = theme.primary('→');
     const display = formatInputSummary(input);
@@ -53,6 +79,7 @@ export class TerminalRenderer implements Renderer {
   }
 
   writeToolResult(name: string, content: unknown, isError: boolean): void {
+    if (this.silent) return;
     const txt = typeof content === 'string' ? content : safeStringify(content);
     const prefix = isError ? theme.error('✘') : theme.success('✓');
 
@@ -98,6 +125,7 @@ export class TerminalRenderer implements Renderer {
   }
 
   writeDiff(diff: string): void {
+    if (this.silent) return;
     if (!this.lineStart) this.out.write('\n');
     this.out.write(`${renderDiff(diff)}\n`);
     this.lineStart = true;
@@ -114,6 +142,7 @@ export class TerminalRenderer implements Renderer {
   }
 
   clear(): void {
+    if (this.silent) return;
     this.out.write('\x1b[2J\x1b[H');
     this.lineStart = true;
   }

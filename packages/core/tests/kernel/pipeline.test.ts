@@ -30,6 +30,26 @@ describe('Pipeline', () => {
     expect(p.list()).toEqual(['a', 'b', 'b2', 'c']);
   });
 
+  it('insertAt at arbitrary index', async () => {
+    const p = new Pipeline<number>();
+    p.use({ name: 'a', handler: async (v, n) => n(v + 1) });
+    p.use({ name: 'b', handler: async (v, n) => n(v + 10) });
+    p.use({ name: 'c', handler: async (v, n) => n(v + 100) });
+    p.insertAt(1, { name: 'x', handler: async (v, n) => n(v + 1000) });
+    expect(p.list()).toEqual(['a', 'x', 'b', 'c']);
+    expect(await p.run(0)).toBe(1111);
+  });
+
+  it('insertAt clamps out-of-range indices', async () => {
+    const p = new Pipeline<number>();
+    p.use({ name: 'a', handler: async (v, n) => n(v + 1) });
+    p.use({ name: 'b', handler: async (v, n) => n(v + 10) });
+    p.insertAt(99, { name: 'c', handler: async (v, n) => n(v + 100) });
+    expect(p.list()).toEqual(['a', 'b', 'c']);
+    p.insertAt(-5, { name: 'd', handler: async (v, n) => n(v + 1000) });
+    expect(p.list()).toEqual(['d', 'a', 'b', 'c']);
+  });
+
   it('replace and remove', async () => {
     const p = new Pipeline<number>();
     p.use({ name: 'a', handler: async (v, n) => n(v + 1) });

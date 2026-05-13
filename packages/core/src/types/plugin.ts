@@ -9,6 +9,7 @@ import type { SlashCommand } from './slash-command.js';
 import type { TextBlock } from './blocks.js';
 import type { Context } from '../core/context.js';
 import type { ToolCallPipelinePayload } from '../core/agent.js';
+import type { WireFamily } from './models-registry.js';
 
 export interface ToolRegistryView {
   register(t: Tool): void;
@@ -19,6 +20,7 @@ export interface ToolRegistryView {
 
 export interface ProviderFactory {
   type: string;
+  family: WireFamily;
   create(cfg: unknown): Provider;
 }
 

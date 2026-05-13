@@ -57,6 +57,12 @@ export class MCPClient {
   private readonly pending = new Map<number, (res: JsonRpcResponse) => void>();
   private rxBuffer = '';
   private tools: MCPTool[] = [];
+  /**
+   * Guards against multiple concurrent drain-waits. When `stdin.write()`
+   * returns false the first waiter sets this flag; any subsequent callers
+   * skip the drain wait and emit a warning instead of racing.
+   */
+  private _drainPending = false;
 
   constructor(public readonly opts: MCPClientOptions) {}
 
@@ -172,11 +178,24 @@ export class MCPClient {
     try {
       const ok = this.child?.stdin?.write(encoded);
       if (!ok) {
-        // Internal buffer full — wait for drain before returning
+        // Only the first caller waits for drain; others just warn and return.
+        // This avoids a race where two concurrent notify() calls each start
+        // their own drain-wait, then both resolve and the buffer is still full.
+        if (this._drainPending) {
+          process.emitWarning(
+            `[MCP] notify("${method}") skipped: stdin buffer backpressure (already waiting for drain)`,
+          );
+          return;
+        }
+        this._drainPending = true;
         await new Promise<void>((resolve) => {
-          const timeout = setTimeout(() => resolve(), 100);
+          const timeout = setTimeout(() => {
+            this._drainPending = false;
+            resolve();
+          }, 500);
           this.child?.stdin?.once('drain', () => {
             clearTimeout(timeout);
+            this._drainPending = false;
             resolve();
           });
         });

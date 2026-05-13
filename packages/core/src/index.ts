@@ -2,6 +2,9 @@ export * from './kernel/index.js';
 export * from './types/index.js';
 export * from './utils/index.js';
 export * from './defaults/index.js';
+// Re-export safeParse explicitly at the top-level export for consumers
+// who import from '@wrongstack/core' directly (e.g. providers package).
+export { safeParse, safeStringify, sanitizeJsonString } from './utils/safe-json.js';
 export {
   Agent,
   type RunResult,

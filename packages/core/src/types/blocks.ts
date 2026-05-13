@@ -14,7 +14,14 @@ export interface ToolUseBlock {
 export interface ToolResultBlock {
   type: 'tool_result';
   tool_use_id: string;
-  content: string | ContentBlock[];
+  /**
+   * The original tool name. Useful for providers like Google Gemini that
+   * need the tool name in `functionResponse.name` — the tool_use_id is
+   * only a session-local identifier and is not stable across replays.
+   * Always set by ToolExecutor; may be absent on manually-constructed blocks.
+   */
+  name?: string;
+  content: string;
   is_error?: boolean;
 }
 
