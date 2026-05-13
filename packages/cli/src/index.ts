@@ -50,6 +50,7 @@ import {
 import { builtinTools, forgetTool, rememberTool } from '@wrongstack/tools';
 import { ReadlineInputReader } from './input-reader.js';
 import { makePromptDelegate } from './permission-prompt.js';
+import { runPicker, saveToGlobalConfig } from './picker.js';
 import { TerminalRenderer } from './renderer.js';
 import { runRepl } from './repl.js';
 import { SessionStats } from './session-stats.js';
@@ -275,14 +276,35 @@ export async function main(argv: string[]): Promise<number> {
     return code;
   }
 
-  // Identity required from this point
+  // Identity required from this point — launch the interactive picker when
+  // running in a TTY and no provider/model is configured. Non-TTY (pipes,
+  // CI) still gets the hard error.
   if (!config.provider || !config.model) {
-    process.stderr.write(
-      'No provider or model configured. Run `wstack init` first, or set ' +
-        'WRONGSTACK_PROVIDER + WRONGSTACK_MODEL.\n',
-    );
-    await reader.close();
-    return 2;
+    if (process.stdin.isTTY) {
+      const picked = await runPicker({ modelsRegistry, renderer, reader });
+      if (!picked) {
+        await reader.close();
+        return 2;
+      }
+      // Apply the selection to the mutable config object so the rest of
+      // the boot sequence sees it.  We patch both the top-level fields
+      // and the underlying object (config is frozen by the loader).
+      (config as { provider: string }).provider = picked.provider;
+      (config as { model: string }).model = picked.model;
+
+      // Persist as default so the user doesn't have to pick again.
+      const saved = await saveToGlobalConfig(wpaths.globalConfig, picked.provider, picked.model);
+      if (saved) {
+        renderer.writeInfo(`Saved ${picked.provider}/${picked.model} as default.\n`);
+      }
+    } else {
+      process.stderr.write(
+        'No provider or model configured. Run `wstack init` first, or set ' +
+          'WRONGSTACK_PROVIDER + WRONGSTACK_MODEL.\n',
+      );
+      await reader.close();
+      return 2;
+    }
   }
 
   // Resolve provider details from models.dev

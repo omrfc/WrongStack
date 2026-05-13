@@ -14,19 +14,53 @@ Provider catalog comes from [models.dev](https://models.dev) — no hardcoded pr
 ## Install
 
 ```bash
-npm install -g @wrongstack/cli
-# or
-pnpm add -g @wrongstack/cli
+npm install -g wrongstack
 ```
 
-Installing `@wrongstack/cli` pulls in the rest of the stack as dependencies — `@wrongstack/core`, `@wrongstack/providers`, `@wrongstack/tools`, `@wrongstack/mcp`, and `@wrongstack/tui`. The TUI is shipped but lazy-loaded behind `--tui`, so plain-REPL users pay no React/Ink import cost at startup.
+This pulls in the full stack — `@wrongstack/core`, `@wrongstack/providers`, `@wrongstack/tools`, `@wrongstack/mcp`, and `@wrongstack/tui`. The TUI is shipped but lazy-loaded behind `--tui`, so plain-REPL users pay no React/Ink import cost at startup.
 
-After install, both `wstack` and `wrongstack` are on your `PATH`.
+After install, `wrongstack` is on your `PATH`. (`wstack` works too — it's an alias.)
+
+## Quick start
+
+```bash
+# First run — interactive setup wizard (picks provider + model, saves to config)
+wrongstack init
+
+# No config? No problem — the interactive picker launches automatically:
+wrongstack          # shows provider list → model list → save prompt → REPL
+wrongstack --tui    # same picker, then enters the TUI
+
+# Start coding with the TUI
+wrongstack --tui
+
+# Skip all permission prompts (auto-approve every tool call)
+wrongstack --tui --yolo
+
+# Use a specific provider and model (skip the picker entirely)
+wrongstack --provider openai --model gpt-4.1
+wrongstack --provider groq --model llama-3.3-70b-versatile
+wrongstack --provider zai-coding-plan --model glm-5.1
+
+# Combine everything: TUI + yolo + custom provider/model
+wrongstack --tui --yolo --provider zai-coding-plan --model glm-5.1
+
+# Single-shot query (no interactive mode)
+wrongstack "refactor src/auth.ts to async/await"
+
+# Resume a saved session
+wrongstack --resume <session-id>
+wrongstack resume <session-id>       # same thing
+```
 
 ## First-run setup
 
+There are three ways to configure a provider and model:
+
+**1. Interactive wizard** (`wrongstack init`):
+
 ```bash
-$ wstack init
+$ wrongstack init
 WrongStack init
 ℹ Loading provider catalog from models.dev (cached locally)…
 Detected API keys for: Anthropic
@@ -36,12 +70,20 @@ Model [claude-opus-4-7]:
 ℹ Wrote C:\Users\you\.wrongstack\config.json
 ```
 
-`init` reads `models.dev/api.json`, detects which provider env vars you already have set, and suggests the newest model for the provider you pick. API keys land in the config encrypted with a key file the CLI generates the first time it needs to encrypt anything.
+**2. Automatic picker** — just run `wrongstack` with no config. An interactive picker lists all supported providers (grouped by wire family, API-key status shown with ●/○), then the models for your chosen provider. Your selection is saved to `~/.wrongstack/config.json` so you only pick once.
+
+**3. CLI flags** — skip all interactivity:
+
+```bash
+wrongstack --provider zai-coding-plan --model glm-5.1
+```
+
+All three approaches read from `models.dev/api.json`. API keys land in the config encrypted with a key file the CLI generates the first time it needs to encrypt anything.
 
 To add a key later without re-running `init`:
 
 ```bash
-$ wstack auth groq
+$ wrongstack auth groq
 Enter GROQ_API_KEY:
 ℹ Stored encrypted key for groq.
 ```
@@ -49,11 +91,46 @@ Enter GROQ_API_KEY:
 ## Daily use
 
 ```bash
-wstack "refactor src/auth.ts to async/await"   # single-shot
-wstack                                          # plain readline REPL
-wstack --tui                                    # Ink-based TUI (paste collapse, @-picker, Alt+V images)
-wstack --resume <id>                            # continue a saved session
-wstack resume <id>                              # same, sugar form
+wrongstack "refactor src/auth.ts to async/await"   # single-shot
+wrongstack                                          # REPL (or picker if no config)
+wrongstack --tui                                    # Ink-based TUI (paste collapse, @-picker, images)
+wrongstack --tui --yolo                             # TUI + auto-approve all tool calls
+wrongstack --resume <id>                            # continue a saved session
+wrongstack resume <id>                              # same, sugar form
+```
+
+### Switching providers and models
+
+`--provider` and `--model` override whatever's in your config. Combine them freely with other flags:
+
+```bash
+# Use OpenAI for this session only
+wrongstack --provider openai --model gpt-4.1
+
+# Groq for fast iteration
+wrongstack --tui --yolo --provider groq --model llama-3.3-70b-versatile
+
+# Any provider from the models.dev catalog (~110 providers)
+wrongstack --provider deepseek --model deepseek-chat
+wrongstack --provider openrouter --model anthropic/claude-opus-4
+wrongstack --provider zai-coding-plan --model glm-5.1
+
+# Or set them permanently in config
+wrongstack config
+```
+
+You can also switch at runtime inside the REPL or TUI with the `/model` and `/use` slash commands — no restart needed.
+
+### `--yolo` mode
+
+`--yolo` skips **all** permission prompts. Every tool call (`bash`, `write`, `edit`, etc.) runs immediately without asking. Useful for:
+
+- CI pipelines and automated workflows
+- Quick iteration when you trust the agent
+- Pair programming where you watch the screen and interrupt if needed
+
+```bash
+wrongstack --tui --yolo "add unit tests for src/auth.ts"
 ```
 
 ## Two interactive modes
@@ -128,22 +205,22 @@ wstack resume <id>                              # same, sugar form
 ## Subcommands
 
 ```bash
-wstack init           # First-run setup wizard
-wstack auth <prov>    # Store an API key (prompted, encrypted at rest)
-wstack sessions       # List saved sessions for this project
-wstack resume <id>    # Continue a saved session
-wstack config         # Show / edit config
-wstack tools          # List registered tools
-wstack skills         # List discovered skills
-wstack providers      # ~110 providers grouped by wire family
-wstack models [prov]  # Models for a provider (default: current)
-wstack mcp            # Inspect connected MCP servers
-wstack plugin         # Plugin manifest commands
-wstack diag           # Diagnostics: provider, tokens, paths
-wstack usage          # Token + cost totals across sessions
-wstack projects       # List known project hashes → paths
-wstack help           # Help text
-wstack version        # Version
+wrongstack init           # First-run setup wizard
+wrongstack auth <prov>    # Store an API key (prompted, encrypted at rest)
+wrongstack sessions       # List saved sessions for this project
+wrongstack resume <id>    # Continue a saved session
+wrongstack config         # Show / edit config
+wrongstack tools          # List registered tools
+wrongstack skills         # List discovered skills
+wrongstack providers      # ~110 providers grouped by wire family
+wrongstack models [prov]  # Models for a provider (default: current)
+wrongstack mcp            # Inspect connected MCP servers
+wrongstack plugin         # Plugin manifest commands
+wrongstack diag           # Diagnostics: provider, tokens, paths
+wrongstack usage          # Token + cost totals across sessions
+wrongstack projects       # List known project hashes → paths
+wrongstack help           # Help text
+wrongstack version        # Version
 ```
 
 ## Slash commands (in-REPL)
@@ -155,11 +232,11 @@ wstack version        # Version
 ## Catalog commands
 
 ```bash
-wstack providers              # ~110 providers grouped by wire family
-wstack providers --all        # include unsupported families (needs plugin)
-wstack models                 # models for current provider
-wstack models google          # models for any provider id from models.dev
-wstack models refresh         # force-refresh the 24h cache
+wrongstack providers              # ~110 providers grouped by wire family
+wrongstack providers --all        # include unsupported families (needs plugin)
+wrongstack models                 # models for current provider
+wrongstack models google          # models for any provider id from models.dev
+wrongstack models refresh         # force-refresh the 24h cache
 ```
 
 `●` = your env has a key for this provider · `○` = configure to use it.
@@ -235,7 +312,7 @@ Commit this file to share project conventions with the agent across all develope
 # Fully offline: no MCP servers, no plugins, no memory persistence,
 # no models.dev fetch, no skill discovery. Provider family must be
 # declared explicitly in providers[<id>].family.
-wstack --no-features --provider anthropic --model claude-opus-4-7 "..."
+wrongstack --no-features --provider anthropic --model claude-opus-4-7 "..."
 ```
 
 Each feature flag is independent; you can keep skills on while turning MCP off, or run a CI job with just `features.modelsRegistry: false` to avoid the startup network call.
