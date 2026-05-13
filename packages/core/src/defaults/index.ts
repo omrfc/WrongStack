@@ -10,6 +10,7 @@ export {
   type RecoveryLockOptions,
   type AbandonedSession,
 } from './recovery-lock.js';
+export { QueueStore, type PersistedQueueItem } from './queue-store.js';
 export {
   DefaultAttachmentStore,
   type AttachmentStoreOptions,

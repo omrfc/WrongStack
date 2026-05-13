@@ -7,6 +7,7 @@ import type {
   AttachmentStore,
   ContentBlock,
   EventBus,
+  QueueStore,
   SlashCommandRegistry,
   TokenCounter,
 } from '@wrongstack/core';
@@ -33,6 +34,8 @@ export interface AppProps {
   tokenCounter?: TokenCounter;
   model: string;
   banner?: boolean;
+  /** Persists the queue across crashes; rehydrated on mount, written on every mutation. */
+  queueStore?: QueueStore;
   onExit: (code: number) => void;
 }
 
@@ -208,6 +211,7 @@ export function App({
   tokenCounter,
   model,
   banner = true,
+  queueStore,
   onExit,
 }: AppProps): React.ReactElement {
   const { exit } = useApp();
@@ -342,6 +346,49 @@ export function App({
       dispatch({ type: 'pickerClose' });
     }
   };
+
+  // Rehydrate any queue items persisted by a previous (crashed) run.
+  // Fires once at mount; the persist effect below picks up afterwards.
+  // We dispatch one enqueue per item so the reducer's id allocation
+  // stays the single source of truth — no need to import its internals.
+  useEffect(() => {
+    if (!queueStore) return;
+    let cancelled = false;
+    queueStore
+      .read()
+      .then((items) => {
+        if (cancelled || items.length === 0) return;
+        for (const item of items) {
+          dispatch({
+            type: 'enqueue',
+            item: { displayText: item.displayText, blocks: item.blocks },
+          });
+        }
+        dispatch({
+          type: 'addEntry',
+          entry: {
+            kind: 'info',
+            text: `Restored ${items.length} queued message${items.length === 1 ? '' : 's'} from a previous run.`,
+          },
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queueStore]);
+
+  // Persist the queue snapshot on every change. Strip the in-memory id
+  // before writing — it's render bookkeeping, not part of the message.
+  // Errors are swallowed: the queue lives in memory regardless, so a
+  // persistence failure only loses crash-recovery, not the queue itself.
+  useEffect(() => {
+    if (!queueStore) return;
+    queueStore
+      .write(state.queue.map(({ displayText, blocks }) => ({ displayText, blocks })))
+      .catch(() => undefined);
+  }, [state.queue, queueStore]);
 
   // Register the TUI-only /queue command for the lifetime of this App.
   useEffect(() => {

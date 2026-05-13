@@ -18,6 +18,7 @@ import {
   DefaultTokenCounter,
   DefaultSessionStore,
   RecoveryLock,
+  QueueStore,
   DefaultAttachmentStore,
   DefaultSecretVault,
   migratePlaintextSecrets,
@@ -516,6 +517,12 @@ export async function main(argv: string[]): Promise<number> {
     spoolDir: path.join(wpaths.projectSessions, session.id, 'attachments'),
   });
 
+  // Queue persistence (TUI only — the REPL has no concurrent input).
+  // Lives next to attachments so deleting the session dir cleans both.
+  const queueStore = new QueueStore({
+    dir: path.join(wpaths.projectSessions, session.id),
+  });
+
   const tokenCounter = container.resolve(TOKENS.TokenCounter);
 
   // Session stats tracker — subscribes to events; rendered at the end.
@@ -700,6 +707,7 @@ export async function main(argv: string[]): Promise<number> {
         tokenCounter,
         model: context.model,
         banner: !flags['no-banner'],
+        queueStore,
       });
     } else {
       code = await runRepl({

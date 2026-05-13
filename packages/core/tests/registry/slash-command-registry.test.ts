@@ -45,10 +45,10 @@ describe('SlashCommandRegistry', () => {
     expect(calls).toBe(3);
   });
 
-  it('rejects duplicate from same owner', () => {
+  it('rejects duplicate from different owner', () => {
     const r = new SlashCommandRegistry();
     r.register({ name: 'x', description: '', async run() {} });
-    expect(() => r.register({ name: 'x', description: '', async run() {} })).toThrow();
+    expect(() => r.register({ name: 'x', description: '', async run() {} }, 'plugin')).toThrow();
   });
 
   it('plugin commands get namespaced names', async () => {

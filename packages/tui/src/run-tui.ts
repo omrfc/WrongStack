@@ -4,6 +4,7 @@ import type {
   Agent,
   AttachmentStore,
   EventBus,
+  QueueStore,
   SlashCommandRegistry,
   TokenCounter,
 } from '@wrongstack/core';
@@ -17,6 +18,8 @@ export interface RunTuiOptions {
   tokenCounter?: TokenCounter;
   model: string;
   banner?: boolean;
+  /** Persists the input queue across crashes; if omitted, the queue is in-memory only. */
+  queueStore?: QueueStore;
 }
 
 // Bracketed paste mode wraps any pasted text with these markers, letting us
@@ -90,6 +93,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           tokenCounter: opts.tokenCounter,
           model: opts.model,
           banner: opts.banner ?? true,
+          queueStore: opts.queueStore,
           onExit,
         }),
         { exitOnCtrlC: false },

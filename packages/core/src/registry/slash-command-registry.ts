@@ -22,16 +22,31 @@ export class SlashCommandRegistry {
     const isPlugin = owner !== 'core';
     const fullName = isPlugin ? `${owner}:${cmd.name}` : cmd.name;
 
-    if (this.cmds.has(fullName)) {
-      const existing = this.cmds.get(fullName)!;
-      if (existing.owner === owner) {
-        this.cmds.set(fullName, { cmd, owner });
-        for (const a of cmd.aliases ?? []) {
-          this.cmds.set(isPlugin ? `${owner}:${a}` : a, { cmd, owner });
-        }
-        return;
+    // Cross-owner collision on the bare name: even though plugin commands
+    // get namespaced (`plugin:x`) and don't share a key with a builtin
+    // `x`, allowing both to coexist would confuse users (they type `/x`
+    // expecting one and get the other). Throw so the conflict surfaces
+    // at registration time rather than as a silent shadowing bug.
+    for (const entry of this.cmds.values()) {
+      if (entry.cmd.name === cmd.name && entry.owner !== owner) {
+        throw new Error(
+          `Slash command "${cmd.name}" already registered by ${entry.owner}`,
+        );
       }
-      throw new Error(`Slash command "${fullName}" already registered by ${existing.owner}`);
+    }
+
+    if (this.cmds.has(fullName)) {
+      // Same owner re-registering: plugins legitimately do this for hot
+      // reload / dev iteration. Built-ins are added once at startup, so
+      // a second core register signals a programming bug — throw loudly.
+      if (!isPlugin) {
+        throw new Error(`Built-in slash command "${fullName}" is already registered.`);
+      }
+      this.cmds.set(fullName, { cmd, owner });
+      for (const a of cmd.aliases ?? []) {
+        this.cmds.set(`${owner}:${a}`, { cmd, owner });
+      }
+      return;
     }
 
     this.cmds.set(fullName, { cmd, owner });
