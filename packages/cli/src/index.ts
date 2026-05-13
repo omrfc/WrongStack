@@ -800,6 +800,79 @@ export async function main(argv: string[]): Promise<number> {
     }
   }
 
+  // Build the list of providers the user can actually switch to right
+  // now: only those whose config has a key (env var or stored
+  // `apiKey/apiKeys`). We inline the catalog's model list for each one
+  // so the picker can show a real selection in step 2 — falling back
+  // to `cfg.models` for custom/LM-Studio-style providers and to the
+  // catalog list (by `cfg.type` for aliases) otherwise.
+  const buildPickableProviders = async () => {
+    const overlay = config.providers ?? {};
+    let catalog: Awaited<ReturnType<typeof modelsRegistry.listProviders>> = [];
+    try {
+      catalog = await modelsRegistry.listProviders();
+    } catch {
+      // catalog unavailable — keyed-by-config-only path still works
+    }
+    const catalogById = new Map(catalog.map((p) => [p.id, p]));
+    const hasKey = (id: string): boolean => {
+      const entry = overlay[id];
+      const envHit = catalogById.get(id)?.envVars.some((v) => !!process.env[v]);
+      if (envHit) return true;
+      if (!entry) return false;
+      if (typeof entry.apiKey === 'string' && entry.apiKey.length > 0) return true;
+      if (Array.isArray(entry.apiKeys) && entry.apiKeys.some((k) => k?.apiKey)) return true;
+      return false;
+    };
+    const seen = new Set<string>();
+    const out: Array<{ id: string; family: string; models: string[] }> = [];
+    for (const [id, cfg] of Object.entries(overlay)) {
+      if (!hasKey(id)) continue;
+      seen.add(id);
+      const catalogType = cfg.type && cfg.type !== id ? cfg.type : id;
+      const inherited = catalogById.get(catalogType);
+      const family = cfg.family ?? inherited?.family ?? 'unsupported';
+      if (family === 'unsupported') continue;
+      const models =
+        cfg.models && cfg.models.length > 0
+          ? [...cfg.models]
+          : (inherited?.models ?? []).map((m) => m.id);
+      out.push({ id, family, models });
+    }
+    for (const p of catalog) {
+      if (seen.has(p.id)) continue;
+      if (p.family === 'unsupported') continue;
+      if (!hasKey(p.id)) continue;
+      out.push({ id: p.id, family: p.family, models: p.models.map((m) => m.id) });
+    }
+    return out;
+  };
+
+  // Build provider+model switch as a single callback. The TUI picker
+  // calls this after the user confirms a (provider, model) pair; we
+  // construct a fresh Provider instance, swap it onto the live context,
+  // and rebuild the frozen config so other consumers see the new ids.
+  const switchProviderAndModel = (providerId: string, modelId: string): string | null => {
+    try {
+      const newCfg = config.providers?.[providerId] ?? {
+        type: providerId,
+        apiKey: config.apiKey,
+        baseUrl: config.baseUrl,
+      };
+      const cfgWithType = { ...newCfg, type: providerId };
+      const newProvider =
+        config.features.modelsRegistry && providerRegistry.has(providerId)
+          ? providerRegistry.create(cfgWithType)
+          : makeProviderFromConfig(providerId, cfgWithType);
+      context.provider = newProvider;
+      context.model = modelId;
+      config = Object.freeze({ ...config, provider: providerId, model: modelId });
+      return null;
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+  };
+
   const slashCmds = buildBuiltinSlashCommands({
     registry: slashRegistry,
     toolRegistry,
@@ -814,58 +887,33 @@ export async function main(argv: string[]): Promise<number> {
       void mcpRegistry.stopAll();
     },
     onClear: () => {
-      // Wipe the visible screen AND the terminal's scrollback so `/clear`
-      // actually feels like a fresh start. Without `\x1b[3J` (xterm
-      // scrollback-erase, supported by Windows Terminal/iTerm/etc.) the
-      // old conversation is still scrollable above. In TUI mode Ink owns
-      // the live area and redraws it on the next state change, so we
-      // only need to clear; we don't need to ourselves re-emit input/
-      // status. In REPL mode the prompt prints fresh after this.
+      // In TUI mode Ink owns the live area; writing `\x1b[2J` here would
+      // fight Ink's cursor math and leave the status bar smeared. The
+      // context/memory reset inside /clear is enough — the user can
+      // scroll up to see prior turns in scrollback. In REPL we erase
+      // the visible screen + scrollback (`\x1b[3J`) so the next prompt
+      // starts on a fresh terminal.
+      if (flags.tui && !flags['no-tui']) return;
       try {
         process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
       } catch {
         // stdout may be closed during shutdown — ignore.
       }
     },
-    onSwitchModel: (name) => {
-      context.model = name;
-    },
-    onSwitchProvider: (name) => {
-      try {
-        const newCfg = config.providers?.[name] ?? {
-          type: name,
-          apiKey: config.apiKey,
-          baseUrl: config.baseUrl,
-        };
-        const newProvider = providerRegistry.create({ ...newCfg, type: name });
-        context.provider = newProvider;
-        // Config is frozen — rebuild rather than assign.
-        config = Object.freeze({ ...config, provider: name });
-      } catch (err) {
-        renderer.writeError(
-          `Cannot switch to "${name}": ${err instanceof Error ? err.message : err}`,
-        );
-      }
-    },
     onDiag: () => {
       const u = tokenCounter.total();
       const cost = tokenCounter.estimateCost();
-      renderer.write(
-        [
-          `${color.bold('WrongStack diag')}`,
-          `  provider:     ${config.provider} / ${context.model}`,
-          `  projectRoot:  ${projectRoot}`,
-          `  tokens:       in ${u.input}  out ${u.output}  cacheR ${u.cacheRead ?? 0}`,
-          `  cost:         $${cost.total.toFixed(4)}`,
-          `  tools:        ${toolRegistry.list().length}`,
-          `  mcpServers:   ${mcpRegistry.list().length}`,
-          '',
-        ].join('\n'),
-      );
+      return [
+        `${color.bold('WrongStack diag')}`,
+        `  provider:     ${config.provider} / ${context.model}`,
+        `  projectRoot:  ${projectRoot}`,
+        `  tokens:       in ${u.input}  out ${u.output}  cacheR ${u.cacheRead ?? 0}`,
+        `  cost:         $${cost.total.toFixed(4)}`,
+        `  tools:        ${toolRegistry.list().length}`,
+        `  mcpServers:   ${mcpRegistry.list().length}`,
+      ].join('\n');
     },
-    onStats: () => {
-      stats.render(renderer);
-    },
+    onStats: () => stats.format(),
   });
   for (const cmd of slashCmds) slashRegistry.register(cmd);
 
@@ -974,6 +1022,8 @@ export async function main(argv: string[]): Promise<number> {
           provider: config.provider,
           family: banneredFamily,
           keyTail: banneredKeyTail,
+          getPickableProviders: buildPickableProviders,
+          switchProviderAndModel,
           effectiveMaxContext,
           // Opt-in: alt-screen disables the terminal's native scrollback,
           // so we default to false. `--no-alt-screen` is kept as a no-op

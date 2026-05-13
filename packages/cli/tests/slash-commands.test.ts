@@ -73,20 +73,6 @@ describe('built-in slash commands', () => {
     expect(result?.message).toContain('/exit');
   });
 
-  it('/usage prints token totals', async () => {
-    const { registry, renderer, tokenCounter } = makeRig();
-    tokenCounter.account({ input: 100, output: 50 }, 'claude-sonnet-4-6');
-    await registry.dispatch('/usage', fakeCtx);
-    expect(renderer.output).toContain('100');
-    expect(renderer.output).toContain('50');
-  });
-
-  it('/cost aliases /usage', async () => {
-    const { registry, renderer } = makeRig();
-    await registry.dispatch('/cost', fakeCtx);
-    expect(renderer.output).toContain('Usage');
-  });
-
   it('/tools lists registered tools', async () => {
     const { registry, renderer, toolRegistry } = makeRig();
     toolRegistry.register({

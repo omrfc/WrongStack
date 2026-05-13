@@ -143,6 +143,65 @@ describe('GoogleProvider', () => {
     expect(inline?.['inlineData']).toEqual({ mimeType: 'image/jpeg', data: 'AAA' });
   });
 
+  it('echoes thought_signature back on subsequent assistant tool_use parts', async () => {
+    let body: Record<string, unknown> | undefined;
+    const fetchImpl = vi.fn(async (_url: unknown, init: { body?: string } = {}) => {
+      body = JSON.parse(init.body ?? '{}');
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [{ content: { role: 'model', parts: [{ text: 'k' }] } }],
+          usageMetadata: {},
+        }),
+        text: async () => '',
+      };
+    }) as unknown as typeof fetch;
+    const p = new GoogleProvider({ apiKey: 'k', fetchImpl });
+    await p.complete(
+      {
+        model: 'gemini',
+        maxTokens: 1,
+        messages: [
+          { role: 'user', content: 'do it' },
+          {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'tu1',
+                name: 'read',
+                input: { path: 'a' },
+                providerMeta: { 'google.thoughtSignature': 'SIG-BLOB-123' },
+              },
+            ],
+          },
+          {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tu1', name: 'read', content: 'ok' }],
+          },
+        ],
+        tools: [
+          {
+            name: 'read',
+            description: 'read',
+            inputSchema: { type: 'object' },
+            permission: 'auto',
+            mutating: false,
+            async execute() {
+              return '';
+            },
+          },
+        ],
+      },
+      { signal: new AbortController().signal },
+    );
+    const contents = body?.['contents'] as Array<{ role: string; parts: Array<Record<string, unknown>> }>;
+    const modelTurn = contents.find((c) => c.role === 'model');
+    const fc = modelTurn?.parts.find((p) => p['functionCall']);
+    expect(fc?.['thoughtSignature']).toBe('SIG-BLOB-123');
+  });
+
   it('strips JSON-Schema keywords Gemini rejects (additionalProperties, $schema, default, allOf)', async () => {
     let body: Record<string, unknown> | undefined;
     const fetchImpl = vi.fn(async (_url: unknown, init: { body?: string } = {}) => {

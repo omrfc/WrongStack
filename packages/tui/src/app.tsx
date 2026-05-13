@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useReducer, useRef } from 'react';
+import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { Box, useApp } from 'ink';
@@ -17,6 +17,7 @@ import { Input, type KeyEvent } from './components/input.js';
 import { StatusBar } from './components/status-bar.js';
 import { FilePicker } from './components/file-picker.js';
 import { SlashMenu } from './components/slash-menu.js';
+import { ModelPicker, type ProviderOption } from './components/model-picker.js';
 import { searchFiles } from './file-search.js';
 import { readClipboardImage } from './clipboard.js';
 import { createQueueSlashCommand } from './queue-slash.js';
@@ -57,6 +58,19 @@ export interface AppProps {
   /** Last 3 chars of the active API key, shown in the banner for "did I pick the right key?" verification. */
   keyTail?: string;
   /**
+   * Snapshot the keyed providers (and their model lists) for the
+   * `/model` picker. Called every time the picker opens, so the result
+   * stays in sync with config edits / new aliases. Async because the
+   * host may need to load the models.dev catalog.
+   */
+  getPickableProviders?: () => Promise<ProviderOption[]>;
+  /**
+   * Apply a (provider, model) pair after the picker confirms. Returns
+   * an error message on failure; null on success. The host owns the
+   * actual Provider construction + Context mutation.
+   */
+  switchProviderAndModel?: (providerId: string, modelId: string) => string | null;
+  /**
    * Real max-context token budget for the *active model*, resolved by the
    * CLI via the ModelsRegistry. The provider object only knows its family
    * default (e.g. anthropic = 200k) which is wrong for variants like the
@@ -95,6 +109,16 @@ type State = {
   inputHistory: string[];
   /** 0 = current buffer (not in history), 1 = most recent, n = nth most recent. */
   historyIndex: number;
+  /** Two-step model picker (provider → model) — opened by `/model`. */
+  modelPicker: {
+    open: boolean;
+    step: 'provider' | 'model';
+    providerOptions: ProviderOption[];
+    modelOptions: string[];
+    selected: number;
+    pickedProviderId?: string;
+    hint?: string;
+  };
 };
 
 type Action =
@@ -121,6 +145,12 @@ type Action =
   | { type: 'slashPickerOpen'; query: string; matches: SlashCommandMatch[] }
   | { type: 'slashPickerClose' }
   | { type: 'slashPickerMove'; delta: number }
+  | { type: 'modelPickerOpen'; providers: ProviderOption[] }
+  | { type: 'modelPickerClose' }
+  | { type: 'modelPickerMove'; delta: number }
+  | { type: 'modelPickerPickProvider'; providerId: string; models: string[] }
+  | { type: 'modelPickerBack' }
+  | { type: 'modelPickerHint'; text?: string }
   | { type: 'historyPush'; text: string }
   | { type: 'historyUp' }
   | { type: 'historyDown' };
@@ -269,6 +299,71 @@ export function reducer(state: State, action: Action): State {
       const entry = next === 0 ? '' : (state.inputHistory[next - 1] ?? '');
       return { ...state, historyIndex: next, buffer: entry, cursor: entry.length };
     }
+    case 'modelPickerOpen':
+      return {
+        ...state,
+        modelPicker: {
+          open: true,
+          step: 'provider',
+          providerOptions: action.providers,
+          modelOptions: [],
+          selected: 0,
+          hint: undefined,
+        },
+      };
+    case 'modelPickerClose':
+      return {
+        ...state,
+        modelPicker: {
+          open: false,
+          step: 'provider',
+          providerOptions: [],
+          modelOptions: [],
+          selected: 0,
+        },
+      };
+    case 'modelPickerMove': {
+      if (!state.modelPicker.open) return state;
+      const len =
+        state.modelPicker.step === 'provider'
+          ? state.modelPicker.providerOptions.length
+          : state.modelPicker.modelOptions.length;
+      if (len === 0) return state;
+      const next = (state.modelPicker.selected + action.delta + len) % len;
+      return {
+        ...state,
+        modelPicker: { ...state.modelPicker, selected: next },
+      };
+    }
+    case 'modelPickerPickProvider':
+      return {
+        ...state,
+        modelPicker: {
+          ...state.modelPicker,
+          step: 'model',
+          modelOptions: action.models,
+          selected: 0,
+          pickedProviderId: action.providerId,
+          hint: undefined,
+        },
+      };
+    case 'modelPickerBack':
+      return {
+        ...state,
+        modelPicker: {
+          ...state.modelPicker,
+          step: 'provider',
+          modelOptions: [],
+          selected: 0,
+          pickedProviderId: undefined,
+          hint: undefined,
+        },
+      };
+    case 'modelPickerHint':
+      return {
+        ...state,
+        modelPicker: { ...state.modelPicker, hint: action.text },
+      };
   }
 }
 
@@ -288,10 +383,18 @@ export function App({
   provider,
   family,
   keyTail,
+  getPickableProviders,
+  switchProviderAndModel,
   effectiveMaxContext,
   onExit,
 }: AppProps): React.ReactElement {
   const { exit } = useApp();
+  // Reactive mirrors of agent.ctx.{model,provider.id} so the status bar
+  // re-renders when /model or /use mutate them. The banner is `Static`
+  // and never re-renders — the user gets the textual confirmation from
+  // the slash command's message in history instead.
+  const [liveModel, setLiveModel] = useState<string>(model);
+  const [liveProvider, setLiveProvider] = useState<string>(provider ?? 'agent');
   const [state, dispatch] = useReducer(reducer, {
     entries: banner
       ? [
@@ -322,6 +425,13 @@ export function App({
     nextQueueId: 1,
     inputHistory: [],
     historyIndex: 0,
+    modelPicker: {
+      open: false,
+      step: 'provider' as const,
+      providerOptions: [],
+      modelOptions: [],
+      selected: 0,
+    },
   });
 
   const builderRef = useRef<InputBuilder | null>(null);
@@ -627,6 +737,27 @@ export function App({
     };
   }, [slashRegistry]);
 
+  // Register the TUI-only `/model` command — opens a two-step picker
+  // (provider → model). All work is local state mutation; the actual
+  // switch fires only after the user confirms a model in step 2.
+  useEffect(() => {
+    if (!getPickableProviders || !switchProviderAndModel) return;
+    const cmd = {
+      name: 'model',
+      aliases: ['provider', 'switch'],
+      description: 'Pick a provider + model interactively (two-step).',
+      async run() {
+        const providers = await getPickableProviders();
+        dispatch({ type: 'modelPickerOpen', providers });
+        return { message: undefined };
+      },
+    };
+    slashRegistry.register(cmd);
+    return () => {
+      slashRegistry.unregister('model');
+    };
+  }, [slashRegistry, getPickableProviders, switchProviderAndModel]);
+
   // Subscribe to provider streaming events.
   useEffect(() => {
     // Throttle stream delta DISPATCHES to reduce flicker — we batch into
@@ -745,6 +876,59 @@ export function App({
     // string, and the slash/file pickers + cursor movement below all
     // depend on receiving those events. The late guard before text
     // insertion handles the empty-input case correctly.
+
+    // Model picker takes absolute precedence: nothing else is meaningful
+    // while the two-step overlay is open. Esc cancels (or backs out of
+    // step 2 to step 1); Enter advances to the next step or confirms.
+    if (state.modelPicker.open) {
+      if (key.escape) {
+        if (state.modelPicker.step === 'model') {
+          dispatch({ type: 'modelPickerBack' });
+        } else {
+          dispatch({ type: 'modelPickerClose' });
+        }
+        return;
+      }
+      if (key.upArrow) {
+        dispatch({ type: 'modelPickerMove', delta: -1 });
+        return;
+      }
+      if (key.downArrow) {
+        dispatch({ type: 'modelPickerMove', delta: 1 });
+        return;
+      }
+      if (key.return) {
+        if (state.modelPicker.step === 'provider') {
+          const opt = state.modelPicker.providerOptions[state.modelPicker.selected];
+          if (!opt) return;
+          dispatch({
+            type: 'modelPickerPickProvider',
+            providerId: opt.id,
+            models: opt.models,
+          });
+          return;
+        }
+        // step === 'model' → commit the switch
+        const providerId = state.modelPicker.pickedProviderId;
+        const modelId = state.modelPicker.modelOptions[state.modelPicker.selected];
+        if (!providerId || !modelId) return;
+        const err = switchProviderAndModel?.(providerId, modelId);
+        if (err) {
+          dispatch({ type: 'modelPickerHint', text: err });
+          return;
+        }
+        setLiveProvider(providerId);
+        setLiveModel(modelId);
+        dispatch({
+          type: 'addEntry',
+          entry: { kind: 'info', text: `Switched to ${providerId} / ${modelId}.` },
+        });
+        dispatch({ type: 'modelPickerClose' });
+        return;
+      }
+      // Any other key while picker is open: ignore.
+      return;
+    }
 
     if (state.slashPicker.open) {
       if (key.escape) {
@@ -1028,6 +1212,15 @@ export function App({
         if (res?.message) {
           dispatch({ type: 'addEntry', entry: { kind: 'info', text: res.message } });
         }
+        // Slash commands like /model and /use mutate agent.ctx directly.
+        // Re-sync the visible status bar so the user sees the switch
+        // landed; otherwise the bar keeps the startup-time values and
+        // /model "feels" broken even when subsequent requests use the
+        // new model.
+        const ctxModel = agent.ctx.model;
+        if (ctxModel && ctxModel !== liveModel) setLiveModel(ctxModel);
+        const ctxProviderId = (agent.ctx.provider as { id?: string } | undefined)?.id;
+        if (ctxProviderId && ctxProviderId !== liveProvider) setLiveProvider(ctxProviderId);
         if (res?.exit) {
           exit();
           onExit(0);
@@ -1096,8 +1289,18 @@ export function App({
           selected={state.slashPicker.selected}
         />
       ) : null}
+      {state.modelPicker.open ? (
+        <ModelPicker
+          step={state.modelPicker.step}
+          providerOptions={state.modelPicker.providerOptions}
+          modelOptions={state.modelPicker.modelOptions}
+          selected={state.modelPicker.selected}
+          pickedProviderId={state.modelPicker.pickedProviderId}
+          hint={state.modelPicker.hint}
+        />
+      ) : null}
       <StatusBar
-        model={model}
+        model={`${liveProvider}/${liveModel}`}
         state={state.status}
         tokenCounter={tokenCounter}
         hint={renderRunningTools(state.runningTools) || state.hint}

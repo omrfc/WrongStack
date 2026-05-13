@@ -2,6 +2,7 @@ import type { Compactor, CompactReport } from '../types/compactor.js';
 import type { Context } from '../core/context.js';
 import type { ContentBlock, ToolResultBlock } from '../types/blocks.js';
 import type { Message } from '../types/messages.js';
+import { estimateToolInputTokens, estimateToolResultTokens, estimateTextTokens } from '../utils/token-estimate.js';
 
 export interface CompactorOptions {
   preserveK?: number;
@@ -17,7 +18,7 @@ export class HybridCompactor implements Compactor {
   constructor(opts: CompactorOptions = {}) {
     this.preserveK = opts.preserveK ?? 10;
     this.eliseThreshold = opts.eliseThreshold ?? 2000;
-    this.estimator = opts.estimator ?? roughTokenEstimate;
+    this.estimator = opts.estimator ?? estimateTextTokens;
   }
 
   async compact(ctx: Context, opts: { aggressive?: boolean } = {}): Promise<CompactReport> {
@@ -59,8 +60,7 @@ export class HybridCompactor implements Compactor {
       if (!msg || !Array.isArray(msg.content)) continue;
       const newContent: ContentBlock[] = msg.content.map((b) => {
         if (b.type !== 'tool_result') return b;
-        const text = typeof b.content === 'string' ? b.content : JSON.stringify(b.content);
-        const tokens = this.estimator(text);
+        const tokens = estimateToolResultTokens(b.content);
         if (tokens < this.eliseThreshold) return b;
         saved += tokens;
         const elided: ToolResultBlock = {
@@ -112,16 +112,12 @@ export class HybridCompactor implements Compactor {
     let total = 0;
     for (const m of messages) {
       if (typeof m.content === 'string') {
-        total += this.estimator(m.content);
+        total += estimateTextTokens(m.content);
       } else {
         for (const b of m.content) {
-          if (b.type === 'text') total += this.estimator(b.text);
-          else if (b.type === 'tool_use') total += this.estimator(JSON.stringify(b.input));
-          else if (b.type === 'tool_result') {
-            total += this.estimator(
-              typeof b.content === 'string' ? b.content : JSON.stringify(b.content),
-            );
-          }
+          if (b.type === 'text') total += estimateTextTokens(b.text);
+          else if (b.type === 'tool_use') total += estimateToolInputTokens(b.input);
+          else if (b.type === 'tool_result') total += estimateToolResultTokens(b.content);
         }
       }
     }
@@ -132,8 +128,4 @@ export class HybridCompactor implements Compactor {
 function hasTextContent(m: Message): boolean {
   if (typeof m.content === 'string') return m.content.trim().length > 0;
   return m.content.some((b) => b.type === 'text' && b.text.trim().length > 0);
-}
-
-function roughTokenEstimate(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 4));
 }

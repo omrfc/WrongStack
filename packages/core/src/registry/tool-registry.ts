@@ -11,6 +11,17 @@ export class ToolRegistry {
   }
 
   /**
+   * Attempt to register a tool. Returns true if successful, false if a tool
+   * with the same name is already registered. Useful in multi-agent or plugin
+   * scenarios where duplicate registration may be intentional.
+   */
+  tryRegister(tool: Tool, owner = 'core'): boolean {
+    if (this.tools.has(tool.name)) return false;
+    this.tools.set(tool.name, { tool, owner });
+    return true;
+  }
+
+  /**
    * Register a tool as a default. If the tool name is already registered,
    * this is a no-op — the existing registration (from core or another
    * plugin) takes precedence. Use `override` to intentionally replace.

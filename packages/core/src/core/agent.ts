@@ -20,6 +20,7 @@ import type { Context, RunOptions } from './context.js';
 import type { ToolRegistry } from '../registry/tool-registry.js';
 import type { ProviderRegistry } from '../registry/provider-registry.js';
 import { ToolExecutor } from '../defaults/tool-executor.js';
+import { streamProviderToResponse } from './streaming-response-builder.js';
 
 /** Default iteration cap. Use 0 or Infinity via config to disable. */
 export const DEFAULT_MAX_ITERATIONS = 100;
@@ -190,16 +191,7 @@ export class Agent {
     opts: RunOptions,
     controller: RunController,
   ): Promise<RunResult> {
-    const signal = controller.signal;
-
-    const { blocks, text } = normalizeInput(userInput);
-    await this.pipelines.userInput.run({ content: blocks, text, ctx: this.ctx });
-    this.ctx.messages.push({ role: 'user', content: blocks });
-    await this.ctx.session.append({
-      type: 'user_input',
-      ts: new Date().toISOString(),
-      content: blocks,
-    });
+    await this.normalizeAndEmitUserInput(userInput);
 
     let finalText = '';
     let iterations = 0;
@@ -208,39 +200,29 @@ export class Agent {
 
     for (let i = 0; ; i++) {
       iterations = i + 1;
-      if (signal.aborted) {
+      if (controller.signal.aborted) {
         return { status: 'aborted', iterations };
       }
 
-      if (hasHardLimit && i >= maxIter) {
-        const extendBy = await this.requestLimitExtension(iterations);
-        if (extendBy > 0) {
-          maxIter += extendBy;
-          this.logger.info(`Iteration limit extended by ${extendBy} (new limit: ${maxIter})`);
-        } else {
-          // Loop exits via return statements above.
-    return { status: 'max_iterations', iterations, finalText };
-        }
+      const limitResult = await this.checkIterationLimit(
+        i,
+        maxIter,
+        hasHardLimit,
+        iterations,
+      );
+      if (limitResult !== undefined) {
+        return { ...limitResult, finalText };
       }
 
       this.events.emit('iteration.started', { ctx: this.ctx, index: i });
 
-      // Build request and run request pipeline
-      const baseReq: Request = {
-        model: opts.model ?? this.ctx.model,
-        system: this.ctx.systemPrompt,
-        messages: this.ctx.messages,
-        tools: this.tools.list(),
-        maxTokens: 8192,
-      };
-      const req = await this.pipelines.request.run(baseReq);
+      const req = await this.buildAndRunRequestPipeline(opts);
 
-      // Provider call with retry
       let res: Response;
       try {
-        res = await this.callProviderWithRetry(this.ctx.provider, req, signal);
+        res = await this.callProviderWithRetry(this.ctx.provider, req, controller.signal);
       } catch (err) {
-        if (signal.aborted) {
+        if (controller.signal.aborted) {
           this.events.emit('error', { err: toError(err), phase: 'provider' });
           return { status: 'aborted', iterations, error: err };
         }
@@ -252,68 +234,182 @@ export class Agent {
         res = recovered;
       }
 
-      res = await this.pipelines.response.run(res);
-      this.events.emit('provider.response', {
-        ctx: this.ctx,
-        usage: res.usage,
-        stopReason: res.stopReason,
-      });
-      this.ctx.tokenCounter.account(res.usage, req.model);
-      // Persist the partial assistant message even when the run was
-      // aborted mid-stream — having the partial text in `ctx.messages`
-      // means the next turn can continue with full context and the
-      // session log is consistent.
-      this.ctx.messages.push({ role: 'assistant', content: res.content });
-      await this.ctx.session.append({
-        type: 'llm_response',
-        ts: new Date().toISOString(),
-        content: res.content,
-        stopReason: res.stopReason,
-        usage: res.usage,
-      });
-      if (signal.aborted) {
-        // Accumulate any text the user did see so callers can show "you
-        // got this much before cancelling" if they want.
-        for (const block of res.content) {
-          if (isTextBlock(block)) finalText += block.text;
-        }
-        this.events.emit('iteration.completed', { ctx: this.ctx, index: i });
-        return { status: 'aborted', iterations, finalText };
+      const responseResult = await this.processResponse(res, req);
+      if (responseResult.aborted) {
+        return { status: 'aborted', iterations, finalText: responseResult.finalText };
+      }
+      if (responseResult.done) {
+        return { status: 'done', iterations, finalText: responseResult.finalText };
       }
 
-      // Render text blocks. For streaming providers the renderer already
-      // saw the text via provider.text_delta events; we still run the
-      // assistantOutput pipeline (for transforms) and accumulate finalText,
-      // but we don't double-write to the renderer.
-      const streamed = this.ctx.provider.capabilities.streaming;
-      for (const block of res.content) {
-        if (isTextBlock(block)) {
-          const rendered = await this.pipelines.assistantOutput.run(block);
-          finalText += rendered.text;
-          if (!streamed) this.renderer?.write(rendered);
-        }
-      }
+      finalText = responseResult.finalText;
 
       const toolUses = res.content.filter(isToolUseBlock);
-      if (toolUses.length === 0 || res.stopReason === 'end_turn') {
+      if (toolUses.length === 0) {
         this.events.emit('iteration.completed', { ctx: this.ctx, index: i });
         return { status: 'done', iterations, finalText };
       }
 
-      // Execute tools
-      const results = await this.executeTools(toolUses, signal);
-      this.ctx.messages.push({ role: 'user', content: results });
+      await this.executeTools(toolUses);
       this.events.emit('iteration.completed', { ctx: this.ctx, index: i });
 
-      // Context-window check: only run the pipeline when a compactor is present.
-      // The compactor itself decides whether to actually compact based on the
-      // token threshold, so this always runs when the compactor is configured.
-      if (this.compactor) {
-        await this.pipelines.contextWindow.run(this.ctx);
+      await this.compactContextIfNeeded();
+    }
+  }
+
+  /**
+   * Normalize user input and emit through userInput pipeline + session append.
+   */
+  private async normalizeAndEmitUserInput(userInput: AgentInput): Promise<void> {
+    const { blocks, text } = normalizeInput(userInput);
+    await this.pipelines.userInput.run({ content: blocks, text, ctx: this.ctx });
+    this.ctx.messages.push({ role: 'user', content: blocks });
+    await this.ctx.session.append({
+      type: 'user_input',
+      ts: new Date().toISOString(),
+      content: blocks,
+    });
+  }
+
+  /**
+   * Check if iteration limit has been reached and request extension if needed.
+   * Returns RunResult if loop should exit, undefined otherwise.
+   */
+  private async checkIterationLimit(
+    iterationIndex: number,
+    maxIter: number,
+    hasHardLimit: boolean,
+    currentIterations: number,
+  ): Promise<RunResult | undefined> {
+    if (hasHardLimit && iterationIndex >= maxIter) {
+      const extendBy = await this.requestLimitExtension(currentIterations);
+      if (extendBy > 0) {
+        maxIter += extendBy;
+        this.logger.info(`Iteration limit extended by ${extendBy} (new limit: ${maxIter})`);
+      } else {
+        return { status: 'max_iterations', iterations: currentIterations };
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Build request and run through request pipeline.
+   */
+  private async buildAndRunRequestPipeline(opts: RunOptions): Promise<Request> {
+    const baseReq: Request = {
+      model: opts.model ?? this.ctx.model,
+      system: this.ctx.systemPrompt,
+      messages: this.ctx.messages,
+      tools: this.tools.list(),
+      maxTokens: 8192,
+    };
+    return this.pipelines.request.run(baseReq);
+  }
+
+  /**
+   * Process the provider response: run response pipeline, emit events,
+   * update session, render text, handle abort.
+   */
+  private async processResponse(
+    res: Response,
+    req: Request,
+  ): Promise<{ finalText: string; aborted: boolean; done: boolean }> {
+    const processedRes = await this.pipelines.response.run(res);
+    this.events.emit('provider.response', {
+      ctx: this.ctx,
+      usage: res.usage,
+      stopReason: res.stopReason,
+    });
+    this.ctx.tokenCounter.account(res.usage, req.model);
+
+    // Persist the partial assistant message even when the run was
+    // aborted mid-stream — having the partial text in `ctx.messages`
+    // means the next turn can continue with full context and the
+    // session log is consistent.
+    this.ctx.messages.push({ role: 'assistant', content: res.content });
+    await this.ctx.session.append({
+      type: 'llm_response',
+      ts: new Date().toISOString(),
+      content: res.content,
+      stopReason: res.stopReason,
+      usage: res.usage,
+    });
+
+    if (this.ctx.signal.aborted) {
+      // Accumulate any text the user did see so callers can show "you
+      // got this much before cancelling" if they want.
+      let finalText = '';
+      for (const block of res.content) {
+        if (isTextBlock(block)) finalText += block.text;
+      }
+      return { finalText, aborted: true, done: false };
+    }
+
+    // Render text blocks. For streaming providers the renderer already
+    // saw the text via provider.text_delta events; we still run the
+    // assistantOutput pipeline (for transforms) and accumulate finalText,
+    // but we don't double-write to the renderer.
+    let finalText = '';
+    const streamed = this.ctx.provider.capabilities.streaming;
+    for (const block of res.content) {
+      if (isTextBlock(block)) {
+        const rendered = await this.pipelines.assistantOutput.run(block);
+        finalText += rendered.text;
+        if (!streamed) this.renderer?.write(rendered);
       }
     }
 
-    return { status: 'max_iterations', iterations, finalText };
+    return { finalText, aborted: false, done: false };
+  }
+
+  /**
+   * Execute tools and append tool results to context.
+   */
+  private async executeTools(toolUses: ToolUseBlock[]): Promise<void> {
+    const { outputs } = await this.toolExecutor.executeBatch(
+      toolUses,
+      this.ctx,
+      this.executionStrategy,
+    );
+
+    // Post-processing: pipeline, session, events
+    const useById = new Map(toolUses.map((u) => [u.id, u]));
+    for (const { result, tool, durationMs } of outputs) {
+      const use = useById.get(result.tool_use_id);
+      if (!use) continue;
+      await this.pipelines.toolCall.run({
+        toolUse: use,
+        result,
+        ctx: this.ctx,
+        tool: tool ?? undefined,
+      });
+      await this.ctx.session.append({
+        type: 'tool_result',
+        ts: new Date().toISOString(),
+        id: result.tool_use_id,
+        content: result.content,
+        isError: !!result.is_error,
+      });
+      this.events.emit('tool.executed', {
+        name: use.name,
+        durationMs,
+        ok: !result.is_error,
+        input: use.input,
+        output: truncateForEvent(result.content),
+      });
+    }
+
+    this.ctx.messages.push({ role: 'user', content: outputs.map((o) => o.result) });
+  }
+
+  /**
+   * Run context window pipeline if compactor is present.
+   */
+  private async compactContextIfNeeded(): Promise<void> {
+    if (this.compactor) {
+      await this.pipelines.contextWindow.run(this.ctx);
+    }
   }
 
   /**
@@ -374,145 +470,15 @@ export class Agent {
 
   /**
    * Consume a Provider.stream() into a Response, emitting text_delta and
-   * tool_use lifecycle events to the EventBus as they arrive. This is the
-   * canonical path when the provider declares `capabilities.streaming`;
-   * complete() is only used as a fallback for legacy providers.
+   * tool_use lifecycle events to the EventBus as they arrive. Delegates to
+   * streaming-response-builder.ts for actual event handling.
    */
   private async streamProviderToResponse(
     provider: Provider,
     req: Request,
     signal: AbortSignal,
   ): Promise<Response> {
-    let model = req.model;
-    let stopReason: Response['stopReason'] = 'end_turn';
-    let usage: Response['usage'] = { input: 0, output: 0 };
-    const textBuffers: string[] = [];
-    let currentTextIndex = -1;
-    // tool_input_chunks[id] accumulates raw deltas. We store as string for
-    // JSON-expected inputs; callers that need binary should handle Uint8Array.
-    const tools = new Map<string, { name: string; partial: string; input?: unknown }>();
-    const blockOrder: Array<{ kind: 'text'; idx: number } | { kind: 'tool'; id: string }> = [];
-    // Track open content blocks for providers that emit content_block_start/stop
-    // (e.g. Anthropic). This lets us handle interleaved text + tool sequences.
-    const openContentBlocks = new Map<string, 'text' | 'tool'>();
-
-    const buildResponse = (): Response => {
-      const content: import('../types/blocks.js').ContentBlock[] = [];
-      for (const b of blockOrder) {
-        if (b.kind === 'text') {
-          const txt = textBuffers[b.idx] ?? '';
-          if (txt) content.push({ type: 'text', text: txt });
-        } else {
-          const tb = tools.get(b.id);
-          if (tb) {
-            content.push({
-              type: 'tool_use',
-              id: b.id,
-              name: tb.name,
-              input: (tb.input as Record<string, unknown>) ?? {},
-            });
-          }
-        }
-      }
-      if (content.length === 0) content.push({ type: 'text', text: '' });
-      return { content, stopReason, usage, model };
-    };
-
-    const iter = provider.stream(req, { signal })[Symbol.asyncIterator]();
-    try {
-      for (;;) {
-        const next = await iter.next();
-        if (next.done) break;
-        const ev = next.value;
-        switch (ev.type) {
-          case 'message_start':
-            model = ev.model;
-            break;
-          case 'content_block_start': {
-            // Anthropic-style framing: each block starts with this event before its deltas.
-            const kind = (ev as { kind: string }).kind ?? 'text';
-            if (kind === 'text') {
-              currentTextIndex = textBuffers.length;
-              textBuffers.push('');
-              blockOrder.push({ kind: 'text', idx: currentTextIndex });
-              openContentBlocks.set(String(currentTextIndex), 'text');
-            } else if (kind === 'tool_use') {
-              const id = (ev as { id: string }).id ?? crypto.randomUUID();
-              tools.set(id, { name: (ev as { name: string }).name ?? 'unknown', partial: '' });
-              blockOrder.push({ kind: 'tool', id });
-              openContentBlocks.set(String(blockOrder.length - 1), 'tool');
-            }
-            break;
-          }
-          case 'content_block_stop': {
-            // Finalize the block that was started by content_block_start.
-            const blockIndex = (ev as { index: number }).index;
-            if (blockIndex !== undefined) {
-              openContentBlocks.delete(String(blockIndex));
-            }
-            break;
-          }
-          case 'text_delta':
-            if (currentTextIndex === -1) {
-              currentTextIndex = textBuffers.length;
-              textBuffers.push('');
-              blockOrder.push({ kind: 'text', idx: currentTextIndex });
-            }
-            textBuffers[currentTextIndex] = (textBuffers[currentTextIndex] ?? '') + ev.text;
-            this.events.emit('provider.text_delta', { ctx: this.ctx, text: ev.text });
-            break;
-          case 'tool_use_start':
-            currentTextIndex = -1;
-            tools.set(ev.id, { name: ev.name, partial: '' });
-            blockOrder.push({ kind: 'tool', id: ev.id });
-            this.events.emit('provider.tool_use_start', {
-              ctx: this.ctx,
-              id: ev.id,
-              name: ev.name,
-            });
-            break;
-          case 'tool_use_input_delta': {
-            const t = tools.get(ev.id);
-            if (t) t.partial += ev.partial;
-            break;
-          }
-          case 'tool_use_stop': {
-            const t = tools.get(ev.id);
-            if (t) {
-              t.input = ev.input !== undefined ? ev.input : safeJsonOrRaw(t.partial);
-            }
-            currentTextIndex = -1;
-            this.events.emit('provider.tool_use_stop', { ctx: this.ctx, id: ev.id });
-            break;
-          }
-          case 'message_stop':
-            stopReason = ev.stopReason;
-            usage = ev.usage;
-            break;
-        }
-      }
-    } catch (err) {
-      // If we were aborted mid-stream, surface what we managed to collect.
-      // The agent loop branches on signal.aborted and persists this as a
-      // partial assistant message so the next turn has the context.
-      if (signal.aborted) {
-        stopReason = 'max_tokens'; // closest canonical "interrupted" signal
-        return buildResponse();
-      }
-      throw err;
-    } finally {
-      // Release the underlying body reader / HTTP socket. Without this an
-      // aborted run can leak undici handles on Windows (UV_HANDLE_CLOSING).
-      // Note: if iter.return() throws after an abort, the thrown error
-      // masks the fact that we had a partial response to return. This is
-      // an accepted trade-off for handle-leak prevention on Windows.
-      try {
-        await iter.return?.();
-      } catch {
-        // best-effort
-      }
-    }
-    return buildResponse();
+    return streamProviderToResponse(provider, req, signal, this.ctx, this.events);
   }
 
   private async callProviderWithRetry(
@@ -521,7 +487,6 @@ export class Agent {
     signal: AbortSignal,
   ): Promise<Response> {
     let attempt = 0;
-    let lastErr: unknown;
     for (;;) {
       try {
         if (provider.capabilities.streaming) {
@@ -529,14 +494,10 @@ export class Agent {
         }
         return await provider.complete(req, { signal });
       } catch (err) {
-        lastErr = err;
         if (signal.aborted) throw err;
         const isProviderErr = err instanceof ProviderError;
         const errAsErr = err instanceof Error ? err : new Error(String(err));
         const canRetry = this.retry.shouldRetry(isProviderErr ? err : errAsErr, attempt);
-        // For ProviderError we have a structured `describe()`; for anything
-        // else (e.g. a TypeError from a malformed body) we fall back to the
-        // raw message.
         const description = isProviderErr
           ? (err as ProviderError).describe()
           : errAsErr.message;
@@ -577,61 +538,11 @@ export class Agent {
         attempt++;
       }
     }
-
-  }
-
-  private async executeTools(
-    toolUses: ToolUseBlock[],
-    signal: AbortSignal,
-  ): Promise<ToolResultBlock[]> {
-    const { outputs } = await this.toolExecutor.executeBatch(
-      toolUses,
-      this.ctx,
-      this.executionStrategy,
-    );
-
-    // Post-processing: pipeline, session, events
-    const useById = new Map(toolUses.map((u) => [u.id, u]));
-    for (const { result, tool, durationMs } of outputs) {
-      const use = useById.get(result.tool_use_id);
-      if (!use) continue;
-      await this.pipelines.toolCall.run({
-        toolUse: use,
-        result,
-        ctx: this.ctx,
-        tool: tool ?? undefined,
-      });
-      await this.ctx.session.append({
-        type: 'tool_result',
-        ts: new Date().toISOString(),
-        id: result.tool_use_id,
-        content: result.content,
-        isError: !!result.is_error,
-      });
-      this.events.emit('tool.executed', {
-        name: use.name,
-        durationMs,
-        ok: !result.is_error,
-        input: use.input,
-        output: truncateForEvent(result.content),
-      });
-    }
-
-    return outputs.map((o) => o.result);
   }
 }
 
 function toError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
-}
-
-function safeJsonOrRaw(s: string): unknown {
-  if (!s) return {};
-  try {
-    return JSON.parse(s);
-  } catch {
-    return { _raw: s };
-  }
 }
 
 /**

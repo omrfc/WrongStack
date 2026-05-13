@@ -26,8 +26,25 @@ export interface ProviderFactory {
 export class ProviderRegistry {
   private readonly factories = new Map<string, ProviderFactory>();
 
+  /**
+   * Register a provider factory. If a factory with the same type already
+   * exists, it is replaced. Use this for both initial registration and
+   * runtime overrides (e.g. from plugins or CLI flags).
+   */
   register(f: ProviderFactory): void {
     this.factories.set(f.type, f);
+  }
+
+  /**
+   * Override an existing factory. Throws if no factory is registered
+   * for the given type. Use this to safely replace a provider at runtime
+   * (e.g. in tests or when a plugin provides a custom implementation).
+   */
+  override(type: string, f: ProviderFactory): void {
+    if (!this.factories.has(type)) {
+      throw new Error(`Provider type "${type}" not registered; cannot override`);
+    }
+    this.factories.set(type, f);
   }
 
   has(type: string): boolean {

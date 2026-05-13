@@ -6,3 +6,8 @@ export * from './glob-match.js';
 export * from './diff.js';
 export * from './wstack-paths.js';
 export { createToolOutputSerializer, type ToolOutputSerializerOptions } from './tool-output-serializer.js';
+export {
+  estimateToolInputTokens,
+  estimateToolResultTokens,
+  estimateTextTokens,
+} from './token-estimate.js';

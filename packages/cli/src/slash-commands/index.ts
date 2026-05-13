@@ -26,10 +26,15 @@ export interface SlashCommandContext {
   context?: Context;
   onExit?: () => void;
   onClear?: () => void;
-  onSwitchProvider?: (name: string) => void;
-  onSwitchModel?: (name: string) => void;
-  onDiag?: () => void;
-  onStats?: () => void;
+  /**
+   * Returns the diagnostics text. The TUI surfaces this as a history
+   * entry (the renderer is silent there); REPL prints it via its
+   * dispatcher. Avoid writing to the renderer directly from here — that
+   * would either double-print in REPL or get swallowed by the TUI.
+   */
+  onDiag?: () => string;
+  /** Same contract as `onDiag`. Returns `null` when there's no activity yet. */
+  onStats?: () => string | null;
 }
 
 export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashCommand[] {
@@ -39,17 +44,64 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     clearCommand(opts),
     compactCommand(opts),
     contextCommand(opts),
-    usageCommand(opts),
     toolsCommand(opts),
     skillCommand(opts),
-    useCommand(opts),
-    modelCommand(opts),
     diagCommand(opts),
     statsCommand(opts),
+    memoryCommand(opts),
     saveCommand(opts),
     loadCommand(opts),
     exitCommand(opts),
   ];
+}
+
+function memoryCommand(opts: SlashCommandContext): SlashCommand {
+  return {
+    name: 'memory',
+    description:
+      'Inspect or edit persistent memory: /memory [show|remember <text>|forget <query>|clear]',
+    async run(args) {
+      const store = opts.memoryStore;
+      if (!store) return { message: 'No memory store configured.' };
+      const [verb, ...rest] = args.trim().split(/\s+/);
+      const restJoined = rest.join(' ').trim();
+      switch (verb) {
+        case '':
+        case 'show':
+        case 'list': {
+          const text = await store.readAll();
+          return {
+            message: text.trim().length === 0
+              ? 'Memory is empty. Add an entry with `/memory remember <text>`.'
+              : text,
+          };
+        }
+        case 'remember':
+        case 'add': {
+          if (!restJoined) return { message: 'Usage: /memory remember <text>' };
+          await store.remember(restJoined);
+          return { message: `Remembered: ${restJoined}` };
+        }
+        case 'forget':
+        case 'rm': {
+          if (!restJoined) return { message: 'Usage: /memory forget <query>' };
+          const n = await store.forget(restJoined);
+          return {
+            message:
+              n === 0 ? `No entries matched "${restJoined}".` : `Forgot ${n} entries.`,
+          };
+        }
+        case 'clear': {
+          await store.clear();
+          return { message: 'Cleared all memory scopes.' };
+        }
+        default:
+          return {
+            message: `Unknown subcommand "${verb}". Try: show | remember <text> | forget <query> | clear`,
+          };
+      }
+    },
+  };
 }
 
 /**
@@ -200,12 +252,8 @@ function diagCommand(opts: SlashCommandContext): SlashCommand {
     name: 'diag',
     description: 'Show runtime diagnostics (provider, tokens, tools, MCP).',
     async run() {
-      if (opts.onDiag) {
-        opts.onDiag();
-        return { message: 'diag' };
-      } else {
-        return { message: 'Diag not available in this context.' };
-      }
+      if (!opts.onDiag) return { message: 'Diag not available in this context.' };
+      return { message: opts.onDiag() };
     },
   };
 }
@@ -215,12 +263,9 @@ function statsCommand(opts: SlashCommandContext): SlashCommand {
     name: 'stats',
     description: 'Show session report: tokens, requests, tools, files, cost.',
     async run() {
-      if (opts.onStats) {
-        opts.onStats();
-        return { message: 'stats' };
-      } else {
-        return { message: 'Stats not available in this context.' };
-      }
+      if (!opts.onStats) return { message: 'Stats not available in this context.' };
+      const text = opts.onStats();
+      return { message: text ?? 'No session activity recorded yet.' };
     },
   };
 }
@@ -381,27 +426,6 @@ function compactCommand(opts: SlashCommandContext): SlashCommand {
   };
 }
 
-function usageCommand(opts: SlashCommandContext): SlashCommand {
-  return {
-    name: 'usage',
-    aliases: ['cost'],
-    description: 'Show token usage and estimated cost.',
-    async run() {
-      const total = opts.tokenCounter.total();
-      const cost = opts.tokenCounter.estimateCost();
-      const msg =
-        `${color.bold('Usage')}\n` +
-          `  input:       ${total.input}\n` +
-          `  output:      ${total.output}\n` +
-          `  cache read:  ${total.cacheRead ?? 0}\n` +
-          `  cache write: ${total.cacheWrite ?? 0}\n` +
-          `  cost:        $${cost.total.toFixed(4)} (input $${cost.input.toFixed(4)} / output $${cost.output.toFixed(4)})\n`;
-      opts.renderer.write(msg);
-      return { message: msg };
-    },
-  };
-}
-
 function toolsCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'tools',
@@ -445,40 +469,6 @@ function skillCommand(opts: SlashCommandContext): SlashCommand {
         const body = await opts.skillLoader.readBody(skill.name);
         return { message: body };
       }
-    },
-  };
-}
-
-function useCommand(opts: SlashCommandContext): SlashCommand {
-  return {
-    name: 'use',
-    description: 'Switch provider mid-session: /use <provider>',
-    async run(args) {
-      const name = args.trim();
-      if (!name) {
-        const msg = 'Usage: /use <provider-name>';
-        return { message: msg };
-      }
-      opts.onSwitchProvider?.(name);
-      const msg = `Switched provider to "${name}".`;
-      return { message: msg };
-    },
-  };
-}
-
-function modelCommand(opts: SlashCommandContext): SlashCommand {
-  return {
-    name: 'model',
-    description: 'Switch model mid-session: /model <model>',
-    async run(args) {
-      const name = args.trim();
-      if (!name) {
-        const msg = 'Usage: /model <model-name>';
-        return { message: msg };
-      }
-      opts.onSwitchModel?.(name);
-      const msg = `Switched model to "${name}".`;
-      return { message: msg };
     },
   };
 }

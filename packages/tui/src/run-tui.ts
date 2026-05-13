@@ -30,6 +30,10 @@ export interface RunTuiOptions {
   family?: string;
   /** Last 3 chars of the active API key — shown in the banner for visual key-pick verification. */
   keyTail?: string;
+  /** Snapshot of keyed providers + their model lists for the `/model` picker. Async — the catalog fetch may need to hit disk/network. */
+  getPickableProviders?: () => Promise<import('./components/model-picker.js').ProviderOption[]>;
+  /** Apply a (provider, model) pair after the picker confirms. Returns an error string on failure. */
+  switchProviderAndModel?: (providerId: string, modelId: string) => string | null;
   /**
    * Model-specific maxContext (tokens), resolved by the CLI via the
    * ModelsRegistry. When omitted, the TUI falls back to the provider
@@ -166,6 +170,8 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           provider: opts.provider,
           family: opts.family,
           keyTail: opts.keyTail,
+          getPickableProviders: opts.getPickableProviders,
+          switchProviderAndModel: opts.switchProviderAndModel,
           effectiveMaxContext: opts.effectiveMaxContext,
           onExit,
         }),

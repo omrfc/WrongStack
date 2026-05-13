@@ -4,6 +4,7 @@ import type { Message } from '../types/messages.js';
 import type { Provider, Request } from '../types/provider.js';
 import type { ContentBlock, TextBlock } from '../types/blocks.js';
 import { isTextBlock } from '../types/blocks.js';
+import { estimateToolInputTokens, estimateToolResultTokens, estimateTextTokens } from '../utils/token-estimate.js';
 
 /**
  * Options for IntelligentCompactor.
@@ -235,8 +236,7 @@ export class IntelligentCompactor implements Compactor {
       if (!msg || !Array.isArray(msg.content)) continue;
       const newContent: ContentBlock[] = msg.content.map((b) => {
         if (b.type !== 'tool_result') return b;
-        const text = typeof b.content === 'string' ? b.content : JSON.stringify(b.content);
-        const tokens = this.roughTokenEstimate(text);
+        const tokens = estimateToolResultTokens(b.content);
         if (tokens < this.eliseThreshold) return b;
         saved += tokens;
         return {
@@ -260,23 +260,15 @@ export class IntelligentCompactor implements Compactor {
     let total = 0;
     for (const m of messages) {
       if (typeof m.content === 'string') {
-        total += this.roughTokenEstimate(m.content);
+        total += estimateTextTokens(m.content);
       } else {
         for (const b of m.content) {
-          if (b.type === 'text') total += this.roughTokenEstimate(b.text);
-          else if (b.type === 'tool_use') total += this.roughTokenEstimate(JSON.stringify(b.input));
-          else if (b.type === 'tool_result') {
-            total += this.roughTokenEstimate(
-              typeof b.content === 'string' ? b.content : JSON.stringify(b.content),
-            );
-          }
+          if (b.type === 'text') total += estimateTextTokens(b.text);
+          else if (b.type === 'tool_use') total += estimateToolInputTokens(b.input);
+          else if (b.type === 'tool_result') total += estimateToolResultTokens(b.content);
         }
       }
     }
     return total;
-  }
-
-  private roughTokenEstimate(text: string): number {
-    return Math.max(1, Math.ceil(text.length / 4));
   }
 }

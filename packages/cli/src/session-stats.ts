@@ -78,8 +78,15 @@ export class SessionStats {
     );
   }
 
-  render(renderer: TerminalRenderer): void {
-    if (!this.hasActivity()) return;
+  /**
+   * Build the report string. Returns null when there's no recorded
+   * activity yet — caller decides whether to emit a placeholder or stay
+   * silent. Splitting `format()` out of `render()` lets the TUI's slash
+   * dispatcher take the string and turn it into a history entry, while
+   * REPL keeps the old direct-write path.
+   */
+  format(): string | null {
+    if (!this.hasActivity()) return null;
     const u = this.tokenCounter.total();
     const cost = this.tokenCounter.estimateCost();
     const elapsedSec = ((Date.now() - this.startedAt) / 1000).toFixed(1);
@@ -149,7 +156,13 @@ export class SessionStats {
     }
 
     lines.push('');
-    renderer.write(`${lines.join('\n')}\n`);
+    return lines.join('\n');
+  }
+
+  render(renderer: TerminalRenderer): void {
+    const text = this.format();
+    if (text === null) return;
+    renderer.write(`${text}\n`);
   }
 }
 

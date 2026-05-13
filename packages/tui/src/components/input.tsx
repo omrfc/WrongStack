@@ -46,9 +46,13 @@ export function Input({
   const at = value.slice(cursor, cursor + 1) || ' ';
   const after = value.slice(cursor + 1);
 
-  // Active = cyan when the user has anything typed; gray otherwise.
-  // Disabled (aborting an iteration) overrides to red — Ctrl+C feedback.
-  const borderColor = disabled ? 'red' : value.length > 0 ? 'cyan' : 'gray';
+  // Disabled (aborting an iteration) is the only signal that needs a
+  // hard visual cue — paint the prompt red. We avoid wrapping the input
+  // in a border Box: Ink redraws the live area on every state change,
+  // and in non-altScreen mode the previous frame's border is left in
+  // the terminal's scrollback. A `> ` prompt + inverse cursor is enough
+  // to indicate the input row.
+  const promptColor = disabled ? 'red' : 'cyan';
 
   return (
     <Box flexDirection="column">
@@ -58,25 +62,16 @@ export function Input({
           {p}
         </Text>
       ))}
-      <Box
-        borderStyle="round"
-        borderColor={borderColor}
-        paddingX={1}
-        // width="100%" makes the border stretch across the terminal; without
-        // it the Box hugs its content and the border looks like a tag.
-        width="100%"
-      >
-        {/* Single <Text> wrapper so prompt + buffer + cursor + tail all wrap
-            as one continuous string. Splitting them across sibling Text
-            elements would let each piece wrap independently and shift the
-            cursor cell off the intended character. */}
-        <Text>
-          <Text color="cyan">{prompt}</Text>
-          {before}
-          <Text inverse>{at}</Text>
-          {after}
-        </Text>
-      </Box>
+      {/* Single <Text> wrapper so prompt + buffer + cursor + tail all wrap
+          as one continuous string. Splitting them across sibling Text
+          elements would let each piece wrap independently and shift the
+          cursor cell off the intended character. */}
+      <Text>
+        <Text color={promptColor}>{prompt}</Text>
+        {before}
+        <Text inverse>{at}</Text>
+        {after}
+      </Text>
       {hint ? <Text dimColor>{hint}</Text> : null}
     </Box>
   );

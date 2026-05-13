@@ -49,7 +49,7 @@ export type StreamEvent =
   | { type: 'text_delta'; text: string }
   | { type: 'tool_use_start'; id: string; name: string }
   | { type: 'tool_use_input_delta'; id: string; partial: string }
-  | { type: 'tool_use_stop'; id: string; input: unknown }
+  | { type: 'tool_use_stop'; id: string; input: unknown; providerMeta?: Record<string, unknown> }
   | { type: 'message_stop'; stopReason: StopReason; usage: Usage };
 
 export interface Provider {

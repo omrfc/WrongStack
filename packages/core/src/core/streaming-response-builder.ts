@@ -1,0 +1,191 @@
+import type { Provider, Request, Response } from '../types/provider.js';
+import type { ContentBlock, ToolUseBlock } from '../types/blocks.js';
+import type { EventBus } from '../kernel/events.js';
+import type { Context } from './context.js';
+
+interface StreamingState {
+  model: string;
+  stopReason: Response['stopReason'];
+  usage: Response['usage'];
+  textBuffers: string[];
+  currentTextIndex: number;
+  tools: Map<string, { name: string; partial: string; input?: unknown; providerMeta?: Record<string, unknown> }>;
+  blockOrder: Array<{ kind: 'text'; idx: number } | { kind: 'tool'; id: string }>;
+}
+
+export function buildResponse(state: StreamingState): Response {
+  const content: ContentBlock[] = [];
+  for (const b of state.blockOrder) {
+    if (b.kind === 'text') {
+      const txt = state.textBuffers[b.idx] ?? '';
+      if (txt) content.push({ type: 'text', text: txt });
+    } else {
+      const tb = state.tools.get(b.id);
+      if (tb) {
+        const block: ToolUseBlock = {
+          type: 'tool_use',
+          id: b.id,
+          name: tb.name,
+          input: (tb.input as Record<string, unknown>) ?? {},
+        };
+        if (tb.providerMeta && Object.keys(tb.providerMeta).length > 0) {
+          block.providerMeta = tb.providerMeta;
+        }
+        content.push(block);
+      }
+    }
+  }
+  if (content.length === 0) content.push({ type: 'text', text: '' });
+  return { content, stopReason: state.stopReason, usage: state.usage, model: state.model };
+}
+
+export function createStreamingState(model: string): StreamingState {
+  return {
+    model,
+    stopReason: 'end_turn',
+    usage: { input: 0, output: 0 },
+    textBuffers: [],
+    currentTextIndex: -1,
+    tools: new Map(),
+    blockOrder: [],
+  };
+}
+
+export function handleMessageStart(state: StreamingState, model: string): void {
+  state.model = model;
+}
+
+export function handleContentBlockStart(
+  state: StreamingState,
+  ev: { kind?: string; id?: string; name?: string },
+): void {
+  const kind = ev.kind ?? 'text';
+  if (kind === 'text') {
+    state.currentTextIndex = state.textBuffers.length;
+    state.textBuffers.push('');
+    state.blockOrder.push({ kind: 'text', idx: state.currentTextIndex });
+  } else if (kind === 'tool_use') {
+    const id = ev.id ?? crypto.randomUUID();
+    state.tools.set(id, { name: ev.name ?? 'unknown', partial: '' });
+    state.blockOrder.push({ kind: 'tool', id });
+    state.currentTextIndex = -1;
+  }
+}
+
+export function handleContentBlockStop(state: StreamingState, ev: { index?: number }): void {
+  // No-op for now, but tracks block boundaries for providers that need it
+  void ev;
+}
+
+export function handleTextDelta(state: StreamingState, text: string): void {
+  if (state.currentTextIndex === -1) {
+    state.currentTextIndex = state.textBuffers.length;
+    state.textBuffers.push('');
+    state.blockOrder.push({ kind: 'text', idx: state.currentTextIndex });
+  }
+  state.textBuffers[state.currentTextIndex] = (state.textBuffers[state.currentTextIndex] ?? '') + text;
+}
+
+export function handleToolUseStart(
+  state: StreamingState,
+  ev: { id: string; name: string },
+): void {
+  state.currentTextIndex = -1;
+  state.tools.set(ev.id, { name: ev.name, partial: '' });
+  state.blockOrder.push({ kind: 'tool', id: ev.id });
+}
+
+export function handleToolUseInputDelta(state: StreamingState, ev: { id: string; partial: string }): void {
+  const t = state.tools.get(ev.id);
+  if (t) t.partial += ev.partial;
+}
+
+export function safeJsonOrRaw(s: string): unknown {
+  if (!s) return {};
+  try {
+    return JSON.parse(s);
+  } catch {
+    return { _raw: s };
+  }
+}
+
+export function handleToolUseStop(
+  state: StreamingState,
+  ev: { id: string; input?: unknown; providerMeta?: Record<string, unknown> },
+): void {
+  const t = state.tools.get(ev.id);
+  if (t) {
+    t.input = ev.input !== undefined ? ev.input : safeJsonOrRaw(t.partial);
+    if (ev.providerMeta) t.providerMeta = ev.providerMeta;
+  }
+  state.currentTextIndex = -1;
+}
+
+export function handleMessageStop(
+  state: StreamingState,
+  ev: { stopReason?: Response['stopReason']; usage?: Response['usage'] },
+): void {
+  state.stopReason = ev.stopReason ?? 'end_turn';
+  state.usage = ev.usage ?? { input: 0, output: 0 };
+}
+
+export async function streamProviderToResponse(
+  provider: Provider,
+  req: Request,
+  signal: AbortSignal,
+  ctx: Context,
+  events: EventBus,
+): Promise<Response> {
+  const state = createStreamingState(req.model);
+
+  const iter = provider.stream(req, { signal })[Symbol.asyncIterator]();
+  try {
+    for (;;) {
+      const next = await iter.next();
+      if (next.done) break;
+      const ev = next.value;
+      switch (ev.type) {
+        case 'message_start':
+          handleMessageStart(state, ev.model);
+          break;
+        case 'content_block_start':
+          handleContentBlockStart(state, ev as Parameters<typeof handleContentBlockStart>[1]);
+          break;
+        case 'content_block_stop':
+          handleContentBlockStop(state, ev as Parameters<typeof handleContentBlockStop>[1]);
+          break;
+        case 'text_delta':
+          handleTextDelta(state, ev.text);
+          events.emit('provider.text_delta', { ctx, text: ev.text });
+          break;
+        case 'tool_use_start':
+          handleToolUseStart(state, ev as Parameters<typeof handleToolUseStart>[1]);
+          events.emit('provider.tool_use_start', { ctx, id: ev.id, name: ev.name });
+          break;
+        case 'tool_use_input_delta':
+          handleToolUseInputDelta(state, ev as Parameters<typeof handleToolUseInputDelta>[1]);
+          break;
+        case 'tool_use_stop':
+          handleToolUseStop(state, ev as Parameters<typeof handleToolUseStop>[1]);
+          events.emit('provider.tool_use_stop', { ctx, id: ev.id });
+          break;
+        case 'message_stop':
+          handleMessageStop(state, ev as Parameters<typeof handleMessageStop>[1]);
+          break;
+      }
+    }
+  } catch (err) {
+    if (signal.aborted) {
+      state.stopReason = 'max_tokens';
+      return buildResponse(state);
+    }
+    throw err;
+  } finally {
+    try {
+      await iter.return?.();
+    } catch {
+      // best-effort
+    }
+  }
+  return buildResponse(state);
+}

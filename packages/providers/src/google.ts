@@ -41,6 +41,14 @@ interface GeminiPart {
   functionCall?: { name: string; args: Record<string, unknown> };
   functionResponse?: { name: string; response: { content?: unknown } };
   inlineData?: { mimeType: string; data: string };
+  /**
+   * Gemini's signed thought blob — present on functionCall parts when
+   * the model is using thinking. Must be echoed back verbatim on the
+   * next request, otherwise the API rejects with:
+   *   400 "Function call is missing a thought_signature in functionCall
+   *   parts. This is required for tools to work correctly".
+   */
+  thoughtSignature?: string;
 }
 
 interface GeminiContent {
@@ -206,7 +214,17 @@ function messagesToGemini(messages: Message[]): GeminiContent[] {
       for (const b of blocks) {
         if (b.type === 'text' && b.text) parts.push({ text: b.text });
         else if (b.type === 'tool_use') {
-          parts.push({ functionCall: { name: b.name, args: b.input } });
+          const part: GeminiPart = {
+            functionCall: { name: b.name, args: b.input },
+          };
+          // Echo the thought_signature back on every assistant tool_use
+          // part — Gemini's thinking models REQUIRE it on the next turn
+          // or the API returns 400. The value is opaque; we just round-trip.
+          const sig = b.providerMeta?.['google.thoughtSignature'];
+          if (typeof sig === 'string' && sig.length > 0) {
+            part.thoughtSignature = sig;
+          }
+          parts.push(part);
         }
       }
       if (parts.length > 0) out.push({ role: 'model', parts });
@@ -260,6 +278,12 @@ async function* parseGoogleStream(
   let usage: Usage = { input: 0, output: 0 };
   let stopReason: StopReason = 'end_turn';
   let started = false;
+  // Gemini does not have a `tool_use`/`tool_calls` finish reason — turns
+  // that contain functionCall parts come back with `finishReason: "STOP"`,
+  // which normalizes to `end_turn` and would otherwise make the agent
+  // loop exit instead of executing the tool. Track whether we saw any
+  // function call so we can force-override the stop reason at message_stop.
+  let sawFunctionCall = false;
 
   for await (const msg of parseSSE(body)) {
     if (!msg.data || msg.data === '[DONE]') continue;
@@ -286,12 +310,21 @@ async function* parseGoogleStream(
       if (typeof part.text === 'string' && part.text.length > 0) {
         yield { type: 'text_delta', text: part.text };
       } else if (part.functionCall) {
+        sawFunctionCall = true;
         const id = `${part.functionCall.name}_${Math.random().toString(36).slice(2, 10)}`;
         yield { type: 'tool_use_start', id, name: part.functionCall.name };
+        // Stash the opaque thought_signature so it can be echoed back on
+        // the next request. Without this the Gemini API rejects with 400
+        // "Function call is missing a thought_signature in functionCall
+        // parts" on thinking models.
+        const providerMeta = typeof part.thoughtSignature === 'string'
+          ? { 'google.thoughtSignature': part.thoughtSignature }
+          : undefined;
         yield {
           type: 'tool_use_stop',
           id,
           input: part.functionCall.args ?? {},
+          ...(providerMeta ? { providerMeta } : {}),
         };
       }
     }
@@ -311,6 +344,10 @@ async function* parseGoogleStream(
   }
 
   if (started) {
-    yield { type: 'message_stop', stopReason, usage };
+    // Force `tool_use` when we saw any functionCall part — Gemini reports
+    // `finishReason: "STOP"` for tool-call turns, which would otherwise
+    // become `end_turn` and short-circuit the agent loop.
+    const finalStop: StopReason = sawFunctionCall ? 'tool_use' : stopReason;
+    yield { type: 'message_stop', stopReason: finalStop, usage };
   }
 }

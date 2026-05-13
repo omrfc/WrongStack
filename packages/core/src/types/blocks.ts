@@ -9,6 +9,19 @@ export interface ToolUseBlock {
   id: string;
   name: string;
   input: Record<string, unknown>;
+  /**
+   * Provider-specific opaque metadata captured from the wire response.
+   * Echoed back verbatim in the next request so providers that bind
+   * extra state to function calls keep working. Example: Gemini's
+   * `thoughtSignature` — required for tool-use turns with thinking
+   * models, otherwise the next request fails with 400 "Function call
+   * is missing a thought_signature in functionCall parts".
+   *
+   * Keys are namespaced by intent so multiple wires can coexist:
+   *   - `google.thoughtSignature` — Gemini signed-thought blob
+   * Other providers can add their own keys without colliding.
+   */
+  providerMeta?: Record<string, unknown>;
 }
 
 export interface ToolResultBlock {
