@@ -138,15 +138,13 @@ describe('DefaultModelsRegistry', () => {
   });
 
   it('load falls back to stale cache on network failure', async () => {
-    // Pre-write stale cache
-    await fs.writeFile(
-      cacheFile,
-      JSON.stringify({
-        fetchedAt: new Date(0).toISOString(),
-        url: 'https://models.dev/api.json',
-        payload: SAMPLE,
-      }),
-    );
+    // Pre-write stale cache (recent enough to pass maxStaleAgeSeconds check)
+    const recentCache = {
+      fetchedAt: new Date(Date.now() - 60_000).toISOString(), // 1 minute ago
+      url: 'https://models.dev/api.json',
+      payload: SAMPLE,
+    };
+    await fs.writeFile(cacheFile, JSON.stringify(recentCache));
     const fetchImpl = vi.fn().mockRejectedValue(new Error('offline')) as unknown as typeof fetch;
     const reg = new DefaultModelsRegistry({ cacheFile, fetchImpl, ttlSeconds: 0 });
     const payload = await reg.load();

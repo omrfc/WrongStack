@@ -147,6 +147,16 @@ export class DefaultMemoryStore implements MemoryStore {
       // backup best-effort
     }
   }
+
+  async clear(scope?: MemoryScope): Promise<void> {
+    if (scope) {
+      await atomicWrite(this.files[scope], '');
+    } else {
+      for (const s of ['project-agents', 'project-memory', 'user-memory'] as MemoryScope[]) {
+        await atomicWrite(this.files[s], '');
+      }
+    }
+  }
 }
 
 function labelOf(scope: MemoryScope): string {

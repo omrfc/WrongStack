@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   normalizeAnthropic,
   normalizeOpenAI,
+  normalizeGemini,
 } from '../src/stop-reason.js';
 
 describe('stop-reason', () => {
@@ -28,6 +29,29 @@ describe('stop-reason', () => {
       expect(normalizeOpenAI('unknown')).toBe('end_turn');
       expect(normalizeOpenAI(null)).toBe('end_turn');
       expect(normalizeOpenAI(undefined)).toBe('end_turn');
+    });
+  });
+
+  describe('normalizeGemini', () => {
+    it('maps SAFETY to refusal', () => expect(normalizeGemini('SAFETY')).toBe('refusal'));
+    it('maps RECITATION to refusal', () => expect(normalizeGemini('RECITATION')).toBe('refusal'));
+    it('maps hallucination to refusal', () => expect(normalizeGemini('hallucination')).toBe('refusal'));
+    it('maps stop / STOP to end_turn', () => {
+      expect(normalizeGemini('stop')).toBe('end_turn');
+      expect(normalizeGemini('STOP')).toBe('end_turn');
+    });
+    it('maps max_tokens / MAX_TOKENS to max_tokens', () => {
+      expect(normalizeGemini('max_tokens')).toBe('max_tokens');
+      expect(normalizeGemini('MAX_TOKENS')).toBe('max_tokens');
+    });
+    it('maps tool_use / TOOL_USE to tool_use', () => {
+      expect(normalizeGemini('tool_use')).toBe('tool_use');
+      expect(normalizeGemini('TOOL_USE')).toBe('tool_use');
+    });
+    it('unknown value falls back to end_turn', () => {
+      expect(normalizeGemini('other')).toBe('end_turn');
+      expect(normalizeGemini(null)).toBe('end_turn');
+      expect(normalizeGemini(undefined)).toBe('end_turn');
     });
   });
 });

@@ -63,6 +63,8 @@ export class MCPClient {
    * skip the drain wait and emit a warning instead of racing.
    */
   private _drainPending = false;
+  /** Set when a notify() call failed for reasons the caller should know about. */
+  private _lastNotifySkipped = false;
 
   constructor(public readonly opts: MCPClientOptions) {}
 
@@ -72,6 +74,11 @@ export class MCPClient {
 
   listTools(): MCPTool[] {
     return [...this.tools];
+  }
+
+  /** Returns true if a prior notify() call was skipped due to backpressure. */
+  hadNotifySkipped(): boolean {
+    return this._lastNotifySkipped;
   }
 
   async connect(): Promise<void> {
@@ -119,8 +126,11 @@ export class MCPClient {
     }
     try {
       await this.notify('notifications/initialized', {});
-    } catch {
-      // some servers don't require this
+    } catch (err) {
+      // some servers don't require this; failures are logged as warnings
+      console.warn(
+        '[MCP] notify("notifications/initialized") failed for "' + this.opts.name + '": ' + (err instanceof Error ? err.message : String(err)),
+      );
     }
     const toolsRes = await this.request('tools/list', {});
     if (toolsRes.error) {
@@ -182,28 +192,32 @@ export class MCPClient {
         // This avoids a race where two concurrent notify() calls each start
         // their own drain-wait, then both resolve and the buffer is still full.
         if (this._drainPending) {
+          this._lastNotifySkipped = true;
           process.emitWarning(
             `[MCP] notify("${method}") skipped: stdin buffer backpressure (already waiting for drain)`,
           );
           return;
         }
         this._drainPending = true;
-        await new Promise<void>((resolve) => {
+        await new Promise<void>((resolve, reject) => {
           const timeout = setTimeout(() => {
             this._drainPending = false;
-            resolve();
+            reject(new Error(`MCP notify("${method}") drain timeout`));
           }, 500);
           this.child?.stdin?.once('drain', () => {
             clearTimeout(timeout);
             this._drainPending = false;
             resolve();
           });
+          this.child?.stdin?.once('error', (err) => {
+            clearTimeout(timeout);
+            this._drainPending = false;
+            reject(err);
+          });
         });
       }
     } catch (err) {
-      process.emitWarning(
-        `[MCP] notify("${method}") failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      throw new Error(`[MCP] notify("${method}") failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

@@ -67,4 +67,11 @@ describe('capabilitiesFor', () => {
     const c = await capabilitiesFor(reg(), 'nonexistent', 'foo');
     expect(c.tools).toBe(false);
   });
+
+  it('model without explicit capabilities still returns family baseline', async () => {
+    const c = await capabilitiesFor(reg(), 'anthropic', 'claude-sonnet-4-6');
+    expect(c.tools).toBe(true);
+    expect(c.vision).toBe(true);
+    expect(c.maxContext).toBe(200_000);
+  });
 });

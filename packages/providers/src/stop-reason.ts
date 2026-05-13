@@ -32,3 +32,27 @@ export function normalizeOpenAI(stop: string | null | undefined): StopReason {
       return 'end_turn';
   }
 }
+
+/**
+ * Normalize Gemini-specific finish reasons. SAFETY, RECITATION, and
+ * "hallucination" are safety blocks that should not silently become end_turn.
+ */
+export function normalizeGemini(stop: string | null | undefined): StopReason {
+  switch (stop) {
+    case 'SAFETY':
+    case 'RECITATION':
+    case 'hallucination':
+      return 'refusal';
+    case 'stop':
+    case 'STOP':
+      return 'end_turn';
+    case 'max_tokens':
+    case 'MAX_TOKENS':
+      return 'max_tokens';
+    case 'tool_use':
+    case 'TOOL_USE':
+      return 'tool_use';
+    default:
+      return 'end_turn';
+  }
+}

@@ -21,6 +21,7 @@ import type { ToolRegistry } from '../registry/tool-registry.js';
 import type { ProviderRegistry } from '../registry/provider-registry.js';
 import { ToolExecutor } from '../defaults/tool-executor.js';
 
+/** Default iteration cap. Use 0 or Infinity via config to disable. */
 export const DEFAULT_MAX_ITERATIONS = 100;
 
 export interface RunResult {
@@ -41,6 +42,12 @@ export interface AgentInit {
   iterationTimeoutMs?: number;
   executionStrategy?: 'parallel' | 'sequential' | 'smart';
   perIterationOutputCapBytes?: number;
+  /**
+   * When true (default), the agent automatically extends its iteration
+   * limit by 100 when hit, without asking the user. Set to false to
+   * emit `iteration.limit_reached` and wait for a listener to grant/deny.
+   */
+  autoExtendLimit?: boolean;
 }
 
 export interface AgentPipelines {
@@ -104,6 +111,7 @@ export class Agent {
   private readonly perIterationOutputCapBytes: number;
   private readonly plugins: { plugin: Plugin; api: PluginAPI }[] = [];
   private readonly toolExecutor: ToolExecutor;
+  private readonly autoExtendLimit: boolean;
 
   constructor(init: AgentInit) {
     this.container = init.container;
@@ -116,6 +124,7 @@ export class Agent {
     this.iterationTimeoutMs = init.iterationTimeoutMs ?? 300_000;
     this.executionStrategy = init.executionStrategy ?? 'smart';
     this.perIterationOutputCapBytes = init.perIterationOutputCapBytes ?? 100_000;
+    this.autoExtendLimit = init.autoExtendLimit ?? true;
     this.toolExecutor = new ToolExecutor(this.tools, {
       permissionPolicy: this.permission,
       secretScrubber: this.scrubber,
@@ -194,13 +203,26 @@ export class Agent {
 
     let finalText = '';
     let iterations = 0;
-    const maxIter = opts.maxIterations ?? this.maxIterations;
+    let maxIter = opts.maxIterations ?? this.maxIterations;
+    const hasHardLimit = maxIter > 0 && Number.isFinite(maxIter);
 
-    for (let i = 0; i < maxIter; i++) {
+    for (let i = 0; ; i++) {
       iterations = i + 1;
       if (signal.aborted) {
         return { status: 'aborted', iterations };
       }
+
+      if (hasHardLimit && i >= maxIter) {
+        const extendBy = await this.requestLimitExtension(iterations);
+        if (extendBy > 0) {
+          maxIter += extendBy;
+          this.logger.info(`Iteration limit extended by ${extendBy} (new limit: ${maxIter})`);
+        } else {
+          // Loop exits via return statements above.
+    return { status: 'max_iterations', iterations, finalText };
+        }
+      }
+
       this.events.emit('iteration.started', { ctx: this.ctx, index: i });
 
       // Build request and run request pipeline
@@ -295,6 +317,62 @@ export class Agent {
   }
 
   /**
+   * Emit an event asking listeners (CLI/TUI) whether to extend the iteration
+   * limit. Returns the number of additional iterations granted. If no listener
+   * responds or the user declines, returns 0.
+   */
+  private async requestLimitExtension(currentIterations: number): Promise<number> {
+    return new Promise((resolve) => {
+      let resolved = false;
+      const timer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          resolve(0);
+        }
+      }, 30_000);
+      const wrappedDeny = () => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          resolve(0);
+        }
+      };
+      const wrappedGrant = (extra: number) => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          resolve(Math.max(0, extra));
+        }
+      };
+      // Auto-extend when enabled (default). Listeners can still override by
+      // calling deny() synchronously before this emit returns.
+      if (this.autoExtendLimit) {
+        this.events.emit('iteration.limit_reached', {
+          currentIterations,
+          currentLimit: this.maxIterations,
+          grant: wrappedGrant,
+          deny: wrappedDeny,
+        });
+        // Give listeners a tick to deny, then auto-grant.
+        setImmediate(() => {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timer);
+            resolve(100);
+          }
+        });
+      } else {
+        this.events.emit('iteration.limit_reached', {
+          currentIterations,
+          currentLimit: this.maxIterations,
+          grant: wrappedGrant,
+          deny: wrappedDeny,
+        });
+      }
+    });
+  }
+
+  /**
    * Consume a Provider.stream() into a Response, emitting text_delta and
    * tool_use lifecycle events to the EventBus as they arrive. This is the
    * canonical path when the provider declares `capabilities.streaming`;
@@ -357,18 +435,21 @@ export class Agent {
               currentTextIndex = textBuffers.length;
               textBuffers.push('');
               blockOrder.push({ kind: 'text', idx: currentTextIndex });
-              openContentBlocks.set(`block_${currentTextIndex}`, 'text');
+              openContentBlocks.set(String(currentTextIndex), 'text');
             } else if (kind === 'tool_use') {
               const id = (ev as { id: string }).id ?? crypto.randomUUID();
               tools.set(id, { name: (ev as { name: string }).name ?? 'unknown', partial: '' });
               blockOrder.push({ kind: 'tool', id });
-              openContentBlocks.set(id, 'tool');
+              openContentBlocks.set(String(blockOrder.length - 1), 'tool');
             }
             break;
           }
           case 'content_block_stop': {
             // Finalize the block that was started by content_block_start.
-            openContentBlocks.delete((ev as { index: number }).index?.toString() ?? '');
+            const blockIndex = (ev as { index: number }).index;
+            if (blockIndex !== undefined) {
+              openContentBlocks.delete(String(blockIndex));
+            }
             break;
           }
           case 'text_delta':
@@ -422,6 +503,9 @@ export class Agent {
     } finally {
       // Release the underlying body reader / HTTP socket. Without this an
       // aborted run can leak undici handles on Windows (UV_HANDLE_CLOSING).
+      // Note: if iter.return() throws after an abort, the thrown error
+      // masks the fact that we had a partial response to return. This is
+      // an accepted trade-off for handle-leak prevention on Windows.
       try {
         await iter.return?.();
       } catch {
@@ -493,9 +577,7 @@ export class Agent {
         attempt++;
       }
     }
-    // reachable in test environments where signal is never aborted
-    // biome-ignore lint/correctness/noUnreachable: intended fallthrough
-    throw lastErr;
+
   }
 
   private async executeTools(
@@ -509,8 +591,9 @@ export class Agent {
     );
 
     // Post-processing: pipeline, session, events
+    const useById = new Map(toolUses.map((u) => [u.id, u]));
     for (const { result, tool, durationMs } of outputs) {
-      const use = toolUses.find((u) => u.id === result.tool_use_id);
+      const use = useById.get(result.tool_use_id);
       if (!use) continue;
       await this.pipelines.toolCall.run({
         toolUse: use,

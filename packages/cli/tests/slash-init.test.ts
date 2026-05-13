@@ -97,6 +97,7 @@ describe('/init slash command', () => {
     expect(written).toContain('`pnpm run build`');
     expect(written).toContain('`pnpm test`');
     expect(written).toContain('`pnpm run lint`');
+    expect(r.buf).toContain('Pre-filled');
     expect(r.buf).toContain('package.json scripts');
   });
 

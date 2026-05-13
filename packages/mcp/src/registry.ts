@@ -73,53 +73,59 @@ export class MCPRegistry {
   }
 
   private async attemptConnect(slot: ServerSlot): Promise<void> {
-    slot.state = slot.attempts === 0 ? 'connecting' : 'reconnecting';
-    slot.attempts++;
-    try {
-      const client = new MCPClient({
-        name: slot.cfg.name,
-        transport: slot.cfg.transport,
-        command: slot.cfg.command,
-        args: slot.cfg.args,
-        env: slot.cfg.env,
-        url: slot.cfg.url,
-        headers: slot.cfg.headers,
-        startupTimeoutMs: slot.cfg.startupTimeoutMs,
-      });
-      await client.connect();
-      slot.client = client;
-      const isReconnect = slot.attempts > 1;
-      slot.state = 'connected';
-      const allowed = slot.cfg.allowedTools;
-      const wrapped = client
-        .listTools()
-        .filter((t) => !allowed || allowed.includes(t.name))
-        .map((t) => wrapMCPTool(slot.cfg.name, t, client, slot.cfg.permission ?? 'confirm'));
-      for (const tool of wrapped) {
-        try {
-          this.toolRegistry.register(tool, `mcp:${slot.cfg.name}`);
-          slot.toolNames.push(tool.name);
-        } catch (err) {
-          this.log.warn(`MCP tool "${tool.name}" not registered`, err);
+    const MAX_ATTEMPTS = 3;
+    let attempt = 0;
+    while (attempt < MAX_ATTEMPTS) {
+      attempt++;
+      slot.state = attempt === 1 ? 'connecting' : 'reconnecting';
+      slot.attempts = attempt;
+      try {
+        const client = new MCPClient({
+          name: slot.cfg.name,
+          transport: slot.cfg.transport,
+          command: slot.cfg.command,
+          args: slot.cfg.args,
+          env: slot.cfg.env,
+          url: slot.cfg.url,
+          headers: slot.cfg.headers,
+          startupTimeoutMs: slot.cfg.startupTimeoutMs,
+        });
+        await client.connect();
+        slot.client = client;
+        const isReconnect = attempt > 1;
+        slot.state = 'connected';
+        const allowed = slot.cfg.allowedTools;
+        const wrapped = client
+          .listTools()
+          .filter((t) => !allowed || allowed.includes(t.name))
+          .map((t) => wrapMCPTool(slot.cfg.name, t, client, slot.cfg.permission ?? 'confirm'));
+        for (const tool of wrapped) {
+          try {
+            this.toolRegistry.register(tool, `mcp:${slot.cfg.name}`);
+            slot.toolNames.push(tool.name);
+          } catch (err) {
+            this.log.warn(`MCP tool "${tool.name}" not registered`, err);
+          }
         }
-      }
-      this.events.emit(isReconnect ? 'mcp.server.reconnected' : 'mcp.server.connected', {
-        name: slot.cfg.name,
-        toolCount: slot.toolNames.length,
-      });
-    } catch (err) {
-      this.log.warn(`MCP server "${slot.cfg.name}" connect failed`, err);
-      if (slot.attempts < 3) {
-        const delay = 500 * 2 ** slot.attempts;
+        this.events.emit(isReconnect ? 'mcp.server.reconnected' : 'mcp.server.connected', {
+          name: slot.cfg.name,
+          toolCount: slot.toolNames.length,
+        });
+        return; // success
+      } catch (err) {
+        this.log.warn(`MCP server "${slot.cfg.name}" connect attempt ${attempt} failed`, err);
+        if (attempt >= MAX_ATTEMPTS) {
+          this.log.error(`MCP server "${slot.cfg.name}" connect exhausted after ${MAX_ATTEMPTS} attempts`, err);
+          slot.state = 'failed';
+          this.events.emit('mcp.server.disconnected', {
+            name: slot.cfg.name,
+            reason: err instanceof Error ? err.message : 'unknown',
+          });
+          return;
+        }
+        const delay = 500 * 2 ** attempt;
         await new Promise((r) => setTimeout(r, delay));
-        return await this.attemptConnect(slot);
       }
-      this.log.error(`MCP server "${slot.cfg.name}" connect exhausted after 3 attempts`, err);
-      slot.state = 'failed';
-      this.events.emit('mcp.server.disconnected', {
-        name: slot.cfg.name,
-        reason: err instanceof Error ? err.message : 'unknown',
-      });
     }
   }
 }

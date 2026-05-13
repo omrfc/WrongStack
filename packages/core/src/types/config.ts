@@ -5,10 +5,27 @@ export interface ContextConfig {
   warnThreshold: number;
   softThreshold: number;
   hardThreshold: number;
+  /** Enable automatic compaction when thresholds are crossed (default: true). */
+  autoCompact?: boolean;
+  /**
+   * Model used for LLM-assisted summarization in IntelligentCompactor.
+   * Falls back to the main model when omitted.
+   */
+  summarizerModel?: string;
+  /**
+   * Override the effective context window size (in tokens). Use this when
+   * you want the compactor to trigger earlier than the provider's actual
+   * maxContext. Defaults to the provider's reported maxContext.
+   */
+  effectiveMaxContext?: number;
   maxSessionTokens?: number;
   maxDailyTokens?: number;
   preserveK: number;
   eliseThreshold: number;
+  /** Compactor strategy: 'hybrid' (default, fast rules), 'intelligent' (LLM summarization), 'selective' (LLM-driven selection). */
+  strategy?: 'hybrid' | 'intelligent' | 'selective';
+  /** Enable LLM-driven selective compaction (default: false for backward compat). */
+  llmSelector?: boolean;
 }
 
 export interface ToolsConfig {
@@ -17,6 +34,11 @@ export interface ToolsConfig {
   iterationTimeoutMs: number;
   sessionTimeoutMs: number;
   perIterationOutputCapBytes: number;
+  /**
+   * When true (default), the agent automatically extends its iteration
+   * limit by 100 when hit. Set to false to require user confirmation.
+   */
+  autoExtendLimit?: boolean;
 }
 
 export interface ProviderConfig {

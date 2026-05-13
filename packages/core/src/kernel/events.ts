@@ -12,6 +12,17 @@ export interface EventMap {
   'session.damaged': { sessionId: string; detail: string };
   'iteration.started': { ctx: Context; index: number };
   'iteration.completed': { ctx: Context; index: number };
+  /**
+   * Fired when the agent hits its iteration limit. Listeners (CLI/TUI) can
+   * call `grant(extra)` to allow more iterations, or `deny()` to stop.
+   * If no listener responds within 30s the run ends with 'max_iterations'.
+   */
+  'iteration.limit_reached': {
+    currentIterations: number;
+    currentLimit: number;
+    grant: (extraIterations: number) => void;
+    deny: () => void;
+  };
   'provider.response': { ctx: Context; usage: Usage; stopReason: string };
   'provider.text_delta': { ctx: Context; text: string };
   'provider.tool_use_start': { ctx: Context; id: string; name: string };
@@ -91,16 +102,12 @@ export class EventBus {
   }
 
   once<E extends EventName>(event: E, fn: Listener<E>): () => void {
-    let unregistered = false;
     const wrapper: Listener<E> = (payload) => {
-      if (unregistered) return;
-      unregistered = true;
       this.off(event, wrapper as Listener<EventName>);
       (fn as Listener<E>)(payload);
     };
     this.on(event, wrapper as Listener<E>);
     return () => {
-      unregistered = true;
       this.off(event, wrapper as Listener<EventName>);
     };
   }

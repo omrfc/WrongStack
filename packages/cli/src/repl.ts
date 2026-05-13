@@ -17,6 +17,8 @@ export interface ReplOptions {
   attachments: AttachmentStore;
   banner?: boolean;
   tokenCounter?: TokenCounter;
+  /** Model-specific max context window (tokens). Used for the context bar in turn summaries. */
+  effectiveMaxContext?: number;
 }
 
 export async function runRepl(opts: ReplOptions): Promise<number> {
@@ -96,9 +98,13 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
       if (opts.tokenCounter && before) {
         const after = opts.tokenCounter.total();
         const costAfter = opts.tokenCounter.estimateCost().total;
+        const ctxChip =
+          opts.effectiveMaxContext && opts.effectiveMaxContext > 0
+            ? `  ctx: ${renderContextChip(after.input, opts.effectiveMaxContext)}`
+            : '';
         opts.renderer.write(
           `\n${color.dim(
-            `[in: ${fmtTok(after.input - before.input)}  out: ${fmtTok(after.output - before.output)}  iters: ${result.iterations}  cost: ${(costAfter - costBefore).toFixed(4)}  ${((Date.now() - startedAt) / 1000).toFixed(1)}s]`,
+            `[in: ${fmtTok(after.input - before.input)}  out: ${fmtTok(after.output - before.output)}  iters: ${result.iterations}  cost: ${(costAfter - costBefore).toFixed(4)}  ${((Date.now() - startedAt) / 1000).toFixed(1)}s]${ctxChip}`,
           )}\n`,
         );
       }
@@ -150,6 +156,23 @@ function fmtTok(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
   return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+const FILLED = '█';
+const EMPTY = '░';
+
+function renderContextChip(used: number, max: number): string {
+  const ratio = Math.max(0, Math.min(1, used / max));
+  const pct = Math.round(ratio * 100);
+  const bar = renderProgress(ratio, 6);
+  return `${bar} ${pct}% (${fmtTok(used)}/${fmtTok(max)})`;
+}
+
+function renderProgress(ratio: number, width: number): string {
+  const clamped = Math.max(0, Math.min(1, ratio));
+  const filled = clamped === 0 ? 0 : Math.max(1, Math.round(clamped * width));
+  const capped = Math.min(width, filled);
+  return FILLED.repeat(capped) + EMPTY.repeat(width - capped);
 }
 
 function printBanner(renderer: TerminalRenderer): void {

@@ -16,6 +16,7 @@ import { History, type HistoryEntry } from './components/history.js';
 import { Input, type KeyEvent } from './components/input.js';
 import { StatusBar } from './components/status-bar.js';
 import { FilePicker } from './components/file-picker.js';
+import { SlashMenu } from './components/slash-menu.js';
 import { searchFiles } from './file-search.js';
 import { readClipboardImage } from './clipboard.js';
 import { createQueueSlashCommand } from './queue-slash.js';
@@ -25,6 +26,14 @@ export interface QueueItem {
   id: number;
   displayText: string;
   blocks: ContentBlock[];
+}
+
+/** A registered slash command matched against the user's current / query. */
+export interface SlashCommandMatch {
+  name: string;
+  description: string;
+  argsHint?: string;
+  isBuiltin: boolean;
 }
 
 export interface AppProps {
@@ -39,6 +48,18 @@ export interface AppProps {
   queueStore?: QueueStore;
   /** Reflects the policy's --yolo flag for the status bar's "⚠ YOLO" chip. */
   yolo?: boolean;
+  /** Surfaced in the startup banner. Falls back to "dev" when omitted. */
+  appVersion?: string;
+  /** Provider id shown in the banner ("openai", "anthropic", …). Defaults to "agent". */
+  provider?: string;
+  /**
+   * Real max-context token budget for the *active model*, resolved by the
+   * CLI via the ModelsRegistry. The provider object only knows its family
+   * default (e.g. anthropic = 200k) which is wrong for variants like the
+   * 1M-context Opus model. The status bar's context chip uses this when
+   * provided and falls back to the provider baseline otherwise.
+   */
+  effectiveMaxContext?: number;
   onExit: (code: number) => void;
 }
 
@@ -59,11 +80,17 @@ type State = {
   hint: string;
   nextId: number;
   picker: { open: boolean; query: string; matches: string[]; selected: number };
+  /** Slash command picker — open while typing a / command. */
+  slashPicker: { open: boolean; query: string; matches: SlashCommandMatch[]; selected: number };
   /** Tool calls currently in-flight, by tool_use id. Surface in the status bar. */
   runningTools: Map<string, { name: string; startedAt: number }>;
   /** FIFO of user messages typed while the agent was running. Drained when idle. */
   queue: QueueItem[];
   nextQueueId: number;
+  /** Previous input strings for up/down navigation. */
+  inputHistory: string[];
+  /** 0 = current buffer (not in history), 1 = most recent, n = nth most recent. */
+  historyIndex: number;
 };
 
 type Action =
@@ -86,22 +113,26 @@ type Action =
   | { type: 'enqueue'; item: Omit<QueueItem, 'id'> }
   | { type: 'dequeueFirst' }
   | { type: 'queueClear' }
-  | { type: 'queueDelete'; positions: number[] };
-
-const MAX_HISTORY_ENTRIES = 500;
+  | { type: 'queueDelete'; positions: number[] }
+  | { type: 'slashPickerOpen'; query: string; matches: SlashCommandMatch[] }
+  | { type: 'slashPickerClose' }
+  | { type: 'slashPickerMove'; delta: number }
+  | { type: 'historyPush'; text: string }
+  | { type: 'historyUp' }
+  | { type: 'historyDown' };
 
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'addEntry': {
+      // Append-only. We render finalized entries via Ink's <Static>,
+      // which forbids removals or reordering — old items live on in the
+      // terminal's native scrollback. Memory growth is bounded by the
+      // terminal's own scrollback limits in practice.
       const appended = [
         ...state.entries,
         { ...action.entry, id: state.nextId } as HistoryEntry,
       ];
-      const trimmed =
-        appended.length > MAX_HISTORY_ENTRIES
-          ? appended.slice(appended.length - MAX_HISTORY_ENTRIES)
-          : appended;
-      return { ...state, entries: trimmed, nextId: state.nextId + 1 };
+      return { ...state, entries: appended, nextId: state.nextId + 1 };
     }
     case 'setBuffer':
       return { ...state, buffer: action.buffer, cursor: action.cursor };
@@ -114,6 +145,7 @@ export function reducer(state: State, action: Action): State {
         cursor: 0,
         placeholders: [],
         picker: { open: false, query: '', matches: [], selected: 0 },
+        slashPicker: { open: false, query: '', matches: [], selected: 0 },
       };
     case 'streamDelta':
       return { ...state, streamingText: state.streamingText + action.delta };
@@ -201,6 +233,38 @@ export function reducer(state: State, action: Action): State {
       if (filtered.length === state.queue.length) return state;
       return { ...state, queue: filtered };
     }
+    case 'slashPickerOpen':
+      return {
+        ...state,
+        slashPicker: { open: true, query: action.query, matches: action.matches, selected: 0 },
+      };
+    case 'slashPickerClose':
+      return {
+        ...state,
+        slashPicker: { open: false, query: '', matches: [], selected: 0 },
+      };
+    case 'slashPickerMove': {
+      const n = state.slashPicker.matches.length;
+      if (n === 0) return state;
+      const next = (state.slashPicker.selected + action.delta + n) % n;
+      return { ...state, slashPicker: { ...state.slashPicker, selected: next } };
+    }
+    case 'historyPush': {
+      if (action.text === '' || action.text === state.inputHistory[0]) return state;
+      return { ...state, inputHistory: [action.text, ...state.inputHistory].slice(0, 100) };
+    }
+    case 'historyUp': {
+      if (state.inputHistory.length === 0) return state;
+      const next = Math.min(state.historyIndex + 1, state.inputHistory.length);
+      const entry = state.inputHistory[next - 1] ?? '';
+      return { ...state, historyIndex: next, buffer: entry, cursor: entry.length };
+    }
+    case 'historyDown': {
+      if (state.historyIndex === 0) return state;
+      const next = state.historyIndex - 1;
+      const entry = next === 0 ? '' : (state.inputHistory[next - 1] ?? '');
+      return { ...state, historyIndex: next, buffer: entry, cursor: entry.length };
+    }
   }
 }
 
@@ -216,6 +280,9 @@ export function App({
   banner = true,
   queueStore,
   yolo = false,
+  appVersion,
+  provider,
+  effectiveMaxContext,
   onExit,
 }: AppProps): React.ReactElement {
   const { exit } = useApp();
@@ -224,8 +291,11 @@ export function App({
       ? [
           {
             id: 0,
-            kind: 'info' as const,
-            text: 'WrongStack — Built on the wrong stack. Shipped anyway. (/help, /exit)',
+            kind: 'banner' as const,
+            version: appVersion ?? 'dev',
+            provider: provider ?? 'agent',
+            model,
+            cwd: agent.ctx.cwd,
           },
         ]
       : [],
@@ -238,9 +308,12 @@ export function App({
     hint: '',
     nextId: 1,
     picker: { open: false, query: '', matches: [], selected: 0 },
+    slashPicker: { open: false, query: '', matches: [], selected: 0 },
     runningTools: new Map(),
     queue: [],
     nextQueueId: 1,
+    inputHistory: [],
+    historyIndex: 0,
   });
 
   const builderRef = useRef<InputBuilder | null>(null);
@@ -250,6 +323,17 @@ export function App({
 
   const activeCtrlRef = useRef<AbortController | null>(null);
   const projectRoot = agent.ctx.projectRoot;
+
+  // Source of truth for the streamed assistant text — kept here, not in
+  // React state, because we need to read it synchronously when `agent.run`
+  // returns. The React `streamingText` shown in the live tail is throttled
+  // (~10fps) for redraw cost, so it can lag the actual stream by up to
+  // FLUSH_MS. Reading from this ref instead removes the race where the
+  // final chunk lands in pending after run() returns and ends up flashing
+  // into the next frame's tail (leaking into scrollback).
+  const streamingTextRef = useRef('');
+  const pendingDeltaRef = useRef('');
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Latest state snapshot — async callbacks (the queue drainer, slash command
   // closures) read this instead of capturing `state` to avoid stale closures.
@@ -304,7 +388,11 @@ export function App({
     };
   }, [events]);
 
-  const maxContext = agent.ctx.provider.capabilities.maxContext;
+  // Prefer the CLI-resolved per-model maxContext (looks up the active
+  // model in the ModelsRegistry, so 1M-context variants report 1M rather
+  // than the provider family's 200k baseline). Fall back to the provider
+  // baseline when the CLI couldn't resolve it (e.g. unknown model id).
+  const maxContext = effectiveMaxContext ?? agent.ctx.provider.capabilities.maxContext;
   const contextWindow = useMemo(
     () =>
       lastInputTokens > 0 && maxContext > 0
@@ -353,6 +441,38 @@ export function App({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.buffer, state.cursor, projectRoot]);
+
+  // Detect an active `/<query>` token at the cursor and drive the slash picker.
+  useEffect(() => {
+    const trimmed = state.buffer.trimStart();
+    if (!trimmed.startsWith('/')) {
+      if (state.slashPicker.open) dispatch({ type: 'slashPickerClose' });
+      return;
+    }
+    // Strip the leading '/' and everything after the first space
+    const query = (trimmed.slice(1).split(/\s/)[0] ?? '').toLowerCase();
+    const allCommands = slashRegistry.listWithOwner();
+    const matches: SlashCommandMatch[] = allCommands
+      .filter(({ cmd }) => {
+        const name = cmd.name.toLowerCase();
+        const aliases = cmd.aliases ?? [];
+        return name.includes(query) || aliases.some((a) => a.toLowerCase().includes(query));
+      })
+      .slice(0, 12)
+      .map(({ cmd, owner }) => ({
+        name: cmd.name,
+        description: cmd.description,
+        argsHint: undefined as string | undefined,
+        isBuiltin: owner === 'core',
+      }));
+
+    if (!state.slashPicker.open) {
+      dispatch({ type: 'slashPickerOpen', query, matches });
+    } else if (state.slashPicker.query !== query) {
+      dispatch({ type: 'slashPickerOpen', query, matches });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.buffer, slashRegistry]);
 
   const pasteClipboardImage = async (): Promise<void> => {
     const builder = builderRef.current;
@@ -424,6 +544,17 @@ export function App({
     }
   };
 
+  /** Fill the buffer with the selected slash command and close the picker. */
+  const acceptSlashPickerSelection = (): void => {
+    const { open, matches, selected } = state.slashPicker;
+    if (!open || matches.length === 0) return;
+    const picked = matches[selected];
+    if (!picked) return;
+    const cmd = picked.argsHint !== undefined ? `/${picked.name} ` : `/${picked.name}`;
+    dispatch({ type: 'setBuffer', buffer: cmd, cursor: cmd.length });
+    dispatch({ type: 'slashPickerClose' });
+  };
+
   // Rehydrate any queue items persisted by a previous (crashed) run.
   // Fires once at mount; the persist effect below picks up afterwards.
   // We dispatch one enqueue per item so the reducer's id allocation
@@ -482,8 +613,27 @@ export function App({
 
   // Subscribe to provider streaming events.
   useEffect(() => {
+    // Throttle stream delta DISPATCHES to reduce flicker — we batch into
+    // React state at ~10fps. The full text is also written into
+    // streamingTextRef synchronously on every delta, so `runBlocks` can
+    // read the complete stream when `agent.run` returns without racing
+    // the throttle's last unflushed batch.
+    const FLUSH_MS = 100;
+    const flush = () => {
+      if (pendingDeltaRef.current) {
+        dispatch({ type: 'streamDelta', delta: pendingDeltaRef.current });
+        pendingDeltaRef.current = '';
+      }
+      flushTimerRef.current = null;
+    };
     const offDelta = events.on('provider.text_delta', (e) => {
-      dispatch({ type: 'streamDelta', delta: e.text });
+      // Strip any bracketed-paste DCS sequences that some providers echo
+      // into the stream. They are invisible in a real terminal but appear as
+      // junk text if Ink's raw rendering catches them.
+      const text = e.text.replace(/\x1b\[200~|\x1b\[201~/g, '');
+      streamingTextRef.current += text;
+      pendingDeltaRef.current += text;
+      if (!flushTimerRef.current) flushTimerRef.current = setTimeout(flush, FLUSH_MS);
     });
     const offToolStart = events.on('tool.started', (e) => {
       dispatch({ type: 'toolStarted', id: e.id, name: e.name });
@@ -523,6 +673,7 @@ export function App({
       offTool();
       offRetry();
       offProvErr();
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
     };
   }, [events]);
 
@@ -573,6 +724,41 @@ export function App({
     // backspace, paste, and clipboard-image all stay live.
     if (state.status === 'aborting') return;
 
+    // IMPORTANT: do NOT bail on `!input` here. Special keys (arrows,
+    // Enter, Escape, Tab, Backspace) arrive with an empty `input`
+    // string, and the slash/file pickers + cursor movement below all
+    // depend on receiving those events. The late guard before text
+    // insertion handles the empty-input case correctly.
+
+    if (state.slashPicker.open) {
+      if (key.escape) {
+        dispatch({ type: 'slashPickerClose' });
+        return;
+      }
+      if (key.upArrow) {
+        dispatch({ type: 'slashPickerMove', delta: -1 });
+        return;
+      }
+      if (key.downArrow) {
+        dispatch({ type: 'slashPickerMove', delta: 1 });
+        return;
+      }
+      if (key.return) {
+        await acceptSlashPickerSelection();
+        return;
+      }
+      // Tab → autocomplete with selected command
+      if (key.tab && state.slashPicker.matches.length > 0) {
+        const sel = state.slashPicker.matches[state.slashPicker.selected];
+        if (sel) {
+          dispatch({ type: 'setBuffer', buffer: `/${sel.name} `, cursor: sel.name.length + 2 });
+          dispatch({ type: 'slashPickerClose' });
+        }
+        return;
+      }
+      // Any other key falls through to normal text handling.
+    }
+
     // Picker takes precedence over normal input handling when open.
     if (state.picker.open) {
       if (key.escape) {
@@ -602,6 +788,24 @@ export function App({
     }
 
     if (key.backspace || key.delete) {
+      if (key.ctrl) {
+        const { cursor, buffer } = state;
+        if (key.backspace) {
+          if (cursor === 0) return;
+          const beforeCursor = buffer.slice(0, cursor);
+          const lastWordStart = beforeCursor.lastIndexOf(' ') + 1;
+          const next = buffer.slice(0, lastWordStart) + buffer.slice(cursor);
+          dispatch({ type: 'setBuffer', buffer: next, cursor: lastWordStart });
+        } else {
+          if (cursor >= buffer.length) return;
+          const afterCursor = buffer.slice(cursor);
+          const nextWordStart = afterCursor.indexOf(' ');
+          const end = nextWordStart === -1 ? buffer.length : cursor + nextWordStart + 1;
+          const next = buffer.slice(0, cursor) + buffer.slice(end);
+          dispatch({ type: 'setBuffer', buffer: next, cursor });
+        }
+        return;
+      }
       if (state.cursor === 0) return;
       const next = state.buffer.slice(0, state.cursor - 1) + state.buffer.slice(state.cursor);
       dispatch({ type: 'setBuffer', buffer: next, cursor: state.cursor - 1 });
@@ -609,12 +813,40 @@ export function App({
     }
 
     if (key.leftArrow) {
+      if (key.ctrl) {
+        const { cursor, buffer } = state;
+        if (cursor === 0) return;
+        const beforeCursor = buffer.slice(0, cursor);
+        const prevWordStart = beforeCursor.lastIndexOf(' ');
+        const target = prevWordStart === -1 ? 0 : prevWordStart + 1;
+        dispatch({ type: 'setBuffer', buffer, cursor: target });
+        return;
+      }
       if (state.cursor > 0) dispatch({ type: 'setBuffer', buffer: state.buffer, cursor: state.cursor - 1 });
       return;
     }
     if (key.rightArrow) {
-      if (state.cursor < state.buffer.length)
-        dispatch({ type: 'setBuffer', buffer: state.buffer, cursor: state.cursor + 1 });
+      if (key.ctrl) {
+        const { cursor, buffer } = state;
+        if (cursor >= buffer.length) return;
+        const afterCursor = buffer.slice(cursor);
+        const nextWordStart = afterCursor.indexOf(' ');
+        const target = nextWordStart === -1 ? buffer.length : cursor + nextWordStart + 1;
+        dispatch({ type: 'setBuffer', buffer, cursor: target });
+        return;
+      }
+      if (state.cursor < state.buffer.length) dispatch({ type: 'setBuffer', buffer: state.buffer, cursor: state.cursor + 1 });
+      return;
+    }
+    // History scrolling is delegated to the terminal's native scrollback
+    // (mouse wheel, Shift+PgUp in Windows Terminal, etc.) — Ink's <Static>
+    // emits each finalized entry once and never repaints over it.
+    if (key.upArrow) {
+      if (state.inputHistory.length > 0) dispatch({ type: 'historyUp' });
+      return;
+    }
+    if (key.downArrow) {
+      if (state.historyIndex > 0) dispatch({ type: 'historyDown' });
       return;
     }
     if (key.ctrl && input === 'a') {
@@ -627,6 +859,16 @@ export function App({
     }
     if (key.ctrl && input === 'u') {
       dispatch({ type: 'setBuffer', buffer: '', cursor: 0 });
+      return;
+    }
+    if (key.ctrl && input === 'w') {
+      // Ctrl+W → delete word before cursor (same as Ctrl+Backspace).
+      const { cursor, buffer } = state;
+      if (cursor === 0) return;
+      const beforeCursor = buffer.slice(0, cursor);
+      const lastWordStart = beforeCursor.lastIndexOf(' ') + 1;
+      const next = buffer.slice(0, lastWordStart) + buffer.slice(cursor);
+      dispatch({ type: 'setBuffer', buffer: next, cursor: lastWordStart });
       return;
     }
 
@@ -685,10 +927,23 @@ export function App({
       const result = await agent.run(blocks, { signal: ctrl.signal });
 
       // Flush the streamed text into history as a single assistant entry.
-      const streamed = stateRef.current.streamingText;
-      if (streamed || (result.status === 'done' && result.finalText)) {
-        const text = streamed || result.finalText || '';
-        if (text.trim()) dispatch({ type: 'addEntry', entry: { kind: 'assistant', text } });
+      // Read from the synchronous ref (which mirrors every delta as it
+      // arrives) rather than the React state — the latter trails by up to
+      // FLUSH_MS via the throttler, so its last chunk can land *after*
+      // run() returns and flash through the tail Box.
+      const streamed = streamingTextRef.current;
+      const text = result.status === 'done' && result.finalText ? result.finalText : streamed;
+      if (text && text.trim()) {
+        dispatch({ type: 'addEntry', entry: { kind: 'assistant', text } });
+      }
+      // Clear every form of streaming state in lockstep — ref, pending
+      // throttle buffer, scheduled flush timer, and React state — so no
+      // late delta can resurrect a phantom tail into the next iteration.
+      streamingTextRef.current = '';
+      pendingDeltaRef.current = '';
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
       }
       dispatch({ type: 'streamReset' });
 
@@ -750,6 +1005,7 @@ export function App({
     // they don't conflict with a running agent.
     if (trimmed.startsWith('/')) {
       dispatch({ type: 'addEntry', entry: { kind: 'user', text: trimmed } });
+      if (state.historyIndex > 0) dispatch({ type: 'historyPush', text: trimmed });
       dispatch({ type: 'clearInput' });
       try {
         const res = await slashRegistry.dispatch(trimmed, agent.ctx);
@@ -783,10 +1039,12 @@ export function App({
         entry: { kind: 'user', text: displayText, queued: true },
       });
       dispatch({ type: 'enqueue', item: { displayText, blocks } });
+      if (state.historyIndex > 0) dispatch({ type: 'historyPush', text: trimmed });
       return;
     }
 
     dispatch({ type: 'addEntry', entry: { kind: 'user', text: displayText } });
+    if (state.historyIndex > 0) dispatch({ type: 'historyPush', text: trimmed });
     await runBlocks(blocks);
   };
 
@@ -813,6 +1071,13 @@ export function App({
           query={state.picker.query}
           matches={state.picker.matches}
           selected={state.picker.selected}
+        />
+      ) : null}
+      {state.slashPicker.open ? (
+        <SlashMenu
+          query={state.slashPicker.query}
+          matches={state.slashPicker.matches}
+          selected={state.slashPicker.selected}
         />
       ) : null}
       <StatusBar

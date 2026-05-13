@@ -25,6 +25,7 @@ export class RunController {
   private readonly ctrl = new AbortController();
   private readonly hooks: Array<() => void | Promise<void>> = [];
   private disposed = false;
+  private hooksDrained = false;
   private readonly errorSink: (err: unknown, where: string) => void;
 
   constructor(opts: RunControllerOptions = {}) {
@@ -91,9 +92,8 @@ export class RunController {
   }
 
   private async runHooks(): Promise<void> {
-    if (this.disposed && !this.ctrl.signal.aborted) {
-      // already drained
-    }
+    if (this.hooksDrained) return;
+    this.hooksDrained = true;
     // Snapshot + clear so hooks added during cleanup don't re-fire.
     const snapshot = this.hooks.splice(0, this.hooks.length).reverse();
     for (const hook of snapshot) {

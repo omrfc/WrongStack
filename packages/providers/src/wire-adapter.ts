@@ -33,7 +33,7 @@ async function safeText(res: Response2): Promise<string> {
  * Subclasses implement the abstract members to provide their specific wire format.
  */
 export abstract class WireAdapter implements Provider {
-  readonly id: string;
+  abstract readonly id: string;
   abstract readonly capabilities: Capabilities;
 
   constructor(
@@ -42,7 +42,6 @@ export abstract class WireAdapter implements Provider {
     public readonly fetchImpl: typeof fetch = fetch,
   ) {
     if (!apiKey) throw new Error(`${this.constructor.name}: apiKey required`);
-    this.id = this.constructor.name;
   }
 
   async complete(req: Request, opts: { signal: AbortSignal }): Promise<Response> {

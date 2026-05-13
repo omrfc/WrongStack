@@ -20,10 +20,17 @@ export interface OpenAICompatibleOptions {
   quirks?: CompatibilityQuirks;
   capabilities?: Partial<Capabilities>;
   fetchImpl?: typeof fetch;
+  /**
+   * Optional override for URL construction. Receives the base URL and request,
+   * returns the full URL to use. Allows custom providers with non-standard
+   * URL structures (e.g. Google with model-in-path, Anthropic with /v1/messages).
+   */
+  urlOverride?: (baseUrl: string, req: Request) => string;
 }
 
 export class OpenAICompatibleProvider extends OpenAIProvider {
   private readonly extraHeaders?: Record<string, string>;
+  private readonly urlOverride?: (baseUrl: string, req: Request) => string;
 
   constructor(opts: OpenAICompatibleOptions) {
     super({
@@ -39,6 +46,14 @@ export class OpenAICompatibleProvider extends OpenAIProvider {
       },
     });
     this.extraHeaders = opts.headers;
+    this.urlOverride = opts.urlOverride;
+  }
+
+  protected override buildUrl(req: Request): string {
+    if (this.urlOverride) {
+      return this.urlOverride(this.baseUrl, req);
+    }
+    return super.buildUrl(req);
   }
 
   protected override buildHeaders(req: Request): Record<string, string> {

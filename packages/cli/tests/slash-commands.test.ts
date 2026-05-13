@@ -67,10 +67,10 @@ const fakeCtx = {
 
 describe('built-in slash commands', () => {
   it('/help lists all commands', async () => {
-    const { registry, renderer } = makeRig();
-    await registry.dispatch('/help', fakeCtx);
-    expect(renderer.output).toContain('/help');
-    expect(renderer.output).toContain('/exit');
+    const { registry } = makeRig();
+    const result = await registry.dispatch('/help', fakeCtx);
+    expect(result?.message).toContain('/help');
+    expect(result?.message).toContain('/exit');
   });
 
   it('/usage prints token totals', async () => {
@@ -115,11 +115,18 @@ describe('built-in slash commands', () => {
     expect(res?.exit).toBe(true);
   });
 
-  it('/clear triggers onClear and clears renderer', async () => {
+  it('/clear triggers onClear and clears renderer and context', async () => {
     const onClear = vi.fn();
     const registry = new SlashCommandRegistry();
     const renderer = new FakeRenderer();
     renderer.output = 'something';
+    const ctx = {
+      messages: [{ role: 'user', content: 'old message' }],
+      todos: [{ id: '1', content: 'old todo', status: 'pending' }],
+      readFiles: new Set(['old.txt']),
+      fileMtimes: new Map([['old.txt', 123]]),
+      meta: { old: 'meta' },
+    } as unknown as Context;
     const cmds = buildBuiltinSlashCommands({
       registry,
       toolRegistry: new ToolRegistry(),
@@ -127,10 +134,19 @@ describe('built-in slash commands', () => {
       tokenCounter: new DefaultTokenCounter(),
       renderer: renderer as unknown as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
       onClear,
+      memoryStore: {
+        async clear() {},
+      },
     });
     for (const c of cmds) registry.register(c);
-    await registry.dispatch('/clear', fakeCtx);
+    await registry.dispatch('/clear', ctx);
     expect(onClear).toHaveBeenCalled();
+    expect(ctx.messages).toEqual([]);
+    expect(ctx.todos).toEqual([]);
+    expect(ctx.readFiles.size).toBe(0);
+    expect(ctx.fileMtimes.size).toBe(0);
+    expect(ctx.meta).toEqual({});
+    expect(renderer.output).toBe('');
   });
 
   it('/compact runs the compactor', async () => {

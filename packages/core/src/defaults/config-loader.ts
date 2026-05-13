@@ -18,6 +18,7 @@ const BEHAVIOR_DEFAULTS: Omit<Config, 'provider' | 'model'> = {
     warnThreshold: 0.6,
     softThreshold: 0.75,
     hardThreshold: 0.9,
+    autoCompact: true,
     preserveK: 10,
     eliseThreshold: 2000,
   },
@@ -27,6 +28,7 @@ const BEHAVIOR_DEFAULTS: Omit<Config, 'provider' | 'model'> = {
     iterationTimeoutMs: 300_000,
     sessionTimeoutMs: 1_800_000,
     perIterationOutputCapBytes: 100_000,
+    autoExtendLimit: true,
   },
   log: { level: 'info' },
   features: {
@@ -59,17 +61,30 @@ const ENV_MAP: Record<string, (cfg: PartialConfig, val: string) => void> = {
 
 type PartialConfig = Partial<Config> & { providers?: Record<string, { apiKey?: string; baseUrl?: string; type?: string }> };
 
+function isPrimitiveArray(a: unknown[]): boolean {
+  return a.every((v) => v === null || typeof v !== 'object');
+}
+
 function deepMerge<T>(base: T, patch: Partial<T>): T {
   if (typeof base !== 'object' || base === null) return (patch as T) ?? base;
   if (typeof patch !== 'object' || patch === null) return base;
   const out: Record<string, unknown> = { ...(base as Record<string, unknown>) };
   for (const [k, v] of Object.entries(patch as Record<string, unknown>)) {
     const existing = out[k];
-    // Array replace: deepMerge replaces arrays entirely rather than merging.
-    // This is intentional — config arrays (e.g. tools, plugins) are not merged
-    // but replaced wholesale by later layers.
+    // Primitive arrays (plugins, tools, etc.) are merged by concatenation.
+    // Object arrays (MCP servers, etc.) are replaced wholesale.
     if (Array.isArray(v)) {
-      out[k] = v;
+      if (Array.isArray(existing) && isPrimitiveArray(v) && isPrimitiveArray(existing)) {
+        out[k] = [...new Set([...existing, ...v])];
+      } else {
+        out[k] = v;
+        if (process.env.WRONGSTACK_DEBUG_CONFIG) {
+          console.warn(
+            `[config] Non-primitive array for "${k}" replaced (global + local config merge). ` +
+              `Global entries: ${(existing as unknown[] | undefined)?.length ?? 0}, local entries: ${v.length}.`,
+          );
+        }
+      }
     } else if (
       typeof v === 'object' &&
       v !== null &&
@@ -185,9 +200,13 @@ export class DefaultConfigLoader implements ConfigLoader {
   }
 
   private validateBehavior(cfg: PartialConfig): void {
+    if (cfg.version === undefined) throw new Error('Config: missing version field');
     if (cfg.version !== 1) throw new Error(`Config: unsupported version ${cfg.version}`);
     const c = cfg.context;
     if (!c) throw new Error('Config: missing context section');
+    // NOTE: the following threshold check is always reachable because
+    // BEHAVIOR_DEFAULTS always provides a context section. The guard
+    // exists for hand-constructed PartialConfig objects.
     if (c.warnThreshold >= c.softThreshold || c.softThreshold >= c.hardThreshold) {
       throw new Error('Config: context thresholds must satisfy warn < soft < hard');
     }

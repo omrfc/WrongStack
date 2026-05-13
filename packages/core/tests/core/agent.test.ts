@@ -150,6 +150,8 @@ describe('Agent', () => {
     const provider = new MockProvider(script);
     const { agent, tmp } = await buildAgent(provider, [echo]);
     cleanupDirs.push(tmp);
+    // Deny any limit extension so the test ends promptly.
+    agent.events.on('iteration.limit_reached', ({ deny }) => deny());
     const result = await agent.run('loop', { maxIterations: 3 });
     expect(result.status).toBe('max_iterations');
   });

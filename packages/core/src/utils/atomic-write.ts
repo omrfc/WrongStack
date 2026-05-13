@@ -16,13 +16,13 @@ export async function atomicWrite(
   await fs.mkdir(dir, { recursive: true });
   const tmp = path.join(dir, `.${path.basename(targetPath)}.${randomBytes(6).toString('hex')}.tmp`);
 
-  // Write content to tmp first; defer stat of target until after tmp is ready
-  // to avoid race between stat and rename.
+  // Write content to tmp first; 'wx' ensures exclusive creation (fails if
+  // tmp already exists — extremely unlikely with 6-byte random suffix).
   try {
     if (typeof content === 'string') {
-      await fs.writeFile(tmp, content, { encoding: opts.encoding ?? 'utf8' });
+      await fs.writeFile(tmp, content, { flag: 'wx', encoding: opts.encoding ?? 'utf8' });
     } else {
-      await fs.writeFile(tmp, content);
+      await fs.writeFile(tmp, content, { flag: 'wx' });
     }
     try {
       const fh = await fs.open(tmp, 'r+');

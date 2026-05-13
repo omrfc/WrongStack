@@ -97,7 +97,9 @@ export const replaceTool: Tool<ReplaceInput, ReplaceOutput> = {
         : contentLf.replace(re, input.replacement);
       re.lastIndex = 0;
 
-      totalReplacements += matches.length;
+      // Only count replacements that were actually performed.
+      const actualCount = replaceAll ? matches.length : 1;
+      totalReplacements += actualCount;
 
       if (!dryRun) {
         const newContent = toStyle(newContentLf, style);

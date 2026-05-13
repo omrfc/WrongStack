@@ -1,4 +1,3 @@
-import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -43,7 +42,7 @@ export class DefaultSessionStore implements SessionStore {
       throw new Error(`Failed to open session file: ${err instanceof Error ? err.message : String(err)}`);
     }
     try {
-      return new FileSessionWriter(id, handle, startedAt, meta, { dir: this.dir });
+      return new FileSessionWriter(id, handle, startedAt, meta, { dir: this.dir, filePath: file });
     } catch (err) {
       await handle.close().catch(() => {});
       throw err;
@@ -70,7 +69,7 @@ export class DefaultSessionStore implements SessionStore {
         model: data.metadata.model,
         provider: data.metadata.provider,
       },
-      { resumed: true, dir: this.dir },
+      { resumed: true, dir: this.dir, filePath: file },
     );
     return { writer, data };
   }
@@ -123,9 +122,7 @@ export class DefaultSessionStore implements SessionStore {
       const full = path.join(this.dir, `${id}.jsonl`);
       const stat = await fsp.stat(full);
       const summary = await this.summarize(id, stat.mtime.toISOString());
-      fsp
-        .writeFile(manifest, JSON.stringify(summary), { mode: 0o600 })
-        .catch(() => undefined);
+      await fsp.writeFile(manifest, JSON.stringify(summary), { mode: 0o600 }).catch(() => undefined);
       return summary;
     }
   }
@@ -170,8 +167,8 @@ export class DefaultSessionStore implements SessionStore {
       id,
       startedAt: start?.ts ?? new Date(0).toISOString(),
       endedAt: end?.ts,
-      model: start && start.type === 'session_start' ? start.model : undefined,
-      provider: start && start.type === 'session_start' ? start.provider : undefined,
+      model: start?.model,
+      provider: start?.provider,
     };
   }
 
@@ -214,8 +211,15 @@ export class DefaultSessionStore implements SessionStore {
           },
         ];
         const last = messages[messages.length - 1];
-        if (last && last.role === 'user' && Array.isArray(last.content)) {
-          last.content.push(...content);
+        if (last && last.role === 'user') {
+          if (Array.isArray(last.content)) {
+            last.content.push(...content);
+          } else if (typeof last.content === 'string') {
+            // Convert string content to blocks and append
+            last.content = [{ type: 'text', text: last.content }, ...content];
+          } else {
+            messages.push({ role: 'user', content });
+          }
         } else {
           messages.push({ role: 'user', content });
         }
@@ -236,15 +240,20 @@ class FileSessionWriter implements SessionWriter {
   private summary: SessionSummary;
   private tokenIn = 0;
   private tokenOut = 0;
+  private readonly filePath: string;
+  private initDone = false;
+  private readonly resumed: boolean;
 
   constructor(
     public readonly id: string,
     private readonly handle: fsp.FileHandle,
     private readonly startedAt: string,
     private readonly meta: Omit<SessionMetadata, 'startedAt'>,
-    opts: { resumed?: boolean; dir?: string } = {},
+    opts: { resumed?: boolean; dir?: string; filePath?: string } = {},
   ) {
+    this.resumed = opts.resumed ?? false;
     this.manifestFile = opts.dir ? path.join(opts.dir, `${id}.summary.json`) : '';
+    this.filePath = opts.filePath ?? '';
     this.summary = {
       id,
       title: '(empty session)',
@@ -253,23 +262,35 @@ class FileSessionWriter implements SessionWriter {
       provider: meta.provider ?? 'unknown',
       tokenTotal: 0,
     };
+    // Session start is written lazily on first append to avoid sync I/O
+    // in constructor and eliminate reliance on FileHandle.fd private property.
+  }
+
+  private async writeSessionStart(): Promise<void> {
+    if (this.initDone || this.closed) return;
+    this.initDone = true;
     const record = `${JSON.stringify({
-      type: opts.resumed ? 'session_resumed' : 'session_start',
-      ts: startedAt,
-      id,
-      model: meta.model ?? 'unknown',
-      provider: meta.provider ?? 'unknown',
+      type: this.resumed ? 'session_resumed' : 'session_start',
+      ts: this.startedAt,
+      id: this.id,
+      model: this.meta.model ?? 'unknown',
+      provider: this.meta.provider ?? 'unknown',
     })}\n`;
     try {
-      const fd = (this.handle as unknown as { fd: number }).fd;
-      fs.writeSync(fd, record, null, 'utf8');
+      if (this.filePath) {
+        // Use fs.promises.writeFile directly to avoid FileHandle.fd private access
+        await fsp.writeFile(this.filePath, record, { flag: 'a', mode: 0o600 });
+      }
     } catch {
-      // best-effort during construction
+      // best-effort; session will still be usable without the start event logged
     }
   }
 
   async append(event: SessionEvent): Promise<void> {
     if (this.closed) return;
+    if (!this.initDone) {
+      await this.writeSessionStart();
+    }
     this.observeForSummary(event);
     try {
       await this.handle.appendFile(`${JSON.stringify(event)}\n`, 'utf8');

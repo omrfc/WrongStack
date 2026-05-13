@@ -12,4 +12,5 @@ export interface MemoryStore {
   remember(text: string, scope?: MemoryScope): Promise<void>;
   forget(query: string, scope?: MemoryScope): Promise<number>;
   consolidate(scope: MemoryScope): Promise<void>;
+  clear(scope?: MemoryScope): Promise<void>;
 }

@@ -25,3 +25,5 @@ coverage/
 # Vitest coverage
 coverage/
 coverage/**
+
+.reports/

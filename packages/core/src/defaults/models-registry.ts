@@ -26,6 +26,13 @@ export interface DefaultModelsRegistryOptions {
   fetchImpl?: typeof fetch;
   /** Pre-seeded payload — useful for offline scenarios and tests. */
   seed?: ModelsDevPayload;
+  /**
+   * Maximum age in seconds for stale cache fallback when network fails.
+   * Defaults to 7 days. Set to `Infinity` for full offline resilience
+   * (risk: deprecated models, wrong pricing). Set to `0` to disable
+   * stale fallback entirely.
+   */
+  maxStaleAgeSeconds?: number;
 }
 
 /**
@@ -66,6 +73,7 @@ export class DefaultModelsRegistry implements ModelsRegistry {
   private readonly ttlMs: number;
   private readonly fetchImpl: typeof fetch;
   private readonly seed?: ModelsDevPayload;
+  private readonly maxStaleAgeMs: number;
 
   constructor(opts: DefaultModelsRegistryOptions) {
     this.cacheFile = opts.cacheFile;
@@ -73,6 +81,9 @@ export class DefaultModelsRegistry implements ModelsRegistry {
     this.ttlMs = (opts.ttlSeconds ?? DEFAULT_TTL_SECONDS) * 1000;
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.seed = opts.seed;
+    // Default max stale age: 7 days
+    const maxStaleSeconds = opts.maxStaleAgeSeconds ?? 7 * 24 * 3600;
+    this.maxStaleAgeMs = maxStaleSeconds * 1000;
   }
 
   async load(opts: { force?: boolean } = {}): Promise<ModelsDevPayload> {
@@ -93,9 +104,9 @@ export class DefaultModelsRegistry implements ModelsRegistry {
     try {
       return await this.refresh();
     } catch (err) {
-      // Network failed — fall back to stale cache if any.
+      // Network failed — fall back to stale cache if within maxStaleAgeMs.
       const cached = await this.readCache();
-      if (cached) {
+      if (cached && this.isWithinMaxStaleAge(cached.fetchedAt)) {
         this.payload = cached.payload;
         this.fetchedAt = new Date(cached.fetchedAt);
         return cached.payload;
@@ -190,6 +201,10 @@ export class DefaultModelsRegistry implements ModelsRegistry {
 
   private isFresh(fetchedAtIso: string): boolean {
     return Date.now() - new Date(fetchedAtIso).getTime() < this.ttlMs;
+  }
+
+  private isWithinMaxStaleAge(fetchedAtIso: string): boolean {
+    return Date.now() - new Date(fetchedAtIso).getTime() < this.maxStaleAgeMs;
   }
 
   private async readCache(): Promise<CacheEnvelope | undefined> {

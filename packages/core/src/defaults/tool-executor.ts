@@ -196,8 +196,13 @@ export class ToolExecutor {
 }
 
 function anySignal(signals: AbortSignal[]): AbortSignal {
-  if ('any' in AbortSignal && typeof (AbortSignal as { any?: (s: AbortSignal[]) => AbortSignal }).any === 'function') {
-    return (AbortSignal as { any: (s: AbortSignal[]) => AbortSignal }).any(signals);
+  // AbortSignal.any is available in Node 22+. Use typeof to check if it's
+  // actually implemented (it's defined as undefined before implementation,
+  // so 'any' in AbortSignal is always truthy but typeof check is reliable).
+  if (
+    typeof AbortSignal.any === 'function'
+  ) {
+    return AbortSignal.any(signals);
   }
   const ctrl = new AbortController();
   const abortSources: AbortSignal[] = [];

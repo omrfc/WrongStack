@@ -22,12 +22,26 @@ export interface RunTuiOptions {
   queueStore?: QueueStore;
   /** Surfaces the "⚠ YOLO" chip in the status bar. */
   yolo?: boolean;
+  /** Renders in the startup banner. Read from the CLI's package.json. */
+  appVersion?: string;
+  /** Provider id for the startup banner ("openai", "anthropic", ...). */
+  provider?: string;
   /**
-   * Render into the terminal's alternate screen buffer (like vim/less/htop)
-   * so the input + status bar stay truly fixed and never leak into
-   * scrollback. Default: true. Pass false to keep the legacy
-   * scrollback-as-history behaviour (chat survives in the terminal
-   * after exit, at the cost of dynamic-area duplication artifacts).
+   * Model-specific maxContext (tokens), resolved by the CLI via the
+   * ModelsRegistry. When omitted, the TUI falls back to the provider
+   * family's baseline (e.g. anthropic = 200_000), which can be wrong
+   * for variants like the 1M-context Opus build. The status bar's
+   * context chip uses this for its progress denominator.
+   */
+  effectiveMaxContext?: number;
+  /**
+   * Render into the terminal's alternate screen buffer (like vim/less/htop).
+   * Default: false — we render into normal scrollback so the user can
+   * scroll history with the terminal's native mouse wheel / Shift+PgUp,
+   * and so completed chat survives after exit. Pass true to switch to
+   * a fixed full-screen view (no scrollback, no native scroll); useful
+   * when terminal redraw flicker is bad enough to outweigh the loss of
+   * scrollback.
    */
   altScreen?: boolean;
   /**
@@ -70,7 +84,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
     return 2;
   }
 
-  const useAltScreen = opts.altScreen !== false;
+  const useAltScreen = opts.altScreen === true;
   if (useAltScreen) {
     stdout.write(ALT_SCREEN_ON);
     stdout.write(CURSOR_HOME);
@@ -144,6 +158,9 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           banner: opts.banner ?? true,
           queueStore: opts.queueStore,
           yolo: opts.yolo,
+          appVersion: opts.appVersion,
+          provider: opts.provider,
+          effectiveMaxContext: opts.effectiveMaxContext,
           onExit,
         }),
         { exitOnCtrlC: false },

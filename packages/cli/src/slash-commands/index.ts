@@ -10,6 +10,7 @@ import type {
   TokenCounter,
   Renderer,
   Context,
+  MemoryStore,
 } from '@wrongstack/core';
 import { color } from '@wrongstack/core';
 
@@ -21,6 +22,8 @@ export interface SlashCommandContext {
   skillLoader?: SkillLoader;
   tokenCounter: TokenCounter;
   renderer: Renderer;
+  memoryStore?: MemoryStore;
+  context?: Context;
   onExit?: () => void;
   onClear?: () => void;
   onSwitchProvider?: (name: string) => void;
@@ -66,10 +69,9 @@ function initCommand(opts: SlashCommandContext): SlashCommand {
       try {
         await fs.access(file);
         if (!force) {
-          opts.renderer.writeWarning(
-            `AGENTS.md already exists at ${file}. Use "/init --force" to overwrite.`,
-          );
-          return;
+          const msg = `AGENTS.md already exists at ${file}. Use "/init --force" to overwrite.`;
+          opts.renderer.writeWarning(msg);
+          return { message: msg };
         }
       } catch {
         // doesn't exist — proceed
@@ -78,15 +80,15 @@ function initCommand(opts: SlashCommandContext): SlashCommand {
       const body = renderAgentsTemplate(detected);
       await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(file, body, 'utf8');
-      opts.renderer.writeInfo(`Wrote ${file}`);
       if (detected.hints.length > 0) {
-        opts.renderer.writeInfo(
-          `Pre-filled: ${detected.hints.join(', ')}. Edit the file to add anything else worth remembering.`,
-        );
+        const msg = `Wrote ${file}\nPre-filled: ${detected.hints.join(', ')}. Edit the file to add anything else worth remembering.`;
+        opts.renderer.writeInfo(`Wrote ${file}`);
+        opts.renderer.writeInfo(`Pre-filled: ${detected.hints.join(', ')}. Edit the file to add anything else worth remembering.`);
+        return { message: msg };
       } else {
-        opts.renderer.writeInfo(
-          'No project type auto-detected. Edit the file to add build/test commands and conventions.',
-        );
+        const msg = `Wrote ${file}\nNo project type auto-detected. Edit the file to add build/test commands and conventions.`;
+        opts.renderer.writeInfo(`Wrote ${file}`);
+        return { message: msg };
       }
     },
   };
@@ -200,8 +202,9 @@ function diagCommand(opts: SlashCommandContext): SlashCommand {
     async run() {
       if (opts.onDiag) {
         opts.onDiag();
+        return { message: 'diag' };
       } else {
-        opts.renderer.writeWarning('Diag not available in this context.');
+        return { message: 'Diag not available in this context.' };
       }
     },
   };
@@ -214,8 +217,9 @@ function statsCommand(opts: SlashCommandContext): SlashCommand {
     async run() {
       if (opts.onStats) {
         opts.onStats();
+        return { message: 'stats' };
       } else {
-        opts.renderer.writeWarning('Stats not available in this context.');
+        return { message: 'Stats not available in this context.' };
       }
     },
   };
@@ -237,7 +241,7 @@ function helpCommand(opts: SlashCommandContext): SlashCommand {
         const aliasStr = aliases ? ` (${aliases})` : '';
         lines.push(`  /${prefix}${cmd.name}${aliasStr} — ${cmd.description}`);
       }
-      opts.renderer.write(`${lines.join('\n')}\n`);
+      return { message: lines.join('\n') };
     },
   };
 }
@@ -246,10 +250,22 @@ function clearCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'clear',
     description: 'Reset the session and start a new one.',
-    async run() {
+    async run(_args, ctx) {
+      // Clear context: messages, todos, readFiles, fileMtimes
+      if (ctx) {
+        ctx.messages = [];
+        ctx.todos = [];
+        ctx.readFiles.clear();
+        ctx.fileMtimes.clear();
+        ctx.meta = {};
+      }
+      // Clear memory store (all scopes)
+      await opts.memoryStore?.clear();
       opts.onClear?.();
       opts.renderer.clear();
-      opts.renderer.writeInfo('Session cleared.');
+      const msg = 'Session cleared (context, memory, and history reset).';
+      opts.renderer.writeInfo(msg);
+      return { message: msg };
     },
   };
 }
@@ -288,7 +304,9 @@ function contextCommand(opts: SlashCommandContext): SlashCommand {
         }
       }
 
-      opts.renderer.write(`${lines.join('\n')}\n`);
+      const msg = lines.join('\n');
+      opts.renderer.write(`${msg}\n`);
+      return { message: msg };
     },
   };
 }
@@ -347,16 +365,18 @@ function compactCommand(opts: SlashCommandContext): SlashCommand {
     description: 'Compact the context window.',
     async run(args, ctx) {
       if (!opts.compactor) {
-        opts.renderer.writeWarning('No compactor configured.');
-        return;
+        const msg = 'No compactor configured.';
+        opts.renderer.writeWarning(msg);
+        return { message: msg };
       }
       const aggressive = args.trim() === 'aggressive';
       const report = await opts.compactor.compact(ctx, { aggressive });
-      opts.renderer.writeInfo(
+      const msg =
         `Compaction: ${report.before} → ${report.after} tokens (${report.reductions
           .map((r) => `${r.phase}: ${r.saved}`)
-          .join(', ')})`,
-      );
+          .join(', ')})`;
+      opts.renderer.writeInfo(msg);
+      return { message: msg };
     },
   };
 }
@@ -369,14 +389,15 @@ function usageCommand(opts: SlashCommandContext): SlashCommand {
     async run() {
       const total = opts.tokenCounter.total();
       const cost = opts.tokenCounter.estimateCost();
-      opts.renderer.write(
+      const msg =
         `${color.bold('Usage')}\n` +
           `  input:       ${total.input}\n` +
           `  output:      ${total.output}\n` +
           `  cache read:  ${total.cacheRead ?? 0}\n` +
           `  cache write: ${total.cacheWrite ?? 0}\n` +
-          `  cost:        $${cost.total.toFixed(4)} (input $${cost.input.toFixed(4)} / output $${cost.output.toFixed(4)})\n`,
-      );
+          `  cost:        $${cost.total.toFixed(4)} (input $${cost.input.toFixed(4)} / output $${cost.output.toFixed(4)})\n`;
+      opts.renderer.write(msg);
+      return { message: msg };
     },
   };
 }
@@ -390,7 +411,9 @@ function toolsCommand(opts: SlashCommandContext): SlashCommand {
       const lines = all.map(({ tool, owner }) => {
         return `  ${tool.name.padEnd(28)} ${color.dim(`[${owner}]`)} ${tool.mutating ? color.yellow('mut') : color.cyan('ro')} ${color.dim(tool.permission)}`;
       });
-      opts.renderer.write(`${[`${color.bold('Tools')} (${all.length}):`, ...lines].join('\n')}\n`);
+      const msg = `${color.bold('Tools')} (${all.length}):\n${lines.join('\n')}\n`;
+      opts.renderer.write(msg);
+      return { message: msg };
     },
   };
 }
@@ -401,25 +424,26 @@ function skillCommand(opts: SlashCommandContext): SlashCommand {
     description: 'Show a skill manifest or list skills.',
     async run(args) {
       if (!opts.skillLoader) {
-        opts.renderer.writeWarning('No skill loader configured.');
-        return;
+        const msg = 'No skill loader configured.';
+        return { message: msg };
       }
       if (!args.trim()) {
         const list = await opts.skillLoader.list();
         if (list.length === 0) {
-          opts.renderer.write('No skills found.\n');
-          return;
+          const msg = 'No skills found.';
+          return { message: msg };
         }
         const lines = list.map((s) => `  ${s.name.padEnd(24)} ${color.dim(`[${s.source}]`)} ${s.description.split('\n')[0]}`);
-        opts.renderer.write(`${[`${color.bold('Skills')}:`, ...lines].join('\n')}\n`);
+        const msg = `Skills:\n${lines.join('\n')}\n`;
+        return { message: msg };
       } else {
         const skill = await opts.skillLoader.find(args.trim());
         if (!skill) {
-          opts.renderer.writeWarning(`Skill "${args.trim()}" not found.`);
-          return;
+          const msg = `Skill "${args.trim()}" not found.`;
+          return { message: msg };
         }
         const body = await opts.skillLoader.readBody(skill.name);
-        opts.renderer.write(`${body}\n`);
+        return { message: body };
       }
     },
   };
@@ -432,11 +456,12 @@ function useCommand(opts: SlashCommandContext): SlashCommand {
     async run(args) {
       const name = args.trim();
       if (!name) {
-        opts.renderer.writeWarning('Usage: /use <provider-name>');
-        return;
+        const msg = 'Usage: /use <provider-name>';
+        return { message: msg };
       }
       opts.onSwitchProvider?.(name);
-      opts.renderer.writeInfo(`Switched provider to "${name}".`);
+      const msg = `Switched provider to "${name}".`;
+      return { message: msg };
     },
   };
 }
@@ -448,11 +473,12 @@ function modelCommand(opts: SlashCommandContext): SlashCommand {
     async run(args) {
       const name = args.trim();
       if (!name) {
-        opts.renderer.writeWarning('Usage: /model <model-name>');
-        return;
+        const msg = 'Usage: /model <model-name>';
+        return { message: msg };
       }
       opts.onSwitchModel?.(name);
-      opts.renderer.writeInfo(`Switched model to "${name}".`);
+      const msg = `Switched model to "${name}".`;
+      return { message: msg };
     },
   };
 }
@@ -467,7 +493,8 @@ function saveCommand(opts: SlashCommandContext): SlashCommand {
         ts: new Date().toISOString(),
         usage: opts.tokenCounter.total(),
       });
-      opts.renderer.writeInfo(`Session ${ctx.session.id} flushed.`);
+      const msg = `Session ${ctx.session.id} flushed.`;
+      return { message: msg };
     },
   };
 }
@@ -480,22 +507,23 @@ function loadCommand(opts: SlashCommandContext): SlashCommand {
       'List recent sessions. To actually resume, exit and run `wstack resume <id>`.',
     async run() {
       if (!opts.sessionStore) {
-        opts.renderer.writeWarning('No session store configured.');
-        return;
+        const msg = 'No session store configured.';
+        return { message: msg };
       }
       const list = await opts.sessionStore.list(10);
       if (list.length === 0) {
-        opts.renderer.write('No saved sessions.\n');
-        return;
+        const msg = 'No saved sessions.';
+        return { message: msg };
       }
       const lines = list.map(
         (s) =>
           `  ${s.id}  ${color.dim(s.startedAt)}  ${color.dim(`${s.tokenTotal} tok`)}  ${s.title}`,
       );
-      opts.renderer.write(`${['Recent sessions:', ...lines].join('\n')}\n`);
-      opts.renderer.write(
-        color.dim(`\nResume one with: wstack resume ${list[0]?.id ?? '<id>'}\n`),
-      );
+      const msg =
+        `Recent sessions:\n${lines.join('\n')}\n\n` +
+        color.dim(`Resume one with: wstack resume ${list[0]?.id ?? '<id>'}\n`);
+      opts.renderer.write(msg);
+      return { message: msg };
     },
   };
 }

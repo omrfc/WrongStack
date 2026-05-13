@@ -71,7 +71,10 @@ export class QueueStore {
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === 'ENOENT') return;
-      throw err;
+      // Best-effort: a permission/lock error during clear is rare and
+      // the queue slash command is non-critical. Warn so it's observable
+      // but don't throw so the slash command doesn't crash.
+      console.warn(`QueueStore.clear() failed for ${this.file}: ${(err as Error).message}`);
     }
   }
 }

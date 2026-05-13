@@ -28,7 +28,10 @@ describe('TUI reducer', () => {
     expect(s.nextId).toBe(3);
   });
 
-  it('addEntry caps history at MAX_HISTORY_ENTRIES (500) by dropping oldest', () => {
+  it('addEntry is append-only and never drops oldest entries', () => {
+    // Entries are rendered via Ink's <Static>, which forbids removals or
+    // reordering. Trimming would break the scrollback. Memory growth is
+    // bounded in practice by the terminal's own scrollback limit.
     let s = initial();
     for (let i = 0; i < 600; i++) {
       s = reducer(s, {
@@ -36,10 +39,9 @@ describe('TUI reducer', () => {
         entry: { kind: 'info', text: `entry-${i}` },
       });
     }
-    expect(s.entries.length).toBe(500);
-    // Oldest 100 dropped; newest preserved.
-    expect((s.entries[0] as { text: string }).text).toBe('entry-100');
-    expect((s.entries[499] as { text: string }).text).toBe('entry-599');
+    expect(s.entries.length).toBe(600);
+    expect((s.entries[0] as { text: string }).text).toBe('entry-0');
+    expect((s.entries[599] as { text: string }).text).toBe('entry-599');
   });
 
   it('setBuffer + clearInput reset cursor and placeholders', () => {

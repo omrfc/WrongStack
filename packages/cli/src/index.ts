@@ -75,6 +75,7 @@ const BOOLEAN_FLAGS = new Set([
   'no-recovery',
   'recover',
   'no-alt-screen',
+  'alt-screen',
   'output-json',
   'prompt',
 ]);
@@ -391,7 +392,15 @@ export async function main(argv: string[]): Promise<number> {
 
   // Spinner: visible "thinking…" line during each model request.
   const spinner = new Spinner();
+  // Track the latest provider request's input-token count so the spinner
+  // can render a live context-window fullness bar (TUI parity).
+  let lastInputTokens = 0;
+  events.on('provider.response', (e) => {
+    lastInputTokens = e.usage?.input ?? 0;
+    updateSpinnerContext();
+  });
   events.on('iteration.started', () => {
+    updateSpinnerContext();
     spinner.start(color.dim(`${config.provider}/${config.model} thinking…`));
   });
   events.on('provider.response', () => {
@@ -589,6 +598,17 @@ export async function main(argv: string[]): Promise<number> {
     config.context.effectiveMaxContext ??
     resolvedCaps?.maxContext ??
     provider.capabilities.maxContext;
+
+  // Helper: keep the spinner's context chip in sync with the latest
+  // provider response and the resolved max-context ceiling.
+  const updateSpinnerContext = () => {
+    if (effectiveMaxContext > 0 && lastInputTokens > 0) {
+      spinner.setContext({ used: lastInputTokens, max: effectiveMaxContext });
+    } else {
+      spinner.setContext(undefined);
+    }
+  };
+
   if (config.context.autoCompact !== false) {
     const autoCompactor = new AutoCompactionMiddleware(
       compactor,
@@ -694,6 +714,20 @@ export async function main(argv: string[]): Promise<number> {
     context,
     onExit: () => {
       void mcpRegistry.stopAll();
+    },
+    onClear: () => {
+      // Wipe the visible screen AND the terminal's scrollback so `/clear`
+      // actually feels like a fresh start. Without `\x1b[3J` (xterm
+      // scrollback-erase, supported by Windows Terminal/iTerm/etc.) the
+      // old conversation is still scrollable above. In TUI mode Ink owns
+      // the live area and redraws it on the next state change, so we
+      // only need to clear; we don't need to ourselves re-emit input/
+      // status. In REPL mode the prompt prints fresh after this.
+      try {
+        process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
+      } catch {
+        // stdout may be closed during shutdown — ignore.
+      }
     },
     onSwitchModel: (name) => {
       context.model = name;
@@ -825,7 +859,10 @@ export async function main(argv: string[]): Promise<number> {
           appVersion: CLI_VERSION,
           provider: config.provider,
           effectiveMaxContext,
-          altScreen: !flags['no-alt-screen'],
+          // Opt-in: alt-screen disables the terminal's native scrollback,
+          // so we default to false. `--no-alt-screen` is kept as a no-op
+          // for backward compatibility with old invocation scripts.
+          altScreen: flags['alt-screen'] === true,
           // Alt-screen exit erases the TUI view. Print a one-line hint
           // into the user's normal terminal so they know the session is
           // preserved and can resume it. Skipped automatically when
@@ -849,6 +886,7 @@ export async function main(argv: string[]): Promise<number> {
         slashRegistry,
         tokenCounter,
         attachments,
+        effectiveMaxContext,
       });
     }
   } finally {
@@ -921,6 +959,8 @@ function fmtTok(n: number): string {
   if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
+
+
 
 const isMain =
   import.meta.url === `file://${process.argv[1]?.replace(/\\/g, '/')}` ||

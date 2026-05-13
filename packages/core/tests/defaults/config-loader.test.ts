@@ -152,6 +152,38 @@ describe('DefaultConfigLoader', () => {
     expect(cfg.context.softThreshold).toBe(0.75);
   });
 
+  it('merges primitive arrays by concatenation with deduplication', async () => {
+    const { loader: l, paths } = loader();
+    await fs.mkdir(path.dirname(paths.globalConfig), { recursive: true });
+    await fs.writeFile(
+      paths.globalConfig,
+      JSON.stringify({ features: { plugins: ['a', 'b'] } }),
+    );
+    await fs.mkdir(path.dirname(paths.projectLocalConfig), { recursive: true });
+    await fs.writeFile(
+      paths.projectLocalConfig,
+      JSON.stringify({ features: { plugins: ['b', 'c'] } }),
+    );
+    const cfg = await l.load();
+    expect(cfg.features.plugins).toEqual(['a', 'b', 'c']);
+  });
+
+  it('replaces object arrays wholesale', async () => {
+    const { loader: l, paths } = loader();
+    await fs.mkdir(path.dirname(paths.globalConfig), { recursive: true });
+    await fs.writeFile(
+      paths.globalConfig,
+      JSON.stringify({ mcpServers: [{ name: 'a', url: 'http://a' }] }),
+    );
+    await fs.mkdir(path.dirname(paths.projectLocalConfig), { recursive: true });
+    await fs.writeFile(
+      paths.projectLocalConfig,
+      JSON.stringify({ mcpServers: [{ name: 'b', url: 'http://b' }] }),
+    );
+    const cfg = await l.load();
+    expect(cfg.mcpServers).toEqual([{ name: 'b', url: 'http://b' }]);
+  });
+
   it('returned config is frozen', async () => {
     const { loader: l } = loader();
     const cfg = await l.load();

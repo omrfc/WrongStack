@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **TUI (React/Ink)** — full-screen terminal UI with alternate screen buffer, streaming text, slash command picker, file picker (`@` token), message queue, and crash recovery
+- **Slash command picker** — type `/` to open a fuzzy-filtered dropdown of all commands; navigate with `↑/↓`, accept with `Enter` or `Tab`
+- **History scroll** — `PageUp`/`PageDown` (or `Ctrl+K`/`Ctrl+J`) navigate history; `Ctrl+G` jumps to top; auto-scrolls to newest entry unless user scrolled up
+- **Streaming throttle** — `provider.text_delta` events buffered at 100ms (~10fps) to eliminate per-character flicker during streaming
+- **Queue persistence** — TUI message queue survives crashes; rehydrated on restart with `QueueStore`
+- **Crash recovery** — abandoned session lockfiles detected on boot; offers to resume or discard
+- **Encrypted secrets** — plaintext `apiKey` fields in config files auto-migrated to AES-GCM vault at `~/.wrongstack/.key`
 - **Monorepo structure** — `packages/cli`, `packages/core`, `packages/mcp`, `packages/providers`, `packages/tools` with pnpm workspaces
 - **Minimal kernel** — `Container`, `Pipeline`, `EventBus` primitives (under 600 lines total)
 - **4 wire-family transports** — `anthropic`, `openai`, `openai-compatible`, `google`
@@ -41,6 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`~/.wrongstack/memory.md`** — user-global agent notes
 - **Project `/.wrongstack/AGENTS.md`** — shared project conventions
 - **`WRONGSTACK_FETCH_ALLOW_PRIVATE=1`** — opt-in to allow localhost in fetch tool
+
+### Fixed
+
+- **Streaming flicker** — per-character Ink re-renders during streaming now throttled at 100ms, eliminating visible flash/jitter on fast providers
 
 ## [0.0.1] — 2026-05-12
 

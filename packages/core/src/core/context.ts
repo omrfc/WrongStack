@@ -72,6 +72,9 @@ export class Context {
   }
   async drainAbortHooks(): Promise<void> {
     const snapshot = [...this.abortHooks].reverse();
+    // Clear before running so new hooks registered during iteration
+    // fire on the next abort cycle (not the current one — hook chains
+    // are intentionally not supported).
     this.abortHooks.clear();
     for (const fn of snapshot) {
       try {

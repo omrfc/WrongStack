@@ -13,6 +13,12 @@ interface EditInput {
   path: string;
   old_string: string;
   new_string: string;
+  /**
+   * When true, replaces all occurrences of `old_string`.
+   * When false (default), replaces only the first occurrence and errors
+   * if more than one match exists — use this to ensure you target the
+   * right location.
+   */
   replace_all?: boolean;
 }
 

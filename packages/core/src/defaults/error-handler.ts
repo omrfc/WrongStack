@@ -3,6 +3,9 @@ import type { ErrorHandler } from '../types/error-handler.js';
 import type { Response } from '../types/provider.js';
 import type { Context } from '../core/context.js';
 
+import type { Compactor } from '../types/compactor.js';
+import type { ModelsRegistry } from '../types/models-registry.js';
+
 /**
  * Tiered error recovery strategies.
  * Each strategy is attempted in order until one succeeds.
@@ -10,6 +13,8 @@ import type { Context } from '../core/context.js';
 export interface RecoveryStrategy {
   /** Human-readable label for logs. */
   label: string;
+  /** Optional compactor for context_overflow recovery. */
+  compactor?: Compactor;
   /** Returns a substitute Response, or null to fall through to the next strategy. */
   attempt: (err: unknown, ctx: Context) => Promise<Response | null>;
 }
@@ -18,15 +23,31 @@ export interface RecoveryStrategy {
  * Builds the ordered list of recovery strategies used by DefaultErrorHandler.
  * Exported so callers can customise or extend the strategy chain.
  */
-export function buildRecoveryStrategies(): RecoveryStrategy[] {
+export function buildRecoveryStrategies(opts?: {
+  compactor?: Compactor;
+  modelsRegistry?: ModelsRegistry;
+}): RecoveryStrategy[] {
   return [
     {
       label: 'context_overflow_reduce',
-      async attempt(err, _ctx) {
-        // Only ProviderError with 413 or context-too-long message qualifies.
+      compactor: opts?.compactor,
+      async attempt(err, ctx) {
         if (err instanceof ProviderError && (err.status === 413 || /context|too long|tokens/i.test(err.message))) {
-          // Placeholder: signal the compactor to aggressively compact and retry.
-          // The agent loop checks this flag on the next iteration.
+          if (this.compactor) {
+            try {
+              const report = await this.compactor.compact(ctx, { aggressive: true });
+              if (report.after < report.before) {
+                return {
+                  content: [{ type: 'text', text: '[context compacted automatically — please retry]' }],
+                  stopReason: 'end_turn',
+                  usage: { input: 0, output: 0 },
+                  model: ctx.model,
+                };
+              }
+            } catch {
+              // compact failed — fall through
+            }
+          }
           return null;
         }
         return null;
@@ -34,22 +55,74 @@ export function buildRecoveryStrategies(): RecoveryStrategy[] {
     },
     {
       label: 'rate_limit_backoff',
-      async attempt(err, _ctx) {
+      async attempt(err, ctx) {
         if (err instanceof ProviderError && err.status === 429) {
-          // Placeholder: implement rate-limit-specific backoff — e.g. wait for
-          // Retry-After header value before returning a Response that allows
-          // the run to continue. Without provider support for Retry-After this
-          // returns null so the run fails cleanly.
-          return null;
+          // Prefer the parsed Retry-After hint the provider extracted into
+          // body.retryAfterMs; fall back to 5s when absent.
+          const delayMs = err.body?.retryAfterMs ?? 5_000;
+          // Clamp between 1s and 60s.
+          const delay = Math.max(1_000, Math.min(delayMs, 60_000));
+          await new Promise((r) => setTimeout(r, delay));
+          return {
+            content: [{ type: 'text', text: '[rate limit backoff applied — please retry]' }],
+            stopReason: 'end_turn',
+            usage: { input: 0, output: 0 },
+            model: ctx.model,
+          };
         }
         return null;
       },
     },
     {
       label: 'downgrade_model',
-      async attempt(_err, _ctx) {
-        // Placeholder: check if the current model has a cheaper fallback registered
-        // in ModelsRegistry and substitute it. Requires ModelsRegistry access on ctx.
+      async attempt(err, ctx) {
+        if (err instanceof ProviderError && (err.status === 429 || err.status === 529 || err.status >= 500)) {
+          const registry = opts?.modelsRegistry;
+          if (!registry) return null;
+
+          try {
+            const provider = await registry.getProvider(ctx.provider.id);
+            if (!provider) return null;
+
+            const currentModel = await registry.getModel(ctx.provider.id, ctx.model);
+            if (!currentModel) return null;
+
+            // Find a cheaper fallback model with the same capabilities.
+            // Prefer models with lower input cost, preferring the same family.
+            const candidates = provider.models.filter((m) => {
+              const modelCost = m.cost?.input ?? Infinity;
+              const currentCost = currentModel.cost?.input ?? Infinity;
+              // Must be cheaper.
+              if (modelCost >= currentCost) return false;
+              // Must support tools if the original did.
+              if (currentModel.capabilities.tools && !m.tool_call) return false;
+              // Must support vision if the original did.
+              if (currentModel.capabilities.vision && !m.modalities?.input?.includes('image')) return false;
+              return true;
+            });
+
+            if (candidates.length === 0) return null;
+
+            // Pick the cheapest one.
+            const fallback = candidates.reduce((prev, curr) =>
+              (curr.cost?.input ?? 0) < (prev.cost?.input ?? 0) ? curr : prev,
+            );
+
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `[model downgrade: ${ctx.model} → ${fallback.id} — please retry]`,
+                },
+              ],
+              stopReason: 'end_turn',
+              usage: { input: 0, output: 0 },
+              model: fallback.id,
+            };
+          } catch {
+            return null;
+          }
+        }
         return null;
       },
     },

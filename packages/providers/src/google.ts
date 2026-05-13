@@ -9,7 +9,7 @@ import type {
 } from '@wrongstack/core';
 import { ProviderError, safeParse } from '@wrongstack/core';
 import { parseProviderHttpError } from './error-parse.js';
-import { normalizeOpenAI } from './stop-reason.js';
+import { normalizeGemini } from './stop-reason.js';
 import { parseSSE } from './sse.js';
 import { WireAdapter } from './wire-adapter.js';
 
@@ -233,7 +233,7 @@ async function* parseGoogleStream(
     }
 
     if (candidate?.finishReason) {
-      stopReason = normalizeOpenAI(candidate.finishReason);
+      stopReason = normalizeGemini(candidate.finishReason);
     }
 
     const u = obj.usageMetadata;

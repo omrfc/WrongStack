@@ -30,9 +30,9 @@ export interface ReadonlyPipeline<T> {
 export class Pipeline<T> {
   private readonly chain: Middleware<T>[] = [];
 
-  use(mw: Middleware<T>): this {
+  use(mw: Middleware<T> | Middleware<unknown>): this {
     this.ensureUnique(mw.name);
-    this.chain.push(mw);
+    this.chain.push(mw as Middleware<T>);
     return this;
   }
 

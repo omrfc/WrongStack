@@ -57,6 +57,23 @@ describe('OpenAICompatibleProvider', () => {
     expect(p.capabilities.parallelTools).toBe(false);
   });
 
+  it('honours urlOverride for non-standard URL structures', async () => {
+    const spy = mockFetchSpy();
+    const p = new OpenAICompatibleProvider({
+      id: 'custom',
+      apiKey: 'k',
+      baseUrl: 'https://api.example.com',
+      urlOverride: (baseUrl, _req) => baseUrl + '/v2/chat',
+      fetchImpl: spy as unknown as typeof fetch,
+    });
+    await p.complete(
+      { model: 'm', messages: [{ role: 'user', content: 'hi' }], maxTokens: 1 },
+      { signal: new AbortController().signal },
+    );
+    const [url] = spy.mock.calls[0]!;
+    expect(url).toBe('https://api.example.com/v2/chat');
+  });
+
   it('works without custom headers', async () => {
     const spy = mockFetchSpy();
     const p = new OpenAICompatibleProvider({

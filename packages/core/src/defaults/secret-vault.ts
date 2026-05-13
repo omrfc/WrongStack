@@ -79,11 +79,19 @@ export class DefaultSecretVault implements SecretVault {
     // remains synchronous from the caller's perspective.
     fs.mkdirSync(path.dirname(this.keyFile), { recursive: true });
     const key = randomBytes(KEY_BYTES);
-    fs.writeFileSync(this.keyFile, key, { mode: 0o600 });
+    // Use exclusive-create flag 'wx' to prevent races: if two processes race
+    // to create the key file, only one succeeds and the loser gets EEXIST.
     try {
-      fs.chmodSync(this.keyFile, 0o600);
-    } catch {
-      // chmod is best-effort on Windows
+      fs.writeFileSync(this.keyFile, key, { mode: 0o600, flag: 'wx' });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      // Another process won the race — re-read what they wrote.
+      const buf = fs.readFileSync(this.keyFile);
+      if (buf.length !== KEY_BYTES) {
+        throw new Error(`SecretVault: key file ${this.keyFile} has wrong size`);
+      }
+      this.key = buf;
+      return this.key;
     }
     this.key = key;
     return key;
@@ -222,6 +230,11 @@ function walkCount<T>(node: T, vault: SecretVault, counter: { n: number }): T {
     }
   }
   return out as T;
+}
+
+/** Mutable counter passed to walkCount to accumulate the migration total. */
+interface MigrationCounter {
+  n: number;
 }
 
 function deepMerge<T extends Record<string, unknown>>(a: T, b: Record<string, unknown>): T {
