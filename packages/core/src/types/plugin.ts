@@ -1,5 +1,5 @@
 import type { Container } from '../kernel/container.js';
-import type { EventBus } from '../kernel/events.js';
+import type { EventBus, EventName, Listener } from '../kernel/events.js';
 import type { Pipeline } from '../kernel/pipeline.js';
 import type { Tool } from './tool.js';
 import type { Provider, Request, Response } from './provider.js';
@@ -47,13 +47,22 @@ export interface PluginAPI {
   mcp: MCPRegistryView;
   config: Config;
   log: Logger;
+  /**
+   * Register a one-time event listener. The handler is automatically removed
+   * after the first emission, or when the plugin is uninstalled — whichever
+   * comes first.
+   */
+  onEvent<K extends EventName>(event: K, handler: Listener<K>): () => void;
 }
 
 export interface Plugin {
   name: string;
   version?: string;
   apiVersion: string;
+  /** Mandatory plugin dependencies — loading fails if any are absent. */
   dependsOn?: string[];
+  /** Optional plugin dependencies — silently skipped if absent. */
+  optionalDeps?: string[];
   conflictsWith?: string[];
   setup(api: PluginAPI): void | Promise<void>;
   teardown?(api: PluginAPI): void | Promise<void>;

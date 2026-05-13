@@ -112,12 +112,15 @@ export class DefaultConfigLoader implements ConfigLoader {
   }
 
   async load(opts: { cliFlags?: Partial<Config>; cwd?: string } = {}): Promise<Config> {
-    let cfg: PartialConfig = structuredClone(BEHAVIOR_DEFAULTS) as PartialConfig;
+    let cfg: PartialConfig = { ...BEHAVIOR_DEFAULTS } as PartialConfig;
 
-    // Layer 2: user-global config
-    cfg = deepMerge(cfg, await this.readJson(this.paths.globalConfig));
-    // Layer 3: per-project local config under ~/.wrongstack/projects/<hash>/
-    cfg = deepMerge(cfg, await this.readJson(this.paths.projectLocalConfig));
+    // Layer 2 & 3: global + project-local config — read in parallel
+    const [global, local] = await Promise.all([
+      this.readJson(this.paths.globalConfig),
+      this.readJson(this.paths.projectLocalConfig),
+    ]);
+    cfg = deepMerge(cfg, global);
+    cfg = deepMerge(cfg, local);
 
     // Layer 4: env vars
     for (const [key, fn] of Object.entries(ENV_MAP)) {

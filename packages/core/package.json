@@ -29,7 +29,7 @@
     "./skills/*": "./skills/*"
   },
   "files": ["dist", "skills"],
-  "wrongstackApiVersion": "1.0.0",
+  "wrongstackApiVersion": "0.0.1",
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",

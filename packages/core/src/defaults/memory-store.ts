@@ -54,7 +54,9 @@ export class DefaultMemoryStore implements MemoryStore {
       // new file
     }
     const ts = new Date().toISOString();
-    const entry = `\n- [${ts}] ${text.replace(/\n/g, ' ')}\n`;
+    // Use a stable ID so forget() can target exact entries regardless of content.
+    const id = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const entry = `\n- [${ts}] ${id} ${text.replace(/\n/g, ' ')}\n`;
     const next = existing.trim()
       ? existing.replace(/\n+$/, '') + entry
       : `# WrongStack Memory\n${entry}`;
@@ -73,10 +75,29 @@ export class DefaultMemoryStore implements MemoryStore {
     } catch {
       return 0;
     }
+    // Match by unique ID suffix (mem_<ts>_<rand>) embedded in the entry.
+    // Fall back to case-insensitive content match for entries without an ID.
     const needle = query.toLowerCase();
+    const idMatcher = /mem_\d+_\w+/;
     let removed = 0;
     const lines = existing.split('\n').filter((line) => {
-      if (line.trim().startsWith('- ') && line.toLowerCase().includes(needle)) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('- ')) return true;
+      // If the query looks like an ID, match exactly; otherwise match content.
+      if (idMatcher.test(query)) {
+        // The entry ID appears right after the timestamp: "- [ts] mem_<ts>_<rand> ..."
+        const afterBracket = trimmed.indexOf('] ');
+        if (afterBracket !== -1) {
+          const afterTs = trimmed.slice(afterBracket + 2);
+          const entryIdMatch = /^mem_\d+_\w+/.exec(afterTs);
+          if (entryIdMatch && entryIdMatch[0] === query) {
+            removed++;
+            return false;
+          }
+        }
+      }
+      // Fall back to content-based match (still useful for project-agents legacy entries)
+      if (trimmed.toLowerCase().includes(needle)) {
         removed++;
         return false;
       }
@@ -96,12 +117,17 @@ export class DefaultMemoryStore implements MemoryStore {
     } catch {
       return;
     }
-    // Dedupe identical bullet lines (case-insensitive, ignoring timestamps)
+    // Dedupe identical bullet lines (case-insensitive, ignoring per-entry
+    // metadata: the leading "[timestamp]" and the "mem_<ts>_<rand>" ID).
     const seen = new Set<string>();
     const lines = existing.split('\n').filter((line) => {
       const trimmed = line.trim();
       if (!trimmed.startsWith('- ')) return true;
-      const norm = trimmed.replace(/\[[^\]]+\]/, '').trim().toLowerCase();
+      const norm = trimmed
+        .replace(/\[[^\]]+\]/, '')
+        .replace(/\bmem_\d+_\w+\s*/, '')
+        .trim()
+        .toLowerCase();
       if (seen.has(norm)) return false;
       seen.add(norm);
       return true;

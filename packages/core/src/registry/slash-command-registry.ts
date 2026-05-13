@@ -4,7 +4,7 @@ export interface SlashCommand {
   name: string;
   aliases?: string[];
   description: string;
-  run(args: string, ctx: Context): Promise<{ exit?: boolean; message?: string } | undefined>;
+  run(args: string, ctx: Context): Promise<{ exit?: boolean; message?: string } | void>;
 }
 
 export class SlashCommandRegistry {

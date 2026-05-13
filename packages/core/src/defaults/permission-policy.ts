@@ -117,15 +117,25 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
   private subjectFor(toolName: string, input: unknown): string | undefined {
     if (!input || typeof input !== 'object') return undefined;
     const obj = input as Record<string, unknown>;
+
+    // Glob metacharacters are dangerous: a crafted subject like "**" or "foo/**/bar"
+    // can match too broadly in the allow/deny pattern match. Escape them so the
+    // matching is done on the literal string.
+    const globChars = /[*?\[\]]/g;
+    const escapeGlob = (s: string) => s.replace(globChars, (c) => `\\${c}`);
+
     if (toolName === 'bash' && typeof obj.command === 'string') {
-      return obj.command as string;
+      return escapeGlob(obj.command);
     }
     if (typeof obj.path === 'string') {
-      // normalize Windows backslashes for glob matching
-      return (obj.path as string).replace(/\\/g, '/');
+      // normalize Windows backslashes for glob matching, then escape metachars
+      return escapeGlob((obj.path as string).replace(/\\/g, '/'));
     }
     if (typeof obj.url === 'string') {
-      return obj.url as string;
+      return escapeGlob(obj.url);
+    }
+    if (typeof obj.name === 'string') {
+      return escapeGlob(obj.name);
     }
     return undefined;
   }

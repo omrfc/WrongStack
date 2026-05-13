@@ -1,7 +1,7 @@
 import type { Plugin, PluginAPI } from '../types/plugin.js';
 import type { Logger } from '../types/logger.js';
 
-export const KERNEL_API_VERSION = '1.0.0';
+export const KERNEL_API_VERSION = '0.0.1';
 
 export interface LoadPluginsOptions {
   apiFactory: (plugin: Plugin) => PluginAPI;
@@ -49,6 +49,11 @@ function topoSort(plugins: Plugin[]): Plugin[] {
         throw new Error(`Plugin "${p.name}" depends on missing plugin "${dep}"`);
       }
       visit(d, [...stack, p.name]);
+    }
+    // Optional deps are silently skipped if the plugin is not loaded.
+    for (const dep of p.optionalDeps ?? []) {
+      const d = map.get(dep);
+      if (d) visit(d, [...stack, p.name]);
     }
     visiting.delete(p.name);
     visited.add(p.name);

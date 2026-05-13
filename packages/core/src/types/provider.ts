@@ -44,6 +44,8 @@ export interface Response {
 
 export type StreamEvent =
   | { type: 'message_start'; model: string }
+  | { type: 'content_block_start'; kind: 'text' | 'tool_use'; id?: string; name?: string }
+  | { type: 'content_block_stop'; index: number }
   | { type: 'text_delta'; text: string }
   | { type: 'tool_use_start'; id: string; name: string }
   | { type: 'tool_use_input_delta'; id: string; partial: string }

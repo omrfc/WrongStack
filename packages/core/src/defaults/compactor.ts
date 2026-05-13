@@ -40,7 +40,19 @@ export class HybridCompactor implements Compactor {
 
   private eliseOldToolResults(ctx: Context): number {
     const messages = ctx.messages;
-    const preserveStart = Math.max(0, messages.length - this.preserveK * 2);
+    // Walk backwards counting (user + assistant) pairs to determine where
+    // the preservation window really starts. This is more accurate than
+    // the fixed multiplier which assumes every turn is 1 message pair.
+    let pairCount = 0;
+    let preserveStart = messages.length;
+    for (let i = messages.length - 1; i >= 0 && pairCount < this.preserveK; i--) {
+      const m = messages[i];
+      if (!m) continue;
+      if (m.role === 'user' || m.role === 'assistant') {
+        pairCount++;
+        preserveStart = i;
+      }
+    }
     let saved = 0;
     for (let i = 0; i < preserveStart; i++) {
       const msg = messages[i];

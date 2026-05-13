@@ -1,6 +1,7 @@
 import type { CacheStats, TokenCounter } from '../types/token-counter.js';
 import type { Usage } from '../types/provider.js';
 import type { ModelsRegistry, ResolvedModel } from '../types/models-registry.js';
+import type { EventBus } from '../kernel/events.js';
 
 interface PriceEntry {
   input?: number;
@@ -23,11 +24,13 @@ export class DefaultTokenCounter implements TokenCounter {
   private costOutput = 0;
   private readonly registry?: ModelsRegistry;
   private readonly providerId?: string;
+  private readonly events?: EventBus;
   private priceCache = new Map<string, PriceEntry>();
 
-  constructor(opts: { registry?: ModelsRegistry; providerId?: string } = {}) {
+  constructor(opts: { registry?: ModelsRegistry; providerId?: string; events?: EventBus } = {}) {
     this.registry = opts.registry;
     this.providerId = opts.providerId;
+    this.events = opts.events;
   }
 
   account(usage: Usage, model?: string): void {
@@ -50,7 +53,11 @@ export class DefaultTokenCounter implements TokenCounter {
             this.applyPrice(usage, p);
           }
         })
-        .catch(() => undefined);
+        .catch(() => {
+          // Emit so observability tooling can detect unknown models.
+          this.events?.emit('token.cost_estimate_unavailable', { model: model ?? '<unknown>' });
+          return undefined;
+        });
     }
   }
 
@@ -93,6 +100,11 @@ export class DefaultTokenCounter implements TokenCounter {
       writeTokens: this.cacheWrite,
       hitRatio: denom === 0 ? 0 : this.cacheRead / denom,
     };
+  }
+
+  /** Invalidate cached prices so the next account() call fetches fresh data. */
+  invalidateCache(): void {
+    this.priceCache.clear();
   }
 
   reset(): void {

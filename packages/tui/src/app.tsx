@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useReducer, useRef } from 'react';
-import { Box, Text, useApp } from 'ink';
+import * as path from 'node:path';
+import * as fs from 'node:fs/promises';
+import { Box, useApp } from 'ink';
 import type {
   Agent,
   AttachmentStore,
@@ -11,6 +13,9 @@ import { InputBuilder } from '@wrongstack/core';
 import { History, type HistoryEntry } from './components/history.js';
 import { Input, type KeyEvent } from './components/input.js';
 import { StatusBar } from './components/status-bar.js';
+import { FilePicker } from './components/file-picker.js';
+import { searchFiles } from './file-search.js';
+import { readClipboardImage } from './clipboard.js';
 
 export interface AppProps {
   agent: Agent;
@@ -23,6 +28,12 @@ export interface AppProps {
   onExit: (code: number) => void;
 }
 
+type DraftEntry = HistoryEntry extends infer T
+  ? T extends { id: number }
+    ? Omit<T, 'id'>
+    : never
+  : never;
+
 type State = {
   entries: HistoryEntry[];
   buffer: string;
@@ -33,10 +44,11 @@ type State = {
   interrupts: number;
   hint: string;
   nextId: number;
+  picker: { open: boolean; query: string; matches: string[]; selected: number };
 };
 
 type Action =
-  | { type: 'addEntry'; entry: Omit<HistoryEntry, 'id'> }
+  | { type: 'addEntry'; entry: DraftEntry }
   | { type: 'setBuffer'; buffer: string; cursor: number }
   | { type: 'addPlaceholder'; ph: string }
   | { type: 'clearInput' }
@@ -45,22 +57,39 @@ type Action =
   | { type: 'status'; status: State['status'] }
   | { type: 'interrupt' }
   | { type: 'resetInterrupts' }
-  | { type: 'hint'; text: string };
+  | { type: 'hint'; text: string }
+  | { type: 'pickerOpen'; query: string }
+  | { type: 'pickerClose' }
+  | { type: 'pickerSetMatches'; query: string; matches: string[] }
+  | { type: 'pickerMove'; delta: number };
 
-function reducer(state: State, action: Action): State {
+const MAX_HISTORY_ENTRIES = 500;
+
+export function reducer(state: State, action: Action): State {
   switch (action.type) {
-    case 'addEntry':
-      return {
-        ...state,
-        entries: [...state.entries, { ...action.entry, id: state.nextId } as HistoryEntry],
-        nextId: state.nextId + 1,
-      };
+    case 'addEntry': {
+      const appended = [
+        ...state.entries,
+        { ...action.entry, id: state.nextId } as HistoryEntry,
+      ];
+      const trimmed =
+        appended.length > MAX_HISTORY_ENTRIES
+          ? appended.slice(appended.length - MAX_HISTORY_ENTRIES)
+          : appended;
+      return { ...state, entries: trimmed, nextId: state.nextId + 1 };
+    }
     case 'setBuffer':
       return { ...state, buffer: action.buffer, cursor: action.cursor };
     case 'addPlaceholder':
       return { ...state, placeholders: [...state.placeholders, action.ph] };
     case 'clearInput':
-      return { ...state, buffer: '', cursor: 0, placeholders: [] };
+      return {
+        ...state,
+        buffer: '',
+        cursor: 0,
+        placeholders: [],
+        picker: { open: false, query: '', matches: [], selected: 0 },
+      };
     case 'streamDelta':
       return { ...state, streamingText: state.streamingText + action.delta };
     case 'streamReset':
@@ -73,6 +102,33 @@ function reducer(state: State, action: Action): State {
       return { ...state, interrupts: 0 };
     case 'hint':
       return { ...state, hint: action.text };
+    case 'pickerOpen':
+      return {
+        ...state,
+        picker: { open: true, query: action.query, matches: state.picker.matches, selected: 0 },
+      };
+    case 'pickerClose':
+      return {
+        ...state,
+        picker: { open: false, query: '', matches: [], selected: 0 },
+      };
+    case 'pickerSetMatches':
+      // Guard against stale async results — only apply if query still matches.
+      if (!state.picker.open || state.picker.query !== action.query) return state;
+      return {
+        ...state,
+        picker: {
+          ...state.picker,
+          matches: action.matches,
+          selected: Math.min(state.picker.selected, Math.max(0, action.matches.length - 1)),
+        },
+      };
+    case 'pickerMove': {
+      const n = state.picker.matches.length;
+      if (n === 0) return state;
+      const next = (state.picker.selected + action.delta + n) % n;
+      return { ...state, picker: { ...state.picker, selected: next } };
+    }
   }
 }
 
@@ -107,6 +163,7 @@ export function App({
     interrupts: 0,
     hint: '',
     nextId: 1,
+    picker: { open: false, query: '', matches: [], selected: 0 },
   });
 
   const builderRef = useRef<InputBuilder | null>(null);
@@ -115,6 +172,102 @@ export function App({
   }
 
   const activeCtrlRef = useRef<AbortController | null>(null);
+  const projectRoot = agent.ctx.projectRoot;
+
+  // Detect an active `@<query>` token at the cursor and drive the picker.
+  // Reruns whenever buffer/cursor changes — guards against stale results.
+  useEffect(() => {
+    const detected = detectAtToken(state.buffer, state.cursor);
+    if (!detected) {
+      if (state.picker.open) dispatch({ type: 'pickerClose' });
+      return;
+    }
+    if (!state.picker.open || state.picker.query !== detected.query) {
+      dispatch({ type: 'pickerOpen', query: detected.query });
+    }
+    let cancelled = false;
+    searchFiles(projectRoot, detected.query, 8)
+      .then((matches) => {
+        if (!cancelled) {
+          dispatch({ type: 'pickerSetMatches', query: detected.query, matches });
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.buffer, state.cursor, projectRoot]);
+
+  const pasteClipboardImage = async (): Promise<void> => {
+    const builder = builderRef.current;
+    if (!builder) return;
+    try {
+      const img = await readClipboardImage();
+      if (!img) {
+        dispatch({
+          type: 'addEntry',
+          entry: { kind: 'info', text: 'No image on the clipboard.' },
+        });
+        return;
+      }
+      const placeholder = await builder.appendImage(img.base64, img.mediaType);
+      const kb = (img.bytes / 1024).toFixed(0);
+      dispatch({ type: 'addPlaceholder', ph: `${placeholder} (PNG ${kb}KB)` });
+    } catch (err) {
+      dispatch({
+        type: 'addEntry',
+        entry: {
+          kind: 'error',
+          text: `Clipboard image error: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      });
+    }
+  };
+
+  const acceptPickerSelection = async (): Promise<void> => {
+    const { open, matches, selected } = state.picker;
+    if (!open || matches.length === 0) return;
+    const picked = matches[selected];
+    if (!picked) return;
+    const builder = builderRef.current;
+    if (!builder) return;
+
+    // Find the @-token span we're replacing.
+    const tok = detectAtToken(state.buffer, state.cursor);
+    if (!tok) {
+      dispatch({ type: 'pickerClose' });
+      return;
+    }
+
+    // Attach the file via the builder. The builder appends "[file #N]" to its
+    // own display string, but we want to put the placeholder inline in the
+    // visible buffer (replacing @query) so the user sees it.
+    const absPath = path.isAbsolute(picked) ? picked : path.join(projectRoot, picked);
+    try {
+      const data = await fs.readFile(absPath, 'utf8');
+      const placeholder = await builder.appendFile({
+        kind: 'file',
+        data,
+        meta: { filename: picked, label: picked },
+      });
+      const before = state.buffer.slice(0, tok.start);
+      const after = state.buffer.slice(tok.end);
+      const next = `${before}${placeholder}${after}`;
+      dispatch({
+        type: 'setBuffer',
+        buffer: next,
+        cursor: tok.start + placeholder.length,
+      });
+      dispatch({ type: 'pickerClose' });
+    } catch (err) {
+      dispatch({
+        type: 'addEntry',
+        entry: { kind: 'error', text: `Attach failed: ${err instanceof Error ? err.message : String(err)}` },
+      });
+      dispatch({ type: 'pickerClose' });
+    }
+  };
 
   // Subscribe to provider streaming events.
   useEffect(() => {
@@ -165,6 +318,29 @@ export function App({
   const handleKey = async (input: string, key: KeyEvent) => {
     if (state.status !== 'idle') return;
 
+    // Picker takes precedence over normal input handling when open.
+    if (state.picker.open) {
+      if (key.escape) {
+        dispatch({ type: 'pickerClose' });
+        return;
+      }
+      if (key.upArrow) {
+        dispatch({ type: 'pickerMove', delta: -1 });
+        return;
+      }
+      if (key.downArrow) {
+        dispatch({ type: 'pickerMove', delta: 1 });
+        return;
+      }
+      if (key.return) {
+        await acceptPickerSelection();
+        return;
+      }
+      // Any other key falls through to normal text handling, which will
+      // either extend the @-query (e.g. typing more chars) or break it
+      // (e.g. typing a space) — handled below.
+    }
+
     if (key.return) {
       await submit();
       return;
@@ -199,11 +375,25 @@ export function App({
       return;
     }
 
+    // Alt+V → read image from clipboard and attach as [image #N].
+    if (key.meta && input === 'v') {
+      await pasteClipboardImage();
+      return;
+    }
+
     if (!input || key.ctrl || key.meta) return;
+
+    // Strip bracketed-paste markers if the terminal sent them through.
+    // The wrapped payload is always treated as a paste regardless of size.
+    let bracketedPaste = false;
+    if (input.includes('\x1b[200~') || input.includes('\x1b[201~')) {
+      input = input.replace(/\x1b\[200~/g, '').replace(/\x1b\[201~/g, '');
+      bracketedPaste = true;
+    }
 
     // Paste detection: chunks larger than threshold or containing a newline
     // are routed through InputBuilder instead of inserted character-by-char.
-    if (input.length > PASTE_THRESHOLD_CHARS || input.includes('\n')) {
+    if (bracketedPaste || input.length > PASTE_THRESHOLD_CHARS || input.includes('\n')) {
       const builder = builderRef.current;
       if (!builder) return;
       const ph = await builder.appendPaste(input);
@@ -315,9 +505,9 @@ export function App({
   const inputHint = useMemo(() => {
     if (state.status !== 'idle') return '';
     if (state.buffer.startsWith('/')) return 'slash command — Enter to dispatch';
-    if (state.buffer.startsWith('@')) return '@-picker not yet wired';
+    if (state.picker.open) return '';
     return '';
-  }, [state.buffer, state.status]);
+  }, [state.buffer, state.status, state.picker.open]);
 
   return (
     <Box flexDirection="column">
@@ -330,6 +520,13 @@ export function App({
         hint={inputHint}
         onKey={handleKey}
       />
+      {state.picker.open ? (
+        <FilePicker
+          query={state.picker.query}
+          matches={state.picker.matches}
+          selected={state.picker.selected}
+        />
+      ) : null}
       <StatusBar
         model={model}
         state={state.status}
@@ -338,6 +535,31 @@ export function App({
       />
     </Box>
   );
+}
+
+/**
+ * Find an active `@<query>` token at the cursor. The token starts at the
+ * last `@` not preceded by a non-whitespace char, and runs up to the cursor
+ * (no whitespace allowed inside). Returns null if no active token.
+ */
+export function detectAtToken(
+  buffer: string,
+  cursor: number,
+): { start: number; end: number; query: string } | null {
+  let i = cursor - 1;
+  while (i >= 0) {
+    const ch = buffer.charCodeAt(i);
+    if (ch === 64 /* @ */) {
+      // Must be at the start of buffer or preceded by whitespace.
+      if (i === 0 || /\s/.test(buffer[i - 1] ?? '')) {
+        return { start: i, end: cursor, query: buffer.slice(i + 1, cursor) };
+      }
+      return null;
+    }
+    if (ch === 32 /* space */ || ch === 9 /* tab */ || ch === 10 /* nl */) return null;
+    i--;
+  }
+  return null;
 }
 
 function fmtTok(n: number): string {

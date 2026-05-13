@@ -154,7 +154,7 @@ function fmtTok(n: number): string {
 
 function printBanner(renderer: TerminalRenderer): void {
   const lines = [
-    theme.primary(theme.bold('WrongStack')) + color.dim(' v1.0.0'),
+    theme.primary(theme.bold('WrongStack')) + color.dim(' v0.0.1'),
     color.dim('Built on the wrong stack. Shipped anyway.'),
     color.dim('Type /help for commands, /exit to quit.'),
     '',

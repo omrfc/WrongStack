@@ -274,7 +274,9 @@ export class Agent {
       this.ctx.messages.push({ role: 'user', content: results });
       this.events.emit('iteration.completed', { ctx: this.ctx, index: i });
 
-      // Context-window check
+      // Context-window check: only run the pipeline when a compactor is present.
+      // The compactor itself decides whether to actually compact based on the
+      // token threshold, so this always runs when the compactor is configured.
       if (this.compactor) {
         await this.pipelines.contextWindow.run(this.ctx);
       }
@@ -299,8 +301,13 @@ export class Agent {
     let usage: Response['usage'] = { input: 0, output: 0 };
     const textBuffers: string[] = [];
     let currentTextIndex = -1;
+    // tool_input_chunks[id] accumulates raw deltas. We store as string for
+    // JSON-expected inputs; callers that need binary should handle Uint8Array.
     const tools = new Map<string, { name: string; partial: string; input?: unknown }>();
     const blockOrder: Array<{ kind: 'text'; idx: number } | { kind: 'tool'; id: string }> = [];
+    // Track open content blocks for providers that emit content_block_start/stop
+    // (e.g. Anthropic). This lets us handle interleaved text + tool sequences.
+    const openContentBlocks = new Map<string, 'text' | 'tool'>();
 
     const buildResponse = (): Response => {
       const content: import('../types/blocks.js').ContentBlock[] = [];
@@ -334,6 +341,27 @@ export class Agent {
           case 'message_start':
             model = ev.model;
             break;
+          case 'content_block_start': {
+            // Anthropic-style framing: each block starts with this event before its deltas.
+            const kind = (ev as { kind: string }).kind ?? 'text';
+            if (kind === 'text') {
+              currentTextIndex = textBuffers.length;
+              textBuffers.push('');
+              blockOrder.push({ kind: 'text', idx: currentTextIndex });
+              openContentBlocks.set(`block_${currentTextIndex}`, 'text');
+            } else if (kind === 'tool_use') {
+              const id = (ev as { id: string }).id ?? crypto.randomUUID();
+              tools.set(id, { name: (ev as { name: string }).name ?? 'unknown', partial: '' });
+              blockOrder.push({ kind: 'tool', id });
+              openContentBlocks.set(id, 'tool');
+            }
+            break;
+          }
+          case 'content_block_stop': {
+            // Finalize the block that was started by content_block_start.
+            openContentBlocks.delete((ev as { index: number }).index?.toString() ?? '');
+            break;
+          }
           case 'text_delta':
             if (currentTextIndex === -1) {
               currentTextIndex = textBuffers.length;
@@ -592,7 +620,10 @@ function serialize(value: unknown): string {
   if (typeof value === 'object') {
     if (Array.isArray(value)) return value.map(serialize).join('\n');
     if ('text' in (value as Record<string, unknown>)) {
-      return String((value as Record<string, unknown>).text);
+      const t = (value as Record<string, unknown>).text;
+      // If .text is a string, return it directly; otherwise fall through to
+      // JSON.stringify so nested objects don't become "[object Object]".
+      return typeof t === 'string' ? t : JSON.stringify(value, null, 2);
     }
     try {
       return JSON.stringify(value, null, 2);
@@ -605,9 +636,16 @@ function serialize(value: unknown): string {
 
 function enforceCap(text: string, capBytes: number): string {
   if (capBytes <= 0) return '[truncated: iteration output cap exceeded]';
-  if (Buffer.byteLength(text, 'utf8') <= capBytes) return text;
-  const half = Math.floor(capBytes / 2);
-  return `${text.slice(0, half)}\n…[truncated ${Buffer.byteLength(text, 'utf8') - capBytes} bytes]…\n${text.slice(-half)}`;
+  const textBytes = Buffer.byteLength(text, 'utf8');
+  if (textBytes <= capBytes) return text;
+  // Pre-calculate the truncation message byte size so the final output
+  // does not exceed capBytes by more than a few bytes.
+  const marker = `\n…[truncated ${textBytes - capBytes} bytes]…\n`;
+  const markerBytes = Buffer.byteLength(marker, 'utf8');
+  const available = capBytes - markerBytes;
+  if (available <= 0) return '[truncated: iteration output cap exceeded]';
+  const half = Math.floor(available / 2);
+  return `${text.slice(0, half)}${marker}${text.slice(textBytes - half)}`;
 }
 
 function toError(err: unknown): Error {

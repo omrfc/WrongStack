@@ -1,5 +1,5 @@
 import type { Container } from '../kernel/container.js';
-import type { EventBus } from '../kernel/events.js';
+import type { EventBus, EventName, Listener } from '../kernel/events.js';
 import type { Tool } from '../types/tool.js';
 import type { Config } from '../types/config.js';
 import type { Logger } from '../types/logger.js';
@@ -35,6 +35,7 @@ export class DefaultPluginAPI implements PluginAPI {
   readonly mcp: MCPRegistryView;
   readonly config: Config;
   readonly log: Logger;
+  private readonly pluginCleanupFns: Array<() => void> = [];
 
   constructor(init: PluginAPIInit) {
     const owner = init.ownerName;
@@ -60,6 +61,19 @@ export class DefaultPluginAPI implements PluginAPI {
     };
 
     this.mcp = init.mcpRegistry ?? noopMcp;
+  }
+
+  onEvent<K extends EventName>(event: K, handler: Listener<K>): () => void {
+    const off = this.events.once(event, handler);
+    this.pluginCleanupFns.push(off);
+    return off;
+  }
+
+  /** Called by the plugin loader when uninstalling the plugin. */
+  drainCleanup(): void {
+    for (const fn of this.pluginCleanupFns.splice(0)) {
+      try { fn(); } catch { /* best-effort */ }
+    }
   }
 }
 

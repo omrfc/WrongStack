@@ -101,7 +101,7 @@ export class MCPClient {
       this.request('initialize', {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
-        clientInfo: { name: 'wrongstack', version: '1.0.0' },
+        clientInfo: { name: 'wrongstack', version: '0.0.1' },
       }),
       new Promise<JsonRpcResponse>((_, rej) =>
         setTimeout(() => rej(new Error('MCP initialize timeout')), timeout),

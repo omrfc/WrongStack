@@ -19,11 +19,22 @@ export interface RunTuiOptions {
   banner?: boolean;
 }
 
+// Bracketed paste mode wraps any pasted text with these markers, letting us
+// distinguish a paste from typed input even when chunks arrive identically.
+const BRACKETED_PASTE_ON = '\x1b[?2004h';
+const BRACKETED_PASTE_OFF = '\x1b[?2004l';
+
 export async function runTui(opts: RunTuiOptions): Promise<number> {
+  const stdout = process.stdout;
+  if (stdout.isTTY) stdout.write(BRACKETED_PASTE_ON);
+
   return new Promise<number>((resolve) => {
     let exitCode = 0;
     const onExit = (code: number) => {
       exitCode = code;
+    };
+    const cleanup = () => {
+      if (stdout.isTTY) stdout.write(BRACKETED_PASTE_OFF);
     };
     const instance = render(
       React.createElement(App, {
@@ -40,7 +51,13 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
     );
     instance
       .waitUntilExit()
-      .then(() => resolve(exitCode))
-      .catch(() => resolve(1));
+      .then(() => {
+        cleanup();
+        resolve(exitCode);
+      })
+      .catch(() => {
+        cleanup();
+        resolve(1);
+      });
   });
 }

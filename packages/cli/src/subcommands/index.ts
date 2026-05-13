@@ -447,7 +447,7 @@ async function diagCmd(_args: string[], deps: SubcommandDeps): Promise<number> {
   const age = await deps.modelsRegistry.ageSeconds();
   const lines = [
     color.bold('WrongStack diagnostics'),
-    `  apiVersion:    1.0.0`,
+    `  apiVersion:    0.0.1`,
     `  cwd:           ${deps.cwd}`,
     `  projectRoot:   ${deps.projectRoot}`,
     `  projectHash:   ${deps.paths.projectHash}`,
@@ -478,7 +478,7 @@ async function usageCmd(_args: string[], deps: SubcommandDeps): Promise<number> 
 
 async function versionCmd(_args: string[], deps: SubcommandDeps): Promise<number> {
   deps.renderer.write(
-    `WrongStack 1.0.0 (apiVersion 1.0.0, node ${process.version}, ${os.platform()})\n`,
+    `WrongStack 0.0.1 (apiVersion 0.0.1, node ${process.version}, ${os.platform()})\n`,
   );
   return 0;
 }

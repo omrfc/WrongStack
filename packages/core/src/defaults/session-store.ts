@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import type { EventBus } from '../kernel/events.js';
 import type {
   ResumedSession,
   SessionData,
@@ -17,13 +18,17 @@ import { ensureDir } from '../utils/atomic-write.js';
 
 export interface SessionStoreOptions {
   dir: string;
+  /** Optional EventBus for emitting session diagnostics. */
+  events?: EventBus;
 }
 
 export class DefaultSessionStore implements SessionStore {
   private readonly dir: string;
+  private readonly events?: EventBus;
 
   constructor(opts: SessionStoreOptions) {
     this.dir = opts.dir;
+    this.events = opts.events;
   }
 
   async create(meta: Omit<SessionMetadata, 'startedAt'>): Promise<SessionWriter> {
@@ -83,7 +88,7 @@ export class DefaultSessionStore implements SessionStore {
       }
     }
     const meta = this.metaFromEvents(id, events);
-    const { messages, usage } = this.replay(events);
+    const { messages, usage } = this.replay(events, id);
     return { metadata: meta, events, messages, usage };
   }
 
@@ -155,7 +160,7 @@ export class DefaultSessionStore implements SessionStore {
     };
   }
 
-  private replay(events: SessionEvent[]): { messages: Message[]; usage: SessionData['usage'] } {
+  private replay(events: SessionEvent[], sessionId = 'unknown'): { messages: Message[]; usage: SessionData['usage'] } {
     const messages: Message[] = [];
     let usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
     const openToolUses = new Set<string>();
@@ -175,8 +180,12 @@ export class DefaultSessionStore implements SessionStore {
         };
       } else if (e.type === 'tool_result') {
         if (!openToolUses.has(e.id)) {
-          // Orphan tool_result: tool_use was never seen. Appending as-is to preserve data
-          // rather than dropping it, but semantically this session is incomplete.
+          // Orphan tool_result: tool_use was never seen. Appending as-is to preserve
+          // data rather than dropping it, but semantically the session is incomplete.
+          this.events?.emit('session.damaged', {
+            sessionId,
+            detail: `Orphan tool_result "${e.id}" has no matching tool_use`,
+          });
         }
         openToolUses.delete(e.id);
         const content: ContentBlock[] = [

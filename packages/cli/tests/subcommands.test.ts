@@ -124,7 +124,7 @@ describe('subcommands', () => {
     const rig = withRig();
     const code = await subcommands['version']!([], mkDeps({ renderer: rig.renderer }));
     expect(code).toBe(0);
-    expect(stripAnsi(rig.out.buf)).toContain('WrongStack 1.0.0');
+    expect(stripAnsi(rig.out.buf)).toContain('WrongStack 0.0.1');
   });
 
   it('help lists subcommands', async () => {

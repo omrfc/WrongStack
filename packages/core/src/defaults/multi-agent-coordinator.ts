@@ -19,7 +19,7 @@ export class DefaultMultiAgentCoordinator
   readonly coordinatorId: string;
   readonly config: MultiAgentConfig;
 
-  private subagents = new Map<string, {
+  private readonly subagents = new Map<string, {
     config: SubagentConfig;
     context: SubagentContext;
     status: 'running' | 'idle' | 'stopped' | 'error';
@@ -46,6 +46,10 @@ export class DefaultMultiAgentCoordinator
       maxConcurrent: this.config.maxConcurrent ?? 4,
     };
 
+    // parentBridge: set by the caller via assign() once the subagent's bridge
+    // has been created and wired up. The coordinator stores it here so it can
+    // forward messages. Access is gated through hasParentBridge() to avoid
+    // accidental null access.
     this.subagents.set(id, {
       config: subagent,
       context,
@@ -72,7 +76,20 @@ export class DefaultMultiAgentCoordinator
   async delegate(to: string, msg: BridgeMessage): Promise<void> {
     const subagent = this.subagents.get(to);
     if (!subagent) throw new Error(`Subagent "${to}" not found`);
+    if (!subagent.context.parentBridge) {
+      throw new Error(`Subagent "${to}" has no parentBridge — call setSubagentBridge() first`);
+    }
     await subagent.context.parentBridge.send(msg);
+  }
+
+  /**
+   * Wire up the communication bridge for a subagent. Call this after `spawn()`
+   * once the caller has created the bidirectional bridge connection.
+   */
+  setSubagentBridge(subagentId: string, bridge: AgentBridge): void {
+    const subagent = this.subagents.get(subagentId);
+    if (!subagent) throw new Error(`Subagent "${subagentId}" not found`);
+    subagent.context.parentBridge = bridge;
   }
 
   async stop(subagentId: string): Promise<void> {
@@ -81,6 +98,8 @@ export class DefaultMultiAgentCoordinator
 
     subagent.status = 'stopped';
     subagent.currentTask = undefined;
+    // Sever the bridge so no further messages can be sent to this subagent.
+    subagent.context.parentBridge = null as unknown as AgentBridge;
 
     this.emit('subagent.stopped', { subagentId, reason: 'stopped by coordinator' });
   }
@@ -122,9 +141,14 @@ export class DefaultMultiAgentCoordinator
     subagent.currentTask = task.id;
     task.subagentId = subagentId;
 
-    this.emit('task.assigned', { task, subagentId });
-
     subagent.context.tasks.push(task);
+
+    // Guard: if parentBridge is null (not yet wired), queue the message and
+    // the caller must call setSubagentBridge() before the subagent can receive it.
+    if (!subagent.context.parentBridge) {
+      this.emit('task.assigned', { task, subagentId });
+      return;
+    }
 
     await subagent.context.parentBridge.send({
       id: randomUUID(),
@@ -134,6 +158,7 @@ export class DefaultMultiAgentCoordinator
       payload: task,
       timestamp: Date.now(),
     });
+    this.emit('task.assigned', { task, subagentId });
   }
 
   private isDone(): boolean {
