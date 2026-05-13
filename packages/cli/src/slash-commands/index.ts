@@ -94,7 +94,7 @@ function initCommand(opts: SlashCommandContext): SlashCommand {
   };
 }
 
-interface ProjectFacts {
+export interface ProjectFacts {
   build?: string;
   test?: string;
   lint?: string;
@@ -102,7 +102,7 @@ interface ProjectFacts {
   hints: string[];
 }
 
-async function detectProjectFacts(root: string): Promise<ProjectFacts> {
+export async function detectProjectFacts(root: string): Promise<ProjectFacts> {
   const facts: ProjectFacts = { hints: [] };
   // package.json
   try {
@@ -159,7 +159,7 @@ async function detectProjectFacts(root: string): Promise<ProjectFacts> {
   return facts;
 }
 
-function renderAgentsTemplate(f: ProjectFacts): string {
+export function renderAgentsTemplate(f: ProjectFacts): string {
   const cmd = (s?: string) => (s ? `\`${s}\`` : '_TODO_');
   return `# AGENTS.md
 

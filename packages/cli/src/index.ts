@@ -51,6 +51,7 @@ import { builtinTools, forgetTool, rememberTool } from '@wrongstack/tools';
 import { ReadlineInputReader } from './input-reader.js';
 import { makePromptDelegate } from './permission-prompt.js';
 import { runPicker, saveToGlobalConfig } from './picker.js';
+import { runLaunchPrompts, runProjectCheck } from './pre-launch.js';
 import { TerminalRenderer } from './renderer.js';
 import { runRepl } from './repl.js';
 import { SessionStats } from './session-stats.js';
@@ -276,6 +277,23 @@ export async function main(argv: string[]): Promise<number> {
     return code;
   }
 
+  // Determine the launch shape up front so the pre-launch prompts (project
+  // check + mode + yolo) only fire when this is actually an interactive
+  // session. Single-shot invocations (`wrongstack "do X"` / `--prompt`) and
+  // non-TTY pipes (CI) skip all the interactive sugar.
+  const isSingleShot = positional.length > 0 || typeof flags['prompt'] === 'string';
+  const isInteractiveTTY = !!process.stdin.isTTY && !isSingleShot;
+
+  // Project status banner + optional AGENTS.md scaffold. Returns false
+  // when the user bails out of an empty/scratch directory.
+  if (isInteractiveTTY) {
+    const cont = await runProjectCheck({ projectRoot, renderer, reader });
+    if (!cont) {
+      await reader.close();
+      return 0;
+    }
+  }
+
   // Identity selection. We launch the interactive picker whenever the user
   // didn't pin BOTH provider and model on the CLI (--provider AND --model).
   // The picker pre-selects whatever the config has so Enter accepts the
@@ -336,6 +354,34 @@ export async function main(argv: string[]): Promise<number> {
       return 2;
     }
     // Non-TTY with config present: fall through using config defaults.
+  }
+
+  // Interactive mode + YOLO prompts. Each prompt is skipped when the user
+  // already pinned the corresponding flag (--tui / --no-tui / --yolo) on
+  // the CLI; otherwise we ask. The chosen values are written back to
+  // `flags` and `config` so the rest of the boot sequence (permission
+  // policy, REPL-vs-TUI branch) reads them naturally.
+  if (isInteractiveTTY) {
+    let modePinned: 'tui' | 'repl' | undefined;
+    if (flags['no-tui']) modePinned = 'repl';
+    else if (flags['tui']) modePinned = 'tui';
+    const yoloPinned: boolean | undefined = flags['yolo'] === true ? true : undefined;
+
+    const choices = await runLaunchPrompts({ renderer, reader, modePinned, yoloPinned });
+
+    // Propagate mode → the REPL/TUI branch later reads flags.tui / flags['no-tui'].
+    if (choices.mode === 'tui') {
+      flags['tui'] = true;
+      flags['no-tui'] = false;
+    } else {
+      flags['tui'] = false;
+      flags['no-tui'] = true;
+    }
+    // Propagate yolo → permission policy reads config.yolo. Config is
+    // frozen so we rebuild (same pattern as the picker patch above).
+    if (choices.yolo !== config.yolo) {
+      config = Object.freeze({ ...config, yolo: choices.yolo });
+    }
   }
 
   // Resolve provider details from models.dev
