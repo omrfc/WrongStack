@@ -276,35 +276,65 @@ export async function main(argv: string[]): Promise<number> {
     return code;
   }
 
-  // Identity required from this point — launch the interactive picker when
-  // running in a TTY and no provider/model is configured. Non-TTY (pipes,
-  // CI) still gets the hard error.
-  if (!config.provider || !config.model) {
+  // Identity selection. We launch the interactive picker whenever the user
+  // didn't pin BOTH provider and model on the CLI (--provider AND --model).
+  // The picker pre-selects whatever the config has so Enter accepts the
+  // previous choice — switching models becomes "wstack ↵ ↵" most days.
+  //
+  // Non-TTY (pipes, CI) skips the picker: it falls back to whatever's in
+  // config and hard-errors if that's still empty.
+  const providerFlag = typeof flags['provider'] === 'string' ? flags['provider'] : undefined;
+  const modelFlag = typeof flags['model'] === 'string' ? flags['model'] : undefined;
+  const bothFlagsPinned = !!providerFlag && !!modelFlag;
+  if (!bothFlagsPinned) {
     if (process.stdin.isTTY) {
-      const picked = await runPicker({ modelsRegistry, renderer, reader });
+      const picked = await runPicker({
+        modelsRegistry,
+        renderer,
+        reader,
+        config,
+        defaultProvider: providerFlag ?? config.provider,
+        defaultModel: modelFlag ?? config.model,
+      });
       if (!picked) {
-        await reader.close();
-        return 2;
-      }
-      // Apply the selection to the mutable config object so the rest of
-      // the boot sequence sees it.  We patch both the top-level fields
-      // and the underlying object (config is frozen by the loader).
-      (config as { provider: string }).provider = picked.provider;
-      (config as { model: string }).model = picked.model;
+        // User bailed out and we have no fallback in config — error out.
+        if (!config.provider || !config.model) {
+          await reader.close();
+          return 2;
+        }
+        // Otherwise honor the cancel by keeping the config defaults.
+      } else {
+        // Persist as the new default so next launch pre-selects this pair.
+        // Read-before-mutate so we can tell whether anything actually
+        // changed — re-saving the same pair every launch is just noise.
+        const prevProvider = config.provider;
+        const prevModel = config.model;
+        // Apply the selection to the mutable config object so the rest of
+        // the boot sequence sees it. config is frozen by the loader, so
+        // we cast through `{ ... }` to patch in place.
+        (config as { provider: string }).provider = picked.provider;
+        (config as { model: string }).model = picked.model;
 
-      // Persist as default so the user doesn't have to pick again.
-      const saved = await saveToGlobalConfig(wpaths.globalConfig, picked.provider, picked.model);
-      if (saved) {
-        renderer.writeInfo(`Saved ${picked.provider}/${picked.model} as default.\n`);
+        if (picked.provider !== prevProvider || picked.model !== prevModel) {
+          const saved = await saveToGlobalConfig(
+            wpaths.globalConfig,
+            picked.provider,
+            picked.model,
+          );
+          if (saved) {
+            renderer.writeInfo(`Saved ${picked.provider}/${picked.model} as default.\n`);
+          }
+        }
       }
-    } else {
+    } else if (!config.provider || !config.model) {
       process.stderr.write(
-        'No provider or model configured. Run `wstack init` first, or set ' +
-          'WRONGSTACK_PROVIDER + WRONGSTACK_MODEL.\n',
+        'No provider or model configured. Run `wrongstack init` first, or pass ' +
+          '--provider <id> --model <id>.\n',
       );
       await reader.close();
       return 2;
     }
+    // Non-TTY with config present: fall through using config defaults.
   }
 
   // Resolve provider details from models.dev
