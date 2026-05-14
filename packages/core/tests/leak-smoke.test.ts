@@ -53,6 +53,8 @@ async function buildAgent(provider: MockProvider) {
 
   const sessionStore = new DefaultSessionStore({ dir: sessionDir });
   const session = await sessionStore.create({ id: '', model: 'test', provider: 'mock' });
+  // Avoid Node's "Closing file descriptor on GC" warning by letting the
+  // caller close the writer at the end of the test.
 
   const ctx = new Context({
     systemPrompt: [{ type: 'text', text: 'You are a test agent.' }],
@@ -74,7 +76,7 @@ async function buildAgent(provider: MockProvider) {
     context: ctx,
     maxIterations: 10,
   });
-  return { agent, ctx, events, tmp };
+  return { agent, ctx, events, tmp, session };
 }
 
 function abortHookCount(ctx: Context): number {
@@ -92,7 +94,7 @@ describe('leak smoke (V2-D)', () => {
       stopReason: 'end_turn' as const,
     }));
     const provider = new MockProvider(script);
-    const { agent, events, tmp } = await buildAgent(provider);
+    const { agent, events, tmp, session } = await buildAgent(provider);
     try {
       const baseline = events.listenerCount();
       for (let i = 0; i < 20; i++) {
@@ -102,6 +104,7 @@ describe('leak smoke (V2-D)', () => {
       // its own EventBus, and any internal subscribers must clean up.
       expect(events.listenerCount()).toBe(baseline);
     } finally {
+      await session.close();
       await fs.rm(tmp, { recursive: true, force: true });
     }
   });
@@ -112,7 +115,7 @@ describe('leak smoke (V2-D)', () => {
       stopReason: 'end_turn' as const,
     }));
     const provider = new MockProvider(script);
-    const { agent, ctx, tmp } = await buildAgent(provider);
+    const { agent, ctx, tmp, session } = await buildAgent(provider);
     try {
       for (let i = 0; i < 5; i++) {
         await agent.run(`turn ${i}`);
@@ -120,6 +123,7 @@ describe('leak smoke (V2-D)', () => {
         expect(abortHookCount(ctx)).toBe(0);
       }
     } finally {
+      await session.close();
       await fs.rm(tmp, { recursive: true, force: true });
     }
   });
@@ -142,7 +146,7 @@ describe('leak smoke (V2-D)', () => {
       stopReason: 'end_turn' as const,
     }));
     const provider = new MockProvider(script);
-    const { agent, tmp } = await buildAgent(provider);
+    const { agent, tmp, session } = await buildAgent(provider);
     try {
       // Warm up the runtime so first-run bookkeeping (open log file, ensure dirs)
       // is reflected in the baseline.
@@ -159,6 +163,7 @@ describe('leak smoke (V2-D)', () => {
       // hundreds across 30 iterations.
       expect(after - baseline).toBeLessThanOrEqual(16);
     } finally {
+      await session.close();
       await fs.rm(tmp, { recursive: true, force: true });
     }
   });

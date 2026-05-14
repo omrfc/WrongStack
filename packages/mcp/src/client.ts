@@ -291,11 +291,21 @@ export class MCPClient {
 
   async close(): Promise<void> {
     if (this.child) {
+      const child = this.child;
+      const exitPromise = child.exitCode === null && child.signalCode === null
+        ? new Promise<void>((resolve) => child.once('exit', () => resolve()))
+        : Promise.resolve();
       try {
-        this.child.kill();
+        child.kill();
       } catch {
         // ignore
       }
+      // Wait for actual exit so exit-listener consumers see the event before
+      // close() resolves. Cap the wait so a hung child can't pin us forever.
+      await Promise.race([
+        exitPromise,
+        new Promise<void>((resolve) => setTimeout(resolve, 1000)),
+      ]);
     }
     this.sseTransport?.close();
     this.httpTransport?.close();

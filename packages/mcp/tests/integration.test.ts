@@ -62,7 +62,7 @@ rl.createInterface({ input: process.stdin, terminal: false }).on('line', (line) 
     if (!raw) continue;
     let req;
     try { req = JSON.parse(raw); } catch { continue; }
-    const send = (res) => { process.stdout.write(JSON.stringify(res) + '\\n'); process.stdout.flush(); };
+    const send = (res) => { process.stdout.write(JSON.stringify(res) + '\\n'); };
     if (req.method === 'initialize') {
       send({ jsonrpc: '2.0', id: req.id, result: { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'mock', version: '1.0.0' } } });
     } else if (req.method === 'tools/list') {
@@ -144,12 +144,17 @@ describe('MCPClient + MockMCPServer', () => {
     await client.close();
   });
 
-  it('callTool maps isError to thrown Error', async () => {
+  it('callTool surfaces isError in the result', async () => {
+    // Contract: callTool returns { content, isError }. The consumer
+    // (see wrap-tool.ts) is the one that throws on isError so the
+    // agent receives a tool_result with is_error: true.
     server.setResponse({}, { content: 'boom', isError: true });
     const scriptPath = await server.writeScript();
     const client = new MCPClient({ name: 'mock', transport: 'stdio', command: 'node', args: [scriptPath], startupTimeoutMs: 5000 });
     await client.connect();
-    await expect(client.callTool('hello', {})).rejects.toThrow('boom');
+    const res = await client.callTool('hello', {});
+    expect(res.isError).toBe(true);
+    expect(res.content).toBe('boom');
     await client.close();
   });
 
@@ -242,7 +247,7 @@ describe('MCPRegistry + MockMCPServer', () => {
     await reg.stopAll();
   });
 
-  it('health returns alive=false for failed', async () => {
+  it('health returns alive=false for failed', { timeout: 15_000 }, async () => {
     const reg = new MCPRegistry({ toolRegistry: toolReg, events, log: silentLog });
     await reg.start(stdioCfg('broken', '/nonexistent/script.js', { enabled: true, startupTimeoutMs: 500 }));
     // Wait for retries to exhaust

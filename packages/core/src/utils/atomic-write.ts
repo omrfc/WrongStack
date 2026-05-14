@@ -26,8 +26,11 @@ export async function atomicWrite(
     }
     try {
       const fh = await fs.open(tmp, 'r+');
-      await fh.sync();
-      await fh.close();
+      try {
+        await fh.sync();
+      } finally {
+        await fh.close();
+      }
     } catch {
       // fsync best-effort
     }
