@@ -156,6 +156,40 @@ need the prior behavior.
   (was: root 5.9.3 + 8.5.1, packages 5.7.2 + 8.3.5).
 - MCP `clientInfo.version` bumped to `0.1.5`.
 
+### Follow-up hardening (post-initial 0.1.5 pass)
+
+- **`system-prompt-builder.gitStatus` bounded at 2 s.** A hung `git status`
+  (corrupt index, `.git/index.lock` held by another process, slow network
+  FS) previously stalled the entire prompt build per turn. Times out
+  gracefully to `git timeout`.
+- **`system-prompt-builder.detectLanguages` parallelized.** 11 marker
+  probes were sequential; now fanned out via `Promise.all`.
+- **`system-prompt-builder.envCache` keyed by `projectRoot`.** Reusing a
+  builder across different project roots used to serve the first call's
+  cached env block to later calls.
+- **Mode + capabilities resolution moved to builder construction-time
+  options.** `BuildContext.activeModeId` / `BuildContext.capabilities`
+  were dead surface (no caller ever set them on ctx). Now passed via
+  `DefaultSystemPromptBuilderOptions.modeId` / `modePrompt` /
+  `modelCapabilities`, and the CLI resolves them once at startup.
+- **Skill block moved into env layer.** Skills are static per session,
+  so they now ride the cached env block instead of being rebuilt per
+  turn in layer 4.
+- **`session-store` append-failure warnings debounced** to one log per
+  5 s with a `+N suppressed` tail. A chatty agent against a full disk
+  previously logged on every event.
+- **`mcp/client.connectStdio` resets `rxBuffer`** at the top of every
+  connect to prevent stale bytes from a half-initialized prior attempt
+  on the same instance corrupting JSON-RPC parsing on the new stream.
+- **`tools/edit` stale-read mtime tolerance raised to 2000 ms on
+  Windows.** FAT and some network filesystems quantize mtime to 2 s,
+  so the previous 1 ms tolerance threw false "modified externally"
+  errors after a tool's own write→read cycle.
+- **`WstackPaths.configDir`** alias for `globalRoot` — gives callers a
+  semantic name for user-global stateful config and lets us split out
+  `XDG_CONFIG_HOME` later without rewriting consumers. `TOKENS.ModeStore`
+  registered so DI consumers can resolve it.
+
 ## [0.1.4] — 2026-05-14
 
 ### Fixed
