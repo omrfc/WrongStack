@@ -39,11 +39,7 @@ export class OpenAICompatibleProvider extends OpenAIProvider {
       fetchImpl: opts.fetchImpl,
       id: opts.id,
       capabilities: opts.capabilities,
-      quirks: {
-        ...opts.quirks,
-        parallelToolsDisabled: opts.quirks?.parallelToolsDisabled,
-        jsonArgumentsBuggy: opts.quirks?.jsonArgumentsBuggy,
-      },
+      quirks: opts.quirks,
     });
     this.extraHeaders = opts.headers;
     this.urlOverride = opts.urlOverride;

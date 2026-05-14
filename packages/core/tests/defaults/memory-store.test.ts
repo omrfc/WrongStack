@@ -88,4 +88,38 @@ describe('DefaultMemoryStore', () => {
     const content = await fs.readFile(agentsFile, 'utf8');
     expect(content).toContain('built with pnpm');
   });
+
+  it('serializes concurrent remember() calls — no entries lost', async () => {
+    // Pre-fix: two parallel remember() calls would both read the same
+    // baseline, compute different `next` strings, and atomicWrite would
+    // let the later writer overwrite the earlier — losing one entry.
+    const N = 20;
+    const writes = Array.from({ length: N }, (_, i) =>
+      store.remember(`concurrent entry ${i}`),
+    );
+    await Promise.all(writes);
+    const content = await store.read('project-memory');
+    for (let i = 0; i < N; i++) {
+      expect(content).toContain(`concurrent entry ${i}`);
+    }
+  });
+
+  it('serializes mixed concurrent remember() + forget() on the same scope', async () => {
+    await store.remember('alpha');
+    await store.remember('beta');
+    await store.remember('gamma');
+    // Issue remember + forget without awaiting; the queue must process
+    // them in issue order so forget('beta') removes the existing entry
+    // rather than racing against the new remember.
+    const [, removed] = await Promise.all([
+      store.remember('delta'),
+      store.forget('beta'),
+    ]);
+    expect(removed).toBe(1);
+    const content = await store.read('project-memory');
+    expect(content).toContain('alpha');
+    expect(content).not.toContain('beta');
+    expect(content).toContain('gamma');
+    expect(content).toContain('delta');
+  });
 });

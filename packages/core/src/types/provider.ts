@@ -79,8 +79,12 @@ export interface ProviderErrorBody {
   requestId?: string;
   /** Parsed Retry-After header (or equivalent body hint) in milliseconds. */
   retryAfterMs?: number;
-  /** The raw response body (truncated), kept for debugging. */
+  /** The raw response body (truncated to ~2 KB), kept for debugging. */
   raw?: string;
+  /** True when `raw` was truncated; check `rawLength` for the original size. */
+  truncated?: boolean;
+  /** Original length of the response body in bytes, when `truncated` is true. */
+  rawLength?: number;
 }
 
 export class ProviderError extends WrongStackError {

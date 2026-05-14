@@ -22,9 +22,17 @@ export function parseProviderHttpError(
   return new ProviderError(message, status, retryable, providerId, { body });
 }
 
+const RAW_TRUNCATE_AT = 2000;
+
 function parseBody(rawText: string): ProviderErrorBody {
-  const raw = rawText.slice(0, 2000);
-  const body: ProviderErrorBody = { raw };
+  const raw = rawText.slice(0, RAW_TRUNCATE_AT);
+  // Surface truncation so downstream renderers (CLI error formatter, log
+  // exporter) can show a "(truncated, N more bytes)" suffix instead of
+  // silently dropping the rest of the provider's error tail.
+  const body: ProviderErrorBody =
+    rawText.length > RAW_TRUNCATE_AT
+      ? { raw, truncated: true, rawLength: rawText.length }
+      : { raw };
   if (!rawText.trim()) return body;
 
   let parsed: unknown;

@@ -122,4 +122,18 @@ describe('ProviderError.describe', () => {
     });
     expect(err.describe()).toContain('[req 0123456789abcdef…]');
   });
+
+  it('surfaces a truncated flag + original length when the raw body exceeds 2 KB', () => {
+    const giant = 'x'.repeat(5000);
+    const err = parseProviderHttpError('p', 500, giant);
+    expect(err.body?.raw?.length).toBe(2000);
+    expect(err.body?.truncated).toBe(true);
+    expect(err.body?.rawLength).toBe(5000);
+  });
+
+  it('leaves truncated flag unset when the body is short', () => {
+    const err = parseProviderHttpError('p', 500, 'short error');
+    expect(err.body?.truncated).toBeUndefined();
+    expect(err.body?.rawLength).toBeUndefined();
+  });
 });

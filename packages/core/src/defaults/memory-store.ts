@@ -18,6 +18,15 @@ export interface MemoryStoreOptions {
  */
 export class DefaultMemoryStore implements MemoryStore {
   private readonly files: Record<MemoryScope, string>;
+  /**
+   * Per-scope serialization queue. `remember` / `forget` / `consolidate` /
+   * `clear` are read-modify-write against a single file; without a lock,
+   * two concurrent calls on the same scope can read the same baseline and
+   * the later write silently drops the earlier entry. We chain each
+   * mutation onto the prior promise for the same scope so they run in
+   * issue order. Different scopes still proceed in parallel.
+   */
+  private readonly writeChain = new Map<MemoryScope, Promise<unknown>>();
 
   constructor(opts: MemoryStoreOptions) {
     this.files = {
@@ -25,6 +34,25 @@ export class DefaultMemoryStore implements MemoryStore {
       'project-memory': opts.paths.projectMemory,
       'user-memory': opts.paths.globalMemory,
     };
+  }
+
+  private async runSerialized<T>(scope: MemoryScope, work: () => Promise<T>): Promise<T> {
+    const prior = this.writeChain.get(scope) ?? Promise.resolve();
+    // Swallow prior errors here so one failed write doesn't poison the
+    // chain — the failed call has already rejected to its own caller.
+    const next = prior.catch(() => undefined).then(work);
+    this.writeChain.set(scope, next);
+    try {
+      return await next;
+    } finally {
+      // Clear the chain reference once this call finishes so memory doesn't
+      // grow unboundedly across long-lived processes. If another call
+      // queued behind us, it's already captured in next; the map entry
+      // serves only as the "what should the next caller wait on" pointer.
+      if (this.writeChain.get(scope) === next) {
+        this.writeChain.delete(scope);
+      }
+    }
   }
 
   async readAll(): Promise<string> {
@@ -45,29 +73,37 @@ export class DefaultMemoryStore implements MemoryStore {
   }
 
   async remember(text: string, scope: MemoryScope = 'project-memory'): Promise<void> {
-    const file = this.files[scope];
-    await ensureDir(path.dirname(file));
-    let existing = '';
-    try {
-      existing = await fs.readFile(file, 'utf8');
-    } catch {
-      // new file
-    }
-    const ts = new Date().toISOString();
-    // Use a stable ID so forget() can target exact entries regardless of content.
-    const id = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-    const entry = `\n- [${ts}] ${id} ${text.replace(/\n/g, ' ')}\n`;
-    const next = existing.trim()
-      ? existing.replace(/\n+$/, '') + entry
-      : `# WrongStack Memory\n${entry}`;
-    await atomicWrite(file, next);
-    const buf = Buffer.byteLength(next, 'utf8');
-    if (buf > MAX_BYTES_TOTAL) {
-      await this.consolidate(scope);
-    }
+    return this.runSerialized(scope, async () => {
+      const file = this.files[scope];
+      await ensureDir(path.dirname(file));
+      let existing = '';
+      try {
+        existing = await fs.readFile(file, 'utf8');
+      } catch {
+        // new file
+      }
+      const ts = new Date().toISOString();
+      // Use a stable ID so forget() can target exact entries regardless of content.
+      const id = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const entry = `\n- [${ts}] ${id} ${text.replace(/\n/g, ' ')}\n`;
+      const next = existing.trim()
+        ? existing.replace(/\n+$/, '') + entry
+        : `# WrongStack Memory\n${entry}`;
+      await atomicWrite(file, next);
+      const buf = Buffer.byteLength(next, 'utf8');
+      if (buf > MAX_BYTES_TOTAL) {
+        // consolidate enqueues onto the same chain — call directly into the
+        // inner implementation to avoid deadlocking on our own queue slot.
+        await this.consolidateUnsafe(scope);
+      }
+    });
   }
 
   async forget(query: string, scope: MemoryScope = 'project-memory'): Promise<number> {
+    return this.runSerialized(scope, async () => this.forgetUnsafe(query, scope));
+  }
+
+  private async forgetUnsafe(query: string, scope: MemoryScope): Promise<number> {
     const file = this.files[scope];
     let existing: string;
     try {
@@ -110,6 +146,10 @@ export class DefaultMemoryStore implements MemoryStore {
   }
 
   async consolidate(scope: MemoryScope): Promise<void> {
+    return this.runSerialized(scope, async () => this.consolidateUnsafe(scope));
+  }
+
+  private async consolidateUnsafe(scope: MemoryScope): Promise<void> {
     const file = this.files[scope];
     let existing: string;
     try {
@@ -150,13 +190,18 @@ export class DefaultMemoryStore implements MemoryStore {
 
   async clear(scope?: MemoryScope): Promise<void> {
     if (scope) {
-      await atomicWrite(this.files[scope], '');
-    } else {
-      for (const s of ['project-agents', 'project-memory', 'user-memory'] as MemoryScope[]) {
-        await atomicWrite(this.files[s], '');
-      }
+      await this.runSerialized(scope, async () => atomicWrite(this.files[scope], ''));
+      return;
     }
+    // Clear-all: serialize each scope independently so different scopes
+    // still run in parallel, but each one waits for its own pending writes.
+    await Promise.all(
+      (['project-agents', 'project-memory', 'user-memory'] as MemoryScope[]).map((s) =>
+        this.runSerialized(s, async () => atomicWrite(this.files[s], '')),
+      ),
+    );
   }
+
 }
 
 function labelOf(scope: MemoryScope): string {
