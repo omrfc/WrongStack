@@ -48,6 +48,11 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
 
   const builder = new InputBuilder({ store: opts.attachments });
 
+  // Wrap the entire loop so SIGINT and reader teardown run on every exit
+  // path — exceptions, EOF, breakouts. Previously a throw between `on`
+  // and the final `off` left the listener installed across REPL restarts.
+  try {
+
   for (;;) {
     let raw: string;
     try {
@@ -121,9 +126,15 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
     }
   }
 
-  process.off('SIGINT', onSigint);
-  await opts.reader.close();
-  return 0;
+    return 0;
+  } finally {
+    // Ensure listener + reader cleanup happens on every exit path: normal
+    // EOF, /quit, an uncaught throw, etc. Without this, a thrown exception
+    // mid-loop would leave the SIGINT handler attached for the rest of
+    // the process lifetime (and the reader's terminal handle open).
+    process.off('SIGINT', onSigint);
+    await opts.reader.close().catch(() => { /* best-effort */ });
+  }
 }
 
 /**

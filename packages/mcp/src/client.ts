@@ -65,7 +65,15 @@ export class MCPClient {
   private state: ConnectionState = 'idle';
   private child?: ChildProcess;
   private nextId = 1;
-  private readonly pending = new Map<number, (res: JsonRpcResponse) => void>();
+  /**
+   * In-flight JSON-RPC calls keyed by id. `resolve` settles the call; `reject`
+   * is invoked from {@link failPending} when the underlying transport dies
+   * (stdio child exit, `close()`) so callers don't hang forever.
+   */
+  private readonly pending = new Map<
+    number,
+    { resolve: (res: JsonRpcResponse) => void; reject: (err: Error) => void }
+  >();
   private rxBuffer = '';
   private _tools: MCPTool[] = [];
   /** Cached tool list — survives reconnects so the registry can re-register without re-discovering. */
@@ -154,6 +162,10 @@ export class MCPClient {
     });
     child.on('exit', (code, signal) => {
       this.state = 'disconnected';
+      // Reject any in-flight JSON-RPC requests — without this, callers
+      // (e.g. callTool during a tool invocation) await forever on a child
+      // that has already gone away.
+      this.failPending(`MCP "${this.opts.name}" child exited (code=${code ?? 'null'} signal=${signal ?? 'null'})`);
       for (const listener of this.exitListeners) {
         try { listener(this.opts.name, code, signal); } catch { /* ignore */ }
       }
@@ -167,7 +179,7 @@ export class MCPClient {
       this.request('initialize', {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
-        clientInfo: { name: 'wrongstack', version: '0.1.4' },
+        clientInfo: { name: 'wrongstack', version: '0.1.5' },
       }),
       new Promise<JsonRpcResponse>((_, rej) =>
         setTimeout(() => rej(new Error('MCP initialize timeout')), timeout),
@@ -292,23 +304,47 @@ export class MCPClient {
   async close(): Promise<void> {
     if (this.child) {
       const child = this.child;
-      const exitPromise = child.exitCode === null && child.signalCode === null
+      const isAlive = child.exitCode === null && child.signalCode === null;
+      const exitPromise = isAlive
         ? new Promise<void>((resolve) => child.once('exit', () => resolve()))
         : Promise.resolve();
       try {
+        // Initial SIGTERM lets the server flush logs / clean up sockets.
         child.kill();
       } catch {
         // ignore
       }
-      // Wait for actual exit so exit-listener consumers see the event before
-      // close() resolves. Cap the wait so a hung child can't pin us forever.
-      await Promise.race([
-        exitPromise,
-        new Promise<void>((resolve) => setTimeout(resolve, 1000)),
+      // Wait briefly for graceful exit, then escalate to SIGKILL. A stuck
+      // server that ignores SIGTERM would otherwise stay alive after
+      // close() returns — orphan child processes accumulate over restarts.
+      const GRACEFUL_MS = 800;
+      const FORCE_TIMEOUT_MS = 1200;
+      const gracefulRace = await Promise.race([
+        exitPromise.then(() => 'exited' as const),
+        new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), GRACEFUL_MS)),
       ]);
+      if (gracefulRace === 'timeout' && isAlive) {
+        try {
+          // SIGKILL is ignored by `kill('SIGKILL')` on Windows in older
+          // Node, but `child.kill('SIGKILL')` maps to TerminateProcess
+          // under the hood for spawned children since Node 18 — safe to
+          // call cross-platform.
+          child.kill('SIGKILL');
+        } catch {
+          // ignore
+        }
+        await Promise.race([
+          exitPromise,
+          new Promise<void>((resolve) => setTimeout(resolve, FORCE_TIMEOUT_MS)),
+        ]);
+      }
     }
     this.sseTransport?.close();
     this.httpTransport?.close();
+    // Reject anything still awaiting the (now-dead) transport. Safe to call
+    // unconditionally — the stdio exit handler runs failPending too, but
+    // close() may be invoked on a never-started or HTTP-only client.
+    this.failPending(`MCP "${this.opts.name}" closed`);
     this.state = 'disconnected';
   }
 
@@ -316,7 +352,7 @@ export class MCPClient {
     const id = this.nextId++;
     const req: JsonRpcRequest = { jsonrpc: '2.0', id, method, params };
     return new Promise((resolve, reject) => {
-      this.pending.set(id, resolve);
+      this.pending.set(id, { resolve, reject });
       try {
         this.child?.stdin?.write(JSON.stringify(req) + '\n');
       } catch (err) {
@@ -324,6 +360,20 @@ export class MCPClient {
         reject(err);
       }
     });
+  }
+
+  /**
+   * Reject every in-flight {@link request} call. Used when the underlying
+   * transport dies — without this, callers awaiting `tools/call` over a
+   * killed stdio child or a closed transport would hang indefinitely.
+   */
+  private failPending(reason: string): void {
+    if (this.pending.size === 0) return;
+    const err = new Error(reason);
+    for (const [, entry] of this.pending) {
+      try { entry.reject(err); } catch { /* ignore */ }
+    }
+    this.pending.clear();
   }
 
   private async notify(method: string, params: unknown): Promise<void> {
@@ -384,9 +434,9 @@ export class MCPClient {
       return;
     }
     if (msg.id !== undefined && this.pending.has(msg.id)) {
-      const resolve = this.pending.get(msg.id);
+      const entry = this.pending.get(msg.id);
       this.pending.delete(msg.id);
-      resolve?.(msg);
+      entry?.resolve(msg);
       return;
     }
     // Notifications have a `method` but no `id`. The MCP spec defines

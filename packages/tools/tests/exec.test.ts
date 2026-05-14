@@ -19,11 +19,14 @@ describe('execTool', () => {
     expect(result.stderr).toContain('Empty command');
   });
 
-  it('blocks commands with dangerous patterns', async () => {
+  it('blocks command strings with embedded shell metacharacters via allowlist', async () => {
+    // Pre-0.1.5 the tool also pattern-matched against a forbidden-regex list,
+    // but that was dead code (only the command name was tested). Today the
+    // allowlist alone suffices: 'echo hello; rm -rf /' is not the key 'echo'.
     const ctx = makeCtx();
     const result = await execTool.execute({ command: 'echo hello; rm -rf /' }, ctx, makeOpts());
     expect(result.allowed).toBe(false);
-    expect(result.stderr).toContain('dangerous pattern');
+    expect(result.stderr).toContain('not in allowlist');
   });
 
   it('blocks rm -rf pattern', async () => {
@@ -45,10 +48,10 @@ describe('execTool', () => {
     expect(result.stderr).toContain('not in allowlist');
   });
 
-  it('allows unknown commands with allow_unknown=true', async () => {
+  it('allows commands present in the allowlist', async () => {
     const ctx = makeCtx();
     const result = await execTool.execute({ command: 'echo', args: ['hello'] }, ctx, makeOpts());
-    // may fail since echo may not be available but should be allowed
+    // may fail if echo is missing from PATH but allowlist gate should let it through
     expect(result).toHaveProperty('command');
   });
 
@@ -65,5 +68,31 @@ describe('execTool', () => {
     // timeout > TIMEOUT_MS should be capped
     const result = await execTool.execute({ command: 'echo', timeout: 999_999_999 } as any, ctx, makeOpts());
     expect(result).toHaveProperty('exitCode');
+  });
+
+  it('rejects cwd that resolves outside projectRoot', async () => {
+    const ctx = makeCtx();
+    const result = await execTool.execute(
+      { command: 'echo', cwd: '../../../etc' },
+      ctx,
+      makeOpts(),
+    );
+    expect(result.allowed).toBe(false);
+    expect(result.stderr).toMatch(/outside project root/);
+  });
+
+  it('accepts cwd resolving inside projectRoot', async () => {
+    const ctx = makeCtx();
+    // ctx.projectRoot is '/fake'; an in-root relative path should pass
+    // the gate (the actual spawn may fail because /fake doesn't exist,
+    // but `allowed` must remain true for the resolved path check).
+    const result = await execTool.execute(
+      { command: 'echo', cwd: 'sub' },
+      ctx,
+      makeOpts(),
+    );
+    // either allowed:true (resolved) or some spawn error — but NOT the
+    // "outside project root" rejection.
+    expect(result.stderr).not.toMatch(/outside project root/);
   });
 });

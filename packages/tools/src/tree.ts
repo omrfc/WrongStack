@@ -124,10 +124,17 @@ export const treeTool: Tool<TreeInput, TreeOutput> = {
       if (queue.length > 0) {
         yield queue.shift()!;
       } else {
-        await Promise.race([
-          walkPromise,
-          new Promise<void>((r) => setTimeout(r, 50)),
-        ]).catch(() => undefined);
+        // Race the walk completion against a short tick so we don't busy-
+        // spin while the producer fills the queue. Previously the
+        // setTimeout was never cleared when walkPromise won — one stray
+        // timer per drain iteration accumulated on the event loop.
+        let pollTimer: ReturnType<typeof setTimeout> | undefined;
+        const poll = new Promise<void>((r) => { pollTimer = setTimeout(r, 50); });
+        try {
+          await Promise.race([walkPromise, poll]).catch(() => undefined);
+        } finally {
+          if (pollTimer) clearTimeout(pollTimer);
+        }
       }
     }
     await walkPromise; // surface any error

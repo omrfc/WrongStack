@@ -53,7 +53,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     const entry = this.policy[tool.name] ?? namespaceEntry;
 
     // 3. Compute subject (the thing being matched)
-    const subject = this.subjectFor(tool.name, input);
+    const subject = this.subjectFor(tool.name, input, tool.subjectKey);
 
     // 4. Deny — absolute
     if (entry?.deny && subject && matchAny(entry.deny, subject)) {
@@ -114,7 +114,11 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     }
   }
 
-  private subjectFor(toolName: string, input: unknown): string | undefined {
+  private subjectFor(
+    toolName: string,
+    input: unknown,
+    subjectKey?: string,
+  ): string | undefined {
     if (!input || typeof input !== 'object') return undefined;
     const obj = input as Record<string, unknown>;
 
@@ -123,13 +127,31 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     // matching is done on the literal string.
     const globChars = /[*?\[\]]/g;
     const escapeGlob = (s: string) => s.replace(globChars, (c) => `\\${c}`);
+    const normalizePath = (s: string) => escapeGlob(s.replace(/\\/g, '/'));
 
+    // 1. Explicit subjectKey on the tool wins — eliminates the cross-tool
+    //    collision where e.g. an HTTP tool's `path` field meant "request
+    //    path" but was matched against filesystem-path trust rules.
+    if (subjectKey) {
+      const v = obj[subjectKey];
+      if (typeof v === 'string') {
+        // Heuristic: path-like keys get backslash normalization for glob
+        // matching on Windows; everything else is treated as opaque.
+        return subjectKey === 'path' || subjectKey === 'file' || subjectKey === 'files'
+          ? normalizePath(v)
+          : escapeGlob(v);
+      }
+      // subjectKey was declared but the runtime value isn't a string —
+      // fall through to the legacy heuristic so the policy still has a
+      // chance to match on something sensible.
+    }
+
+    // 2. Legacy heuristic — preserved for tools that haven't migrated.
     if (toolName === 'bash' && typeof obj.command === 'string') {
       return escapeGlob(obj.command);
     }
     if (typeof obj.path === 'string') {
-      // normalize Windows backslashes for glob matching, then escape metachars
-      return escapeGlob((obj.path as string).replace(/\\/g, '/'));
+      return normalizePath(obj.path);
     }
     if (typeof obj.url === 'string') {
       return escapeGlob(obj.url);

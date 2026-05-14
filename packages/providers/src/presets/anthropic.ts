@@ -9,6 +9,7 @@
  */
 import type { Message, Request, StreamEvent, StopReason, Usage } from '@wrongstack/core';
 import { ProviderError, safeParse } from '@wrongstack/core';
+import { parseToolInput } from '../_tool-input.js';
 import { toolsToAnthropic } from '../tool-format/to-anthropic.js';
 import { normalizeAnthropic } from '../stop-reason.js';
 import { defineWireFormat } from '../wire-format.js';
@@ -144,9 +145,7 @@ export const anthropicWireFormat = defineWireFormat<AnthropicStreamState>({
         const index = Number(ev['index'] ?? 0);
         const block = state.blocks.get(index);
         if (block?.kind === 'tool_use' && block.id) {
-          const input = block.partial
-            ? (safeParse<unknown>(block.partial).value ?? {})
-            : {};
+          const input = parseToolInput(block.partial);
           out.push({ type: 'tool_use_stop', id: block.id, input });
         }
         break;

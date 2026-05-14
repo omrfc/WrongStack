@@ -8,6 +8,7 @@ import type {
 } from '@wrongstack/core';
 import { ProviderError, safeParse } from '@wrongstack/core';
 import { parseProviderHttpError } from './error-parse.js';
+import { parseToolInput } from './_tool-input.js';
 import { toolsToAnthropic } from './tool-format/to-anthropic.js';
 import { normalizeAnthropic } from './stop-reason.js';
 import { parseSSE } from './sse.js';
@@ -182,9 +183,7 @@ async function* parseAnthropicStream(
         const index = Number(ev['index'] ?? 0);
         const block = blocks.get(index);
         if (block?.kind === 'tool_use' && block.id) {
-          const input = block.partial
-            ? (safeParse<unknown>(block.partial).value ?? {})
-            : {};
+          const input = parseToolInput(block.partial);
           yield { type: 'tool_use_stop', id: block.id, input };
         }
         break;

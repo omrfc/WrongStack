@@ -18,6 +18,14 @@ export interface SSEMessage {
   data: string;
 }
 
+/**
+ * Cap on the pending-line buffer. A malicious or buggy upstream that sends
+ * megabytes without a newline could otherwise pin a worker via the prior
+ * O(n²) CRLF replace + unbounded `buffer +=` pattern. 256 KB comfortably
+ * accommodates any sane SSE event while ensuring we fail fast on garbage.
+ */
+const MAX_BUFFER_BYTES = 256 * 1024;
+
 export async function* parseSSE(
   body: ReadableStream<Uint8Array> | NodeJS.ReadableStream | null,
 ): AsyncIterable<SSEMessage> {
@@ -56,13 +64,29 @@ export async function* parseSSE(
     return undefined;
   };
 
+  // Incremental CRLF normalization on each appended chunk only — previously
+  // we ran `.replace(/\r\n/g, '\n')` on the *entire* buffer per chunk, which
+  // is O(n²) in stream length. Trailing CR (split across chunks) is left
+  // in the buffer; the splitter handles it on the next round.
+  const appendChunk = (chunkStr: string): void => {
+    if (chunkStr.length === 0) return;
+    buffer += chunkStr;
+    if (buffer.length > MAX_BUFFER_BYTES) {
+      throw new Error(
+        `SSE: pending line exceeds ${MAX_BUFFER_BYTES} bytes — upstream is not framing events`,
+      );
+    }
+  };
+
   // Node.js Readable stream
   if (isNodeReadable(body)) {
     for await (const chunk of body as NodeJS.ReadableStream) {
-      buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk as Buffer, { stream: true });
-      const lines = splitBuffer(buffer);
-      buffer = lines.tail;
-      for (const line of lines.lines) {
+      appendChunk(
+        typeof chunk === 'string' ? chunk : decoder.decode(chunk as Buffer, { stream: true }),
+      );
+      const split = splitBuffer(buffer);
+      buffer = split.tail;
+      for (const line of split.lines) {
         const msg = processLine(line);
         if (msg) yield msg;
       }
@@ -74,10 +98,10 @@ export async function* parseSSE(
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = splitBuffer(buffer);
-        buffer = lines.tail;
-        for (const line of lines.lines) {
+        appendChunk(decoder.decode(value, { stream: true }));
+        const split = splitBuffer(buffer);
+        buffer = split.tail;
+        for (const line of split.lines) {
           const msg = processLine(line);
           if (msg) yield msg;
         }
@@ -88,7 +112,7 @@ export async function* parseSSE(
   }
   // Flush any trailing buffered line
   if (buffer.length > 0) {
-    const msg = processLine(buffer);
+    const msg = processLine(buffer.replace(/\r$/, ''));
     if (msg) yield msg;
   }
   const final = flush();
@@ -96,11 +120,13 @@ export async function* parseSSE(
 }
 
 function splitBuffer(buf: string): { lines: string[]; tail: string } {
-  // Normalize \r\n to \n, then split by \n. Last fragment without trailing \n is held.
-  const norm = buf.replace(/\r\n/g, '\n');
-  const parts = norm.split('\n');
+  // Split on \n directly; strip trailing \r per-line. Avoids the O(n²)
+  // pattern of running .replace(/\r\n/g, '\n') on the entire buffer
+  // every chunk.
+  const parts = buf.split('\n');
   const tail = parts.pop() ?? '';
-  return { lines: parts, tail };
+  const lines = parts.map((p) => (p.endsWith('\r') ? p.slice(0, -1) : p));
+  return { lines, tail };
 }
 
 function isNodeReadable(b: unknown): boolean {

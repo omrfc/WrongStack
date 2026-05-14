@@ -39,7 +39,11 @@ export class DefaultSessionStore implements SessionStore {
     try {
       handle = await fsp.open(file, 'a', 0o600);
     } catch (err) {
-      throw new Error(`Failed to open session file: ${err instanceof Error ? err.message : String(err)}`);
+      // Preserve cause + errno so callers can branch on EACCES vs EMFILE
+      // vs ENOSPC etc. instead of substring-matching the error message.
+      throw new Error(`Failed to open session file: ${err instanceof Error ? err.message : String(err)}`, {
+        cause: err,
+      });
     }
     try {
       return new FileSessionWriter(id, handle, startedAt, meta, { dir: this.dir, filePath: file });
@@ -58,6 +62,7 @@ export class DefaultSessionStore implements SessionStore {
     } catch (err) {
       throw new Error(
         `Failed to open session "${id}" for append: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
       );
     }
     const writer = new FileSessionWriter(
@@ -81,9 +86,22 @@ export class DefaultSessionStore implements SessionStore {
     const events: SessionEvent[] = [];
     for (const line of lines) {
       try {
-        events.push(JSON.parse(line) as SessionEvent);
+        const parsed: unknown = JSON.parse(line);
+        // Session JSONL is on-disk user-writable state; downstream replay
+        // trusts `e.type` / `e.ts` etc. and would TypeError on a malformed
+        // shape. Validate the discriminator + timestamp before pushing.
+        if (
+          parsed !== null &&
+          typeof parsed === 'object' &&
+          typeof (parsed as { type?: unknown }).type === 'string' &&
+          typeof (parsed as { ts?: unknown }).ts === 'string'
+        ) {
+          events.push(parsed as SessionEvent);
+        }
+        // else: skip — a hand-edited file with a partial object should not
+        // crash replay, just lose that one event.
       } catch {
-        // skip malformed lines
+        // skip malformed JSON
       }
     }
     const meta = this.metaFromEvents(id, events);

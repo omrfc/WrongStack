@@ -53,6 +53,18 @@ export interface Tool<I = unknown, O = unknown> {
   inputSchema: JSONSchema;
   permission: Permission;
   mutating: boolean;
+  /**
+   * Input-field name that the permission policy should match trust rules
+   * against. Without this, the policy falls back to a heuristic
+   * (`command` / `path` / `url` / `name`) that can collide across tools —
+   * e.g. an HTTP tool whose `path` means "request path" would be checked
+   * against filesystem-path trust rules. Set explicitly to avoid the
+   * cross-tool subject collision.
+   *
+   * The named field's value must be a string at runtime; non-string values
+   * fall back to the heuristic.
+   */
+  subjectKey?: string;
   maxOutputBytes?: number;
   timeoutMs?: number;
   /**

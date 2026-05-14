@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import type { SkillLoader, SkillManifest } from '../types/skill.js';
+import type { SkillEntry, SkillLoader, SkillManifest } from '../types/skill.js';
 import type { WstackPaths } from '../utils/wstack-paths.js';
 
 export interface SkillLoaderOptions {
@@ -72,12 +72,29 @@ export class DefaultSkillLoader implements SkillLoader {
   async manifestText(): Promise<string> {
     const skills = await this.list();
     if (skills.length === 0) return '';
+    const entries = await this.listEntries();
     const lines = ['## Available skills'];
-    for (const s of skills) {
-      lines.push(`- **${s.name}** — ${s.description.replace(/\n/g, ' ').trim()}`);
-      lines.push(`  Path: ${s.path}`);
+    for (const e of entries) {
+      const scopeTag = e.scope.length > 0 ? ` — ${e.scope.slice(0, 3).join(', ')}` : '';
+      lines.push(`- **${e.name}**${scopeTag}`);
+      lines.push(`  Use when: ${e.trigger}`);
     }
     return lines.join('\n');
+  }
+
+  async listEntries(): Promise<SkillEntry[]> {
+    const skills = await this.list();
+    const entries: SkillEntry[] = [];
+    for (const s of skills) {
+      try {
+        const raw = await fs.readFile(s.path, 'utf8');
+        const { trigger, scope } = parseDescription(raw);
+        entries.push({ name: s.name, trigger, scope, source: s.source, path: s.path });
+      } catch {
+        // skip
+      }
+    }
+    return entries;
   }
 
   async readBody(name: string): Promise<string> {
@@ -128,4 +145,30 @@ function parseFrontmatter(raw: string): Frontmatter {
   }
   flush();
   return out;
+}
+
+/**
+ * Parse skill description into:
+ * - trigger: extracted "Use when..." sentence (first sentence of description)
+ * - scope: comma-separated items from first line's parenthetical or file-ext list
+ */
+function parseDescription(raw: string): { trigger: string; scope: string[] } {
+  const fm = parseFrontmatter(raw);
+  const desc = fm.description ?? '';
+
+  // Extract first sentence as trigger
+  const firstSentenceEnd = desc.indexOf('. ');
+  const trigger = firstSentenceEnd !== -1
+    ? desc.slice(0, firstSentenceEnd + 1).trim()
+    : desc.trim().split('\n')[0] ?? '';
+
+  // Extract scope from parenthetical: "Covers X, Y, and Z" or "for A, B, C"
+  const scope: string[] = [];
+  const coversMatch = /(?:covers|for|including)\s+([^.]+)/i.exec(desc);
+  if (coversMatch) {
+    const items = coversMatch[1]!.replace(/[·•]/g, ',').split(',').map((s) => s.trim()).filter(Boolean);
+    scope.push(...items);
+  }
+
+  return { trigger, scope };
 }

@@ -130,4 +130,18 @@ describe('DefaultSkillLoader', () => {
     const loader = new DefaultSkillLoader({ paths });
     await expect(loader.readBody('does-not-exist')).rejects.toThrow(/not found/);
   });
+
+  it('listEntries returns structured entries with trigger and scope', async () => {
+    const paths = resolveWstackPaths({ projectRoot, globalRoot });
+    const loader = new DefaultSkillLoader({ paths, bundledDir: bundled });
+    const entries = await loader.listEntries();
+    const alpha = entries.find((e) => e.name === 'alpha');
+    expect(alpha).toBeDefined();
+    expect(alpha!.trigger).toBe('the alpha skill'); // first line (no period in description)
+    expect(alpha!.scope).toEqual([]); // no "covers/for/including" in description
+    expect(alpha!.source).toBe('project');
+    const beta = entries.find((e) => e.name === 'beta');
+    expect(beta!.trigger).toBe('short');
+    expect(beta!.scope).toEqual([]);
+  });
 });

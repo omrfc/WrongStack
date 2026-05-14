@@ -18,7 +18,6 @@ type GitSubcommand =
 
 interface GitInput {
   command: GitSubcommand;
-  args?: string;
   files?: string | string[];
   dry_run?: boolean;
   /** commit message for `commit` subcommand */
@@ -49,9 +48,10 @@ export const gitTool: Tool<GitInput, GitOutput> = {
   usageHint:
     'Prefer built-in subcommands over raw args. `command` is required. `message` for commits. `branch` for checkout/branch. `files` for status/diff. `format` for log.',
   permission: 'confirm',
-  mutating: ['commit', 'push', 'pull', 'checkout', 'stash', 'reset'].includes(
-    'commit', // this is for type-check only; runtime check below
-  ),
+  // Conservative: any of these may mutate. The non-mutating commands
+  // (status/log/diff/branch/fetch) are still gated on `permission: 'confirm'`
+  // and `MUTATING_SUBCOMMANDS` is consulted at runtime for per-call checks.
+  mutating: true,
   timeoutMs: TIMEOUT_MS,
   inputSchema: {
     type: 'object',
@@ -64,7 +64,6 @@ export const gitTool: Tool<GitInput, GitOutput> = {
         ],
         description: 'Git subcommand',
       },
-      args: { type: 'string', description: 'Raw args string (bypasses subcommand logic)' },
       files: {
         type: 'string',
         description: 'File(s) for status/diff: single path, comma-separated list, or "**/*.ts" glob',
@@ -84,12 +83,14 @@ export const gitTool: Tool<GitInput, GitOutput> = {
   async execute(input, ctx, opts) {
     if (!input?.command) throw new Error('git: command is required');
 
-    const gitDir = findGitDir(ctx.cwd);
+    // Bound the search at projectRoot so a non-git project doesn't drift
+    // into a parent repo (e.g. ~/repos/.git) and operate on the wrong tree.
+    const gitDir = findGitDir(ctx.cwd, ctx.projectRoot);
     if (!gitDir) {
       return {
         command: input.command,
         stdout: '',
-        stderr: 'Not in a git repository',
+        stderr: 'Not in a git repository (within project root)',
         exitCode: 128,
         truncated: false,
       };
@@ -100,7 +101,8 @@ export const gitTool: Tool<GitInput, GitOutput> = {
   },
 };
 
-function findGitDir(cwd: string): string | null {
+function findGitDir(cwd: string, projectRoot: string): string | null {
+  const root = projectRoot;
   let dir = cwd;
   for (let i = 0; i < 20; i++) {
     try {
@@ -109,6 +111,7 @@ function findGitDir(cwd: string): string | null {
     } catch {
       // continue
     }
+    if (dir === root) break;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
@@ -117,8 +120,6 @@ function findGitDir(cwd: string): string | null {
 }
 
 function buildArgs(input: GitInput): string[] {
-  if (input.args) return input.args.split(/\s+/).filter(Boolean);
-
   const limit = input.limit ?? 20;
   const files = input.files
     ? (Array.isArray(input.files) ? input.files : input.files.split(',')).map((s: string) => s.trim()).filter(Boolean)

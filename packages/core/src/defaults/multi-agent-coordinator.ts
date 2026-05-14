@@ -64,9 +64,10 @@ export class DefaultMultiAgentCoordinator
     const context: SubagentContext = {
       subagentId: id,
       tasks: [],
-      // parentBridge: wired by the caller via setSubagentBridge() once the
-      // bidirectional bridge is created. Reads gated by hasParentBridge().
-      parentBridge: null as unknown as AgentBridge,
+      // Wired later by the caller via setSubagentBridge() once the
+      // bidirectional bridge is created. Readers must null-check / use
+      // hasParentBridge() — the type now reflects this.
+      parentBridge: null,
       doneCondition: this.config.doneCondition,
       maxConcurrent: this.config.maxConcurrent ?? 4,
     };
@@ -116,7 +117,7 @@ export class DefaultMultiAgentCoordinator
     subagent.abortController.abort();
     subagent.status = 'stopped';
     subagent.currentTask = undefined;
-    subagent.context.parentBridge = null as unknown as AgentBridge;
+    subagent.context.parentBridge = null;
 
     this.emit('subagent.stopped', { subagentId, reason: 'stopped by coordinator' });
   }
@@ -165,7 +166,21 @@ export class DefaultMultiAgentCoordinator
       if (!subagentId) return;
       const task = this.pendingTasks.shift();
       if (!task) return;
-      void this.runDispatched(subagentId, task);
+      // Attach a catch so a synchronous throw inside runDispatched (rare —
+      // e.g. provider misconfiguration before the first await) becomes a
+      // visible failed task instead of an unhandled rejection that leaves
+      // `inFlight` permanently elevated.
+      this.runDispatched(subagentId, task).catch((err) => {
+        this.recordCompletion({
+          subagentId,
+          taskId: task.id,
+          status: 'failed',
+          error: err instanceof Error ? err.message : String(err),
+          iterations: 0,
+          toolCalls: 0,
+          durationMs: 0,
+        });
+      });
     }
   }
 
@@ -189,7 +204,6 @@ export class DefaultMultiAgentCoordinator
     subagent.currentTask = task.id;
     task.subagentId = subagentId;
     subagent.context.tasks.push(task);
-    this.inFlight++;
 
     this.emit('task.assigned', { task, subagentId });
 
@@ -204,6 +218,19 @@ export class DefaultMultiAgentCoordinator
     });
     subagent.activeBudget = budget;
 
+    if (!this.runner) {
+      // No runner wired — caller drives execution via completeTask(). Status
+      // reverts when the caller reports. We intentionally don't bump
+      // `inFlight` here: `completeTask` → `recordCompletion` would then
+      // decrement an inFlight that runDispatched never incremented, masking
+      // the "no runner" state. With this guard, `isDone()`'s all_tasks_done
+      // check still settles correctly once the caller reports.
+      return;
+    }
+
+    // Only count inFlight when we actually own the execution lifecycle.
+    this.inFlight++;
+
     const startTime = Date.now();
     const runCtx: SubagentRunContext = {
       subagentId,
@@ -214,12 +241,6 @@ export class DefaultMultiAgentCoordinator
     };
 
     let result: TaskResult;
-
-    if (!this.runner) {
-      // No runner wired — caller drives execution via completeTask(). Leave
-      // the subagent in 'running' state; status reverts when caller reports.
-      return;
-    }
 
     budget.start();
     try {
@@ -285,12 +306,30 @@ export class DefaultMultiAgentCoordinator
   private recordCompletion(result: TaskResult): void {
     this.completedResults.push(result);
     this.totalIterations += result.iterations;
-    this.inFlight = Math.max(0, this.inFlight - 1);
+    if (this.inFlight === 0) {
+      // Double-completion of the same task, or completion for a task whose
+      // runDispatched never bumped inFlight (no-runner path). Either case
+      // is a caller bug — surface it instead of silently clamping.
+      this.emit('warning', {
+        type: 'inFlight_underflow',
+        taskId: result.taskId,
+        subagentId: result.subagentId,
+      });
+    } else {
+      this.inFlight--;
+    }
 
     const subagent = this.subagents.get(result.subagentId);
     if (subagent && subagent.status !== 'stopped') {
-      subagent.status = result.status === 'failed' || result.status === 'timeout' ? 'error' : 'idle';
+      const failed = result.status === 'failed' || result.status === 'timeout';
+      subagent.status = failed ? 'error' : 'idle';
       subagent.currentTask = undefined;
+      // If the run aborted (timeout or explicit stop), the subagent's
+      // signal is now permanently aborted — recycling the controller lets
+      // the next dispatched task start with a fresh cancellation scope.
+      if (subagent.abortController.signal.aborted) {
+        subagent.abortController = new AbortController();
+      }
       // Reset error state on next assignment so a transient failure doesn't
       // permanently sideline the subagent.
       if (subagent.status === 'error') {

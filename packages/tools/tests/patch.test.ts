@@ -65,4 +65,37 @@ describe('patchTool', () => {
     // patch will fail because the file doesn't exist - applied should be 0
     expect(result).toHaveProperty('applied');
   });
+
+  it('rejects a diff whose target resolves outside the project root', async () => {
+    const ctx = makeCtx();
+    // strip=1 trims one component; the remaining path "../../etc/passwd"
+    // resolves outside tmpDir.
+    const evilPatch =
+      '--- a/foo\n+++ b/../../etc/passwd\n@@ -1 @@\n-old\n+new';
+    const result = await patchTool.execute(
+      { patch: evilPatch },
+      ctx,
+      makeOpts(),
+    );
+    expect(result.applied).toBe(0);
+    expect(result.rejected).toBe(1);
+    expect(result.message).toMatch(/outside project root/);
+  });
+
+  it('forces strip >= 1 — strip=0 is treated as 1', async () => {
+    // With strip=0 an attacker could put absolute paths in +++ targets.
+    // The tool clamps strip to >= 1 internally. We can't observe the
+    // clamp directly via the API, but we can verify that strip=0 with
+    // a target that ONLY works at strip=0 doesn't escape: pass
+    // /tmp/absolute as the target and confirm rejection.
+    const ctx = makeCtx();
+    const evilPatch =
+      '--- /etc/passwd\n+++ /etc/passwd\n@@ -1 @@\n-old\n+new';
+    const result = await patchTool.execute(
+      { patch: evilPatch, strip: 0 },
+      ctx,
+      makeOpts(),
+    );
+    expect(result.applied).toBe(0);
+  });
 });

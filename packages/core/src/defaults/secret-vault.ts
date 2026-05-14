@@ -104,14 +104,27 @@ export class DefaultSecretVault implements SecretVault {
  * system never has to know about the wire format.
  */
 export function decryptConfigSecrets<T>(cfg: T, vault: SecretVault): T {
-  return walk(cfg, vault, (v) => vault.decrypt(v));
+  // A single corrupted/malformed encrypted field should not kill the entire
+  // config load. Swallow per-field decrypt errors (zero the field so callers
+  // see "missing key" instead of holding ciphertext) and surface a warning.
+  return walk(cfg, vault, (v, key) => {
+    try {
+      return vault.decrypt(v);
+    } catch (err) {
+      console.warn(
+        `[secret-vault] Failed to decrypt "${key}":`,
+        err instanceof Error ? err.message : err,
+      );
+      return '';
+    }
+  });
 }
 
 export function encryptConfigSecrets<T>(cfg: T, vault: SecretVault): T {
   return walk(cfg, vault, (v) => vault.encrypt(v));
 }
 
-function walk<T>(node: T, vault: SecretVault, transform: (s: string) => string): T {
+function walk<T>(node: T, vault: SecretVault, transform: (s: string, key: string) => string): T {
   if (node === null || node === undefined) return node;
   if (typeof node !== 'object') return node;
   if (Array.isArray(node)) {
@@ -120,7 +133,7 @@ function walk<T>(node: T, vault: SecretVault, transform: (s: string) => string):
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
     if (typeof v === 'string' && isSecretField(k)) {
-      out[k] = transform(v);
+      out[k] = transform(v, k);
     } else if (typeof v === 'object' && v !== null) {
       out[k] = walk(v, vault, transform);
     } else {
@@ -232,14 +245,14 @@ function walkCount<T>(node: T, vault: SecretVault, counter: { n: number }): T {
   return out as T;
 }
 
-/** Mutable counter passed to walkCount to accumulate the migration total. */
-interface MigrationCounter {
-  n: number;
-}
+/** Keys that, when written into a plain object, can poison the prototype
+ *  chain. We never want user config to carry these. */
+const FORBIDDEN_PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 function deepMerge<T extends Record<string, unknown>>(a: T, b: Record<string, unknown>): T {
   const out: Record<string, unknown> = { ...a };
   for (const [k, v] of Object.entries(b)) {
+    if (FORBIDDEN_PROTO_KEYS.has(k)) continue;
     const existing = out[k];
     if (
       v !== null &&

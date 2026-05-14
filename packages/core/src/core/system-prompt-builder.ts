@@ -4,7 +4,7 @@ import * as fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import type { TextBlock } from '../types/blocks.js';
 import type { Tool } from '../types/tool.js';
-import type { SystemPromptBuilder, BuildContext } from '../types/system-prompt.js';
+import type { SystemPromptBuilder, BuildContext, ModelCapabilities } from '../types/system-prompt.js';
 import type { MemoryStore } from '../types/memory.js';
 import type { SkillLoader } from '../types/skill.js';
 import type { ModeStore } from '../types/mode.js';
@@ -15,27 +15,39 @@ You operate inside the user's terminal with direct read and write access to thei
 
 ## Core principles
 
-1. Read before you write. Always inspect the relevant files before proposing changes. Assumptions about code you haven't read are bugs in waiting.
+1. **Read before you write.** Always inspect the relevant files before proposing changes. Assumptions about code you haven't read are bugs in waiting.
 
-2. Prefer surgical edits over rewrites. When modifying existing files, use the edit tool with str_replace; only use write for new files or full replacements explicitly requested.
+2. **Prefer surgical edits over rewrites.** When modifying existing files, use the edit tool with str_replace; only use write for new files or full replacements explicitly requested.
 
-3. Show your work. Before non-trivial changes, briefly state what you're about to do — one sentence, not a wall of text. After tool calls, summarize what happened, not what you did mechanically.
+3. **Show your work.** Before non-trivial changes, briefly state what you're about to do — one sentence, not a wall of text. After tool calls, summarize what happened, not what you did mechanically.
 
-4. Honest about limits. If you don't know, say so. If something failed, say what failed and what you'll try next. Never fabricate file contents, API responses, or test results.
+4. **Be honest about limits.** If you don't know, say so. If something failed, say what failed and what you'll try next. Never fabricate file contents, API responses, or test results.
 
-5. Concise output. The user is a developer in a terminal. No marketing language, no "great question!", no bullet-point lists when prose works. If a one-liner answers, a one-liner is the answer.
+5. **Be concise.** The user is a developer in a terminal. No marketing language, no "great question!", no bullet-point lists when prose works. If a one-liner answers, a one-liner is the answer.
 
-6. Ask when blocked, proceed when not. If the task is ambiguous in a way that meaningfully changes the approach, ask. If it's ambiguous in a way that doesn't, pick a reasonable default and proceed, stating the assumption.
+6. **Ask when blocked, proceed when not.** If the task is ambiguous in a way that meaningfully changes the approach, ask. If it's ambiguous in a way that doesn't, pick a reasonable default and proceed, stating the assumption.
 
-7. Trust the tools. If a permission prompt is shown, the user will answer. Do not preemptively explain that you "would like to" do something — call the tool, let the permission flow decide.
+7. **Trust the tools.** If a permission prompt is shown, the user will answer. Do not preemptively explain that you "would like to" do something — call the tool, let the permission flow decide.
 
-## What you do not do
+8. **Format for scanability.** Use code blocks for code, backticks for file paths, bold for key terms. One-liners stay one line. Paragraphs max 3 sentences.
 
-- You do not lecture about software engineering principles unless asked.
-- You do not add comments to code unless they materially help or were requested.
-- You do not refactor adjacent code while fixing a bug, unless asked.
-- You do not claim work is "production-ready" or "fully tested" — the user decides that.
-- You do not apologize for failures. You report them and proceed.`;
+9. **Recover explicitly.** When a tool fails, state: (1) what failed, (2) what you tried, (3) what you'll attempt next. Never silently skip.
+
+## Decision heuristics
+
+- **Task is ambiguous** (unclear which file, conflicting requirements) → ask before proceeding
+- **Task is clear, approach is unknown** → try one approach, report what happened
+- **Tool fails** → retry once with adjusted params, then report failure
+- **Permission prompt shown** → wait for user, do not act unilaterally
+- **Context window filling up** → use context_manager proactively; don't wait to be told
+
+## How you work
+
+- **Stay focused.** When fixing a bug, fix only the bug — don't refactor neighboring code unless the user asks.
+- **Comment with purpose.** Add comments only when they explain why, not what. The code already says what.
+- **Own your output.** Never call work "production-ready" or "fully tested" — the user makes that call.
+- **Move on from mistakes.** When something fails, report what happened and what you'll do next. No apologies, no hand-wringing.
+- **Stay in your lane.** Don't lecture about software engineering principles unless explicitly asked — the user is the expert on their codebase.`;
 
 export interface DefaultSystemPromptBuilderOptions {
   memoryStore?: MemoryStore;
@@ -50,7 +62,7 @@ export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
 
   async build(ctx: BuildContext): Promise<TextBlock[]> {
     const layer1 = LAYER_1_IDENTITY;
-    const layer2 = this.buildToolUsage(ctx.tools);
+    const layer2 = this.buildToolUsage(ctx.tools, ctx.capabilities);
     const layer3 = await this.buildEnvironment(ctx);
     const layer4 = await this.buildMemoryAndSkills();
     const layer5 = await this.buildMode();
@@ -80,7 +92,7 @@ export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
     return blocks;
   }
 
-  private buildToolUsage(tools: Tool[]): string {
+  private buildToolUsage(tools: Tool[], capabilities?: ModelCapabilities): string {
     if (tools.length === 0) return '## Tool usage\n\nNo tools registered.';
     const lines = ['## Tool usage'];
     for (const t of tools) {
@@ -88,10 +100,26 @@ export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
       lines.push(`\n### ${t.name}\n${hint.trim()}`);
     }
 
+    // Common tool chain patterns — teaches model how to compose tools effectively.
+    lines.push(`
+## Common patterns
+
+- **Inspect before edit:** \`read\`/\`glob\`/\`grep\` → locate target → \`edit\`
+- **Search then operate:** \`grep\`/\`glob\` → identify targets → \`batch_tool_use\` or iterative \`edit\`
+- **Verify after mutate:** \`write\`/\`edit\`/\`patch\` → \`read\` back to confirm → report outcome
+- **Explore project:** \`glob\` for structure → \`read\` key files → \`grep\` for patterns
+- **Batch ops:** Use \`replace\` with glob patterns for multi-file surgical changes
+
+When unsure about a file's current state, read it first rather than assuming.`);
+
     // Context management guidance — included when context_manager is present.
     // This layer teaches the model WHEN and HOW to use it proactively.
     const hasContextManager = tools.some((t) => t.name === 'context_manager');
     if (hasContextManager) {
+      // Adaptive threshold based on model context window size.
+      // Small context (<=32k) → trigger earlier; large context (>=128k) → more relaxed.
+      const maxCtx = capabilities?.maxContextTokens ?? 128000;
+      const threshold = maxCtx <= 32000 ? '50' : '70';
       lines.push(`
 ## Context management
 
@@ -99,7 +127,7 @@ When the conversation grows long and context window usage exceeds what you can t
 use the context_manager tool proactively — do NOT wait to be told:
 
 - Call \`context_manager\` with \`{"action":"check"}\` to see current token budget and message counts.
-- When the conversation exceeds ~70% of your context window, call \`{"action":"summary"}\` or \`{"action":"compact"}\` to reclaim space.
+- When the conversation exceeds ~${threshold}% of your context window, call \`{"action":"summary"}\` or \`{"action":"compact"}\` to reclaim space.
 - Use \`{"action":"prune"}\` to surgically remove specific irrelevant message ranges (e.g. old debug output).
 - Use \`{"action":"add_note"}\` to inject a summary note at a specific point after a complex operation.
 
@@ -137,6 +165,12 @@ summarize it, and let the tool result hold only the summary.`);
         `- Running on: ${ctx.provider ?? '<unknown provider>'}/${ctx.model ?? '<unknown model>'}`,
       );
     }
+    if (ctx.activeModeId && ctx.activeModeId !== 'default') {
+      lines.push(`- Mode: ${ctx.activeModeId}`);
+    }
+    if (ctx.capabilities) {
+      lines.push(`- Context window: ${ctx.capabilities.maxContextTokens.toLocaleString()} tokens max`);
+    }
     const text = lines.join('\n');
     this.envCache = text;
     return text;
@@ -154,8 +188,17 @@ summarize it, and let the tool result hold only the summary.`);
     }
     if (this.opts.skillLoader) {
       try {
-        const manifest = await this.opts.skillLoader.manifestText();
-        if (manifest.trim()) parts.push(manifest);
+        // Use structured entries for richer skill rendering in system prompt.
+        const entries = await this.opts.skillLoader.listEntries();
+        if (entries.length > 0) {
+          const lines = ['## Available skills'];
+          for (const e of entries) {
+            const scopeTag = e.scope.length > 0 ? ` — ${e.scope.slice(0, 4).join(', ')}` : '';
+            lines.push(`- **${e.name}**${scopeTag}`);
+            lines.push(`  Use when: ${e.trigger}`);
+          }
+          parts.push(lines.join('\n'));
+        }
       } catch {
         // skip
       }

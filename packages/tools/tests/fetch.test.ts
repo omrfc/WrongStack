@@ -166,4 +166,212 @@ describe('fetchTool', () => {
       await sb.cleanup();
     }
   });
+
+  describe('SSRF defenses', () => {
+    const blocked = [
+      // IPv4 metadata / private / CGNAT / multicast
+      'https://169.254.169.254/latest/meta-data/',
+      'https://127.0.0.1/',
+      'https://0.0.0.0/',
+      'https://10.5.5.5/',
+      'https://172.16.1.1/',
+      'https://172.31.255.255/',
+      'https://192.168.1.1/',
+      'https://100.64.0.1/',
+      'https://224.0.0.1/',
+      'https://240.0.0.1/',
+      // IPv6 loopback / link-local / ULA / multicast / IPv4-mapped
+      'https://[::1]/',
+      'https://[fe80::1]/',
+      'https://[fc00::1]/',
+      'https://[fd00::1]/',
+      'https://[ff00::1]/',
+      'https://[::ffff:127.0.0.1]/',
+      'https://[::ffff:169.254.169.254]/',
+    ];
+
+    for (const url of blocked) {
+      it(`blocks ${url}`, async () => {
+        const sb = await mkSandbox();
+        try {
+          await expect(
+            fetchTool.execute({ url }, sb.ctx, { signal: newSignal() }),
+          ).rejects.toThrow(/private|localhost|blocked/);
+        } finally {
+          await sb.cleanup();
+        }
+      });
+    }
+
+    it('re-validates redirect target against private ranges', async () => {
+      // Public host returns a 302 redirecting to AWS metadata. The fix
+      // requires re-checking each hop; pre-fix this would have fetched it.
+      let firstHit = true;
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const u = typeof input === 'string' ? input : (input as URL).toString();
+        if (firstHit && u.startsWith('https://public.example')) {
+          firstHit = false;
+          return {
+            status: 302,
+            ok: false,
+            url: u,
+            headers: new Headers({ location: 'https://169.254.169.254/latest/meta-data/' }),
+            body: null,
+          } as unknown as Response;
+        }
+        // Should never reach here — re-validation must throw before we issue
+        // the second fetch.
+        return mkResponse({ body: 'leaked metadata!', contentType: 'text/plain' });
+      }) as unknown as typeof fetch;
+
+      const sb = await mkSandbox();
+      try {
+        await expect(
+          fetchTool.execute({ url: 'https://public.example/redirect' }, sb.ctx, {
+            signal: newSignal(),
+          }),
+        ).rejects.toThrow(/private|blocked/);
+      } finally {
+        await sb.cleanup();
+      }
+    });
+
+    it('blocks IPv6 with mapped IPv4 private address', async () => {
+      const sb = await mkSandbox();
+      try {
+        await expect(
+          fetchTool.execute({ url: 'https://[::ffff:10.0.0.1]/' }, sb.ctx, {
+            signal: newSignal(),
+          }),
+        ).rejects.toThrow(/private|blocked/);
+      } finally {
+        await sb.cleanup();
+      }
+    });
+
+    it('allows public IPs (e.g. 8.8.8.8) — sanity check the gate is not over-broad', async () => {
+      globalThis.fetch = vi.fn(async () =>
+        mkResponse({ body: 'ok', contentType: 'text/plain' }),
+      ) as unknown as typeof fetch;
+      const sb = await mkSandbox();
+      try {
+        const out = await fetchTool.execute({ url: 'https://8.8.8.8/' }, sb.ctx, {
+          signal: newSignal(),
+        });
+        expect(out.status).toBe(200);
+      } finally {
+        await sb.cleanup();
+      }
+    });
+
+    it('allows public IPv6 (e.g. 2606:4700:4700::1111)', async () => {
+      globalThis.fetch = vi.fn(async () =>
+        mkResponse({ body: 'ok', contentType: 'text/plain' }),
+      ) as unknown as typeof fetch;
+      const sb = await mkSandbox();
+      try {
+        // Cloudflare DNS IPv6 — a clear public address. Confirms the IPv6
+        // private-range gate isn't over-broad.
+        const out = await fetchTool.execute(
+          { url: 'https://[2606:4700:4700::1111]/' },
+          sb.ctx,
+          { signal: newSignal() },
+        );
+        expect(out.status).toBe(200);
+      } finally {
+        await sb.cleanup();
+      }
+    });
+
+    it('rejects bracketed IPv6 unspecified address (::)', async () => {
+      const sb = await mkSandbox();
+      try {
+        await expect(
+          fetchTool.execute({ url: 'https://[::]/' }, sb.ctx, { signal: newSignal() }),
+        ).rejects.toThrow(/private|blocked/);
+      } finally {
+        await sb.cleanup();
+      }
+    });
+
+    it('blocks redirect to http:// (downgrade attempt)', async () => {
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const u = typeof input === 'string' ? input : (input as URL).toString();
+        return {
+          status: 302,
+          ok: false,
+          url: u,
+          headers: new Headers({ location: 'http://attacker.example/' }),
+          body: null,
+        } as unknown as Response;
+      }) as unknown as typeof fetch;
+
+      const sb = await mkSandbox();
+      try {
+        await expect(
+          fetchTool.execute({ url: 'https://good.example/' }, sb.ctx, {
+            signal: newSignal(),
+          }),
+        ).rejects.toThrow(/blocked/);
+      } finally {
+        await sb.cleanup();
+      }
+    });
+
+    it('rejects after too many redirects', async () => {
+      // Always-redirect server — exhausts the 5-redirect budget.
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const u = typeof input === 'string' ? input : (input as URL).toString();
+        return {
+          status: 302,
+          ok: false,
+          url: u,
+          headers: new Headers({ location: 'https://loop.example/' }),
+          body: null,
+        } as unknown as Response;
+      }) as unknown as typeof fetch;
+
+      const sb = await mkSandbox();
+      try {
+        await expect(
+          fetchTool.execute({ url: 'https://loop.example/' }, sb.ctx, {
+            signal: newSignal(),
+          }),
+        ).rejects.toThrow(/redirects/);
+      } finally {
+        await sb.cleanup();
+      }
+    });
+
+    it('passes redirects to non-private targets through', async () => {
+      let hop = 0;
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const u = typeof input === 'string' ? input : (input as URL).toString();
+        hop++;
+        if (hop === 1 && u.startsWith('https://a.example')) {
+          return {
+            status: 302,
+            ok: false,
+            url: u,
+            headers: new Headers({ location: 'https://b.example/' }),
+            body: null,
+          } as unknown as Response;
+        }
+        return mkResponse({ body: 'final', contentType: 'text/plain', url: u });
+      }) as unknown as typeof fetch;
+
+      const sb = await mkSandbox();
+      try {
+        const out = await fetchTool.execute(
+          { url: 'https://a.example/' },
+          sb.ctx,
+          { signal: newSignal() },
+        );
+        expect(out.status).toBe(200);
+        expect(out.content).toContain('final');
+      } finally {
+        await sb.cleanup();
+      }
+    });
+  });
 });

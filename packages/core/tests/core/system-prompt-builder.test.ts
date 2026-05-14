@@ -77,7 +77,11 @@ describe('DefaultSystemPromptBuilder', () => {
     };
     const skills: SkillLoader = {
       manifestText: async () => '## Skills\n- /foo',
+      listEntries: async () => [
+        { name: 'test-skill', trigger: 'Use for testing.', scope: ['testing'], source: 'bundled', path: '/test/skill.md' },
+      ],
       list: async () => [],
+      find: async () => undefined,
       load: async () => undefined,
     } as unknown as SkillLoader;
     const b = new DefaultSystemPromptBuilder({ memoryStore: memory, skillLoader: skills });
@@ -86,7 +90,9 @@ describe('DefaultSystemPromptBuilder', () => {
     const last = blocks[3]!;
     expect(last.text).toContain('Project Memory');
     expect(last.text).toContain('prefer pnpm');
-    expect(last.text).toContain('## Skills');
+    expect(last.text).toContain('## Available skills');
+    expect(last.text).toContain('test-skill');
+    expect(last.text).toContain('Use when:');
     expect(last.cache_control).toEqual({ type: 'ephemeral' });
   });
 

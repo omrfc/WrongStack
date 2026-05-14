@@ -67,6 +67,16 @@ export class InMemoryAgentBridge implements AgentBridge {
     const timeout = timeoutMs ?? this.timeoutMs;
     const correlationId = msg.id;
 
+    // Detect collision: if a caller reuses an id while a prior request is
+    // still outstanding, the second .set() would silently overwrite the
+    // first record — leaving its caller hanging until its timer fired but
+    // looking up the now-replaced entry. Surface the bug instead.
+    if (this.pendingRequests.has(correlationId)) {
+      throw new Error(
+        `Bridge request id "${correlationId}" collides with an in-flight request — caller is reusing message ids`,
+      );
+    }
+
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingRequests.delete(correlationId);

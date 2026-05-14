@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import * as path from 'node:path';
 import type { Tool } from '@wrongstack/core';
+import { buildChildEnv } from './_env.js';
 
 const ALLOWED_COMMANDS: Record<string, string[]> = {
   node: ['--version', '-e', '-p', '-r', '--input-type=module'],
@@ -34,26 +35,6 @@ const ALLOWED_COMMANDS: Record<string, string[]> = {
   kubectl: ['version', 'get', 'describe', 'logs'],
 };
 
-const FORBIDDEN_PATTERNS = [
-  /;\s*rm\s+-rf/i,
-  /\|\s*rm\s/i,
-  /\&\&\s*rm/i,
-  /\$\(.*rm/s,
-  /`.*rm/s,
-  /eval\s*\(/i,
-  /exec\s+/i,
-  /nc\s+-e/i,
-  /bash\s+-i/i,
-  /\/dev\/tcp\//i,
-  /curl\s+.*\|/i,
-  /wget\s+.*\|/i,
-  /chmod\s+777/i,
-  /chmod\s+4755/i,
-  />\s*\/dev\//i,
-  /2>\s*\/dev\//i,
-  /tee\s+/i,
-];
-
 const MAX_ARGS = 20;
 const MAX_OUTPUT = 200_000;
 const TIMEOUT_MS = 30_000;
@@ -63,7 +44,6 @@ interface ExecInput {
   args?: string[];
   cwd?: string;
   timeout?: number;
-  allow_unknown?: boolean;
 }
 
 interface ExecOutput {
@@ -81,7 +61,7 @@ export const execTool: Tool<ExecInput, ExecOutput> = {
   description:
     'Restricted shell that only runs pre-approved commands with constrained arguments. Safer alternative to `bash`.',
   usageHint:
-    'Set `command` (must be in allowlist). `args` passed through. Unknown commands require `allow_unknown: true`. Blocks dangerous patterns.',
+    'Set `command` (must be in allowlist). `args` passed through. For arbitrary shell access use the `bash` tool instead.',
   permission: 'confirm',
   mutating: false,
   timeoutMs: TIMEOUT_MS,
@@ -90,12 +70,8 @@ export const execTool: Tool<ExecInput, ExecOutput> = {
     properties: {
       command: { type: 'string', description: 'Command to run (must be in allowlist)' },
       args: { type: 'array', items: { type: 'string' }, description: 'Arguments' },
-      cwd: { type: 'string', description: 'Working directory' },
+      cwd: { type: 'string', description: 'Working directory (must resolve inside project root)' },
       timeout: { type: 'integer', description: 'Timeout in ms (default: 30000)' },
-      allow_unknown: {
-        type: 'boolean',
-        description: 'Allow commands not in allowlist (DANGEROUS, use with caution)',
-      },
     },
     required: ['command'],
   },
@@ -103,29 +79,12 @@ export const execTool: Tool<ExecInput, ExecOutput> = {
     const cmd = input.command.trim();
     if (!cmd) return { command: cmd, args: [], stdout: '', stderr: 'Empty command', exitCode: 1, truncated: false, allowed: false };
 
-    if (FORBIDDEN_PATTERNS.some((re) => re.test(cmd))) {
+    if (!(cmd in ALLOWED_COMMANDS)) {
       return {
         command: cmd,
         args: input.args ?? [],
         stdout: '',
-        stderr: `Command blocked: dangerous pattern detected`,
-        exitCode: 1,
-        truncated: false,
-        allowed: false,
-      };
-    }
-
-    const allowedCommands = { ...ALLOWED_COMMANDS };
-    if (input.allow_unknown) {
-      allowedCommands[cmd] = [];
-    }
-
-    if (!(cmd in allowedCommands)) {
-      return {
-        command: cmd,
-        args: input.args ?? [],
-        stdout: '',
-        stderr: `Command "${cmd}" not in allowlist. Set allow_unknown: true to bypass.`,
+        stderr: `Command "${cmd}" not in allowlist. Use the bash tool for arbitrary commands.`,
         exitCode: 1,
         truncated: false,
         allowed: false,
@@ -135,10 +94,27 @@ export const execTool: Tool<ExecInput, ExecOutput> = {
     const args = (input.args ?? []).slice(0, MAX_ARGS);
     const timeout = Math.min(input.timeout ?? TIMEOUT_MS, TIMEOUT_MS);
 
-    const cwd = input.cwd ?? ctx.cwd;
+    // Resolve cwd inside the project root. Model-supplied paths like '/etc'
+    // would otherwise let allowlisted commands operate anywhere on disk.
+    const requestedCwd = input.cwd
+      ? path.resolve(ctx.projectRoot, input.cwd)
+      : ctx.cwd;
+    const rel = path.relative(ctx.projectRoot, requestedCwd);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      return {
+        command: cmd,
+        args,
+        stdout: '',
+        stderr: `cwd "${input.cwd}" resolves outside project root`,
+        exitCode: 1,
+        truncated: false,
+        allowed: false,
+      };
+    }
+    const cwd = requestedCwd;
     const signal = opts.signal;
 
-    return runCommand(cmd, args, cwd, timeout, signal);
+    return runCommand(cmd, args, cwd, timeout, signal, ctx.session?.id);
   },
 };
 
@@ -148,13 +124,19 @@ function runCommand(
   cwd: string,
   timeout: number,
   signal: AbortSignal,
+  sessionId: string | undefined,
 ): Promise<ExecOutput> {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
     let killed = false;
 
-    const child = spawn(cmd, args, { cwd, signal, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, {
+      cwd,
+      signal,
+      env: buildChildEnv(sessionId),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     const timer = setTimeout(() => {
       killed = true;
       child.kill('SIGTERM');

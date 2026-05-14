@@ -5,7 +5,7 @@ import type {
   StreamEvent,
   Usage,
 } from '@wrongstack/core';
-import { safeParse } from '@wrongstack/core';
+import { parseToolInput } from './_tool-input.js';
 
 /**
  * Consume an `AsyncIterable<StreamEvent>` and reduce it to a non-streaming
@@ -57,13 +57,17 @@ export async function aggregateStream(
       case 'tool_use_stop': {
         const b = toolBuffers.get(ev.id);
         if (b) {
-          if (ev.input !== undefined) {
+          if (ev.input === undefined) {
+            // No upstream input — parse from the accumulated partial buffer.
+            b.input = parseToolInput(b.partial);
+          } else if (typeof ev.input === 'string') {
+            // Upstream gave us a raw JSON string; route through the validator.
+            b.input = parseToolInput(ev.input);
+          } else if (ev.input && typeof ev.input === 'object' && !Array.isArray(ev.input)) {
             b.input = ev.input;
-          } else if (b.partial) {
-            const parsed = safeParse<unknown>(b.partial);
-            b.input = parsed.ok ? parsed.value : { _raw: b.partial };
           } else {
-            b.input = {};
+            // Array / scalar — preserve via __raw so downstream sees an object.
+            b.input = { __raw: ev.input };
           }
         }
         // Tool just stopped — next text_delta should open a new text block.
@@ -89,7 +93,10 @@ export async function aggregateStream(
           type: 'tool_use',
           id: b.id,
           name: tb.name,
-          input: (tb.input as Record<string, unknown>) ?? {},
+          input:
+            tb.input && typeof tb.input === 'object' && !Array.isArray(tb.input)
+              ? (tb.input as Record<string, unknown>)
+              : {},
         });
       }
     }

@@ -7,6 +7,155 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] — 2026-05-14
+
+Security hardening pass: 7 CRITICAL, 16 HIGH, 20 MEDIUM, 9 LOW findings from
+a forensic codebase review closed out. **No public API breaking changes.**
+
+The full threat model and rationale for each control is documented in
+[SECURITY.md](SECURITY.md). Highlights below; if you only read one line,
+read this one: **the `bash` tool now sanitizes its child process env so
+`ANTHROPIC_API_KEY` / `GITHUB_TOKEN` / etc. are no longer forwarded to
+LLM-generated commands.** Set `WRONGSTACK_BASH_ENV_PASSTHROUGH=1` if you
+need the prior behavior.
+
+### Fixed — SSRF cluster (`fetch` tool)
+
+- **Redirect target re-validated every hop.** A public host's 302 to AWS/GCE
+  metadata (`169.254.169.254`) is now refused at hop 2; previously only the
+  initial URL was checked.
+- **Private-range detection rewritten with numeric CIDR.** Previously regex
+  substring matching on hostname strings — bypassed by IPv4-mapped IPv6,
+  CGNAT (100.64/10), multicast (224/4), reserved (240/4), Azure-style
+  fd-prefixed ULA, and several other forms. New implementation fully
+  expands IPv6 to 8 groups and compares numerically.
+- **IPv4-mapped IPv6 in Node's URL-normalized form.** `https://[::ffff:127.0.0.1]/`
+  becomes `[::ffff:7f00:1]` after `new URL().hostname` — the old detector
+  missed this entirely. New detector decodes the v4-mapped low 32 bits
+  back to an IPv4 address and runs the IPv4 private check.
+- **DNS lookup before connect.** Best-effort guard against DNS rebinding;
+  not a full guarantee (see SECURITY.md).
+
+### Fixed — agent-tool boundary
+
+- **`bash` child env sanitized** by an allowlist (PATH, HOME, LANG, …) plus
+  substring-strip of TOKEN/SECRET/PASSWORD/AUTH/BEARER/COOKIE/PRIVATE/KEY
+  variables. Opt-out via `WRONGSTACK_BASH_ENV_PASSTHROUGH=1`.
+- **`bash` POSIX process-group kill** on timeout/abort — runaway grandchildren
+  (`sleep 9999 & disown`) no longer survive.
+- **`exec.allow_unknown` removed.** The flag advertised "DANGEROUS" was
+  trivially flippable by an LLM; for unrestricted commands use `bash`
+  (which is more clearly gated).
+- **`exec` dead-code blocklist removed.** `FORBIDDEN_PATTERNS` only tested
+  the command name, never the args — it never matched anything. The
+  allowlist alone now does the gating.
+- **`exec.cwd` validated** to resolve inside `ctx.projectRoot`.
+- **`git.args` raw string field removed.** The bypass allowed
+  `-c core.sshCommand=…` / `--upload-pack='sh …'` RCE. All git operations
+  go through the typed subcommand fields.
+- **`git.findGitDir` bounded by `projectRoot`** — non-git projects no
+  longer drift into a parent repo at `~/repos/.git`.
+- **`patch` diff-target validation.** `+++ ../../../etc/passwd`-style
+  escapes are pre-rejected before GNU patch sees the diff. `strip` clamped
+  to ≥1. Temp diff file written into a `0700 mkdtemp` directory rather
+  than a predictable timestamp name. `LC_ALL=C` set so the
+  "patching file" detection works under any locale.
+- **`replace` symlink/TOCTOU.** Resolves through `realpath`, validates
+  the result is inside `projectRoot`, writes to the resolved path.
+  Symlinks are skipped, not followed.
+- **`grep` symlinks skipped** during native traversal.
+- **User-regex ReDoS guard** (`compileUserRegex` in `packages/tools/src/_regex.ts`)
+  — 512-char pattern cap, rejection of `(a+)+`-style nested quantifiers,
+  64 KB subject-line cap. Applied to grep, replace, logs.
+- **`grep` stdout buffer 1 MB cap** — pathological producers (matching a
+  huge binary with no newlines) can't pin memory.
+- **`logs.lines:0`** historically buffered the entire file; now clamps to
+  100k lines via a fixed-size rolling window.
+
+### Fixed — MCP / multi-agent lifecycle
+
+- **MCP `failPending()` on transport death.** When a stdio child exits or
+  `close()` is called, every in-flight JSON-RPC request is rejected with a
+  transport-closed error. Previously callers (e.g. `callTool` mid-tool-use)
+  hung forever on a dead transport.
+- **MCP SIGTERM → SIGKILL escalation.** Stuck servers that ignored
+  SIGTERM stayed alive after `close()` returned. Now waits 800ms then
+  force-kills.
+- **MCP registry disconnect-listener leak fixed.** Listeners were stored
+  in a Set keyed by arrow-function reference; remove never matched because
+  each call site created a fresh lambda. Now stored on the slot.
+- **MCP registry closes prior client** before swapping references on
+  reconnect.
+- **`Multi-agent` floating promise + inFlight leak fixed.**
+  `runDispatched` no longer bumps `inFlight` when no runner is wired (it
+  would never be decremented). Sync errors in dispatch now produce a
+  failed task instead of an unhandled rejection.
+- **`Multi-agent` AbortController recycle** after timeout, so the next
+  task on the same subagent doesn't start with an already-aborted signal.
+- **`agent-bridge` duplicate correlation-id detection.** Caller-supplied
+  message IDs that collide with in-flight requests now throw at submit
+  time instead of silently replacing the prior pending entry.
+- **`tool-executor` per-tool error isolation.** A `safeRun` wrapper
+  ensures one tool's unexpected exception doesn't collapse `Promise.all`
+  and lose every sibling's output.
+
+### Fixed — providers / SSE
+
+- **Provider tool-call argument validation.** All six stream parsers
+  (Anthropic, OpenAI, Google, Mistral preset, plus the aggregate path)
+  route arg JSON through a shared `parseToolInput` helper. Arrays, null,
+  scalars, and invalid JSON are wrapped under `__raw` so the tool always
+  receives a `Record<string, unknown>`.
+- **SSE parser buffer cap (256 KB)** + incremental CRLF normalization.
+  Previously `buffer.replace(/\r\n/g, '\n')` ran on the entire pending
+  buffer per chunk — O(n²) in stream length.
+- **Stream builder no longer fabricates `stopReason: 'max_tokens'`** on
+  abort. Uses `'end_turn'` instead so telemetry isn't poisoned and retry
+  logic that branches on max_tokens doesn't trigger.
+
+### Fixed — type safety / config
+
+- **Config-loader `apiKeys` entries filtered** through a runtime type
+  guard before use — a null or malformed entry no longer crashes provider
+  resolution.
+- **Config-loader JSON parse vs ENOENT** distinguished: a typo'd local
+  config now warns instead of silently falling back to defaults.
+- **Config `context.*` thresholds typeof-checked** — string values in
+  `config.json` no longer coerce silently through `>=`.
+- **Prototype pollution guard** on `deepMerge` (config-loader,
+  secret-vault) — `__proto__` / `constructor` / `prototype` keys ignored.
+- **SecretVault per-field decrypt try/catch** — one corrupted ciphertext
+  no longer kills the entire config load.
+- **Session-store JSONL shape validation** — events with malformed
+  `type` / `ts` are skipped at load rather than crashing replay.
+- **Session-store error wrapping** uses `Error.cause` to preserve
+  ENOENT/EACCES/EMFILE codes.
+- **`SubagentContext.parentBridge` typed `| null`** — the previous
+  `null as unknown as AgentBridge` cast was a type lie that hid the
+  two-phase init contract.
+- **`SessionAnalyzer.analyze` populates `sessionId`, `tasks`, and
+  `modeChanges`** from session_start/task_*/mode_changed events; these
+  were hardcoded empty.
+
+### Added
+
+- **`Tool.subjectKey`** — Tools can declare which input field is the
+  permission-trust subject. Bash → `command`, fetch → `url`. Without this
+  the policy heuristic could mismatch across tools (an HTTP tool whose
+  `path` means request-path would have been checked against filesystem
+  trust rules). Optional; legacy heuristic still applies as fallback.
+- **[SECURITY.md](SECURITY.md)** — Threat model, adversary assumptions,
+  every control with rationale, and known limitations.
+
+### Internal
+
+- 57 new tests covering env stripping, regex compilation, tool-input
+  validation, and 28 SSRF cases (private-range detection, redirect
+  re-validation, IPv6 v4-mapped, public-IP sanity).
+- TypeScript and tsup versions aligned across all packages
+  (was: root 5.9.3 + 8.5.1, packages 5.7.2 + 8.3.5).
+- MCP `clientInfo.version` bumped to `0.1.5`.
+
 ## [0.1.4] — 2026-05-14
 
 ### Fixed

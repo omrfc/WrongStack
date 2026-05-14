@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import type { Tool } from '@wrongstack/core';
 import { safeResolve } from './_util.js';
+import { compileUserRegex } from './_regex.js';
 
 interface LogsInput {
   service?: string;
@@ -72,7 +73,14 @@ export const logsTool: Tool<LogsInput, LogsOutput> = {
   async execute(input, ctx, opts) {
     const cwd = input.cwd ? safeResolve(input.cwd, ctx) : ctx.cwd;
     const lines = input.lines ?? 100;
-    const filterRe = input.filter ? new RegExp(input.filter, 'i') : null;
+    let filterRe: RegExp | null = null;
+    if (input.filter) {
+      const compiled = compileUserRegex(input.filter, 'i');
+      if (!compiled.ok) {
+        throw new Error(`logs: ${compiled.reason}`);
+      }
+      filterRe = compiled.regex;
+    }
 
     if (input.service) {
       return await dockerLogs(input.service, lines, filterRe, cwd, opts.signal);
@@ -137,6 +145,11 @@ async function dockerLogs(
   });
 }
 
+// Hard cap on tail-window size — `lines: 0` historically meant "all" and
+// happily buffered an entire multi-GB log into memory. Cap at 100k lines;
+// callers that need more should narrow with `filter`.
+const MAX_TAIL_LINES = 100_000;
+
 async function fileLogs(
   path: string,
   lines: number,
@@ -146,7 +159,16 @@ async function fileLogs(
   const { createInterface } = await import('node:readline');
   const { createReadStream } = await import('node:fs');
   const entries: LogEntry[] = [];
-  const allLines: string[] = [];
+
+  // Effective tail window: clamp to MAX_TAIL_LINES; treat 0 / negative as
+  // "max window" rather than "unlimited" so a malicious /proc/kcore path
+  // cannot OOM the worker.
+  const effLines = lines > 0 ? Math.min(lines, MAX_TAIL_LINES) : MAX_TAIL_LINES;
+  // Rolling window backed by a fixed-size circular buffer — at most
+  // `effLines` strings live in memory regardless of file size.
+  const window: string[] = new Array(effLines);
+  let writeIdx = 0;
+  let totalLines = 0;
 
   const rl = createInterface({
     input: createReadStream(path),
@@ -155,11 +177,21 @@ async function fileLogs(
 
   for await (const line of rl) {
     if (filterRe && !filterRe.test(line)) continue;
-    allLines.push(line);
+    window[writeIdx] = line;
+    writeIdx = (writeIdx + 1) % effLines;
+    totalLines++;
   }
 
-  const sliced = lines > 0 ? allLines.slice(-lines) : allLines;
-  for (const line of sliced) {
+  // Read the window back in arrival order.
+  const ordered: string[] = [];
+  const start = totalLines >= effLines ? writeIdx : 0;
+  const count = Math.min(totalLines, effLines);
+  for (let i = 0; i < count; i++) {
+    const v = window[(start + i) % effLines];
+    if (v !== undefined) ordered.push(v);
+  }
+
+  for (const line of ordered) {
     const parsed = parseLine(line);
     if (parsed) entries.push(parsed);
   }
@@ -168,7 +200,7 @@ async function fileLogs(
     source: path,
     entries,
     total: entries.length,
-    truncated: allLines.length > lines && lines > 0,
+    truncated: totalLines > effLines,
     stream_mode: stream,
   };
 }

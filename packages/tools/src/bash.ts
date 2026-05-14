@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import type { Tool, ToolStreamEvent } from '@wrongstack/core';
 import { stripAnsi } from '@wrongstack/core';
 import { truncateMiddle } from './_util.js';
+import { buildChildEnv } from './_env.js';
 
 interface BashInput {
   command: string;
@@ -32,6 +33,10 @@ export const bashTool: Tool<BashInput, BashOutput> = {
     'Runs via `bash -c` (or `cmd /c` on Windows). Cwd is the project root. Default timeout 30s. Output truncated from the middle if oversized. Use for git, npm, builds, tests.',
   permission: 'confirm',
   mutating: true,
+  // Trust rules match on the literal `command` string. Without subjectKey
+  // the policy heuristic would have done the same here, but declaring it
+  // explicitly removes the implicit cross-tool aliasing.
+  subjectKey: 'command',
   timeoutMs: 30_000,
   maxOutputBytes: MAX_OUTPUT,
   estimatedDurationMs: 3_000,
@@ -62,14 +67,20 @@ export const bashTool: Tool<BashInput, BashOutput> = {
       : process.env['SHELL'] ?? '/bin/bash';
     const args = isWin ? ['/c', input.command] : ['-c', input.command];
 
-    const env: NodeJS.ProcessEnv = { ...process.env };
-    env['WRONGSTACK_SESSION_ID'] = ctx.session.id;
+    const env = buildChildEnv(ctx.session?.id);
 
+    // On POSIX we put the shell in its own process group so that timeout /
+    // abort can kill the entire group with `process.kill(-pid)`. Otherwise
+    // `bash -c "sleep 9999 & disown"` would leave the grandchild running.
+    // `detached: true` is also reused for the user-facing background mode;
+    // we always want detached on POSIX, only on Windows is it tied to the
+    // explicit background flag.
+    const detached = isWin ? !!input.background : true;
     const child = spawn(shell, args, {
       cwd: ctx.projectRoot,
       env,
       stdio: input.background ? 'ignore' : ['ignore', 'pipe', 'pipe'],
-      detached: input.background,
+      detached,
       signal: opts.signal,
     });
 
@@ -98,9 +109,22 @@ export const bashTool: Tool<BashInput, BashOutput> = {
         try { child.kill(); } catch { /* ignore */ }
       } else {
         try {
-          child.kill('SIGTERM');
+          // Kill the process group, not just the shell — pid is positive,
+          // group id is the negated pid. Without this a runaway grandchild
+          // ('sleep 9999 & disown') survives bash termination.
+          if (typeof child.pid === 'number') {
+            try { process.kill(-child.pid, 'SIGTERM'); } catch { child.kill('SIGTERM'); }
+          } else {
+            child.kill('SIGTERM');
+          }
           const killTimer = setTimeout(() => {
-            try { child.kill('SIGKILL'); } catch { /* ignore */ }
+            try {
+              if (typeof child.pid === 'number') {
+                try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+              } else {
+                child.kill('SIGKILL');
+              }
+            } catch { /* ignore */ }
           }, 2000);
           timers.push(killTimer);
         } catch { /* ignore */ }

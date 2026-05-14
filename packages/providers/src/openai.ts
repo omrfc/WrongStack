@@ -7,6 +7,7 @@ import type {
 } from '@wrongstack/core';
 import { type ProviderError, safeParse } from '@wrongstack/core';
 import { parseProviderHttpError } from './error-parse.js';
+import { parseToolInput } from './_tool-input.js';
 import {
   messagesToOpenAI,
   toolsToOpenAI,
@@ -218,9 +219,7 @@ async function* parseOpenAIStream(
   }
 
   for (const entry of toolByIndex.values()) {
-    const input = entry.argBuf
-      ? (safeParse<unknown>(entry.argBuf).value ?? { _raw: entry.argBuf })
-      : {};
+    const input = parseToolInput(entry.argBuf);
     yield { type: 'tool_use_stop', id: entry.id, input };
   }
   if (started) {

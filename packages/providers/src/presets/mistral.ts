@@ -9,6 +9,7 @@
  */
 import type { Request, StreamEvent, StopReason } from '@wrongstack/core';
 import { safeParse } from '@wrongstack/core';
+import { parseToolInput } from '../_tool-input.js';
 import { defineWireFormat } from '../wire-format.js';
 
 interface MistralStreamState {
@@ -98,11 +99,10 @@ export const mistralWireFormat = defineWireFormat<MistralStreamState>({
       // Close out tool calls with parsed JSON
       for (const block of state.toolCalls.values()) {
         if (block.id) {
-          const parsedInput = safeParse(block.partial || '{}');
           out.push({
             type: 'tool_use_stop',
             id: block.id,
-            input: parsedInput.ok ? parsedInput.value : {},
+            input: parseToolInput(block.partial),
           });
         }
       }

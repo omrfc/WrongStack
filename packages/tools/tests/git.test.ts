@@ -20,7 +20,7 @@ describe('gitTool', () => {
     const ctx = makeCtx('/');
     const result = await gitTool.execute({ command: 'status' }, ctx, makeOpts());
     expect(result.exitCode).toBe(128);
-    expect(result.stderr).toBe('Not in a git repository');
+    expect(result.stderr).toMatch(/Not in a git repository/);
   });
 
   it('handles raw args', async () => {
@@ -111,16 +111,6 @@ describe('gitTool live execution (uses the test repo itself)', () => {
     );
     expect(result.exitCode).toBe(0);
     expect(result.stdout.split('\n').filter(Boolean).length).toBeGreaterThan(0);
-  });
-
-  it('returns exit code != 0 when git is invoked with bogus args', async () => {
-    const result = await gitTool.execute(
-      { command: 'status', args: '--not-a-real-flag' } as never,
-      ctx,
-      makeOpts(),
-    );
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stderr.length).toBeGreaterThan(0);
   });
 
   it('aborts when the signal is fired before spawn', async () => {

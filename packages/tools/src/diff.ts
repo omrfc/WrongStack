@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises';
+import { statSync } from 'node:fs';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
 import type { Tool } from '@wrongstack/core';
@@ -91,12 +92,12 @@ function findGitDir(cwd: string): string | null {
   let dir = cwd;
   for (let i = 0; i < 20; i++) {
     try {
-      const stat = require('node:fs').statSync(`${dir}/.git`);
+      const stat = statSync(path.join(dir, '.git'));
       if (stat.isDirectory()) return dir;
     } catch {
       // continue
     }
-    const parent = require('node:path').dirname(dir);
+    const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }

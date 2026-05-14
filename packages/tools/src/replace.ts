@@ -11,6 +11,7 @@ import {
 } from '@wrongstack/core';
 import type { Tool, Context } from '@wrongstack/core';
 import { isBinaryBuffer, safeResolve } from './_util.js';
+import { compileUserRegex } from './_regex.js';
 
 interface ReplaceInput {
   pattern: string;
@@ -59,10 +60,17 @@ export const replaceTool: Tool<ReplaceInput, ReplaceOutput> = {
     if (input.replacement === undefined) throw new Error('replace: replacement is required');
     if (!input?.files) throw new Error('replace: files is required');
 
-    const re = new RegExp(input.pattern, 'g');
+    const replaceAll = input.replace_all ?? true;
+    // L-8 (audit) fix: when replace_all is false we previously still used the
+    // 'g' flag, so both branches replaced every occurrence. Build flags from
+    // replaceAll for correct semantics.
+    const compiled = compileUserRegex(input.pattern, replaceAll ? 'g' : '');
+    if (!compiled.ok) {
+      throw new Error(`replace: ${compiled.reason}`);
+    }
+    const re = compiled.regex;
     const globRe = input.glob ? compileGlob(input.glob) : null;
     const dryRun = input.dry_run ?? false;
-    const replaceAll = input.replace_all ?? true;
 
     const filesInput = Array.isArray(input.files) ? input.files.join(',') : input.files;
     const fileList = await resolveFiles(filesInput, ctx, globRe);
@@ -71,15 +79,36 @@ export const replaceTool: Tool<ReplaceInput, ReplaceOutput> = {
     let totalReplacements = 0;
 
     for (const absPath of fileList) {
-      const stat = await fs.stat(absPath).catch((err) => {
+      // Use lstat to detect symlinks. resolveFiles already applies
+      // safeResolve, but a symlink with a target outside the project
+      // root would still pass that string check — explicitly skip it
+      // so we never read or write through a link.
+      const lstat = await fs.lstat(absPath).catch((err) => {
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
         throw err;
       });
+      if (!lstat || !lstat.isFile()) continue;
+      if (lstat.isSymbolicLink()) continue;
+
+      // Cross-check via realpath: if the resolved target lives outside the
+      // project root (e.g. a bind mount or a parent-dir traversal we missed),
+      // skip rather than rewrite through it.
+      let realPath: string;
+      try {
+        realPath = await fs.realpath(absPath);
+      } catch {
+        continue;
+      }
+      const rel = path.relative(ctx.projectRoot, realPath);
+      if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
+
+      // Now stat the real target so we use its mode for atomicWrite.
+      const stat = await fs.stat(realPath).catch(() => null);
       if (!stat || !stat.isFile()) continue;
 
       let content: string;
       try {
-        const buf = await fs.readFile(absPath);
+        const buf = await fs.readFile(realPath);
         if (isBinaryBuffer(buf)) continue;
         content = buf.toString('utf8');
       } catch {
@@ -92,18 +121,21 @@ export const replaceTool: Tool<ReplaceInput, ReplaceOutput> = {
       const matches = [...contentLf.matchAll(re)];
       if (matches.length === 0) continue;
 
-      const newContentLf = replaceAll
-        ? contentLf.replace(re, input.replacement)
-        : contentLf.replace(re, input.replacement);
+      // The 'g' flag on `re` is set iff replaceAll, so a single replace()
+      // call covers both modes: with 'g' it replaces every match, without
+      // it replaces only the first. matchAll already returns the correct
+      // count for both modes — replaceAll=true → all matches, false → at
+      // most one — so totalReplacements is accurate either way.
+      const newContentLf = contentLf.replace(re, input.replacement);
       re.lastIndex = 0;
-
-      // Only count replacements that were actually performed.
-      const actualCount = replaceAll ? matches.length : 1;
-      totalReplacements += actualCount;
+      totalReplacements += matches.length;
 
       if (!dryRun) {
         const newContent = toStyle(newContentLf, style);
-        await atomicWrite(absPath, newContent, { mode: stat.mode & 0o777 });
+        // Write to the real path (already validated inside project root)
+        // so atomicWrite's temp-and-rename can't be redirected through a
+        // freshly-planted symlink at absPath.
+        await atomicWrite(realPath, newContent, { mode: stat.mode & 0o777 });
       }
 
       const diff = dryRun || matches.length > 0

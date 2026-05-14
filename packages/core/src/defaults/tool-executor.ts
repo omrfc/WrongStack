@@ -64,7 +64,7 @@ export class ToolExecutor {
           }
           // fall through to execute
         } else {
-          const suggestedPattern = this.subjectFor(tool.name, use.input) ?? tool.name;
+          const suggestedPattern = this.subjectFor(tool.name, use.input, tool.subjectKey) ?? tool.name;
           const pending: ToolConfirmPendingResult = { type: 'tool_confirm_pending', toolUseId: use.id, toolName: tool.name, input: use.input, suggestedPattern };
           return { result: pending, tool, durationMs: Date.now() - start };
         }
@@ -101,16 +101,39 @@ export class ToolExecutor {
       }
     };
 
+    // Run a single tool but never let an exception propagate to the
+    // gather() below — `runOne` is already try/catch-wrapped for the
+    // execution phase, but the *pre*-execution paths (permission policy,
+    // confirmAwaiter) are unguarded and an unexpected throw there would
+    // collapse Promise.all and lose every sibling's output. Wrap each
+    // call so a per-tool failure becomes a per-tool error result.
+    const safeRun = async (use: ToolUseBlock): Promise<ToolExecutionOutput> => {
+      try {
+        return await runOne(use);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const scrubbed = this.opts.secretScrubber.scrub(msg);
+        const result = {
+          type: 'tool_result' as const,
+          tool_use_id: use.id,
+          content: `Tool "${use.name}" execution failed: ${scrubbed}`,
+          is_error: true,
+        };
+        budget = this.decrementBudget(result, budget);
+        return { result, tool: this.registry.get(use.name), durationMs: 0 };
+      }
+    };
+
     if (strategy === 'sequential') {
       const outputs: ToolExecutionOutput[] = [];
       for (const use of toolUses) {
-        if (use) outputs.push(await runOne(use));
+        if (use) outputs.push(await safeRun(use));
       }
       return { outputs, remainingBudget: budget };
     }
 
     if (strategy === 'parallel') {
-      const outputs = await Promise.all(toolUses.map((use) => runOne(use)));
+      const outputs = await Promise.all(toolUses.map((use) => safeRun(use)));
       return { outputs, remainingBudget: budget };
     }
 
@@ -123,10 +146,10 @@ export class ToolExecutor {
       if (tool?.mutating) mutating.push(use);
       else nonMutating.push(use);
     }
-    const firstPass = await Promise.all(nonMutating.map((use) => runOne(use)));
+    const firstPass = await Promise.all(nonMutating.map((use) => safeRun(use)));
     const secondPass: ToolExecutionOutput[] = [];
     for (const use of mutating) {
-      secondPass.push(await runOne(use));
+      secondPass.push(await safeRun(use));
     }
     return {
       outputs: [...firstPass, ...secondPass],
@@ -265,16 +288,33 @@ export class ToolExecutor {
    * Matches the logic in DefaultPermissionPolicy so the TUI shows the
    * same subject that the trust file would use.
    */
-  private subjectFor(toolName: string, input: unknown): string | undefined {
+  private subjectFor(
+    toolName: string,
+    input: unknown,
+    subjectKey?: string,
+  ): string | undefined {
     if (!input || typeof input !== 'object') return undefined;
     const obj = input as Record<string, unknown>;
     const globChars = /[*?\[\]]/g;
     const escapeGlob = (s: string) => s.replace(globChars, (c) => `\\${c}`);
+    const normalizePath = (s: string) => escapeGlob(s.replace(/\\/g, '/'));
+
+    // Mirror DefaultPermissionPolicy.subjectFor — keep both in sync so the
+    // TUI's "suggested pattern" matches what the trust file actually uses.
+    if (subjectKey) {
+      const v = obj[subjectKey];
+      if (typeof v === 'string') {
+        return subjectKey === 'path' || subjectKey === 'file' || subjectKey === 'files'
+          ? normalizePath(v)
+          : escapeGlob(v);
+      }
+    }
+
     if (toolName === 'bash' && typeof obj.command === 'string') {
       return escapeGlob(obj.command);
     }
     if (typeof obj.path === 'string') {
-      return escapeGlob(obj.path.replace(/\\/g, '/'));
+      return normalizePath(obj.path);
     }
     if (typeof obj.url === 'string') {
       return escapeGlob(obj.url);

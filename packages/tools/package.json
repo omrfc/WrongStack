@@ -1,6 +1,6 @@
 {
   "name": "@wrongstack/tools",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "license": "MIT",
   "description": "WrongStack built-in tools: read/write/edit, bash/exec, grep/glob, git, fetch, test, lint, and more.",
   "repository": {
@@ -24,40 +24,138 @@
       "types": "./dist/builtin.d.ts",
       "import": "./dist/builtin.js"
     },
-    "./read": { "types": "./dist/read.d.ts", "import": "./dist/read.js" },
-    "./write": { "types": "./dist/write.d.ts", "import": "./dist/write.js" },
-    "./edit": { "types": "./dist/edit.d.ts", "import": "./dist/edit.js" },
-    "./replace": { "types": "./dist/replace.d.ts", "import": "./dist/replace.js" },
-    "./glob": { "types": "./dist/glob.d.ts", "import": "./dist/glob.js" },
-    "./grep": { "types": "./dist/grep.d.ts", "import": "./dist/grep.js" },
-    "./bash": { "types": "./dist/bash.d.ts", "import": "./dist/bash.js" },
-    "./exec": { "types": "./dist/exec.d.ts", "import": "./dist/exec.js" },
-    "./fetch": { "types": "./dist/fetch.d.ts", "import": "./dist/fetch.js" },
-    "./search": { "types": "./dist/search.d.ts", "import": "./dist/search.js" },
-    "./todo": { "types": "./dist/todo.d.ts", "import": "./dist/todo.js" },
-    "./git": { "types": "./dist/git.d.ts", "import": "./dist/git.js" },
-    "./patch": { "types": "./dist/patch.d.ts", "import": "./dist/patch.js" },
-    "./json": { "types": "./dist/json.d.ts", "import": "./dist/json.js" },
-    "./diff": { "types": "./dist/diff.d.ts", "import": "./dist/diff.js" },
-    "./tree": { "types": "./dist/tree.d.ts", "import": "./dist/tree.js" },
-    "./lint": { "types": "./dist/lint.d.ts", "import": "./dist/lint.js" },
-    "./format": { "types": "./dist/format.d.ts", "import": "./dist/format.js" },
-    "./typecheck": { "types": "./dist/typecheck.d.ts", "import": "./dist/typecheck.js" },
-    "./test": { "types": "./dist/test.d.ts", "import": "./dist/test.js" },
-    "./install": { "types": "./dist/install.d.ts", "import": "./dist/install.js" },
-    "./audit": { "types": "./dist/audit.d.ts", "import": "./dist/audit.js" },
-    "./outdated": { "types": "./dist/outdated.d.ts", "import": "./dist/outdated.js" },
-    "./logs": { "types": "./dist/logs.d.ts", "import": "./dist/logs.js" },
-    "./document": { "types": "./dist/document.d.ts", "import": "./dist/document.js" },
-    "./scaffold": { "types": "./dist/scaffold.d.ts", "import": "./dist/scaffold.js" },
-    "./tool-search": { "types": "./dist/tool-search.d.ts", "import": "./dist/tool-search.js" },
-    "./tool-use": { "types": "./dist/tool-use.d.ts", "import": "./dist/tool-use.js" },
-    "./batch-tool-use": { "types": "./dist/batch-tool-use.d.ts", "import": "./dist/batch-tool-use.js" },
-    "./tool-help": { "types": "./dist/tool-help.d.ts", "import": "./dist/tool-help.js" },
-    "./memory": { "types": "./dist/memory.d.ts", "import": "./dist/memory.js" },
-    "./mode": { "types": "./dist/mode.d.ts", "import": "./dist/mode.js" }
+    "./read": {
+      "types": "./dist/read.d.ts",
+      "import": "./dist/read.js"
+    },
+    "./write": {
+      "types": "./dist/write.d.ts",
+      "import": "./dist/write.js"
+    },
+    "./edit": {
+      "types": "./dist/edit.d.ts",
+      "import": "./dist/edit.js"
+    },
+    "./replace": {
+      "types": "./dist/replace.d.ts",
+      "import": "./dist/replace.js"
+    },
+    "./glob": {
+      "types": "./dist/glob.d.ts",
+      "import": "./dist/glob.js"
+    },
+    "./grep": {
+      "types": "./dist/grep.d.ts",
+      "import": "./dist/grep.js"
+    },
+    "./bash": {
+      "types": "./dist/bash.d.ts",
+      "import": "./dist/bash.js"
+    },
+    "./exec": {
+      "types": "./dist/exec.d.ts",
+      "import": "./dist/exec.js"
+    },
+    "./fetch": {
+      "types": "./dist/fetch.d.ts",
+      "import": "./dist/fetch.js"
+    },
+    "./search": {
+      "types": "./dist/search.d.ts",
+      "import": "./dist/search.js"
+    },
+    "./todo": {
+      "types": "./dist/todo.d.ts",
+      "import": "./dist/todo.js"
+    },
+    "./git": {
+      "types": "./dist/git.d.ts",
+      "import": "./dist/git.js"
+    },
+    "./patch": {
+      "types": "./dist/patch.d.ts",
+      "import": "./dist/patch.js"
+    },
+    "./json": {
+      "types": "./dist/json.d.ts",
+      "import": "./dist/json.js"
+    },
+    "./diff": {
+      "types": "./dist/diff.d.ts",
+      "import": "./dist/diff.js"
+    },
+    "./tree": {
+      "types": "./dist/tree.d.ts",
+      "import": "./dist/tree.js"
+    },
+    "./lint": {
+      "types": "./dist/lint.d.ts",
+      "import": "./dist/lint.js"
+    },
+    "./format": {
+      "types": "./dist/format.d.ts",
+      "import": "./dist/format.js"
+    },
+    "./typecheck": {
+      "types": "./dist/typecheck.d.ts",
+      "import": "./dist/typecheck.js"
+    },
+    "./test": {
+      "types": "./dist/test.d.ts",
+      "import": "./dist/test.js"
+    },
+    "./install": {
+      "types": "./dist/install.d.ts",
+      "import": "./dist/install.js"
+    },
+    "./audit": {
+      "types": "./dist/audit.d.ts",
+      "import": "./dist/audit.js"
+    },
+    "./outdated": {
+      "types": "./dist/outdated.d.ts",
+      "import": "./dist/outdated.js"
+    },
+    "./logs": {
+      "types": "./dist/logs.d.ts",
+      "import": "./dist/logs.js"
+    },
+    "./document": {
+      "types": "./dist/document.d.ts",
+      "import": "./dist/document.js"
+    },
+    "./scaffold": {
+      "types": "./dist/scaffold.d.ts",
+      "import": "./dist/scaffold.js"
+    },
+    "./tool-search": {
+      "types": "./dist/tool-search.d.ts",
+      "import": "./dist/tool-search.js"
+    },
+    "./tool-use": {
+      "types": "./dist/tool-use.d.ts",
+      "import": "./dist/tool-use.js"
+    },
+    "./batch-tool-use": {
+      "types": "./dist/batch-tool-use.d.ts",
+      "import": "./dist/batch-tool-use.js"
+    },
+    "./tool-help": {
+      "types": "./dist/tool-help.d.ts",
+      "import": "./dist/tool-help.js"
+    },
+    "./memory": {
+      "types": "./dist/memory.d.ts",
+      "import": "./dist/memory.js"
+    },
+    "./mode": {
+      "types": "./dist/mode.d.ts",
+      "import": "./dist/mode.js"
+    }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
@@ -68,7 +166,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.19.19",
-    "tsup": "^8.3.5",
-    "typescript": "^5.7.2"
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
   }
 }

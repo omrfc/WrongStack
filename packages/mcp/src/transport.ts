@@ -83,7 +83,12 @@ export class SSETransport {
   private headers: Record<string, string>;
   private timeout: number;
   private nextId = 1;
-  private pending = new Map<number, (res: JsonRpcResult) => void>();
+  // NOTE: id-correlation via this map was scaffolded but never populated by
+  // `httpPost` — JSON-RPC responses come back synchronously over HTTP, not
+  // via the SSE stream. Keep the field reserved for future bidirectional-
+  // streaming support; do not wire callsites to it without first deciding
+  // who is responsible for clearing it on transport teardown.
+  private readonly _reservedPending = new Map<number, (res: JsonRpcResult) => void>();
   private tools: MCPTool[] = [];
   private abortController?: AbortController;
   private reader?: globalThis.ReadableStreamDefaultReader<string>;
@@ -158,13 +163,9 @@ export class SSETransport {
       this.readLoopAbort = new AbortController();
 
       sseReader.onMessage((msg) => {
-        if (msg.id !== undefined) {
-          const resolve = this.pending.get(msg.id);
-          if (resolve) {
-            this.pending.delete(msg.id);
-            resolve({ jsonrpc: '2.0', id: msg.id, result: msg.params });
-          }
-        }
+        // Future: if the spec evolves to send JSON-RPC responses over SSE
+        // (rather than as HTTP POST replies), wire id-correlation here via
+        // `_reservedPending`. Today httpPost owns response routing.
         // Server-initiated notifications (no id). Handle list_changed for L2-C.
         if (msg.method && !msg.id) {
           if (msg.method === 'notifications/tools/list_changed') {
@@ -184,7 +185,7 @@ export class SSETransport {
       const initRes = await this.httpPost('initialize', {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
-        clientInfo: { name: 'wrongstack', version: '0.1.4' },
+        clientInfo: { name: 'wrongstack', version: '0.1.5' },
       });
 
       if (initRes.error) {
@@ -265,12 +266,25 @@ export class SSETransport {
     });
 
     if (!res.ok) {
-      throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      // Cap the body — a misbehaving server could return megabytes of
+      // HTML and that's not useful in an error message anyway.
+      const body = await res.text();
+      const cap = 1024;
+      const snippet = body.length > cap ? `${body.slice(0, cap)}… [${body.length} bytes total]` : body;
+      throw new Error(`HTTP ${res.status}: ${snippet}`);
     }
 
-    const data = await res.json();
+    let data: unknown;
+    try {
+      data = await res.json();
+    } catch (err) {
+      throw new Error(
+        `Invalid JSON-RPC response: ${err instanceof Error ? err.message : 'parse failed'}`,
+        { cause: err },
+      );
+    }
     if (!isJsonRpcResult(data)) {
-      throw new Error('Invalid JSON-RPC response');
+      throw new Error('Invalid JSON-RPC response: not a JSON-RPC envelope');
     }
     return data;
   }
@@ -380,7 +394,7 @@ export class StreamableHTTPTransport {
           params: {
             protocolVersion: '2024-11-05',
             capabilities: { tools: {} },
-            clientInfo: { name: 'wrongstack', version: '0.1.4' },
+            clientInfo: { name: 'wrongstack', version: '0.1.5' },
           },
         }),
         signal,

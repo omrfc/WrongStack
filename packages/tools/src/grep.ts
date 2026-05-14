@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import type { Tool, ToolStreamEvent } from '@wrongstack/core';
 import { compileGlob } from '@wrongstack/core';
 import { isBinaryBuffer, safeResolve } from './_util.js';
+import { compileUserRegex, capSubject } from './_regex.js';
 
 interface GrepInput {
   pattern: string;
@@ -110,6 +111,12 @@ async function* runRgStream(
   let totalLines = 0;
   let batchSinceFlush = 0;
   const FLUSH_AT = 16; // yield a partial_output every 16 matches
+  // Cap on the in-progress line buffer. Without this, a single huge "line"
+  // (e.g. a file with no newlines under a symlink) plus a fast producer
+  // would let `buf` grow unbounded. 1 MB comfortably holds any realistic
+  // grep hit; beyond that we kill the child and surface a truncation.
+  const MAX_BUF_BYTES = 1_000_000;
+  let bufOverflow = false;
 
   const child = spawn('rg', args, { signal, stdio: ['ignore', 'pipe', 'pipe'] });
 
@@ -151,6 +158,14 @@ async function* runRgStream(
     }
     if (c.kind === 'close') break;
     buf += c.data;
+    // Guard against a pathological producer (e.g. matching a huge binary
+    // without newlines) pinning memory. Kill the child and mark the result
+    // truncated; whatever we already captured stays intact.
+    if (buf.length > MAX_BUF_BYTES && !bufOverflow) {
+      bufOverflow = true;
+      buf = buf.slice(-MAX_BUF_BYTES);
+      try { child.kill('SIGTERM'); } catch { /* ignore */ }
+    }
     const idx = buf.lastIndexOf('\n');
     if (idx === -1) continue;
     const ready = buf.slice(0, idx);
@@ -199,7 +214,7 @@ async function* runRgStream(
     output: {
       matches,
       count: totalLines,
-      truncated: totalLines > limit,
+      truncated: totalLines > limit || bufOverflow,
       used: 'rg',
     },
   };
@@ -213,7 +228,11 @@ async function runNative(
   signal: AbortSignal,
 ): Promise<GrepOutput> {
   const flags = input.case_insensitive ? 'i' : '';
-  const re = new RegExp(input.pattern, flags);
+  const compiled = compileUserRegex(input.pattern, flags);
+  if (!compiled.ok) {
+    throw new Error(`grep: ${compiled.reason}`);
+  }
+  const re = compiled.regex;
   const globRe = input.glob ? compileGlob(input.glob) : null;
   const matches: string[] = [];
   const fileMatches = new Map<string, number>();
@@ -231,6 +250,11 @@ async function runNative(
     for (const e of entries) {
       if (stopped) return;
       if (DEFAULT_IGNORE.includes(e.name)) continue;
+      // Skip symlinks entirely. fs.Dirent.isDirectory/isFile return the
+      // symlink's TYPE without resolving, but following the link into
+      // arbitrary places (e.g. ~/.ssh) is the security concern. Tools
+      // that genuinely need to traverse symlinks should opt in explicitly.
+      if (e.isSymbolicLink()) continue;
       const full = path.join(dir, e.name);
       if (e.isDirectory()) {
         await walk(full);
@@ -246,7 +270,7 @@ async function runNative(
           const lines = text.split(/\r?\n/);
           let fileHits = 0;
           for (let i = 0; i < lines.length; i++) {
-            const ln = lines[i] ?? '';
+            const ln = capSubject(lines[i] ?? '');
             re.lastIndex = 0;
             if (re.test(ln)) {
               fileHits++;

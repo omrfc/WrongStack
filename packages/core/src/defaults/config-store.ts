@@ -50,7 +50,15 @@ export class DefaultConfigStore implements ConfigStore {
     // see the new state. Watcher exceptions are caught individually so one
     // misbehaving subscriber can't block the others.
     for (const w of this.watchers) {
-      try { w(next, prev); } catch { /* ignore */ }
+      try {
+        w(next, prev);
+      } catch (err) {
+        // A plugin watcher that crashes on /model switch or similar would
+        // otherwise leave the system in a quietly-inconsistent state. We
+        // still don't propagate (one bad subscriber must not break the
+        // others), but we surface the error so it's discoverable.
+        console.error('[config-store] watcher threw:', err);
+      }
     }
     return next;
   }

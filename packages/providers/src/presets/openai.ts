@@ -5,6 +5,7 @@
  */
 import type { Request, StreamEvent, StopReason, Usage } from '@wrongstack/core';
 import { safeParse } from '@wrongstack/core';
+import { parseToolInput } from '../_tool-input.js';
 import { messagesToOpenAI, toolsToOpenAI } from '../tool-format/to-openai.js';
 import { normalizeOpenAI } from '../stop-reason.js';
 import { defineWireFormat } from '../wire-format.js';
@@ -154,9 +155,7 @@ export const openaiWireFormat = defineWireFormat<OpenAIStreamState>({
     state.finalEmitted = true;
     const out: StreamEvent[] = [];
     for (const entry of state.toolByIndex.values()) {
-      const input = entry.argBuf
-        ? (safeParse<unknown>(entry.argBuf).value ?? { _raw: entry.argBuf })
-        : {};
+      const input = parseToolInput(entry.argBuf);
       out.push({ type: 'tool_use_stop', id: entry.id, input });
     }
     if (state.started) {

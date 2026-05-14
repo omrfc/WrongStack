@@ -75,12 +75,29 @@ export async function runProviderWithRetry(opts: RunProviderOptions): Promise<Re
         });
       }
       await new Promise<void>((resolve, reject) => {
-        const t = setTimeout(resolve, delay);
-        const onAbort = () => {
+        // The previous version only removed the abort listener if it fired
+        // (via { once: true }). On the timeout-resolves path the listener
+        // stayed attached to the long-lived parent signal, accumulating one
+        // per retry attempt across many requests.
+        let settled = false;
+        const cleanup = () => {
+          if (settled) return;
+          settled = true;
           clearTimeout(t);
+          signal.removeEventListener('abort', onAbort);
+        };
+        const onAbort = () => {
+          cleanup();
           reject(new Error('aborted'));
         };
-        if (signal.aborted) onAbort();
+        const t = setTimeout(() => {
+          cleanup();
+          resolve();
+        }, delay);
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
         signal.addEventListener('abort', onAbort, { once: true });
       });
       attempt++;

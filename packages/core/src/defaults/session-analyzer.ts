@@ -49,23 +49,74 @@ export class SessionAnalyzer {
     const toolUsageCount: Record<string, number> = {};
     const errors: SessionError[] = [];
     const modeChanges: ModeChange[] = [];
+    const tasksById = new Map<string, TaskSummary>();
+    let sessionId = '';
 
     for (const event of events) {
+      // sessionId comes from session_start / session_resumed.
+      if (event.type === 'session_start' || event.type === 'session_resumed') {
+        if (!sessionId) sessionId = event.id;
+      }
       if (event.type === 'tool_use') {
         toolUsageCount[event.name] = (toolUsageCount[event.name] ?? 0) + 1;
       }
       if (event.type === 'error') {
         errors.push({ ts: event.ts, phase: event.phase, message: event.message });
       }
+      if (event.type === 'mode_changed') {
+        modeChanges.push({ ts: event.ts, from: event.from, to: event.to });
+      }
+      if (event.type === 'task_created') {
+        tasksById.set(event.taskId, {
+          taskId: event.taskId,
+          title: event.title,
+          status: 'created',
+          createdAt: event.ts,
+        });
+      }
+      if (event.type === 'task_updated') {
+        const t = tasksById.get(event.taskId);
+        if (t) t.status = event.status;
+      }
+      if (event.type === 'task_completed') {
+        const t = tasksById.get(event.taskId);
+        if (t) {
+          t.status = 'completed';
+          t.completedAt = event.ts;
+        } else {
+          tasksById.set(event.taskId, {
+            taskId: event.taskId,
+            title: event.title,
+            status: 'completed',
+            createdAt: event.ts,
+            completedAt: event.ts,
+          });
+        }
+      }
+      if (event.type === 'task_failed') {
+        const t = tasksById.get(event.taskId);
+        if (t) {
+          t.status = 'failed';
+          t.completedAt = event.ts;
+        } else {
+          tasksById.set(event.taskId, {
+            taskId: event.taskId,
+            title: event.title,
+            status: 'failed',
+            createdAt: event.ts,
+            completedAt: event.ts,
+          });
+        }
+      }
     }
 
     return {
-      sessionId: '',
+      sessionId,
       totalDuration: this.calcDuration(events),
       toolUsageCount,
       errorCount: errors.length,
       modeChanges,
-      tasks: [],
+      tasks: Array.from(tasksById.values()),
     };
   }
 

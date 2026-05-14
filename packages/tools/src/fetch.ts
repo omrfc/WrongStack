@@ -1,4 +1,5 @@
 import * as dns from 'node:dns/promises';
+import * as net from 'node:net';
 import type { Tool, ToolStreamEvent } from '@wrongstack/core';
 import { truncateMiddle } from './_util.js';
 
@@ -17,18 +18,6 @@ interface FetchOutput {
 const MAX_BYTES = 131_072;
 const TIMEOUT_MS = 20_000;
 
-const PRIVATE_RANGES = [
-  /^10\./,
-  /^192\.168\./,
-  /^172\.(1[6-9]|2[0-9]|3[01])\./,
-  /^127\./,
-  /^0\./,
-  /^169\.254\./,
-  /^::1$/,
-  /^fc/i,
-  /^fe80:/i,
-];
-
 const ALLOW_PRIVATE = process.env['WRONGSTACK_FETCH_ALLOW_PRIVATE'] === '1';
 
 async function fetchWithRedirectLimit(
@@ -43,6 +32,17 @@ async function fetchWithRedirectLimit(
   let redirectCount = 0;
   let currentUrl = url;
   for (;;) {
+    // Re-validate every hop. A public host can 302 to 169.254.169.254 (cloud metadata),
+    // or DNS can rebind between hops; checking only the initial URL is insufficient.
+    const parsed = new URL(currentUrl);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new Error(`fetch: redirect to unsupported protocol "${parsed.protocol}"`);
+    }
+    if (parsed.protocol === 'http:' && !ALLOW_PRIVATE) {
+      throw new Error('fetch: redirect to http:// blocked (HTTPS required by default)');
+    }
+    await assertNotPrivate(parsed.hostname);
+
     const res = await fetch(currentUrl, {
       redirect: 'manual',
       signal,
@@ -70,6 +70,11 @@ export const fetchTool: Tool<FetchInput, FetchOutput> = {
     'HTTPS only by default. Localhost and RFC1918 ranges blocked unless WRONGSTACK_FETCH_ALLOW_PRIVATE=1. Max 5 redirects, 20s timeout, 128KB cap.',
   permission: 'confirm',
   mutating: false,
+  // Trust rules for fetch match on the literal URL — declare it explicitly
+  // so a user can trust `https://api.example.com/*` without accidentally
+  // matching that pattern on any other tool that happens to have a `url`
+  // input field.
+  subjectKey: 'url',
   timeoutMs: TIMEOUT_MS,
   maxOutputBytes: MAX_BYTES,
   inputSchema: {
@@ -169,37 +174,151 @@ export const fetchTool: Tool<FetchInput, FetchOutput> = {
 
 async function assertNotPrivate(hostname: string): Promise<void> {
   if (ALLOW_PRIVATE) return;
-  if (PRIVATE_RANGES.some((r) => r.test(hostname))) {
-    throw new Error(`fetch: blocked private/loopback address "${hostname}"`);
-  }
-  if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+
+  const host = hostname.startsWith('[') && hostname.endsWith(']')
+    ? hostname.slice(1, -1)
+    : hostname;
+
+  if (host === 'localhost' || host.endsWith('.localhost')) {
     throw new Error('fetch: blocked localhost target');
   }
-  try {
-    const records = await dns.lookup(hostname, { all: true });
-    for (const r of records) {
-      if (PRIVATE_RANGES.some((re) => re.test(r.address))) {
-        throw new Error(`fetch: resolved to private address ${r.address}`);
-      }
+
+  const ipVersion = net.isIP(host);
+  if (ipVersion === 4) {
+    if (isPrivateIPv4(host)) {
+      throw new Error(`fetch: blocked private/loopback address "${host}"`);
     }
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith('fetch:')) throw err;
-    // DNS failure — let fetch handle it
+  } else if (ipVersion === 6) {
+    if (isPrivateIPv6(host)) {
+      throw new Error(`fetch: blocked private/loopback address "${host}"`);
+    }
+  } else {
+    // Hostname — resolve and check every record. Best-effort against DNS
+    // rebinding; the actual fetch() does its own lookup. Strong protection
+    // would require pinning the resolved IP via a custom undici Agent.
+    try {
+      const records = await dns.lookup(host, { all: true });
+      for (const r of records) {
+        const bad = r.family === 4 ? isPrivateIPv4(r.address) : isPrivateIPv6(r.address);
+        if (bad) {
+          throw new Error(`fetch: resolved to private address ${r.address}`);
+        }
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('fetch:')) throw err;
+      // DNS failure — let fetch handle it
+    }
   }
+}
+
+function isPrivateIPv4(addr: string): boolean {
+  // net.isIP rejects octal/hex/decimal forms, so when isIP(addr) === 4 we
+  // know it's canonical dotted-quad and safe to parse this way.
+  const parts = addr.split('.').map((p) => parseInt(p, 10));
+  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n) || n < 0 || n > 255)) {
+    return true; // defensive
+  }
+  const [a, b, c] = parts as [number, number, number, number];
+  if (a === 0) return true;                       // 0.0.0.0/8
+  if (a === 10) return true;                      // 10.0.0.0/8
+  if (a === 127) return true;                     // 127.0.0.0/8 loopback
+  if (a === 169 && b === 254) return true;        // 169.254.0.0/16 link-local + AWS/GCE/Azure IMDS
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+  if (a === 192 && b === 168) return true;        // 192.168.0.0/16
+  if (a === 192 && b === 0 && c === 0) return true; // 192.0.0.0/24 reserved
+  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 CGNAT
+  if (a >= 224) return true;                      // 224.0.0.0/4 multicast + 240.0.0.0/4 reserved
+  return false;
+}
+
+function isPrivateIPv6(addr: string): boolean {
+  const lower = addr.toLowerCase();
+  if (lower === '::' || lower === '::1') return true;
+  // Convert to 8-group canonical form (16 hex words) so range checks
+  // don't have to handle every shortening notation. Returns null on
+  // anything we can't normalize; we conservatively return true in that
+  // case so a parser surprise blocks rather than leaks.
+  const groups = expandIPv6(lower);
+  if (!groups) return true;
+  // IPv4-mapped: ::ffff:0:0/96 → groups[0..5] all 0, groups[6..7] hold the
+  // embedded IPv4 as two 16-bit words. Node URL normalizes the dotted form
+  // to this representation (e.g. ::ffff:127.0.0.1 → ::ffff:7f00:1).
+  if (
+    groups[0] === 0 && groups[1] === 0 && groups[2] === 0 &&
+    groups[3] === 0 && groups[4] === 0 && groups[5] === 0xffff
+  ) {
+    const a = (groups[6] ?? 0) >> 8;
+    const b = (groups[6] ?? 0) & 0xff;
+    const c = (groups[7] ?? 0) >> 8;
+    const d = (groups[7] ?? 0) & 0xff;
+    return isPrivateIPv4(`${a}.${b}.${c}.${d}`);
+  }
+  const high = groups[0] ?? 0;
+  if ((high & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local (fc..fd)
+  if ((high & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
+  if ((high & 0xff00) === 0xff00) return true; // ff00::/8 multicast
+  return false;
+}
+
+/**
+ * Expand an IPv6 string into exactly 8 16-bit numbers. Handles `::`
+ * compression. Returns null on malformed input — caller should treat that
+ * as "block".
+ */
+function expandIPv6(addr: string): number[] | null {
+  const parts = addr.split('::');
+  if (parts.length > 2) return null;
+  const parseGroups = (s: string): number[] | null => {
+    if (s === '') return [];
+    const out: number[] = [];
+    for (const g of s.split(':')) {
+      if (g.length === 0 || g.length > 4) return null;
+      const n = parseInt(g, 16);
+      if (Number.isNaN(n) || n < 0 || n > 0xffff) return null;
+      out.push(n);
+    }
+    return out;
+  };
+  if (parts.length === 1) {
+    const groups = parseGroups(parts[0] ?? '');
+    if (!groups || groups.length !== 8) return null;
+    return groups;
+  }
+  const head = parseGroups(parts[0] ?? '');
+  const tail = parseGroups(parts[1] ?? '');
+  if (!head || !tail) return null;
+  const fill = 8 - head.length - tail.length;
+  if (fill < 0) return null;
+  return [...head, ...new Array<number>(fill).fill(0), ...tail];
 }
 
 function combineSignals(...sigs: AbortSignal[]): AbortSignal {
   if (typeof (AbortSignal as { any?: unknown }).any === 'function') {
     return (AbortSignal as { any: (s: AbortSignal[]) => AbortSignal }).any(sigs);
   }
+  // Fallback for older runtimes. We register listeners on the parent signals
+  // and clean them up once any of them fires (or once ctrl itself aborts) to
+  // avoid accumulating handlers on long-lived signals across many fetches.
   const ctrl = new AbortController();
+  const cleanups: Array<() => void> = [];
+  const detach = () => {
+    for (const fn of cleanups) fn();
+    cleanups.length = 0;
+  };
   for (const s of sigs) {
     if (s.aborted) {
+      detach();
       ctrl.abort(s.reason);
-      break;
+      return ctrl.signal;
     }
-    s.addEventListener('abort', () => ctrl.abort(s.reason), { once: true });
+    const onAbort = () => {
+      detach();
+      ctrl.abort(s.reason);
+    };
+    s.addEventListener('abort', onAbort, { once: true });
+    cleanups.push(() => s.removeEventListener('abort', onAbort));
   }
+  ctrl.signal.addEventListener('abort', detach, { once: true });
   return ctrl.signal;
 }
 

@@ -63,9 +63,18 @@ export class DefaultPathResolver implements PathResolver {
   ensureInsideRoot(absPath: string): string {
     const resolved = this.resolve(absPath);
     if (!this.isInsideRoot(resolved)) {
-      throw new Error(
-        `Path "${absPath}" resolves outside the project root (${this.projectRoot})`,
-      );
+      // Render the input as a project-relative-looking string when possible
+      // so the error message can flow through telemetry / LLM transcripts
+      // without leaking the absolute project root layout.
+      const display = path.isAbsolute(absPath)
+        ? path.basename(absPath)
+        : absPath;
+      const err = new Error(`Path "${display}" resolves outside the project root`);
+      // Keep the full information available to programmatic callers; only
+      // the user-facing `message` is sanitized.
+      (err as Error & { fullPath?: string; projectRoot?: string }).fullPath = absPath;
+      (err as Error & { fullPath?: string; projectRoot?: string }).projectRoot = this.projectRoot;
+      throw err;
     }
     return resolved;
   }

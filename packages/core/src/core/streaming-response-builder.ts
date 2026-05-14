@@ -176,13 +176,28 @@ export async function streamProviderToResponse(
     }
   } catch (err) {
     if (signal.aborted) {
-      state.stopReason = 'max_tokens';
+      // Preserve partial state so the agent can persist what was already
+      // streamed before honoring the abort. The agent's outer loop checks
+      // `controller.signal.aborted` after consuming this response and
+      // returns `status: 'aborted'` with the finalText we built here.
+      //
+      // The stop reason `end_turn` is the most accurate of the available
+      // StopReason values — the stream simply ended early, it was NOT a
+      // token-budget hit (the previous code mis-attributed this as
+      // `max_tokens`, which corrupted telemetry and broke retry logic
+      // that branches on max_tokens specifically).
+      state.stopReason = 'end_turn';
       return buildResponse(state);
     }
     throw err;
   } finally {
     try {
-      await iter.return?.();
+      // Race the drain against a short deadline so a non-cooperative
+      // provider stream can't pin shutdown.
+      await Promise.race([
+        Promise.resolve(iter.return?.()),
+        new Promise<void>((resolve) => setTimeout(resolve, 500)),
+      ]);
     } catch {
       // best-effort
     }

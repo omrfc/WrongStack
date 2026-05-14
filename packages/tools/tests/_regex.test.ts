@@ -1,0 +1,60 @@
+import { describe, it, expect } from 'vitest';
+import { compileUserRegex, capSubject, MAX_SUBJECT_LEN } from '../src/_regex.js';
+
+describe('compileUserRegex (ReDoS guard for grep/replace/logs)', () => {
+  it('compiles a simple pattern', () => {
+    const r = compileUserRegex('foo', '');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.regex.test('foobar')).toBe(true);
+  });
+
+  it('rejects empty patterns', () => {
+    const r = compileUserRegex('', '');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/empty/);
+  });
+
+  it('rejects patterns above the length cap', () => {
+    const huge = 'a'.repeat(513);
+    const r = compileUserRegex(huge, '');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/exceeds/);
+  });
+
+  it('rejects classic catastrophic-backtracking pattern (a+)+', () => {
+    const r = compileUserRegex('(a+)+', '');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/backtracking|nested/i);
+  });
+
+  it('rejects nested non-capturing super-linear pattern', () => {
+    const r = compileUserRegex('(?:x+)*', '');
+    expect(r.ok).toBe(false);
+  });
+
+  it('returns a useful reason on invalid regex syntax', () => {
+    const r = compileUserRegex('(unbalanced', '');
+    expect(r.ok).toBe(false);
+  });
+
+  it('honors flags', () => {
+    const r = compileUserRegex('foo', 'i');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.regex.test('FOO')).toBe(true);
+      expect(r.regex.flags).toContain('i');
+    }
+  });
+});
+
+describe('capSubject', () => {
+  it('passes through short lines unchanged', () => {
+    expect(capSubject('hello')).toBe('hello');
+  });
+
+  it('caps oversized lines at MAX_SUBJECT_LEN', () => {
+    const huge = 'a'.repeat(MAX_SUBJECT_LEN + 100);
+    const capped = capSubject(huge);
+    expect(capped.length).toBe(MAX_SUBJECT_LEN);
+  });
+});

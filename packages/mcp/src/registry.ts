@@ -17,6 +17,15 @@ interface ServerSlot {
    * `failed` until a manual `restart()` resets it.
    */
   reconnectCycles: number;
+  /**
+   * Slot-scoped, bound disconnect callback. Stored so the matching
+   * `removeDisconnectListener` call can hand back the *same* reference —
+   * a fresh arrow `() => onTransportDisconnect(slot.cfg.name)` would
+   * not match the one we added and the set-based listener registry
+   * would silently keep the old handler, causing duplicate reconnect
+   * cycles after a few transport flaps.
+   */
+  onDisconnect?: () => void;
 }
 
 export interface MCPRegistryOptions {
@@ -57,10 +66,12 @@ export class MCPRegistry {
     slot.reconnectPending = false;
     if (slot.client) {
       slot.client.removeExitListener(this.onChildExit);
-      slot.client.removeDisconnectListener(() => this.onTransportDisconnect(slot.cfg.name));
+      if (slot.onDisconnect) slot.client.removeDisconnectListener(slot.onDisconnect);
       slot.client.removeToolsChangedListener(this.onToolsChanged);
       await slot.client.close();
+      slot.client = undefined;
     }
+    slot.onDisconnect = undefined;
     for (const t of slot.toolNames) this.toolRegistry.unregister(t);
     slot.toolNames = [];
     slot.state = 'disconnected';
@@ -213,6 +224,7 @@ export class MCPRegistry {
       slot.state = attempt === 1 ? 'connecting' : 'reconnecting';
       slot.attempts = attempt;
       let client: MCPClient | undefined;
+      let boundDisconnect: (() => void) | undefined;
       try {
         client = new MCPClient({
           name: slot.cfg.name,
@@ -227,13 +239,28 @@ export class MCPRegistry {
         if (slot.cfg.transport === 'stdio') {
           client.addExitListener(this.onChildExit);
         } else {
-          // SSE / streamable-http — wire transport disconnect to registry reconnect
-          client.addDisconnectListener(() => this.onTransportDisconnect(slot.cfg.name));
+          // SSE / streamable-http — wire transport disconnect to registry reconnect.
+          // Capture the bound function so we can hand the same reference to
+          // removeDisconnectListener on cleanup paths.
+          boundDisconnect = () => this.onTransportDisconnect(slot.cfg.name);
+          client.addDisconnectListener(boundDisconnect);
         }
         // L2-C: react to server-side tool changes by re-registering wrappers.
         client.addToolsChangedListener(this.onToolsChanged);
         await client.connect();
+        // Close any prior client before swapping refs so the old transport
+        // can release its abort controller, child process, and listeners
+        // instead of being held until GC.
+        if (slot.client && slot.client !== client) {
+          const prior = slot.client;
+          const priorDisconnect = slot.onDisconnect;
+          slot.client.removeExitListener(this.onChildExit);
+          if (priorDisconnect) prior.removeDisconnectListener(priorDisconnect);
+          prior.removeToolsChangedListener(this.onToolsChanged);
+          prior.close().catch(() => { /* best-effort */ });
+        }
         slot.client = client;
+        slot.onDisconnect = boundDisconnect;
         const isReconnect = attempt > 1;
         slot.state = 'connected';
         // L2-B: a healthy connect resets the cycle counter so future
@@ -267,7 +294,7 @@ export class MCPRegistry {
         this.log.warn(`MCP server "${slot.cfg.name}" connect attempt ${attempt} failed`, err);
         if (client) {
           client.removeExitListener(this.onChildExit);
-          client.removeDisconnectListener(() => this.onTransportDisconnect(slot.cfg.name));
+          if (boundDisconnect) client.removeDisconnectListener(boundDisconnect);
           client.removeToolsChangedListener(this.onToolsChanged);
           await client.close().catch(() => {/* ignore */});
         }

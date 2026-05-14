@@ -82,6 +82,11 @@ export class MultiAgentHost {
         systemPrompt: baseSystem,
         provider,
         session: subSession,
+        // Placeholder — Agent.run() overwrites ctx.signal with the live
+        // per-run signal (see core/agent.ts run()). Tools/middleware that
+        // read ctx.signal after construction will see the runtime signal,
+        // not this one. Kept as `new AbortController().signal` so the
+        // initial value is non-null/non-aborted.
         signal: new AbortController().signal,
         tokenCounter: this.deps.tokenCounter,
         cwd: this.deps.cwd,

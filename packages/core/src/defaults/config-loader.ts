@@ -65,11 +65,17 @@ function isPrimitiveArray(a: unknown[]): boolean {
   return a.every((v) => v === null || typeof v !== 'object');
 }
 
+const FORBIDDEN_PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 function deepMerge<T>(base: T, patch: Partial<T>): T {
   if (typeof base !== 'object' || base === null) return (patch as T) ?? base;
   if (typeof patch !== 'object' || patch === null) return base;
   const out: Record<string, unknown> = { ...(base as Record<string, unknown>) };
   for (const [k, v] of Object.entries(patch as Record<string, unknown>)) {
+    // Defense in depth — user config is parsed from JSON and merged
+    // recursively; blocking these keys eliminates prototype-pollution
+    // gadgets regardless of where else they might be touched.
+    if (FORBIDDEN_PROTO_KEYS.has(k)) continue;
     const existing = out[k];
     // Primitive arrays (plugins, tools, etc.) are merged by concatenation.
     // Object arrays (MCP servers, etc.) are replaced wholesale.
@@ -192,8 +198,20 @@ export class DefaultConfigLoader implements ConfigLoader {
     if (cfg.providers) {
       for (const pcfg of Object.values(cfg.providers)) {
         if (!pcfg || typeof pcfg !== 'object') continue;
-        const keys = (pcfg as { apiKeys?: Array<{ label: string; apiKey: string }> }).apiKeys;
-        if (!Array.isArray(keys) || keys.length === 0) continue;
+        const rawKeys = (pcfg as { apiKeys?: unknown }).apiKeys;
+        if (!Array.isArray(rawKeys) || rawKeys.length === 0) continue;
+        // Each apiKeys entry came from arbitrary JSON. Filter to entries
+        // that actually have a string apiKey + label so a malformed array
+        // (null entry, missing field) doesn't crash the .find / chosen.apiKey
+        // path below.
+        const keys = rawKeys.filter(
+          (k): k is { label: string; apiKey: string } =>
+            !!k &&
+            typeof k === 'object' &&
+            typeof (k as { label?: unknown }).label === 'string' &&
+            typeof (k as { apiKey?: unknown }).apiKey === 'string',
+        );
+        if (keys.length === 0) continue;
         const existing = (pcfg as { apiKey?: string }).apiKey;
         if (existing && existing.length > 0) continue;
         const activeLabel = (pcfg as { activeKey?: string }).activeKey;
@@ -207,19 +225,40 @@ export class DefaultConfigLoader implements ConfigLoader {
     }
 
     this.validateBehavior(cfg);
-    if (this.strict) this.validateIdentity(cfg);
+    if (this.strict) {
+      this.validateIdentity(cfg);
+    }
+    // In strict mode, validateIdentity has confirmed provider/model are set;
+    // it's safe to assert the full Config contract. In non-strict mode the
+    // caller (e.g. early-boot wizard) accepts a Partial and constructs the
+    // provider later, so we deliberately return without the cast.
     return Object.freeze(cfg) as Config;
   }
 
   private async readJson(file: string): Promise<PartialConfig> {
+    let raw: string;
     try {
-      const raw = await fs.readFile(file, 'utf8');
-      const parsed = safeParse<PartialConfig>(raw);
-      if (parsed.ok && parsed.value) return parsed.value;
-    } catch {
-      // missing or unreadable; skip
+      raw = await fs.readFile(file, 'utf8');
+    } catch (err) {
+      // Missing file is the common case (per-project local config rarely
+      // exists at start). Surface anything else (EACCES, EISDIR) so a
+      // mis-permissioned config doesn't silently fall back to defaults.
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.warn(`[config] Failed to read "${file}":`, err);
+      }
+      return {};
     }
-    return {};
+    const parsed = safeParse<PartialConfig>(raw);
+    if (!parsed.ok || !parsed.value) {
+      // The file exists but isn't valid JSON. Don't silently reset to
+      // defaults — that's hours of debug timesink for users who'd typo'd
+      // their config. Warn loudly and keep the in-memory defaults.
+      console.warn(
+        `[config] Failed to parse "${file}": invalid JSON. Falling back to defaults for this layer.`,
+      );
+      return {};
+    }
+    return parsed.value;
   }
 
   private validateBehavior(cfg: PartialConfig): void {
@@ -227,9 +266,18 @@ export class DefaultConfigLoader implements ConfigLoader {
     if (cfg.version !== 1) throw new Error(`Config: unsupported version ${cfg.version}`);
     const c = cfg.context;
     if (!c) throw new Error('Config: missing context section');
-    // NOTE: the following threshold check is always reachable because
-    // BEHAVIOR_DEFAULTS always provides a context section. The guard
-    // exists for hand-constructed PartialConfig objects.
+    // A user-edited config.json can land strings here ("0.6") and slip past
+    // truthiness checks; the `>=` comparison then coerces silently and the
+    // threshold ordering check passes for nonsense values. Validate types
+    // explicitly so misconfigs surface here, not as confusing failures deep
+    // in the auto-compaction logic.
+    const fields: Array<keyof typeof c> = ['warnThreshold', 'softThreshold', 'hardThreshold'];
+    for (const f of fields) {
+      const v = c[f];
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        throw new Error(`Config: context.${String(f)} must be a finite number (got ${typeof v})`);
+      }
+    }
     if (c.warnThreshold >= c.softThreshold || c.softThreshold >= c.hardThreshold) {
       throw new Error('Config: context thresholds must satisfy warn < soft < hard');
     }
