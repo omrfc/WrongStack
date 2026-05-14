@@ -818,6 +818,7 @@ export async function main(argv: string[]): Promise<number> {
         hard: config.context.hardThreshold,
       },
       'soft',
+      events,
     );
     pipelines.contextWindow.use({
       name: 'AutoCompaction',

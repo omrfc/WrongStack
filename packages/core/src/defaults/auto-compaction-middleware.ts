@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from '../kernel/pipeline.js';
 import type { Context } from '../core/context.js';
 import type { Compactor } from '../types/compactor.js';
+import type { EventBus } from '../kernel/events.js';
 
 /**
  * Pipeline middleware that monitors context token load and
@@ -17,6 +18,7 @@ export class AutoCompactionMiddleware {
   private readonly maxContext: number;
   private readonly estimator: (ctx: Context) => number;
   private readonly aggressiveOn: 'hard' | 'soft' | 'warn';
+  private readonly events?: EventBus;
 
   /**
    * @param compactor        Compactor to use for compaction
@@ -24,6 +26,10 @@ export class AutoCompactionMiddleware {
    * @param estimator        Token estimation function (ctx → token count)
    * @param thresholds      Threshold fractions (0-1) of maxContext
    * @param aggressiveOn    Which threshold triggers aggressive (full LLM summarization)
+   * @param events          Optional EventBus — receives `compaction.failed`
+   *                        when the compactor throws. Without it, failures
+   *                        are still swallowed (best-effort by design) but
+   *                        invisible to observability layers.
    */
   constructor(
     compactor: Compactor,
@@ -31,6 +37,7 @@ export class AutoCompactionMiddleware {
     estimator: (ctx: Context) => number,
     thresholds: { warn: number; soft: number; hard: number },
     aggressiveOn: 'hard' | 'soft' | 'warn' = 'soft',
+    events?: EventBus,
   ) {
     this.compactor = compactor;
     this.maxContext = maxContext;
@@ -39,6 +46,7 @@ export class AutoCompactionMiddleware {
     this.softThreshold = thresholds.soft;
     this.hardThreshold = thresholds.hard;
     this.aggressiveOn = aggressiveOn;
+    this.events = events;
   }
 
   handler(): MiddlewareHandler<Context> {
@@ -61,8 +69,15 @@ export class AutoCompactionMiddleware {
   private async compact(ctx: Context, aggressive: boolean): Promise<void> {
     try {
       await this.compactor.compact(ctx, { aggressive });
-    } catch {
-      // compaction is best-effort; never crash the agent loop
+    } catch (err) {
+      // Compaction is best-effort — never crash the agent loop — but
+      // emit so observability sees the silent regression. A persistent
+      // failure here is what causes the "agent suddenly hits context
+      // limit out of nowhere" symptom in production.
+      this.events?.emit('compaction.failed', {
+        err: err instanceof Error ? err : new Error(String(err)),
+        aggressive,
+      });
     }
   }
 }

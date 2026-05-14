@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AutoCompactionMiddleware } from '../../src/defaults/auto-compaction-middleware.js';
+import { EventBus } from '../../src/kernel/events.js';
 import type { Context } from '../../src/core/context.js';
 import type { Compactor, CompactReport } from '../../src/types/compactor.js';
 
@@ -148,5 +149,47 @@ describe('AutoCompactionMiddleware', () => {
 
     expect(estimator).toHaveBeenCalledWith(ctx);
     expect(compactor.compactCalls).toHaveLength(1);
+  });
+
+  it('emits compaction.failed when the compactor throws and an EventBus is wired', async () => {
+    const badCompactor: Compactor = {
+      async compact() {
+        throw new Error('summarizer model unavailable');
+      },
+    };
+    const events = new EventBus();
+    const failures: { err: Error; aggressive: boolean }[] = [];
+    events.on('compaction.failed', (p) => failures.push(p));
+
+    const mw = new AutoCompactionMiddleware(
+      badCompactor,
+      10000,
+      simpleEstimator(9500), // hard load → aggressive
+      { warn: 0.5, soft: 0.75, hard: 0.9 },
+      'soft',
+      events,
+    );
+
+    let ran = false;
+    await mw.handler()(mockContext(0), async (c) => { ran = true; return c; });
+    expect(ran).toBe(true); // failure swallowed — loop continues
+    expect(failures).toHaveLength(1);
+    expect(failures[0]!.err.message).toBe('summarizer model unavailable');
+    expect(failures[0]!.aggressive).toBe(true);
+  });
+
+  it('still swallows compaction errors with no EventBus (backward compatible)', async () => {
+    const badCompactor: Compactor = {
+      async compact() { throw new Error('boom'); },
+    };
+    const mw = new AutoCompactionMiddleware(badCompactor, 10000, simpleEstimator(9500), {
+      warn: 0.5,
+      soft: 0.75,
+      hard: 0.9,
+    });
+    // No events arg — call site looks like all the old callers.
+    let ran = false;
+    await mw.handler()(mockContext(0), async (c) => { ran = true; return c; });
+    expect(ran).toBe(true);
   });
 });

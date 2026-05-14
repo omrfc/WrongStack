@@ -106,4 +106,19 @@ describe('DefaultMultiAgentCoordinator', () => {
     coord.completeTask({ subagentId: 'agent1', taskId: 'task1', status: 'success', iterations: 1 });
     expect(coord.getStatus().done).toBe(true);
   });
+
+  it('does NOT warn on inFlight=0 completion when no runner is wired (caller-driven path)', async () => {
+    // The no-runner pattern is intentional: callers drive task lifecycle
+    // via completeTask, and runDispatched skips inFlight++ to avoid
+    // underflow. The warning that used to fire on every such completion
+    // was noise — it should only fire on true double-completion (runner
+    // wired but inFlight already at 0).
+    const coord = new DefaultMultiAgentCoordinator(makeConfig());
+    const warnings: any[] = [];
+    coord.on('warning' as any, (e: any) => warnings.push(e));
+    await coord.spawn({ id: 'agent1', name: 'A1' });
+    await coord.assign({ id: 'task1' });
+    coord.completeTask({ subagentId: 'agent1', taskId: 'task1', status: 'success', iterations: 1 });
+    expect(warnings.filter((w) => w.type === 'inFlight_underflow')).toHaveLength(0);
+  });
 });

@@ -85,6 +85,14 @@ export interface EventMap {
   };
   'token.threshold': { used: number; limit: number };
   'compaction.fired': { before: number; after: number };
+  /**
+   * Fired when the auto-compaction middleware's compactor.compact() call
+   * throws. Compaction is best-effort by design so we don't crash the agent
+   * loop, but a persistent failure (misconfigured summarizer model, network
+   * outage) means the next iteration may hit context overflow. Observability
+   * layers / dashboards subscribe to this to surface the silent regression.
+   */
+  'compaction.failed': { err: Error; aggressive: boolean };
   'mcp.server.connected': { name: string; toolCount: number };
   'mcp.server.reconnected': { name: string; toolCount: number };
   'mcp.server.disconnected': { name: string; reason: string };
