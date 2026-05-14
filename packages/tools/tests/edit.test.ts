@@ -119,4 +119,36 @@ describe('edit tool', () => {
       ),
     ).rejects.toThrow(/does not exist/);
   });
+
+  it('flags external modification when mtime advances past tolerance', async () => {
+    const file = path.join(sb.dir, 'a.txt');
+    await fs.writeFile(file, 'hello');
+    await readTool.execute({ path: 'a.txt' }, sb.ctx, { signal: newSignal() });
+    // Bump mtime well past either tolerance window (1 ms POSIX / 2 s Windows).
+    const future = new Date(Date.now() + 10_000);
+    await fs.utimes(file, future, future);
+    await expect(
+      editTool.execute(
+        { path: 'a.txt', old_string: 'hello', new_string: 'hi' },
+        sb.ctx,
+        { signal: newSignal() },
+      ),
+    ).rejects.toThrow(/modified externally/);
+  });
+
+  it('accepts a re-edit when mtime is within tolerance', async () => {
+    // Write and edit twice in quick succession. On Windows FAT, the second
+    // edit's stat may report an unchanged mtime; on Linux it advances by
+    // ~µs. Either way it must fall within tolerance and not trip the stale-
+    // read guard.
+    const file = path.join(sb.dir, 'a.txt');
+    await fs.writeFile(file, 'hello world');
+    await readTool.execute({ path: 'a.txt' }, sb.ctx, { signal: newSignal() });
+    const first = await editTool.execute(
+      { path: 'a.txt', old_string: 'hello', new_string: 'hi' },
+      sb.ctx,
+      { signal: newSignal() },
+    );
+    expect(first.replacements).toBe(1);
+  });
 });

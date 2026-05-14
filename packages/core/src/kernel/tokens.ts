@@ -15,6 +15,7 @@ import type { SkillLoader } from '../types/skill.js';
 import type { SystemPromptBuilder } from '../types/system-prompt.js';
 import type { SecretScrubber } from '../types/secret-scrubber.js';
 import type { ModelsRegistry } from '../types/models-registry.js';
+import type { ModeStore } from '../types/mode.js';
 
 const t = <T>(name: string): Token<T> => Symbol(name) as Token<T>;
 
@@ -36,4 +37,5 @@ export const TOKENS = {
   SystemPromptBuilder: t<SystemPromptBuilder>('SystemPromptBuilder'),
   SecretScrubber: t<SecretScrubber>('SecretScrubber'),
   ModelsRegistry: t<ModelsRegistry>('ModelsRegistry'),
+  ModeStore: t<ModeStore>('ModeStore'),
 } as const;

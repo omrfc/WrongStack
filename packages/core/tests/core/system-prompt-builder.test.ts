@@ -67,7 +67,7 @@ describe('DefaultSystemPromptBuilder', () => {
     expect(blocks[2]?.text).toContain('Go');
   });
 
-  it('includes memory + skill block with ephemeral cache_control when present', async () => {
+  it('includes memory block with ephemeral cache_control when present', async () => {
     const memory: MemoryStore = {
       readAll: async () => '- prefer pnpm',
       read: async () => '',
@@ -76,10 +76,10 @@ describe('DefaultSystemPromptBuilder', () => {
       consolidate: async () => undefined,
     };
     const skills: SkillLoader = {
-      manifestText: async () => '## Skills\n- /foo',
       listEntries: async () => [
         { name: 'test-skill', trigger: 'Use for testing.', scope: ['testing'], source: 'bundled', path: '/test/skill.md' },
       ],
+      manifestText: async () => '',
       list: async () => [],
       find: async () => undefined,
       load: async () => undefined,
@@ -87,13 +87,15 @@ describe('DefaultSystemPromptBuilder', () => {
     const b = new DefaultSystemPromptBuilder({ memoryStore: memory, skillLoader: skills });
     const blocks = await b.build({ cwd: tmp, projectRoot: tmp, tools: [] });
     expect(blocks).toHaveLength(4);
+    // Memory is in layer 4 (ephemeral)
     const last = blocks[3]!;
     expect(last.text).toContain('Project Memory');
     expect(last.text).toContain('prefer pnpm');
-    expect(last.text).toContain('## Available skills');
-    expect(last.text).toContain('test-skill');
-    expect(last.text).toContain('Use when:');
     expect(last.cache_control).toEqual({ type: 'ephemeral' });
+    // Skills are in layer 3 (environment block, cached)
+    const env = blocks[2]?.text ?? '';
+    expect(env).toContain('test-skill');
+    expect(env).toContain('Skills in scope for this session');
   });
 
   it('omits memory block when both readers return empty', async () => {

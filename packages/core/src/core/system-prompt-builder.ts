@@ -53,8 +53,10 @@ export interface DefaultSystemPromptBuilderOptions {
   memoryStore?: MemoryStore;
   skillLoader?: SkillLoader;
   modeStore?: ModeStore;
-  /** Pre-resolved mode id — shown in environment block (e.g. "debugger", "code-reviewer"). */
+  /** Pre-resolved active mode id — shown in environment block. */
   modeId?: string;
+  /** Pre-resolved mode prompt — avoids redundant modeStore.getActiveMode() call. */
+  modePrompt?: string;
   /** Pre-resolved model capabilities — enables adaptive context thresholds. */
   modelCapabilities?: ModelCapabilities;
   todayIso?: string;
@@ -62,9 +64,28 @@ export interface DefaultSystemPromptBuilderOptions {
 
 export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
   private envCache?: string;
+  private skillCache?: string;
   constructor(private readonly opts: DefaultSystemPromptBuilderOptions = {}) {}
 
   async build(ctx: BuildContext): Promise<TextBlock[]> {
+    // Pre-load skill entries so we can include them in the environment block
+    // (which is cached). Skills are static per-session, so this is safe.
+    if (this.opts.skillLoader && !this.skillCache) {
+      try {
+        const entries = await this.opts.skillLoader.listEntries();
+        if (entries.length > 0) {
+          const lines: string[] = [];
+          for (const e of entries) {
+            const scopeTag = e.scope.length > 0 ? ` — ${e.scope.slice(0, 4).join(', ')}` : '';
+            lines.push(`- **${e.name}**${scopeTag}  (${e.trigger})`);
+          }
+          this.skillCache = lines.join('\n');
+        }
+      } catch {
+        // skip
+      }
+    }
+
     const layer1 = LAYER_1_IDENTITY;
     const layer2 = this.buildToolUsage(ctx.tools);
     const layer3 = await this.buildEnvironment(ctx);
@@ -175,6 +196,9 @@ summarize it, and let the tool result hold only the summary.`);
     if (this.opts.modelCapabilities) {
       lines.push(`- Context window: ${this.opts.modelCapabilities.maxContextTokens.toLocaleString()} tokens max`);
     }
+    if (this.skillCache) {
+      lines.push('', '## Skills in scope for this session', this.skillCache);
+    }
     const text = lines.join('\n');
     this.envCache = text;
     return text;
@@ -190,27 +214,14 @@ summarize it, and let the tool result hold only the summary.`);
         // skip
       }
     }
-    if (this.opts.skillLoader) {
-      try {
-        // Use structured entries for richer skill rendering in system prompt.
-        const entries = await this.opts.skillLoader.listEntries();
-        if (entries.length > 0) {
-          const lines = ['## Available skills'];
-          for (const e of entries) {
-            const scopeTag = e.scope.length > 0 ? ` — ${e.scope.slice(0, 4).join(', ')}` : '';
-            lines.push(`- **${e.name}**${scopeTag}`);
-            lines.push(`  Use when: ${e.trigger}`);
-          }
-          parts.push(lines.join('\n'));
-        }
-      } catch {
-        // skip
-      }
-    }
+    // Skills are rendered in buildEnvironment (envCache) to benefit from caching.
+    // Layer 4 only contains memory content.
     return parts.join('\n\n');
   }
 
   private async buildMode(): Promise<string> {
+    // Use pre-resolved modePrompt if available (avoids redundant async call).
+    if (this.opts.modePrompt) return this.opts.modePrompt;
     if (!this.opts.modeStore) return '';
     const mode = await this.opts.modeStore.getActiveMode();
     if (!mode?.prompt) return '';

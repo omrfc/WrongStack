@@ -538,20 +538,23 @@ function toolsCommand(opts: SlashCommandContext): SlashCommand {
 function skillCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'skill',
-    description: 'Show a skill manifest or list skills.',
+    description: 'Show skill details or list available skills.',
     async run(args) {
       if (!opts.skillLoader) {
         const msg = 'No skill loader configured.';
         return { message: msg };
       }
       if (!args.trim()) {
-        const list = await opts.skillLoader.list();
-        if (list.length === 0) {
+        const entries = await opts.skillLoader.listEntries();
+        if (entries.length === 0) {
           const msg = 'No skills found.';
           return { message: msg };
         }
-        const lines = list.map((s) => `  ${s.name.padEnd(24)} ${color.dim(`[${s.source}]`)} ${s.description.split('\n')[0]}`);
-        const msg = `Skills:\n${lines.join('\n')}\n`;
+        const lines = entries.map((e) => {
+          const scopeTag = e.scope.length > 0 ? `  ${color.dim(`(${e.scope.slice(0, 3).join(', ')})`)}` : '';
+          return `  ${color.bold(e.name)}${scopeTag}\n    Use when: ${e.trigger}`;
+        });
+        const msg = `Available skills:\n${lines.join('\n\n')}\n`;
         return { message: msg };
       }
       const skill = await opts.skillLoader.find(args.trim());

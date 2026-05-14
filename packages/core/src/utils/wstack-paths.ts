@@ -14,6 +14,13 @@ import { createHash } from 'node:crypto';
 export interface WstackPaths {
   /** ~/.wrongstack — global root. */
   globalRoot: string;
+  /**
+   * ~/.wrongstack — directory for user-global stateful config files
+   * (mode.json, theme.json, …). Currently an alias for `globalRoot`;
+   * separate name lets us split out per-OS XDG_CONFIG_HOME later
+   * without rewriting callers.
+   */
+  configDir: string;
   /** ~/.wrongstack/config.json */
   globalConfig: string;
   /** ~/.wrongstack/.key — 32 random bytes, mode 0600, AES-GCM key for the secret vault. */
@@ -68,6 +75,7 @@ export function resolveWstackPaths(opts: WstackPathOptions): WstackPaths {
   const projectDir = path.join(globalRoot, 'projects', hash);
   return {
     globalRoot,
+    configDir: globalRoot,
     globalConfig: path.join(globalRoot, 'config.json'),
     secretsKey: path.join(globalRoot, '.key'),
     globalMemory: path.join(globalRoot, 'memory.md'),

@@ -68,9 +68,14 @@ export const editTool: Tool<EditInput, EditOutput> = {
         `edit: file "${input.path}" was not read in this session. Read it first.`,
       );
     }
-    // Stale-read detection
+    // Stale-read detection. Tolerance accounts for filesystem mtime
+    // resolution: ext4/APFS report ms, but Windows FAT and some network
+    // filesystems quantize to 2 s. A too-tight tolerance triggers false
+    // "modified externally" failures when a tool writes and re-reads the
+    // same file in quick succession.
     const lastReadMtime = ctx.lastReadMtime(absPath);
-    if (lastReadMtime !== undefined && stat.mtimeMs > lastReadMtime + 1) {
+    const mtimeTolerance = process.platform === 'win32' ? 2000 : 1;
+    if (lastReadMtime !== undefined && stat.mtimeMs > lastReadMtime + mtimeTolerance) {
       throw new Error(`edit: file "${input.path}" was modified externally. Re-read it first.`);
     }
 

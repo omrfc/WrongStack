@@ -261,6 +261,8 @@ class FileSessionWriter implements SessionWriter {
   private readonly filePath: string;
   private initDone = false;
   private readonly resumed: boolean;
+  private appendFailCount = 0;
+  private lastAppendWarnAt = 0;
 
   constructor(
     public readonly id: string,
@@ -313,7 +315,22 @@ class FileSessionWriter implements SessionWriter {
     try {
       await this.handle.appendFile(`${JSON.stringify(event)}\n`, 'utf8');
     } catch (err) {
-      console.warn('[session] append failed:', err instanceof Error ? err.message : String(err));
+      // A persistent failure (full disk, broken pipe) would otherwise log
+      // once per appended event — which for a chatty agent run is a lot.
+      // Debounce to one log per 5 s and surface the suppressed count.
+      this.appendFailCount++;
+      const now = Date.now();
+      if (now - this.lastAppendWarnAt > 5000) {
+        const suppressed = this.appendFailCount - 1;
+        const tail = suppressed > 0 ? ` (+${suppressed} suppressed)` : '';
+        console.warn(
+          '[session] append failed:',
+          err instanceof Error ? err.message : String(err),
+          tail,
+        );
+        this.lastAppendWarnAt = now;
+        this.appendFailCount = 0;
+      }
     }
   }
 

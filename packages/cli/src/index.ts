@@ -19,6 +19,7 @@ import {
   DefaultSecretScrubber,
   DefaultSessionStore,
   DefaultSkillLoader,
+  DefaultModeStore,
   DefaultSystemPromptBuilder,
   DefaultTokenCounter,
   EventBus,
@@ -361,6 +362,8 @@ export async function main(argv: string[]): Promise<number> {
     TOKENS.TokenCounter,
     () => new DefaultTokenCounter({ registry: modelsRegistry, providerId: config.provider }),
   );
+  const modeStore = new DefaultModeStore({ directory: wpaths.configDir });
+  container.bind(TOKENS.ModeStore, () => modeStore);
   container.bind(
     TOKENS.SessionStore,
     () => new DefaultSessionStore({ dir: wpaths.projectSessions }),
@@ -375,12 +378,29 @@ export async function main(argv: string[]): Promise<number> {
     bundledDir: config.features.skills ? resolveBundledSkillsDir() : undefined,
   });
   container.bind(TOKENS.SkillLoader, () => skillLoader);
+  // Resolve modeId and modelCapabilities before building system prompt.
+  const activeMode = await modeStore.getActiveMode();
+  const modeId = activeMode?.id ?? 'default';
+  const modePrompt = activeMode?.prompt ?? '';
+  const resolvedModel = await modelsRegistry.getModel(config.provider, config.model);
+  const modelCapabilities = resolvedModel?.capabilities
+    ? {
+        maxContextTokens: resolvedModel.capabilities.maxContext,
+        supportsTools: resolvedModel.capabilities.tools,
+        supportsVision: resolvedModel.capabilities.vision,
+        supportsReasoning: resolvedModel.capabilities.reasoning,
+      }
+    : undefined;
   container.bind(
     TOKENS.SystemPromptBuilder,
     () =>
       new DefaultSystemPromptBuilder({
         memoryStore,
         skillLoader: config.features.skills ? skillLoader : undefined,
+        modeStore,
+        modeId,
+        modePrompt,
+        modelCapabilities,
       }),
   );
   container.bind(TOKENS.Renderer, () => renderer);

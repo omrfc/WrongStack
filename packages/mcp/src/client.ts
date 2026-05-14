@@ -150,6 +150,12 @@ export class MCPClient {
       throw new Error('MCP stdio transport requires "command"');
     }
 
+    // Defense-in-depth: clear any rx state from a previous connect attempt
+    // on this instance. The registry normally creates a fresh client per
+    // (re)connect cycle, but a leftover rxBuffer from a half-initialized
+    // attempt would corrupt JSON-RPC parsing on the new stream.
+    this.rxBuffer = '';
+
     const child = spawn(this.opts.command, this.opts.args ?? [], {
       env: { ...process.env, ...this.opts.env },
       stdio: ['pipe', 'pipe', 'pipe'],

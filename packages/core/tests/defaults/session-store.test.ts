@@ -1,8 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { DefaultSessionStore } from '../../src/index.js';
+
+// Lift the prototype so we can override appendFile per-test without touching
+// the production code path.
+type FileHandle = Awaited<ReturnType<typeof fs.open>>;
 
 describe('DefaultSessionStore', () => {
   let tmp: string;
@@ -240,5 +244,58 @@ describe('DefaultSessionStore', () => {
     await expect(fs.access(path.join(tmp, 'gone.summary.json'))).resolves.toBeUndefined();
     await store.delete('gone');
     await expect(fs.access(path.join(tmp, 'gone.summary.json'))).rejects.toThrow();
+  });
+
+  it('debounces append-failure warnings instead of flooding the console', async () => {
+    const w = await store.create({ id: 'flood', model: 'm', provider: 'p' });
+    // Force every appendFile after this point to fail. The first event still
+    // hits the real disk (session_start) — we replace the handle's method
+    // on the instance only.
+    const handle = (w as unknown as { handle: FileHandle }).handle;
+    const stub = vi.spyOn(handle, 'appendFile').mockRejectedValue(new Error('ENOSPC'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      for (let i = 0; i < 25; i++) {
+        await w.append({ type: 'user_input', ts: new Date().toISOString(), content: `m${i}` });
+      }
+      // Despite 25 failed appends, the debounce folds them into a single
+      // warning (the 5-second window hasn't elapsed within the test).
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      stub.mockRestore();
+      warn.mockRestore();
+      await w.close().catch(() => undefined);
+    }
+  });
+
+  it('surfaces the suppressed count once the debounce window elapses', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const w = await store.create({ id: 'flood2', model: 'm', provider: 'p' });
+      const handle = (w as unknown as { handle: FileHandle }).handle;
+      const stub = vi.spyOn(handle, 'appendFile').mockRejectedValue(new Error('ENOSPC'));
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        // First batch: one warn fires, the rest are debounced.
+        for (let i = 0; i < 5; i++) {
+          await w.append({ type: 'user_input', ts: new Date().toISOString(), content: `m${i}` });
+        }
+        expect(warn).toHaveBeenCalledTimes(1);
+        // Advance past the 5-second debounce window and fail one more.
+        vi.setSystemTime(Date.now() + 6000);
+        await w.append({ type: 'user_input', ts: new Date().toISOString(), content: 'after' });
+        expect(warn).toHaveBeenCalledTimes(2);
+        // The second warn surfaces the count of failures that happened
+        // between the two warn windows (4 events).
+        const secondCall = warn.mock.calls[1]!;
+        expect(secondCall.some((arg) => /\+\d+ suppressed/.test(String(arg)))).toBe(true);
+      } finally {
+        stub.mockRestore();
+        warn.mockRestore();
+        await w.close().catch(() => undefined);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
