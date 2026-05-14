@@ -21,6 +21,47 @@ This pulls in the full stack — `@wrongstack/core`, `@wrongstack/providers`, `@
 
 After install, `wrongstack` is on your `PATH`. (`wstack` works too — it's an alias.)
 
+### What's new in 0.1.5
+
+A forensic-audit security pass: **7 CRITICAL, 16 HIGH, 20 MEDIUM, 9 LOW**
+findings closed. No public API breaking changes.
+
+If you only read one line: **the `bash` tool now sanitizes its child
+process env**, so `ANTHROPIC_API_KEY` / `GITHUB_TOKEN` / etc. are no
+longer forwarded into LLM-generated shell commands. Set
+`WRONGSTACK_BASH_ENV_PASSTHROUGH=1` to opt back into the old behaviour.
+
+Highlights — full catalogue in [`SECURITY.md`](SECURITY.md):
+
+- **SSRF defences rewritten** for the `fetch` tool. Private-range
+  detection now uses numeric CIDR for IPv4 (`10/8`, `127/8`,
+  `169.254/16`, `100.64/10`, `224/4`, `240/4`, …) and full 8-group
+  expansion for IPv6 (including Node's compressed `::ffff:7f00:1` form
+  for IPv4-mapped addresses). Redirect target is re-validated on every
+  hop; `http://` downgrade is refused.
+- **Agent ↔ tool boundary** hardened: `bash` POSIX process-group kill on
+  timeout, `exec` cwd validated inside projectRoot, `git` raw-args RCE
+  vector removed, `patch` diff-target pre-validated, `replace` symlink-
+  + realpath-safe, ReDoS guard on every user-regex (`grep` / `replace` /
+  `logs`).
+- **MCP transport lifecycle** fixed: in-flight JSON-RPC requests now
+  reject on stdio child exit / `close()` — callers no longer hang
+  forever; SIGTERM→800 ms→SIGKILL escalation.
+- **Provider stream parsing** routed through a canonical
+  `parseToolInput()` — guarantees `tool_use.input` is always a
+  `Record<string,unknown>`, even when models emit invalid JSON.
+- **system-prompt-builder** hardened: 2 s timeout on `git status`,
+  parallel language probes, `envCache` keyed by `projectRoot`.
+- **Memory-store race** fixed: per-scope async chain serializes
+  `remember`/`forget`/`consolidate`/`clear` so concurrent writes don't
+  silently drop entries.
+- **`Tool.subjectKey`** — tools can declare which input field is the
+  permission-trust subject; closes cross-tool subject collisions.
+- **`compaction.failed` event** — observability for the previously-
+  silent auto-compaction error path.
+- **+138 new tests** (now **1802 passing**), 5 new per-package READMEs
+  (`core`, `cli`, `providers`, `tools`, `tui`).
+
 ### What's new in 0.1.4
 
 0.1.4 is the first version where `npm install -g wrongstack` actually
@@ -279,6 +320,7 @@ All four supported families implement **real streaming** end-to-end: provider `s
 |----------|-------------|
 | `<PROVIDER>_API_KEY` | API key for the provider (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) |
 | `WRONGSTACK_FETCH_ALLOW_PRIVATE` | Set to `1` to allow localhost / private IPs in the `fetch` tool |
+| `WRONGSTACK_BASH_ENV_PASSTHROUGH` | Set to `1` to disable the bash-tool env allowlist (legacy unsafe mode — see [SECURITY.md](SECURITY.md)) |
 
 ### Config file (`~/.wrongstack/config.json`)
 
@@ -407,7 +449,7 @@ The CLI auto-migrates any plaintext keys it finds in `config.json` on every boot
 
 ## Observability events
 
-The `EventBus` carries 18 typed events including `tool.started` and `tool.executed` (closes the gap between "model decided to call a tool" and "tool finished" — the TUI uses these to render the live "running: <tool> Ns" indicator), `provider.text_delta` (live streaming text), `session.damaged`, `token.threshold`, `token.cost_estimate_unavailable`, `compaction.fired`, and per-MCP-server connection events.
+The `EventBus` carries 23 typed events including `tool.started` and `tool.executed` (closes the gap between "model decided to call a tool" and "tool finished" — the TUI uses these to render the live "running: <tool> Ns" indicator), `provider.text_delta` (live streaming text), `session.damaged`, `token.threshold`, `token.cost_estimate_unavailable`, `compaction.fired`, `compaction.failed`, `provider.retry`, `provider.error`, and per-MCP-server connection events.
 
 Subscribe with `events.on(name, fn)` or `events.once(name, fn)`; listeners that throw are caught and logged, never re-thrown.
 
@@ -454,14 +496,14 @@ A plugin declares `apiVersion: "^1.0"` and gets the full `PluginAPI`: container,
 
 ## Packages
 
-| Package | Purpose |
-|---------|---------|
-| `@wrongstack/core` | Kernel, agent, defaults, types, registries, plugin contract |
-| `@wrongstack/providers` | Anthropic/OpenAI/OpenAI-compatible/Google wire adapters + SSE |
-| `@wrongstack/tools` | 33 built-in tools |
-| `@wrongstack/mcp` | MCP server registry + reconnection logic |
-| `@wrongstack/cli` | REPL, subcommands, slash commands, terminal renderer |
-| `@wrongstack/tui` | Ink-based TUI (paste collapse, @-picker, image paste) — lazy-loaded behind `--tui` |
+| Package | Purpose | README |
+|---------|---------|--------|
+| `@wrongstack/core` | Kernel, agent, defaults, types, registries, plugin contract | [packages/core](packages/core/README.md) |
+| `@wrongstack/providers` | Anthropic/OpenAI/OpenAI-compatible/Google wire adapters + SSE | [packages/providers](packages/providers/README.md) |
+| `@wrongstack/tools` | 33 built-in tools | [packages/tools](packages/tools/README.md) |
+| `@wrongstack/mcp` | MCP server registry + reconnection logic | [packages/mcp](packages/mcp/README.md) |
+| `@wrongstack/cli` | REPL, subcommands, slash commands, terminal renderer | [packages/cli](packages/cli/README.md) |
+| `@wrongstack/tui` | Ink-based TUI (paste collapse, @-picker, image paste) — lazy-loaded behind `--tui` | [packages/tui](packages/tui/README.md) |
 
 ## Architecture
 
@@ -500,11 +542,12 @@ validation, and the system prompt builder. See
 
 ## Status
 
-- **1679 tests passing** across 163 test files (~12s)
-- Coverage: 85.4% lines / 70.7% branches / 85.9% functions / 82.6% statements (and rising)
-- All 7 packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
+- **1802 tests passing** across 181 test files (~12 s)
+- Coverage: ≥85 % lines / ≥70 % branches / ≥85 % functions / ≥82 % statements (enforced in `vitest.config.ts`)
+- All 6 published packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles
 - CI gate: `pnpm typecheck && pnpm build && pnpm test` all required
+- Threat model and adversary trust assumptions: [`SECURITY.md`](SECURITY.md)
 
 ## License
 
