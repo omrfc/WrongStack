@@ -41,6 +41,9 @@ importers:
       '@wrongstack/mcp':
         specifier: workspace:*
         version: link:../mcp
+      '@wrongstack/plug-lsp':
+        specifier: workspace:*
+        version: link:../plug-lsp
       '@wrongstack/providers':
         specifier: workspace:*
         version: link:../providers

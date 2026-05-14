@@ -80,6 +80,8 @@ export interface AppProps {
    */
   effectiveMaxContext?: number;
   onExit: (code: number) => void;
+  /** Called when /clear is dispatched — the TUI should wipe its history entries (but keep the banner). */
+  onClearHistory?: (dispatch: React.Dispatch<{ type: 'clearHistory' } | { type: 'resetContextChip' }>) => void;
 }
 
 type DraftEntry = HistoryEntry extends infer T
@@ -136,6 +138,8 @@ type State = {
     suggestedPattern: string;
     resolve: (decision: 'yes' | 'no' | 'always' | 'deny') => void;
   } | null;
+  /** Incremented on /clear so the context chip re-reads from agent.ctx tokens. */
+  contextChipVersion: number;
 };
 
 type Action =
@@ -143,6 +147,7 @@ type Action =
   | { type: 'setBuffer'; buffer: string; cursor: number }
   | { type: 'addPlaceholder'; ph: string }
   | { type: 'clearInput' }
+  | { type: 'clearHistory' }
   | { type: 'streamDelta'; delta: string }
   | { type: 'streamReset' }
   | { type: 'status'; status: State['status'] }
@@ -174,7 +179,8 @@ type Action =
   | { type: 'historyUp' }
   | { type: 'historyDown' }
   | { type: 'confirmOpen'; info: State['confirm'] }
-  | { type: 'confirmClose' };
+  | { type: 'confirmClose' }
+  | { type: 'resetContextChip' };
 
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -202,6 +208,15 @@ export function reducer(state: State, action: Action): State {
         picker: { open: false, query: '', matches: [], selected: 0 },
         slashPicker: { open: false, query: '', matches: [], selected: 0 },
       };
+    case 'clearHistory': {
+      const last = state.entries[state.entries.length - 1];
+      return {
+        ...state,
+        entries: last ? [last] : state.entries,
+        queue: [],
+        nextQueueId: 1,
+      };
+    }
     case 'streamDelta':
       return { ...state, streamingText: state.streamingText + action.delta };
     case 'streamReset':
@@ -417,6 +432,8 @@ export function reducer(state: State, action: Action): State {
       return { ...state, confirm: action.info };
     case 'confirmClose':
       return { ...state, confirm: null };
+    case 'resetContextChip':
+      return { ...state, contextChipVersion: state.contextChipVersion + 1 };
   }
 }
 
@@ -440,6 +457,7 @@ export function App({
   switchProviderAndModel,
   effectiveMaxContext,
   onExit,
+  onClearHistory,
 }: AppProps): React.ReactElement {
   const { exit } = useApp();
   // Reactive mirrors of agent.ctx.{model,provider.id} so the status bar
@@ -487,6 +505,7 @@ export function App({
       selected: 0,
     },
     confirm: null,
+    contextChipVersion: 0,
   });
 
   const builderRef = useRef<InputBuilder | null>(null);
@@ -571,7 +590,7 @@ export function App({
       lastInputTokens > 0 && maxContext > 0
         ? { used: lastInputTokens, max: maxContext }
         : undefined,
-    [lastInputTokens, maxContext],
+    [lastInputTokens, maxContext, state.contextChipVersion],
   );
 
   // Todo counts come from the agent's context, which is mutated by
@@ -1326,6 +1345,14 @@ export function App({
         if (res?.exit) {
           exit();
           onExit(0);
+        }
+        // Only fire onClearHistory for `/clear` — without this gate every
+        // slash command (`/model`, `/use`, `/help`, …) would wipe the
+        // conversation. Match the command name segment, not just the
+        // prefix, so `/clearfoo` doesn't trigger.
+        const cmd = trimmed.slice(1).split(/\s+/, 1)[0];
+        if (cmd === 'clear') {
+          onClearHistory?.(dispatch);
         }
       } catch (err) {
         dispatch({

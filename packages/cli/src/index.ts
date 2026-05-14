@@ -1194,6 +1194,14 @@ export async function main(argv: string[]): Promise<number> {
                 '\n',
             );
           },
+          onClearHistory: (dispatch) => {
+            // Signal the TUI to wipe its history entries and reset the context chip.
+            // This is fire-and-forget — the slash command has already reset
+            // agent.ctx + memory; the TUI just needs to stop showing the old
+            // conversation and stale context bar.
+            dispatch({ type: 'clearHistory' });
+            dispatch({ type: 'resetContextChip' });
+          },
         });
       } finally {
         renderer.setSilent(false);

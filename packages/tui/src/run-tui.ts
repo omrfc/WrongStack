@@ -59,6 +59,8 @@ export interface RunTuiOptions {
    * TUI view.
    */
   onAfterExit?: () => void;
+  /** Called from /clear so the TUI can wipe its history entries while agent.ctx + memory are cleared separately. */
+  onClearHistory?: (dispatch: React.Dispatch<{ type: 'clearHistory' } | { type: 'resetContextChip' }>) => void;
 }
 
 // Bracketed paste mode wraps any pasted text with these markers, letting us
@@ -174,6 +176,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           switchProviderAndModel: opts.switchProviderAndModel,
           effectiveMaxContext: opts.effectiveMaxContext,
           onExit,
+          onClearHistory: opts.onClearHistory ? (dispatch) => opts.onClearHistory!(dispatch) : undefined,
         }),
         { exitOnCtrlC: false },
       );

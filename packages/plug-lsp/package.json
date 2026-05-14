@@ -1,33 +1,22 @@
 {
-  "name": "@wrongstack/cli",
-  "version": "0.1.5",
+  "name": "@wrongstack/plug-lsp",
+  "version": "0.1.0",
   "license": "MIT",
-  "description": "WrongStack CLI — terminal AI coding agent with provider catalog from models.dev. Provides `wrongstack` and `wstack` binaries.",
-  "keywords": [
-    "ai",
-    "agent",
-    "cli",
-    "llm",
-    "anthropic",
-    "openai",
-    "gemini",
-    "coding-agent",
-    "mcp"
-  ],
+  "description": "WrongStack plugin that exposes Language Server Protocol tools.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/WrongStack/WrongStack.git",
-    "directory": "packages/cli"
+    "directory": "packages/plug-lsp"
   },
   "homepage": "https://github.com/WrongStack/WrongStack#readme",
   "bugs": "https://github.com/WrongStack/WrongStack/issues",
-  "author": "ECOSTACK TECHNOLOGY OÜ",
+  "author": "ECOSTACK TECHNOLOGY OU",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "sideEffects": false,
   "bin": {
-    "wstack": "./dist/index.js",
-    "wrongstack": "./dist/index.js"
+    "wrongstack-lsp-setup": "./dist/setup.js"
   },
   "exports": {
     ".": {
@@ -35,24 +24,22 @@
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "scripts": {
     "build": "tsup",
+    "setup": "node ./dist/setup.js",
     "typecheck": "tsc --noEmit",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
-    "@wrongstack/core": "workspace:*",
-    "@wrongstack/providers": "workspace:*",
-    "@wrongstack/plug-lsp": "workspace:*",
-    "@wrongstack/tools": "workspace:*",
-    "@wrongstack/mcp": "workspace:*",
-    "@wrongstack/tui": "workspace:*"
+    "vscode-languageserver-protocol": "^3.17.5"
+  },
+  "peerDependencies": {
+    "@wrongstack/core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.19.19",
+    "@wrongstack/core": "workspace:*",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3"
   }
