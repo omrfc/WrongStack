@@ -21,6 +21,16 @@ This pulls in the full stack — `@wrongstack/core`, `@wrongstack/providers`, `@
 
 After install, `wrongstack` is on your `PATH`. (`wstack` works too — it's an alias.)
 
+### What's new in 0.1.3
+
+- Bench harness (`pnpm bench`) with built-in suites for compactor, token estimation, JSON-schema validation, and the system prompt builder.
+- Observability: optional `/metrics` (Prometheus) + `/healthz` (Kubernetes-style) endpoint, OTLP/JSON metrics push, OTLP/JSON traces push, in-memory tracer.
+- CLI subcommands: `wstack doctor` (config/key/MCP/node health checks), `wstack export <id>` (render sessions as markdown/JSON/plain text).
+- Slash commands: `/help <name>` now renders detailed help for individual commands.
+- Contributor docs: [architecture](docs/architecture.md), [plugin author guide](docs/plugin-author-guide.md), [provider author guide](docs/provider-author-guide.md), [tool author guide](docs/tool-author-guide.md).
+- 13 long-broken MCP integration tests now pass; FileHandle GC warning eliminated.
+- License switched to MIT.
+
 ## Quick start
 
 ```bash
@@ -482,11 +492,12 @@ validation, and the system prompt builder. See
 
 ## Status
 
-- **1526 tests passing** across 156 test files (~12s)
+- **1679 tests passing** across 163 test files (~12s)
+- Coverage: 85.4% lines / 70.7% branches / 85.9% functions / 82.6% statements (and rising)
 - All 7 packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles
 - CI gate: `pnpm typecheck && pnpm build && pnpm test` all required
 
 ## License
 
-Apache-2.0
+MIT © 2026 ECOSTACK TECHNOLOGY OÜ — see [LICENSE](LICENSE).

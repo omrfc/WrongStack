@@ -1,6 +1,17 @@
 {
   "name": "wrongstack",
-  "version": "0.1.0",
+  "version": "0.1.3",
+  "license": "MIT",
+  "description": "WrongStack — terminal AI coding agent. Installs `wrongstack` and `wstack` binaries (re-export of @wrongstack/cli).",
+  "keywords": ["ai", "agent", "cli", "llm", "coding-agent"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WrongStack/WrongStack.git",
+    "directory": "apps/wrongstack"
+  },
+  "homepage": "https://github.com/WrongStack/WrongStack#readme",
+  "bugs": "https://github.com/WrongStack/WrongStack/issues",
+  "author": "ECOSTACK TECHNOLOGY OÜ",
   "type": "module",
   "bin": {
     "wstack": "./src/index.js",
