@@ -21,10 +21,12 @@ export interface ReplOptions {
   tokenCounter?: TokenCounter;
   /** Model-specific max context window (tokens). Used for the context bar in turn summaries. */
   effectiveMaxContext?: number;
+  /** Project / folder name shown in the banner. Usually `path.basename(projectRoot)`. */
+  projectName?: string;
 }
 
 export async function runRepl(opts: ReplOptions): Promise<number> {
-  if (opts.banner !== false) printBanner(opts.renderer);
+  if (opts.banner !== false) printBanner(opts.renderer, opts.projectName);
 
   // Per-iteration abort controller — assigned each loop so a Ctrl+C that
   // cancels turn N doesn't leak into turn N+1. `activeCtrl` is updated
@@ -187,12 +189,14 @@ function renderProgress(ratio: number, width: number): string {
   return FILLED.repeat(capped) + EMPTY.repeat(width - capped);
 }
 
-function printBanner(renderer: TerminalRenderer): void {
+function printBanner(renderer: TerminalRenderer, projectName?: string): void {
   const lines = [
     theme.primary(theme.bold('WrongStack')) + color.dim(` v${CLI_VERSION}`),
     color.dim('Built on the wrong stack. Shipped anyway.'),
-    color.dim('Type /help for commands, /exit to quit.'),
-    '',
   ];
+  if (projectName && projectName.length > 0) {
+    lines.push(color.dim('Project: ') + theme.bold(projectName));
+  }
+  lines.push(color.dim('Type /help for commands, /exit to quit.'), '');
   renderer.write(`${lines.join('\n')}\n`);
 }

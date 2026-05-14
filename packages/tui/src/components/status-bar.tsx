@@ -30,6 +30,13 @@ export interface StatusBarProps {
   subagentCount?: number;
   /** Renders the "ctx ████░░ 42%" chip on line 1 when present. */
   context?: ContextWindow;
+  /**
+   * Project / working-folder name. Rendered on line 2 just before the git
+   * branch so users running multiple WrongStack windows can tell at a
+   * glance which repo each one is pinned to. Usually the basename of
+   * `agent.ctx.projectRoot`.
+   */
+  projectName?: string;
 }
 
 /**
@@ -51,6 +58,7 @@ export function StatusBar({
   git,
   subagentCount = 0,
   context,
+  projectName,
 }: StatusBarProps): React.ReactElement {
   const usage = tokenCounter?.total();
   const cost = tokenCounter?.estimateCost();
@@ -65,7 +73,8 @@ export function StatusBar({
     elapsedMs !== undefined ||
     (todos && (todos.pending > 0 || todos.inProgress > 0 || todos.completed > 0)) ||
     (git !== null && git !== undefined) ||
-    subagentCount > 0;
+    subagentCount > 0 ||
+    (projectName !== undefined && projectName.length > 0);
 
   return (
     <Box
@@ -135,9 +144,15 @@ export function StatusBar({
               <Text dimColor>⏱ {fmtElapsed(elapsedMs)}</Text>
             </>
           ) : null}
-          {git ? (
+          {projectName ? (
             <>
               {yolo || elapsedMs !== undefined ? <Text dimColor>│</Text> : null}
+              <Text color="blue">📁 {projectName}</Text>
+            </>
+          ) : null}
+          {git ? (
+            <>
+              {yolo || elapsedMs !== undefined || projectName ? <Text dimColor>│</Text> : null}
               <Text>
                 <Text color="magenta">⎇ {git.branch}</Text>
                 {git.added > 0 ? <Text color="green"> +{git.added}</Text> : null}

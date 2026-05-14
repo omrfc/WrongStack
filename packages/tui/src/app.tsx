@@ -515,6 +515,13 @@ export function App({
 
   const activeCtrlRef = useRef<AbortController | null>(null);
   const projectRoot = agent.ctx.projectRoot;
+  // The status-bar chip surfaces the basename so multiple WrongStack
+  // windows running against different repos are immediately distinguishable.
+  // Empty / root fallback to undefined so the chip just hides itself.
+  const projectName = React.useMemo(() => {
+    const base = path.basename(projectRoot);
+    return base && base !== path.sep ? base : undefined;
+  }, [projectRoot]);
 
   // Source of truth for the streamed assistant text — kept here, not in
   // React state, because we need to read it synchronously when `agent.run`
@@ -1447,6 +1454,7 @@ export function App({
         todos={todos}
         git={gitInfo}
         context={contextWindow}
+        projectName={projectName}
       />
     </Box>
   );
