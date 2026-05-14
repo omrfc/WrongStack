@@ -21,15 +21,23 @@ This pulls in the full stack — `@wrongstack/core`, `@wrongstack/providers`, `@
 
 After install, `wrongstack` is on your `PATH`. (`wstack` works too — it's an alias.)
 
-### What's new in 0.1.3
+### What's new in 0.1.4
 
-- Bench harness (`pnpm bench`) with built-in suites for compactor, token estimation, JSON-schema validation, and the system prompt builder.
-- Observability: optional `/metrics` (Prometheus) + `/healthz` (Kubernetes-style) endpoint, OTLP/JSON metrics push, OTLP/JSON traces push, in-memory tracer.
-- CLI subcommands: `wstack doctor` (config/key/MCP/node health checks), `wstack export <id>` (render sessions as markdown/JSON/plain text).
-- Slash commands: `/help <name>` now renders detailed help for individual commands.
-- Contributor docs: [architecture](docs/architecture.md), [plugin author guide](docs/plugin-author-guide.md), [provider author guide](docs/provider-author-guide.md), [tool author guide](docs/tool-author-guide.md).
-- 13 long-broken MCP integration tests now pass; FileHandle GC warning eliminated.
-- License switched to MIT.
+0.1.4 is the first version where `npm install -g wrongstack` actually
+pulls the recent code — 0.1.3 was published as `@wrongstack/cli@0.1.3`
+but the `wrongstack` umbrella package was accidentally left at 0.1.0,
+so installs kept resolving to the old binary. 0.1.4 re-publishes every
+package in lockstep.
+
+Since 0.1.0 you get:
+
+- **Bench harness** (`pnpm bench`) with built-in suites for compactor, token estimation, JSON-schema validation, and the system prompt builder.
+- **Observability**: optional `/metrics` (Prometheus) + `/healthz` (Kubernetes-style) endpoint, OTLP/JSON metrics push, OTLP/JSON traces push, in-memory tracer.
+- **CLI subcommands**: `wstack doctor` (config/key/MCP/node health checks), `wstack export <id>` (render sessions as markdown/JSON/plain text).
+- **Slash commands**: `/help <name>` now renders detailed help for individual commands.
+- **Contributor docs**: [architecture](docs/architecture.md), [plugin author guide](docs/plugin-author-guide.md), [provider author guide](docs/provider-author-guide.md), [tool author guide](docs/tool-author-guide.md).
+- **13 long-broken MCP integration tests** now pass; FileHandle GC warning eliminated.
+- **License switched to MIT** (every published package now carries the SPDX `MIT` identifier).
 
 ## Quick start
 

@@ -1,6 +1,6 @@
 {
   "name": "@wrongstack/cli",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "license": "MIT",
   "description": "WrongStack CLI — terminal AI coding agent with provider catalog from models.dev. Provides `wrongstack` and `wstack` binaries.",
   "keywords": ["ai", "agent", "cli", "llm", "anthropic", "openai", "gemini", "coding-agent", "mcp"],
