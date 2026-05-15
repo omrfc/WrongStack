@@ -37,3 +37,22 @@ export function buildAgentsCommand(opts: SlashCommandContext): SlashCommand {
     },
   };
 }
+
+export function buildDirectorCommand(opts: SlashCommandContext): SlashCommand {
+  return {
+    name: 'director',
+    description:
+      'Promote this session to director mode, enabling fleet orchestration tools. Only works before any subagents are spawned.',
+    async run() {
+      if (!opts.onDirector) return { message: 'Director promotion is not available in this session.' };
+      const result = await opts.onDirector();
+      if (result === null) {
+        return {
+          message:
+            'Cannot promote to director mode: subagents have already been spawned. Promote before using /spawn, or restart with --director.',
+        };
+      }
+      return { message: result };
+    },
+  };
+}

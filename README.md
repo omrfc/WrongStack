@@ -21,6 +21,33 @@ This pulls in the full stack — `@wrongstack/core`, `@wrongstack/providers`, `@
 
 After install, `wrongstack` is on your `PATH`. (`wstack` works too — it's an alias.)
 
+### What's new in 0.1.10
+
+Additive update — no breaking changes.
+
+**Extended thinking / reasoning stream** — `thinking_delta` events flow
+end-to-end from provider SSE through the agent loop to the TUI/WebUI.
+OpenAI `reasoning_content`, Anthropic thinking blocks, and Google
+thoughts all normalize to the same `StreamEvent` schema.
+
+**`@wrongstack/core` subpath exports** — `execution/`, `coordination/`,
+`infrastructure/`, `storage/`, `security/`, `models/`, `sdd/`, and
+`observability/` are now independent entrypoints. Deep-import what you
+need; deep-imports tree-shake cleanly.
+
+**Tool output size chips** — `tool.executed` events now carry
+`outputBytes`, `outputTokens`, and `outputLines` so the TUI can render
+inline size chips (`1.2 KB · ~340t · 45 lines`) beside each tool result.
+
+**Child-process env hardening** — `buildChildEnv()` is now the single
+canonical implementation in `@wrongstack/core`; the `patch` tool was
+the last holdout still spreading `process.env`. `WRONGSTACK_CHILD_ENV_PASSTHROUGH=1`
+(defaults off) opts back to the old behaviour.
+
+**4 security fixes + WebUI guards** — MCP SSE reader 256 KB buffer cap,
+`replace` symlink traversal prevention, WebUI overlapping-run guard,
+WebUI broadcast error handling, and memory-store consolidation backup.
+
 ### What's new in 0.1.9
 
 No breaking changes — additive on both the public API and the plugin contract.
@@ -581,7 +608,7 @@ validation, and the system prompt builder. See
 
 ## Status
 
-- **1888 tests passing** across 184 test files (~13 s, 1 skipped)
+- **1903 tests passing** across 183 test files (~13 s, 1 skipped)
 - Coverage thresholds enforced in `vitest.config.ts`: ≥85 % lines / ≥85 % functions / ≥70 % branches / ≥82 % statements
 - All 8 packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles

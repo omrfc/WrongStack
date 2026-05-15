@@ -14,7 +14,7 @@ import { validateAgainstSchema } from '../utils/json-schema-validate.js';
  * Security Scanner) now exported from `@wrongstack/core`.
  * Plugins pinning `apiVersion: "^0.1"` continue to load unchanged.
  */
-export const KERNEL_API_VERSION = '0.1.9';
+export const KERNEL_API_VERSION = '0.1.10';
 
 export interface LoadPluginsOptions {
   apiFactory: (plugin: Plugin) => PluginAPI;

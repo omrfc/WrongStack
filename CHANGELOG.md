@@ -7,6 +7,125 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.10] — 2026-05-15
+
+Core package restructuring + thinking/reasoning stream support + tool
+output size chips + child-process env hardening pass + WebUI guard and
+formatting sweep. No breaking changes — additive on the plugin contract
+(`KERNEL_API_VERSION` moves to `0.1.10`; `apiVersion: "^0.1"` plugins
+keep loading).
+
+### Added
+
+- **`@wrongstack/core` subpath exports reorganized.** `execution/`,
+  `coordination/`, `infrastructure/`, `storage/`, `security/`,
+  `models/`, `sdd/`, and `observability/` are now independent subpath
+  entrypoints — `import { Agent } from '@wrongstack/core'` works as
+  before, but consumers can now deep-import `@wrongstack/core/execution`,
+  `@wrongstack/core/coordination`, etc. The old `defaults/` barrel is
+  deprecated but preserved as a re-export. 8 new `exports` maps
+  added to `package.json`; `tsup` config updated to emit each
+  entrypoint. No runtime change for existing consumers.
+
+- **Extended thinking / reasoning stream support.** Six new stream
+  events wired end-to-end — `thinking_start`, `thinking_delta`,
+  `thinking_signature`, `thinking_stop` — with full `StreamingState`
+  tracking, `buildResponse()` content-block ordering, and an empty-block
+  guard that prevents `400` on Anthropic. `content_block_start` now
+  recognizes `kind: 'thinking'`. The agent loop emits
+  `provider.thinking_delta` events; the WebUI server broadcasts them
+  for a transient "Thinking…" chip; the CLI + TUI forward
+  `thinking_delta` through the WebSocket. Providers (Anthropic, OpenAI,
+  Google) that already annotate thinking deltas are plumbed; OpenAI
+  `reasoning_content` in `chunk.choices[0].delta` is normalized to
+  `thinking_delta`.
+
+- **Tool output size chips on `tool.executed`.** The agent loop now
+  computes `outputBytes` (UTF-8 byte length), `outputTokens`
+  (~3.5 chars/token heuristic), and `outputLines` (read-prefix counts
+  or newline-based for bash/grep/logs) before emitting
+  `tool.executed`. These ride as optional fields on the existing
+  event — the TUI renders them as inline chips beside tool results
+  (`1.2 KB · ~340t · 45 lines`). The `output` field remains the
+  400-char preview; the chip fields reflect the full uncapped result.
+
+- **`buildChildEnv()` centralized in `@wrongstack/core`**
+  (`@wrongstack/core/utils`). Previously duplicated across
+  `tools/src/_env.ts`, `tools/src/bash.ts`, and `tools/src/exec.ts`.
+  Now a single canonical implementation with an explicit allowlist
+  (PATH, HOME, LANG, …), secret-name detection (TOKEN, SECRET, API_KEY,
+  …), and a tooling-prefix pass (NODE_, NPM_, PNPM_, YARN_, GIT_,
+  CI, XDG_…). The `_spawn-stream` helper and `patch` tool also use
+  it. Override with `WRONGSTACK_CHILD_ENV_PASSTHROUGH=1` (the legacy
+  `WRONGSTACK_BASH_ENV_PASSTHROUGH=1` is preserved as an alias).
+
+### Fixed — security
+
+- **`patch` tool child-process env hardened.** `runPatch()` previously
+  passed `{ ...process.env }` as the env — API keys and tokens leaked
+  into the `patch` subprocess. Now uses `buildChildEnv()` with
+  `LANG=C / LC_ALL=C` overrides layered on top. The `patch` call
+  site was the last `process.env` spread remaining in the tools layer.
+
+- **`replace` tool symlink traversal.** The native glob walk
+  (`globNative`) now skips symlinks with `e.isSymbolicLink()` rather
+  than following them, matching the `grep` tool's behavior from 0.1.6.
+
+- **MCP `SSEReader` buffer cap (256 KB).** Defense-in-depth: the
+  SSE reader inside MCP HTTP transports now throws if the pending-line
+  buffer exceeds 256 KB, preventing a malicious stream from pinning
+  memory. The upstream providers SSE parser already enforces this cap;
+  this covers the MCP transport's own reader.
+
+- **WebUI overlapping-run guard.** `handleUserMessage` previously
+  aborted the prior run and started a new one — a second
+  `agent.run()` could sneak in before the first's cleanup settled,
+  corrupting context state. Now rejects with an error message if a
+  run is already in flight. The abort path remains reachable through
+  explicit `abort` messages from the client.
+
+- **WebUI `broadcast()` error handling.** A client disconnecting
+  between the `readyState` check and the `send()` call previously
+  propagated as an unhandled rejection. Now caught and silently
+  dropped — the `close` handler removes the client naturally.
+
+- **Memory-store consolidation backup.** `consolidate()` now writes
+  a `<file>.bak.<ts>` backup before the atomic write so a crash
+  mid-consolidation doesn't lose the pre-consolidation state.
+
+### Changed — core
+
+- **Usage type disjoint-semantics documented.** `Usage.input` is now
+  formally specified as the FRESH input token count (excluding cached
+  portions). Provider adapters (Anthropic, OpenAI, Google) already
+  normalize to this invariant; the JSDoc on the type now states it
+  explicitly so third-party providers don't double-count cache.
+
+- **Prometheus `startMetricsServer` gains health endpoint.** A
+  `healthRegistry` option enables `/healthz` alongside `/metrics` on
+  the same port — K8s probes expect a single HTTP server; no need
+  for a sibling listener. The `/healthz` handler returns JSON
+  aggregate with status codes (200 healthy, 503 unhealthy).
+
+- **WebUI WebSocket binds to `127.0.0.1` explicitly.** Previously
+  `new WebSocketServer({ port })` defaulted to `::` on dual-stack
+  systems, risking LAN exposure. Now binds `127.0.0.1` — existing
+  `WS_HOST` env override still works for network scraping.
+
+### Internal
+
+- **`provider-config-utils.ts` extracted** from `webui-server.ts` —
+  `normalizeKeys`, `writeKeysBack`, `maskedKey`, and `nowIso` are
+  now reusable by the CLI subcommands layer.
+- **Source files alphabetized** — import ordering, `package.json`
+  `keywords`/`scripts` arrays, and test-import blocks across
+  `packages/core`, `packages/cli`, `packages/mcp`,
+  `packages/providers`, `packages/tools`, `packages/plug-lsp`,
+  `packages/tui`, and `packages/webui`.
+- **WebUI server source reformatted** — long lines broken at ~100
+  columns, trailing commas added consistently, brace style normalized
+  to match the rest of the codebase.
+
 ## [0.1.9] — 2026-05-15
 
 Post-0.1.7 audit triage + Director orchestration ecosystem + `/fleet`

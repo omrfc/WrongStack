@@ -43,6 +43,8 @@ export interface SlashCommandContext {
   ) => Promise<string>;
   onAgents?: () => string;
   onFleet?: (action: 'status' | 'usage' | 'kill' | 'manifest', target?: string) => Promise<string>;
+  /** Promote to director mode at runtime. Returns success message or null on failure. */
+  onDirector?: () => Promise<string | null>;
 }
 
 // Re-export helpers for external consumers (pre-launch.ts)
@@ -61,7 +63,7 @@ import { buildMemoryCommand } from './memory.js';
 import { buildMetricsCommand } from './metrics.js';
 import { buildExitCommand, buildLoadCommand, buildSaveCommand } from './session.js';
 import { buildSkillCommand } from './skill.js';
-import { buildAgentsCommand, buildSpawnCommand } from './spawn-agents.js';
+import { buildAgentsCommand, buildSpawnCommand, buildDirectorCommand } from './spawn-agents.js';
 import { buildTodosCommand } from './todos.js';
 import { buildToolsCommand } from './tools.js';
 
@@ -78,6 +80,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildStatsCommand(opts),
     buildSpawnCommand(opts),
     buildAgentsCommand(opts),
+    buildDirectorCommand(opts),
     buildFleetCommand(opts),
     buildMetricsCommand(opts),
     buildHealthCommand(opts),

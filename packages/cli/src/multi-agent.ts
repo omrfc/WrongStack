@@ -4,6 +4,7 @@
  * subagents don't pay the construction cost.
  */
 import { randomUUID } from 'node:crypto';
+import * as path from 'node:path';
 import {
   Agent,
   type Config,
@@ -87,6 +88,15 @@ export interface MultiAgentHostOptions {
    * prior fleet manifest.
    */
   directorRunId?: string;
+  /**
+   * Base directory for fleet artifacts (manifest, shared scratchpad,
+   * subagent sessions). When set and director mode is promoted at runtime
+   * (via /director), paths are derived as:
+   *   <fleetRoot>/fleet.json        (manifest)
+   *   <fleetRoot>/shared/           (scratchpad)
+   *   <fleetRoot>/subagents/        (per-subagent JSONL)
+   */
+  fleetRoot?: string;
 }
 
 /**
@@ -443,6 +453,38 @@ export class MultiAgentHost {
   async manifest(): Promise<string | null> {
     if (!this.director) return null;
     return this.director.writeManifest();
+  }
+
+  /**
+   * Promote a non-director session to director mode at runtime. Only
+   * succeeds when no subagents have been spawned yet — once a coordinator
+   * is running, the state cannot be migrated. Returns the live Director
+   * so the caller can register orchestration tools into the ToolRegistry.
+   *
+   * Idempotent: calling promoteToDirector on an already-promoted host
+   * returns the existing director without side effects.
+   */
+  async promoteToDirector(): Promise<Director | null> {
+    if (this.director) return this.director;
+    if (this.coordinator) {
+      // A coordinator already exists (subagents were spawned). Cannot
+      // safely replace a running coordinator with a Director wrapper.
+      return null;
+    }
+    // Force director mode on so ensureCoordinator builds a Director.
+    this.opts.directorMode = true;
+    // Derive fleet paths from fleetRoot when available.
+    if (this.opts.fleetRoot && !this.opts.manifestPath) {
+      this.opts.manifestPath = path.join(this.opts.fleetRoot, 'fleet.json');
+    }
+    if (this.opts.fleetRoot && !this.opts.sharedScratchpadPath) {
+      this.opts.sharedScratchpadPath = path.join(this.opts.fleetRoot, 'shared');
+    }
+    if (this.opts.fleetRoot && !this.opts.sessionsRoot) {
+      this.opts.sessionsRoot = path.join(this.opts.fleetRoot, 'subagents');
+    }
+    await this.ensureDirector();
+    return this.director ?? null;
   }
 
   /**

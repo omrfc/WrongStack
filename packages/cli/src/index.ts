@@ -752,6 +752,9 @@ export async function main(argv: string[]): Promise<number> {
     : undefined;
   const sharedScratchpadPath = directorMode ? path.join(fleetRoot!, 'shared') : undefined;
   const subagentSessionsRoot = directorMode ? path.join(fleetRoot!, 'subagents') : undefined;
+  // Always derive a fleetRoot for runtime promotion — /director needs
+  // a base dir to write manifest + scratchpad + per-subagent JSONLs into.
+  const fleetRootForPromotion = path.join(wpaths.projectSessions, session.id);
   const multiAgentHost = new MultiAgentHost(
     {
       container,
@@ -771,6 +774,7 @@ export async function main(argv: string[]): Promise<number> {
       sharedScratchpadPath,
       sessionsRoot: subagentSessionsRoot,
       directorRunId: session.id,
+      fleetRoot: fleetRootForPromotion,
     },
   );
   if (directorMode) {
@@ -890,6 +894,26 @@ export async function main(argv: string[]): Promise<number> {
         return `Manifest written → ${p}`;
       }
       return `Unknown fleet action: ${action}`;
+    },
+    onDirector: async () => {
+      const director = await multiAgentHost.promoteToDirector();
+      if (!director) return null;
+      // Register the 8 LLM-callable orchestration tools into the leader's
+      // ToolRegistry so the agent can discover fleet surface mid-session.
+      for (const tool of director.tools(FLEET_ROSTER)) {
+        toolRegistry.register(tool);
+      }
+      const mp = path.join(fleetRootForPromotion, 'fleet.json');
+      const sp = path.join(fleetRootForPromotion, 'shared');
+      const ss = path.join(fleetRootForPromotion, 'subagents');
+      const lines = [
+        `${color.green('✓')} Promoted to director mode.`,
+        `  Roster: ${Object.keys(FLEET_ROSTER).join(', ')}`,
+        `  Manifest → ${mp}`,
+        `  Scratchpad → ${sp}`,
+        `  Subagents → ${ss}`,
+      ];
+      return lines.join('\n');
     },
     onExit: () => {
       void mcpRegistry.stopAll();

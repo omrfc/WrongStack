@@ -1,0 +1,30 @@
+{
+  "directorRunId": "5c353247-167f-4fda-a20c-ab3a7d5ecea0",
+  "writtenAt": "2026-05-15T22:01:37.777Z",
+  "children": [
+    {
+      "subagentId": "32ce1c1c-9bb8-4259-88cb-4157add688a9",
+      "name": "checker",
+      "role": "general",
+      "taskIds": [
+        "361e3192-1cbf-40c4-9433-7002388f5fda"
+      ],
+      "results": [
+        {
+          "taskId": "361e3192-1cbf-40c4-9433-7002388f5fda",
+          "status": "pending"
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "total": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "cost": 0
+    },
+    "perSubagent": {}
+  }
+}

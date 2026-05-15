@@ -578,4 +578,61 @@ describe('built-in slash commands', () => {
       expect(onFleet).not.toHaveBeenCalled();
     });
   });
+
+  describe('/director runtime promotion', () => {
+    function makeDirectorRig(onDirector?: SlashCommandContext['onDirector']) {
+      const registry = new SlashCommandRegistry();
+      const toolRegistry = new ToolRegistry();
+      const renderer = new FakeRenderer();
+      const tokenCounter = new DefaultTokenCounter();
+      const compactor = new HybridCompactor({ preserveK: 5 });
+      const cmds = buildBuiltinSlashCommands({
+        registry,
+        toolRegistry,
+        compactor,
+        tokenCounter,
+        renderer: renderer as unknown as Parameters<
+          typeof buildBuiltinSlashCommands
+        >[0]['renderer'],
+        onDirector,
+      });
+      for (const c of cmds) registry.register(c);
+      return { registry };
+    }
+
+    it('/director without onDirector reports not available', async () => {
+      const { registry } = makeDirectorRig(undefined);
+      const r = await registry.dispatch('/director', fakeCtx);
+      expect(r?.message).toContain('not available');
+    });
+
+    it('/director when promotion fails (returns null) shows block message', async () => {
+      const { registry } = makeDirectorRig(async () => null);
+      const r = await registry.dispatch('/director', fakeCtx);
+      expect(r?.message).toContain('Cannot promote');
+      expect(r?.message).toContain('subagents have already been spawned');
+      expect(r?.message).toContain('--director');
+    });
+
+    it('/director when promotion succeeds returns the success message', async () => {
+      const { registry } = makeDirectorRig(async () => '✓ Promoted.\n  Roster: bug-hunter, security-scanner');
+      const r = await registry.dispatch('/director', fakeCtx);
+      expect(r?.message).toContain('✓ Promoted');
+      expect(r?.message).toContain('bug-hunter');
+    });
+
+    it('/director appears in /help listing', async () => {
+      const { registry } = makeDirectorRig(async () => 'ok');
+      const r = await registry.dispatch('/help', fakeCtx);
+      expect(r?.message).toContain('/director');
+      expect(r?.message).toContain('Promote this session');
+    });
+
+    it('/help director shows usage instructions', async () => {
+      const { registry } = makeDirectorRig(async () => 'ok');
+      const r = await registry.dispatch('/help director', fakeCtx);
+      expect(r?.message).toContain('/director');
+      expect(r?.message).toContain('fleet orchestration');
+    });
+  });
 });

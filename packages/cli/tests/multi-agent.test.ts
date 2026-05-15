@@ -89,6 +89,18 @@ describe('MultiAgentHost', () => {
     await expect(host.stopAll()).resolves.toBeUndefined();
   });
 
+  it('kill() before any spawn returns false', async () => {
+    const host = new MultiAgentHost(makeDeps());
+    expect(await host.kill('any-id')).toBe(false);
+  });
+
+  it('kill() after spawn stops the subagent and returns true', async () => {
+    const host = new MultiAgentHost(makeDeps());
+    const { subagentId } = await host.spawn('do a thing');
+    expect(await host.kill(subagentId)).toBe(true);
+    await host.stopAll();
+  });
+
   it('constructor does not eagerly read config or build the coordinator', () => {
     const deps = makeDeps();
     new MultiAgentHost(deps);
@@ -378,6 +390,136 @@ describe('MultiAgentHost', () => {
       expect(stat?.isDirectory() ?? false).toBe(true);
       await host.stopAll();
       await fs.rm(tmpRoot, { recursive: true, force: true });
+    });
+
+    describe('promoteToDirector (runtime promotion)', () => {
+      it('promotes a non-director host and returns the Director', async () => {
+        const host = new MultiAgentHost(makeDeps());
+        expect(host.isDirectorMode()).toBe(false);
+
+        const director = await host.promoteToDirector();
+        expect(director).not.toBeNull();
+        expect(host.isDirectorMode()).toBe(true);
+        // After promotion, the director has the 8 orchestration tools.
+        const tools = director!.tools();
+        expect(tools.map((t) => t.name).sort()).toEqual([
+          'ask_subagent',
+          'assign_task',
+          'await_tasks',
+          'fleet_status',
+          'fleet_usage',
+          'roll_up',
+          'spawn_subagent',
+          'terminate_subagent',
+        ]);
+        await host.stopAll();
+      });
+
+      it('is idempotent — calling promoteToDirector twice returns the same Director', async () => {
+        const host = new MultiAgentHost(makeDeps());
+        const a = await host.promoteToDirector();
+        const b = await host.promoteToDirector();
+        expect(a).not.toBeNull();
+        expect(a).toBe(b); // Same instance — no double-build.
+        await host.stopAll();
+      });
+
+      it('returns null when subagents have already been spawned', async () => {
+        const host = new MultiAgentHost(makeDeps());
+        // Spawn triggers lazy coordinator build; cannot promote after.
+        await host.spawn('do something');
+        const director = await host.promoteToDirector();
+        expect(director).toBeNull();
+        expect(host.isDirectorMode()).toBe(false);
+        await host.stopAll();
+      });
+
+      it('manifest() works after runtime promotion', async () => {
+        const os = await import('node:os');
+        const path = await import('node:path');
+        const fs = await import('node:fs/promises');
+        const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-promote-manifest-'));
+        const fleetRoot = path.join(tmpRoot, 'session-1');
+
+        const host = new MultiAgentHost(makeDeps(), { fleetRoot });
+        await host.promoteToDirector();
+        // manifest() should return null before any spawn (no director yet
+        // in the simple path, but we just promoted, so it should work).
+        await host.spawn('inspect', { name: 'inspector' });
+        const written = await host.manifest();
+        expect(written).toBe(path.join(fleetRoot, 'fleet.json'));
+        const raw = await fs.readFile(written!, 'utf8');
+        const parsed = JSON.parse(raw) as { directorRunId: string; children: unknown[] };
+        expect(parsed.directorRunId).toBeTruthy();
+        expect(parsed.children.length).toBeGreaterThanOrEqual(1);
+        await host.stopAll();
+        await fs.rm(tmpRoot, { recursive: true, force: true });
+      });
+
+      it('derives manifest/shared/subagent paths from fleetRoot', async () => {
+        const path = await import('node:path');
+        const host = new MultiAgentHost(makeDeps(), {
+          fleetRoot: path.join('tmp', 'fleet', 'session-2'),
+        });
+        const director = await host.promoteToDirector();
+        expect(director).not.toBeNull();
+
+        // Trigger lazy build and verify the Director's session factory
+        // was wired — spawn + assign a task and check the manifest path.
+        await host.spawn('path check', { name: 'checker' });
+        const written = await host.manifest();
+        expect(written).toBe(path.join('tmp', 'fleet', 'session-2', 'fleet.json'));
+        await host.stopAll();
+      });
+
+      it('works without fleetRoot — director still built, no paths', async () => {
+        const host = new MultiAgentHost(makeDeps());
+        // No fleetRoot at all — should still create the director.
+        const director = await host.promoteToDirector();
+        expect(director).not.toBeNull();
+        expect(host.isDirectorMode()).toBe(true);
+
+        // The director is alive but without paths, manifest() returns
+        // null because no manifestPath was configured.
+        await host.spawn('no-root', { name: 'ghost' });
+        expect(await host.manifest()).toBeNull();
+        await host.stopAll();
+      });
+
+      it('ensureDirector() returns the same Director after promotion', async () => {
+        const host = new MultiAgentHost(makeDeps());
+        const promoted = await host.promoteToDirector();
+        const ensured = await host.ensureDirector();
+        expect(ensured).toBe(promoted);
+        await host.stopAll();
+      });
+
+      it('spawn() after promotion routes through Director (manifest populated)', async () => {
+        const os = await import('node:os');
+        const path = await import('node:path');
+        const fs = await import('node:fs/promises');
+        const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-promote-route-'));
+        const fleetRoot = path.join(tmpRoot, 'session-3');
+
+        const host = new MultiAgentHost(makeDeps(), { fleetRoot });
+        await host.promoteToDirector();
+        const { taskId } = await host.spawn('routed', { name: 'router', provider: 'anthropic', model: 'claude' });
+        expect(taskId).toBeTruthy();
+
+        // The manifest should reflect the spawn even though we promoted
+        // at runtime — the spawn path checks `this.director` and routes
+        // through `Director.spawn` + `Director.assign`.
+        const written = await host.manifest();
+        expect(written).toBe(path.join(fleetRoot, 'fleet.json'));
+        const raw = await fs.readFile(written!, 'utf8');
+        const parsed = JSON.parse(raw) as { children: { name: string; provider: string; model: string }[] };
+        const child = parsed.children.find((c) => c.name === 'router');
+        expect(child).toBeDefined();
+        expect(child!.provider).toBe('anthropic');
+        expect(child!.model).toBe('claude');
+        await host.stopAll();
+        await fs.rm(tmpRoot, { recursive: true, force: true });
+      });
     });
   });
 });
