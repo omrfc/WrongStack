@@ -341,6 +341,38 @@ export interface WSKeyOperationResult {
   };
 }
 
+export interface WSFilesList {
+  type: 'files.list';
+  payload: {
+    files: string[];
+  };
+}
+
+export interface WSTodosUpdated {
+  type: 'todos.updated';
+  payload: {
+    todos: Array<{
+      id: string;
+      content: string;
+      status: 'pending' | 'in_progress' | 'completed';
+      activeForm?: string;
+    }>;
+  };
+}
+
+export interface WSModesList {
+  type: 'modes.list';
+  payload: {
+    modes: Array<{
+      id: string;
+      name: string;
+      description: string;
+      isActive: boolean;
+    }>;
+    activeId: string;
+  };
+}
+
 export type WSClientMessage =
   | WSUserMessage
   | WSToolConfirmResult
@@ -370,6 +402,11 @@ export type WSClientMessage =
   | { type: 'session.save' }
   | { type: 'sessions.list'; payload: { limit: number } }
   | { type: 'session.delete'; payload: { id: string } }
+  | { type: 'modes.list' }
+  | { type: 'mode.switch'; payload: { id: string } }
+  | { type: 'files.list'; payload: { query?: string; limit?: number } }
+  | { type: 'todos.get' }
+  | { type: 'todos.clear' }
   | { type: 'ping' };
 
 export type WSServerMessage =
@@ -397,7 +434,10 @@ export type WSServerMessage =
   | WSProviderCatalog
   | WSProviderModels
   | WSSavedProviders
-  | WSKeyOperationResult;
+  | WSKeyOperationResult
+  | WSFilesList
+  | WSTodosUpdated
+  | WSModesList;
 
 // Helper to broadcast to all clients
 export type BroadcastFn = (msg: WSServerMessage) => void;

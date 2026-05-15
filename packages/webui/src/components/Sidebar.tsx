@@ -107,7 +107,7 @@ export function Sidebar() {
    *  list reads like a journal instead of one long undifferentiated stream.
    *  Boundaries are local midnight. Entries with unparseable timestamps
    *  fall into "Earlier" so they're not silently dropped. */
-  const groupedHistory = ((): Array<{ label: string; rows: typeof historyEntries }> => {
+  const groupedHistory = ((): Array<{ label: string; rows: typeof historyEntries; star?: boolean }> => {
     const q = historyQuery.trim().toLowerCase();
     const filtered = q
       ? historyEntries.filter(
