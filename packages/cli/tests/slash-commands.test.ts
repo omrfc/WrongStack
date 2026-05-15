@@ -6,7 +6,7 @@ import {
   HybridCompactor,
   type Context,
 } from '@wrongstack/core';
-import { buildBuiltinSlashCommands } from '../src/slash-commands/index.js';
+import { buildBuiltinSlashCommands, type SlashCommandContext } from '../src/slash-commands/index.js';
 
 class FakeRenderer {
   output = '';
@@ -292,6 +292,112 @@ describe('built-in slash commands', () => {
       expect(r?.message).toContain('spawned:');
     });
 
+    it('/spawn --provider=openai --model=gpt-5 forwards overrides', async () => {
+      const registry = new SlashCommandRegistry();
+      const toolRegistry = new ToolRegistry();
+      const renderer = new FakeRenderer();
+      const tokenCounter = new DefaultTokenCounter();
+      const compactor = new HybridCompactor({ preserveK: 5 });
+      const onSpawn = vi.fn(async (desc: string) => `spawned: ${desc}`);
+      const cmds = buildBuiltinSlashCommands({
+        registry, toolRegistry, compactor, tokenCounter,
+        renderer: renderer as unknown as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
+        onSpawn,
+        onAgents: () => '',
+      });
+      for (const c of cmds) registry.register(c);
+      await registry.dispatch('/spawn --provider=openai --model=gpt-5 audit the auth flow', fakeCtx);
+      expect(onSpawn).toHaveBeenCalledWith('audit the auth flow', {
+        provider: 'openai',
+        model: 'gpt-5',
+      });
+    });
+
+    it('/spawn short flags (-p, -m, -n) work the same as long form', async () => {
+      const registry = new SlashCommandRegistry();
+      const toolRegistry = new ToolRegistry();
+      const renderer = new FakeRenderer();
+      const tokenCounter = new DefaultTokenCounter();
+      const compactor = new HybridCompactor({ preserveK: 5 });
+      const onSpawn = vi.fn(async (desc: string) => `spawned: ${desc}`);
+      const cmds = buildBuiltinSlashCommands({
+        registry, toolRegistry, compactor, tokenCounter,
+        renderer: renderer as unknown as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
+        onSpawn,
+        onAgents: () => '',
+      });
+      for (const c of cmds) registry.register(c);
+      await registry.dispatch('/spawn -p anthropic -m haiku -n researcher enumerate every package', fakeCtx);
+      expect(onSpawn).toHaveBeenCalledWith('enumerate every package', {
+        provider: 'anthropic',
+        model: 'haiku',
+        name: 'researcher',
+      });
+    });
+
+    it('/spawn --tools=a,b,c parses the tool slice as an array', async () => {
+      const registry = new SlashCommandRegistry();
+      const toolRegistry = new ToolRegistry();
+      const renderer = new FakeRenderer();
+      const tokenCounter = new DefaultTokenCounter();
+      const compactor = new HybridCompactor({ preserveK: 5 });
+      const onSpawn = vi.fn(async () => 'spawned');
+      const cmds = buildBuiltinSlashCommands({
+        registry, toolRegistry, compactor, tokenCounter,
+        renderer: renderer as unknown as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
+        onSpawn,
+        onAgents: () => '',
+      });
+      for (const c of cmds) registry.register(c);
+      await registry.dispatch('/spawn --tools=read,grep,bash investigate the bug', fakeCtx);
+      expect(onSpawn).toHaveBeenCalledWith('investigate the bug', {
+        tools: ['read', 'grep', 'bash'],
+      });
+    });
+
+    it('/spawn --name="Cool Name" handles quoted multi-word name', async () => {
+      const registry = new SlashCommandRegistry();
+      const toolRegistry = new ToolRegistry();
+      const renderer = new FakeRenderer();
+      const tokenCounter = new DefaultTokenCounter();
+      const compactor = new HybridCompactor({ preserveK: 5 });
+      const onSpawn = vi.fn(async () => 'spawned');
+      const cmds = buildBuiltinSlashCommands({
+        registry, toolRegistry, compactor, tokenCounter,
+        renderer: renderer as unknown as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
+        onSpawn,
+        onAgents: () => '',
+      });
+      for (const c of cmds) registry.register(c);
+      await registry.dispatch('/spawn --name="Security Reviewer" audit OWASP', fakeCtx);
+      expect(onSpawn).toHaveBeenCalledWith('audit OWASP', {
+        name: 'Security Reviewer',
+      });
+    });
+
+    it('/spawn with no flags preserves legacy single-arg signature', async () => {
+      // Regression guard for the call-site arity change: callers that
+      // overload by `arguments.length` (or test assertions that use
+      // `toHaveBeenCalledWith(desc)` without a 2nd arg) must keep
+      // working when no flags are passed.
+      const registry = new SlashCommandRegistry();
+      const toolRegistry = new ToolRegistry();
+      const renderer = new FakeRenderer();
+      const tokenCounter = new DefaultTokenCounter();
+      const compactor = new HybridCompactor({ preserveK: 5 });
+      const onSpawn = vi.fn(async (desc: string) => `spawned: ${desc}`);
+      const cmds = buildBuiltinSlashCommands({
+        registry, toolRegistry, compactor, tokenCounter,
+        renderer: renderer as unknown as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
+        onSpawn,
+        onAgents: () => '',
+      });
+      for (const c of cmds) registry.register(c);
+      await registry.dispatch('/spawn no flags here', fakeCtx);
+      // Strict single-arg call — the slash command must NOT pass undefined.
+      expect(onSpawn).toHaveBeenCalledWith('no flags here');
+    });
+
     it('/agents returns whatever onAgents produces', async () => {
       const registry = new SlashCommandRegistry();
       const toolRegistry = new ToolRegistry();
@@ -335,6 +441,86 @@ describe('built-in slash commands', () => {
       const r = await registry.dispatch('/spawn do a thing', fakeCtx);
       expect(r?.message).toMatch(/Spawn failed/);
       expect(r?.message).toContain('no provider configured');
+    });
+  });
+
+  describe('/fleet hub command', () => {
+    function makeFleetRig(onFleet?: SlashCommandContext['onFleet']) {
+      const registry = new SlashCommandRegistry();
+      const toolRegistry = new ToolRegistry();
+      const renderer = new FakeRenderer();
+      const tokenCounter = new DefaultTokenCounter();
+      const compactor = new HybridCompactor({ preserveK: 5 });
+      const cmds = buildBuiltinSlashCommands({
+        registry,
+        toolRegistry,
+        compactor,
+        tokenCounter,
+        renderer:
+          renderer as unknown as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
+        onFleet,
+      });
+      for (const c of cmds) registry.register(c);
+      return { registry };
+    }
+
+    it('/fleet without onFleet reports multi-agent not enabled', async () => {
+      const { registry } = makeFleetRig(undefined);
+      const r = await registry.dispatch('/fleet', fakeCtx);
+      expect(r?.message).toContain('not enabled');
+    });
+
+    it('/fleet defaults to status when no subcommand given', async () => {
+      const onFleet = vi.fn(async (action: string) => `[${action} called]`);
+      const { registry } = makeFleetRig(onFleet);
+      const r = await registry.dispatch('/fleet', fakeCtx);
+      expect(onFleet).toHaveBeenCalledWith('status', undefined);
+      expect(r?.message).toBe('[status called]');
+    });
+
+    it('/fleet status / usage / manifest dispatch without a target', async () => {
+      const onFleet = vi.fn(async (action: string) => `${action}-ok`);
+      const { registry } = makeFleetRig(onFleet);
+      await registry.dispatch('/fleet status', fakeCtx);
+      await registry.dispatch('/fleet usage', fakeCtx);
+      await registry.dispatch('/fleet manifest', fakeCtx);
+      expect(onFleet).toHaveBeenNthCalledWith(1, 'status', undefined);
+      expect(onFleet).toHaveBeenNthCalledWith(2, 'usage', undefined);
+      expect(onFleet).toHaveBeenNthCalledWith(3, 'manifest', undefined);
+    });
+
+    it('/fleet kill <id> forwards the target subagent id', async () => {
+      const onFleet = vi.fn(async () => 'stopped');
+      const { registry } = makeFleetRig(onFleet);
+      const r = await registry.dispatch('/fleet kill sub_abc123', fakeCtx);
+      expect(onFleet).toHaveBeenCalledWith('kill', 'sub_abc123');
+      expect(r?.message).toBe('stopped');
+    });
+
+    it('/fleet kill without id surfaces the usage line', async () => {
+      const onFleet = vi.fn(async () => 'should not be called');
+      const { registry } = makeFleetRig(onFleet);
+      const r = await registry.dispatch('/fleet kill', fakeCtx);
+      expect(r?.message).toMatch(/Usage:\s*\/fleet kill/);
+      expect(onFleet).not.toHaveBeenCalled();
+    });
+
+    it('/fleet help returns inline usage block', async () => {
+      const onFleet = vi.fn(async () => 'should not be called');
+      const { registry } = makeFleetRig(onFleet);
+      const r = await registry.dispatch('/fleet help', fakeCtx);
+      expect(r?.message).toContain('/fleet status');
+      expect(r?.message).toContain('/fleet kill');
+      expect(onFleet).not.toHaveBeenCalled();
+    });
+
+    it('/fleet <unknown> shows a hint listing valid subcommands', async () => {
+      const onFleet = vi.fn(async () => 'should not be called');
+      const { registry } = makeFleetRig(onFleet);
+      const r = await registry.dispatch('/fleet nope', fakeCtx);
+      expect(r?.message).toContain('Unknown subcommand "nope"');
+      expect(r?.message).toContain('status');
+      expect(onFleet).not.toHaveBeenCalled();
     });
   });
 });

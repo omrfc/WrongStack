@@ -14,6 +14,43 @@ export interface SubagentConfig {
   tools?: string[];
   model?: string;
   priority?: number;
+
+  // --- Director orchestration extensions ---
+
+  /**
+   * Provider registry id (e.g. `'anthropic'`, `'openai'`, `'google'`).
+   * Allows a director to mix providers across siblings — one subagent on
+   * Sonnet, another on GPT-5, another on Haiku. Falls back to the
+   * factory's default provider when omitted, which is the legacy
+   * single-provider behavior.
+   */
+  provider?: string;
+
+  /**
+   * Per-subagent session JSONL path. When omitted the orchestrator-
+   * supplied factory derives a path under `<sessionRoot>/<runId>/`.
+   * Override to redirect the transcript elsewhere (long-term storage,
+   * a different filesystem, etc.).
+   */
+  sessionPath?: string;
+
+  /**
+   * Additional text appended to the role's base system prompt. Does not
+   * replace it. Useful for last-mile guidance like "you may only call
+   * read tools, never write" or "respond in JSON only".
+   */
+  systemPromptOverride?: string;
+
+  /**
+   * Routing for streaming output. `'director'` (default) forwards
+   * text/tool events to the parent's FleetBus so the director can read
+   * the subagent's stream. `'silent'` keeps everything subagent-local;
+   * the director only sees the final task result. `'user'` forwards
+   * direct to the user-facing renderer (gate this behind an explicit
+   * config flag — it can confuse the chat surface).
+   */
+  textStream?: 'director' | 'silent' | 'user';
+  toolStream?: 'director' | 'silent' | 'user';
 }
 
 export interface TaskResult<T = unknown> {

@@ -90,6 +90,33 @@ export {
   type AgentFactoryResult,
   type AgentRunnerOptions,
 } from './agent-subagent-runner.js';
+// Director orchestration — per-subagent provider/model/session +
+// fleet-wide observability + LLM-callable orchestration tools.
+export {
+  Director,
+} from './director.js';
+export {
+  FleetBus,
+  FleetUsageAggregator,
+  type FleetEvent,
+  type FleetHandler,
+  type FleetUsage,
+  type SubagentUsageSnapshot,
+} from './fleet-bus.js';
+export {
+  makeDirectorSessionFactory,
+  type DirectorSessionFactory,
+  type DirectorSessionFactoryOptions,
+} from './director-session.js';
+export {
+  composeDirectorPrompt,
+  composeSubagentPrompt,
+  rosterSummaryFromConfigs,
+  DEFAULT_DIRECTOR_PREAMBLE,
+  DEFAULT_SUBAGENT_BASELINE,
+  type DirectorPromptParts,
+  type SubagentPromptParts,
+} from './director-prompts.js';
 export {
   InMemoryAgentBridge,
   InMemoryBridgeTransport,

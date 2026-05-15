@@ -976,6 +976,18 @@ export async function main(argv: string[]): Promise<number> {
   // L1-E: lazily-instantiated multi-agent host. Wired into /spawn and
   // /agents slash commands; constructed on first invocation so users
   // who never spawn subagents pay nothing.
+  //
+  // `--director` upgrades the host to Director mode — same external API,
+  // but task lifecycle flows through a `Director` so manifest writing
+  // works and the FleetBus is available for observability hooks. Manifest
+  // path defaults to `<projectSessions>/<sessionId>/fleet.json`; users can
+  // override via `WRONGSTACK_FLEET_MANIFEST` if they want a fixed path.
+  const directorMode = flags['director'] === true;
+  const manifestPath = directorMode
+    ? (typeof process.env['WRONGSTACK_FLEET_MANIFEST'] === 'string'
+        ? process.env['WRONGSTACK_FLEET_MANIFEST']
+        : path.join(wpaths.projectSessions, session.id, 'fleet.json'))
+    : undefined;
   const multiAgentHost = new MultiAgentHost({
     container,
     toolRegistry,
@@ -987,7 +999,10 @@ export async function main(argv: string[]): Promise<number> {
     tokenCounter,
     projectRoot,
     cwd,
-  });
+  }, { directorMode, manifestPath });
+  if (directorMode) {
+    renderer.writeInfo(`Director mode enabled. Fleet manifest → ${manifestPath}`);
+  }
 
   const slashCmds = buildBuiltinSlashCommands({
     registry: slashRegistry,
@@ -1001,9 +1016,14 @@ export async function main(argv: string[]): Promise<number> {
     context,
     metricsSink,
     healthRegistry,
-    onSpawn: async (description) => {
-      const { subagentId, taskId } = await multiAgentHost.spawn(description);
-      return `Spawned subagent ${subagentId} for task ${taskId}. Use /agents to track progress.`;
+    onSpawn: async (description, spawnOpts) => {
+      const { subagentId, taskId } = await multiAgentHost.spawn(description, spawnOpts);
+      const tags: string[] = [];
+      if (spawnOpts?.provider) tags.push(spawnOpts.provider);
+      if (spawnOpts?.model) tags.push(spawnOpts.model);
+      if (spawnOpts?.name) tags.push(`"${spawnOpts.name}"`);
+      const tag = tags.length > 0 ? ` (${tags.join(' / ')})` : '';
+      return `Spawned subagent ${subagentId}${tag} for task ${taskId}. Use /agents to track progress.`;
     },
     onAgents: () => {
       const s = multiAgentHost.status();
@@ -1017,6 +1037,62 @@ export async function main(argv: string[]): Promise<number> {
         );
       }
       return lines.join('\n');
+    },
+    onFleet: async (action, target) => {
+      if (action === 'status') {
+        const s = multiAgentHost.status();
+        const lines = [color.bold('Fleet status'), `  ${s.summary}`];
+        if (s.pending.length > 0) {
+          lines.push('', color.dim('  Pending'));
+          for (const p of s.pending) {
+            lines.push(`    ${p.taskId.slice(0, 8)} → ${p.subagentId.slice(0, 8)} · ${p.description.slice(0, 60)}`);
+          }
+        }
+        if (s.completed.length > 0) {
+          lines.push('', color.dim('  Completed'));
+          for (const r of s.completed) {
+            const mark = r.status === 'success' ? color.green('✓') : color.red('✗');
+            lines.push(`    ${mark} ${r.taskId.slice(0, 8)} → ${r.subagentId.slice(0, 8)} · ${r.iterations}it ${r.toolCalls}tc ${r.durationMs}ms`);
+          }
+        }
+        return lines.join('\n');
+      }
+      if (action === 'usage') {
+        const u = multiAgentHost.usage();
+        if (u.rows.length === 0) return 'No completed subagent tasks yet.';
+        const lines = [
+          color.bold('Fleet usage'),
+          color.dim('  subagent          tasks  iter  tools     ms  status'),
+        ];
+        for (const r of u.rows) {
+          lines.push(
+            `  ${r.subagentId.slice(0, 14).padEnd(14)}  ${String(r.tasks).padStart(5)}  ${String(r.iterations).padStart(4)}  ${String(r.toolCalls).padStart(5)}  ${String(r.durationMs).padStart(5)}  ${r.status}`,
+          );
+        }
+        lines.push(
+          color.dim('  ─'.repeat(28)),
+          `  ${'TOTAL'.padEnd(14)}  ${String(u.totals.tasks).padStart(5)}  ${String(u.totals.iterations).padStart(4)}  ${String(u.totals.toolCalls).padStart(5)}  ${String(u.totals.durationMs).padStart(5)}`,
+        );
+        return lines.join('\n');
+      }
+      if (action === 'kill') {
+        if (!target) return 'Usage: /fleet kill <subagent-id>';
+        const ok = await multiAgentHost.kill(target);
+        return ok
+          ? `Sent stop signal to ${target}.`
+          : 'No coordinator is running yet — nothing to kill.';
+      }
+      if (action === 'manifest') {
+        if (!multiAgentHost.isDirectorMode()) {
+          return 'Manifest is only available when the run was started with --director.';
+        }
+        const p = await multiAgentHost.manifest();
+        if (!p) {
+          return 'Director is active but no subagents have been spawned — nothing to record yet.';
+        }
+        return `Manifest written → ${p}`;
+      }
+      return `Unknown fleet action: ${action}`;
     },
     onExit: () => {
       void mcpRegistry.stopAll();

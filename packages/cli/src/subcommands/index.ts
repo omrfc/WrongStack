@@ -835,6 +835,7 @@ async function helpCmd(_args: string[], deps: SubcommandDeps): Promise<number> {
     '',
     'Global flags:',
     '  --provider, --model, --cwd, --log-level, --yolo, --verbose, --trace, --config',
+    '  --director                   Run with Director-backed orchestration (writes fleet manifest)',
   ];
   deps.renderer.write(lines.join('\n') + '\n');
   return 0;

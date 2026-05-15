@@ -7,6 +7,179 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] — 2026-05-15
+
+Post-0.1.7 audit triage + Director orchestration ecosystem + `/fleet`
+slash hub + `--director` CLI flag. No breaking changes — additive on
+both the public API and the plugin contract (KERNEL_API_VERSION moves
+to 0.1.8 to advertise the new exports; `apiVersion: "^0.1"` plugins
+keep loading).
+
+### Fixed — audit triage (bugs.md round)
+
+- **`AutonomousRunner.toolCalls` now counts `tool.executed` events**
+  rather than `agent.run()` calls. Previously a `maxToolCalls: 3` budget
+  could let an iteration burst fire 15 tools before the done-condition
+  tripped (counter only incremented once per iteration, not once per
+  tool). The runner now subscribes to `agent.events.on('tool.executed')`
+  for the lifetime of `run()`, tears the listener down in `finally`,
+  and tolerates mock agents whose events bus is null/undefined.
+  Regression test asserts a 5-tool burst trips a 3-tool budget after a
+  single iteration.
+- **MCP `_toolsCache` now stays in sync with `_tools`** on SSE/HTTP
+  transport `onToolsChanged` callbacks. Previously only `_tools` was
+  updated, so an empty tools-update would leave the cache pointing at
+  the prior non-empty list and `MCPClient.listTools()`'s empty-`_tools`
+  fallback would serve stale entries. Both stdio paths were already
+  correct; this fix is scoped to the two remote transports.
+- **`tool_use` meta-tool no longer hard-rejects confirm-permission
+  inner tools.** The outer `tool_use` itself has `permission: 'confirm'`,
+  so the user has already approved the call (and seen the inner tool
+  name + input) by the time `execute()` runs — the duplicate inner
+  check made every confirm-gated tool unreachable through `tool_use`.
+  The inner `deny` check is preserved as a hard policy floor that
+  meta-tools cannot bypass. `batch_tool_use` already followed this
+  model.
+- **`scaffold` migrated from sync to async I/O.** `fsSync.mkdirSync` /
+  `fsSync.writeFileSync` in the template-write loop blocked the event
+  loop for every file in a multi-file template. Switched to the
+  already-imported `node:fs/promises` API; `handleBuiltIn` is now
+  `async` and each `mkdir` / `writeFile` is awaited.
+
+The remaining audit findings (BUG-002, -004, -005, -006, -007, -008, -009,
+-010) were investigated and either intentional-by-design or
+self-corrected in the report; see `bugs.md` for the per-finding triage.
+
+### Added — Director orchestration
+
+A new high-level orchestration surface that runs every subagent with its
+own provider, model, context, session, and budget under an LLM-driven
+**Director** that plans, spawns, asks, rolls up, and supervises the
+fleet. Builds on the existing `MultiAgentCoordinator` + `SubagentBudget`
+without breaking either — `MultiAgentHost`'s legacy path is unchanged,
+director mode is opt-in via `--director`.
+
+Design doc: [`docs/director-architecture.md`](docs/director-architecture.md).
+
+- **`Director`** — owns a `MultiAgentCoordinator`, a `FleetBus`, a
+  `FleetUsageAggregator`, and an in-memory `AgentBridge` so the director
+  can `ask()` subagents synchronously. Public API: `spawn`,
+  `assign`, `awaitTasks`, `ask`, `rollUp`, `terminate`, `terminateAll`,
+  `status`, `snapshot`, `writeManifest`, `shutdown`, plus the
+  `leaderSystemPrompt()` / `subagentSystemPrompt(config, taskBrief?)`
+  composers for prompt injection. Lifecycle events are observable via
+  `Director.on('task.completed', handler)` and the completed results
+  cache via `Director.completedResults()`.
+- **8 LLM-callable orchestration tools** via `Director.tools(roster?)`:
+  `spawn_subagent`, `assign_task`, `await_tasks`, `ask_subagent`,
+  `roll_up`, `terminate_subagent`, `fleet_status`, `fleet_usage`. Each
+  ships a minimal JSON schema and `permission: 'auto'` (the user
+  already approved the director run; gating each orchestration call
+  would be noise — subagent tools are still permission-checked
+  normally).
+- **`FleetBus`** — fan-in for per-subagent `EventBus`es. Subscribe by
+  subagent id (`subscribe(id, handler)`), by event type
+  (`filter(type, handler)`), or to every event (`onAny(handler)`).
+  Attach a subagent's bus with `attach(subagentId, bus, taskId?)`;
+  detach with `detach(subagentId)`. Backed by canonical event names —
+  `tool.started`, `tool.executed`, `tool.progress`, `tool.confirm_needed`,
+  `iteration.started`, `iteration.completed`, `provider.text_delta`,
+  `provider.response`, `provider.retry`, `provider.error`,
+  `session.started`, `session.ended`, `token.threshold`.
+- **`FleetUsageAggregator`** — subscribes to `FleetBus` and rolls up
+  token/cost totals per subagent. Pluggable price lookup via
+  `priceLookup(subagentId)`; output rows tag each subagent with the
+  provider/model captured at spawn time. `snapshot()` returns
+  `{ total, perSubagent: Record<id, SubagentUsageSnapshot> }`.
+- **`makeDirectorSessionFactory({ store?, sessionsRoot?, directorRunId? })`**
+  — produces a `SessionFactory` for the coordinator's per-subagent
+  JSONL writers. Sessions land under `<sessionsRoot>/<runId>/<subagentId>.jsonl`
+  so every subagent has its own replayable transcript — fleet replay
+  doesn't need to demux a merged log.
+
+**System-prompt injection for Director + subagents.** Two pure
+composers — `composeDirectorPrompt()` and `composeSubagentPrompt()` —
+plus a `rosterSummaryFromConfigs()` helper, all exported from
+`@wrongstack/core`. The director-agent prompt is layered as
+*fleet preamble → roster summary → user base prompt*; subagent prompts
+layer as *bridge-contract baseline → role → task brief → per-spawn
+`systemPromptOverride`*, with the override always last so it wins on
+conflict. Two built-in defaults ship: `DEFAULT_DIRECTOR_PREAMBLE`
+teaches the leader the eight fleet tools and working rules;
+`DEFAULT_SUBAGENT_BASELINE` explains the bridge contract and the rule
+that subagents may not exfiltrate the parent's system prompt or tool
+list. Both overridable via `DirectorOptions.directorPreamble` /
+`subagentBaseline`. `Director.leaderSystemPrompt()` and
+`Director.subagentSystemPrompt(config, taskBrief?)` expose the
+composed strings without mutating the config — factories opt in by
+calling them when building each Agent.
+
+### Added — CLI surfaces
+
+- **`--director` flag.** Pass it to upgrade the lazy `MultiAgentHost`
+  from the plain coordinator path to a `Director`-backed one. Same
+  external `/spawn` / `/agents` / `/fleet` surface; under the hood,
+  the host's task lifecycle now flows through `Director.spawn` /
+  `Director.assign` so the in-memory manifest entries get populated.
+  On shutdown — or on-demand via `/fleet manifest` — the director
+  writes `fleet.json` to `<projectSessions>/<sessionId>/fleet.json`
+  (override with the `WRONGSTACK_FLEET_MANIFEST` env var).
+  `MultiAgentHost` gains `manifest()` returning the written path and
+  `isDirectorMode()` for slash-command branching.
+- **`/spawn` flag parser.** Now accepts `--provider=<id>` /
+  `--model=<id>` / `--name="..."` / `--tools=a,b,c` plus short forms
+  `-p` / `-m` / `-n`. Quoted multi-word names supported via
+  `--name="..."`. Single-arg legacy `/spawn <description>` preserved.
+  Spawn confirmation message tags the subagent with its
+  provider/model for visibility.
+- **`/fleet` slash command hub.** Inspects and controls the subagent
+  fleet without leaving the REPL: `/fleet` (defaults to status),
+  `/fleet status`, `/fleet usage`, `/fleet kill <id>`, `/fleet
+  manifest`, `/fleet help`. Status shows pending and completed tasks
+  per subagent; usage rolls up iterations, tool calls, and durations
+  across all completed tasks (sorted slowest first); kill sends a
+  stop signal to a specific subagent; manifest is fully wired when
+  running with `--director`. Wired through a new `onFleet` callback
+  on `SlashCommandContext`.
+
+**Tests** — 58 new tests across 5 files, all green:
+
+- Core: 17 director tests (provider isolation, task routing, usage
+  roll-up, ask/round-trip, rollUp markdown/JSON/empty, manifest disk
+  persistence, FleetBus subscribe/filter/onAny, per-subagent JSONL
+  isolation, tool surface stability) + 23 director-prompts tests
+  (layering order, override-last-wins, empty-section suppression,
+  roster summary rendering, parent-context exfil regression guard).
+- CLI: 2 multi-agent tests for provider routing + 4 director-mode
+  tests (isDirectorMode flips after lazy build, manifest null
+  off-mode, manifest written on-disk in director mode, status/usage
+  API stable in director mode) + 5 slash-command tests for `/spawn`
+  (long/short flag forms, tool slice parsing, quoted names, legacy
+  single-arg preservation) + 7 `/fleet` tests (default → status,
+  status/usage/manifest dispatch, kill with/without target, help,
+  unknown subcommand hint).
+
+### Changed — plugin API
+
+- **`KERNEL_API_VERSION` advanced to `0.1.8`** (was `0.1.1`) to
+  advertise the new additive surfaces above (Director, FleetBus,
+  prompt composers). Plugins pinning `apiVersion: "^0.1"` continue
+  to load unchanged.
+- **`@wrongstack/core/package.json` `wrongstackApiVersion`** updated
+  to `0.1.8` in lockstep. `wstack version` and `wstack diag` now
+  surface this value.
+
+**Not yet shipped** (documented in `director-architecture.md`):
+
+- TUI/WebUI fleet panels (subscribe to `FleetBus.onAny` for live view)
+- `wstack replay <runId>` subcommand (rehydrate from `fleet.json`
+  manifest)
+- `maxSpawnDepth` enforcement in the `spawn_subagent` tool
+- Hostile-prompt regression pack (bridge exfil attempts)
+
+The core protocol and isolation invariants are proven; surface work
+above can land independently without touching the core layer.
+
 ## [0.1.7] — 2026-05-15
 
 WebUI polish + publishing pass. `@wrongstack/webui` debuts on npm; all
@@ -70,41 +243,6 @@ other packages re-publish in lockstep. No breaking changes.
   `pnpm release:dry` (full dry-run), `pnpm release` (gate + publish).
 - **`publishConfig.access: "public"`** added to every publishable
   package so `pnpm publish` no longer needs the `--access public` flag.
-
-### Fixed — audit triage (bugs.md round)
-
-- **`AutonomousRunner.toolCalls` now counts `tool.executed` events**
-  rather than `agent.run()` calls. Previously a `maxToolCalls: 3` budget
-  could let an iteration burst fire 15 tools before the done-condition
-  tripped (counter only incremented once per iteration, not once per
-  tool). The runner now subscribes to `agent.events.on('tool.executed')`
-  for the lifetime of `run()`, tears the listener down in `finally`,
-  and tolerates mock agents whose events bus is null/undefined.
-  Regression test asserts a 5-tool burst trips a 3-tool budget after a
-  single iteration.
-- **MCP `_toolsCache` now stays in sync with `_tools`** on SSE/HTTP
-  transport `onToolsChanged` callbacks. Previously only `_tools` was
-  updated, so an empty tools-update would leave the cache pointing at
-  the prior non-empty list and `MCPClient.listTools()`'s empty-`_tools`
-  fallback would serve stale entries. Both stdio paths were already
-  correct; this fix is scoped to the two remote transports.
-- **`tool_use` meta-tool no longer hard-rejects confirm-permission
-  inner tools.** The outer `tool_use` itself has `permission: 'confirm'`,
-  so the user has already approved the call (and seen the inner tool
-  name + input) by the time `execute()` runs — the duplicate inner
-  check made every confirm-gated tool unreachable through `tool_use`.
-  The inner `deny` check is preserved as a hard policy floor that
-  meta-tools cannot bypass. `batch_tool_use` already followed this
-  model.
-- **`scaffold` migrated from sync to async I/O.** `fsSync.mkdirSync` /
-  `fsSync.writeFileSync` in the template-write loop blocked the event
-  loop for every file in a multi-file template. Switched to the
-  already-imported `node:fs/promises` API; `handleBuiltIn` is now
-  `async` and each `mkdir` / `writeFile` is awaited.
-
-The remaining audit findings (BUG-002, -004, -005, -006, -007, -008, -009,
--010) were investigated and either intentional-by-design or
-self-corrected in the report; see `bugs.md` for the per-finding triage.
 
 ## [0.1.6] — 2026-05-14
 

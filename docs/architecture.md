@@ -14,13 +14,15 @@ packages/
   mcp/          MCP client + registry + stdio/SSE/streamable-http transports
   cli/          REPL, subcommands, interactive pickers, slash commands
   tui/          React/Ink terminal UI (lazy-loaded behind --tui)
+  plug-lsp/     LSP bridge + language tooling + slash commands
+  webui/        Vite+React web UI served by the CLI
 apps/
   wrongstack/   bin entry — runs cli/main(argv)
 ```
 
 Each package depends only on what's below it. `core` depends on nothing
-WrongStack-internal; `providers`/`tools`/`mcp` depend on `core`; `cli`/`tui`
-depend on everything beneath.
+WrongStack-internal; `providers`/`tools`/`mcp`/`plug-lsp` depend on `core`;
+`cli`/`tui` depend on everything beneath.
 
 ---
 
@@ -41,7 +43,7 @@ TOKENS.MemoryStore     TOKENS.PermissionPolicy  TOKENS.Compactor
 TOKENS.PathResolver    TOKENS.ConfigLoader      TOKENS.ConfigStore
 TOKENS.Renderer        TOKENS.InputReader       TOKENS.ErrorHandler
 TOKENS.RetryPolicy     TOKENS.SkillLoader       TOKENS.SystemPromptBuilder
-TOKENS.SecretScrubber  TOKENS.ModelsRegistry
+TOKENS.SecretScrubber  TOKENS.ModelsRegistry    TOKENS.ModeStore
 ```
 
 The CLI binds defaults at boot; plugins can rebind any token before
@@ -76,25 +78,31 @@ const mw: Middleware<Request> = {
 };
 ```
 
-L1-F gave `Pipeline` a `setErrorHandler(fn)` so the host can decide
+`Pipeline` has a `setErrorHandler(fn)` so the host can decide
 rethrow-vs-swallow when a plugin handler crashes. Default is rethrow.
+`insertBefore`/`insertAfter`/`replace`/`remove` support position-aware
+mutation of the chain; `asReadonly()` exposes a frozen view for plugins.
 
 ### `EventBus`
 
 Typed pub/sub. Every meaningful runtime moment fires an event:
-`iteration.started`, `provider.text_delta`, `tool.executed`,
-`tool.progress`, `compaction.completed`, `provider.retry`,
-`provider.error`, and ~30 more. See [`events.ts`](../packages/core/src/kernel/events.ts).
+`iteration.started`, `iteration.completed`, `provider.text_delta`,
+`provider.response`, `provider.retry`, `provider.error`,
+`tool.started`, `tool.progress`, `tool.executed`, `tool.confirm_needed`,
+`compaction.fired`, `compaction.failed`, `mcp.server.connected`,
+`mcp.server.reconnected`, `mcp.server.disconnected`, and ~30 more.
+See [`events.ts`](../packages/core/src/kernel/events.ts).
 
 The CLI subscribes for spinner / live-tail / session-log; the TUI subscribes
 the same events into React state; observability sinks subscribe via
-`wireMetricsToEvents`.
+`wireMetricsToEvents`. V2-D added `listenerCount()` for leak-detection.
 
 ### `RunController`
 
 One per `Agent.run`. Owns the `AbortController`, chains the parent signal,
-and drains abort hooks when the run ends (whether normally, by abort, or
-by throw).
+drains abort hooks when the run ends (LIFO order), and enforces cleanup
+even on normal exit via `dispose()`. Hooks are snapshot before firing so
+hooks added during cleanup don't re-trigger.
 
 ---
 
@@ -140,16 +148,18 @@ const unsubscribe = ctx.state.onChange((change, state) => {
                          ▼
                    ┌──────────────────────────┐
                    │ for each iteration       │
+                   │   checkIterationLimit    │
                    │   build request          │ ← request pipeline
-                   │   provider.complete      │ ← provider.complete span
-                   │   stream into Response   │ ← provider.text_delta / response pipeline
+                   │   runProviderWithRetry   │ ← provider.complete span
+                   │   processResponse        │ ← provider.text_delta / response pipeline
                    │   if assistant text only → done
                    │   else: tool_use blocks  │
-                   │     ToolExecutor.run     │
+                   │     ToolExecutor.executeBatch
                    │       permission check   │
-                   │       tool.execute(eS)   │ ← tool.<name> span
+                   │       tool.execute(eS)  │ ← tool.<name> span
                    │       toolCall pipeline  │
                    │       ctx.state.append   │
+                   │   compactContextIfNeeded │ ← contextWindow pipeline
                    │   loop                   │
                    └──────────────────────────┘
                          │
@@ -160,8 +170,8 @@ const unsubscribe = ctx.state.onChange((change, state) => {
 ```
 
 Iteration cap is a soft limit: when reached, the agent fires
-`iteration.limit_reached` and either auto-extends by 100 or waits for a
-listener to grant/deny. Default is auto-extend.
+`iteration.limit_reached` and either auto-extends by 100 (default) or
+waits for a listener to grant/deny. `autoExtendLimit` is configurable.
 
 Errors at any layer are surfaced as `WrongStackError` (extends `Error`
 with `code`, `severity`, `recoverable`). `RunResult.error` is typed
@@ -172,8 +182,7 @@ with `code`, `severity`, `recoverable`). `RunResult.error` is typed
 ## Providers — declarative wire formats
 
 A `Provider` adapts a model's HTTP API to the unified `complete` /
-`stream` interface. After L0-C, the three built-ins live as
-`WireFormatConfig` presets:
+`stream` interface. The three built-ins live as `WireFormatConfig` presets:
 
 ```ts
 const config: WireFormatConfig<MyStreamState> = {
@@ -189,7 +198,7 @@ const config: WireFormatConfig<MyStreamState> = {
 `WireFormatProvider` consumes the config and gives you a fully-wired
 `Provider`. The compat re-exports (`class AnthropicProvider extends
 WireFormatProvider`) keep the legacy `new AnthropicProvider(...)` shape
-working for one minor.
+working.
 
 See [`provider-author-guide.md`](provider-author-guide.md) for writing
 a new one.
@@ -218,7 +227,55 @@ When defined, `executeStream` is preferred: yields `log`, `partial_output`,
 `{ type: 'final', output }`. The executor publishes each event as
 `tool.progress` on the EventBus; the TUI live-tails.
 
+`ToolExecutor` runs tools with three strategies: `parallel` (all at once),
+`sequential` (one after another), or `smart` (auto, defaults to parallel
+when tools are independent). Output per iteration is capped and truncated
+in `tool.executed` events to avoid flooding the session log.
+
 See [`tool-author-guide.md`](tool-author-guide.md).
+
+---
+
+## Compactors
+
+Three compaction strategies compose in `HybridCompactor`:
+
+| Compactor | Strategy |
+|---|---|
+| `SelectiveCompactor` | preserves task-critical messages, elides the rest |
+| `IntelligentCompactor` | LLM-assisted summarization of ancient turns |
+| `LLMSelector` | picks the best model for context reduction decisions |
+
+`AutoCompactionMiddleware` wraps the contextWindow pipeline and fires
+compaction automatically when token threshold fractions are crossed
+(`warnThreshold`, `softThreshold`, `hardThreshold`). Compaction is
+best-effort — a failure fires `compaction.failed` but never aborts the
+run.
+
+---
+
+## Multi-agent
+
+`DefaultMultiAgentCoordinator` manages a fleet of subagents with:
+
+- Task queue with `maxConcurrent` (default 4) in-flight limit
+- Per-subagent `SubagentBudget` (maxIterations, maxToolCalls, maxTokens,
+  maxCostUsd, timeoutMs) with precedence: task > subagent > coordinator
+- `AgentBridge` for bidirectional parent↔subagent messaging
+- `BudgetExceededError` surfaced as `timeout` or `stopped` result status
+- Subagent signal lifecycle (AbortController recycled between tasks so
+  aborted subagents can take new work)
+
+`makeAgentSubagentRunner()` wraps a regular `Agent` instance as a
+`SubagentRunner`. The coordinator emits `subagent.started`,
+`subagent.stopped`, `task.assigned`, `task.completed`, and `done` events.
+
+For the **director-driven** evolution of this — where every subagent
+runs with its own provider, model, context, session, and budget under
+an LLM-driven Director agent — see
+[director-architecture.md](director-architecture.md). It's a design
+doc, not yet implemented; the gap analysis there lists the small set
+of additions needed on top of the primitives above.
 
 ---
 
@@ -260,7 +317,7 @@ export default {
 
 The loader runs `teardown()` on SIGINT and natural exit. When a plugin
 calls `api.tools.register` but `capabilities.tools !== true`, the loader
-logs a warning (L0-D capability check).
+logs a warning.
 
 See [`plugin-author-guide.md`](plugin-author-guide.md).
 
@@ -276,13 +333,14 @@ Three pillars, all behind interfaces with noop default impls:
 | Traces | `Tracer` | `NoopTracer` | bind a real `OTelTracer` |
 | Health | `HealthRegistry` | `DefaultHealthRegistry` | enabled with `--metrics` |
 
-L3-C added a Prometheus pull endpoint: `--metrics-port 9090` starts an
-HTTP server on `127.0.0.1` exposing `/metrics` in v0.0.4 text format.
-Set `METRICS_HOST=0.0.0.0` to bind publicly.
+Prometheus pull endpoint: `--metrics-port 9090` starts an HTTP server on
+`127.0.0.1` exposing `/metrics` in v0.0.4 text format. Set
+`METRICS_HOST=0.0.0.0` to bind publicly. OTLP exporters are also
+available via `startOtlpMetricsExporter` / `startOtlpTraceExporter`.
 
-`Agent.run` opens an `Agent.run` span. `provider.complete` and
-`tool.<name>` are child spans. Everything is noop unless you wire a real
-tracer.
+`Agent.run` opens an `agent.run` span; per-iteration `agent.iteration`
+spans and `provider.complete` spans nest inside. Tool spans are opened
+by the ToolExecutor. Everything is noop unless you wire a real tracer.
 
 ---
 
@@ -296,8 +354,8 @@ skill events.
 `DefaultSessionStore.list()` reads a side-car `<id>.summary.json` for
 fast listing; only damaged or pre-manifest sessions force a full parse.
 
-L2-A added `DefaultSessionReader` over this store with query/replay/
-search/export. Export formats: markdown, json, text.
+`DefaultSessionReader` provides query/replay/search/export over the
+store. Export formats: markdown, json, text.
 
 ---
 
@@ -310,11 +368,20 @@ search/export. Export formats: markdown, json, text.
 3. Subcommand dispatch if `positional[0]` matches (`init`, `auth`, `mcp`, …)
 4. Otherwise: pre-launch prompts (project check, mode, yolo) on interactive TTY
 5. Wire container, registries, pipelines, system prompt builder, mcp registry,
-   plugins, multi-agent host
+   plugins, multi-agent coordinator
 6. `runRepl(...)` or `runTui(...)` based on mode
 
 The CLI knows nothing the plugins / providers / tools couldn't also do —
 it's just the assembly of defaults + the interactive shell.
+
+---
+
+## WebUI
+
+A Vite+React web UI served by the CLI via `--webui`. The CLI starts an
+HTTP server that mounts the compiled React app and wires it to the same
+EventBus and session store as the TUI, so both UIs stay consistent with
+the agent run.
 
 ---
 

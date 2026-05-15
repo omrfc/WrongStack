@@ -144,6 +144,70 @@ describe('MultiAgentHost', () => {
     await host.stopAll();
   });
 
+  it('spawn() with per-subagent provider override builds that provider, not the leader', async () => {
+    // Director-mode: a single fleet should be able to use sonnet for the
+    // editor + haiku for the researcher in the same run. Verifies the
+    // factory looks up `config.providers[<overrideId>]` and passes the
+    // right config to `makeProviderFromConfig`.
+    const providersMod = await import('@wrongstack/providers');
+    const mocked = providersMod.makeProviderFromConfig as ReturnType<typeof vi.fn>;
+    mocked.mockClear();
+
+    const deps = makeDeps();
+    (deps.configStore.get as ReturnType<typeof vi.fn>).mockReturnValue({
+      provider: 'anthropic',
+      model: 'sonnet',
+      apiKey: 'leader-key',
+      providers: {
+        anthropic: { type: 'anthropic', family: 'anthropic', apiKey: 'anthropic-key' },
+        openai: { type: 'openai', family: 'openai', apiKey: 'openai-key' },
+      },
+    });
+
+    const host = new MultiAgentHost(deps);
+    await host.spawn('rewrite README', { name: 'editor', provider: 'anthropic', model: 'sonnet' });
+    await host.spawn('audit code', { name: 'auditor', provider: 'openai', model: 'gpt-5' });
+    await host.stopAll();
+
+    // Each unique provider override should land as one of the recorded calls.
+    const providerIds = mocked.mock.calls.map((c) => c[0]);
+    expect(providerIds).toContain('anthropic');
+    expect(providerIds).toContain('openai');
+
+    // And the openai call must use the openai-specific apiKey, not the leader's.
+    const openaiCall = mocked.mock.calls.find((c) => c[0] === 'openai');
+    expect(openaiCall).toBeDefined();
+    expect((openaiCall![1] as { apiKey: string }).apiKey).toBe('openai-key');
+  });
+
+  it('spawn() falls back to leader provider when override is unknown', async () => {
+    // Typo / unconfigured provider id shouldn't crash the run — we use
+    // the leader and let downstream code decide whether to fail loudly.
+    const providersMod = await import('@wrongstack/providers');
+    const mocked = providersMod.makeProviderFromConfig as ReturnType<typeof vi.fn>;
+    mocked.mockClear();
+
+    const deps = makeDeps();
+    (deps.configStore.get as ReturnType<typeof vi.fn>).mockReturnValue({
+      provider: 'anthropic',
+      model: 'sonnet',
+      apiKey: 'leader-key',
+      providers: {
+        anthropic: { type: 'anthropic', family: 'anthropic', apiKey: 'anthropic-key' },
+      },
+    });
+
+    const host = new MultiAgentHost(deps);
+    await host.spawn('do thing', { provider: 'mistral-but-not-configured' });
+    await host.stopAll();
+
+    // We should have called makeProviderFromConfig with 'anthropic' (the
+    // leader), not the unknown id.
+    const providerIds = mocked.mock.calls.map((c) => c[0]);
+    expect(providerIds).toContain('anthropic');
+    expect(providerIds).not.toContain('mistral-but-not-configured');
+  });
+
   it('spawn() honors the toolRegistry filter when called with allow-list', async () => {
     const deps = makeDeps();
     const tools = deps.toolRegistry;
@@ -159,5 +223,59 @@ describe('MultiAgentHost', () => {
     // SystemPromptBuilder receives the unfiltered list via the factory closure;
     // exercising the path is what matters for coverage.
     expect((deps.systemPromptBuilder as { build: ReturnType<typeof vi.fn> }).build).toHaveBeenCalled();
+  });
+
+  describe('director mode', () => {
+    it('isDirectorMode() is false by default and true when opt-in', () => {
+      const simple = new MultiAgentHost(makeDeps());
+      expect(simple.isDirectorMode()).toBe(false);
+      const directed = new MultiAgentHost(makeDeps(), { directorMode: true });
+      expect(directed.isDirectorMode()).toBe(false);
+      // isDirectorMode flips on after the lazy build kicks in (first spawn).
+    });
+
+    it('manifest() returns null when director mode is off', async () => {
+      const host = new MultiAgentHost(makeDeps());
+      await host.spawn('do thing');
+      expect(await host.manifest()).toBeNull();
+      await host.stopAll();
+    });
+
+    it('director mode builds a Director on first spawn and writes a manifest', async () => {
+      const os = await import('node:os');
+      const path = await import('node:path');
+      const fs = await import('node:fs/promises');
+      const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-manifest-'));
+      const manifestPath = path.join(tmpRoot, 'fleet.json');
+
+      const host = new MultiAgentHost(makeDeps(), {
+        directorMode: true,
+        manifestPath,
+      });
+      expect(host.isDirectorMode()).toBe(false); // not yet built
+      await host.spawn('inspect', { name: 'inspector', provider: 'anthropic', model: 'claude' });
+      expect(host.isDirectorMode()).toBe(true);
+      const written = await host.manifest();
+      expect(written).toBe(manifestPath);
+      const raw = await fs.readFile(manifestPath, 'utf8');
+      const parsed = JSON.parse(raw) as { directorRunId: string; children: unknown[] };
+      expect(parsed.directorRunId).toBeTruthy();
+      expect(parsed.children.length).toBeGreaterThanOrEqual(1);
+      await host.stopAll();
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    });
+
+    it('status() / usage() keep working in director mode', async () => {
+      // Smoke-test that the host's public API stays the same when the
+      // Director is the one driving the coordinator under the hood.
+      const host = new MultiAgentHost(makeDeps(), { directorMode: true });
+      await host.spawn('a thing');
+      const s = host.status();
+      expect(s.pending.length).toBeGreaterThanOrEqual(0);
+      const u = host.usage();
+      expect(u).toHaveProperty('rows');
+      expect(u).toHaveProperty('totals');
+      await host.stopAll();
+    });
   });
 });

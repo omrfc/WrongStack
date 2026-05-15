@@ -41,13 +41,29 @@ export interface SlashCommandContext {
   onStats?: () => string | null;
   /**
    * Optional spawn handler — wired by the CLI when the multi-agent host is
-   * available. Receives the task description and returns a one-line summary
-   * once the subagent finishes (or an error). When unset, `/spawn` reports
-   * that multi-agent is not enabled.
+   * available. Receives the task description plus optional per-subagent
+   * overrides (provider/model/tool slice/name) and returns a one-line
+   * summary once the subagent finishes (or an error). When unset,
+   * `/spawn` reports that multi-agent is not enabled.
    */
-  onSpawn?: (description: string) => Promise<string>;
+  onSpawn?: (
+    description: string,
+    opts?: { provider?: string; model?: string; tools?: string[]; name?: string },
+  ) => Promise<string>;
   /** Lists active and completed subagents. Same on/off semantics as onSpawn. */
   onAgents?: () => string;
+  /**
+   * Fleet inspection / control surface. The CLI wires this when the
+   * multi-agent host is available; the slash command dispatches by `action`:
+   *   - 'status'   — same shape as /agents (kept here so /fleet works as a hub)
+   *   - 'usage'    — per-subagent runtime cost (iterations / tools / ms)
+   *   - 'kill'     — terminate a subagent; `target` is the subagent id
+   *   - 'manifest' — print the in-memory manifest if a director is wired
+   * Returns a formatted, ready-to-print string. Implementations should
+   * never throw; surface errors as part of the returned string instead so
+   * the slash dispatcher doesn't need a try/catch.
+   */
+  onFleet?: (action: 'status' | 'usage' | 'kill' | 'manifest', target?: string) => Promise<string>;
 }
 
 export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashCommand[] {
@@ -63,6 +79,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     statsCommand(opts),
     spawnCommand(opts),
     agentsCommand(opts),
+    fleetCommand(opts),
     metricsCommand(opts),
     healthCommand(opts),
     memoryCommand(opts),
@@ -779,19 +796,74 @@ function statusIcon(status: string): string {
   return color.red('●');
 }
 
+/**
+ * Parse `/spawn` flags from the args head. Supported:
+ *   --provider=<id> / -p <id>   override the subagent's provider id
+ *   --model=<id>    / -m <id>   override the subagent's model
+ *   --name=<label>  / -n <label> display name
+ *   --tools=a,b,c               restrict the subagent's tool slice
+ *
+ * Anything after the last flag is the task description. Returns null
+ * when no flags are present (legacy `/spawn <description>` path) so the
+ * caller can take the cheap path. Whitespace inside quoted descriptions
+ * is preserved.
+ */
+function parseSpawnFlags(input: string): {
+  description: string;
+  opts: { provider?: string; model?: string; tools?: string[]; name?: string };
+} {
+  const opts: { provider?: string; model?: string; tools?: string[]; name?: string } = {};
+  // Tokenize from the start, peeling off recognized flags one at a time.
+  // We stop as soon as we hit a non-flag token; the remainder of the
+  // string (preserving inner whitespace and quotes) becomes the description.
+  let rest = input;
+  const consume = (re: RegExp): RegExpMatchArray | null => {
+    const m = rest.match(re);
+    if (m) {
+      rest = rest.slice(m[0].length).replace(/^\s+/, '');
+      return m;
+    }
+    return null;
+  };
+  while (rest.length > 0) {
+    let m: RegExpMatchArray | null;
+    if ((m = consume(/^--provider=(\S+)\s*/))) opts.provider = m[1];
+    else if ((m = consume(/^--model=(\S+)\s*/))) opts.model = m[1];
+    else if ((m = consume(/^--name=("([^"]+)"|(\S+))\s*/))) opts.name = m[2] ?? m[3];
+    else if ((m = consume(/^--tools=(\S+)\s*/))) opts.tools = m[1]!.split(',').map((t) => t.trim()).filter(Boolean);
+    else if ((m = consume(/^-p\s+(\S+)\s*/))) opts.provider = m[1];
+    else if ((m = consume(/^-m\s+(\S+)\s*/))) opts.model = m[1];
+    else if ((m = consume(/^-n\s+("([^"]+)"|(\S+))\s*/))) opts.name = m[2] ?? m[3];
+    else break;
+  }
+  return { description: rest.trim(), opts };
+}
+
 function spawnCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'spawn',
     description:
-      'Spawn an isolated subagent to handle a task. Usage: /spawn <task description>',
+      'Spawn an isolated subagent to handle a task. Usage: /spawn [--provider=<id>] [--model=<id>] [--name=<label>] [--tools=a,b,c] <task description>',
     async run(args) {
-      const description = args.trim();
-      if (!description) return { message: 'Usage: /spawn <task description>' };
+      const { description, opts: parsed } = parseSpawnFlags(args.trim());
+      if (!description) {
+        return {
+          message:
+            'Usage: /spawn [--provider=<id>] [--model=<id>] [--name=<label>] [--tools=a,b,c] <task description>',
+        };
+      }
       if (!opts.onSpawn) {
         return { message: 'Multi-agent is not enabled in this session.' };
       }
       try {
-        const summary = await opts.onSpawn(description);
+        // Preserve legacy call signature when no flags were given so
+        // existing test assertions of the form `toHaveBeenCalledWith(description)`
+        // — and any external onSpawn implementations that overload by arity
+        // — keep working. Only pass the second arg when there's something
+        // worth saying about it.
+        const summary = Object.keys(parsed).length > 0
+          ? await opts.onSpawn(description, parsed)
+          : await opts.onSpawn(description);
         return { message: summary };
       } catch (err) {
         return {
@@ -811,6 +883,81 @@ function agentsCommand(opts: SlashCommandContext): SlashCommand {
         return { message: 'Multi-agent is not enabled in this session.' };
       }
       return { message: opts.onAgents() };
+    },
+  };
+}
+
+/**
+ * Fleet inspection / control hub. Dispatches to `onFleet` with a typed
+ * action; the heavy lifting lives in the CLI's `MultiAgentHost` wrapper.
+ * Kept thin on purpose — the slash command just parses + routes, the
+ * host owns the data and formatting.
+ *
+ *   /fleet                  → status (default)
+ *   /fleet status           → status table (same as /agents but kept here for hub feel)
+ *   /fleet usage            → per-subagent iterations/tools/ms roll-up
+ *   /fleet kill <id>        → terminate a subagent by id (prefix-matched by the host)
+ *   /fleet manifest         → in-memory manifest dump (no-op without a director)
+ *   /fleet help             → usage block
+ *
+ * The `kill` subcommand is the one mutating action; everything else is
+ * read-only and safe to call repeatedly while the fleet is running.
+ */
+function fleetCommand(opts: SlashCommandContext): SlashCommand {
+  return {
+    name: 'fleet',
+    description:
+      'Inspect or control the subagent fleet: /fleet [status|usage|kill <id>|manifest|help]',
+    help: [
+      'Usage:',
+      '  /fleet                  Show fleet status (alias for /fleet status).',
+      '  /fleet status           Pending + completed subagent task table.',
+      '  /fleet usage            Per-subagent runtime cost — iterations, tool calls, duration.',
+      '  /fleet kill <id>        Terminate a running subagent by id (or prefix).',
+      '  /fleet manifest         Print the director manifest (only with --director).',
+      '  /fleet help             Show this help.',
+      '',
+      'Subagent ids are returned by /spawn and listed in /fleet status.',
+    ].join('\n'),
+    async run(args) {
+      if (!opts.onFleet) {
+        return { message: 'Multi-agent is not enabled in this session.' };
+      }
+      const trimmed = args.trim();
+      const [verb, ...rest] = trimmed.length === 0 ? ['status'] : trimmed.split(/\s+/);
+      const target = rest.join(' ').trim() || undefined;
+      switch (verb) {
+        case 'status':
+        case 'usage':
+        case 'manifest': {
+          const out = await opts.onFleet(verb, undefined);
+          return { message: out };
+        }
+        case 'kill': {
+          if (!target) {
+            return { message: 'Usage: /fleet kill <subagent-id>' };
+          }
+          const out = await opts.onFleet('kill', target);
+          return { message: out };
+        }
+        case 'help':
+        case '?':
+          return {
+            message: [
+              '/fleet — inspect or control the subagent fleet',
+              '',
+              '  /fleet                  → status (default)',
+              '  /fleet status           pending + completed tasks per subagent',
+              '  /fleet usage            iterations, tool calls, duration roll-up',
+              '  /fleet kill <id>        terminate a subagent',
+              '  /fleet manifest         director manifest (requires --director)',
+            ].join('\n'),
+          };
+        default:
+          return {
+            message: `Unknown subcommand "${verb}". Try: status | usage | kill <id> | manifest | help`,
+          };
+      }
     },
   };
 }
