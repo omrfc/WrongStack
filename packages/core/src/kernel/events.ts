@@ -91,6 +91,26 @@ export interface EventMap {
     ok: boolean;
     input?: unknown;
     output?: string;
+    /**
+     * Full UTF-8 byte length of the serialized tool result that the model
+     * actually sees (post-cap, post-scrub). The `output` preview is capped
+     * at ~400 chars for transport; this number lets UIs surface what the
+     * model is really paying tokens for. Optional only for legacy emit
+     * sites that may not yet populate it.
+     */
+    outputBytes?: number;
+    /**
+     * Estimated token count for the full result body the model sees.
+     * Computed from `outputBytes` with the standard ~3.5 chars/token
+     * heuristic. Cheap to show in the TUI; not authoritative — the real
+     * provider count lives in `provider.response.usage`. */
+    outputTokens?: number;
+    /**
+     * For tools whose output has a clear "line" notion (file reads with
+     * numbered prefixes, grep hits, bash stdout), the agent counts the
+     * actual lines the model received and forwards it here. Undefined
+     * for tools without a meaningful line count. */
+    outputLines?: number;
   };
   'token.threshold': { used: number; limit: number };
   'compaction.fired': { before: number; after: number };

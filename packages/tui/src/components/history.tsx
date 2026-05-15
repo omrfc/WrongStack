@@ -1,5 +1,6 @@
 import { Box, Static, Text, useStdout } from 'ink';
 import type React from 'react';
+import { useEffect, useState } from 'react';
 import { renderMarkdownTables } from '../markdown-table.js';
 import { ConfirmPrompt } from './confirm-prompt.js';
 
@@ -14,6 +15,17 @@ export type HistoryEntry =
       ok: boolean;
       input?: unknown;
       output?: string;
+      /** Full byte length of the result body the model actually received
+       *  (post-cap, post-scrub). Carried separately because `output` is a
+       *  ~400-char preview — `outputBytes` is what the model paid for. */
+      outputBytes?: number;
+      /** ~3.5 chars/token estimate over `outputBytes`. Cheap to render in
+       *  the chip; the authoritative count lives in provider.response.usage. */
+      outputTokens?: number;
+      /** Real line count for tools that have a meaningful one — read counts
+       *  numbered prefixes, shell/grep/logs count newlines. Undefined for
+       *  tools without a line notion (json, fetch, …). */
+      outputLines?: number;
     }
   | { id: number; kind: 'info'; text: string }
   | { id: number; kind: 'warn'; text: string }
@@ -43,7 +55,7 @@ export interface HistoryProps {
    * output. Cleared automatically when the tool's `tool.executed` event
    * fires and the final entry lands in `entries`.
    */
-  toolStream?: { toolUseId: string; name: string; text: string } | null;
+  toolStream?: { toolUseId: string; name: string; text: string; startedAt: number } | null;
 }
 
 export function History({ entries, streamingText, toolStream }: HistoryProps): React.ReactElement {
@@ -80,16 +92,84 @@ export function History({ entries, streamingText, toolStream }: HistoryProps): R
         </Box>
       ) : null}
       {toolTail ? (
-        <Box flexDirection="column">
-          <Text dimColor>{`◆ ${toolStream!.name} `}</Text>
-          <Text>{toolTail}</Text>
-        </Box>
+        <ToolStreamBox
+          name={toolStream!.name}
+          text={toolTail}
+          startedAt={toolStream!.startedAt}
+          termWidth={termWidth}
+        />
       ) : null}
     </>
   );
 }
 
 const MAX_STREAM_DISPLAY_CHARS = 480;
+
+const MAX_STREAM_LINES = 8;
+
+/**
+ * Rich streaming tool output — framed header with live elapsed time,
+ * tail-N output so the screen doesn't flood, and a "N more lines
+ * above" indicator when truncated.
+ */
+function ToolStreamBox({
+  name,
+  text,
+  startedAt,
+  termWidth,
+}: {
+  name: string;
+  text: string;
+  startedAt: number;
+  termWidth: number;
+}): React.ReactElement {
+  // Tick every 500ms while streaming to refresh the elapsed counter.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 500);
+    return () => clearInterval(t);
+  }, []);
+  void tick; // consumed in elapsed calc below
+
+  const elapsedMs = Date.now() - startedAt;
+  const lines = text.split('\n');
+  const totalLines = lines.length;
+  const hidden = Math.max(0, totalLines - MAX_STREAM_LINES);
+  const visible = hidden > 0 ? lines.slice(hidden) : lines;
+  // Truncate long individual lines so borders don't break.
+  const contentWidth = Math.max(20, Math.min(termWidth - 4, 100));
+
+  return (
+    <Box flexDirection="column" marginTop={0}>
+      {/* Header */}
+      <Box flexDirection="row">
+        <Text color="yellow">◆ </Text>
+        <Text bold color="cyan">
+          {name}
+        </Text>
+        <Text dimColor>{`  ⏱ ${fmtDuration(elapsedMs)}`}</Text>
+        {hidden > 0 ? (
+          <Text dimColor>{`  (${totalLines} lines, showing last ${MAX_STREAM_LINES})`}</Text>
+        ) : null}
+      </Box>
+      {/* Output lines */}
+      <Box flexDirection="column" marginLeft={2}>
+        {hidden > 0 ? (
+          <Text dimColor italic>{`  … ${hidden} more line${hidden === 1 ? '' : 's'} above`}</Text>
+        ) : null}
+        {visible.map((line, i) => {
+          const key = i;
+          const trimmed = line.length > contentWidth ? `${line.slice(0, contentWidth - 1)}…` : line;
+          return (
+            <Text key={key} dimColor>
+              {trimmed || ' '}
+            </Text>
+          );
+        })}
+      </Box>
+    </Box>
+  );
+}
 
 export function tailForDisplay(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
@@ -163,8 +243,32 @@ function Entry({
       return <Text>{renderMarkdownTables(entry.text, termWidth)}</Text>;
     case 'tool': {
       const argSummary = formatToolArgs(entry.name, entry.input);
-      const outLines = formatToolOutput(entry.name, entry.output, entry.ok);
+      const outLines = formatToolOutput(
+        entry.name,
+        entry.output,
+        entry.ok,
+        entry.outputBytes,
+        entry.outputLines,
+      );
       const diff = entry.ok ? extractDiffPreview(entry.name, entry.output) : undefined;
+      // Right-aligned size chip: what the MODEL actually received, not the
+      // 400-char event preview. Lines (when meaningful), real bytes, and a
+      // ~3.5 chars/token estimate. Skipped entirely on errors and empty
+      // bodies so the success line stays clean.
+      const sizeChip = (() => {
+        if (!entry.ok) return '';
+        const parts: string[] = [];
+        if (entry.outputLines !== undefined && entry.outputLines > 0) {
+          parts.push(`${entry.outputLines} L`);
+        }
+        if (entry.outputBytes && entry.outputBytes > 0) {
+          parts.push(fmtBytes(entry.outputBytes));
+        }
+        if (entry.outputTokens && entry.outputTokens > 0) {
+          parts.push(`≈${fmtTok(entry.outputTokens)} tok`);
+        }
+        return parts.join(' · ');
+      })();
       return (
         <Box flexDirection="column">
           <Text>
@@ -179,6 +283,7 @@ function Entry({
               </>
             ) : null}
             <Text dimColor>{`  ·  ${fmtDuration(entry.durationMs)}`}</Text>
+            {sizeChip ? <Text dimColor>{`  ·  ${sizeChip}`}</Text> : null}
           </Text>
           {outLines.map((line, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: tool output lines are static, index is stable
@@ -344,6 +449,16 @@ function collapse(s: string, max: number): string {
   return oneLine.length <= max ? oneLine : `${oneLine.slice(0, max - 1)}…`;
 }
 
+/** Compact thousands formatter used by the tool-size chip. 4500 → "4.5k",
+ *  12000 → "12k", 1_500_000 → "1.5M". Keeps the chip from blowing out the
+ *  status line when a tool dumps a megabyte of output. */
+export function fmtTok(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k`;
+  return String(n);
+}
+
 export function fmtDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
@@ -486,6 +601,13 @@ export function formatToolOutput(
   toolName: string,
   output: string | undefined,
   ok: boolean,
+  /** Real bytes the model received — passed in by the Entry component so
+   *  read-tool / shell-tool digests can quote the true size instead of the
+   *  400-char preview that `output` is capped to. */
+  _outputBytes?: number,
+  /** Real line count from the agent — preferred over scanning the preview
+   *  when present, since the preview rarely contains every prefix. */
+  outputLines?: number,
 ): string[] {
   if (!output) return ok ? [] : ['failed'];
   const text = output.trim();
@@ -566,13 +688,19 @@ export function formatToolOutput(
   }
 
   if (toolName === 'read') {
+    // When the agent supplied a real line count (new path), the size chip
+    // beside the tool header already shows lines/bytes/tokens for the FULL
+    // body the model received — no need to repeat misleading numbers
+    // derived from the 400-char preview.
+    if (outputLines !== undefined) return [];
+    // Legacy fallback: derive what we can from the preview text. The byte
+    // count below is the preview length, NOT what the model received, so
+    // mark it as such to avoid confusion.
     if (json && typeof json === 'object') {
       const o = json as Record<string, unknown>;
       const bytes = numOf(o['bytes']);
       if (bytes !== undefined) return [`${fmtBytes(bytes)} read`];
     }
-    // read returns numbered lines like "  1→...\n  2→...". Surface the
-    // actual line range (start–end) — that's denser than a count alone.
     const range = scanNumberedRange(text);
     if (range.count > 0 && range.first !== undefined && range.last !== undefined) {
       if (range.first === range.last) {

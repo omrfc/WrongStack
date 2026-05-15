@@ -489,14 +489,20 @@ export class Agent {
             content: reRunResult.result.content,
             isError: !!reRunResult.result.is_error,
           });
-          this.events.emit('tool.executed', {
-            id: reRunResult.result.tool_use_id,
-            name: tool!.name,
-            durationMs: reRunResult.durationMs,
-            ok: !reRunResult.result.is_error,
-            input: result.input,
-            output: truncateForEvent(reRunResult.result.content),
-          });
+          {
+            const sig = sizeSignals(tool?.name, reRunResult.result.content);
+            this.events.emit('tool.executed', {
+              id: reRunResult.result.tool_use_id,
+              name: tool!.name,
+              durationMs: reRunResult.durationMs,
+              ok: !reRunResult.result.is_error,
+              input: result.input,
+              output: truncateForEvent(reRunResult.result.content),
+              outputBytes: sig.outputBytes,
+              outputTokens: sig.outputTokens,
+              outputLines: sig.outputLines,
+            });
+          }
         }
         // Re-run result already appended above — skip the generic append at loop end.
         continue;
@@ -517,14 +523,20 @@ export class Agent {
         content: result.content,
         isError: !!result.is_error,
       });
-      this.events.emit('tool.executed', {
-        id: result.tool_use_id,
-        name: use.name,
-        durationMs,
-        ok: !result.is_error,
-        input: use.input,
-        output: truncateForEvent(result.content),
-      });
+      {
+        const sig = sizeSignals(use.name, result.content);
+        this.events.emit('tool.executed', {
+          id: result.tool_use_id,
+          name: use.name,
+          durationMs,
+          ok: !result.is_error,
+          input: use.input,
+          output: truncateForEvent(result.content),
+          outputBytes: sig.outputBytes,
+          outputTokens: sig.outputTokens,
+          outputLines: sig.outputLines,
+        });
+      }
     }
 
     this.ctx.state.appendMessage({
@@ -612,4 +624,45 @@ function toError(err: unknown): Error {
 function truncateForEvent(content: ToolResultBlock['content'], max = 400): string {
   if (!content) return '';
   return content.length <= max ? content : `${content.slice(0, max - 1)}…`;
+}
+
+/**
+ * Derive size signals (bytes / tokens / lines) for the chip rendered beside
+ * each tool result. Computed once over the FULL `result.content` BEFORE the
+ * 400-char event preview is taken — the whole point is to surface what the
+ * model actually paid for, not the teaser.
+ *
+ *  - bytes: UTF-8 byte length (multi-byte aware — JS string.length would
+ *    miscount Turkish/CJK output).
+ *  - tokens: standard ~3.5 chars/token heuristic; close enough for an
+ *    inline chip, authoritative count still lands via provider.response.
+ *  - lines: read prefixes lines with `<n>→`; for shell/grep/logs we fall
+ *    back to a newline count. Undefined for tools without a line notion.
+ */
+function sizeSignals(
+  toolName: string | undefined,
+  content: ToolResultBlock['content'],
+): { outputBytes: number; outputTokens: number; outputLines: number | undefined } {
+  if (typeof content !== 'string' || content.length === 0) {
+    return { outputBytes: 0, outputTokens: 0, outputLines: undefined };
+  }
+  const outputBytes = Buffer.byteLength(content, 'utf8');
+  const outputTokens = Math.max(1, Math.round(outputBytes / 3.5));
+  let outputLines: number | undefined;
+  if (toolName === 'read') {
+    const lineRe = /^\s*\d+→/gm;
+    let count = 0;
+    while (lineRe.exec(content) !== null) count++;
+    if (count > 0) outputLines = count;
+  } else if (
+    toolName === 'bash' ||
+    toolName === 'shell' ||
+    toolName === 'grep' ||
+    toolName === 'logs'
+  ) {
+    let nl = 0;
+    for (let i = 0; i < content.length; i++) if (content.charCodeAt(i) === 10) nl++;
+    outputLines = nl + (content.endsWith('\n') ? 0 : 1);
+  }
+  return { outputBytes, outputTokens, outputLines };
 }

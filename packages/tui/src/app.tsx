@@ -9,7 +9,7 @@ import type {
   SlashCommandRegistry,
   TokenCounter,
 } from '@wrongstack/core';
-import { InputBuilder } from '@wrongstack/core';
+import { InputBuilder, formatTodosList } from '@wrongstack/core';
 import { Box, useApp } from 'ink';
 import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { readClipboardImage } from './clipboard.js';
@@ -105,7 +105,7 @@ type State = {
    * stream is shown at a time — multi-tool streaming is rare and stacking
    * tails fights for the same screen space.
    */
-  toolStream: { toolUseId: string; name: string; text: string } | null;
+  toolStream: { toolUseId: string; name: string; text: string; startedAt: number } | null;
   status: 'idle' | 'running' | 'streaming' | 'aborting';
   interrupts: number;
   hint: string;
@@ -162,7 +162,7 @@ type Action =
   | { type: 'pickerMove'; delta: number }
   | { type: 'toolStarted'; id: string; name: string }
   | { type: 'toolEnded'; id?: string; name?: string }
-  | { type: 'toolStreamAppend'; toolUseId: string; name: string; text: string }
+  | { type: 'toolStreamAppend'; toolUseId: string; name: string; text: string; startedAt: number }
   | { type: 'toolStreamClear'; toolUseId?: string; name?: string }
   | { type: 'enqueue'; item: Omit<QueueItem, 'id'> }
   | { type: 'dequeueFirst' }
@@ -293,7 +293,12 @@ export function reducer(state: State, action: Action): State {
       }
       return {
         ...state,
-        toolStream: { toolUseId: action.toolUseId, name: action.name, text: action.text },
+        toolStream: {
+          toolUseId: action.toolUseId,
+          name: action.name,
+          text: action.text,
+          startedAt: action.startedAt,
+        },
       };
     }
     case 'toolStreamClear': {
@@ -577,10 +582,18 @@ export function App({
   // fullness bar we want the live size of the conversation as it sat
   // on the wire — that's what determines how close we are to the
   // model's max context window.
+  //
+  // We sum input + cacheRead + cacheWrite so the chip reflects the TRUE
+  // total context the model loaded (Usage is disjoint by design — see the
+  // doc on Usage). Without this, prompt-cached turns would show only the
+  // fresh-token delta and the chip would read 0% even when the context
+  // was near the limit.
   const [lastInputTokens, setLastInputTokens] = React.useState<number>(0);
   useEffect(() => {
     const off = events.on('provider.response', (e) => {
-      setLastInputTokens(e.usage.input);
+      const total =
+        (e.usage.input ?? 0) + (e.usage.cacheRead ?? 0) + (e.usage.cacheWrite ?? 0);
+      setLastInputTokens(total);
     });
     return () => {
       off();
@@ -884,6 +897,7 @@ export function App({
         toolUseId: e.id,
         name: e.name,
         text: e.event.text,
+        startedAt: Date.now(),
       });
     });
     const offTool = events.on('tool.executed', (e) => {
@@ -896,6 +910,12 @@ export function App({
           ok: e.ok,
           input: e.input,
           output: e.output,
+          // Real model-visible sizes — forwarded so the size chip beside
+          // the tool header can show what the model paid for instead of
+          // the misleading preview-byte count we used to surface.
+          outputBytes: e.outputBytes,
+          outputTokens: e.outputTokens,
+          outputLines: e.outputLines,
         },
       });
       // `tool.executed` has no tool_use id; the reducer falls back to
@@ -904,6 +924,16 @@ export function App({
       // Clear the live tail for this tool — the final entry is now in
       // <Static>, no need to keep mirroring it below.
       dispatch({ type: 'toolStreamClear', name: e.name });
+      // Echo the current todo list into chat whenever the `todo` tool
+      // mutates ctx.todos — same format as `/todos list`. Snapshotted from
+      // agent.ctx.todos at this point (the tool executor has already
+      // applied the mutation by the time tool.executed fires).
+      if (e.ok && e.name === 'todo') {
+        dispatch({
+          type: 'addEntry',
+          entry: { kind: 'info', text: formatTodosList(agent.ctx.todos) },
+        });
+      }
     });
     const offRetry = events.on('provider.retry', (e) => {
       const secs = (e.delayMs / 1000).toFixed(e.delayMs >= 1000 ? 1 : 2);

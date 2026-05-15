@@ -21,64 +21,46 @@ This pulls in the full stack — `@wrongstack/core`, `@wrongstack/providers`, `@
 
 After install, `wrongstack` is on your `PATH`. (`wstack` works too — it's an alias.)
 
+### What's new in 0.1.9
+
+No breaking changes — additive on both the public API and the plugin contract.
+
+**Director orchestration** — LLM-driven multi-agent fleet: one Director
+plans, spawns, assigns, asks, and rolls up a fleet of subagents, each
+with its own provider, model, context, session, and budget. Opt-in via
+`--director`.
+
+- **8 LLM-callable fleet tools** on the leader's tool belt:
+  `spawn_subagent`, `assign_task`, `await_tasks`, `ask_subagent`,
+  `roll_up`, `terminate_subagent`, `fleet_status`, `fleet_usage`.
+  A pre-built 4-agent roster ships: Audit Log, Bug Hunter, Refactor
+  Planner, Security Scanner.
+- **`/fleet` slash command hub** (status, usage, kill, manifest) +
+  `/spawn` flag parser (`--provider`, `--model`, `--name`, `--tools`).
+- **FleetBus** fans in per-subagent EventBus events; **FleetUsageAggregator**
+  rolls up token/cost; **per-subagent JSONL transcripts** for independent
+  replay; **shared fleet scratchpad** for filesystem-mediated coordination.
+- **Safety caps**: `maxSpawns` (lifetime limit), `maxSpawnDepth` (nesting
+  bound), `DirectorBudgetError` for graceful leader replanning.
+- **Audit triage closed**: `AutonomousRunner` tool-call counting fix,
+  MCP `_toolsCache` sync, `tool_use` confirm-permission unwrap,
+  `scaffold` sync→async I/O migration. See [CHANGELOG.md](CHANGELOG.md).
+
+### What's new in 0.1.7
+
+**`@wrongstack/webui` first npm release** — standalone `webui` binary with
+React 19 + Radix + Tailwind frontend, `ws`-backed Node backend reusing
+the CLI's boot path. Vim-style `j`/`k` bubble nav, CSS Custom Highlights
+API search, inline error stack-trace expander, token-estimate chip,
+drag-and-drop file attach, pretty tool-input renderer, Preferences panel.
+
 ### What's new in 0.1.6
 
-A forensic-audit security pass: **7 CRITICAL, 16 HIGH, 20 MEDIUM, 9 LOW**
-findings closed. No public API breaking changes.
-
-If you only read one line: **the `bash` tool now sanitizes its child
-process env**, so `ANTHROPIC_API_KEY` / `GITHUB_TOKEN` / etc. are no
-longer forwarded into LLM-generated shell commands. Set
-`WRONGSTACK_BASH_ENV_PASSTHROUGH=1` to opt back into the old behaviour.
-
-Highlights — full catalogue in [`SECURITY.md`](SECURITY.md):
-
-- **SSRF defences rewritten** for the `fetch` tool. Private-range
-  detection now uses numeric CIDR for IPv4 (`10/8`, `127/8`,
-  `169.254/16`, `100.64/10`, `224/4`, `240/4`, …) and full 8-group
-  expansion for IPv6 (including Node's compressed `::ffff:7f00:1` form
-  for IPv4-mapped addresses). Redirect target is re-validated on every
-  hop; `http://` downgrade is refused.
-- **Agent ↔ tool boundary** hardened: `bash` POSIX process-group kill on
-  timeout, `exec` cwd validated inside projectRoot, `git` raw-args RCE
-  vector removed, `patch` diff-target pre-validated, `replace` symlink-
-  + realpath-safe, ReDoS guard on every user-regex (`grep` / `replace` /
-  `logs`).
-- **MCP transport lifecycle** fixed: in-flight JSON-RPC requests now
-  reject on stdio child exit / `close()` — callers no longer hang
-  forever; SIGTERM→800 ms→SIGKILL escalation.
-- **Provider stream parsing** routed through a canonical
-  `parseToolInput()` — guarantees `tool_use.input` is always a
-  `Record<string,unknown>`, even when models emit invalid JSON.
-- **system-prompt-builder** hardened: 2 s timeout on `git status`,
-  parallel language probes, `envCache` keyed by `projectRoot`.
-- **Memory-store race** fixed: per-scope async chain serializes
-  `remember`/`forget`/`consolidate`/`clear` so concurrent writes don't
-  silently drop entries.
-- **`Tool.subjectKey`** — tools can declare which input field is the
-  permission-trust subject; closes cross-tool subject collisions.
-- **`compaction.failed` event** — observability for the previously-
-  silent auto-compaction error path.
-- **+144 new tests** (now **1808 passing**, 1 skipped), 5 new per-package READMEs
-  (`core`, `cli`, `providers`, `tools`, `tui`).
-
-### What's new in 0.1.4
-
-0.1.4 is the first version where `npm install -g wrongstack` actually
-pulls the recent code — 0.1.3 was published as `@wrongstack/cli@0.1.3`
-but the `wrongstack` umbrella package was accidentally left at 0.1.0,
-so installs kept resolving to the old binary. 0.1.4 re-publishes every
-package in lockstep.
-
-Since 0.1.0 you get:
-
-- **Bench harness** (`pnpm bench`) with built-in suites for compactor, token estimation, JSON-schema validation, and the system prompt builder.
-- **Observability**: optional `/metrics` (Prometheus) + `/healthz` (Kubernetes-style) endpoint, OTLP/JSON metrics push, OTLP/JSON traces push, in-memory tracer.
-- **CLI subcommands**: `wstack doctor` (config/key/MCP/node health checks), `wstack export <id>` (render sessions as markdown/JSON/plain text).
-- **Slash commands**: `/help <name>` now renders detailed help for individual commands.
-- **Contributor docs**: [architecture](docs/architecture.md), [plugin author guide](docs/plugin-author-guide.md), [provider author guide](docs/provider-author-guide.md), [tool author guide](docs/tool-author-guide.md).
-- **13 long-broken MCP integration tests** now pass; FileHandle GC warning eliminated.
-- **License switched to MIT** (every published package now carries the SPDX `MIT` identifier).
+Forensic-audit security pass: **7 CRITICAL, 16 HIGH, 20 MEDIUM, 9 LOW**
+findings closed. See [`SECURITY.md`](SECURITY.md). Headline: **`bash`
+tool now sanitizes its child process env** — no more API key leakage
+into LLM-generated commands. `WRONGSTACK_BASH_ENV_PASSTHROUGH=1`
+opts back to the old behaviour.
 
 ## Quick start
 
@@ -103,6 +85,9 @@ wrongstack --provider zai-coding-plan --model glm-5.1
 
 # Combine everything: TUI + yolo + custom provider/model
 wrongstack --tui --yolo --provider zai-coding-plan --model glm-5.1
+
+# Director fleet orchestration (LLM-driven multi-agent)
+wrongstack --director "audit src/ for security issues"
 
 # Single-shot query (no interactive mode)
 wrongstack "refactor src/auth.ts to async/await"
@@ -154,6 +139,7 @@ wrongstack "refactor src/auth.ts to async/await"   # single-shot
 wrongstack                                          # REPL (or picker if no config)
 wrongstack --tui                                    # Ink-based TUI (paste collapse, @-picker, images)
 wrongstack --tui --yolo                             # TUI + auto-approve all tool calls
+wrongstack --director "audit src/ for security"  # Director fleet orchestration
 wrongstack --resume <id>                            # continue a saved session
 wrongstack resume <id>                              # same, sugar form
 ```
@@ -276,6 +262,8 @@ wrongstack --webui
 --no-features        Run with everything off: no MCP, no plugins, no memory tools,
                      no models.dev fetch, no skill discovery. Minimal viable WrongStack.
 --yolo               Auto-allow all tool calls (don't ask for confirmation)
+--director           Enable Director-based fleet orchestration (LLM-driven
+                     subagent planning, spawning, roll-up)
 --verbose / -v       Log level → debug
 --trace              Log level → trace
 --log-level <lvl>    Explicit log level
@@ -305,9 +293,9 @@ wrongstack version        # Version
 
 ## Slash commands (in-REPL)
 
-`/init`, `/diag`, `/stats`, `/help`, `/clear`, `/context`, `/compact`, `/usage`, `/tools`, `/skill`, `/use`, `/model`, `/save`, `/resume`, `/exit`
+`/init`, `/diag`, `/stats`, `/help`, `/clear`, `/context`, `/compact`, `/usage`, `/tools`, `/skill`, `/use`, `/model`, `/save`, `/resume`, `/exit`, `/spawn`, `/fleet`, `/agents`
 
-`/init` scaffolds `.wrongstack/AGENTS.md` for the project, detecting your build system (package.json / pyproject.toml / go.mod / Cargo.toml / Makefile) and pre-filling the build/test/lint/run commands.
+`/init` scaffolds `.wrongstack/AGENTS.md` for the project, detecting your build system (package.json / pyproject.toml / go.mod / Cargo.toml / Makefile) and pre-filling the build/test/lint/run commands. `/spawn` launches a subagent (supports `--provider`, `--model`, `--name`, `--tools` flags). `/fleet` inspects and controls the subagent fleet (status, usage, kill, manifest). `/agents` shows the current fleet roster.
 
 ## Catalog commands
 
@@ -435,6 +423,32 @@ await coordinator.spawn({ id: 'w1', name: 'Worker', role: 'reviewer' });
 await coordinator.assign({ id: 't1', description: 'Review auth module' });
 ```
 
+### Director (fleet orchestration)
+
+Opt into LLM-driven fleet orchestration with `--director`. The Director
+model plans, spawns, assigns, asks, and rolls up a fleet of subagents —
+each with its own provider, model, and budget. The 8 fleet tools
+(`spawn_subagent`, `assign_task`, …) are on the leader's tool belt from
+the first message.
+
+```bash
+# Launch a director with the pre-built 4-agent roster
+wrongstack --director "audit src/ for security issues"
+
+# Fleet management from inside the REPL
+/fleet status          # task progress per subagent
+/fleet usage           # token + cost breakdown
+/fleet kill <id>       # stop a specific subagent
+/fleet manifest        # full fleet snapshot
+
+# Spawn custom subagents
+/spawn --provider groq --model llama-3.3-70b --name reviewer --tools read,grep,edit
+```
+
+See [`docs/director-architecture.md`](docs/director-architecture.md) for
+the full design — FleetBus, prompt layering, safety caps, per-subagent
+JSONL transcripts, and the shared scratchpad.
+
 ## Spec-Driven Development
 
 Full workflow: `SpecParser` → `TaskGenerator` → `TaskTracker` → `TaskFlow`
@@ -454,7 +468,7 @@ await flow.execute({ executeTask: async (task) => { /* ... */ } });
 
 ### Bundled skills
 
-`git-flow`, `multi-agent`, `node-modern`, `prompt-engineering`, `react-modern`, `sdd`, `typescript-strict` — discovered in this order: project → user → bundled, with first-seen winning on name collisions.
+`audit-log`, `bug-hunter`, `git-flow`, `multi-agent`, `node-modern`, `prompt-engineering`, `react-modern`, `refactor-planner`, `sdd`, `security-scanner`, `typescript-strict` — discovered in this order: project → user → bundled, with first-seen winning on name collisions.
 
 ## Sessions
 
@@ -533,6 +547,7 @@ A plugin declares `apiVersion: "^1.0"` and gets the full `PluginAPI`: container,
 ```
 CLI       → REPL, renderer, slash commands, subcommands
 TUI       → Ink frontend (lazy-loaded behind --tui)
+Director  → Fleet orchestration (LLM-driven, opt-in via --director)
 Agent     → loop, context, system prompt, permission, compaction
 Tools     → ToolExecutor (parallel/sequential/smart strategies, abort-safe)
 Kernel    → Container · Pipeline · EventBus · RunController (the 4 primitives)
@@ -551,6 +566,7 @@ plug in — see [`docs/architecture.md`](docs/architecture.md).
 | Doc | What it covers |
 |---|---|
 | [`docs/architecture.md`](docs/architecture.md) | Package layout, the kernel primitives (Container/Pipeline/EventBus/RunController), the agent lifecycle, the L1-A reactive split |
+| [`docs/director-architecture.md`](docs/director-architecture.md) | Director orchestration: FleetBus, prompt layering, safety caps, per-subagent JSONL, shared scratchpad |
 | [`docs/plugin-author-guide.md`](docs/plugin-author-guide.md) | Building a plugin end-to-end: capabilities, dependencies, configSchema, teardown contract, testing |
 | [`docs/provider-author-guide.md`](docs/provider-author-guide.md) | Adding an LLM provider declaratively via `WireFormatConfig`, stream-state design, vendor quirks |
 | [`docs/tool-author-guide.md`](docs/tool-author-guide.md) | Writing a tool: streaming `executeStream`, permission semantics, `cleanup` vs `registerAbortHook`, the mtime contract |
@@ -565,7 +581,7 @@ validation, and the system prompt builder. See
 
 ## Status
 
-- **1808 tests passing** across 181 test files (~12 s, 1 skipped)
+- **1888 tests passing** across 184 test files (~13 s, 1 skipped)
 - Coverage thresholds enforced in `vitest.config.ts`: ≥85 % lines / ≥85 % functions / ≥70 % branches / ≥82 % statements
 - All 8 packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles

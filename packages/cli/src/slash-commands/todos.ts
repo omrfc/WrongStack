@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { color } from '@wrongstack/core';
+import { formatTodosList } from '@wrongstack/core';
 import type { SlashCommand } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
 
@@ -17,23 +17,7 @@ export function buildTodosCommand(opts: SlashCommandContext): SlashCommand {
         case '':
         case 'show':
         case 'list': {
-          const todos = ctx.todos;
-          if (todos.length === 0) return { message: 'No todos.' };
-          const lines: string[] = [];
-          const done = todos.filter((t) => t.status === 'completed').length;
-          lines.push(color.dim(`Todos (${done}/${todos.length} done):`));
-          todos.forEach((t, i) => {
-            const mark =
-              t.status === 'completed'
-                ? color.green('[x]')
-                : t.status === 'in_progress'
-                  ? color.yellow('[~]')
-                  : color.dim('[ ]');
-            const text = t.status === 'in_progress' && t.activeForm ? t.activeForm : t.content;
-            const label = t.status === 'completed' ? color.dim(text) : text;
-            lines.push(`  ${color.dim(String(i + 1).padStart(2))}. ${mark} ${label}`);
-          });
-          return { message: lines.join('\n') };
+          return { message: formatTodosList(ctx.todos) };
         }
         case 'clear': {
           const n = ctx.todos.length;

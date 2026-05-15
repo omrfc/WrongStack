@@ -467,15 +467,22 @@ export const useSessionStore = create<SessionState>()(
       setSession: (session) => set({ session }),
 
       updateUsage: (usage) =>
-        set((state) => ({
-          totalTokens: {
-            input: state.totalTokens.input + usage.input,
-            output: state.totalTokens.output + usage.output,
-            cacheRead: (state.totalTokens.cacheRead ?? 0) + (usage.cacheRead ?? 0),
-            cacheWrite: (state.totalTokens.cacheWrite ?? 0) + (usage.cacheWrite ?? 0),
-          },
-          lastInputTokens: usage.input || state.lastInputTokens,
-        })),
+        set((state) => {
+          // True total input this turn = fresh + cached subsets, since
+          // Usage is now disjoint across providers (see core's Usage doc).
+          // Without summing, prompt-cached turns under-report the ctx chip.
+          const totalInput =
+            (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+          return {
+            totalTokens: {
+              input: state.totalTokens.input + usage.input,
+              output: state.totalTokens.output + usage.output,
+              cacheRead: (state.totalTokens.cacheRead ?? 0) + (usage.cacheRead ?? 0),
+              cacheWrite: (state.totalTokens.cacheWrite ?? 0) + (usage.cacheWrite ?? 0),
+            },
+            lastInputTokens: totalInput || state.lastInputTokens,
+          };
+        }),
 
       addCost: (cost) => set((state) => ({ cost: state.cost + cost })),
 

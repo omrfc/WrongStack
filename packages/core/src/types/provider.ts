@@ -4,6 +4,26 @@ import { WrongStackError } from './errors.js';
 import type { Message } from './messages.js';
 import type { Tool } from './tool.js';
 
+/**
+ * Token usage for a single provider call, normalized across providers.
+ *
+ * Disjoint semantics: the four fields never overlap. `input` is the count
+ * of FRESH input tokens (billed at the full input rate); `cacheRead` and
+ * `cacheWrite` are separate cached subsets each priced at their own rate.
+ * The total context the model loaded for this turn is
+ * `input + (cacheRead ?? 0) + (cacheWrite ?? 0)`.
+ *
+ * Provider quirks normalized at the adapter layer:
+ *  - Anthropic: returns `input_tokens` already disjoint from cache fields.
+ *  - OpenAI / OpenAI-compatible: `prompt_tokens` is the TOTAL including
+ *    cached portion; the adapter subtracts `cached_tokens` to stay disjoint.
+ *  - Google: `promptTokenCount` likewise includes cache; adapter subtracts
+ *    `cachedContentTokenCount`.
+ *
+ * Cost math and the context-fullness chip both depend on the disjoint
+ * invariant — a TOTAL `input` plus a separate `cacheRead` count would bill
+ * cached tokens twice and skew cache-hit-ratio reporting.
+ */
 export interface Usage {
   input: number;
   output: number;

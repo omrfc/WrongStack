@@ -98,8 +98,15 @@ export function StatusBar({
           <>
             <Text dimColor>│</Text>
             <Text>
-              ↑ <Text color="cyan">{fmtTok(usage.input)}</Text> ↓{' '}
-              <Text color="cyan">{fmtTok(usage.output)}</Text>
+              ↑{' '}
+              <Text color="cyan">
+                {/* Total tokens sent: fresh `input` + the two cached subsets.
+                    Usage is disjoint, so this sum is the true uplink count
+                    the user wants to see — without it, prompt-cached turns
+                    look artificially cheap on this chip. */}
+                {fmtTok(usage.input + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0))}
+              </Text>{' '}
+              ↓ <Text color="cyan">{fmtTok(usage.output)}</Text>
             </Text>
           </>
         ) : null}

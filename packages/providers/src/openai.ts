@@ -231,10 +231,18 @@ async function* parseOpenAIStream(
         }
       | undefined;
     if (u) {
+      // Normalize to disjoint semantics: `input` is fresh-only (priced at
+      // the full rate), `cacheRead` is the cached subset (priced at the
+      // cache rate). OpenAI returns `prompt_tokens` as the TOTAL including
+      // cached portion, so we subtract here to keep TokenCounter's cost
+      // math (which assumes the two are disjoint) from double-billing the
+      // cached tokens. Mirrors Anthropic's `input_tokens` semantics.
+      const cached = u.prompt_tokens_details?.cached_tokens ?? 0;
+      const promptTotal = u.prompt_tokens ?? usage.input + cached;
       usage = {
-        input: u.prompt_tokens ?? usage.input,
+        input: Math.max(0, promptTotal - cached),
         output: u.completion_tokens ?? usage.output,
-        cacheRead: u.prompt_tokens_details?.cached_tokens ?? usage.cacheRead,
+        cacheRead: cached || usage.cacheRead,
       };
     }
   }

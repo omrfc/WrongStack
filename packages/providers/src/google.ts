@@ -350,10 +350,16 @@ async function* parseGoogleStream(
 
     const u = obj.usageMetadata;
     if (u) {
+      // Disjoint semantics — see openai.ts for rationale. Gemini reports
+      // `promptTokenCount` as the TOTAL (including cached) and
+      // `cachedContentTokenCount` as the cached subset; subtracting keeps
+      // cost / hit-ratio math correct.
+      const cached = u.cachedContentTokenCount ?? 0;
+      const promptTotal = u.promptTokenCount ?? usage.input + cached;
       usage = {
-        input: u.promptTokenCount ?? usage.input,
+        input: Math.max(0, promptTotal - cached),
         output: u.candidatesTokenCount ?? usage.output,
-        cacheRead: u.cachedContentTokenCount ?? usage.cacheRead,
+        cacheRead: cached || usage.cacheRead,
       };
     }
   }

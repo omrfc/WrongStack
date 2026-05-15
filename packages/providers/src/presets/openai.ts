@@ -164,10 +164,15 @@ export const openaiWireFormat = defineWireFormat<OpenAIStreamState>({
         }
       | undefined;
     if (u) {
+      // Mirror openai.ts: disjoint semantics — input is fresh-only,
+      // cacheRead is the cached subset. Subtracting prevents the cost
+      // calc / cache-hit-ratio from double-counting cached tokens.
+      const cached = u.prompt_tokens_details?.cached_tokens ?? 0;
+      const promptTotal = u.prompt_tokens ?? state.usage.input + cached;
       state.usage = {
-        input: u.prompt_tokens ?? state.usage.input,
+        input: Math.max(0, promptTotal - cached),
         output: u.completion_tokens ?? state.usage.output,
-        cacheRead: u.prompt_tokens_details?.cached_tokens ?? state.usage.cacheRead,
+        cacheRead: cached || state.usage.cacheRead,
       };
     }
 

@@ -117,10 +117,13 @@ export const googleWireFormat = defineWireFormat<GoogleStreamState>({
 
     const u = obj.usageMetadata;
     if (u) {
+      // Disjoint semantics — see google.ts for rationale.
+      const cached = u.cachedContentTokenCount ?? 0;
+      const promptTotal = u.promptTokenCount ?? state.usage.input + cached;
       state.usage = {
-        input: u.promptTokenCount ?? state.usage.input,
+        input: Math.max(0, promptTotal - cached),
         output: u.candidatesTokenCount ?? state.usage.output,
-        cacheRead: u.cachedContentTokenCount ?? state.usage.cacheRead,
+        cacheRead: cached || state.usage.cacheRead,
       };
     }
     return out;
