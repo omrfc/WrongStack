@@ -1,7 +1,7 @@
 {
   "name": "wrongstack-monorepo",
   "private": true,
-  "version": "0.1.6",
+  "version": "0.1.7",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.1.2+sha512.415a1cc25974731e75455c1468371be74c5aa5fb7621b50d4056d222451609f11412f23fd602e6169f1e060466641f798597e1be961a10688836a67b16569499",
@@ -17,7 +17,14 @@
     "lint": "biome lint .",
     "format": "biome format --write .",
     "typecheck": "pnpm -r --parallel typecheck",
-    "clean": "pnpm -r --parallel clean && node -e \"require('node:fs').rmSync('node_modules',{recursive:true,force:true})\""
+    "clean": "pnpm -r --parallel clean && node -e \"require('node:fs').rmSync('node_modules',{recursive:true,force:true})\"",
+    "version:patch": "node scripts/bump-version.mjs patch",
+    "version:minor": "node scripts/bump-version.mjs minor",
+    "version:major": "node scripts/bump-version.mjs major",
+    "version:set": "node scripts/bump-version.mjs set",
+    "release:check": "pnpm typecheck && pnpm test && pnpm build",
+    "release:dry": "pnpm publish -r --dry-run --no-git-checks",
+    "release": "pnpm release:check && pnpm publish -r --access public --no-git-checks"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

@@ -124,6 +124,70 @@ function AppInner() {
         e.preventDefault();
         useUIStore.getState().toggleCompactMode();
       }
+      // Vim-style chat navigation: j/k step between bubbles, g goes to the
+      // first message and G to the last. Skipped while typing so j/k inside
+      // the textarea still inserts those letters. No modifier required —
+      // this is the chat surface's primary input mode for keyboard users.
+      if (!inField && !mod && !e.altKey) {
+        const bubbles = Array.from(
+          document.querySelectorAll<HTMLElement>('[data-message-id]'),
+        );
+        if (bubbles.length === 0) return;
+        const current = document.querySelector<HTMLElement>('[data-message-id][data-focused="true"]');
+        const idx = current ? bubbles.indexOf(current) : -1;
+        const focusBubble = (target: HTMLElement) => {
+          bubbles.forEach((b) => b.removeAttribute('data-focused'));
+          target.setAttribute('data-focused', 'true');
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        };
+        if (e.key === 'j' || e.key === 'ArrowDown') {
+          // ArrowDown only intercepts when nothing else has focus AND the
+          // user is not in a scrollable list context — the textarea check
+          // above covers the only place arrows have meaningful default
+          // behaviour for this app.
+          const next = bubbles[Math.min(bubbles.length - 1, Math.max(0, idx + 1))];
+          if (next) {
+            e.preventDefault();
+            focusBubble(next);
+          }
+          return;
+        }
+        if (e.key === 'k' || e.key === 'ArrowUp') {
+          const prev = bubbles[Math.max(0, idx <= 0 ? 0 : idx - 1)];
+          if (prev) {
+            e.preventDefault();
+            focusBubble(prev);
+          }
+          return;
+        }
+        if (e.key === 'g' && !e.shiftKey) {
+          e.preventDefault();
+          focusBubble(bubbles[0]!);
+          return;
+        }
+        if (e.key === 'G' || (e.key === 'g' && e.shiftKey)) {
+          e.preventDefault();
+          focusBubble(bubbles[bubbles.length - 1]!);
+          return;
+        }
+        if (e.key === 'Escape' && current) {
+          e.preventDefault();
+          current.removeAttribute('data-focused');
+          return;
+        }
+        // `c` while a bubble is focused: copy its visible text. Useful
+        // pairing with the j/k flow so power users can step + copy without
+        // hunting for the in-bubble copy button.
+        if (e.key === 'c' && current) {
+          const text = current.querySelector<HTMLElement>('.markdown-content')?.innerText
+            ?? current.innerText;
+          if (text) {
+            void navigator.clipboard?.writeText(text).catch(() => {});
+            e.preventDefault();
+          }
+          return;
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

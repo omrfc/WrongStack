@@ -1,8 +1,37 @@
 {
   "name": "@wrongstack/webui",
-  "version": "0.1.5",
+  "version": "0.1.7",
   "license": "MIT",
+  "description": "Browser-based WebUI for WrongStack — React + Vite frontend with WebSocket backend that drives the same agent kernel as the CLI/TUI.",
+  "keywords": [
+    "wrongstack",
+    "ai",
+    "agent",
+    "llm",
+    "claude",
+    "openai",
+    "webui",
+    "react",
+    "websocket"
+  ],
+  "homepage": "https://github.com/WrongStack/WrongStack#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WrongStack/WrongStack.git",
+    "directory": "packages/webui"
+  },
+  "bugs": {
+    "url": "https://github.com/WrongStack/WrongStack/issues"
+  },
   "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

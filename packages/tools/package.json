@@ -1,6 +1,6 @@
 {
   "name": "@wrongstack/tools",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "license": "MIT",
   "description": "WrongStack built-in tools: read/write/edit, bash/exec, grep/glob, git, fetch, test, lint, and more.",
   "repository": {
@@ -168,5 +168,8 @@
     "@types/node": "^22.19.19",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

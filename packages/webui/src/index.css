@@ -153,3 +153,29 @@
   background-color: rgb(250 204 21 / 0.95);
   color: rgb(24 24 27);
 }
+
+/* Vim-style chat navigation focus marker. Bubbles get this when stepped
+   to with j/k/g/G — a left-side accent bar + soft background tint so the
+   active row is obvious without competing with the chat-search highlight
+   layer. Cleared on Esc or by clicking elsewhere. */
+[data-message-id][data-focused="true"] {
+  position: relative;
+  background-color: rgb(59 130 246 / 0.04);
+  border-radius: 0.5rem;
+  transition: background-color 0.15s ease-out;
+}
+
+[data-message-id][data-focused="true"]::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 2px;
+  background-color: hsl(var(--primary));
+}
+
+.dark [data-message-id][data-focused="true"] {
+  background-color: rgb(96 165 250 / 0.06);
+}

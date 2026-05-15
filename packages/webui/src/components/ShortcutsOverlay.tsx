@@ -41,6 +41,17 @@ const SHORTCUTS: Array<{ section: string; items: Shortcut[] }> = [
       { keys: ['Esc'], description: 'Abort the current run (when running)' },
     ],
   },
+  {
+    section: 'Chat navigation (when not typing)',
+    items: [
+      { keys: ['j'], description: 'Focus next message (alias: ↓)' },
+      { keys: ['k'], description: 'Focus previous message (alias: ↑)' },
+      { keys: ['g'], description: 'Jump to first message' },
+      { keys: ['Shift', 'G'], description: 'Jump to last message' },
+      { keys: ['c'], description: 'Copy focused message text' },
+      { keys: ['Esc'], description: 'Clear focused message' },
+    ],
+  },
 ];
 
 export function ShortcutsOverlay() {

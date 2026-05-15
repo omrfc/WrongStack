@@ -99,6 +99,13 @@ export function ChatInput() {
   const promptHistory = useUIStore((s) => s.promptHistory);
   const ws = useWebSocket();
   const { sendMessage, sendAbort, client } = ws;
+  /** Live context-budget signals — drive the token-estimate chip beside
+   *  the character counter. The estimate uses the universal 4-char-per-token
+   *  heuristic which is wrong by ±25% for natural prose but accurate enough
+   *  to warn the user before they paste a 100k-char file into a 200k window.
+   *  The chip only renders past the threshold so short drafts stay clean. */
+  const lastInputTokens = useSessionStore((s) => s.lastInputTokens);
+  const maxContext = useSessionStore((s) => s.maxContext);
   const [input, setInput] = useState('');
   const [slashIndex, setSlashIndex] = useState(0);
   /** Cursor into promptHistory. -1 = "live input, not browsing history".
@@ -113,6 +120,12 @@ export function ChatInput() {
    *  few seconds then it auto-dismisses. We only surface it for genuinely
    *  big drops (>800 chars) — smaller pastes don't need a callout. */
   const [pasteHint, setPasteHint] = useState<{ chars: number; lines: number } | null>(null);
+  /** True while an OS-drag is hovering over the input area. Triggers the
+   *  drop overlay so the user gets visual confirmation they're about to
+   *  attach. Browsers don't expose full filesystem paths from drops for
+   *  security reasons, so we seed the @-mention picker with the file's
+   *  basename and let the user confirm the resolved workspace path. */
+  const [draggingOver, setDraggingOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const runSlashCommand = useCallback(
@@ -475,7 +488,85 @@ export function ChatInput() {
         </div>
       )}
 
-    <form onSubmit={handleSubmit} className="flex items-end gap-2">
+    <form
+      onSubmit={handleSubmit}
+      onDragEnter={(e) => {
+        // Only react to drags carrying files — text/uri-list drags from
+        // other parts of the page shouldn't trip the overlay.
+        if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes('Files')) return;
+        e.preventDefault();
+        setDraggingOver(true);
+      }}
+      onDragOver={(e) => {
+        if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes('Files')) return;
+        // preventDefault on dragover is what makes the area a valid drop
+        // target — without it the browser navigates to the file instead.
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }}
+      onDragLeave={(e) => {
+        // dragleave fires when crossing child boundaries too; only clear if
+        // the cursor genuinely left the form (relatedTarget outside or null).
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setDraggingOver(false);
+      }}
+      onDrop={(e) => {
+        if (!e.dataTransfer) return;
+        const files = Array.from(e.dataTransfer.files ?? []);
+        if (files.length === 0) {
+          setDraggingOver(false);
+          return;
+        }
+        e.preventDefault();
+        setDraggingOver(false);
+        // Insert `@<filename>` per dropped file at the current cursor, with
+        // spaces between them. Browsers strip the full path for security, so
+        // we use the basename only — the FilePicker (opened by setting
+        // atMention to the last inserted handle) will resolve it against
+        // the workspace tree.
+        const ta = textareaRef.current;
+        const insertPos = ta?.selectionStart ?? input.length;
+        const before = input.slice(0, insertPos);
+        const after = input.slice(insertPos);
+        const needsLeadingSpace = before.length > 0 && !/\s$/.test(before);
+        const lead = needsLeadingSpace ? ' ' : '';
+        const tokens = files.map((f) => `@${f.name}`);
+        const joined = tokens.join(' ');
+        // Trailing space only when there isn't already one — keeps the
+        // cursor neatly between insert and following text.
+        const needsTrailingSpace = after.length === 0 || !/^\s/.test(after);
+        const trail = needsTrailingSpace ? ' ' : '';
+        const insertion = `${lead}${joined}${trail}`;
+        const next = before + insertion + after;
+        setInput(next);
+        // Open the FilePicker against the LAST dropped basename so the user
+        // can replace the basename with the correctly-resolved workspace
+        // path. Position the @-mention start at the `@` of the last token.
+        const lastTokenStart =
+          before.length + lead.length + tokens.slice(0, -1).join(' ').length +
+          (tokens.length > 1 ? 1 : 0);
+        const lastBasename = files[files.length - 1]!.name;
+        requestAnimationFrame(() => {
+          if (ta) {
+            const cur = before.length + insertion.length - trail.length;
+            ta.focus();
+            ta.setSelectionRange(cur, cur);
+            ta.style.height = 'auto';
+            ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+          }
+          setAtMention({ start: lastTokenStart, query: lastBasename });
+        });
+      }}
+      className={cn(
+        'flex items-end gap-2 relative rounded-lg transition-colors',
+        draggingOver && 'ring-2 ring-primary ring-offset-2 ring-offset-background bg-primary/5',
+      )}
+    >
+      {draggingOver && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none rounded-lg bg-primary/10 text-primary text-sm font-medium">
+          Drop file{`(s)`} to attach as @-mention
+        </div>
+      )}
       <div className="relative flex-1">
         {/* @-mention file picker — takes priority over the slash popup
             since `@` and `/` can't both be active at the cursor. */}
@@ -611,11 +702,48 @@ export function ChatInput() {
           disabled={!client?.isConnected}
         />
 
-        {input.length > 0 && (
-          <span className="absolute bottom-1.5 right-12 text-xs text-muted-foreground">
-            {input.length}
-          </span>
-        )}
+        {input.length > 0 && (() => {
+          // Hide the token estimate until the draft is non-trivial — small
+          // messages aren't worth a context warning, and the chip would
+          // otherwise just flicker as the user types each character.
+          const showTokens = input.length >= 400;
+          const estTokens = Math.ceil(input.length / 4);
+          // Project the next request's context usage: last sent + draft +
+          // small overhead. If that crosses 85% of the configured window,
+          // tint amber; past 100% turns red. Falls through to muted when
+          // we don't have the window size yet (e.g. before first request).
+          let tone = 'text-muted-foreground';
+          let title: string | undefined;
+          if (maxContext > 0 && showTokens) {
+            const projected = lastInputTokens + estTokens + 64;
+            const pct = (projected / maxContext) * 100;
+            if (pct >= 100) {
+              tone = 'text-red-600 dark:text-red-400 font-medium';
+              title = `Projected ${Math.round(pct)}% of ${maxContext.toLocaleString()} ctx — will likely error or compact.`;
+            } else if (pct >= 85) {
+              tone = 'text-amber-600 dark:text-amber-400 font-medium';
+              title = `Projected ${Math.round(pct)}% of ${maxContext.toLocaleString()} ctx — getting tight.`;
+            } else {
+              title = `≈ ${estTokens.toLocaleString()} tokens · projected ${Math.round(pct)}% of ${maxContext.toLocaleString()} ctx.`;
+            }
+          } else if (showTokens) {
+            title = `≈ ${estTokens.toLocaleString()} tokens (4-char heuristic)`;
+          }
+          return (
+            <span
+              className={cn(
+                'absolute bottom-1.5 right-12 text-xs tabular-nums',
+                tone,
+              )}
+              title={title}
+            >
+              {input.length}
+              {showTokens && (
+                <span className="ml-1 opacity-70">· ≈{estTokens >= 1000 ? `${(estTokens / 1000).toFixed(1)}k` : estTokens}t</span>
+              )}
+            </span>
+          );
+        })()}
       </div>
 
       <div className="flex gap-1">
