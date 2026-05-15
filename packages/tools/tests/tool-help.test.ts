@@ -1,8 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { toolHelpTool } from '../src/tool-help.js';
 
-const makeCtx = (tools: any[] = []) =>
-  ({ cwd: '/fake', tools, projectRoot: '/fake' } as any);
+const makeCtx = (tools: any[] = []) => ({ cwd: '/fake', tools, projectRoot: '/fake' }) as any;
 
 describe('toolHelpTool', () => {
   it('has correct metadata', () => {
@@ -19,7 +18,16 @@ describe('toolHelpTool', () => {
   });
 
   it('returns help for known tool', async () => {
-    const ctx = makeCtx([{ name: 'test', description: 'A test tool', usageHint: 'Use it', permission: 'auto', mutating: false, inputSchema: {} }]);
+    const ctx = makeCtx([
+      {
+        name: 'test',
+        description: 'A test tool',
+        usageHint: 'Use it',
+        permission: 'auto',
+        mutating: false,
+        inputSchema: {},
+      },
+    ]);
     const result = await toolHelpTool.execute({ tool: 'test' }, ctx);
     expect(result.total).toBe(1);
     expect(result.tools[0].name).toBe('test');
@@ -27,8 +35,22 @@ describe('toolHelpTool', () => {
 
   it('lists all tools when no tool specified', async () => {
     const ctx = makeCtx([
-      { name: 'foo', description: 'Foo', usageHint: '', permission: 'auto', mutating: false, inputSchema: {} },
-      { name: 'bar', description: 'Bar', usageHint: '', permission: 'auto', mutating: false, inputSchema: {} },
+      {
+        name: 'foo',
+        description: 'Foo',
+        usageHint: '',
+        permission: 'auto',
+        mutating: false,
+        inputSchema: {},
+      },
+      {
+        name: 'bar',
+        description: 'Bar',
+        usageHint: '',
+        permission: 'auto',
+        mutating: false,
+        inputSchema: {},
+      },
     ]);
     const result = await toolHelpTool.execute({}, ctx);
     expect(result.total).toBe(2);
@@ -36,34 +58,77 @@ describe('toolHelpTool', () => {
   });
 
   it('formats as short by default', async () => {
-    const ctx = makeCtx([{ name: 'foo', description: 'Foo', usageHint: 'Hint', permission: 'auto', mutating: false, inputSchema: {} }]);
+    const ctx = makeCtx([
+      {
+        name: 'foo',
+        description: 'Foo',
+        usageHint: 'Hint',
+        permission: 'auto',
+        mutating: false,
+        inputSchema: {},
+      },
+    ]);
     const result = await toolHelpTool.execute({}, ctx);
     expect(result.help).toContain('foo');
     expect(result.help).toContain('Foo');
   });
 
   it('formats as markdown', async () => {
-    const ctx = makeCtx([{ name: 'foo', description: 'Foo', usageHint: '', permission: 'auto', mutating: false, inputSchema: {} }]);
+    const ctx = makeCtx([
+      {
+        name: 'foo',
+        description: 'Foo',
+        usageHint: '',
+        permission: 'auto',
+        mutating: false,
+        inputSchema: {},
+      },
+    ]);
     const result = await toolHelpTool.execute({ format: 'markdown' }, ctx);
     expect(result.help).toContain('##');
     expect(result.help).toContain('|');
   });
 
   it('formats as full with schema', async () => {
-    const ctx = makeCtx([{ name: 'foo', description: 'Foo', usageHint: '', permission: 'auto', mutating: false, inputSchema: { type: 'object' } }]);
+    const ctx = makeCtx([
+      {
+        name: 'foo',
+        description: 'Foo',
+        usageHint: '',
+        permission: 'auto',
+        mutating: false,
+        inputSchema: { type: 'object' },
+      },
+    ]);
     const result = await toolHelpTool.execute({ format: 'full' }, ctx);
     expect(result.tools[0].inputSchema).toBeDefined();
   });
 
   it('includes examples when requested', async () => {
-    const ctx = makeCtx([{ name: 'foo', description: 'Foo', usageHint: '', permission: 'auto', mutating: false, inputSchema: { type: 'object' } }]);
+    const ctx = makeCtx([
+      {
+        name: 'foo',
+        description: 'Foo',
+        usageHint: '',
+        permission: 'auto',
+        mutating: false,
+        inputSchema: { type: 'object' },
+      },
+    ]);
     const result = await toolHelpTool.execute({ include_examples: true }, ctx);
     expect(result).toHaveProperty('total');
   });
 
   it('short format for a single tool renders name+desc+hint', async () => {
     const ctx = makeCtx([
-      { name: 'foo', description: 'Foo desc', usageHint: 'do X', permission: 'auto', mutating: false, inputSchema: {} },
+      {
+        name: 'foo',
+        description: 'Foo desc',
+        usageHint: 'do X',
+        permission: 'auto',
+        mutating: false,
+        inputSchema: {},
+      },
     ]);
     const result = await toolHelpTool.execute({ tool: 'foo', format: 'short' }, ctx);
     expect(result.help).toContain('foo: Foo desc');
@@ -80,7 +145,14 @@ describe('toolHelpTool', () => {
 
   it('markdown format for a single tool renders full block', async () => {
     const ctx = makeCtx([
-      { name: 'foo', description: 'Foo desc', usageHint: 'use it', permission: 'confirm', mutating: true, inputSchema: { type: 'object' } },
+      {
+        name: 'foo',
+        description: 'Foo desc',
+        usageHint: 'use it',
+        permission: 'confirm',
+        mutating: true,
+        inputSchema: { type: 'object' },
+      },
     ]);
     const result = await toolHelpTool.execute(
       { tool: 'foo', format: 'markdown', include_examples: true },
@@ -96,7 +168,13 @@ describe('toolHelpTool', () => {
 
   it('markdown format without hint or examples skips those sections', async () => {
     const ctx = makeCtx([
-      { name: 'bar', description: 'Bar desc', permission: 'auto', mutating: false, inputSchema: {} },
+      {
+        name: 'bar',
+        description: 'Bar desc',
+        permission: 'auto',
+        mutating: false,
+        inputSchema: {},
+      },
     ]);
     const result = await toolHelpTool.execute({ tool: 'bar', format: 'markdown' }, ctx);
     expect(result.help).not.toContain('### Usage Hint');
@@ -106,7 +184,14 @@ describe('toolHelpTool', () => {
 
   it('full format for a single tool includes schema only with format=full', async () => {
     const ctx = makeCtx([
-      { name: 'baz', description: 'Baz', usageHint: 'baz-hint', permission: 'auto', mutating: false, inputSchema: { type: 'object', properties: { x: { type: 'string' } } } },
+      {
+        name: 'baz',
+        description: 'Baz',
+        usageHint: 'baz-hint',
+        permission: 'auto',
+        mutating: false,
+        inputSchema: { type: 'object', properties: { x: { type: 'string' } } },
+      },
     ]);
     const result = await toolHelpTool.execute({ tool: 'baz', format: 'full' }, ctx);
     expect(result.help).toContain('Tool: baz');
@@ -117,7 +202,13 @@ describe('toolHelpTool', () => {
 
   it('full format without inputSchema omits the Schema line', async () => {
     const ctx = makeCtx([
-      { name: 'qux', description: 'Q', permission: 'auto', mutating: false, inputSchema: undefined as never },
+      {
+        name: 'qux',
+        description: 'Q',
+        permission: 'auto',
+        mutating: false,
+        inputSchema: undefined as never,
+      },
     ]);
     const result = await toolHelpTool.execute({ tool: 'qux', format: 'full' }, ctx);
     expect(result.help).not.toContain('Schema:');

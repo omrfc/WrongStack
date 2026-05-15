@@ -71,10 +71,7 @@
     "./package.json": "./package.json",
     "./skills/*": "./skills/*"
   },
-  "files": [
-    "dist",
-    "skills"
-  ],
+  "files": ["dist", "skills"],
   "wrongstackApiVersion": "0.1.9",
   "scripts": {
     "build": "tsup",

@@ -183,9 +183,7 @@ export function buildOtlpTracesRequest(
     resourceSpans: [
       {
         resource: {
-          attributes: Object.entries(resourceAttributes).map(([k, v]) =>
-            encodeAttr(k, v),
-          ),
+          attributes: Object.entries(resourceAttributes).map(([k, v]) => encodeAttr(k, v)),
         },
         scopeSpans: [{ scope: { name: scopeName }, spans: otlpSpans }],
       },
@@ -197,9 +195,7 @@ export function buildOtlpTracesRequest(
  * Start the OTLP trace exporter. Returns a `Tracer` to install on the
  * runtime (`Agent.run` etc.) and `flush()`/`stop()` controls.
  */
-export function startOtlpTraceExporter(
-  opts: OtlpTraceExporterOptions,
-): OtlpTraceExporterHandle {
+export function startOtlpTraceExporter(opts: OtlpTraceExporterOptions): OtlpTraceExporterHandle {
   const url = joinEndpoint(opts.endpoint);
   const intervalMs = opts.intervalMs ?? DEFAULT_INTERVAL_MS;
   const maxBuffered = opts.maxBufferedSpans ?? DEFAULT_BUFFER_CAP;

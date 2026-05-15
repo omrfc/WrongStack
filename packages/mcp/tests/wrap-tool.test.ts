@@ -1,6 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
-import { wrapMCPTool } from '../src/wrap-tool.js';
+import { describe, expect, it, vi } from 'vitest';
 import type { MCPClient, MCPTool } from '../src/client.js';
+import { wrapMCPTool } from '../src/wrap-tool.js';
 
 const mkClient = (callImpl: (name: string, input: unknown) => Promise<unknown>) =>
   ({
@@ -13,7 +13,11 @@ const mkClient = (callImpl: (name: string, input: unknown) => Promise<unknown>) 
 describe('wrapMCPTool', () => {
   it('namespaces tool names', () => {
     const mcpTool: MCPTool = { name: 'list', inputSchema: { type: 'object' } };
-    const wrapped = wrapMCPTool('postgres', mcpTool, mkClient(async () => 'ok'));
+    const wrapped = wrapMCPTool(
+      'postgres',
+      mcpTool,
+      mkClient(async () => 'ok'),
+    );
     expect(wrapped.name).toBe('mcp__postgres__list');
   });
 
@@ -42,11 +46,7 @@ describe('wrapMCPTool', () => {
       ]),
     );
     const ctx = {} as Parameters<typeof wrapped.execute>[1];
-    const out = await wrapped.execute(
-      {},
-      ctx,
-      { signal: new AbortController().signal },
-    );
+    const out = await wrapped.execute({}, ctx, { signal: new AbortController().signal });
     expect(out).toBe('line1\nline2');
   });
 

@@ -1,7 +1,12 @@
-import type { Specification, SpecAnalysis, SpecRequirement, SpecSection, SpecValidationResult } from '../types/spec.js';
+import type {
+  SpecAnalysis,
+  SpecRequirement,
+  SpecSection,
+  SpecValidationResult,
+  Specification,
+} from '../types/spec.js';
 
 export class SpecParser {
-
   parse(content: string): Specification {
     const lines = content.split('\n');
     const sections = this.extractSections(lines);
@@ -128,7 +133,13 @@ export class SpecParser {
     if (!trimmed || trimmed.startsWith('#')) return null;
 
     const lower = trimmed.toLowerCase();
-    const types: SpecRequirement['type'][] = ['functional', 'non-functional', 'security', 'performance', 'ux'];
+    const types: SpecRequirement['type'][] = [
+      'functional',
+      'non-functional',
+      'security',
+      'performance',
+      'ux',
+    ];
     let type: SpecRequirement['type'] = 'functional';
     for (const t of types) {
       if (lower.includes(`[${t}]`)) type = t;
@@ -201,9 +212,13 @@ export class SpecParser {
     }
 
     const completeness = Math.round(
-      ((hasOverview ? 1 : 0) + (hasRequirements ? 1 : 0) + (hasAcceptance ? 1 : 0) +
+      (((hasOverview ? 1 : 0) +
+        (hasRequirements ? 1 : 0) +
+        (hasAcceptance ? 1 : 0) +
         (spec.requirements.length > 0 ? 1 : 0) +
-        (spec.sections.length > 3 ? 1 : 0)) / 5 * 100,
+        (spec.sections.length > 3 ? 1 : 0)) /
+        5) *
+        100,
     );
 
     return {
@@ -246,7 +261,10 @@ export class SpecParser {
     const blockedByIds = new Set(spec.requirements.flatMap((r) => r.blockedBy ?? []));
     for (const id of blockedByIds) {
       if (!reqIds.has(id)) {
-        errors.push({ path: 'requirements', message: `BlockedBy references non-existent requirement: ${id}` });
+        errors.push({
+          path: 'requirements',
+          message: `BlockedBy references non-existent requirement: ${id}`,
+        });
       }
     }
 

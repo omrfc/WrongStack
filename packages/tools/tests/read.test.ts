@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readTool } from '../src/read.js';
-import { mkSandbox, newSignal, type Sandbox } from './fixtures.js';
+import { type Sandbox, mkSandbox, newSignal } from './fixtures.js';
 
 describe('read tool', () => {
   let sb: Sandbox;
@@ -25,11 +25,9 @@ describe('read tool', () => {
   it('supports offset and limit', async () => {
     const file = path.join(sb.dir, 'b.txt');
     await fs.writeFile(file, Array.from({ length: 100 }, (_, i) => `line${i + 1}`).join('\n'));
-    const out = await readTool.execute(
-      { path: 'b.txt', offset: 10, limit: 5 },
-      sb.ctx,
-      { signal: newSignal() },
-    );
+    const out = await readTool.execute({ path: 'b.txt', offset: 10, limit: 5 }, sb.ctx, {
+      signal: newSignal(),
+    });
     expect(out.text).toContain('10→line10');
     expect(out.text).toContain('14→line14');
     expect(out.text).not.toContain('15→');

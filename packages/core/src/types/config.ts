@@ -1,5 +1,5 @@
-import type { Permission } from './tool.js';
 import type { WireFamily } from './models-registry.js';
+import type { Permission } from './tool.js';
 
 export interface ContextConfig {
   warnThreshold: number;

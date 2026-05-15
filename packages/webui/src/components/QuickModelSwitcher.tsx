@@ -41,6 +41,7 @@ export function QuickModelSwitcher() {
 
   // Ctrl/Cmd+M opens. Skip when the command palette is already open so
   // the two overlays don't fight for focus.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: setOpen is stable
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
@@ -154,6 +155,9 @@ export function QuickModelSwitcher() {
       className="fixed inset-0 z-50 flex items-start justify-center bg-background/60 backdrop-blur-sm pt-[15vh]"
       onClick={(e) => {
         if (e.target === e.currentTarget) setOpen(false);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') setOpen(false);
       }}
     >
       <div className="w-full max-w-xl rounded-xl border bg-popover shadow-2xl overflow-hidden">

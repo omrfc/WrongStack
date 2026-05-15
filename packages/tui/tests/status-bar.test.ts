@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { fmtElapsed, renderProgress } from '../src/components/status-bar.js';
 
 describe('fmtElapsed', () => {

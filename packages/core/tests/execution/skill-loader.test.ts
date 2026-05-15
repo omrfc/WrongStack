@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DefaultSkillLoader, resolveWstackPaths } from '../../src/index.js';
 
 const SKILL_A = `---
@@ -46,7 +46,10 @@ describe('DefaultSkillLoader', () => {
     await fs.mkdir(path.join(globalRoot, 'skills', 'malformed'), { recursive: true });
     await fs.mkdir(path.join(bundled, 'alpha'), { recursive: true });
     await fs.mkdir(path.join(bundled, 'gamma'), { recursive: true });
-    await fs.writeFile(path.join(projectRoot, '.wrongstack', 'skills', 'alpha', 'SKILL.md'), SKILL_A);
+    await fs.writeFile(
+      path.join(projectRoot, '.wrongstack', 'skills', 'alpha', 'SKILL.md'),
+      SKILL_A,
+    );
     await fs.writeFile(path.join(globalRoot, 'skills', 'beta', 'SKILL.md'), SKILL_B);
     await fs.writeFile(path.join(globalRoot, 'skills', 'malformed', 'SKILL.md'), SKILL_BAD);
     await fs.writeFile(

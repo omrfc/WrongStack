@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
 import { Writable } from 'node:stream';
-import { EventBus, DefaultTokenCounter, stripAnsi } from '@wrongstack/core';
+import { DefaultTokenCounter, EventBus, stripAnsi } from '@wrongstack/core';
+import { describe, expect, it } from 'vitest';
 import { TerminalRenderer } from '../src/renderer.js';
 import { SessionStats } from '../src/session-stats.js';
 
@@ -59,7 +59,11 @@ describe('SessionStats', () => {
     const r = rig();
     r.tc.account({ input: 1200, output: 80 }, 'm');
     r.events.emit('iteration.completed', {} as never);
-    r.events.emit('provider.response', { ctx: {} as never, usage: {} as never, stopReason: 'end_turn' });
+    r.events.emit('provider.response', {
+      ctx: {} as never,
+      usage: {} as never,
+      stopReason: 'end_turn',
+    });
     r.events.emit('tool.executed', {
       name: 'read',
       durationMs: 5,
@@ -119,16 +123,17 @@ describe('SessionStats', () => {
 
   it('shows pricing when registry-priced model is used', () => {
     const r = rig();
-    r.tc.accountWithModel(
-      { input: 1_000_000, output: 1_000_000 },
-      {
-        providerId: 'anthropic',
-        modelId: 'claude-haiku-4-5',
-        capabilities: { tools: true, vision: false, reasoning: false, maxContext: 200_000 },
-        cost: { input: 1, output: 5 },
-      } as never,
-    );
-    r.events.emit('provider.response', { ctx: {} as never, usage: {} as never, stopReason: 'end_turn' });
+    r.tc.accountWithModel({ input: 1_000_000, output: 1_000_000 }, {
+      providerId: 'anthropic',
+      modelId: 'claude-haiku-4-5',
+      capabilities: { tools: true, vision: false, reasoning: false, maxContext: 200_000 },
+      cost: { input: 1, output: 5 },
+    } as never);
+    r.events.emit('provider.response', {
+      ctx: {} as never,
+      usage: {} as never,
+      stopReason: 'end_turn',
+    });
     r.stats.render(r.renderer);
     const text = stripAnsi(r.out.buf);
     expect(text).toContain('Cost:          $6.0000');

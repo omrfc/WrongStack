@@ -1,6 +1,6 @@
-import * as path from 'node:path';
-import * as os from 'node:os';
 import { createHash } from 'node:crypto';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 /**
  * Path layout. All developer-level state lives in ~/.wrongstack/.

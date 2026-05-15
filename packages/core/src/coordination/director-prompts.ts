@@ -173,12 +173,12 @@ export function composeSubagentPrompt(parts: SubagentPromptParts = {}): string {
   if (parts.sharedScratchpad && parts.sharedScratchpad.trim().length > 0) {
     sections.push(
       `Shared notes:\n` +
-      `A scratchpad shared with the rest of the fleet is mounted at \`${parts.sharedScratchpad.trim()}\`.\n` +
-      `- Write your final findings as markdown files there (e.g. \`findings.md\`, \`security.md\`).\n` +
-      `- Before starting, list the directory and read any sibling files relevant to your task — ` +
-      `they may already contain context you can build on.\n` +
-      `- Use stable filenames (one file per concern); overwrite instead of appending so the ` +
-      `Director sees the latest state.`,
+        `A scratchpad shared with the rest of the fleet is mounted at \`${parts.sharedScratchpad.trim()}\`.\n` +
+        `- Write your final findings as markdown files there (e.g. \`findings.md\`, \`security.md\`).\n` +
+        `- Before starting, list the directory and read any sibling files relevant to your task — ` +
+        `they may already contain context you can build on.\n` +
+        `- Use stable filenames (one file per concern); overwrite instead of appending so the ` +
+        `Director sees the latest state.`,
     );
   }
   if (parts.override && parts.override.trim().length > 0) {
@@ -197,7 +197,10 @@ export function composeSubagentPrompt(parts: SubagentPromptParts = {}): string {
  * truncated to 80 chars. Skipped entirely when the role has no prompt.
  */
 export function rosterSummaryFromConfigs(
-  roster: Record<string, { name: string; provider?: string; model?: string; prompt?: string; role?: string }>,
+  roster: Record<
+    string,
+    { name: string; provider?: string; model?: string; prompt?: string; role?: string }
+  >,
 ): string {
   const lines: string[] = [];
   for (const [roleId, cfg] of Object.entries(roster)) {

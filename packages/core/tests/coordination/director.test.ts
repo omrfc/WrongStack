@@ -1,12 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Director } from '../../src/coordination/director.js';
+import { EventBus } from '../../src/kernel/events.js';
 import type {
   SubagentConfig,
   SubagentRunContext,
   SubagentRunOutcome,
   TaskSpec,
 } from '../../src/types/multi-agent.js';
-import { EventBus } from '../../src/kernel/events.js';
 
 /**
  * Integration tests for the Director orchestration layer.
@@ -132,8 +132,16 @@ describe('Director orchestration', () => {
   it('routes a task to the named subagent (no cross-talk)', async () => {
     const { director: d, runner } = buildDirector();
     director = d;
-    const editorId = await spawnWithBus(d, { name: 'editor', provider: 'anthropic', model: 'sonnet' });
-    const researcherId = await spawnWithBus(d, { name: 'researcher', provider: 'anthropic', model: 'haiku' });
+    const editorId = await spawnWithBus(d, {
+      name: 'editor',
+      provider: 'anthropic',
+      model: 'sonnet',
+    });
+    const researcherId = await spawnWithBus(d, {
+      name: 'researcher',
+      provider: 'anthropic',
+      model: 'haiku',
+    });
 
     const taskId = await d.assign({
       id: 't-1',
@@ -160,12 +168,14 @@ describe('Director orchestration', () => {
     director = d;
     // Sonnet: $3/M in, $15/M out.
     const sonnetId = await spawnWithBus(
-      d, { name: 'editor', provider: 'anthropic', model: 'sonnet' },
+      d,
+      { name: 'editor', provider: 'anthropic', model: 'sonnet' },
       { input: 3, output: 15 },
     );
     // Haiku: $0.80/M in, $4/M out.
     const haikuId = await spawnWithBus(
-      d, { name: 'researcher', provider: 'anthropic', model: 'haiku' },
+      d,
+      { name: 'researcher', provider: 'anthropic', model: 'haiku' },
       { input: 0.8, output: 4 },
     );
 
@@ -263,9 +273,9 @@ describe('Director orchestration', () => {
     const usage = tools.find((t) => t.name === 'fleet_usage')!;
 
     // Spawn from roster.
-    const spawnRes = (await spawn.execute(
-      { role: 'researcher' }, null as never, { signal: new AbortController().signal },
-    )) as { subagentId: string; provider: string; model: string };
+    const spawnRes = (await spawn.execute({ role: 'researcher' }, null as never, {
+      signal: new AbortController().signal,
+    })) as { subagentId: string; provider: string; model: string };
     expect(spawnRes.provider).toBe('anthropic');
     expect(spawnRes.model).toBe('haiku');
 
@@ -278,19 +288,19 @@ describe('Director orchestration', () => {
     // Assign + await via tools.
     const assignRes = (await assign.execute(
       { subagentId: spawnRes.subagentId, description: 'enumerate packages' },
-      null as never, { signal: new AbortController().signal },
+      null as never,
+      { signal: new AbortController().signal },
     )) as { taskId: string };
 
-    const awaitRes = (await awaitTasks.execute(
-      { taskIds: [assignRes.taskId] },
-      null as never, { signal: new AbortController().signal },
-    )) as { results: Array<{ status: string }> };
+    const awaitRes = (await awaitTasks.execute({ taskIds: [assignRes.taskId] }, null as never, {
+      signal: new AbortController().signal,
+    })) as { results: Array<{ status: string }> };
     expect(awaitRes.results[0].status).toBe('success');
 
     // fleet_usage should show one subagent with non-zero token usage.
-    const usageRes = (await usage.execute(
-      {}, null as never, { signal: new AbortController().signal },
-    )) as { total: { input: number } };
+    const usageRes = (await usage.execute({}, null as never, {
+      signal: new AbortController().signal,
+    })) as { total: { input: number } };
     expect(usageRes.total.input).toBeGreaterThan(0);
   });
 
@@ -298,9 +308,9 @@ describe('Director orchestration', () => {
     const { director: d } = buildDirector();
     director = d;
     const [spawn] = d.tools({ researcher: { name: 'researcher' } });
-    const res = (await spawn.execute(
-      { role: 'nope' }, null as never, { signal: new AbortController().signal },
-    )) as { error?: string };
+    const res = (await spawn.execute({ role: 'nope' }, null as never, {
+      signal: new AbortController().signal,
+    })) as { error?: string };
     expect(res.error).toMatch(/unknown role "nope"/);
   });
 
@@ -322,7 +332,12 @@ describe('Director orchestration', () => {
 
     // Subscribe-by-id sees every event from that subagent.
     expect(perAgent).toEqual(
-      expect.arrayContaining(['iteration.started', 'tool.started', 'tool.executed', 'provider.response']),
+      expect.arrayContaining([
+        'iteration.started',
+        'tool.started',
+        'tool.executed',
+        'provider.response',
+      ]),
     );
     // Filter sees only the requested type but across the fleet.
     expect(allTools).toEqual([id]);
@@ -334,32 +349,37 @@ describe('Director orchestration', () => {
     // The runner subscribes to the child's bridge and replies with an
     // echoed payload. Director.ask resolves with the reply payload.
     const responses: string[] = [];
-    const runner = vi.fn(async (task: TaskSpec, ctx: SubagentRunContext): Promise<SubagentRunOutcome> => {
-      // Subscribe BEFORE doing anything else — we want to catch the
-      // director's `ask()` message arriving while this task runs.
-      ctx.bridge?.subscribe((msg) => {
-        if (msg.type === 'task') {
-          const q = (msg.payload as { question?: string }).question ?? 'no question';
-          responses.push(q);
-          // Reply: same id so the director's `request<T>` matches it,
-          // direction reversed (from child, to director).
-          void ctx.bridge!.send({
-            id: msg.id,
-            type: 'result',
-            from: ctx.subagentId,
-            to: msg.from,
-            payload: { answer: `echo: ${q}` },
-            timestamp: Date.now(),
+    const runner = vi.fn(
+      async (task: TaskSpec, ctx: SubagentRunContext): Promise<SubagentRunOutcome> => {
+        // Subscribe BEFORE doing anything else — we want to catch the
+        // director's `ask()` message arriving while this task runs.
+        ctx.bridge?.subscribe((msg) => {
+          if (msg.type === 'task') {
+            const q = (msg.payload as { question?: string }).question ?? 'no question';
+            responses.push(q);
+            // Reply: same id so the director's `request<T>` matches it,
+            // direction reversed (from child, to director).
+            void ctx.bridge!.send({
+              id: msg.id,
+              type: 'result',
+              from: ctx.subagentId,
+              to: msg.from,
+              payload: { answer: `echo: ${q}` },
+              timestamp: Date.now(),
+            });
+          }
+        });
+        // Keep the task alive so the bridge stays subscribed.
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, 200);
+          ctx.signal.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(new Error('aborted'));
           });
-        }
-      });
-      // Keep the task alive so the bridge stays subscribed.
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(resolve, 200);
-        ctx.signal.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('aborted')); });
-      });
-      return { iterations: 1, toolCalls: 0 };
-    });
+        });
+        return { iterations: 1, toolCalls: 0 };
+      },
+    );
     const d = new Director({
       config: { coordinatorId: 'ask-d', doneCondition: { type: 'all_tasks_done' } },
       runner,
@@ -390,8 +410,16 @@ describe('Director orchestration', () => {
   it('rollUp() formats markdown summary across completed tasks', async () => {
     const { director: d } = buildDirector();
     director = d;
-    const editor = await spawnWithBus(d, { name: 'editor', provider: 'anthropic', model: 'sonnet' });
-    const researcher = await spawnWithBus(d, { name: 'researcher', provider: 'anthropic', model: 'haiku' });
+    const editor = await spawnWithBus(d, {
+      name: 'editor',
+      provider: 'anthropic',
+      model: 'sonnet',
+    });
+    const researcher = await spawnWithBus(d, {
+      name: 'researcher',
+      provider: 'anthropic',
+      model: 'haiku',
+    });
     const a = await d.assign({ id: 'r-a', description: 'edit X', subagentId: editor });
     const b = await d.assign({ id: 'r-b', description: 'research Y', subagentId: researcher });
     await d.awaitTasks([a, b]);
@@ -436,7 +464,11 @@ describe('Director orchestration', () => {
     try {
       const { director: d } = buildDirectorWithManifest(manifestPath);
       director = d;
-      const editor = await spawnWithBus(d, { name: 'editor', provider: 'anthropic', model: 'sonnet' });
+      const editor = await spawnWithBus(d, {
+        name: 'editor',
+        provider: 'anthropic',
+        model: 'sonnet',
+      });
       const taskId = await d.assign({ id: 'm-1', description: 'rewrite', subagentId: editor });
       await d.awaitTasks([taskId]);
 
@@ -445,7 +477,11 @@ describe('Director orchestration', () => {
 
       const content = JSON.parse(await fsp.readFile(manifestPath, 'utf8')) as {
         directorRunId: string;
-        children: Array<{ subagentId: string; provider?: string; results: Array<{ taskId: string; status: string }> }>;
+        children: Array<{
+          subagentId: string;
+          provider?: string;
+          results: Array<{ taskId: string; status: string }>;
+        }>;
         usage: { total: { input: number } };
       };
       expect(content.directorRunId).toBe('test-director-manifest');
@@ -465,16 +501,28 @@ describe('Director orchestration', () => {
    * option to the existing helper without rewriting all the other tests,
    * so this co-located factory keeps the manifest test self-contained.
    */
-  function buildDirectorWithManifest(manifestPath: string): { director: Director; runner: ReturnType<typeof vi.fn> } {
-    const runner = vi.fn(async (task: TaskSpec, ctx: SubagentRunContext): Promise<SubagentRunOutcome> => {
-      const bus = buses.get(ctx.subagentId)!;
-      bus.emit('iteration.started', { ctx: null as never, index: 1 });
-      bus.emit('tool.executed', { id: 'm-1', name: 'mock', durationMs: 5, ok: true });
-      bus.emit('provider.response', { ctx: null as never, usage: { input: 1000, output: 200 }, stopReason: 'end_turn' });
-      return { result: `${ctx.config.name}:${task.description}`, iterations: 1, toolCalls: 1 };
-    });
+  function buildDirectorWithManifest(manifestPath: string): {
+    director: Director;
+    runner: ReturnType<typeof vi.fn>;
+  } {
+    const runner = vi.fn(
+      async (task: TaskSpec, ctx: SubagentRunContext): Promise<SubagentRunOutcome> => {
+        const bus = buses.get(ctx.subagentId)!;
+        bus.emit('iteration.started', { ctx: null as never, index: 1 });
+        bus.emit('tool.executed', { id: 'm-1', name: 'mock', durationMs: 5, ok: true });
+        bus.emit('provider.response', {
+          ctx: null as never,
+          usage: { input: 1000, output: 200 },
+          stopReason: 'end_turn',
+        });
+        return { result: `${ctx.config.name}:${task.description}`, iterations: 1, toolCalls: 1 };
+      },
+    );
     const d = new Director({
-      config: { coordinatorId: 'test-director-manifest', doneCondition: { type: 'all_tasks_done' } },
+      config: {
+        coordinatorId: 'test-director-manifest',
+        doneCondition: { type: 'all_tasks_done' },
+      },
       runner,
       manifestPath,
     });
@@ -505,7 +553,9 @@ describe('Director orchestration', () => {
     const os = await import('node:os');
     const fsp = await import('node:fs/promises');
     const path = await import('node:path');
-    const { makeDirectorSessionFactory } = await import('../../src/coordination/director-session.js');
+    const { makeDirectorSessionFactory } = await import(
+      '../../src/coordination/director-session.js'
+    );
 
     const tmpRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'wrongstack-director-test-'));
     try {
@@ -515,15 +565,27 @@ describe('Director orchestration', () => {
       });
 
       const editor = await factory.createSubagentSession({
-        subagentId: 'editor', provider: 'anthropic', model: 'sonnet',
+        subagentId: 'editor',
+        provider: 'anthropic',
+        model: 'sonnet',
       });
       const researcher = await factory.createSubagentSession({
-        subagentId: 'researcher', provider: 'anthropic', model: 'haiku',
+        subagentId: 'researcher',
+        provider: 'anthropic',
+        model: 'haiku',
       });
 
       // Write distinct events to each — proves no cross-talk.
-      await editor.append({ type: 'user_input', ts: new Date().toISOString(), content: 'rewrite README' });
-      await researcher.append({ type: 'user_input', ts: new Date().toISOString(), content: 'find OWASP risks' });
+      await editor.append({
+        type: 'user_input',
+        ts: new Date().toISOString(),
+        content: 'rewrite README',
+      });
+      await researcher.append({
+        type: 'user_input',
+        ts: new Date().toISOString(),
+        content: 'find OWASP risks',
+      });
       await editor.close();
       await researcher.close();
 
@@ -609,7 +671,7 @@ describe('Director orchestration', () => {
       });
       expect(dir.maxSpawnDepth).toBe(2);
       expect(dir.spawnDepth).toBe(0);
-      expect(dir.maxSpawns).toBe(Infinity);
+      expect(dir.maxSpawns).toBe(Number.POSITIVE_INFINITY);
       // Root spawn should succeed since 0 < 2.
       await expect(dir.spawn({ name: 'a' })).resolves.toBeTruthy();
       await dir.shutdown();
@@ -642,8 +704,16 @@ describe('Director orchestration', () => {
         config: { coordinatorId: 'iso', doneCondition: { type: 'all_tasks_done' } },
         // The director's own "leader" prompt — must NOT appear inside any subagent prompt.
       });
-      const a: SubagentConfig = { name: 'A', prompt: 'You are A. SECRET_A=alpha.', systemPromptOverride: 'OVERRIDE_A' };
-      const b: SubagentConfig = { name: 'B', prompt: 'You are B. SECRET_B=bravo.', systemPromptOverride: 'OVERRIDE_B' };
+      const a: SubagentConfig = {
+        name: 'A',
+        prompt: 'You are A. SECRET_A=alpha.',
+        systemPromptOverride: 'OVERRIDE_A',
+      };
+      const b: SubagentConfig = {
+        name: 'B',
+        prompt: 'You are B. SECRET_B=bravo.',
+        systemPromptOverride: 'OVERRIDE_B',
+      };
       const promptA = dir.subagentSystemPrompt(a, 'task A');
       const promptB = dir.subagentSystemPrompt(b, 'task B');
 

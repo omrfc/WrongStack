@@ -1,7 +1,7 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DefaultConfigLoader } from '../../src/storage/config-loader.js';
 import { resolveWstackPaths } from '../../src/utils/wstack-paths.js';
 

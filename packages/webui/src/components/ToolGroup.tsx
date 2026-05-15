@@ -12,6 +12,11 @@ interface ToolGroupProps {
    *  default (otherwise users see "5 tool calls" pop in and have to click to
    *  understand what's running). Older groups stay collapsed. */
   defaultOpen?: boolean;
+  /** Render as a continuation of the previous item in the same agent turn —
+   *  hides the avatar column (replaced with a transparent spacer) and the
+   *  group's chrome stitches into the same flow as the surrounding text /
+   *  tool items instead of standing alone. */
+  isContinuation?: boolean;
 }
 
 function formatDuration(ms: number): string {
@@ -22,12 +27,12 @@ function formatDuration(ms: number): string {
   return `${m}m${s}s`;
 }
 
-export function ToolGroup({ tools, defaultOpen = false }: ToolGroupProps) {
+export function ToolGroup({ tools, defaultOpen = false, isContinuation = false }: ToolGroupProps) {
   const [open, setOpen] = useState(defaultOpen);
 
   // Single tool? Render as a normal bubble — grouping overhead is just noise.
   if (tools.length === 1) {
-    return <MessageBubble message={tools[0]!} isFirst />;
+    return <MessageBubble message={tools[0]!} isFirst isContinuation={isContinuation} />;
   }
 
   const running = tools.filter((t) => t.toolResult === undefined).length;
@@ -42,9 +47,13 @@ export function ToolGroup({ tools, defaultOpen = false }: ToolGroupProps) {
 
   return (
     <div className="flex gap-3 animate-message">
-      <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-secondary text-secondary-foreground ring-2 ring-offset-2 ring-offset-background ring-secondary/20">
-        <Terminal className="h-4 w-4" />
-      </div>
+      {isContinuation ? (
+        <div className="flex-shrink-0 w-8 h-8" aria-hidden />
+      ) : (
+        <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-secondary text-secondary-foreground ring-2 ring-offset-2 ring-offset-background ring-secondary/20">
+          <Terminal className="h-4 w-4" />
+        </div>
+      )}
 
       <div className="flex flex-col gap-1.5 max-w-[85%] flex-1 min-w-0">
         <button

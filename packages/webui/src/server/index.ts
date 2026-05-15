@@ -419,6 +419,10 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
       broadcast({ type: 'provider.text_delta', payload: { text: e.text, messageId: 'current' } });
     });
 
+    events.on('provider.thinking_delta', (e) => {
+      broadcast({ type: 'provider.thinking_delta', payload: { text: e.text } });
+    });
+
     events.on('tool.started', (e) => {
       broadcast({
         type: 'tool.started',

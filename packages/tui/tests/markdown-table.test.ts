@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { renderMarkdownTables } from '../src/markdown-table.js';
 
 describe('renderMarkdownTables', () => {
@@ -28,26 +28,14 @@ describe('renderMarkdownTables', () => {
   });
 
   it('preserves surrounding prose around the table', () => {
-    const input = [
-      'before',
-      '',
-      '| A | B |',
-      '|---|---|',
-      '| 1 | 2 |',
-      '',
-      'after',
-    ].join('\n');
+    const input = ['before', '', '| A | B |', '|---|---|', '| 1 | 2 |', '', 'after'].join('\n');
     const out = renderMarkdownTables(input, 80);
     expect(out.startsWith('before\n\n┌')).toBe(true);
     expect(out.endsWith('┘\n\nafter')).toBe(true);
   });
 
   it('honours alignment markers (left, right, center)', () => {
-    const input = [
-      '| L | C | R |',
-      '|:--|:-:|--:|',
-      '| 1 | 2 | 3 |',
-    ].join('\n');
+    const input = ['| L | C | R |', '|:--|:-:|--:|', '| 1 | 2 | 3 |'].join('\n');
     const out = renderMarkdownTables(input, 80);
     const row = out.split('\n').find((l) => l.includes('1'))!;
     // Left col: "1   ", center: " 2 ", right: "   3"
@@ -58,11 +46,7 @@ describe('renderMarkdownTables', () => {
 
   it('wraps long cell contents over multiple lines, keeping borders aligned', () => {
     const long = 'this is a fairly long cell content that should wrap';
-    const input = [
-      '| short | wide |',
-      '|-------|------|',
-      `| a     | ${long} |`,
-    ].join('\n');
+    const input = ['| short | wide |', '|-------|------|', `| a     | ${long} |`].join('\n');
     const out = renderMarkdownTables(input, 40);
     const lines = out.split('\n');
     // Border lines all the same width.

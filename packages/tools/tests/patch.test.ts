@@ -1,8 +1,8 @@
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { patchTool } from '../src/patch.js';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { patchTool } from '../src/patch.js';
 
 let tmpDir: string;
 
@@ -14,7 +14,7 @@ afterEach(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
-const makeCtx = () => ({ cwd: tmpDir, tools: [], projectRoot: tmpDir } as any);
+const makeCtx = () => ({ cwd: tmpDir, tools: [], projectRoot: tmpDir }) as any;
 const makeOpts = () => ({ signal: new AbortController().signal });
 
 describe('patchTool', () => {
@@ -70,13 +70,8 @@ describe('patchTool', () => {
     const ctx = makeCtx();
     // strip=1 trims one component; the remaining path "../../etc/passwd"
     // resolves outside tmpDir.
-    const evilPatch =
-      '--- a/foo\n+++ b/../../etc/passwd\n@@ -1 @@\n-old\n+new';
-    const result = await patchTool.execute(
-      { patch: evilPatch },
-      ctx,
-      makeOpts(),
-    );
+    const evilPatch = '--- a/foo\n+++ b/../../etc/passwd\n@@ -1 @@\n-old\n+new';
+    const result = await patchTool.execute({ patch: evilPatch }, ctx, makeOpts());
     expect(result.applied).toBe(0);
     expect(result.rejected).toBe(1);
     expect(result.message).toMatch(/outside project root/);
@@ -89,13 +84,8 @@ describe('patchTool', () => {
     // a target that ONLY works at strip=0 doesn't escape: pass
     // /tmp/absolute as the target and confirm rejection.
     const ctx = makeCtx();
-    const evilPatch =
-      '--- /etc/passwd\n+++ /etc/passwd\n@@ -1 @@\n-old\n+new';
-    const result = await patchTool.execute(
-      { patch: evilPatch, strip: 0 },
-      ctx,
-      makeOpts(),
-    );
+    const evilPatch = '--- /etc/passwd\n+++ /etc/passwd\n@@ -1 @@\n-old\n+new';
+    const result = await patchTool.execute({ patch: evilPatch, strip: 0 }, ctx, makeOpts());
     expect(result.applied).toBe(0);
   });
 });

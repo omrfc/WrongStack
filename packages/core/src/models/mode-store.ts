@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import type { Mode, ModeStore, ModeManifest, ModeConfig } from '../types/mode.js';
+import type { Mode, ModeConfig, ModeManifest, ModeStore } from '../types/mode.js';
 import { DEFAULT_MODES } from '../types/mode.js';
 
 export class DefaultModeStore implements ModeStore {

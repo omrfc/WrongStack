@@ -1,7 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { SpecParser } from '../../src/sdd/spec-parser.js';
 
-function makeSpec(overrides: Partial<import('../../src/types/spec.js').Specification> = {}): import('../../src/types/spec.js').Specification {
+function makeSpec(
+  overrides: Partial<import('../../src/types/spec.js').Specification> = {},
+): import('../../src/types/spec.js').Specification {
   return {
     id: 'test-id',
     title: 'Test Spec',
@@ -16,7 +18,9 @@ function makeSpec(overrides: Partial<import('../../src/types/spec.js').Specifica
   };
 }
 
-function makeReq(overrides: Partial<import('../../src/types/spec.js').SpecRequirement> = {}): import('../../src/types/spec.js').SpecRequirement {
+function makeReq(
+  overrides: Partial<import('../../src/types/spec.js').SpecRequirement> = {},
+): import('../../src/types/spec.js').SpecRequirement {
   return {
     id: 'REQ-1',
     type: 'functional',
@@ -166,7 +170,9 @@ Req 3`);
 
     it('removes all tag brackets from requirement description', () => {
       const parser = new SpecParser();
-      const spec = parser.parse('# Title\n\n## Requirements\n\n[functional][critical] Do something amazing');
+      const spec = parser.parse(
+        '# Title\n\n## Requirements\n\n[functional][critical] Do something amazing',
+      );
       expect(spec.requirements[0].description).toBe('Do something amazing');
     });
 
@@ -187,28 +193,43 @@ Req 3`);
   describe('analyze', () => {
     it('detects missing overview section', () => {
       const parser = new SpecParser();
-      const spec = makeSpec({ sections: [{ type: 'requirements', title: 'Requirements', level: 2, content: '' }] });
+      const spec = makeSpec({
+        sections: [{ type: 'requirements', title: 'Requirements', level: 2, content: '' }],
+      });
       const analysis = parser.analyze(spec);
       expect(analysis.gaps).toContain('Missing Overview section');
     });
 
     it('detects missing requirements section', () => {
       const parser = new SpecParser();
-      const spec = makeSpec({ sections: [{ type: 'overview', title: 'Overview', level: 2, content: '' }] });
+      const spec = makeSpec({
+        sections: [{ type: 'overview', title: 'Overview', level: 2, content: '' }],
+      });
       const analysis = parser.analyze(spec);
       expect(analysis.gaps).toContain('Missing Requirements section');
     });
 
     it('detects missing acceptance section', () => {
       const parser = new SpecParser();
-      const spec = makeSpec({ sections: [{ type: 'overview', title: 'Overview', level: 2, content: '' }, { type: 'requirements', title: 'Requirements', level: 2, content: '' }] });
+      const spec = makeSpec({
+        sections: [
+          { type: 'overview', title: 'Overview', level: 2, content: '' },
+          { type: 'requirements', title: 'Requirements', level: 2, content: '' },
+        ],
+      });
       const analysis = parser.analyze(spec);
       expect(analysis.gaps).toContain('Missing Acceptance Criteria section');
     });
 
     it('detects no requirements defined', () => {
       const parser = new SpecParser();
-      const spec = makeSpec({ sections: [{ type: 'overview', title: 'Overview', level: 2, content: '' }, { type: 'requirements', title: 'Requirements', level: 2, content: '' }], requirements: [] });
+      const spec = makeSpec({
+        sections: [
+          { type: 'overview', title: 'Overview', level: 2, content: '' },
+          { type: 'requirements', title: 'Requirements', level: 2, content: '' },
+        ],
+        requirements: [],
+      });
       const analysis = parser.analyze(spec);
       expect(analysis.gaps).toContain('No requirements defined');
     });
@@ -221,7 +242,10 @@ Req 3`);
           { type: 'requirements', title: 'Requirements', level: 2, content: '' },
           { type: 'acceptance', title: 'Acceptance', level: 2, content: '' },
         ],
-        requirements: [makeReq({ id: 'REQ-1', acceptanceCriteria: [] }), makeReq({ id: 'REQ-2', acceptanceCriteria: ['crit1'] })],
+        requirements: [
+          makeReq({ id: 'REQ-1', acceptanceCriteria: [] }),
+          makeReq({ id: 'REQ-2', acceptanceCriteria: ['crit1'] }),
+        ],
       });
       const analysis = parser.analyze(spec);
       expect(analysis.gaps).toContain('1 requirements without acceptance criteria');
@@ -342,10 +366,7 @@ Req 3`);
       const spec = makeSpec({
         title: 'Title',
         version: '1.0.0',
-        requirements: [
-          makeReq({ id: 'REQ-1', blockedBy: ['REQ-2'] }),
-          makeReq({ id: 'REQ-2' }),
-        ],
+        requirements: [makeReq({ id: 'REQ-1', blockedBy: ['REQ-2'] }), makeReq({ id: 'REQ-2' })],
       });
       const result = parser.validate(spec);
       expect(result.valid).toBe(true);

@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { DefaultLogger } from '../../src/infrastructure/logger.js';
 import { loadPlugins } from '../../src/plugin/loader.js';
 import type { Plugin, PluginAPI } from '../../src/types/plugin.js';
-import { DefaultLogger } from '../../src/infrastructure/logger.js';
 import { validateAgainstSchema } from '../../src/utils/json-schema-validate.js';
 
 const fakeApi = {} as PluginAPI;
@@ -18,10 +18,7 @@ function p(overrides: Partial<Plugin> & { name: string }): Plugin {
 describe('Plugin manifest — structured dependencies', () => {
   it('accepts the legacy string-array dependsOn form (backward compat)', async () => {
     const { loaded } = await loadPlugins(
-      [
-        p({ name: 'core' }),
-        p({ name: 'ext', dependsOn: ['core'] }),
-      ],
+      [p({ name: 'core' }), p({ name: 'ext', dependsOn: ['core'] })],
       { apiFactory: () => fakeApi, log },
     );
     expect(loaded.map((x) => x.name)).toEqual(['core', 'ext']);
@@ -98,7 +95,9 @@ describe('Plugin manifest — configSchema validation', () => {
             properties: { port: { type: 'integer' } },
             required: ['port'],
           },
-          setup: () => { setupCalled = true; },
+          setup: () => {
+            setupCalled = true;
+          },
         }),
       ],
       {
@@ -124,7 +123,9 @@ describe('Plugin manifest — configSchema validation', () => {
             properties: { port: { type: 'integer' }, host: { type: 'string' } },
             required: ['port'],
           },
-          setup: () => { receivedOpts = 'ok'; },
+          setup: () => {
+            receivedOpts = 'ok';
+          },
         }),
       ],
       {
@@ -236,11 +237,14 @@ describe('validateAgainstSchema', () => {
   });
 
   it('treats unknown keywords as no-ops', () => {
-    const r = validateAgainstSchema({ x: 1 }, {
-      type: 'object',
-      properties: { x: { type: 'integer' } },
-      futureKeyword: { totally: 'unknown' } as never,
-    });
+    const r = validateAgainstSchema(
+      { x: 1 },
+      {
+        type: 'object',
+        properties: { x: { type: 'integer' } },
+        futureKeyword: { totally: 'unknown' } as never,
+      },
+    );
     expect(r.ok).toBe(true);
   });
 });

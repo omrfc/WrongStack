@@ -1,14 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {
-  detectProjectKind,
-  runProjectCheck,
-  runLaunchPrompts,
-} from '../src/pre-launch.js';
-import type { TerminalRenderer } from '../src/renderer.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReadlineInputReader } from '../src/input-reader.js';
+import { detectProjectKind, runLaunchPrompts, runProjectCheck } from '../src/pre-launch.js';
+import type { TerminalRenderer } from '../src/renderer.js';
 
 /**
  * V0-C: pre-launch decides whether to scaffold AGENTS.md, prompts for
@@ -178,7 +174,7 @@ describe('runLaunchPrompts', () => {
     expect(result.yolo).toBe(false);
   });
 
-  it("empty answer defaults to TUI mode", async () => {
+  it('empty answer defaults to TUI mode', async () => {
     const renderer = makeRenderer();
     const reader = makeReader(['', '']);
     const result = await runLaunchPrompts({ renderer, reader });

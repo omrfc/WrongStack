@@ -1,8 +1,4 @@
-import type {
-  HealthRegistry,
-  MetricsSink,
-  MetricsSnapshot,
-} from '../types/observability.js';
+import type { HealthRegistry, MetricsSink, MetricsSnapshot } from '../types/observability.js';
 
 /**
  * L3-C: Prometheus text exposition format renderer.
@@ -36,7 +32,10 @@ function formatNumber(n: number): string {
   return Number.isInteger(n) ? n.toString() : n.toString();
 }
 
-function joinLabels(base: Record<string, string>, extra: Record<string, string>): Record<string, string> {
+function joinLabels(
+  base: Record<string, string>,
+  extra: Record<string, string>,
+): Record<string, string> {
   return { ...base, ...extra };
 }
 
@@ -47,7 +46,10 @@ function joinLabels(base: Record<string, string>, extra: Record<string, string>)
 export function renderPrometheus(snapshot: MetricsSnapshot): string {
   // Group by name so we can emit one HELP/TYPE pair per metric.
   type Row = { labels: Record<string, string>; values: Record<string, number> };
-  const groups = new Map<string, { type: MetricsSnapshot['series'][number]['type']; rows: Row[] }>();
+  const groups = new Map<
+    string,
+    { type: MetricsSnapshot['series'][number]['type']; rows: Row[] }
+  >();
   for (const s of snapshot.series) {
     let g = groups.get(s.name);
     if (!g) {

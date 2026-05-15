@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SSEReader, SSETransport, StreamableHTTPTransport } from '../src/transport.js';
 
 describe('SSEReader', () => {
@@ -45,7 +45,9 @@ describe('SSEReader', () => {
   it('handler exception does not block other handlers', () => {
     const r = new SSEReader();
     const good = vi.fn();
-    r.onMessage(() => { throw new Error('boom'); });
+    r.onMessage(() => {
+      throw new Error('boom');
+    });
     r.onMessage(good);
     r.feed('data: {"id":1}\n\n');
     expect(good).toHaveBeenCalledOnce();
@@ -97,7 +99,7 @@ describe('SSETransport — connection failure modes', () => {
   it('startupTimeoutMs bounds connect() wall-clock duration', async () => {
     const t = new SSETransport({
       name: 'slow',
-      url: 'http://10.255.255.1/never',  // blackholed
+      url: 'http://10.255.255.1/never', // blackholed
       startupTimeoutMs: 150,
     });
     const start = Date.now();
@@ -171,7 +173,10 @@ describe('StreamableHTTPTransport — connection failure modes', () => {
 
 describe('StreamableHTTPTransport — connect/callTool with mocked fetch', () => {
   function mkFetch(
-    handlers: ((url: string, init: { body?: string; headers?: Record<string, string> }) => Promise<Response> | Response)[],
+    handlers: ((
+      url: string,
+      init: { body?: string; headers?: Record<string, string> },
+    ) => Promise<Response> | Response)[],
   ): typeof globalThis.fetch {
     let i = 0;
     return ((url: string, init: { body?: string; headers?: Record<string, string> } = {}) => {
@@ -181,7 +186,10 @@ describe('StreamableHTTPTransport — connect/callTool with mocked fetch', () =>
     }) as unknown as typeof globalThis.fetch;
   }
 
-  function jsonRes(body: unknown, init: { status?: number; headers?: Record<string, string> } = {}): Response {
+  function jsonRes(
+    body: unknown,
+    init: { status?: number; headers?: Record<string, string> } = {},
+  ): Response {
     return new Response(JSON.stringify(body), {
       status: init.status ?? 200,
       headers: { 'content-type': 'application/json', ...(init.headers ?? {}) },
@@ -235,17 +243,19 @@ describe('StreamableHTTPTransport — connect/callTool with mocked fetch', () =>
       // notifications/initialized — postRaw requires a valid JSON-RPC line
       () => jsonRes({ jsonrpc: '2.0' }),
       // tools/list
-      (_u, init) => jsonRes({
-        jsonrpc: '2.0',
-        id: JSON.parse(init.body ?? '{}').id,
-        result: { tools: [{ name: 'hello' }] },
-      }),
+      (_u, init) =>
+        jsonRes({
+          jsonrpc: '2.0',
+          id: JSON.parse(init.body ?? '{}').id,
+          result: { tools: [{ name: 'hello' }] },
+        }),
       // tools/call
-      (_u, init) => jsonRes({
-        jsonrpc: '2.0',
-        id: JSON.parse(init.body ?? '{}').id,
-        result: { content: 'hi', isError: false },
-      }),
+      (_u, init) =>
+        jsonRes({
+          jsonrpc: '2.0',
+          id: JSON.parse(init.body ?? '{}').id,
+          result: { content: 'hi', isError: false },
+        }),
     ]);
     const origFetch = globalThis.fetch;
     (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
@@ -264,16 +274,18 @@ describe('StreamableHTTPTransport — connect/callTool with mocked fetch', () =>
     const fetchImpl = mkFetch([
       (_u, init) => jsonRes({ jsonrpc: '2.0', id: JSON.parse(init.body ?? '{}').id, result: {} }),
       () => jsonRes({ jsonrpc: '2.0' }),
-      (_u, init) => jsonRes({
-        jsonrpc: '2.0',
-        id: JSON.parse(init.body ?? '{}').id,
-        result: { tools: [] },
-      }),
-      (_u, init) => jsonRes({
-        jsonrpc: '2.0',
-        id: JSON.parse(init.body ?? '{}').id,
-        error: { code: -32601, message: 'bad call' },
-      }),
+      (_u, init) =>
+        jsonRes({
+          jsonrpc: '2.0',
+          id: JSON.parse(init.body ?? '{}').id,
+          result: { tools: [] },
+        }),
+      (_u, init) =>
+        jsonRes({
+          jsonrpc: '2.0',
+          id: JSON.parse(init.body ?? '{}').id,
+          error: { code: -32601, message: 'bad call' },
+        }),
     ]);
     const origFetch = globalThis.fetch;
     (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
@@ -290,11 +302,12 @@ describe('StreamableHTTPTransport — connect/callTool with mocked fetch', () =>
 
   it('connect throws when initialize returns a JSON-RPC error', async () => {
     const fetchImpl = mkFetch([
-      (_u, init) => jsonRes({
-        jsonrpc: '2.0',
-        id: JSON.parse(init.body ?? '{}').id,
-        error: { code: -1, message: 'no good' },
-      }),
+      (_u, init) =>
+        jsonRes({
+          jsonrpc: '2.0',
+          id: JSON.parse(init.body ?? '{}').id,
+          error: { code: -1, message: 'no good' },
+        }),
     ]);
     const origFetch = globalThis.fetch;
     (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
@@ -309,10 +322,11 @@ describe('StreamableHTTPTransport — connect/callTool with mocked fetch', () =>
 
   it('connect throws when initialize body cannot be parsed', async () => {
     const fetchImpl = mkFetch([
-      () => new Response('totally not JSON', {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
+      () =>
+        new Response('totally not JSON', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
     ]);
     const origFetch = globalThis.fetch;
     (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
@@ -326,20 +340,18 @@ describe('StreamableHTTPTransport — connect/callTool with mocked fetch', () =>
   });
 
   it('connect parses NDJSON body when content-type is not application/json', async () => {
-    const ndjson = [
-      JSON.stringify({ jsonrpc: '2.0', id: 1, result: {} }),
-      '',
-    ].join('\n');
+    const ndjson = [JSON.stringify({ jsonrpc: '2.0', id: 1, result: {} }), ''].join('\n');
     const fetchImpl = mkFetch([
       () => new Response(ndjson, { status: 200, headers: { 'content-type': 'text/event-stream' } }),
       // notifications/initialized — postRaw requires a valid JSON-RPC line
       () => jsonRes({ jsonrpc: '2.0' }),
       // tools/list
-      (_u, init) => jsonRes({
-        jsonrpc: '2.0',
-        id: JSON.parse(init.body ?? '{}').id,
-        result: { tools: [] },
-      }),
+      (_u, init) =>
+        jsonRes({
+          jsonrpc: '2.0',
+          id: JSON.parse(init.body ?? '{}').id,
+          result: { tools: [] },
+        }),
     ]);
     const origFetch = globalThis.fetch;
     (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;

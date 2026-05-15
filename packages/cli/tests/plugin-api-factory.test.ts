@@ -1,12 +1,12 @@
-import { describe, it, expect } from 'vitest';
 import {
-  Container,
-  EventBus,
-  ToolRegistry,
-  ProviderRegistry,
-  DefaultLogger,
   type Config,
+  Container,
+  DefaultLogger,
+  EventBus,
+  ProviderRegistry,
+  ToolRegistry,
 } from '@wrongstack/core';
+import { describe, expect, it } from 'vitest';
 import createApi from '../src/plugin-api-factory.js';
 
 describe('plugin-api-factory', () => {

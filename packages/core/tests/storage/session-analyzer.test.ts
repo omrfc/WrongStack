@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { SessionAnalyzer } from '../../src/storage/session-analyzer.js';
 
 describe('SessionAnalyzer', () => {
@@ -82,9 +82,7 @@ describe('SessionAnalyzer', () => {
   });
 
   it('query returns all when no filter', () => {
-    const events = [
-      { type: 'user_input', ts: '2024-01-01T00:00:00Z', content: 'a' } as any,
-    ];
+    const events = [{ type: 'user_input', ts: '2024-01-01T00:00:00Z', content: 'a' } as any];
     const result = analyzer.query(events, {});
     expect(result).toHaveLength(1);
   });

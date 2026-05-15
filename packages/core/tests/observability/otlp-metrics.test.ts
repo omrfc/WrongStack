@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InMemoryMetricsSink } from '../../src/observability/metrics.js';
 import {
   buildOtlpMetricsRequest,
@@ -98,7 +98,9 @@ describe('startOtlpMetricsExporter', () => {
   it('POSTs to the OTLP endpoint with the right URL and content-type', async () => {
     const sink = new InMemoryMetricsSink();
     sink.counter('events_total', 1);
-    const fetchImpl = vi.fn(async () => new Response('', { status: 200 })) as unknown as typeof globalThis.fetch;
+    const fetchImpl = vi.fn(
+      async () => new Response('', { status: 200 }),
+    ) as unknown as typeof globalThis.fetch;
 
     const exp = startOtlpMetricsExporter({
       sink,
@@ -120,7 +122,9 @@ describe('startOtlpMetricsExporter', () => {
   });
 
   it('does not duplicate /v1/metrics when already in the endpoint', async () => {
-    const fetchImpl = vi.fn(async () => new Response('', { status: 200 })) as unknown as typeof globalThis.fetch;
+    const fetchImpl = vi.fn(
+      async () => new Response('', { status: 200 }),
+    ) as unknown as typeof globalThis.fetch;
     const exp = startOtlpMetricsExporter({
       sink: new InMemoryMetricsSink(),
       endpoint: 'https://otel.example.com/v1/metrics',
@@ -128,12 +132,16 @@ describe('startOtlpMetricsExporter', () => {
     });
     await exp.flush();
     await exp.stop();
-    const [url] = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as [string];
+    const [url] = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as [
+      string,
+    ];
     expect(url).toBe('https://otel.example.com/v1/metrics');
   });
 
   it('attaches the authorization header when supplied', async () => {
-    const fetchImpl = vi.fn(async () => new Response('', { status: 200 })) as unknown as typeof globalThis.fetch;
+    const fetchImpl = vi.fn(
+      async () => new Response('', { status: 200 }),
+    ) as unknown as typeof globalThis.fetch;
     const exp = startOtlpMetricsExporter({
       sink: new InMemoryMetricsSink(),
       endpoint: 'http://collector:4318',
@@ -143,14 +151,19 @@ describe('startOtlpMetricsExporter', () => {
     });
     await exp.flush();
     await exp.stop();
-    const [, init] = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as [string, RequestInit];
+    const [, init] = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
     const h = init.headers as Record<string, string>;
     expect(h.authorization).toBe('Bearer xyz');
     expect(h['x-tenant']).toBe('a');
   });
 
   it('calls onError on non-2xx responses', async () => {
-    const fetchImpl = vi.fn(async () => new Response('bad', { status: 500 })) as unknown as typeof globalThis.fetch;
+    const fetchImpl = vi.fn(
+      async () => new Response('bad', { status: 500 }),
+    ) as unknown as typeof globalThis.fetch;
     const onError = vi.fn();
     const exp = startOtlpMetricsExporter({
       sink: new InMemoryMetricsSink(),
@@ -182,7 +195,9 @@ describe('startOtlpMetricsExporter', () => {
   });
 
   it('pushes again on the scheduled interval', async () => {
-    const fetchImpl = vi.fn(async () => new Response('', { status: 200 })) as unknown as typeof globalThis.fetch;
+    const fetchImpl = vi.fn(
+      async () => new Response('', { status: 200 }),
+    ) as unknown as typeof globalThis.fetch;
     const exp = startOtlpMetricsExporter({
       sink: new InMemoryMetricsSink(),
       endpoint: 'http://collector:4318',

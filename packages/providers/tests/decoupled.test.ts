@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { makeProviderFromConfig } from '../src/index.js';
+import { describe, expect, it } from 'vitest';
 import { AnthropicProvider } from '../src/anthropic.js';
+import { makeProviderFromConfig } from '../src/index.js';
 import { OpenAICompatibleProvider } from '../src/openai-compatible.js';
 
 describe('makeProviderFromConfig (no models.dev dependency)', () => {
@@ -27,9 +27,9 @@ describe('makeProviderFromConfig (no models.dev dependency)', () => {
   });
 
   it('rejects missing family with a helpful error', () => {
-    expect(() =>
-      makeProviderFromConfig('mystery', { type: 'mystery', apiKey: 'sk-fake' }),
-    ).toThrow(/explicit family/);
+    expect(() => makeProviderFromConfig('mystery', { type: 'mystery', apiKey: 'sk-fake' })).toThrow(
+      /explicit family/,
+    );
   });
 
   it('uses envVars from config when apiKey is absent', () => {

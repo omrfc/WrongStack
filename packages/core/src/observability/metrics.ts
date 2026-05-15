@@ -136,10 +136,7 @@ export class InMemoryMetricsSink implements MetricsSink {
     this.histograms.clear();
   }
 
-  private getOrCreate<V>(
-    bag: Map<string, Map<string, V>>,
-    name: string,
-  ): Map<string, V> {
+  private getOrCreate<V>(bag: Map<string, Map<string, V>>, name: string): Map<string, V> {
     let series = bag.get(name);
     if (!series) {
       series = new Map();

@@ -1,6 +1,6 @@
 import * as path from 'node:path';
-import type { SessionStore, SessionWriter } from '../types/session.js';
 import { DefaultSessionStore } from '../storage/session-store.js';
+import type { SessionStore, SessionWriter } from '../types/session.js';
 
 /**
  * Per-subagent session factory.
@@ -67,8 +67,7 @@ export interface DirectorSessionFactory {
 export function makeDirectorSessionFactory(
   opts: DirectorSessionFactoryOptions,
 ): DirectorSessionFactory {
-  const runId = opts.directorRunId
-    ?? `${new Date().toISOString().replace(/[:.]/g, '-')}-director`;
+  const runId = opts.directorRunId ?? `${new Date().toISOString().replace(/[:.]/g, '-')}-director`;
 
   let store: SessionStore;
   let dir: string;
@@ -83,9 +82,7 @@ export function makeDirectorSessionFactory(
     dir = path.join(opts.sessionsRoot, runId);
     store = new DefaultSessionStore({ dir });
   } else {
-    throw new Error(
-      'makeDirectorSessionFactory requires either `store` or `sessionsRoot`',
-    );
+    throw new Error('makeDirectorSessionFactory requires either `store` or `sessionsRoot`');
   }
 
   return {

@@ -1,18 +1,20 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Compactor, CompactReport } from '../../src/types/compactor.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Context } from '../../src/core/context.js';
+import { SelectiveCompactor } from '../../src/execution/selective-compactor.js';
+import type { ContentBlock, TextBlock } from '../../src/types/blocks.js';
+import type { CompactReport, Compactor } from '../../src/types/compactor.js';
 import type { Message } from '../../src/types/messages.js';
 import type { Provider } from '../../src/types/provider.js';
 import type { MessageSelector, SelectorResult } from '../../src/types/selector.js';
-import type { ContentBlock, TextBlock } from '../../src/types/blocks.js';
-import { SelectiveCompactor } from '../../src/execution/selective-compactor.js';
 
 function makeTextBlock(text: string): TextBlock {
   return { type: 'text', text };
 }
 
 function makeMessage(role: string, content: ContentBlock[] | string): Message {
-  return typeof content === 'string' ? { role: role as Message['role'], content } : { role: role as Message['role'], content };
+  return typeof content === 'string'
+    ? { role: role as Message['role'], content }
+    : { role: role as Message['role'], content };
 }
 
 function fakeContext(messages: Message[], signal = new AbortController().signal): Context {
@@ -24,7 +26,12 @@ function fakeContext(messages: Message[], signal = new AbortController().signal)
     provider: null as any,
     config: null as any,
     tools: [],
-    session: { append: vi.fn(), flush: vi.fn(), getMessages: () => messages, clear: vi.fn() } as any,
+    session: {
+      append: vi.fn(),
+      flush: vi.fn(),
+      getMessages: () => messages,
+      clear: vi.fn(),
+    } as any,
     tokenCounter: { account: vi.fn(), estimate: vi.fn(), reset: vi.fn() } as any,
     registerAbortHook: vi.fn(),
     drainAbortHooks: vi.fn(),
@@ -91,7 +98,11 @@ describe('SelectiveCompactor', () => {
   describe('compact', () => {
     it('returns early without modification when below warn threshold', async () => {
       const provider = makeFakeProvider([]);
-      const compactor = new SelectiveCompactor({ provider, warnThreshold: 0.9, maxContext: 100000 });
+      const compactor = new SelectiveCompactor({
+        provider,
+        warnThreshold: 0.9,
+        maxContext: 100000,
+      });
       const messages = [
         makeMessage('user', [makeTextBlock('hi')]),
         makeMessage('assistant', [makeTextBlock('hello')]),
@@ -242,9 +253,11 @@ describe('SelectiveCompactor', () => {
       const compactor = new SelectiveCompactor({ provider, hardThreshold: 0.9, maxContext: 1000 });
       const ctx = fakeContext([]);
       // Use private method through compact behavior
-      const messages = Array(50).fill(null).map((_, i) =>
-        makeMessage(i % 2 === 0 ? 'user' : 'assistant', [makeTextBlock('x'.repeat(50))])
-      );
+      const messages = Array(50)
+        .fill(null)
+        .map((_, i) =>
+          makeMessage(i % 2 === 0 ? 'user' : 'assistant', [makeTextBlock('x'.repeat(50))]),
+        );
       ctx.state.replaceMessages(messages);
       // Test hard load path
       const result = (compactor as any).computeTargetBudget(0.95, false);
@@ -253,14 +266,24 @@ describe('SelectiveCompactor', () => {
 
     it('returns 65% for soft threshold load', () => {
       const provider = makeFakeProvider([]);
-      const compactor = new SelectiveCompactor({ provider, softThreshold: 0.75, hardThreshold: 0.9, maxContext: 1000 });
+      const compactor = new SelectiveCompactor({
+        provider,
+        softThreshold: 0.75,
+        hardThreshold: 0.9,
+        maxContext: 1000,
+      });
       const result = (compactor as any).computeTargetBudget(0.8, false);
       expect(result).toBe(650); // 65% of 1000
     });
 
     it('returns 75% for warn threshold load', () => {
       const provider = makeFakeProvider([]);
-      const compactor = new SelectiveCompactor({ provider, softThreshold: 0.75, hardThreshold: 0.9, maxContext: 1000 });
+      const compactor = new SelectiveCompactor({
+        provider,
+        softThreshold: 0.75,
+        hardThreshold: 0.9,
+        maxContext: 1000,
+      });
       const result = (compactor as any).computeTargetBudget(0.65, false);
       expect(result).toBe(750); // 75% of 1000
     });
@@ -350,7 +373,10 @@ describe('SelectiveCompactor', () => {
     it('returns false for tool_result only content', () => {
       const provider = makeFakeProvider([]);
       const compactor = new SelectiveCompactor({ provider });
-      const msg: Message = { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'result' }] };
+      const msg: Message = {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 't1', content: 'result' }],
+      };
       expect((compactor as any).hasTextContent(msg)).toBe(false);
     });
   });

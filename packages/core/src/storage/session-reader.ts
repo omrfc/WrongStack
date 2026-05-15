@@ -1,8 +1,4 @@
-import type {
-  SessionEvent,
-  SessionMetadata,
-  SessionStore,
-} from '../types/session.js';
+import type { ContentBlock } from '../types/blocks.js';
 import type {
   DefaultSessionReaderOptions,
   SessionExportOptions,
@@ -12,7 +8,7 @@ import type {
   SessionSearchQuery,
   SessionSummaryLite,
 } from '../types/session-reader.js';
-import type { ContentBlock } from '../types/blocks.js';
+import type { SessionEvent, SessionMetadata, SessionStore } from '../types/session.js';
 
 /**
  * L2-A: read-only view over a `SessionStore` with query, replay, search,
@@ -130,7 +126,9 @@ export class DefaultSessionReader implements SessionReader {
   }
 }
 
-function buildMatcher(q: SessionSearchQuery): (text: string) => { start: number; end: number } | null {
+function buildMatcher(
+  q: SessionSearchQuery,
+): (text: string) => { start: number; end: number } | null {
   const ci = q.caseInsensitive ?? true;
   if (q.regex) {
     const flags = ci ? 'i' : '';
@@ -274,7 +272,9 @@ function renderMarkdown(meta: SessionMetadata, events: SessionEvent[]): string {
 
 function renderPlainText(meta: SessionMetadata, events: SessionEvent[]): string {
   const lines: string[] = [];
-  lines.push(`Session ${meta.id} — ${meta.provider ?? '?'}/${meta.model ?? '?'} — started ${meta.startedAt}`);
+  lines.push(
+    `Session ${meta.id} — ${meta.provider ?? '?'}/${meta.model ?? '?'} — started ${meta.startedAt}`,
+  );
   lines.push(''.padEnd(72, '-'));
   for (const e of events) {
     switch (e.type) {

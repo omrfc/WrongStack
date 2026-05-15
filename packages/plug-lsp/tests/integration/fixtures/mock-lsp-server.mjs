@@ -96,7 +96,9 @@ function handle(msg) {
   }
   if (msg.method === 'textDocument/definition') {
     const uri = msg.params.textDocument.uri;
-    respond(msg.id, [{ uri, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 6 } } }]);
+    respond(msg.id, [
+      { uri, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 6 } } },
+    ]);
     return;
   }
   if (msg.method === 'textDocument/references') {

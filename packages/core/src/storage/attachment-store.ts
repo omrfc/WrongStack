@@ -1,7 +1,6 @@
+import { randomBytes } from 'node:crypto';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { randomBytes } from 'node:crypto';
-import type { ContentBlock } from '../types/blocks.js';
 import type {
   AddAttachmentInput,
   Attachment,
@@ -9,6 +8,7 @@ import type {
   AttachmentRef,
   AttachmentStore,
 } from '../types/attachment.js';
+import type { ContentBlock } from '../types/blocks.js';
 
 export interface AttachmentStoreOptions {
   /**
@@ -108,7 +108,8 @@ export class DefaultAttachmentStore implements AttachmentStore {
 
   private async toBlock(att: Attachment): Promise<ContentBlock> {
     if (att.kind === 'image') {
-      const data = att.data ?? (att.path ? await fsp.readFile(att.path, { encoding: 'base64' }) : '');
+      const data =
+        att.data ?? (att.path ? await fsp.readFile(att.path, { encoding: 'base64' }) : '');
       return {
         type: 'image',
         source: {

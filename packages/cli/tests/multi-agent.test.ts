@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@wrongstack/providers', () => ({
   makeProviderFromConfig: vi.fn(() => ({
@@ -12,17 +12,17 @@ vi.mock('@wrongstack/providers', () => ({
   })),
 }));
 
-import { MultiAgentHost, type MultiAgentDeps } from '../src/multi-agent.js';
 import {
+  type ConfigStore,
   Container,
   EventBus,
   ProviderRegistry,
-  ToolRegistry,
-  type ConfigStore,
-  type SystemPromptBuilder,
   type SessionWriter,
+  type SystemPromptBuilder,
   type TokenCounter,
+  ToolRegistry,
 } from '@wrongstack/core';
+import { type MultiAgentDeps, MultiAgentHost } from '../src/multi-agent.js';
 
 /**
  * V0-C: `MultiAgentHost` is lazy by design — until /spawn fires, no
@@ -94,7 +94,9 @@ describe('MultiAgentHost', () => {
     new MultiAgentHost(deps);
     // configStore.get is only called inside ensureCoordinator()
     expect(deps.configStore.get).not.toHaveBeenCalled();
-    expect((deps.systemPromptBuilder as { build: ReturnType<typeof vi.fn> }).build).not.toHaveBeenCalled();
+    expect(
+      (deps.systemPromptBuilder as { build: ReturnType<typeof vi.fn> }).build,
+    ).not.toHaveBeenCalled();
   });
 
   it('status() shape stays stable across calls when nothing changes', () => {
@@ -112,7 +114,9 @@ describe('MultiAgentHost', () => {
     expect(subagentId).toBeTruthy();
     expect(taskId).toBeTruthy();
     expect(deps.configStore.get).toHaveBeenCalled();
-    expect((deps.systemPromptBuilder as { build: ReturnType<typeof vi.fn> }).build).toHaveBeenCalled();
+    expect(
+      (deps.systemPromptBuilder as { build: ReturnType<typeof vi.fn> }).build,
+    ).toHaveBeenCalled();
     const s = host.status();
     expect(s.pending).toHaveLength(1);
     expect(s.pending[0]!.description).toBe('do a thing');
@@ -212,17 +216,33 @@ describe('MultiAgentHost', () => {
     const deps = makeDeps();
     const tools = deps.toolRegistry;
     tools.register({
-      name: 'a', description: '', inputSchema: { type: 'object' }, permission: 'auto', mutating: false, async execute() { return ''; },
+      name: 'a',
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
+      async execute() {
+        return '';
+      },
     });
     tools.register({
-      name: 'b', description: '', inputSchema: { type: 'object' }, permission: 'auto', mutating: false, async execute() { return ''; },
+      name: 'b',
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
+      async execute() {
+        return '';
+      },
     });
     const host = new MultiAgentHost(deps);
     await host.spawn('go');
     await host.stopAll();
     // SystemPromptBuilder receives the unfiltered list via the factory closure;
     // exercising the path is what matters for coverage.
-    expect((deps.systemPromptBuilder as { build: ReturnType<typeof vi.fn> }).build).toHaveBeenCalled();
+    expect(
+      (deps.systemPromptBuilder as { build: ReturnType<typeof vi.fn> }).build,
+    ).toHaveBeenCalled();
   });
 
   describe('director mode', () => {

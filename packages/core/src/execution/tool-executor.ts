@@ -1,13 +1,13 @@
 import type { Context } from '../core/context.js';
-import type { Tool } from '../types/tool.js';
 import type { ToolResultBlock, ToolUseBlock } from '../types/blocks.js';
 import type {
+  ToolBatchResult,
+  ToolConfirmPendingResult,
+  ToolExecutionOutput,
   ToolExecutorOptions,
   ToolExecutorStrategy,
-  ToolBatchResult,
-  ToolExecutionOutput,
-  ToolConfirmPendingResult,
 } from '../types/tool-executor.js';
+import type { Tool } from '../types/tool.js';
 import { createToolOutputSerializer } from '../utils/tool-output-serializer.js';
 
 export class ToolExecutor {
@@ -58,14 +58,26 @@ export class ToolExecutor {
         if (this.opts.confirmAwaiter) {
           const choice = await this.opts.confirmAwaiter(tool, use.input, use.id, tool.name);
           if (choice !== 'yes' && choice !== 'always') {
-            const result = { type: 'tool_result' as const, tool_use_id: use.id, content: `Tool "${tool.name}" denied by user.`, is_error: true };
+            const result = {
+              type: 'tool_result' as const,
+              tool_use_id: use.id,
+              content: `Tool "${tool.name}" denied by user.`,
+              is_error: true,
+            };
             budget = this.decrementBudget(result, budget);
             return { result, tool, durationMs: Date.now() - start };
           }
           // fall through to execute
         } else {
-          const suggestedPattern = this.subjectFor(tool.name, use.input, tool.subjectKey) ?? tool.name;
-          const pending: ToolConfirmPendingResult = { type: 'tool_confirm_pending', toolUseId: use.id, toolName: tool.name, input: use.input, suggestedPattern };
+          const suggestedPattern =
+            this.subjectFor(tool.name, use.input, tool.subjectKey) ?? tool.name;
+          const pending: ToolConfirmPendingResult = {
+            type: 'tool_confirm_pending',
+            toolUseId: use.id,
+            toolName: tool.name,
+            input: use.input,
+            suggestedPattern,
+          };
           return { result: pending, tool, durationMs: Date.now() - start };
         }
       }
@@ -91,7 +103,12 @@ export class ToolExecutor {
         const msg = err instanceof Error ? err.message : String(err);
         const scrubbed = this.opts.secretScrubber.scrub(msg);
         this.opts.renderer?.writeToolResult(tool.name, scrubbed, true);
-        const result = { type: 'tool_result' as const, tool_use_id: use.id, content: `Tool "${tool.name}" threw: ${scrubbed}`, is_error: true };
+        const result = {
+          type: 'tool_result' as const,
+          tool_use_id: use.id,
+          content: `Tool "${tool.name}" threw: ${scrubbed}`,
+          is_error: true,
+        };
         budget = this.decrementBudget(result, budget);
         if (err instanceof Error) span?.recordError(err);
         span?.setAttribute('tool.is_error', true);
@@ -216,7 +233,11 @@ export class ToolExecutor {
     } catch (err) {
       if (combined.aborted && typeof tool.cleanup === 'function') {
         // Best-effort cleanup; never let it mask the original error.
-        try { await tool.cleanup(input, ctx); } catch { /* swallow */ }
+        try {
+          await tool.cleanup(input, ctx);
+        } catch {
+          /* swallow */
+        }
       }
       throw err;
     } finally {
@@ -254,10 +275,7 @@ export class ToolExecutor {
     return finalOutput;
   }
 
-  private unknownToolResult(
-    use: ToolUseBlock,
-    listFns: () => string[],
-  ): ToolResultBlock {
+  private unknownToolResult(use: ToolUseBlock, listFns: () => string[]): ToolResultBlock {
     return {
       type: 'tool_result',
       tool_use_id: use.id,
@@ -288,11 +306,7 @@ export class ToolExecutor {
    * Matches the logic in DefaultPermissionPolicy so the TUI shows the
    * same subject that the trust file would use.
    */
-  private subjectFor(
-    toolName: string,
-    input: unknown,
-    subjectKey?: string,
-  ): string | undefined {
+  private subjectFor(toolName: string, input: unknown, subjectKey?: string): string | undefined {
     if (!input || typeof input !== 'object') return undefined;
     const obj = input as Record<string, unknown>;
     const globChars = /[*?\[\]]/g;

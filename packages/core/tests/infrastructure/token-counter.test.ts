@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DefaultTokenCounter } from '../../src/index.js';
 import type { ModelsRegistry, ResolvedModel } from '../../src/index.js';
 
@@ -51,10 +51,7 @@ describe('DefaultTokenCounter', () => {
 
   it('cacheRead and cacheWrite contribute to input cost when priced', () => {
     const tc = new DefaultTokenCounter();
-    tc.accountWithModel(
-      { input: 0, output: 0, cacheRead: 1_000_000, cacheWrite: 1_000_000 },
-      m1,
-    );
+    tc.accountWithModel({ input: 0, output: 0, cacheRead: 1_000_000, cacheWrite: 1_000_000 }, m1);
     const cost = tc.estimateCost();
     // 1M cacheRead @ $0.3 + 1M cacheWrite @ $3.75 = $4.05
     expect(cost.input).toBeCloseTo(4.05, 4);

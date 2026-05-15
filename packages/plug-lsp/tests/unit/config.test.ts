@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
 import { TOKENS } from '@wrongstack/core';
-import { PLUGIN_NAME, mergeConfig, readPlugLSPConfig, withPresetFallbacks } from '../../src/config.js';
+import { describe, expect, it } from 'vitest';
+import {
+  PLUGIN_NAME,
+  mergeConfig,
+  readPlugLSPConfig,
+  withPresetFallbacks,
+} from '../../src/config.js';
 
 describe('plug-lsp config', () => {
   it('normalizes valid server config and defaults invalid options', () => {
@@ -93,11 +98,15 @@ describe('plug-lsp config', () => {
     const fallback = {
       container: {
         has: () => true,
-        resolve: () => { throw new Error('no store'); },
+        resolve: () => {
+          throw new Error('no store');
+        },
       },
       config: { extensions: { [PLUGIN_NAME]: { autoStart: 'eager', servers: {} } } },
     };
     expect(readPlugLSPConfig(fallback as never).autoStart).toBe('eager');
-    expect(readPlugLSPConfig({ container: { has: () => false }, config: {} } as never).autoStart).toBe('lazy');
+    expect(
+      readPlugLSPConfig({ container: { has: () => false }, config: {} } as never).autoStart,
+    ).toBe('lazy');
   });
 });

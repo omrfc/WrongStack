@@ -24,8 +24,21 @@ function makeTool(name: string): Tool {
 }
 
 const TOOL_NAMES = [
-  'read', 'write', 'edit', 'glob', 'grep', 'bash', 'fetch', 'todo',
-  'replace', 'search', 'git', 'exec', 'patch', 'json', 'diff',
+  'read',
+  'write',
+  'edit',
+  'glob',
+  'grep',
+  'bash',
+  'fetch',
+  'todo',
+  'replace',
+  'search',
+  'git',
+  'exec',
+  'patch',
+  'json',
+  'diff',
 ];
 const tools = TOOL_NAMES.map(makeTool);
 

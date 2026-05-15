@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MCPClient } from '../src/client.js';
 
 describe('MCPClient', () => {
@@ -21,13 +21,23 @@ describe('MCPClient', () => {
   });
 
   it('SSE transport fails when URL unreachable', async () => {
-    const c = new MCPClient({ name: 'sse-bad', transport: 'sse', url: 'https://127.0.0.1:9', startupTimeoutMs: 500 });
+    const c = new MCPClient({
+      name: 'sse-bad',
+      transport: 'sse',
+      url: 'https://127.0.0.1:9',
+      startupTimeoutMs: 500,
+    });
     await expect(c.connect()).rejects.toThrow();
     expect(c.getState()).toBe('failed');
   });
 
   it('streamable-http transport fails when URL unreachable', async () => {
-    const c = new MCPClient({ name: 'http-bad', transport: 'streamable-http', url: 'https://127.0.0.1:9', startupTimeoutMs: 500 });
+    const c = new MCPClient({
+      name: 'http-bad',
+      transport: 'streamable-http',
+      url: 'https://127.0.0.1:9',
+      startupTimeoutMs: 500,
+    });
     await expect(c.connect()).rejects.toThrow();
     expect(c.getState()).toBe('failed');
   }, 10_000);
@@ -60,7 +70,12 @@ describe('MCPClient', () => {
   });
 
   it('addExitListener fires callback on child exit', () => {
-    const c = new MCPClient({ name: 'listener-test', transport: 'stdio', command: 'echo', args: ['hello'] });
+    const c = new MCPClient({
+      name: 'listener-test',
+      transport: 'stdio',
+      command: 'echo',
+      args: ['hello'],
+    });
     const handler = vi.fn();
     c.addExitListener(handler);
     // Simulate exit by directly emitting (can't easily test real spawn exit here)
@@ -96,7 +111,11 @@ describe('MCPClient', () => {
       // sending the notification.
       const fakeRequest = vi.fn(async (method: string) => {
         if (method === 'tools/list') {
-          return { jsonrpc: '2.0', id: 1, result: { tools: [{ name: 'new_tool', inputSchema: {} }] } };
+          return {
+            jsonrpc: '2.0',
+            id: 1,
+            result: { tools: [{ name: 'new_tool', inputSchema: {} }] },
+          };
         }
         return { jsonrpc: '2.0', id: 1, result: {} };
       });

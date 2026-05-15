@@ -1,9 +1,9 @@
-import { describe, it, expect } from 'vitest';
 import type { StreamEvent } from '@wrongstack/core';
-import { WireFormatProvider } from '../src/wire-format.js';
+import { describe, expect, it } from 'vitest';
 import { anthropicWireFormat } from '../src/presets/anthropic.js';
-import { openaiWireFormat } from '../src/presets/openai.js';
 import { googleWireFormat } from '../src/presets/google.js';
+import { openaiWireFormat } from '../src/presets/openai.js';
+import { WireFormatProvider } from '../src/wire-format.js';
 
 /**
  * Parity tests: the L0-C presets must produce the same canonical
@@ -93,7 +93,10 @@ describe('Anthropic preset', () => {
     const events = await collectFromPreset(
       anthropicWireFormat,
       sseBody([
-        JSON.stringify({ type: 'message_start', message: { model: 'c', usage: { input_tokens: 1 } } }),
+        JSON.stringify({
+          type: 'message_start',
+          message: { model: 'c', usage: { input_tokens: 1 } },
+        }),
         JSON.stringify({
           type: 'content_block_start',
           index: 0,
@@ -140,18 +143,24 @@ describe('OpenAI preset', () => {
         JSON.stringify({ model: 'gpt-4o', choices: [{ delta: { content: 'hi ' } }] }),
         JSON.stringify({ choices: [{ delta: { content: 'there' } }] }),
         JSON.stringify({
-          choices: [{
-            delta: {
-              tool_calls: [{ index: 0, id: 'call_a', function: { name: 'lookup', arguments: '{"q":' } }],
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  { index: 0, id: 'call_a', function: { name: 'lookup', arguments: '{"q":' } },
+                ],
+              },
             },
-          }],
+          ],
         }),
         JSON.stringify({
-          choices: [{
-            delta: {
-              tool_calls: [{ index: 0, function: { arguments: '"x"}' } }],
+          choices: [
+            {
+              delta: {
+                tool_calls: [{ index: 0, function: { arguments: '"x"}' } }],
+              },
             },
-          }],
+          ],
         }),
         JSON.stringify({
           choices: [{ delta: {}, finish_reason: 'tool_calls' }],
@@ -186,13 +195,15 @@ describe('Google preset', () => {
       sseBody([
         JSON.stringify({
           modelVersion: 'gemini-2.0-flash',
-          candidates: [{
-            content: {
-              role: 'model',
-              parts: [{ functionCall: { name: 'lookup', args: { q: 'hello' } } }],
+          candidates: [
+            {
+              content: {
+                role: 'model',
+                parts: [{ functionCall: { name: 'lookup', args: { q: 'hello' } } }],
+              },
+              finishReason: 'STOP',
             },
-            finishReason: 'STOP',
-          }],
+          ],
           usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 5 },
         }),
       ]),
@@ -214,7 +225,9 @@ describe('Google preset', () => {
       sseBody([
         JSON.stringify({
           modelVersion: 'gemini-2.0-flash',
-          candidates: [{ content: { role: 'model', parts: [{ text: 'hi' }] }, finishReason: 'STOP' }],
+          candidates: [
+            { content: { role: 'model', parts: [{ text: 'hi' }] }, finishReason: 'STOP' },
+          ],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
         }),
       ]),
@@ -232,16 +245,20 @@ describe('Google preset', () => {
       sseBody([
         JSON.stringify({
           modelVersion: 'gemini-2.0-flash',
-          candidates: [{
-            content: {
-              role: 'model',
-              parts: [{
-                functionCall: { name: 'doit', args: {} },
-                thoughtSignature: 'opaque-signature-blob',
-              }],
+          candidates: [
+            {
+              content: {
+                role: 'model',
+                parts: [
+                  {
+                    functionCall: { name: 'doit', args: {} },
+                    thoughtSignature: 'opaque-signature-blob',
+                  },
+                ],
+              },
+              finishReason: 'STOP',
             },
-            finishReason: 'STOP',
-          }],
+          ],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
         }),
       ]),
@@ -249,7 +266,9 @@ describe('Google preset', () => {
     );
     const tStop = events.find((e) => e.type === 'tool_use_stop');
     expect(
-      (tStop as { providerMeta?: Record<string, unknown> }).providerMeta?.['google.thoughtSignature'],
+      (tStop as { providerMeta?: Record<string, unknown> }).providerMeta?.[
+        'google.thoughtSignature'
+      ],
     ).toBe('opaque-signature-blob');
   });
 

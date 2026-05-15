@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { PRESETS, listPresets, type PresetSpec } from '../src/presets.js';
+import { describe, expect, it } from 'vitest';
+import { PRESETS, type PresetSpec, listPresets } from '../src/presets.js';
 
 describe('presets (deprecated)', () => {
   it('PRESETS is empty', () => expect(PRESETS).toEqual({}));

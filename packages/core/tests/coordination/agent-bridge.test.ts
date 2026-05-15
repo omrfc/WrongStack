@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  InMemoryBridgeTransport,
   InMemoryAgentBridge,
+  InMemoryBridgeTransport,
   createMessage,
 } from '../../src/coordination/agent-bridge.js';
 
@@ -14,8 +14,21 @@ describe('InMemoryBridgeTransport', () => {
 
   it('delivers message to subscribed handler', async () => {
     let received: any;
-    const unsub = transport.subscribe('agent1', (msg) => { received = msg; });
-    await transport.send({ id: '1', type: 'task', from: 'c', to: 'agent1', payload: {}, timestamp: Date.now(), priority: 'normal' }, 'agent1');
+    const unsub = transport.subscribe('agent1', (msg) => {
+      received = msg;
+    });
+    await transport.send(
+      {
+        id: '1',
+        type: 'task',
+        from: 'c',
+        to: 'agent1',
+        payload: {},
+        timestamp: Date.now(),
+        priority: 'normal',
+      },
+      'agent1',
+    );
     expect(received).toBeDefined();
     expect(received.id).toBe('1');
     unsub();
@@ -23,23 +36,73 @@ describe('InMemoryBridgeTransport', () => {
 
   it('subscribe returns unsubscribe function', () => {
     let count = 0;
-    const unsub = transport.subscribe('agent1', () => { count++; });
-    transport.send({ id: '1', type: 'task', from: 'c', to: 'agent1', payload: {}, timestamp: Date.now(), priority: 'normal' }, 'agent1');
+    const unsub = transport.subscribe('agent1', () => {
+      count++;
+    });
+    transport.send(
+      {
+        id: '1',
+        type: 'task',
+        from: 'c',
+        to: 'agent1',
+        payload: {},
+        timestamp: Date.now(),
+        priority: 'normal',
+      },
+      'agent1',
+    );
     unsub();
-    transport.send({ id: '2', type: 'task', from: 'c', to: 'agent1', payload: {}, timestamp: Date.now(), priority: 'normal' }, 'agent1');
+    transport.send(
+      {
+        id: '2',
+        type: 'task',
+        from: 'c',
+        to: 'agent1',
+        payload: {},
+        timestamp: Date.now(),
+        priority: 'normal',
+      },
+      'agent1',
+    );
     expect(count).toBe(1);
   });
 
   it('close removes subscription', async () => {
     let count = 0;
-    transport.subscribe('agent1', () => { count++; });
+    transport.subscribe('agent1', () => {
+      count++;
+    });
     await transport.close('agent1');
-    await transport.send({ id: '1', type: 'task', from: 'c', to: 'agent1', payload: {}, timestamp: Date.now(), priority: 'normal' }, 'agent1');
+    await transport.send(
+      {
+        id: '1',
+        type: 'task',
+        from: 'c',
+        to: 'agent1',
+        payload: {},
+        timestamp: Date.now(),
+        priority: 'normal',
+      },
+      'agent1',
+    );
     expect(count).toBe(0);
   });
 
   it('send to unknown agent does not throw', async () => {
-    await expect(transport.send({ id: '1', type: 'task', from: 'c', to: 'ghost', payload: {}, timestamp: Date.now(), priority: 'normal' }, 'ghost')).resolves.toBeUndefined();
+    await expect(
+      transport.send(
+        {
+          id: '1',
+          type: 'task',
+          from: 'c',
+          to: 'ghost',
+          payload: {},
+          timestamp: Date.now(),
+          priority: 'normal',
+        },
+        'ghost',
+      ),
+    ).resolves.toBeUndefined();
   });
 });
 
@@ -63,9 +126,14 @@ describe('InMemoryAgentBridge', () => {
 
   it('subscribe delivers messages', async () => {
     const messages: any[] = [];
-    bridge.subscribe((msg) => { messages.push(msg); });
+    bridge.subscribe((msg) => {
+      messages.push(msg);
+    });
 
-    const otherBridge = new InMemoryAgentBridge({ agentId: 'agent2', coordinatorId: 'coord1' }, transport);
+    const otherBridge = new InMemoryAgentBridge(
+      { agentId: 'agent2', coordinatorId: 'coord1' },
+      transport,
+    );
     await otherBridge.send(createMessage('task', 'agent2', { data: 'hello' }, 'agent1'));
     await otherBridge.stop();
 
@@ -75,9 +143,14 @@ describe('InMemoryAgentBridge', () => {
 
   it('broadcast reaches every other subscriber but not the sender', async () => {
     const messages: any[] = [];
-    bridge.subscribe((msg) => { messages.push(msg); });
+    bridge.subscribe((msg) => {
+      messages.push(msg);
+    });
 
-    const otherBridge = new InMemoryAgentBridge({ agentId: 'agent2', coordinatorId: 'coord1' }, transport);
+    const otherBridge = new InMemoryAgentBridge(
+      { agentId: 'agent2', coordinatorId: 'coord1' },
+      transport,
+    );
     await otherBridge.broadcast(createMessage('task', 'agent2', { data: 'broadcast' }));
     await otherBridge.stop();
 
@@ -89,12 +162,17 @@ describe('InMemoryAgentBridge', () => {
 
   it('stopped subscriber stops receiving messages', async () => {
     const messages: any[] = [];
-    bridge.subscribe((msg) => { messages.push(msg); });
+    bridge.subscribe((msg) => {
+      messages.push(msg);
+    });
 
     // Stop agent1 BEFORE the broadcast — it should not receive any new traffic.
     await bridge.stop();
 
-    const otherBridge = new InMemoryAgentBridge({ agentId: 'agent2', coordinatorId: 'coord1' }, transport);
+    const otherBridge = new InMemoryAgentBridge(
+      { agentId: 'agent2', coordinatorId: 'coord1' },
+      transport,
+    );
     await otherBridge.broadcast(createMessage('task', 'agent2', { data: 'test' }));
     await otherBridge.stop();
 
@@ -104,7 +182,7 @@ describe('InMemoryAgentBridge', () => {
   it('request throws when bridge is stopped', async () => {
     await bridge.stop();
     await expect(
-      bridge.request(createMessage('task', 'agent1', { data: 1 }, 'coord1'), 100)
+      bridge.request(createMessage('task', 'agent1', { data: 1 }, 'coord1'), 100),
     ).rejects.toThrow();
   });
 
@@ -112,11 +190,20 @@ describe('InMemoryAgentBridge', () => {
     const msg = createMessage('task', 'agent1', { data: 1 }, 'coord1');
     const p1 = bridge.request(msg, 500);
     // Second concurrent request with the same id is a caller bug — reject loudly.
-    await expect(
-      bridge.request(msg, 500)
-    ).rejects.toThrow('collides');
+    await expect(bridge.request(msg, 500)).rejects.toThrow('collides');
     // Resolve the first so we don't leak — send a response with the SAME id.
-    transport.send({ ...msg, type: 'response' as const, from: 'coord1', to: 'agent1', payload: {}, timestamp: Date.now(), priority: 'normal' as const }, 'agent1');
+    transport.send(
+      {
+        ...msg,
+        type: 'response' as const,
+        from: 'coord1',
+        to: 'agent1',
+        payload: {},
+        timestamp: Date.now(),
+        priority: 'normal' as const,
+      },
+      'agent1',
+    );
     await expect(p1).resolves.toBeDefined();
   });
 
@@ -127,9 +214,7 @@ describe('InMemoryAgentBridge', () => {
     await expect(p1).rejects.toThrow('timed out');
     // After the timeout fires, the guard is removed — reuse is now safe.
     // Same id should NOT throw 'collides'.
-    await expect(
-      bridge.request(msg, 100)
-    ).rejects.toThrow('timed out');
+    await expect(bridge.request(msg, 100)).rejects.toThrow('timed out');
   });
 
   it('guard clears when send() throws synchronously', async () => {
@@ -144,11 +229,11 @@ describe('InMemoryAgentBridge', () => {
       badTransport,
     );
     await expect(
-      badBridge.request(createMessage('task', 'bad', {}, 'coord1'), 100)
+      badBridge.request(createMessage('task', 'bad', {}, 'coord1'), 100),
     ).rejects.toThrow('send broken');
     // Id is free again — no "collides" error on retry.
     await expect(
-      badBridge.request(createMessage('task', 'bad', {}, 'coord1'), 100)
+      badBridge.request(createMessage('task', 'bad', {}, 'coord1'), 100),
     ).rejects.toThrow('send broken');
     await badBridge.stop();
   });

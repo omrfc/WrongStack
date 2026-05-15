@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { parseSSE } from '../src/sse.js';
-import { aggregateStream } from '../src/aggregate.js';
 import type { StreamEvent } from '@wrongstack/core';
+import { describe, expect, it } from 'vitest';
+import { aggregateStream } from '../src/aggregate.js';
+import { parseSSE } from '../src/sse.js';
 
 function bodyFrom(chunks: string[]): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
@@ -19,9 +19,7 @@ function bodyFrom(chunks: string[]): ReadableStream<Uint8Array> {
 
 describe('parseSSE', () => {
   it('parses single event with named type and data', async () => {
-    const body = bodyFrom([
-      'event: message_start\ndata: {"type":"message_start"}\n\n',
-    ]);
+    const body = bodyFrom(['event: message_start\ndata: {"type":"message_start"}\n\n']);
     const events = [];
     for await (const msg of parseSSE(body)) events.push(msg);
     expect(events).toEqual([{ event: 'message_start', data: '{"type":"message_start"}' }]);

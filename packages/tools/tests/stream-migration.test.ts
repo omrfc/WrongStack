@@ -1,15 +1,15 @@
-import { describe, it, expect } from 'vitest';
 import type { ToolStreamEvent } from '@wrongstack/core';
-import { lintTool } from '../src/lint.js';
-import { formatTool } from '../src/format.js';
-import { typecheckTool } from '../src/typecheck.js';
-import { testTool } from '../src/test.js';
+import { describe, expect, it } from 'vitest';
 import { auditTool } from '../src/audit.js';
-import { installTool } from '../src/install.js';
-import { treeTool } from '../src/tree.js';
-import { grepTool } from '../src/grep.js';
 import { fetchTool } from '../src/fetch.js';
+import { formatTool } from '../src/format.js';
+import { grepTool } from '../src/grep.js';
+import { installTool } from '../src/install.js';
+import { lintTool } from '../src/lint.js';
 import { searchTool } from '../src/search.js';
+import { testTool } from '../src/test.js';
+import { treeTool } from '../src/tree.js';
+import { typecheckTool } from '../src/typecheck.js';
 
 const ctx = { cwd: '/__nope__', tools: [], projectRoot: '/__nope__' } as any;
 const opts = () => ({ signal: new AbortController().signal });
@@ -47,9 +47,7 @@ describe('L0-A executeStream migration', () => {
   });
 
   it('typecheck emits log + final', async () => {
-    const { events, final } = await collect(
-      typecheckTool.executeStream!({}, ctx, opts()),
-    );
+    const { events, final } = await collect(typecheckTool.executeStream!({}, ctx, opts()));
     assertExactlyOneFinal(events);
     expect(events.some((e) => e.type === 'log')).toBe(true);
     expect(final).toBeDefined();
@@ -96,11 +94,7 @@ describe('L0-A executeStream migration', () => {
     // Use a non-existent base; native walker just produces an empty result.
     const realCtx = { cwd: process.cwd(), tools: [], projectRoot: process.cwd() } as any;
     const { events, final } = await collect(
-      grepTool.executeStream!(
-        { pattern: 'wrongstack', limit: 5 },
-        realCtx,
-        opts(),
-      ),
+      grepTool.executeStream!({ pattern: 'wrongstack', limit: 5 }, realCtx, opts()),
     );
     assertExactlyOneFinal(events);
     expect(final).toBeDefined();

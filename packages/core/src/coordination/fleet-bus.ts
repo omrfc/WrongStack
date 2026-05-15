@@ -48,12 +48,21 @@ export class FleetBus {
    */
   attach(subagentId: string, bus: EventBus, taskId?: string): () => void {
     const FORWARDED_TYPES = [
-      'tool.started', 'tool.executed', 'tool.progress', 'tool.confirm_needed',
-      'iteration.started', 'iteration.completed',
-      'provider.text_delta', 'provider.response',
-      'provider.retry', 'provider.error',
-      'session.started', 'session.ended', 'session.damaged',
-      'compaction.fired', 'compaction.failed',
+      'tool.started',
+      'tool.executed',
+      'tool.progress',
+      'tool.confirm_needed',
+      'iteration.started',
+      'iteration.completed',
+      'provider.text_delta',
+      'provider.response',
+      'provider.retry',
+      'provider.error',
+      'session.started',
+      'session.ended',
+      'session.damaged',
+      'compaction.fired',
+      'compaction.failed',
       'token.threshold',
     ] as const;
     const offs: Array<() => void> = [];
@@ -64,29 +73,43 @@ export class FleetBus {
         }),
       );
     }
-    return () => { for (const off of offs) off(); };
+    return () => {
+      for (const off of offs) off();
+    };
   }
 
   /** Subscribe to every event from one subagent. */
   subscribe(subagentId: string, handler: FleetHandler): () => void {
     let set = this.byId.get(subagentId);
-    if (!set) { set = new Set(); this.byId.set(subagentId, set); }
+    if (!set) {
+      set = new Set();
+      this.byId.set(subagentId, set);
+    }
     set.add(handler);
-    return () => { set!.delete(handler); };
+    return () => {
+      set!.delete(handler);
+    };
   }
 
   /** Subscribe to one event type across all subagents. */
   filter(type: string, handler: FleetHandler): () => void {
     let set = this.byType.get(type);
-    if (!set) { set = new Set(); this.byType.set(type, set); }
+    if (!set) {
+      set = new Set();
+      this.byType.set(type, set);
+    }
     set.add(handler);
-    return () => { set!.delete(handler); };
+    return () => {
+      set!.delete(handler);
+    };
   }
 
   /** Subscribe to literally everything. The fleet roll-up uses this. */
   onAny(handler: FleetHandler): () => void {
     this.any.add(handler);
-    return () => { this.any.delete(handler); };
+    return () => {
+      this.any.delete(handler);
+    };
   }
 
   emit(event: FleetEvent): void {
@@ -94,10 +117,30 @@ export class FleetBus {
     // bring down the bus or other handlers. Errors are swallowed
     // (matching the rest of the project's listener-error policy).
     const byId = this.byId.get(event.subagentId);
-    if (byId) for (const h of byId) { try { h(event); } catch { /* ignore */ } }
+    if (byId)
+      for (const h of byId) {
+        try {
+          h(event);
+        } catch {
+          /* ignore */
+        }
+      }
     const byType = this.byType.get(event.type);
-    if (byType) for (const h of byType) { try { h(event); } catch { /* ignore */ } }
-    for (const h of this.any) { try { h(event); } catch { /* ignore */ } }
+    if (byType)
+      for (const h of byType) {
+        try {
+          h(event);
+        } catch {
+          /* ignore */
+        }
+      }
+    for (const h of this.any) {
+      try {
+        h(event);
+      } catch {
+        /* ignore */
+      }
+    }
   }
 }
 
@@ -146,8 +189,12 @@ export class FleetUsageAggregator {
 
   constructor(
     private readonly bus: FleetBus,
-    private readonly priceLookup?: (subagentId: string) => { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | undefined,
-    private readonly metaLookup?: (subagentId: string) => { provider?: string; model?: string } | undefined,
+    private readonly priceLookup?: (
+      subagentId: string,
+    ) => { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | undefined,
+    private readonly metaLookup?: (
+      subagentId: string,
+    ) => { provider?: string; model?: string } | undefined,
   ) {
     bus.filter('provider.response', (e) => this.onProviderResponse(e));
     bus.filter('tool.executed', (e) => this.onToolExecuted(e));
@@ -172,8 +219,13 @@ export class FleetUsageAggregator {
         subagentId,
         provider: meta?.provider,
         model: meta?.model,
-        input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
-        cost: 0, toolCalls: 0, iterations: 0,
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: 0,
+        toolCalls: 0,
+        iterations: 0,
         startedAt: Date.now(),
         lastEventAt: Date.now(),
       };
@@ -184,7 +236,9 @@ export class FleetUsageAggregator {
 
   private onProviderResponse(e: FleetEvent): void {
     const snap = this.ensure(e.subagentId);
-    const p = e.payload as { usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } };
+    const p = e.payload as {
+      usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+    };
     const usage = p?.usage;
     if (!usage) return;
     snap.input += usage.input ?? 0;

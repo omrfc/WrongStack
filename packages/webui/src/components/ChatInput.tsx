@@ -525,6 +525,7 @@ export function ChatInput() {
           <ul className="space-y-1">
             {queue.map((q, i) => (
               <li
+                // biome-ignore lint/suspicious/noArrayIndexKey: queue has stable order
                 key={i}
                 className="flex items-start justify-between gap-2 rounded bg-background/60 border px-2 py-1"
               >
@@ -666,7 +667,8 @@ export function ChatInput() {
               // position in the un-grouped `slashSuggestions` array.
               const byCategory: Record<string, Array<{ cmd: SlashCommandDef; idx: number }>> = {};
               slashSuggestions.forEach((cmd, idx) => {
-                (byCategory[cmd.category] ??= []).push({ cmd, idx });
+                if (!byCategory[cmd.category]) byCategory[cmd.category] = [];
+                byCategory[cmd.category]!.push({ cmd, idx });
               });
               const orderedCategories = SLASH_CATEGORY_ORDER.filter((c) => byCategory[c]?.length);
               return (

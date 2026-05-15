@@ -1,8 +1,8 @@
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { jsonTool } from '../src/json.js';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { jsonTool } from '../src/json.js';
 
 let tmpDir: string;
 

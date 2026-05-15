@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { handleQueueCommand, createQueueSlashCommand } from '../src/queue-slash.js';
+import { describe, expect, it } from 'vitest';
 import type { QueueItem } from '../src/app.js';
+import { createQueueSlashCommand, handleQueueCommand } from '../src/queue-slash.js';
 
 function makeDeps(initial: QueueItem[] = []) {
   let queue = [...initial];
@@ -33,10 +33,7 @@ describe('handleQueueCommand', () => {
   });
 
   it('list renders 1-based numbered items with single-line preview', () => {
-    const { deps } = makeDeps([
-      item(1, 'first message'),
-      item(2, 'multi\n\nline\nthing'),
-    ]);
+    const { deps } = makeDeps([item(1, 'first message'), item(2, 'multi\n\nline\nthing')]);
     const out = handleQueueCommand('list', deps);
     expect(out).toContain('Queue (2):');
     expect(out).toContain('  1. first message');
@@ -63,12 +60,7 @@ describe('handleQueueCommand', () => {
   });
 
   it('delete by 1-based positions, ignoring duplicates and invalid', () => {
-    const { deps, snapshot } = makeDeps([
-      item(1, 'a'),
-      item(2, 'b'),
-      item(3, 'c'),
-      item(4, 'd'),
-    ]);
+    const { deps, snapshot } = makeDeps([item(1, 'a'), item(2, 'b'), item(3, 'c'), item(4, 'd')]);
     const out = handleQueueCommand('delete 1 3 3 99 abc', deps);
     expect(out).toContain('Deleted 2 of 4');
     expect(out).toContain('positions 1, 3');

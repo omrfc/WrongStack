@@ -1,21 +1,32 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { TaskNode, TaskGraph, TaskStore, TaskProgress } from '../../src/types/task-graph.js';
-import { TaskTracker } from '../../src/sdd/task-tracker.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DefaultTaskStore } from '../../src/sdd/task-generator.js';
+import { TaskTracker } from '../../src/sdd/task-tracker.js';
+import type { TaskGraph, TaskNode, TaskProgress, TaskStore } from '../../src/types/task-graph.js';
 
 function makeFakeStore(): TaskStore & { graphs: Map<string, TaskGraph> } {
   const graphs = new Map<string, TaskGraph>();
   return {
     graphs,
     async saveGraph(graph: TaskGraph) {
-      graphs.set(graph.id, { ...graph, nodes: new Map(graph.nodes), edges: [...graph.edges], rootNodes: [...graph.rootNodes] });
+      graphs.set(graph.id, {
+        ...graph,
+        nodes: new Map(graph.nodes),
+        edges: [...graph.edges],
+        rootNodes: [...graph.rootNodes],
+      });
     },
     async loadGraph(id: string) {
       const g = graphs.get(id);
-      return g ? { ...g, nodes: new Map(g.nodes), edges: [...g.edges], rootNodes: [...g.rootNodes] } : null;
+      return g
+        ? { ...g, nodes: new Map(g.nodes), edges: [...g.edges], rootNodes: [...g.rootNodes] }
+        : null;
     },
     async listGraphs() {
-      return Array.from(graphs.values()).map((g) => ({ id: g.id, title: g.title, updatedAt: g.updatedAt }));
+      return Array.from(graphs.values()).map((g) => ({
+        id: g.id,
+        title: g.title,
+        updatedAt: g.updatedAt,
+      }));
     },
     async deleteGraph(id: string) {
       graphs.delete(id);
@@ -64,12 +75,26 @@ describe('TaskTracker', () => {
 
   describe('addNode', () => {
     it('throws when no graph loaded', () => {
-      expect(() => tracker.addNode({ title: 'T', description: '', type: 'feature', priority: 'high', status: 'pending' })).toThrow('No graph loaded');
+      expect(() =>
+        tracker.addNode({
+          title: 'T',
+          description: '',
+          type: 'feature',
+          priority: 'high',
+          status: 'pending',
+        }),
+      ).toThrow('No graph loaded');
     });
 
     it('adds node with generated id and timestamps', async () => {
       await tracker.createGraph('s', 't');
-      const node = tracker.addNode({ title: 'Task', description: 'Desc', type: 'feature', priority: 'high', status: 'pending' });
+      const node = tracker.addNode({
+        title: 'Task',
+        description: 'Desc',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       expect(node.id).toBeTruthy();
       expect(node.createdAt).toBeDefined();
       expect(node.updatedAt).toBeDefined();
@@ -78,13 +103,24 @@ describe('TaskTracker', () => {
 
     it('defaults status to pending', async () => {
       await tracker.createGraph('s', 't');
-      const node = tracker.addNode({ title: 'T', description: '', type: 'feature', priority: 'high' });
+      const node = tracker.addNode({
+        title: 'T',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+      });
       expect(node.status).toBe('pending');
     });
 
     it('adds to rootNodes when no parentId', async () => {
       await tracker.createGraph('s', 't');
-      const node = tracker.addNode({ title: 'T', description: '', type: 'feature', priority: 'high', status: 'pending' });
+      const node = tracker.addNode({
+        title: 'T',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       const nodes = tracker.getAllNodes();
       expect(nodes.length).toBeGreaterThan(0);
       // Parent nodes (no parentId) go to rootNodes
@@ -94,15 +130,34 @@ describe('TaskTracker', () => {
 
     it('does not add to rootNodes when parentId set', async () => {
       await tracker.createGraph('s', 't');
-      const parent = tracker.addNode({ title: 'P', description: '', type: 'feature', priority: 'high', status: 'pending' });
-      const child = tracker.addNode({ title: 'C', description: '', type: 'feature', priority: 'high', status: 'pending', parentId: parent.id });
+      const parent = tracker.addNode({
+        title: 'P',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
+      const child = tracker.addNode({
+        title: 'C',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+        parentId: parent.id,
+      });
       expect(child.parentId).toBe(parent.id);
       const graph = await store.loadGraph((await tracker.loadGraph('' as any))?.id ?? '');
     });
 
     it('persists node in store', async () => {
       await tracker.createGraph('s', 't');
-      const node = tracker.addNode({ title: 'T', description: '', type: 'feature', priority: 'high', status: 'pending' });
+      const node = tracker.addNode({
+        title: 'T',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       expect(tracker.getNode(node.id)).toBeDefined();
     });
   });
@@ -114,8 +169,20 @@ describe('TaskTracker', () => {
 
     it('adds edge with type default', async () => {
       await tracker.createGraph('s', 't');
-      const n1 = tracker.addNode({ title: 'N1', description: '', type: 'feature', priority: 'high', status: 'pending' });
-      const n2 = tracker.addNode({ title: 'N2', description: '', type: 'feature', priority: 'high', status: 'pending' });
+      const n1 = tracker.addNode({
+        title: 'N1',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
+      const n2 = tracker.addNode({
+        title: 'N2',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       tracker.addEdge(n1.id, n2.id);
       const nodes = tracker.getAllNodes();
       // Edge should be persisted in store
@@ -123,8 +190,20 @@ describe('TaskTracker', () => {
 
     it('adds edge with custom type', async () => {
       await tracker.createGraph('s', 't');
-      const n1 = tracker.addNode({ title: 'N1', description: '', type: 'feature', priority: 'high', status: 'pending' });
-      const n2 = tracker.addNode({ title: 'N2', description: '', type: 'feature', priority: 'high', status: 'pending' });
+      const n1 = tracker.addNode({
+        title: 'N1',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
+      const n2 = tracker.addNode({
+        title: 'N2',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       tracker.addEdge(n1.id, n2.id, 'blocks');
       // Verify edge added
     });
@@ -142,14 +221,26 @@ describe('TaskTracker', () => {
 
     it('updates node status', async () => {
       await tracker.createGraph('s', 't');
-      const node = tracker.addNode({ title: 'T', description: '', type: 'feature', priority: 'high', status: 'pending' });
+      const node = tracker.addNode({
+        title: 'T',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       tracker.updateNodeStatus(node.id, 'in_progress');
       expect(tracker.getNode(node.id)?.status).toBe('in_progress');
     });
 
     it('records transition', async () => {
       await tracker.createGraph('s', 't');
-      const node = tracker.addNode({ title: 'T', description: '', type: 'feature', priority: 'high', status: 'pending' });
+      const node = tracker.addNode({
+        title: 'T',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       tracker.updateNodeStatus(node.id, 'in_progress');
       const transitions = tracker.getTransitions();
       expect(transitions.some((t) => t.from === 'pending' && t.to === 'in_progress')).toBe(true);
@@ -157,15 +248,33 @@ describe('TaskTracker', () => {
 
     it('sets completedAt when status becomes completed', async () => {
       await tracker.createGraph('s', 't');
-      const node = tracker.addNode({ title: 'T', description: '', type: 'feature', priority: 'high', status: 'pending' });
+      const node = tracker.addNode({
+        title: 'T',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       tracker.updateNodeStatus(node.id, 'completed');
       expect(tracker.getNode(node.id)?.completedAt).toBeDefined();
     });
 
     it('auto-unblocks dependents when completed', async () => {
       await tracker.createGraph('s', 't');
-      const n1 = tracker.addNode({ title: 'N1', description: '', type: 'feature', priority: 'high', status: 'pending' });
-      const n2 = tracker.addNode({ title: 'N2', description: '', type: 'feature', priority: 'high', status: 'blocked' });
+      const n1 = tracker.addNode({
+        title: 'N1',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
+      const n2 = tracker.addNode({
+        title: 'N2',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'blocked',
+      });
       tracker.addEdge(n1.id, n2.id, 'depends_on');
       tracker.updateNodeStatus(n1.id, 'completed');
       // n2 should become pending
@@ -174,8 +283,20 @@ describe('TaskTracker', () => {
 
     it('auto-blocks task when blockers not completed', async () => {
       await tracker.createGraph('s', 't');
-      const n1 = tracker.addNode({ title: 'N1', description: '', type: 'feature', priority: 'high', status: 'pending' });
-      const n2 = tracker.addNode({ title: 'N2', description: '', type: 'feature', priority: 'high', status: 'pending' });
+      const n1 = tracker.addNode({
+        title: 'N1',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
+      const n2 = tracker.addNode({
+        title: 'N2',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       tracker.addEdge(n1.id, n2.id, 'depends_on');
       tracker.updateNodeStatus(n2.id, 'in_progress');
       // n2 should become blocked since n1 is not completed
@@ -184,7 +305,13 @@ describe('TaskTracker', () => {
 
     it('accepts optional reason in transition', async () => {
       await tracker.createGraph('s', 't');
-      const node = tracker.addNode({ title: 'T', description: '', type: 'feature', priority: 'high', status: 'pending' });
+      const node = tracker.addNode({
+        title: 'T',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       tracker.updateNodeStatus(node.id, 'completed', 'all done');
       const transitions = tracker.getTransitions();
       expect(transitions.some((t) => t.reason === 'all done')).toBe(true);
@@ -198,7 +325,13 @@ describe('TaskTracker', () => {
 
     it('returns node by id', async () => {
       await tracker.createGraph('s', 't');
-      const node = tracker.addNode({ title: 'T', description: '', type: 'feature', priority: 'high', status: 'pending' });
+      const node = tracker.addNode({
+        title: 'T',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       expect(tracker.getNode(node.id)).toBeDefined();
       expect(tracker.getNode(node.id)?.title).toBe('T');
     });
@@ -216,16 +349,40 @@ describe('TaskTracker', () => {
 
     it('returns all nodes', async () => {
       await tracker.createGraph('s', 't');
-      tracker.addNode({ title: 'N1', description: '', type: 'feature', priority: 'high', status: 'pending' });
-      tracker.addNode({ title: 'N2', description: '', type: 'bugfix', priority: 'medium', status: 'pending' });
+      tracker.addNode({
+        title: 'N1',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
+      tracker.addNode({
+        title: 'N2',
+        description: '',
+        type: 'bugfix',
+        priority: 'medium',
+        status: 'pending',
+      });
       const nodes = tracker.getAllNodes();
       expect(nodes).toHaveLength(2);
     });
 
     it('filters by status', async () => {
       await tracker.createGraph('s', 't');
-      tracker.addNode({ title: 'N1', description: '', type: 'feature', priority: 'high', status: 'pending' });
-      tracker.addNode({ title: 'N2', description: '', type: 'feature', priority: 'high', status: 'completed' });
+      tracker.addNode({
+        title: 'N1',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
+      tracker.addNode({
+        title: 'N2',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'completed',
+      });
       const pending = tracker.getAllNodes({ status: ['pending'] });
       expect(pending).toHaveLength(1);
       expect(pending[0].title).toBe('N1');
@@ -233,8 +390,20 @@ describe('TaskTracker', () => {
 
     it('filters by priority', async () => {
       await tracker.createGraph('s', 't');
-      tracker.addNode({ title: 'N1', description: '', type: 'feature', priority: 'high', status: 'pending' });
-      tracker.addNode({ title: 'N2', description: '', type: 'feature', priority: 'low', status: 'pending' });
+      tracker.addNode({
+        title: 'N1',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
+      tracker.addNode({
+        title: 'N2',
+        description: '',
+        type: 'feature',
+        priority: 'low',
+        status: 'pending',
+      });
       const filtered = tracker.getAllNodes({ priority: ['high'] });
       expect(filtered).toHaveLength(1);
       expect(filtered[0].title).toBe('N1');
@@ -242,8 +411,20 @@ describe('TaskTracker', () => {
 
     it('filters by type', async () => {
       await tracker.createGraph('s', 't');
-      tracker.addNode({ title: 'N1', description: '', type: 'feature', priority: 'high', status: 'pending' });
-      tracker.addNode({ title: 'N2', description: '', type: 'bugfix', priority: 'high', status: 'pending' });
+      tracker.addNode({
+        title: 'N1',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
+      tracker.addNode({
+        title: 'N2',
+        description: '',
+        type: 'bugfix',
+        priority: 'high',
+        status: 'pending',
+      });
       const filtered = tracker.getAllNodes({ type: ['bugfix'] });
       expect(filtered).toHaveLength(1);
       expect(filtered[0].title).toBe('N2');
@@ -251,8 +432,22 @@ describe('TaskTracker', () => {
 
     it('filters by tags', async () => {
       await tracker.createGraph('s', 't');
-      tracker.addNode({ title: 'N1', description: '', type: 'feature', priority: 'high', status: 'pending', tags: ['security'] });
-      tracker.addNode({ title: 'N2', description: '', type: 'feature', priority: 'high', status: 'pending', tags: ['performance'] });
+      tracker.addNode({
+        title: 'N1',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+        tags: ['security'],
+      });
+      tracker.addNode({
+        title: 'N2',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+        tags: ['performance'],
+      });
       const filtered = tracker.getAllNodes({ tags: ['security'] });
       expect(filtered).toHaveLength(1);
       expect(filtered[0].title).toBe('N1');
@@ -260,8 +455,20 @@ describe('TaskTracker', () => {
 
     it('sorts by field and direction', async () => {
       await tracker.createGraph('s', 't');
-      tracker.addNode({ title: 'Z', description: '', type: 'feature', priority: 'low', status: 'pending' });
-      tracker.addNode({ title: 'A', description: '', type: 'feature', priority: 'high', status: 'pending' });
+      tracker.addNode({
+        title: 'Z',
+        description: '',
+        type: 'feature',
+        priority: 'low',
+        status: 'pending',
+      });
+      tracker.addNode({
+        title: 'A',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       const sorted = tracker.getAllNodes(undefined, { field: 'priority', direction: 'asc' });
       expect(sorted[0].title).toBe('A');
     });
@@ -274,16 +481,42 @@ describe('TaskTracker', () => {
 
     it('returns children of parent', async () => {
       await tracker.createGraph('s', 't');
-      const parent = tracker.addNode({ title: 'P', description: '', type: 'feature', priority: 'high', status: 'pending' });
-      tracker.addNode({ title: 'C1', description: '', type: 'feature', priority: 'high', status: 'pending', parentId: parent.id });
-      tracker.addNode({ title: 'C2', description: '', type: 'feature', priority: 'high', status: 'pending', parentId: parent.id });
+      const parent = tracker.addNode({
+        title: 'P',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
+      tracker.addNode({
+        title: 'C1',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+        parentId: parent.id,
+      });
+      tracker.addNode({
+        title: 'C2',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+        parentId: parent.id,
+      });
       const children = tracker.getChildren(parent.id);
       expect(children).toHaveLength(2);
     });
 
     it('returns empty for node with no children', async () => {
       await tracker.createGraph('s', 't');
-      const node = tracker.addNode({ title: 'Solo', description: '', type: 'feature', priority: 'high', status: 'pending' });
+      const node = tracker.addNode({
+        title: 'Solo',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       expect(tracker.getChildren(node.id)).toHaveLength(0);
     });
   });
@@ -295,8 +528,20 @@ describe('TaskTracker', () => {
 
     it('returns tasks that depend on given task', async () => {
       await tracker.createGraph('s', 't');
-      const n1 = tracker.addNode({ title: 'N1', description: '', type: 'feature', priority: 'high', status: 'pending' });
-      const n2 = tracker.addNode({ title: 'N2', description: '', type: 'feature', priority: 'high', status: 'pending' });
+      const n1 = tracker.addNode({
+        title: 'N1',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
+      const n2 = tracker.addNode({
+        title: 'N2',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       tracker.addEdge(n1.id, n2.id, 'depends_on');
       const deps = tracker.getDependents(n1.id);
       expect(deps).toContain(n2.id);
@@ -310,8 +555,20 @@ describe('TaskTracker', () => {
 
     it('returns tasks that block given task', async () => {
       await tracker.createGraph('s', 't');
-      const n1 = tracker.addNode({ title: 'N1', description: '', type: 'feature', priority: 'high', status: 'pending' });
-      const n2 = tracker.addNode({ title: 'N2', description: '', type: 'feature', priority: 'high', status: 'pending' });
+      const n1 = tracker.addNode({
+        title: 'N1',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
+      const n2 = tracker.addNode({
+        title: 'N2',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       tracker.addEdge(n1.id, n2.id, 'depends_on');
       const blockers = tracker.getBlockers(n2.id);
       expect(blockers).toContain(n1.id);
@@ -321,22 +578,52 @@ describe('TaskTracker', () => {
   describe('canStart', () => {
     it('returns true when no blockers', async () => {
       await tracker.createGraph('s', 't');
-      const node = tracker.addNode({ title: 'N', description: '', type: 'feature', priority: 'high', status: 'pending' });
+      const node = tracker.addNode({
+        title: 'N',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       expect(tracker.canStart(node.id)).toBe(true);
     });
 
     it('returns true when all blockers completed', async () => {
       await tracker.createGraph('s', 't');
-      const n1 = tracker.addNode({ title: 'N1', description: '', type: 'feature', priority: 'high', status: 'completed' });
-      const n2 = tracker.addNode({ title: 'N2', description: '', type: 'feature', priority: 'high', status: 'pending' });
+      const n1 = tracker.addNode({
+        title: 'N1',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'completed',
+      });
+      const n2 = tracker.addNode({
+        title: 'N2',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       tracker.addEdge(n1.id, n2.id, 'depends_on');
       expect(tracker.canStart(n2.id)).toBe(true);
     });
 
     it('returns false when some blockers not completed', async () => {
       await tracker.createGraph('s', 't');
-      const n1 = tracker.addNode({ title: 'N1', description: '', type: 'feature', priority: 'high', status: 'pending' });
-      const n2 = tracker.addNode({ title: 'N2', description: '', type: 'feature', priority: 'high', status: 'pending' });
+      const n1 = tracker.addNode({
+        title: 'N1',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
+      const n2 = tracker.addNode({
+        title: 'N2',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       tracker.addEdge(n1.id, n2.id, 'depends_on');
       expect(tracker.canStart(n2.id)).toBe(false);
     });
@@ -351,9 +638,27 @@ describe('TaskTracker', () => {
 
     it('calculates progress correctly', async () => {
       await tracker.createGraph('s', 't');
-      tracker.addNode({ title: 'N1', description: '', type: 'feature', priority: 'high', status: 'completed' });
-      tracker.addNode({ title: 'N2', description: '', type: 'feature', priority: 'high', status: 'in_progress' });
-      tracker.addNode({ title: 'N3', description: '', type: 'feature', priority: 'high', status: 'pending' });
+      tracker.addNode({
+        title: 'N1',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'completed',
+      });
+      tracker.addNode({
+        title: 'N2',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'in_progress',
+      });
+      tracker.addNode({
+        title: 'N3',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       const progress = tracker.getProgress();
       expect(progress.total).toBe(3);
       expect(progress.completed).toBe(1);
@@ -377,7 +682,13 @@ describe('TaskTracker', () => {
 
     it('records transitions for status changes', async () => {
       await tracker.createGraph('s', 't');
-      const node = tracker.addNode({ title: 'T', description: '', type: 'feature', priority: 'high', status: 'pending' });
+      const node = tracker.addNode({
+        title: 'T',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      });
       tracker.updateNodeStatus(node.id, 'in_progress');
       tracker.updateNodeStatus(node.id, 'completed');
       const transitions = tracker.getTransitions();

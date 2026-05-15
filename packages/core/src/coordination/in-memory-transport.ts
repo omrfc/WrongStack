@@ -13,7 +13,11 @@ export class InMemoryBridgeTransport implements BridgeTransport {
       for (const [id, handlers] of this.subs) {
         if (id === msg.from) continue;
         for (const h of handlers) {
-          try { h(msg); } catch { /* ignore */ }
+          try {
+            h(msg);
+          } catch {
+            /* ignore */
+          }
         }
       }
       return Promise.resolve();
@@ -21,7 +25,11 @@ export class InMemoryBridgeTransport implements BridgeTransport {
     const handlers = this.subs.get(to);
     if (handlers) {
       for (const h of handlers) {
-        try { h(msg); } catch { /* ignore */ }
+        try {
+          h(msg);
+        } catch {
+          /* ignore */
+        }
       }
     }
     return Promise.resolve();

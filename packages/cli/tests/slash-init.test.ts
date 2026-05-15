@@ -1,9 +1,9 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { SlashCommandRegistry } from '@wrongstack/core';
 import type { Context } from '@wrongstack/core';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildBuiltinSlashCommands } from '../src/slash-commands/index.js';
 
 class FakeRenderer {

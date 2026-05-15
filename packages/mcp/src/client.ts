@@ -436,7 +436,7 @@ export class MCPClient {
         // their own drain-wait, then both resolve and the buffer is still full.
         if (this._drainPending) {
           this._lastNotifySkipped = true;
-          process.emitWarning(
+          console.warn(
             `[MCP] notify("${method}") skipped: stdin buffer backpressure (already waiting for drain)`,
           );
           return;

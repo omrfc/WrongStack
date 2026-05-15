@@ -1,5 +1,12 @@
 export type SpecStatus = 'draft' | 'review' | 'approved' | 'implemented' | 'deprecated';
-export type SpecSectionType = 'overview' | 'requirements' | 'architecture' | 'api' | 'data' | 'security' | 'acceptance';
+export type SpecSectionType =
+  | 'overview'
+  | 'requirements'
+  | 'architecture'
+  | 'api'
+  | 'data'
+  | 'security'
+  | 'acceptance';
 
 export interface SpecSection {
   type: SpecSectionType;
@@ -86,6 +93,12 @@ export const DEFAULT_SPEC_TEMPLATE: SpecTemplate = {
   ],
   defaultRequirements: [
     { type: 'functional', priority: 'high', acceptanceCriteria: [], blockedBy: [], implements: [] },
-    { type: 'non-functional', priority: 'medium', acceptanceCriteria: [], blockedBy: [], implements: [] },
+    {
+      type: 'non-functional',
+      priority: 'medium',
+      acceptanceCriteria: [],
+      blockedBy: [],
+      implements: [],
+    },
   ],
 };

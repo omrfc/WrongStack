@@ -1,6 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
-import { EventBus } from '../../src/kernel/events.js';
+import { describe, expect, it, vi } from 'vitest';
 import { requestLimitExtension } from '../../src/core/iteration-limit.js';
+import { EventBus } from '../../src/kernel/events.js';
 
 describe('requestLimitExtension', () => {
   it('auto-grants 100 when autoExtend=true and no listener responds', async () => {

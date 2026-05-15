@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
 import * as path from 'node:path';
-import { resolveWstackPaths, projectHash } from '../../src/utils/wstack-paths.js';
+import { describe, expect, it } from 'vitest';
+import { projectHash, resolveWstackPaths } from '../../src/utils/wstack-paths.js';
 
 describe('wstack-paths', () => {
   it('projectHash is stable for the same absolute path', () => {

@@ -85,9 +85,13 @@ export function ShortcutsOverlay() {
     <div
       className="fixed inset-0 z-50 bg-background/60 backdrop-blur-sm flex items-center justify-center px-4"
       onClick={() => setOpen(false)}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') setOpen(false);
+      }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
         className="w-full max-w-2xl rounded-xl border bg-popover shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
       >
         <div className="flex items-center justify-between px-5 py-4 border-b">
@@ -117,9 +121,9 @@ export function ShortcutsOverlay() {
                   >
                     <span className="text-foreground/80">{s.description}</span>
                     <span className="flex items-center gap-1 shrink-0">
-                      {s.keys.map((k, i) => (
-                        <span key={i} className="flex items-center gap-1">
-                          {i > 0 && <span className="text-muted-foreground/40 text-xs">+</span>}
+                      {s.keys.map((k, ki) => (
+                        <span key={k} className="flex items-center gap-1">
+                          {ki > 0 && <span className="text-muted-foreground/40 text-xs">+</span>}
                           <kbd className="font-mono text-[10px] border rounded px-1.5 py-0.5 bg-background">
                             {k}
                           </kbd>

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { color, stripAnsi } from '../../src/index.js';
 
 describe('color helpers', () => {
@@ -19,9 +19,22 @@ describe('color helpers', () => {
 
   it('exposes all expected colour helpers', () => {
     const keys = [
-      'reset', 'bold', 'dim', 'italic', 'underline',
-      'red', 'green', 'yellow', 'blue', 'magenta', 'cyan',
-      'gray', 'amber', 'pink', 'bgRed', 'bgGreen',
+      'reset',
+      'bold',
+      'dim',
+      'italic',
+      'underline',
+      'red',
+      'green',
+      'yellow',
+      'blue',
+      'magenta',
+      'cyan',
+      'gray',
+      'amber',
+      'pink',
+      'bgRed',
+      'bgGreen',
     ] as const;
     for (const k of keys) {
       expect(typeof (color as Record<string, unknown>)[k]).toBe('function');

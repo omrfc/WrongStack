@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { auditTool } from '../src/audit.js';
 
-const makeCtx = () => ({ cwd: '/fake', tools: [], projectRoot: '/fake' } as any);
+const makeCtx = () => ({ cwd: '/fake', tools: [], projectRoot: '/fake' }) as any;
 const makeOpts = () => ({ signal: new AbortController().signal });
 
 describe('auditTool', () => {

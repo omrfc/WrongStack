@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
-import { WireFormatProvider } from '../src/wire-format.js';
-import { mistralWireFormat } from '../src/presets/mistral.js';
 import type { StreamEvent } from '@wrongstack/core';
+import { describe, expect, it } from 'vitest';
+import { mistralWireFormat } from '../src/presets/mistral.js';
+import { WireFormatProvider } from '../src/wire-format.js';
 
 /**
  * Smoke test for the declarative Mistral preset. The point isn't to be
@@ -48,15 +48,20 @@ async function collectEvents(body: ReadableStream<Uint8Array>): Promise<StreamEv
 
 describe('Mistral preset', () => {
   it('parses text-only completion', async () => {
-    const events = await collectEvents(sseBody([
-      JSON.stringify({ model: 'mistral-large-latest', choices: [{ delta: { content: 'Hello ' } }] }),
-      JSON.stringify({ choices: [{ delta: { content: 'world' } }] }),
-      JSON.stringify({
-        choices: [{ delta: {}, finish_reason: 'stop' }],
-        usage: { prompt_tokens: 12, completion_tokens: 3 },
-      }),
-      '[DONE]',
-    ]));
+    const events = await collectEvents(
+      sseBody([
+        JSON.stringify({
+          model: 'mistral-large-latest',
+          choices: [{ delta: { content: 'Hello ' } }],
+        }),
+        JSON.stringify({ choices: [{ delta: { content: 'world' } }] }),
+        JSON.stringify({
+          choices: [{ delta: {}, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 12, completion_tokens: 3 },
+        }),
+        '[DONE]',
+      ]),
+    );
 
     const start = events.find((e) => e.type === 'message_start');
     expect(start).toBeDefined();
@@ -76,31 +81,39 @@ describe('Mistral preset', () => {
   });
 
   it('parses streaming tool call with accumulated arguments', async () => {
-    const events = await collectEvents(sseBody([
-      JSON.stringify({
-        model: 'mistral-large',
-        choices: [{
-          delta: {
-            tool_calls: [{ index: 0, id: 'call_42', function: { name: 'search' } }],
-          },
-        }],
-      }),
-      JSON.stringify({
-        choices: [{
-          delta: { tool_calls: [{ index: 0, function: { arguments: '{"q":' } }] },
-        }],
-      }),
-      JSON.stringify({
-        choices: [{
-          delta: { tool_calls: [{ index: 0, function: { arguments: '"hello"}' } }] },
-        }],
-      }),
-      JSON.stringify({
-        choices: [{ delta: {}, finish_reason: 'tool_calls' }],
-        usage: { prompt_tokens: 50, completion_tokens: 8 },
-      }),
-      '[DONE]',
-    ]));
+    const events = await collectEvents(
+      sseBody([
+        JSON.stringify({
+          model: 'mistral-large',
+          choices: [
+            {
+              delta: {
+                tool_calls: [{ index: 0, id: 'call_42', function: { name: 'search' } }],
+              },
+            },
+          ],
+        }),
+        JSON.stringify({
+          choices: [
+            {
+              delta: { tool_calls: [{ index: 0, function: { arguments: '{"q":' } }] },
+            },
+          ],
+        }),
+        JSON.stringify({
+          choices: [
+            {
+              delta: { tool_calls: [{ index: 0, function: { arguments: '"hello"}' } }] },
+            },
+          ],
+        }),
+        JSON.stringify({
+          choices: [{ delta: {}, finish_reason: 'tool_calls' }],
+          usage: { prompt_tokens: 50, completion_tokens: 8 },
+        }),
+        '[DONE]',
+      ]),
+    );
 
     const toolStart = events.find((e) => e.type === 'tool_use_start');
     expect(toolStart).toEqual({ type: 'tool_use_start', id: 'call_42', name: 'search' });
@@ -124,23 +137,33 @@ describe('Mistral preset', () => {
       ['other-unknown', 'end_turn'],
     ];
     for (const [wire, canonical] of cases) {
-      const events = await collectEvents(sseBody([
-        JSON.stringify({ model: 'm', choices: [{ delta: { content: 'x' } }] }),
-        JSON.stringify({ choices: [{ delta: {}, finish_reason: wire }], usage: { prompt_tokens: 1, completion_tokens: 1 } }),
-        '[DONE]',
-      ]));
+      const events = await collectEvents(
+        sseBody([
+          JSON.stringify({ model: 'm', choices: [{ delta: { content: 'x' } }] }),
+          JSON.stringify({
+            choices: [{ delta: {}, finish_reason: wire }],
+            usage: { prompt_tokens: 1, completion_tokens: 1 },
+          }),
+          '[DONE]',
+        ]),
+      );
       const stop = events.find((e) => e.type === 'message_stop');
       expect((stop as { stopReason: string }).stopReason).toBe(canonical);
     }
   });
 
   it('ignores malformed SSE data without crashing', async () => {
-    const events = await collectEvents(sseBody([
-      'not-json-at-all',
-      JSON.stringify({ model: 'm', choices: [{ delta: { content: 'recovered' } }] }),
-      JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1 } }),
-      '[DONE]',
-    ]));
+    const events = await collectEvents(
+      sseBody([
+        'not-json-at-all',
+        JSON.stringify({ model: 'm', choices: [{ delta: { content: 'recovered' } }] }),
+        JSON.stringify({
+          choices: [{ delta: {}, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+        }),
+        '[DONE]',
+      ]),
+    );
 
     const text = events.find((e) => e.type === 'text_delta');
     expect(text).toBeDefined();

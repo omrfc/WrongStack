@@ -1,12 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
-import { buildProviderFactoriesFromRegistry } from '../src/index.js';
-import {
-  DefaultModelsRegistry,
-  DefaultLogger,
-  type ModelsDevPayload,
-} from '@wrongstack/core';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
+import { DefaultLogger, DefaultModelsRegistry, type ModelsDevPayload } from '@wrongstack/core';
+import { describe, expect, it, vi } from 'vitest';
+import { buildProviderFactoriesFromRegistry } from '../src/index.js';
 
 const SAMPLE: ModelsDevPayload = {
   anthropic: {

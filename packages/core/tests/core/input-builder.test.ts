@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DefaultAttachmentStore } from '../../src/storage/attachment-store.js';
 import { InputBuilder } from '../../src/core/input-builder.js';
+import { DefaultAttachmentStore } from '../../src/storage/attachment-store.js';
 
 function makeBuilder() {
   const store = new DefaultAttachmentStore();

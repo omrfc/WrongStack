@@ -122,6 +122,15 @@ interface ChatState {
    *  between the session's current cost and the cost captured here. Null
    *  while idle. */
   runStart: { at: number; cost: number } | null;
+  /** Transient extended-thinking buffer. Populated by provider.thinking_delta
+   *  events and shown as a soft, ephemeral bubble below the chat tail while
+   *  the model is reasoning. Cleared the moment the model produces user-
+   *  facing output (text_delta) or starts a tool — and at provider.response /
+   *  run.result. Never persisted into `messages`, so refresh wipes it. */
+  thinkingBuffer: string;
+  /** Wall-clock ms when the current thinking burst started, for the chip's
+   *  elapsed timer. Reset alongside `thinkingBuffer`. */
+  thinkingStartedAt: number | null;
 
   // Actions
   addMessage: (msg: Omit<ChatMessage, 'id' | 'timestamp'>) => string;
@@ -157,6 +166,12 @@ interface ChatState {
   removeQueued: (idx: number) => void;
   clearQueue: () => void;
   setRunStart: (s: { at: number; cost: number } | null) => void;
+  /** Append a thinking chunk. Lazy-starts the elapsed timer on the first
+   *  chunk after a clear. */
+  appendThinking: (text: string) => void;
+  /** Wipe the thinking buffer + timer. Called by the events that indicate
+   *  the model has moved past reasoning (text/tool/response/run end). */
+  clearThinking: () => void;
 }
 
 export const useChatStore = create<ChatState>()(
@@ -170,6 +185,8 @@ export const useChatStore = create<ChatState>()(
       executions: new Map(),
       queue: [],
       runStart: null,
+      thinkingBuffer: '',
+      thinkingStartedAt: null,
 
       addMessage: (msg) => {
         const id = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -281,6 +298,12 @@ export const useChatStore = create<ChatState>()(
       removeQueued: (idx) => set((state) => ({ queue: state.queue.filter((_, i) => i !== idx) })),
       clearQueue: () => set({ queue: [] }),
       setRunStart: (s) => set({ runStart: s }),
+      appendThinking: (text) =>
+        set((state) => ({
+          thinkingBuffer: state.thinkingBuffer + text,
+          thinkingStartedAt: state.thinkingStartedAt ?? Date.now(),
+        })),
+      clearThinking: () => set({ thinkingBuffer: '', thinkingStartedAt: null }),
     }),
     {
       name: 'wrongstack-chat',

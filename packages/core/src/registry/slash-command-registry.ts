@@ -29,9 +29,7 @@ export class SlashCommandRegistry {
     // at registration time rather than as a silent shadowing bug.
     for (const entry of this.cmds.values()) {
       if (entry.cmd.name === cmd.name && entry.owner !== owner) {
-        throw new Error(
-          `Slash command "${cmd.name}" already registered by ${entry.owner}`,
-        );
+        throw new Error(`Slash command "${cmd.name}" already registered by ${entry.owner}`);
       }
     }
 

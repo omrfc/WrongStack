@@ -1,6 +1,6 @@
 import { bench, describe } from 'vitest';
-import { validateAgainstSchema } from '../../src/utils/json-schema-validate.js';
 import type { JSONSchema } from '../../src/types/tool.js';
+import { validateAgainstSchema } from '../../src/utils/json-schema-validate.js';
 
 /**
  * V0-B: every tool call validates input against the tool's inputSchema. A
@@ -32,13 +32,13 @@ const largeSchema: JSONSchema = {
       i % 3 === 0
         ? { type: 'string', enum: ['a', 'b', 'c'] }
         : i % 3 === 1
-        ? { type: 'integer', minimum: 0, maximum: 1000 }
-        : {
-            type: 'object',
-            properties: {
-              nested: { type: 'array', items: { type: 'string' } },
+          ? { type: 'integer', minimum: 0, maximum: 1000 }
+          : {
+              type: 'object',
+              properties: {
+                nested: { type: 'array', items: { type: 'string' } },
+              },
             },
-          },
     ]),
   ),
   required: ['field_0', 'field_1'],

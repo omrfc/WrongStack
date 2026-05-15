@@ -1,9 +1,9 @@
 import * as fs from 'node:fs/promises';
+import { decryptConfigSecrets } from '../security/secret-vault.js';
 import type { Config, ConfigLoader } from '../types/config.js';
 import type { SecretVault } from '../types/secret-vault.js';
 import { safeParse } from '../utils/safe-json.js';
 import type { WstackPaths } from '../utils/wstack-paths.js';
-import { decryptConfigSecrets } from '../security/secret-vault.js';
 
 /**
  * Defaults express *behavior*, not identity. Provider and model are NOT
@@ -59,7 +59,9 @@ const ENV_MAP: Record<string, (cfg: PartialConfig, val: string) => void> = {
   },
 };
 
-type PartialConfig = Partial<Config> & { providers?: Record<string, { apiKey?: string; baseUrl?: string; type?: string }> };
+type PartialConfig = Partial<Config> & {
+  providers?: Record<string, { apiKey?: string; baseUrl?: string; type?: string }>;
+};
 
 function isPrimitiveArray(a: unknown[]): boolean {
   return a.every((v) => v === null || typeof v !== 'object');
@@ -216,7 +218,7 @@ export class DefaultConfigLoader implements ConfigLoader {
         if (existing && existing.length > 0) continue;
         const activeLabel = (pcfg as { activeKey?: string }).activeKey;
         const chosen = activeLabel
-          ? keys.find((k) => k.label === activeLabel) ?? keys[0]
+          ? (keys.find((k) => k.label === activeLabel) ?? keys[0])
           : keys[0];
         if (chosen?.apiKey) {
           (pcfg as { apiKey?: string }).apiKey = chosen.apiKey;
@@ -290,9 +292,7 @@ export class DefaultConfigLoader implements ConfigLoader {
       );
     }
     if (!cfg.model) {
-      throw new Error(
-        'Config: no model configured. Run `wstack init` or set WRONGSTACK_MODEL.',
-      );
+      throw new Error('Config: no model configured. Run `wstack init` or set WRONGSTACK_MODEL.');
     }
   }
 }

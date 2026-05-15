@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { GoogleProvider } from '../src/google.js';
 
 function mockFetch(json: unknown, status = 200) {
@@ -49,7 +49,9 @@ describe('GoogleProvider', () => {
         ok: true,
         status: 200,
         json: async () => ({
-          candidates: [{ content: { role: 'model', parts: [{ text: 'k' }] }, finishReason: 'stop' }],
+          candidates: [
+            { content: { role: 'model', parts: [{ text: 'k' }] }, finishReason: 'stop' },
+          ],
           usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
         }),
         text: async () => '',
@@ -75,9 +77,7 @@ describe('GoogleProvider', () => {
           },
           {
             role: 'user',
-            content: [
-              { type: 'tool_result', tool_use_id: 'tu1', content: 'data' },
-            ],
+            content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'data' }],
           },
         ],
         tools: [
@@ -101,9 +101,12 @@ describe('GoogleProvider', () => {
     // Tool results are inlined into the user turn with functionResponse parts
     // (Gemini API spec) — not as a separate 'function' role. This was a bug
     // where all-non-text user messages were silently dropped; now fixed.
-    const userWithFn = contents.find((c) =>
-      c.role === 'user' &&
-      (c.parts as unknown[]).some((p) => typeof p === 'object' && 'functionResponse' in (p as object)),
+    const userWithFn = contents.find(
+      (c) =>
+        c.role === 'user' &&
+        (c.parts as unknown[]).some(
+          (p) => typeof p === 'object' && 'functionResponse' in (p as object),
+        ),
     );
     expect(userWithFn).toBeDefined();
     const tools = body?.['tools'] as Array<{ functionDeclarations: unknown[] }>;
@@ -203,7 +206,10 @@ describe('GoogleProvider', () => {
       },
       { signal: new AbortController().signal },
     );
-    const contents = body?.['contents'] as Array<{ role: string; parts: Array<Record<string, unknown>> }>;
+    const contents = body?.['contents'] as Array<{
+      role: string;
+      parts: Array<Record<string, unknown>>;
+    }>;
     const modelTurn = contents.find((c) => c.role === 'model');
     const fc = modelTurn?.parts.find((p) => p['functionCall']);
     expect(fc?.['thoughtSignature']).toBe('SIG-BLOB-123');
@@ -264,7 +270,9 @@ describe('GoogleProvider', () => {
       },
       { signal: new AbortController().signal },
     );
-    const tools = body?.['tools'] as Array<{ functionDeclarations: Array<{ parameters: Record<string, unknown> }> }>;
+    const tools = body?.['tools'] as Array<{
+      functionDeclarations: Array<{ parameters: Record<string, unknown> }>;
+    }>;
     const params = tools[0]!.functionDeclarations[0]!.parameters;
     // Top-level forbidden keys are gone
     expect(params['additionalProperties']).toBeUndefined();
@@ -277,7 +285,9 @@ describe('GoogleProvider', () => {
     // Nested object also sanitized
     expect(props['opts']?.['additionalProperties']).toBeUndefined();
     expect(props['opts']?.['default']).toBeUndefined();
-    const nested = (props['opts']?.['properties'] as Record<string, Record<string, unknown>> | undefined)?.['nested'];
+    const nested = (
+      props['opts']?.['properties'] as Record<string, Record<string, unknown>> | undefined
+    )?.['nested'];
     expect(nested?.['allOf']).toBeUndefined();
     expect(nested?.['type']).toBe('string');
     // Array items sanitized

@@ -1,5 +1,5 @@
-import type { Tool } from '../types/tool.js';
 import type { ToolResultBlock, ToolUseBlock } from '../types/blocks.js';
+import type { Tool } from '../types/tool.js';
 
 /**
  * Input for a single tool execution, scoped to a single iteration's budget.

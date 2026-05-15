@@ -1,16 +1,16 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
+  allServers,
+  awsServer,
+  blockServer,
+  braveSearchServer,
+  context7Server,
+  everArtServer,
   filesystemServer,
   githubServer,
-  context7Server,
-  braveSearchServer,
-  blockServer,
-  everArtServer,
-  slackServer,
-  awsServer,
   googleMapsServer,
   sentinelServer,
-  allServers,
+  slackServer,
 } from '../../src/infrastructure/mcp-servers.js';
 import type { MCPServerConfig } from '../../src/types/config.js';
 
@@ -21,11 +21,7 @@ import type { MCPServerConfig } from '../../src/types/config.js';
  * matters: name, transport, and the transport-specific required keys.
  */
 
-const VALID_TRANSPORTS = new Set<MCPServerConfig['transport']>([
-  'stdio',
-  'sse',
-  'streamable-http',
-]);
+const VALID_TRANSPORTS = new Set<MCPServerConfig['transport']>(['stdio', 'sse', 'streamable-http']);
 
 function assertValidShape(cfg: MCPServerConfig): void {
   expect(typeof cfg.name).toBe('string');

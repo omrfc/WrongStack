@@ -27,7 +27,8 @@ export const filesystemServer = (): MCPServerConfig => ({
 /** GitHub API: issues, PRs, repos, search, file operations. Requires GITHUB_PERSONAL_ACCESS_TOKEN. */
 export const githubServer = (): MCPServerConfig => ({
   name: 'github',
-  description: 'GitHub API — issues, PRs, repos, search, file ops (requires GITHUB_PERSONAL_ACCESS_TOKEN)',
+  description:
+    'GitHub API — issues, PRs, repos, search, file ops (requires GITHUB_PERSONAL_ACCESS_TOKEN)',
   transport: 'stdio',
   command: 'npx',
   args: ['-y', '@modelcontextprotocol/server-github'],

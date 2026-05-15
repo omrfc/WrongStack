@@ -78,7 +78,7 @@ export function SearchOverlay() {
     const allRanges: Range[] = [];
     const activeRanges: Range[] = [];
     const activeId = hits[activeHit];
-    document.querySelectorAll('[data-message-id]').forEach((el) => {
+    for (const el of document.querySelectorAll('[data-message-id]')) {
       const id = (el as HTMLElement).dataset.messageId;
       const isActive = id === activeId;
       const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
@@ -101,7 +101,7 @@ export function SearchOverlay() {
         }
         node = walker.nextNode() as Text | null;
       }
-    });
+    }
     if (allRanges.length > 0) {
       highlights.set('chat-search', new HighlightCtor(...allRanges) as never);
     } else {

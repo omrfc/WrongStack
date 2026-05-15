@@ -1,7 +1,7 @@
 import type { Context } from '../core/context.js';
-import type { Tool } from '../types/tool.js';
-import type { Message } from '../types/messages.js';
 import type { Compactor } from '../types/compactor.js';
+import type { Message } from '../types/messages.js';
+import type { Tool } from '../types/tool.js';
 
 /**
  * Context introspection and management tool.
@@ -68,7 +68,9 @@ function roughEstimate(messages: Message[]): number {
   return total;
 }
 
-export function createContextManagerTool(opts: ContextManagerToolOptions = {}): Tool<ContextManagerInput, ContextManagerResult> {
+export function createContextManagerTool(
+  opts: ContextManagerToolOptions = {},
+): Tool<ContextManagerInput, ContextManagerResult> {
   return {
     name: CONTEXT_MANAGER_TOOL_NAME,
     description:
@@ -113,6 +115,18 @@ export function createContextManagerTool(opts: ContextManagerToolOptions = {}): 
     async execute(input: ContextManagerInput, ctx: Context): Promise<ContextManagerResult> {
       const messages = ctx.messages;
       const beforeTokens = roughEstimate(messages);
+
+      // When ctx.state is available, route mutations through the observer
+      // layer so subscribers stay in sync. Fall back to direct splice for
+      // tests and environments that haven't wired ConversationState.
+      const applyMessages = (next: Message[]) => {
+        if (ctx.state) {
+          ctx.state.replaceMessages(next);
+        } else {
+          messages.length = 0;
+          messages.splice(0, 0, ...next);
+        }
+      };
 
       switch (input.action) {
         case 'check': {
@@ -159,13 +173,15 @@ export function createContextManagerTool(opts: ContextManagerToolOptions = {}): 
               notes: `Invalid range [${from}, ${to}] for ${messages.length} messages.`,
             };
           }
-          const removed = messages.splice(from, to - from + 1);
-          const afterTokens = roughEstimate(messages);
+          const copy = [...messages];
+          const removed = copy.splice(from, to - from + 1);
+          applyMessages(copy);
+          const afterTokens = roughEstimate(copy);
           return {
             action: 'prune',
             beforeTokens,
             afterTokens,
-            messageCount: messages.length,
+            messageCount: copy.length,
             removedCount: removed.length,
           };
         }
@@ -177,13 +193,15 @@ export function createContextManagerTool(opts: ContextManagerToolOptions = {}): 
             role: 'system',
             content: `[note: ${noteText}]`,
           };
-          messages.splice(afterIdx, 0, noteMsg);
-          const afterTokens = roughEstimate(messages);
+          const copy = [...messages];
+          copy.splice(afterIdx, 0, noteMsg);
+          applyMessages(copy);
+          const afterTokens = roughEstimate(copy);
           return {
             action: 'add_note',
             beforeTokens,
             afterTokens,
-            messageCount: messages.length,
+            messageCount: copy.length,
             summary: noteText,
           };
         }
@@ -199,18 +217,21 @@ export function createContextManagerTool(opts: ContextManagerToolOptions = {}): 
               notes: `Invalid range [${from}, ${to}] for ${messages.length} messages.`,
             };
           }
-          const summaryText = input.text ?? '[summary placeholder — provide "text" to record the summary]';
+          const summaryText =
+            input.text ?? '[summary placeholder — provide "text" to record the summary]';
           const summaryMsg: Message = {
             role: 'system',
             content: `[summary of messages ${from}–${to}]: ${summaryText}`,
           };
-          messages.splice(from, to - from + 1, summaryMsg);
-          const afterTokens = roughEstimate(messages);
+          const copy = [...messages];
+          copy.splice(from, to - from + 1, summaryMsg);
+          applyMessages(copy);
+          const afterTokens = roughEstimate(copy);
           return {
             action: 'summary',
             beforeTokens,
             afterTokens,
-            messageCount: messages.length,
+            messageCount: copy.length,
             summary: summaryText,
           };
         }

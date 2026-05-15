@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { ToolRegistry } from '../../src/registry/tool-registry.js';
 import type { Tool } from '../../src/types/tool.js';
 
@@ -18,7 +18,12 @@ describe('ToolRegistry', () => {
     const r = new ToolRegistry();
     r.register(t('a'));
     r.register(t('b'));
-    expect(r.list().map((x) => x.name).sort()).toEqual(['a', 'b']);
+    expect(
+      r
+        .list()
+        .map((x) => x.name)
+        .sort(),
+    ).toEqual(['a', 'b']);
     expect(r.get('a')?.name).toBe('a');
   });
 

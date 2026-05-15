@@ -1,12 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { EventBus } from '../../src/kernel/events.js';
 import {
+  DefaultHealthRegistry,
   InMemoryMetricsSink,
   NoopMetricsSink,
   NoopTracer,
-  DefaultHealthRegistry,
   wireMetricsToEvents,
 } from '../../src/observability/index.js';
-import { EventBus } from '../../src/kernel/events.js';
 
 describe('InMemoryMetricsSink', () => {
   it('accumulates counters', () => {
@@ -118,7 +118,9 @@ describe('DefaultHealthRegistry', () => {
     const reg = new DefaultHealthRegistry();
     reg.register({
       name: 'broken',
-      check: async () => { throw new Error('explosion'); },
+      check: async () => {
+        throw new Error('explosion');
+      },
     });
 
     const result = await reg.run();
@@ -130,7 +132,10 @@ describe('DefaultHealthRegistry', () => {
     const reg = new DefaultHealthRegistry({ timeoutMs: 50 });
     reg.register({
       name: 'slow',
-      check: () => new Promise(() => { /* never resolves */ }),
+      check: () =>
+        new Promise(() => {
+          /* never resolves */
+        }),
     });
 
     const result = await reg.run();
@@ -168,9 +173,8 @@ describe('wireMetricsToEvents', () => {
 
     const snap = sink.snapshot();
     const find = (name: string, labels: Record<string, string> = {}) =>
-      snap.series.find((s) =>
-        s.name === name &&
-        Object.entries(labels).every(([k, v]) => s.labels[k] === v),
+      snap.series.find(
+        (s) => s.name === name && Object.entries(labels).every(([k, v]) => s.labels[k] === v),
       );
 
     expect(find('agent.iterations.total')?.values.value).toBe(2);
@@ -186,7 +190,9 @@ describe('wireMetricsToEvents', () => {
     unwire();
     bus.emit('iteration.completed', { ctx: {} as any, index: 2 });
     // After unwire the counter must not advance
-    expect(sink.snapshot().series.find((s) => s.name === 'agent.iterations.total')?.values.value).toBe(2);
+    expect(
+      sink.snapshot().series.find((s) => s.name === 'agent.iterations.total')?.values.value,
+    ).toBe(2);
   });
 
   it('translates every wired event type into the matching metric', () => {
@@ -257,8 +263,13 @@ describe('wireMetricsToEvents', () => {
     const bus = new EventBus();
     bus.setLogger({ error: vi.fn() });
     const sink: any = {
-      counter: vi.fn(() => { throw new Error('sink dead'); }),
-      gauge: vi.fn(), histogram: vi.fn(), snapshot: vi.fn(), reset: vi.fn(),
+      counter: vi.fn(() => {
+        throw new Error('sink dead');
+      }),
+      gauge: vi.fn(),
+      histogram: vi.fn(),
+      snapshot: vi.fn(),
+      reset: vi.fn(),
     };
     wireMetricsToEvents(bus, sink);
 

@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { SlashCommandRegistry } from '../../src/registry/slash-command-registry.js';
+import { describe, expect, it } from 'vitest';
 import type { Context } from '../../src/core/context.js';
+import { SlashCommandRegistry } from '../../src/registry/slash-command-registry.js';
 
 describe('SlashCommandRegistry', () => {
   it('dispatch returns null for non-slash', async () => {
@@ -55,7 +55,14 @@ describe('SlashCommandRegistry', () => {
     const r = new SlashCommandRegistry();
     let ran = false;
     r.register(
-      { name: 'cmd', aliases: ['c'], description: 'plugin cmd', async run() { ran = true; } },
+      {
+        name: 'cmd',
+        aliases: ['c'],
+        description: 'plugin cmd',
+        async run() {
+          ran = true;
+        },
+      },
       'my-plugin',
     );
     // Registered as `my-plugin:cmd`

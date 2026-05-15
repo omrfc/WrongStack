@@ -1,10 +1,14 @@
-import type { Compactor, CompactReport } from '../types/compactor.js';
 import type { Context } from '../core/context.js';
-import type { Message } from '../types/messages.js';
-import type { Provider, Request } from '../types/provider.js';
 import type { ContentBlock, TextBlock } from '../types/blocks.js';
 import { isTextBlock } from '../types/blocks.js';
-import { estimateToolInputTokens, estimateToolResultTokens, estimateTextTokens } from '../utils/token-estimate.js';
+import type { CompactReport, Compactor } from '../types/compactor.js';
+import type { Message } from '../types/messages.js';
+import type { Provider, Request } from '../types/provider.js';
+import {
+  estimateTextTokens,
+  estimateToolInputTokens,
+  estimateToolResultTokens,
+} from '../utils/token-estimate.js';
 
 /**
  * Options for IntelligentCompactor.
@@ -87,9 +91,8 @@ export class IntelligentCompactor implements Compactor {
     const load = beforeTokens / this.maxContext;
     // Past hardThreshold, force aggressive regardless of caller preference —
     // the alternative (lightweight elision) is unlikely to recover enough.
-    const aggressive = load >= this.hardThreshold
-      ? true
-      : opts.aggressive ?? load >= this.softThreshold;
+    const aggressive =
+      load >= this.hardThreshold ? true : (opts.aggressive ?? load >= this.softThreshold);
 
     // Phase 1: always run elision (preserves recent K pairs)
     const saved1 = this.eliseOldToolResults(ctx);
@@ -204,7 +207,12 @@ export class IntelligentCompactor implements Compactor {
     const res = await this.provider.complete(req, { signal });
 
     const textBlocks = res.content.filter(isTextBlock);
-    return textBlocks.map((b) => b.text).join('\n').trim() || '(empty summary)';
+    return (
+      textBlocks
+        .map((b) => b.text)
+        .join('\n')
+        .trim() || '(empty summary)'
+    );
   }
 
   private messagesToText(messages: Message[]): TextBlock[] {
@@ -267,7 +275,10 @@ export class IntelligentCompactor implements Compactor {
         };
       });
       // Check by reference equality whether any block actually changed
-      if (newContent.length === msg.content.length && newContent.every((b, idx) => b === msg.content[idx])) {
+      if (
+        newContent.length === msg.content.length &&
+        newContent.every((b, idx) => b === msg.content[idx])
+      ) {
         nextMessages[i] = msg;
       } else {
         nextMessages[i] = { ...msg, content: newContent };

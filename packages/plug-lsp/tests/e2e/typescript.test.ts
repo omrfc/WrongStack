@@ -1,9 +1,9 @@
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { describe, expect, it } from 'vitest';
 import { EventBus, type Logger } from '@wrongstack/core';
+import { describe, expect, it } from 'vitest';
 import { DocumentTracker } from '../../src/document-tracker.js';
 import { LSPRegistry } from '../../src/registry.js';
 import { makeLSPTools } from '../../src/tools/index.js';
@@ -65,18 +65,20 @@ describe.skipIf(!hasTypeScriptLanguageServer)('typescript-language-server E2E', 
     await registry.bind(root, 'lazy');
     await tracker.open(source);
 
-    const tools = new Map(makeLSPTools({ registry, tracker, cfg, log }).map((tool) => [tool.name, tool]));
+    const tools = new Map(
+      makeLSPTools({ registry, tracker, cfg, log }).map((tool) => [tool.name, tool]),
+    );
     const ctx = { cwd: root, projectRoot: root } as never;
     const signal = new AbortController().signal;
 
-    const hover = await tools.get('lsp_hover')!.execute(
-      { path: source, line: 1, character: 14 },
-      ctx,
-      { signal },
-    );
+    const hover = await tools
+      .get('lsp_hover')!
+      .execute({ path: source, line: 1, character: 14 }, ctx, { signal });
     expect(String(hover)).toContain('answer');
 
-    const diagnostics = await tools.get('lsp_diagnostics')!.execute({ path: source }, ctx, { signal });
+    const diagnostics = await tools
+      .get('lsp_diagnostics')!
+      .execute({ path: source }, ctx, { signal });
     expect(String(diagnostics).toLowerCase()).toContain('string');
 
     await registry.shutdown();
@@ -84,8 +86,9 @@ describe.skipIf(!hasTypeScriptLanguageServer)('typescript-language-server E2E', 
 });
 
 function commandExists(command: string): boolean {
-  const result = process.platform === 'win32'
-    ? spawnSync('where.exe', [command], { stdio: 'ignore' })
-    : spawnSync('sh', ['-lc', `command -v ${JSON.stringify(command)}`], { stdio: 'ignore' });
+  const result =
+    process.platform === 'win32'
+      ? spawnSync('where.exe', [command], { stdio: 'ignore' })
+      : spawnSync('sh', ['-lc', `command -v ${JSON.stringify(command)}`], { stdio: 'ignore' });
   return result.status === 0;
 }

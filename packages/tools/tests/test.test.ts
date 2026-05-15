@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { testTool } from '../src/test.js';
 
-const makeCtx = () => ({ cwd: '/fake', tools: [], projectRoot: '/fake' } as any);
+const makeCtx = () => ({ cwd: '/fake', tools: [], projectRoot: '/fake' }) as any;
 const makeOpts = () => ({ signal: new AbortController().signal });
 
 describe('testTool', () => {
@@ -38,7 +38,11 @@ describe('testTool', () => {
 
   it('handles files as array', async () => {
     const ctx = makeCtx();
-    const result = await testTool.execute({ runner: 'vitest', files: ['a.test.ts', 'b.test.ts'] }, ctx, makeOpts());
+    const result = await testTool.execute(
+      { runner: 'vitest', files: ['a.test.ts', 'b.test.ts'] },
+      ctx,
+      makeOpts(),
+    );
     expect(result).toHaveProperty('output');
   });
 

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { EventBus, ToolRegistry, type Logger, type MCPServerConfig } from '@wrongstack/core';
+import { EventBus, type Logger, type MCPServerConfig, ToolRegistry } from '@wrongstack/core';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { MCPRegistry } from '../src/registry.js';
 
 const silentLog: Logger = {
@@ -11,10 +11,7 @@ const silentLog: Logger = {
   child: () => silentLog,
 } as unknown as Logger;
 
-const stdioCfg = (
-  name: string,
-  extra: Partial<MCPServerConfig> = {},
-): MCPServerConfig => ({
+const stdioCfg = (name: string, extra: Partial<MCPServerConfig> = {}): MCPServerConfig => ({
   name,
   transport: 'stdio',
   command: 'never-actually-run',
@@ -87,9 +84,7 @@ describe('MCPRegistry', () => {
 
   it('health reflects failed state', async () => {
     const reg = new MCPRegistry({ toolRegistry: toolReg, events, log: silentLog });
-    await reg.start(
-      stdioCfg('failing', { command: '__nonexistent__', startupTimeoutMs: 50 }),
-    );
+    await reg.start(stdioCfg('failing', { command: '__nonexistent__', startupTimeoutMs: 50 }));
     // Give retries time to exhaust
     await new Promise((r) => setTimeout(r, 5000));
     const h = reg.health();

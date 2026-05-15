@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fsp from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RecoveryLock } from '../../src/storage/recovery-lock.js';
 import { DefaultSessionStore } from '../../src/storage/session-store.js';
 
@@ -86,7 +86,12 @@ describe('RecoveryLock', () => {
       });
       await session.close();
 
-      const writer = new RecoveryLock({ dir, pid: 31337, hostname: 'host', isPidAlive: () => false });
+      const writer = new RecoveryLock({
+        dir,
+        pid: 31337,
+        hostname: 'host',
+        isPidAlive: () => false,
+      });
       await writer.write(session.id);
 
       const checker = new RecoveryLock({

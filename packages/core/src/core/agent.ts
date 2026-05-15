@@ -1,27 +1,27 @@
+import { ToolExecutor } from '../execution/tool-executor.js';
 import type { Container } from '../kernel/container.js';
 import type { EventBus } from '../kernel/events.js';
 import { Pipeline } from '../kernel/pipeline.js';
 import { RunController } from '../kernel/run-controller.js';
 import { TOKENS } from '../kernel/tokens.js';
-import type { Tool } from '../types/tool.js';
+import type { ProviderRegistry } from '../registry/provider-registry.js';
+import type { ToolRegistry } from '../registry/tool-registry.js';
 import type { ContentBlock, TextBlock, ToolResultBlock, ToolUseBlock } from '../types/blocks.js';
 import { isTextBlock, isToolUseBlock } from '../types/blocks.js';
-import type { Request, Response } from '../types/provider.js';
-import { type WrongStackError, AgentError, toWrongStackError } from '../types/errors.js';
-import type { Tracer } from '../types/observability.js';
-import type { Logger } from '../types/logger.js';
-import type { RetryPolicy } from '../types/retry-policy.js';
 import type { ErrorHandler } from '../types/error-handler.js';
+import { AgentError, type WrongStackError, toWrongStackError } from '../types/errors.js';
+import type { Logger } from '../types/logger.js';
+import type { Tracer } from '../types/observability.js';
 import type { PermissionPolicy } from '../types/permission.js';
-import type { SecretScrubber } from '../types/secret-scrubber.js';
-import type { Renderer } from '../types/renderer.js';
 import type { Plugin, PluginAPI } from '../types/plugin.js';
+import type { Request, Response } from '../types/provider.js';
+import type { Renderer } from '../types/renderer.js';
+import type { RetryPolicy } from '../types/retry-policy.js';
+import type { SecretScrubber } from '../types/secret-scrubber.js';
+import type { Tool } from '../types/tool.js';
 import type { Context, RunOptions } from './context.js';
-import type { ToolRegistry } from '../registry/tool-registry.js';
-import type { ProviderRegistry } from '../registry/provider-registry.js';
-import { ToolExecutor } from '../execution/tool-executor.js';
-import { runProviderWithRetry } from './provider-runner.js';
 import { requestLimitExtension } from './iteration-limit.js';
+import { runProviderWithRetry } from './provider-runner.js';
 
 /** Default iteration cap. Use 0 or Infinity via config to disable. */
 export const DEFAULT_MAX_ITERATIONS = 100;
@@ -356,7 +356,7 @@ export class Agent {
       const extendBy = await requestLimitExtension({
         events: this.events,
         currentIterations,
-        currentLimit: this.maxIterations,
+        currentLimit: limit,
         autoExtend: this.autoExtendLimit,
       });
       if (extendBy > 0) {
@@ -388,12 +388,13 @@ export class Agent {
    * update session, render text, handle abort.
    */
   private async processResponse(
-    res: Response,
+    raw: Response,
     req: Request,
   ): Promise<{ finalText: string; aborted: boolean; done: boolean }> {
     // Run response middleware and adopt any transform it returns so later code
     // sees the processed value (currently no middleware is registered, but the
     // pattern matches `assistantOutput` below).
+    let res = raw;
     res = await this.pipelines.response.run(res);
     this.events.emit('provider.response', {
       ctx: this.ctx,
@@ -475,7 +476,12 @@ export class Agent {
         );
         const use = useById.get(reRunResult.result.tool_use_id);
         if (use) {
-          await this.pipelines.toolCall.run({ toolUse: use, result: reRunResult.result, ctx: this.ctx, tool });
+          await this.pipelines.toolCall.run({
+            toolUse: use,
+            result: reRunResult.result,
+            ctx: this.ctx,
+            tool,
+          });
           await this.ctx.session.append({
             type: 'tool_result',
             ts: new Date().toISOString(),
@@ -521,7 +527,10 @@ export class Agent {
       });
     }
 
-    this.ctx.state.appendMessage({ role: 'user', content: outputs.map((o) => o.result) as ToolResultBlock[] });
+    this.ctx.state.appendMessage({
+      role: 'user',
+      content: outputs.map((o) => o.result) as ToolResultBlock[],
+    });
   }
 
   private waitForConfirm(info: {
@@ -549,18 +558,33 @@ export class Agent {
     const start = Date.now();
     if (decision === 'no' || decision === 'deny') {
       return {
-        result: { type: 'tool_result', tool_use_id: use.id, content: `Tool "${tool.name}" denied by user.`, is_error: true },
+        result: {
+          type: 'tool_result',
+          tool_use_id: use.id,
+          content: `Tool "${tool.name}" denied by user.`,
+          is_error: true,
+        },
         durationMs: Date.now() - start,
       };
     }
     // 'yes' or 'always' — execute
     try {
-      const result = await this.toolExecutor.executeTool(tool, use as ToolUseBlock, this.ctx, this.perIterationOutputCapBytes);
+      const result = await this.toolExecutor.executeTool(
+        tool,
+        use as ToolUseBlock,
+        this.ctx,
+        this.perIterationOutputCapBytes,
+      );
       return { result, durationMs: Date.now() - start };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return {
-        result: { type: 'tool_result', tool_use_id: use.id, content: `Tool "${tool.name}" threw: ${msg}`, is_error: true },
+        result: {
+          type: 'tool_result',
+          tool_use_id: use.id,
+          content: `Tool "${tool.name}" threw: ${msg}`,
+          is_error: true,
+        },
         durationMs: Date.now() - start,
       };
     }
@@ -573,7 +597,6 @@ export class Agent {
   private async compactContextIfNeeded(): Promise<void> {
     await this.pipelines.contextWindow.run(this.ctx);
   }
-
 }
 
 function toError(err: unknown): Error {

@@ -1,5 +1,5 @@
-import type { Tool, Permission } from './tool.js';
 import type { Context } from '../core/context.js';
+import type { Permission, Tool } from './tool.js';
 
 export interface TrustPolicy {
   [toolNameOrPattern: string]: {

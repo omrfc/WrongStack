@@ -136,7 +136,7 @@ function AppInner() {
         );
         const idx = current ? bubbles.indexOf(current) : -1;
         const focusBubble = (target: HTMLElement) => {
-          bubbles.forEach((b) => b.removeAttribute('data-focused'));
+          for (const b of bubbles) b.removeAttribute('data-focused');
           target.setAttribute('data-focused', 'true');
           target.scrollIntoView({ behavior: 'smooth', block: 'center' });
         };

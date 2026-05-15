@@ -1,12 +1,15 @@
-import { describe, it, expect, vi } from 'vitest';
 import {
-  SlashCommandRegistry,
-  ToolRegistry,
+  type Context,
   DefaultTokenCounter,
   HybridCompactor,
-  type Context,
+  SlashCommandRegistry,
+  ToolRegistry,
 } from '@wrongstack/core';
-import { buildBuiltinSlashCommands, type SlashCommandContext } from '../src/slash-commands/index.js';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  type SlashCommandContext,
+  buildBuiltinSlashCommands,
+} from '../src/slash-commands/index.js';
 
 class FakeRenderer {
   output = '';
@@ -146,7 +149,11 @@ describe('built-in slash commands', () => {
       fileMtimes: new Map([['old.txt', 123]]),
       meta,
     } as unknown as Context;
-    (ctx as unknown as { state: Pick<Context['state'], 'replaceMessages' | 'replaceTodos' | 'deleteMeta'> }).state = {
+    (
+      ctx as unknown as {
+        state: Pick<Context['state'], 'replaceMessages' | 'replaceTodos' | 'deleteMeta'>;
+      }
+    ).state = {
       replaceMessages(next) {
         messages.length = 0;
         messages.splice(0, 0, ...next);
@@ -195,7 +202,13 @@ describe('built-in slash commands', () => {
         { role: 'user', content: [{ type: 'text', text: 'hello' }] },
         { role: 'assistant', content: [{ type: 'text', text: 'hi' }] },
         { role: 'user', content: [{ type: 'text', text: 'world' }] },
-        { role: 'assistant', content: [{ type: 'tool_use', id: '1', name: 'bash', input: {} }, { type: 'text', text: 'done' }] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: '1', name: 'bash', input: {} },
+            { type: 'text', text: 'done' },
+          ],
+        },
         { role: 'user', content: [{ type: 'tool_result', tool_use_id: '1', content: 'ok' }] },
       ],
       todos: [
@@ -219,7 +232,13 @@ describe('built-in slash commands', () => {
 
   it('/ctx aliases /context', async () => {
     const { registry, renderer } = makeRig();
-    const ctx = { messages: [], todos: [], systemPrompt: [], readFiles: new Set(), fileMtimes: new Map() } as unknown as Context;
+    const ctx = {
+      messages: [],
+      todos: [],
+      systemPrompt: [],
+      readFiles: new Set(),
+      fileMtimes: new Map(),
+    } as unknown as Context;
     await registry.dispatch('/ctx', ctx);
     expect(renderer.output).toContain('Context Window');
   });
@@ -259,8 +278,9 @@ describe('built-in slash commands', () => {
         toolRegistry,
         compactor,
         tokenCounter,
-        renderer:
-          renderer as unknown as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
+        renderer: renderer as unknown as Parameters<
+          typeof buildBuiltinSlashCommands
+        >[0]['renderer'],
         onSpawn: async () => 'should not be called',
         onAgents: () => '',
       });
@@ -281,8 +301,9 @@ describe('built-in slash commands', () => {
         toolRegistry,
         compactor,
         tokenCounter,
-        renderer:
-          renderer as unknown as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
+        renderer: renderer as unknown as Parameters<
+          typeof buildBuiltinSlashCommands
+        >[0]['renderer'],
         onSpawn,
         onAgents: () => 'no agents',
       });
@@ -300,13 +321,21 @@ describe('built-in slash commands', () => {
       const compactor = new HybridCompactor({ preserveK: 5 });
       const onSpawn = vi.fn(async (desc: string) => `spawned: ${desc}`);
       const cmds = buildBuiltinSlashCommands({
-        registry, toolRegistry, compactor, tokenCounter,
-        renderer: renderer as unknown as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
+        registry,
+        toolRegistry,
+        compactor,
+        tokenCounter,
+        renderer: renderer as unknown as Parameters<
+          typeof buildBuiltinSlashCommands
+        >[0]['renderer'],
         onSpawn,
         onAgents: () => '',
       });
       for (const c of cmds) registry.register(c);
-      await registry.dispatch('/spawn --provider=openai --model=gpt-5 audit the auth flow', fakeCtx);
+      await registry.dispatch(
+        '/spawn --provider=openai --model=gpt-5 audit the auth flow',
+        fakeCtx,
+      );
       expect(onSpawn).toHaveBeenCalledWith('audit the auth flow', {
         provider: 'openai',
         model: 'gpt-5',
@@ -321,13 +350,21 @@ describe('built-in slash commands', () => {
       const compactor = new HybridCompactor({ preserveK: 5 });
       const onSpawn = vi.fn(async (desc: string) => `spawned: ${desc}`);
       const cmds = buildBuiltinSlashCommands({
-        registry, toolRegistry, compactor, tokenCounter,
-        renderer: renderer as unknown as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
+        registry,
+        toolRegistry,
+        compactor,
+        tokenCounter,
+        renderer: renderer as unknown as Parameters<
+          typeof buildBuiltinSlashCommands
+        >[0]['renderer'],
         onSpawn,
         onAgents: () => '',
       });
       for (const c of cmds) registry.register(c);
-      await registry.dispatch('/spawn -p anthropic -m haiku -n researcher enumerate every package', fakeCtx);
+      await registry.dispatch(
+        '/spawn -p anthropic -m haiku -n researcher enumerate every package',
+        fakeCtx,
+      );
       expect(onSpawn).toHaveBeenCalledWith('enumerate every package', {
         provider: 'anthropic',
         model: 'haiku',
@@ -343,8 +380,13 @@ describe('built-in slash commands', () => {
       const compactor = new HybridCompactor({ preserveK: 5 });
       const onSpawn = vi.fn(async () => 'spawned');
       const cmds = buildBuiltinSlashCommands({
-        registry, toolRegistry, compactor, tokenCounter,
-        renderer: renderer as unknown as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
+        registry,
+        toolRegistry,
+        compactor,
+        tokenCounter,
+        renderer: renderer as unknown as Parameters<
+          typeof buildBuiltinSlashCommands
+        >[0]['renderer'],
         onSpawn,
         onAgents: () => '',
       });
@@ -363,8 +405,13 @@ describe('built-in slash commands', () => {
       const compactor = new HybridCompactor({ preserveK: 5 });
       const onSpawn = vi.fn(async () => 'spawned');
       const cmds = buildBuiltinSlashCommands({
-        registry, toolRegistry, compactor, tokenCounter,
-        renderer: renderer as unknown as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
+        registry,
+        toolRegistry,
+        compactor,
+        tokenCounter,
+        renderer: renderer as unknown as Parameters<
+          typeof buildBuiltinSlashCommands
+        >[0]['renderer'],
         onSpawn,
         onAgents: () => '',
       });
@@ -387,8 +434,13 @@ describe('built-in slash commands', () => {
       const compactor = new HybridCompactor({ preserveK: 5 });
       const onSpawn = vi.fn(async (desc: string) => `spawned: ${desc}`);
       const cmds = buildBuiltinSlashCommands({
-        registry, toolRegistry, compactor, tokenCounter,
-        renderer: renderer as unknown as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
+        registry,
+        toolRegistry,
+        compactor,
+        tokenCounter,
+        renderer: renderer as unknown as Parameters<
+          typeof buildBuiltinSlashCommands
+        >[0]['renderer'],
         onSpawn,
         onAgents: () => '',
       });
@@ -409,8 +461,9 @@ describe('built-in slash commands', () => {
         toolRegistry,
         compactor,
         tokenCounter,
-        renderer:
-          renderer as unknown as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
+        renderer: renderer as unknown as Parameters<
+          typeof buildBuiltinSlashCommands
+        >[0]['renderer'],
         onSpawn: async () => '',
         onAgents: () => '2 pending, 1 completed.\n  ✓        abc12345',
       });
@@ -430,8 +483,9 @@ describe('built-in slash commands', () => {
         toolRegistry,
         compactor,
         tokenCounter,
-        renderer:
-          renderer as unknown as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
+        renderer: renderer as unknown as Parameters<
+          typeof buildBuiltinSlashCommands
+        >[0]['renderer'],
         onSpawn: async () => {
           throw new Error('no provider configured');
         },
@@ -456,8 +510,9 @@ describe('built-in slash commands', () => {
         toolRegistry,
         compactor,
         tokenCounter,
-        renderer:
-          renderer as unknown as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
+        renderer: renderer as unknown as Parameters<
+          typeof buildBuiltinSlashCommands
+        >[0]['renderer'],
         onFleet,
       });
       for (const c of cmds) registry.register(c);

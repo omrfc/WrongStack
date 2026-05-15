@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { TaskNode, TaskGraph } from '../../src/types/task-graph.js';
-import type { Specification } from '../../src/types/spec.js';
-import { TaskFlow, SpecDrivenDev } from '../../src/sdd/task-flow.js';
-import { TaskTracker } from '../../src/sdd/task-tracker.js';
-import { DefaultTaskStore } from '../../src/sdd/task-generator.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventBus } from '../../src/kernel/events.js';
+import { SpecDrivenDev, TaskFlow } from '../../src/sdd/task-flow.js';
+import { DefaultTaskStore } from '../../src/sdd/task-generator.js';
+import { TaskTracker } from '../../src/sdd/task-tracker.js';
+import type { Specification } from '../../src/types/spec.js';
+import type { TaskGraph, TaskNode } from '../../src/types/task-graph.js';
 
 function makeSpec(overrides: Partial<Specification> = {}): Specification {
   return {
@@ -81,7 +81,9 @@ describe('TaskFlow', () => {
       const specContent = `# Test\n\n## Overview\nOverview content\n\n## Requirements\n[functional] Some requirement\n\n## Acceptance\n\nSome acceptance`;
 
       let analysis: any = null;
-      events.on('spec.analyzed' as any, (payload: any) => { analysis = payload; });
+      events.on('spec.analyzed' as any, (payload: any) => {
+        analysis = payload;
+      });
 
       await flow.fromSpec(specContent);
 
@@ -102,7 +104,9 @@ describe('TaskFlow', () => {
       const specContent = `# Test\n\nNo proper structure`;
 
       let errorPayload: any = null;
-      events.on('error' as any, (payload: any) => { errorPayload = payload; });
+      events.on('error' as any, (payload: any) => {
+        errorPayload = payload;
+      });
 
       await expect(flow.fromSpec(specContent)).rejects.toThrow();
     });
@@ -120,9 +124,11 @@ describe('TaskFlow', () => {
   describe('execute', () => {
     it('throws error if no graph loaded', async () => {
       const flow = createFlow();
-      await expect(flow.execute({
-        executeTask: async () => 'result',
-      })).rejects.toThrow('No graph loaded');
+      await expect(
+        flow.execute({
+          executeTask: async () => 'result',
+        }),
+      ).rejects.toThrow('No graph loaded');
     });
 
     it('executes pending tasks and updates status to completed', async () => {
@@ -162,7 +168,9 @@ describe('TaskFlow', () => {
 
       const onFail = vi.fn();
       await flow.execute({
-        executeTask: async () => { throw new Error('task failed'); },
+        executeTask: async () => {
+          throw new Error('task failed');
+        },
         onTaskFail: onFail,
       });
 
@@ -265,7 +273,9 @@ describe('TaskFlow', () => {
       const firstTaskId = Array.from(graph!.nodes.keys())[0];
 
       let eventFired = false;
-      events.on('task.completed' as any, () => { eventFired = true; });
+      events.on('task.completed' as any, () => {
+        eventFired = true;
+      });
 
       await flow.reviewTask(firstTaskId, true);
 
@@ -281,7 +291,9 @@ describe('TaskFlow', () => {
       const firstTaskId = Array.from(graph!.nodes.keys())[0];
 
       let eventFired = false;
-      events.on('task.review' as any, () => { eventFired = true; });
+      events.on('task.review' as any, () => {
+        eventFired = true;
+      });
 
       await flow.reviewTask(firstTaskId, false);
 

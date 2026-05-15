@@ -1,15 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
+  extractDiffPreview,
+  fmtDuration,
   formatToolArgs,
   formatToolOutput,
-  fmtDuration,
-  extractDiffPreview,
 } from '../src/components/history.js';
 
 describe('formatToolArgs', () => {
   it('read/edit/write: just the (shortened) path', () => {
     expect(formatToolArgs('read', { path: '/tmp/x.ts' })).toBe('/tmp/x.ts');
-    expect(formatToolArgs('edit', { path: '/tmp/x.ts', old_string: 'a', new_string: 'b' })).toBe('/tmp/x.ts');
+    expect(formatToolArgs('edit', { path: '/tmp/x.ts', old_string: 'a', new_string: 'b' })).toBe(
+      '/tmp/x.ts',
+    );
     expect(formatToolArgs('write', { path: '/tmp/x.ts', content: 'z' })).toBe('/tmp/x.ts');
   });
 
@@ -124,12 +126,12 @@ describe('formatToolOutput', () => {
   });
 
   it('edit: surfaces replacement count from JSON', () => {
-    expect(
-      formatToolOutput('edit', JSON.stringify({ replacements: 2, path: '/x' }), true),
-    ).toEqual(['2 replacements']);
-    expect(
-      formatToolOutput('edit', JSON.stringify({ replacements: 1, path: '/x' }), true),
-    ).toEqual(['1 replacement']);
+    expect(formatToolOutput('edit', JSON.stringify({ replacements: 2, path: '/x' }), true)).toEqual(
+      ['2 replacements'],
+    );
+    expect(formatToolOutput('edit', JSON.stringify({ replacements: 1, path: '/x' }), true)).toEqual(
+      ['1 replacement'],
+    );
   });
 
   it('write: bytes written', () => {
@@ -194,9 +196,7 @@ describe('formatToolOutput', () => {
   });
 
   it('unknown tool: first non-empty line, collapsed', () => {
-    expect(formatToolOutput('weird', '\n\nfirst line\nsecond line', true)).toEqual([
-      'first line',
-    ]);
+    expect(formatToolOutput('weird', '\n\nfirst line\nsecond line', true)).toEqual(['first line']);
   });
 
   it('failed tool with empty output renders ["failed"]', () => {
@@ -263,7 +263,12 @@ describe('formatToolOutput (extended tools)', () => {
   it('fetch: HTTP status + content type + size', () => {
     const out = formatToolOutput(
       'fetch',
-      JSON.stringify({ status: 200, content_type: 'text/html', url: 'https://x', content: 'a'.repeat(2048) }),
+      JSON.stringify({
+        status: 200,
+        content_type: 'text/html',
+        url: 'https://x',
+        content: 'a'.repeat(2048),
+      }),
       true,
     );
     expect(out[0]).toContain('HTTP 200');
@@ -285,7 +290,12 @@ describe('formatToolOutput (extended tools)', () => {
     expect(
       formatToolOutput(
         'audit',
-        JSON.stringify({ exit_code: 0, vulnerabilities: [], total: 0, summary: 'No vulnerabilities found' }),
+        JSON.stringify({
+          exit_code: 0,
+          vulnerabilities: [],
+          total: 0,
+          summary: 'No vulnerabilities found',
+        }),
         true,
       ),
     ).toEqual(['no vulnerabilities']);
@@ -327,7 +337,10 @@ describe('extractDiffPreview', () => {
   });
 
   it('parses an edit-tool diff JSON into add/del/hunk rows', () => {
-    const out = extractDiffPreview('edit', JSON.stringify({ path: '/x', replacements: 1, diff: sampleDiff }));
+    const out = extractDiffPreview(
+      'edit',
+      JSON.stringify({ path: '/x', replacements: 1, diff: sampleDiff }),
+    );
     expect(out).toBeDefined();
     const kinds = out!.rows.map((r) => r.kind);
     expect(kinds).toContain('hunk');
@@ -340,14 +353,19 @@ describe('extractDiffPreview', () => {
   });
 
   it('caps preview at 8 lines and reports the hidden remainder', () => {
-    const many = ['@@ -1,20 +1,20 @@', ...Array.from({ length: 30 }, (_, i) => `+line ${i}`)].join('\n');
+    const many = ['@@ -1,20 +1,20 @@', ...Array.from({ length: 30 }, (_, i) => `+line ${i}`)].join(
+      '\n',
+    );
     const out = extractDiffPreview('edit', JSON.stringify({ diff: many }));
     expect(out!.rows.length).toBeLessThanOrEqual(8);
     expect(out!.hidden).toBeGreaterThan(0);
   });
 
   it('skips no-op edit sentinel diff', () => {
-    const out = extractDiffPreview('edit', JSON.stringify({ diff: '(no-op: old and new are identical)' }));
+    const out = extractDiffPreview(
+      'edit',
+      JSON.stringify({ diff: '(no-op: old and new are identical)' }),
+    );
     expect(out).toBeUndefined();
   });
 

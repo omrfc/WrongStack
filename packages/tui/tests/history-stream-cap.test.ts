@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { tailForDisplay } from '../src/components/history.js';
 
 describe('tailForDisplay (streaming buffer cap)', () => {

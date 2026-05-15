@@ -9,9 +9,10 @@ describe('autoDiscoverServers', () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plug-lsp-bin-'));
     const binDir = path.join(root, 'node_modules', '.bin');
     await fs.mkdir(binDir, { recursive: true });
-    const command = process.platform === 'win32'
-      ? path.join(binDir, 'typescript-language-server.cmd')
-      : path.join(binDir, 'typescript-language-server');
+    const command =
+      process.platform === 'win32'
+        ? path.join(binDir, 'typescript-language-server.cmd')
+        : path.join(binDir, 'typescript-language-server');
     await fs.writeFile(command, process.platform === 'win32' ? '@echo off\r\n' : '#!/bin/sh\n');
 
     const servers = await autoDiscoverServers({}, root);
@@ -20,12 +21,15 @@ describe('autoDiscoverServers', () => {
   });
 
   it('keeps user configured servers instead of overwriting presets', async () => {
-    const servers = await autoDiscoverServers({
-      typescript: {
-        command: 'custom-ts',
-        languages: ['typescript'],
+    const servers = await autoDiscoverServers(
+      {
+        typescript: {
+          command: 'custom-ts',
+          languages: ['typescript'],
+        },
       },
-    }, process.cwd());
+      process.cwd(),
+    );
     expect(servers.typescript?.command).toBe('custom-ts');
   });
 });

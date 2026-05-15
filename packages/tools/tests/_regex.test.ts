@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { compileUserRegex, capSubject, MAX_SUBJECT_LEN } from '../src/_regex.js';
+import { describe, expect, it } from 'vitest';
+import { MAX_SUBJECT_LEN, capSubject, compileUserRegex } from '../src/_regex.js';
 
 describe('compileUserRegex (ReDoS guard for grep/replace/logs)', () => {
   it('compiles a simple pattern', () => {

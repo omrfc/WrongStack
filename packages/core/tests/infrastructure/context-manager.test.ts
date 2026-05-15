@@ -1,17 +1,21 @@
-import { describe, it, expect } from 'vitest';
-import { createContextManagerTool, contextManagerTool } from '../../src/infrastructure/context-manager.js';
+import { describe, expect, it } from 'vitest';
+import {
+  contextManagerTool,
+  createContextManagerTool,
+} from '../../src/infrastructure/context-manager.js';
 
-const makeCtx = (messages: any[] = []) => ({
-  cwd: '/fake',
-  projectRoot: '/fake',
-  readFiles: new Set<string>(),
-  fileMtimes: new Map<string, number>(),
-  hasRead: () => false,
-  lastReadMtime: () => undefined,
-  recordRead: () => {},
-  todos: [],
-  messages,
-} as any);
+const makeCtx = (messages: any[] = []) =>
+  ({
+    cwd: '/fake',
+    projectRoot: '/fake',
+    readFiles: new Set<string>(),
+    fileMtimes: new Map<string, number>(),
+    hasRead: () => false,
+    lastReadMtime: () => undefined,
+    recordRead: () => {},
+    todos: [],
+    messages,
+  }) as any;
 
 describe('createContextManagerTool', () => {
   it('has correct metadata', () => {
@@ -23,9 +27,7 @@ describe('createContextManagerTool', () => {
 
   it('check action returns budget info', async () => {
     const tool = createContextManagerTool();
-    const ctx = makeCtx([
-      { role: 'user', content: 'hello world' },
-    ]);
+    const ctx = makeCtx([{ role: 'user', content: 'hello world' }]);
     const result = await tool.execute({ action: 'check' }, ctx);
     expect(result.action).toBe('check');
     expect(result.messageCount).toBe(1);
@@ -85,7 +87,10 @@ describe('createContextManagerTool', () => {
 
   it('add_note respects afterIndex', async () => {
     const tool = createContextManagerTool();
-    const ctx = makeCtx([{ role: 'user', content: 'a' }, { role: 'user', content: 'b' }]);
+    const ctx = makeCtx([
+      { role: 'user', content: 'a' },
+      { role: 'user', content: 'b' },
+    ]);
     const result = await tool.execute({ action: 'add_note', text: 'inserted', afterIndex: 1 }, ctx);
     expect(ctx.messages[1].content).toContain('inserted');
   });

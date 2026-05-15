@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ToolExecutor } from '../../src/execution/tool-executor.js';
-import type { Tool } from '../../src/types/tool.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Context } from '../../src/core/context.js';
-import type { ToolUseBlock, ToolResultBlock } from '../../src/types/blocks.js';
-import type { PermissionDecision } from '../../src/types/permission.js';
+import { ToolExecutor } from '../../src/execution/tool-executor.js';
 import { EventBus } from '../../src/kernel/events.js';
+import type { ToolResultBlock, ToolUseBlock } from '../../src/types/blocks.js';
+import type { PermissionDecision } from '../../src/types/permission.js';
+import type { Tool } from '../../src/types/tool.js';
 
 // --- Test helpers ---
 
@@ -38,7 +38,11 @@ function makeCtx(): Context {
     provider: { id: 'test', capabilities: {}, complete: vi.fn(), stream: vi.fn() } as never,
     session: session as never,
     signal: new AbortController().signal,
-    tokenCounter: { account: vi.fn(), total: vi.fn().mockReturnValue({ input: 0, output: 0 }), estimateCost: vi.fn().mockReturnValue({ total: 0 }) } as never,
+    tokenCounter: {
+      account: vi.fn(),
+      total: vi.fn().mockReturnValue({ input: 0, output: 0 }),
+      estimateCost: vi.fn().mockReturnValue({ total: 0 }),
+    } as never,
     cwd: '/test',
     projectRoot: '/test',
     model: 'test-model',
@@ -77,9 +81,7 @@ describe('ToolExecutor', () => {
       list: () => tools,
     };
     return new ToolExecutor(registry, {
-      permissionPolicy: policy.evaluate.mockResolvedValue
-        ? policy
-        : (policy as never),
+      permissionPolicy: policy.evaluate.mockResolvedValue ? policy : (policy as never),
       secretScrubber: scrubber as never,
       perIterationOutputCapBytes: 50_000,
       ...opts,
@@ -93,11 +95,7 @@ describe('ToolExecutor', () => {
   describe('executeBatch — unknown tool', () => {
     it('returns an error for unregistered tools', async () => {
       const executor = makeExecutor([]);
-      const result = await executor.executeBatch(
-        [makeUse('nonexistent')],
-        makeCtx(),
-        'sequential',
-      );
+      const result = await executor.executeBatch([makeUse('nonexistent')], makeCtx(), 'sequential');
       const output = result.outputs[0]!;
       expect(output.result).toMatchObject({
         type: 'tool_result',
@@ -127,7 +125,10 @@ describe('ToolExecutor', () => {
   describe('executeBatch — confirm with awaiter', () => {
     it('executes when user confirms via awaiter', async () => {
       policy.evaluate.mockResolvedValue(confirmDecision());
-      const tool = makeTool({ name: 'edit', execute: vi.fn().mockResolvedValue({ path: 'a.ts', replacements: 1 }) });
+      const tool = makeTool({
+        name: 'edit',
+        execute: vi.fn().mockResolvedValue({ path: 'a.ts', replacements: 1 }),
+      });
       const awaiter = vi.fn().mockResolvedValue('yes');
       const executor = makeExecutor([tool], { confirmAwaiter: awaiter });
       const result = await executor.executeBatch(
@@ -204,7 +205,10 @@ describe('ToolExecutor', () => {
 
   describe('executeBatch — tool execution error', () => {
     it('catches tool errors and returns error result', async () => {
-      const tool = makeTool({ name: 'bash', execute: vi.fn().mockRejectedValue(new Error('boom')) });
+      const tool = makeTool({
+        name: 'bash',
+        execute: vi.fn().mockRejectedValue(new Error('boom')),
+      });
       const executor = makeExecutor([tool]);
       const result = await executor.executeBatch(
         [makeUse('bash', { command: 'fail' })],
@@ -220,7 +224,10 @@ describe('ToolExecutor', () => {
     it('scrubs secrets from error messages', async () => {
       const scrubbingPolicy = { evaluate: vi.fn().mockResolvedValue(autoPermit()) };
       const scrubbingScrubber = { scrub: vi.fn().mockReturnValue('[REDACTED]') };
-      const tool = makeTool({ name: 'bash', execute: vi.fn().mockRejectedValue(new Error('key=secret123')) });
+      const tool = makeTool({
+        name: 'bash',
+        execute: vi.fn().mockRejectedValue(new Error('key=secret123')),
+      });
       const executor = makeExecutor([tool], {
         permissionPolicy: scrubbingPolicy as never,
         secretScrubber: scrubbingScrubber as never,
@@ -240,14 +247,22 @@ describe('ToolExecutor', () => {
   describe('executeBatch — sequential strategy', () => {
     it('runs tools one at a time', async () => {
       const order: string[] = [];
-      const tool1 = makeTool({ name: 'a', execute: vi.fn().mockImplementation(async () => { order.push('a'); return { ok: true }; }) });
-      const tool2 = makeTool({ name: 'b', execute: vi.fn().mockImplementation(async () => { order.push('b'); return { ok: true }; }) });
+      const tool1 = makeTool({
+        name: 'a',
+        execute: vi.fn().mockImplementation(async () => {
+          order.push('a');
+          return { ok: true };
+        }),
+      });
+      const tool2 = makeTool({
+        name: 'b',
+        execute: vi.fn().mockImplementation(async () => {
+          order.push('b');
+          return { ok: true };
+        }),
+      });
       const executor = makeExecutor([tool1, tool2]);
-      await executor.executeBatch(
-        [makeUse('a'), makeUse('b')],
-        makeCtx(),
-        'sequential',
-      );
+      await executor.executeBatch([makeUse('a'), makeUse('b')], makeCtx(), 'sequential');
       expect(order).toEqual(['a', 'b']);
     });
   });
@@ -272,10 +287,38 @@ describe('ToolExecutor', () => {
   describe('executeBatch — smart strategy', () => {
     it('runs non-mutating in parallel, mutating sequentially', async () => {
       const order: string[] = [];
-      const read = makeTool({ name: 'read', mutating: false, execute: vi.fn().mockImplementation(async () => { order.push('read'); return { ok: true }; }) });
-      const grep = makeTool({ name: 'grep', mutating: false, execute: vi.fn().mockImplementation(async () => { order.push('grep'); return { ok: true }; }) });
-      const edit = makeTool({ name: 'edit', mutating: true, execute: vi.fn().mockImplementation(async () => { order.push('edit'); return { ok: true }; }) });
-      const write = makeTool({ name: 'write', mutating: true, execute: vi.fn().mockImplementation(async () => { order.push('write'); return { ok: true }; }) });
+      const read = makeTool({
+        name: 'read',
+        mutating: false,
+        execute: vi.fn().mockImplementation(async () => {
+          order.push('read');
+          return { ok: true };
+        }),
+      });
+      const grep = makeTool({
+        name: 'grep',
+        mutating: false,
+        execute: vi.fn().mockImplementation(async () => {
+          order.push('grep');
+          return { ok: true };
+        }),
+      });
+      const edit = makeTool({
+        name: 'edit',
+        mutating: true,
+        execute: vi.fn().mockImplementation(async () => {
+          order.push('edit');
+          return { ok: true };
+        }),
+      });
+      const write = makeTool({
+        name: 'write',
+        mutating: true,
+        execute: vi.fn().mockImplementation(async () => {
+          order.push('write');
+          return { ok: true };
+        }),
+      });
       const executor = makeExecutor([read, grep, edit, write]);
 
       const result = await executor.executeBatch(
@@ -286,7 +329,9 @@ describe('ToolExecutor', () => {
 
       expect(result.outputs).toHaveLength(4);
       // read and grep must come before edit and write
-      const names = result.outputs.map((o) => o.result.type === 'tool_result' ? (o.result as ToolResultBlock).name : undefined);
+      const names = result.outputs.map((o) =>
+        o.result.type === 'tool_result' ? (o.result as ToolResultBlock).name : undefined,
+      );
       const readIdx = names.indexOf('read');
       const grepIdx = names.indexOf('grep');
       const editIdx = names.indexOf('edit');
@@ -302,11 +347,7 @@ describe('ToolExecutor', () => {
     it('decrements remaining budget after each tool', async () => {
       const tool = makeTool({ name: 'echo', execute: vi.fn().mockResolvedValue('hello world') });
       const executor = makeExecutor([tool], { perIterationOutputCapBytes: 100_000 });
-      const result = await executor.executeBatch(
-        [makeUse('echo')],
-        makeCtx(),
-        'sequential',
-      );
+      const result = await executor.executeBatch([makeUse('echo')], makeCtx(), 'sequential');
       expect(result.remainingBudget).toBeLessThan(100_000);
       expect(result.remainingBudget).toBeGreaterThanOrEqual(0);
     });
@@ -319,15 +360,13 @@ describe('ToolExecutor', () => {
       events.on('tool.started', started);
       const tool = makeTool({ name: 'test', execute: vi.fn().mockResolvedValue('ok') });
       const executor = makeExecutor([tool], { events });
-      await executor.executeBatch(
-        [makeUse('test')],
-        makeCtx(),
-        'sequential',
+      await executor.executeBatch([makeUse('test')], makeCtx(), 'sequential');
+      expect(started).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'test',
+          id: 'id_test',
+        }),
       );
-      expect(started).toHaveBeenCalledWith(expect.objectContaining({
-        name: 'test',
-        id: 'id_test',
-      }));
     });
   });
 
@@ -336,11 +375,7 @@ describe('ToolExecutor', () => {
       const renderer = { writeToolCall: vi.fn(), writeToolResult: vi.fn() };
       const tool = makeTool({ name: 'read', execute: vi.fn().mockResolvedValue('content') });
       const executor = makeExecutor([tool], { renderer: renderer as never });
-      await executor.executeBatch(
-        [makeUse('read', { path: '/tmp/a' })],
-        makeCtx(),
-        'sequential',
-      );
+      await executor.executeBatch([makeUse('read', { path: '/tmp/a' })], makeCtx(), 'sequential');
       expect(renderer.writeToolCall).toHaveBeenCalledWith('read', expect.anything());
       expect(renderer.writeToolResult).toHaveBeenCalledWith('read', expect.anything(), false);
     });
@@ -355,11 +390,7 @@ describe('ToolExecutor', () => {
       const ctx = makeCtx();
       ctx.signal = ctrl.signal;
       // The error from aborted signal is caught and returned as error result
-      const result = await executor.executeBatch(
-        [makeUse('slow')],
-        ctx,
-        'sequential',
-      );
+      const result = await executor.executeBatch([makeUse('slow')], ctx, 'sequential');
       expect(tool.execute).not.toHaveBeenCalled();
       expect((result.outputs[0]!.result as ToolResultBlock).is_error).toBe(true);
     });

@@ -66,9 +66,7 @@ export class DefaultPathResolver implements PathResolver {
       // Render the input as a project-relative-looking string when possible
       // so the error message can flow through telemetry / LLM transcripts
       // without leaking the absolute project root layout.
-      const display = path.isAbsolute(absPath)
-        ? path.basename(absPath)
-        : absPath;
+      const display = path.isAbsolute(absPath) ? path.basename(absPath) : absPath;
       const err = new Error(`Path "${display}" resolves outside the project root`);
       // Keep the full information available to programmatic callers; only
       // the user-facing `message` is sanitized.

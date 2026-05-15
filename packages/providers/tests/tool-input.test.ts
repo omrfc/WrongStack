@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { parseToolInput } from '../src/_tool-input.js';
 
 describe('parseToolInput (provider stream → canonical Record<string, unknown>)', () => {

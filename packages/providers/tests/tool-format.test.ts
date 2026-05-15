@@ -1,9 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import { messagesToOpenAI, toolsToOpenAI } from '../src/tool-format/to-openai.js';
+import type { Message, Tool } from '@wrongstack/core';
+import { describe, expect, it } from 'vitest';
+import { contentFromAnthropic } from '../src/tool-format/from-anthropic.js';
 import { contentFromOpenAI } from '../src/tool-format/from-openai.js';
 import { toolsToAnthropic } from '../src/tool-format/to-anthropic.js';
-import { contentFromAnthropic } from '../src/tool-format/from-anthropic.js';
-import type { Message, Tool } from '@wrongstack/core';
+import { messagesToOpenAI, toolsToOpenAI } from '../src/tool-format/to-openai.js';
 
 describe('tool-format conversions', () => {
   it('toolsToAnthropic passes name and schema', () => {
@@ -37,9 +37,7 @@ describe('tool-format conversions', () => {
       },
       {
         role: 'user',
-        content: [
-          { type: 'tool_result', tool_use_id: 'u1', content: 'file contents' },
-        ],
+        content: [{ type: 'tool_result', tool_use_id: 'u1', content: 'file contents' }],
       },
     ];
     const out = messagesToOpenAI(undefined, messages);
@@ -259,9 +257,7 @@ describe('tool-format conversions', () => {
   });
 
   it('contentFromAnthropic defaults missing tool_use input to empty object', () => {
-    const blocks = contentFromAnthropic([
-      { type: 'tool_use', id: 'u', name: 'n' },
-    ]);
+    const blocks = contentFromAnthropic([{ type: 'tool_use', id: 'u', name: 'n' }]);
     expect(blocks[0]).toMatchObject({ type: 'tool_use', input: {} });
   });
 
@@ -317,10 +313,7 @@ describe('tool-format conversions', () => {
   it('contentFromAnthropic invokes onUnsupported for unknown block types', () => {
     const seen: string[] = [];
     const blocks = contentFromAnthropic(
-      [
-        { type: 'text', text: 'ok' },
-        { type: 'server_tool_use' },
-      ],
+      [{ type: 'text', text: 'ok' }, { type: 'server_tool_use' }],
       { onUnsupported: (t) => seen.push(t) },
     );
     expect(blocks).toHaveLength(1);
@@ -429,9 +422,7 @@ describe('tool-format conversions', () => {
       },
       { onParseFailure: (info) => failures.push(info) },
     );
-    expect(failures).toEqual([
-      { toolName: 'read', toolCallId: 'tc1', raw: 'not-json-at-all' },
-    ]);
+    expect(failures).toEqual([{ toolName: 'read', toolCallId: 'tc1', raw: 'not-json-at-all' }]);
     expect(content[0]).toMatchObject({ input: { __raw_arguments: 'not-json-at-all' } });
   });
 

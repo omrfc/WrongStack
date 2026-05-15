@@ -1,14 +1,23 @@
-import { describe, it, expect, vi } from 'vitest';
-import { runRepl } from '../src/repl.js';
-import type { Agent, RunResult, Context, SlashCommandRegistry, AttachmentStore, TokenCounter } from '@wrongstack/core';
+import type {
+  Agent,
+  AttachmentStore,
+  Context,
+  RunResult,
+  SlashCommandRegistry,
+  TokenCounter,
+} from '@wrongstack/core';
 import { AgentError } from '@wrongstack/core';
+import { describe, expect, it, vi } from 'vitest';
 import type { ReadlineInputReader } from '../src/input-reader.js';
 import type { TerminalRenderer } from '../src/renderer.js';
+import { runRepl } from '../src/repl.js';
 
 function makeFakeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
     ctx: {} as Context,
-    run: vi.fn(async (): Promise<RunResult> => ({ status: 'done', iterations: 1, finalText: 'ok' })),
+    run: vi.fn(
+      async (): Promise<RunResult> => ({ status: 'done', iterations: 1, finalText: 'ok' }),
+    ),
     ...overrides,
   } as unknown as Agent;
 }
@@ -118,11 +127,13 @@ describe('runRepl', () => {
   });
 
   it('runs agent with user input', async () => {
-    const run = vi.fn(async (): Promise<RunResult> => ({
-      status: 'done',
-      iterations: 2,
-      finalText: 'hello world',
-    }));
+    const run = vi.fn(
+      async (): Promise<RunResult> => ({
+        status: 'done',
+        iterations: 2,
+        finalText: 'hello world',
+      }),
+    );
     const agent = makeFakeAgent({ run });
     const renderer = makeFakeRenderer();
     const reader = makeFakeReader(['hello\n', '/exit\n']);
@@ -160,11 +171,13 @@ describe('runRepl', () => {
   });
 
   it('shows token stats after agent run when tokenCounter provided', async () => {
-    const run = vi.fn(async (): Promise<RunResult> => ({
-      status: 'done',
-      iterations: 1,
-      finalText: 'result',
-    }));
+    const run = vi.fn(
+      async (): Promise<RunResult> => ({
+        status: 'done',
+        iterations: 1,
+        finalText: 'result',
+      }),
+    );
     const agent = makeFakeAgent({ run });
     const renderer = makeFakeRenderer();
     const reader = makeFakeReader(['hello\n', '/exit\n']);
@@ -183,18 +196,20 @@ describe('runRepl', () => {
     });
 
     const writes = (renderer.write as ReturnType<typeof vi.fn>).mock.calls;
-    const statsLine = writes.find((c: unknown[]) =>
-      String(c[0] ?? '').includes('in:') && String(c[0] ?? '').includes('out:'),
+    const statsLine = writes.find(
+      (c: unknown[]) => String(c[0] ?? '').includes('in:') && String(c[0] ?? '').includes('out:'),
     );
     expect(statsLine).toBeDefined();
   });
 
   it('writes error on agent failure', async () => {
-    const run = vi.fn(async (): Promise<RunResult> => ({
-      status: 'failed',
-      error: new AgentError({ message: 'oops', code: 'AGENT_RUN_FAILED' }),
-      iterations: 1,
-    }));
+    const run = vi.fn(
+      async (): Promise<RunResult> => ({
+        status: 'failed',
+        error: new AgentError({ message: 'oops', code: 'AGENT_RUN_FAILED' }),
+        iterations: 1,
+      }),
+    );
     const agent = makeFakeAgent({ run });
     const renderer = makeFakeRenderer();
     const reader = makeFakeReader(['hello\n', '/exit\n']);
@@ -213,10 +228,12 @@ describe('runRepl', () => {
   });
 
   it('writes warning on aborted status', async () => {
-    const run = vi.fn(async (): Promise<RunResult> => ({
-      status: 'aborted',
-      iterations: 0,
-    }));
+    const run = vi.fn(
+      async (): Promise<RunResult> => ({
+        status: 'aborted',
+        iterations: 0,
+      }),
+    );
     const agent = makeFakeAgent({ run });
     const renderer = makeFakeRenderer();
     const reader = makeFakeReader(['hello\n', '/exit\n']);
@@ -235,10 +252,12 @@ describe('runRepl', () => {
   });
 
   it('writes warning on max_iterations', async () => {
-    const run = vi.fn(async (): Promise<RunResult> => ({
-      status: 'max_iterations',
-      iterations: 5,
-    }));
+    const run = vi.fn(
+      async (): Promise<RunResult> => ({
+        status: 'max_iterations',
+        iterations: 5,
+      }),
+    );
     const agent = makeFakeAgent({ run });
     const renderer = makeFakeRenderer();
     const reader = makeFakeReader(['hello\n', '/exit\n']);

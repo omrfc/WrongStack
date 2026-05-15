@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { searchFiles, invalidateFileCache } from '../src/file-search.js';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { invalidateFileCache, searchFiles } from '../src/file-search.js';
 
 let root: string;
 

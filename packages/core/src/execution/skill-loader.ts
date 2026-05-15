@@ -158,15 +158,20 @@ function parseDescription(raw: string): { trigger: string; scope: string[] } {
 
   // Extract first sentence as trigger
   const firstSentenceEnd = desc.indexOf('. ');
-  const trigger = firstSentenceEnd !== -1
-    ? desc.slice(0, firstSentenceEnd + 1).trim()
-    : desc.trim().split('\n')[0] ?? '';
+  const trigger =
+    firstSentenceEnd !== -1
+      ? desc.slice(0, firstSentenceEnd + 1).trim()
+      : (desc.trim().split('\n')[0] ?? '');
 
   // Extract scope from parenthetical: "Covers X, Y, and Z" or "for A, B, C"
   const scope: string[] = [];
   const coversMatch = /(?:covers|for|including)\s+([^.]+)/i.exec(desc);
   if (coversMatch) {
-    const items = coversMatch[1]!.replace(/[·•]/g, ',').split(',').map((s) => s.trim()).filter(Boolean);
+    const items = coversMatch[1]!
+      .replace(/[·•]/g, ',')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
     scope.push(...items);
   }
 

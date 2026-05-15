@@ -1,5 +1,5 @@
-import type { Tool } from '../types/tool.js';
 import { WrongStackError } from '../types/errors.js';
+import type { Tool } from '../types/tool.js';
 
 export class ToolRegistry {
   private readonly tools = new Map<string, { tool: Tool; owner: string }>();

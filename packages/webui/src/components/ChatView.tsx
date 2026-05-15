@@ -7,6 +7,7 @@ import {
   ArrowDown,
   ArrowUp,
   Bot,
+  Brain,
   Command,
   Cpu,
   FolderOpen,
@@ -35,6 +36,41 @@ function fmtTok(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1000) return `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k`;
   return String(n);
+}
+
+/**
+ * Soft, ephemeral chip rendered while the model is mid-reasoning. Reads the
+ * thinking buffer straight from the chat store so it stays in sync with the
+ * stream without re-rendering the full message list. Mounted only while the
+ * buffer is non-empty — the WS handler clears it on text/tool/response/run
+ * boundaries, so this naturally appears at the start of a turn and
+ * disappears the moment the model commits to user-visible output.
+ */
+function ThinkingBubble() {
+  const buf = useChatStore((s) => s.thinkingBuffer);
+  if (!buf) return null;
+  // Show only the last ~6 lines so the chip stays bounded while the model
+  // rambles. Whole buffer is in the store if we ever want a "show all"
+  // affordance, but for the ephemeral chip the tail is what feels live.
+  const tailLines = buf.split('\n').slice(-6);
+  const tail = tailLines.join('\n').trim();
+  return (
+    <div className="flex gap-3 animate-message">
+      <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-violet-500/10 text-violet-600 dark:text-violet-400 ring-2 ring-offset-2 ring-offset-background ring-violet-500/20">
+        <Brain className="h-4 w-4 animate-pulse" />
+      </div>
+      <div className="flex flex-col gap-1 max-w-[85%] min-w-0">
+        <span className="text-xs font-medium text-violet-600 dark:text-violet-400 px-1">
+          Thinking…
+        </span>
+        <div className="rounded-2xl rounded-bl-md px-3 py-2 bg-violet-500/[0.04] border border-violet-500/20 text-foreground/80">
+          <pre className="whitespace-pre-wrap break-words font-sans text-xs leading-relaxed italic max-h-32 overflow-hidden">
+            {tail || '…'}
+          </pre>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function ChatView() {
@@ -433,11 +469,15 @@ export function ChatView() {
           >
             {messages.length === 0 && !isLoading && <WelcomeScreen />}
 
-            {/* Group consecutive tool messages into one collapsible chip so a
-              run of 8 parallel reads doesn't eat half the viewport. Non-tool
-              messages render as before. The last group auto-opens while the
-              agent is still running so the user can watch tools land in
-              real time; older groups default to collapsed. */}
+            {/* Two-pass grouping.
+              Pass 1 — collapse consecutive tool messages into one ToolGroup
+                chip (so 8 parallel reads don't eat the viewport).
+              Pass 2 — bundle every run of non-user groups (assistant text +
+                tool chips) into a single "agent turn". Inside a turn, items
+                render with tight spacing and only the first item shows the
+                avatar; this stitches the text-tool-text-tool stream into one
+                continuous flow instead of stacking each message as its own
+                detached bubble. */}
             {(() => {
               type Group =
                 | { kind: 'msg'; message: ChatMessage; isFirst: boolean }
@@ -461,8 +501,27 @@ export function ChatView() {
                   });
                 }
               }
-              const lastGroupIdx = groups.length - 1;
-              // Track which date (local YYYY-MM-DD) the previous group was
+              // Bundle consecutive non-user groups into agent turns. User
+              // messages stay as their own standalone turn so the bubble
+              // alignment switches sides naturally.
+              type Turn =
+                | { kind: 'user'; message: ChatMessage; key: string }
+                | { kind: 'agent'; items: Group[]; key: string };
+              const turns: Turn[] = [];
+              for (const g of groups) {
+                if (g.kind === 'msg' && g.message.role === 'user') {
+                  turns.push({ kind: 'user', message: g.message, key: g.message.id });
+                  continue;
+                }
+                const last = turns[turns.length - 1];
+                if (last && last.kind === 'agent') {
+                  last.items.push(g);
+                } else {
+                  const key = g.kind === 'msg' ? g.message.id : g.key;
+                  turns.push({ kind: 'agent', items: [g], key });
+                }
+              }
+              // Track which date (local YYYY-MM-DD) the previous turn was
               // stamped with, so we can emit a soft divider between days. This
               // matters most after `session.resume` rehydrates a transcript
               // that spans yesterday → today; without dividers the user can't
@@ -485,10 +544,15 @@ export function ChatView() {
                   year: d.getFullYear() === today.getFullYear() ? undefined : 'numeric',
                 });
               };
+              const turnTs = (t: Turn): number => {
+                if (t.kind === 'user') return t.message.timestamp;
+                const first = t.items[0]!;
+                return first.kind === 'msg' ? first.message.timestamp : first.tools[0]!.timestamp;
+              };
               const out: ReactNode[] = [];
-              for (let idx = 0; idx < groups.length; idx++) {
-                const g = groups[idx]!;
-                const ts = g.kind === 'msg' ? g.message.timestamp : g.tools[0]!.timestamp;
+              for (let idx = 0; idx < turns.length; idx++) {
+                const t = turns[idx]!;
+                const ts = turnTs(t);
                 const day = dayKey(ts);
                 if (day !== prevDay) {
                   out.push(
@@ -503,20 +567,51 @@ export function ChatView() {
                   );
                   prevDay = day;
                 }
-                if (g.kind === 'msg') {
-                  out.push(
-                    <MessageBubble key={g.message.id} message={g.message} isFirst={g.isFirst} />,
-                  );
-                } else {
-                  const isLatestRunning =
-                    idx === lastGroupIdx &&
-                    isLoading &&
-                    g.tools.some((t) => t.toolResult === undefined);
-                  out.push(<ToolGroup key={g.key} tools={g.tools} defaultOpen={isLatestRunning} />);
+                if (t.kind === 'user') {
+                  out.push(<MessageBubble key={t.key} message={t.message} isFirst />);
+                  continue;
                 }
+                const isLastTurn = idx === turns.length - 1;
+                out.push(
+                  <div key={t.key} className={cn(compactMode ? 'space-y-1' : 'space-y-1.5')}>
+                    {t.items.map((g, gi) => {
+                      const continuation = gi > 0;
+                      if (g.kind === 'msg') {
+                        return (
+                          <MessageBubble
+                            key={g.message.id}
+                            message={g.message}
+                            isFirst={!continuation && g.isFirst}
+                            isContinuation={continuation}
+                          />
+                        );
+                      }
+                      const isLatestRunning =
+                        isLastTurn &&
+                        gi === t.items.length - 1 &&
+                        isLoading &&
+                        g.tools.some((tt) => tt.toolResult === undefined);
+                      return (
+                        <ToolGroup
+                          key={g.key}
+                          tools={g.tools}
+                          defaultOpen={isLatestRunning}
+                          isContinuation={continuation}
+                        />
+                      );
+                    })}
+                  </div>,
+                );
               }
               return out;
             })()}
+
+            {/* Transient extended-thinking bubble. Driven by
+              provider.thinking_delta events; cleared by the first text_delta /
+              tool.started / provider.response / run.result of the turn, so it
+              "appears and disappears" alongside the model's internal reasoning
+              and never persists into the transcript. */}
+            <ThinkingBubble />
 
             {/* Running status bubble — always present as the last message
               while the agent is not idle. Picks a label based on what the

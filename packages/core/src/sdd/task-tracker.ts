@@ -1,4 +1,10 @@
-import type { TaskNode, TaskGraph, TaskFilter, TaskSort, TaskProgress } from '../types/task-graph.js';
+import type {
+  TaskFilter,
+  TaskGraph,
+  TaskNode,
+  TaskProgress,
+  TaskSort,
+} from '../types/task-graph.js';
 import { computeTaskProgress } from '../types/task-graph.js';
 
 export interface TaskStore {
@@ -134,9 +140,12 @@ export class TaskTracker {
         if (filter.status?.length && !filter.status.includes(n.status)) return false;
         if (filter.priority?.length && !filter.priority.includes(n.priority)) return false;
         if (filter.type?.length && !filter.type.includes(n.type)) return false;
-        if (filter.assignee?.length && n.assignee && !filter.assignee.includes(n.assignee)) return false;
-        if (filter.tags?.length && n.tags && !n.tags.some((t) => filter.tags!.includes(t))) return false;
-        if (filter.specRequirementId && n.specRequirementId !== filter.specRequirementId) return false;
+        if (filter.assignee?.length && n.assignee && !filter.assignee.includes(n.assignee))
+          return false;
+        if (filter.tags?.length && n.tags && !n.tags.some((t) => filter.tags!.includes(t)))
+          return false;
+        if (filter.specRequirementId && n.specRequirementId !== filter.specRequirementId)
+          return false;
         return true;
       });
     }
@@ -181,9 +190,16 @@ export class TaskTracker {
   getProgress(): TaskProgress {
     if (!this.graph) {
       return {
-        total: 0, pending: 0, inProgress: 0, blocked: 0,
-        failed: 0, review: 0, completed: 0,
-        percentComplete: 0, estimatedHours: 0, actualHours: 0,
+        total: 0,
+        pending: 0,
+        inProgress: 0,
+        blocked: 0,
+        failed: 0,
+        review: 0,
+        completed: 0,
+        percentComplete: 0,
+        estimatedHours: 0,
+        actualHours: 0,
       };
     }
     return computeTaskProgress(this.graph);
@@ -241,23 +257,39 @@ export class TaskTracker {
     if (!this.graph) return;
     this.opts.store.saveGraph(this.graph).catch((err) => {
       if (this.opts.onPersistError) this.opts.onPersistError(err);
-      else console.warn('[task-tracker] saveGraph failed:', err instanceof Error ? err.message : String(err));
+      else
+        console.warn(
+          '[task-tracker] saveGraph failed:',
+          err instanceof Error ? err.message : String(err),
+        );
     });
   }
 }
 
 const PRIORITY_RANK: Record<TaskNode['priority'], number> = {
-  critical: 0, high: 1, medium: 2, low: 3,
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
 };
 const STATUS_RANK: Record<TaskNode['status'], number> = {
-  in_progress: 0, pending: 1, review: 2, blocked: 3, failed: 4, completed: 5,
+  in_progress: 0,
+  pending: 1,
+  review: 2,
+  blocked: 3,
+  failed: 4,
+  completed: 5,
 };
 
 function compareByField(a: TaskNode, b: TaskNode, field: TaskSort['field']): number {
   switch (field) {
-    case 'priority': return PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
-    case 'status': return STATUS_RANK[a.status] - STATUS_RANK[b.status];
-    case 'createdAt': return a.createdAt - b.createdAt;
-    case 'updatedAt': return a.updatedAt - b.updatedAt;
+    case 'priority':
+      return PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
+    case 'status':
+      return STATUS_RANK[a.status] - STATUS_RANK[b.status];
+    case 'createdAt':
+      return a.createdAt - b.createdAt;
+    case 'updatedAt':
+      return a.updatedAt - b.updatedAt;
   }
 }

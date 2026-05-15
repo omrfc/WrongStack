@@ -1,9 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { InMemoryMetricsSink } from '../../src/observability/metrics.js';
 import {
+  PROMETHEUS_CONTENT_TYPE,
   renderPrometheus,
   startMetricsServer,
-  PROMETHEUS_CONTENT_TYPE,
 } from '../../src/observability/prometheus.js';
 
 describe('Prometheus exposition (L3-C)', () => {
@@ -107,7 +107,10 @@ describe('/healthz endpoint (V2-C)', () => {
       const h = await fetch(`http://127.0.0.1:${handle.port}/healthz`);
       expect(h.status).toBe(200);
       expect(h.headers.get('content-type')).toContain('application/json');
-      const json = (await h.json()) as { status: string; checks: { name: string; status: string }[] };
+      const json = (await h.json()) as {
+        status: string;
+        checks: { name: string; status: string }[];
+      };
       expect(json.status).toBe('healthy');
       expect(json.checks).toHaveLength(1);
       expect(json.checks[0]!.name).toBe('session-store');

@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { installTool } from '../src/install.js';
 
-const makeCtx = () => ({ cwd: '/fake', tools: [], projectRoot: '/fake' } as any);
+const makeCtx = () => ({ cwd: '/fake', tools: [], projectRoot: '/fake' }) as any;
 const makeOpts = () => ({ signal: new AbortController().signal });
 
 describe('installTool', () => {

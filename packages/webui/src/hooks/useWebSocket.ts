@@ -232,12 +232,21 @@ function installHandlers(ws: WrongStackWebSocketClient): () => void {
 
   on('provider.text_delta', (msg) => {
     const payload = msg.payload as { text: string; messageId: string };
+    // Model has moved from internal reasoning to user-facing output — the
+    // transient thinking buffer is no longer current.
+    useChatStore.getState().clearThinking();
     let id = useChatStore.getState().currentAssistantMessageId;
     if (!id) {
       id = useChatStore.getState().addMessage({ role: 'assistant', content: '', streaming: true });
       useChatStore.getState().setCurrentAssistantMessage(id);
     }
     useChatStore.getState().appendToMessage(id, payload.text);
+  });
+
+  on('provider.thinking_delta', (msg) => {
+    const payload = msg.payload as { text: string };
+    if (!payload.text) return;
+    useChatStore.getState().appendThinking(payload.text);
   });
 
   on('tool.started', (msg) => {
@@ -255,6 +264,8 @@ function installHandlers(ws: WrongStackWebSocketClient): () => void {
       useChatStore.getState().setCurrentToolId(existing.id);
       return;
     }
+    // Model is acting, not still reasoning — drop the transient thinking.
+    useChatStore.getState().clearThinking();
     useChatStore.getState().setCurrentAssistantMessage(null);
     const id = useChatStore.getState().addMessage({
       role: 'tool',
@@ -371,6 +382,8 @@ function installHandlers(ws: WrongStackWebSocketClient): () => void {
       }
     }
     useChatStore.getState().setCurrentAssistantMessage(null);
+    // Belt-and-suspenders: response landed → no more thinking for this turn.
+    useChatStore.getState().clearThinking();
   });
 
   on('tool.confirm_needed', (msg) => {
@@ -398,6 +411,7 @@ function installHandlers(ws: WrongStackWebSocketClient): () => void {
     useSessionStore.getState().setIteration(null);
     useChatStore.getState().setLoading(false);
     useChatStore.getState().setCurrentAssistantMessage(null);
+    useChatStore.getState().clearThinking();
     // Compute a per-turn summary and attach it to the last assistant
     // message of this run, then clear runStart for the next turn. Tools
     // are counted by walking the chat backwards for tool bubbles whose

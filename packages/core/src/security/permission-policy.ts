@@ -1,10 +1,10 @@
 import * as fs from 'node:fs/promises';
 import type { Context } from '../core/context.js';
+import type { InputReader } from '../types/input-reader.js';
 import type { PermissionDecision, PermissionPolicy, TrustPolicy } from '../types/permission.js';
 import type { Tool } from '../types/tool.js';
-import type { InputReader } from '../types/input-reader.js';
-import { matchAny, matchGlob } from '../utils/glob-match.js';
 import { atomicWrite } from '../utils/atomic-write.js';
+import { matchAny, matchGlob } from '../utils/glob-match.js';
 import { safeParse } from '../utils/safe-json.js';
 
 export interface PermissionPolicyOptions {
@@ -113,11 +113,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     }
   }
 
-  private subjectFor(
-    toolName: string,
-    input: unknown,
-    subjectKey?: string,
-  ): string | undefined {
+  private subjectFor(toolName: string, input: unknown, subjectKey?: string): string | undefined {
     if (!input || typeof input !== 'object') return undefined;
     const obj = input as Record<string, unknown>;
 

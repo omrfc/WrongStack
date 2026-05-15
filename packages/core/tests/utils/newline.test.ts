@@ -1,9 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import {
-  detectNewlineStyle,
-  toStyle,
-  normalizeToLf,
-} from '../../src/utils/newline-normalize.js';
+import { describe, expect, it } from 'vitest';
+import { detectNewlineStyle, normalizeToLf, toStyle } from '../../src/utils/newline-normalize.js';
 
 describe('newline-normalize', () => {
   it('detects LF', () => {

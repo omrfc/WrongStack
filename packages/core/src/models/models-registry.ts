@@ -1,14 +1,14 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { atomicWrite } from '../utils/atomic-write.js';
 import type {
-  ModelsRegistry,
   ModelsDevPayload,
   ModelsDevProvider,
+  ModelsRegistry,
   ResolvedModel,
   ResolvedProvider,
   WireFamily,
 } from '../types/models-registry.js';
+import { atomicWrite } from '../utils/atomic-write.js';
 
 const DEFAULT_URL = 'https://models.dev/api.json';
 const DEFAULT_TTL_SECONDS = 24 * 3600;

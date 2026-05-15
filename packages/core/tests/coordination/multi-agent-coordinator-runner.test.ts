@@ -1,10 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DefaultMultiAgentCoordinator } from '../../src/coordination/multi-agent-coordinator.js';
 import { BudgetExceededError } from '../../src/coordination/subagent-budget.js';
-import type {
-  SubagentRunner,
-  TaskResult,
-} from '../../src/types/multi-agent.js';
+import type { SubagentRunner, TaskResult } from '../../src/types/multi-agent.js';
 
 const makeConfig = (overrides: Record<string, unknown> = {}) => ({
   coordinatorId: 'coord1',
@@ -15,7 +12,10 @@ const makeConfig = (overrides: Record<string, unknown> = {}) => ({
 
 function waitForDone(coord: DefaultMultiAgentCoordinator, timeoutMs = 2000): Promise<TaskResult[]> {
   return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`done not fired within ${timeoutMs}ms`)), timeoutMs);
+    const t = setTimeout(
+      () => reject(new Error(`done not fired within ${timeoutMs}ms`)),
+      timeoutMs,
+    );
     coord.on('done', (e: { results: TaskResult[] }) => {
       clearTimeout(t);
       resolve(e.results);
@@ -23,10 +23,17 @@ function waitForDone(coord: DefaultMultiAgentCoordinator, timeoutMs = 2000): Pro
   });
 }
 
-function waitForCompletions(coord: DefaultMultiAgentCoordinator, count: number, timeoutMs = 2000): Promise<TaskResult[]> {
+function waitForCompletions(
+  coord: DefaultMultiAgentCoordinator,
+  count: number,
+  timeoutMs = 2000,
+): Promise<TaskResult[]> {
   return new Promise((resolve, reject) => {
     const results: TaskResult[] = [];
-    const t = setTimeout(() => reject(new Error(`only ${results.length}/${count} completed`)), timeoutMs);
+    const t = setTimeout(
+      () => reject(new Error(`only ${results.length}/${count} completed`)),
+      timeoutMs,
+    );
     coord.on('task.completed', (e: { result: TaskResult }) => {
       results.push(e.result);
       if (results.length >= count) {
@@ -139,7 +146,9 @@ describe('DefaultMultiAgentCoordinator with runner', () => {
     // forcing the coordinator to pick distinct subagents.
     const signals: AbortSignal[] = [];
     let resolveAll!: () => void;
-    const allStarted = new Promise<void>((r) => { resolveAll = r; });
+    const allStarted = new Promise<void>((r) => {
+      resolveAll = r;
+    });
     let started = 0;
     const runner: SubagentRunner = async (_task, ctx) => {
       signals.push(ctx.signal);

@@ -36,9 +36,7 @@ export class DefaultConfigStore implements ConfigStore {
     // the caller passes a fully-formed sub-object. That matches the JSON
     // config user mental model (replace `tools.maxIterations` by passing
     // the whole `tools` block, or by patching `extensions.<name>`).
-    const next = deepFreeze(
-      structuredClone({ ...this.current, ...partial }),
-    ) as Readonly<Config>;
+    const next = deepFreeze(structuredClone({ ...this.current, ...partial })) as Readonly<Config>;
 
     if (next.version !== 1) {
       throw new Error(`ConfigStore.update: version must remain 1, got ${String(next.version)}`);

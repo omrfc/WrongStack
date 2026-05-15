@@ -71,7 +71,6 @@ function ToastItem({ entry }: { entry: ToastEntry }) {
         entry.variant === 'warn' && 'border-amber-500/40',
         entry.variant === 'success' && 'border-green-500/40',
       )}
-      role="status"
     >
       <Icon variant={entry.variant} />
       <div className="flex-1 min-w-0 whitespace-pre-wrap break-words leading-snug">

@@ -1,7 +1,7 @@
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type { SecretVault } from '../types/secret-vault.js';
 import { ENCRYPTED_PREFIX } from '../types/secret-vault.js';
 
@@ -150,7 +150,8 @@ function walk<T>(node: T, vault: SecretVault, transform: (s: string, key: string
  * Use a named field with `isSecret: false` annotation if you must opt out —
  * see `NON_SECRET_OVERRIDES` below.
  */
-const SECRET_KEY_PATTERN = /(?:apikey|api_key|authtoken|auth_token|bearer|secret|password|passwd|pwd|refreshtoken|refresh_token|sessionkey|session_key|access[_-]?token|private[_-]?key)/i;
+const SECRET_KEY_PATTERN =
+  /(?:apikey|api_key|authtoken|auth_token|bearer|secret|password|passwd|pwd|refreshtoken|refresh_token|sessionkey|session_key|access[_-]?token|private[_-]?key)/i;
 
 // Field names that contain the literal substring "key" but are not secrets.
 // Keep this list short; the substring rule itself is intentionally narrow.

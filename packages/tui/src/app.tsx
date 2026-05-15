@@ -918,6 +918,32 @@ export function App({
         entry: { kind: 'error', text: e.description },
       });
     });
+    // Per-iteration text flush. Without this, the entire run buffers all text
+    // deltas in the live tail box and dumps them into history as ONE assistant
+    // entry only after `agent.run()` returns. Tool results, in contrast, land
+    // in history immediately via `tool.executed` — so a multi-iteration turn
+    // renders as "all tools, then a wall of text" instead of the natural
+    // text → tool → text → tool interleaving that matches the actual stream.
+    //
+    // We hook `provider.response` (fires once per LLM call, both for
+    // intermediate `tool_use` stops and the final `end_turn`) and commit
+    // whatever has accumulated in `streamingTextRef` as an assistant history
+    // entry. The next iteration's deltas start a fresh buffer. `runBlocks`
+    // becomes purely the loop driver — it no longer adds the assistant entry,
+    // since the per-iteration flushes have already done so.
+    const offProvResp = events.on('provider.response', () => {
+      const text = streamingTextRef.current;
+      streamingTextRef.current = '';
+      pendingDeltaRef.current = '';
+      if (flushTimerRef.current) {
+        clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+      dispatch({ type: 'streamReset' });
+      if (text.trim()) {
+        dispatch({ type: 'addEntry', entry: { kind: 'assistant', text } });
+      }
+    });
     const offConfirmNeeded = events.on('tool.confirm_needed', (e) => {
       dispatch({
         type: 'addEntry',
@@ -946,6 +972,7 @@ export function App({
       offTool();
       offRetry();
       offProvErr();
+      offProvResp();
       offConfirmNeeded();
       if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
     };
@@ -1258,19 +1285,15 @@ export function App({
       const costBefore = tokenCounter?.estimateCost().total ?? 0;
       const result = await agent.run(blocks, { signal: ctrl.signal });
 
-      // Flush the streamed text into history as a single assistant entry.
-      // Read from the synchronous ref (which mirrors every delta as it
-      // arrives) rather than the React state — the latter trails by up to
-      // FLUSH_MS via the throttler, so its last chunk can land *after*
-      // run() returns and flash through the tail Box.
-      const streamed = streamingTextRef.current;
-      const text = result.status === 'done' && result.finalText ? result.finalText : streamed;
-      if (text?.trim()) {
-        dispatch({ type: 'addEntry', entry: { kind: 'assistant', text } });
+      // Per-iteration assistant text was already committed by the
+      // `provider.response` listener as each LLM call finished. Safety net:
+      // if anything is still lingering in the synchronous ref (e.g. an
+      // aborted run that never received a final provider.response), commit
+      // it now so partial output is preserved rather than silently dropped.
+      const lingering = streamingTextRef.current;
+      if (lingering.trim()) {
+        dispatch({ type: 'addEntry', entry: { kind: 'assistant', text: lingering } });
       }
-      // Clear every form of streaming state in lockstep — ref, pending
-      // throttle buffer, scheduled flush timer, and React state — so no
-      // late delta can resurrect a phantom tail into the next iteration.
       streamingTextRef.current = '';
       pendingDeltaRef.current = '';
       if (flushTimerRef.current) {

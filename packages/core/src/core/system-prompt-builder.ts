@@ -1,13 +1,17 @@
+import { spawn } from 'node:child_process';
+import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import * as fs from 'node:fs/promises';
-import { spawn } from 'node:child_process';
 import type { TextBlock } from '../types/blocks.js';
-import type { Tool } from '../types/tool.js';
-import type { SystemPromptBuilder, BuildContext, ModelCapabilities } from '../types/system-prompt.js';
 import type { MemoryStore } from '../types/memory.js';
-import type { SkillLoader } from '../types/skill.js';
 import type { ModeStore } from '../types/mode.js';
+import type { SkillLoader } from '../types/skill.js';
+import type {
+  BuildContext,
+  ModelCapabilities,
+  SystemPromptBuilder,
+} from '../types/system-prompt.js';
+import type { Tool } from '../types/tool.js';
 
 export const LAYER_1_IDENTITY = `You are WrongStack, a command-line AI coding agent.
 
@@ -199,7 +203,9 @@ summarize it, and let the tool result hold only the summary.`);
       lines.push(`- Mode: ${this.opts.modeId}`);
     }
     if (this.opts.modelCapabilities) {
-      lines.push(`- Context window: ${this.opts.modelCapabilities.maxContextTokens.toLocaleString()} tokens max`);
+      lines.push(
+        `- Context window: ${this.opts.modelCapabilities.maxContextTokens.toLocaleString()} tokens max`,
+      );
     }
     if (this.skillCache) {
       lines.push('', '## Skills in scope for this session', this.skillCache);

@@ -1,6 +1,6 @@
-import type { Provider, Request, Response } from '../types/provider.js';
-import type { ContentBlock, ThinkingBlock, ToolUseBlock } from '../types/blocks.js';
 import type { EventBus } from '../kernel/events.js';
+import type { ContentBlock, ThinkingBlock, ToolUseBlock } from '../types/blocks.js';
+import type { Provider, Request, Response } from '../types/provider.js';
 import type { Context } from './context.js';
 
 interface ThinkingEntry {
@@ -15,13 +15,14 @@ interface StreamingState {
   usage: Response['usage'];
   textBuffers: string[];
   currentTextIndex: number;
-  tools: Map<string, { name: string; partial: string; input?: unknown; providerMeta?: Record<string, unknown> }>;
+  tools: Map<
+    string,
+    { name: string; partial: string; input?: unknown; providerMeta?: Record<string, unknown> }
+  >;
   thinking: ThinkingEntry[];
   currentThinkingIndex: number;
   blockOrder: Array<
-    | { kind: 'text'; idx: number }
-    | { kind: 'tool'; id: string }
-    | { kind: 'thinking'; idx: number }
+    { kind: 'text'; idx: number } | { kind: 'tool'; id: string } | { kind: 'thinking'; idx: number }
   >;
 }
 
@@ -120,19 +121,20 @@ export function handleTextDelta(state: StreamingState, text: string): void {
     state.textBuffers.push('');
     state.blockOrder.push({ kind: 'text', idx: state.currentTextIndex });
   }
-  state.textBuffers[state.currentTextIndex] = (state.textBuffers[state.currentTextIndex] ?? '') + text;
+  state.textBuffers[state.currentTextIndex] =
+    (state.textBuffers[state.currentTextIndex] ?? '') + text;
 }
 
-export function handleToolUseStart(
-  state: StreamingState,
-  ev: { id: string; name: string },
-): void {
+export function handleToolUseStart(state: StreamingState, ev: { id: string; name: string }): void {
   state.currentTextIndex = -1;
   state.tools.set(ev.id, { name: ev.name, partial: '' });
   state.blockOrder.push({ kind: 'tool', id: ev.id });
 }
 
-export function handleToolUseInputDelta(state: StreamingState, ev: { id: string; partial: string }): void {
+export function handleToolUseInputDelta(
+  state: StreamingState,
+  ev: { id: string; partial: string },
+): void {
   const t = state.tools.get(ev.id);
   if (t) t.partial += ev.partial;
 }
@@ -248,6 +250,7 @@ export async function streamProviderToResponse(
           break;
         case 'thinking_delta':
           handleThinkingDelta(state, ev.text);
+          events.emit('provider.thinking_delta', { ctx, text: ev.text });
           break;
         case 'thinking_signature':
           handleThinkingSignature(state, ev.signature);

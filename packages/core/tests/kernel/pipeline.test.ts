@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { Pipeline } from '../../src/kernel/pipeline.js';
 
 describe('Pipeline', () => {
@@ -67,9 +67,9 @@ describe('Pipeline', () => {
 
   it('throws for unknown insertBefore target', () => {
     const p = new Pipeline<number>();
-    expect(() =>
-      p.insertBefore('missing', { name: 'x', handler: async (v, n) => n(v) }),
-    ).toThrow(/not found/);
+    expect(() => p.insertBefore('missing', { name: 'x', handler: async (v, n) => n(v) })).toThrow(
+      /not found/,
+    );
   });
 
   it('propagates middleware throw', async () => {
@@ -142,7 +142,12 @@ describe('Pipeline', () => {
     it('rethrows when the handler returns "rethrow"', async () => {
       const p = new Pipeline<number>();
       p.use({ name: 'good', handler: async (v, next) => next(v + 1) });
-      p.use({ name: 'kaboom', handler: async () => { throw new Error('x'); } });
+      p.use({
+        name: 'kaboom',
+        handler: async () => {
+          throw new Error('x');
+        },
+      });
       p.setErrorHandler(() => 'rethrow');
       await expect(p.run(0)).rejects.toThrow('x');
     });

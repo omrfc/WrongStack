@@ -1,15 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {
-  DefaultSecretVault,
-  type ModelsRegistry,
-  type ResolvedProvider,
-} from '@wrongstack/core';
-import { runAuthDirect, runAuthMenu, type AuthMenuDeps } from '../src/auth-menu.js';
-import type { TerminalRenderer } from '../src/renderer.js';
+import { DefaultSecretVault, type ModelsRegistry, type ResolvedProvider } from '@wrongstack/core';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { type AuthMenuDeps, runAuthDirect, runAuthMenu } from '../src/auth-menu.js';
 import type { ReadlineInputReader } from '../src/input-reader.js';
+import type { TerminalRenderer } from '../src/renderer.js';
 
 /**
  * V0-C: `auth-menu` is the 776-line entry point for every API-key
@@ -63,7 +59,9 @@ function makeReader(lines: string[], secrets: string[] = []): ReadlineInputReade
 
 function makeModelsRegistry(catalog: Record<string, Partial<ResolvedProvider>>): ModelsRegistry {
   return {
-    getProvider: vi.fn(async (id: string) => (catalog[id] ? (catalog[id] as ResolvedProvider) : undefined)),
+    getProvider: vi.fn(async (id: string) =>
+      catalog[id] ? (catalog[id] as ResolvedProvider) : undefined,
+    ),
     listProviders: vi.fn(async () => Object.values(catalog) as ResolvedProvider[]),
     suggestModel: vi.fn(async () => undefined),
     refresh: vi.fn(async () => undefined),
@@ -159,11 +157,11 @@ describe('runAuthDirect', () => {
     await runAuthDirect(deps, { providerId: 'anthropic' });
 
     const raw = JSON.parse(await fs.readFile(configPath, 'utf8'));
-    const labels = (raw.providers.anthropic.apiKeys as { label: string }[]).map((k) => k.label).sort();
+    const labels = (raw.providers.anthropic.apiKeys as { label: string }[])
+      .map((k) => k.label)
+      .sort();
     expect(labels).toEqual(['default', 'default-2', 'default-3']);
-    expect(deps.renderer.writeInfo).toHaveBeenCalledWith(
-      expect.stringMatching(/Label collided/),
-    );
+    expect(deps.renderer.writeInfo).toHaveBeenCalledWith(expect.stringMatching(/Label collided/));
   });
 
   it('empty secret input returns exit 1', async () => {
@@ -261,9 +259,7 @@ describe('runAuthMenu', () => {
           openai: {
             type: 'openai',
             family: 'openai',
-            apiKeys: [
-              { label: 'default', apiKey: 'plain', createdAt: '2025-01-01T00:00:00.000Z' },
-            ],
+            apiKeys: [{ label: 'default', apiKey: 'plain', createdAt: '2025-01-01T00:00:00.000Z' }],
             activeKey: 'default',
           },
         },
@@ -424,7 +420,16 @@ describe('runAuthMenu', () => {
       // c -> custom flow; type=local-llama; family=openai-compatible; baseUrl;
       // models empty; envVars empty; label empty (default); then q
       scripted: {
-        lines: ['c', 'local-llama', 'openai-compatible', 'http://localhost:11434/v1', '', '', '', 'q'],
+        lines: [
+          'c',
+          'local-llama',
+          'openai-compatible',
+          'http://localhost:11434/v1',
+          '',
+          '',
+          '',
+          'q',
+        ],
         secrets: ['llama-key'],
       },
     });
@@ -440,8 +445,6 @@ describe('runAuthMenu', () => {
       scripted: { lines: ['c', 'local-llama', 'bogus-family', 'q'] },
     });
     await runAuthMenu(deps);
-    expect(deps.renderer.writeError).toHaveBeenCalledWith(
-      expect.stringMatching(/Invalid family/),
-    );
+    expect(deps.renderer.writeError).toHaveBeenCalledWith(expect.stringMatching(/Invalid family/));
   });
 });

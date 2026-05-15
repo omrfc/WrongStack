@@ -1,15 +1,15 @@
+import type { ToolCallPipelinePayload } from '../core/agent.js';
+import type { Context } from '../core/context.js';
 import type { Container } from '../kernel/container.js';
 import type { EventBus, EventName, Listener } from '../kernel/events.js';
 import type { ReadonlyPipeline } from '../kernel/pipeline.js';
-import type { Tool, JSONSchema } from './tool.js';
-import type { Provider, Request, Response } from './provider.js';
+import type { TextBlock } from './blocks.js';
 import type { Config } from './config.js';
 import type { Logger } from './logger.js';
-import type { SlashCommand } from './slash-command.js';
-import type { TextBlock } from './blocks.js';
-import type { Context } from '../core/context.js';
-import type { ToolCallPipelinePayload } from '../core/agent.js';
 import type { WireFamily } from './models-registry.js';
+import type { Provider, Request, Response } from './provider.js';
+import type { SlashCommand } from './slash-command.js';
+import type { JSONSchema, Tool } from './tool.js';
 
 export interface ToolRegistryView {
   register(t: Tool): void;
@@ -48,7 +48,11 @@ export interface PluginPipelines {
   request: ReadonlyPipeline<Request>;
   response: ReadonlyPipeline<Response>;
   toolCall: ReadonlyPipeline<ToolCallPipelinePayload>;
-  userInput: ReadonlyPipeline<{ content: import('./blocks.js').ContentBlock[]; text: string; ctx: Context }>;
+  userInput: ReadonlyPipeline<{
+    content: import('./blocks.js').ContentBlock[];
+    text: string;
+    ctx: Context;
+  }>;
   assistantOutput: ReadonlyPipeline<TextBlock>;
   contextWindow: ReadonlyPipeline<Context>;
   // biome-ignore lint/suspicious/noExplicitAny: plugins may extend with custom pipelines

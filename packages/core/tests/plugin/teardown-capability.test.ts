@@ -1,7 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { DefaultLogger } from '../../src/infrastructure/logger.js';
 import { loadPlugins, unloadPlugins } from '../../src/plugin/loader.js';
 import type { Plugin, PluginAPI } from '../../src/types/plugin.js';
-import { DefaultLogger } from '../../src/infrastructure/logger.js';
 
 const log = new DefaultLogger({ level: 'error' });
 
@@ -52,8 +52,19 @@ describe('unloadPlugins', () => {
   it('calls teardown on each loaded plugin in reverse order', async () => {
     const order: string[] = [];
     const plugins = [
-      p({ name: 'a', teardown: async () => { order.push('a'); } }),
-      p({ name: 'b', teardown: async () => { order.push('b'); }, dependsOn: ['a'] }),
+      p({
+        name: 'a',
+        teardown: async () => {
+          order.push('a');
+        },
+      }),
+      p({
+        name: 'b',
+        teardown: async () => {
+          order.push('b');
+        },
+        dependsOn: ['a'],
+      }),
     ];
     const api = makeMockApi();
     const { loaded } = await loadPlugins(plugins, {
@@ -81,9 +92,26 @@ describe('unloadPlugins', () => {
   it('swallows teardown errors and continues with siblings', async () => {
     const calls: string[] = [];
     const plugins = [
-      p({ name: 'good1', teardown: async () => { calls.push('good1'); } }),
-      p({ name: 'bad', teardown: async () => { calls.push('bad'); throw new Error('boom'); } }),
-      p({ name: 'good2', teardown: async () => { calls.push('good2'); }, dependsOn: ['good1'] }),
+      p({
+        name: 'good1',
+        teardown: async () => {
+          calls.push('good1');
+        },
+      }),
+      p({
+        name: 'bad',
+        teardown: async () => {
+          calls.push('bad');
+          throw new Error('boom');
+        },
+      }),
+      p({
+        name: 'good2',
+        teardown: async () => {
+          calls.push('good2');
+        },
+        dependsOn: ['good1'],
+      }),
     ];
     const api = makeMockApi();
     const { loaded } = await loadPlugins(plugins, { apiFactory: () => api, log });
@@ -102,11 +130,15 @@ describe('Plugin capability runtime check', () => {
     const api = makeMockApi();
 
     await loadPlugins(
-      [p({
-        name: 'sneaky',
-        capabilities: { tools: false },
-        setup: (a) => { a.tools.register({ name: 'rogue' } as never); },
-      })],
+      [
+        p({
+          name: 'sneaky',
+          capabilities: { tools: false },
+          setup: (a) => {
+            a.tools.register({ name: 'rogue' } as never);
+          },
+        }),
+      ],
       { apiFactory: () => api, log: customLog },
     );
 
@@ -123,11 +155,15 @@ describe('Plugin capability runtime check', () => {
     const api = makeMockApi();
 
     await loadPlugins(
-      [p({
-        name: 'honest',
-        capabilities: { tools: true },
-        setup: (a) => { a.tools.register({ name: 'ok' } as never); },
-      })],
+      [
+        p({
+          name: 'honest',
+          capabilities: { tools: true },
+          setup: (a) => {
+            a.tools.register({ name: 'ok' } as never);
+          },
+        }),
+      ],
       { apiFactory: () => api, log: customLog },
     );
 
@@ -140,11 +176,15 @@ describe('Plugin capability runtime check', () => {
     const api = makeMockApi();
 
     await loadPlugins(
-      [p({
-        name: 'silent',
-        // No capabilities field at all
-        setup: (a) => { a.tools.register({ name: 'unannounced' } as never); },
-      })],
+      [
+        p({
+          name: 'silent',
+          // No capabilities field at all
+          setup: (a) => {
+            a.tools.register({ name: 'unannounced' } as never);
+          },
+        }),
+      ],
       { apiFactory: () => api, log: customLog },
     );
 
@@ -154,26 +194,34 @@ describe('Plugin capability runtime check', () => {
   it('still completes the underlying registration even when warning fires', async () => {
     const api = makeMockApi();
     await loadPlugins(
-      [p({
-        name: 'sneaky',
-        capabilities: { tools: false },
-        setup: (a) => { a.tools.register({ name: 'gets-registered' } as never); },
-      })],
+      [
+        p({
+          name: 'sneaky',
+          capabilities: { tools: false },
+          setup: (a) => {
+            a.tools.register({ name: 'gets-registered' } as never);
+          },
+        }),
+      ],
       { apiFactory: () => api, log: makeStubLog(vi.fn()) },
     );
     // Plugin still gets its work done; we only flag the discrepancy
-    expect((api.tools.register as ReturnType<typeof vi.fn>)).toHaveBeenCalled();
+    expect(api.tools.register as ReturnType<typeof vi.fn>).toHaveBeenCalled();
   });
 
   it('warns on slashCommands.register too', async () => {
     const warnSpy = vi.fn();
     const api = makeMockApi();
     await loadPlugins(
-      [p({
-        name: 'sneaky',
-        capabilities: { slashCommands: false },
-        setup: (a) => { a.slashCommands.register({ name: 'rogue-cmd' } as never); },
-      })],
+      [
+        p({
+          name: 'sneaky',
+          capabilities: { slashCommands: false },
+          setup: (a) => {
+            a.slashCommands.register({ name: 'rogue-cmd' } as never);
+          },
+        }),
+      ],
       { apiFactory: () => api, log: makeStubLog(warnSpy) },
     );
     expect(warnSpy.mock.calls[0]![0]).toMatch(/slashCommands/);
@@ -187,12 +235,16 @@ describe('Plugin capability runtime check', () => {
         p({
           name: 'p1',
           capabilities: { providers: false },
-          setup: (a) => { a.providers.register({ type: 'fake' } as never); },
+          setup: (a) => {
+            a.providers.register({ type: 'fake' } as never);
+          },
         }),
         p({
           name: 'p2',
           capabilities: { mcp: false },
-          setup: async (a) => { await a.mcp.start({ name: 'svc' }); },
+          setup: async (a) => {
+            await a.mcp.start({ name: 'svc' });
+          },
         }),
       ],
       { apiFactory: () => api, log: makeStubLog(warnSpy) },

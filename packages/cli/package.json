@@ -3,17 +3,7 @@
   "version": "0.1.9",
   "license": "MIT",
   "description": "WrongStack CLI — terminal AI coding agent with provider catalog from models.dev. Provides `wrongstack` and `wstack` binaries.",
-  "keywords": [
-    "ai",
-    "agent",
-    "cli",
-    "llm",
-    "anthropic",
-    "openai",
-    "gemini",
-    "coding-agent",
-    "mcp"
-  ],
+  "keywords": ["ai", "agent", "cli", "llm", "anthropic", "openai", "gemini", "coding-agent", "mcp"],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/WrongStack/WrongStack.git",
@@ -35,9 +25,7 @@
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",

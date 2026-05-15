@@ -559,13 +559,8 @@ export class StreamableHTTPTransport {
     if (this.state === 'disconnected') return;
     this.state = 'disconnected';
     this.abortController?.abort();
-    for (const cb of this.disconnectHandlers) {
-      try {
-        cb();
-      } catch {
-        /* ignore */
-      }
-    }
+    // Intentionally do NOT fire disconnect handlers — those trigger
+    // reconnection in the registry, which would fight an explicit close().
     this.disconnectHandlers = [];
   }
 }

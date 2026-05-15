@@ -1,23 +1,23 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Agent, createDefaultPipelines } from '../../src/core/agent.js';
+import { Context } from '../../src/core/context.js';
+import { DefaultErrorHandler } from '../../src/execution/error-handler.js';
+import { DefaultRetryPolicy } from '../../src/execution/retry-policy.js';
+import { DefaultLogger } from '../../src/infrastructure/logger.js';
+import { DefaultTokenCounter } from '../../src/infrastructure/token-counter.js';
 import { Container } from '../../src/kernel/container.js';
 import { EventBus } from '../../src/kernel/events.js';
 import { TOKENS } from '../../src/kernel/tokens.js';
-import { ToolRegistry } from '../../src/registry/tool-registry.js';
 import { ProviderRegistry } from '../../src/registry/provider-registry.js';
-import { Agent, createDefaultPipelines } from '../../src/core/agent.js';
-import { Context } from '../../src/core/context.js';
-import { DefaultLogger } from '../../src/infrastructure/logger.js';
-import { DefaultRetryPolicy } from '../../src/execution/retry-policy.js';
-import { DefaultErrorHandler } from '../../src/execution/error-handler.js';
-import { DefaultSecretScrubber } from '../../src/security/secret-scrubber.js';
-import { DefaultTokenCounter } from '../../src/infrastructure/token-counter.js';
+import { ToolRegistry } from '../../src/registry/tool-registry.js';
 import { DefaultPermissionPolicy } from '../../src/security/permission-policy.js';
+import { DefaultSecretScrubber } from '../../src/security/secret-scrubber.js';
 import { DefaultSessionStore } from '../../src/storage/session-store.js';
+import type { Span, Tracer } from '../../src/types/observability.js';
 import type { Tool } from '../../src/types/tool.js';
-import type { Tracer, Span } from '../../src/types/observability.js';
 import { MockProvider } from '../helpers/mock-provider.js';
 
 interface SpanRecord {
@@ -148,9 +148,7 @@ describe('Agent + ToolExecutor tracing (L1-C)', () => {
     };
     const provider = new MockProvider([
       {
-        content: [
-          { type: 'tool_use', id: 'u1', name: 'echo', input: { text: 'pong' } },
-        ],
+        content: [{ type: 'tool_use', id: 'u1', name: 'echo', input: { text: 'pong' } }],
         stopReason: 'tool_use',
       },
       { content: [{ type: 'text', text: 'done' }], stopReason: 'end_turn' },

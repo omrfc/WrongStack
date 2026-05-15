@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
 import type { Context } from '@wrongstack/core';
 
 export interface Sandbox {
@@ -36,16 +36,17 @@ export async function mkSandbox(): Promise<Sandbox> {
     },
     messages,
   } as unknown as Context;
-  (ctx as unknown as { state: Pick<Context['state'], 'replaceMessages' | 'replaceTodos'> }).state = {
-    replaceMessages(next) {
-      messages.length = 0;
-      messages.splice(0, 0, ...next);
-    },
-    replaceTodos(next) {
-      todos.length = 0;
-      todos.splice(0, 0, ...next);
-    },
-  };
+  (ctx as unknown as { state: Pick<Context['state'], 'replaceMessages' | 'replaceTodos'> }).state =
+    {
+      replaceMessages(next) {
+        messages.length = 0;
+        messages.splice(0, 0, ...next);
+      },
+      replaceTodos(next) {
+        todos.length = 0;
+        todos.splice(0, 0, ...next);
+      },
+    };
   return {
     dir,
     ctx,

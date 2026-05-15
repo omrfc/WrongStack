@@ -147,9 +147,15 @@ export class Pipeline<T> {
     // `list()` returns a frozen snapshot to prevent external mutation of the chain.
     const self = this;
     return Object.freeze({
-      get size() { return self.size(); },
-      list() { return Object.freeze(self.list()); },
-      run(input: T) { return self.run(input); },
+      get size() {
+        return self.size();
+      },
+      list() {
+        return Object.freeze(self.list());
+      },
+      run(input: T) {
+        return self.run(input);
+      },
     });
   }
 

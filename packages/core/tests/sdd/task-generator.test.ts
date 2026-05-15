@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Specification, SpecRequirement } from '../../src/types/spec.js';
-import type { TaskNode, TaskGraph, TaskStore } from '../../src/types/task-graph.js';
-import { TaskGenerator, DefaultTaskStore } from '../../src/sdd/task-generator.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { DefaultTaskStore, TaskGenerator } from '../../src/sdd/task-generator.js';
 import { TaskTracker } from '../../src/sdd/task-tracker.js';
+import type { SpecRequirement, Specification } from '../../src/types/spec.js';
+import type { TaskGraph, TaskNode, TaskStore } from '../../src/types/task-graph.js';
 
 function makeRequirement(overrides: Partial<SpecRequirement> = {}): SpecRequirement {
   return {
@@ -44,15 +44,21 @@ function makeFakeStore(): TaskStore & { graphs: Map<string, TaskGraph> } {
     },
     async loadGraph(id: string) {
       const g = graphs.get(id);
-      return g ? {
-        ...g,
-        nodes: new Map(g.nodes),
-        edges: [...g.edges],
-        rootNodes: [...g.rootNodes],
-      } : null;
+      return g
+        ? {
+            ...g,
+            nodes: new Map(g.nodes),
+            edges: [...g.edges],
+            rootNodes: [...g.rootNodes],
+          }
+        : null;
     },
     async listGraphs() {
-      return Array.from(graphs.values()).map((g) => ({ id: g.id, title: g.title, updatedAt: g.updatedAt }));
+      return Array.from(graphs.values()).map((g) => ({
+        id: g.id,
+        title: g.title,
+        updatedAt: g.updatedAt,
+      }));
     },
     async deleteGraph(id: string) {
       graphs.delete(id);
@@ -139,8 +145,22 @@ describe('TaskGenerator', () => {
     it('adds API tasks when spec has apiEndpoints', async () => {
       const spec = makeSpec({
         apiEndpoints: [
-          { method: 'GET', path: '/users', description: 'Get users', auth: false, request: undefined, response: {} },
-          { method: 'POST', path: '/users', description: 'Create user', auth: true, request: {}, response: {} },
+          {
+            method: 'GET',
+            path: '/users',
+            description: 'Get users',
+            auth: false,
+            request: undefined,
+            response: {},
+          },
+          {
+            method: 'POST',
+            path: '/users',
+            description: 'Create user',
+            auth: true,
+            request: {},
+            response: {},
+          },
         ],
       });
       await generator.generateFromSpec(spec);
@@ -154,8 +174,22 @@ describe('TaskGenerator', () => {
     it('estimates extra hours for authenticated endpoints', async () => {
       const spec = makeSpec({
         apiEndpoints: [
-          { method: 'GET', path: '/public', description: 'Public', auth: false, request: undefined, response: {} },
-          { method: 'GET', path: '/private', description: 'Private', auth: true, request: { type: 'object' as any, fields: [] }, response: {} },
+          {
+            method: 'GET',
+            path: '/public',
+            description: 'Public',
+            auth: false,
+            request: undefined,
+            response: {},
+          },
+          {
+            method: 'GET',
+            path: '/private',
+            description: 'Private',
+            auth: true,
+            request: { type: 'object' as any, fields: [] },
+            response: {},
+          },
         ],
       });
       await generator.generateFromSpec(spec);
@@ -245,7 +279,13 @@ describe('TaskGenerator', () => {
     it('returns early if task has no specRequirementId', async () => {
       const spec = makeSpec({ requirements: [] });
       await tracker.createGraph('s', 't');
-      const taskId = tracker.addNode({ title: 'Task', description: '', type: 'feature', priority: 'high', status: 'pending' }).id;
+      const taskId = tracker.addNode({
+        title: 'Task',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+      }).id;
       await generator.generateSubtasks(taskId, spec);
       // Should not throw and not add any nodes
       const children = tracker.getChildren(taskId);
@@ -255,7 +295,14 @@ describe('TaskGenerator', () => {
     it('returns early if requirement not found in spec', async () => {
       const spec = makeSpec({ requirements: [] });
       await tracker.createGraph('s', 't');
-      const taskId = tracker.addNode({ title: 'Task', description: '', type: 'feature', priority: 'high', status: 'pending', specRequirementId: 'NONEXISTENT' }).id;
+      const taskId = tracker.addNode({
+        title: 'Task',
+        description: '',
+        type: 'feature',
+        priority: 'high',
+        status: 'pending',
+        specRequirementId: 'NONEXISTENT',
+      }).id;
       await generator.generateSubtasks(taskId, spec);
       // Should not throw
     });
@@ -339,7 +386,21 @@ describe('DefaultTaskStore', () => {
         id: 'g1',
         specId: 's1',
         title: 'Test Graph',
-        nodes: new Map([['n1', { id: 'n1', title: 'Node', description: '', type: 'feature', priority: 'high', status: 'pending', createdAt: 0, updatedAt: 0 }]]),
+        nodes: new Map([
+          [
+            'n1',
+            {
+              id: 'n1',
+              title: 'Node',
+              description: '',
+              type: 'feature',
+              priority: 'high',
+              status: 'pending',
+              createdAt: 0,
+              updatedAt: 0,
+            },
+          ],
+        ]),
         edges: [],
         rootNodes: [],
         createdAt: Date.now(),
@@ -383,8 +444,26 @@ describe('DefaultTaskStore', () => {
     });
 
     it('returns all saved graphs', async () => {
-      const g1: TaskGraph = { id: 'g1', specId: 's1', title: 'Graph 1', nodes: new Map(), edges: [], rootNodes: [], createdAt: 0, updatedAt: 0 };
-      const g2: TaskGraph = { id: 'g2', specId: 's1', title: 'Graph 2', nodes: new Map(), edges: [], rootNodes: [], createdAt: 0, updatedAt: 0 };
+      const g1: TaskGraph = {
+        id: 'g1',
+        specId: 's1',
+        title: 'Graph 1',
+        nodes: new Map(),
+        edges: [],
+        rootNodes: [],
+        createdAt: 0,
+        updatedAt: 0,
+      };
+      const g2: TaskGraph = {
+        id: 'g2',
+        specId: 's1',
+        title: 'Graph 2',
+        nodes: new Map(),
+        edges: [],
+        rootNodes: [],
+        createdAt: 0,
+        updatedAt: 0,
+      };
       await store.saveGraph(g1);
       await store.saveGraph(g2);
       const result = await store.listGraphs();
@@ -396,7 +475,16 @@ describe('DefaultTaskStore', () => {
 
   describe('deleteGraph', () => {
     it('deletes existing graph', async () => {
-      const graph: TaskGraph = { id: 'g1', specId: 's1', title: 'Test', nodes: new Map(), edges: [], rootNodes: [], createdAt: 0, updatedAt: 0 };
+      const graph: TaskGraph = {
+        id: 'g1',
+        specId: 's1',
+        title: 'Test',
+        nodes: new Map(),
+        edges: [],
+        rootNodes: [],
+        createdAt: 0,
+        updatedAt: 0,
+      };
       await store.saveGraph(graph);
       await store.deleteGraph('g1');
       const loaded = await store.loadGraph('g1');

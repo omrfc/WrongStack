@@ -1,8 +1,12 @@
-import type { Compactor, CompactReport } from '../types/compactor.js';
 import type { Context } from '../core/context.js';
 import type { ContentBlock, ToolResultBlock } from '../types/blocks.js';
+import type { CompactReport, Compactor } from '../types/compactor.js';
 import type { Message } from '../types/messages.js';
-import { estimateToolInputTokens, estimateToolResultTokens, estimateTextTokens } from '../utils/token-estimate.js';
+import {
+  estimateTextTokens,
+  estimateToolInputTokens,
+  estimateToolResultTokens,
+} from '../utils/token-estimate.js';
 
 export interface CompactorOptions {
   preserveK?: number;
@@ -82,7 +86,10 @@ export class HybridCompactor implements Compactor {
         return elided;
       });
       // Check whether any block actually changed by reference equality
-      if (newContent.length === msg.content.length && newContent.every((b, idx) => b === msg.content[idx])) {
+      if (
+        newContent.length === msg.content.length &&
+        newContent.every((b, idx) => b === msg.content[idx])
+      ) {
         nextMessages[i] = msg;
       } else {
         nextMessages[i] = { ...msg, content: newContent };

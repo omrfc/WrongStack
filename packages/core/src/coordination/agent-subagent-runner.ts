@@ -60,32 +60,52 @@ export function makeAgentSubagentRunner(opts: AgentRunnerOptions): SubagentRunne
     // recordToolCall/recordUsage so the budget can short-circuit the run by
     // aborting the controller — the agent then unwinds cooperatively.
     const aborter = new AbortController();
+    let budgetError: BudgetExceededError | null = null;
+
     const onBudgetError = (err: unknown) => {
-      if (err instanceof BudgetExceededError) {
-        aborter.abort();
-        budgetError = err;
-      } else {
-        throw err;
+      // Any error from a budget operation (BudgetExceededError, TypeError from
+      // a malformed event payload, etc.) must abort the run. EventBus.emit()
+      // swallows listener throws, so we can't re-throw — set budgetError and
+      // abort the controller so the agent unwinds cooperatively.
+      aborter.abort();
+      budgetError =
+        err instanceof BudgetExceededError
+          ? err
+          : new BudgetExceededError(
+              'tool_calls',
+              0,
+              0,
+            );
+      // Attach the real error detail so the task result surfaces
+      // something actionable instead of a generic budget message.
+      if (budgetError !== err && err instanceof Error) {
+        budgetError.message += ` (caused by: ${err.message})`;
       }
     };
-
-    let budgetError: BudgetExceededError | null = null;
 
     const unsub: Array<() => void> = [];
     unsub.push(
       events.on('tool.started', () => {
-        try { ctx.budget.recordToolCall(); }
-        catch (e) { onBudgetError(e); }
+        try {
+          ctx.budget.recordToolCall();
+        } catch (e) {
+          onBudgetError(e);
+        }
       }),
       events.on('provider.response', (e) => {
-        try { ctx.budget.recordUsage(e.usage); }
-        catch (e2) { onBudgetError(e2); }
+        try {
+          ctx.budget.recordUsage(e.usage);
+        } catch (e2) {
+          onBudgetError(e2);
+        }
       }),
       events.on('iteration.started', () => {
         try {
           ctx.budget.recordIteration();
           ctx.budget.checkTimeout();
-        } catch (e) { onBudgetError(e); }
+        } catch (e) {
+          onBudgetError(e);
+        }
       }),
     );
 

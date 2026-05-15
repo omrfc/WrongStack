@@ -1,12 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   Context,
+  ConversationState,
   DefaultTokenCounter,
   extractRunEnv,
-  ConversationState,
   wrapAsState,
 } from '../../src/index.js';
-import type { Provider, SessionWriter, TextBlock, Message } from '../../src/index.js';
+import type { Message, Provider, SessionWriter, TextBlock } from '../../src/index.js';
 
 const fakeProvider = {} as Provider;
 const fakeSession: SessionWriter = {
@@ -196,7 +196,9 @@ describe('ConversationState — write API and onChange', () => {
   it('throwing listener does not block others', () => {
     const state = wrapAsState(mkContext());
     const good = vi.fn();
-    state.onChange(() => { throw new Error('listener crash'); });
+    state.onChange(() => {
+      throw new Error('listener crash');
+    });
     state.onChange(good);
 
     expect(() => state.appendMessage(userMessage('m'))).not.toThrow();

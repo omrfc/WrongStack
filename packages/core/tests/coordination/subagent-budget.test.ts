@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { SubagentBudget, BudgetExceededError } from '../../src/coordination/subagent-budget.js';
+import { describe, expect, it } from 'vitest';
+import { BudgetExceededError, SubagentBudget } from '../../src/coordination/subagent-budget.js';
 
 describe('SubagentBudget', () => {
   it('records iterations and throws when over limit', () => {

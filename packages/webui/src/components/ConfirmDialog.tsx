@@ -104,6 +104,7 @@ export function ConfirmDialog() {
   // Keyboard shortcuts inside the dialog: y = yes, n = no, a = always,
   // Esc = no (dismiss). Matches the CLI permission prompt so habits
   // transfer directly.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyboard handler; handleConfirm stable
   useEffect(() => {
     if (!showConfirmDialog) return;
     const onKey = (e: KeyboardEvent) => {

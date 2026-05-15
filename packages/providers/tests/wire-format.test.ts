@@ -1,11 +1,11 @@
-import { describe, it, expect } from 'vitest';
-import {
-  WireFormatProvider,
-  defineWireFormat,
-  createWireFormatFactory,
-} from '../src/wire-format.js';
 import type { Request, StreamEvent } from '@wrongstack/core';
 import { ProviderError } from '@wrongstack/core';
+import { describe, expect, it } from 'vitest';
+import {
+  WireFormatProvider,
+  createWireFormatFactory,
+  defineWireFormat,
+} from '../src/wire-format.js';
 
 // --- Test helpers -----------------------------------------------------------
 
@@ -107,7 +107,13 @@ describe('WireFormatProvider — declarative wire format', () => {
       { data: JSON.stringify({ type: 'start', model: 'mini-1' }) },
       { data: JSON.stringify({ type: 'text', text: 'hello ' }) },
       { data: JSON.stringify({ type: 'text', text: 'world' }) },
-      { data: JSON.stringify({ type: 'stop', stopReason: 'end_turn', usage: { input: 10, output: 5 } }) },
+      {
+        data: JSON.stringify({
+          type: 'stop',
+          stopReason: 'end_turn',
+          usage: { input: 10, output: 5 },
+        }),
+      },
       { data: '[DONE]' },
     ]);
     const provider = new WireFormatProvider(miniConfig, {
@@ -128,7 +134,9 @@ describe('WireFormatProvider — declarative wire format', () => {
     expect(textDeltas).toHaveLength(2);
     const stop = events.find((e) => e.type === 'message_stop');
     expect(stop).toBeDefined();
-    expect((stop as { stopReason: string; usage: { input: number; output: number } }).usage).toEqual({
+    expect(
+      (stop as { stopReason: string; usage: { input: number; output: number } }).usage,
+    ).toEqual({
       input: 10,
       output: 5,
     });
@@ -156,7 +164,9 @@ describe('WireFormatProvider — declarative wire format', () => {
     for await (const _ of provider.stream(
       { model: 'mini-1', messages: [], maxTokens: 100 },
       { signal: new AbortController().signal },
-    )) { /* drain */ }
+    )) {
+      /* drain */
+    }
 
     expect(captured).not.toBeNull();
     expect(captured!.url).toBe('https://override.test/v9/chat/completions');
@@ -261,11 +271,7 @@ describe('WireFormatProvider — declarative wire format', () => {
 
     const provider = new WireFormatProvider(trailingCfg, {
       apiKey: 'k',
-      fetchImpl: fakeFetch(sseBody([
-        { data: 'a' },
-        { data: 'b' },
-        { data: '[DONE]' },
-      ])),
+      fetchImpl: fakeFetch(sseBody([{ data: 'a' }, { data: 'b' }, { data: '[DONE]' }])),
     });
 
     const events: StreamEvent[] = [];

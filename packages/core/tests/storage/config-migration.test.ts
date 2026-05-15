@@ -1,8 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
-  runConfigMigrations,
-  ConfigMigrationError,
   type ConfigMigration,
+  ConfigMigrationError,
+  runConfigMigrations,
 } from '../../src/storage/config-migration.js';
 
 describe('runConfigMigrations (L2-D)', () => {

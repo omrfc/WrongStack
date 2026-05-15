@@ -23,7 +23,10 @@ interface OTelLikeSpan {
 }
 
 interface OTelLikeTracer {
-  startSpan(name: string, options?: { attributes?: Record<string, string | number | boolean> }): OTelLikeSpan;
+  startSpan(
+    name: string,
+    options?: { attributes?: Record<string, string | number | boolean> },
+  ): OTelLikeSpan;
 }
 
 // OTel SpanStatusCode.ERROR = 2 (per the spec). Hard-coded here so we don't

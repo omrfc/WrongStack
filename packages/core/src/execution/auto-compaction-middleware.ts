@@ -1,7 +1,7 @@
-import type { MiddlewareHandler } from '../kernel/pipeline.js';
 import type { Context } from '../core/context.js';
-import type { Compactor } from '../types/compactor.js';
 import type { EventBus } from '../kernel/events.js';
+import type { MiddlewareHandler } from '../kernel/pipeline.js';
+import type { Compactor } from '../types/compactor.js';
 import { AgentError } from '../types/errors.js';
 
 export type CompactionFailureMode = 'throw' | 'throw_on_hard' | 'continue';

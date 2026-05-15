@@ -337,6 +337,12 @@ function ToolInputView({ input }: { input: unknown }) {
 interface MessageBubbleProps {
   message: ChatMessage;
   isFirst?: boolean;
+  /** Render as a continuation of the previous item in the same agent turn.
+   *  Hides the avatar (replaces it with a transparent spacer so content
+   *  stays aligned) and the role label, and tightens the top margin — used
+   *  by ChatView's turn-bundling so text→tool→text reads as one flow
+   *  instead of three detached bubbles each with its own avatar column. */
+  isContinuation?: boolean;
 }
 
 function formatToolDuration(ms: number): string {
@@ -347,7 +353,11 @@ function formatToolDuration(ms: number): string {
   return `${m}m ${s}s`;
 }
 
-export function MessageBubble({ message, isFirst = false }: MessageBubbleProps) {
+export function MessageBubble({
+  message,
+  isFirst = false,
+  isContinuation = false,
+}: MessageBubbleProps) {
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
@@ -458,31 +468,39 @@ export function MessageBubble({ message, isFirst = false }: MessageBubbleProps) 
         isPinned && 'ring-1 ring-amber-500/30 bg-amber-500/[0.02] px-1 -mx-1',
       )}
     >
-      {/* Avatar */}
-      <div
-        className={cn(
-          'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center',
-          'ring-2 ring-offset-2 ring-offset-background',
-          isUser
-            ? 'bg-primary text-primary-foreground ring-primary/20'
-            : isTool
-              ? 'bg-secondary text-secondary-foreground ring-secondary/20'
-              : 'bg-accent text-accent-foreground ring-accent/20',
-        )}
-      >
-        {isUser ? (
-          <User className="h-4 w-4" />
-        ) : isTool ? (
-          <Terminal className="h-4 w-4" />
-        ) : (
-          <Bot className="h-4 w-4" />
-        )}
-      </div>
+      {/* Avatar — replaced by an invisible spacer in continuation mode so
+          subsequent items in the same agent turn align under the first
+          item's avatar without redrawing it. */}
+      {isContinuation ? (
+        <div className="flex-shrink-0 w-8 h-8" aria-hidden />
+      ) : (
+        <div
+          className={cn(
+            'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center',
+            'ring-2 ring-offset-2 ring-offset-background',
+            isUser
+              ? 'bg-primary text-primary-foreground ring-primary/20'
+              : isTool
+                ? 'bg-secondary text-secondary-foreground ring-secondary/20'
+                : 'bg-accent text-accent-foreground ring-accent/20',
+          )}
+        >
+          {isUser ? (
+            <User className="h-4 w-4" />
+          ) : isTool ? (
+            <Terminal className="h-4 w-4" />
+          ) : (
+            <Bot className="h-4 w-4" />
+          )}
+        </div>
+      )}
 
       {/* Content */}
       <div className={cn('flex flex-col gap-1.5 max-w-[85%]', isUser && 'items-end')}>
-        {/* Role indicator for first message in a group */}
-        {isFirst && (
+        {/* Role indicator for first message in a group. Suppressed for
+            continuation items so the same label doesn't repeat for every
+            text→tool→text segment of one agent turn. */}
+        {isFirst && !isContinuation && (
           <span
             className={cn(
               'text-xs font-medium px-1',
@@ -571,7 +589,11 @@ export function MessageBubble({ message, isFirst = false }: MessageBubbleProps) 
                     message.progressLines.length > 0 && (
                       <div className="mt-1 rounded-md border border-amber-500/20 bg-amber-500/5 p-1.5 text-[11px] font-mono leading-snug max-h-32 overflow-auto">
                         {message.progressLines.slice(-6).map((line, i) => (
-                          <div key={i} className="truncate text-muted-foreground">
+                          <div
+                            // biome-ignore lint/suspicious/noArrayIndexKey: static progress lines
+                            key={i}
+                            className="truncate text-muted-foreground"
+                          >
                             {line}
                           </div>
                         ))}
@@ -678,7 +700,6 @@ export function MessageBubble({ message, isFirst = false }: MessageBubbleProps) 
           ) : editing && isUser ? (
             <div className="flex flex-col gap-2 min-w-[280px]">
               <textarea
-                autoFocus
                 value={editValue}
                 onChange={(e) => setEditValue(e.target.value)}
                 onKeyDown={(e) => {

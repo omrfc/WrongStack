@@ -1,20 +1,20 @@
-import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { Agent, createDefaultPipelines } from '../src/core/agent.js';
+import { Context } from '../src/core/context.js';
+import { DefaultErrorHandler } from '../src/execution/error-handler.js';
+import { DefaultRetryPolicy } from '../src/execution/retry-policy.js';
+import { DefaultLogger } from '../src/infrastructure/logger.js';
+import { DefaultTokenCounter } from '../src/infrastructure/token-counter.js';
 import { Container } from '../src/kernel/container.js';
 import { EventBus } from '../src/kernel/events.js';
 import { TOKENS } from '../src/kernel/tokens.js';
-import { ToolRegistry } from '../src/registry/tool-registry.js';
 import { ProviderRegistry } from '../src/registry/provider-registry.js';
-import { Agent, createDefaultPipelines } from '../src/core/agent.js';
-import { Context } from '../src/core/context.js';
-import { DefaultLogger } from '../src/infrastructure/logger.js';
-import { DefaultRetryPolicy } from '../src/execution/retry-policy.js';
-import { DefaultErrorHandler } from '../src/execution/error-handler.js';
-import { DefaultSecretScrubber } from '../src/security/secret-scrubber.js';
-import { DefaultTokenCounter } from '../src/infrastructure/token-counter.js';
+import { ToolRegistry } from '../src/registry/tool-registry.js';
 import { DefaultPermissionPolicy } from '../src/security/permission-policy.js';
+import { DefaultSecretScrubber } from '../src/security/secret-scrubber.js';
 import { DefaultSessionStore } from '../src/storage/session-store.js';
 import { MockProvider } from './helpers/mock-provider.js';
 
@@ -133,9 +133,8 @@ describe('leak smoke (V2-D)', () => {
     // of strings naming each live handle/resource. We allow some
     // variance for short-lived timers and file ops; we just want to flag
     // monotonic growth.
-    const getInfo = (
-      process as unknown as { getActiveResourcesInfo?: () => string[] }
-    ).getActiveResourcesInfo;
+    const getInfo = (process as unknown as { getActiveResourcesInfo?: () => string[] })
+      .getActiveResourcesInfo;
     if (typeof getInfo !== 'function') {
       // Old Node — skip silently. Real CI runs Node ≥22 (engines field).
       return;

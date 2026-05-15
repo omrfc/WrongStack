@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 // Pure function tests — no React/Ink rendering needed.
 // We import the helpers by testing the exported component's internal

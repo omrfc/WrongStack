@@ -2,14 +2,16 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
 import { EventBus, type Logger } from '@wrongstack/core';
+import { describe, expect, it } from 'vitest';
 import { DocumentTracker } from '../../src/document-tracker.js';
 import { LSPRegistry } from '../../src/registry.js';
 import { makeLSPTools } from '../../src/tools/index.js';
 import type { PlugLSPConfig } from '../../src/types.js';
 
-const fixtureServer = fileURLToPath(new URL('./fixtures/crash-once-lsp-server.mjs', import.meta.url));
+const fixtureServer = fileURLToPath(
+  new URL('./fixtures/crash-once-lsp-server.mjs', import.meta.url),
+);
 
 const log: Logger = {
   level: 'error',
@@ -65,19 +67,24 @@ describe('crash recovery', () => {
     await new Promise((resolve) => setTimeout(resolve, 150));
     await waitFor(async () => registry.get('crashy')?.state === 'ready', 5000);
 
-    const tools = new Map(makeLSPTools({ registry, tracker, cfg, log }).map((tool) => [tool.name, tool]));
-    const hover = await tools.get('lsp_hover')!.execute(
-      { path: source, line: 1, character: 7 },
-      { cwd: root, projectRoot: root } as never,
-      { signal: new AbortController().signal },
+    const tools = new Map(
+      makeLSPTools({ registry, tracker, cfg, log }).map((tool) => [tool.name, tool]),
     );
+    const hover = await tools
+      .get('lsp_hover')!
+      .execute({ path: source, line: 1, character: 7 }, { cwd: root, projectRoot: root } as never, {
+        signal: new AbortController().signal,
+      });
     expect(String(hover)).toContain('recovered hover');
 
     await registry.shutdown();
   }, 10_000);
 });
 
-async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs: number): Promise<void> {
+async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs: number,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await predicate()) return;

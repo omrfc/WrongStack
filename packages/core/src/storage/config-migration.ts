@@ -49,7 +49,12 @@ export class ConfigMigrationError extends Error {
   readonly targetVersion: number;
   readonly missingStep: number | null;
 
-  constructor(opts: { message: string; fromVersion: number; targetVersion: number; missingStep: number | null }) {
+  constructor(opts: {
+    message: string;
+    fromVersion: number;
+    targetVersion: number;
+    missingStep: number | null;
+  }) {
     super(opts.message);
     this.name = 'ConfigMigrationError';
     this.fromVersion = opts.fromVersion;

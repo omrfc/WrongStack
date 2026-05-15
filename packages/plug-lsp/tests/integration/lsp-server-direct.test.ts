@@ -2,11 +2,11 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it, vi } from 'vitest';
 import { EventBus, type Logger } from '@wrongstack/core';
+import { describe, expect, it, vi } from 'vitest';
 import { LSPServer } from '../../src/server/lsp-server.js';
-import { pathToUri } from '../../src/utils/uri.js';
 import { LSPErrorCode } from '../../src/types.js';
+import { pathToUri } from '../../src/utils/uri.js';
 
 const fixtureServer = fileURLToPath(new URL('./fixtures/mock-lsp-server.mjs', import.meta.url));
 
@@ -32,17 +32,26 @@ describe('LSPServer direct API', () => {
     const diagnostics = vi.fn();
     events.on('lsp.server.ready', ready);
     events.on('lsp.diagnostics.updated', diagnostics);
-    const server = new LSPServer('mock', {
-      command: process.execPath,
-      args: [fixtureServer],
-      languages: ['typescript'],
-      startupTimeoutMs: 5000,
-    }, { cwd: root, rootPath: root, log, events });
+    const server = new LSPServer(
+      'mock',
+      {
+        command: process.execPath,
+        args: [fixtureServer],
+        languages: ['typescript'],
+        startupTimeoutMs: 5000,
+      },
+      { cwd: root, rootPath: root, log, events },
+    );
 
     expect(server.rootPath).toBe(root);
     expect(server.getDiagnostics(uri)).toEqual([]);
-    await expect(server.hover({ textDocument: { uri }, position: { line: 0, character: 0 } }, 1, new AbortController().signal))
-      .rejects.toMatchObject({ code: LSPErrorCode.ServerNotReady });
+    await expect(
+      server.hover(
+        { textDocument: { uri }, position: { line: 0, character: 0 } },
+        1,
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ code: LSPErrorCode.ServerNotReady });
     await server.start();
     await server.start();
     expect(ready).toHaveBeenCalledOnce();
@@ -52,16 +61,61 @@ describe('LSPServer direct API', () => {
     server.notifyDidChange({ uri, version: 2 }, 'const answer = 2;');
     server.notifyDidClose(uri);
 
-    expect(await server.definition({ textDocument: { uri }, position: { line: 0, character: 0 } }, 5000, new AbortController().signal)).toHaveLength(1);
-    expect(await server.references({ textDocument: { uri }, position: { line: 0, character: 0 }, context: { includeDeclaration: true } }, 5000, new AbortController().signal)).toHaveLength(2);
-    expect(await server.hover({ textDocument: { uri }, position: { line: 0, character: 0 } }, 5000, new AbortController().signal)).toBeTruthy();
-    expect(await server.documentSymbol({ textDocument: { uri } }, 5000, new AbortController().signal)).toHaveLength(1);
-    expect(await server.workspaceSymbol({ query: 'answer' }, 5000, new AbortController().signal)).toHaveLength(1);
-    await expect(server.prepareRename({ textDocument: { uri }, position: { line: 0, character: 0 } }, 5, new AbortController().signal))
-      .rejects.toMatchObject({ code: LSPErrorCode.RequestTimeout });
-    expect(await server.rename({ textDocument: { uri }, position: { line: 0, character: 0 }, newName: 'renamed' }, 5000, new AbortController().signal)).toBeTruthy();
-    expect(await server.codeAction({ textDocument: { uri }, range: r(0, 0), context: { diagnostics: [] } }, 5000, new AbortController().signal)).toHaveLength(1);
-    expect(await server.executeCommand({ command: 'mock.command' }, 5000, new AbortController().signal)).toBeNull();
+    expect(
+      await server.definition(
+        { textDocument: { uri }, position: { line: 0, character: 0 } },
+        5000,
+        new AbortController().signal,
+      ),
+    ).toHaveLength(1);
+    expect(
+      await server.references(
+        {
+          textDocument: { uri },
+          position: { line: 0, character: 0 },
+          context: { includeDeclaration: true },
+        },
+        5000,
+        new AbortController().signal,
+      ),
+    ).toHaveLength(2);
+    expect(
+      await server.hover(
+        { textDocument: { uri }, position: { line: 0, character: 0 } },
+        5000,
+        new AbortController().signal,
+      ),
+    ).toBeTruthy();
+    expect(
+      await server.documentSymbol({ textDocument: { uri } }, 5000, new AbortController().signal),
+    ).toHaveLength(1);
+    expect(
+      await server.workspaceSymbol({ query: 'answer' }, 5000, new AbortController().signal),
+    ).toHaveLength(1);
+    await expect(
+      server.prepareRename(
+        { textDocument: { uri }, position: { line: 0, character: 0 } },
+        5,
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ code: LSPErrorCode.RequestTimeout });
+    expect(
+      await server.rename(
+        { textDocument: { uri }, position: { line: 0, character: 0 }, newName: 'renamed' },
+        5000,
+        new AbortController().signal,
+      ),
+    ).toBeTruthy();
+    expect(
+      await server.codeAction(
+        { textDocument: { uri }, range: r(0, 0), context: { diagnostics: [] } },
+        5000,
+        new AbortController().signal,
+      ),
+    ).toHaveLength(1);
+    expect(
+      await server.executeCommand({ command: 'mock.command' }, 5000, new AbortController().signal),
+    ).toBeNull();
     expect(await server.pullDiagnostics(uri, 5000, new AbortController().signal)).toHaveLength(1);
     expect(server.textDocumentIdentifier(file)).toEqual({ uri });
     await server.shutdown();
@@ -70,21 +124,29 @@ describe('LSPServer direct API', () => {
 
   it('handles disabled and startup-failure servers', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plug-lsp-server-'));
-    const disabled = new LSPServer('off', {
-      command: process.execPath,
-      languages: ['typescript'],
-      enabled: false,
-    }, { cwd: root, rootPath: root, log, events: new EventBus() });
+    const disabled = new LSPServer(
+      'off',
+      {
+        command: process.execPath,
+        languages: ['typescript'],
+        enabled: false,
+      },
+      { cwd: root, rootPath: root, log, events: new EventBus() },
+    );
     await disabled.start();
     await disabled.shutdown();
     expect(disabled.state).toBe('disabled');
 
-    const failed = new LSPServer('fail', {
-      command: process.execPath,
-      args: ['-e', 'process.stderr.write("boom\\n"); process.exit(42)'],
-      languages: ['typescript'],
-      startupTimeoutMs: 5000,
-    }, { cwd: root, rootPath: root, log, events: new EventBus() });
+    const failed = new LSPServer(
+      'fail',
+      {
+        command: process.execPath,
+        args: ['-e', 'process.stderr.write("boom\\n"); process.exit(42)'],
+        languages: ['typescript'],
+        startupTimeoutMs: 5000,
+      },
+      { cwd: root, rootPath: root, log, events: new EventBus() },
+    );
     await expect(failed.start()).rejects.toHaveProperty('code');
     expect(failed.lastStderr).toContain('boom');
   });

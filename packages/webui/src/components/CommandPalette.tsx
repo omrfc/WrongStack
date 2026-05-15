@@ -319,9 +319,13 @@ export function CommandPalette() {
     <div
       className="fixed inset-0 z-50 bg-background/60 backdrop-blur-sm flex items-start justify-center pt-[14vh] px-4"
       onClick={() => setOpen(false)}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') setOpen(false);
+      }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
         className="w-full max-w-2xl rounded-xl border bg-popover shadow-2xl overflow-hidden flex flex-col"
       >
         <div className="flex items-center gap-2 px-4 py-3 border-b">
@@ -380,7 +384,8 @@ function renderGroupedList(
   // matches what arrow keys point at. Grouping is visual sugar only.
   const groups: Record<string, Array<{ item: PaletteItem; globalIdx: number }>> = {};
   filtered.forEach((it, i) => {
-    (groups[it.category] ??= []).push({ item: it, globalIdx: i });
+    if (!groups[it.category]) groups[it.category] = [];
+    groups[it.category]!.push({ item: it, globalIdx: i });
   });
   return (
     <div className="p-1">
@@ -394,6 +399,7 @@ function renderGroupedList(
             const active = globalIdx === index;
             return (
               <button
+                type="button"
                 key={item.id}
                 onMouseEnter={() => setIndex(globalIdx)}
                 onClick={() => dispatch(item)}
@@ -487,7 +493,7 @@ export function downloadChatAsHtml(): void {
   const messages = useChatStore.getState().messages;
   const session = useSessionStore.getState();
   const now = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-  const escape = (s: string) =>
+  const escapeHtml = (s: string) =>
     s
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
@@ -500,15 +506,15 @@ export function downloadChatAsHtml(): void {
       const status = m.isError ? '❌' : m.toolResult !== undefined ? '✅' : '⏳';
       return `
         <section class="bubble tool ${m.isError ? 'error' : ''}">
-          <header><span class="icon">🔧</span><code>${escape(m.toolName ?? 'tool')}</code> ${status}</header>
+          <header><span class="icon">🔧</span><code>${escapeHtml(m.toolName ?? 'tool')}</code> ${status}</header>
           ${
             m.toolInput !== undefined
-              ? `<details><summary>Input</summary><pre>${escape(JSON.stringify(m.toolInput, null, 2))}</pre></details>`
+              ? `<details><summary>Input</summary><pre>${escapeHtml(JSON.stringify(m.toolInput, null, 2))}</pre></details>`
               : ''
           }
           ${
             m.toolResult
-              ? `<details><summary>Output</summary><pre>${escape(m.toolResult)}</pre></details>`
+              ? `<details><summary>Output</summary><pre>${escapeHtml(m.toolResult)}</pre></details>`
               : ''
           }
         </section>`;

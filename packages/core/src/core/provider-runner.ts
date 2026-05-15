@@ -1,10 +1,10 @@
 import type { EventBus } from '../kernel/events.js';
-import type { Context } from './context.js';
+import type { Logger } from '../types/logger.js';
+import type { Tracer } from '../types/observability.js';
 import type { Provider, Request, Response } from '../types/provider.js';
 import { ProviderError } from '../types/provider.js';
 import type { RetryPolicy } from '../types/retry-policy.js';
-import type { Logger } from '../types/logger.js';
-import type { Tracer } from '../types/observability.js';
+import type { Context } from './context.js';
 import { streamProviderToResponse } from './streaming-response-builder.js';
 
 export interface RunProviderOptions {
@@ -75,26 +75,18 @@ export async function runProviderWithRetry(opts: RunProviderOptions): Promise<Re
         });
       }
       await new Promise<void>((resolve, reject) => {
-        // The previous version only removed the abort listener if it fired
-        // (via { once: true }). On the timeout-resolves path the listener
-        // stayed attached to the long-lived parent signal, accumulating one
-        // per retry attempt across many requests.
         let settled = false;
-        const cleanup = () => {
+        const onAbort = () => {
           if (settled) return;
           settled = true;
           clearTimeout(t);
-          // Note: listener is auto-removed via { once: true }, no need to call
-          // removeEventListener. Calling it here after the signal has already
-          // aborted (and the listener already fired) would be a no-op, but
-          // keeping it removed avoids confusion about lifetime.
-        };
-        const onAbort = () => {
-          cleanup();
           reject(new Error('aborted'));
         };
         const t = setTimeout(() => {
-          cleanup();
+          if (settled) return;
+          settled = true;
+          clearTimeout(t);
+          signal.removeEventListener('abort', onAbort);
           resolve();
         }, delay);
         if (signal.aborted) {

@@ -1,10 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_DIRECTOR_PREAMBLE,
+  DEFAULT_SUBAGENT_BASELINE,
   composeDirectorPrompt,
   composeSubagentPrompt,
   rosterSummaryFromConfigs,
-  DEFAULT_DIRECTOR_PREAMBLE,
-  DEFAULT_SUBAGENT_BASELINE,
 } from '../../src/coordination/director-prompts.js';
 import { Director } from '../../src/coordination/director.js';
 import type { MultiAgentConfig, SubagentConfig } from '../../src/types/multi-agent.js';
@@ -256,9 +256,7 @@ describe('Director.leaderSystemPrompt / subagentSystemPrompt', () => {
     expect(out).toContain('Role:\nYou review code.');
     expect(out).toContain('Task:\nReview src/foo.ts');
     expect(out).toContain('Respond only in JSON.');
-    expect(out.lastIndexOf('Respond only in JSON')).toBeGreaterThan(
-      out.lastIndexOf('Role:'),
-    );
+    expect(out.lastIndexOf('Respond only in JSON')).toBeGreaterThan(out.lastIndexOf('Role:'));
   });
 
   it('subagentBaseline option overrides the bridge-contract baseline', () => {

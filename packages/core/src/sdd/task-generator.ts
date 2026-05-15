@@ -1,6 +1,6 @@
-import type { Specification, SpecRequirement } from '../types/spec.js';
-import type { TaskNode, TaskGraph, TaskType, TaskPriority } from '../types/task-graph.js';
-import type { TaskTracker, TaskStore } from './task-tracker.js';
+import type { SpecRequirement, Specification } from '../types/spec.js';
+import type { TaskGraph, TaskNode, TaskPriority, TaskType } from '../types/task-graph.js';
+import type { TaskStore, TaskTracker } from './task-tracker.js';
 
 export interface TaskGeneratorOptions {
   taskTracker: TaskTracker;
@@ -35,7 +35,10 @@ export class TaskGenerator {
 
     // Group requirements by priority in a single pass, then emit in priority order.
     const byPriority: Record<TaskPriority, SpecRequirement[]> = {
-      critical: [], high: [], medium: [], low: [],
+      critical: [],
+      high: [],
+      medium: [],
+      low: [],
     };
     for (const req of spec.requirements) {
       const bucket = byPriority[req.priority] ?? byPriority.medium;
@@ -89,7 +92,9 @@ export class TaskGenerator {
     return graph;
   }
 
-  private createTaskFromRequirement(req: SpecRequirement): Omit<TaskNode, 'id' | 'createdAt' | 'updatedAt'> {
+  private createTaskFromRequirement(
+    req: SpecRequirement,
+  ): Omit<TaskNode, 'id' | 'createdAt' | 'updatedAt'> {
     return {
       title: req.description,
       description: this.buildDescription(req),
@@ -102,7 +107,9 @@ export class TaskGenerator {
     };
   }
 
-  private createTaskFromEndpoint(endpoint: NonNullable<Specification['apiEndpoints']>[number]): Omit<TaskNode, 'id' | 'createdAt' | 'updatedAt'> {
+  private createTaskFromEndpoint(
+    endpoint: NonNullable<Specification['apiEndpoints']>[number],
+  ): Omit<TaskNode, 'id' | 'createdAt' | 'updatedAt'> {
     return {
       title: `${endpoint.method} ${endpoint.path}`,
       description: endpoint.description,
@@ -115,12 +122,7 @@ export class TaskGenerator {
   }
 
   private buildDescription(req: SpecRequirement): string {
-    const lines = [
-      req.description,
-      '',
-      '**Type:** ' + req.type,
-      '**Priority:** ' + req.priority,
-    ];
+    const lines = [req.description, '', '**Type:** ' + req.type, '**Priority:** ' + req.priority];
 
     if (req.acceptanceCriteria.length > 0) {
       lines.push('', '**Acceptance Criteria:**');
@@ -138,26 +140,39 @@ export class TaskGenerator {
 
   private mapRequirementType(type: SpecRequirement['type']): TaskType {
     switch (type) {
-      case 'functional': return 'feature';
-      case 'non-functional': return 'feature';
-      case 'security': return 'feature';
-      case 'performance': return 'feature';
-      case 'ux': return 'feature';
-      default: return 'feature';
+      case 'functional':
+        return 'feature';
+      case 'non-functional':
+        return 'feature';
+      case 'security':
+        return 'feature';
+      case 'performance':
+        return 'feature';
+      case 'ux':
+        return 'feature';
+      default:
+        return 'feature';
     }
   }
 
   private estimateHours(req: SpecRequirement): number {
     switch (req.priority) {
-      case 'critical': return 8;
-      case 'high': return 4;
-      case 'medium': return 2;
-      case 'low': return 1;
-      default: return 2;
+      case 'critical':
+        return 8;
+      case 'high':
+        return 4;
+      case 'medium':
+        return 2;
+      case 'low':
+        return 1;
+      default:
+        return 2;
     }
   }
 
-  private estimateForEndpoint(endpoint: NonNullable<Specification['apiEndpoints']>[number]): number {
+  private estimateForEndpoint(
+    endpoint: NonNullable<Specification['apiEndpoints']>[number],
+  ): number {
     let hours = 2;
     if (endpoint.auth) hours += 1;
     if (endpoint.request) hours += 1;

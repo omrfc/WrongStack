@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent } from '../../src/core/agent.js';
-import type { Context } from '../../src/core/context.js';
 import type { RunResult } from '../../src/core/agent.js';
-import type { DoneCondition } from '../../src/types/multi-agent.js';
+import type { Context } from '../../src/core/context.js';
 import { AutonomousRunner, DoneConditionChecker } from '../../src/execution/autonomous-runner.js';
 import { EventBus } from '../../src/kernel/events.js';
+import type { DoneCondition } from '../../src/types/multi-agent.js';
 
 function mockAgent(overrides: Partial<Agent> = {}): Agent {
   // Real EventBus so AutonomousRunner can subscribe to `tool.executed`
@@ -78,7 +78,11 @@ describe('DoneConditionChecker', () => {
 
   it('returns done=true for output_match when pattern matches', () => {
     const checker = new DoneConditionChecker({ type: 'output_match', pattern: 'success' });
-    const result = checker.check({ iterations: 1, toolCalls: 1, lastOutput: 'task completed success' });
+    const result = checker.check({
+      iterations: 1,
+      toolCalls: 1,
+      lastOutput: 'task completed success',
+    });
     expect(result.done).toBe(true);
     expect(result.reason).toMatch(/output matched pattern/);
   });
@@ -268,7 +272,9 @@ describe('AutonomousRunner', () => {
 
   it('handles timeout error and returns failed result', async () => {
     const agent = mockAgent({
-      run: vi.fn().mockRejectedValue(new Error('timeout')),
+      run: vi.fn().mockRejectedValue(
+        Object.assign(new Error('iteration timeout'), { name: 'AbortError' }),
+      ),
     });
     const runner = new AutonomousRunner({
       agent,
@@ -283,7 +289,7 @@ describe('AutonomousRunner', () => {
     expect(result.reason).toBe('iteration timeout');
   });
 
-  it('continues on non-timeout errors', async () => {
+  it('fails on non-timeout errors instead of continuing', async () => {
     let callCount = 0;
     const agent = mockAgent({
       run: vi.fn().mockImplementation(async () => {
@@ -301,8 +307,10 @@ describe('AutonomousRunner', () => {
 
     const result = await runner.run();
 
-    // Should have continued past the error
-    expect(result.status).toBe('done');
+    // Non-timeout errors should stop the runner immediately — silently
+    // swallowing them would cause an infinite loop burning provider tokens.
+    expect(result.status).toBe('failed');
+    expect(callCount).toBe(1);
   });
 
   it('stop() prevents further iterations', async () => {

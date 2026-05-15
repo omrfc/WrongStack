@@ -133,6 +133,7 @@ export function WelcomeScreen() {
    *  populated by the History tab on demand. */
   const { listSessions, resumeSession } = useWebSocket();
   const historyEntries = useHistoryStore((s) => s.entries);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional mount-only
   useEffect(() => {
     if (wsConnected && historyEntries.length === 0) listSessions(10);
     // Intentionally only fire on first connect — refreshing on every
@@ -237,6 +238,7 @@ export function WelcomeScreen() {
               <div className="flex flex-col gap-1.5">
                 {card.prompts.map((p, i) => (
                   <button
+                    // biome-ignore lint/suspicious/noArrayIndexKey: static list
                     key={i}
                     type="button"
                     onClick={() => fillTextarea(p)}
@@ -305,6 +307,7 @@ export function WelcomeScreen() {
               .slice(0, 5)
               .map((p, i) => (
                 <button
+                  // biome-ignore lint/suspicious/noArrayIndexKey: static list
                   key={i}
                   type="button"
                   onClick={() => fillTextarea(p)}

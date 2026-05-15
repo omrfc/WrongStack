@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 describe('@wrongstack/tui module', () => {
   it('exports runTui as a function', async () => {

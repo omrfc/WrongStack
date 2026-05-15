@@ -1,8 +1,8 @@
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { documentTool } from '../src/document.js';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { documentTool } from '../src/document.js';
 
 let tmpDir: string;
 
@@ -14,7 +14,7 @@ afterEach(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
-const makeCtx = () => ({ cwd: tmpDir, tools: [], projectRoot: tmpDir } as any);
+const makeCtx = () => ({ cwd: tmpDir, tools: [], projectRoot: tmpDir }) as any;
 
 describe('documentTool', () => {
   it('has correct metadata', () => {
@@ -43,7 +43,10 @@ describe('documentTool', () => {
 
   it('uses jsdoc style by default', async () => {
     const ctx = makeCtx();
-    const result = await documentTool.execute({ target: 'all', path: path.join(tmpDir, 'test.ts') }, ctx);
+    const result = await documentTool.execute(
+      { target: 'all', path: path.join(tmpDir, 'test.ts') },
+      ctx,
+    );
     expect(result.style).toBe('jsdoc');
   });
 
@@ -76,7 +79,11 @@ describe('documentTool', () => {
 
   it('processes functions in a real file', async () => {
     const filePath = path.join(tmpDir, 'funcs.ts');
-    await fs.writeFile(filePath, 'export function hello() {}\nexport async function world() {}', 'utf8');
+    await fs.writeFile(
+      filePath,
+      'export function hello() {}\nexport async function world() {}',
+      'utf8',
+    );
     const ctx = makeCtx();
     const result = await documentTool.execute({ target: 'function', files: 'funcs.ts' }, ctx);
     expect(result.files_processed).toBe(1);

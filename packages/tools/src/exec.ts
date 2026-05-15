@@ -113,7 +113,7 @@ export const execTool: Tool<ExecInput, ExecOutput> = {
     }
 
     const args = (input.args ?? []).slice(0, MAX_ARGS);
-    const timeout = Math.min(input.timeout ?? TIMEOUT_MS, TIMEOUT_MS);
+    const timeout = Math.max(1, Math.min(input.timeout ?? TIMEOUT_MS, TIMEOUT_MS));
 
     // Resolve cwd inside the project root. Model-supplied paths like '/etc'
     // would otherwise let allowlisted commands operate anywhere on disk.

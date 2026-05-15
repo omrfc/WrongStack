@@ -1,20 +1,20 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { Writable } from 'node:stream';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
+import { Writable } from 'node:stream';
 import {
+  type Config,
   DefaultSessionStore,
+  type ModelsRegistry,
+  type ResolvedModel,
+  type ResolvedProvider,
   ToolRegistry,
   resolveWstackPaths,
-  type Config,
-  type ModelsRegistry,
-  type ResolvedProvider,
-  type ResolvedModel,
 } from '@wrongstack/core';
 import { stripAnsi } from '@wrongstack/core';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalRenderer } from '../src/renderer.js';
-import { subcommands, type SubcommandDeps } from '../src/subcommands/index.js';
+import { type SubcommandDeps, subcommands } from '../src/subcommands/index.js';
 
 class CapStream extends Writable {
   buf = '';
@@ -66,8 +66,7 @@ function fakeRegistry(providers: ResolvedProvider[]): ModelsRegistry {
     getProvider: async (id: string) => providers.find((p) => p.id === id),
     getModel: async (pid: string, mid: string) =>
       providers.find((p) => p.id === pid)?.models.find((m) => m.id === mid),
-    suggestModel: async (pid: string) =>
-      providers.find((p) => p.id === pid)?.models[0]?.id,
+    suggestModel: async (pid: string) => providers.find((p) => p.id === pid)?.models[0]?.id,
     ageSeconds: async () => 60,
   } as ModelsRegistry;
 }
@@ -489,10 +488,7 @@ describe('subcommands', () => {
   it('export without id prints usage and exits 1', async () => {
     const rig = withRig();
     const sessionStore = new DefaultSessionStore({ dir: tmp });
-    const code = await subcommands['export']!(
-      [],
-      mkDeps({ renderer: rig.renderer, sessionStore }),
-    );
+    const code = await subcommands['export']!([], mkDeps({ renderer: rig.renderer, sessionStore }));
     expect(code).toBe(1);
     expect(stripAnsi(rig.err.buf)).toMatch(/Usage:/);
   });
@@ -515,10 +511,7 @@ describe('subcommands', () => {
       globalRoot: path.join(tmp, 'definitely-empty'),
       userHome: tmp,
     });
-    const code = await subcommands['projects']!(
-      [],
-      mkDeps({ renderer: rig.renderer, paths }),
-    );
+    const code = await subcommands['projects']!([], mkDeps({ renderer: rig.renderer, paths }));
     expect(code).toBe(0);
     expect(stripAnsi(rig.out.buf)).toContain('No projects');
   });
@@ -538,10 +531,7 @@ describe('subcommands', () => {
       globalRoot,
       userHome: tmp,
     });
-    const code = await subcommands['projects']!(
-      [],
-      mkDeps({ renderer: rig.renderer, paths }),
-    );
+    const code = await subcommands['projects']!([], mkDeps({ renderer: rig.renderer, paths }));
     expect(code).toBe(0);
     const text = stripAnsi(rig.out.buf);
     expect(text).toContain('abc123');
@@ -585,8 +575,17 @@ describe('subcommands', () => {
   it('sessions reports empty when none exist', async () => {
     const rig = withRig();
     const sessionStore = {
-      create: async () => ({ id: 'x', append: async () => undefined, close: async () => undefined }),
-      load: async () => ({ metadata: {}, events: [], messages: [], usage: { input: 0, output: 0 } }),
+      create: async () => ({
+        id: 'x',
+        append: async () => undefined,
+        close: async () => undefined,
+      }),
+      load: async () => ({
+        metadata: {},
+        events: [],
+        messages: [],
+        usage: { input: 0, output: 0 },
+      }),
       list: async () => [],
       delete: async () => undefined,
     } as never;
@@ -601,8 +600,17 @@ describe('subcommands', () => {
   it('sessions lists summaries', async () => {
     const rig = withRig();
     const sessionStore = {
-      create: async () => ({ id: 'x', append: async () => undefined, close: async () => undefined }),
-      load: async () => ({ metadata: {}, events: [], messages: [], usage: { input: 0, output: 0 } }),
+      create: async () => ({
+        id: 'x',
+        append: async () => undefined,
+        close: async () => undefined,
+      }),
+      load: async () => ({
+        metadata: {},
+        events: [],
+        messages: [],
+        usage: { input: 0, output: 0 },
+      }),
       list: async () => [
         {
           id: 's1',
@@ -635,16 +643,18 @@ describe('subcommands', () => {
     const rig = withRig();
     const skillLoader = {
       list: async () => [
-        { name: 'graphify', description: 'turn input into knowledge graph', source: 'bundled', path: '/x' },
+        {
+          name: 'graphify',
+          description: 'turn input into knowledge graph',
+          source: 'bundled',
+          path: '/x',
+        },
       ],
       find: async () => undefined,
       manifestText: async () => '',
       readBody: async () => '',
     } as never;
-    const code = await subcommands['skills']!(
-      [],
-      mkDeps({ renderer: rig.renderer, skillLoader }),
-    );
+    const code = await subcommands['skills']!([], mkDeps({ renderer: rig.renderer, skillLoader }));
     expect(code).toBe(0);
     const text = stripAnsi(rig.out.buf);
     expect(text).toContain('graphify');
@@ -761,7 +771,10 @@ describe('subcommands', () => {
 
   it('plugin warns on unimplemented subcommand', async () => {
     const rig = withRig();
-    const code = await subcommands['plugin']!(['install', 'foo'], mkDeps({ renderer: rig.renderer }));
+    const code = await subcommands['plugin']!(
+      ['install', 'foo'],
+      mkDeps({ renderer: rig.renderer }),
+    );
     expect(code).toBe(0);
     expect(stripAnsi(rig.err.buf)).toContain('not implemented');
   });
@@ -769,18 +782,24 @@ describe('subcommands', () => {
   it('usage prints session token totals', async () => {
     const rig = withRig();
     const sessionStore = {
-      create: async () => ({ id: 'x', append: async () => undefined, close: async () => undefined }),
-      load: async () => ({ metadata: {}, events: [], messages: [], usage: { input: 0, output: 0 } }),
+      create: async () => ({
+        id: 'x',
+        append: async () => undefined,
+        close: async () => undefined,
+      }),
+      load: async () => ({
+        metadata: {},
+        events: [],
+        messages: [],
+        usage: { input: 0, output: 0 },
+      }),
       list: async () => [
         { id: 'a', title: '', startedAt: '', model: '', provider: '', tokenTotal: 50 },
         { id: 'b', title: '', startedAt: '', model: '', provider: '', tokenTotal: 75 },
       ],
       delete: async () => undefined,
     } as never;
-    const code = await subcommands['usage']!(
-      [],
-      mkDeps({ renderer: rig.renderer, sessionStore }),
-    );
+    const code = await subcommands['usage']!([], mkDeps({ renderer: rig.renderer, sessionStore }));
     expect(code).toBe(0);
     const text = stripAnsi(rig.out.buf);
     expect(text).toContain('Sessions: 2');

@@ -15,11 +15,14 @@ export class InMemoryAgentBridge implements AgentBridge {
   readonly coordinatorId: string;
   private readonly transport: BridgeTransport;
   private readonly subscriptions: Set<(msg: BridgeMessage) => void> = new Set();
-  private readonly pendingRequests = new Map<string, {
-    resolve: (msg: BridgeMessage) => void;
-    reject: (e: Error) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>();
+  private readonly pendingRequests = new Map<
+    string,
+    {
+      resolve: (msg: BridgeMessage) => void;
+      reject: (e: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
   private stopped = false;
   private timeoutMs: number;
   /** Guards request() so concurrent calls on the same id can't silently overwrite. */
@@ -44,7 +47,11 @@ export class InMemoryAgentBridge implements AgentBridge {
       }
 
       for (const h of this.subscriptions) {
-        try { h(msg); } catch { /* ignore */ }
+        try {
+          h(msg);
+        } catch {
+          /* ignore */
+        }
       }
     });
   }
@@ -89,7 +96,11 @@ export class InMemoryAgentBridge implements AgentBridge {
         reject(new Error(`Request ${correlationId} timed out after ${timeout}ms`));
       }, timeout);
 
-      this.pendingRequests.set(correlationId, { resolve: resolve as (msg: BridgeMessage) => void, reject, timer });
+      this.pendingRequests.set(correlationId, {
+        resolve: resolve as (msg: BridgeMessage) => void,
+        reject,
+        timer,
+      });
 
       msg.timestamp = Date.now();
       this.transport.send(msg, msg.to ?? this.coordinatorId).catch((e) => {

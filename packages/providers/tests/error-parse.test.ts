@@ -1,12 +1,15 @@
-import { describe, it, expect } from 'vitest';
 import { ProviderError } from '@wrongstack/core';
+import { describe, expect, it } from 'vitest';
 import { parseProviderHttpError } from '../src/error-parse.js';
 
 describe('parseProviderHttpError', () => {
   it('parses Anthropic 529 overloaded body', () => {
     const body = JSON.stringify({
       type: 'error',
-      error: { type: 'overloaded_error', message: 'High traffic detected. Upgrade for highspeed model.' },
+      error: {
+        type: 'overloaded_error',
+        message: 'High traffic detected. Upgrade for highspeed model.',
+      },
       request_id: '06534785201de9c0a1b2c3d4e5f6',
     });
     const err = parseProviderHttpError('minimax', 529, body);
@@ -50,7 +53,10 @@ describe('parseProviderHttpError', () => {
 
   it('does not retry on 400 invalid request', () => {
     const body = JSON.stringify({
-      error: { type: 'invalid_request_error', message: 'messages.0.role must be one of [user, assistant]' },
+      error: {
+        type: 'invalid_request_error',
+        message: 'messages.0.role must be one of [user, assistant]',
+      },
     });
     const err = parseProviderHttpError('anthropic', 400, body);
     expect(err.retryable).toBe(false);

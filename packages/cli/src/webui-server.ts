@@ -69,6 +69,19 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
       }),
     );
 
+    // provider.thinking_delta — extended-thinking deltas. The WebUI renders a
+    // transient "Thinking…" chip from these; clears the moment text_delta /
+    // tool.started / provider.response / run.result lands so the chip never
+    // pollutes the persisted transcript.
+    eventUnsubscribers.push(
+      opts.events.on('provider.thinking_delta', (e) => {
+        broadcast({
+          type: 'provider.thinking_delta',
+          payload: { text: e.text },
+        });
+      }),
+    );
+
     // tool.started
     eventUnsubscribers.push(
       opts.events.on('tool.started', (e) => {
@@ -284,8 +297,20 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
     client: ConnectedClient,
     content: string,
   ): Promise<void> {
-    // Abort any existing run
-    abortController?.abort();
+    // Guard against overlapping runs on the same Agent instance. Two
+    // rapid user messages would otherwise start a second agent.run()
+    // before the first one's cleanup settles, corrupting context state.
+    if (abortController) {
+      send(ws, {
+        type: 'error',
+        payload: { phase: 'agent.run', message: 'A run is already in progress. Abort it first.' },
+      });
+      return;
+    }
+
+    // Abort any existing run (safety net; the guard above makes this
+    // unreachable in the overlapping case, but direct abort requests
+    // from the client still need the controller reference).
     abortController = new AbortController();
 
     try {
@@ -331,7 +356,12 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
     const data = JSON.stringify(msg);
     for (const [ws] of clients) {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
+        try {
+          ws.send(data);
+        } catch {
+          // Client disconnected between the readyState check and the send
+          // — let the 'close' handler remove it from the map naturally.
+        }
       }
     }
   }

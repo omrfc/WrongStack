@@ -71,12 +71,7 @@ export interface ThinkingBlock {
   providerMeta?: Record<string, unknown>;
 }
 
-export type ContentBlock =
-  | TextBlock
-  | ToolUseBlock
-  | ToolResultBlock
-  | ImageBlock
-  | ThinkingBlock;
+export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ImageBlock | ThinkingBlock;
 
 export function isTextBlock(b: ContentBlock): b is TextBlock {
   return b.type === 'text';

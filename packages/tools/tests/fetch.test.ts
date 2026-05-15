@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fetchTool } from '../src/fetch.js';
 import { mkSandbox, newSignal } from './fixtures.js';
 
@@ -83,11 +83,9 @@ describe('fetchTool', () => {
     ) as unknown as typeof fetch;
     const sb = await mkSandbox();
     try {
-      const out = await fetchTool.execute(
-        { url: 'https://example.com/page' },
-        sb.ctx,
-        { signal: newSignal() },
-      );
+      const out = await fetchTool.execute({ url: 'https://example.com/page' }, sb.ctx, {
+        signal: newSignal(),
+      });
       expect(out.status).toBe(200);
       expect(out.content).toContain('hello');
       expect(out.content_type).toBe('text/plain');
@@ -102,11 +100,9 @@ describe('fetchTool', () => {
     ) as unknown as typeof fetch;
     const sb = await mkSandbox();
     try {
-      const out = await fetchTool.execute(
-        { url: 'https://api.example.com/d.json' },
-        sb.ctx,
-        { signal: newSignal() },
-      );
+      const out = await fetchTool.execute({ url: 'https://api.example.com/d.json' }, sb.ctx, {
+        signal: newSignal(),
+      });
       expect(out.content).toContain('"a": 1');
       expect(out.content).toContain('"b": 2');
     } finally {
@@ -122,11 +118,9 @@ describe('fetchTool', () => {
     ) as unknown as typeof fetch;
     const sb = await mkSandbox();
     try {
-      const out = await fetchTool.execute(
-        { url: 'https://example.com/page' },
-        sb.ctx,
-        { signal: newSignal() },
-      );
+      const out = await fetchTool.execute({ url: 'https://example.com/page' }, sb.ctx, {
+        signal: newSignal(),
+      });
       expect(out.content).toContain('# Title');
       expect(out.content).toContain('[link](https://x/)');
       expect(out.content).not.toContain('bad()');
@@ -156,11 +150,9 @@ describe('fetchTool', () => {
     ) as unknown as typeof fetch;
     const sb = await mkSandbox();
     try {
-      const out = await fetchTool.execute(
-        { url: 'https://example.com/', format: 'raw' },
-        sb.ctx,
-        { signal: newSignal() },
-      );
+      const out = await fetchTool.execute({ url: 'https://example.com/', format: 'raw' }, sb.ctx, {
+        signal: newSignal(),
+      });
       expect(out.content).toBe('<p>raw</p>');
     } finally {
       await sb.cleanup();
@@ -194,9 +186,9 @@ describe('fetchTool', () => {
       it(`blocks ${url}`, async () => {
         const sb = await mkSandbox();
         try {
-          await expect(
-            fetchTool.execute({ url }, sb.ctx, { signal: newSignal() }),
-          ).rejects.toThrow(/private|localhost|blocked/);
+          await expect(fetchTool.execute({ url }, sb.ctx, { signal: newSignal() })).rejects.toThrow(
+            /private|localhost|blocked/,
+          );
         } finally {
           await sb.cleanup();
         }
@@ -272,11 +264,9 @@ describe('fetchTool', () => {
       try {
         // Cloudflare DNS IPv6 — a clear public address. Confirms the IPv6
         // private-range gate isn't over-broad.
-        const out = await fetchTool.execute(
-          { url: 'https://[2606:4700:4700::1111]/' },
-          sb.ctx,
-          { signal: newSignal() },
-        );
+        const out = await fetchTool.execute({ url: 'https://[2606:4700:4700::1111]/' }, sb.ctx, {
+          signal: newSignal(),
+        });
         expect(out.status).toBe(200);
       } finally {
         await sb.cleanup();
@@ -362,11 +352,9 @@ describe('fetchTool', () => {
 
       const sb = await mkSandbox();
       try {
-        const out = await fetchTool.execute(
-          { url: 'https://a.example/' },
-          sb.ctx,
-          { signal: newSignal() },
-        );
+        const out = await fetchTool.execute({ url: 'https://a.example/' }, sb.ctx, {
+          signal: newSignal(),
+        });
         expect(out.status).toBe(200);
         expect(out.content).toContain('final');
       } finally {

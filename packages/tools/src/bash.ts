@@ -59,7 +59,7 @@ export const bashTool: Tool<BashInput, BashOutput> = {
   },
   async *executeStream(input, ctx, opts): AsyncGenerator<ToolStreamEvent<BashOutput>> {
     if (!input?.command) throw new Error('bash: command is required');
-    const timeoutMs = Math.min(input.timeout_ms ?? DEFAULT_TIMEOUT, 600_000);
+    const timeoutMs = Math.max(1, Math.min(input.timeout_ms ?? DEFAULT_TIMEOUT, 600_000));
 
     const isWin = os.platform() === 'win32';
     const shell = isWin

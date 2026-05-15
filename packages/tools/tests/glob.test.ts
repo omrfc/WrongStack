@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { globTool } from '../src/glob.js';
-import { mkSandbox, newSignal, type Sandbox } from './fixtures.js';
+import { type Sandbox, mkSandbox, newSignal } from './fixtures.js';
 
 describe('glob tool', () => {
   let sb: Sandbox;

@@ -1,6 +1,6 @@
+import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { randomBytes } from 'node:crypto';
 
 export interface AtomicWriteOptions {
   mode?: number;
@@ -34,13 +34,14 @@ export async function atomicWrite(
     } catch {
       // fsync best-effort
     }
-    // Now safely read mode from target (if it exists) and apply to tmp before rename
+    // Now safely read mode from target (if it exists) and apply to tmp before rename.
+    // Prefer opts.mode for new files; for existing files preserve their mode.
     let mode: number | undefined;
     try {
       const stat = await fs.stat(targetPath);
       mode = stat.mode & 0o777;
     } catch {
-      // target may not exist yet; mode stays undefined
+      mode = opts.mode;
     }
     if (mode !== undefined) {
       await fs.chmod(tmp, mode);

@@ -45,6 +45,7 @@ export function DiffView({ oldText, newText, caption }: DiffViewProps) {
       <div className="font-mono leading-relaxed max-h-96 overflow-auto">
         {rows.map((r, i) => (
           <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: static diff rows
             key={i}
             className={cn(
               'flex',

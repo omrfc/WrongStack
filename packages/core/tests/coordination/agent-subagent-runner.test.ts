@@ -1,8 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
-import { EventBus } from '../../src/kernel/events.js';
-import { DefaultMultiAgentCoordinator } from '../../src/coordination/multi-agent-coordinator.js';
+import { describe, expect, it, vi } from 'vitest';
 import { makeAgentSubagentRunner } from '../../src/coordination/agent-subagent-runner.js';
+import { DefaultMultiAgentCoordinator } from '../../src/coordination/multi-agent-coordinator.js';
 import type { Agent, RunResult } from '../../src/core/agent.js';
+import { EventBus } from '../../src/kernel/events.js';
 import type { TaskResult } from '../../src/types/multi-agent.js';
 
 /**
@@ -55,9 +55,15 @@ const makeConfig = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-function waitForCompletion(coord: DefaultMultiAgentCoordinator, timeoutMs = 2000): Promise<TaskResult> {
+function waitForCompletion(
+  coord: DefaultMultiAgentCoordinator,
+  timeoutMs = 2000,
+): Promise<TaskResult> {
   return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`task did not complete within ${timeoutMs}ms`)), timeoutMs);
+    const t = setTimeout(
+      () => reject(new Error(`task did not complete within ${timeoutMs}ms`)),
+      timeoutMs,
+    );
     coord.once('task.completed', (e: { result: TaskResult }) => {
       clearTimeout(t);
       resolve(e.result);

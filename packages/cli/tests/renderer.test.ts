@@ -1,8 +1,8 @@
-import { describe, it, expect } from 'vitest';
 import { Writable } from 'node:stream';
-import { TerminalRenderer } from '../src/renderer.js';
-import { renderDiff } from '../src/diff-renderer.js';
 import { stripAnsi } from '@wrongstack/core';
+import { describe, expect, it } from 'vitest';
+import { renderDiff } from '../src/diff-renderer.js';
+import { TerminalRenderer } from '../src/renderer.js';
 
 class CaptureStream extends Writable {
   buf = '';

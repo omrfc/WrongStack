@@ -1,14 +1,14 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   Context,
   DefaultTokenCounter,
   HybridCompactor,
   IntelligentCompactor,
+  type Message,
   type Provider,
   type SessionWriter,
-  type TextBlock,
-  type Message,
   type StateChange,
+  type TextBlock,
 } from '../../src/index.js';
 
 /**

@@ -1,6 +1,6 @@
-import { ProviderError } from '../types/provider.js';
-import type { ErrorHandler, RecoveryDecision } from '../types/error-handler.js';
 import type { Context } from '../core/context.js';
+import type { ErrorHandler, RecoveryDecision } from '../types/error-handler.js';
+import { ProviderError } from '../types/provider.js';
 
 import type { Compactor } from '../types/compactor.js';
 import type { ModelsRegistry } from '../types/models-registry.js';
@@ -90,7 +90,8 @@ export function buildRecoveryStrategies(opts?: {
             const currentCost = currentModel.cost?.input ?? Number.POSITIVE_INFINITY;
             if (modelCost >= currentCost) return false;
             if (currentModel.capabilities.tools && !m.tool_call) return false;
-            if (currentModel.capabilities.vision && !m.modalities?.input?.includes('image')) return false;
+            if (currentModel.capabilities.vision && !m.modalities?.input?.includes('image'))
+              return false;
             return true;
           });
 
@@ -136,7 +137,11 @@ export class DefaultErrorHandler implements ErrorHandler {
   } {
     // AbortError can be thrown in both browser (DOMException) and Node (Error).
     // Guard with typeof check so Node builds don't reference the browser-only DOMException.
-    if (typeof DOMException !== 'undefined' && err instanceof DOMException && err.name === 'AbortError') {
+    if (
+      typeof DOMException !== 'undefined' &&
+      err instanceof DOMException &&
+      err.name === 'AbortError'
+    ) {
       return { kind: 'abort', retryable: false };
     }
     if (err instanceof Error && err.name === 'AbortError') {

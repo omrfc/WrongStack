@@ -3,8 +3,8 @@
  * Subscribers cannot modify or cancel. Subscriber exceptions are caught.
  */
 
-import type { Usage } from '../types/provider.js';
 import type { Context } from '../core/context.js';
+import type { Usage } from '../types/provider.js';
 import type { Tool, ToolProgressEvent } from '../types/tool.js';
 
 export interface EventMap {
@@ -26,6 +26,7 @@ export interface EventMap {
   };
   'provider.response': { ctx: Context; usage: Usage; stopReason: string };
   'provider.text_delta': { ctx: Context; text: string };
+  'provider.thinking_delta': { ctx: Context; text: string };
   'provider.tool_use_start': { ctx: Context; id: string; name: string };
   'provider.tool_use_stop': { ctx: Context; id: string };
   /**

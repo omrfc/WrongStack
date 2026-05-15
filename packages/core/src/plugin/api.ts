@@ -1,21 +1,21 @@
 import type { Container } from '../kernel/container.js';
 import type { EventBus, EventName, Listener } from '../kernel/events.js';
 import type { Pipeline } from '../kernel/pipeline.js';
-import type { Tool } from '../types/tool.js';
+import type { ProviderRegistry } from '../registry/provider-registry.js';
+import type { SlashCommandRegistry } from '../registry/slash-command-registry.js';
+import type { ToolRegistry } from '../registry/tool-registry.js';
 import type { Config } from '../types/config.js';
 import type { Logger } from '../types/logger.js';
 import type {
+  MCPRegistryView,
   PluginAPI,
   PluginPipelines,
-  ToolRegistryView,
-  ProviderRegistryView,
-  MCPRegistryView,
-  SlashCommandRegistryView,
   ProviderFactory,
+  ProviderRegistryView,
+  SlashCommandRegistryView,
+  ToolRegistryView,
 } from '../types/plugin.js';
-import type { ToolRegistry } from '../registry/tool-registry.js';
-import type { ProviderRegistry } from '../registry/provider-registry.js';
-import type { SlashCommandRegistry } from '../registry/slash-command-registry.js';
+import type { Tool } from '../types/tool.js';
 
 export interface PluginAPIInit {
   ownerName: string;
@@ -99,7 +99,11 @@ export class DefaultPluginAPI implements PluginAPI {
   /** Called by the plugin loader when uninstalling the plugin. */
   drainCleanup(): void {
     for (const fn of this.pluginCleanupFns.splice(0)) {
-      try { fn(); } catch { /* best-effort */ }
+      try {
+        fn();
+      } catch {
+        /* best-effort */
+      }
     }
   }
 }
@@ -112,8 +116,16 @@ const noopMcp: MCPRegistryView = {
 };
 
 const noopSlashCommands: SlashCommandRegistryView = {
-  register() { /* noop */ },
-  unregister() { return false; },
-  get() { return undefined; },
-  list() { return []; },
+  register() {
+    /* noop */
+  },
+  unregister() {
+    return false;
+  },
+  get() {
+    return undefined;
+  },
+  list() {
+    return [];
+  },
 };

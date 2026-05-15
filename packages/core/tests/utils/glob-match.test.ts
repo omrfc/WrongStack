@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { matchGlob, matchAny } from '../../src/utils/glob-match.js';
+import { describe, expect, it } from 'vitest';
+import { matchAny, matchGlob } from '../../src/utils/glob-match.js';
 
 describe('glob-match', () => {
   it('matches *', () => {

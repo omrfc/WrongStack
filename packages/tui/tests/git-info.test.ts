@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import * as fsp from 'node:fs/promises';
-import * as path from 'node:path';
-import * as os from 'node:os';
 import { spawnSync } from 'node:child_process';
+import * as fsp from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { readGitInfo } from '../src/git-info.js';
 
 const hasGit = (() => {

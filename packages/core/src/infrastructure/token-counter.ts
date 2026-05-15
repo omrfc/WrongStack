@@ -1,7 +1,7 @@
-import type { CacheStats, TokenCounter } from '../types/token-counter.js';
-import type { Usage } from '../types/provider.js';
-import type { ModelsRegistry, ResolvedModel } from '../types/models-registry.js';
 import type { EventBus } from '../kernel/events.js';
+import type { ModelsRegistry, ResolvedModel } from '../types/models-registry.js';
+import type { Usage } from '../types/provider.js';
+import type { CacheStats, TokenCounter } from '../types/token-counter.js';
 
 interface PriceEntry {
   input?: number;

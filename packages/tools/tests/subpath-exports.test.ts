@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { describe, expect, it } from 'vitest';
 
 /**
  * L3-A: verify the package.json exports map and the built dist match,
@@ -37,9 +37,7 @@ describe('per-tool subpath exports (L3-A)', () => {
     // Internal helper chunks (anything with a hash suffix) and the index/builtin
     // bundles are allowed to be present without an export entry.
     const orphan = distFiles.filter(
-      (f) =>
-        !expectedSubpathFiles.has(f) &&
-        !/-[A-Za-z0-9_-]{6,}\.js$/.test(f), // tsup chunk file
+      (f) => !expectedSubpathFiles.has(f) && !/-[A-Za-z0-9_-]{6,}\.js$/.test(f), // tsup chunk file
     );
     expect(orphan).toEqual([]);
   });

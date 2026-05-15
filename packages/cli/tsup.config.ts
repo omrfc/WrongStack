@@ -10,10 +10,5 @@ export default defineConfig({
   treeshake: true,
   target: 'es2023',
   banner: { js: '#!/usr/bin/env node' },
-  external: [
-    '@wrongstack/core',
-    '@wrongstack/providers',
-    '@wrongstack/tools',
-    '@wrongstack/mcp',
-  ],
+  external: ['@wrongstack/core', '@wrongstack/providers', '@wrongstack/tools', '@wrongstack/mcp'],
 });

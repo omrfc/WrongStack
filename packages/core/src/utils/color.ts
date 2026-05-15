@@ -6,7 +6,8 @@ const isColorTty = (): boolean => {
 
 const COLOR = isColorTty();
 
-const wrap = (open: string, close: string) =>
+const wrap =
+  (open: string, close: string) =>
   (s: string): string =>
     COLOR ? `\x1b[${open}m${s}\x1b[${close}m` : s;
 

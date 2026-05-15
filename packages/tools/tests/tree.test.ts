@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { treeTool } from '../src/tree.js';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { treeTool } from '../src/tree.js';
 
 let tmpDir: string;
 
@@ -14,7 +14,7 @@ afterEach(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
-const makeCtx = () => ({ cwd: tmpDir, tools: [], projectRoot: tmpDir } as any);
+const makeCtx = () => ({ cwd: tmpDir, tools: [], projectRoot: tmpDir }) as any;
 
 describe('treeTool', () => {
   it('has correct metadata', () => {

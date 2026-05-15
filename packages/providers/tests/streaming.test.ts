@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { AnthropicProvider } from '../src/anthropic.js';
-import { OpenAIProvider } from '../src/openai.js';
 import { GoogleProvider } from '../src/google.js';
+import { OpenAIProvider } from '../src/openai.js';
 
 function sseBody(events: string): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
@@ -53,7 +53,12 @@ describe('AnthropicProvider.stream', () => {
     );
     expect(res.content).toEqual([{ type: 'text', text: 'Hello world' }]);
     expect(res.stopReason).toBe('end_turn');
-    expect(res.usage).toEqual({ input: 12, output: 7, cacheRead: undefined, cacheWrite: undefined });
+    expect(res.usage).toEqual({
+      input: 12,
+      output: 7,
+      cacheRead: undefined,
+      cacheWrite: undefined,
+    });
     expect(res.model).toBe('claude-test');
   });
 

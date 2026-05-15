@@ -1,7 +1,14 @@
+import {
+  Container,
+  EventBus,
+  type Logger,
+  type PluginAPI,
+  type SlashCommand,
+  type Tool,
+} from '@wrongstack/core';
 import { describe, expect, it } from 'vitest';
-import { Container, EventBus, type Logger, type PluginAPI, type SlashCommand, type Tool } from '@wrongstack/core';
-import plugin from '../../src/index.js';
 import { PLUGIN_NAME } from '../../src/config.js';
+import plugin from '../../src/index.js';
 
 const log: Logger = {
   level: 'error',

@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { diffTool } from '../src/diff.js';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { diffTool } from '../src/diff.js';
 
 let tmpDir: string;
 
@@ -14,7 +14,7 @@ afterEach(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
-const makeCtx = () => ({ cwd: tmpDir, tools: [], projectRoot: tmpDir } as any);
+const makeCtx = () => ({ cwd: tmpDir, tools: [], projectRoot: tmpDir }) as any;
 const makeOpts = () => ({ signal: new AbortController().signal });
 
 describe('diffTool', () => {
@@ -56,7 +56,11 @@ describe('diffTool', () => {
     const filePath = path.join(tmpDir, 'file.txt');
     await fs.writeFile(filePath, 'hello\nworld', 'utf8');
     const ctx = makeCtx();
-    const result = await diffTool.execute({ files: 'file.txt', mode: 'side-by-side' }, ctx, makeOpts());
+    const result = await diffTool.execute(
+      { files: 'file.txt', mode: 'side-by-side' },
+      ctx,
+      makeOpts(),
+    );
     expect(result.mode).toBe('side-by-side');
   });
 

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { ProviderOption } from '../src/components/model-picker.js';
 
 describe('ModelPicker types and data', () => {

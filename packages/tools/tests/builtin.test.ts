@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { builtinTools } from '../src/builtin.js';
 
 describe('builtinTools', () => {

@@ -54,7 +54,11 @@ export const readTool: Tool<ReadInput, ReadOutput> = {
     const allLines = text.split(/\r\n|\r|\n/);
     const total = allLines.length;
     const offset = Math.max(1, input.offset ?? 1);
-    const limit = Math.max(1, Math.min(input.limit ?? 2000, 5000));
+    const limit = Math.max(0, Math.min(input.limit ?? 2000, 5000));
+    if (limit === 0) {
+      ctx.recordRead(absPath, stat.mtimeMs);
+      return { text: '', total_lines: total, encoding: 'utf8', truncated: total > 0 };
+    }
     const slice = allLines.slice(offset - 1, offset - 1 + limit);
     const truncated = offset - 1 + slice.length < total;
 

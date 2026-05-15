@@ -1,7 +1,7 @@
+import type { TextBlock } from '../types/blocks.js';
 import type { Provider } from '../types/provider.js';
 import type { SessionWriter } from '../types/session.js';
 import type { TokenCounter } from '../types/token-counter.js';
-import type { TextBlock } from '../types/blocks.js';
 import type { Tool } from '../types/tool.js';
 import type { Context } from './context.js';
 

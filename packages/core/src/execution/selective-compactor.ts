@@ -1,11 +1,11 @@
-import type { Compactor, CompactReport } from '../types/compactor.js';
 import type { Context } from '../core/context.js';
-import type { Message } from '../types/messages.js';
-import type { Provider, Request } from '../types/provider.js';
+import { LLMSelector } from '../models/llm-selector.js';
 import type { ContentBlock } from '../types/blocks.js';
 import { isTextBlock } from '../types/blocks.js';
+import type { CompactReport, Compactor } from '../types/compactor.js';
+import type { Message } from '../types/messages.js';
+import type { Provider, Request } from '../types/provider.js';
 import type { MessageSelector, SelectorResult } from '../types/selector.js';
-import { LLMSelector } from '../models/llm-selector.js';
 
 /**
  * Options for SelectiveCompactor — the most configurable compactor.
@@ -58,7 +58,8 @@ export class SelectiveCompactor implements Compactor {
 
   constructor(opts: SelectiveCompactorOptions) {
     this.provider = opts.provider;
-    this.selector = opts.selector ?? new LLMSelector({ provider: opts.provider, model: opts.selectorModel });
+    this.selector =
+      opts.selector ?? new LLMSelector({ provider: opts.provider, model: opts.selectorModel });
     this.warnThreshold = opts.warnThreshold ?? 0.6;
     this.softThreshold = opts.softThreshold ?? 0.75;
     this.hardThreshold = opts.hardThreshold ?? 0.9;
@@ -170,8 +171,16 @@ export class SelectiveCompactor implements Compactor {
     };
 
     try {
-      const res = await this.provider.complete(req, { signal: ctx.signal ?? new AbortController().signal });
-      return res.content.filter(isTextBlock).map((b) => b.text).join('\n').trim() || '(empty)';
+      const res = await this.provider.complete(req, {
+        signal: ctx.signal ?? new AbortController().signal,
+      });
+      return (
+        res.content
+          .filter(isTextBlock)
+          .map((b) => b.text)
+          .join('\n')
+          .trim() || '(empty)'
+      );
     } catch {
       return `[${messages.length} earlier turns omitted]`;
     }

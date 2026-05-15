@@ -41,8 +41,15 @@ export type SessionEvent =
   | { type: 'skill_activated'; ts: string; skillName: string }
   | { type: 'skill_deactivated'; ts: string; skillName: string }
   | { type: 'tool_call_start'; ts: string; name: string; id: string; input: unknown }
-  | { type: 'tool_call_end'; ts: string; name: string; id: string; durationMs: number; outputSize: number }
-  | { type: 'message_truncated'; ts: string; before: number; after: number }
+  | {
+      type: 'tool_call_end';
+      ts: string;
+      name: string;
+      id: string;
+      durationMs: number;
+      outputSize: number;
+    }
+  | { type: 'message_truncated'; ts: string; before: number; after: number };
 
 export interface SessionSummary {
   id: string;

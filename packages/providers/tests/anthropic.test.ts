@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AnthropicProvider } from '../src/anthropic.js';
 
 function mockFetch(json: unknown, status = 200) {
@@ -100,7 +100,7 @@ describe('AnthropicProvider', () => {
     expect(body?.['temperature']).toBe(0.2);
     expect(body?.['top_p']).toBe(0.9);
     expect(body?.['stop_sequences']).toEqual(['<end>']);
-    expect((body?.['tools'] as unknown[])).toHaveLength(1);
+    expect(body?.['tools'] as unknown[]).toHaveLength(1);
   });
 
   it('non-2xx with 500 is retryable', async () => {

@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { DefaultSessionStore } from '../../src/storage/session-store.js';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { DefaultSessionReader } from '../../src/storage/session-reader.js';
+import { DefaultSessionStore } from '../../src/storage/session-store.js';
 
 async function mkdtemp(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'wrongstack-sessions-'));
@@ -81,9 +81,24 @@ describe('DefaultSessionReader (L2-A)', () => {
   });
 
   it('query filters by provider, model, and time range', async () => {
-    await seedSession(dir, 'a', { model: 'gpt-4', provider: 'openai', startedAt: '2026-01-01T00:00:00.000Z', title: 'old' });
-    await seedSession(dir, 'b', { model: 'claude', provider: 'anthropic', startedAt: '2026-04-01T00:00:00.000Z', title: 'recent' });
-    await seedSession(dir, 'c', { model: 'gpt-4', provider: 'openai', startedAt: '2026-05-01T00:00:00.000Z', title: 'newest' });
+    await seedSession(dir, 'a', {
+      model: 'gpt-4',
+      provider: 'openai',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      title: 'old',
+    });
+    await seedSession(dir, 'b', {
+      model: 'claude',
+      provider: 'anthropic',
+      startedAt: '2026-04-01T00:00:00.000Z',
+      title: 'recent',
+    });
+    await seedSession(dir, 'c', {
+      model: 'gpt-4',
+      provider: 'openai',
+      startedAt: '2026-05-01T00:00:00.000Z',
+      title: 'newest',
+    });
 
     const byProvider = await reader.query({ provider: 'openai' });
     expect(byProvider.map((r) => r.id).sort()).toEqual(['a', 'c']);
@@ -91,17 +106,26 @@ describe('DefaultSessionReader (L2-A)', () => {
     const byModel = await reader.query({ model: 'claude' });
     expect(byModel.map((r) => r.id)).toEqual(['b']);
 
-    const byRange = await reader.query({ since: '2026-03-01T00:00:00.000Z', until: '2026-04-30T00:00:00.000Z' });
+    const byRange = await reader.query({
+      since: '2026-03-01T00:00:00.000Z',
+      until: '2026-04-30T00:00:00.000Z',
+    });
     expect(byRange.map((r) => r.id)).toEqual(['b']);
   });
 
   it('query filters by title substring (case-insensitive) and minTokens', async () => {
     await seedSession(dir, 'a', {
-      model: 'm', provider: 'p', startedAt: '2026-01-01T00:00:00.000Z', title: 'Fix Bug',
+      model: 'm',
+      provider: 'p',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      title: 'Fix Bug',
       tokens: { input: 10, output: 5 },
     });
     await seedSession(dir, 'b', {
-      model: 'm', provider: 'p', startedAt: '2026-01-02T00:00:00.000Z', title: 'add feature',
+      model: 'm',
+      provider: 'p',
+      startedAt: '2026-01-02T00:00:00.000Z',
+      title: 'add feature',
       tokens: { input: 1000, output: 500 },
     });
     const byTitle = await reader.query({ titleContains: 'BUG' });
@@ -111,7 +135,12 @@ describe('DefaultSessionReader (L2-A)', () => {
   });
 
   it('replay yields events in chronological order', async () => {
-    await seedSession(dir, 'a', { model: 'm', provider: 'p', startedAt: '2026-01-01T00:00:00.000Z', title: 'hi' });
+    await seedSession(dir, 'a', {
+      model: 'm',
+      provider: 'p',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      title: 'hi',
+    });
     const events = [];
     for await (const e of reader.replay('a')) events.push(e);
     expect(events.map((e) => e.type)).toEqual([
@@ -124,11 +153,15 @@ describe('DefaultSessionReader (L2-A)', () => {
 
   it('search finds literal substring matches across sessions', async () => {
     await seedSession(dir, 'a', {
-      model: 'm', provider: 'p', startedAt: '2026-01-01T00:00:00.000Z',
+      model: 'm',
+      provider: 'p',
+      startedAt: '2026-01-01T00:00:00.000Z',
       title: 'how do I configure tsup',
     });
     await seedSession(dir, 'b', {
-      model: 'm', provider: 'p', startedAt: '2026-01-02T00:00:00.000Z',
+      model: 'm',
+      provider: 'p',
+      startedAt: '2026-01-02T00:00:00.000Z',
       title: 'unrelated topic',
     });
     const hits = await reader.search({ query: 'tsup' });
@@ -139,7 +172,9 @@ describe('DefaultSessionReader (L2-A)', () => {
 
   it('search supports regex mode and respects case-insensitive default', async () => {
     await seedSession(dir, 'a', {
-      model: 'm', provider: 'p', startedAt: '2026-01-01T00:00:00.000Z',
+      model: 'm',
+      provider: 'p',
+      startedAt: '2026-01-01T00:00:00.000Z',
       title: 'Error code 42 happened',
     });
     const re = await reader.search({ query: 'error\\s+code\\s+\\d+', regex: true });
@@ -150,7 +185,9 @@ describe('DefaultSessionReader (L2-A)', () => {
 
   it('search limits to specified event types', async () => {
     await seedSession(dir, 'a', {
-      model: 'm', provider: 'p', startedAt: '2026-01-01T00:00:00.000Z',
+      model: 'm',
+      provider: 'p',
+      startedAt: '2026-01-01T00:00:00.000Z',
       title: 'reply text',
       body: 'reply text',
     });
@@ -160,8 +197,18 @@ describe('DefaultSessionReader (L2-A)', () => {
   });
 
   it('search can be scoped to a single session', async () => {
-    await seedSession(dir, 'a', { model: 'm', provider: 'p', startedAt: '2026-01-01T00:00:00.000Z', title: 'foo' });
-    await seedSession(dir, 'b', { model: 'm', provider: 'p', startedAt: '2026-01-02T00:00:00.000Z', title: 'foo' });
+    await seedSession(dir, 'a', {
+      model: 'm',
+      provider: 'p',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      title: 'foo',
+    });
+    await seedSession(dir, 'b', {
+      model: 'm',
+      provider: 'p',
+      startedAt: '2026-01-02T00:00:00.000Z',
+      title: 'foo',
+    });
     const hits = await reader.search({ query: 'foo' }, 'b');
     expect(hits).toHaveLength(1);
     expect(hits[0]!.sessionId).toBe('b');
@@ -169,7 +216,8 @@ describe('DefaultSessionReader (L2-A)', () => {
 
   it('export markdown renders user/assistant turns', async () => {
     await seedSession(dir, 'a', {
-      model: 'gpt-4', provider: 'openai',
+      model: 'gpt-4',
+      provider: 'openai',
       startedAt: '2026-01-01T00:00:00.000Z',
       title: 'hello world',
       body: 'hi there',
@@ -183,7 +231,12 @@ describe('DefaultSessionReader (L2-A)', () => {
   });
 
   it('export json round-trips events and metadata', async () => {
-    await seedSession(dir, 'a', { model: 'm', provider: 'p', startedAt: '2026-01-01T00:00:00.000Z', title: 'q' });
+    await seedSession(dir, 'a', {
+      model: 'm',
+      provider: 'p',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      title: 'q',
+    });
     const json = await reader.export('a', { format: 'json' });
     const parsed = JSON.parse(json);
     expect(parsed.metadata.id).toBe('a');
@@ -191,7 +244,12 @@ describe('DefaultSessionReader (L2-A)', () => {
   });
 
   it('export text format includes timestamps and role markers', async () => {
-    await seedSession(dir, 'a', { model: 'm', provider: 'p', startedAt: '2026-01-01T00:00:00.000Z', title: 'q' });
+    await seedSession(dir, 'a', {
+      model: 'm',
+      provider: 'p',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      title: 'q',
+    });
     const text = await reader.export('a', { format: 'text' });
     expect(text).toContain('Session a');
     expect(text).toContain('USER');
@@ -201,12 +259,42 @@ describe('DefaultSessionReader (L2-A)', () => {
   it('markdown export renders tool_use / tool_result / error / compaction blocks', async () => {
     const file = path.join(dir, 'rich.jsonl');
     const events = [
-      { type: 'session_start', ts: '2026-01-01T00:00:00.000Z', id: 'rich', model: 'm', provider: 'p' },
+      {
+        type: 'session_start',
+        ts: '2026-01-01T00:00:00.000Z',
+        id: 'rich',
+        model: 'm',
+        provider: 'p',
+      },
       { type: 'user_input', ts: '2026-01-01T00:00:01.000Z', content: 'do it' },
-      { type: 'llm_response', ts: '2026-01-01T00:00:02.000Z', content: [{ type: 'text', text: 'sure' }], stopReason: 'tool_use', usage: { input: 10, output: 5 } },
-      { type: 'tool_use', ts: '2026-01-01T00:00:03.000Z', id: 'tu1', name: 'bash', input: { command: 'ls' } },
-      { type: 'tool_result', ts: '2026-01-01T00:00:04.000Z', id: 'tu1', content: 'file.txt', isError: false },
-      { type: 'tool_result', ts: '2026-01-01T00:00:05.000Z', id: 'tu2', content: 'oops', isError: true },
+      {
+        type: 'llm_response',
+        ts: '2026-01-01T00:00:02.000Z',
+        content: [{ type: 'text', text: 'sure' }],
+        stopReason: 'tool_use',
+        usage: { input: 10, output: 5 },
+      },
+      {
+        type: 'tool_use',
+        ts: '2026-01-01T00:00:03.000Z',
+        id: 'tu1',
+        name: 'bash',
+        input: { command: 'ls' },
+      },
+      {
+        type: 'tool_result',
+        ts: '2026-01-01T00:00:04.000Z',
+        id: 'tu1',
+        content: 'file.txt',
+        isError: false,
+      },
+      {
+        type: 'tool_result',
+        ts: '2026-01-01T00:00:05.000Z',
+        id: 'tu2',
+        content: 'oops',
+        isError: true,
+      },
       { type: 'error', ts: '2026-01-01T00:00:06.000Z', phase: 'tool', message: 'kapow' },
       { type: 'compaction', ts: '2026-01-01T00:00:07.000Z', before: 1000, after: 500 },
     ];
@@ -224,10 +312,34 @@ describe('DefaultSessionReader (L2-A)', () => {
   it('text export renders tool_use / tool_result / error blocks', async () => {
     const file = path.join(dir, 'rich2.jsonl');
     const events = [
-      { type: 'session_start', ts: '2026-01-01T00:00:00.000Z', id: 'rich2', model: 'm', provider: 'p' },
-      { type: 'tool_use', ts: '2026-01-01T00:00:03.000Z', id: 'tu1', name: 'bash', input: { command: 'ls' } },
-      { type: 'tool_result', ts: '2026-01-01T00:00:04.000Z', id: 'tu1', content: 'file.txt', isError: false },
-      { type: 'tool_result', ts: '2026-01-01T00:00:05.000Z', id: 'tu2', content: 'fail', isError: true },
+      {
+        type: 'session_start',
+        ts: '2026-01-01T00:00:00.000Z',
+        id: 'rich2',
+        model: 'm',
+        provider: 'p',
+      },
+      {
+        type: 'tool_use',
+        ts: '2026-01-01T00:00:03.000Z',
+        id: 'tu1',
+        name: 'bash',
+        input: { command: 'ls' },
+      },
+      {
+        type: 'tool_result',
+        ts: '2026-01-01T00:00:04.000Z',
+        id: 'tu1',
+        content: 'file.txt',
+        isError: false,
+      },
+      {
+        type: 'tool_result',
+        ts: '2026-01-01T00:00:05.000Z',
+        id: 'tu2',
+        content: 'fail',
+        isError: true,
+      },
       { type: 'error', ts: '2026-01-01T00:00:06.000Z', phase: 'tool', message: 'kapow' },
     ];
     await fs.writeFile(file, events.map((e) => JSON.stringify(e)).join('\n') + '\n');
@@ -241,8 +353,20 @@ describe('DefaultSessionReader (L2-A)', () => {
   it('export renders stop reason hint when non-end_turn', async () => {
     const file = path.join(dir, 'stoppy.jsonl');
     const events = [
-      { type: 'session_start', ts: '2026-01-01T00:00:00.000Z', id: 'stoppy', model: 'm', provider: 'p' },
-      { type: 'llm_response', ts: '2026-01-01T00:00:02.000Z', content: [{ type: 'text', text: 'truncated' }], stopReason: 'max_tokens', usage: { input: 1, output: 1 } },
+      {
+        type: 'session_start',
+        ts: '2026-01-01T00:00:00.000Z',
+        id: 'stoppy',
+        model: 'm',
+        provider: 'p',
+      },
+      {
+        type: 'llm_response',
+        ts: '2026-01-01T00:00:02.000Z',
+        content: [{ type: 'text', text: 'truncated' }],
+        stopReason: 'max_tokens',
+        usage: { input: 1, output: 1 },
+      },
     ];
     await fs.writeFile(file, events.map((e) => JSON.stringify(e)).join('\n') + '\n');
     const md = await reader.export('stoppy', { format: 'markdown' });
@@ -250,7 +374,12 @@ describe('DefaultSessionReader (L2-A)', () => {
   });
 
   it('metadata returns session header without errors', async () => {
-    await seedSession(dir, 'a', { model: 'gpt-4', provider: 'openai', startedAt: '2026-01-01T00:00:00.000Z', title: 'q' });
+    await seedSession(dir, 'a', {
+      model: 'gpt-4',
+      provider: 'openai',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      title: 'q',
+    });
     const meta = await reader.metadata('a');
     expect(meta.id).toBe('a');
     expect(meta.provider).toBe('openai');

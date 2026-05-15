@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { PRICING, priceFor, type ModelPrice } from '../src/pricing.js';
+import { describe, expect, it } from 'vitest';
+import { type ModelPrice, PRICING, priceFor } from '../src/pricing.js';
 
 describe('pricing (deprecated)', () => {
   it('PRICING is always empty', () => expect(PRICING).toEqual({}));

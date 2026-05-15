@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DefaultSystemPromptBuilder, LAYER_1_IDENTITY } from '../../src/index.js';
 import type { MemoryStore, SkillLoader, Tool } from '../../src/index.js';
 
@@ -77,7 +77,13 @@ describe('DefaultSystemPromptBuilder', () => {
     };
     const skills: SkillLoader = {
       listEntries: async () => [
-        { name: 'test-skill', trigger: 'Use for testing.', scope: ['testing'], source: 'bundled', path: '/test/skill.md' },
+        {
+          name: 'test-skill',
+          trigger: 'Use for testing.',
+          scope: ['testing'],
+          source: 'bundled',
+          path: '/test/skill.md',
+        },
       ],
       manifestText: async () => '',
       list: async () => [],
@@ -184,7 +190,12 @@ describe('DefaultSystemPromptBuilder', () => {
 
   it('shows context window size when modelCapabilities provided', async () => {
     const b = new DefaultSystemPromptBuilder({
-      modelCapabilities: { maxContextTokens: 32768, supportsTools: true, supportsVision: false, supportsReasoning: false },
+      modelCapabilities: {
+        maxContextTokens: 32768,
+        supportsTools: true,
+        supportsVision: false,
+        supportsReasoning: false,
+      },
       todayIso: '2026-05-13',
     });
     const blocks = await b.build({ cwd: tmp, projectRoot: tmp, tools: [] });
@@ -201,11 +212,18 @@ describe('DefaultSystemPromptBuilder', () => {
       inputSchema: { type: 'object' },
       permission: 'auto',
       mutating: true,
-      async execute() { return ''; },
+      async execute() {
+        return '';
+      },
     };
     // <= 32000 triggers 50% threshold.
     const b = new DefaultSystemPromptBuilder({
-      modelCapabilities: { maxContextTokens: 32000, supportsTools: true, supportsVision: false, supportsReasoning: false },
+      modelCapabilities: {
+        maxContextTokens: 32000,
+        supportsTools: true,
+        supportsVision: false,
+        supportsReasoning: false,
+      },
     });
     const blocks = await b.build({ cwd: tmp, projectRoot: tmp, tools: [ctxManagerTool] });
     const toolBlock = blocks[1]?.text ?? '';
@@ -220,10 +238,17 @@ describe('DefaultSystemPromptBuilder', () => {
       inputSchema: { type: 'object' },
       permission: 'auto',
       mutating: true,
-      async execute() { return ''; },
+      async execute() {
+        return '';
+      },
     };
     const b = new DefaultSystemPromptBuilder({
-      modelCapabilities: { maxContextTokens: 128000, supportsTools: true, supportsVision: true, supportsReasoning: true },
+      modelCapabilities: {
+        maxContextTokens: 128000,
+        supportsTools: true,
+        supportsVision: true,
+        supportsReasoning: true,
+      },
     });
     const blocks = await b.build({ cwd: tmp, projectRoot: tmp, tools: [ctxManagerTool] });
     const toolBlock = blocks[1]?.text ?? '';

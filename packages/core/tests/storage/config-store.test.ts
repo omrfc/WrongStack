@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DefaultConfigStore } from '../../src/storage/config-store.js';
 import type { Config } from '../../src/types/config.js';
 
@@ -115,7 +115,9 @@ describe('DefaultConfigStore', () => {
 
   it('a throwing watcher does not block others', () => {
     const store = new DefaultConfigStore(baseConfig);
-    const bad = vi.fn(() => { throw new Error('boom'); });
+    const bad = vi.fn(() => {
+      throw new Error('boom');
+    });
     const good = vi.fn();
     store.watch(bad);
     store.watch(good);
@@ -131,7 +133,7 @@ describe('DefaultConfigStore', () => {
   it('update merging preserves untouched fields', () => {
     const store = new DefaultConfigStore({
       ...baseConfig,
-      extensions: { 'a': { foo: 1 } },
+      extensions: { a: { foo: 1 } },
     });
     store.update({ model: 'changed' });
     expect(store.get().extensions?.a).toEqual({ foo: 1 });

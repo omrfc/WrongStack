@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Provider } from '../../src/types/provider.js';
-import type { Message } from '../../src/types/messages.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LLMSelector } from '../../src/models/llm-selector.js';
+import type { Message } from '../../src/types/messages.js';
+import type { Provider } from '../../src/types/provider.js';
 
 function makeTextBlock(text: string) {
   return { type: 'text' as const, text };
@@ -55,7 +55,9 @@ describe('LLMSelector', () => {
 
   describe('select', () => {
     it('calls provider.complete with formatted messages', async () => {
-      const provider = mockProvider(['{"kept":[{"from":0,"to":2,"importance":"high"}],"collapsed":[],"reasoning":"test"}']);
+      const provider = mockProvider([
+        '{"kept":[{"from":0,"to":2,"importance":"high"}],"collapsed":[],"reasoning":"test"}',
+      ]);
       const selector = new LLMSelector({ provider, maxContextTokens: 40000 });
       const messages = [
         makeMessage('system', 'You are helpful'),
@@ -67,9 +69,13 @@ describe('LLMSelector', () => {
     });
 
     it('returns kept and collapsed from parsed JSON', async () => {
-      const provider = mockProvider(['{"kept":[{"from":0,"to":1,"importance":"critical"}],"collapsed":[{"from":2,"to":5,"summary":"old conversation"}],"reasoning":"reasoning here"}']);
+      const provider = mockProvider([
+        '{"kept":[{"from":0,"to":1,"importance":"critical"}],"collapsed":[{"from":2,"to":5,"summary":"old conversation"}],"reasoning":"reasoning here"}',
+      ]);
       const selector = new LLMSelector({ provider });
-      const messages = Array(6).fill(null).map((_, i) => makeMessage(i % 2 === 0 ? 'user' : 'assistant', `message ${i}`));
+      const messages = Array(6)
+        .fill(null)
+        .map((_, i) => makeMessage(i % 2 === 0 ? 'user' : 'assistant', `message ${i}`));
       const result = await selector.select(messages, 1000);
       expect(result.kept).toHaveLength(1);
       expect(result.kept[0].from).toBe(0);
@@ -90,7 +96,9 @@ describe('LLMSelector', () => {
         stream: vi.fn(),
       };
       const selector = new LLMSelector({ provider });
-      const messages = Array(10).fill(null).map((_, i) => makeMessage(i % 2 === 0 ? 'user' : 'assistant', `message ${i}`));
+      const messages = Array(10)
+        .fill(null)
+        .map((_, i) => makeMessage(i % 2 === 0 ? 'user' : 'assistant', `message ${i}`));
       const result = await selector.select(messages, 1000);
       expect(result.kept.length + result.collapsed.length).toBeGreaterThan(0);
     });
@@ -98,7 +106,9 @@ describe('LLMSelector', () => {
     it('uses fallback when JSON cannot be parsed', async () => {
       const provider = mockProvider(['not valid json at all']);
       const selector = new LLMSelector({ provider });
-      const messages = Array(10).fill(null).map((_, i) => makeMessage(i % 2 === 0 ? 'user' : 'assistant', `msg ${i}`));
+      const messages = Array(10)
+        .fill(null)
+        .map((_, i) => makeMessage(i % 2 === 0 ? 'user' : 'assistant', `msg ${i}`));
       const result = await selector.select(messages, 1000);
       // Should fall back, meaning result has kept/collapsed
       expect(result.kept.length + result.collapsed.length).toBeGreaterThan(0);
@@ -107,7 +117,9 @@ describe('LLMSelector', () => {
     it('uses fallback when JSON has no kept/collapsed keys', async () => {
       const provider = mockProvider(['{"other":"data"}']);
       const selector = new LLMSelector({ provider });
-      const messages = Array(5).fill(null).map((_, i) => makeMessage('user', `msg ${i}`));
+      const messages = Array(5)
+        .fill(null)
+        .map((_, i) => makeMessage('user', `msg ${i}`));
       const result = await selector.select(messages, 1000);
       expect(result.kept).toEqual([]);
       expect(result.collapsed).toEqual([]);
@@ -116,13 +128,17 @@ describe('LLMSelector', () => {
     it('respects maxContextTokens as upper bound', async () => {
       const provider = mockProvider(['{"kept":[],"collapsed":[],"reasoning":""}']);
       const selector = new LLMSelector({ provider, maxContextTokens: 5000 });
-      const messages = Array(10).fill(null).map((_, i) => makeMessage('user', 'x'.repeat(100)));
+      const messages = Array(10)
+        .fill(null)
+        .map((_, i) => makeMessage('user', 'x'.repeat(100)));
       await selector.select(messages, 1000);
       // The effective budget should be min(maxToKeep, maxContextTokens) = min(1000, 5000) = 1000
     });
 
     it('maps importance string to typed importance', async () => {
-      const provider = mockProvider(['{"kept":[{"from":0,"to":0,"importance":"high"},{"from":1,"to":1,"importance":"medium"}],"collapsed":[],"reasoning":""}']);
+      const provider = mockProvider([
+        '{"kept":[{"from":0,"to":0,"importance":"high"},{"from":1,"to":1,"importance":"medium"}],"collapsed":[],"reasoning":""}',
+      ]);
       const selector = new LLMSelector({ provider });
       const messages = [makeMessage('user', 'msg1'), makeMessage('assistant', 'msg2')];
       const result = await selector.select(messages, 1000);
@@ -149,7 +165,9 @@ describe('LLMSelector', () => {
       };
       const selector = new LLMSelector({ provider, maxContextTokens: 40000 });
       // Each message ~25 tokens (100 chars / 4)
-      const messages = Array(20).fill(null).map((_, i) => makeMessage(i % 2 === 0 ? 'user' : 'assistant', 'x'.repeat(100)));
+      const messages = Array(20)
+        .fill(null)
+        .map((_, i) => makeMessage(i % 2 === 0 ? 'user' : 'assistant', 'x'.repeat(100)));
       const result = await selector.select(messages, 500); // 500 token budget
       // Should keep some recent messages and collapse older ones
       expect(result.kept.length).toBeGreaterThan(0);
@@ -163,7 +181,9 @@ describe('LLMSelector', () => {
         stream: vi.fn(),
       };
       const selector = new LLMSelector({ provider, maxContextTokens: 40000 });
-      const messages = Array(5).fill(null).map((_, i) => makeMessage('user', 'x'.repeat(200)));
+      const messages = Array(5)
+        .fill(null)
+        .map((_, i) => makeMessage('user', 'x'.repeat(200)));
       const result = await selector.select(messages, 10); // tiny budget
       // If budget is tiny, even 1 message might not fit
     });
@@ -176,7 +196,9 @@ describe('LLMSelector', () => {
         stream: vi.fn(),
       };
       const selector = new LLMSelector({ provider, maxContextTokens: 40000 });
-      const messages = Array(5).fill(null).map((_, i) => makeMessage('user', 'short'));
+      const messages = Array(5)
+        .fill(null)
+        .map((_, i) => makeMessage('user', 'short'));
       const result = await selector.select(messages, 100000); // huge budget
       expect(result.collapsed).toHaveLength(0);
       expect(result.kept).toHaveLength(1); // All in one kept range

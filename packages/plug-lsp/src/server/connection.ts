@@ -84,6 +84,13 @@ export class Connection {
   }
 
   private onData(chunk: Buffer): void {
+    // Cap the receive buffer so a misbehaving server that floods data
+    // without proper Content-Length headers can't exhaust memory.
+    const MAX_BUFFER = 16 * 1024 * 1024; // 16 MiB
+    if (this.buffer.length + chunk.length > MAX_BUFFER) {
+      this.close();
+      return;
+    }
     this.buffer = Buffer.concat([this.buffer, chunk]);
     for (;;) {
       const sep = this.buffer.indexOf('\r\n\r\n');
@@ -95,6 +102,13 @@ export class Connection {
         continue;
       }
       const length = Number(match[1]);
+      // Reject NaN, negative, or absurd lengths. Without this a
+      // Content-Length: abc slips past as NaN and permanently stalls
+      // the message parser.
+      if (!Number.isFinite(length) || length < 0 || length > MAX_BUFFER) {
+        this.buffer = this.buffer.subarray(sep + 4);
+        continue;
+      }
       const total = sep + 4 + length;
       if (this.buffer.length < total) return;
       const body = this.buffer.subarray(sep + 4, total).toString('utf8');

@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DefaultMemoryStore } from '../../src/storage/memory-store.js';
 import { resolveWstackPaths } from '../../src/utils/wstack-paths.js';
 
@@ -94,9 +94,7 @@ describe('DefaultMemoryStore', () => {
     // baseline, compute different `next` strings, and atomicWrite would
     // let the later writer overwrite the earlier — losing one entry.
     const N = 20;
-    const writes = Array.from({ length: N }, (_, i) =>
-      store.remember(`concurrent entry ${i}`),
-    );
+    const writes = Array.from({ length: N }, (_, i) => store.remember(`concurrent entry ${i}`));
     await Promise.all(writes);
     const content = await store.read('project-memory');
     for (let i = 0; i < N; i++) {
@@ -111,10 +109,7 @@ describe('DefaultMemoryStore', () => {
     // Issue remember + forget without awaiting; the queue must process
     // them in issue order so forget('beta') removes the existing entry
     // rather than racing against the new remember.
-    const [, removed] = await Promise.all([
-      store.remember('delta'),
-      store.forget('beta'),
-    ]);
+    const [, removed] = await Promise.all([store.remember('delta'), store.forget('beta')]);
     expect(removed).toBe(1);
     const content = await store.read('project-memory');
     expect(content).toContain('alpha');

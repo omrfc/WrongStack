@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { outdatedTool } from '../src/outdated.js';
 
-const makeCtx = () => ({ cwd: '/fake', tools: [], projectRoot: '/fake' } as any);
+const makeCtx = () => ({ cwd: '/fake', tools: [], projectRoot: '/fake' }) as any;
 const makeOpts = () => ({ signal: new AbortController().signal });
 
 describe('outdatedTool', () => {
@@ -38,7 +38,11 @@ describe('outdatedTool', () => {
 
   it('handles check as array', async () => {
     const ctx = makeCtx();
-    const result = await outdatedTool.execute({ check: ['vitest', 'prettier'] } as any, ctx, makeOpts());
+    const result = await outdatedTool.execute(
+      { check: ['vitest', 'prettier'] } as any,
+      ctx,
+      makeOpts(),
+    );
     expect(result).toHaveProperty('exit_code');
   });
 });

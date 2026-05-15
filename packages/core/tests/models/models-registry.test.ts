@@ -1,11 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
-import {
-  DefaultModelsRegistry,
-  classifyFamily,
-} from '../../src/models/models-registry.js';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DefaultModelsRegistry, classifyFamily } from '../../src/models/models-registry.js';
 import type { ModelsDevPayload } from '../../src/types/models-registry.js';
 
 const SAMPLE: ModelsDevPayload = {

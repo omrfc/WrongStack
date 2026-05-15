@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createModeTool } from '../src/mode.js';
 
 const makeOpts = () => ({ signal: new AbortController().signal });
@@ -6,9 +6,9 @@ const makeOpts = () => ({ signal: new AbortController().signal });
 const mockModeStore = (modes: any[] = [], active: string | null = null) => ({
   getActiveMode: vi.fn().mockResolvedValue(modes.find((m) => m.id === active) ?? null),
   listModes: vi.fn().mockResolvedValue(modes),
-  getMode: vi.fn().mockImplementation((id: string) =>
-    Promise.resolve(modes.find((m) => m.id === id) ?? null)
-  ),
+  getMode: vi
+    .fn()
+    .mockImplementation((id: string) => Promise.resolve(modes.find((m) => m.id === id) ?? null)),
   setActiveMode: vi.fn().mockResolvedValue(undefined),
 });
 
@@ -22,7 +22,10 @@ describe('createModeTool', () => {
   });
 
   it('get action returns current mode', async () => {
-    const store = mockModeStore([{ id: 'dev', name: 'Dev', description: 'Development mode' }], 'dev');
+    const store = mockModeStore(
+      [{ id: 'dev', name: 'Dev', description: 'Development mode' }],
+      'dev',
+    );
     const tool = createModeTool(store);
     const result = await tool.execute({ action: 'get' }, {} as any, makeOpts());
     expect(result.action).toBe('get');

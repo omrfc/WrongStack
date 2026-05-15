@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { Context, DefaultTokenCounter } from '../../src/index.js';
 import type { Provider, SessionWriter, TextBlock } from '../../src/index.js';
 

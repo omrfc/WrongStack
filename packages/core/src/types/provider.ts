@@ -1,8 +1,8 @@
 import type { ContentBlock, TextBlock } from './blocks.js';
-import type { Message } from './messages.js';
-import type { Tool } from './tool.js';
 import type { ErrorCode } from './errors.js';
 import { WrongStackError } from './errors.js';
+import type { Message } from './messages.js';
+import type { Tool } from './tool.js';
 
 export interface Usage {
   input: number;
@@ -46,7 +46,12 @@ export interface Response {
 
 export type StreamEvent =
   | { type: 'message_start'; model: string }
-  | { type: 'content_block_start'; kind: 'text' | 'tool_use' | 'thinking'; id?: string; name?: string }
+  | {
+      type: 'content_block_start';
+      kind: 'text' | 'tool_use' | 'thinking';
+      id?: string;
+      name?: string;
+    }
   | { type: 'content_block_stop'; index: number }
   | { type: 'text_delta'; text: string }
   | { type: 'tool_use_start'; id: string; name: string }

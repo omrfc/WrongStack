@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { IntelligentCompactor } from '../../src/execution/intelligent-compactor.js';
+import { describe, expect, it } from 'vitest';
 import type { Context } from '../../src/core/context.js';
+import { IntelligentCompactor } from '../../src/execution/intelligent-compactor.js';
 import type { Message } from '../../src/types/messages.js';
 import type { Provider } from '../../src/types/provider.js';
 
@@ -77,8 +77,15 @@ describe('IntelligentCompactor', () => {
     const messages: Message[] = [];
     // Use long enough content to push context over maxContext threshold
     for (let i = 0; i < 20; i++) {
-      messages.push({ role: 'user', content: `This is a longer user query number ${i} with some extra text to increase token count` });
-      messages.push({ role: 'assistant', content: 'Here is a detailed response that helps answer the user question with relevant information' });
+      messages.push({
+        role: 'user',
+        content: `This is a longer user query number ${i} with some extra text to increase token count`,
+      });
+      messages.push({
+        role: 'assistant',
+        content:
+          'Here is a detailed response that helps answer the user question with relevant information',
+      });
     }
     const ctx = fakeContext(messages);
     // Use a tiny maxContext so even modest content triggers summarization
@@ -118,12 +125,22 @@ describe('IntelligentCompactor', () => {
     const badProvider: Provider = {
       id: 'bad',
       capabilities: {
-        tools: false, parallelTools: false, vision: false, streaming: false,
-        promptCache: false, systemPrompt: false, jsonMode: false,
-        maxContext: 128000, cacheControl: 'none',
+        tools: false,
+        parallelTools: false,
+        vision: false,
+        streaming: false,
+        promptCache: false,
+        systemPrompt: false,
+        jsonMode: false,
+        maxContext: 128000,
+        cacheControl: 'none',
       },
-      stream() { return (async function* () {})(); },
-      async complete() { throw new Error('provider failed'); },
+      stream() {
+        return (async function* () {})();
+      },
+      async complete() {
+        throw new Error('provider failed');
+      },
     };
 
     const messages: Message[] = [];

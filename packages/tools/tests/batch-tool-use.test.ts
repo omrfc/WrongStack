@@ -1,11 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { batchToolUseTool } from '../src/batch-tool-use.js';
 
-const makeCtx = (tools: any[] = []) => ({
-  cwd: '/fake',
-  tools,
-  projectRoot: '/fake',
-} as any);
+const makeCtx = (tools: any[] = []) =>
+  ({
+    cwd: '/fake',
+    tools,
+    projectRoot: '/fake',
+  }) as any;
 const makeOpts = () => ({ signal: new AbortController().signal });
 
 describe('batchToolUseTool', () => {
@@ -33,7 +34,9 @@ describe('batchToolUseTool', () => {
 
   it('runs tools in parallel by default', async () => {
     let resolve: (v: any) => void;
-    const promise = new Promise((r) => { resolve = r; });
+    const promise = new Promise((r) => {
+      resolve = r;
+    });
     const fakeTool = {
       name: 'test',
       execute: vi.fn().mockReturnValue(Promise.resolve({ value: 1 })),
@@ -88,7 +91,14 @@ describe('batchToolUseTool', () => {
     const ctx = makeCtx([fakeTool]);
 
     const result = await batchToolUseTool.execute(
-      { calls: [{ tool: 'test', input: {} }, { tool: 'test', input: {} }], stop_on_error: true, parallel: false },
+      {
+        calls: [
+          { tool: 'test', input: {} },
+          { tool: 'test', input: {} },
+        ],
+        stop_on_error: true,
+        parallel: false,
+      },
       ctx,
       makeOpts(),
     );
@@ -104,7 +114,13 @@ describe('batchToolUseTool', () => {
     const ctx = makeCtx([fakeTool]);
 
     const result = await batchToolUseTool.execute(
-      { calls: [{ tool: 'test', input: {} }, { tool: 'test', input: {} }], stop_on_error: false },
+      {
+        calls: [
+          { tool: 'test', input: {} },
+          { tool: 'test', input: {} },
+        ],
+        stop_on_error: false,
+      },
       ctx,
       makeOpts(),
     );

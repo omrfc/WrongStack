@@ -210,7 +210,6 @@ export class DefaultMemoryStore implements MemoryStore {
       ),
     );
   }
-
 }
 
 function labelOf(scope: MemoryScope): string {

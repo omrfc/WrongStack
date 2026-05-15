@@ -1,22 +1,28 @@
-import { describe, it, expect, vi } from 'vitest';
-import { ToolExecutor } from '../../src/execution/tool-executor.js';
-import type { Tool, ToolStreamEvent, ToolProgressEvent } from '../../src/types/tool.js';
+import { describe, expect, it, vi } from 'vitest';
 import type { Context } from '../../src/core/context.js';
+import { ToolExecutor } from '../../src/execution/tool-executor.js';
+import { EventBus } from '../../src/kernel/events.js';
 import type { ToolUseBlock } from '../../src/types/blocks.js';
 import type { PermissionDecision } from '../../src/types/permission.js';
-import { EventBus } from '../../src/kernel/events.js';
+import type { Tool, ToolProgressEvent, ToolStreamEvent } from '../../src/types/tool.js';
 
 function makeCtx(): Context {
   const session = { id: 'test-session', append: vi.fn(), close: vi.fn() };
   return {
-    messages: [], todos: [], readFiles: new Set(), fileMtimes: new Map(),
+    messages: [],
+    todos: [],
+    readFiles: new Set(),
+    fileMtimes: new Map(),
     systemPrompt: [],
     provider: {} as never,
     session: session as never,
     signal: new AbortController().signal,
     tokenCounter: { account: vi.fn() } as never,
-    cwd: '/test', projectRoot: '/test', model: 'test-model',
-    tools: [], meta: {},
+    cwd: '/test',
+    projectRoot: '/test',
+    model: 'test-model',
+    tools: [],
+    meta: {},
     registerAbortHook: vi.fn().mockReturnValue(() => {}),
     drainAbortHooks: vi.fn(),
   } as unknown as Context;
@@ -87,8 +93,12 @@ describe('Tool lifecycle — executeStream', () => {
     });
 
     const tool: Tool = {
-      name: 'identified', description: '', inputSchema: { type: 'object' },
-      permission: 'auto', mutating: false, execute: vi.fn(),
+      name: 'identified',
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
+      execute: vi.fn(),
       async *executeStream(): AsyncGenerator<ToolStreamEvent> {
         yield { type: 'log', text: 'hi' };
         yield { type: 'final', output: null };
@@ -108,8 +118,12 @@ describe('Tool lifecycle — executeStream', () => {
     events.on('tool.progress', (e) => progress.push(e));
 
     const tool: Tool = {
-      name: 'classic', description: '', inputSchema: { type: 'object' },
-      permission: 'auto', mutating: false, execute: exec,
+      name: 'classic',
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
+      execute: exec,
     };
 
     const executor = makeExecutor([tool], events);
@@ -121,8 +135,12 @@ describe('Tool lifecycle — executeStream', () => {
 
   it('throws when executeStream completes without final event', async () => {
     const tool: Tool = {
-      name: 'incomplete', description: '', inputSchema: { type: 'object' },
-      permission: 'auto', mutating: false, execute: vi.fn(),
+      name: 'incomplete',
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
+      execute: vi.fn(),
       async *executeStream(): AsyncGenerator<ToolStreamEvent> {
         yield { type: 'log', text: 'mid-flight' };
         // No final event!
@@ -138,8 +156,11 @@ describe('Tool lifecycle — executeStream', () => {
   it('calls cleanup when the tool is aborted', async () => {
     const cleanup = vi.fn().mockResolvedValue(undefined);
     const tool: Tool = {
-      name: 'abortable', description: '', inputSchema: { type: 'object' },
-      permission: 'auto', mutating: false,
+      name: 'abortable',
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
       execute: async (_input, _ctx, opts) => {
         await new Promise<void>((_, reject) => {
           opts.signal.addEventListener('abort', () => reject(new Error('aborted')));
@@ -165,8 +186,11 @@ describe('Tool lifecycle — executeStream', () => {
   it('cleanup errors are swallowed and do not mask the underlying failure', async () => {
     const cleanup = vi.fn().mockRejectedValue(new Error('cleanup blew up'));
     const tool: Tool = {
-      name: 'flaky-cleanup', description: '', inputSchema: { type: 'object' },
-      permission: 'auto', mutating: false,
+      name: 'flaky-cleanup',
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
       execute: async (_input, _ctx, opts) => {
         await new Promise<void>((_, reject) => {
           opts.signal.addEventListener('abort', () => reject(new Error('original error')));
@@ -192,8 +216,11 @@ describe('Tool lifecycle — executeStream', () => {
   it('does not call cleanup on successful completion', async () => {
     const cleanup = vi.fn();
     const tool: Tool = {
-      name: 'happy-path', description: '', inputSchema: { type: 'object' },
-      permission: 'auto', mutating: false,
+      name: 'happy-path',
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
       execute: vi.fn().mockResolvedValue('ok'),
       cleanup,
     };
@@ -211,8 +238,12 @@ describe('Tool lifecycle — executeStream', () => {
 
     let observedAbort = false;
     const tool: Tool = {
-      name: 'long-stream', description: '', inputSchema: { type: 'object' },
-      permission: 'auto', mutating: false, execute: vi.fn(),
+      name: 'long-stream',
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
+      execute: vi.fn(),
       async *executeStream(_input, _ctx, opts): AsyncGenerator<ToolStreamEvent> {
         for (let i = 0; i < 100; i++) {
           if (opts.signal.aborted) {
@@ -236,8 +267,11 @@ describe('Tool lifecycle — executeStream', () => {
 
   it('estimatedDurationMs field is part of the Tool type and preserved on the object', () => {
     const tool: Tool = {
-      name: 'timed', description: '', inputSchema: { type: 'object' },
-      permission: 'auto', mutating: false,
+      name: 'timed',
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
       execute: vi.fn(),
       estimatedDurationMs: 5_000,
     };

@@ -1,7 +1,9 @@
+import { randomBytes } from 'node:crypto';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { randomBytes } from 'node:crypto';
 import type { EventBus } from '../kernel/events.js';
+import type { ContentBlock } from '../types/blocks.js';
+import type { Message } from '../types/messages.js';
 import type {
   ResumedSession,
   SessionData,
@@ -11,8 +13,6 @@ import type {
   SessionSummary,
   SessionWriter,
 } from '../types/session.js';
-import type { Message } from '../types/messages.js';
-import type { ContentBlock } from '../types/blocks.js';
 import { ensureDir } from '../utils/atomic-write.js';
 
 export interface SessionStoreOptions {
@@ -41,9 +41,12 @@ export class DefaultSessionStore implements SessionStore {
     } catch (err) {
       // Preserve cause + errno so callers can branch on EACCES vs EMFILE
       // vs ENOSPC etc. instead of substring-matching the error message.
-      throw new Error(`Failed to open session file: ${err instanceof Error ? err.message : String(err)}`, {
-        cause: err,
-      });
+      throw new Error(
+        `Failed to open session file: ${err instanceof Error ? err.message : String(err)}`,
+        {
+          cause: err,
+        },
+      );
     }
     try {
       return new FileSessionWriter(id, handle, startedAt, meta, { dir: this.dir, filePath: file });
@@ -113,14 +116,10 @@ export class DefaultSessionStore implements SessionStore {
     try {
       await ensureDir(this.dir);
       const files = await fsp.readdir(this.dir);
-      const ids = files
-        .filter((f) => f.endsWith('.jsonl'))
-        .map((f) => f.replace(/\.jsonl$/, ''));
+      const ids = files.filter((f) => f.endsWith('.jsonl')).map((f) => f.replace(/\.jsonl$/, ''));
       // Read all manifests in parallel; fall back to full load only for
       // sessions that haven't been closed cleanly (or predate the manifest).
-      const sessions = await Promise.all(
-        ids.map((id) => this.summaryFor(id).catch(() => null)),
-      );
+      const sessions = await Promise.all(ids.map((id) => this.summaryFor(id).catch(() => null)));
       const out = sessions.filter((s): s is SessionSummary => s !== null);
       out.sort((a, b) => {
         if (a.startedAt < b.startedAt) return 1;
@@ -145,7 +144,17 @@ export class DefaultSessionStore implements SessionStore {
       const full = path.join(this.dir, `${id}.jsonl`);
       const stat = await fsp.stat(full);
       const summary = await this.summarize(id, stat.mtime.toISOString());
-      await fsp.writeFile(manifest, JSON.stringify(summary), { mode: 0o600 }).catch(() => undefined);
+      await fsp
+        .writeFile(manifest, JSON.stringify(summary), { mode: 0o600 })
+        .catch((err) => {
+          // Best-effort manifest write — list() falls back to full parse
+          // on next invocation, so surface the error for diagnostics but
+          // don't fail the listing.
+          console.warn(
+            `[session-store] Failed to write manifest for "${id}":`,
+            err instanceof Error ? err.message : String(err),
+          );
+        });
       return summary;
     }
   }
@@ -195,7 +204,10 @@ export class DefaultSessionStore implements SessionStore {
     };
   }
 
-  private replay(events: SessionEvent[], sessionId = 'unknown'): { messages: Message[]; usage: SessionData['usage'] } {
+  private replay(
+    events: SessionEvent[],
+    sessionId = 'unknown',
+  ): { messages: Message[]; usage: SessionData['usage'] } {
     const messages: Message[] = [];
     let usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
     const openToolUses = new Set<string>();
@@ -249,9 +261,13 @@ export class DefaultSessionStore implements SessionStore {
       }
     }
     if (openToolUses.size > 0) {
-      throw new Error(
-        `Session damaged: ${openToolUses.size} tool_use blocks without matching results`,
-      );
+      this.events?.emit('session.damaged', {
+        sessionId,
+        detail: `${openToolUses.size} tool_use blocks without matching results — replay truncated`,
+      });
+      // Return what we could replay instead of throwing — a damaged session
+      // should not block the entire session-listing or resume path.
+      return { messages, usage };
     }
     return { messages, usage };
   }

@@ -1,25 +1,31 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { Agent, createDefaultPipelines } from '../../src/core/agent.js';
+import { Context } from '../../src/core/context.js';
+import { DefaultErrorHandler } from '../../src/execution/error-handler.js';
+import { DefaultRetryPolicy } from '../../src/execution/retry-policy.js';
+import { DefaultLogger } from '../../src/infrastructure/logger.js';
+import { DefaultTokenCounter } from '../../src/infrastructure/token-counter.js';
 import { Container } from '../../src/kernel/container.js';
 import { EventBus } from '../../src/kernel/events.js';
 import { TOKENS } from '../../src/kernel/tokens.js';
-import { ToolRegistry } from '../../src/registry/tool-registry.js';
 import { ProviderRegistry } from '../../src/registry/provider-registry.js';
-import { Agent, createDefaultPipelines } from '../../src/core/agent.js';
-import { Context } from '../../src/core/context.js';
-import { DefaultLogger } from '../../src/infrastructure/logger.js';
-import { DefaultRetryPolicy } from '../../src/execution/retry-policy.js';
-import { DefaultErrorHandler } from '../../src/execution/error-handler.js';
-import { DefaultSecretScrubber } from '../../src/security/secret-scrubber.js';
-import { DefaultTokenCounter } from '../../src/infrastructure/token-counter.js';
+import { ToolRegistry } from '../../src/registry/tool-registry.js';
 import { DefaultPermissionPolicy } from '../../src/security/permission-policy.js';
+import { DefaultSecretScrubber } from '../../src/security/secret-scrubber.js';
 import { DefaultSessionStore } from '../../src/storage/session-store.js';
+import { ProviderError } from '../../src/types/provider.js';
+import type {
+  Capabilities,
+  Provider,
+  Request,
+  Response,
+  StreamEvent,
+} from '../../src/types/provider.js';
 import type { Tool } from '../../src/types/tool.js';
 import { MockProvider, StreamingMockProvider } from '../helpers/mock-provider.js';
-import { ProviderError } from '../../src/types/provider.js';
-import type { Provider, Request, Response, StreamEvent, Capabilities } from '../../src/types/provider.js';
 
 async function buildAgent(provider: MockProvider, extraTools: Tool[] = []) {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-ag-'));
@@ -103,9 +109,7 @@ describe('Agent', () => {
     };
     const provider = new MockProvider([
       {
-        content: [
-          { type: 'tool_use', id: 'u1', name: 'echo', input: { text: 'pong' } },
-        ],
+        content: [{ type: 'tool_use', id: 'u1', name: 'echo', input: { text: 'pong' } }],
         stopReason: 'tool_use',
       },
       { content: [{ type: 'text', text: 'done' }], stopReason: 'end_turn' },
@@ -228,9 +232,7 @@ describe('Agent', () => {
   it('streams tool_use blocks and emits tool_use_start/stop events', async () => {
     const provider = new StreamingMockProvider([
       {
-        content: [
-          { type: 'tool_use', id: 'u1', name: 'echo', input: { text: 'pong' } },
-        ],
+        content: [{ type: 'tool_use', id: 'u1', name: 'echo', input: { text: 'pong' } }],
         stopReason: 'tool_use',
       },
       { content: [{ type: 'text', text: 'done' }], stopReason: 'end_turn' },
@@ -385,18 +387,20 @@ describe('Agent', () => {
     const { agent, tmp, ctx } = await buildAgent(provider as unknown as MockProvider);
     cleanupDirs.push(tmp);
     // Override retry policy to a near-zero delay so the test runs fast.
-    (agent as unknown as { container: Container }).container.override(
-      TOKENS.RetryPolicy,
-      () => ({
-        shouldRetry: (err: Error | ProviderError, attempt: number) =>
-          err instanceof ProviderError && err.retryable && attempt < 3,
-        delayMs: () => 1,
-      }),
-    );
+    (agent as unknown as { container: Container }).container.override(TOKENS.RetryPolicy, () => ({
+      shouldRetry: (err: Error | ProviderError, attempt: number) =>
+        err instanceof ProviderError && err.retryable && attempt < 3,
+      delayMs: () => 1,
+    }));
     // Replace the context's provider with our flaky one.
     (ctx as unknown as { provider: Provider }).provider = provider;
 
-    const retries: Array<{ providerId: string; attempt: number; status: number; description: string }> = [];
+    const retries: Array<{
+      providerId: string;
+      attempt: number;
+      status: number;
+      description: string;
+    }> = [];
     const errors: Array<{ providerId: string; status: number; description: string }> = [];
     (agent as unknown as { events: EventBus }).events.on('provider.retry', (e) => retries.push(e));
     (agent as unknown as { events: EventBus }).events.on('provider.error', (e) => errors.push(e));
@@ -564,13 +568,14 @@ describe('Agent', () => {
     const { agent, tmp, ctx } = await buildAgent(provider as unknown as MockProvider);
     cleanupDirs.push(tmp);
     (ctx as unknown as { provider: Provider }).provider = provider;
-    (agent as unknown as { container: Container }).container.override(
-      TOKENS.ErrorHandler,
-      () => ({
-        recover: async () => ({ action: 'retry' as const, reason: 'test_retry', model: 'fallback-model' }),
-        classify: () => ({ kind: 'context_overflow' as const, retryable: false }),
+    (agent as unknown as { container: Container }).container.override(TOKENS.ErrorHandler, () => ({
+      recover: async () => ({
+        action: 'retry' as const,
+        reason: 'test_retry',
+        model: 'fallback-model',
       }),
-    );
+      classify: () => ({ kind: 'context_overflow' as const, retryable: false }),
+    }));
 
     const result = await agent.run('ping');
     expect(result.status).toBe('done');
@@ -607,21 +612,18 @@ describe('Agent', () => {
     const { agent, tmp, ctx } = await buildAgent(provider as unknown as MockProvider);
     cleanupDirs.push(tmp);
     (ctx as unknown as { provider: Provider }).provider = provider;
-    (agent as unknown as { container: Container }).container.override(
-      TOKENS.ErrorHandler,
-      () => ({
-        recover: async () => ({
-          action: 'continue' as const,
-          response: {
-            content: [{ type: 'text' as const, text: 'synthetic recovery' }],
-            stopReason: 'end_turn' as const,
-            usage: { input: 0, output: 0 },
-            model: 'test-model',
-          },
-        }),
-        classify: () => ({ kind: 'server' as const, retryable: true }),
+    (agent as unknown as { container: Container }).container.override(TOKENS.ErrorHandler, () => ({
+      recover: async () => ({
+        action: 'continue' as const,
+        response: {
+          content: [{ type: 'text' as const, text: 'synthetic recovery' }],
+          stopReason: 'end_turn' as const,
+          usage: { input: 0, output: 0 },
+          model: 'test-model',
+        },
       }),
-    );
+      classify: () => ({ kind: 'server' as const, retryable: true }),
+    }));
 
     const result = await agent.run('ping');
     expect(result.status).toBe('done');
@@ -657,13 +659,10 @@ describe('Agent', () => {
     cleanupDirs.push(tmp);
     (ctx as unknown as { provider: Provider }).provider = provider;
     const terminal = new Error('terminal recovery decision');
-    (agent as unknown as { container: Container }).container.override(
-      TOKENS.ErrorHandler,
-      () => ({
-        recover: async () => ({ action: 'fail' as const, reason: 'terminal', error: terminal }),
-        classify: () => ({ kind: 'server' as const, retryable: false }),
-      }),
-    );
+    (agent as unknown as { container: Container }).container.override(TOKENS.ErrorHandler, () => ({
+      recover: async () => ({ action: 'fail' as const, reason: 'terminal', error: terminal }),
+      classify: () => ({ kind: 'server' as const, retryable: false }),
+    }));
 
     const result = await agent.run('ping');
     expect(result.status).toBe('failed');

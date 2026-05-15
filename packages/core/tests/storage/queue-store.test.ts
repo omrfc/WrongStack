@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fsp from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { QueueStore } from '../../src/storage/queue-store.js';
 
 async function mktmp(): Promise<string> {
@@ -35,9 +35,7 @@ describe('QueueStore', () => {
 
   it('write([]) removes the file (clean idle state)', async () => {
     const store = new QueueStore({ dir });
-    await store.write([
-      { displayText: 'a', blocks: [{ type: 'text', text: 'a' }] },
-    ]);
+    await store.write([{ displayText: 'a', blocks: [{ type: 'text', text: 'a' }] }]);
     await store.write([]);
     await expect(fsp.access(path.join(dir, 'queue.json'))).rejects.toThrow();
     expect(await store.read()).toEqual([]);
@@ -50,9 +48,7 @@ describe('QueueStore', () => {
 
   it('write() is atomic — no .tmp residue after a successful write', async () => {
     const store = new QueueStore({ dir });
-    await store.write([
-      { displayText: 'one', blocks: [{ type: 'text', text: 'one' }] },
-    ]);
+    await store.write([{ displayText: 'one', blocks: [{ type: 'text', text: 'one' }] }]);
     const files = await fsp.readdir(dir);
     expect(files.filter((f) => f.endsWith('.tmp'))).toEqual([]);
   });
@@ -91,9 +87,7 @@ describe('QueueStore', () => {
       { displayText: 'first', blocks: [{ type: 'text', text: 'first' }] },
       { displayText: 'second', blocks: [{ type: 'text', text: 'second' }] },
     ]);
-    await store.write([
-      { displayText: 'only', blocks: [{ type: 'text', text: 'only' }] },
-    ]);
+    await store.write([{ displayText: 'only', blocks: [{ type: 'text', text: 'only' }] }]);
     const out = await store.read();
     expect(out).toHaveLength(1);
     expect(out[0]?.displayText).toBe('only');

@@ -3,8 +3,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it, vi } from 'vitest';
 import { EventBus, type Logger } from '@wrongstack/core';
+import { describe, expect, it, vi } from 'vitest';
 import { DocumentTracker } from '../../src/document-tracker.js';
 import { LSPRegistry } from '../../src/registry.js';
 import {
@@ -20,10 +20,10 @@ import {
 } from '../../src/server/capabilities.js';
 import { Connection } from '../../src/server/connection.js';
 import { canTransition, nextReconnectDelay } from '../../src/server/lifecycle.js';
+import { LSPError, LSPErrorCode, type PlugLSPConfig } from '../../src/types.js';
 import { promiseWithTimeout } from '../../src/utils/timeout.js';
 import { displayPath, pathToUri, uriToPath } from '../../src/utils/uri.js';
 import { findWorkspaceRoot } from '../../src/workspace-root.js';
-import { LSPError, LSPErrorCode, type PlugLSPConfig } from '../../src/types.js';
 
 const log: Logger = {
   level: 'error',
@@ -37,7 +37,9 @@ const log: Logger = {
   },
 };
 
-const fixtureServer = fileURLToPath(new URL('../integration/fixtures/mock-lsp-server.mjs', import.meta.url));
+const fixtureServer = fileURLToPath(
+  new URL('../integration/fixtures/mock-lsp-server.mjs', import.meta.url),
+);
 
 describe('runtime helpers', () => {
   it('checks capabilities and lifecycle transitions', () => {
@@ -77,7 +79,9 @@ describe('runtime helpers', () => {
     });
     const aborted = new AbortController();
     aborted.abort(new Error('stop'));
-    await expect(promiseWithTimeout(Promise.resolve('x'), 50, aborted.signal)).rejects.toThrow('stop');
+    await expect(promiseWithTimeout(Promise.resolve('x'), 50, aborted.signal)).rejects.toThrow(
+      'stop',
+    );
     const ctrl = new AbortController();
     const pending = promiseWithTimeout(new Promise(() => undefined), 50, ctrl.signal);
     ctrl.abort();
@@ -95,7 +99,9 @@ describe('runtime helpers', () => {
     expect(findWorkspaceRoot(file, ['tsconfig.*.json'], os.tmpdir())).toBe(root);
     expect(findWorkspaceRoot(file, undefined, root)).toBe(path.resolve(root));
     expect(findWorkspaceRoot(file, ['missing'], root)).toBe(path.resolve(root));
-    expect(findWorkspaceRoot(path.join(root, 'missing', 'x.ts'), ['*.json'], root)).toBe(path.resolve(root));
+    expect(findWorkspaceRoot(path.join(root, 'missing', 'x.ts'), ['*.json'], root)).toBe(
+      path.resolve(root),
+    );
     expect(displayPath(path.join(root, 'x.ts'), root)).toBe('x.ts');
     expect(displayPath(path.join(os.tmpdir(), 'outside.ts'), root)).toContain('outside.ts');
     expect(uriToPath(pathToUri(file))).toBe(file);
@@ -157,10 +163,16 @@ describe('runtime helpers', () => {
       autoDiscover: false,
       logServerOutput: false,
     };
-    const registry = new LSPRegistry(cfg, tracker as never, { cwd: root, log, events: new EventBus() });
+    const registry = new LSPRegistry(cfg, tracker as never, {
+      cwd: root,
+      log,
+      events: new EventBus(),
+    });
     await registry.bind(root, 'lazy');
     expect(registry.list()).toEqual([]);
-    await expect(registry.start('missing')).rejects.toMatchObject({ code: LSPErrorCode.ServerNotFound });
+    await expect(registry.start('missing')).rejects.toMatchObject({
+      code: LSPErrorCode.ServerNotFound,
+    });
     expect(await registry.findForPath(path.join(root, 'readme.md'))).toBeNull();
     await registry.shutdown();
   });
@@ -177,8 +189,20 @@ describe('runtime helpers', () => {
     const warn = vi.fn();
     const duplicateCfg: PlugLSPConfig = {
       servers: {
-        one: { command: process.execPath, args: [fixtureServer], languages: ['typescript'], rootPatterns: ['package.json'], startupTimeoutMs: 5000 },
-        two: { command: process.execPath, args: [fixtureServer], languages: ['typescript'], rootPatterns: ['package.json'], startupTimeoutMs: 5000 },
+        one: {
+          command: process.execPath,
+          args: [fixtureServer],
+          languages: ['typescript'],
+          rootPatterns: ['package.json'],
+          startupTimeoutMs: 5000,
+        },
+        two: {
+          command: process.execPath,
+          args: [fixtureServer],
+          languages: ['typescript'],
+          rootPatterns: ['package.json'],
+          startupTimeoutMs: 5000,
+        },
       },
       autoStart: 'lazy',
       diagnosticsAfterEdit: 'background',
@@ -202,10 +226,20 @@ describe('runtime helpers', () => {
     const cfg: PlugLSPConfig = {
       ...duplicateCfg,
       servers: {
-        one: { command: process.execPath, args: [fixtureServer], languages: ['typescript'], rootPatterns: ['package.json'], startupTimeoutMs: 5000 },
+        one: {
+          command: process.execPath,
+          args: [fixtureServer],
+          languages: ['typescript'],
+          rootPatterns: ['package.json'],
+          startupTimeoutMs: 5000,
+        },
       },
     };
-    const registry = new LSPRegistry(cfg, tracker as never, { cwd: root, log, events: new EventBus() });
+    const registry = new LSPRegistry(cfg, tracker as never, {
+      cwd: root,
+      log,
+      events: new EventBus(),
+    });
     await registry.bind(root, 'eager');
     expect(registry.list()).toHaveLength(1);
     expect(registry.get('one')?.rootPath).toBe(root);

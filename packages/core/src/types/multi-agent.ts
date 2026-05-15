@@ -1,5 +1,5 @@
-import type { BridgeMessage, AgentBridge } from './agent-bridge.js';
 import type { SubagentBudget } from '../coordination/subagent-budget.js';
+import type { AgentBridge, BridgeMessage } from './agent-bridge.js';
 
 export interface SubagentConfig {
   id?: string;
@@ -118,7 +118,7 @@ export interface CoordinatorEvents {
   'task.completed': { task: TaskSpec; result: TaskResult };
   'subagent.started': { subagent: SubagentConfig };
   'subagent.stopped': { subagentId: string; reason: string };
-  'done': { results: TaskResult[]; totalIterations: number };
+  done: { results: TaskResult[]; totalIterations: number };
 }
 
 export interface MultiAgentCoordinator {

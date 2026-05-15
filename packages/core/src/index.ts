@@ -41,7 +41,12 @@ export {
   type SlashCommand,
 } from './registry/slash-command-registry.js';
 export { DefaultPluginAPI, type PluginAPIInit } from './plugin/api.js';
-export { loadPlugins, unloadPlugins, KERNEL_API_VERSION, type LoadPluginsOptions } from './plugin/loader.js';
+export {
+  loadPlugins,
+  unloadPlugins,
+  KERNEL_API_VERSION,
+  type LoadPluginsOptions,
+} from './plugin/loader.js';
 
 // Explicit type re-exports needed because tsup DTS deduplication drops types
 // that are reachable through both types/ and defaults/ export chains.

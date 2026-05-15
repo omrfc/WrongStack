@@ -50,7 +50,15 @@ export type ErrorCode =
   // General
   | 'UNKNOWN';
 
-export type ErrorSubsystem = 'provider' | 'tool' | 'config' | 'plugin' | 'agent' | 'session' | 'container' | 'general';
+export type ErrorSubsystem =
+  | 'provider'
+  | 'tool'
+  | 'config'
+  | 'plugin'
+  | 'agent'
+  | 'session'
+  | 'container'
+  | 'general';
 export type ErrorSeverity = 'fatal' | 'error' | 'warning';
 
 // ── Base error class ─────────────────────────────────────────────────
@@ -108,7 +116,14 @@ export class ToolError extends WrongStackError {
 
   constructor(opts: {
     message: string;
-    code: Extract<ErrorCode, 'TOOL_NOT_FOUND' | 'TOOL_PERMISSION_DENIED' | 'TOOL_EXECUTION_FAILED' | 'TOOL_TIMEOUT' | 'TOOL_INPUT_INVALID'>;
+    code: Extract<
+      ErrorCode,
+      | 'TOOL_NOT_FOUND'
+      | 'TOOL_PERMISSION_DENIED'
+      | 'TOOL_EXECUTION_FAILED'
+      | 'TOOL_TIMEOUT'
+      | 'TOOL_INPUT_INVALID'
+    >;
     toolName: string;
     recoverable?: boolean;
     context?: Record<string, unknown>;
@@ -133,7 +148,10 @@ export class ToolError extends WrongStackError {
 export class ConfigError extends WrongStackError {
   constructor(opts: {
     message: string;
-    code: Extract<ErrorCode, 'CONFIG_INVALID' | 'CONFIG_NOT_FOUND' | 'CONFIG_PARSE_FAILED' | 'CONFIG_MIGRATION_NEEDED'>;
+    code: Extract<
+      ErrorCode,
+      'CONFIG_INVALID' | 'CONFIG_NOT_FOUND' | 'CONFIG_PARSE_FAILED' | 'CONFIG_MIGRATION_NEEDED'
+    >;
     context?: Record<string, unknown>;
     cause?: unknown;
   }) {
@@ -158,7 +176,10 @@ export class PluginError extends WrongStackError {
 
   constructor(opts: {
     message: string;
-    code: Extract<ErrorCode, 'PLUGIN_LOAD_FAILED' | 'PLUGIN_API_MISMATCH' | 'PLUGIN_MISSING_DEPENDENCY'>;
+    code: Extract<
+      ErrorCode,
+      'PLUGIN_LOAD_FAILED' | 'PLUGIN_API_MISMATCH' | 'PLUGIN_MISSING_DEPENDENCY'
+    >;
     pluginName: string;
     context?: Record<string, unknown>;
     cause?: unknown;
@@ -184,7 +205,10 @@ export class PluginError extends WrongStackError {
 export class AgentError extends WrongStackError {
   constructor(opts: {
     message: string;
-    code: Extract<ErrorCode, 'AGENT_ITERATION_LIMIT' | 'AGENT_CONTEXT_OVERFLOW' | 'AGENT_ABORTED' | 'AGENT_RUN_FAILED'>;
+    code: Extract<
+      ErrorCode,
+      'AGENT_ITERATION_LIMIT' | 'AGENT_CONTEXT_OVERFLOW' | 'AGENT_ABORTED' | 'AGENT_RUN_FAILED'
+    >;
     recoverable?: boolean;
     context?: Record<string, unknown>;
     cause?: unknown;
@@ -208,7 +232,10 @@ export class AgentError extends WrongStackError {
  * unchanged; raw `Error`s and primitives get an `AGENT_RUN_FAILED` wrapper
  * with the original preserved as `cause`.
  */
-export function toWrongStackError(err: unknown, code: Extract<ErrorCode, 'AGENT_RUN_FAILED' | 'AGENT_ABORTED' | 'UNKNOWN'> = 'AGENT_RUN_FAILED'): WrongStackError {
+export function toWrongStackError(
+  err: unknown,
+  code: Extract<ErrorCode, 'AGENT_RUN_FAILED' | 'AGENT_ABORTED' | 'UNKNOWN'> = 'AGENT_RUN_FAILED',
+): WrongStackError {
   if (err instanceof WrongStackError) return err;
   const message = err instanceof Error ? err.message : String(err);
   return new AgentError({

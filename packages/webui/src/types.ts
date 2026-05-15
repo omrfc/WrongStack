@@ -52,6 +52,13 @@ export interface WSTextDelta {
   };
 }
 
+export interface WSThinkingDelta {
+  type: 'provider.thinking_delta';
+  payload: {
+    text: string;
+  };
+}
+
 export interface WSToolUseStart {
   type: 'tool.started';
   payload: {
@@ -416,6 +423,7 @@ export type WSServerMessage =
   | WSSessionStart
   | WSSessionEnd
   | WSTextDelta
+  | WSThinkingDelta
   | WSToolUseStart
   | WSToolProgress
   | WSToolExecuted

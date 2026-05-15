@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { grepTool } from '../src/grep.js';
-import { mkSandbox, newSignal, type Sandbox } from './fixtures.js';
+import { type Sandbox, mkSandbox, newSignal } from './fixtures.js';
 
 describe('grep tool', () => {
   let sb: Sandbox;
@@ -15,11 +15,9 @@ describe('grep tool', () => {
 
   it('finds matches in content mode', async () => {
     await fs.writeFile(path.join(sb.dir, 'a.txt'), 'hello world\nfoo bar\nhello again\n');
-    const out = await grepTool.execute(
-      { pattern: 'hello', output_mode: 'content' },
-      sb.ctx,
-      { signal: newSignal() },
-    );
+    const out = await grepTool.execute({ pattern: 'hello', output_mode: 'content' }, sb.ctx, {
+      signal: newSignal(),
+    });
     expect(out.count).toBeGreaterThanOrEqual(2);
   });
 
@@ -53,11 +51,9 @@ describe('grep tool', () => {
   it('count mode reports per-file tallies', async () => {
     await fs.writeFile(path.join(sb.dir, 'a.txt'), 'hello\nhello\nworld\n');
     await fs.writeFile(path.join(sb.dir, 'b.txt'), 'hello\n');
-    const out = await grepTool.execute(
-      { pattern: 'hello', output_mode: 'count' },
-      sb.ctx,
-      { signal: newSignal() },
-    );
+    const out = await grepTool.execute({ pattern: 'hello', output_mode: 'count' }, sb.ctx, {
+      signal: newSignal(),
+    });
     expect(out.count).toBeGreaterThanOrEqual(3);
   });
 
@@ -76,11 +72,9 @@ describe('grep tool', () => {
   it('skips binary files', async () => {
     await fs.writeFile(path.join(sb.dir, 'a.bin'), Buffer.from([0, 1, 2, 3, 0, 0, 5]));
     await fs.writeFile(path.join(sb.dir, 'b.txt'), 'real match');
-    const out = await grepTool.execute(
-      { pattern: 'match', output_mode: 'content' },
-      sb.ctx,
-      { signal: newSignal() },
-    );
+    const out = await grepTool.execute({ pattern: 'match', output_mode: 'content' }, sb.ctx, {
+      signal: newSignal(),
+    });
     expect(out.matches.some((m) => m.includes('b.txt'))).toBe(true);
     expect(out.matches.some((m) => m.includes('a.bin'))).toBe(false);
   });
@@ -130,11 +124,9 @@ describe('grep tool', () => {
   it('count mode reports per-file tallies and totals', async () => {
     await fs.writeFile(path.join(sb.dir, 'a.txt'), 'x\nx\ny\n');
     await fs.writeFile(path.join(sb.dir, 'b.txt'), 'x\n');
-    const out = await grepTool.execute(
-      { pattern: 'x', output_mode: 'count' },
-      sb.ctx,
-      { signal: newSignal() },
-    );
+    const out = await grepTool.execute({ pattern: 'x', output_mode: 'count' }, sb.ctx, {
+      signal: newSignal(),
+    });
     expect(out.count).toBeGreaterThanOrEqual(3);
   });
 
@@ -183,11 +175,9 @@ describe('grep tool', () => {
   });
 
   it('finds nothing in an empty directory', async () => {
-    const out = await grepTool.execute(
-      { pattern: 'anything', output_mode: 'content' },
-      sb.ctx,
-      { signal: newSignal() },
-    );
+    const out = await grepTool.execute({ pattern: 'anything', output_mode: 'content' }, sb.ctx, {
+      signal: newSignal(),
+    });
     expect(out.matches).toEqual([]);
     expect(out.count).toBe(0);
   });

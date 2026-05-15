@@ -1,11 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
 import { Writable } from 'node:stream';
-import type {
-  ResolvedProvider,
-  ModelsDevModel,
-} from '@wrongstack/core';
-import { TerminalRenderer } from '../src/renderer.js';
+import type { ModelsDevModel, ResolvedProvider } from '@wrongstack/core';
+import { describe, expect, it, vi } from 'vitest';
 import { runPicker, saveToGlobalConfig } from '../src/picker.js';
+import { TerminalRenderer } from '../src/renderer.js';
 
 class CapStream extends Writable {
   buf = '';
@@ -76,12 +73,22 @@ describe('runPicker', () => {
     const { renderer } = mkRig();
     const providers = [
       fakeProvider(),
-      fakeProvider({ id: 'openai', name: 'OpenAI', family: 'openai', envVars: ['OPENAI_API_KEY'], models: [fakeModel({ id: 'gpt-4o' })] }),
+      fakeProvider({
+        id: 'openai',
+        name: 'OpenAI',
+        family: 'openai',
+        envVars: ['OPENAI_API_KEY'],
+        models: [fakeModel({ id: 'gpt-4o' })],
+      }),
     ];
     const reader = fakeReader(['1', '1', 'y']); // provider 1, model 1, save yes
     const registry = fakeRegistry(providers);
 
-    const result = await runPicker({ modelsRegistry: registry as never, renderer, reader: reader as never });
+    const result = await runPicker({
+      modelsRegistry: registry as never,
+      renderer,
+      reader: reader as never,
+    });
 
     expect(result).toBeDefined();
     expect(result!.provider).toBe('anthropic');
@@ -94,7 +101,11 @@ describe('runPicker', () => {
     const reader = fakeReader(['']); // empty = cancel
     const registry = fakeRegistry(providers);
 
-    const result = await runPicker({ modelsRegistry: registry as never, renderer, reader: reader as never });
+    const result = await runPicker({
+      modelsRegistry: registry as never,
+      renderer,
+      reader: reader as never,
+    });
 
     expect(result).toBeUndefined();
   });
@@ -105,7 +116,11 @@ describe('runPicker', () => {
     const reader = fakeReader(['1', '']); // pick provider, cancel model
     const registry = fakeRegistry(providers);
 
-    const result = await runPicker({ modelsRegistry: registry as never, renderer, reader: reader as never });
+    const result = await runPicker({
+      modelsRegistry: registry as never,
+      renderer,
+      reader: reader as never,
+    });
 
     expect(result).toBeUndefined();
   });
@@ -115,10 +130,16 @@ describe('runPicker', () => {
     const reader = fakeReader([]);
     const registry = {
       ...fakeRegistry([]),
-      listProviders: vi.fn(async () => { throw new Error('network'); }),
+      listProviders: vi.fn(async () => {
+        throw new Error('network');
+      }),
     };
 
-    const result = await runPicker({ modelsRegistry: registry as never, renderer, reader: reader as never });
+    const result = await runPicker({
+      modelsRegistry: registry as never,
+      renderer,
+      reader: reader as never,
+    });
 
     expect(result).toBeUndefined();
   });
@@ -127,12 +148,21 @@ describe('runPicker', () => {
     const { renderer } = mkRig();
     const providers = [
       fakeProvider({ id: 'anthropic', family: 'anthropic' }),
-      fakeProvider({ id: 'openai', family: 'openai', envVars: ['OPENAI_API_KEY'], models: [fakeModel({ id: 'gpt-4o' })] }),
+      fakeProvider({
+        id: 'openai',
+        family: 'openai',
+        envVars: ['OPENAI_API_KEY'],
+        models: [fakeModel({ id: 'gpt-4o' })],
+      }),
     ];
     const reader = fakeReader(['openai', '1', 'n']); // type id, pick model, don't save
     const registry = fakeRegistry(providers);
 
-    const result = await runPicker({ modelsRegistry: registry as never, renderer, reader: reader as never });
+    const result = await runPicker({
+      modelsRegistry: registry as never,
+      renderer,
+      reader: reader as never,
+    });
 
     expect(result).toBeDefined();
     expect(result!.provider).toBe('openai');

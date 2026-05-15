@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Context } from '../../src/core/context.js';
 import { AutoCompactionMiddleware } from '../../src/execution/auto-compaction-middleware.js';
 import { EventBus } from '../../src/kernel/events.js';
-import type { Context } from '../../src/core/context.js';
-import type { Compactor, CompactReport } from '../../src/types/compactor.js';
+import type { CompactReport, Compactor } from '../../src/types/compactor.js';
 
 function mockContext(tokenEstimate: number): Context {
   return {
@@ -53,7 +53,10 @@ describe('AutoCompactionMiddleware', () => {
 
     const ctx = mockContext(3000); // 30% load
     let ran = false;
-    await mw.handler()(ctx, async (c) => { ran = true; return c; });
+    await mw.handler()(ctx, async (c) => {
+      ran = true;
+      return c;
+    });
 
     expect(ran).toBe(true);
     expect(compactor.compactCalls).toHaveLength(0);
@@ -68,7 +71,10 @@ describe('AutoCompactionMiddleware', () => {
 
     const ctx = mockContext(0); // 55% load — between warn and soft
     let ran = false;
-    await mw.handler()(ctx, async (c) => { ran = true; return c; });
+    await mw.handler()(ctx, async (c) => {
+      ran = true;
+      return c;
+    });
 
     expect(ran).toBe(true);
     expect(compactor.compactCalls).toHaveLength(1);
@@ -84,7 +90,10 @@ describe('AutoCompactionMiddleware', () => {
 
     const ctx = mockContext(0); // 80% load — between soft and hard
     let ran = false;
-    await mw.handler()(ctx, async (c) => { ran = true; return c; });
+    await mw.handler()(ctx, async (c) => {
+      ran = true;
+      return c;
+    });
 
     expect(compactor.compactCalls).toHaveLength(1);
     expect(compactor.compactCalls[0].aggressive).toBe(true); // aggressiveOn='soft' default
@@ -99,18 +108,27 @@ describe('AutoCompactionMiddleware', () => {
 
     const ctx = mockContext(0); // 95% load — above hard
     let ran = false;
-    await mw.handler()(ctx, async (c) => { ran = true; return c; });
+    await mw.handler()(ctx, async (c) => {
+      ran = true;
+      return c;
+    });
 
     expect(compactor.compactCalls).toHaveLength(1);
     expect(compactor.compactCalls[0].aggressive).toBe(true);
   });
 
   it('respects aggressiveOn=hard setting', async () => {
-    const mw = new AutoCompactionMiddleware(compactor, 10000, simpleEstimator(8000), {
-      warn: 0.5,
-      soft: 0.75,
-      hard: 0.9,
-    }, 'hard');
+    const mw = new AutoCompactionMiddleware(
+      compactor,
+      10000,
+      simpleEstimator(8000),
+      {
+        warn: 0.5,
+        soft: 0.75,
+        hard: 0.9,
+      },
+      'hard',
+    );
 
     const ctx = mockContext(0); // 80% — between soft and hard
     await mw.handler()(ctx, async (c) => c);
@@ -121,7 +139,9 @@ describe('AutoCompactionMiddleware', () => {
 
   it('throws compaction errors at hard threshold by default', async () => {
     const badCompactor: Compactor = {
-      async compact() { throw new Error('compaction failed'); },
+      async compact() {
+        throw new Error('compaction failed');
+      },
     };
     const mw = new AutoCompactionMiddleware(badCompactor, 10000, simpleEstimator(9500), {
       warn: 0.5,
@@ -131,9 +151,12 @@ describe('AutoCompactionMiddleware', () => {
 
     const ctx = mockContext(0);
     let ran = false;
-    await expect(mw.handler()(ctx, async (c) => { ran = true; return c; })).rejects.toThrow(
-      /Auto-compaction failed/,
-    );
+    await expect(
+      mw.handler()(ctx, async (c) => {
+        ran = true;
+        return c;
+      }),
+    ).rejects.toThrow(/Auto-compaction failed/);
 
     expect(ran).toBe(false);
   });
@@ -177,9 +200,12 @@ describe('AutoCompactionMiddleware', () => {
     );
 
     let ran = false;
-    await expect(mw.handler()(mockContext(0), async (c) => { ran = true; return c; })).rejects.toThrow(
-      /Auto-compaction failed/,
-    );
+    await expect(
+      mw.handler()(mockContext(0), async (c) => {
+        ran = true;
+        return c;
+      }),
+    ).rejects.toThrow(/Auto-compaction failed/);
     expect(ran).toBe(false);
     expect(failures).toHaveLength(1);
     expect(failures[0]!.err.message).toBe('summarizer model unavailable');
@@ -190,7 +216,9 @@ describe('AutoCompactionMiddleware', () => {
 
   it('can be configured to continue after compaction errors', async () => {
     const badCompactor: Compactor = {
-      async compact() { throw new Error('boom'); },
+      async compact() {
+        throw new Error('boom');
+      },
     };
     const mw = new AutoCompactionMiddleware(
       badCompactor,
@@ -204,7 +232,10 @@ describe('AutoCompactionMiddleware', () => {
       { failureMode: 'continue' },
     );
     let ran = false;
-    await mw.handler()(mockContext(0), async (c) => { ran = true; return c; });
+    await mw.handler()(mockContext(0), async (c) => {
+      ran = true;
+      return c;
+    });
     expect(ran).toBe(true);
   });
 });

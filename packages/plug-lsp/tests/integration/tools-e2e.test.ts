@@ -2,8 +2,8 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
 import { EventBus, type Logger } from '@wrongstack/core';
+import { describe, expect, it } from 'vitest';
 import { DocumentTracker } from '../../src/document-tracker.js';
 import { LSPRegistry } from '../../src/registry.js';
 import { makeLSPTools } from '../../src/tools/index.js';
@@ -58,50 +58,62 @@ describe('LSP tools with mock server', () => {
     await registry.bind(root, 'lazy');
     await tracker.open(source);
 
-    const tools = new Map(makeLSPTools({ registry, tracker, cfg, log }).map((tool) => [tool.name, tool]));
-    const ctx = { cwd: root, projectRoot: root } as Parameters<NonNullable<typeof tools.get>['call']>[0] & { cwd: string; projectRoot: string };
+    const tools = new Map(
+      makeLSPTools({ registry, tracker, cfg, log }).map((tool) => [tool.name, tool]),
+    );
+    const ctx = { cwd: root, projectRoot: root } as Parameters<
+      NonNullable<typeof tools.get>['call']
+    >[0] & { cwd: string; projectRoot: string };
     const signal = new AbortController().signal;
 
-    const diagnostics = await tools.get('lsp_diagnostics')!.execute({ path: source }, ctx as never, { signal });
+    const diagnostics = await tools
+      .get('lsp_diagnostics')!
+      .execute({ path: source }, ctx as never, { signal });
     expect(String(diagnostics)).toContain('MOCK001');
 
-    const hover = await tools.get('lsp_hover')!.execute({ path: source, line: 1, character: 7 }, ctx as never, { signal });
+    const hover = await tools
+      .get('lsp_hover')!
+      .execute({ path: source, line: 1, character: 7 }, ctx as never, { signal });
     expect(String(hover)).toContain('const answer: number');
 
-    const definition = await tools.get('lsp_definition')!.execute({ path: source, line: 1, character: 7 }, ctx as never, { signal });
+    const definition = await tools
+      .get('lsp_definition')!
+      .execute({ path: source, line: 1, character: 7 }, ctx as never, { signal });
     expect(String(definition)).toContain('sample.ts:1:1');
 
-    const references = await tools.get('lsp_references')!.execute({ path: source, line: 1, character: 7 }, ctx as never, { signal });
+    const references = await tools
+      .get('lsp_references')!
+      .execute({ path: source, line: 1, character: 7 }, ctx as never, { signal });
     expect(String(references)).toContain('sample.ts:2:1');
 
-    const symbols = await tools.get('lsp_symbols')!.execute({ path: source }, ctx as never, { signal });
+    const symbols = await tools
+      .get('lsp_symbols')!
+      .execute({ path: source }, ctx as never, { signal });
     expect(String(symbols)).toContain('answer');
 
-    const workspaceSymbols = await tools.get('lsp_symbols')!.execute({ query: 'answer' }, ctx as never, { signal });
+    const workspaceSymbols = await tools
+      .get('lsp_symbols')!
+      .execute({ query: 'answer' }, ctx as never, { signal });
     expect(String(workspaceSymbols)).toContain('answer');
 
-    const rename = await tools.get('lsp_rename')!.execute(
-      { path: source, line: 1, character: 7, new_name: 'renamed' },
-      ctx as never,
-      { signal },
-    );
+    const rename = await tools
+      .get('lsp_rename')!
+      .execute({ path: source, line: 1, character: 7, new_name: 'renamed' }, ctx as never, {
+        signal,
+      });
     expect(String(rename)).toContain('Applied: 1 edits');
     expect(await fs.readFile(source, 'utf8')).toContain('const renamed = 42');
 
     await fs.writeFile(source, 'const answer = 42;\nanswer;\n');
     await tracker.fileWritten(source);
-    const codeActions = await tools.get('lsp_code_actions')!.execute(
-      { path: source, line: 1 },
-      ctx as never,
-      { signal },
-    );
+    const codeActions = await tools
+      .get('lsp_code_actions')!
+      .execute({ path: source, line: 1 }, ctx as never, { signal });
     expect(String(codeActions)).toContain('[0] quickfix Replace answer');
 
-    const applyAction = await tools.get('lsp_code_actions')!.execute(
-      { path: source, line: 1, apply: 0 },
-      ctx as never,
-      { signal },
-    );
+    const applyAction = await tools
+      .get('lsp_code_actions')!
+      .execute({ path: source, line: 1, apply: 0 }, ctx as never, { signal });
     expect(String(applyAction)).toContain('Applied: 1 edits');
     expect(await fs.readFile(source, 'utf8')).toContain('const fixed = 42');
 

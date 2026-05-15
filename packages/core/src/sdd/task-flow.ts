@@ -1,10 +1,10 @@
-import type { TaskGraph, TaskNode } from '../types/task-graph.js';
-import type { Specification, SpecAnalysis } from '../types/spec.js';
-import type { DoneCondition } from '../types/multi-agent.js';
-import { TaskTracker } from './task-tracker.js';
-import { SpecParser } from './spec-parser.js';
-import { TaskGenerator, DefaultTaskStore } from './task-generator.js';
 import type { EventBus } from '../kernel/events.js';
+import type { DoneCondition } from '../types/multi-agent.js';
+import type { SpecAnalysis, Specification } from '../types/spec.js';
+import type { TaskGraph, TaskNode } from '../types/task-graph.js';
+import { SpecParser } from './spec-parser.js';
+import { DefaultTaskStore, TaskGenerator } from './task-generator.js';
+import { TaskTracker } from './task-tracker.js';
 
 /**
  * Extended event map used internally by TaskFlow and multi-agent components.
@@ -18,9 +18,9 @@ export interface TaskFlowEventMap {
   'task.failed': { taskId: string; error: string };
   'task.review': { taskId: string };
   'spec.analyzed': { analysis: SpecAnalysis };
-  'progress': { percent: number; message: string };
-  'done': { graph: TaskGraph };
-  'error': { phase: TaskFlowPhase; error: Error };
+  progress: { percent: number; message: string };
+  done: { graph: TaskGraph };
+  error: { phase: TaskFlowPhase; error: Error };
 }
 
 export type TaskFlowPhase =

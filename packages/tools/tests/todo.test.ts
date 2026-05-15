@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { todoTool } from '../src/todo.js';
-import { mkSandbox, newSignal, type Sandbox } from './fixtures.js';
+import { type Sandbox, mkSandbox, newSignal } from './fixtures.js';
 
 describe('todo tool', () => {
   let sb: Sandbox;

@@ -1,6 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
-import { rememberTool, forgetTool } from '../src/memory.js';
 import type { MemoryStore } from '@wrongstack/core';
+import { describe, expect, it, vi } from 'vitest';
+import { forgetTool, rememberTool } from '../src/memory.js';
 import { mkSandbox, newSignal } from './fixtures.js';
 
 function fakeStore() {
@@ -40,11 +40,9 @@ describe('memory tools', () => {
     const tool = rememberTool(store);
     const sb = await mkSandbox();
     try {
-      await tool.execute(
-        { text: 'prefer biome', scope: 'user-memory' },
-        sb.ctx,
-        { signal: newSignal() },
-      );
+      await tool.execute({ text: 'prefer biome', scope: 'user-memory' }, sb.ctx, {
+        signal: newSignal(),
+      });
       expect(calls[0]?.args[1]).toBe('user-memory');
     } finally {
       await sb.cleanup();
@@ -68,9 +66,7 @@ describe('memory tools', () => {
     const tool = rememberTool(store);
     const sb = await mkSandbox();
     try {
-      await expect(
-        tool.execute({ text: '' }, sb.ctx, { signal: newSignal() }),
-      ).rejects.toThrow();
+      await expect(tool.execute({ text: '' }, sb.ctx, { signal: newSignal() })).rejects.toThrow();
     } finally {
       await sb.cleanup();
     }

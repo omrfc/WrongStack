@@ -1,6 +1,6 @@
-import type { Plugin, PluginAPI, PluginDependency } from '../types/plugin.js';
-import type { Logger } from '../types/logger.js';
 import { PluginError } from '../types/errors.js';
+import type { Logger } from '../types/logger.js';
+import type { Plugin, PluginAPI, PluginDependency } from '../types/plugin.js';
 import { validateAgainstSchema } from '../utils/json-schema-validate.js';
 
 /**
@@ -30,7 +30,10 @@ export interface LoadPluginsOptions {
 }
 
 function parseSemver(v: string): [number, number, number] {
-  const parts = v.replace(/^[^0-9]*/, '').split('.').map((s) => Number.parseInt(s, 10) || 0);
+  const parts = v
+    .replace(/^[^0-9]*/, '')
+    .split('.')
+    .map((s) => Number.parseInt(s, 10) || 0);
   return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
 }
 
@@ -173,9 +176,7 @@ export async function loadPlugins(
         const result = validateAgainstSchema(pluginOpts, plugin.configSchema);
         if (!result.ok) {
           const firstErr = result.errors[0];
-          const detail = firstErr
-            ? `${firstErr.path}: ${firstErr.message}`
-            : 'config invalid';
+          const detail = firstErr ? `${firstErr.path}: ${firstErr.message}` : 'config invalid';
           const err = new PluginError({
             message: `Plugin "${plugin.name}" config invalid — ${detail}`,
             code: 'PLUGIN_LOAD_FAILED',
@@ -190,7 +191,9 @@ export async function loadPlugins(
     }
     try {
       const rawApi = opts.apiFactory(plugin);
-      const api = plugin.capabilities ? wrapApiForCapabilityCheck(plugin, rawApi, opts.log) : rawApi;
+      const api = plugin.capabilities
+        ? wrapApiForCapabilityCheck(plugin, rawApi, opts.log)
+        : rawApi;
       await plugin.setup(api);
       loaded.push(plugin);
       opts.log.info(`Plugin "${plugin.name}" loaded`);
@@ -236,7 +239,15 @@ export async function unloadPlugins(
  * we just surface the lie so the host can flag it (or escalate to a hard
  * fail in a dev build via env var).
  */
-function wrapApiForCapabilityCheck(plugin: Plugin, api: PluginAPI, log: { error(msg: string, ctx?: unknown): void; warn?(msg: string, ctx?: unknown): void; info?(msg: string, ctx?: unknown): void }): PluginAPI {
+function wrapApiForCapabilityCheck(
+  plugin: Plugin,
+  api: PluginAPI,
+  log: {
+    error(msg: string, ctx?: unknown): void;
+    warn?(msg: string, ctx?: unknown): void;
+    info?(msg: string, ctx?: unknown): void;
+  },
+): PluginAPI {
   const caps = plugin.capabilities ?? {};
   const warn = (subsystem: string, detail: string) => {
     const msg = `Plugin "${plugin.name}" used ${subsystem} without declaring capabilities.${subsystem} — ${detail}`;
@@ -245,62 +256,79 @@ function wrapApiForCapabilityCheck(plugin: Plugin, api: PluginAPI, log: { error(
   };
 
   // Wrap tools.register
-  const wrappedTools = caps.tools !== false ? api.tools : new Proxy(api.tools, {
-    get(target, prop, receiver) {
-      if (prop === 'register') {
-        return (t: unknown) => {
-          warn('tools', `register(${(t as { name?: string })?.name ?? '<unknown>'})`);
-          return (target.register as (x: unknown) => unknown)(t);
-        };
-      }
-      return Reflect.get(target, prop, receiver);
-    },
-  });
+  const wrappedTools =
+    caps.tools !== false
+      ? api.tools
+      : new Proxy(api.tools, {
+          get(target, prop, receiver) {
+            if (prop === 'register') {
+              return (t: unknown) => {
+                warn('tools', `register(${(t as { name?: string })?.name ?? '<unknown>'})`);
+                return (target.register as (x: unknown) => unknown)(t);
+              };
+            }
+            return Reflect.get(target, prop, receiver);
+          },
+        });
   // Wrap providers.register
-  const wrappedProviders = caps.providers !== false ? api.providers : new Proxy(api.providers, {
-    get(target, prop, receiver) {
-      if (prop === 'register') {
-        return (f: unknown) => {
-          warn('providers', `register(${(f as { type?: string })?.type ?? '<unknown>'})`);
-          return (target.register as (x: unknown) => unknown)(f);
-        };
-      }
-      return Reflect.get(target, prop, receiver);
-    },
-  });
+  const wrappedProviders =
+    caps.providers !== false
+      ? api.providers
+      : new Proxy(api.providers, {
+          get(target, prop, receiver) {
+            if (prop === 'register') {
+              return (f: unknown) => {
+                warn('providers', `register(${(f as { type?: string })?.type ?? '<unknown>'})`);
+                return (target.register as (x: unknown) => unknown)(f);
+              };
+            }
+            return Reflect.get(target, prop, receiver);
+          },
+        });
   // Wrap slashCommands.register
-  const wrappedSlash = caps.slashCommands !== false ? api.slashCommands : new Proxy(api.slashCommands, {
-    get(target, prop, receiver) {
-      if (prop === 'register') {
-        return (c: unknown) => {
-          warn('slashCommands', `register(${(c as { name?: string })?.name ?? '<unknown>'})`);
-          return (target.register as (x: unknown) => unknown)(c);
-        };
-      }
-      return Reflect.get(target, prop, receiver);
-    },
-  });
+  const wrappedSlash =
+    caps.slashCommands !== false
+      ? api.slashCommands
+      : new Proxy(api.slashCommands, {
+          get(target, prop, receiver) {
+            if (prop === 'register') {
+              return (c: unknown) => {
+                warn('slashCommands', `register(${(c as { name?: string })?.name ?? '<unknown>'})`);
+                return (target.register as (x: unknown) => unknown)(c);
+              };
+            }
+            return Reflect.get(target, prop, receiver);
+          },
+        });
   // Wrap mcp.start
-  const wrappedMcp = caps.mcp !== false ? api.mcp : new Proxy(api.mcp, {
-    get(target, prop, receiver) {
-      if (prop === 'start') {
-        return (cfg: unknown) => {
-          warn('mcp', `start(${(cfg as { name?: string })?.name ?? '<unknown>'})`);
-          return (target.start as (x: unknown) => unknown)(cfg);
-        };
-      }
-      return Reflect.get(target, prop, receiver);
-    },
-  });
+  const wrappedMcp =
+    caps.mcp !== false
+      ? api.mcp
+      : new Proxy(api.mcp, {
+          get(target, prop, receiver) {
+            if (prop === 'start') {
+              return (cfg: unknown) => {
+                warn('mcp', `start(${(cfg as { name?: string })?.name ?? '<unknown>'})`);
+                return (target.start as (x: unknown) => unknown)(cfg);
+              };
+            }
+            return Reflect.get(target, prop, receiver);
+          },
+        });
 
   return new Proxy(api, {
     get(target, prop, receiver) {
       switch (prop) {
-        case 'tools': return wrappedTools;
-        case 'providers': return wrappedProviders;
-        case 'slashCommands': return wrappedSlash;
-        case 'mcp': return wrappedMcp;
-        default: return Reflect.get(target, prop, receiver);
+        case 'tools':
+          return wrappedTools;
+        case 'providers':
+          return wrappedProviders;
+        case 'slashCommands':
+          return wrappedSlash;
+        case 'mcp':
+          return wrappedMcp;
+        default:
+          return Reflect.get(target, prop, receiver);
       }
     },
   });

@@ -1,6 +1,6 @@
+import { isTextBlock } from '../types/blocks.js';
 import type { Message } from '../types/messages.js';
 import type { Provider, Request } from '../types/provider.js';
-import { isTextBlock } from '../types/blocks.js';
 import type { MessageSelector, SelectorResult } from '../types/selector.js';
 
 export interface LLMSelectorOptions {
@@ -136,7 +136,10 @@ export class LLMSelector implements MessageSelector {
       const ac = new AbortController();
       const res = await this.provider.complete(req, { signal: ac.signal });
       const textBlocks = res.content.filter(isTextBlock);
-      raw = textBlocks.map((b) => b.text).join('\n').trim();
+      raw = textBlocks
+        .map((b) => b.text)
+        .join('\n')
+        .trim();
     } catch (err) {
       // Fallback: use simple recency-based selection
       return this.fallbackSelect(messages, effectiveBudget);
@@ -156,9 +159,17 @@ export class LLMSelector implements MessageSelector {
     // Scan from the end backwards
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i]!;
-      const cost = typeof m.content === 'string'
-        ? Math.ceil(m.content.length / 4)
-        : m.content.reduce((acc, b) => acc + (b.type === 'text' ? Math.ceil(b.text.length / 4) : Math.ceil(JSON.stringify(b).length / 4)), 0);
+      const cost =
+        typeof m.content === 'string'
+          ? Math.ceil(m.content.length / 4)
+          : m.content.reduce(
+              (acc, b) =>
+                acc +
+                (b.type === 'text'
+                  ? Math.ceil(b.text.length / 4)
+                  : Math.ceil(JSON.stringify(b).length / 4)),
+              0,
+            );
 
       if (tokenCount + cost <= budget) {
         tokenCount += cost;
@@ -187,7 +198,7 @@ export class LLMSelector implements MessageSelector {
     if (jsonStart === -1 || jsonEnd === -1) {
       // Can't parse — use fallback
       return this.fallbackSelect(
-        Array.from({ length: messageCount }, () => ({ role: 'user', content: '' } as Message)),
+        Array.from({ length: messageCount }, () => ({ role: 'user', content: '' }) as Message),
         this.maxContextTokens,
       );
     }
@@ -197,17 +208,23 @@ export class LLMSelector implements MessageSelector {
       parsed = JSON.parse(raw.slice(jsonStart, jsonEnd + 1));
     } catch {
       return this.fallbackSelect(
-        Array.from({ length: messageCount }, () => ({ role: 'user', content: '' } as Message)),
+        Array.from({ length: messageCount }, () => ({ role: 'user', content: '' }) as Message),
         this.maxContextTokens,
       );
     }
 
     const obj = parsed as Record<string, unknown>;
-    const kept = (obj.kept as Array<{ from: number; to: number; importance: string }> | undefined) ?? [];
-    const collapsed = (obj.collapsed as Array<{ from: number; to: number; summary?: string }> | undefined) ?? [];
+    const kept =
+      (obj.kept as Array<{ from: number; to: number; importance: string }> | undefined) ?? [];
+    const collapsed =
+      (obj.collapsed as Array<{ from: number; to: number; summary?: string }> | undefined) ?? [];
 
     return {
-      kept: kept.map((k) => ({ from: k.from, to: k.to, importance: (k.importance ?? 'medium') as 'critical' | 'high' | 'medium' })),
+      kept: kept.map((k) => ({
+        from: k.from,
+        to: k.to,
+        importance: (k.importance ?? 'medium') as 'critical' | 'high' | 'medium',
+      })),
       collapsed: collapsed.map((c) => ({ from: c.from, to: c.to, summary: c.summary })),
       reasoning: typeof obj.reasoning === 'string' ? obj.reasoning : '',
     };

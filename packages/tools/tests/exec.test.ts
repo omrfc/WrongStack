@@ -1,9 +1,9 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { execTool } from '../src/exec.js';
 import * as fs from 'node:fs/promises';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { execTool } from '../src/exec.js';
 
 const makeOpts = () => ({ signal: new AbortController().signal });
-const makeCtx = () => ({ cwd: '/fake', tools: [], projectRoot: '/fake' } as any);
+const makeCtx = () => ({ cwd: '/fake', tools: [], projectRoot: '/fake' }) as any;
 
 describe('execTool', () => {
   it('has correct metadata', () => {
@@ -58,7 +58,11 @@ describe('execTool', () => {
   it('respects MAX_ARGS limit', async () => {
     const ctx = makeCtx();
     const manyArgs = Array(30).fill('arg');
-    const result = await execTool.execute({ command: 'echo', args: manyArgs as string[] }, ctx, makeOpts());
+    const result = await execTool.execute(
+      { command: 'echo', args: manyArgs as string[] },
+      ctx,
+      makeOpts(),
+    );
     // args should be sliced to MAX_ARGS
     expect(result).toHaveProperty('args');
   });
@@ -66,7 +70,11 @@ describe('execTool', () => {
   it('respects timeout cap', async () => {
     const ctx = makeCtx();
     // timeout > TIMEOUT_MS should be capped
-    const result = await execTool.execute({ command: 'echo', timeout: 999_999_999 } as any, ctx, makeOpts());
+    const result = await execTool.execute(
+      { command: 'echo', timeout: 999_999_999 } as any,
+      ctx,
+      makeOpts(),
+    );
     expect(result).toHaveProperty('exitCode');
   });
 
@@ -86,11 +94,7 @@ describe('execTool', () => {
     // ctx.projectRoot is '/fake'; an in-root relative path should pass
     // the gate (the actual spawn may fail because /fake doesn't exist,
     // but `allowed` must remain true for the resolved path check).
-    const result = await execTool.execute(
-      { command: 'echo', cwd: 'sub' },
-      ctx,
-      makeOpts(),
-    );
+    const result = await execTool.execute({ command: 'echo', cwd: 'sub' }, ctx, makeOpts());
     // either allowed:true (resolved) or some spawn error — but NOT the
     // "outside project root" rejection.
     expect(result.stderr).not.toMatch(/outside project root/);

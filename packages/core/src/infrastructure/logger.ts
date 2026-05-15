@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import type { LogLevel, Logger } from '../types/logger.js';
 import { color } from '../utils/color.js';
-import type { Logger, LogLevel } from '../types/logger.js';
 
 const LEVEL_RANK: Record<LogLevel, number> = {
   error: 0,

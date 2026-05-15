@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import * as fs from 'node:fs/promises';
 import * as fsSync from 'node:fs';
+import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { describe, expect, it } from 'vitest';
 import {
   DefaultSecretVault,
   decryptConfigSecrets,
@@ -116,10 +116,9 @@ describe('DefaultSecretVault', () => {
 
   it('encryptConfigSecrets idempotent on already-encrypted values', async () => {
     const { dir, vault } = await makeVault();
-    const enc1 = encryptConfigSecrets(
-      { providers: { a: { apiKey: 'plain' } } },
-      vault,
-    ) as { providers: { a: { apiKey: string } } };
+    const enc1 = encryptConfigSecrets({ providers: { a: { apiKey: 'plain' } } }, vault) as {
+      providers: { a: { apiKey: string } };
+    };
     expect(enc1.providers.a.apiKey.startsWith('enc:v1:')).toBe(true);
     const enc2 = encryptConfigSecrets(enc1, vault) as typeof enc1;
     expect(enc2.providers.a.apiKey).toBe(enc1.providers.a.apiKey);
@@ -198,10 +197,7 @@ describe('DefaultSecretVault', () => {
   it('rewriteConfigEncrypted merges + encrypts + writes 0600 file', async () => {
     const { dir, vault } = await makeVault();
     const cfgPath = path.join(dir, 'config.json');
-    await fs.writeFile(
-      cfgPath,
-      JSON.stringify({ version: 1, provider: 'a', model: 'm' }, null, 2),
-    );
+    await fs.writeFile(cfgPath, JSON.stringify({ version: 1, provider: 'a', model: 'm' }, null, 2));
     await rewriteConfigEncrypted(cfgPath, vault, {
       providers: { foo: { type: 'foo', apiKey: 'newkey', family: 'openai' } },
     });

@@ -70,14 +70,22 @@ function walk(value: unknown, schema: JSONSchema, path: string, errors: Validati
 
 function checkType(value: unknown, type: string): boolean {
   switch (type) {
-    case 'string': return typeof value === 'string';
-    case 'number': return typeof value === 'number' && !Number.isNaN(value);
-    case 'integer': return typeof value === 'number' && Number.isInteger(value);
-    case 'boolean': return typeof value === 'boolean';
-    case 'null': return value === null;
-    case 'array': return Array.isArray(value);
-    case 'object': return isPlainObject(value);
-    default: return true;
+    case 'string':
+      return typeof value === 'string';
+    case 'number':
+      return typeof value === 'number' && !Number.isNaN(value);
+    case 'integer':
+      return typeof value === 'number' && Number.isInteger(value);
+    case 'boolean':
+      return typeof value === 'boolean';
+    case 'null':
+      return value === null;
+    case 'array':
+      return Array.isArray(value);
+    case 'object':
+      return isPlainObject(value);
+    default:
+      return true;
   }
 }
 

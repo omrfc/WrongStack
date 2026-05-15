@@ -1,27 +1,27 @@
 import { randomUUID } from 'node:crypto';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
+import type { BridgeMessage } from '../types/agent-bridge.js';
 import type {
+  CoordinatorStatus,
   MultiAgentConfig,
   SubagentConfig,
-  TaskSpec,
-  TaskResult,
   SubagentRunner,
-  CoordinatorStatus,
+  TaskResult,
+  TaskSpec,
 } from '../types/multi-agent.js';
-import type { Tool, JSONSchema } from '../types/tool.js';
-import type { BridgeMessage } from '../types/agent-bridge.js';
-import { DefaultMultiAgentCoordinator } from './multi-agent-coordinator.js';
-import { FleetBus, FleetUsageAggregator, type FleetUsage } from './fleet-bus.js';
+import type { JSONSchema, Tool } from '../types/tool.js';
 import { InMemoryAgentBridge } from './agent-bridge.js';
-import { InMemoryBridgeTransport } from './in-memory-transport.js';
 import {
+  DEFAULT_DIRECTOR_PREAMBLE,
+  DEFAULT_SUBAGENT_BASELINE,
   composeDirectorPrompt,
   composeSubagentPrompt,
   rosterSummaryFromConfigs,
-  DEFAULT_DIRECTOR_PREAMBLE,
-  DEFAULT_SUBAGENT_BASELINE,
 } from './director-prompts.js';
+import { FleetBus, type FleetUsage, FleetUsageAggregator } from './fleet-bus.js';
+import { InMemoryBridgeTransport } from './in-memory-transport.js';
+import { DefaultMultiAgentCoordinator } from './multi-agent-coordinator.js';
 
 /**
  * Director — high-level orchestrator that owns a `MultiAgentCoordinator`,
@@ -141,10 +141,13 @@ export class Director {
   /** Resolves with the matching `TaskResult` the first time the
    *  coordinator emits `task.completed` for a given task id. Each entry
    *  is created lazily on first poll/await and cleared once consumed. */
-  private readonly taskWaiters = new Map<string, {
-    promise: Promise<TaskResult>;
-    resolve: (r: TaskResult) => void;
-  }>();
+  private readonly taskWaiters = new Map<
+    string,
+    {
+      promise: Promise<TaskResult>;
+      resolve: (r: TaskResult) => void;
+    }
+  >();
   /** Cache of completed results in case the consumer asks AFTER the
    *  coordinator already fired the event — `awaitTasks(['t-1'])` after
    *  t-1 finished should resolve immediately, not hang. */
@@ -152,19 +155,25 @@ export class Director {
   /** Per-subagent provider/model metadata, captured at spawn time so the
    *  FleetUsageAggregator's metaLookup can surface readable rows. */
   private readonly subagentMeta = new Map<string, { provider?: string; model?: string }>();
-  private readonly priceLookups = new Map<string, { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }>();
+  private readonly priceLookups = new Map<
+    string,
+    { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }
+  >();
   /** Bridge endpoints we created per subagent (so we can `stop()` them
    *  on shutdown and free transport subscriptions). */
   private readonly subagentBridges = new Map<string, InMemoryAgentBridge>();
   /** Tracks per-spawn config + assigned task ids for manifest writing. */
-  private readonly manifestEntries = new Map<string, {
-    subagentId: string;
-    name: string;
-    role?: string;
-    provider?: string;
-    model?: string;
-    taskIds: string[];
-  }>();
+  private readonly manifestEntries = new Map<
+    string,
+    {
+      subagentId: string;
+      name: string;
+      role?: string;
+      provider?: string;
+      model?: string;
+      taskIds: string[];
+    }
+  >();
   private readonly manifestPath?: string;
   private readonly roster?: Record<string, SubagentConfig>;
   private readonly directorPreamble: string;
@@ -190,7 +199,7 @@ export class Director {
     this.directorPreamble = opts.directorPreamble ?? DEFAULT_DIRECTOR_PREAMBLE;
     this.subagentBaseline = opts.subagentBaseline ?? DEFAULT_SUBAGENT_BASELINE;
     this.sharedScratchpadPath = opts.sharedScratchpadPath ?? null;
-    this.maxSpawns = opts.maxSpawns ?? Infinity;
+    this.maxSpawns = opts.maxSpawns ?? Number.POSITIVE_INFINITY;
     this.maxSpawnDepth = opts.maxSpawnDepth ?? 2;
     this.spawnDepth = opts.spawnDepth ?? 0;
     if (this.sharedScratchpadPath) {
@@ -294,11 +303,7 @@ export class Director {
    * matches the bridge's own default of 30s) — surface those rejections
    * to the caller as actionable errors instead of letting tools hang.
    */
-  async ask<T = unknown>(
-    subagentId: string,
-    payload: unknown,
-    timeoutMs?: number,
-  ): Promise<T> {
+  async ask<T = unknown>(subagentId: string, payload: unknown, timeoutMs?: number): Promise<T> {
     if (!this.subagentBridges.has(subagentId)) {
       throw new Error(
         `ask: unknown subagent "${subagentId}" (spawn() it first; current fleet: ${Array.from(this.subagentBridges.keys()).join(', ') || '(empty)'})`,
@@ -329,9 +334,7 @@ export class Director {
    * (useful when the director model is doing structured-output work).
    */
   rollUp(taskIds: string[], style: 'markdown' | 'json' = 'markdown'): string {
-    const rows = taskIds.map((id) => this.completed.get(id)).filter(
-      (r): r is TaskResult => !!r,
-    );
+    const rows = taskIds.map((id) => this.completed.get(id)).filter((r): r is TaskResult => !!r);
     if (style === 'json') {
       return JSON.stringify(
         rows.map((r) => ({
@@ -356,13 +359,12 @@ export class Director {
       const meta = this.subagentMeta.get(r.subagentId);
       const tag = meta?.provider && meta?.model ? ` · ${meta.provider}/${meta.model}` : '';
       lines.push(`### ${r.subagentId}${tag}`);
-      lines.push(
-        `_${r.status} — ${r.iterations} iter · ${r.toolCalls} tools · ${r.durationMs}ms_`,
-      );
+      lines.push(`_${r.status} — ${r.iterations} iter · ${r.toolCalls} tools · ${r.durationMs}ms_`);
       lines.push('');
       if (r.error) lines.push(`**Error:** ${r.error}`);
       else if (typeof r.result === 'string') lines.push(r.result);
-      else if (r.result !== undefined) lines.push('```json\n' + JSON.stringify(r.result, null, 2) + '\n```');
+      else if (r.result !== undefined)
+        lines.push('```json\n' + JSON.stringify(r.result, null, 2) + '\n```');
       else lines.push('_(no output)_');
       lines.push('');
     }
@@ -387,13 +389,15 @@ export class Director {
         // success/failure state.
         results: e.taskIds.map((tid) => {
           const r = this.completed.get(tid);
-          return r ? {
-            taskId: tid,
-            status: r.status,
-            iterations: r.iterations,
-            toolCalls: r.toolCalls,
-            durationMs: r.durationMs,
-          } : { taskId: tid, status: 'pending' as const };
+          return r
+            ? {
+                taskId: tid,
+                status: r.status,
+                iterations: r.iterations,
+                toolCalls: r.toolCalls,
+                durationMs: r.durationMs,
+              }
+            : { taskId: tid, status: 'pending' as const };
         }),
       })),
       usage: this.usage.snapshot(),
@@ -441,16 +445,20 @@ export class Director {
    * whose results were already cached.
    */
   awaitTasks(taskIds: string[]): Promise<TaskResult[]> {
-    return Promise.all(taskIds.map((id) => {
-      const cached = this.completed.get(id);
-      if (cached) return cached;
-      const existing = this.taskWaiters.get(id);
-      if (existing) return existing.promise;
-      let resolve!: (r: TaskResult) => void;
-      const promise = new Promise<TaskResult>((res) => { resolve = res; });
-      this.taskWaiters.set(id, { promise, resolve });
-      return promise;
-    }));
+    return Promise.all(
+      taskIds.map((id) => {
+        const cached = this.completed.get(id);
+        if (cached) return cached;
+        const existing = this.taskWaiters.get(id);
+        if (existing) return existing.promise;
+        let resolve!: (r: TaskResult) => void;
+        const promise = new Promise<TaskResult>((res) => {
+          resolve = res;
+        });
+        this.taskWaiters.set(id, { promise, resolve });
+        return promise;
+      }),
+    );
   }
 
   async terminate(subagentId: string): Promise<void> {
@@ -575,11 +583,28 @@ function makeSpawnTool(director: Director, roster?: Record<string, SubagentConfi
   const inputSchema: JSONSchema = {
     type: 'object',
     properties: {
-      role: { type: 'string', description: 'Roster role id (preferred). When set, the spawn uses the matching config from the roster and ignores other fields.' },
-      name: { type: 'string', description: 'Display name for the subagent. Required when not using roster.' },
-      provider: { type: 'string', description: 'Provider id (e.g. "anthropic", "openai"). Defaults to the leader provider when omitted.' },
-      model: { type: 'string', description: 'Model id within the provider. Defaults to the leader model when omitted.' },
-      systemPromptOverride: { type: 'string', description: 'Extra prompt text appended after the role-base prompt.' },
+      role: {
+        type: 'string',
+        description:
+          'Roster role id (preferred). When set, the spawn uses the matching config from the roster and ignores other fields.',
+      },
+      name: {
+        type: 'string',
+        description: 'Display name for the subagent. Required when not using roster.',
+      },
+      provider: {
+        type: 'string',
+        description:
+          'Provider id (e.g. "anthropic", "openai"). Defaults to the leader provider when omitted.',
+      },
+      model: {
+        type: 'string',
+        description: 'Model id within the provider. Defaults to the leader model when omitted.',
+      },
+      systemPromptOverride: {
+        type: 'string',
+        description: 'Extra prompt text appended after the role-base prompt.',
+      },
       maxIterations: { type: 'number' },
       maxToolCalls: { type: 'number' },
       maxCostUsd: { type: 'number' },
@@ -588,8 +613,10 @@ function makeSpawnTool(director: Director, roster?: Record<string, SubagentConfi
   };
   return {
     name: 'spawn_subagent',
-    description: 'Create a new subagent under this director. Returns the subagent id. Use this when you need a worker with a specific provider, model, or role to handle a piece of the plan.',
-    usageHint: 'Either pass `role` (matches the roster) OR pass `name` + optional `provider`/`model`. Returns `{ subagentId }`.',
+    description:
+      'Create a new subagent under this director. Returns the subagent id. Use this when you need a worker with a specific provider, model, or role to handle a piece of the plan.',
+    usageHint:
+      'Either pass `role` (matches the roster) OR pass `name` + optional `provider`/`model`. Returns `{ subagentId }`.',
     permission: 'auto',
     mutating: false,
     inputSchema,
@@ -598,7 +625,9 @@ function makeSpawnTool(director: Director, roster?: Record<string, SubagentConfi
       const role = typeof i.role === 'string' ? i.role : undefined;
       const base: SubagentConfig | undefined = role && roster ? roster[role] : undefined;
       if (role && !base) {
-        return { error: `unknown role "${role}". roster has: ${roster ? Object.keys(roster).join(', ') : '(empty)'}` };
+        return {
+          error: `unknown role "${role}". roster has: ${roster ? Object.keys(roster).join(', ') : '(empty)'}`,
+        };
       }
       const cfg: SubagentConfig = {
         ...(base ?? { name: (i.name as string) ?? 'subagent' }),
@@ -606,7 +635,8 @@ function makeSpawnTool(director: Director, roster?: Record<string, SubagentConfi
       if (typeof i.name === 'string') cfg.name = i.name;
       if (typeof i.provider === 'string') cfg.provider = i.provider;
       if (typeof i.model === 'string') cfg.model = i.model;
-      if (typeof i.systemPromptOverride === 'string') cfg.systemPromptOverride = i.systemPromptOverride;
+      if (typeof i.systemPromptOverride === 'string')
+        cfg.systemPromptOverride = i.systemPromptOverride;
       if (typeof i.maxIterations === 'number') cfg.maxIterations = i.maxIterations;
       if (typeof i.maxToolCalls === 'number') cfg.maxToolCalls = i.maxToolCalls;
       if (typeof i.maxCostUsd === 'number') cfg.maxCostUsd = i.maxCostUsd;
@@ -632,7 +662,10 @@ function makeAssignTool(director: Director): Tool {
     type: 'object',
     properties: {
       subagentId: { type: 'string', description: 'Target subagent id. Required.' },
-      description: { type: 'string', description: 'The task in natural language — what you want this subagent to do.' },
+      description: {
+        type: 'string',
+        description: 'The task in natural language — what you want this subagent to do.',
+      },
       maxToolCalls: { type: 'number', description: 'Optional per-task tool-call budget override.' },
       timeoutMs: { type: 'number', description: 'Optional per-task timeout in ms.' },
     },
@@ -640,12 +673,18 @@ function makeAssignTool(director: Director): Tool {
   };
   return {
     name: 'assign_task',
-    description: 'Hand a task to a previously spawned subagent. Returns the task id — pass it to `await_tasks` to block on completion.',
+    description:
+      'Hand a task to a previously spawned subagent. Returns the task id — pass it to `await_tasks` to block on completion.',
     permission: 'auto',
     mutating: false,
     inputSchema,
     async execute(input: unknown) {
-      const i = input as { subagentId: string; description: string; maxToolCalls?: number; timeoutMs?: number };
+      const i = input as {
+        subagentId: string;
+        description: string;
+        maxToolCalls?: number;
+        timeoutMs?: number;
+      };
       const task: TaskSpec = {
         id: randomUUID(),
         description: i.description,
@@ -666,14 +705,16 @@ function makeAwaitTasksTool(director: Director): Tool {
       taskIds: {
         type: 'array',
         items: { type: 'string' },
-        description: 'One or more task ids returned by `assign_task`. The call blocks until every id resolves.',
+        description:
+          'One or more task ids returned by `assign_task`. The call blocks until every id resolves.',
       },
     },
     required: ['taskIds'],
   };
   return {
     name: 'await_tasks',
-    description: 'Block until every named task completes. Returns the array of TaskResult — use this to gather subagent output before deciding the next step.',
+    description:
+      'Block until every named task completes. Returns the array of TaskResult — use this to gather subagent output before deciding the next step.',
     permission: 'auto',
     mutating: false,
     inputSchema,
@@ -689,15 +730,22 @@ function makeAskTool(director: Director): Tool {
   const inputSchema: JSONSchema = {
     type: 'object',
     properties: {
-      subagentId: { type: 'string', description: 'Subagent to ask. Must be a previously spawned id.' },
-      question: { type: 'string', description: 'The question or instruction. Sent as the bridge message payload.' },
+      subagentId: {
+        type: 'string',
+        description: 'Subagent to ask. Must be a previously spawned id.',
+      },
+      question: {
+        type: 'string',
+        description: 'The question or instruction. Sent as the bridge message payload.',
+      },
       timeoutMs: { type: 'number', description: 'Optional timeout in ms (default 30s).' },
     },
     required: ['subagentId', 'question'],
   };
   return {
     name: 'ask_subagent',
-    description: 'Synchronously ask a subagent a question. Blocks until the subagent replies via the bridge (or the timeout fires). Use this when you need a one-shot answer without spawning a fresh task.',
+    description:
+      'Synchronously ask a subagent a question. Blocks until the subagent replies via the bridge (or the timeout fires). Use this when you need a one-shot answer without spawning a fresh task.',
     permission: 'auto',
     mutating: false,
     inputSchema,
@@ -720,19 +768,22 @@ function makeRollUpTool(director: Director): Tool {
       taskIds: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Completed task ids to aggregate. Pass the ids returned by previous `assign_task` calls.',
+        description:
+          'Completed task ids to aggregate. Pass the ids returned by previous `assign_task` calls.',
       },
       style: {
         type: 'string',
         enum: ['markdown', 'json'],
-        description: 'Output flavor — markdown (default) for in-prompt summarization, json for structured downstream processing.',
+        description:
+          'Output flavor — markdown (default) for in-prompt summarization, json for structured downstream processing.',
       },
     },
     required: ['taskIds'],
   };
   return {
     name: 'roll_up',
-    description: 'Aggregate completed task results into a single formatted summary. Use this after `await_tasks` to fold subagent outputs back into the director\'s context before deciding the next step.',
+    description:
+      "Aggregate completed task results into a single formatted summary. Use this after `await_tasks` to fold subagent outputs back into the director's context before deciding the next step.",
     permission: 'auto',
     mutating: false,
     inputSchema,
@@ -754,7 +805,8 @@ function makeTerminateTool(director: Director): Tool {
   };
   return {
     name: 'terminate_subagent',
-    description: 'Forcibly abort a subagent. Use sparingly — prefer waiting on the natural budget to expire. The current task (if any) ends with status "stopped".',
+    description:
+      'Forcibly abort a subagent. Use sparingly — prefer waiting on the natural budget to expire. The current task (if any) ends with status "stopped".',
     permission: 'auto',
     mutating: true,
     inputSchema,
@@ -769,7 +821,8 @@ function makeTerminateTool(director: Director): Tool {
 function makeFleetStatusTool(director: Director): Tool {
   return {
     name: 'fleet_status',
-    description: 'Snapshot of the fleet — every subagent\'s current status, pending vs. completed task counts, and the running total iteration count. Cheap; call freely.',
+    description:
+      "Snapshot of the fleet — every subagent's current status, pending vs. completed task counts, and the running total iteration count. Cheap; call freely.",
     permission: 'auto',
     mutating: false,
     inputSchema: { type: 'object', properties: {}, required: [] },
@@ -782,7 +835,8 @@ function makeFleetStatusTool(director: Director): Tool {
 function makeFleetUsageTool(director: Director): Tool {
   return {
     name: 'fleet_usage',
-    description: 'Token + cost breakdown across the fleet, per-subagent and totals. Use this to reason about which workers to assign costly tasks to or when to wrap up to stay within budget.',
+    description:
+      'Token + cost breakdown across the fleet, per-subagent and totals. Use this to reason about which workers to assign costly tasks to or when to wrap up to stay within budget.',
     permission: 'auto',
     mutating: false,
     inputSchema: { type: 'object', properties: {}, required: [] },

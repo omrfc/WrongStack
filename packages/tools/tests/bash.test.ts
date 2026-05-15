@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
 import * as os from 'node:os';
 import type { ToolProgressEvent, ToolStreamEvent } from '@wrongstack/core';
+import { describe, expect, it } from 'vitest';
 import { bashTool } from '../src/bash.js';
 import { mkSandbox, newSignal } from './fixtures.js';
 
@@ -12,11 +12,7 @@ describe('bashTool', () => {
   it('runs a simple command and captures output', async () => {
     const sb = await mkSandbox();
     try {
-      const out = await bashTool.execute(
-        { command: echoCmd },
-        sb.ctx,
-        { signal: newSignal() },
-      );
+      const out = await bashTool.execute({ command: echoCmd }, sb.ctx, { signal: newSignal() });
       expect(out.exit_code).toBe(0);
       expect(out.output.trim()).toContain('hello');
       expect(out.timed_out).toBe(false);
@@ -28,11 +24,7 @@ describe('bashTool', () => {
   it('reports non-zero exit code', async () => {
     const sb = await mkSandbox();
     try {
-      const out = await bashTool.execute(
-        { command: failCmd },
-        sb.ctx,
-        { signal: newSignal() },
-      );
+      const out = await bashTool.execute({ command: failCmd }, sb.ctx, { signal: newSignal() });
       expect(out.exit_code).toBe(7);
     } finally {
       await sb.cleanup();
@@ -54,11 +46,9 @@ describe('bashTool', () => {
     const sb = await mkSandbox();
     try {
       const cmd = isWin ? 'ping -n 5 127.0.0.1 > NUL' : 'sleep 5';
-      const out = await bashTool.execute(
-        { command: cmd, timeout_ms: 200 },
-        sb.ctx,
-        { signal: newSignal() },
-      );
+      const out = await bashTool.execute({ command: cmd, timeout_ms: 200 }, sb.ctx, {
+        signal: newSignal(),
+      });
       expect(out.timed_out).toBe(true);
     } finally {
       await sb.cleanup();
@@ -70,11 +60,9 @@ describe('bashTool', () => {
     try {
       expect(typeof bashTool.executeStream).toBe('function');
       const events: ToolStreamEvent[] = [];
-      for await (const ev of bashTool.executeStream!(
-        { command: echoCmd },
-        sb.ctx,
-        { signal: newSignal() },
-      )) {
+      for await (const ev of bashTool.executeStream!({ command: echoCmd }, sb.ctx, {
+        signal: newSignal(),
+      })) {
         events.push(ev);
       }
       const finals = events.filter((e) => e.type === 'final');
@@ -100,24 +88,24 @@ describe('bashTool', () => {
       // event shape, not subprocess lifetime, so the fastest-exiting command
       // avoids holding the sandbox temp dir on Windows.
       const cmd = isWin ? 'exit 0' : 'true';
-      for await (const ev of bashTool.executeStream!(
-        { command: cmd, background: true },
-        sb.ctx,
-        { signal: newSignal() },
-      )) {
+      for await (const ev of bashTool.executeStream!({ command: cmd, background: true }, sb.ctx, {
+        signal: newSignal(),
+      })) {
         events.push(ev);
       }
       // Background runs return immediately with just the final event,
       // no partial_output (stdio is 'ignore').
-      const progressEvents = events.filter(
-        (e): e is ToolProgressEvent => e.type !== 'final',
-      );
+      const progressEvents = events.filter((e): e is ToolProgressEvent => e.type !== 'final');
       expect(progressEvents).toEqual([]);
       expect(events.filter((e) => e.type === 'final')).toHaveLength(1);
     } finally {
       // On Windows the detached child may still hold the temp dir for a
       // moment after exit — swallow the cleanup race; the OS reaps soon.
-      try { await sb.cleanup(); } catch { /* ignore */ }
+      try {
+        await sb.cleanup();
+      } catch {
+        /* ignore */
+      }
     }
   });
 });

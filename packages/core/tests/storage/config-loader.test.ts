@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DefaultConfigLoader } from '../../src/storage/config-loader.js';
 import { resolveWstackPaths } from '../../src/utils/wstack-paths.js';
 
@@ -54,10 +54,7 @@ describe('DefaultConfigLoader', () => {
       JSON.stringify({ provider: 'anthropic', model: 'claude-haiku-4-5' }),
     );
     await fs.mkdir(path.dirname(paths.projectLocalConfig), { recursive: true });
-    await fs.writeFile(
-      paths.projectLocalConfig,
-      JSON.stringify({ model: 'claude-opus-4-7' }),
-    );
+    await fs.writeFile(paths.projectLocalConfig, JSON.stringify({ model: 'claude-opus-4-7' }));
     const cfg = await l.load();
     expect(cfg.provider).toBe('anthropic');
     expect(cfg.model).toBe('claude-opus-4-7');
@@ -93,10 +90,7 @@ describe('DefaultConfigLoader', () => {
   it('strict mode passes when provider+model both present', async () => {
     const paths = resolveWstackPaths({ projectRoot, userHome });
     await fs.mkdir(path.dirname(paths.globalConfig), { recursive: true });
-    await fs.writeFile(
-      paths.globalConfig,
-      JSON.stringify({ provider: 'openai', model: 'gpt-4o' }),
-    );
+    await fs.writeFile(paths.globalConfig, JSON.stringify({ provider: 'openai', model: 'gpt-4o' }));
     const l = new DefaultConfigLoader({ paths, strict: true });
     const cfg = await l.load();
     expect(cfg.provider).toBe('openai');
@@ -155,10 +149,7 @@ describe('DefaultConfigLoader', () => {
   it('merges primitive arrays by concatenation with deduplication', async () => {
     const { loader: l, paths } = loader();
     await fs.mkdir(path.dirname(paths.globalConfig), { recursive: true });
-    await fs.writeFile(
-      paths.globalConfig,
-      JSON.stringify({ features: { plugins: ['a', 'b'] } }),
-    );
+    await fs.writeFile(paths.globalConfig, JSON.stringify({ features: { plugins: ['a', 'b'] } }));
     await fs.mkdir(path.dirname(paths.projectLocalConfig), { recursive: true });
     await fs.writeFile(
       paths.projectLocalConfig,

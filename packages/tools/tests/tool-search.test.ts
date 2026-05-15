@@ -1,8 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { toolSearchTool } from '../src/tool-search.js';
 
-const makeCtx = (tools: any[] = []) =>
-  ({ cwd: '/fake', tools, projectRoot: '/fake' } as any);
+const makeCtx = (tools: any[] = []) => ({ cwd: '/fake', tools, projectRoot: '/fake' }) as any;
 
 describe('toolSearchTool', () => {
   it('has correct metadata', () => {

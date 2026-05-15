@@ -1,5 +1,5 @@
 import type { Message } from '../types/messages.js';
-import type { TodoItem, Context } from './context.js';
+import type { Context, TodoItem } from './context.js';
 
 /**
  * Observable wrapper for mutable conversation state. Production code should
@@ -54,12 +54,13 @@ export class ConversationState {
    * that need a stable view across an async boundary.
    */
   snapshot(): ReadonlyConversationState {
-    // Return a frozen view — no defensive spread needed since the returned
-    // object is deep-frozen and callers receive it as ReadonlyConversationState.
-    return Object.freeze({
-      messages: Object.freeze([...this.ctx.messages]),
-      todos: Object.freeze([...this.ctx.todos]),
-      meta: Object.freeze({ ...this.ctx.meta }),
+    // Return a deep-frozen view — both the arrays and the message/todo/meta
+    // objects they contain are immutable so callers can't accidentally mutate
+    // state through a snapshot reference.
+    return deepFreeze({
+      messages: [...this.ctx.messages],
+      todos: [...this.ctx.todos],
+      meta: { ...this.ctx.meta },
     });
   }
 
@@ -124,4 +125,17 @@ export class ConversationState {
  */
 export function wrapAsState(ctx: Context): ConversationState {
   return new ConversationState(ctx);
+}
+
+function deepFreeze<T>(obj: T): T {
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Object.isFrozen(obj)) return obj;
+  Object.freeze(obj);
+  for (const key of Object.keys(obj as object)) {
+    const v = (obj as Record<string, unknown>)[key];
+    if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) {
+      deepFreeze(v);
+    }
+  }
+  return obj;
 }

@@ -1,19 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import type {
-  MultiAgentCoordinator,
-  CoordinatorStatus,
-  SubagentConfig,
-  SpawnResult,
-  TaskSpec,
-  TaskResult,
-  MultiAgentConfig,
-  SubagentContext,
-  SubagentRunner,
-  SubagentRunContext,
-} from '../types/multi-agent.js';
 import type { AgentBridge, BridgeMessage } from '../types/agent-bridge.js';
-import { SubagentBudget, BudgetExceededError } from './subagent-budget.js';
+import type {
+  CoordinatorStatus,
+  MultiAgentConfig,
+  MultiAgentCoordinator,
+  SpawnResult,
+  SubagentConfig,
+  SubagentContext,
+  SubagentRunContext,
+  SubagentRunner,
+  TaskResult,
+  TaskSpec,
+} from '../types/multi-agent.js';
+import { BudgetExceededError, SubagentBudget } from './subagent-budget.js';
 
 type SubagentStatus = 'running' | 'idle' | 'stopped' | 'error';
 
@@ -37,10 +37,7 @@ export interface MultiAgentCoordinatorOptions {
   runner?: SubagentRunner;
 }
 
-export class DefaultMultiAgentCoordinator
-  extends EventEmitter
-  implements MultiAgentCoordinator
-{
+export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiAgentCoordinator {
   readonly coordinatorId: string;
   readonly config: MultiAgentConfig;
   private readonly runner?: SubagentRunner;
@@ -210,10 +207,14 @@ export class DefaultMultiAgentCoordinator
     // Precedence: task > subagent > coordinator default.
     const budget = new SubagentBudget({
       maxIterations: subagent.config.maxIterations ?? this.config.defaultBudget?.maxIterations,
-      maxToolCalls: task.maxToolCalls ?? subagent.config.maxToolCalls ?? this.config.defaultBudget?.maxToolCalls,
+      maxToolCalls:
+        task.maxToolCalls ??
+        subagent.config.maxToolCalls ??
+        this.config.defaultBudget?.maxToolCalls,
       maxTokens: subagent.config.maxTokens ?? this.config.defaultBudget?.maxTokens,
       maxCostUsd: subagent.config.maxCostUsd ?? this.config.defaultBudget?.maxCostUsd,
-      timeoutMs: task.timeoutMs ?? subagent.config.timeoutMs ?? this.config.defaultBudget?.timeoutMs,
+      timeoutMs:
+        task.timeoutMs ?? subagent.config.timeoutMs ?? this.config.defaultBudget?.timeoutMs,
     });
     subagent.activeBudget = budget;
 

@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DefaultModeStore, loadProjectModes, loadUserModes } from '../../src/models/mode-store.js';
 
 let tmpDir: string;
@@ -60,7 +60,13 @@ describe('DefaultModeStore', () => {
 
   it('addMode inserts new mode', async () => {
     const store = new DefaultModeStore({ directory: tmpDir });
-    await store.addMode({ id: 'custom', name: 'Custom', description: 'A custom mode', prompt: 'custom prompt', tags: [] });
+    await store.addMode({
+      id: 'custom',
+      name: 'Custom',
+      description: 'A custom mode',
+      prompt: 'custom prompt',
+      tags: [],
+    });
     const mode = await store.getMode('custom');
     expect(mode?.name).toBe('Custom');
   });
@@ -115,7 +121,9 @@ describe('loadUserModes', () => {
   });
 
   it('loads modes from manifest', async () => {
-    const manifest = { modes: [{ id: 'user1', name: 'User', description: '', prompt: 'hello', tags: [] }] };
+    const manifest = {
+      modes: [{ id: 'user1', name: 'User', description: '', prompt: 'hello', tags: [] }],
+    };
     await fs.writeFile(path.join(tmpDir, 'modes.json'), JSON.stringify(manifest), 'utf8');
     const modes = await loadUserModes(tmpDir);
     expect(modes).toHaveLength(1);

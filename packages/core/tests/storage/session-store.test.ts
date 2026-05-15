@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DefaultSessionStore } from '../../src/index.js';
 
 // Lift the prototype so we can override appendFile per-test without touching
@@ -69,7 +69,10 @@ describe('DefaultSessionStore', () => {
     await writer.close();
 
     const raw = await fs.readFile(path.join(tmp, 'res1.jsonl'), 'utf8');
-    const lines = raw.trim().split('\n').map((l) => JSON.parse(l));
+    const lines = raw
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
     expect(lines[0].type).toBe('session_start');
     expect(lines.some((l) => l.type === 'session_resumed')).toBe(true);
     expect(lines[lines.length - 1].content).toBe('second');
@@ -105,7 +108,7 @@ describe('DefaultSessionStore', () => {
     expect(data.usage.output).toBe(5);
   });
 
-  it('throws on damaged session (open tool_use without result)', async () => {
+  it('returns partial data for damaged session (open tool_use without result)', async () => {
     const w = await store.create({ id: 'broken', model: 'm', provider: 'p' });
     await w.append({
       type: 'llm_response',
@@ -115,7 +118,12 @@ describe('DefaultSessionStore', () => {
       model: 'm',
     });
     await w.close();
-    await expect(store.load('broken')).rejects.toThrow(/damaged/);
+    // Damaged sessions resolve with partial replay instead of throwing —
+    // the undamaged portion is still useful for session listing / resume.
+    const data = await store.load('broken');
+    expect(data.messages).toHaveLength(1);
+    // The orphan tool_use is preserved in the LLM response but no tool_result follows
+    expect(data.usage.input).toBe(1);
   });
 
   it('pairs tool_result with prior tool_use into single user message', async () => {

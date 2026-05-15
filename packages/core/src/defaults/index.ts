@@ -71,8 +71,14 @@ export { DefaultRetryPolicy } from '../execution/retry-policy.js';
 export { DefaultErrorHandler } from '../execution/error-handler.js';
 export { DefaultSkillLoader, type SkillLoaderOptions } from '../execution/skill-loader.js';
 export { HybridCompactor, type CompactorOptions } from '../execution/compactor.js';
-export { IntelligentCompactor, type IntelligentCompactorOptions } from '../execution/intelligent-compactor.js';
-export { SelectiveCompactor, type SelectiveCompactorOptions } from '../execution/selective-compactor.js';
+export {
+  IntelligentCompactor,
+  type IntelligentCompactorOptions,
+} from '../execution/intelligent-compactor.js';
+export {
+  SelectiveCompactor,
+  type SelectiveCompactorOptions,
+} from '../execution/selective-compactor.js';
 export { AutoCompactionMiddleware } from '../execution/auto-compaction-middleware.js';
 export { ToolExecutor } from '../execution/tool-executor.js';
 export {

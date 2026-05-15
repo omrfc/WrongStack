@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { MCPClient } from '../src/client.js';
-import { MCPRegistry } from '../src/registry.js';
-import type { MCPTool } from '../src/client.js';
 import type { MCPServerConfig } from '@wrongstack/core';
 import { EventBus, ToolRegistry } from '@wrongstack/core';
 import type { Logger } from '@wrongstack/core';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MCPClient } from '../src/client.js';
+import type { MCPTool } from '../src/client.js';
+import { MCPRegistry } from '../src/registry.js';
 
 const silentLog: Logger = {
   error: () => {},
@@ -32,7 +32,10 @@ class InlineMockMCP {
   }
 
   setResponse(params: unknown, response: { content: unknown; isError?: boolean } | string): void {
-    this.responses.set(JSON.stringify(params), typeof response === 'string' ? { content: response } : response);
+    this.responses.set(
+      JSON.stringify(params),
+      typeof response === 'string' ? { content: response } : response,
+    );
   }
 
   /**
@@ -89,7 +92,11 @@ rl.createInterface({ input: process.stdin, terminal: false }).on('line', (line) 
 
   async cleanup(): Promise<void> {
     if (this.scriptPath) {
-      try { await import('node:fs').then(m => m.unlinkSync(this.scriptPath!)); } catch { /* ignore */ }
+      try {
+        await import('node:fs').then((m) => m.unlinkSync(this.scriptPath!));
+      } catch {
+        /* ignore */
+      }
       this.scriptPath = undefined;
     }
   }
@@ -99,7 +106,11 @@ rl.createInterface({ input: process.stdin, terminal: false }).on('line', (line) 
   }
 }
 
-const stdioCfg = (name: string, scriptPath: string, extra: Partial<MCPServerConfig> = {}): MCPServerConfig => ({
+const stdioCfg = (
+  name: string,
+  scriptPath: string,
+  extra: Partial<MCPServerConfig> = {},
+): MCPServerConfig => ({
   name,
   transport: 'stdio',
   command: 'node',
@@ -113,7 +124,11 @@ describe('MCPClient + MockMCPServer', () => {
 
   beforeEach(async () => {
     server = new InlineMockMCP([
-      { name: 'hello', description: 'Says hello', inputSchema: { type: 'object', properties: { name: { type: 'string' } } } },
+      {
+        name: 'hello',
+        description: 'Says hello',
+        inputSchema: { type: 'object', properties: { name: { type: 'string' } } },
+      },
       { name: 'ping', description: 'Ping', inputSchema: { type: 'object' } },
     ]);
     server.setResponse({}, { content: 'pong' });
@@ -126,7 +141,13 @@ describe('MCPClient + MockMCPServer', () => {
 
   it('connect + listTools returns correct tools', async () => {
     const scriptPath = await server.writeScript();
-    const client = new MCPClient({ name: 'mock', transport: 'stdio', command: 'node', args: [scriptPath], startupTimeoutMs: 5000 });
+    const client = new MCPClient({
+      name: 'mock',
+      transport: 'stdio',
+      command: 'node',
+      args: [scriptPath],
+      startupTimeoutMs: 5000,
+    });
     await client.connect();
     expect(client.getState()).toBe('connected');
     const tools = client.listTools();
@@ -136,7 +157,13 @@ describe('MCPClient + MockMCPServer', () => {
 
   it('callTool returns the mocked response', async () => {
     const scriptPath = await server.writeScript();
-    const client = new MCPClient({ name: 'mock', transport: 'stdio', command: 'node', args: [scriptPath], startupTimeoutMs: 5000 });
+    const client = new MCPClient({
+      name: 'mock',
+      transport: 'stdio',
+      command: 'node',
+      args: [scriptPath],
+      startupTimeoutMs: 5000,
+    });
     await client.connect();
     const result = await client.callTool('hello', { name: 'test' });
     expect(result.content).toBe('Hello, test!');
@@ -150,7 +177,13 @@ describe('MCPClient + MockMCPServer', () => {
     // agent receives a tool_result with is_error: true.
     server.setResponse({}, { content: 'boom', isError: true });
     const scriptPath = await server.writeScript();
-    const client = new MCPClient({ name: 'mock', transport: 'stdio', command: 'node', args: [scriptPath], startupTimeoutMs: 5000 });
+    const client = new MCPClient({
+      name: 'mock',
+      transport: 'stdio',
+      command: 'node',
+      args: [scriptPath],
+      startupTimeoutMs: 5000,
+    });
     await client.connect();
     const res = await client.callTool('hello', {});
     expect(res.isError).toBe(true);
@@ -160,13 +193,25 @@ describe('MCPClient + MockMCPServer', () => {
 
   it('callTool rejects when disconnected', async () => {
     const scriptPath = await server.writeScript();
-    const client = new MCPClient({ name: 'mock', transport: 'stdio', command: 'node', args: [scriptPath], startupTimeoutMs: 5000 });
+    const client = new MCPClient({
+      name: 'mock',
+      transport: 'stdio',
+      command: 'node',
+      args: [scriptPath],
+      startupTimeoutMs: 5000,
+    });
     await expect(client.callTool('hello', {})).rejects.toThrow(/not connected/);
   });
 
   it('close is idempotent', async () => {
     const scriptPath = await server.writeScript();
-    const client = new MCPClient({ name: 'mock', transport: 'stdio', command: 'node', args: [scriptPath], startupTimeoutMs: 5000 });
+    const client = new MCPClient({
+      name: 'mock',
+      transport: 'stdio',
+      command: 'node',
+      args: [scriptPath],
+      startupTimeoutMs: 5000,
+    });
     await client.connect();
     await client.close();
     await expect(client.close()).resolves.toBeUndefined();
@@ -174,7 +219,13 @@ describe('MCPClient + MockMCPServer', () => {
 
   it('exit listener fires on close', async () => {
     const scriptPath = await server.writeScript();
-    const client = new MCPClient({ name: 'mock', transport: 'stdio', command: 'node', args: [scriptPath], startupTimeoutMs: 5000 });
+    const client = new MCPClient({
+      name: 'mock',
+      transport: 'stdio',
+      command: 'node',
+      args: [scriptPath],
+      startupTimeoutMs: 5000,
+    });
     const exitEvents: unknown[] = [];
     client.addExitListener((_n, code, signal) => exitEvents.push({ code, signal }));
     await client.connect();
@@ -183,7 +234,13 @@ describe('MCPClient + MockMCPServer', () => {
   });
 
   it('listTools returns empty before connect', () => {
-    const client = new MCPClient({ name: 'mock', transport: 'stdio', command: 'node', args: ['/nonexistent'], startupTimeoutMs: 5000 });
+    const client = new MCPClient({
+      name: 'mock',
+      transport: 'stdio',
+      command: 'node',
+      args: ['/nonexistent'],
+      startupTimeoutMs: 5000,
+    });
     expect(client.listTools()).toEqual([]);
   });
 });
@@ -197,7 +254,11 @@ describe('MCPRegistry + MockMCPServer', () => {
   beforeEach(async () => {
     server = new InlineMockMCP([
       { name: 'ping', description: 'Ping', inputSchema: { type: 'object' } },
-      { name: 'echo', description: 'Echo', inputSchema: { type: 'object', properties: { msg: { type: 'string' } } } },
+      {
+        name: 'echo',
+        description: 'Echo',
+        inputSchema: { type: 'object', properties: { msg: { type: 'string' } } },
+      },
     ]);
     server.setResponse({}, { content: 'pong' });
     scriptPath = await server.writeScript();
@@ -249,7 +310,9 @@ describe('MCPRegistry + MockMCPServer', () => {
 
   it('health returns alive=false for failed', { timeout: 15_000 }, async () => {
     const reg = new MCPRegistry({ toolRegistry: toolReg, events, log: silentLog });
-    await reg.start(stdioCfg('broken', '/nonexistent/script.js', { enabled: true, startupTimeoutMs: 500 }));
+    await reg.start(
+      stdioCfg('broken', '/nonexistent/script.js', { enabled: true, startupTimeoutMs: 500 }),
+    );
     // Wait for retries to exhaust
     await new Promise((r) => setTimeout(r, 6000));
     const h = reg.health();

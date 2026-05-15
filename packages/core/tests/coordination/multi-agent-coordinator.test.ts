@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DefaultMultiAgentCoordinator } from '../../src/coordination/multi-agent-coordinator.js';
 
 describe('DefaultMultiAgentCoordinator', () => {
@@ -65,13 +65,29 @@ describe('DefaultMultiAgentCoordinator', () => {
 
   it('delegate throws for unknown subagent', async () => {
     const coord = new DefaultMultiAgentCoordinator(makeConfig());
-    await expect(coord.delegate('ghost', { id: '1', type: 'task', from: 'c', payload: {}, timestamp: Date.now(), priority: 'normal' })).rejects.toThrow('not found');
+    await expect(
+      coord.delegate('ghost', {
+        id: '1',
+        type: 'task',
+        from: 'c',
+        payload: {},
+        timestamp: Date.now(),
+        priority: 'normal',
+      }),
+    ).rejects.toThrow('not found');
   });
 
   it('setSubagentBridge wires up subagent', async () => {
     const coord = new DefaultMultiAgentCoordinator(makeConfig());
     await coord.spawn({ id: 'agent1', name: 'A1' });
-    const mockBridge = { send: vi.fn().mockResolvedValue(undefined), agentId: 'agent1', coordinatorId: 'coord1', subscribe: vi.fn(), stop: vi.fn(), request: vi.fn() } as any;
+    const mockBridge = {
+      send: vi.fn().mockResolvedValue(undefined),
+      agentId: 'agent1',
+      coordinatorId: 'coord1',
+      subscribe: vi.fn(),
+      stop: vi.fn(),
+      request: vi.fn(),
+    } as any;
     expect(() => coord.setSubagentBridge('agent1', mockBridge)).not.toThrow();
   });
 
@@ -94,12 +110,16 @@ describe('DefaultMultiAgentCoordinator', () => {
   });
 
   it('done=true when all_tasks_done and no pending', () => {
-    const coord = new DefaultMultiAgentCoordinator(makeConfig({ doneCondition: { type: 'all_tasks_done' } }));
+    const coord = new DefaultMultiAgentCoordinator(
+      makeConfig({ doneCondition: { type: 'all_tasks_done' } }),
+    );
     expect(coord.getStatus().done).toBe(true); // no pending tasks
   });
 
   it('done=true when maxIterations reached via completeTask', async () => {
-    const coord = new DefaultMultiAgentCoordinator(makeConfig({ doneCondition: { type: 'max_iterations', maxIterations: 1 } }));
+    const coord = new DefaultMultiAgentCoordinator(
+      makeConfig({ doneCondition: { type: 'max_iterations', maxIterations: 1 } }),
+    );
     await coord.spawn({ id: 'agent1', name: 'A1' });
     await coord.assign({ id: 'task1' });
     // Simulate task completion which increments totalIterations

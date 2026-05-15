@@ -1,7 +1,7 @@
 import { bench, describe } from 'vitest';
+import type { Context } from '../../src/core/context.js';
 import { HybridCompactor } from '../../src/execution/compactor.js';
 import { IntelligentCompactor } from '../../src/execution/intelligent-compactor.js';
-import type { Context } from '../../src/core/context.js';
 import type { Message } from '../../src/types/messages.js';
 
 /**
@@ -17,9 +17,7 @@ function buildMessages(n: number): Message[] {
     out.push({ role: 'user', content: `user message ${i} ${'lorem ipsum '.repeat(50)}` });
     out.push({
       role: 'assistant',
-      content: [
-        { type: 'text', text: `assistant reply ${i} ${'dolor sit '.repeat(80)}` },
-      ],
+      content: [{ type: 'text', text: `assistant reply ${i} ${'dolor sit '.repeat(80)}` }],
     });
   }
   return out;

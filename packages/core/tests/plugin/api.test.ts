@@ -1,13 +1,13 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   Container,
-  EventBus,
-  ToolRegistry,
-  ProviderRegistry,
-  DefaultPluginAPI,
   DefaultLogger,
+  DefaultPluginAPI,
+  EventBus,
+  ProviderRegistry,
+  ToolRegistry,
 } from '../../src/index.js';
-import type { Tool, Config, ProviderFactory } from '../../src/index.js';
+import type { Config, ProviderFactory, Tool } from '../../src/index.js';
 
 const baseConfig: Config = {
   providers: {},
@@ -68,7 +68,12 @@ describe('DefaultPluginAPI', () => {
       create: () => ({
         id: 'mock',
         capabilities: {} as never,
-        complete: async () => ({ content: [], stopReason: 'end_turn', usage: { input: 0, output: 0 }, model: 'm' }),
+        complete: async () => ({
+          content: [],
+          stopReason: 'end_turn',
+          usage: { input: 0, output: 0 },
+          model: 'm',
+        }),
       }),
     };
     api.providers.register(factory);

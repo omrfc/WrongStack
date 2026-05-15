@@ -583,7 +583,6 @@ export function Sidebar() {
                           <div className="min-w-0 flex-1">
                             {renamingId === entry.id ? (
                               <input
-                                autoFocus
                                 value={renameDraft}
                                 onChange={(e) => setRenameDraft(e.target.value)}
                                 onClick={(e) => e.stopPropagation()}

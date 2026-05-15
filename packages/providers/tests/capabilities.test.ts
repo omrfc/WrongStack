@@ -1,8 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { capabilitiesFor } from '../src/capabilities.js';
-import { DefaultModelsRegistry, type ModelsDevPayload } from '@wrongstack/core';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
+import { DefaultModelsRegistry, type ModelsDevPayload } from '@wrongstack/core';
+import { describe, expect, it } from 'vitest';
+import { capabilitiesFor } from '../src/capabilities.js';
 
 const SAMPLE: ModelsDevPayload = {
   anthropic: {

@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Writable } from 'node:stream';
-import { makePromptDelegate } from '../src/permission-prompt.js';
 import type { InputReader, Tool } from '@wrongstack/core';
 import { stripAnsi } from '@wrongstack/core';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { makePromptDelegate } from '../src/permission-prompt.js';
 
 class _FakeStdout extends Writable {
   buf = '';
@@ -41,7 +41,7 @@ afterEach(() => {
 });
 
 describe('makePromptDelegate', () => {
-  it('returns the reader\'s answer', async () => {
+  it("returns the reader's answer", async () => {
     captureStdout();
     const reader: InputReader = {
       readLine: vi.fn(async () => ''),
@@ -65,11 +65,7 @@ describe('makePromptDelegate', () => {
       close: vi.fn(async () => undefined),
     };
     const prompt = makePromptDelegate(reader);
-    await prompt(
-      fakeTool,
-      { path: '/a', diff: '--- a\n+++ a\n@@\n-x\n+y\n' },
-      'edit:/a',
-    );
+    await prompt(fakeTool, { path: '/a', diff: '--- a\n+++ a\n@@\n-x\n+y\n' }, 'edit:/a');
     expect(getStdout()).toContain('-x');
     expect(getStdout()).toContain('+y');
   });

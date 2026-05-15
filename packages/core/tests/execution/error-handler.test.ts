@@ -1,12 +1,11 @@
-import { describe, it, expect, vi } from 'vitest';
-import { DefaultErrorHandler, ProviderError } from '../../src/index.js';
-import { buildRecoveryStrategies } from '../../src/execution/error-handler.js';
+import { describe, expect, it, vi } from 'vitest';
 import type { Context } from '../../src/core/context.js';
+import { buildRecoveryStrategies } from '../../src/execution/error-handler.js';
+import { DefaultErrorHandler, ProviderError } from '../../src/index.js';
 import type { Compactor } from '../../src/types/compactor.js';
 import type { ModelsRegistry } from '../../src/types/models-registry.js';
 
-const provErr = (msg: string, status: number) =>
-  new ProviderError(msg, status, false, 'test');
+const provErr = (msg: string, status: number) => new ProviderError(msg, status, false, 'test');
 
 describe('DefaultErrorHandler.classify', () => {
   const eh = new DefaultErrorHandler();
@@ -39,9 +38,7 @@ describe('DefaultErrorHandler.classify', () => {
   });
 
   it('classifies 400 with "context" in message as context_overflow', () => {
-    expect(eh.classify(provErr('context length exceeded', 400)).kind).toBe(
-      'context_overflow',
-    );
+    expect(eh.classify(provErr('context length exceeded', 400)).kind).toBe('context_overflow');
   });
 
   it('classifies generic 4xx as client (not retryable)', () => {
@@ -113,7 +110,9 @@ describe('recovery strategies', () => {
 
   it('context_overflow swallows compactor throws', async () => {
     const compactor: Compactor = {
-      compact: vi.fn(async () => { throw new Error('compaction failed'); }),
+      compact: vi.fn(async () => {
+        throw new Error('compaction failed');
+      }),
     } as unknown as Compactor;
     const eh = new DefaultErrorHandler(buildRecoveryStrategies({ compactor }));
     const res = await eh.recover(provErr('payload too big', 413), makeCtx());
@@ -122,7 +121,9 @@ describe('recovery strategies', () => {
 
   it('rate_limit_backoff waits then asks the agent to retry', { timeout: 10_000 }, async () => {
     const eh = new DefaultErrorHandler(buildRecoveryStrategies());
-    const err = new ProviderError('rate limited', 429, true, 'test', { body: { retryAfterMs: 1100 } });
+    const err = new ProviderError('rate limited', 429, true, 'test', {
+      body: { retryAfterMs: 1100 },
+    });
     const start = Date.now();
     const res = await eh.recover(err, makeCtx());
     const elapsed = Date.now() - start;
@@ -194,7 +195,9 @@ describe('recovery strategies', () => {
 
   it('downgrade_model swallows registry throws', async () => {
     const modelsRegistry = {
-      getProvider: vi.fn(async () => { throw new Error('catalog gone'); }),
+      getProvider: vi.fn(async () => {
+        throw new Error('catalog gone');
+      }),
       getModel: vi.fn(),
     } as unknown as ModelsRegistry;
     const eh = new DefaultErrorHandler(buildRecoveryStrategies({ modelsRegistry }));
@@ -206,7 +209,12 @@ describe('recovery strategies', () => {
       getProvider: vi.fn(async () => ({
         id: 'openai',
         models: [
-          { id: 'gpt-4-vision', cost: { input: 30 }, tool_call: true, modalities: { input: ['text', 'image'] } },
+          {
+            id: 'gpt-4-vision',
+            cost: { input: 30 },
+            tool_call: true,
+            modalities: { input: ['text', 'image'] },
+          },
           { id: 'gpt-3.5', cost: { input: 1 }, tool_call: true, modalities: { input: ['text'] } },
         ],
       })),

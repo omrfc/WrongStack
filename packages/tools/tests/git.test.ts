@@ -1,7 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { gitTool } from '../src/git.js';
 
-const makeCtx = (cwd = '/fake') => ({ cwd, tools: [], projectRoot: cwd } as Parameters<typeof gitTool.execute>[1]);
+const makeCtx = (cwd = '/fake') =>
+  ({ cwd, tools: [], projectRoot: cwd }) as Parameters<typeof gitTool.execute>[1];
 const makeOpts = () => ({ signal: new AbortController().signal });
 
 describe('gitTool', () => {
@@ -13,7 +14,9 @@ describe('gitTool', () => {
 
   it('throws when command is missing', async () => {
     const ctx = makeCtx();
-    await expect(gitTool.execute({} as never, ctx, makeOpts())).rejects.toThrow('command is required');
+    await expect(gitTool.execute({} as never, ctx, makeOpts())).rejects.toThrow(
+      'command is required',
+    );
   });
 
   it('returns error when not in a git repo', async () => {
@@ -25,13 +28,21 @@ describe('gitTool', () => {
 
   it('handles raw args', async () => {
     const ctx = makeCtx('/');
-    const result = await gitTool.execute({ command: 'status', args: '--porcelain' } as never, ctx, makeOpts());
+    const result = await gitTool.execute(
+      { command: 'status', args: '--porcelain' } as never,
+      ctx,
+      makeOpts(),
+    );
     expect(result).toHaveProperty('exitCode');
   });
 
   it('respects dry_run for commit', async () => {
     const ctx = makeCtx('/');
-    const result = await gitTool.execute({ command: 'commit', dry_run: true, message: 'test' }, ctx, makeOpts());
+    const result = await gitTool.execute(
+      { command: 'commit', dry_run: true, message: 'test' },
+      ctx,
+      makeOpts(),
+    );
     expect(result).toHaveProperty('exitCode');
   });
 
@@ -86,7 +97,11 @@ describe('buildArgs (via execute in non-git dir)', () => {
 
   it('handles array files', async () => {
     const ctx = makeCtx('/');
-    const result = await gitTool.execute({ command: 'status', files: ['a.ts', 'b.ts'] }, ctx, makeOpts());
+    const result = await gitTool.execute(
+      { command: 'status', files: ['a.ts', 'b.ts'] },
+      ctx,
+      makeOpts(),
+    );
     expect(result).toHaveProperty('exitCode');
   });
 });
@@ -116,11 +131,7 @@ describe('gitTool live execution (uses the test repo itself)', () => {
   it('aborts when the signal is fired before spawn', async () => {
     const ac = new AbortController();
     ac.abort();
-    const result = await gitTool.execute(
-      { command: 'log' },
-      ctx,
-      { signal: ac.signal },
-    );
+    const result = await gitTool.execute({ command: 'log' }, ctx, { signal: ac.signal });
     // Aborted signal causes ENOENT / AbortError; exitCode comes from
     // child.on('error') path. We just verify the tool resolves rather than
     // throws.

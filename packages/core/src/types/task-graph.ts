@@ -87,16 +87,34 @@ export interface CriticalPathResult {
 }
 
 export function computeTaskProgress(graph: TaskGraph): TaskProgress {
-  let completed = 0, pending = 0, inProgress = 0, blocked = 0, failed = 0, review = 0;
-  let estimatedHours = 0, actualHours = 0;
+  let completed = 0;
+  let pending = 0;
+  let inProgress = 0;
+  let blocked = 0;
+  let failed = 0;
+  let review = 0;
+  let estimatedHours = 0;
+  let actualHours = 0;
   for (const n of graph.nodes.values()) {
     switch (n.status) {
-      case 'completed': completed++; break;
-      case 'pending': pending++; break;
-      case 'in_progress': inProgress++; break;
-      case 'blocked': blocked++; break;
-      case 'failed': failed++; break;
-      case 'review': review++; break;
+      case 'completed':
+        completed++;
+        break;
+      case 'pending':
+        pending++;
+        break;
+      case 'in_progress':
+        inProgress++;
+        break;
+      case 'blocked':
+        blocked++;
+        break;
+      case 'failed':
+        failed++;
+        break;
+      case 'review':
+        review++;
+        break;
     }
     estimatedHours += n.estimateHours ?? 0;
     actualHours += n.actualHours ?? 0;

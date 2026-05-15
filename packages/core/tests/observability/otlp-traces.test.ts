@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildOtlpTracesRequest,
   startOtlpTraceExporter,
@@ -116,7 +116,9 @@ describe('startOtlpTraceExporter — push behavior', () => {
   });
 
   it('POSTs to /v1/traces with content-type application/json', async () => {
-    const fetchImpl = vi.fn(async () => new Response('', { status: 200 })) as unknown as typeof globalThis.fetch;
+    const fetchImpl = vi.fn(
+      async () => new Response('', { status: 200 }),
+    ) as unknown as typeof globalThis.fetch;
     const exp = startOtlpTraceExporter({ endpoint: 'http://collector:4318', fetchImpl });
 
     exp.tracer.startSpan('hello').end();
@@ -132,20 +134,26 @@ describe('startOtlpTraceExporter — push behavior', () => {
   });
 
   it('does not duplicate /v1/traces when endpoint already includes it', async () => {
-    const fetchImpl = vi.fn(async () => new Response('', { status: 200 })) as unknown as typeof globalThis.fetch;
+    const fetchImpl = vi.fn(
+      async () => new Response('', { status: 200 }),
+    ) as unknown as typeof globalThis.fetch;
     const exp = startOtlpTraceExporter({
       endpoint: 'https://otel.example.com/v1/traces',
       fetchImpl,
     });
     exp.tracer.startSpan('hi').end();
     await exp.flush();
-    const [url] = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as [string];
+    const [url] = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as [
+      string,
+    ];
     expect(url).toBe('https://otel.example.com/v1/traces');
     await exp.stop();
   });
 
   it('drains the buffer on push — second flush sends nothing', async () => {
-    const fetchImpl = vi.fn(async () => new Response('', { status: 200 })) as unknown as typeof globalThis.fetch;
+    const fetchImpl = vi.fn(
+      async () => new Response('', { status: 200 }),
+    ) as unknown as typeof globalThis.fetch;
     const exp = startOtlpTraceExporter({ endpoint: 'http://x:4318', fetchImpl });
 
     exp.tracer.startSpan('a').end();
@@ -157,7 +165,9 @@ describe('startOtlpTraceExporter — push behavior', () => {
   });
 
   it('calls onError on 5xx', async () => {
-    const fetchImpl = vi.fn(async () => new Response('boom', { status: 500 })) as unknown as typeof globalThis.fetch;
+    const fetchImpl = vi.fn(
+      async () => new Response('boom', { status: 500 }),
+    ) as unknown as typeof globalThis.fetch;
     const onError = vi.fn();
     const exp = startOtlpTraceExporter({ endpoint: 'http://x:4318', fetchImpl, onError });
 

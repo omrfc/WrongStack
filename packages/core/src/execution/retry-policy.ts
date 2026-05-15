@@ -2,7 +2,8 @@ import { ProviderError } from '../types/provider.js';
 import type { RetryPolicy } from '../types/retry-policy.js';
 
 export class DefaultRetryPolicy implements RetryPolicy {
-  private static readonly NETWORK_ERR_RE = /ECONN|ETIMEDOUT|ETIME|ENOTFOUND|EAI_AGAIN|fetch failed/i;
+  private static readonly NETWORK_ERR_RE =
+    /ECONN|ETIMEDOUT|ETIME|ENOTFOUND|EAI_AGAIN|fetch failed/i;
 
   shouldRetry(err: Error | ProviderError, attempt: number): boolean {
     if (err instanceof ProviderError) {
