@@ -4,8 +4,13 @@ import type { Context } from '../../src/core/context.js';
 import type { RunResult } from '../../src/core/agent.js';
 import type { DoneCondition } from '../../src/types/multi-agent.js';
 import { AutonomousRunner, DoneConditionChecker } from '../../src/defaults/autonomous-runner.js';
+import { EventBus } from '../../src/kernel/events.js';
 
 function mockAgent(overrides: Partial<Agent> = {}): Agent {
+  // Real EventBus so AutonomousRunner can subscribe to `tool.executed`
+  // to count individual tool invocations (BUG-001 fix). Tests that want
+  // to simulate tool calls emit on this bus from within their run mock.
+  const events = new EventBus();
   return {
     run: vi.fn().mockResolvedValue({ status: 'done', iterations: 1, finalText: 'result' }),
     register: vi.fn(),
@@ -13,7 +18,7 @@ function mockAgent(overrides: Partial<Agent> = {}): Agent {
     container: null as any,
     tools: null as any,
     providers: null as any,
-    events: null as any,
+    events,
     pipelines: null as any,
     ctx: null as any,
     ...overrides,
@@ -134,8 +139,13 @@ describe('AutonomousRunner', () => {
   });
 
   it('stops when max tool_calls condition is met', async () => {
-    const agent = mockAgent({
-      run: vi.fn().mockResolvedValue(makeResult('done', 'out')),
+    // BUG-001: toolCalls now counts actual `tool.executed` events, not
+    // iterations. The mocked `agent.run` emits one `tool.executed` per
+    // call so the budget of 3 fires after exactly 3 iterations.
+    const agent = mockAgent({});
+    (agent.run as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      agent.events.emit('tool.executed', { id: 't', name: 'mock', durationMs: 0, ok: true });
+      return makeResult('done', 'out');
     });
     const runner = new AutonomousRunner({
       agent,
@@ -146,6 +156,33 @@ describe('AutonomousRunner', () => {
     const result = await runner.run();
 
     expect(result.status).toBe('done');
+    expect(result.reason).toMatch(/max tool calls/);
+    expect(result.toolCalls).toBe(3);
+  });
+
+  it('toolCalls counts individual tool.executed events, not iterations', async () => {
+    // Regression test for BUG-001. A single iteration that fires 5 tools
+    // must bump `toolCalls` by 5, not 1. Without this, per-tool budgets
+    // would silently let the agent burn through far more tools than
+    // allowed.
+    const agent = mockAgent({});
+    (agent.run as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+      for (let i = 0; i < 5; i++) {
+        agent.events.emit('tool.executed', { id: `t${i}`, name: 'mock', durationMs: 0, ok: true });
+      }
+      return makeResult('done', 'out');
+    });
+    const runner = new AutonomousRunner({
+      agent,
+      context: mockContext(),
+      doneCondition: { type: 'tool_calls', maxToolCalls: 3 },
+    });
+
+    const result = await runner.run();
+
+    // After one iteration the loop sees toolCalls=5 >= 3 and stops on
+    // the next done-check. The asserted count is the cumulative emit count.
+    expect(result.toolCalls).toBeGreaterThanOrEqual(3);
     expect(result.reason).toMatch(/max tool calls/);
   });
 
@@ -308,8 +345,13 @@ describe('AutonomousRunner', () => {
   });
 
   it('tracks iterations and toolCalls in result', async () => {
-    const agent = mockAgent({
-      run: vi.fn().mockResolvedValue(makeResult('done', 'out')),
+    // Mock emits one tool.executed per run() call so the 1:1 iter:tool
+    // relationship asserted below still holds after the BUG-001 fix
+    // (which moved toolCalls counting from per-iter to per-event).
+    const agent = mockAgent({});
+    (agent.run as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      agent.events.emit('tool.executed', { id: 't', name: 'mock', durationMs: 0, ok: true });
+      return makeResult('done', 'out');
     });
     const runner = new AutonomousRunner({
       agent,

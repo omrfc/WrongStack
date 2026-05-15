@@ -23,7 +23,7 @@
     "version:major": "node scripts/bump-version.mjs major",
     "version:set": "node scripts/bump-version.mjs set",
     "release:check": "pnpm typecheck && pnpm test && pnpm build",
-    "release:dry": "pnpm publish -r --dry-run --no-git-checks",
+    "release:dry": "pnpm publish -r --dry-run --no-git-checks --force",
     "release": "pnpm release:check && pnpm publish -r --access public --no-git-checks"
   },
   "devDependencies": {

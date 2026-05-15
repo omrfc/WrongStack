@@ -72,6 +72,26 @@ export class AutonomousRunner {
   }
 
   async run(): Promise<AutonomousResult> {
+    // Subscribe to `tool.executed` so the per-tool budget (`tool_calls`
+    // done-condition) actually counts each tool invocation rather than
+    // each `agent.run()` call. Without this, a single iteration that
+    // fires 5 tools only bumps the counter once, and a `maxToolCalls: 3`
+    // budget would fire after 3 iterations (typically 3×N tools) instead
+    // of after 3 tools. Unsubscribed in the `finally` so the listener
+    // doesn't outlive this run instance. Mock agents in tests may pass
+    // null/undefined for `events`; gracefully skip when missing — those
+    // tests don't exercise the tool-count budget path.
+    const offToolExecuted = this.opts.agent.events?.on?.('tool.executed', () => {
+      this.toolCalls++;
+    });
+    try {
+      return await this.runLoop();
+    } finally {
+      offToolExecuted?.();
+    }
+  }
+
+  private async runLoop(): Promise<AutonomousResult> {
     while (!this.stopped) {
       const check = this.doneChecker.check({
         iterations: this.iterations,
@@ -103,7 +123,8 @@ export class AutonomousRunner {
 
         this.iterations++;
         this.lastOutput = result.finalText;
-        this.toolCalls++;
+        // `toolCalls` is bumped by the `tool.executed` listener installed
+        // in run() — no manual increment here.
 
         if (result.status === 'failed' || result.status === 'aborted') {
           const failedResult: AutonomousResult = {

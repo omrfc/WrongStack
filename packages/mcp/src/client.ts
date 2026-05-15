@@ -234,6 +234,11 @@ export class MCPClient {
     });
     this.sseTransport.onToolsChanged((tools) => {
       this._tools = tools;
+      // Keep the reconnect-recovery cache in sync. Without this, an empty
+      // tools update would leave `_toolsCache` pointing at the previous
+      // non-empty list, and `listTools()` would serve the stale cache
+      // (since it falls back to the cache when `_tools` is empty).
+      this._toolsCache = tools;
       for (const cb of this.toolsChangedListeners) {
         try { cb(this.opts.name, tools); } catch { /* ignore */ }
       }
@@ -269,6 +274,11 @@ export class MCPClient {
     });
     this.httpTransport.onToolsChanged((tools) => {
       this._tools = tools;
+      // Same cache-sync reasoning as the SSE branch above — keep
+      // `_toolsCache` in lockstep with `_tools` on every transport
+      // update so the empty-list fallback in `listTools()` never serves
+      // stale data.
+      this._toolsCache = tools;
       for (const cb of this.toolsChangedListeners) {
         try { cb(this.opts.name, tools); } catch { /* ignore */ }
       }

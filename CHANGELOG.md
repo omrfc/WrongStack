@@ -71,6 +71,41 @@ other packages re-publish in lockstep. No breaking changes.
 - **`publishConfig.access: "public"`** added to every publishable
   package so `pnpm publish` no longer needs the `--access public` flag.
 
+### Fixed — audit triage (bugs.md round)
+
+- **`AutonomousRunner.toolCalls` now counts `tool.executed` events**
+  rather than `agent.run()` calls. Previously a `maxToolCalls: 3` budget
+  could let an iteration burst fire 15 tools before the done-condition
+  tripped (counter only incremented once per iteration, not once per
+  tool). The runner now subscribes to `agent.events.on('tool.executed')`
+  for the lifetime of `run()`, tears the listener down in `finally`,
+  and tolerates mock agents whose events bus is null/undefined.
+  Regression test asserts a 5-tool burst trips a 3-tool budget after a
+  single iteration.
+- **MCP `_toolsCache` now stays in sync with `_tools`** on SSE/HTTP
+  transport `onToolsChanged` callbacks. Previously only `_tools` was
+  updated, so an empty tools-update would leave the cache pointing at
+  the prior non-empty list and `MCPClient.listTools()`'s empty-`_tools`
+  fallback would serve stale entries. Both stdio paths were already
+  correct; this fix is scoped to the two remote transports.
+- **`tool_use` meta-tool no longer hard-rejects confirm-permission
+  inner tools.** The outer `tool_use` itself has `permission: 'confirm'`,
+  so the user has already approved the call (and seen the inner tool
+  name + input) by the time `execute()` runs — the duplicate inner
+  check made every confirm-gated tool unreachable through `tool_use`.
+  The inner `deny` check is preserved as a hard policy floor that
+  meta-tools cannot bypass. `batch_tool_use` already followed this
+  model.
+- **`scaffold` migrated from sync to async I/O.** `fsSync.mkdirSync` /
+  `fsSync.writeFileSync` in the template-write loop blocked the event
+  loop for every file in a multi-file template. Switched to the
+  already-imported `node:fs/promises` API; `handleBuiltIn` is now
+  `async` and each `mkdir` / `writeFile` is awaited.
+
+The remaining audit findings (BUG-002, -004, -005, -006, -007, -008, -009,
+-010) were investigated and either intentional-by-design or
+self-corrected in the report; see `bugs.md` for the per-finding triage.
+
 ## [0.1.6] — 2026-05-14
 
 Security hardening pass: 7 CRITICAL, 16 HIGH, 20 MEDIUM, 9 LOW findings from
