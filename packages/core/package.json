@@ -1,6 +1,6 @@
 {
   "name": "@wrongstack/core",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "license": "MIT",
   "description": "WrongStack core: kernel, types, defaults, and shared utilities for the WrongStack CLI agent.",
   "repository": {
@@ -43,7 +43,7 @@
     "dist",
     "skills"
   ],
-  "wrongstackApiVersion": "0.1.8",
+  "wrongstackApiVersion": "0.1.9",
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",

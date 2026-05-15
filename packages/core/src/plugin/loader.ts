@@ -9,11 +9,12 @@ import { validateAgainstSchema } from '../utils/json-schema-validate.js';
  * (PluginAPI, types/plugin) changes in a way that breaks existing setup
  * functions. Plugins declare `apiVersion: "^1.0"` to opt into this contract.
  *
- * 0.1.8: additive — Director, FleetBus, FleetUsageAggregator, and the
- * director-prompts composers are now exported from `@wrongstack/core`.
+ * 0.1.9: additive — `DirectorBudgetError` plus `FLEET_ROSTER` and the
+ * pre-built fleet agent configs (Audit Log, Bug Hunter, Refactor Planner,
+ * Security Scanner) now exported from `@wrongstack/core`.
  * Plugins pinning `apiVersion: "^0.1"` continue to load unchanged.
  */
-export const KERNEL_API_VERSION = '0.1.8';
+export const KERNEL_API_VERSION = '0.1.9';
 
 export interface LoadPluginsOptions {
   apiFactory: (plugin: Plugin) => PluginAPI;

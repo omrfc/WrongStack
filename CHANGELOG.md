@@ -7,13 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.8] — 2026-05-15
+## [0.1.9] — 2026-05-15
 
 Post-0.1.7 audit triage + Director orchestration ecosystem + `/fleet`
-slash hub + `--director` CLI flag. No breaking changes — additive on
-both the public API and the plugin contract (KERNEL_API_VERSION moves
-to 0.1.8 to advertise the new exports; `apiVersion: "^0.1"` plugins
-keep loading).
+slash hub + `--director` CLI flag with full tool wiring + shared
+fleet scratchpad + per-subagent JSONLs + Phase 6 safety caps. No
+breaking changes — additive on both the public API and the plugin
+contract (`KERNEL_API_VERSION` moves to `0.1.9` to advertise the
+new exports; `apiVersion: "^0.1"` plugins keep loading). The
+preceding `v0.1.8` tag was a local-only snapshot that never shipped;
+this is the first release to actually go out.
 
 ### Fixed — audit triage (bugs.md round)
 
@@ -218,12 +221,12 @@ calling them when building each Agent.
 
 ### Changed — plugin API
 
-- **`KERNEL_API_VERSION` advanced to `0.1.8`** (was `0.1.1`) to
+- **`KERNEL_API_VERSION` advanced to `0.1.9`** (was `0.1.1`) to
   advertise the new additive surfaces above (Director, FleetBus,
-  prompt composers). Plugins pinning `apiVersion: "^0.1"` continue
-  to load unchanged.
+  prompt composers, `DirectorBudgetError`, `FLEET_ROSTER`). Plugins
+  pinning `apiVersion: "^0.1"` continue to load unchanged.
 - **`@wrongstack/core/package.json` `wrongstackApiVersion`** updated
-  to `0.1.8` in lockstep. `wstack version` and `wstack diag` now
+  to `0.1.9` in lockstep. `wstack version` and `wstack diag` now
   surface this value.
 
 **Not yet shipped** (documented in `director-architecture.md`):
