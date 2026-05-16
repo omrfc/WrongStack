@@ -326,7 +326,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   // loopback, require the shared token. Local loopback connections
   // without a token are still allowed for convenience.
   const isLoopback = (hostname: string) =>
-    hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+    hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
 
   const verifyClient = (info: {
     origin: string;
