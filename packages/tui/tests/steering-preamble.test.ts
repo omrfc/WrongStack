@@ -15,7 +15,7 @@
  *   - the closing `]` mirrors the opening so the block is symmetric
  */
 import { describe, expect, it } from 'vitest';
-import { buildSteeringPreamble } from '../src/app.js';
+import { buildGoalPreamble, buildSteeringPreamble } from '../src/app.js';
 
 describe('buildSteeringPreamble', () => {
   it('marker + authority + fenced direction are always present', () => {
@@ -97,6 +97,39 @@ describe('buildSteeringPreamble', () => {
     // Both fences still present, model can still recover.
     expect(out).toContain('New direction:');
     expect(out.trimEnd().endsWith(']')).toBe(true);
+  });
+
+  it('goal preamble carries authority + done bar + persistence + the goal verbatim', () => {
+    const out = buildGoalPreamble('rewrite the auth middleware to use JWT');
+    // Lock-in marker and the four pillars must all be present so the
+    // model can't selectively read past the "this is a real contract"
+    // framing.
+    expect(out).toContain('GOAL — LOCKED IN');
+    expect(out).toContain('AUTHORITY YOU HAVE:');
+    expect(out).toMatch(/WHAT "DONE" MEANS/);
+    expect(out).toContain('WHAT IS NOT DONE');
+    expect(out).toContain('PERSISTENCE PROTOCOL:');
+    // The user's task must land inside the fence, not bleed into any
+    // other section.
+    expect(out).toMatch(/YOUR GOAL:\n---\nrewrite the auth middleware to use JWT\n---/);
+    // Block closes symmetrically.
+    expect(out.trimEnd().endsWith('BEGIN.]')).toBe(true);
+  });
+
+  it('goal preamble explicitly grants unlimited fan-out + model switching', () => {
+    const out = buildGoalPreamble('audit packages/core');
+    expect(out).toMatch(/no spawn budget/i);
+    expect(out).toMatch(/unlimited tool calls/i);
+    expect(out).toMatch(/any provider\/model/i);
+    expect(out).toMatch(/auto-extends/i);
+  });
+
+  it('goal preamble explicitly forbids common hedge completions', () => {
+    const out = buildGoalPreamble('x');
+    expect(out).toMatch(/should i continue\?/i);
+    expect(out).toMatch(/want me to also/i);
+    expect(out).toMatch(/hedged/i);
+    expect(out).toMatch(/partial progress/i);
   });
 
   it('truncates very long partial text to a 300-char tail so the preamble does not balloon', () => {

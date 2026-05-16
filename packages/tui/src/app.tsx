@@ -746,6 +746,102 @@ export function buildSteeringPreamble(
   return lines.join('\n');
 }
 
+/**
+ * `/goal <description>` preamble — the "no force can stop this" mode.
+ *
+ * Unlike STEERING (which redirects mid-flight), GOAL is a contract:
+ * the user hands over a problem, the agent commits to verifiably
+ * finishing it, and every iteration re-reads this preamble from the
+ * conversation history. The hardening is entirely prompt-level —
+ * the system has already removed implicit budget caps, so this
+ * preamble's job is to remove the MODEL's tendency to hedge, ask
+ * permission, or declare premature success.
+ *
+ * The four sections are intentional:
+ *   1. AUTHORITY — explicit grant of unbounded fan-out + model
+ *      switching. Without this the model self-throttles ("I shouldn't
+ *      spawn too many…") even when budgets are unlimited.
+ *   2. DONE — concrete bar for completion. Forces a verifiable
+ *      artifact (test passing, file written, bug re-run clean).
+ *      Without this the model returns "I believe it's fixed" and
+ *      counts that as done.
+ *   3. NOT DONE — explicit anti-patterns. Each item is something we
+ *      saw real agents do as a "completion" that wasn't.
+ *   4. PERSISTENCE — three-angle rule for blockers. Stops the model
+ *      from giving up on the first tool failure.
+ *
+ * Exported for the test that pins the structural guarantees.
+ */
+export function buildGoalPreamble(goal: string): string {
+  return [
+    '[GOAL — LOCKED IN. You will work on this until it is verifiably done.',
+    'The user granted you full autonomy. Read these constraints once, then act.',
+    '',
+    'YOUR GOAL:',
+    '---',
+    goal,
+    '---',
+    '',
+    'AUTHORITY YOU HAVE:',
+    '- Spawn as many subagents as the work needs (delegate / spawn_subagent).',
+    '  Parallel + recursive fan-out are both fine. There is no spawn budget.',
+    '- Use any provider/model per subagent — pick the right tool for each',
+    '  piece of work. Heavy reasoning model for planning, fast model for',
+    '  batch work, specialist model for domain code.',
+    '- Run unlimited tool calls and iterations. There is NO hidden budget.',
+    '  The Agent loop auto-extends every 100 iterations forever.',
+    '- Retry failed tools with different inputs, alternative paths, fresh',
+    '  subagents. Switch providers mid-run if one is rate-limited.',
+    '- Re-plan freely when an approach hits a dead end. You are not obliged',
+    "  to stick with the first plan you proposed.",
+    '',
+    'WHAT "DONE" MEANS — non-negotiable:',
+    '- You can name a concrete artifact (a passing test, a written file at',
+    '  a specific path, a fixed bug verified by re-running the failing case,',
+    '  a clean grep that previously had matches).',
+    '- You can tell the user HOW to verify it themselves in 10 seconds.',
+    "- You have NOT hedged. None of: \"looks like it should work\", \"I",
+    '  believe this fixes it\", "the changes appear correct".',
+    '',
+    'WHAT IS NOT DONE — never report any of these as completion:',
+    "- An error message you didn't recover from.",
+    '- An empty result, a 0-line file, a "no matches found" you accepted',
+    '  without questioning the search.',
+    '- "Should I continue?" / "Want me to also...?" / "Let me know if you',
+    '  want X." Those are hedges. The user already told you to finish the',
+    "  goal — just do it.",
+    '- Partial progress dressed up as success. Fixed 3 of 5 bugs = 60%',
+    '  done, not done.',
+    "- A subagent's failed/timeout/stopped TaskResult that you didn't",
+    '  respond to with a fresh attempt (different role, different model,',
+    '  tighter prompt).',
+    '',
+    'PERSISTENCE PROTOCOL:',
+    '- If blocked, try at least 3 different angles before reporting the',
+    '  problem to the user. Different tool inputs, different subagent',
+    '  roles, different providers, different decomposition of the task.',
+    '- If a tool fails, read its error, alter the input, try again. Do',
+    '  not just report the failure back.',
+    '- If a subagent returns useless output, respawn with a tighter prompt',
+    '  or a different role. Do not accept "I could not determine…" as the',
+    '  final answer.',
+    '- Use `ask_subagent` for one-shot questions when you don\'t need a',
+    '  full delegated task.',
+    '',
+    'REPORTING:',
+    '- Stream short progress notes between major actions so the user can',
+    '  monitor. Do not go silent for 50 tool calls then dump a wall of',
+    '  text — but also do not narrate every tool call.',
+    "- Use the shared scratchpad (if available) to leave breadcrumbs",
+    '  subagents can read.',
+    '- Final response must include: (a) what was accomplished, (b) how',
+    '  to verify, (c) any caveats (residual TODOs, things the user',
+    '  should know about).',
+    '',
+    'BEGIN.]',
+  ].join('\n');
+}
+
 export function App({
   agent,
   slashRegistry,
@@ -999,6 +1095,7 @@ export function App({
   // order so the bar doesn't wrap on wide fleets. Reuses the global
   // `nowTick` (bumped every 1s above) so elapsed time keeps ticking
   // without needing a second timer.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: labelFor is ref-stable (uses useRef)
   const fleetAgents = useMemo(() => {
     const entries = Object.entries(state.fleet);
     if (entries.length === 0) return undefined;
@@ -1452,6 +1549,48 @@ export function App({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slashRegistry, director]);
 
+  // `/goal <description>` — lock in a goal the agent must complete.
+  // Identical mechanism to /steer (slash command returns runText that
+  // the submit handler feeds through the normal agent.run pipeline),
+  // but the preamble is a HARDER contract: full autonomy grant, an
+  // explicit "this is done" bar, anti-hedge anti-patterns, and a
+  // persistence protocol for blockers. The actual unlimited-budget
+  // hardening lives at the coordinator layer (no defaultBudget, no
+  // hardcoded /spawn caps, autoExtendLimit on the Agent); this
+  // preamble's job is to remove the MODEL's tendency to self-throttle.
+  useEffect(() => {
+    const cmd = {
+      name: 'goal',
+      description: 'Lock in a goal — no budgets, no hedging, no premature done. /goal <description>',
+      help: [
+        'Usage: /goal <description>',
+        '',
+        'Hands the agent a task it must drive to a verifiable finish.',
+        'Adds a preamble to the next turn that grants full autonomy',
+        '(unlimited subagents, any provider/model, retry-until-it-works),',
+        'spells out what "done" actually means, and forbids hedge-style',
+        'completions ("I believe this works", "should I continue?").',
+        '',
+        'Combine with /steer to redirect mid-goal, or Ctrl+C / /fleet kill',
+        'to bail out — only the user can stop a /goal.',
+      ].join('\n'),
+      async run(args: string) {
+        const goal = args.trim();
+        if (!goal) return { message: 'Usage: /goal <description>' };
+        const preamble = buildGoalPreamble(goal);
+        const shortGoal = goal.length > 80 ? `${goal.slice(0, 80)}…` : goal;
+        return {
+          message: `🎯 Goal locked: ${shortGoal}\n   Agent will work until verifiably complete. Esc / /steer to redirect, Ctrl+C to stop.`,
+          runText: preamble,
+        };
+      },
+    };
+    slashRegistry.register(cmd);
+    return () => {
+      slashRegistry.unregister('goal');
+    };
+  }, [slashRegistry]);
+
   // Register the TUI-only `/model` command — opens a two-step picker
   // (provider → model). All work is local state mutation; the actual
   // switch fires only after the user confirms a model in step 2.
@@ -1639,6 +1778,7 @@ export function App({
   // the same events through `MultiAgentHost`, so this single listener
   // covers both modes and replaces the per-status history entry that
   // previously lived inside the director.on('task.completed') hook.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: labelFor is ref-stable (uses useRef)
   useEffect(() => {
     const offSpawned = events.on('subagent.spawned', (e) => {
       const lbl = labelFor(e.subagentId, e.name);
@@ -1751,7 +1891,6 @@ export function App({
       offCompleted();
       offTool();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events]);
 
   // Install a dispatch-backed setter into the shared controller so the
@@ -2059,7 +2198,7 @@ export function App({
     return () => {
       process.off('SIGINT', onSigint);
     };
-  }, [state.interrupts, state.status, exit, onExit, director]);
+  }, [state.interrupts, exit, onExit, director]);
 
   const handleKey = async (input: string, key: KeyEvent) => {
     // Note: we no longer block input while the agent is running. Enter
