@@ -21,6 +21,7 @@ export class WrongStackWebSocketClient {
   private maxReconnectAttempts = 10;
   private reconnectDelay = 1000;
   private shouldReconnect = true;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private messageQueue: WSClientMessage[] = [];
   private pendingConfirms: Map<string, PendingConfirm> = new Map();
   private sessionId: string | null = null;
@@ -72,8 +73,15 @@ export class WrongStackWebSocketClient {
           reject(new Error('Connection timeout'));
         }, 10000);
 
+        // Track whether the connection was ever established so onerror and
+        // onclose know whether to reject the promise or just attempt a
+        // reconnect. Without this, a connection failure leaves callers
+        // awaiting connect() hanging forever.
+        let established = false;
+
         this.ws.onopen = () => {
           clearTimeout(connectTimeout);
+          established = true;
           console.log('[WS Client] Connected');
           this.reconnectAttempts = 0;
           this.lastErrorText = undefined;
@@ -97,10 +105,21 @@ export class WrongStackWebSocketClient {
           // expose the underlying reason for security. We stash a generic
           // hint so the UI has something to display.
           this.lastErrorText = 'Connection error (see browser devtools)';
+          if (!established) {
+            clearTimeout(connectTimeout);
+            reject(new Error(this.lastErrorText));
+          }
         };
 
         this.ws.onclose = (ev) => {
           console.log('[WS Client] Disconnected', ev.code, ev.reason);
+          if (!established) {
+            clearTimeout(connectTimeout);
+            const reason = ev.reason || `Closed with code ${ev.code}`;
+            this.lastErrorText = reason;
+            reject(new Error(reason));
+            return;
+          }
           if (ev.reason && !this.lastErrorText) {
             this.lastErrorText = `${ev.reason} (code ${ev.code})`;
           } else if (!this.lastErrorText && ev.code !== 1000) {
@@ -109,7 +128,6 @@ export class WrongStackWebSocketClient {
           this.attemptReconnect();
         };
       } catch (err) {
-        clearTimeout((globalThis as Record<string, unknown>).connectTimeout as number);
         this.lastErrorText = err instanceof Error ? err.message : String(err);
         this.setStatus({ state: 'closed', error: this.lastErrorText });
         reject(err);
@@ -120,6 +138,7 @@ export class WrongStackWebSocketClient {
   private attemptReconnect() {
     if (!this.shouldReconnect || this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.log('[WS Client] Not reconnecting');
+      this.reconnectTimer = null;
       this.setStatus({ state: 'closed', error: this.lastErrorText ?? 'Disconnected' });
       return;
     }
@@ -135,7 +154,7 @@ export class WrongStackWebSocketClient {
       lastError: this.lastErrorText,
     });
 
-    setTimeout(async () => {
+    this.reconnectTimer = setTimeout(async () => {
       if (this.shouldReconnect) {
         try {
           await this.connect();
@@ -149,6 +168,10 @@ export class WrongStackWebSocketClient {
   /** Force an immediate reconnect attempt, bypassing the backoff timer. */
   retryNow(): void {
     if (this.currentStatus.state === 'open') return;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.reconnectAttempts = 0;
     void this.connect().catch(() => undefined);
   }
@@ -401,6 +424,10 @@ export class WrongStackWebSocketClient {
 
   disconnect() {
     this.shouldReconnect = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.ws?.close();
     this.ws = null;
   }

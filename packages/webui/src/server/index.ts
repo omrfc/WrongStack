@@ -400,7 +400,11 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   // authenticated WebSocket against this server. Restrict origin to loopback
   // hostnames by default; non-browser clients (curl, wscat) send no Origin
   // header and are allowed through.
-  const verifyClient: ConstructorParameters<typeof WebSocketServer>[0]['verifyClient'] = (info) => {
+  const verifyClient = (info: {
+    origin: string;
+    secure: boolean;
+    req: import('node:http').IncomingMessage;
+  }) => {
     const origin = info.origin;
     if (!origin) return true;
     try {
@@ -410,13 +414,25 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
       return false;
     }
   };
-  const wssPrimary = new WebSocketServer({ port: wsPort, host: wsHost, verifyClient });
+  const wssPrimary = new WebSocketServer({
+    port: wsPort,
+    host: wsHost,
+    verifyClient,
+  } as ConstructorParameters<typeof WebSocketServer>[0]);
   const wssSecondary =
     wsHost === '127.0.0.1'
-      ? new WebSocketServer({ port: wsPort, host: '::1', verifyClient })
+      ? new WebSocketServer({ port: wsPort, host: '::1', verifyClient } as ConstructorParameters<
+          typeof WebSocketServer
+        >[0])
       : null;
   const clients = new Map<WebSocket, ConnectedClient>();
-  let abortController: AbortController | null = null;
+  /** Holds the AbortController for the currently in-flight agent.run().
+   *  Non-null while the agent is running; guarded at the user_message
+   *  handler to prevent concurrent runs that would corrupt shared state
+   *  (context, agent, tokenCounter). A second user_message while running
+   *  is answered with an inline error instead of being queued — the
+   *  caller should wait for run.result. */
+  let runLock: AbortController | null = null;
 
   console.log(
     `[WebUI] WebSocket server running on ws://${wsHost}:${wsPort}` +
@@ -593,12 +609,30 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
       case 'user_message': {
         const content = (msg as { payload: { content: string } }).payload.content;
 
-        // Abort any existing run
-        abortController?.abort();
-        abortController = new AbortController();
+        // Guard against concurrent agent runs — a second user_message while
+        // the agent is already processing would kick off two agent.run()
+        // calls on the same shared context/agent, leading to corrupted
+        // state (duplicate tool bubbles, mixed text_delta streams, token
+        // counter undercount). Reject with an inline error; the frontend
+        // should wait for run.result before sending the next message.
+        if (runLock) {
+          send(ws, {
+            type: 'error',
+            payload: {
+              phase: 'user_message',
+              message: 'Agent is already processing a request. Wait for the current run to finish.',
+            },
+          });
+          break;
+        }
+
+        runLock = new AbortController();
+        // Capture so the finally block only clears its own lock — a
+        // second race could set a new runLock between await and finally.
+        const thisRun = runLock;
 
         try {
-          const result = await agent.run(content, { signal: abortController.signal });
+          const result = await agent.run(content, { signal: thisRun.signal });
           send(ws, {
             type: 'run.result',
             payload: {
@@ -623,13 +657,17 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
             },
           });
         } finally {
-          abortController = null;
+          // Only clear runLock if it's still ours — otherwise we'd wipe a
+          // newer run's controller set after we returned.
+          if (runLock === thisRun) {
+            runLock = null;
+          }
         }
         break;
       }
 
       case 'abort':
-        abortController?.abort();
+        runLock?.abort();
         broadcast({ type: 'error', payload: { phase: 'abort', message: 'User aborted' } });
         break;
 
@@ -1316,6 +1354,29 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
             await modeStore.setActiveMode(id);
           }
           modeId = id;
+          // Rebuild the system prompt so the next turn picks up the new
+          // mode's instructions. The builder caches the environment block
+          // per projectRoot (including the modeId), so we clear the cache
+          // and rebuild. The `buildMode()` method reads this.opts.modePrompt
+          // which is set on the builder constructor — we construct a fresh
+          // builder with the updated mode. This is cheap (no fs/net IO in
+          // the constructor; the real work happens in build()).
+          const modePrompt = id === 'default' ? '' : ((await modeStore.getMode(id))?.prompt ?? '');
+          const freshBuilder = new DefaultSystemPromptBuilder({
+            memoryStore,
+            skillLoader,
+            modeStore,
+            modeId: id,
+            modePrompt,
+            modelCapabilities,
+          });
+          context.systemPrompt = await freshBuilder.build({
+            cwd: projectRoot,
+            projectRoot,
+            tools: toolRegistry.list(),
+            provider: config.provider,
+            model: config.model,
+          });
           sendResult(ws, true, `Switched to mode "${id}"`);
           broadcast({
             type: 'session.start',

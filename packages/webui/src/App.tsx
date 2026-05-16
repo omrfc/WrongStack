@@ -1,12 +1,13 @@
-import { useWebSocket } from '@/hooks/useWebSocket';
 import { useWebSocketBootstrap } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
-import { useChatStore, useSessionStore, useUIStore } from '@/stores';
+import { getWSClient } from '@/lib/ws-client';
+import { useChatStore, useConfigStore, useSessionStore, useUIStore } from '@/stores';
 import { useEffect } from 'react';
 import { ChatView } from './components/ChatView';
 import { CommandPalette, downloadChatAsMarkdown } from './components/CommandPalette';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { ConnectionBanner } from './components/ConnectionBanner';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { QuickModelSwitcher } from './components/QuickModelSwitcher';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ShortcutsOverlay } from './components/ShortcutsOverlay';
@@ -25,7 +26,6 @@ function AppInner() {
   // User-set local nickname for the current session — takes precedence
   // over the backend title in the tab strip and topbar.
   const nickname = useUIStore((s) => (sessionId ? s.sessionNicknames[sessionId] : undefined));
-  const ws = useWebSocket();
 
   // Mobile-friendly: collapse the sidebar automatically below the md
   // breakpoint (768px). Tracks viewport changes so a window resize behaves
@@ -105,14 +105,17 @@ function AppInner() {
       }
       // The Ctrl-letter shortcuts skip when the user is typing in any
       // input — otherwise Ctrl+L wipes the chat while they're composing.
+      // Access the WS client via the Zustand store instead of the `ws`
+      // hook return value so we don't re-register this effect on every
+      // render (useWebSocket() returns a fresh object each time).
       if (mod && !inField) {
         if (e.key.toLowerCase() === 'l') {
           e.preventDefault();
           useChatStore.getState().clearMessages();
-          ws.client?.clearContext?.();
+          getWSClient(useConfigStore.getState().wsUrl)?.clearContext?.();
         } else if (e.key.toLowerCase() === 'n') {
           e.preventDefault();
-          ws.client?.newSession?.();
+          getWSClient(useConfigStore.getState().wsUrl)?.newSession?.();
         } else if (e.key.toLowerCase() === 'e') {
           e.preventDefault();
           downloadChatAsMarkdown();
@@ -191,7 +194,7 @@ function AppInner() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [toggleSidebar, setSearchOpen, ws]);
+  }, [toggleSidebar, setSearchOpen]);
 
   return (
     <div className={cn('flex h-screen', theme)}>
@@ -214,8 +217,10 @@ function AppInner() {
 
 export function App() {
   return (
-    <ThemeProvider defaultTheme="system">
-      <AppInner />
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider defaultTheme="system">
+        <AppInner />
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }
