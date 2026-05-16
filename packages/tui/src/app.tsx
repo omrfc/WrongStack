@@ -18,6 +18,7 @@ import { readClipboardImage } from './clipboard.js';
 import { ConfirmPrompt } from './components/confirm-prompt.js';
 import { FilePicker } from './components/file-picker.js';
 import { FleetPanel } from './components/fleet-panel.js';
+import { LiveActivityStrip } from './components/live-activity-strip.js';
 import { History, type HistoryEntry, formatToolArgs } from './components/history.js';
 import { Input, type KeyEvent } from './components/input.js';
 import { ModelPicker, type ProviderOption } from './components/model-picker.js';
@@ -164,6 +165,19 @@ type State = {
    * lands. Distinct from `interrupts` (which is the Ctrl+C exit ladder).
    */
   steeringPending: boolean;
+  /**
+   * Context snapshot captured at Esc time, replayed into the STEERING
+   * preamble so the model sees exactly what it was mid-doing when the
+   * user pulled the cord. Cleared together with `steeringPending`.
+   * Without this the model has to guess from chat scrollback which
+   * tools were live — and it can't see subagent state at all.
+   */
+  steerSnapshot: {
+    runningTools: string[];
+    subagents: Array<{ label: string; status: string; tool?: string }>;
+    subagentsTerminated: number;
+    partialAssistantText: string;
+  } | null;
   hint: string;
   nextId: number;
   picker: { open: boolean; query: string; matches: string[]; selected: number };
@@ -222,8 +236,12 @@ type Action =
   | { type: 'status'; status: State['status'] }
   | { type: 'interrupt' }
   | { type: 'resetInterrupts' }
-  /** User pressed Esc mid-iteration — flag the next message for steering. */
-  | { type: 'steerStart' }
+  /**
+   * User pressed Esc mid-iteration — flag the next message for steering
+   * AND stash a context snapshot so the preamble can tell the model
+   * exactly what it was doing.
+   */
+  | { type: 'steerStart'; snapshot: State['steerSnapshot'] }
   /** Submit handler consumed the steering flag; reset. */
   | { type: 'steerConsume' }
   | { type: 'hint'; text: string }
@@ -310,9 +328,9 @@ export function reducer(state: State, action: Action): State {
     case 'interrupt':
       return { ...state, interrupts: state.interrupts + 1 };
     case 'steerStart':
-      return { ...state, steeringPending: true };
+      return { ...state, steeringPending: true, steerSnapshot: action.snapshot };
     case 'steerConsume':
-      return { ...state, steeringPending: false };
+      return { ...state, steeringPending: false, steerSnapshot: null };
     case 'resetInterrupts':
       return { ...state, interrupts: 0 };
     case 'hint':
@@ -654,6 +672,80 @@ export function reducer(state: State, action: Action): State {
 
 const PASTE_THRESHOLD_CHARS = 200;
 
+/**
+ * Build the steering preamble that gets prepended to a user's message
+ * after they pressed Esc to interrupt the agent. The preamble carries
+ * three things the model would otherwise have to infer:
+ *
+ *   1. Context — exactly what was in flight (tool calls, subagents,
+ *      partial assistant text). Without this the model rationalizes
+ *      from chat scrollback and often resumes the prior task by
+ *      accident.
+ *   2. Authority — a short, explicit list of what the model is
+ *      allowed to do (abandon the prior plan, respawn fresh
+ *      subagents, ask for clarification). Models hedge unless they
+ *      believe they have permission to pivot hard.
+ *   3. New direction — the user's actual instruction, fenced off.
+ *
+ * The block is user-role plain text. We deliberately don't use a
+ * system role here — the human triggered this, so accountability
+ * stays with their turn and the model can challenge / clarify
+ * without violating role separation.
+ *
+ * Exported for the steering test that pins the contract.
+ */
+export function buildSteeringPreamble(
+  snapshot: State['steerSnapshot'],
+  newDirection: string,
+): string {
+  const lines: string[] = [
+    '[STEERING — I pressed Esc to interrupt you mid-task on purpose.',
+    '',
+  ];
+
+  // Section 1: what was running. Even an empty list is useful —
+  // tells the model "you weren't doing much yet, no work to mourn".
+  const ctx: string[] = [];
+  if (snapshot?.runningTools && snapshot.runningTools.length > 0) {
+    ctx.push(`- in-flight tools (now cancelled): ${snapshot.runningTools.join(', ')}`);
+  }
+  if (snapshot?.subagentsTerminated && snapshot.subagentsTerminated > 0) {
+    const subDetails = snapshot.subagents
+      .map((s) => `${s.label}${s.tool ? ` (was running: ${s.tool})` : ''}`)
+      .join(', ');
+    ctx.push(
+      `- subagents (${snapshot.subagentsTerminated} terminated by me, do NOT await them): ${subDetails}`,
+    );
+  }
+  if (snapshot?.partialAssistantText && snapshot.partialAssistantText.trim().length > 0) {
+    const tail = snapshot.partialAssistantText.trim().slice(-300);
+    ctx.push(`- your last partial output (truncated, for context only): "${tail}"`);
+  }
+  if (ctx.length > 0) {
+    lines.push('What was happening when I cut you off:');
+    lines.push(...ctx);
+    lines.push('');
+  }
+
+  // Section 2: authority. Explicit grant so the model doesn't hedge.
+  lines.push('You have authority to:');
+  lines.push('- Abandon the prior plan entirely if the new direction makes it stale.');
+  lines.push('- Re-spawn fresh subagents (with different roles or tasks) if needed.');
+  lines.push('- Skip a polite "should I continue?" — just pivot.');
+  lines.push("- Ask me to clarify if the new direction is genuinely ambiguous.");
+  lines.push('');
+
+  // Section 3: the user's instruction, fenced so the model can't
+  // mistake it for part of the preamble.
+  lines.push('New direction:');
+  lines.push('---');
+  lines.push(newDirection);
+  lines.push('---');
+  lines.push(']');
+
+  return lines.join('\n');
+}
+
 export function App({
   agent,
   slashRegistry,
@@ -707,6 +799,7 @@ export function App({
     status: 'idle' as const,
     interrupts: 0,
     steeringPending: false,
+    steerSnapshot: null,
     hint: '',
     nextId: 1,
     picker: { open: false, query: '', matches: [], selected: 0 },
@@ -2022,29 +2115,68 @@ export function App({
     }
 
     // Esc when the agent is busy = "drop what you're doing, I want to
-    // steer". Aborts the current iteration, flags steeringPending so
-    // the very next user message gets a STEERING preamble injected
-    // before being sent to the model. Does NOT consume the Ctrl+C
-    // exit ladder (interrupts counter untouched). When no run is
-    // active, Esc falls through to normal text handling so it can
-    // close pickers / clear buffer / etc. via existing behaviour.
+    // steer". Aborts the current iteration, terminates any running
+    // subagents (otherwise they keep burning tokens on now-stale work),
+    // and stashes a context snapshot so the STEERING preamble can tell
+    // the model exactly what it was mid-doing. Does NOT consume the
+    // Ctrl+C exit ladder (interrupts counter untouched). When no run
+    // is active, Esc falls through to normal text handling.
     if (key.escape && state.status !== 'idle' && !state.confirm) {
+      // Snapshot context BEFORE we mutate anything. The submit handler
+      // replays this into the model prompt so the model isn't guessing.
+      const runningTools = Array.from(state.runningTools.values()).map((t) => t.name);
+      const subagents = Object.values(state.fleet)
+        .filter((e) => e.status === 'running')
+        .map((e) => ({
+          label: e.name,
+          status: e.status,
+          tool: e.currentTool?.name,
+        }));
+      const subagentsTerminated = subagents.length;
+      const partialAssistantText = streamingTextRef.current.slice(-1500);
+
       activeCtrlRef.current?.abort();
       dispatch({ type: 'status', status: 'aborting' });
-      dispatch({ type: 'steerStart' });
+      dispatch({
+        type: 'steerStart',
+        snapshot: {
+          runningTools,
+          subagents,
+          subagentsTerminated,
+          partialAssistantText,
+        },
+      });
+
+      // Kill the fleet too. Without this the subagents keep running
+      // on the old direction, finish minutes later, and pollute the
+      // chat with task.completed events the model doesn't care about
+      // anymore. Cap at 1.5s so a wedged bridge can't hang the steer.
+      if (director && subagentsTerminated > 0) {
+        const cap = new Promise<void>((resolve) => {
+          const t = setTimeout(resolve, 1500);
+          t.unref?.();
+        });
+        void Promise.race([director.terminateAll().catch(() => undefined), cap]);
+      }
+
       // Drop anything queued — steering means the user is redirecting,
       // not adding to the backlog. Without this the queued items would
       // run *before* the steering message, which contradicts the UX.
       const droppedCount = state.queue.length;
       if (droppedCount > 0) dispatch({ type: 'queueClear' });
+      const droppedTag =
+        droppedCount > 0
+          ? ` · dropped ${droppedCount} queued`
+          : '';
+      const fleetTag =
+        subagentsTerminated > 0
+          ? ` · stopped ${subagentsTerminated} subagent${subagentsTerminated === 1 ? '' : 's'}`
+          : '';
       dispatch({
         type: 'addEntry',
         entry: {
           kind: 'warn',
-          text:
-            droppedCount > 0
-              ? `↯ Interrupted. Dropped ${droppedCount} queued message${droppedCount === 1 ? '' : 's'}. Type your new direction.`
-              : '↯ Interrupted. Type your new direction.',
+          text: `↯ Interrupted${droppedTag}${fleetTag}. Type your new direction.`,
         },
       });
       return;
@@ -2343,14 +2475,14 @@ export function App({
     // Steering inject: if the user pressed Esc on the prior iteration,
     // prepend a STEERING preamble so the model sees this isn't a
     // follow-up — it's an interrupt redirecting the work. The preamble
-    // is plain text the model can interpret; we deliberately don't use
-    // a system role here because the user might still be conversing
-    // and the preamble should be attributable to them.
+    // carries (a) context the model would otherwise have to guess
+    // (what tools were running, what subagents were live) and (b)
+    // explicit authority — "drop the prior plan, respawn subagents
+    // if useful, ask for clarification if needed". Plain user-role
+    // text so accountability stays with the human who triggered it.
     const steering = state.steeringPending;
     if (trimmed) {
-      const toAppend = steering
-        ? `[STEERING — I interrupted you mid-task on purpose. Stop whatever you were doing and focus on this:]\n\n${trimmed}`
-        : trimmed;
+      const toAppend = steering ? buildSteeringPreamble(state.steerSnapshot, trimmed) : trimmed;
       builder.appendText(toAppend);
     }
     if (steering) dispatch({ type: 'steerConsume' });
@@ -2395,6 +2527,11 @@ export function App({
         streamingText={state.streamingText}
         toolStream={state.toolStream}
       />
+      {/* Live activity strip — one line per running subagent with
+          current tool + elapsed timer. Sits directly above the input
+          area so it's always visible without scrolling. Renders
+          nothing when no subagents are running. */}
+      <LiveActivityStrip entries={state.fleet} nowTick={nowTick} />
       <Input
         value={state.buffer}
         cursor={state.cursor}
