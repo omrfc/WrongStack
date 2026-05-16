@@ -40,6 +40,7 @@ import { buildProviderFactoriesFromRegistry, makeProviderFromConfig } from '@wro
 import { forgetTool, rememberTool } from '@wrongstack/tools';
 import { builtinToolsPack } from '@wrongstack/tools/pack';
 import { WebSocket, WebSocketServer } from 'ws';
+import { randomBytes } from 'node:crypto';
 import { bootConfig, patchConfig, type BootResult } from './boot.js';
 
 // Re-export types
@@ -280,6 +281,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     projectName: string;
     cwd: string;
     mode: string;
+    wsToken: string;
   }> {
     let maxContext = 0;
     let inputCost = 0;
@@ -311,6 +313,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
       projectName: path.basename(projectRoot) || projectRoot,
       cwd: projectRoot,
       mode: modeId,
+      wsToken,
     };
   }
 
@@ -326,21 +329,41 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   //
   // When the user explicitly sets WS_HOST (e.g. 0.0.0.0 or a LAN IP), we
   // respect that choice exactly and don't add a second listener.
-  // CSWSH guard: when the user explicitly exposes the socket (WS_HOST set to a
-  // non-loopback address), browsers from any origin could otherwise open an
-  // authenticated WebSocket against this server. Restrict origin to loopback
-  // hostnames by default; non-browser clients (curl, wscat) send no Origin
-  // header and are allowed through.
+  // Generate a random WS auth token so only callers that know the token
+  // can connect. Printed to console on startup; the frontend reads it from
+  // the URL query param `?token=...`. Without a token, any client on the
+  // network can connect and send `user_message`/`key.add`/`model.switch`.
+  const wsToken = randomBytes(16).toString('hex');
+  console.log(`[WebUI] WS auth token: ${wsToken}`);
+
+  // CSWSH guard + token auth: when the user exposes the socket beyond
+  // loopback, require the shared token. Local loopback connections
+  // without a token are still allowed for convenience.
+  const isLoopback = (hostname: string) =>
+    hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+
   const verifyClient = (info: {
     origin: string;
     secure: boolean;
     req: import('node:http').IncomingMessage;
   }) => {
     const origin = info.origin;
-    if (!origin) return true;
+    // Token check: extract from query string
+    const url = info.req.url ?? '';
+    const tokenMatch = url.match(/[?&]token=([^&]+)/);
+    const providedToken = tokenMatch ? tokenMatch[1] : undefined;
+    const tokenOk = providedToken === wsToken;
+
+    if (!origin) {
+      // Non-browser clients: require token when not on loopback
+      return tokenOk || wsHost === '127.0.0.1' || wsHost === '::1' || wsHost === 'localhost';
+    }
     try {
       const { hostname } = new URL(origin);
-      return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+      // Loopback browser origins: allow without token
+      if (isLoopback(hostname)) return true;
+      // Non-loopback origins: require token
+      return tokenOk;
     } catch {
       return false;
     }
