@@ -176,6 +176,30 @@ describe('AutoCompactionMiddleware', () => {
     expect(compactor.compactCalls).toHaveLength(1);
   });
 
+  it('uses a runtime policy provider for thresholds and aggressiveness', async () => {
+    const mw = new AutoCompactionMiddleware(
+      compactor,
+      10000,
+      simpleEstimator(5000),
+      {
+        warn: 0.7,
+        soft: 0.85,
+        hard: 0.95,
+      },
+      {
+        policyProvider: () => ({
+          thresholds: { warn: 0.45, soft: 0.6, hard: 0.75 },
+          aggressiveOn: 'warn',
+        }),
+      },
+    );
+
+    await mw.handler()(mockContext(0), async (c) => c);
+
+    expect(compactor.compactCalls).toHaveLength(1);
+    expect(compactor.compactCalls[0].aggressive).toBe(true);
+  });
+
   it('emits compaction.failed when the compactor throws and an EventBus is wired', async () => {
     const badCompactor: Compactor = {
       async compact() {

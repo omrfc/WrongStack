@@ -511,6 +511,12 @@ message. TUI users can also press `Alt+V`.
 | `/model` | Two-step provider → model picker. |
 | `/use`, `/context`, `/compact`, `/usage`, `/tools`, `/skill` | Switch modes, inspect context, compact, show usage, list tools/skills. |
 
+Context-window modes are separate from persona modes. Use `/context mode`
+to list policies and `/context mode frugal|balanced|deep|archival` to switch
+how aggressively the session trims history. `frugal` is the most token
+friendly, `deep` preserves more recent turns, and `archival` favors steady
+decision-preserving compaction.
+
 ### Mid-flight controls (cheat sheet)
 
 | Key / Command | What it does |

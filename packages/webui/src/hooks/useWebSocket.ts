@@ -46,6 +46,7 @@ function installHandlers(ws: WrongStackWebSocketClient): () => void {
       projectName?: string;
       cwd?: string;
       mode?: string;
+      contextMode?: string;
       inputCost?: number;
       outputCost?: number;
       cacheReadCost?: number;
@@ -66,6 +67,7 @@ function installHandlers(ws: WrongStackWebSocketClient): () => void {
       maxContext: payload.maxContext,
       projectName: payload.projectName,
       mode: payload.mode,
+      contextMode: payload.contextMode,
       inputCost: payload.inputCost,
       outputCost: payload.outputCost,
       cacheReadCost: payload.cacheReadCost,
@@ -655,6 +657,37 @@ function installHandlers(ws: WrongStackWebSocketClient): () => void {
     useSessionStore.getState().setEnv({ mode: p.activeId });
   });
 
+  on('context.modes.list', (msg) => {
+    const p = msg.payload as {
+      activeId: string;
+      modes: Array<{
+        id: string;
+        name: string;
+        description: string;
+        isActive: boolean;
+        thresholds?: { warn: number; soft: number; hard: number };
+        preserveK?: number;
+        eliseThreshold?: number;
+      }>;
+    };
+    useSessionStore.getState().setContextModes(
+      p.modes.map((m) => ({
+        id: m.id,
+        name: m.name,
+        description: m.description,
+        thresholds: m.thresholds,
+        preserveK: m.preserveK,
+        eliseThreshold: m.eliseThreshold,
+      })),
+    );
+    useSessionStore.getState().setEnv({ contextMode: p.activeId });
+  });
+
+  on('context.mode.changed', (msg) => {
+    const p = msg.payload as { id: string; name?: string };
+    useSessionStore.getState().setEnv({ contextMode: p.id });
+  });
+
   on('sessions.list', (msg) => {
     const payload = msg.payload as {
       sessions: SessionHistoryEntry[];
@@ -806,6 +839,8 @@ export function useWebSocket() {
   const getStats = useCallback(() => client.getStats(), [client]);
   const listModes = useCallback(() => client.listModes(), [client]);
   const switchMode = useCallback((id: string) => client.switchMode(id), [client]);
+  const listContextModes = useCallback(() => client.listContextModes(), [client]);
+  const switchContextMode = useCallback((id: string) => client.switchContextMode(id), [client]);
 
   return {
     client,
@@ -833,5 +868,7 @@ export function useWebSocket() {
     getStats,
     listModes,
     switchMode,
+    listContextModes,
+    switchContextMode,
   };
 }

@@ -417,6 +417,17 @@ interface SessionState {
    *  topbar mode chip uses this to render a picker; empty until the
    *  backend responds. */
   modes: Array<{ id: string; name: string; description: string }>;
+  /** Active context-window policy id (balanced | frugal | deep | archival). */
+  contextMode: string;
+  /** Context-window policy presets from the backend. */
+  contextModes: Array<{
+    id: string;
+    name: string;
+    description: string;
+    thresholds?: { warn: number; soft: number; hard: number };
+    preserveK?: number;
+    eliseThreshold?: number;
+  }>;
   /** Iteration progress while the agent is running. Resets on run.result. */
   iteration: { index: number; max: number } | null;
   /** Live snapshot of context.todos — backend broadcasts on every
@@ -437,12 +448,14 @@ interface SessionState {
     maxContext?: number;
     projectName?: string;
     mode?: string;
+    contextMode?: string;
     inputCost?: number;
     outputCost?: number;
     cacheReadCost?: number;
   }) => void;
   setIteration: (it: { index: number; max: number } | null) => void;
   setModes: (modes: Array<{ id: string; name: string; description: string }>) => void;
+  setContextModes: (modes: SessionState['contextModes']) => void;
   setTodos: (todos: SessionState['todos']) => void;
 }
 
@@ -461,6 +474,8 @@ export const useSessionStore = create<SessionState>()(
       projectName: '',
       mode: 'default',
       modes: [],
+      contextMode: 'balanced',
+      contextModes: [],
       iteration: null,
       todos: [],
 
@@ -511,6 +526,7 @@ export const useSessionStore = create<SessionState>()(
           maxContext: env.maxContext ?? state.maxContext,
           projectName: env.projectName ?? state.projectName,
           mode: env.mode ?? state.mode,
+          contextMode: env.contextMode ?? state.contextMode,
           inputCost: env.inputCost ?? state.inputCost,
           outputCost: env.outputCost ?? state.outputCost,
           cacheReadCost: env.cacheReadCost ?? state.cacheReadCost,
@@ -518,6 +534,7 @@ export const useSessionStore = create<SessionState>()(
 
       setIteration: (iteration) => set({ iteration }),
       setModes: (modes) => set({ modes }),
+      setContextModes: (contextModes) => set({ contextModes }),
       setTodos: (todos) => set({ todos }),
     }),
     {

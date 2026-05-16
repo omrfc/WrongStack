@@ -68,4 +68,31 @@ describe('HybridCompactor', () => {
       expect(ctx.messages).toContainEqual(m);
     }
   });
+
+  it('honors context-window policy from ctx.meta', async () => {
+    const big = 'x'.repeat(5000);
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'old', content: big }] },
+      { role: 'assistant', content: 'old done' },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'recent', content: big }] },
+    ];
+    const ctx = fakeContext(messages);
+    ctx.meta = {
+      contextWindowPolicy: {
+        id: 'frugal',
+        name: 'Frugal',
+        description: '',
+        thresholds: { warn: 0.45, soft: 0.6, hard: 0.75 },
+        aggressiveOn: 'warn',
+        preserveK: 1,
+        eliseThreshold: 500,
+        targetLoad: 0.5,
+      },
+    };
+    const c = new HybridCompactor({ preserveK: 20, eliseThreshold: 10000 });
+    await c.compact(ctx);
+
+    expect(JSON.stringify(ctx.messages[0])).toContain('[elided:');
+    expect(JSON.stringify(ctx.messages[2])).toContain(big);
+  });
 });

@@ -30,6 +30,7 @@ describe('DefaultConfigLoader', () => {
     const cfg = await l.load();
     expect(cfg.provider).toBeUndefined();
     expect(cfg.model).toBeUndefined();
+    expect(cfg.context.mode).toBe('balanced');
     expect(cfg.context.softThreshold).toBe(0.75);
     expect(cfg.tools.maxIterations).toBe(100);
   });
@@ -135,6 +136,13 @@ describe('DefaultConfigLoader', () => {
       }),
     );
     await expect(l.load()).rejects.toThrow(/thresholds/);
+  });
+
+  it('rejects unknown context-window modes', async () => {
+    const { loader: l, paths } = loader();
+    await fs.mkdir(path.dirname(paths.globalConfig), { recursive: true });
+    await fs.writeFile(paths.globalConfig, JSON.stringify({ context: { mode: 'tiny' } }));
+    await expect(l.load()).rejects.toThrow(/context\.mode/);
   });
 
   it('ignores malformed JSON gracefully', async () => {

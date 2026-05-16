@@ -345,6 +345,14 @@ export class WrongStackWebSocketClient {
     this.send({ type: 'context.debug' });
   }
 
+  listContextModes() {
+    this.send({ type: 'context.modes.list' });
+  }
+
+  switchContextMode(id: string) {
+    this.send({ type: 'context.mode.switch', payload: { id } });
+  }
+
   // ---- Inspect commands (mirror TUI/CLI's /tools /memory /skill /diag /stats) ----
 
   listTools() {

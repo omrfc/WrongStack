@@ -79,3 +79,18 @@ export type { TokenCounter } from './types/token-counter.js';
 export type { ProviderRunner, RunProviderOptions } from './types/provider-runner.js';
 export type { SecretVault } from './types/secret-vault.js';
 export type { Compactor, CompactReport } from './types/compactor.js';
+export {
+  CONTEXT_WINDOW_MODES,
+  DEFAULT_CONTEXT_WINDOW_MODE_ID,
+  formatContextWindowModeList,
+  getContextWindowMode,
+  isContextWindowModeId,
+  listContextWindowModes,
+  resolveContextWindowPolicy,
+  type ContextWindowAggressiveOn,
+  type ContextWindowConfigLike,
+  type ContextWindowMode,
+  type ContextWindowModeId,
+  type ContextWindowPolicy,
+  type ContextWindowThresholds,
+} from './types/context-window.js';

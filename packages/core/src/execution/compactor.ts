@@ -1,6 +1,7 @@
 import type { Context } from '../core/context.js';
 import type { ContentBlock, ToolResultBlock } from '../types/blocks.js';
 import type { CompactReport, Compactor } from '../types/compactor.js';
+import type { ContextWindowPolicy } from '../types/context-window.js';
 import type { Message } from '../types/messages.js';
 import {
   estimateTextTokens,
@@ -28,14 +29,17 @@ export class HybridCompactor implements Compactor {
   async compact(ctx: Context, opts: { aggressive?: boolean } = {}): Promise<CompactReport> {
     const beforeTokens = this.estimateMessages(ctx.messages);
     const reductions: CompactReport['reductions'] = [];
+    const policy = readContextWindowPolicy(ctx);
+    const preserveK = policy?.preserveK ?? this.preserveK;
+    const eliseThreshold = policy?.eliseThreshold ?? this.eliseThreshold;
 
     // Phase 1: elision
-    const phase1Saved = this.eliseOldToolResults(ctx);
+    const phase1Saved = this.eliseOldToolResults(ctx, preserveK, eliseThreshold);
     if (phase1Saved > 0) reductions.push({ phase: 'elision', saved: phase1Saved });
 
     // Phase 2: summary (placeholder; in production calls sub-LLM)
     if (opts.aggressive) {
-      const phase2Saved = this.collapseAncientTurns(ctx);
+      const phase2Saved = this.collapseAncientTurns(ctx, preserveK);
       if (phase2Saved > 0) reductions.push({ phase: 'summary', saved: phase2Saved });
     }
 
@@ -43,14 +47,18 @@ export class HybridCompactor implements Compactor {
     return { before: beforeTokens, after: afterTokens, reductions };
   }
 
-  private eliseOldToolResults(ctx: Context): number {
+  private eliseOldToolResults(
+    ctx: Context,
+    preserveK = this.preserveK,
+    eliseThreshold = this.eliseThreshold,
+  ): number {
     const messages = ctx.messages;
     // Walk backwards counting (user + assistant) pairs to determine where
     // the preservation window really starts. This is more accurate than
     // the fixed multiplier which assumes every turn is 1 message pair.
     let pairCount = 0;
     let preserveStart = messages.length;
-    for (let i = messages.length - 1; i >= 0 && pairCount < this.preserveK; i--) {
+    for (let i = messages.length - 1; i >= 0 && pairCount < preserveK; i--) {
       const m = messages[i];
       if (!m) continue;
       if (m.role === 'user' || m.role === 'assistant') {
@@ -75,7 +83,7 @@ export class HybridCompactor implements Compactor {
       const newContent: ContentBlock[] = msg.content.map((b) => {
         if (b.type !== 'tool_result') return b;
         const tokens = estimateToolResultTokens(b.content);
-        if (tokens < this.eliseThreshold) return b;
+        if (tokens < eliseThreshold) return b;
         saved += tokens;
         const elided: ToolResultBlock = {
           type: 'tool_result',
@@ -100,9 +108,9 @@ export class HybridCompactor implements Compactor {
     return saved;
   }
 
-  private collapseAncientTurns(ctx: Context): number {
+  private collapseAncientTurns(ctx: Context, preserveK = this.preserveK): number {
     const messages = ctx.messages;
-    const cutTarget = Math.max(0, messages.length - this.preserveK * 2);
+    const cutTarget = Math.max(0, messages.length - preserveK * 2);
     if (cutTarget <= 0) return 0;
 
     // Find a safe boundary: nearest user-message-with-text at or after cutTarget
@@ -149,6 +157,19 @@ export class HybridCompactor implements Compactor {
     }
     return total;
   }
+}
+
+function readContextWindowPolicy(ctx: Context): ContextWindowPolicy | null {
+  const policy = ctx.meta?.['contextWindowPolicy'];
+  if (!policy || typeof policy !== 'object') return null;
+  const candidate = policy as Partial<ContextWindowPolicy>;
+  if (
+    typeof candidate.preserveK !== 'number' ||
+    typeof candidate.eliseThreshold !== 'number'
+  ) {
+    return null;
+  }
+  return candidate as ContextWindowPolicy;
 }
 
 function hasTextContent(m: Message): boolean {

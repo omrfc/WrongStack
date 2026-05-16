@@ -1,7 +1,10 @@
 import type { WireFamily } from './models-registry.js';
+import type { ContextWindowModeId } from './context-window.js';
 import type { Permission } from './tool.js';
 
 export interface ContextConfig {
+  /** Context-window policy mode. Controls compaction thresholds and preservation depth. */
+  mode?: ContextWindowModeId;
   warnThreshold: number;
   softThreshold: number;
   hardThreshold: number;

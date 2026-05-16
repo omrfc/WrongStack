@@ -23,6 +23,7 @@ import {
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { ChatInput } from './ChatInput';
 import { ConnectionChip } from './ConnectionChip';
+import { ContextModePicker } from './ContextModePicker';
 import { CostChip } from './CostChip';
 import { MessageBubble } from './MessageBubble';
 import { ModePicker } from './ModePicker';
@@ -298,6 +299,7 @@ export function ChatView() {
               </span>
             </button>
             <ModePicker />
+            <ContextModePicker />
             {iteration && (
               <span
                 className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-medium bg-primary/10 text-primary shrink-0"

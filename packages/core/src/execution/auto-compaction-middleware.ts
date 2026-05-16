@@ -2,14 +2,19 @@ import type { Context } from '../core/context.js';
 import type { EventBus } from '../kernel/events.js';
 import type { MiddlewareHandler } from '../kernel/pipeline.js';
 import type { Compactor } from '../types/compactor.js';
+import type { ContextWindowAggressiveOn, ContextWindowPolicy } from '../types/context-window.js';
 import { AgentError } from '../types/errors.js';
 
 export type CompactionFailureMode = 'throw' | 'throw_on_hard' | 'continue';
 
 export interface AutoCompactionOptions {
-  aggressiveOn?: 'hard' | 'soft' | 'warn';
+  aggressiveOn?: ContextWindowAggressiveOn;
   events?: EventBus;
   failureMode?: CompactionFailureMode;
+  policyProvider?: (ctx: Context) => Pick<
+    ContextWindowPolicy,
+    'thresholds' | 'aggressiveOn'
+  > | null | undefined;
 }
 
 /**
@@ -26,9 +31,10 @@ export class AutoCompactionMiddleware {
   private readonly hardThreshold: number;
   private readonly maxContext: number;
   private readonly estimator: (ctx: Context) => number;
-  private readonly aggressiveOn: 'hard' | 'soft' | 'warn';
+  private readonly aggressiveOn: ContextWindowAggressiveOn;
   private readonly events?: EventBus;
   private readonly failureMode: CompactionFailureMode;
+  private readonly policyProvider?: AutoCompactionOptions['policyProvider'];
 
   /**
    * @param compactor        Compactor to use for compaction.
@@ -46,7 +52,7 @@ export class AutoCompactionMiddleware {
     maxContext: number,
     estimator: (ctx: Context) => number,
     thresholds: { warn: number; soft: number; hard: number },
-    optsOrAggressiveOn: AutoCompactionOptions | 'hard' | 'soft' | 'warn' = {},
+    optsOrAggressiveOn: AutoCompactionOptions | ContextWindowAggressiveOn = {},
     events?: EventBus,
   ) {
     const opts =
@@ -62,19 +68,27 @@ export class AutoCompactionMiddleware {
     this.aggressiveOn = opts.aggressiveOn ?? 'soft';
     this.events = opts.events;
     this.failureMode = opts.failureMode ?? 'throw_on_hard';
+    this.policyProvider = opts.policyProvider;
   }
 
   handler(): MiddlewareHandler<Context> {
     return async (ctx, next) => {
       const tokens = this.estimator(ctx);
       const load = tokens / this.maxContext;
+      const policy = this.policyProvider?.(ctx);
+      const thresholds = policy?.thresholds ?? {
+        warn: this.warnThreshold,
+        soft: this.softThreshold,
+        hard: this.hardThreshold,
+      };
+      const aggressiveOn = policy?.aggressiveOn ?? this.aggressiveOn;
 
-      if (load >= this.hardThreshold) {
+      if (load >= thresholds.hard) {
         await this.compact(ctx, true, { level: 'hard', tokens, load });
-      } else if (load >= this.softThreshold) {
-        await this.compact(ctx, this.aggressiveOn !== 'hard', { level: 'soft', tokens, load });
-      } else if (load >= this.warnThreshold) {
-        await this.compact(ctx, false, { level: 'warn', tokens, load });
+      } else if (load >= thresholds.soft) {
+        await this.compact(ctx, aggressiveOn !== 'hard', { level: 'soft', tokens, load });
+      } else if (load >= thresholds.warn) {
+        await this.compact(ctx, aggressiveOn === 'warn', { level: 'warn', tokens, load });
       }
 
       return next(ctx);

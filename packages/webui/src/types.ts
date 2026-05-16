@@ -17,6 +17,7 @@ export interface WSSessionStart {
     projectName?: string;
     cwd?: string;
     mode?: string;
+    contextMode?: string;
     inputCost?: number;
     outputCost?: number;
     cacheReadCost?: number;
@@ -186,6 +187,8 @@ export interface WSContextDebug {
   type: 'context.debug';
   payload: {
     total: number;
+    mode?: string;
+    policy?: unknown;
     systemPrompt: number;
     tools: {
       total: number;
@@ -207,6 +210,31 @@ export interface WSContextCompacted {
     after: number;
     saved: number;
     reductions: Array<{ phase: string; saved: number }>;
+  };
+}
+
+export interface WSContextModesList {
+  type: 'context.modes.list';
+  payload: {
+    activeId: string;
+    modes: Array<{
+      id: string;
+      name: string;
+      description: string;
+      isActive: boolean;
+      thresholds: { warn: number; soft: number; hard: number };
+      preserveK: number;
+      eliseThreshold: number;
+    }>;
+  };
+}
+
+export interface WSContextModeChanged {
+  type: 'context.mode.changed';
+  payload: {
+    id: string;
+    name: string;
+    policy: unknown;
   };
 }
 
@@ -389,6 +417,8 @@ export type WSClientMessage =
   | { type: 'context.clear' }
   | { type: 'context.compact'; payload: { aggressive: boolean } }
   | { type: 'context.debug' }
+  | { type: 'context.modes.list' }
+  | { type: 'context.mode.switch'; payload: { id: string } }
   | WSModelSwitch
   | { type: 'providers.list' }
   | { type: 'provider.models'; payload: { providerId: string } }
@@ -436,6 +466,8 @@ export type WSServerMessage =
   | WSToolConfirmNeeded
   | WSContextDebug
   | WSContextCompacted
+  | WSContextModesList
+  | WSContextModeChanged
   | WSToolsList
   | WSMemoryList
   | WSSkillsList

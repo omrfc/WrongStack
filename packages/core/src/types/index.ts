@@ -25,6 +25,7 @@ export * from './plugin.js';
 export * from './errors.js';
 export * from '../models/models-registry.js';
 export * from './mode.js';
+export * from './context-window.js';
 export * from '../coordination/agent-bridge.js';
 export * from './multi-agent.js';
 export * from './spec.js';

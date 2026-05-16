@@ -252,6 +252,23 @@ compaction automatically when token threshold fractions are crossed
 best-effort — a failure fires `compaction.failed` but never aborts the
 run.
 
+Context-window behavior is policy-driven. `context.mode` selects one of
+the built-in presets:
+
+| Mode | Behavior |
+|---|---|
+| `balanced` | Default rolling compaction; preserves the recent tail and trims old heavy tool output. |
+| `frugal` | Token-saver mode; compacts early and keeps a tighter verbatim tail. |
+| `deep` | Long-reasoning mode; delays compaction and keeps more recent turns intact. |
+| `archival` | Decision-preserving mode; compacts steadily while keeping summaries prominent. |
+
+The active policy is copied into `ctx.meta.contextWindowPolicy` at boot
+and can change during a session. `AutoCompactionMiddleware` reads that
+policy before every provider turn, while `HybridCompactor` reads the same
+policy to choose preservation depth and tool-result elision thresholds.
+CLI users switch with `/context mode <id>`; WebUI clients can call
+`context.modes.list` and `context.mode.switch`.
+
 ---
 
 ## Multi-agent

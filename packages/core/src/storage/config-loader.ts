@@ -1,5 +1,10 @@
 import * as fs from 'node:fs/promises';
 import { decryptConfigSecrets } from '../security/config-secrets.js';
+import {
+  DEFAULT_CONTEXT_WINDOW_MODE_ID,
+  isContextWindowModeId,
+  listContextWindowModes,
+} from '../types/context-window.js';
 import type { Config, ConfigLoader } from '../types/config.js';
 import type { SecretVault } from '../types/secret-vault.js';
 import { safeParse } from '../utils/safe-json.js';
@@ -15,6 +20,7 @@ import type { WstackPaths } from '../utils/wstack-paths.js';
 const BEHAVIOR_DEFAULTS: Omit<Config, 'provider' | 'model'> = {
   version: 1,
   context: {
+    mode: DEFAULT_CONTEXT_WINDOW_MODE_ID,
     warnThreshold: 0.6,
     softThreshold: 0.75,
     hardThreshold: 0.9,
@@ -282,6 +288,10 @@ export class DefaultConfigLoader implements ConfigLoader {
     }
     if (c.warnThreshold >= c.softThreshold || c.softThreshold >= c.hardThreshold) {
       throw new Error('Config: context thresholds must satisfy warn < soft < hard');
+    }
+    if (c.mode !== undefined && !isContextWindowModeId(c.mode)) {
+      const known = listContextWindowModes().map((m) => m.id).join(', ');
+      throw new Error(`Config: context.mode must be one of: ${known}`);
     }
   }
 

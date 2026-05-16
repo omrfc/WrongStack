@@ -33,8 +33,11 @@ import {
   type WstackPaths,
   atomicWrite,
   createDefaultPipelines,
+  DEFAULT_CONTEXT_WINDOW_MODE_ID,
   migratePlaintextSecrets,
   resolveWstackPaths,
+  listContextWindowModes,
+  resolveContextWindowPolicy,
 } from '@wrongstack/core';
 import { buildProviderFactoriesFromRegistry, makeProviderFromConfig } from '@wrongstack/providers';
 import { forgetTool, rememberTool } from '@wrongstack/tools';
@@ -205,6 +208,9 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     projectRoot,
     model: config.model,
   });
+  const initialContextPolicy = resolveContextWindowPolicy(config.context);
+  context.meta['contextWindowMode'] = initialContextPolicy.id;
+  context.meta['contextWindowPolicy'] = initialContextPolicy;
 
   // Pipelines
   const pipelines = createDefaultPipelines();
@@ -217,18 +223,35 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
 
   // Auto-compaction
   if (config.context?.autoCompact !== false) {
+    const effectiveMaxContext = config.context?.effectiveMaxContext ?? provider.capabilities.maxContext;
     const autoCompactor = new AutoCompactionMiddleware(
       compactor,
-      200000,
+      effectiveMaxContext,
       (ctx) => {
         let total = 0;
         for (const m of ctx.messages) {
           if (typeof m.content === 'string') total += Math.ceil(m.content.length / 4);
+          else if (Array.isArray(m.content)) {
+            for (const b of m.content) total += Math.ceil(JSON.stringify(b).length / 4);
+          }
         }
         return total;
       },
-      { warn: 0.7, soft: 0.85, hard: 0.95 },
-      { events },
+      {
+        warn: initialContextPolicy.thresholds.warn,
+        soft: initialContextPolicy.thresholds.soft,
+        hard: initialContextPolicy.thresholds.hard,
+      },
+      {
+        events,
+        aggressiveOn: initialContextPolicy.aggressiveOn,
+        policyProvider: (ctx) => {
+          const policy = ctx.meta['contextWindowPolicy'];
+          return policy && typeof policy === 'object'
+            ? (policy as ReturnType<typeof resolveContextWindowPolicy>)
+            : initialContextPolicy;
+        },
+      },
     );
     pipelines.contextWindow.use({ name: 'AutoCompaction', handler: autoCompactor.handler() });
   }
@@ -267,6 +290,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     projectName: string;
     cwd: string;
     mode: string;
+    contextMode: string;
     wsToken: string;
   }> {
     let maxContext = 0;
@@ -299,6 +323,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
       projectName: path.basename(projectRoot) || projectRoot,
       cwd: projectRoot,
       mode: modeId,
+      contextMode: String(context.meta['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID),
       wsToken,
     };
   }
@@ -723,6 +748,8 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
           type: 'context.debug',
           payload: {
             total,
+            mode: context.meta['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID,
+            policy: context.meta['contextWindowPolicy'],
             systemPrompt: sysTokens,
             tools: { total: toolTokens, count: tools.length, breakdown: toolBreakdown },
             messages: {
@@ -756,6 +783,43 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
         } catch (err) {
           sendResult(ws, false, err instanceof Error ? err.message : String(err));
         }
+        break;
+      }
+
+      case 'context.modes.list': {
+        const active = String(context.meta['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID);
+        send(ws, {
+          type: 'context.modes.list',
+          payload: {
+            activeId: active,
+            modes: listContextWindowModes().map((m) => ({
+              id: m.id,
+              name: m.name,
+              description: m.description,
+              isActive: m.id === active,
+              thresholds: m.thresholds,
+              preserveK: m.preserveK,
+              eliseThreshold: m.eliseThreshold,
+            })),
+          },
+        });
+        break;
+      }
+
+      case 'context.mode.switch': {
+        const { id } = (msg as { payload: { id: string } }).payload;
+        const policy = resolveContextWindowPolicy({}, id);
+        if (policy.id !== id) {
+          sendResult(ws, false, `Unknown context mode "${id}"`);
+          break;
+        }
+        context.meta['contextWindowMode'] = policy.id;
+        context.meta['contextWindowPolicy'] = policy;
+        sendResult(ws, true, `Context mode switched to ${policy.id}`);
+        broadcast({
+          type: 'context.mode.changed',
+          payload: { id: policy.id, name: policy.name, policy },
+        });
         break;
       }
 
