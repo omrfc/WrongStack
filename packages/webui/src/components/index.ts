@@ -6,3 +6,4 @@ export { MessageBubble } from './MessageBubble';
 export { Sidebar } from './Sidebar';
 export { SettingsPanel } from './SettingsPanel';
 export { ConfirmDialog } from './ConfirmDialog';
+export { ErrorBoundary } from './ErrorBoundary';

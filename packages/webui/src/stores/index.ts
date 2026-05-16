@@ -471,8 +471,7 @@ export const useSessionStore = create<SessionState>()(
           // True total input this turn = fresh + cached subsets, since
           // Usage is now disjoint across providers (see core's Usage doc).
           // Without summing, prompt-cached turns under-report the ctx chip.
-          const totalInput =
-            (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+          const totalInput = (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
           return {
             totalTokens: {
               input: state.totalTokens.input + usage.input,

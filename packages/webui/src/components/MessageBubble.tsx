@@ -23,7 +23,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import type React from 'react';
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { DiffView, diffFromToolInput } from './DiffView';
@@ -353,7 +353,7 @@ function formatToolDuration(ms: number): string {
   return `${m}m ${s}s`;
 }
 
-export function MessageBubble({
+export const MessageBubble = memo(function MessageBubble({
   message,
   isFirst = false,
   isContinuation = false,
@@ -918,4 +918,4 @@ export function MessageBubble({
       </div>
     </div>
   );
-}
+});

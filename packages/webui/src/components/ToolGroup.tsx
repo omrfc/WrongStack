@@ -1,7 +1,7 @@
 import { cn } from '@/lib/utils';
 import type { ChatMessage } from '@/stores';
 import { CheckCircle2, ChevronDown, ChevronRight, Loader2, Terminal, XCircle } from 'lucide-react';
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { MessageBubble } from './MessageBubble';
 
 interface ToolGroupProps {
@@ -27,7 +27,11 @@ function formatDuration(ms: number): string {
   return `${m}m${s}s`;
 }
 
-export function ToolGroup({ tools, defaultOpen = false, isContinuation = false }: ToolGroupProps) {
+export const ToolGroup = memo(function ToolGroup({
+  tools,
+  defaultOpen = false,
+  isContinuation = false,
+}: ToolGroupProps) {
   const [open, setOpen] = useState(defaultOpen);
 
   // Single tool? Render as a normal bubble — grouping overhead is just noise.
@@ -104,4 +108,4 @@ export function ToolGroup({ tools, defaultOpen = false, isContinuation = false }
       </div>
     </div>
   );
-}
+});

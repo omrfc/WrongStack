@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
 import { ChevronDown, ChevronRight, ChevronsDown, ChevronsUp } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 
 /** When a tool dumps hundreds of lines of output, the chat turns into a
  *  scroll-wall. This threshold gates the auto-collapse: anything longer
@@ -111,7 +111,12 @@ interface Props {
  *   - Valid JSON gets pretty-printed and collapsible by default.
  *   - Everything else falls back to raw monospace.
  */
-export function ToolResult({ toolName, result, isError, className }: Props) {
+export const ToolResult = memo(function ToolResult({
+  toolName,
+  result,
+  isError,
+  className,
+}: Props) {
   const shape = useMemo(() => detectShape(toolName, result), [toolName, result]);
 
   if (shape.kind === 'json') {
@@ -168,7 +173,7 @@ export function ToolResult({ toolName, result, isError, className }: Props) {
       showLineNumbers
     />
   );
-}
+});
 
 interface Shape {
   kind: 'numbered' | 'json' | 'bash' | 'plain';

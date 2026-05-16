@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 
 interface DiffViewProps {
   oldText: string;
@@ -18,7 +18,7 @@ interface DiffViewProps {
  * Limits: text > 5000 lines is shown without a diff (just a "too large"
  * note); that's a UI guard, not a hard limit on the underlying tool.
  */
-export function DiffView({ oldText, newText, caption }: DiffViewProps) {
+export const DiffView = memo(function DiffView({ oldText, newText, caption }: DiffViewProps) {
   const rows = useMemo(() => computeDiff(oldText, newText), [oldText, newText]);
 
   if (rows === null) {
@@ -76,7 +76,7 @@ export function DiffView({ oldText, newText, caption }: DiffViewProps) {
       </div>
     </div>
   );
-}
+});
 
 interface DiffRow {
   kind: 'add' | 'del' | 'ctx';
