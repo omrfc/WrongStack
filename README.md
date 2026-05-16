@@ -21,10 +21,15 @@ This pulls in the full stack — `@wrongstack/core`, `@wrongstack/runtime`, `@wr
 
 After install, `wrongstack` is on your `PATH`. (`wstack` works too — it's an alias.)
 
-### What's new on `main`
+### What's new in 0.3.2
 
-The current development branch tightens the package architecture and quiets the
-multi-agent TUI.
+This patch release tightens the package architecture, improves context-window
+control, adds image routing, and quiets the multi-agent TUI.
+
+**Context-window modes and repair.** Sessions can switch between `balanced`,
+`frugal`, `deep`, and `archival` context policies. CLI users get `/context mode`
+and `/context repair`; WebUI clients get mode switching plus `context.repair`.
+Damaged tool-call adjacency is repaired before provider requests.
 
 **Core stays core.** `@wrongstack/runtime` is the new home for concrete runtime
 defaults and host composition helpers. `@wrongstack/core` keeps the kernel,
@@ -49,6 +54,12 @@ image blocks. Vision-capable models receive them natively; text-only models can
 fall back to safe read-only MCP/tool adapters that describe the image. If no
 route exists, WrongStack tells you to switch to a vision model or enable an
 image-understanding adapter instead of silently dropping the image.
+
+**Release gate cleanup.** `pnpm test` is green again at 2059 passing tests
+across 203 files, with 1 skipped. Todo checkpoint writes now drain during
+detach/shutdown, CLI compaction resolves model capabilities through the active
+provider id, director tools live in a single module, and WebUI builds without
+the previous chime import/chunk-size warnings.
 
 ### What's new in 0.2.0 — the autonomous fleet release
 
