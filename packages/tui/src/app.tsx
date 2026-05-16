@@ -863,6 +863,27 @@ export function App({
     return { running, idle, pending: 0, completed };
   }, [state.fleet]);
 
+  // Stable per-subagent label + color, assigned on first sighting and
+  // shared between the FleetBus listener (history stream) and the
+  // fleetAgents memo (status bar 4th line). Declared HERE — above
+  // `fleetAgents` — because that memo's callback calls labelFor on
+  // every recompute. The previous declaration site (below the memo)
+  // worked while state.fleet was empty (the memo's early-return
+  // skipped the call) but threw a TDZ error the moment a subagent
+  // was spawned and the memo actually executed its body.
+  const STREAM_COLORS = ['cyan', 'magenta', 'yellow', 'green', 'blue'];
+  const labelsRef = useRef<Map<string, { label: string; color: string }>>(new Map());
+  const labelFor = (id: string, name?: string): { label: string; color: string } => {
+    const m = labelsRef.current;
+    const existing = m.get(id);
+    if (existing) return existing;
+    const n = m.size + 1;
+    const suffix = name && name !== id ? ` ${name}` : '';
+    const v = { label: `AGENT#${n}${suffix}`, color: STREAM_COLORS[(n - 1) % STREAM_COLORS.length]! };
+    m.set(id, v);
+    return v;
+  };
+
   // Per-agent detail for the status bar's optional 4th line. Limited to
   // the top 4 active agents (running first, then idle) sorted by spawn
   // order so the bar doesn't wrap on wide fleets. Reuses the global
@@ -1407,24 +1428,6 @@ export function App({
       if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
     };
   }, [events, agent.ctx.todos]);
-
-  // Stable per-subagent label + color, assigned on first sighting and
-  // shared between the FleetBus listener (history stream) and the
-  // fleetAgents memo (status bar 4th line). Stored in a ref so a label
-  // assigned during one render is visible to the next render's memo
-  // without forcing a separate state update for the side table.
-  const STREAM_COLORS = ['cyan', 'magenta', 'yellow', 'green', 'blue'];
-  const labelsRef = useRef<Map<string, { label: string; color: string }>>(new Map());
-  const labelFor = (id: string, name?: string): { label: string; color: string } => {
-    const m = labelsRef.current;
-    const existing = m.get(id);
-    if (existing) return existing;
-    const n = m.size + 1;
-    const suffix = name && name !== id ? ` ${name}` : '';
-    const v = { label: `AGENT#${n}${suffix}`, color: STREAM_COLORS[(n - 1) % STREAM_COLORS.length]! };
-    m.set(id, v);
-    return v;
-  };
 
   // Live mirror of `streamFleet` for the FleetBus listener below. The
   // listener is wired in a single mount-time effect so it doesn't tear
