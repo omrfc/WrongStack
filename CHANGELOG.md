@@ -88,7 +88,190 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mix). Append `raw` to dump the full JSONL when you need the
   uncompressed view.
 
+- **`/goal <description>` — autonomous lock-in mode.** Slash command
+  in the TUI that prepends a four-section preamble to the next agent
+  turn (AUTHORITY / DONE / NOT DONE / PERSISTENCE), turning the leader
+  into a relentless worker that drives the task to a verifiable
+  finish. No implicit budget cap, full multi-provider fan-out
+  permission, explicit anti-patterns ("should I continue?", "I
+  believe this fixes it"), three-angle persistence rule for blockers.
+  Only the user can stop a /goal — Esc / `/steer` redirect, Ctrl+C /
+  `/fleet kill` bail out.
+
+- **`/steer <new direction>` and `Esc`-to-steer.** Mid-flight redirect
+  primitives. Both abort the active iteration, terminate running
+  subagents (1.5s cap), drop the queued messages, and send the new
+  direction with a rich STEERING preamble prepended — snapshot of
+  in-flight tools, terminated subagents (with their currentTool),
+  last partial assistant text, plus explicit authority to abandon
+  the prior plan. The chat just shows `↯ <text>`; the preamble goes
+  to the model, not the human view. `/steer` works whether the agent
+  is busy or idle; Esc only when the agent is busy.
+
+- **`SubagentError` envelope — 14 classified failure kinds.**
+  `TaskResult.error` is no longer an opaque `string`; it's a
+  discriminated union with `kind`, `message`, `retryable`,
+  optional `backoffMs`, and the original `cause`. Kinds:
+  `provider_5xx`, `provider_rate_limit`, `provider_auth`,
+  `provider_timeout`, `context_overflow`, `tool_failed`,
+  `tool_threw`, `budget_iterations`, `budget_tool_calls`,
+  `budget_tokens`, `budget_cost`, `budget_timeout`,
+  `aborted_by_parent`, `empty_response`, `bridge_failed`,
+  `unknown`. `classifySubagentError` is exported for tests and
+  CLI surfaces. The delegate tool output exposes `errorKind` /
+  `retryable` / `backoffMs` so the calling LLM can branch on
+  classification. Chat renders `[kind]` chip beside every failed
+  task. Backwards-compat string is preserved as
+  `error.message`.
+
+- **LiveActivityStrip above the input area.** Compact one-line-per-
+  subagent strip that sits directly above the input, showing
+  `● <name> · → <currentTool> (Xs) · Nit Mtc · elapsed`. Renders
+  nothing when no subagents are running. Updates every tick so
+  elapsed timers stay live. Works in both director and non-director
+  mode.
+
+- **Per-tool surface in chat regardless of director mode.** Every
+  subagent's `tool.executed` event is now bridged from its per-task
+  EventBus onto the host EventBus as `subagent.tool_executed`, and
+  the TUI listens unconditionally — `[AGENT#1] ● bash 250ms · 1.2KB`
+  lands in chat for plain `/spawn` too. Director-mode `/fleet stream
+  on` still adds the richer verbose stream with arg formatting +
+  currentTool live updates.
+
+- **`subagent.tool_executed` event** on the host EventBus
+  (`packages/core/src/kernel/events.ts`). Carries `subagentId`, tool
+  name, duration, ok, optional input + outputBytes. Bridge installed
+  by `MultiAgentHost.spawn` factory, cleaned up via the existing
+  dispose hook.
+
+- **`tool.progress` budget heartbeat.** The subagent runner subscribes
+  to `tool.progress` events emitted by long-running tools (bash
+  chunks, fetch byte progress, spawn-stream stdout) and calls
+  `ctx.budget.checkTimeout()` on each heartbeat. A `bash sleep 3600`
+  no longer parks past its wall-clock deadline waiting for the
+  coordinator's hard `Promise.race` — the budget trips cooperatively,
+  the aborter fires, signal propagates to the tool, child process
+  killed. Tools without progress emission still rely on the
+  coordinator race as the backstop.
+
+- **Per-subagent JSONL path on `subagent.spawned`.** New
+  `transcriptPath?: string` field carries the absolute path to the
+  per-subagent transcript file. Pre-computed from the session
+  factory dir at spawn time so the very first event the TUI sees
+  already has it. `SessionWriter.transcriptPath` (readonly,
+  optional) is the new contract; `FileSessionWriter` exposes it via
+  a getter. The FleetPanel renders `log: <path>` under each entry
+  so users can `tail -f` without grepping the filesystem.
+
+- **`currentTool` on FleetEntry.** Tracks the tool a subagent is
+  currently inside via `tool.started` (set) / `tool.executed`
+  (clear). FleetPanel renders `→ bash (250ms)` under running
+  subagents.
+
+- **`provider.thinking_delta` forwarded onto FleetBus.** Subagents'
+  extended-thinking output now surfaces to the FleetPanel and
+  `/fleet log` instead of falling between `iteration.started` and
+  the first text delta.
+
+- **Coordinator race fixes.** `spawn()` rejects duplicate ids
+  (previously silently overwrote, orphaning the prior subagent's
+  AbortController + Context). `stop()` + `assign()` race produces a
+  synthetic `aborted_by_parent` task.completed instead of an orphan
+  task that leaked `inFlight` forever. `stopAll()` drains the
+  pending queue with the same synthetic completion. Error-state
+  reset is synchronous now (the prior `queueMicrotask` opened a
+  window where `assign()` could observe a "running" worker that was
+  actually idle). Tool counter pairs on `tool.executed` rather than
+  `tool.started` — a tool that fires start then crashes mid-exec
+  no longer drifts the budget tally.
+
+- **Per-task `dispose` hook on `AgentFactoryResult`.** Closes the
+  per-subagent JSONL writer in the runner's `finally` block —
+  swallowed errors, so a flaky cleanup can't mask the real task
+  result. Closes the FD leak that exhausted at ~1000 tasks.
+
+- **Director listener leak fix.** `coordinator.on('task.completed',
+  ...)` is now captured in a field and `off()`-ed in
+  `Director.shutdown()`. Repeated Director construction (tests, hot
+  reloads) no longer accumulates listeners.
+
+- **`promoteToDirector` failure reason.** When promotion is refused
+  because subagents are already running, the host records a
+  human-readable reason ("Cannot promote: N subagents are running.
+  /fleet kill them or wait.") and the delegate tool surfaces it
+  verbatim to the calling LLM. Replaces the prior opaque "Director
+  could not be activated" message.
+
+- **Director shutdown errors surface via `process.emitWarning`.**
+  Bridge.stop / writeManifest / stateCheckpoint.flush failures used
+  to be silently swallowed with `.catch(() => undefined)`. They now
+  funnel through `process.emitWarning('DirectorShutdownWarning',
+  ...)` so hosts can plug a warning listener for structured
+  collection; default stderr surface is enough to spot a persistent
+  failure during normal use.
+
+- **Ctrl+C terminates the fleet with a 1.5s ceiling.** The TUI's
+  SIGINT handler now races `director.terminateAll()` against a
+  1.5s cap before falling through to the exit ladder, so subagents
+  drain cleanly when possible and hard-exit when wedged.
+
+- **Test coverage: 1981 total.** Five new dedicated suites pin the
+  regression duvarı:
+  - `subagent-error-classification.test.ts` — 20 tests covering
+    every kind + the integration path
+  - `coordinator-race.test.ts` — duplicate-id reject (T5),
+    stop+assign race (T4), stopAll drain (T4b), paired tool
+    counter (T8), synchronous error-reset (M4)
+  - `subagent-abort-during-tool.test.ts` — mid-tool abort (T3),
+    stop-after-tool-completes
+  - `subagent-budget-edges.test.ts` — `tool.progress` heartbeat
+    busts mid-tool, no-timeout regression guard
+  - `fleet-usage-aggregator.test.ts` — disjoint cost-bucket
+    contract (M2), per-subagent isolation, missing price guard
+  - `delegate-tool.test.ts` +2 — partial JSONL read robustness
+    (T6) on missing + corrupt transcripts
+  - `steering-preamble.test.ts` — 9 tests covering both
+    `buildSteeringPreamble` and `buildGoalPreamble` structural
+    guarantees
+
 ### Changed
+
+- **Unlimited budgets by default.** The prior 20-tool / 20-iteration
+  hardcap on `/spawn` adhoc subagents (`packages/cli/src/multi-agent.ts`)
+  is gone, and the coordinator's `defaultBudget` (1000 tools /
+  200 iter / 4h timeout) has been removed entirely. Subagents get
+  a budget only when the orchestrator (`delegate` /
+  `spawn_subagent`) explicitly passes one. Runaway protection now
+  lives in the Agent's iteration loop (`autoExtendLimit: true`,
+  auto-grants 100 more iterations every 100 forever). `maxConcurrent`
+  raised 2 → 8. Director `maxSpawnDepth` 2 → 5 so recursive
+  delegation works without tripping the depth budget at level 3.
+
+- **Subagent tool-counter pairs on `tool.executed`.** Was previously
+  incremented on `tool.started`, which produced phantom counts when
+  a tool started then crashed before emitting executed. The paired
+  count matches what the model actually saw in its turn.
+
+- **Subagent `empty_response` is now a classified failure.** An LLM
+  run that returns `status: 'done'` with empty `finalText` AND zero
+  tool calls used to silently succeed; now surfaces as
+  `kind: 'empty_response'`. Almost always indicates a prompt /
+  config issue rather than legitimate "nothing to say".
+
+- **Subagent `tool_failed` is now a classified failure.** A tool
+  returning `ok: false` whose error the agent never recovered from
+  (no follow-up text on the next iteration) used to report a clean
+  success. Now surfaces as `kind: 'tool_failed'` with the failed
+  tool name in the message. Healthy "tool errored then I tried
+  again" patterns still report success because the next iteration's
+  text clears `lastToolFailed`.
+
+- **`SlashCommand.run` may return `{ runText }`.** Lets a slash
+  command queue a follow-up user-role message that the TUI submits
+  as if the user had typed it. Used by `/steer` and `/goal` to send
+  the rich preamble. Backwards compatible — existing commands
+  return `{ exit?, message? }` as before.
 
 - **TUI alt-screen by default.** `runTui({ altScreen })` now defaults
   to `true`, taking over the alternate screen buffer (vim/less/htop
@@ -99,6 +282,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SIGTSTP`/`SIGQUIT`/`SIGTTIN`/`SIGTTOU` as belt-and-suspenders.
 
 ### Fixed
+
+- **TUI TDZ crash on first subagent spawn.** The `fleetAgents`
+  `useMemo` (status bar 4th line) called `labelFor` in its
+  callback, but `labelFor` was declared ~550 lines further down in
+  `App`. While `state.fleet` stayed empty the memo's early-return
+  skipped the call, so the temporal-dead-zone access stayed
+  dormant — but the first `/spawn` populated `state.fleet` and the
+  next render hit `Cannot access 'labelFor' before initialization`,
+  killing the TUI mid-frame. Moved the `labelFor` + `labelsRef` +
+  `STREAM_COLORS` block above `fleetAgents` so the const is
+  initialised before any memo body runs.
+
+- **Ctrl+C with a wedged delegate.** The first Ctrl+C only
+  cancelled the host agent loop; a delegate that ignored the
+  abort signal would keep the parent parked in `await
+  director.awaitTasks` and the "press again to exit" hint became a
+  lie. Ctrl+C now races `director.terminateAll()` against a 1.5s
+  cap before unwinding so the fleet drains polite-first then
+  hard-cuts.
+
+- **`/spawn` artificial 20-tool / 20-iter caps killed real work.**
+  Real screenshot from the field: `AGENT#1 ✗ failed (9 iter · 21
+  tools · 248s) [budget_tool_calls] — Budget exceeded: tool_calls
+  (limit=20, observed=21)`. The 20 was a defensive default from
+  when `/spawn` was a single-shot tester; for an autonomous
+  director that delegates and respawns it was crippling. Caps
+  removed; orchestrator owns the budget decision.
 
 - **Test pollution writing to project cwd `tmp/`.** A test in
   `packages/cli/tests/multi-agent.test.ts` was using a relative
