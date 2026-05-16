@@ -68,6 +68,10 @@
       "types": "./dist/observability/index.d.ts",
       "import": "./dist/observability/index.js"
     },
+    "./extension": {
+      "types": "./dist/extension/index.d.ts",
+      "import": "./dist/extension/index.js"
+    },
     "./package.json": "./package.json",
     "./skills/*": "./skills/*"
   },

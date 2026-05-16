@@ -1,3 +1,4 @@
+import { ExtensionRegistry } from '../extension/registry.js';
 import { ToolExecutor } from '../execution/tool-executor.js';
 import type { Container } from '../kernel/container.js';
 import type { EventBus } from '../kernel/events.js';
@@ -78,6 +79,14 @@ export interface AgentInit {
    * Default is `NoopTracer` (zero overhead).
    */
   tracer?: Tracer | undefined;
+  /**
+   * Optional extension registry. Plugins and host applications register
+   * extensions here to hook into the agent lifecycle (beforeRun, afterRun,
+   * beforeIteration, onError, wrapProviderRunner, etc.).
+   * When not provided, the agent creates an empty registry internally —
+   * no overhead, zero breakage.
+   */
+  extensions?: ExtensionRegistry | undefined;
 }
 
 export interface AgentPipelines {
@@ -143,6 +152,7 @@ export class Agent {
   private readonly toolExecutor: ToolExecutor;
   private readonly autoExtendLimit: boolean;
   private readonly tracer: Tracer | undefined;
+  readonly extensions: ExtensionRegistry;
 
   constructor(init: AgentInit) {
     this.container = init.container;
@@ -157,6 +167,8 @@ export class Agent {
     this.perIterationOutputCapBytes = init.perIterationOutputCapBytes ?? 100_000;
     this.autoExtendLimit = init.autoExtendLimit ?? true;
     this.tracer = init.tracer;
+    this.extensions = init.extensions ?? new ExtensionRegistry();
+    this.extensions.setLogger(this.container.resolve(TOKENS.Logger));
     this.toolExecutor = new ToolExecutor(this.tools, {
       permissionPolicy: init.permissionPolicy ?? this.permission,
       secretScrubber: this.scrubber,
@@ -211,10 +223,24 @@ export class Agent {
       'agent.model': opts.model ?? this.ctx.model,
       'agent.executionStrategy': opts.executionStrategy ?? this.executionStrategy,
     });
+
+    // Normalize input once so beforeRun hooks see the canonical payload
+    const { blocks, text } = normalizeInput(userInput);
+    const inputPayload = { content: blocks, text, ctx: this.ctx };
+
+    // Extension: beforeRun hooks — a thrown error is caught and logged;
+    // the run proceeds. This matches the Pipeline error-boundary philosophy:
+    // one bad listener can't kill the agent.
+    await this.extensions.runBeforeRun(this.ctx, inputPayload);
+
     try {
-      const result = await this.runInner(userInput, opts, controller);
+      const result = await this.runInner(inputPayload, opts, controller);
       span?.setAttribute('agent.status', result.status);
       span?.setAttribute('agent.iterations', result.iterations);
+
+      // Extension: afterRun — always called, even on failed/aborted runs.
+      await this.extensions.runAfterRun(this.ctx, result);
+
       return result;
     } catch (err) {
       // Any throw that escapes runInner is treated as a hard agent failure.
@@ -224,11 +250,14 @@ export class Agent {
       this.events.emit('error', { err: toError(err), phase: 'agent' });
       if (err instanceof Error) span?.recordError(err);
       span?.setAttribute('agent.status', 'failed');
-      return {
+      const result: RunResult = {
         status: signal.aborted ? 'aborted' : 'failed',
         iterations: 0,
         error: wse,
       };
+      // Extension: afterRun on hard failure too
+      await this.extensions.runAfterRun(this.ctx, result);
+      return result;
     } finally {
       span?.end();
       await controller.dispose();
@@ -236,17 +265,58 @@ export class Agent {
   }
 
   private async runInner(
-    userInput: AgentInput,
+    inputPayload: UserInputPayload,
     opts: RunOptions,
     controller: RunController,
   ): Promise<RunResult> {
-    await this.normalizeAndEmitUserInput(userInput);
+    // Emit user input through pipeline and append to session (already normalized in run())
+    await this.pipelines.userInput.run(inputPayload);
+    this.ctx.state.appendMessage({ role: 'user', content: inputPayload.content });
+    await this.ctx.session.append({
+      type: 'user_input',
+      ts: new Date().toISOString(),
+      content: inputPayload.content,
+    });
 
     let finalText = '';
     let iterations = 0;
     let effectiveLimit = opts.maxIterations ?? this.maxIterations;
     const hasHardLimit = effectiveLimit > 0 && Number.isFinite(effectiveLimit);
     let recoveryRetries = 0;
+
+    // Build the base provider runner: resolve from DI if bound, otherwise
+    // use the built-in runProviderWithRetry (backward compat — consumers
+    // that don't bind TOKENS.ProviderRunner get the default behavior).
+    const diRunner = this.container.has(TOKENS.ProviderRunner)
+      ? this.container.resolve(TOKENS.ProviderRunner)
+      : null;
+
+    const baseRunner = diRunner
+      ? (ctx: import('./context.js').Context, req: import('../types/provider.js').Request) =>
+          diRunner.run({
+            provider: ctx.provider,
+            request: req,
+            signal: controller.signal,
+            ctx,
+            events: this.events,
+            retry: this.retry,
+            logger: this.logger,
+            tracer: this.tracer,
+          })
+      : async (ctx: import('./context.js').Context, req: import('../types/provider.js').Request) =>
+          runProviderWithRetry({
+            provider: ctx.provider,
+            request: req,
+            signal: controller.signal,
+            ctx,
+            events: this.events,
+            retry: this.retry,
+            logger: this.logger,
+            tracer: this.tracer,
+          });
+
+    // Build composed provider runner (extensions wrap the base runner)
+    const customRunner = this.extensions.wrapProviderRunner(baseRunner);
 
     for (let i = 0; ; i++) {
       iterations = i + 1;
@@ -265,28 +335,47 @@ export class Agent {
         return { ...limitCheck.exit, finalText };
       }
 
+      // Extension: beforeIteration
+      await this.extensions.runBeforeIteration(this.ctx, i);
+
       this.events.emit('iteration.started', { ctx: this.ctx, index: i });
 
       const req = await this.buildAndRunRequestPipeline(opts);
 
       let res: Response;
       try {
-        res = await runProviderWithRetry({
-          provider: this.ctx.provider,
-          request: req,
-          signal: controller.signal,
-          ctx: this.ctx,
-          events: this.events,
-          retry: this.retry,
-          logger: this.logger,
-          tracer: this.tracer,
-        });
+        res = await customRunner(this.ctx, req);
         recoveryRetries = 0;
       } catch (err) {
         if (controller.signal.aborted) {
           this.events.emit('error', { err: toError(err), phase: 'provider' });
           return { status: 'aborted', iterations, error: toWrongStackError(err, 'AGENT_ABORTED') };
         }
+
+        // Extension: onError — extensions get first crack at recovery
+        const extDecision = await this.extensions.runOnError(this.ctx, err, 'provider', i);
+        if (extDecision) {
+          if (extDecision.action === 'fail') {
+            this.events.emit('error', { err: toError(err), phase: 'provider' });
+            return { status: 'failed', iterations, error: toWrongStackError(err) };
+          }
+          if (extDecision.action === 'continue') {
+            // Extension says skip this turn — go to next iteration
+            await this.extensions.runAfterIteration(this.ctx, i);
+            continue;
+          }
+          if (extDecision.action === 'retry') {
+            recoveryRetries++;
+            if (recoveryRetries > 2) {
+              this.events.emit('error', { err: toError(err), phase: 'provider' });
+              return { status: 'failed', iterations, error: toWrongStackError(err) };
+            }
+            if (extDecision.model) this.ctx.model = extDecision.model;
+            this.logger.info('Extension requested retry; retrying turn');
+            continue;
+          }
+        }
+
         const recovered = await this.errorHandler.recover(err, this.ctx);
         if (!recovered || recovered.action === 'fail') {
           this.events.emit('error', { err: toError(err), phase: 'provider' });
@@ -330,21 +419,10 @@ export class Agent {
       this.events.emit('iteration.completed', { ctx: this.ctx, index: i });
 
       await this.compactContextIfNeeded();
-    }
-  }
 
-  /**
-   * Normalize user input and emit through userInput pipeline + session append.
-   */
-  private async normalizeAndEmitUserInput(userInput: AgentInput): Promise<void> {
-    const { blocks, text } = normalizeInput(userInput);
-    await this.pipelines.userInput.run({ content: blocks, text, ctx: this.ctx });
-    this.ctx.state.appendMessage({ role: 'user', content: blocks });
-    await this.ctx.session.append({
-      type: 'user_input',
-      ts: new Date().toISOString(),
-      content: blocks,
-    });
+      // Extension: afterIteration
+      await this.extensions.runAfterIteration(this.ctx, i);
+    }
   }
 
   /**
@@ -458,6 +536,9 @@ export class Agent {
    * single tool.
    */
   private async executeTools(toolUses: ToolUseBlock[]): Promise<void> {
+    // Extension: beforeToolExecution — allow filtering/reordering tools
+    toolUses = await this.extensions.runBeforeToolExecution(this.ctx, toolUses);
+
     const { outputs } = await this.toolExecutor.executeBatch(
       toolUses,
       this.ctx,
@@ -550,6 +631,9 @@ export class Agent {
       role: 'user',
       content: outputs.map((o) => o.result) as ToolResultBlock[],
     });
+
+    // Extension: afterToolExecution — inspect or react to tool results
+    await this.extensions.runAfterToolExecution(this.ctx, outputs);
   }
 
   private waitForConfirm(info: {

@@ -8,6 +8,7 @@ import type { ModeStore } from '../types/mode.js';
 import type { ModelsRegistry } from '../types/models-registry.js';
 import type { PathResolver } from '../types/path-resolver.js';
 import type { PermissionPolicy } from '../types/permission.js';
+import type { ProviderRunner } from '../types/provider-runner.js';
 import type { Renderer } from '../types/renderer.js';
 import type { RetryPolicy } from '../types/retry-policy.js';
 import type { SecretScrubber } from '../types/secret-scrubber.js';
@@ -38,4 +39,6 @@ export const TOKENS = {
   SecretScrubber: t<SecretScrubber>('SecretScrubber'),
   ModelsRegistry: t<ModelsRegistry>('ModelsRegistry'),
   ModeStore: t<ModeStore>('ModeStore'),
+  /** Replaces the entire provider call layer — retry, streaming, tracing. */
+  ProviderRunner: t<ProviderRunner>('ProviderRunner'),
 } as const;

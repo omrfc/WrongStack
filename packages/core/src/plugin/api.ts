@@ -1,6 +1,7 @@
 import type { Container } from '../kernel/container.js';
 import type { EventBus, EventName, Listener } from '../kernel/events.js';
 import type { Pipeline } from '../kernel/pipeline.js';
+import { ExtensionRegistry } from '../extension/registry.js';
 import type { ProviderRegistry } from '../registry/provider-registry.js';
 import type { SlashCommandRegistry } from '../registry/slash-command-registry.js';
 import type { ToolRegistry } from '../registry/tool-registry.js';
@@ -31,6 +32,11 @@ export interface PluginAPIInit {
   providerRegistry: ProviderRegistry;
   slashCommandRegistry?: SlashCommandRegistry;
   mcpRegistry?: MCPRegistryView;
+  /**
+   * The agent's extension registry. Plugins register AgentExtension
+   * instances here to hook into agent lifecycle events.
+   */
+  extensions?: ExtensionRegistry;
   config: Config;
   log: Logger;
 }
@@ -43,6 +49,7 @@ export class DefaultPluginAPI implements PluginAPI {
   readonly providers: ProviderRegistryView;
   readonly mcp: MCPRegistryView;
   readonly slashCommands: SlashCommandRegistryView;
+  readonly extensions: ExtensionRegistry;
   readonly config: Config;
   readonly log: Logger;
   private readonly pluginCleanupFns: Array<() => void> = [];
@@ -53,6 +60,7 @@ export class DefaultPluginAPI implements PluginAPI {
     this.events = init.events;
     this.config = init.config;
     this.log = init.log.child({ plugin: owner });
+    this.extensions = init.extensions ?? new ExtensionRegistry();
 
     // Convert concrete pipelines to read-only views before passing to plugins.
     const pipelines = init.pipelines as unknown as Record<string, Pipeline<unknown>>;

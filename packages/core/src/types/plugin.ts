@@ -3,6 +3,7 @@ import type { Context } from '../core/context.js';
 import type { Container } from '../kernel/container.js';
 import type { EventBus, EventName, Listener } from '../kernel/events.js';
 import type { ReadonlyPipeline } from '../kernel/pipeline.js';
+import type { ExtensionRegistry } from '../extension/registry.js';
 import type { TextBlock } from './blocks.js';
 import type { Config } from './config.js';
 import type { Logger } from './logger.js';
@@ -67,6 +68,8 @@ export interface PluginAPI {
   providers: ProviderRegistryView;
   mcp: MCPRegistryView;
   slashCommands: SlashCommandRegistryView;
+  /** Registry for agent lifecycle extensions — hooks like beforeRun, beforeIteration, onError, etc. */
+  extensions: ExtensionRegistry;
   config: Config;
   log: Logger;
   /**

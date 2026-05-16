@@ -63,6 +63,13 @@ export class SlashCommandRegistry {
     return this.cmds.delete(name);
   }
 
+  /**
+   * Bulk-register multiple slash commands at once.
+   */
+  registerAll(cmds: SlashCommand[], owner = 'core'): void {
+    for (const cmd of cmds) this.register(cmd, owner);
+  }
+
   get(name: string): SlashCommand | undefined {
     return this.cmds.get(name)?.cmd;
   }

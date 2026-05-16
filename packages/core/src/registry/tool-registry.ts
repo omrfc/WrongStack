@@ -28,6 +28,23 @@ export class ToolRegistry {
   }
 
   /**
+   * Bulk-register multiple tools at once. Each tool that conflicts with an
+   * existing registration is silently skipped — use `registerAllOrThrow`
+   * if you want it to throw on conflicts.
+   */
+  registerAll(tools: Tool[], owner = 'core'): void {
+    for (const tool of tools) this.tryRegister(tool, owner);
+  }
+
+  /**
+   * Bulk-register and throw on the first conflict. Use when you need
+   * strict registration (e.g. at boot time).
+   */
+  registerAllOrThrow(tools: Tool[], owner = 'core'): void {
+    for (const tool of tools) this.register(tool, owner);
+  }
+
+  /**
    * Register a tool as a default. If the tool name is already registered,
    * this is a no-op — the existing registration (from core or another
    * plugin) takes precedence. Use `override` to intentionally replace.

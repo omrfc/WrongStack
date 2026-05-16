@@ -36,6 +36,13 @@ export class ProviderRegistry {
   }
 
   /**
+   * Bulk-register multiple provider factories at once.
+   */
+  registerAll(factories: ProviderFactory[]): void {
+    for (const f of factories) this.register(f);
+  }
+
+  /**
    * Override an existing factory. Throws if no factory is registered
    * for the given type. Use this to safely replace a provider at runtime
    * (e.g. in tests or when a plugin provides a custom implementation).

@@ -48,6 +48,20 @@ export {
   type LoadPluginsOptions,
 } from './plugin/loader.js';
 
+// Extension API
+export {
+  ExtensionRegistry,
+  type AgentExtension,
+  type BeforeRunHook,
+  type AfterRunHook,
+  type BeforeIterationHook,
+  type AfterIterationHook,
+  type OnErrorHook,
+  type ProviderRunnerWrapper,
+  type BeforeToolExecutionHook,
+  type AfterToolExecutionHook,
+} from './extension/index.js';
+
 // Explicit type re-exports needed because tsup DTS deduplication drops types
 // that are reachable through both types/ and defaults/ export chains.
 // Consumers (e.g. @wrongstack/providers) import these directly from '@wrongstack/core'.
@@ -61,4 +75,5 @@ export type {
 } from './types/models-registry.js';
 export type { Logger, LogLevel } from './types/logger.js';
 export type { TokenCounter } from './types/token-counter.js';
+export type { ProviderRunner, RunProviderOptions } from './types/provider-runner.js';
 export type { SecretVault } from './types/secret-vault.js';

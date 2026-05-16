@@ -2,6 +2,7 @@ export * from './blocks.js';
 export * from './messages.js';
 export * from './tool.js';
 export * from './provider.js';
+export * from './provider-runner.js';
 export * from './config.js';
 export * from './permission.js';
 export * from './session.js';

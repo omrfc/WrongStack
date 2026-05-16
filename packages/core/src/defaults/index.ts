@@ -97,6 +97,7 @@ export {
 export { DefaultRetryPolicy } from '../execution/retry-policy.js';
 export { DefaultErrorHandler } from '../execution/error-handler.js';
 export { DefaultSkillLoader, type SkillLoaderOptions } from '../execution/skill-loader.js';
+export { DefaultProviderRunner } from '../execution/provider-runner-impl.js';
 export { HybridCompactor, type CompactorOptions } from '../execution/compactor.js';
 export {
   IntelligentCompactor,
