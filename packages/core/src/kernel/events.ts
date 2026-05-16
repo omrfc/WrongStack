@@ -144,6 +144,14 @@ export interface EventMap {
     provider?: string;
     model?: string;
     description?: string;
+    /**
+     * Absolute path to the per-subagent JSONL transcript on disk, when
+     * one was created. Undefined when the subagent shares the parent
+     * session writer (in-memory or single-file configurations).
+     * Surfaced so the TUI (FleetPanel) and `/fleet log` can show the
+     * user *where* to look without computing it from the run id.
+     */
+    transcriptPath?: string;
   };
   'subagent.task_started': {
     subagentId: string;

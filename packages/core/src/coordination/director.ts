@@ -572,15 +572,35 @@ export class Director {
     }
     await this.coordinator.stopAll();
     for (const b of this.subagentBridges.values()) {
-      await b.stop().catch(() => undefined);
+      await b.stop().catch((err) => this.logShutdownError('subagent_bridge_stop', err));
     }
     this.subagentBridges.clear();
-    await this.bridge.stop().catch(() => undefined);
-    if (this.manifestPath) await this.writeManifest().catch(() => undefined);
+    await this.bridge.stop().catch((err) => this.logShutdownError('director_bridge_stop', err));
+    if (this.manifestPath)
+      await this.writeManifest().catch((err) => this.logShutdownError('manifest_write', err));
     if (this.stateCheckpoint) {
       this.stateCheckpoint.setUsage(this.usage.snapshot());
-      await this.stateCheckpoint.flush().catch(() => undefined);
+      await this.stateCheckpoint
+        .flush()
+        .catch((err) => this.logShutdownError('state_checkpoint_flush', err));
     }
+  }
+
+  /**
+   * Funnel for shutdown-phase errors. We can't throw — `shutdown()` is
+   * called from process-exit paths where an uncaught throw would lose
+   * the manifest write that comes after. But we MUST NOT silently
+   * swallow either — a persistent bridge-close failure would otherwise
+   * mask a real bug. `process.emitWarning` is the right tier:
+   * surfaces on stderr by default, lets the host plug a warning
+   * listener for structured collection, and never affects exit code.
+   */
+  private logShutdownError(phase: string, err: unknown): void {
+    const detail = err instanceof Error ? err.message : String(err);
+    process.emitWarning(
+      `Director shutdown phase "${phase}" failed: ${detail}`,
+      'DirectorShutdownWarning',
+    );
   }
 
   /**

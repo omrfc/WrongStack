@@ -113,12 +113,25 @@ export function FleetPanel({ entries, totalCost, roster }: FleetPanelProps): Rea
               <Text dimColor>·</Text>
               <Text color="yellow">{fmtCost(entry.cost)}</Text>
             </Box>
+            {/* Current tool — shown only while a tool is mid-flight. */}
+            {entry.status === 'running' && entry.currentTool ? (
+              <Box paddingLeft={2}>
+                <Text color="cyan">→ {entry.currentTool.name}</Text>
+                <Text dimColor> ({Math.max(0, Date.now() - entry.currentTool.startedAt)}ms)</Text>
+              </Box>
+            ) : null}
             {/* Streaming tail for running agents */}
             {entry.status === 'running' && entry.streamingText ? (
               <Box paddingLeft={2}>
                 <Text dimColor>
                   {'>'} {entry.streamingText.slice(-80)}
                 </Text>
+              </Box>
+            ) : null}
+            {/* JSONL transcript path — dim, last so users grep -F it. */}
+            {entry.transcriptPath ? (
+              <Box paddingLeft={2}>
+                <Text dimColor>log: {entry.transcriptPath}</Text>
               </Box>
             ) : null}
           </Box>

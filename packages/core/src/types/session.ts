@@ -88,6 +88,14 @@ export interface SessionStore {
 
 export interface SessionWriter {
   readonly id: string;
+  /**
+   * Absolute path to the JSONL file this writer appends to, when one
+   * exists. In-memory writers (tests, ephemeral sessions) leave it
+   * undefined. Observability surfaces (`/fleet log`, FleetPanel) use
+   * this to tell the user *where* the transcript lives without
+   * having to recompute the path from session metadata.
+   */
+  readonly transcriptPath?: string;
   append(event: SessionEvent): Promise<void>;
   close(): Promise<void>;
 }

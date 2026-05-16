@@ -55,6 +55,10 @@ export class FleetBus {
       'iteration.started',
       'iteration.completed',
       'provider.text_delta',
+      // Subagent extended-thinking output. Forwarded so the FleetPanel /
+      // /fleet log can surface "the planner is thinking…" instead of a
+      // silent gap between iteration.started and the first text_delta.
+      'provider.thinking_delta',
       'provider.response',
       'provider.retry',
       'provider.error',

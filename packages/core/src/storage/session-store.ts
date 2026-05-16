@@ -280,6 +280,12 @@ class FileSessionWriter implements SessionWriter {
   private tokenIn = 0;
   private tokenOut = 0;
   private readonly filePath: string;
+  /** Public accessor for the JSONL path — required by SessionWriter so
+   *  observability surfaces (`/fleet log`, FleetPanel) can locate the
+   *  transcript without recomputing the path from session metadata. */
+  get transcriptPath(): string | undefined {
+    return this.filePath || undefined;
+  }
   private initDone = false;
   private readonly resumed: boolean;
   private appendFailCount = 0;

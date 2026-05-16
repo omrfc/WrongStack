@@ -46,6 +46,21 @@ export interface FleetEntry {
   cost: number;
   startedAt: number;
   lastEventAt: number;
+  /**
+   * Tool the subagent is currently inside, set on `tool.started` and
+   * cleared on `tool.executed`. Lets the FleetPanel render "running →
+   * bash" instead of an opaque "running". Undefined when no tool is
+   * mid-flight (between iterations, before the first tool, or after
+   * the last tool of a run).
+   */
+  currentTool?: { name: string; startedAt: number };
+  /**
+   * Absolute path to the per-subagent JSONL transcript on disk, when
+   * one was created. Surfaced so the FleetPanel can render `path:`
+   * dim under the entry — users grep / tail the file for full
+   * visibility into the subagent's run.
+   */
+  transcriptPath?: string;
 }
 
 /** A registered slash command matched against the user's current / query. */
@@ -229,10 +244,14 @@ type Action =
   | { type: 'resetContextChip' }
   // Fleet actions
   | { type: 'fleetSeed'; entries: FleetEntry[]; cost: number }
-  | { type: 'fleetSpawn'; id: string; name?: string; provider?: string; model?: string }
+  | { type: 'fleetSpawn'; id: string; name?: string; provider?: string; model?: string; transcriptPath?: string }
   | { type: 'fleetStart'; id: string; taskId?: string }
   | { type: 'fleetDelta'; id: string; text: string }
   | { type: 'fleetTool'; id: string }
+  /** tool.started: pin the current tool name for status display. */
+  | { type: 'fleetToolStart'; id: string; name: string }
+  /** tool.executed: clear the current tool (paired with fleetTool). */
+  | { type: 'fleetToolEnd'; id: string }
   | { type: 'fleetUsage'; id: string; input: number; output: number; cacheRead: number; cacheWrite: number }
   | { type: 'fleetDone'; id: string; status: FleetEntry['status']; iterations: number; toolCalls: number }
   | { type: 'fleetCost'; cost: number }
@@ -513,8 +532,35 @@ export function reducer(state: State, action: Action): State {
         cost: 0,
         startedAt: Date.now(),
         lastEventAt: Date.now(),
+        transcriptPath: action.transcriptPath,
       };
       return { ...state, fleet: { ...state.fleet, [action.id]: entry } };
+    }
+    case 'fleetToolStart': {
+      const cur = state.fleet[action.id];
+      if (!cur) return state;
+      return {
+        ...state,
+        fleet: {
+          ...state.fleet,
+          [action.id]: {
+            ...cur,
+            currentTool: { name: action.name, startedAt: Date.now() },
+            lastEventAt: Date.now(),
+          },
+        },
+      };
+    }
+    case 'fleetToolEnd': {
+      const cur = state.fleet[action.id];
+      if (!cur) return state;
+      return {
+        ...state,
+        fleet: {
+          ...state.fleet,
+          [action.id]: { ...cur, currentTool: undefined, lastEventAt: Date.now() },
+        },
+      };
     }
     case 'fleetStart': {
       const cur = state.fleet[action.id];
@@ -1404,6 +1450,7 @@ export function App({
         name: e.name,
         provider: e.provider,
         model: e.model,
+        transcriptPath: e.transcriptPath,
       });
       const where = e.provider && e.model ? `${e.provider}/${e.model}` : 'spawned';
       const desc = e.description ? ` — ${e.description.slice(0, 80)}` : '';
@@ -1617,8 +1664,16 @@ export function App({
           }
           break;
         }
+        case 'tool.started': {
+          const p = e.payload as { name?: string };
+          if (p?.name) {
+            dispatch({ type: 'fleetToolStart', id: e.subagentId, name: p.name });
+          }
+          break;
+        }
         case 'tool.executed': {
           dispatch({ type: 'fleetTool', id: e.subagentId });
+          dispatch({ type: 'fleetToolEnd', id: e.subagentId });
           if (streamFleetRef.current) {
             // Flush any pending assistant text so tool calls appear in
             // order relative to the chat that produced them.
