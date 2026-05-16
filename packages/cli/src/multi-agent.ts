@@ -187,12 +187,14 @@ export class MultiAgentHost {
     const coordinatorConfig = {
       coordinatorId: randomUUID(),
       doneCondition: { type: 'all_tasks_done' as const },
-      maxConcurrent: 2,
-      defaultBudget: {
-        maxToolCalls: 1000,
-        maxIterations: 200,
-        timeoutMs: 4 * 60 * 60 * 1000,
-      },
+      maxConcurrent: 8,
+      // No defaultBudget. Caps land on a subagent ONLY when the
+      // orchestrator (delegate-tool / spawn_subagent) or the user
+      // (CLI flag) sets them explicitly. The prior defaults
+      // (1000 tools / 200 iter / 4h) silently killed long autonomous
+      // runs; for a "work until done" director we want no implicit
+      // ceilings. The orchestrator can still cap a single subagent
+      // by passing maxToolCalls/maxIterations through the spawn tool.
     };
 
     if (this.opts.directorMode) {
@@ -202,6 +204,13 @@ export class MultiAgentHost {
         sharedScratchpadPath: this.opts.sharedScratchpadPath,
         stateCheckpointPath: this.opts.stateCheckpointPath,
         sessionWriter: this.opts.sessionWriter,
+        // Autonomy: allow nested directors a few levels deep. Default
+        // is 2 (root + one tier of workers), which trips the moment a
+        // worker tries to recurse into "let me delegate the parser
+        // analysis to a tighter specialist". 5 lets the director
+        // structure work as deeply as the task requires without us
+        // having to pass a flag every time.
+        maxSpawnDepth: 5,
       });
       this.director.on('task.completed', ({ task, result }) => {
         this.results.push(result);
@@ -427,11 +436,15 @@ export class MultiAgentHost {
     opts?: { provider?: string; model?: string; tools?: string[]; name?: string },
   ): Promise<{ subagentId: string; taskId: string }> {
     await this.ensureCoordinator();
+    // No implicit budget caps. The orchestrator (when it spawns
+    // through delegate / spawn_subagent) passes budgets sized to the
+    // task; the human-driven /spawn entrypoint defaults to "run
+    // until the work is done", because the human is right here and
+    // can interrupt with Esc / /steer / Ctrl+C. Setting maxToolCalls=20
+    // here would kill any non-trivial audit at iteration 21.
     const subagentConfig = {
       name: opts?.name ?? 'adhoc',
       role: 'general',
-      maxToolCalls: 20,
-      maxIterations: 20,
       provider: opts?.provider,
       model: opts?.model,
       tools: opts?.tools,
@@ -466,7 +479,8 @@ export class MultiAgentHost {
         id: taskId,
         description,
         subagentId,
-        maxToolCalls: 20,
+        // No maxToolCalls — same reasoning as the spawn config above.
+        // The director / orchestrator owns the budget decision.
       });
       return { subagentId, taskId };
     }
@@ -487,7 +501,7 @@ export class MultiAgentHost {
       id: taskId,
       description,
       subagentId: spawned.subagentId,
-      maxToolCalls: 20,
+      // No maxToolCalls — see comment on the director branch above.
     });
     return { subagentId: spawned.subagentId, taskId };
   }
