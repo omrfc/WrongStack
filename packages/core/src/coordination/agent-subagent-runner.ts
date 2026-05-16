@@ -152,6 +152,26 @@ export function makeAgentSubagentRunner(opts: AgentRunnerOptions): SubagentRunne
           onBudgetError(e);
         }
       }),
+      // D3: cooperative timeout enforcement DURING a long tool call.
+      // The iteration-loop checkTimeout() only fires between agent
+      // iterations — a single `bash sleep 3600` call would otherwise
+      // park inside one tool execution while the timeout silently
+      // passes, relying solely on the coordinator's hard Promise.race
+      // to interrupt. Tools that emit `tool.progress` (bash chunks,
+      // fetch byte progress, spawn-stream stdout) give us a heartbeat
+      // we can hang the check on. When the budget trips here:
+      //   1. onBudgetError sets budgetError + aborter.abort()
+      //   2. aborter signal propagates to agent.run → tool executor
+      //   3. tool's own signal listener kills the child process
+      // Cheap: O(1) per progress event, and the budget short-circuits
+      // when timeoutMs is unset (most subagents have one set anyway).
+      events.on('tool.progress', () => {
+        try {
+          ctx.budget.checkTimeout();
+        } catch (e) {
+          onBudgetError(e);
+        }
+      }),
     );
 
     // Forward the coordinator signal so stop() from outside also aborts.
