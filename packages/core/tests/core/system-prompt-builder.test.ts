@@ -328,6 +328,7 @@ describe('DefaultSystemPromptBuilder', () => {
           items: [{ id: 'x', title: 'late item', status: 'open', createdAt: '', updatedAt: '' }],
         }),
       );
+      // biome-ignore lint/style/useConst: reassigned below
       let resolved: string | undefined;
       const b = new DefaultSystemPromptBuilder({
         planPath: () => resolved,

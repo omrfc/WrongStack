@@ -71,8 +71,8 @@ function bump(current, kind) {
 }
 
 function compareSemver(a, b) {
-  const pa = a.split(/[.-]/).map((x) => (isNaN(+x) ? x : +x));
-  const pb = b.split(/[.-]/).map((x) => (isNaN(+x) ? x : +x));
+  const pa = a.split(/[.-]/).map((x) => (Number.isNaN(+x) ? x : +x));
+  const pb = b.split(/[.-]/).map((x) => (Number.isNaN(+x) ? x : +x));
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const ai = pa[i] ?? 0;
     const bi = pb[i] ?? 0;
