@@ -101,7 +101,10 @@ export class SlashCommandRegistry {
    *   `/pluginName:cmd args` → plugin command
    * The command name is split at the first `:` if the prefix matches a known owner.
    */
-  async dispatch(line: string, ctx: Context): Promise<{ exit?: boolean; message?: string } | null> {
+  async dispatch(
+    line: string,
+    ctx: Context,
+  ): Promise<{ exit?: boolean; message?: string; runText?: string } | null> {
     if (!line.startsWith('/')) return null;
     const trimmed = line.slice(1);
     const spaceIdx = trimmed.indexOf(' ');

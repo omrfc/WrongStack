@@ -24,7 +24,15 @@ export interface SlashCommand {
    * Execute the command.
    * @param args Everything after the command name (trimmed by dispatch).
    * @param ctx The current agent context.
-   * @returns `{ exit: true }` to quit the REPL. `{ message }` to print and continue.
+   * @returns `{ exit: true }` to quit the REPL. `{ message }` to print and
+   * continue. `{ runText }` to send a follow-up user-role message to the
+   * model immediately (e.g. `/steer <text>` builds a STEERING preamble
+   * here and asks the TUI to run it as the next turn). The TUI prints
+   * `message` first (if any) so the user sees the slash result before
+   * the model's response starts streaming.
    */
-  run(args: string, ctx: Context): Promise<{ exit?: boolean; message?: string } | void>;
+  run(
+    args: string,
+    ctx: Context,
+  ): Promise<{ exit?: boolean; message?: string; runText?: string } | void>;
 }

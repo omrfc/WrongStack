@@ -1367,6 +1367,91 @@ export function App({
     };
   }, [slashRegistry]);
 
+  // `/steer <message>` — slash-command equivalent of Esc-to-steer.
+  // Useful when Esc is consumed by an outer terminal multiplexer, or
+  // when the user wants a single-shot redirect without the typed
+  // follow-up (the message is the new direction). Performs the same
+  // sequence the Esc handler does: snapshot context, abort the active
+  // run, terminate the fleet, drop the queue, then sets steeringPending
+  // so the message — submitted as the slash command's return — picks
+  // up the rich STEERING preamble in the normal submit path.
+  //
+  // Unlike Esc, this slash command can be invoked at any state. When
+  // the agent is idle the abort and fleet-termination are no-ops; the
+  // steering preamble still gets prepended, which is harmless extra
+  // context ("nothing was running") for the next turn.
+  useEffect(() => {
+    const cmd = {
+      name: 'steer',
+      description:
+        'Interrupt the running agent (incl. fleet) and redirect: /steer <new direction>',
+      help: [
+        'Usage: /steer <new direction>',
+        '',
+        'Aborts the active iteration, terminates any running subagents,',
+        'drops queued messages, and sends your text to the model with a',
+        'STEERING preamble explaining what was in flight and what the',
+        'model is authorised to do (pivot hard, respawn subagents, ask',
+        'for clarification). Equivalent to pressing Esc then typing.',
+      ].join('\n'),
+      async run(args: string) {
+        const text = args.trim();
+        if (!text) {
+          return { message: 'Usage: /steer <new direction>' };
+        }
+        // Capture BEFORE mutating — same as the Esc handler.
+        const s = stateRef.current;
+        const runningTools = Array.from(s.runningTools.values()).map((t) => t.name);
+        const subagents = Object.values(s.fleet)
+          .filter((e) => e.status === 'running')
+          .map((e) => ({ label: e.name, status: e.status, tool: e.currentTool?.name }));
+        const subagentsTerminated = subagents.length;
+        const partialAssistantText = streamingTextRef.current.slice(-1500);
+
+        activeCtrlRef.current?.abort();
+        dispatch({
+          type: 'steerStart',
+          snapshot: { runningTools, subagents, subagentsTerminated, partialAssistantText },
+        });
+        const droppedCount = s.queue.length;
+        if (droppedCount > 0) dispatch({ type: 'queueClear' });
+        if (director && subagentsTerminated > 0) {
+          const cap = new Promise<void>((resolve) => {
+            const t = setTimeout(resolve, 1500);
+            t.unref?.();
+          });
+          void Promise.race([director.terminateAll().catch(() => undefined), cap]);
+        }
+
+        // Build the full preamble + direction here, return it as the
+        // slash command output's `runText` so the submit pipeline
+        // sends THIS to the model instead of "/steer …".
+        const preamble = buildSteeringPreamble(
+          { runningTools, subagents, subagentsTerminated, partialAssistantText },
+          text,
+        );
+        // Consume immediately — the runText below already carries the
+        // preamble; the steeringPending flag would otherwise double up.
+        dispatch({ type: 'steerConsume' });
+
+        const droppedTag = droppedCount > 0 ? ` · dropped ${droppedCount} queued` : '';
+        const fleetTag =
+          subagentsTerminated > 0
+            ? ` · stopped ${subagentsTerminated} subagent${subagentsTerminated === 1 ? '' : 's'}`
+            : '';
+        return {
+          message: `↯ Steering${droppedTag}${fleetTag}.`,
+          runText: preamble,
+        };
+      },
+    };
+    slashRegistry.register(cmd);
+    return () => {
+      slashRegistry.unregister('steer');
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slashRegistry, director]);
+
   // Register the TUI-only `/model` command — opens a two-step picker
   // (provider → model). All work is local state mutation; the actual
   // switch fires only after the user confirms a model in step 2.
@@ -2452,6 +2537,26 @@ export function App({
         if (res?.exit) {
           exit();
           onExit(0);
+        }
+        // `runText` lets a slash command queue a follow-up user-role
+        // message (used by `/steer <text>` to send the STEERING
+        // preamble + new direction as if the user had typed it).
+        // Run AFTER the message is rendered so the user sees the
+        // slash result before the model's response streams.
+        if (res?.runText) {
+          const b = builderRef.current;
+          if (b) {
+            b.appendText(res.runText);
+            const blocks = await b.submit();
+            // Wait briefly for any in-flight abort to settle into
+            // 'idle' before kicking the next iteration — otherwise
+            // runBlocks would early-return on the busy guard.
+            const start = Date.now();
+            while (stateRef.current.status !== 'idle' && Date.now() - start < 1500) {
+              await new Promise((r) => setTimeout(r, 25));
+            }
+            await runBlocks(blocks);
+          }
         }
         // Only fire onClearHistory for `/clear` — without this gate every
         // slash command (`/model`, `/use`, `/help`, …) would wipe the
