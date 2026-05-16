@@ -261,6 +261,9 @@ importers:
       '@wrongstack/providers':
         specifier: workspace:*
         version: link:../providers
+      '@wrongstack/runtime':
+        specifier: workspace:*
+        version: link:../runtime
       '@wrongstack/tools':
         specifier: workspace:*
         version: link:../tools

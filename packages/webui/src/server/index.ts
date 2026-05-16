@@ -41,6 +41,7 @@ import { forgetTool, rememberTool } from '@wrongstack/tools';
 import { builtinToolsPack } from '@wrongstack/tools/pack';
 import { WebSocket, WebSocketServer } from 'ws';
 import { randomBytes } from 'node:crypto';
+import { createDefaultContainer } from '@wrongstack/runtime';
 import { bootConfig, patchConfig, type BootResult } from './boot.js';
 
 // Re-export types
@@ -84,24 +85,9 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     ttlSeconds: 24 * 3600,
   });
 
-  // Container & bindings
-  const container = new Container();
-  const configStore = new DefaultConfigStore(config);
-  container.bind(TOKENS.ConfigStore, () => configStore);
-  container.bind(TOKENS.Logger, () => logger);
-  container.bind(TOKENS.SecretScrubber, () => new DefaultSecretScrubber());
-  container.bind(TOKENS.RetryPolicy, () => new DefaultRetryPolicy());
-  container.bind(TOKENS.ErrorHandler, () => new DefaultErrorHandler());
-  container.bind(TOKENS.ModelsRegistry, () => modelsRegistry);
-  container.bind(
-    TOKENS.PermissionPolicy,
-    () =>
-      new DefaultPermissionPolicy({
-        trustFile: wpaths.projectTrust,
-        yolo: false,
-        promptDelegate: undefined,
-      }),
-  );
+  // Container via shared factory
+  const container = createDefaultContainer({ config, wpaths, logger, modelsRegistry });
+  const configStore = container.resolve(TOKENS.ConfigStore);
 
   // Provider registry
   const providerRegistry = new ProviderRegistry();

@@ -60,6 +60,7 @@
   "dependencies": {
     "@wrongstack/core": "workspace:*",
     "@wrongstack/providers": "workspace:*",
+    "@wrongstack/runtime": "workspace:*",
     "@wrongstack/tools": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
