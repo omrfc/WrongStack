@@ -222,6 +222,7 @@ describe('built-in slash commands', () => {
       model: 'claude-sonnet-4-6',
       cwd: '/tmp',
       projectRoot: '/proj',
+      meta: {},
     } as unknown as Context;
     await registry.dispatch('/context', ctx);
     expect(renderer.output).toContain('Context Window');
@@ -238,6 +239,7 @@ describe('built-in slash commands', () => {
       systemPrompt: [],
       readFiles: new Set(),
       fileMtimes: new Map(),
+      meta: {},
     } as unknown as Context;
     await registry.dispatch('/ctx', ctx);
     expect(renderer.output).toContain('Context Window');
@@ -254,6 +256,7 @@ describe('built-in slash commands', () => {
       model: 'claude-sonnet-4-6',
       cwd: '/tmp',
       projectRoot: '/proj',
+      meta: {},
     } as unknown as Context;
     await registry.dispatch('/context detail', ctx);
     expect(renderer.output).toContain('model:');
