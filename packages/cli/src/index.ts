@@ -105,9 +105,21 @@ export async function main(argv: string[]): Promise<number> {
   // PathResolver is created from the resolved projectRoot
   const pathResolver = new DefaultPathResolver(cwd);
 
-  // Build container + services
-  const container = new Container();
-  // Resolve provider + build registry (extracted to wiring/provider)
+  // Build container via shared factory
+  const container = createDefaultContainer({
+    config, wpaths, logger, modelsRegistry,
+    permission: { yolo: config.yolo, promptDelegate: makePromptDelegate(reader) as any },
+    compactor: { preserveK: config.context.preserveK, eliseThreshold: config.context.eliseThreshold },
+    bundledSkillsDir: config.features.skills ? resolveBundledSkillsDir() : undefined,
+  });
+  const configStore = container.resolve(TOKENS.ConfigStore);
+  container.bind(TOKENS.PathResolver, () => pathResolver);
+  container.bind(TOKENS.Renderer, () => renderer);
+  container.bind(TOKENS.InputReader, () => reader);
+
+  // Resolve modeId and modelCapabilities before building system prompt.
+  const modeStore = container.resolve(TOKENS.ModeStore);
+  const activeMode = await modeStore.getActiveMode();
   let resolvedProvider: import('@wrongstack/core').ResolvedProvider | undefined;
   let providerRegistry: ProviderRegistry;
   let provider: ReturnType<ProviderRegistry['create']>;
@@ -121,34 +133,6 @@ export async function main(argv: string[]): Promise<number> {
     await reader.close();
     return 2;
   }
-  // L1-B: a single ConfigStore is the source of truth for runtime config.
-  const configStore = new DefaultConfigStore(config);
-  container.bind(TOKENS.ConfigStore, () => configStore);
-  container.bind(TOKENS.Logger, () => logger);
-  container.bind(TOKENS.PathResolver, () => pathResolver);
-  container.bind(TOKENS.SecretScrubber, () => new DefaultSecretScrubber());
-  container.bind(TOKENS.RetryPolicy, () => new DefaultRetryPolicy());
-  container.bind(TOKENS.ErrorHandler, () => new DefaultErrorHandler());
-  container.bind(TOKENS.ModelsRegistry, () => modelsRegistry);
-  container.bind(
-    TOKENS.TokenCounter,
-    () => new DefaultTokenCounter({ registry: modelsRegistry, providerId: config.provider }),
-  );
-  const modeStore = new DefaultModeStore({ directory: wpaths.configDir });
-  container.bind(TOKENS.ModeStore, () => modeStore);
-  container.bind(
-    TOKENS.SessionStore,
-    () => new DefaultSessionStore({ dir: wpaths.projectSessions }),
-  );
-  const memoryStore = new DefaultMemoryStore({ paths: wpaths });
-  container.bind(TOKENS.MemoryStore, () => memoryStore);
-  const skillLoader = new DefaultSkillLoader({
-    paths: wpaths,
-    bundledDir: config.features.skills ? resolveBundledSkillsDir() : undefined,
-  });
-  container.bind(TOKENS.SkillLoader, () => skillLoader);
-  // Resolve modeId and modelCapabilities before building system prompt.
-  const activeMode = await modeStore.getActiveMode();
   const modeId = activeMode?.id ?? 'default';
   const modePrompt = activeMode?.prompt ?? '';
   const resolvedModel = await modelsRegistry.getModel(config.provider, config.model);
@@ -160,41 +144,23 @@ export async function main(argv: string[]): Promise<number> {
         supportsReasoning: resolvedModel.capabilities.reasoning,
       }
     : undefined;
+
+  const memoryStore = container.resolve(TOKENS.MemoryStore);
+  const skillLoader = container.resolve(TOKENS.SkillLoader);
   const sessionRef: { current?: import('@wrongstack/core').SessionWriter } = {};
-  container.bind(
-    TOKENS.SystemPromptBuilder,
-    () =>
-      new DefaultSystemPromptBuilder({
-        memoryStore,
-        skillLoader: config.features.skills ? skillLoader : undefined,
-        modeStore,
-        modeId,
-        modePrompt,
-        modelCapabilities,
-        planPath: () =>
-          sessionRef.current
-            ? path.join(wpaths.projectSessions, `${sessionRef.current.id}.plan.json`)
-            : undefined,
-      }),
-  );
-  container.bind(TOKENS.Renderer, () => renderer);
-  container.bind(TOKENS.InputReader, () => reader);
-  container.bind(
-    TOKENS.PermissionPolicy,
-    () =>
-      new DefaultPermissionPolicy({
-        trustFile: wpaths.projectTrust,
-        yolo: config.yolo,
-        promptDelegate: makePromptDelegate(reader),
-      }),
-  );
-  container.bind(
-    TOKENS.Compactor,
-    () =>
-      new HybridCompactor({
-        preserveK: config.context.preserveK,
-        eliseThreshold: config.context.eliseThreshold,
-      }),
+  container.bind(TOKENS.SystemPromptBuilder, () =>
+    new DefaultSystemPromptBuilder({
+      memoryStore,
+      skillLoader: config.features.skills ? skillLoader : undefined,
+      modeStore,
+      modeId,
+      modePrompt,
+      modelCapabilities,
+      planPath: () =>
+        sessionRef.current
+          ? path.join(wpaths.projectSessions, `${sessionRef.current.id}.plan.json`)
+          : undefined,
+    }),
   );
 
   // Tool registry
