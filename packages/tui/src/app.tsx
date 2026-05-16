@@ -1443,9 +1443,11 @@ export function App({
         toolCalls: e.toolCalls,
       });
       // Status-specific icon so timeout/stopped/failed are visually
-      // distinct from a plain success. Error tail (when present) is
-      // collapsed-whitespace and capped so a stack-trace from the
-      // provider doesn't blow up the chat line.
+      // distinct from a plain success. We now have a structured error
+      // envelope with `kind` (e.g. `provider_rate_limit`,
+      // `tool_failed`) — prefix the tail with `[kind]` so the user
+      // sees the actual failure mode, not just "✗ failed" for every
+      // breed of failure.
       const icon =
         e.status === 'success'
           ? '✓'
@@ -1454,9 +1456,12 @@ export function App({
             : e.status === 'stopped'
               ? '⊘'
               : '✗';
-      const errSnip = e.error
-        ? ` — ${e.error.replace(/\s+/g, ' ').slice(0, 100)}${e.error.length > 100 ? '…' : ''}`
+      const errKind = e.error?.kind;
+      const errMsg = e.error?.message;
+      const errMsgTail = errMsg
+        ? ` — ${errMsg.replace(/\s+/g, ' ').slice(0, 100)}${errMsg.length > 100 ? '…' : ''}`
         : '';
+      const errChip = errKind ? ` [${errKind}]` : '';
       const secs = (e.durationMs / 1000).toFixed(e.durationMs < 10_000 ? 1 : 0);
       dispatch({
         type: 'addEntry',
@@ -1465,7 +1470,7 @@ export function App({
           agentLabel: lbl.label,
           agentColor: lbl.color,
           icon,
-          text: `${e.status} (${e.iterations} iter · ${e.toolCalls} tools · ${secs}s)${errSnip}`,
+          text: `${e.status} (${e.iterations} iter · ${e.toolCalls} tools · ${secs}s)${errChip}${errMsgTail}`,
         },
       });
     });

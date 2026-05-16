@@ -42,8 +42,13 @@ export function fmtDuration(ms: number): string {
  * Render a completed TaskResult into a single line for `/agents` and
  * `/fleet status`. Distinguishes all four terminal statuses with
  * separate icons + colors so users can tell a timeout from a real
- * failure at a glance, and surfaces a truncated error tail when the
- * task didn't succeed (previously dropped on the floor).
+ * failure at a glance, and surfaces both the failure kind (e.g.
+ * `provider_rate_limit`, `tool_failed`) and a truncated error tail
+ * (previously dropped on the floor).
+ *
+ * Accepts either the structured `SubagentError` envelope (current) or
+ * a legacy string error — the field shape is widened to keep older
+ * callers compiling while migrations roll through.
  *
  * The caller passes the color helper (it lives in @wrongstack/core)
  * to avoid a circular import from this utility module.
@@ -51,7 +56,9 @@ export function fmtDuration(ms: number): string {
 export function fmtTaskResultLine(
   r: {
     status: 'success' | 'failed' | 'timeout' | 'stopped';
-    error?: string;
+    error?:
+      | string
+      | { kind?: string; message?: string; retryable?: boolean; backoffMs?: number };
     iterations: number;
     toolCalls: number;
     durationMs: number;
@@ -65,10 +72,17 @@ export function fmtTaskResultLine(
 ): { mark: string; stats: string; tail: string } {
   const stats = `${r.iterations}it ${r.toolCalls}tc ${fmtDuration(r.durationMs)}`;
   // Error tails are unbounded provider strings — collapse whitespace and
-  // truncate so a 2KB stack trace can't blow up the chat line.
-  const errSnip = r.error
-    ? color.dim(` — ${r.error.replace(/\s+/g, ' ').slice(0, 80)}${r.error.length > 80 ? '…' : ''}`)
+  // truncate so a 2KB stack trace can't blow up the chat line. Lift the
+  // structured `kind` chip in front of the tail so the user reads
+  // `✗ failed [provider_rate_limit] — server overloaded` instead of
+  // raw verbose body.
+  const errMsg = typeof r.error === 'string' ? r.error : r.error?.message;
+  const errKind = typeof r.error === 'object' ? r.error?.kind : undefined;
+  const errTail = errMsg
+    ? ` — ${errMsg.replace(/\s+/g, ' ').slice(0, 80)}${errMsg.length > 80 ? '…' : ''}`
     : '';
+  const errKindChip = errKind ? color.dim(` [${errKind}]`) : '';
+  const errSnip = errMsg || errKind ? `${errKindChip}${color.dim(errTail)}` : '';
   switch (r.status) {
     case 'success':
       return { mark: color.green('✓'), stats, tail: '' };

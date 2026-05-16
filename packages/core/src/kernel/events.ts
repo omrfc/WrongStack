@@ -157,7 +157,21 @@ export interface EventMap {
     iterations: number;
     toolCalls: number;
     durationMs: number;
-    error?: string;
+    /**
+     * Structured failure envelope when `status !== 'success'`. Carries
+     * `kind` (one of `SubagentErrorKind`), `message`, `retryable`, and
+     * optional `backoffMs`. UIs branch on `kind` to render the right
+     * chip (rate_limit vs auth vs tool_failed). The type is imported
+     * lazily as a structural object to avoid a coordination → kernel
+     * cycle in the dependency graph.
+     */
+    error?: {
+      kind: string;
+      message: string;
+      retryable: boolean;
+      backoffMs?: number;
+      cause?: { name: string; message: string; stack?: string };
+    };
   };
   'mcp.server.connected': { name: string; toolCount: number };
   'mcp.server.reconnected': { name: string; toolCount: number };

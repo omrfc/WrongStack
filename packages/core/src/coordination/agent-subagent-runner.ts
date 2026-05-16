@@ -157,6 +157,17 @@ export function makeAgentSubagentRunner(opts: AgentRunnerOptions): SubagentRunne
     }
 
     const usage = ctx.budget.usage();
+    // Empty-response guard. A "successful" run with no text AND no tool
+    // calls is almost always a prompt / config issue, not a real
+    // success — the agent burned an iteration to say nothing. Surface
+    // it as a classified failure so callers can show "✗ empty_response"
+    // instead of a confusing green ✓ with no output. We only trip on
+    // the (no-text AND no-tools) intersection because text-less runs
+    // with tool calls are legit (e.g. "run npm test then end_turn").
+    const finalText = (result.finalText ?? '').trim();
+    if (finalText.length === 0 && usage.toolCalls === 0) {
+      throw new Error('empty response');
+    }
     return {
       result: result.finalText,
       iterations: result.iterations,

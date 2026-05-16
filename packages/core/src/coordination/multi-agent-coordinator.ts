@@ -8,11 +8,14 @@ import type {
   SpawnResult,
   SubagentConfig,
   SubagentContext,
+  SubagentError,
+  SubagentErrorKind,
   SubagentRunContext,
   SubagentRunner,
   TaskResult,
   TaskSpec,
 } from '../types/multi-agent.js';
+import { ProviderError } from '../types/provider.js';
 import { BudgetExceededError, SubagentBudget } from './subagent-budget.js';
 
 type SubagentStatus = 'running' | 'idle' | 'stopped' | 'error';
@@ -180,7 +183,7 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
           subagentId,
           taskId: task.id,
           status: 'failed',
-          error: err instanceof Error ? err.message : String(err),
+          error: classifySubagentError(err),
           iterations: 0,
           toolCalls: 0,
           durationMs: 0,
@@ -278,7 +281,9 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
         subagentId,
         taskId: task.id,
         status,
-        error: err instanceof Error ? err.message : String(err),
+        error: classifySubagentError(err, {
+          parentAborted: subagent.abortController.signal.aborted,
+        }),
         iterations: usage.iterations,
         toolCalls: usage.toolCalls,
         durationMs: Date.now() - startTime,
@@ -377,4 +382,152 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
     }
     return false;
   }
+}
+
+/**
+ * Map any raw exception thrown out of a subagent's runner into a
+ * structured `SubagentError`. This is the single point where the
+ * coordinator decides "what kind of failure was that" — so callers
+ * (delegate tool output, /agents UI, retry policies) branch on
+ * `kind` instead of substring-matching `error.message`.
+ *
+ * The classification order matters:
+ *   1. Provider errors first (their `status` + `retryable` are
+ *      already structured, just translate to our enum).
+ *   2. Budget errors next (BudgetExceededError carries a discrete
+ *      `kind` we can lift directly).
+ *   3. Parent-abort if the subagent's signal was aborted and we
+ *      didn't recognize the error otherwise — distinguishes user
+ *      Ctrl+C from a tool throwing.
+ *   4. Substring sniffing for stable error markers ("agent
+ *      aborted" from agent-subagent-runner, "Bridge transport"
+ *      from agent-bridge).
+ *   5. Fallback to `unknown` so callers know we couldn't classify.
+ *
+ * The `cause` field is always populated when `err` is an Error so
+ * diagnostics survive even when `kind === 'unknown'` — no info is
+ * dropped, the classifier just refused to commit.
+ *
+ * Exported because tests and CLI surfaces want to assert on the
+ * classification without instantiating a coordinator.
+ */
+export function classifySubagentError(
+  err: unknown,
+  hints: { parentAborted?: boolean } = {},
+): SubagentError {
+  const cause = err instanceof Error
+    ? { name: err.name, message: err.message, stack: err.stack }
+    : undefined;
+  const baseMessage = err instanceof Error ? err.message : String(err);
+
+  if (err instanceof ProviderError) {
+    return providerErrorToSubagentError(err, baseMessage, cause);
+  }
+
+  if (err instanceof BudgetExceededError) {
+    const map: Record<BudgetExceededError['kind'], SubagentErrorKind> = {
+      iterations: 'budget_iterations',
+      tool_calls: 'budget_tool_calls',
+      tokens: 'budget_tokens',
+      cost: 'budget_cost',
+      timeout: 'budget_timeout',
+    };
+    return {
+      kind: map[err.kind],
+      message: baseMessage,
+      // Budgets are user-configured ceilings, not transient failures —
+      // retrying with the same budget will hit the same ceiling. The
+      // orchestrator must raise the budget or narrow the task first.
+      retryable: false,
+      cause,
+    };
+  }
+
+  // Distinguish parent-aborted from real failures BEFORE substring
+  // sniffing — if the parent signal is aborted, the most common
+  // exception is "agent aborted" thrown by agent-subagent-runner.
+  if (hints.parentAborted) {
+    return {
+      kind: 'aborted_by_parent',
+      message: baseMessage,
+      retryable: false,
+      cause,
+    };
+  }
+
+  // Stable markers — these strings live in our own code and are
+  // checked here intentionally so callers can react without
+  // exception-type imports.
+  const lower = baseMessage.toLowerCase();
+  if (/agent aborted$/i.test(baseMessage)) {
+    return {
+      kind: 'aborted_by_parent',
+      message: baseMessage,
+      retryable: false,
+      cause,
+    };
+  }
+  if (/agent exhausted iteration limit$/i.test(baseMessage)) {
+    return { kind: 'budget_iterations', message: baseMessage, retryable: false, cause };
+  }
+  if (/empty response$/i.test(baseMessage)) {
+    return { kind: 'empty_response', message: baseMessage, retryable: false, cause };
+  }
+  if (lower.includes('bridge transport') || /bridge.*(closed|disconnect)/i.test(baseMessage)) {
+    return { kind: 'bridge_failed', message: baseMessage, retryable: false, cause };
+  }
+  if (/context length|max.*tokens?.*exceeded|prompt is too long/i.test(baseMessage)) {
+    return { kind: 'context_overflow', message: baseMessage, retryable: false, cause };
+  }
+
+  // Final fallback — preserve cause so diagnostics aren't lost.
+  return {
+    kind: 'unknown',
+    message: baseMessage,
+    retryable: false,
+    cause,
+  };
+}
+
+function providerErrorToSubagentError(
+  err: ProviderError,
+  message: string,
+  cause: SubagentError['cause'],
+): SubagentError {
+  const status = err.status;
+  // Read suggested retry-after from the provider body when present so
+  // the orchestrator doesn't have to invent a backoff. Most providers
+  // include retry-after as a header / body field which our provider
+  // layer normalises into `body.message` — we cannot trust a numeric
+  // field exists, so we leave backoffMs unset when unknown.
+  if (status === 429 || err.body?.type === 'rate_limit_error') {
+    return {
+      kind: 'provider_rate_limit',
+      message,
+      retryable: true,
+      // Conservative default: 5s. Provider-specific code can override
+      // by emitting an error whose body carries an explicit hint.
+      backoffMs: 5_000,
+      cause,
+    };
+  }
+  if (status === 401 || status === 403 || err.body?.type === 'authentication_error') {
+    return { kind: 'provider_auth', message, retryable: false, cause };
+  }
+  if (status === 408 || status === 0) {
+    return { kind: 'provider_timeout', message, retryable: true, cause };
+  }
+  if (status >= 500 && status < 600) {
+    return {
+      kind: 'provider_5xx',
+      message,
+      retryable: true,
+      backoffMs: 3_000,
+      cause,
+    };
+  }
+  // Other provider errors (400 invalid request, 404 not found, etc.)
+  // are not retryable as-is and don't have a dedicated kind — surface
+  // as 'unknown' so the orchestrator treats them as terminal.
+  return { kind: 'unknown', message, retryable: err.retryable, cause };
 }

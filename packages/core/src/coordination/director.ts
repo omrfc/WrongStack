@@ -287,13 +287,22 @@ export class Director {
       // crashed director leaves a complete picture of which tasks landed.
       const title = this.taskDescriptions.get(r.taskId) ?? payload.task.description ?? r.taskId;
       const failed = r.status !== 'success';
+      // Disk-side state-checkpoint and session JSONL both store `error`
+      // as a string for historical reasons. The structured SubagentError
+      // envelope carries `kind`, `message`, `retryable`, etc. — flatten
+      // to a `kind: message` string here so old readers stay valid and
+      // grep-friendly. The full envelope is still available live via
+      // the EventBus / TaskResult to in-process consumers.
+      const errorString = r.error
+        ? `${r.error.kind}: ${r.error.message}`
+        : undefined;
       this.stateCheckpoint?.recordTaskStatus(r.taskId, {
         status: failed ? (r.status as 'failed' | 'timeout' | 'stopped') : 'completed',
         completedAt: new Date().toISOString(),
         iterations: r.iterations,
         toolCalls: r.toolCalls,
         durationMs: r.durationMs,
-        error: r.error,
+        error: errorString,
       });
       this.stateCheckpoint?.setUsage(this.usage.snapshot());
       void this.appendSessionEvent(
@@ -303,7 +312,7 @@ export class Director {
               ts: new Date().toISOString(),
               taskId: r.taskId,
               title,
-              error: r.error ?? r.status,
+              error: errorString ?? r.status,
             }
           : {
               type: 'task_completed',

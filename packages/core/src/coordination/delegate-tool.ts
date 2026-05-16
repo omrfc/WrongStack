@@ -279,10 +279,21 @@ export function createDelegateTool(opts: CreateDelegateToolOptions): Tool {
         const partial =
           result.status === 'success' ? undefined : await readSubagentPartial(opts, subagentId);
 
+        // Lift the classified error envelope into top-level fields so a
+        // model reading this output can branch on `errorKind` / `retryable`
+        // without parsing a nested object. The original `error` envelope
+        // is preserved verbatim for callers that want the full record
+        // (including the `cause` stack for diagnostics).
+        const errorKind = result.error?.kind;
+        const retryable = result.error?.retryable;
+        const backoffMs = result.error?.backoffMs;
         return {
           ok: result.status === 'success',
           status: result.status,
           stopReason: baseStopReason,
+          errorKind,
+          retryable,
+          backoffMs,
           subagentId: result.subagentId,
           taskId: result.taskId,
           result: result.result,
@@ -291,10 +302,8 @@ export function createDelegateTool(opts: CreateDelegateToolOptions): Tool {
           toolCalls: result.toolCalls,
           durationMs: result.durationMs,
           ...(partial ? { partial } : {}),
-          ...(baseStopReason === 'budget_exhausted'
-            ? {
-                hint: 'Subagent exhausted its iteration / tool-call budget. Either narrow the task scope or pass higher `maxIterations` / `maxToolCalls` via spawn_subagent + assign_task for explicit budget control.',
-              }
+          ...(hintForKind(errorKind, retryable, backoffMs)
+            ? { hint: hintForKind(errorKind, retryable, backoffMs) }
             : {}),
         };
       } catch (err) {
@@ -315,6 +324,51 @@ type StopReason =
   | 'host_timeout'
   | 'aborted'
   | 'error';
+
+/**
+ * Per-kind orchestrator hint. Returned alongside the structured error
+ * so the calling model has a concrete next step instead of "task
+ * failed, good luck". Returns undefined for success / unknown kinds —
+ * the caller checks for presence before including in output.
+ */
+function hintForKind(
+  kind: string | undefined,
+  retryable: boolean | undefined,
+  backoffMs: number | undefined,
+): string | undefined {
+  if (!kind) return undefined;
+  switch (kind) {
+    case 'provider_rate_limit':
+      return `Provider rate-limited. Retry safe after ${backoffMs ?? 5000}ms backoff. Consider a smaller model or fewer parallel delegates.`;
+    case 'provider_5xx':
+      return `Provider server error. Retry safe after ${backoffMs ?? 3000}ms backoff — usually transient.`;
+    case 'provider_timeout':
+      return 'Provider network timeout. Retry safe; reduce input size if it persists.';
+    case 'provider_auth':
+      return 'Provider rejected credentials. Cannot retry — fix the API key / config and re-invoke.';
+    case 'context_overflow':
+      return 'Subagent context exceeded the model limit. Narrow the task, use a larger-context model, or split into multiple delegates.';
+    case 'budget_iterations':
+    case 'budget_tool_calls':
+    case 'budget_tokens':
+    case 'budget_cost':
+      return 'Subagent exhausted its budget. Raise the matching `max*` field on the next delegate or narrow task scope.';
+    case 'budget_timeout':
+      return 'Subagent hit its wall-clock budget. Raise `timeoutMs` on the next delegate or split the task.';
+    case 'aborted_by_parent':
+      return 'Subagent was aborted (user Ctrl+C, parent unwound, or sibling failure cascade). Not retryable until the abort condition is resolved.';
+    case 'empty_response':
+      return 'Subagent ended its turn with no text and no tool calls. Almost always a prompt / config issue — clarify the task or check the model.';
+    case 'tool_failed':
+      return 'A tool inside the subagent returned ok:false. Inspect `partial.lastAssistantText` for the agent reasoning, then retry with corrected inputs.';
+    case 'bridge_failed':
+      return 'Parent-child bridge transport failed. This is rare — restart the session and retry.';
+    default:
+      return retryable
+        ? 'Failure classified as retryable. Try again with the same input.'
+        : undefined;
+  }
+}
 
 /**
  * Parse the per-subagent JSONL at `<sessionsRoot>/<runId>/<subagentId>.jsonl`
