@@ -128,7 +128,7 @@ export class DefaultPluginAPI implements PluginAPI {
   }
 
   onEvent<K extends EventName>(event: K, handler: Listener<K>): () => void {
-    const off = this.events.once(event, handler);
+    const off = this.events.on(event, handler);
     this.pluginCleanupFns.push(off);
     return off;
   }

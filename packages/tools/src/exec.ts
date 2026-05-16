@@ -4,9 +4,9 @@ import type { Tool } from '@wrongstack/core';
 import { buildChildEnv } from './_env.js';
 
 const ALLOWED_COMMANDS: Record<string, string[]> = {
-  node: ['--version', '-e', '-p', '-r', '--input-type=module'],
-  npm: ['--version', 'init', 'install', 'test', 'run', 'list', 'pkg', 'doctor'],
-  pnpm: ['--version', 'init', 'install', 'add', 'remove', 'exec', 'list', 'run', 'dlx'],
+  node: ['--version', '-r', '--input-type=module'],
+  npm: ['--version', 'init', 'install', 'test', 'list', 'pkg', 'doctor'],
+  pnpm: ['--version', 'init', 'install', 'add', 'remove', 'list'],
   npx: ['--version'],
   git: [
     '--version',
@@ -34,7 +34,7 @@ const ALLOWED_COMMANDS: Record<string, string[]> = {
   mv: [],
   rm: ['-rf'],
   touch: [],
-  bun: ['--version', 'run', 'add', 'init'],
+  bun: ['--version', 'add', 'init'],
   tsc: ['--version', '--noEmit', '--project'],
   vitest: ['--version', 'run', '--coverage'],
   biome: ['--version', 'lint', 'format', 'check'],

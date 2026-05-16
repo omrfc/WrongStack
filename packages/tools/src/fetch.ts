@@ -351,8 +351,11 @@ function htmlToMarkdown(html: string): string {
   // Bold / italic
   s = s.replace(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/gi, '**$2**');
   s = s.replace(/<(em|i)[^>]*>([\s\S]*?)<\/\1>/gi, '*$2*');
-  // Links
-  s = s.replace(/<a [^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, '[$2]($1)');
+  // Links — only emit markdown links for safe protocols
+  s = s.replace(/<a [^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, (_m, href, text) => {
+    const safe = /^(https?|ftps?):\/\//i.test(href);
+    return safe ? `[${text}](${href})` : text;
+  });
   // Code
   s = s.replace(/<pre[^>]*>([\s\S]*?)<\/pre>/gi, (_m, c) => '\n```\n' + stripTags(c) + '\n```\n');
   s = s.replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, '`$1`');

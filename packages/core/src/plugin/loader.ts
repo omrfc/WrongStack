@@ -3,6 +3,11 @@ import type { Logger } from '../types/logger.js';
 import type { Plugin, PluginAPI, PluginDependency } from '../types/plugin.js';
 import { validateAgainstSchema } from '../utils/json-schema-validate.js';
 
+/** Internal map tracking the API instance each plugin received during setup,
+ *  so unloadPlugins can call teardown with the same API (not a fresh one).
+ *  Using a WeakMap avoids pinning plugins in memory after teardown. */
+const pluginApiMap = new WeakMap<Plugin, PluginAPI>();
+
 /**
  * Stable plugin API contract version. This is intentionally independent of
  * the package version: bump only when the surface visible to plugins
@@ -240,6 +245,7 @@ export async function loadPlugins(
         ? wrapApiForCapabilityCheck(plugin, rawApi, opts.log, opts.enforceCapabilities)
         : rawApi;
       await plugin.setup(api);
+      pluginApiMap.set(plugin, api);
       loaded.push(plugin);
       opts.log.info(`Plugin "${plugin.name}" loaded`);
     } catch (err) {
@@ -269,8 +275,11 @@ export async function unloadPlugins(
   for (const plugin of ordered) {
     if (typeof plugin.teardown !== 'function') continue;
     try {
-      const api = opts.apiFactory(plugin);
+      // Use the same API instance the plugin received during setup,
+      // so its accumulated cleanup functions are properly drained.
+      const api = pluginApiMap.get(plugin) ?? opts.apiFactory(plugin);
       await plugin.teardown(api);
+      pluginApiMap.delete(plugin);
       opts.log.info(`Plugin "${plugin.name}" torn down`);
     } catch (err) {
       opts.log.error(`Plugin "${plugin.name}" teardown failed`, err);

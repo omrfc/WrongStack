@@ -275,6 +275,7 @@ export class DefaultSessionStore implements SessionStore {
 
 class FileSessionWriter implements SessionWriter {
   private closed = false;
+  private closing = false;
   private manifestFile: string;
   private summary: SessionSummary;
   private tokenIn = 0;
@@ -313,9 +314,7 @@ class FileSessionWriter implements SessionWriter {
     // in constructor and eliminate reliance on FileHandle.fd private property.
   }
 
-  private async writeSessionStart(): Promise<void> {
-    if (this.initDone || this.closed) return;
-    this.initDone = true;
+  private async writeSessionStartLazy(): Promise<void> {
     const record = `${JSON.stringify({
       type: this.resumed ? 'session_resumed' : 'session_start',
       ts: this.startedAt,
@@ -335,8 +334,11 @@ class FileSessionWriter implements SessionWriter {
 
   async append(event: SessionEvent): Promise<void> {
     if (this.closed) return;
+    // Guard against concurrent append calls racing on lazy initialization.
+    // Set initDone BEFORE the await so a second caller sees it and skips.
     if (!this.initDone) {
-      await this.writeSessionStart();
+      this.initDone = true;
+      await this.writeSessionStartLazy();
     }
     this.observeForSummary(event);
     try {
@@ -382,7 +384,8 @@ class FileSessionWriter implements SessionWriter {
   }
 
   async close(): Promise<void> {
-    if (this.closed) return;
+    if (this.closing) return;
+    this.closing = true;
     this.closed = true;
     if (this.manifestFile) {
       try {

@@ -40,6 +40,7 @@ import { buildProviderFactoriesFromRegistry, makeProviderFromConfig } from '@wro
 import { forgetTool, rememberTool } from '@wrongstack/tools';
 import { builtinToolsPack } from '@wrongstack/tools/pack';
 import { WebSocket, WebSocketServer } from 'ws';
+import { bootConfig, patchConfig, type BootResult } from './boot.js';
 
 // Re-export types
 export type { WebUIOptions, BackendServices } from './types.js';
@@ -58,76 +59,6 @@ interface WSClientMessage {
 interface ConnectedClient {
   ws: WebSocket;
   sessionId: string | null;
-}
-
-interface BootResult {
-  config: Config;
-  vault: DefaultSecretVault;
-  globalConfigPath: string;
-  projectRoot: string;
-  wpaths: WstackPaths;
-  logger: InstanceType<typeof DefaultLogger>;
-}
-
-/**
- * Boot config the same way the CLI does (mirrors packages/cli/src/boot-config.ts):
- *   - resolve wstack paths
- *   - create the real DefaultSecretVault (AES-GCM, not XOR) backed by ~/.wrongstack/.key
- *   - migrate any plaintext secrets in config files to encrypted form
- *   - load + merge global/project config with apiKeys auto-decrypted by the vault
- *
- * This ensures the WebUI uses the SAME stored credentials and SAME on-disk
- * format as `wstack` / `wstack auth`. Anything you registered in the CLI just
- * works here.
- */
-async function bootConfig(): Promise<BootResult> {
-  const cwd = process.cwd();
-  const pathResolver = new DefaultPathResolver(cwd);
-  const projectRoot = pathResolver.projectRoot;
-  const userHome = os.homedir();
-  const wpaths = resolveWstackPaths({ projectRoot, userHome });
-
-  await fs.mkdir(wpaths.globalRoot, { recursive: true });
-  await fs.mkdir(wpaths.projectDir, { recursive: true });
-  await fs.mkdir(wpaths.projectSessions, { recursive: true });
-
-  // Vault must come before the config loader so it can decrypt apiKey-like
-  // fields. Lazily creates ~/.wrongstack/.key on first use.
-  const vault = new DefaultSecretVault({ keyFile: wpaths.secretsKey });
-
-  // Auto-encrypt any plaintext secrets the user still has in their config
-  // (left over from before the vault, or hand-written). Same flow as CLI boot.
-  for (const file of [wpaths.globalConfig, wpaths.projectLocalConfig]) {
-    try {
-      const { migrated } = await migratePlaintextSecrets(file, vault);
-      if (migrated > 0) {
-        process.stderr.write(`[WebUI] Encrypted ${migrated} plaintext secret(s) in ${file}\n`);
-      }
-    } catch {
-      // best-effort — never block boot on migration issues
-    }
-  }
-
-  const configLoader = new DefaultConfigLoader({ paths: wpaths, vault });
-  const config = await configLoader.load({ cliFlags: {} });
-
-  const logger = new DefaultLogger({
-    level: config.log?.level ?? 'info',
-    file: wpaths.logFile,
-  });
-
-  return {
-    config,
-    vault,
-    globalConfigPath: wpaths.globalConfig,
-    projectRoot,
-    wpaths,
-    logger,
-  };
-}
-
-function patchConfig(config: Config, updates: Partial<Config>): Config {
-  return Object.freeze({ ...config, ...updates });
 }
 
 export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}): Promise<void> {

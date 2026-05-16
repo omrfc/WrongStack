@@ -33,7 +33,7 @@ import {
   type MetricsServerHandle,
   type MetricsSink,
   type Plugin,
-  ProviderRegistry,
+  type ProviderRegistry,
   QueueStore,
   RecoveryLock,
   SlashCommandRegistry,
@@ -53,11 +53,10 @@ import {
   wireMetricsToEvents,
 } from '@wrongstack/core';
 import { MCPRegistry } from '@wrongstack/mcp';
-import {
-  buildProviderFactoriesFromRegistry,
-  capabilitiesFor,
-  makeProviderFromConfig,
-} from '@wrongstack/providers';
+import { capabilitiesFor, makeProviderFromConfig } from '@wrongstack/providers';
+import { setupProvider } from './wiring/provider.js';
+import { setupSession } from './wiring/session.js';
+import { createAgent, setupCompaction, setupPipelines } from './wiring/pipeline.js';
 import { forgetTool, rememberTool } from '@wrongstack/tools';
 import { builtinToolsPack } from '@wrongstack/tools/pack';
 import { boot } from './boot.js';
@@ -105,44 +104,23 @@ export async function main(argv: string[]): Promise<number> {
   // PathResolver is created from the resolved projectRoot
   const pathResolver = new DefaultPathResolver(cwd);
 
-  // Resolve provider details from models.dev. An alias may not match a
-  // catalog id directly, so we also try `cfg.type` (which points at the
-  // catalog entry the alias was derived from). When neither resolves AND
-  // the user has explicitly set `family` in their config, this is a
-  // deliberate custom/local provider — staying silent is the right call;
-  // logging would just train people to ignore the warning.
-  const savedProviderCfg = config.providers?.[config.provider];
-  let resolvedProvider = await modelsRegistry.getProvider(config.provider).catch(() => undefined);
-  if (!resolvedProvider && savedProviderCfg?.type && savedProviderCfg.type !== config.provider) {
-    resolvedProvider = await modelsRegistry
-      .getProvider(savedProviderCfg.type)
-      .catch(() => undefined);
-  }
-  if (!resolvedProvider) {
-    if (!savedProviderCfg?.family) {
-      logger.warn(
-        `Provider "${config.provider}" not found in models.dev. Continuing with raw config.`,
-      );
-    }
-  } else if (resolvedProvider.family === 'unsupported' && !savedProviderCfg?.family) {
-    // Catalog says unsupported AND the user hasn't supplied their own
-    // family override — bail. With an override we trust the user knows
-    // how to route this endpoint.
-    process.stderr.write(
-      `Provider "${config.provider}" uses an unsupported wire family (${resolvedProvider.npm}). ` +
-        `Install a plugin to enable it, or pick a different provider.\n`,
-    );
+  // Build container + services
+  const container = new Container();
+  // Resolve provider + build registry (extracted to wiring/provider)
+  let resolvedProvider: import('@wrongstack/core').ResolvedProvider | undefined;
+  let providerRegistry: ProviderRegistry;
+  let provider: ReturnType<ProviderRegistry['create']>;
+  try {
+    const result = await setupProvider({ config, modelsRegistry, logger });
+    resolvedProvider = result.resolvedProvider;
+    providerRegistry = result.providerRegistry;
+    provider = result.provider;
+  } catch (err) {
+    process.stderr.write(`${err instanceof Error ? err.message : err}\n`);
     await reader.close();
     return 2;
   }
-
-  // Build container + services
-  const container = new Container();
   // L1-B: a single ConfigStore is the source of truth for runtime config.
-  // Subsystems that care about live updates (provider switching, extension
-  // reload) resolve this and call .watch() — everything else can still read
-  // the flat `config` snapshot. We mutate the store on /model and similar
-  // commands so observers re-render automatically.
   const configStore = new DefaultConfigStore(config);
   container.bind(TOKENS.ConfigStore, () => configStore);
   container.bind(TOKENS.Logger, () => logger);
@@ -163,9 +141,6 @@ export async function main(argv: string[]): Promise<number> {
   );
   const memoryStore = new DefaultMemoryStore({ paths: wpaths });
   container.bind(TOKENS.MemoryStore, () => memoryStore);
-  // Skills are an opt-in feature pack — when disabled we still bind a
-  // loader that returns an empty list so the prompt builder doesn't
-  // need a special path. This way `--no-features` doesn't drift behaviour.
   const skillLoader = new DefaultSkillLoader({
     paths: wpaths,
     bundledDir: config.features.skills ? resolveBundledSkillsDir() : undefined,
@@ -184,13 +159,6 @@ export async function main(argv: string[]): Promise<number> {
         supportsReasoning: resolvedModel.capabilities.reasoning,
       }
     : undefined;
-  // Mutable ref the prompt builder reads on every build() to discover
-  // the active session's plan path. Defined BEFORE the bind so the
-  // getter closure captures a stable reference instead of the `let
-  // session` declaration later in the function — referring to that
-  // `let` directly hit a TDZ ReferenceError when build() was called
-  // before the declaration line executed (the first build runs at
-  // line ~432, the declaration is at ~474).
   const sessionRef: { current?: import('@wrongstack/core').SessionWriter } = {};
   container.bind(
     TOKENS.SystemPromptBuilder,
@@ -202,8 +170,6 @@ export async function main(argv: string[]): Promise<number> {
         modeId,
         modePrompt,
         modelCapabilities,
-        // Reads the ref each time — returns undefined until the session
-        // is created, then resolves to the per-session plan JSON path.
         planPath: () =>
           sessionRef.current
             ? path.join(wpaths.projectSessions, `${sessionRef.current.id}.plan.json`)
@@ -229,28 +195,6 @@ export async function main(argv: string[]): Promise<number> {
         eliseThreshold: config.context.eliseThreshold,
       }),
   );
-
-  // Provider registry — populated dynamically from models.dev catalog
-  // when enabled. With features.modelsRegistry=false we don't touch the
-  // network at boot and rely on the user's config to declare the wire
-  // family explicitly (see makeProviderFromConfig path below).
-  const providerRegistry = new ProviderRegistry();
-  if (config.features.modelsRegistry) {
-    try {
-      const factories = await buildProviderFactoriesFromRegistry({
-        registry: modelsRegistry,
-        log: logger,
-      });
-      for (const f of factories) providerRegistry.register(f);
-    } catch (err) {
-      process.stderr.write(
-        `Failed to load models.dev registry: ${err instanceof Error ? err.message : err}\n` +
-          `Try \`wstack models refresh\` once you have network access, or run with --no-features.\n`,
-      );
-      await reader.close();
-      return 2;
-    }
-  }
 
   // Tool registry
   const toolRegistry = new ToolRegistry();
@@ -408,33 +352,6 @@ export async function main(argv: string[]): Promise<number> {
   });
 
   // Provider instance — registry-driven by default, but falls through to
-  // config-only construction when the catalog is unavailable (or the
-  // user explicitly disabled it).
-  const providerConfig = config.providers?.[config.provider] ?? {
-    type: config.provider,
-    apiKey: config.apiKey,
-    baseUrl: config.baseUrl,
-  };
-  let provider: ReturnType<ProviderRegistry['create']>;
-  try {
-    const cfgWithType = { ...providerConfig, type: config.provider };
-    if (config.features.modelsRegistry && providerRegistry.has(config.provider)) {
-      // Catalog-backed type: registry knows it, so use the factory. Config
-      // overrides (family, baseUrl, envVars) still apply inside `makeProvider`.
-      provider = providerRegistry.create(cfgWithType);
-    } else {
-      // Custom provider (not in catalog), or modelsRegistry feature
-      // disabled. Requires `family` to be set in the saved config.
-      provider = makeProviderFromConfig(config.provider, cfgWithType);
-    }
-  } catch (err) {
-    process.stderr.write(
-      `Failed to create provider: ${err instanceof Error ? err.message : err}\n`,
-    );
-    await reader.close();
-    return 2;
-  }
-
   // Build system prompt
   const promptBuilder = container.resolve(TOKENS.SystemPromptBuilder) as SystemPromptBuilder;
   const systemPrompt = await promptBuilder.build({
@@ -445,98 +362,40 @@ export async function main(argv: string[]): Promise<number> {
     model: config.model,
   });
 
-  // Session — fresh by default, or resumed from disk if --resume <id> was passed.
+  // Session — extracted to wiring/session
   const sessionStore = container.resolve(TOKENS.SessionStore);
-  let resumeId = typeof flags['resume'] === 'string' ? flags['resume'] : undefined;
-
-  // Crash recovery: if the last interactive run was killed mid-flight,
-  // its `active.json` lockfile is still on disk and the session has no
-  // `session_end` event. Offer to resume it before opening a fresh one.
-  // Skipped when the user explicitly chose `--resume <id>` or asked to
-  // bypass with `--no-recovery`.
-  const recoveryLock = new RecoveryLock({
-    dir: wpaths.projectSessions,
-    sessionStore,
-  });
-  if (!resumeId && !flags['no-recovery']) {
-    const abandoned = await recoveryLock.checkAbandoned();
-    if (abandoned && abandoned.messageCount > 0) {
-      const choice = await promptRecovery(reader, renderer, abandoned, !!flags['recover']);
-      if (choice === 'resume') {
-        resumeId = abandoned.sessionId;
-      } else if (choice === 'delete') {
-        await sessionStore.delete(abandoned.sessionId).catch(() => undefined);
-        await recoveryLock.clear();
-      } else {
-        // 'skip' — leave the file on disk, just clear the lock so we
-        // don't ask again every launch.
-        await recoveryLock.clear();
-      }
-    } else if (abandoned) {
-      // Empty session (no real work done) — silently discard.
-      await sessionStore.delete(abandoned.sessionId).catch(() => undefined);
-      await recoveryLock.clear();
-    }
-  }
-
-  let session: import('@wrongstack/core').SessionWriter | undefined;
-  let restoredMessages: import('@wrongstack/core').Message[] = [];
-  if (resumeId) {
-    try {
-      const resumed = await sessionStore.resume(resumeId);
-      session = resumed.writer;
-      restoredMessages = resumed.data.messages;
-      renderer.writeInfo(
-        `Resumed session ${resumed.data.metadata.id} — ${restoredMessages.length} messages, ${resumed.data.usage.input + resumed.data.usage.output} tokens used previously.`,
-      );
-    } catch (err) {
-      renderer.writeError(`Resume failed: ${err instanceof Error ? err.message : String(err)}`);
-      return 2;
-    }
-  } else {
-    session = await sessionStore.create({
-      id: '',
-      title: '',
-      model: config.model,
-      provider: config.provider,
-    });
-  }
-
-  // Publish the live session to the prompt-builder ref so future
-  // build() calls can locate the per-session plan path. Setting this
-  // AFTER session is assigned guarantees the getter never sees a
-  // partially-constructed writer.
-  sessionRef.current = session;
-
-  // Claim the lock for this session. Released in the finally block below.
-  await recoveryLock.write(session.id).catch(() => undefined);
-
-  // Attachment store: per-session, spooled under sessions/<id>/attachments/.
-  const attachments = new DefaultAttachmentStore({
-    spoolDir: path.join(wpaths.projectSessions, session.id, 'attachments'),
-  });
-
-  // Queue persistence (TUI only — the REPL has no concurrent input).
-  // Lives next to attachments so deleting the session dir cleans both.
-  const queueStore = new QueueStore({
-    dir: path.join(wpaths.projectSessions, session.id),
-  });
-
   const tokenCounter = container.resolve(TOKENS.TokenCounter);
+  const sessResult = await setupSession({
+    config: { model: config.model, provider: config.provider },
+    wpaths,
+    projectRoot,
+    cwd,
+    sessionStore,
+    systemPrompt,
+    provider,
+    tokenCounter,
+    renderer,
+    flags,
+    onRecovery: (abandoned, autoRecover) => promptRecovery(reader, renderer, abandoned, autoRecover),
+  });
+  const session = sessResult.session;
+  sessionRef.current = session;
+  const restoredMessages = sessResult.restoredMessages;
+  const context = sessResult.context;
+  const attachments = sessResult.attachments;
+  const recoveryLock = sessResult.recoveryLock;
+  const queueStore = sessResult.queueStore;
+  const planPath = sessResult.planPath;
+  const detachTodosCheckpoint = sessResult.detachTodosCheckpoint;
 
-  // Session stats tracker — subscribes to events; rendered at the end.
   const stats = new SessionStats(events, tokenCounter);
 
-  // Last-N error ring buffer surfaced by /diag. Captures whatever `error`
-  // events the agent emits during a run (provider failures, retries, etc).
+  // Last-N error ring buffer surfaced by /diag.
   const errorRing: { ts: string; phase: string; code: string; message: string }[] = [];
   events.on('error', (e) => {
     const err = e.err as unknown;
     const code =
-      err &&
-      typeof err === 'object' &&
-      'code' in err &&
-      typeof (err as { code: unknown }).code === 'string'
+      err && typeof err === 'object' && 'code' in err && typeof (err as { code: unknown }).code === 'string'
         ? (err as { code: string }).code
         : 'UNKNOWN';
     const message = e.err instanceof Error ? e.err.message : String(e.err);
@@ -544,203 +403,18 @@ export async function main(argv: string[]): Promise<number> {
     if (errorRing.length > 5) errorRing.shift();
   });
 
-  const ctxSignal = new AbortController().signal;
-  const context = new Context({
-    systemPrompt,
-    provider,
-    session,
-    signal: ctxSignal,
-    tokenCounter,
-    cwd,
-    projectRoot,
-    model: config.model,
-  });
-  // Hydrate the transcript when resuming so the model sees the prior
-  // conversation. Order is preserved from the JSONL log.
-  if (restoredMessages.length > 0) {
-    context.state.replaceMessages(restoredMessages);
-  }
-
-  // ---- Todos checkpoint: persist ctx.todos to disk + reload on resume ----
-  // Lives next to the JSONL session file so deleting one session cleans
-  // its sidecar checkpoints in one shot. The checkpoint is plain JSON
-  // (not JSONL) — overwritten atomically on every todos_replaced event.
-  const todosCheckpointPath = path.join(wpaths.projectSessions, `${session.id}.todos.json`);
-  if (resumeId) {
-    try {
-      const restoredTodos = await loadTodosCheckpoint(todosCheckpointPath);
-      if (restoredTodos && restoredTodos.length > 0) {
-        context.state.replaceTodos(restoredTodos);
-        renderer.writeInfo(
-          `Restored ${restoredTodos.length} todo${restoredTodos.length === 1 ? '' : 's'} from previous run.`,
-        );
-      }
-    } catch {
-      // Best-effort: a missing or unreadable checkpoint is the common
-      // case for sessions that never used todos. Stay silent.
-    }
-  }
-  const detachTodosCheckpoint = attachTodosCheckpoint(
-    context.state,
-    todosCheckpointPath,
-    session.id,
-  );
-
-  // Seed the plan-tool path into ctx.meta so the LLM-callable `plan` tool
-  // (and any future plan-aware middleware) knows where to read/write.
-  // The slash command reads `planPath` from its own context separately;
-  // this meta entry is purely for tool execution.
-  const planPath = path.join(wpaths.projectSessions, `${session.id}.plan.json`);
-  context.state.setMeta('plan.path', planPath);
-
-  // Surface any prior director-state.json so the user knows a multi-agent
-  // run was interrupted. The director itself reattaches via fleetRoot,
-  // but we want a banner-level "you have unfinished fleet work" cue too.
-  if (resumeId) {
-    try {
-      const fleetRoot = path.join(wpaths.projectSessions, session.id);
-      const dirState = await loadDirectorState(path.join(fleetRoot, 'director-state.json'));
-      if (dirState) {
-        const tCounts: Record<string, number> = {};
-        for (const t of dirState.tasks) {
-          tCounts[t.status] = (tCounts[t.status] ?? 0) + 1;
-        }
-        const summary = Object.entries(tCounts)
-          .map(([k, v]) => `${v} ${k}`)
-          .join(', ');
-        renderer.writeInfo(
-          `Prior fleet state: ${dirState.subagents.length} subagent${dirState.subagents.length === 1 ? '' : 's'}, tasks ${summary || '(none)'}.`,
-        );
-      }
-    } catch {
-      // ignore — fleet rehydration is a UX hint, not load-bearing
-    }
-    // Symmetric plan banner: surface open plan items so the user (and the
-    // model, on first turn) know the strategic roadmap survived the gap.
-    try {
-      const plan = await loadPlan(planPath);
-      if (plan && plan.items.length > 0) {
-        const open = plan.items.filter((p) => p.status !== 'done').length;
-        const done = plan.items.length - open;
-        renderer.writeInfo(
-          `Plan: ${plan.items.length} item${plan.items.length === 1 ? '' : 's'} (${open} open, ${done} done). Use /plan to review.`,
-        );
-      }
-    } catch {
-      // ignore — plan banner is decorative
-    }
-  }
-
-  const pipelines = createDefaultPipelines();
-
-  // L1-F error boundary: a crashing plugin-owned middleware shouldn't kill
-  // the agent run. Core-owned middleware still rethrows so genuine bugs in
-  // the framework surface loudly. Plugin owners are identified by the
-  // `owner` field set by the slash-command/middleware registration helper.
-  const installBoundary = <T>(p: {
-    setErrorHandler: (
-      h: (ev: { middleware: string; owner?: string; err: unknown }) => 'rethrow' | 'swallow',
-    ) => unknown;
-  }) => {
-    p.setErrorHandler((ev) => {
-      const fromPlugin = !!ev.owner && ev.owner !== 'core';
-      logger.error(
-        `Pipeline middleware "${ev.middleware}" crashed (owner=${ev.owner ?? 'unknown'}); ${fromPlugin ? 'swallowed' : 'rethrown'}`,
-        ev.err,
-      );
-      events.emit('error', {
-        err: ev.err instanceof Error ? ev.err : new Error(String(ev.err)),
-        phase: `pipeline:${ev.middleware}`,
-      });
-      return fromPlugin ? 'swallow' : 'rethrow';
-    });
-  };
-  installBoundary(pipelines.request);
-  installBoundary(pipelines.response);
-  installBoundary(pipelines.toolCall);
-  installBoundary(pipelines.userInput);
-  installBoundary(pipelines.assistantOutput);
-  installBoundary(pipelines.contextWindow);
-
-  // Resolve compactor — bound earlier (strategy-aware binding moved before provider creation)
+  const pipelines = setupPipelines({ events, logger });
   const compactor = container.resolve(TOKENS.Compactor);
+  const effectiveMaxContext = await setupCompaction({ compactor, events, modelsRegistry, context, config, provider, pipelines });
 
-  // Auto-compaction: monitor token load and compact when thresholds are crossed.
-  // Skipped when config.context.autoCompact is false.
-  //
-  // Resolve the *model-specific* maxContext via the registry — the
-  // provider object only knows its family default (e.g. anthropic =
-  // 200k), which is wrong for variants like Claude Opus 4.7 with the
-  // 1M-context beta. Falls back to the provider baseline when the
-  // registry can't resolve the model.
-  const resolvedCaps = await capabilitiesFor(modelsRegistry, config.provider, context.model).catch(
-    () => undefined,
-  );
-  const effectiveMaxContext =
-    config.context.effectiveMaxContext ??
-    resolvedCaps?.maxContext ??
-    provider.capabilities.maxContext;
-
-  // Helper: keep the spinner's context chip in sync with the latest
-  // provider response and the resolved max-context ceiling.
+  // Helper: keep the spinner's context chip in sync
   const updateSpinnerContext = () => {
     if (effectiveMaxContext > 0 && lastInputTokens > 0) {
       spinner.setContext({ used: lastInputTokens, max: effectiveMaxContext });
-    } else {
-      spinner.setContext(undefined);
-    }
+    } else spinner.setContext(undefined);
   };
 
-  if (config.context.autoCompact !== false) {
-    const autoCompactor = new AutoCompactionMiddleware(
-      compactor,
-      effectiveMaxContext,
-      (ctx) => {
-        const msgs = ctx.messages;
-        let total = 0;
-        for (const m of msgs) {
-          if (typeof m.content === 'string') total += Math.ceil(m.content.length / 4);
-          else if (Array.isArray(m.content)) {
-            for (const b of m.content) {
-              if (b.type === 'text') total += Math.ceil(b.text.length / 4);
-              else if (b.type === 'tool_use' || b.type === 'tool_result') {
-                total += Math.ceil(JSON.stringify(b).length / 4);
-              }
-            }
-          }
-        }
-        return total;
-      },
-      {
-        warn: config.context.warnThreshold,
-        soft: config.context.softThreshold,
-        hard: config.context.hardThreshold,
-      },
-      {
-        aggressiveOn: 'soft',
-        failureMode: 'throw_on_hard',
-        events,
-      },
-    );
-    pipelines.contextWindow.use({
-      name: 'AutoCompaction',
-      handler: autoCompactor.handler(),
-    });
-  }
-
-  const agent = new Agent({
-    container,
-    tools: toolRegistry,
-    providers: providerRegistry,
-    events,
-    pipelines,
-    context,
-    maxIterations: config.tools.maxIterations,
-    iterationTimeoutMs: config.tools.iterationTimeoutMs,
-    executionStrategy: config.tools.defaultExecutionStrategy,
-    perIterationOutputCapBytes: config.tools.perIterationOutputCapBytes,
-    confirmAwaiter: makeConfirmAwaiter(reader),
-  });
+  const agent = createAgent({ container, tools: toolRegistry, providers: providerRegistry, events, pipelines, context, config, confirmAwaiter: makeConfirmAwaiter(reader) });
 
   // MCP servers
   const mcpRegistry = new MCPRegistry({ toolRegistry, events, log: logger });
@@ -1335,6 +1009,7 @@ export async function main(argv: string[]): Promise<number> {
   for (const cmd of slashCmds) slashRegistry.register(cmd);
 
   // Dispatch to execution phase — single-shot, TUI, REPL, or WebUI.
+  const savedProviderCfg = config.providers?.[config.provider];
   return execute({
     agent,
     events,
@@ -1356,6 +1031,7 @@ export async function main(argv: string[]): Promise<number> {
     queueStore,
     context,
     stats,
+    detachTodosCheckpoint,
     savedProviderCfg: savedProviderCfg as ExecutionDeps['savedProviderCfg'],
     resolvedProvider: resolvedProvider ?? undefined,
     getPickableProviders: () => buildPickableProviders(modelsRegistry, config),

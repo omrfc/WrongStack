@@ -160,11 +160,14 @@ function buildArgs(input: GitInput): string[] {
         ...(files.length ? ['--', ...files] : []),
       ];
     case 'branch':
-      return input.branch ? ['branch', input.branch] : ['branch'];
+      // Validate branch name: reject names starting with '-' (flag injection).
+      return input.branch
+        ? ['branch', ...(input.branch.startsWith('-') ? [] : [input.branch])]
+        : ['branch'];
     case 'checkout':
       return [
         'checkout',
-        ...(input.branch ? [input.branch] : []),
+        ...(input.branch ? ['--', input.branch] : []),
         ...(files.length ? ['--', ...files] : []),
       ];
     case 'stash':

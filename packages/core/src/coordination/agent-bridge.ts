@@ -116,6 +116,7 @@ export class InMemoryAgentBridge implements AgentBridge {
     this.stopped = true;
     for (const [, p] of this.pendingRequests) {
       clearTimeout(p.timer);
+      p.reject(new Error('Bridge stopped'));
     }
     this.pendingRequests.clear();
     this.inflightGuards.clear();

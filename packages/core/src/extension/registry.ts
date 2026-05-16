@@ -136,7 +136,8 @@ export class ExtensionRegistry {
   // ── Hook runners ─────────────────────────────────────────────────
 
   async runBeforeRun(...args: Parameters<BeforeRunHook>): Promise<void> {
-    for (const ext of this.extensions) {
+    const snapshot = [...this.extensions];
+    for (const ext of snapshot) {
       if (!ext.beforeRun) continue;
       try {
         await ext.beforeRun(...args);
@@ -147,7 +148,8 @@ export class ExtensionRegistry {
   }
 
   async runAfterRun(...args: Parameters<AfterRunHook>): Promise<void> {
-    for (const ext of this.extensions) {
+    const snapshot = [...this.extensions];
+    for (const ext of snapshot) {
       if (!ext.afterRun) continue;
       try {
         await ext.afterRun(...args);
@@ -158,7 +160,8 @@ export class ExtensionRegistry {
   }
 
   async runBeforeIteration(...args: Parameters<BeforeIterationHook>): Promise<void> {
-    for (const ext of this.extensions) {
+    const snapshot = [...this.extensions];
+    for (const ext of snapshot) {
       if (!ext.beforeIteration) continue;
       try {
         await ext.beforeIteration(...args);
@@ -169,7 +172,8 @@ export class ExtensionRegistry {
   }
 
   async runAfterIteration(...args: Parameters<AfterIterationHook>): Promise<void> {
-    for (const ext of this.extensions) {
+    const snapshot = [...this.extensions];
+    for (const ext of snapshot) {
       if (!ext.afterIteration) continue;
       try {
         await ext.afterIteration(...args);
@@ -188,7 +192,8 @@ export class ExtensionRegistry {
   ): Promise<
     { action: 'retry'; model?: string } | { action: 'fail' } | { action: 'continue' } | void
   > {
-    for (const ext of this.extensions) {
+    const snapshot = [...this.extensions];
+    for (const ext of snapshot) {
       if (!ext.onError) continue;
       try {
         const result = await ext.onError(...args);
@@ -232,7 +237,8 @@ export class ExtensionRegistry {
     ...args: Parameters<BeforeToolExecutionHook>
   ): Promise<Parameters<BeforeToolExecutionHook>[1]> {
     let toolUses = args[1];
-    for (const ext of this.extensions) {
+    const snapshot = [...this.extensions];
+    for (const ext of snapshot) {
       if (!ext.beforeToolExecution) continue;
       try {
         toolUses = await ext.beforeToolExecution(args[0], toolUses);
@@ -244,7 +250,8 @@ export class ExtensionRegistry {
   }
 
   async runAfterToolExecution(...args: Parameters<AfterToolExecutionHook>): Promise<void> {
-    for (const ext of this.extensions) {
+    const snapshot = [...this.extensions];
+    for (const ext of snapshot) {
       if (!ext.afterToolExecution) continue;
       try {
         await ext.afterToolExecution(...args);

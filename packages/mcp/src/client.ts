@@ -350,10 +350,12 @@ export class MCPClient {
   async close(): Promise<void> {
     if (this.child) {
       const child = this.child;
-      const isAlive = child.exitCode === null && child.signalCode === null;
-      const exitPromise = isAlive
-        ? new Promise<void>((resolve) => child.once('exit', () => resolve()))
-        : Promise.resolve();
+      // Use a pre-check on exitCode/signalCode to avoid the race where
+      // 'exit' fires between the alive-check and listener attachment.
+      const alreadyDead = child.exitCode !== null || child.signalCode !== null;
+      const exitPromise = alreadyDead
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => child.once('exit', () => resolve()));
       try {
         // Initial SIGTERM lets the server flush logs / clean up sockets.
         child.kill();
@@ -369,7 +371,7 @@ export class MCPClient {
         exitPromise.then(() => 'exited' as const),
         new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), GRACEFUL_MS)),
       ]);
-      if (gracefulRace === 'timeout' && isAlive) {
+      if (gracefulRace === 'timeout' && !alreadyDead) {
         try {
           // SIGKILL is ignored by `kill('SIGKILL')` on Windows in older
           // Node, but `child.kill('SIGKILL')` maps to TerminateProcess
@@ -444,20 +446,24 @@ export class MCPClient {
         }
         this._drainPending = true;
         await new Promise<void>((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            this._drainPending = false;
-            reject(new Error(`MCP notify("${method}") drain timeout`));
-          }, 500);
-          this.child?.stdin?.once('drain', () => {
+          const onDrain = () => {
             clearTimeout(timeout);
             this._drainPending = false;
             resolve();
-          });
-          this.child?.stdin?.once('error', (err) => {
+          };
+          const onError = (err: Error) => {
             clearTimeout(timeout);
             this._drainPending = false;
             reject(err);
-          });
+          };
+          const timeout = setTimeout(() => {
+            this.child?.stdin?.removeListener('drain', onDrain);
+            this.child?.stdin?.removeListener('error', onError);
+            this._drainPending = false;
+            reject(new Error(`MCP notify("${method}") drain timeout`));
+          }, 500);
+          this.child?.stdin?.once('drain', onDrain);
+          this.child?.stdin?.once('error', onError);
         });
       }
     } catch (err) {
