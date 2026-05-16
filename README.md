@@ -17,9 +17,32 @@ Provider catalog comes from [models.dev](https://models.dev) — no hardcoded pr
 npm install -g wrongstack
 ```
 
-This pulls in the full stack — `@wrongstack/core`, `@wrongstack/providers`, `@wrongstack/tools`, `@wrongstack/mcp`, `@wrongstack/plug-lsp`, and `@wrongstack/tui`. The TUI is shipped but lazy-loaded behind `--tui`, so plain-REPL users pay no React/Ink import cost at startup. The web-based UI (`@wrongstack/webui`) is available as a separate binary (`webui`).
+This pulls in the full stack — `@wrongstack/core`, `@wrongstack/runtime`, `@wrongstack/providers`, `@wrongstack/tools`, `@wrongstack/mcp`, `@wrongstack/plug-lsp`, and `@wrongstack/tui`. The TUI is shipped but lazy-loaded behind `--tui`, so plain-REPL users pay no React/Ink import cost at startup. The web-based UI (`@wrongstack/webui`) is available as a separate binary (`webui`).
 
 After install, `wrongstack` is on your `PATH`. (`wstack` works too — it's an alias.)
+
+### What's new on `main`
+
+The current development branch tightens the package architecture and quiets the
+multi-agent TUI.
+
+**Core stays core.** `@wrongstack/runtime` is the new home for concrete runtime
+defaults and host composition helpers. `@wrongstack/core` keeps the kernel,
+agent contracts, registries, plugin API, and lifecycle primitives.
+
+**Extension packs.** `@wrongstack/tools/pack` exports `builtinToolsPack`, and
+CLI/WebUI now register built-ins through that pack shape. This is the migration
+path for CLI, TUI, WebUI, Telegram, tools, providers, and future integrations
+to behave like extension packages around the core.
+
+**Quieter multi-agent UI.** Subagent tool calls no longer spam chat as separate
+`[AGENT#N]` entries. The TUI keeps the last two tool calls and last two text
+snippets per agent in `LiveActivityStrip` / `FleetPanel`; the main chat keeps
+agent text and lifecycle summaries.
+
+**`grep` correctness.** The `rg` backend now validates regex syntax up front,
+honors default ignored directories consistently, and reports real total match
+counts in `output_mode: "count"`.
 
 ### What's new in 0.2.0 — the autonomous fleet release
 
@@ -63,12 +86,11 @@ delegation actually works. Subagents only die from real causes:
 parent abort, per-tool 300s timeout, orchestrator-set explicit
 budget, or a classified provider error.
 
-**Live activity strip + tool calls always visible.** Compact one-line-
+**Live activity strip + compact fleet panel.** Compact one-line-
 per-subagent strip sits directly above the input area showing
-`● bug-hunter · → bash (12.3s) · 5it 12tc · 1m23s`. Every subagent's
-`tool.executed` is bridged onto the host EventBus so `[AGENT#1] ● bash
-250ms · 1.2KB` lands in chat regardless of director mode — no more
-"task started → 50 seconds of silence → task completed".
+`● bug-hunter · → bash (12.3s) · 5it 12tc · 1m23s`. The TUI keeps the
+last two tool calls and text snippets per worker in the live surfaces,
+so tool telemetry stays visible without filling chat history.
 
 **SubagentError envelope (14 kinds).** `provider_5xx`,
 `provider_rate_limit`, `provider_auth`, `context_overflow`,
@@ -142,7 +164,7 @@ bubble. Concurrent-run lock prevents two streaming `agent.run` calls
 from corrupting session state. WebSocket `connect()` now rejects on
 `onerror`/`onclose` before `onopen` instead of hanging the UI forever.
 
-**Test coverage: 1981 tests** across 195 files. Five new dedicated
+**Test coverage: 2045 tests** across 202 files. Five new dedicated
 suites pin the regression duvarı: error classification (T1/T2/T7),
 abort-during-tool (T3), partial JSONL read (T6), coordinator races
 (T4/T5/M4/M5/T8), cost-bucket disjointness (M2). The plan-mode
@@ -342,7 +364,7 @@ wrongstack --tui --yolo "add unit tests for src/auth.ts"
 - `@<query>` opens a fuzzy file-picker over the project root, arrow keys to navigate, Enter attaches as `[file #N]`
 - `Alt+V` reads an image from the clipboard (PowerShell on Windows, `osascript` on macOS, `wl-paste`/`xclip` on Linux), attaches as `[image #N]`
 - **Live status bar**: model · token in/out · cache hit % · cost · run state · `running: <tool> Ns (+N)` while tools execute · 4th line showing top-4 active subagents
-- **LiveActivityStrip** above the input: one line per running subagent showing the tool currently in flight, elapsed timer, iteration + tool-call counters — visible in both director and non-director mode (`[AGENT#1] ● bash 250ms · 1.2KB` lands in chat regardless of mode)
+- **LiveActivityStrip** above the input: one line per running subagent showing the tool currently in flight, elapsed timer, iteration + tool-call counters, plus the last two compact tool/message summaries. Tool telemetry stays here and in FleetPanel instead of flooding chat history.
 - **Esc-to-steer**: mid-flight redirect that aborts the run, terminates the fleet (1.5s cap), and prepends a STEERING preamble (snapshot of in-flight tools, terminated subagents, last partial output + explicit authority grant) to the next user message
 - **`/goal <description>`** locks in a relentless autonomous mode — no implicit budget cap, anti-hedge constraints, three-angle persistence
 - Streaming text rendered live from the provider's SSE stream
@@ -690,7 +712,7 @@ wrongstack --director "audit src/ for security issues"
    │  ─────────────────────────────────────────────────────────────  │
    │  • Fresh Agent + Context + EventBus (full isolation)            │
    │  • Multi-provider: any provider/model per subagent              │
-   │  • Bridges tool.executed → host bus (always-on chat surface)    │
+   │  • Bridges tool.executed → host bus (compact TUI surface)       │
    │  • tool.progress → checkTimeout (cooperative wall-clock bust)   │
    │  • Empty-response / tool-failed guards → kind-classified errors │
    │  • Per-task JSONL writer, closed via dispose() in finally       │
@@ -817,7 +839,7 @@ The `EventBus` carries **28 typed events**:
 - **Provider**: `provider.response`, `provider.text_delta`, `provider.thinking_delta`, `provider.tool_use_start`, `provider.tool_use_stop`, `provider.retry`, `provider.error`
 - **Tool**: `tool.started`, `tool.progress`, `tool.confirm_needed`, `tool.executed` (closes the gap between "model decided to call a tool" and "tool finished"; carries `outputBytes` / `outputTokens` / `outputLines` for inline size chips)
 - **Token / compaction**: `token.threshold`, `token.cost_estimate_unavailable`, `compaction.fired`, `compaction.failed`
-- **Subagent lifecycle**: `subagent.spawned` (carries `transcriptPath` to the JSONL on disk), `subagent.task_started`, `subagent.task_completed` (carries the full `SubagentError` envelope on failure), `subagent.tool_executed` (always-on per-tool bridge so the TUI surfaces subagent tool calls regardless of director mode)
+- **Subagent lifecycle**: `subagent.spawned` (carries `transcriptPath` to the JSONL on disk), `subagent.task_started`, `subagent.task_completed` (carries the full `SubagentError` envelope on failure), `subagent.tool_executed` (always-on per-tool bridge so the TUI can update compact live agent surfaces regardless of director mode)
 - **MCP**: `mcp.server.connected`, `mcp.server.reconnected`, `mcp.server.disconnected`
 - **Error**: `error`
 
@@ -868,7 +890,8 @@ A plugin declares `apiVersion: "^1.0"` and gets the full `PluginAPI`: container,
 
 | Package | Purpose | README |
 |---------|---------|--------|
-| `@wrongstack/core` | Kernel, agent, defaults, types, registries, plugin contract | [packages/core](packages/core/README.md) |
+| `@wrongstack/core` | Kernel, agent, types, registries, plugin contract | [packages/core](packages/core/README.md) |
+| `@wrongstack/runtime` | Default runtime implementations, host composition helpers, extension pack contracts | [packages/runtime](packages/runtime/README.md) |
 | `@wrongstack/providers` | Anthropic/OpenAI/OpenAI-compatible/Google wire adapters + SSE | [packages/providers](packages/providers/README.md) |
 | `@wrongstack/tools` | 33 built-in tools | [packages/tools](packages/tools/README.md) |
 | `@wrongstack/mcp` | MCP server registry + reconnection logic | [packages/mcp](packages/mcp/README.md) |
@@ -886,6 +909,7 @@ Steering  → Esc / /steer / /goal — mid-flight redirect + autonomous lock-in
 Director  → Fleet orchestration (LLM-driven, opt-in via --director)
 Agent     → loop, context, system prompt, permission, compaction, autoExtendLimit
 Tools     → ToolExecutor (parallel/sequential/smart strategies, abort-safe)
+Runtime   → Default host assembly + WrongStackPack extension composition
 Kernel    → Container · Pipeline · EventBus · RunController (the 4 primitives)
 Provider  → 4 wire families, factories built from ModelsRegistry, real SSE
 Models    → models.dev/api.json fetched + cached + classified
@@ -898,7 +922,7 @@ Models    → models.dev/api.json fetched + cached + classified
                     │       Human view (TUI)            │
                     │   • LiveActivityStrip (top-4)     │
                     │   • FleetPanel (full roster)      │
-                    │   • Chat: [AGENT#N] ● tool size   │
+                    │   • Chat: agent text + lifecycle   │
                     │   • Kind chips on failures        │
                     └─────────────┬─────────────────────┘
                                   │
@@ -953,9 +977,9 @@ validation, and the system prompt builder. See
 
 ## Status
 
-- **1981 tests passing** across 195 test files (~13 s, 1 skipped)
+- **2045 tests passing** across 202 test files (~12 s, 1 skipped)
 - Coverage thresholds enforced in `vitest.config.ts`: ≥85 % lines / ≥85 % functions / ≥70 % branches / ≥82 % statements
-- All 8 packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
+- All workspace packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles
 - CI gate: `pnpm typecheck && pnpm build && pnpm test` all required
 - Threat model and adversary trust assumptions: [`SECURITY.md`](SECURITY.md)

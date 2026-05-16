@@ -21,7 +21,7 @@ pnpm add @wrongstack/tools @wrongstack/core
 | `edit` | `confirm` | yes | str_replace; requires prior `read`; FAT-aware mtime tolerance |
 | `replace` | `confirm` | yes | Regex replace across files; symlink-skipped + realpath-revalidated |
 | `glob` | `auto` | no | Glob pattern matching |
-| `grep` | `auto` | no | rg-backed; user-regex compiled through ReDoS guard |
+| `grep` | `auto` | no | rg-backed; ReDoS-guarded regex, default ignores, accurate count totals |
 | `tree` | `auto` | no | Project tree; clears its polling timer (no leaks) |
 | `patch` | `confirm` | yes | GNU-patch diff applier; targets pre-validated against `projectRoot` |
 | `diff` | `auto` | no | Git diff against HEAD |

@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`@wrongstack/runtime` host composition package.** Runtime is now the
+  migration target for concrete defaults and host assembly helpers, keeping
+  `@wrongstack/core` focused on kernel contracts, registries, primitives, and
+  the agent lifecycle. The first slice re-exports the current defaults from
+  `@wrongstack/core/defaults` and introduces the `WrongStackPack` extension
+  shape for tools, providers, slash commands, and lifecycle hooks.
+- **Built-in tools pack.** `@wrongstack/tools/pack` now exports
+  `builtinToolsPack`; CLI and WebUI register built-ins through that pack shape
+  instead of hard-wiring the raw tool array. This is the first package-level
+  step toward CLI, TUI, WebUI, Telegram, and future hosts acting as extension
+  packages around a small core.
+- **Compact multi-agent activity memory.** The TUI tracks the last two tool
+  calls and last two assistant text snippets per subagent. `LiveActivityStrip`
+  and `FleetPanel` render those compact summaries so users can see what each
+  worker is doing without flooding the transcript.
+
+### Changed
+
+- **Subagent tool calls no longer spam chat history.** Tool telemetry is now a
+  live status/fleet concern; the main chat keeps human-readable text and
+  lifecycle summaries. Agent text streamed from FleetBus is debounced before it
+  lands in history, while the live strip still updates quickly from deltas.
+
+### Fixed
+
+- **`grep` ripgrep backend correctness.** Regex syntax is validated before
+  invoking `rg`, default ignored directories are excluded consistently in both
+  native and `rg` backends, and `output_mode: "count"` now returns the total
+  match count rather than the number of files with matches.
+- **Full test suite regression.** `pnpm test` is back to green:
+  2045 passing tests across 202 files, with 1 skipped.
+
 ## [0.2.0] — 2026-05-16
 
 The "autonomous fleet" release. Six weeks of work focused on one
