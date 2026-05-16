@@ -9,6 +9,7 @@ export { execTool } from './exec.js';
 export { fetchTool } from './fetch.js';
 export { searchTool } from './search.js';
 export { todoTool } from './todo.js';
+export { planTool } from './plan.js';
 export { gitTool } from './git.js';
 export { patchTool } from './patch.js';
 export { jsonTool } from './json.js';

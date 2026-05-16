@@ -7,6 +7,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Session checkpoint system.** Three new sidecar files next to each
+  session JSONL turn `wstack resume <id>` into a real "kaldığım yerden
+  devam" experience instead of just replaying messages:
+  - `<id>.todos.json` — `ctx.todos` mirrored to disk on every
+    `todos_replaced` mutation (150ms debounce, atomic write). Reloaded
+    transparently on resume; `attachTodosCheckpoint(state, path, id)`
+    is the new public helper in `@wrongstack/core`.
+  - `<id>.plan.json` — strategic roadmap maintained via the new
+    `/plan` slash command (`show|add|start|done|remove|clear`). Plans
+    are higher-level than todos (survive across sessions by intent)
+    and surface a "N items, M open" banner on resume.
+  - `<id>/director-state.json` — live director task graph
+    (pending/running/completed + spawn roster + usage), written
+    incrementally as spawns and task completions land. Distinct from
+    the existing `fleet.json` manifest, which previously only got
+    written on `Director.shutdown()` and is now also periodically
+    flushed (~2s debounce) on every spawn/assign/complete event.
+
+- **Director session event emission.** `Director` accepts an optional
+  `sessionWriter` and now forwards `agent_spawned`, `task_created`,
+  `task_completed`, and `task_failed` events to the host session JSONL
+  — these were already in the `SessionEvent` union but were never
+  actually emitted by any subsystem. Production callers (CLI) pass the
+  same writer the host Agent uses so all events land in one log.
+
+- **`/plan` slash command** for strategic roadmap management
+  (`packages/cli/src/slash-commands/plan.ts`). Items have status
+  (`open` / `in_progress` / `done`), optional details, and stable ids.
+
+- **`planTool` — LLM-callable counterpart to `/plan`.** Registered with
+  the builtin tool set; reads `ctx.meta['plan.path']` (seeded by the
+  CLI during startup) so the model can manage long-running strategy
+  the same way it manages todos. One tool, six actions
+  (`show|add|start|done|remove|clear`).
+
+- **`/fleet retry [taskId|all]`** for resuming interrupted multi-agent
+  runs. Reads `director-state.json`, finds tasks left in `running` /
+  `pending` state when the previous process died, and re-spawns the
+  matching subagent (preferring the original roster role) before
+  re-assigning the task. Auto-promotes to director mode if needed.
+
+- **TUI plan chip** in the status bar (`📋 ⌛N ☐N ✓N`), polling
+  `<sessionId>.plan.json` every 3s. Distinct from the todos chip so
+  the user can read tactical and strategic progress at a glance.
+
+- **`delegate` tool — autonomous multi-agent activation.** A new
+  always-on built-in tool (`packages/core/src/coordination/delegate-tool.ts`)
+  bundles spawn + assign + await into one call. Registered in every
+  CLI session regardless of `--director` mode: the first call
+  auto-promotes the host to director mode under the hood, so the
+  model no longer needs the user to "enable multi-agent" before it
+  can delegate. Accepts a roster role (`bug-hunter`, `security-scanner`,
+  `refactor-planner`, `audit-log`) OR an explicit `name`/`provider`/`model`.
+  Per-call `timeoutMs` cap (default 5min) keeps a hung worker from
+  hanging the host turn.
+
+- **System prompt "Delegation" section.** The
+  `DefaultSystemPromptBuilder` now detects when the `delegate` tool is
+  registered and injects a guide telling the model when to delegate
+  (task fans out naturally, specialized role exists, subtask would
+  blow up context) and when to stay in-process (trivial / atomic /
+  user mid-conversation). The model can read the available role list
+  off the tool's schema enum without any extra plumbing.
+
+- **Plan-aware system prompt.** `DefaultSystemPromptBuilder` accepts
+  `planPath?: string | (() => string | undefined)` and reads the
+  session's `<id>.plan.json` on every `build()` call. Open items are
+  injected as an ephemeral "Active plan" block so the LLM is anchored
+  to the strategic roadmap every turn — not just on resume. The getter
+  form lets DI containers bind the builder before the session id is
+  known. CLI seeds the path automatically.
+
+- **`/fleet log [<subagentId>] [raw]`** — surface per-subagent
+  transcripts. Without arguments lists every JSONL on disk for the
+  current session's fleet. With an id shows a compact summary
+  (iteration count, tool breakdown, first task, last response, event
+  mix). Append `raw` to dump the full JSONL when you need the
+  uncompressed view.
+
+### Changed
+
+- **TUI alt-screen by default.** `runTui({ altScreen })` now defaults
+  to `true`, taking over the alternate screen buffer (vim/less/htop
+  style) so every keystroke — Ctrl+S, Ctrl+Q, Ctrl+Z, Ctrl+\\ — reaches
+  Ink instead of being eaten by the terminal driver. `--no-alt-screen`
+  is the new opt-out flag for users who want completed chat to survive
+  after exit. `runTui` additionally installs no-op handlers for
+  `SIGTSTP`/`SIGQUIT`/`SIGTTIN`/`SIGTTOU` as belt-and-suspenders.
+
+### Fixed
+
+- **Test pollution writing to project cwd `tmp/`.** A test in
+  `packages/cli/tests/multi-agent.test.ts` was using a relative
+  `'tmp/fleet/session-2'` path that materialized fleet JSONLs inside
+  the project working directory. Switched to `os.tmpdir()` + cleanup.
+  Production code already routed all fleet artifacts under
+  `~/.wrongstack/projects/<hash>/sessions/<id>/`.
+
 ## [0.1.10] — 2026-05-15
 
 Core package restructuring + thinking/reasoning stream support + tool

@@ -31,7 +31,7 @@ const exitCode = await runTui({
   family: 'anthropic',
   keyTail: '…ABC',
   effectiveMaxContext: 200_000,
-  altScreen: false,
+  altScreen: true,
 });
 
 process.exit(exitCode);
@@ -76,7 +76,7 @@ process.exit(exitCode);
 
 ## Options worth knowing
 
-- **`altScreen: false`** (default) — render into normal scrollback so the user keeps native terminal scroll + history after exit. Set `true` for full-screen mode (no scrollback).
+- **`altScreen: true`** (default) — render into the terminal's alternate screen buffer (vim/less/htop style). The TUI owns the whole viewport, native scrollback is untouched, and the live region cannot leak into terminal history. Raw mode plus alt-screen also means every keystroke — including Ctrl+S, Ctrl+Q, Ctrl+Z, Ctrl+\\ — reaches Ink instead of being consumed by the terminal driver (`runTui` additionally registers no-op handlers for `SIGTSTP`/`SIGQUIT`/`SIGTTIN`/`SIGTTOU` as belt-and-suspenders). Set `false` (or pass `--no-alt-screen`) to render into normal scrollback if you specifically want completed chat to survive after exit; the trade-off is the documented live-region leak on resize / overlay-close / picker-submit, and that some shortcuts may fall through to the terminal.
 - **`effectiveMaxContext`** — the context-bar denominator. Pass the model-specific value resolved via `ModelsRegistry`, not the family baseline; the 1M Opus variant has a much larger window than the 200k default.
 - **`queueStore`** — if set, queued input survives a crash. Without it, queued lines are in-memory only.
 - **`onClearHistory`** — invoked from the `/clear` slash command so the TUI can wipe its rendered history entries (keeping just the banner) while `Agent`/memory reset happens elsewhere.

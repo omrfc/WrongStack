@@ -17,6 +17,7 @@ import { lintTool } from './lint.js';
 import { logsTool } from './logs.js';
 import { outdatedTool } from './outdated.js';
 import { patchTool } from './patch.js';
+import { planTool } from './plan.js';
 import { readTool } from './read.js';
 import { replaceTool } from './replace.js';
 import { scaffoldTool } from './scaffold.js';
@@ -42,6 +43,7 @@ export const builtinTools: Tool[] = [
   fetchTool,
   searchTool,
   todoTool,
+  planTool,
   gitTool,
   patchTool,
   jsonTool,

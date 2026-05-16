@@ -166,3 +166,30 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     return undefined;
   }
 }
+
+/**
+ * Auto-approving PermissionPolicy used for subagents. Subagents run
+ * non-interactively under a director — they cannot answer permission
+ * prompts, so a non-YOLO policy on the leader would silently hang the
+ * delegated run on the first sensitive tool call. The user already
+ * authorized the delegation when they invoked the leader; subagents
+ * inherit that authorization automatically.
+ *
+ * Tool defaults of `permission: 'deny'` are still honored (this is a
+ * subagent capability override, not a deny-bypass).
+ */
+export class AutoApprovePermissionPolicy implements PermissionPolicy {
+  async evaluate(tool: Tool): Promise<PermissionDecision> {
+    if (tool.permission === 'deny') {
+      return { permission: 'deny', source: 'default', reason: 'tool default deny' };
+    }
+    return { permission: 'auto', source: 'yolo' };
+  }
+  async trust(): Promise<void> {
+    // No-op: subagent permission decisions are ephemeral and must not
+    // pollute the leader's persisted trust file.
+  }
+  async reload(): Promise<void> {
+    // No-op: nothing to load.
+  }
+}

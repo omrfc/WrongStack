@@ -47,12 +47,13 @@ export interface RunTuiOptions {
   effectiveMaxContext?: number;
   /**
    * Render into the terminal's alternate screen buffer (like vim/less/htop).
-   * Default: false — we render into normal scrollback so the user can
-   * scroll history with the terminal's native mouse wheel / Shift+PgUp,
-   * and so completed chat survives after exit. Pass true to switch to
-   * a fixed full-screen view (no scrollback, no native scroll); useful
-   * when terminal redraw flicker is bad enough to outweigh the loss of
-   * scrollback.
+   * Default: false — native scrollback stays live so chat history is
+   * scrollable via mouse wheel / Shift+PgUp, which matches the user's
+   * "this is a chat app, let me scroll the chat" intuition. Pass true
+   * (or run with `--alt-screen`) for the full-screen mode that owns the
+   * terminal and prevents resize/overlay leaks of the live region —
+   * trade-off is that the terminal's native scrollback is suspended
+   * while the TUI is up and only what's currently on screen is visible.
    */
   altScreen?: boolean;
   /**
@@ -81,6 +82,16 @@ export interface RunTuiOptions {
    * human-readable names. Same value passed to director.tools().
    */
   fleetRoster?: Record<string, { name: string }>;
+  /**
+   * Shared controller for the `/fleet stream on|off` toggle. The slash
+   * command runs in the CLI process and needs to flip TUI reducer state;
+   * the App installs a dispatch-backed `setEnabled` here on mount so
+   * both sides stay synchronized.
+   */
+  fleetStreamController?: {
+    enabled: boolean;
+    setEnabled: (enabled: boolean) => void;
+  };
 }
 
 // Bracketed paste mode wraps any pasted text with these markers, letting us
@@ -121,6 +132,25 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
   }
   stdout.write(BRACKETED_PASTE_ON);
 
+  // Take over EVERY keystroke. Raw mode (Ink turns this on when render
+  // mounts) already disables ICANON/ECHO/ISIG/IXON on Linux+macOS, so
+  // Ctrl+C/Z/\\/S/Q arrive as input bytes instead of generating
+  // signals or being eaten by the terminal driver. Belt-and-suspenders:
+  // install no-op handlers for the suspend/quit signals just in case
+  // some shell or terminal still surfaces them — without these, a
+  // stray Ctrl+Z could background the TUI mid-session.
+  const swallowSignals: NodeJS.Signals[] = ['SIGTSTP', 'SIGQUIT', 'SIGTTIN', 'SIGTTOU'];
+  const swallow = () => {};
+  for (const s of swallowSignals) {
+    try {
+      process.on(s, swallow);
+    } catch {
+      // Signal not supported on this platform (Windows ignores most of
+      // these). Safe to skip — there's nothing for the terminal to
+      // deliver in the first place.
+    }
+  }
+
   // Track cleanup state so signal handlers don't double-disable. Order
   // matters on exit: paste mode off first (it's a screen-independent
   // setting), then alt-screen off (which restores the user's previous
@@ -150,6 +180,13 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
 
   const detachListeners = () => {
     for (const s of signals) process.off(s, signalHandler);
+    for (const s of swallowSignals) {
+      try {
+        process.off(s, swallow);
+      } catch {
+        // ignore — see install site
+      }
+    }
     process.off('exit', exitHandler);
   };
 
@@ -201,6 +238,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           onClearHistory: opts.onClearHistory
             ? (dispatch) => opts.onClearHistory!(dispatch)
             : undefined,
+          fleetStreamController: opts.fleetStreamController,
         }),
         { exitOnCtrlC: false },
       );
@@ -211,9 +249,47 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
       settle(1);
       return;
     }
+    // Non-altScreen mode: terminal reflows visible text on resize BEFORE
+    // Ink can react, which leaks one or more lines of the live region
+    // (input prompt, status bar) into native scrollback. We can't recover
+    // what the terminal already pushed up, but we CAN ensure no leftover
+    // ghosts persist below the cursor by erasing from-cursor-to-end on
+    // every resize. Combined with Ink's automatic re-render on resize,
+    // this minimizes the artifact to (at most) the lines the terminal
+    // itself pushed up at the moment of the resize event.
+    //
+    // For users doing heavy resize / split-pane workflows, --alt-screen
+    // is the bullet-proof fix: Ink renders into a separate screen buffer
+    // that has no native scrollback, so terminal-side reflow can't push
+    // anything anywhere. Trade-off documented in tui/README.md.
+    let detachResize: (() => void) | null = null;
+    if (!useAltScreen) {
+      const onResize = () => {
+        try {
+          // \x1b[J = erase from cursor to end of screen. Does NOT touch
+          // anything above the cursor, so committed Static history in
+          // scrollback is preserved. Ink's useStdout subscriber will
+          // immediately re-render the live region at the new width, and
+          // log-update's stale line-count tracker gets a clean slate to
+          // draw onto.
+          stdout.write('\x1b[J');
+        } catch {
+          // stdout might be detached mid-shutdown — ignore.
+        }
+      };
+      stdout.on('resize', onResize);
+      detachResize = () => stdout.off('resize', onResize);
+    }
+
     instance
       .waitUntilExit()
-      .then(() => settle(exitCode))
-      .catch(() => settle(1));
+      .then(() => {
+        detachResize?.();
+        settle(exitCode);
+      })
+      .catch(() => {
+        detachResize?.();
+        settle(1);
+      });
   });
 }

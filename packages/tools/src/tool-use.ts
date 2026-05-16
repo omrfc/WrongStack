@@ -20,7 +20,7 @@ export const toolUseTool: Tool<ToolUseInput, ToolUseOutput> = {
   usageHint:
     'Set `tool` with exact tool name and `input` with the tool parameters. Returns result or error.',
   permission: 'confirm',
-  mutating: false,
+  mutating: true,
   timeoutMs: 60_000,
   inputSchema: {
     type: 'object',

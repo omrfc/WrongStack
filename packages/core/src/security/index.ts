@@ -10,5 +10,6 @@ export {
 } from './secret-vault.js';
 export {
   DefaultPermissionPolicy,
+  AutoApprovePermissionPolicy,
   type PermissionPolicyOptions,
 } from './permission-policy.js';

@@ -13,7 +13,7 @@ describe('batchToolUseTool', () => {
   it('has correct metadata', () => {
     expect(batchToolUseTool.name).toBe('batch_tool_use');
     expect(batchToolUseTool.permission).toBe('confirm');
-    expect(batchToolUseTool.mutating).toBe(false);
+    expect(batchToolUseTool.mutating).toBe(true);
     expect(batchToolUseTool.timeoutMs).toBe(120_000);
   });
 

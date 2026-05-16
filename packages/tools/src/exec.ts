@@ -75,7 +75,7 @@ export const execTool: Tool<ExecInput, ExecOutput> = {
   usageHint:
     'Set `command` (must be in allowlist). `args` passed through. For arbitrary shell access use the `bash` tool instead.',
   permission: 'confirm',
-  mutating: false,
+  mutating: true,
   timeoutMs: TIMEOUT_MS,
   inputSchema: {
     type: 'object',

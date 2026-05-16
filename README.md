@@ -218,6 +218,9 @@ wrongstack --tui --yolo "add unit tests for src/auth.ts"
 - Streaming text rendered live from the provider's SSE stream
 - Signal-safe cleanup: `SIGINT`/`SIGTERM`/`SIGHUP`/`exit` all disable bracketed paste mode on the way out
 - Non-TTY guard: refuses to start with exit code 2 when stdin or stdout is piped
+- `Home`/`End` keys jump to start/end of the input buffer (parsed from raw stdin CSI sequences since Ink 5.x doesn't surface them)
+- Re-entrancy guard on `Enter`: blocks stale second events from terminals that emit `\r\n` as two separate stdin frames, preventing double-submit
+- Resize ghost mitigation: `\x1b[J` erase-below-cursor on every resize event prevents leftover live-region lines from persisting in non-alt-screen mode; for heavy resize / split-pane workflows, `--alt-screen` eliminates the issue entirely
 
 **Web UI** (`@wrongstack/webui`): React + Radix + Tailwind frontend with a Node `ws` backend that reuses the same `bootConfig()` / vault / agent assembly the CLI uses. Standalone `webui` binary serves the static bundle on port `3456` and the WebSocket on `3457`. The CLI can also opt in with `wrongstack --webui`. Both paths bind to `127.0.0.1` by default — set `WS_HOST=0.0.0.0` for LAN access. Highlights:
 
@@ -291,6 +294,9 @@ wrongstack --webui
 --yolo               Auto-allow all tool calls (don't ask for confirmation)
 --director           Enable Director-based fleet orchestration (LLM-driven
                      subagent planning, spawning, roll-up)
+--alt-screen         TUI only: render into a separate screen buffer (no native
+                     scrollback). Eliminates resize ghost artifacts at the cost
+                     of losing terminal history after exit.
 --verbose / -v       Log level → debug
 --trace              Log level → trace
 --log-level <lvl>    Explicit log level

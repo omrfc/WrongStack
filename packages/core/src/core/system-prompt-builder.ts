@@ -56,6 +56,20 @@ export interface DefaultSystemPromptBuilderOptions {
   /** Pre-resolved model capabilities — enables adaptive context thresholds. */
   modelCapabilities?: ModelCapabilities;
   todayIso?: string;
+  /**
+   * Path to the session's plan JSON, or a getter that returns it. When
+   * set, the builder reads the file on every `build()` call and injects
+   * an "Active plan" block listing open items, so the LLM is anchored to
+   * the strategic roadmap every turn — not just at resume. The block is
+   * tagged `ephemeral` so a plan edit on turn N doesn't invalidate the
+   * provider's prefix cache for earlier turns.
+   *
+   * The function form lets callers bind the builder before the session
+   * id is known (e.g. DI containers that resolve the builder lazily) —
+   * the getter is called at build-time, after the session has been
+   * created.
+   */
+  planPath?: string | (() => string | undefined);
 }
 
 export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
@@ -94,6 +108,11 @@ export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
     const layer3 = await this.buildEnvironment(ctx);
     const layer4 = await this.buildMemoryAndSkills();
     const layer5 = await this.buildMode();
+    // Plans anchor the HOST agent across turns. Subagents run one
+    // narrow task and shouldn't carry the host's strategic context —
+    // it just bloats their prompt and risks them mutating a plan
+    // they weren't supposed to touch.
+    const layer6 = ctx.subagent ? '' : await this.buildActivePlan();
 
     const blocks: TextBlock[] = [
       { type: 'text', text: layer1 },
@@ -117,7 +136,54 @@ export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
       });
     }
 
+    if (layer6.trim()) {
+      blocks.push({
+        type: 'text',
+        text: layer6,
+        cache_control: { type: 'ephemeral' },
+      });
+    }
+
     return blocks;
+  }
+
+  /**
+   * Reads `<sessionId>.plan.json` (when configured) and produces a short
+   * "Active plan" block listing open items so the model is anchored to
+   * the strategic roadmap every turn. Reads on every `build()` so a
+   * plan edit (via `/plan` or the `plan` tool) reflects on the next
+   * turn without restarting the session.
+   */
+  private async buildActivePlan(): Promise<string> {
+    const planPath =
+      typeof this.opts.planPath === 'function' ? this.opts.planPath() : this.opts.planPath;
+    if (!planPath) return '';
+    let raw: string;
+    try {
+      raw = await fs.readFile(planPath, 'utf8');
+    } catch {
+      return ''; // no plan yet — silent
+    }
+    let parsed: { items?: Array<{ status?: string; title?: string }>; title?: string };
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return '';
+    }
+    if (!Array.isArray(parsed.items) || parsed.items.length === 0) return '';
+    const open = parsed.items.filter((i) => i?.status !== 'done');
+    if (open.length === 0) return '';
+    const lines = ['## Active plan'];
+    if (parsed.title) lines.push(`*${parsed.title}*`, '');
+    parsed.items.forEach((it, idx) => {
+      const mark = it?.status === 'done' ? '[x]' : it?.status === 'in_progress' ? '[~]' : '[ ]';
+      lines.push(`${idx + 1}. ${mark} ${it?.title ?? '(untitled)'}`);
+    });
+    lines.push(
+      '',
+      'Use `/plan` (user) or the `plan` tool to update status as you progress. The roadmap survives session resume.',
+    );
+    return lines.join('\n');
   }
 
   private buildToolUsage(tools: Tool[]): string {
@@ -139,6 +205,87 @@ export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
 - **Batch ops:** Use \`replace\` with glob patterns for multi-file surgical changes
 
 When unsure about a file's current state, read it first rather than assuming.`);
+
+    // Delegation guidance — included when the `delegate` tool is present.
+    // Without this block the model doesn't know that multi-agent work is
+    // even an option, and `delegate` sits unused while the host agent
+    // tries to do everything in one expensive context.
+    const hasDelegate = tools.some((t) => t.name === 'delegate');
+    if (hasDelegate) {
+      const delegateTool = tools.find((t) => t.name === 'delegate');
+      const enumValues = (() => {
+        const role = (
+          delegateTool?.inputSchema as
+            | { properties?: { role?: { enum?: unknown } } }
+            | undefined
+        )?.properties?.role?.enum;
+        return Array.isArray(role) ? (role.filter((r) => typeof r === 'string') as string[]) : [];
+      })();
+      const roleList = enumValues.length > 0 ? enumValues.join(', ') : '(no roster configured)';
+      lines.push(`
+## Delegation
+
+You have a \`delegate\` tool that hands a discrete piece of work to a
+dedicated subagent (its own context, its own LLM call, its own budget
+cap) and waits for the result. Use it proactively when:
+
+- **The task fans out naturally** — e.g. "audit these 5 files for
+  security issues" splits cleanly into 5 parallel \`delegate\` calls,
+  one per file or per role. Fire them through the provider's
+  parallel-tool-call surface in the same turn.
+- **A specialized role exists** — the roster has tuned prompts and
+  budgets for: ${roleList}. Reach for a role when the description
+  matches your subtask; otherwise pass \`name\` + \`provider\` + \`model\`.
+- **A subtask would blow up your context** — long log analyses, large
+  diff reviews, multi-file refactor plans. The subagent absorbs the
+  reading cost and hands back a summary.
+- **You'd otherwise switch hats mid-turn** — instead of stopping a code
+  fix to do a security pass, delegate the security pass.
+
+### Scope it tight — narrow tasks succeed, broad tasks time out
+
+A subagent has a finite iteration / tool-call budget (typically 50–80
+iterations, 200–300 tool calls). Tasks that mention "ALL files" or "the
+entire codebase" reliably exhaust that budget without producing a clean
+answer — the delegate returns with \`stopReason: budget_exhausted\` and
+no useful output.
+
+- ❌ BAD: \`"Analyze ALL .ts files in src/ for bugs"\`
+- ❌ BAD: \`"Audit the codebase for security issues"\`
+- ❌ BAD: \`"Plan a refactor of the whole project"\`
+- ✅ GOOD: \`"Audit src/auth/session.ts for null-deref bugs in the login flow"\`
+- ✅ GOOD: \`"Check packages/core/src/storage/*.ts for unhandled promise rejections (~6 files)"\`
+- ✅ GOOD: \`"Plan a phased refactor of the InMemoryBridge transport (3 files in coordination/)"\`
+
+If you need fleet-wide coverage, **fan out**: list the target files
+yourself first (one quick \`glob\` call), then fire one \`delegate\` per
+chunk of ≤5–10 files in parallel.
+
+### Reading the result
+
+\`delegate\` returns a structured object. Look at \`stopReason\`:
+
+- \`end_turn\` — subagent finished cleanly, \`result\` has the answer.
+- \`budget_exhausted\` — task was too broad; \`partial.lastAssistantText\`
+  has whatever it managed. Narrow the next try.
+- \`subagent_timeout\` / \`host_timeout\` — likewise partial; raise
+  \`timeoutMs\` only if you have a reason to believe more time would help.
+- \`aborted\` — the user or another tool stopped this worker; don't retry
+  silently.
+- \`error\` — infrastructure problem; surface it.
+
+Stay in-process (no \`delegate\`) when:
+- The task is trivial or atomic.
+- The information needed is already in your context.
+- The user is mid-conversation and expects an immediate reply from you,
+  not a research detour through a subagent.
+
+\`delegate\` auto-promotes the host into director mode the first time
+it's called — you do not need to call any setup tool. For fine-grained
+control over a long-running fleet (spawn N workers, hand them tasks
+one by one, roll up results), use \`spawn_subagent\` + \`assign_task\` +
+\`await_tasks\` directly; \`delegate\` is the one-call shortcut.`);
+    }
 
     // Context management guidance — included when context_manager is present.
     // This layer teaches the model WHEN and HOW to use it proactively.

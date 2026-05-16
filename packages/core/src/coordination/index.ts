@@ -4,6 +4,11 @@ export {
   DirectorBudgetError,
 } from './director.js';
 export {
+  createDelegateTool,
+  type DelegateHost,
+  type CreateDelegateToolOptions,
+} from './delegate-tool.js';
+export {
   DefaultMultiAgentCoordinator,
   type MultiAgentCoordinatorOptions,
 } from './multi-agent-coordinator.js';

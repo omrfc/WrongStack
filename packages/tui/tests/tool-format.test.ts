@@ -195,8 +195,30 @@ describe('formatToolOutput', () => {
     expect(formatToolOutput('todo', 'updated', true)).toEqual([]);
   });
 
-  it('unknown tool: first non-empty line, collapsed', () => {
-    expect(formatToolOutput('weird', '\n\nfirst line\nsecond line', true)).toEqual(['first line']);
+  it('unknown tool: all whitespace collapsed to single line', () => {
+    // The fallback used to take only the first non-empty line, which
+    // broke pretty-printed JSON results (the first line was just `{`).
+    // The new behavior joins every line with single spaces so the
+    // preview surfaces the actual content, not just the opening brace.
+    expect(formatToolOutput('weird', '\n\nfirst line\nsecond line', true)).toEqual([
+      'first line second line',
+    ]);
+  });
+
+  it('unknown tool: JSON object rendered as key=value preview', () => {
+    // Pretty-printed JSON used to display as `└─ {` (just the opening
+    // brace from the first line). The new behavior summarizes by key.
+    const json = JSON.stringify(
+      { ok: false, stopReason: 'host_timeout', error: 'too slow', toolCalls: 12 },
+      null,
+      2,
+    );
+    const out = formatToolOutput('delegate', json, false);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain('ok=false');
+    expect(out[0]).toContain('stopReason="host_timeout"');
+    expect(out[0]).toContain('error="too slow"');
+    expect(out[0]).toContain('toolCalls=12');
   });
 
   it('failed tool with empty output renders ["failed"]', () => {

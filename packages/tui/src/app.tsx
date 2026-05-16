@@ -18,7 +18,7 @@ import { readClipboardImage } from './clipboard.js';
 import { ConfirmPrompt } from './components/confirm-prompt.js';
 import { FilePicker } from './components/file-picker.js';
 import { FleetPanel } from './components/fleet-panel.js';
-import { History, type HistoryEntry } from './components/history.js';
+import { History, type HistoryEntry, formatToolArgs } from './components/history.js';
 import { Input, type KeyEvent } from './components/input.js';
 import { ModelPicker, type ProviderOption } from './components/model-picker.js';
 import { SlashMenu } from './components/slash-menu.js';
@@ -108,6 +108,15 @@ export interface AppProps {
   director: Director | null;
   /** Optional roster for human-readable subagent names. */
   fleetRoster?: Record<string, { name: string }>;
+  /**
+   * Shared controller for the `/fleet stream on|off` slash command. The
+   * App installs a dispatch-backed setter on mount so the slash command
+   * can flip the reducer's `streamFleet` flag from the CLI surface.
+   */
+  fleetStreamController?: {
+    enabled: boolean;
+    setEnabled: (enabled: boolean) => void;
+  };
 }
 
 type DraftEntry = HistoryEntry extends infer T
@@ -170,6 +179,13 @@ type State = {
   fleet: Record<string, FleetEntry>;
   /** Fleet-wide accumulated cost. */
   fleetCost: number;
+  /**
+   * When true, subagent activity (tool calls + assistant messages) is
+   * streamed into the main history with an `AGENT#N` prefix. Toggled
+   * with `/fleet stream on|off`. Default true so users see what their
+   * delegated agents are actually doing.
+   */
+  streamFleet: boolean;
 };
 
 type Action =
@@ -219,7 +235,8 @@ type Action =
   | { type: 'fleetTool'; id: string }
   | { type: 'fleetUsage'; id: string; input: number; output: number; cacheRead: number; cacheWrite: number }
   | { type: 'fleetDone'; id: string; status: FleetEntry['status']; iterations: number; toolCalls: number }
-  | { type: 'fleetCost'; cost: number };
+  | { type: 'fleetCost'; cost: number }
+  | { type: 'setStreamFleet'; enabled: boolean };
 
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -567,6 +584,9 @@ export function reducer(state: State, action: Action): State {
     case 'fleetCost': {
       return { ...state, fleetCost: action.cost };
     }
+    case 'setStreamFleet': {
+      return { ...state, streamFleet: action.enabled };
+    }
   }
 }
 
@@ -593,6 +613,7 @@ export function App({
   director,
   fleetRoster,
   onClearHistory,
+  fleetStreamController,
 }: AppProps): React.ReactElement {
   const { exit } = useApp();
   // Reactive mirrors of agent.ctx.{model,provider.id} so the status bar
@@ -643,6 +664,7 @@ export function App({
     contextChipVersion: 0,
     fleet: {},
     fleetCost: 0,
+    streamFleet: true,
   });
 
   const builderRef = useRef<InputBuilder | null>(null);
@@ -651,6 +673,21 @@ export function App({
   }
 
   const activeCtrlRef = useRef<AbortController | null>(null);
+  // Prevent re-entrant handleKey: some terminals emit \r\n as two separate
+  // stdin events for Enter. While the first event is being processed (submit
+  // or picker accept), the second arrives with stale state and would trigger
+  // a duplicate action. The gate blocks the stale-second event entirely.
+  const inputGateRef = useRef(false);
+  // Separate guard JUST for the submit path. The full `inputGateRef`
+  // is held across `await foo()` blocks (picker accept, model picker
+  // commit) — that's fine because those resolve in milliseconds. But
+  // `await submit()` resolves only when `agent.run()` finishes, which
+  // can be minutes for a delegated subagent task. Using the same gate
+  // would lock ALL keystrokes (typing, backspace, slash menu) for the
+  // entire agent run. This timestamp-based guard fires for the few
+  // milliseconds needed to debounce a terminal-side `\r\n` double-event
+  // and then auto-releases — leaving the input live for the user.
+  const lastEnterAtRef = useRef(0);
   const projectRoot = agent.ctx.projectRoot;
   // The status-bar chip surfaces the basename so multiple WrongStack
   // windows running against different repos are immediately distinguishable.
@@ -760,6 +797,145 @@ export function App({
     // agent.ctx.todos isn't React state — the 1s clock doubles as a
     // poll for ctx-side state.
   }, [nowTick, agent.ctx.todos]);
+
+  // Fleet breakdown for the status-bar chip. Derived from `state.fleet`,
+  // which the FleetBus event listeners already maintain — re-bucket
+  // into running / idle / pending / completed because that's the slice
+  // the user cares about at a glance. Recomputes on every state.fleet
+  // change (cheap — fleet usually has <10 entries).
+  const fleetCounts = useMemo(() => {
+    const entries = Object.values(state.fleet);
+    if (entries.length === 0) return undefined;
+    let running = 0;
+    let idle = 0;
+    let completed = 0;
+    for (const e of entries) {
+      if (e.status === 'running') running += 1;
+      else if (e.status === 'idle') idle += 1;
+      else completed += 1; // success/failed/timeout/stopped all count as "done"
+    }
+    return { running, idle, pending: 0, completed };
+  }, [state.fleet]);
+
+  // Per-agent detail for the status bar's optional 4th line. Limited to
+  // the top 4 active agents (running first, then idle) sorted by spawn
+  // order so the bar doesn't wrap on wide fleets. Reuses the global
+  // `nowTick` (bumped every 1s above) so elapsed time keeps ticking
+  // without needing a second timer.
+  const fleetAgents = useMemo(() => {
+    const entries = Object.entries(state.fleet);
+    if (entries.length === 0) return undefined;
+    // Show running first, then idle. Completed/failed agents drop off
+    // the active line — they're already reflected in the aggregate ✓N
+    // counter on line 3.
+    const active = entries.filter(([_id, e]) => e.status === 'running' || e.status === 'idle');
+    if (active.length === 0) return undefined;
+    active.sort((a, b) => {
+      const sa = a[1].status === 'running' ? 0 : 1;
+      const sb = b[1].status === 'running' ? 0 : 1;
+      if (sa !== sb) return sa - sb;
+      return a[1].startedAt - b[1].startedAt;
+    });
+    return active.slice(0, 4).map(([id, e]) => {
+      const lbl = labelFor(id, e.name);
+      return {
+        label: lbl.label,
+        color: lbl.color,
+        elapsedMs: Math.max(0, nowTick - e.startedAt),
+        toolCalls: e.toolCalls,
+        running: e.status === 'running',
+      };
+    });
+  }, [state.fleet, nowTick]);
+
+  // Plan counts come from `<sessionId>.plan.json` on disk, not React
+  // state. We poll lazily every few ticks so the chip stays current
+  // without slamming the FS — plans change at human pace (a few times
+  // per session at most), so 3s granularity is plenty.
+  const [planCounts, setPlanCounts] = useState<{
+    open: number;
+    inProgress: number;
+    done: number;
+  } | null>(null);
+  useEffect(() => {
+    const planPath = (agent.ctx.meta as Record<string, unknown>)['plan.path'];
+    if (typeof planPath !== 'string' || !planPath) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const data = await fs.readFile(planPath, 'utf8');
+        const parsed = JSON.parse(data) as {
+          items?: Array<{ status?: string }>;
+        };
+        if (cancelled) return;
+        if (!Array.isArray(parsed.items)) {
+          setPlanCounts(null);
+          return;
+        }
+        let open = 0;
+        let inProgress = 0;
+        let done = 0;
+        for (const it of parsed.items) {
+          if (it?.status === 'done') done++;
+          else if (it?.status === 'in_progress') inProgress++;
+          else open++;
+        }
+        setPlanCounts(open + inProgress + done > 0 ? { open, inProgress, done } : null);
+      } catch {
+        // Missing or corrupt — clear the chip.
+        if (!cancelled) setPlanCounts(null);
+      }
+    };
+    void poll();
+    const id = setInterval(poll, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [agent.ctx.meta]);
+
+  // Live-region shrink mitigation. Ink's log-update tracks the previous
+  // render's logical line count; when content visually wraps past the
+  // terminal width, the visual-row count exceeds the logical count and
+  // log-update's clear-and-rewrite leaves the extra visual rows behind.
+  // Those extras then slide into native scrollback as the next render
+  // commits new Static items above the live region — looking to the user
+  // like an extra echo of the input ("Enter ile boş input da history'e
+  // sıyrılıyor").
+  //
+  // We can't reach log-update directly, but we can issue an erase-below-
+  // cursor (\x1b[J) at the moments most likely to leak: when a picker /
+  // dialog transitions from open → closed (the live region's height
+  // drops sharply), and when a fresh history entry was just committed.
+  // \x1b[J only touches what's below the cursor, so committed Static
+  // history above is preserved. For users in heavy resize / picker
+  // workflows the bullet-proof alternative is still `--alt-screen`.
+  const prevAnyOverlayOpen = useRef(false);
+  const prevEntriesCount = useRef(0);
+  useEffect(() => {
+    const anyOpenNow =
+      state.picker.open ||
+      state.slashPicker.open ||
+      state.modelPicker.open ||
+      !!state.confirm;
+    const overlayClosed = prevAnyOverlayOpen.current && !anyOpenNow;
+    const newEntryCommitted = state.entries.length > prevEntriesCount.current;
+    prevAnyOverlayOpen.current = anyOpenNow;
+    prevEntriesCount.current = state.entries.length;
+    if (overlayClosed || newEntryCommitted) {
+      try {
+        process.stdout.write('\x1b[J');
+      } catch {
+        // stdout might be detached during shutdown — ignore.
+      }
+    }
+  }, [
+    state.picker.open,
+    state.slashPicker.open,
+    state.modelPicker.open,
+    state.confirm,
+    state.entries.length,
+  ]);
 
   // Detect an active `@<query>` token at the cursor and drive the picker.
   // Reruns whenever buffer/cursor changes — guards against stale results.
@@ -968,6 +1144,52 @@ export function App({
     };
   }, [slashRegistry]);
 
+  // Register `/altscreen on|off` — runtime escape valve for the
+  // alt-screen scrollback limitation. In alt-screen mode the terminal's
+  // native scrollback is disabled, so users can't review old chat
+  // entries. `off` writes the alt-screen-exit escape so subsequent
+  // entries land in the normal scroll region and the mouse wheel /
+  // shift+pgup work again. The trade-off (lost on-screen history,
+  // resize artifacts) is spelled out in the response message so the
+  // user can decide whether to keep it.
+  useEffect(() => {
+    const ALT_OFF = '\x1b[?1049l';
+    const ALT_ON = '\x1b[?1049h';
+    const cmd = {
+      name: 'altscreen',
+      description: 'Toggle the alt-screen buffer. Default is OFF (native scroll); /altscreen on for full-screen mode.',
+      async run(args: string) {
+        const arg = args.trim().toLowerCase();
+        if (arg === 'off') {
+          try {
+            process.stdout.write(ALT_OFF);
+          } catch {
+            return { message: 'Failed to exit alt-screen.' };
+          }
+          return {
+            message:
+              'Alt-screen disabled. New entries will land in normal scrollback (mouse wheel / Shift+PgUp work). ' +
+              'On-screen history rendered before this command is no longer reachable via terminal scroll. ' +
+              'Resize may now leak the live region — `/altscreen on` to re-enable.',
+          };
+        }
+        if (arg === 'on') {
+          try {
+            process.stdout.write(ALT_ON);
+          } catch {
+            return { message: 'Failed to re-enter alt-screen.' };
+          }
+          return { message: 'Alt-screen re-enabled. Native scroll is now disabled.' };
+        }
+        return { message: 'Usage: /altscreen on|off' };
+      },
+    };
+    slashRegistry.register(cmd);
+    return () => {
+      slashRegistry.unregister('altscreen');
+    };
+  }, [slashRegistry]);
+
   // Register the TUI-only `/model` command — opens a two-step picker
   // (provider → model). All work is local state mutation; the actual
   // switch fires only after the user confirms a model in step 2.
@@ -1140,6 +1362,56 @@ export function App({
     };
   }, [events]);
 
+  // Stable per-subagent label + color, assigned on first sighting and
+  // shared between the FleetBus listener (history stream) and the
+  // fleetAgents memo (status bar 4th line). Stored in a ref so a label
+  // assigned during one render is visible to the next render's memo
+  // without forcing a separate state update for the side table.
+  const STREAM_COLORS = ['cyan', 'magenta', 'yellow', 'green', 'blue'];
+  const labelsRef = useRef<Map<string, { label: string; color: string }>>(new Map());
+  const labelFor = (id: string, name?: string): { label: string; color: string } => {
+    const m = labelsRef.current;
+    const existing = m.get(id);
+    if (existing) return existing;
+    const n = m.size + 1;
+    const suffix = name && name !== id ? ` ${name}` : '';
+    const v = { label: `AGENT#${n}${suffix}`, color: STREAM_COLORS[(n - 1) % STREAM_COLORS.length]! };
+    m.set(id, v);
+    return v;
+  };
+
+  // Live mirror of `streamFleet` for the FleetBus listener below. The
+  // listener is wired in a single mount-time effect so it doesn't tear
+  // down per-state-change; a ref lets it read the current toggle value
+  // on every event without re-subscribing.
+  const streamFleetRef = useRef(state.streamFleet);
+  useEffect(() => {
+    streamFleetRef.current = state.streamFleet;
+  }, [state.streamFleet]);
+
+  // Install a dispatch-backed setter into the shared controller so the
+  // `/fleet stream on|off` slash command can flip our reducer flag.
+  // Restored to a noop on unmount so a late-arriving slash callback
+  // doesn't dispatch into a torn-down React tree.
+  useEffect(() => {
+    if (!fleetStreamController) return;
+    fleetStreamController.enabled = state.streamFleet;
+    fleetStreamController.setEnabled = (enabled: boolean) => {
+      dispatch({ type: 'setStreamFleet', enabled });
+    };
+    return () => {
+      fleetStreamController.setEnabled = (enabled: boolean) => {
+        fleetStreamController.enabled = enabled;
+      };
+    };
+  }, [fleetStreamController]);
+
+  // Keep the controller's mirror of `enabled` in sync when the toggle is
+  // flipped from a TUI-side path (not the slash command).
+  useEffect(() => {
+    if (fleetStreamController) fleetStreamController.enabled = state.streamFleet;
+  }, [state.streamFleet, fleetStreamController]);
+
   // --- FleetBus → TUI dispatch bridge ---
   // Subscribes to every event on the director's FleetBus and dispatches
   // fleet state actions. Text deltas are throttled (FLUSH_MS) to avoid
@@ -1150,6 +1422,30 @@ export function App({
     const d = director;
     if (!d) return;
     const FLUSH_MS = 150;
+
+    // Per-agent buffered assistant text. Flushed as one `subagent`
+    // history entry when the agent stops emitting deltas for FLUSH_MS,
+    // so we don't fire a fresh history entry on every token.
+    const streamBuf = new Map<string, string>();
+    let streamFlushTimer: ReturnType<typeof setTimeout> | null = null;
+    const flushStreamBufs = () => {
+      for (const [id, text] of streamBuf) {
+        if (!text.trim()) continue;
+        const lbl = labelFor(id);
+        dispatch({
+          type: 'addEntry',
+          entry: {
+            kind: 'subagent',
+            agentLabel: lbl.label,
+            agentColor: lbl.color,
+            icon: '💬',
+            text: text.trim(),
+          },
+        });
+      }
+      streamBuf.clear();
+      streamFlushTimer = null;
+    };
 
     // Seed: discover already-spawned subagents from the coordinator.
     const status = d.status();
@@ -1162,6 +1458,9 @@ export function App({
         provider: meta?.provider,
         model: meta?.model,
       });
+      // Seed a stable label so subagents spawned before TUI mount still
+      // show up by name in the status bar's per-agent detail line.
+      labelFor(s.id, meta?.name ?? s.name);
     }
     // Also seed cost from the usage aggregator.
     dispatch({ type: 'fleetCost', cost: d.snapshot().total.cost });
@@ -1182,10 +1481,29 @@ export function App({
 
     const offFleet = d.fleet.onAny((e: FleetEvent) => {
       // Discover new subagents.
-      if (!seen.has(e.subagentId)) {
+      const fresh = !seen.has(e.subagentId);
+      if (fresh) {
         seen.add(e.subagentId);
         const meta = d.getSubagentMeta(e.subagentId);
         dispatch({ type: 'fleetSpawn', id: e.subagentId, name: meta?.name, provider: meta?.provider, model: meta?.model });
+        // Always assign a label on first sighting so the status bar's
+        // 4th line has stable AGENT#N names even when history streaming
+        // is disabled. The history `spawned` entry below is gated on
+        // streamFleet; label assignment itself is unconditional.
+        const lbl = labelFor(e.subagentId, meta?.name);
+        if (streamFleetRef.current) {
+          const where = meta?.provider && meta?.model ? `${meta.provider}/${meta.model}` : 'spawned';
+          dispatch({
+            type: 'addEntry',
+            entry: {
+              kind: 'subagent',
+              agentLabel: lbl.label,
+              agentColor: lbl.color,
+              icon: '▶',
+              text: where,
+            },
+          });
+        }
       }
 
       switch (e.type) {
@@ -1198,12 +1516,39 @@ export function App({
             const cur = pending.get(e.subagentId) ?? '';
             pending.set(e.subagentId, cur + p.text);
             if (!flushTimer) flushTimer = setTimeout(doFlush, FLUSH_MS);
+            if (streamFleetRef.current) {
+              streamBuf.set(e.subagentId, (streamBuf.get(e.subagentId) ?? '') + p.text);
+              if (!streamFlushTimer) streamFlushTimer = setTimeout(flushStreamBufs, FLUSH_MS * 4);
+            }
           }
           break;
         }
-        case 'tool.executed':
+        case 'tool.executed': {
           dispatch({ type: 'fleetTool', id: e.subagentId });
+          if (streamFleetRef.current) {
+            // Flush any pending assistant text so tool calls appear in
+            // order relative to the chat that produced them.
+            if (streamFlushTimer) {
+              clearTimeout(streamFlushTimer);
+              flushStreamBufs();
+            }
+            const p = e.payload as { name?: string; ok?: boolean; durationMs?: number; input?: unknown };
+            const args = p?.input ? formatToolArgs(p.name ?? '', p.input) : '';
+            const lbl = labelFor(e.subagentId);
+            dispatch({
+              type: 'addEntry',
+              entry: {
+                kind: 'subagent',
+                agentLabel: lbl.label,
+                agentColor: lbl.color,
+                icon: p?.ok === false ? '✗' : '●',
+                text: args ? `${p?.name ?? 'tool'} ${args}` : (p?.name ?? 'tool'),
+                detail: typeof p?.durationMs === 'number' ? `${p.durationMs}ms` : undefined,
+              },
+            });
+          }
           break;
+        }
         case 'provider.response': {
           // Surface live cost from the aggregator (already computed with
           // per-model pricing). The fleetUsage reducer case is a stub that
@@ -1227,6 +1572,25 @@ export function App({
         toolCalls: payload.result.toolCalls,
       });
       dispatch({ type: 'fleetCost', cost: d.snapshot().total.cost });
+      if (streamFleetRef.current) {
+        // Drain remaining assistant text before the done line so the
+        // final chat is visible above the completion marker.
+        if (streamFlushTimer) {
+          clearTimeout(streamFlushTimer);
+          flushStreamBufs();
+        }
+        const lbl = labelFor(payload.result.subagentId);
+        dispatch({
+          type: 'addEntry',
+          entry: {
+            kind: 'subagent',
+            agentLabel: lbl.label,
+            agentColor: lbl.color,
+            icon: payload.result.status === 'success' ? '✓' : '✗',
+            text: `${payload.result.status} (${payload.result.iterations} iter · ${payload.result.toolCalls} tools)`,
+          },
+        });
+      }
     });
 
     return () => {
@@ -1234,6 +1598,8 @@ export function App({
       offDone();
       if (flushTimer) clearTimeout(flushTimer);
       doFlush(); // commit any pending deltas before cleanup
+      if (streamFlushTimer) clearTimeout(streamFlushTimer);
+      flushStreamBufs();
     };
   }, [director]);
 
@@ -1284,6 +1650,15 @@ export function App({
     // backspace, paste, and clipboard-image all stay live.
     if (state.status === 'aborting') return;
 
+    // Re-entrancy guard: block stale-second events from \r\n terminals.
+    if (inputGateRef.current) return;
+
+    // Some terminals emit \r\n for Enter as two separate stdin events.
+    // \r arrives with key.return=true (handled below); \n may arrive as
+    // a stray character with key.return=false. Normalize both to Enter
+    // and prevent them from polluting the buffer as literal text.
+    const isEnter = key.return || input === '\r' || input === '\n';
+
     // IMPORTANT: do NOT bail on `!input` here. Special keys (arrows,
     // Enter, Escape, Tab, Backspace) arrive with an empty `input`
     // string, and the slash/file pickers + cursor movement below all
@@ -1310,8 +1685,10 @@ export function App({
         dispatch({ type: 'modelPickerMove', delta: 1 });
         return;
       }
-      if (key.return) {
-        if (state.modelPicker.step === 'provider') {
+      if (isEnter) {
+        inputGateRef.current = true;
+        try {
+          if (state.modelPicker.step === 'provider') {
           const opt = state.modelPicker.providerOptions[state.modelPicker.selected];
           if (!opt) return;
           dispatch({
@@ -1338,6 +1715,9 @@ export function App({
         });
         dispatch({ type: 'modelPickerClose' });
         return;
+        } finally {
+          inputGateRef.current = false;
+        }
       }
       // Any other key while picker is open: ignore.
       return;
@@ -1356,8 +1736,10 @@ export function App({
         dispatch({ type: 'slashPickerMove', delta: 1 });
         return;
       }
-      if (key.return) {
-        await acceptSlashPickerSelection();
+      if (isEnter) {
+        inputGateRef.current = true;
+        acceptSlashPickerSelection();
+        inputGateRef.current = false;
         return;
       }
       // Tab → autocomplete with selected command
@@ -1386,8 +1768,13 @@ export function App({
         dispatch({ type: 'pickerMove', delta: 1 });
         return;
       }
-      if (key.return) {
-        await acceptPickerSelection();
+      if (isEnter) {
+        inputGateRef.current = true;
+        try {
+          await acceptPickerSelection();
+        } finally {
+          inputGateRef.current = false;
+        }
         return;
       }
       // Any other key falls through to normal text handling, which will
@@ -1395,8 +1782,25 @@ export function App({
       // (e.g. typing a space) — handled below.
     }
 
-    if (key.return) {
-      await submit();
+    if (isEnter) {
+      // Re-entrancy protection for terminals that emit `\r\n` as two
+      // separate stdin events: ignore Enter pressed within 50ms of the
+      // last one. The 50ms window catches the double-event reliably
+      // (the second `\n` arrives within microseconds of the `\r`) while
+      // staying well below human double-tap speed.
+      //
+      // We intentionally do NOT await submit() here — it kicks off
+      // agent.run() which can stay pending for minutes when a delegate
+      // call is in flight. Awaiting would block this handler frame for
+      // the full duration, which means every subsequent keystroke would
+      // miss its dispatch (including the slash key — the user reported
+      // the input feeling dead during delegated work). submit() handles
+      // its own re-entrancy via state.status: when the agent is busy,
+      // the message is queued instead of re-running concurrently.
+      const now = Date.now();
+      if (now - lastEnterAtRef.current < 50) return;
+      lastEnterAtRef.current = now;
+      void submit();
       return;
     }
 
@@ -1453,6 +1857,15 @@ export function App({
         dispatch({ type: 'setBuffer', buffer: state.buffer, cursor: state.cursor + 1 });
       return;
     }
+    if (key.home) {
+      dispatch({ type: 'setBuffer', buffer: state.buffer, cursor: 0 });
+      return;
+    }
+    if (key.end) {
+      dispatch({ type: 'setBuffer', buffer: state.buffer, cursor: state.buffer.length });
+      return;
+    }
+
     // History scrolling is delegated to the terminal's native scrollback
     // (mouse wheel, Shift+PgUp in Windows Terminal, etc.) — Ink's <Static>
     // emits each finalized entry once and never repaints over it.
@@ -1743,6 +2156,9 @@ export function App({
         yolo={yolo}
         elapsedMs={elapsedMs}
         todos={todos}
+        plan={planCounts ?? undefined}
+        fleet={fleetCounts}
+        fleetAgents={fleetAgents}
         git={gitInfo}
         context={contextWindow}
         projectName={projectName}

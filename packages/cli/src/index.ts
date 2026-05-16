@@ -40,10 +40,15 @@ import {
   type SystemPromptBuilder,
   TOKENS,
   ToolRegistry,
+  attachTodosCheckpoint,
   color,
   createContextManagerTool,
   createDefaultPipelines,
+  createDelegateTool,
+  loadDirectorState,
+  loadPlan,
   loadPlugins,
+  loadTodosCheckpoint,
   startMetricsServer,
   wireMetricsToEvents,
 } from '@wrongstack/core';
@@ -179,6 +184,14 @@ export async function main(argv: string[]): Promise<number> {
         supportsReasoning: resolvedModel.capabilities.reasoning,
       }
     : undefined;
+  // Mutable ref the prompt builder reads on every build() to discover
+  // the active session's plan path. Defined BEFORE the bind so the
+  // getter closure captures a stable reference instead of the `let
+  // session` declaration later in the function — referring to that
+  // `let` directly hit a TDZ ReferenceError when build() was called
+  // before the declaration line executed (the first build runs at
+  // line ~432, the declaration is at ~474).
+  const sessionRef: { current?: import('@wrongstack/core').SessionWriter } = {};
   container.bind(
     TOKENS.SystemPromptBuilder,
     () =>
@@ -189,6 +202,12 @@ export async function main(argv: string[]): Promise<number> {
         modeId,
         modePrompt,
         modelCapabilities,
+        // Reads the ref each time — returns undefined until the session
+        // is created, then resolves to the per-session plan JSON path.
+        planPath: () =>
+          sessionRef.current
+            ? path.join(wpaths.projectSessions, `${sessionRef.current.id}.plan.json`)
+            : undefined,
       }),
   );
   container.bind(TOKENS.Renderer, () => renderer);
@@ -460,7 +479,7 @@ export async function main(argv: string[]): Promise<number> {
     }
   }
 
-  let session;
+  let session: import('@wrongstack/core').SessionWriter | undefined;
   let restoredMessages: import('@wrongstack/core').Message[] = [];
   if (resumeId) {
     try {
@@ -482,6 +501,12 @@ export async function main(argv: string[]): Promise<number> {
       provider: config.provider,
     });
   }
+
+  // Publish the live session to the prompt-builder ref so future
+  // build() calls can locate the per-session plan path. Setting this
+  // AFTER session is assigned guarantees the getter never sees a
+  // partially-constructed writer.
+  sessionRef.current = session;
 
   // Claim the lock for this session. Released in the finally block below.
   await recoveryLock.write(session.id).catch(() => undefined);
@@ -534,6 +559,76 @@ export async function main(argv: string[]): Promise<number> {
   // conversation. Order is preserved from the JSONL log.
   if (restoredMessages.length > 0) {
     context.state.replaceMessages(restoredMessages);
+  }
+
+  // ---- Todos checkpoint: persist ctx.todos to disk + reload on resume ----
+  // Lives next to the JSONL session file so deleting one session cleans
+  // its sidecar checkpoints in one shot. The checkpoint is plain JSON
+  // (not JSONL) — overwritten atomically on every todos_replaced event.
+  const todosCheckpointPath = path.join(wpaths.projectSessions, `${session.id}.todos.json`);
+  if (resumeId) {
+    try {
+      const restoredTodos = await loadTodosCheckpoint(todosCheckpointPath);
+      if (restoredTodos && restoredTodos.length > 0) {
+        context.state.replaceTodos(restoredTodos);
+        renderer.writeInfo(
+          `Restored ${restoredTodos.length} todo${restoredTodos.length === 1 ? '' : 's'} from previous run.`,
+        );
+      }
+    } catch {
+      // Best-effort: a missing or unreadable checkpoint is the common
+      // case for sessions that never used todos. Stay silent.
+    }
+  }
+  const detachTodosCheckpoint = attachTodosCheckpoint(
+    context.state,
+    todosCheckpointPath,
+    session.id,
+  );
+
+  // Seed the plan-tool path into ctx.meta so the LLM-callable `plan` tool
+  // (and any future plan-aware middleware) knows where to read/write.
+  // The slash command reads `planPath` from its own context separately;
+  // this meta entry is purely for tool execution.
+  const planPath = path.join(wpaths.projectSessions, `${session.id}.plan.json`);
+  context.state.setMeta('plan.path', planPath);
+
+  // Surface any prior director-state.json so the user knows a multi-agent
+  // run was interrupted. The director itself reattaches via fleetRoot,
+  // but we want a banner-level "you have unfinished fleet work" cue too.
+  if (resumeId) {
+    try {
+      const fleetRoot = path.join(wpaths.projectSessions, session.id);
+      const dirState = await loadDirectorState(path.join(fleetRoot, 'director-state.json'));
+      if (dirState) {
+        const tCounts: Record<string, number> = {};
+        for (const t of dirState.tasks) {
+          tCounts[t.status] = (tCounts[t.status] ?? 0) + 1;
+        }
+        const summary = Object.entries(tCounts)
+          .map(([k, v]) => `${v} ${k}`)
+          .join(', ');
+        renderer.writeInfo(
+          `Prior fleet state: ${dirState.subagents.length} subagent${dirState.subagents.length === 1 ? '' : 's'}, tasks ${summary || '(none)'}.`,
+        );
+      }
+    } catch {
+      // ignore — fleet rehydration is a UX hint, not load-bearing
+    }
+    // Symmetric plan banner: surface open plan items so the user (and the
+    // model, on first turn) know the strategic roadmap survived the gap.
+    try {
+      const plan = await loadPlan(planPath);
+      if (plan && plan.items.length > 0) {
+        const open = plan.items.filter((p) => p.status !== 'done').length;
+        const done = plan.items.length - open;
+        renderer.writeInfo(
+          `Plan: ${plan.items.length} item${plan.items.length === 1 ? '' : 's'} (${open} open, ${done} done). Use /plan to review.`,
+        );
+      }
+    } catch {
+      // ignore — plan banner is decorative
+    }
   }
 
   const pipelines = createDefaultPipelines();
@@ -754,6 +849,12 @@ export async function main(argv: string[]): Promise<number> {
     : undefined;
   const sharedScratchpadPath = directorMode ? path.join(fleetRoot!, 'shared') : undefined;
   const subagentSessionsRoot = directorMode ? path.join(fleetRoot!, 'subagents') : undefined;
+  // Live director state checkpoint — written incrementally to disk on
+  // every spawn/assign/complete event so a crashed director leaves a
+  // recoverable snapshot. Distinct from manifestPath (final record).
+  const stateCheckpointPath = directorMode
+    ? path.join(fleetRoot!, 'director-state.json')
+    : undefined;
   // Always derive a fleetRoot for runtime promotion — /director needs
   // a base dir to write manifest + scratchpad + per-subagent JSONLs into.
   const fleetRootForPromotion = path.join(wpaths.projectSessions, session.id);
@@ -777,8 +878,30 @@ export async function main(argv: string[]): Promise<number> {
       sessionsRoot: subagentSessionsRoot,
       directorRunId: session.id,
       fleetRoot: fleetRootForPromotion,
+      stateCheckpointPath,
+      sessionWriter: session,
     },
   );
+  // ALWAYS register the `delegate` tool, even in non-director mode. It
+  // auto-promotes the host to director mode on first call so the LLM
+  // never has to know upfront whether multi-agent is "on" — it just
+  // calls `delegate({ role, task })` when it judges a subtask warrants
+  // a dedicated subagent. The system-prompt builder picks up this tool
+  // and surfaces a "Delegation" section teaching the model when to use
+  // it; without that block, the tool sits idle.
+  toolRegistry.register(
+    createDelegateTool({
+      host: multiAgentHost,
+      roster: FLEET_ROSTER,
+      // Wire the per-subagent transcript location so the tool can
+      // extract partial output on timeout / budget exhaustion. Without
+      // this, a subagent that hit its iteration cap returns an empty
+      // result and the host LLM has no idea what work was done.
+      sessionsRoot: subagentSessionsRoot,
+      directorRunId: session.id,
+    }),
+  );
+
   if (directorMode) {
     // Eagerly build the director so its 8 LLM-callable orchestration
     // tools (`spawn_subagent`, `assign_task`, `await_tasks`,
@@ -803,6 +926,17 @@ export async function main(argv: string[]): Promise<number> {
     }
   }
 
+  // Shared controller for the `/fleet stream on|off` toggle. The TUI
+  // replaces `setEnabled` with a dispatch-backed setter on mount; before
+  // that the no-op setter just keeps `enabled` in sync so callers see a
+  // stable view even when invoked from a non-TUI surface.
+  const fleetStreamController = {
+    enabled: true,
+    setEnabled(enabled: boolean) {
+      this.enabled = enabled;
+    },
+  };
+
   const slashCmds = buildBuiltinSlashCommands({
     registry: slashRegistry,
     toolRegistry,
@@ -815,6 +949,8 @@ export async function main(argv: string[]): Promise<number> {
     context,
     metricsSink,
     healthRegistry,
+    planPath,
+    fleetStreamController,
     onSpawn: async (description, spawnOpts) => {
       const { subagentId, taskId } = await multiAgentHost.spawn(description, spawnOpts);
       const tags: string[] = [];
@@ -896,6 +1032,234 @@ export async function main(argv: string[]): Promise<number> {
         return `Manifest written → ${p}`;
       }
       return `Unknown fleet action: ${action}`;
+    },
+    onFleetLog: async (subagentId, mode) => {
+      // Per-subagent JSONLs live under <fleetRoot>/subagents/<runId>/<subagentId>.jsonl
+      // and the runId is namespace-stable (session id by default), so we
+      // walk the subagents dir to discover both runs and subagents.
+      const subagentsRoot = path.join(fleetRootForPromotion, 'subagents');
+      let runDirs: string[];
+      try {
+        runDirs = await fs.readdir(subagentsRoot);
+      } catch {
+        return 'No fleet transcripts on disk — no subagents have been spawned for this session.';
+      }
+      // Collect every transcript across every run-dir for this session.
+      const found: Array<{ runId: string; subagentId: string; file: string; size: number }> = [];
+      for (const runId of runDirs) {
+        const runDir = path.join(subagentsRoot, runId);
+        let files: string[];
+        try {
+          files = await fs.readdir(runDir);
+        } catch {
+          continue;
+        }
+        for (const f of files) {
+          if (!f.endsWith('.jsonl')) continue;
+          const full = path.join(runDir, f);
+          try {
+            const stat = await fs.stat(full);
+            found.push({
+              runId,
+              subagentId: f.replace(/\.jsonl$/, ''),
+              file: full,
+              size: stat.size,
+            });
+          } catch {
+            // skip
+          }
+        }
+      }
+      if (found.length === 0) {
+        return 'No subagent transcripts found on disk.';
+      }
+      // Listing mode (no id provided).
+      if (!subagentId) {
+        const lines = [
+          `${found.length} subagent transcript${found.length === 1 ? '' : 's'} on disk:`,
+        ];
+        for (const t of found) {
+          lines.push(
+            `  ${color.cyan(t.subagentId.padEnd(18))}  ${color.dim(t.runId.slice(0, 18))}  ${color.dim(`${(t.size / 1024).toFixed(1)} KB`)}`,
+          );
+        }
+        lines.push('Use `/fleet log <subagentId>` for a summary, or append `raw` for the full JSONL.');
+        return lines.join('\n');
+      }
+      // Match by exact id or prefix; ambiguous matches return the list.
+      const matches = found.filter(
+        (t) => t.subagentId === subagentId || t.subagentId.startsWith(subagentId),
+      );
+      if (matches.length === 0) {
+        return `No transcript matched "${subagentId}". Run \`/fleet log\` to list available ids.`;
+      }
+      if (matches.length > 1) {
+        return [
+          `Ambiguous id "${subagentId}" — ${matches.length} matches:`,
+          ...matches.map((m) => `  ${m.subagentId}  (${m.runId})`),
+        ].join('\n');
+      }
+      const t = matches[0]!;
+      const raw = await fs.readFile(t.file, 'utf8');
+      if (mode === 'raw') return raw;
+
+      // Summary: walk JSONL events, count types, list the first user/llm
+      // pair + the last few iterations. Designed to fit in one terminal
+      // screen even for verbose transcripts.
+      const lines = raw.split('\n').filter((l) => l.trim());
+      const counts: Record<string, number> = {};
+      let firstUser: string | null = null;
+      let lastResponse: string | null = null;
+      let totalIterations = 0;
+      const toolNames = new Map<string, number>();
+      for (const line of lines) {
+        try {
+          const ev = JSON.parse(line) as { type: string; content?: unknown; name?: string };
+          counts[ev.type] = (counts[ev.type] ?? 0) + 1;
+          if (ev.type === 'user_input' && !firstUser) {
+            const txt =
+              typeof ev.content === 'string'
+                ? ev.content
+                : Array.isArray(ev.content)
+                  ? ev.content
+                      .filter((b): b is { type: 'text'; text: string } => (b as { type?: string }).type === 'text')
+                      .map((b) => b.text)
+                      .join(' ')
+                  : '';
+            firstUser = txt.slice(0, 120);
+          }
+          if (ev.type === 'llm_response') {
+            if (Array.isArray(ev.content)) {
+              const txt = (ev.content as Array<{ type?: string; text?: string }>)
+                .filter((b) => b.type === 'text')
+                .map((b) => b.text ?? '')
+                .join(' ');
+              if (txt) lastResponse = txt.slice(0, 240);
+            }
+            totalIterations += 1;
+          }
+          if (ev.type === 'tool_use' && typeof ev.name === 'string') {
+            toolNames.set(ev.name, (toolNames.get(ev.name) ?? 0) + 1);
+          }
+        } catch {
+          // skip malformed
+        }
+      }
+      const toolBreakdown =
+        toolNames.size > 0
+          ? Array.from(toolNames.entries())
+              .sort((a, b) => b[1] - a[1])
+              .map(([n, c]) => `${n}×${c}`)
+              .join(', ')
+          : '(none)';
+      const out: string[] = [
+        color.bold(`Subagent ${t.subagentId}`) + color.dim(`  (run ${t.runId})`),
+        `  ${lines.length} events  ·  ${totalIterations} llm iterations  ·  ${(t.size / 1024).toFixed(1)} KB`,
+        `  tools: ${toolBreakdown}`,
+      ];
+      if (firstUser) out.push('', color.dim('  task:'), `  ${firstUser}`);
+      if (lastResponse) out.push('', color.dim('  last response:'), `  ${lastResponse}`);
+      out.push('', color.dim('  event mix:'));
+      for (const [type, count] of Object.entries(counts).sort((a, b) => b[1] - a[1])) {
+        out.push(`    ${type.padEnd(20)} ${count}`);
+      }
+      out.push('', color.dim('Use `/fleet log <id> raw` for the full JSONL.'));
+      return out.join('\n');
+    },
+    onFleetRetry: async (taskId) => {
+      if (!multiAgentHost.isDirectorMode()) {
+        const promoted = await multiAgentHost.promoteToDirector();
+        if (!promoted) {
+          return 'Cannot retry: a coordinator already exists in non-director mode.';
+        }
+        for (const tool of promoted.tools(FLEET_ROSTER)) {
+          toolRegistry.register(tool);
+        }
+      }
+      const dir = await multiAgentHost.ensureDirector();
+      if (!dir) return 'Director is not available.';
+      const dirStatePath = path.join(fleetRootForPromotion, 'director-state.json');
+      const prior = await loadDirectorState(dirStatePath);
+      if (!prior) {
+        return 'No prior director-state.json found — nothing to retry.';
+      }
+      // "Interrupted" = whatever was running/pending when the previous
+      // process died. Completed/failed/timeout/stopped tasks are final.
+      const interrupted = prior.tasks.filter(
+        (t) => t.status === 'running' || t.status === 'pending',
+      );
+      if (interrupted.length === 0) {
+        return 'No interrupted tasks: every prior task reached a terminal state.';
+      }
+
+      // List mode — no target given.
+      if (!taskId) {
+        const lines = [
+          `${interrupted.length} interrupted task${interrupted.length === 1 ? '' : 's'} from prior run:`,
+        ];
+        for (const t of interrupted) {
+          const owner = t.subagentId
+            ? prior.subagents.find((s) => s.id === t.subagentId)
+            : undefined;
+          const tag = owner ? `${owner.name ?? owner.id} (${owner.role ?? 'no-role'})` : 'no-owner';
+          lines.push(
+            `  ${t.taskId.slice(0, 12)}  ${t.status.padEnd(8)} ${tag}  ${(t.description ?? '').slice(0, 60)}`,
+          );
+        }
+        lines.push('Run `/fleet retry <taskId>` or `/fleet retry all` to re-assign.');
+        return lines.join('\n');
+      }
+
+      const targets =
+        taskId === 'all'
+          ? interrupted
+          : interrupted.filter(
+              (t) => t.taskId === taskId || t.taskId.startsWith(taskId),
+            );
+      if (targets.length === 0) {
+        return `No interrupted task matched "${taskId}".`;
+      }
+
+      const results: string[] = [];
+      for (const t of targets) {
+        const owner = t.subagentId
+          ? prior.subagents.find((s) => s.id === t.subagentId)
+          : undefined;
+        if (!owner) {
+          results.push(`  - ${t.taskId.slice(0, 12)}: no owner record, skipped.`);
+          continue;
+        }
+        // Re-spawn from the roster when role is set (preferred path —
+        // role-based spawns get their full prompt/tool slice). Otherwise
+        // synthesize a minimal SubagentConfig from the prior record.
+        const rosterCfg = owner.role ? FLEET_ROSTER[owner.role] : undefined;
+        const cfg = rosterCfg
+          ? { ...rosterCfg }
+          : {
+              name: owner.name ?? owner.id,
+              role: owner.role,
+              provider: owner.provider,
+              model: owner.model,
+            };
+        try {
+          const newSubId = await dir.spawn(cfg);
+          const newTaskId = await dir.assign({
+            id: '',
+            description: t.description ?? '(no description)',
+            subagentId: newSubId,
+          });
+          results.push(
+            `  ${color.green('✓')} ${t.taskId.slice(0, 12)} → re-spawned ${newSubId.slice(0, 12)} (task ${newTaskId.slice(0, 12)})`,
+          );
+        } catch (err) {
+          results.push(
+            `  ${color.red('✗')} ${t.taskId.slice(0, 12)} → ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+      return [`Retried ${targets.length} task${targets.length === 1 ? '' : 's'}:`, ...results].join(
+        '\n',
+      );
     },
     onDirector: async () => {
       const director = await multiAgentHost.promoteToDirector();
@@ -991,6 +1355,7 @@ export async function main(argv: string[]): Promise<number> {
     switchProviderAndModel,
     director: director ?? null,
     fleetRoster: FLEET_ROSTER as Record<string, { name: string }>,
+    fleetStreamController,
   });
 }
 

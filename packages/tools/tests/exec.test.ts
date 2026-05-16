@@ -9,7 +9,7 @@ describe('execTool', () => {
   it('has correct metadata', () => {
     expect(execTool.name).toBe('exec');
     expect(execTool.permission).toBe('confirm');
-    expect(execTool.mutating).toBe(false);
+    expect(execTool.mutating).toBe(true);
   });
 
   it('rejects empty command', async () => {

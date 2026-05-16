@@ -17,6 +17,14 @@ export interface BuildContext {
   provider?: string;
   /** Model id (e.g. "claude-sonnet-4-6", "MiniMax-M2.7"). */
   model?: string;
+  /**
+   * True when the prompt is being built for a SUBAGENT, not the host
+   * agent. Subagents are scoped to a single task — they should NOT see
+   * the host's strategic plan board (which is anchoring the host across
+   * turns, not steering individual subtasks). The plan-injection
+   * layer short-circuits when this flag is set.
+   */
+  subagent?: boolean;
 }
 
 export interface SystemPromptBuilder {

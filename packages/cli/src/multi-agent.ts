@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import {
   Agent,
+  AutoApprovePermissionPolicy,
   type Config,
   type ConfigStore,
   type Container,
@@ -97,6 +98,21 @@ export interface MultiAgentHostOptions {
    *   <fleetRoot>/subagents/        (per-subagent JSONL)
    */
   fleetRoot?: string;
+  /**
+   * Absolute path the director writes its live state checkpoint to. Distinct
+   * from `manifestPath` (final record) — the checkpoint mirrors pending /
+   * running / completed tasks on every mutation so `wstack resume` can show
+   * a "you had N tasks in flight" banner after a crash. Only meaningful in
+   * director mode.
+   */
+  stateCheckpointPath?: string;
+  /**
+   * Session writer the director forwards task lifecycle events to
+   * (agent_spawned, task_created, task_completed, task_failed). The CLI
+   * passes the same writer the host Agent uses so all events land in one
+   * JSONL. Optional — when omitted, those events stay in-memory.
+   */
+  sessionWriter?: import('@wrongstack/core').SessionWriter;
 }
 
 /**
@@ -165,6 +181,8 @@ export class MultiAgentHost {
         config: coordinatorConfig,
         manifestPath: this.opts.manifestPath,
         sharedScratchpadPath: this.opts.sharedScratchpadPath,
+        stateCheckpointPath: this.opts.stateCheckpointPath,
+        sessionWriter: this.opts.sessionWriter,
       });
       this.director.on('task.completed', ({ task, result }) => {
         this.results.push(result);
@@ -218,6 +236,11 @@ export class MultiAgentHost {
         tools: this.filterTools(subCfg.tools),
         model: subCfg.model ?? config.model,
         provider: subCfg.provider ?? config.provider,
+        // Tell the builder this is a subagent build — skips the host's
+        // plan injection so each subagent gets a clean, task-scoped
+        // prompt instead of inheriting strategic context that's
+        // meaningless to a single delegated subtask.
+        subagent: true,
       });
 
       let subSession: SessionWriter;
@@ -256,6 +279,11 @@ export class MultiAgentHost {
         events,
         pipelines: createDefaultPipelines(),
         context: ctx,
+        // Subagents cannot answer interactive permission prompts — they
+        // run under a director, not the user. Auto-approve everything
+        // (except tool-level hard denies); the user already authorized
+        // the work when they invoked the leader.
+        permissionPolicy: new AutoApprovePermissionPolicy(),
       });
 
       return { agent, events };
@@ -480,6 +508,9 @@ export class MultiAgentHost {
     }
     if (this.opts.fleetRoot && !this.opts.sessionsRoot) {
       this.opts.sessionsRoot = path.join(this.opts.fleetRoot, 'subagents');
+    }
+    if (this.opts.fleetRoot && !this.opts.stateCheckpointPath) {
+      this.opts.stateCheckpointPath = path.join(this.opts.fleetRoot, 'director-state.json');
     }
     await this.ensureDirector();
     return this.director ?? null;

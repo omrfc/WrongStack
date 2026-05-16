@@ -9,7 +9,7 @@ describe('toolUseTool', () => {
   it('has correct metadata', () => {
     expect(toolUseTool.name).toBe('tool_use');
     expect(toolUseTool.permission).toBe('confirm');
-    expect(toolUseTool.mutating).toBe(false);
+    expect(toolUseTool.mutating).toBe(true);
     expect(toolUseTool.inputSchema.required).toContain('tool');
   });
 

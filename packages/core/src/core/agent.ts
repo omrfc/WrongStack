@@ -65,6 +65,13 @@ export interface AgentInit {
    */
   confirmAwaiter?: import('../types/tool-executor.js').ConfirmAwaiter | undefined;
   /**
+   * Override the PermissionPolicy resolved from the container. Subagents
+   * use this to force auto-approval — they cannot respond to interactive
+   * permission prompts, so inheriting the leader's non-YOLO policy would
+   * silently hang the entire delegated run on the first tool call.
+   */
+  permissionPolicy?: PermissionPolicy;
+  /**
    * Optional tracer. When provided, `Agent.run` opens an `agent.run` span,
    * per-iteration `agent.iteration` spans, and `provider.complete` spans
    * inside the retry loop. Tool spans are opened by the ToolExecutor.
@@ -151,7 +158,7 @@ export class Agent {
     this.autoExtendLimit = init.autoExtendLimit ?? true;
     this.tracer = init.tracer;
     this.toolExecutor = new ToolExecutor(this.tools, {
-      permissionPolicy: this.permission,
+      permissionPolicy: init.permissionPolicy ?? this.permission,
       secretScrubber: this.scrubber,
       renderer: this.renderer,
       events: this.events,

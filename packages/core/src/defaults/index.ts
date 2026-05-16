@@ -50,6 +50,32 @@ export {
 } from '../storage/recovery-lock.js';
 export { DefaultSessionReader } from '../storage/session-reader.js';
 export { SessionAnalyzer } from '../storage/session-analyzer.js';
+export {
+  attachTodosCheckpoint,
+  loadTodosCheckpoint,
+  saveTodosCheckpoint,
+  type TodosCheckpointFile,
+} from '../storage/todos-checkpoint.js';
+export {
+  attachPlanCheckpoint,
+  loadPlan,
+  savePlan,
+  emptyPlan,
+  addPlanItem,
+  removePlanItem,
+  setPlanItemStatus,
+  clearPlan,
+  formatPlan,
+  type PlanItem,
+  type PlanFile,
+} from '../storage/plan-store.js';
+export {
+  DirectorStateCheckpoint,
+  loadDirectorState,
+  type DirectorStateSnapshot,
+  type DirectorTaskState,
+  type DirectorSubagentState,
+} from '../storage/director-state.js';
 
 // ---- Security ----
 export { DefaultSecretScrubber } from '../security/secret-scrubber.js';
@@ -63,6 +89,7 @@ export {
 } from '../security/secret-vault.js';
 export {
   DefaultPermissionPolicy,
+  AutoApprovePermissionPolicy,
   type PermissionPolicyOptions,
 } from '../security/permission-policy.js';
 
@@ -93,6 +120,11 @@ export {
   Director,
   DirectorBudgetError,
 } from '../coordination/director.js';
+export {
+  createDelegateTool,
+  type DelegateHost,
+  type CreateDelegateToolOptions,
+} from '../coordination/delegate-tool.js';
 export {
   DefaultMultiAgentCoordinator,
   type MultiAgentCoordinatorOptions,

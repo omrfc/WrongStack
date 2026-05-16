@@ -1,4 +1,5 @@
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, useStdin } from 'ink';
+import { useEffect } from 'react';
 import type React from 'react';
 
 export interface InputProps {
@@ -26,7 +27,50 @@ export interface KeyEvent {
   delete: boolean;
   pageUp: boolean;
   pageDown: boolean;
+  home: boolean;
+  end: boolean;
 }
+
+// Ink 5.x useInput does not expose home/end as boolean flags even though
+// parseKeypress recognizes them. We subscribe to raw stdin to catch these.
+function isHomeEnd(data: string): 'home' | 'end' | null {
+  // Common terminal sequences for Home/End.
+  // CSI H / CSI F are the most universal; the longer variants are fallbacks.
+  if (
+    data === '\x1b[H' ||
+    data === '\x1b[1~' ||
+    data === '\x1bOH' ||
+    data === '\x1b[7~'
+  )
+    return 'home';
+  if (
+    data === '\x1b[F' ||
+    data === '\x1b[4~' ||
+    data === '\x1bOF' ||
+    data === '\x1b[8~'
+  )
+    return 'end';
+  return null;
+}
+
+const EMPTY_KEY: KeyEvent = {
+  upArrow: false,
+  downArrow: false,
+  leftArrow: false,
+  rightArrow: false,
+  return: false,
+  escape: false,
+  ctrl: false,
+  meta: false,
+  shift: false,
+  tab: false,
+  backspace: false,
+  delete: false,
+  pageUp: false,
+  pageDown: false,
+  home: false,
+  end: false,
+};
 
 export function Input({
   prompt = '› ',
@@ -41,6 +85,21 @@ export function Input({
     if (disabled) return;
     onKey(input, key as KeyEvent);
   });
+
+  // Catch Home/End that Ink's useInput doesn't surface.
+  const { stdin } = useStdin();
+  useEffect(() => {
+    if (!stdin || disabled) return;
+    const handleData = (data: Buffer) => {
+      const kind = isHomeEnd(data.toString());
+      if (kind === 'home') onKey('', { ...EMPTY_KEY, home: true });
+      else if (kind === 'end') onKey('', { ...EMPTY_KEY, end: true });
+    };
+    stdin.on('data', handleData);
+    return () => {
+      stdin.off('data', handleData);
+    };
+  }, [stdin, disabled, onKey]);
 
   const before = value.slice(0, cursor);
   const at = value.slice(cursor, cursor + 1) || ' ';

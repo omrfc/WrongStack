@@ -5,7 +5,7 @@ export function buildFleetCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'fleet',
     description:
-      'Inspect or control the subagent fleet: /fleet [status|usage|kill <id>|manifest|help]',
+      'Inspect or control the subagent fleet: /fleet [status|usage|kill <id>|manifest|retry [taskId]|log <id>|stream on|off|help]',
     help: [
       'Usage:',
       '  /fleet                  Show fleet status (alias for /fleet status).',
@@ -13,6 +13,13 @@ export function buildFleetCommand(opts: SlashCommandContext): SlashCommand {
       '  /fleet usage            Per-subagent runtime cost.',
       '  /fleet kill <id>        Terminate a running subagent.',
       '  /fleet manifest         Print the director manifest.',
+      '  /fleet retry            List interrupted tasks from the last run.',
+      '  /fleet retry <taskId>   Re-spawn the matching subagent and re-assign the task.',
+      '  /fleet retry all        Re-assign every interrupted task at once.',
+      '  /fleet log              List subagent transcripts available on disk.',
+      '  /fleet log <id>         Print a compact summary of a subagent transcript.',
+      '  /fleet log <id> raw     Dump the full per-subagent JSONL.',
+      '  /fleet stream on|off    Show/hide subagent activity in the main history.',
       '  /fleet help             Show this help.',
     ].join('\n'),
     async run(args) {
@@ -30,6 +37,40 @@ export function buildFleetCommand(opts: SlashCommandContext): SlashCommand {
         case 'kill': {
           if (!target) return { message: 'Usage: /fleet kill <subagent-id>' };
           return { message: await opts.onFleet('kill', target) };
+        }
+        case 'retry': {
+          if (!opts.onFleetRetry) {
+            return { message: 'Retry is only available when director mode is active.' };
+          }
+          const msg = await opts.onFleetRetry(target);
+          return { message: msg };
+        }
+        case 'log': {
+          if (!opts.onFleetLog) {
+            return { message: 'Log inspection is only available when a fleet root is configured.' };
+          }
+          // Second word after the id, if any, picks the rendering mode
+          // (raw vs summary). Default: summary.
+          const [id, ...modeRest] = rest;
+          const mode = modeRest.join(' ').trim() === 'raw' ? 'raw' : 'summary';
+          return { message: await opts.onFleetLog(id, mode) };
+        }
+        case 'stream': {
+          const ctrl = opts.fleetStreamController;
+          if (!ctrl) {
+            return { message: 'Stream toggle is only available in the TUI.' };
+          }
+          const arg = (target ?? '').toLowerCase();
+          if (arg === '' || arg === 'status') {
+            return { message: `Fleet streaming is ${ctrl.enabled ? 'on' : 'off'}.` };
+          }
+          if (arg !== 'on' && arg !== 'off') {
+            return { message: 'Usage: /fleet stream on|off' };
+          }
+          const enabled = arg === 'on';
+          ctrl.setEnabled(enabled);
+          ctrl.enabled = enabled;
+          return { message: `Fleet streaming ${enabled ? 'enabled' : 'disabled'}.` };
         }
         case 'help':
         case '?':

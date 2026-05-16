@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
+import { DirectorStateCheckpoint } from '../storage/director-state.js';
 import type { BridgeMessage } from '../types/agent-bridge.js';
 import type {
   CoordinatorStatus,
@@ -10,6 +11,7 @@ import type {
   TaskResult,
   TaskSpec,
 } from '../types/multi-agent.js';
+import type { SessionWriter } from '../types/session.js';
 import type { JSONSchema, Tool } from '../types/tool.js';
 import { InMemoryAgentBridge } from './agent-bridge.js';
 import {
@@ -100,6 +102,29 @@ export interface DirectorOptions {
    * `maxSpawnDepth` this bounds the chain.
    */
   spawnDepth?: number;
+  /**
+   * Absolute path to a director-state checkpoint file. When set, the
+   * director writes an incremental snapshot of pending/running/completed
+   * tasks + spawned subagents on every state mutation. Distinct from
+   * `manifestPath`: the manifest is a final record written on shutdown,
+   * the checkpoint is a live mirror useful for crash recovery and the
+   * `wstack resume` "you had N tasks in flight" banner.
+   */
+  stateCheckpointPath?: string;
+  /**
+   * Session writer the director should forward task lifecycle events to
+   * (`agent_spawned`, `task_created`, `task_completed`, `task_failed`).
+   * When omitted these events stay in-memory only — useful for tests but
+   * lossy in production. Production callers (the CLI) pass the same
+   * writer the host Agent uses so all events land in a single JSONL.
+   */
+  sessionWriter?: SessionWriter;
+  /**
+   * Debounce window for periodic manifest writes triggered by spawn/
+   * assign/complete events. Default: 2000ms. Pass 0 to disable periodic
+   * writes (the manifest will then only be written on `shutdown()`).
+   */
+  manifestDebounceMs?: number;
 }
 
 /**
@@ -191,6 +216,19 @@ export class Director {
   readonly spawnDepth: number;
   /** Live spawn counter for `maxSpawns` enforcement. */
   private spawnCount = 0;
+  /** Optional checkpoint mirror — writes the live task graph + roster to disk. */
+  private readonly stateCheckpoint: DirectorStateCheckpoint | null;
+  /** Optional session writer for emitting task_* / agent_* lifecycle events. */
+  private readonly sessionWriter: SessionWriter | null;
+  /** Debounce timer for periodic manifest writes. */
+  private manifestTimer: NodeJS.Timeout | null = null;
+  private readonly manifestDebounceMs: number;
+  /** Resolves task descriptions back from `assign()` so completion events
+   *  can also carry a human-readable title. */
+  private readonly taskDescriptions = new Map<string, string>();
+  /** Snapshot of which subagent owns each task — drives state-checkpoint
+   *  status updates without re-walking the manifest. */
+  private readonly taskOwners = new Map<string, string>();
 
   constructor(opts: DirectorOptions) {
     this.id = opts.config.coordinatorId || randomUUID();
@@ -202,6 +240,16 @@ export class Director {
     this.maxSpawns = opts.maxSpawns ?? Number.POSITIVE_INFINITY;
     this.maxSpawnDepth = opts.maxSpawnDepth ?? 2;
     this.spawnDepth = opts.spawnDepth ?? 0;
+    this.sessionWriter = opts.sessionWriter ?? null;
+    this.manifestDebounceMs = opts.manifestDebounceMs ?? 2000;
+    this.stateCheckpoint = opts.stateCheckpointPath
+      ? new DirectorStateCheckpoint(opts.stateCheckpointPath, {
+          directorRunId: this.id,
+          maxSpawns: opts.maxSpawns,
+          spawnDepth: this.spawnDepth,
+          maxSpawnDepth: this.maxSpawnDepth,
+        })
+      : null;
     if (this.sharedScratchpadPath) {
       // Create the directory eagerly so subagents that try to write
       // there on first iteration don't trip on ENOENT. Fire-and-forget;
@@ -235,7 +283,59 @@ export class Director {
         waiter.resolve(r);
         this.taskWaiters.delete(r.taskId);
       }
+      // Mirror into the on-disk checkpoint + session event stream so a
+      // crashed director leaves a complete picture of which tasks landed.
+      const title = this.taskDescriptions.get(r.taskId) ?? payload.task.description ?? r.taskId;
+      const failed = r.status !== 'success';
+      this.stateCheckpoint?.recordTaskStatus(r.taskId, {
+        status: failed ? (r.status as 'failed' | 'timeout' | 'stopped') : 'completed',
+        completedAt: new Date().toISOString(),
+        iterations: r.iterations,
+        toolCalls: r.toolCalls,
+        durationMs: r.durationMs,
+        error: r.error,
+      });
+      this.stateCheckpoint?.setUsage(this.usage.snapshot());
+      void this.appendSessionEvent(
+        failed
+          ? {
+              type: 'task_failed',
+              ts: new Date().toISOString(),
+              taskId: r.taskId,
+              title,
+              error: r.error ?? r.status,
+            }
+          : {
+              type: 'task_completed',
+              ts: new Date().toISOString(),
+              taskId: r.taskId,
+              title,
+            },
+      );
+      this.scheduleManifest();
     });
+  }
+
+  /** Best-effort session-writer append. Swallows failures — the director
+   *  must not break a fleet run because the session JSONL handle closed. */
+  private async appendSessionEvent(event: Parameters<SessionWriter['append']>[0]): Promise<void> {
+    if (!this.sessionWriter) return;
+    try {
+      await this.sessionWriter.append(event);
+    } catch {
+      // ignore
+    }
+  }
+
+  /** Debounced manifest writer. A burst of spawn/assign/complete events
+   *  collapses into one write. Set `manifestDebounceMs` to 0 to disable. */
+  private scheduleManifest(): void {
+    if (!this.manifestPath || this.manifestDebounceMs <= 0) return;
+    if (this.manifestTimer) return;
+    this.manifestTimer = setTimeout(() => {
+      this.manifestTimer = null;
+      void this.writeManifest().catch(() => undefined);
+    }, this.manifestDebounceMs);
   }
 
   /**
@@ -287,6 +387,27 @@ export class Director {
       model: config.model,
       taskIds: [],
     });
+    // Live state checkpoint + session event so crash recovery and the
+    // resume banner both see this spawn even before any task is assigned.
+    const spawnedAt = new Date().toISOString();
+    this.stateCheckpoint?.recordSpawn(
+      {
+        id: result.subagentId,
+        name: config.name,
+        role: config.role,
+        provider: config.provider,
+        model: config.model,
+        spawnedAt,
+      },
+      this.spawnCount,
+    );
+    void this.appendSessionEvent({
+      type: 'agent_spawned',
+      ts: spawnedAt,
+      agentId: result.subagentId,
+      role: config.role ?? config.name,
+    });
+    this.scheduleManifest();
     return result.subagentId;
   }
 
@@ -413,6 +534,10 @@ export class Director {
    * — calling shutdown twice is a no-op on the second invocation.
    */
   async shutdown(): Promise<void> {
+    if (this.manifestTimer) {
+      clearTimeout(this.manifestTimer);
+      this.manifestTimer = null;
+    }
     await this.coordinator.stopAll();
     for (const b of this.subagentBridges.values()) {
       await b.stop().catch(() => undefined);
@@ -420,6 +545,10 @@ export class Director {
     this.subagentBridges.clear();
     await this.bridge.stop().catch(() => undefined);
     if (this.manifestPath) await this.writeManifest().catch(() => undefined);
+    if (this.stateCheckpoint) {
+      this.stateCheckpoint.setUsage(this.usage.snapshot());
+      await this.stateCheckpoint.flush().catch(() => undefined);
+    }
   }
 
   /**
@@ -434,6 +563,26 @@ export class Director {
       if (entry) entry.taskIds.push(taskWithId.id);
     }
     await this.coordinator.assign(taskWithId);
+    // Snapshot task metadata for completion-event titles + state checkpoint
+    // bookkeeping. Done AFTER coordinator.assign() so we don't checkpoint a
+    // task the coordinator rejected.
+    this.taskDescriptions.set(taskWithId.id, taskWithId.description);
+    if (taskWithId.subagentId) this.taskOwners.set(taskWithId.id, taskWithId.subagentId);
+    const assignedAt = new Date().toISOString();
+    this.stateCheckpoint?.recordTaskAssigned({
+      taskId: taskWithId.id,
+      subagentId: taskWithId.subagentId,
+      description: taskWithId.description,
+      status: 'running',
+      assignedAt,
+    });
+    void this.appendSessionEvent({
+      type: 'task_created',
+      ts: assignedAt,
+      taskId: taskWithId.id,
+      title: taskWithId.description,
+    });
+    this.scheduleManifest();
     return taskWithId.id;
   }
 

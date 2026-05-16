@@ -55,6 +55,15 @@ export interface ExecutionDeps {
   director: Director | null;
   /** Fleet roster for human-readable subagent names. */
   fleetRoster?: Record<string, { name: string }>;
+  /**
+   * Shared controller object for the `/fleet stream on|off` toggle. The
+   * TUI installs a dispatch-backed setter on mount; the slash command
+   * reads/writes via this object so both surfaces stay synchronized.
+   */
+  fleetStreamController?: {
+    enabled: boolean;
+    setEnabled: (enabled: boolean) => void;
+  };
 }
 
 export async function execute(deps: ExecutionDeps): Promise<number> {
@@ -85,6 +94,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     switchProviderAndModel,
     director,
     fleetRoster,
+    fleetStreamController,
   } = deps;
 
   let code = 0;
@@ -190,7 +200,12 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           getPickableProviders,
           switchProviderAndModel,
           effectiveMaxContext,
-          altScreen: flags['alt-screen'] === true,
+          // Default OFF so the terminal's native scrollback works for chat
+          // history out of the box (mouse wheel / Shift+PgUp). Users who hit
+          // resize/overlay-leak artifacts can opt back into alt-screen with
+          // `--alt-screen` or `/altscreen on`. `--no-alt-screen` still wins
+          // when both are passed.
+          altScreen: flags['alt-screen'] === true && flags['no-alt-screen'] !== true,
           director,
           fleetRoster,
           onAfterExit: () => {
@@ -204,6 +219,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             dispatch({ type: 'clearHistory' });
             dispatch({ type: 'resetContextChip' });
           },
+          fleetStreamController,
         });
       } finally {
         renderer.setSilent(false);

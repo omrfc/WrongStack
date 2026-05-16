@@ -29,7 +29,7 @@ export const batchToolUseTool: Tool<BatchToolUseInput, BatchToolUseOutput> = {
   usageHint:
     'Set `calls` array with tool names and inputs. `stop_on_error` halts on first failure. `parallel` runs concurrently (default: true).',
   permission: 'confirm',
-  mutating: false,
+  mutating: true,
   timeoutMs: 120_000,
   inputSchema: {
     type: 'object',

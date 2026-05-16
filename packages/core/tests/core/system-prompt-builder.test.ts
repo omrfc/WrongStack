@@ -254,4 +254,92 @@ describe('DefaultSystemPromptBuilder', () => {
     const toolBlock = blocks[1]?.text ?? '';
     expect(toolBlock).toContain('~70%');
   });
+
+  describe('plan injection', () => {
+    it('omits the plan block when no plan file is configured', async () => {
+      const b = new DefaultSystemPromptBuilder({ todayIso: '2026-05-13' });
+      const blocks = await b.build({ cwd: tmp, projectRoot: tmp, tools: [] });
+      const joined = blocks.map((b) => b.text).join('\n');
+      expect(joined).not.toContain('## Active plan');
+    });
+
+    it('omits the plan block when the file does not exist', async () => {
+      const planPath = path.join(tmp, 'sess.plan.json');
+      const b = new DefaultSystemPromptBuilder({ planPath, todayIso: '2026-05-13' });
+      const blocks = await b.build({ cwd: tmp, projectRoot: tmp, tools: [] });
+      const joined = blocks.map((b) => b.text).join('\n');
+      expect(joined).not.toContain('## Active plan');
+    });
+
+    it('omits the plan block when all items are done', async () => {
+      const planPath = path.join(tmp, 'sess.plan.json');
+      await fs.writeFile(
+        planPath,
+        JSON.stringify({
+          version: 1,
+          sessionId: 'sess',
+          updatedAt: '2026-05-13T00:00:00Z',
+          items: [
+            { id: 'a', title: 'finished', status: 'done', createdAt: '', updatedAt: '' },
+          ],
+        }),
+      );
+      const b = new DefaultSystemPromptBuilder({ planPath, todayIso: '2026-05-13' });
+      const blocks = await b.build({ cwd: tmp, projectRoot: tmp, tools: [] });
+      expect(blocks.map((b) => b.text).join('\n')).not.toContain('## Active plan');
+    });
+
+    it('injects open plan items as an ephemeral block', async () => {
+      const planPath = path.join(tmp, 'sess.plan.json');
+      await fs.writeFile(
+        planPath,
+        JSON.stringify({
+          version: 1,
+          sessionId: 'sess',
+          title: 'Migration roadmap',
+          updatedAt: '2026-05-13T00:00:00Z',
+          items: [
+            { id: 'a', title: 'audit schema', status: 'in_progress', createdAt: '', updatedAt: '' },
+            { id: 'b', title: 'write scripts', status: 'open', createdAt: '', updatedAt: '' },
+            { id: 'c', title: 'old step', status: 'done', createdAt: '', updatedAt: '' },
+          ],
+        }),
+      );
+      const b = new DefaultSystemPromptBuilder({ planPath, todayIso: '2026-05-13' });
+      const blocks = await b.build({ cwd: tmp, projectRoot: tmp, tools: [] });
+      const planBlock = blocks.find((bl) => bl.text.includes('## Active plan'));
+      expect(planBlock).toBeTruthy();
+      expect(planBlock?.text).toContain('Migration roadmap');
+      expect(planBlock?.text).toContain('[~] audit schema');
+      expect(planBlock?.text).toContain('[ ] write scripts');
+      // Done item still rendered (preserves numbering) but with [x].
+      expect(planBlock?.text).toContain('[x] old step');
+      expect(planBlock?.cache_control).toEqual({ type: 'ephemeral' });
+    });
+
+    it('accepts a getter function for late-binding the path', async () => {
+      const planPath = path.join(tmp, 'late.plan.json');
+      await fs.writeFile(
+        planPath,
+        JSON.stringify({
+          version: 1,
+          sessionId: 'late',
+          updatedAt: '2026-05-13T00:00:00Z',
+          items: [{ id: 'x', title: 'late item', status: 'open', createdAt: '', updatedAt: '' }],
+        }),
+      );
+      let resolved: string | undefined;
+      const b = new DefaultSystemPromptBuilder({
+        planPath: () => resolved,
+        todayIso: '2026-05-13',
+      });
+      // First build before the getter resolves anything — no plan block.
+      const before = await b.build({ cwd: tmp, projectRoot: tmp, tools: [] });
+      expect(before.map((bl) => bl.text).join('\n')).not.toContain('## Active plan');
+      // Second build after the getter is wired — plan block appears.
+      resolved = planPath;
+      const after = await b.build({ cwd: tmp, projectRoot: tmp, tools: [] });
+      expect(after.map((bl) => bl.text).join('\n')).toContain('[ ] late item');
+    });
+  });
 });

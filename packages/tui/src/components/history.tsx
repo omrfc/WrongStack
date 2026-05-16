@@ -44,7 +44,22 @@ export type HistoryEntry =
       keyTail?: string;
     }
   /** Tool confirmation shown while waiting for the user to approve/deny. */
-  | { id: number; kind: 'confirm'; toolName: string; input: unknown; suggestedPattern: string };
+  | { id: number; kind: 'confirm'; toolName: string; input: unknown; suggestedPattern: string }
+  /**
+   * Subagent activity surfaced into the leader's history. One entry per
+   * tool call, assistant message, spawn, or completion — prefixed with a
+   * stable `AGENT#N` label so users can follow each subagent across
+   * interleaved output from multiple parallel runs.
+   */
+  | {
+      id: number;
+      kind: 'subagent';
+      agentLabel: string;
+      agentColor: string;
+      icon: string;
+      text: string;
+      detail?: string;
+    };
 
 export interface HistoryProps {
   entries: HistoryEntry[];
@@ -360,6 +375,38 @@ function Entry({
       );
     case 'banner':
       return <Banner entry={entry} />;
+    case 'subagent': {
+      // One-line summary for tools/spawn/done; multi-line wrap for
+      // assistant messages. The label color is stable per subagent so
+      // the eye can track interleaved output from multiple agents.
+      const lines = entry.text.split('\n');
+      return (
+        <Box flexDirection="column">
+          <Text>
+            <Text color={entry.agentColor} bold>
+              {`[${entry.agentLabel}]`}
+            </Text>
+            <Text>{' '}</Text>
+            <Text color={entry.agentColor}>{entry.icon}</Text>
+            <Text>{' '}</Text>
+            <Text>{lines[0] ?? ''}</Text>
+            {entry.detail ? (
+              <>
+                <Text dimColor>{'  ·  '}</Text>
+                <Text dimColor>{entry.detail}</Text>
+              </>
+            ) : null}
+          </Text>
+          {lines.slice(1).map((line, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: stable line index
+            <Text key={i}>
+              <Text dimColor>{'  '}</Text>
+              <Text>{line}</Text>
+            </Text>
+          ))}
+        </Box>
+      );
+    }
   }
 }
 
@@ -1011,9 +1058,83 @@ export function formatToolOutput(
     return lastLine ? [head, `"${truncMid(lastLine.trim(), 70)}"`] : [head];
   }
 
-  // Generic fallback — first non-empty line, collapsed.
-  const firstLine = text.split('\n').find((l) => l.trim()) ?? text;
-  return [truncMid(firstLine.replace(/\s+/g, ' '), OUT_BUDGET)];
+  // Generic fallback.
+  //
+  // Earlier we just grabbed the first non-empty line. That broke
+  // catastrophically for tools that return pretty-printed JSON (most
+  // notably `delegate`): `JSON.stringify(obj, null, 2)` starts with a
+  // bare `{` on line 1, so the preview rendered as `└─ {` and the
+  // user couldn't see WHY the subagent finished — defeating the whole
+  // point of the chip.
+  //
+  // New behavior:
+  // 1. If the text parses as a JSON object, surface up to GENERIC_KV_KEYS
+  //    of its most informative keys inline (`ok=false · status=timeout
+  //    · iterations=12 · error="..."`).
+  // 2. Otherwise collapse ALL whitespace into single spaces (no more
+  //    "first line only" trap) and render up to GENERIC_BUDGET chars.
+  if (json && typeof json === 'object' && !Array.isArray(json)) {
+    const summary = summarizeJsonObject(json as Record<string, unknown>);
+    if (summary) return [summary];
+  }
+  const collapsed = text.replace(/\s+/g, ' ').trim();
+  return [truncMid(collapsed, GENERIC_BUDGET)];
+}
+
+const GENERIC_BUDGET = 240;
+
+/**
+ * Build a one-line "key=value · key=value …" preview for a JSON-shaped
+ * tool result. Prioritises fields the user cares about: status flags,
+ * error/result fields, then everything else by appearance order. Stops
+ * once the rendered preview hits the budget.
+ */
+function summarizeJsonObject(obj: Record<string, unknown>): string | null {
+  const keys = Object.keys(obj);
+  if (keys.length === 0) return null;
+  // Reorder: status-y keys first (so a failure/timeout reads obviously),
+  // then narrative fields (result/error/message), then the rest.
+  const priority = [
+    'ok',
+    'status',
+    'timedOut',
+    'stopReason',
+    'reason',
+    'error',
+    'message',
+    'result',
+    'summary',
+    'iterations',
+    'toolCalls',
+    'durationMs',
+    'subagentId',
+    'taskId',
+  ];
+  const ordered = [
+    ...priority.filter((k) => keys.includes(k)),
+    ...keys.filter((k) => !priority.includes(k)),
+  ];
+  const parts: string[] = [];
+  let used = 0;
+  for (const key of ordered) {
+    const v = obj[key];
+    if (v === undefined || v === null) continue;
+    const rendered =
+      typeof v === 'string'
+        ? `${key}="${truncMid(v.replace(/\s+/g, ' '), 80)}"`
+        : typeof v === 'number' || typeof v === 'boolean'
+          ? `${key}=${v}`
+          : Array.isArray(v)
+            ? `${key}=[${v.length}]`
+            : `${key}={…}`;
+    if (used + rendered.length > GENERIC_BUDGET) {
+      parts.push('…');
+      break;
+    }
+    parts.push(rendered);
+    used += rendered.length + 3; // " · " separator
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
 }
 
 function firstNonEmpty(text: string): string | undefined {

@@ -9,6 +9,49 @@ export interface TodoCounts {
   completed: number;
 }
 
+export interface PlanCounts {
+  open: number;
+  inProgress: number;
+  done: number;
+}
+
+/**
+ * Fleet activity breakdown surfaced on the work-in-flight line. Derived
+ * from `director.status()` in the host app and refreshed alongside the
+ * other dynamic chips. Kept optional (and the chip is only rendered
+ * when any field is non-zero) so single-agent sessions stay quiet.
+ */
+export interface FleetCounts {
+  /** Subagents currently mid-task. */
+  running: number;
+  /** Subagents spawned but idle (no current task). */
+  idle: number;
+  /** Tasks queued but not yet picked up by a worker. */
+  pending: number;
+  /** Tasks resolved (success/failure/timeout/stopped). */
+  completed: number;
+}
+
+/**
+ * Per-agent detail surfaced on the optional 4th line — one chip per
+ * currently-running subagent so the user can see at a glance which
+ * agent is doing what, for how long, and how many tools it has called.
+ * Truncated to the top N by the host (typically 3-4) to keep the bar
+ * from wrapping.
+ */
+export interface FleetAgentDetail {
+  /** Stable label used by the streaming history (e.g. "AGENT#1 bug-hunter"). */
+  label: string;
+  /** Ink color name — same palette as the per-agent history prefix. */
+  color: string;
+  /** Ms since the subagent's first iteration. */
+  elapsedMs: number;
+  /** Tool calls observed via tool.executed. */
+  toolCalls: number;
+  /** True when the subagent is actively iterating. */
+  running: boolean;
+}
+
 export interface ContextWindow {
   /** Input tokens of the most recent provider request — the de-facto live context size. */
   used: number;
@@ -26,6 +69,27 @@ export interface StatusBarProps {
   /** Session elapsed in milliseconds. Renders as `mm:ss` (< 1h) or `h:mm:ss`. */
   elapsedMs?: number;
   todos?: TodoCounts;
+  /**
+   * Plan board counts surfaced as a chip on line 2. Distinct from
+   * `todos` — plans are higher-level and persist across resume; the
+   * chip uses a different glyph (📋) so the user can tell them apart
+   * at a glance.
+   */
+  plan?: PlanCounts;
+  /**
+   * Per-status fleet breakdown. When provided, takes precedence over
+   * `subagentCount` for chip rendering. `subagentCount` is kept for
+   * backwards compatibility when callers haven't wired the richer
+   * breakdown yet.
+   */
+  fleet?: FleetCounts;
+  /**
+   * Optional per-agent detail row (up to ~4 agents). Renders below the
+   * aggregate fleet chip on a dedicated 4th line so the user can see
+   * which specific agent is burning time/tools right now without
+   * scrolling history.
+   */
+  fleetAgents?: FleetAgentDetail[];
   git?: GitInfo | null;
   subagentCount?: number;
   /** Renders the "ctx ████░░ 42%" chip on line 1 when present. */
@@ -55,6 +119,9 @@ export function StatusBar({
   yolo = false,
   elapsedMs,
   todos,
+  plan,
+  fleet,
+  fleetAgents,
   git,
   subagentCount = 0,
   context,
@@ -66,13 +133,26 @@ export function StatusBar({
   const stateColor = state === 'idle' ? 'cyan' : state === 'aborting' ? 'yellow' : 'green';
   const stateLabel = state === 'idle' ? 'idle' : state === 'aborting' ? 'aborting…' : 'thinking…';
 
+  // Line 2 is *session context* — slow-moving facts about where you
+  // are: the project, the branch, the elapsed clock, YOLO chip. These
+  // change at most once per session.
   const hasSecondLine =
     yolo ||
     elapsedMs !== undefined ||
-    (todos && (todos.pending > 0 || todos.inProgress > 0 || todos.completed > 0)) ||
     (git !== null && git !== undefined) ||
-    subagentCount > 0 ||
     (projectName !== undefined && projectName.length > 0);
+
+  // Line 3 is *active work* — the dynamic chips that mutate as the
+  // agent / subagents make progress. Hidden when nothing is in flight
+  // so a fresh session keeps the two-line baseline.
+  const fleetHasActivity =
+    (fleet &&
+      (fleet.running > 0 || fleet.idle > 0 || fleet.pending > 0 || fleet.completed > 0)) ||
+    subagentCount > 0;
+  const hasThirdLine =
+    (todos && (todos.pending > 0 || todos.inProgress > 0 || todos.completed > 0)) ||
+    (plan && (plan.open > 0 || plan.inProgress > 0 || plan.done > 0)) ||
+    fleetHasActivity;
 
   return (
     <Box
@@ -166,26 +246,83 @@ export function StatusBar({
               </Text>
             </>
           ) : null}
+        </Box>
+      ) : null}
+
+      {hasThirdLine ? (
+        <Box flexDirection="row" gap={2}>
           {todos && (todos.pending > 0 || todos.inProgress > 0 || todos.completed > 0) ? (
+            <Text>
+              <Text dimColor>todos </Text>
+              {todos.inProgress > 0 ? <Text color="yellow">⌛{todos.inProgress}</Text> : null}
+              {todos.inProgress > 0 && (todos.pending > 0 || todos.completed > 0) ? ' ' : ''}
+              {todos.pending > 0 ? <Text dimColor>☐{todos.pending}</Text> : null}
+              {todos.pending > 0 && todos.completed > 0 ? ' ' : ''}
+              {todos.completed > 0 ? <Text color="green">✓{todos.completed}</Text> : null}
+            </Text>
+          ) : null}
+          {plan && (plan.open > 0 || plan.inProgress > 0 || plan.done > 0) ? (
             <>
-              <Text dimColor>│</Text>
+              {todos && (todos.pending > 0 || todos.inProgress > 0 || todos.completed > 0) ? (
+                <Text dimColor>│</Text>
+              ) : null}
               <Text>
-                {todos.inProgress > 0 ? <Text color="yellow">⌛ {todos.inProgress}</Text> : null}
-                {todos.inProgress > 0 && (todos.pending > 0 || todos.completed > 0) ? ' ' : ''}
-                {todos.pending > 0 ? <Text dimColor>☐ {todos.pending}</Text> : null}
-                {todos.pending > 0 && todos.completed > 0 ? ' ' : ''}
-                {todos.completed > 0 ? <Text color="green">✓ {todos.completed}</Text> : null}
+                <Text color="cyan">📋 </Text>
+                {plan.inProgress > 0 ? <Text color="yellow">⌛{plan.inProgress}</Text> : null}
+                {plan.inProgress > 0 && (plan.open > 0 || plan.done > 0) ? ' ' : ''}
+                {plan.open > 0 ? <Text dimColor>☐{plan.open}</Text> : null}
+                {plan.open > 0 && plan.done > 0 ? ' ' : ''}
+                {plan.done > 0 ? <Text color="green">✓{plan.done}</Text> : null}
               </Text>
             </>
           ) : null}
-          {subagentCount > 0 ? (
+          {fleetHasActivity ? (
             <>
-              <Text dimColor>│</Text>
-              <Text color="blue">
-                🌐 {subagentCount} agent{subagentCount === 1 ? '' : 's'}
-              </Text>
+              {((todos && (todos.pending > 0 || todos.inProgress > 0 || todos.completed > 0)) ||
+                (plan && (plan.open > 0 || plan.inProgress > 0 || plan.done > 0))) ? (
+                <Text dimColor>│</Text>
+              ) : null}
+              {fleet ? (
+                <Text>
+                  <Text color="blue">🌐 </Text>
+                  {fleet.running > 0 ? <Text color="yellow">▶{fleet.running}</Text> : null}
+                  {fleet.running > 0 && (fleet.pending > 0 || fleet.idle > 0 || fleet.completed > 0)
+                    ? ' '
+                    : ''}
+                  {fleet.pending > 0 ? <Text dimColor>☐{fleet.pending}</Text> : null}
+                  {fleet.pending > 0 && (fleet.idle > 0 || fleet.completed > 0) ? ' ' : ''}
+                  {fleet.idle > 0 ? <Text dimColor>·{fleet.idle}idle</Text> : null}
+                  {fleet.idle > 0 && fleet.completed > 0 ? ' ' : ''}
+                  {fleet.completed > 0 ? <Text color="green">✓{fleet.completed}</Text> : null}
+                </Text>
+              ) : (
+                <Text color="blue">
+                  🌐 {subagentCount} agent{subagentCount === 1 ? '' : 's'}
+                </Text>
+              )}
             </>
           ) : null}
+        </Box>
+      ) : null}
+
+      {fleetAgents && fleetAgents.length > 0 ? (
+        <Box flexDirection="row" gap={2}>
+          {fleetAgents.map((a, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: agent list is stable per render
+            <Text key={i}>
+              <Text color={a.color} bold>
+                {a.label}
+              </Text>
+              <Text dimColor>{' '}</Text>
+              <Text color={a.running ? 'yellow' : undefined} dimColor={!a.running}>
+                {a.running ? '▶' : '·'}
+              </Text>
+              <Text dimColor>{' '}</Text>
+              <Text dimColor>{fmtElapsed(a.elapsedMs)}</Text>
+              <Text dimColor>{' · '}</Text>
+              <Text dimColor>{a.toolCalls}t</Text>
+            </Text>
+          ))}
         </Box>
       ) : null}
     </Box>

@@ -395,9 +395,26 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   //
   // When the user explicitly sets WS_HOST (e.g. 0.0.0.0 or a LAN IP), we
   // respect that choice exactly and don't add a second listener.
-  const wssPrimary = new WebSocketServer({ port: wsPort, host: wsHost });
+  // CSWSH guard: when the user explicitly exposes the socket (WS_HOST set to a
+  // non-loopback address), browsers from any origin could otherwise open an
+  // authenticated WebSocket against this server. Restrict origin to loopback
+  // hostnames by default; non-browser clients (curl, wscat) send no Origin
+  // header and are allowed through.
+  const verifyClient: ConstructorParameters<typeof WebSocketServer>[0]['verifyClient'] = (info) => {
+    const origin = info.origin;
+    if (!origin) return true;
+    try {
+      const { hostname } = new URL(origin);
+      return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+    } catch {
+      return false;
+    }
+  };
+  const wssPrimary = new WebSocketServer({ port: wsPort, host: wsHost, verifyClient });
   const wssSecondary =
-    wsHost === '127.0.0.1' ? new WebSocketServer({ port: wsPort, host: '::1' }) : null;
+    wsHost === '127.0.0.1'
+      ? new WebSocketServer({ port: wsPort, host: '::1', verifyClient })
+      : null;
   const clients = new Map<WebSocket, ConnectedClient>();
   let abortController: AbortController | null = null;
 

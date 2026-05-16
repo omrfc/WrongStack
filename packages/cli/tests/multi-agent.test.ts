@@ -458,9 +458,11 @@ describe('MultiAgentHost', () => {
 
       it('derives manifest/shared/subagent paths from fleetRoot', async () => {
         const path = await import('node:path');
-        const host = new MultiAgentHost(makeDeps(), {
-          fleetRoot: path.join('tmp', 'fleet', 'session-2'),
-        });
+        const os = await import('node:os');
+        const fs = await import('node:fs/promises');
+        const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-fleet-paths-'));
+        const fleetRoot = path.join(tmpRoot, 'session-2');
+        const host = new MultiAgentHost(makeDeps(), { fleetRoot });
         const director = await host.promoteToDirector();
         expect(director).not.toBeNull();
 
@@ -468,8 +470,9 @@ describe('MultiAgentHost', () => {
         // was wired — spawn + assign a task and check the manifest path.
         await host.spawn('path check', { name: 'checker' });
         const written = await host.manifest();
-        expect(written).toBe(path.join('tmp', 'fleet', 'session-2', 'fleet.json'));
+        expect(written).toBe(path.join(fleetRoot, 'fleet.json'));
         await host.stopAll();
+        await fs.rm(tmpRoot, { recursive: true, force: true });
       });
 
       it('works without fleetRoot — director still built, no paths', async () => {
