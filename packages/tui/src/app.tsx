@@ -1524,10 +1524,37 @@ export function App({
         },
       });
     });
+    // Always-on per-tool surface for the chat history. Director mode
+    // also gets a richer FleetBus path that includes arg formatting +
+    // currentTool live updates, but THIS bridge fires regardless of
+    // mode so plain `/spawn` no longer looks like a black box.
+    const offTool = events.on('subagent.tool_executed', (e) => {
+      const lbl = labelFor(e.subagentId);
+      // Also bump the entry's currentTool/toolCalls so the status bar
+      // 4th line + FleetPanel update in non-director mode.
+      dispatch({ type: 'fleetTool', id: e.subagentId });
+      dispatch({ type: 'fleetToolEnd', id: e.subagentId });
+      const bytesTag =
+        typeof e.outputBytes === 'number' && e.outputBytes > 0
+          ? ` · ${e.outputBytes < 1024 ? `${e.outputBytes}B` : `${(e.outputBytes / 1024).toFixed(1)}KB`}`
+          : '';
+      dispatch({
+        type: 'addEntry',
+        entry: {
+          kind: 'subagent',
+          agentLabel: lbl.label,
+          agentColor: lbl.color,
+          icon: e.ok === false ? '✗' : '●',
+          text: e.name,
+          detail: `${e.durationMs}ms${bytesTag}`,
+        },
+      });
+    });
     return () => {
       offSpawned();
       offStarted();
       offCompleted();
+      offTool();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events]);

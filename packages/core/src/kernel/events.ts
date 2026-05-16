@@ -158,6 +158,23 @@ export interface EventMap {
     taskId: string;
     description?: string;
   };
+  /**
+   * Per-tool-call event re-emitted from a subagent's own EventBus
+   * onto the host EventBus, so the TUI / non-director surfaces can
+   * render "AGENT#1 ● bash 250ms" without having to subscribe to
+   * the director-only FleetBus. Fired AFTER the tool completes
+   * (paired with `tool.executed`). Includes the subagent id so
+   * multiple parallel subagents are distinguishable.
+   */
+  'subagent.tool_executed': {
+    subagentId: string;
+    taskId?: string;
+    name: string;
+    durationMs: number;
+    ok: boolean;
+    input?: unknown;
+    outputBytes?: number;
+  };
   'subagent.task_completed': {
     subagentId: string;
     taskId: string;

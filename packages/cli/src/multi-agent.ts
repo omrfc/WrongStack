@@ -331,7 +331,37 @@ export class MultiAgentHost {
       // host owns and must not close here. The shim writer in the
       // fallback branch has no `close()`, so the null-guard handles
       // both cases.
+      // Bridge per-subagent tool.executed to the host EventBus so the
+      // TUI can render tool calls in history regardless of director
+      // mode. The FleetBus path (director-only) covers FleetPanel and
+      // verbose streaming; this bridge gives the baseline visibility
+      // that "AGENT#1 ● bash 250ms" lands in chat even on plain /spawn.
+      // Capture the subagentId from the caller-supplied config — the
+      // factory itself doesn't know the id until spawn() assigns one,
+      // but director.spawn/coord.spawn both pass it back via subCfg.id
+      // when in director mode; in legacy non-director mode the id is
+      // discovered post-spawn, so we wire the bridge lazily with a
+      // mutable holder and let the legacy emit path fill it.
+      const hostEvents = this.deps.events;
+      const offToolBridge = events.on('tool.executed', (e) => {
+        // subCfg.id is populated by Director.spawn before this factory
+        // is invoked, and by coord.spawn for the non-director path
+        // (the runner re-uses the same config object). When it's
+        // missing we still emit with a fallback so the bridge never
+        // drops events — observability is more useful than perfect
+        // attribution in that edge case.
+        hostEvents.emit('subagent.tool_executed', {
+          subagentId: subCfg.id ?? subCfg.name ?? 'subagent',
+          name: e.name,
+          durationMs: e.durationMs,
+          ok: e.ok,
+          input: e.input,
+          outputBytes: e.outputBytes,
+        });
+      });
+
       const dispose = async () => {
+        offToolBridge();
         try {
           await subSession.close?.();
         } catch {
