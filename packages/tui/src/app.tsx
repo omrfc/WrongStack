@@ -156,6 +156,14 @@ type State = {
   toolStream: { toolUseId: string; name: string; text: string; startedAt: number } | null;
   status: 'idle' | 'running' | 'streaming' | 'aborting';
   interrupts: number;
+  /**
+   * Set when the user pressed Esc mid-iteration to interrupt the agent.
+   * The NEXT submitted user message gets a STEERING prefix block prepended
+   * so the model sees "I interrupted you on purpose — focus on this
+   * instead of resuming the prior task". Cleared once that message
+   * lands. Distinct from `interrupts` (which is the Ctrl+C exit ladder).
+   */
+  steeringPending: boolean;
   hint: string;
   nextId: number;
   picker: { open: boolean; query: string; matches: string[]; selected: number };
@@ -214,6 +222,10 @@ type Action =
   | { type: 'status'; status: State['status'] }
   | { type: 'interrupt' }
   | { type: 'resetInterrupts' }
+  /** User pressed Esc mid-iteration — flag the next message for steering. */
+  | { type: 'steerStart' }
+  /** Submit handler consumed the steering flag; reset. */
+  | { type: 'steerConsume' }
   | { type: 'hint'; text: string }
   | { type: 'pickerOpen'; query: string }
   | { type: 'pickerClose' }
@@ -297,6 +309,10 @@ export function reducer(state: State, action: Action): State {
       return { ...state, status: action.status };
     case 'interrupt':
       return { ...state, interrupts: state.interrupts + 1 };
+    case 'steerStart':
+      return { ...state, steeringPending: true };
+    case 'steerConsume':
+      return { ...state, steeringPending: false };
     case 'resetInterrupts':
       return { ...state, interrupts: 0 };
     case 'hint':
@@ -690,6 +706,7 @@ export function App({
     toolStream: null,
     status: 'idle' as const,
     interrupts: 0,
+    steeringPending: false,
     hint: '',
     nextId: 1,
     picker: { open: false, query: '', matches: [], selected: 0 },
@@ -2004,6 +2021,35 @@ export function App({
       // (e.g. typing a space) — handled below.
     }
 
+    // Esc when the agent is busy = "drop what you're doing, I want to
+    // steer". Aborts the current iteration, flags steeringPending so
+    // the very next user message gets a STEERING preamble injected
+    // before being sent to the model. Does NOT consume the Ctrl+C
+    // exit ladder (interrupts counter untouched). When no run is
+    // active, Esc falls through to normal text handling so it can
+    // close pickers / clear buffer / etc. via existing behaviour.
+    if (key.escape && state.status !== 'idle' && !state.confirm) {
+      activeCtrlRef.current?.abort();
+      dispatch({ type: 'status', status: 'aborting' });
+      dispatch({ type: 'steerStart' });
+      // Drop anything queued — steering means the user is redirecting,
+      // not adding to the backlog. Without this the queued items would
+      // run *before* the steering message, which contradicts the UX.
+      const droppedCount = state.queue.length;
+      if (droppedCount > 0) dispatch({ type: 'queueClear' });
+      dispatch({
+        type: 'addEntry',
+        entry: {
+          kind: 'warn',
+          text:
+            droppedCount > 0
+              ? `↯ Interrupted. Dropped ${droppedCount} queued message${droppedCount === 1 ? '' : 's'}. Type your new direction.`
+              : '↯ Interrupted. Type your new direction.',
+        },
+      });
+      return;
+    }
+
     if (isEnter) {
       // Re-entrancy protection for terminals that emit `\r\n` as two
       // separate stdin events: ignore Enter pressed within 50ms of the
@@ -2294,9 +2340,29 @@ export function App({
 
     const builder = builderRef.current;
     if (!builder) return;
-    if (trimmed) builder.appendText(trimmed);
+    // Steering inject: if the user pressed Esc on the prior iteration,
+    // prepend a STEERING preamble so the model sees this isn't a
+    // follow-up — it's an interrupt redirecting the work. The preamble
+    // is plain text the model can interpret; we deliberately don't use
+    // a system role here because the user might still be conversing
+    // and the preamble should be attributable to them.
+    const steering = state.steeringPending;
+    if (trimmed) {
+      const toAppend = steering
+        ? `[STEERING — I interrupted you mid-task on purpose. Stop whatever you were doing and focus on this:]\n\n${trimmed}`
+        : trimmed;
+      builder.appendText(toAppend);
+    }
+    if (steering) dispatch({ type: 'steerConsume' });
     const blocks = await builder.submit();
-    const displayText = trimmed || '(attachments only)';
+    // The user sees their original text + a visual ↯ marker when
+    // steering, not the full preamble — keeps the chat readable while
+    // the model still gets the explicit instruction.
+    const displayText = trimmed
+      ? steering
+        ? `↯ ${trimmed}`
+        : trimmed
+      : '(attachments only)';
     dispatch({ type: 'clearInput' });
 
     if (state.status !== 'idle') {
