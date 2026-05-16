@@ -24,6 +24,10 @@
       "types": "./dist/builtin.d.ts",
       "import": "./dist/builtin.js"
     },
+    "./pack": {
+      "types": "./dist/pack.d.ts",
+      "import": "./dist/pack.js"
+    },
     "./read": {
       "types": "./dist/read.d.ts",
       "import": "./dist/read.js"

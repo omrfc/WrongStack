@@ -15,7 +15,7 @@ import {
   ToolRegistry,
   type WstackPaths,
 } from '@wrongstack/core';
-import { builtinTools } from '@wrongstack/tools/builtin';
+import { builtinToolsPack } from '@wrongstack/tools/pack';
 import { parseArgs } from './arg-parser.js';
 import { bootConfig } from './boot-config.js';
 import { ReadlineInputReader } from './input-reader.js';
@@ -94,7 +94,10 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
       bundledDir: resolveBundledSkillsDir(),
     });
     const toolRegistryForSubcmd = new ToolRegistry();
-    for (const t of builtinTools) toolRegistryForSubcmd.register(t);
+    toolRegistryForSubcmd.registerAllOrThrow(
+      [...(builtinToolsPack.tools ?? [])],
+      builtinToolsPack.name,
+    );
     const code = await subcommands[first]!(positional.slice(1), {
       config,
       renderer,

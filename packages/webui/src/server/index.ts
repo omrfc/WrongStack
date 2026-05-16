@@ -38,7 +38,7 @@ import {
 } from '@wrongstack/core';
 import { buildProviderFactoriesFromRegistry, makeProviderFromConfig } from '@wrongstack/providers';
 import { forgetTool, rememberTool } from '@wrongstack/tools';
-import { builtinTools } from '@wrongstack/tools/builtin';
+import { builtinToolsPack } from '@wrongstack/tools/pack';
 import { WebSocket, WebSocketServer } from 'ws';
 
 // Re-export types
@@ -186,7 +186,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
 
   // Tool registry
   const toolRegistry = new ToolRegistry();
-  for (const t of builtinTools) toolRegistry.register(t);
+  toolRegistry.registerAllOrThrow([...(builtinToolsPack.tools ?? [])], builtinToolsPack.name);
 
   // Memory tools
   const memoryStore = new DefaultMemoryStore({ paths: wpaths });

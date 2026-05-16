@@ -7,6 +7,7 @@ export default defineConfig({
   entry: [
     'src/index.ts',
     'src/builtin.ts',
+    'src/pack.ts',
     // Public tool entry points — explicit list rather than a glob so
     // removing a tool doesn't silently break a public subpath.
     'src/read.ts',

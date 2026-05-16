@@ -59,7 +59,7 @@ import {
   makeProviderFromConfig,
 } from '@wrongstack/providers';
 import { forgetTool, rememberTool } from '@wrongstack/tools';
-import { builtinTools } from '@wrongstack/tools/builtin';
+import { builtinToolsPack } from '@wrongstack/tools/pack';
 import { boot } from './boot.js';
 import { type ExecutionDeps, execute } from './execution.js';
 import type { ReadlineInputReader } from './input-reader.js';
@@ -254,7 +254,7 @@ export async function main(argv: string[]): Promise<number> {
 
   // Tool registry
   const toolRegistry = new ToolRegistry();
-  for (const t of builtinTools) toolRegistry.register(t);
+  toolRegistry.registerAllOrThrow([...(builtinToolsPack.tools ?? [])], builtinToolsPack.name);
   toolRegistry.registerDefault(
     createContextManagerTool({ compactor: container.resolve(TOKENS.Compactor) }),
   );

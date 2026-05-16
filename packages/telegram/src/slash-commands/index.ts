@@ -1,0 +1,126 @@
+import type { PluginAPI, SlashCommand } from '@wrongstack/core';
+import type { TelegramBot } from '../bot.js';
+import type { TelegramPluginConfig } from '../config.js';
+
+// ---------------------------------------------------------------------------
+// /tg status
+// ---------------------------------------------------------------------------
+
+export function tgStatusCommand(bot: TelegramBot, cfg: TelegramPluginConfig): SlashCommand {
+  return {
+    name: 'status',
+    aliases: ['tgstat', 'tgs'],
+    description: 'Show Telegram bot connection status and config',
+    help: `Usage: /tg status
+
+Shows whether the bot is connected, its username, polling interval,
+allowlist status, and notification settings.`,
+    async run(_args, _ctx) {
+      const health = await bot.health();
+      const lines = [
+        '═══ Telegram Plugin Status ═══',
+        '',
+        `Bot:       ${health.ok ? `✅ @${health.username ?? 'connected'}` : `❌ ${health.error ?? 'offline'}`}`,
+        `Running:   ${bot.running ? 'yes' : 'no'}`,
+        `Started:   ${bot.startedAt ? new Date(bot.startedAt).toLocaleTimeString() : 'N/A'}`,
+        `Poll:      every ${cfg.pollIntervalSec ?? 2}s`,
+        `Allowed:   ${(cfg.allowedUsers?.length ?? 0) > 0 ? `${cfg.allowedUsers!.length} users` : 'everyone (users)'} / ${(cfg.allowedChats?.length ?? 0) > 0 ? `${cfg.allowedChats!.length} chats` : 'everyone (chats)'}`,
+        `Notify:    sessionEnd=${cfg.notifyOnSessionEnd ?? false}, longTool=${cfg.longToolThresholdMs ? `${cfg.longToolThresholdMs}ms` : 'off'}`,
+      ];
+
+      return { message: lines.join('\n') };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// /tg send
+// ---------------------------------------------------------------------------
+
+export function tgSendCommand(
+  bot: TelegramBot,
+  defaultChatId: string | number | undefined,
+): SlashCommand {
+  return {
+    name: 'send',
+    description: 'Send a message to a Telegram chat',
+    help: `Usage: /tg send [chat_id] <message>
+
+Send a message to a Telegram chat.
+- First argument (optional): chat or user ID. Uses notifyChatId from config when omitted.
+- Everything else: the message text.
+
+Examples:
+  /tg send 123456789 Build completed successfully ✓
+  /tg send Deploy finished — check staging`,
+    async run(args, _ctx) {
+      if (!args.trim()) {
+        return { message: 'Usage: /tg send [chat_id] <message>' };
+      }
+
+      let chatId: string | number;
+      let text: string;
+
+      // First token might be a numeric chat_id
+      const parts = args.trim().split(/\s+/);
+      const maybeId = parts[0];
+      if (/^\d+$/.test(maybeId!) && parts.length > 1) {
+        chatId = maybeId!;
+        text = parts.slice(1).join(' ');
+      } else if (defaultChatId) {
+        chatId = defaultChatId;
+        text = args.trim();
+      } else {
+        return {
+          message:
+            'No chat_id provided and no default notifyChatId configured.\nUsage: /tg send <chat_id> <message>',
+        };
+      }
+
+      try {
+        const res = await bot.sendMessage(chatId, text);
+        return {
+          message: `✅ Message sent to ${chatId} (msg_id=${res.result?.message_id ?? '?'})`,
+        };
+      } catch (err) {
+        return { message: `❌ Failed to send: ${(err as Error).message}` };
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// /tg chatid
+// ---------------------------------------------------------------------------
+
+export function tgChatIdCommand(): SlashCommand {
+  return {
+    name: 'chatid',
+    description: 'Show the default notifyChatId',
+    help: `Usage: /tg chatid
+
+Shows the current default chat ID used for notifications
+and the ` + '`telegram_send`' + ` tool when no chat_id is specified.`,
+    async run(_args, _ctx) {
+      return { message: `This command shows the configured notifyChatId. Ask the plugin to display it.` };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Register all
+// ---------------------------------------------------------------------------
+
+export function registerSlashCommands(
+  api: PluginAPI,
+  bot: TelegramBot,
+  cfg: TelegramPluginConfig,
+): string[] {
+  const cmds = [
+    tgStatusCommand(bot, cfg),
+    tgSendCommand(bot, cfg.notifyChatId),
+    tgChatIdCommand(),
+  ];
+  for (const cmd of cmds) api.slashCommands.register(cmd);
+  return cmds.map((c) => c.name);
+}
