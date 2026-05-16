@@ -51,6 +51,15 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
   private completedResults: TaskResult[] = [];
   private totalIterations = 0;
   private inFlight = 0;
+  /**
+   * Subagents currently being stopped. Set on entry to `stop()`, cleared
+   * once `recordCompletion` lands the terminal TaskResult. Used by
+   * `runDispatched` and `findIdleSubagent` to refuse mid-flight dispatch
+   * to a subagent the caller has already asked to terminate — closes the
+   * assign+terminate race where a fresh task could land on a worker that
+   * was about to be killed.
+   */
+  private readonly terminating = new Set<string>();
 
   constructor(config: MultiAgentConfig, options: MultiAgentCoordinatorOptions = {}) {
     super();
@@ -70,6 +79,14 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
 
   async spawn(subagent: SubagentConfig): Promise<SpawnResult> {
     const id = subagent.id || randomUUID();
+    // Duplicate-id guard. Previously a second spawn({id}) with the
+    // same id silently overwrote the existing entry — orphaning the
+    // first subagent's AbortController, Context, and any in-flight
+    // task referencing it. Two spawns with the same id are almost
+    // always a bug at the caller; refuse and let them surface it.
+    if (this.subagents.has(id)) {
+      throw new Error(`Subagent id "${id}" already exists — refusing to overwrite`);
+    }
     const context: SubagentContext = {
       subagentId: id,
       tasks: [],
@@ -121,6 +138,12 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
     const subagent = this.subagents.get(subagentId);
     if (!subagent) return;
 
+    // Mark terminating BEFORE the abort so a synchronous tryDispatchNext
+    // observation in another callback path sees the intent and skips
+    // this subagent. Cleared by recordCompletion once the runner's
+    // catch block lands the terminal TaskResult.
+    this.terminating.add(subagentId);
+
     // Abort any in-flight run, then sever the bridge so further messages fail
     // fast instead of silently queueing on a dead subagent.
     subagent.abortController.abort();
@@ -132,6 +155,16 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
   }
 
   async stopAll(): Promise<void> {
+    // Clear the queue FIRST so no new tasks land on subagents while
+    // we're tearing them down. Each dropped task gets a synthetic
+    // `aborted_by_parent` completion so any caller awaiting it (e.g.
+    // delegate tool's awaitTasks) resolves instead of hanging.
+    //
+    // Pending tasks never reached `inFlight`, so we cannot route them
+    // through `recordCompletion` — its underflow guard would short-
+    // circuit on the second pending task and emit a warning instead
+    // of the completion event. The shared helper inline-emits.
+    this.drainPendingAsAborted('Coordinator stopAll() drained the pending queue');
     // allSettled so one failure doesn't leave other subagents un-stopped.
     await Promise.allSettled([...this.subagents.keys()].map((id) => this.stop(id)));
   }
@@ -171,7 +204,21 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
   private tryDispatchNext(): void {
     while (this.canDispatch()) {
       const subagentId = this.findIdleSubagent();
-      if (!subagentId) return;
+      if (!subagentId) {
+        // No idle worker right now. If every spawned subagent is
+        // stopped or mid-termination, the pending queue is dead —
+        // a pending task can never start, so synthetic-complete it
+        // as `aborted_by_parent`. Without this, an `assign()` after
+        // `stop()` would hang forever waiting for `task.completed`.
+        // We DO NOT drain when subagents are busy (status='running'):
+        // those will free up and accept the work normally.
+        if (this.pendingTasks.length > 0 && !this.hasLiveSubagent()) {
+          this.drainPendingAsAborted(
+            'No live subagent available — all stopped or mid-termination',
+          );
+        }
+        return;
+      }
       const task = this.pendingTasks.shift();
       if (!task) return;
       // Attach a catch so a synchronous throw inside runDispatched (rare —
@@ -199,14 +246,90 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
 
   private findIdleSubagent(): string | null {
     for (const [id, s] of this.subagents) {
-      if (s.status === 'idle') return id;
+      // Skip subagents that are mid-termination — `stop()` set the
+      // `terminating` flag and aborted the controller, but the
+      // status mutation happens synchronously after; checking both
+      // is belt-and-suspenders against any race where status is
+      // transiently still 'idle' while termination is in flight.
+      if (s.status === 'idle' && !this.terminating.has(id)) return id;
     }
     return null;
+  }
+
+  /**
+   * Returns true iff at least one spawned subagent could still
+   * process a task. A "live" subagent is one that is not stopped
+   * AND not mid-termination — `running` workers count because they
+   * will eventually finish and become idle.
+   *
+   * When no subagent has ever been spawned, returns `true` so a
+   * pre-spawn `assign()` simply queues (legacy behaviour). The
+   * dead-end detection only fires after `stop()` has retired every
+   * spawned worker.
+   *
+   * Used by `tryDispatchNext` to detect a dead-end pending queue.
+   */
+  private hasLiveSubagent(): boolean {
+    if (this.subagents.size === 0) return true;
+    for (const [id, s] of this.subagents) {
+      if (s.status !== 'stopped' && !this.terminating.has(id)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Drain every pending task with a synthetic `aborted_by_parent`
+   * completion event. Same shape as the `stopAll()` drain — we go
+   * around `recordCompletion` because pending tasks were never
+   * counted in `inFlight` and routing them through would trip the
+   * underflow guard on every task after the first.
+   */
+  private drainPendingAsAborted(message: string): void {
+    const dropped = this.pendingTasks.splice(0, this.pendingTasks.length);
+    for (const t of dropped) {
+      const synthetic: TaskResult = {
+        subagentId: t.subagentId ?? 'unassigned',
+        taskId: t.id,
+        status: 'stopped',
+        error: {
+          kind: 'aborted_by_parent',
+          message,
+          retryable: false,
+        },
+        iterations: 0,
+        toolCalls: 0,
+        durationMs: 0,
+      };
+      this.completedResults.push(synthetic);
+      this.emit('task.completed', { task: t, result: synthetic });
+    }
   }
 
   private async runDispatched(subagentId: string, task: TaskSpec): Promise<void> {
     const subagent = this.subagents.get(subagentId);
     if (!subagent) return;
+    // Final race guard: if `stop(subagentId)` ran between dispatch
+    // and us arriving here, refuse to start the task and surface it
+    // as `aborted_by_parent` so any caller awaiting the task id
+    // unblocks. Without this, the task would be marked 'running',
+    // collide with the just-completed 'stopped' state, and leak
+    // inFlight by 1 because no recordCompletion path covers it.
+    if (this.terminating.has(subagentId) || subagent.status === 'stopped') {
+      this.recordCompletion({
+        subagentId,
+        taskId: task.id,
+        status: 'stopped',
+        error: {
+          kind: 'aborted_by_parent',
+          message: 'Subagent was terminated before task could start',
+          retryable: false,
+        },
+        iterations: 0,
+        toolCalls: 0,
+        durationMs: 0,
+      });
+      return;
+    }
 
     subagent.status = 'running';
     subagent.currentTask = task.id;
@@ -337,7 +460,15 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
     const subagent = this.subagents.get(result.subagentId);
     if (subagent && subagent.status !== 'stopped') {
       const failed = result.status === 'failed' || result.status === 'timeout';
-      subagent.status = failed ? 'error' : 'idle';
+      // Synchronously reset the worker to idle after either a clean
+      // finish or a transient failure. The previous code parked the
+      // subagent in 'error' and used a `queueMicrotask` to flip it
+      // back to 'idle' — that opened a window where `assign()` +
+      // `tryDispatchNext` could race the microtask, leaving the
+      // worker stuck in 'running' state while actually idle. By
+      // resetting now, no async gap can leak the state machine.
+      subagent.status = 'idle';
+      void failed; // kept for future telemetry hooks
       subagent.currentTask = undefined;
       // If the run aborted (timeout or explicit stop), the subagent's
       // signal is now permanently aborted — recycling the controller lets
@@ -345,15 +476,11 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
       if (subagent.abortController.signal.aborted) {
         subagent.abortController = new AbortController();
       }
-      // Reset error state on next assignment so a transient failure doesn't
-      // permanently sideline the subagent.
-      if (subagent.status === 'error') {
-        queueMicrotask(() => {
-          if (subagent.status === 'error') subagent.status = 'idle';
-          this.tryDispatchNext();
-        });
-      }
     }
+    // Clear the terminating flag now that the worker has a terminal
+    // TaskResult on record. Subsequent stop() calls re-add it; new
+    // assign() calls can flow normally.
+    this.terminating.delete(result.subagentId);
 
     this.emit('task.completed', {
       task: subagent?.context.tasks.find((t) => t.id === result.taskId) ?? { id: result.taskId },
@@ -472,6 +599,14 @@ export function classifySubagentError(
   }
   if (/empty response$/i.test(baseMessage)) {
     return { kind: 'empty_response', message: baseMessage, retryable: false, cause };
+  }
+  // The runner throws `Error('tool failed: <name>')` when an executed tool
+  // returned `ok:false` and the agent ultimately ended without recovering
+  // (or aborted). Surface as `tool_failed` so callers don't conflate a
+  // failed tool with a thrown tool — both are useful but mean different
+  // things at the LLM layer.
+  if (/^tool failed: /i.test(baseMessage)) {
+    return { kind: 'tool_failed', message: baseMessage, retryable: false, cause };
   }
   if (lower.includes('bridge transport') || /bridge.*(closed|disconnect)/i.test(baseMessage)) {
     return { kind: 'bridge_failed', message: baseMessage, retryable: false, cause };

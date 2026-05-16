@@ -229,6 +229,14 @@ export class Director {
   /** Snapshot of which subagent owns each task — drives state-checkpoint
    *  status updates without re-walking the manifest. */
   private readonly taskOwners = new Map<string, string>();
+  /**
+   * Handle to the coordinator-side `task.completed` listener so we can
+   * unsubscribe in `shutdown()`. Without this, repeated Director
+   * construction (e.g. tests, hot reloads) accumulates listeners on a
+   * cached coordinator and slowly drifts the EventEmitter past its
+   * default cap.
+   */
+  private taskCompletedListener: ((payload: { task: TaskSpec; result: TaskResult }) => void) | null = null;
 
   constructor(opts: DirectorOptions) {
     this.id = opts.config.coordinatorId || randomUUID();
@@ -275,7 +283,13 @@ export class Director {
     // lets `awaitTasks([...])` resolve on the *next* completion event
     // without polling — and the `completed` cache covers the case where
     // a caller asks after the fact.
-    this.coordinator.on('task.completed', (payload: { task: TaskSpec; result: TaskResult }) => {
+    //
+    // The listener is captured in a field (`taskCompletedListener`) so
+    // `shutdown()` can `coordinator.off(...)` it cleanly — otherwise
+    // repeated Director construction against a cached coordinator
+    // (tests, hot reloads) leaks listeners and eventually trips
+    // EventEmitter's max-listener warning.
+    this.taskCompletedListener = (payload: { task: TaskSpec; result: TaskResult }) => {
       const r = payload.result;
       this.completed.set(r.taskId, r);
       const waiter = this.taskWaiters.get(r.taskId);
@@ -322,7 +336,8 @@ export class Director {
             },
       );
       this.scheduleManifest();
-    });
+    };
+    this.coordinator.on('task.completed', this.taskCompletedListener);
   }
 
   /** Best-effort session-writer append. Swallows failures — the director
@@ -546,6 +561,14 @@ export class Director {
     if (this.manifestTimer) {
       clearTimeout(this.manifestTimer);
       this.manifestTimer = null;
+    }
+    // Detach the coordinator-side task.completed listener so a Director
+    // that lives shorter than its coordinator (rare but possible in
+    // tests + delegate auto-promotion) doesn't leak the closure on
+    // the EventEmitter for the coordinator's remaining lifetime.
+    if (this.taskCompletedListener) {
+      this.coordinator.off('task.completed', this.taskCompletedListener);
+      this.taskCompletedListener = null;
     }
     await this.coordinator.stopAll();
     for (const b of this.subagentBridges.values()) {

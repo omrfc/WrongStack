@@ -80,7 +80,8 @@ describe('DefaultMultiAgentCoordinator with runner', () => {
     const [result] = await donePromise;
 
     expect(result.status).toBe('failed');
-    expect(result.error).toMatch(/tool_calls/);
+    expect(result.error?.kind).toBe('budget_tool_calls');
+    expect(result.error?.message).toMatch(/tool_calls/);
     expect(result.toolCalls).toBe(2);
   });
 
@@ -208,7 +209,8 @@ describe('DefaultMultiAgentCoordinator with runner', () => {
     const [result] = await donePromise;
 
     expect(result.status).toBe('failed');
-    expect(result.error).toMatch(/kaboom/);
+    expect(result.error?.message).toMatch(/kaboom/);
+    expect(result.error?.kind).toBe('unknown');
   });
 
   it('coordinator defaultBudget applies when subagent omits limits', async () => {

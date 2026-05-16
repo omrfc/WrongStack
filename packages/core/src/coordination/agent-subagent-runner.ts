@@ -23,6 +23,16 @@ export interface AgentFactoryResult {
   agent: Agent;
   /** Event bus the factory wired to this agent — required for budget hookup. */
   events: EventBus;
+  /**
+   * Optional cleanup hook invoked in the runner's `finally` block once
+   * the task ends (success, failure, abort — same exit path). Factories
+   * that own resources scoped to a single task (per-subagent JSONL
+   * writers, transient providers, throwaway containers) implement this
+   * to close them deterministically instead of relying on GC. Errors
+   * thrown here are swallowed so a flaky cleanup can't mask the task's
+   * real result.
+   */
+  dispose?: () => Promise<void> | void;
 }
 
 export interface AgentRunnerOptions {
@@ -62,7 +72,8 @@ export function makeAgentSubagentRunner(opts: AgentRunnerOptions): SubagentRunne
   const format = opts.formatTaskInput ?? defaultFormatTaskInput;
 
   return async (task: TaskSpec, ctx: SubagentRunContext): Promise<SubagentRunOutcome> => {
-    const { agent, events } = await opts.factory(ctx.config);
+    const factoryResult = await opts.factory(ctx.config);
+    const { agent, events } = factoryResult;
 
     // Attach subagent EventBus to FleetBus so the TUI fleet panel (and any
     // other FleetBus subscriber) can observe this subagent live. Detach on
@@ -97,13 +108,33 @@ export function makeAgentSubagentRunner(opts: AgentRunnerOptions): SubagentRunne
       }
     };
 
+    // Track the name of the most recent tool that returned ok:false so
+    // we can lift it into the SubagentError when the agent ends without
+    // recovering. Cleared on every successful tool execution so a tool
+    // that later succeeded doesn't taint the final report.
+    let lastToolFailed: string | null = null;
+
     const unsub: Array<() => void> = [];
     unsub.push(
-      events.on('tool.started', () => {
+      events.on('tool.executed', (e) => {
+        // Count tool calls on the PAIRED 'tool.executed' event rather
+        // than 'tool.started'. A tool can fire start then crash before
+        // emitting executed (process killed, signal aborted mid-exec);
+        // counting only the paired event keeps the budget tally honest
+        // and matches what the model actually saw in its turn.
         try {
           ctx.budget.recordToolCall();
-        } catch (e) {
-          onBudgetError(e);
+        } catch (eb) {
+          onBudgetError(eb);
+        }
+        // Track ok:false so we can fail the subagent if it ends without
+        // recovering. Successful runs clear it — the model may try a
+        // tool, get an error, and self-heal on the next iteration; that
+        // path should still report success.
+        if (e.ok === false) {
+          lastToolFailed = e.name;
+        } else if (e.ok === true) {
+          lastToolFailed = null;
         }
       }),
       events.on('provider.response', (e) => {
@@ -134,6 +165,17 @@ export function makeAgentSubagentRunner(opts: AgentRunnerOptions): SubagentRunne
       detachFleet?.();
       ctx.signal.removeEventListener('abort', onParentAbort);
       for (const u of unsub) u();
+      // Per-task resource cleanup. Closes JSONL writers, throwaway
+      // providers, etc. that the factory wired up. Swallowed errors —
+      // a flaky cleanup must not mask the real task result. The
+      // caller can re-emit via observability if needed.
+      if (factoryResult.dispose) {
+        try {
+          await factoryResult.dispose();
+        } catch {
+          // intentional swallow — see comment above
+        }
+      }
     }
 
     // A budget violation is the signal — surface it so the coordinator can
@@ -167,6 +209,18 @@ export function makeAgentSubagentRunner(opts: AgentRunnerOptions): SubagentRunne
     const finalText = (result.finalText ?? '').trim();
     if (finalText.length === 0 && usage.toolCalls === 0) {
       throw new Error('empty response');
+    }
+    // Unrecovered-tool-failure guard. If the last executed tool came
+    // back ok:false AND the agent ended its turn with no closing text,
+    // the agent never acknowledged or recovered from the failure — the
+    // task is effectively broken. A model that handles a tool error
+    // emits SOME text on the next iteration ("the read failed, trying
+    // an alternate path…") which clears `lastToolFailed`; the only way
+    // both signals can be live at end-of-run is if the model gave up
+    // silently. Surface as `tool_failed` so callers see the actual
+    // failure mode instead of a clean ✓ with no output.
+    if (finalText.length === 0 && lastToolFailed !== null) {
+      throw new Error(`tool failed: ${lastToolFailed}`);
     }
     return {
       result: result.finalText,

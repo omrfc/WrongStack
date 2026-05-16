@@ -31,6 +31,10 @@ function makeStubAgent(opts: {
         events.emit('iteration.started', { ctx, index: i });
         for (let t = 0; t < toolCallsPerIter; t++) {
           events.emit('tool.started', { name: 'stub', id: `t${i}-${t}` });
+          // Pair with executed — the runner's budget hook now counts
+          // tool calls on the executed event (D2/M5), so the stub must
+          // emit both halves of the lifecycle to model a real tool.
+          events.emit('tool.executed', { name: 'stub', id: `t${i}-${t}`, durationMs: 0, ok: true });
         }
         events.emit('provider.response', { ctx, usage, stopReason: 'end_turn' });
         events.emit('iteration.completed', { ctx, index: i });
@@ -103,7 +107,11 @@ describe('makeAgentSubagentRunner', () => {
     const result = await completion;
 
     expect(result.status).toBe('failed');
-    expect(result.error).toMatch(/tool_calls/);
+    // Error envelope (D1) — assert on the structured `kind` so the
+    // test fails loudly if budget classification ever drifts back into
+    // an opaque string bucket.
+    expect(result.error?.kind).toBe('budget_tool_calls');
+    expect(result.error?.message).toMatch(/tool_calls/);
     // Tool calls observed at least breached the limit
     expect(result.toolCalls).toBeGreaterThanOrEqual(3);
   });
@@ -119,7 +127,8 @@ describe('makeAgentSubagentRunner', () => {
     const result = await completion;
 
     expect(result.status).toBe('failed');
-    expect(result.error).toMatch(/iterations/);
+    expect(result.error?.kind).toBe('budget_iterations');
+    expect(result.error?.message).toMatch(/iterations/);
   });
 
   it('agent failure surfaces as failed task', async () => {
@@ -133,7 +142,11 @@ describe('makeAgentSubagentRunner', () => {
     const result = await completion;
 
     expect(result.status).toBe('failed');
-    expect(result.error).toMatch(/stub failure/);
+    // The stub agent throws a vanilla `Error('stub failure')` which the
+    // classifier can't route to a structured kind — falls into
+    // 'unknown' but the original message is preserved.
+    expect(result.error?.kind).toBe('unknown');
+    expect(result.error?.message).toMatch(/stub failure/);
   });
 
   it('coordinator stop() propagates as abort signal to the agent', async () => {

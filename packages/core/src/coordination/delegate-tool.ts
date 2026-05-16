@@ -21,6 +21,13 @@ export interface DelegateHost {
    * legacy code path).
    */
   promoteToDirector(): Promise<Director | null>;
+  /**
+   * Optional: when promotion fails, return the human-readable reason.
+   * Used to render an actionable error to the calling model instead of
+   * the prior opaque "Director could not be activated" message.
+   * Implementations may return null when they don't track the reason.
+   */
+  getPromotionBlockReason?(): string | null;
 }
 
 export interface CreateDelegateToolOptions {
@@ -161,9 +168,16 @@ export function createDelegateTool(opts: CreateDelegateToolOptions): Tool {
         director = await opts.host.promoteToDirector();
       }
       if (!director) {
+        // Prefer the host's structured reason (set by promoteToDirector
+        // when it refuses) so the calling model can see "3 subagents
+        // running, wait or /fleet kill" instead of a one-size-fits-all
+        // "could not activate" string. Fall back to the legacy message
+        // for hosts that don't implement the optional reason hook.
+        const reason = opts.host.getPromotionBlockReason?.();
         return {
           ok: false,
           error:
+            reason ??
             'Director could not be activated — multi-agent host already running in legacy non-director mode. Restart with `--director` for fleet support.',
         };
       }

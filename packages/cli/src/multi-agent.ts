@@ -131,6 +131,13 @@ export class MultiAgentHost {
   private readonly pending = new Map<string, { description: string; subagentId: string }>();
   private readonly results: TaskResult[] = [];
   private readonly opts: MultiAgentHostOptions;
+  /**
+   * Populated by `promoteToDirector` when it refuses to promote (typically
+   * because a non-director coordinator is already running). The delegate
+   * tool reads this through `getPromotionBlockReason` to render an
+   * actionable error instead of a generic "could not activate director".
+   */
+  private promotionBlockReason: string | null = null;
 
   constructor(
     private readonly deps: MultiAgentDeps,
@@ -316,7 +323,23 @@ export class MultiAgentHost {
         permissionPolicy: new AutoApprovePermissionPolicy(),
       });
 
-      return { agent, events };
+      // Close the per-subagent JSONL writer when the task ends. Without
+      // this each completed task leaks one open file descriptor; over a
+      // long fleet run (1000+ tasks) the process eventually hits the OS
+      // limit. We only close writers we created via `sessionFactory` —
+      // the fallback path forwards into the parent's session, which the
+      // host owns and must not close here. The shim writer in the
+      // fallback branch has no `close()`, so the null-guard handles
+      // both cases.
+      const dispose = async () => {
+        try {
+          await subSession.close?.();
+        } catch {
+          // see runner-side comment — cleanup must not mask the result
+        }
+      };
+
+      return { agent, events, dispose };
     };
 
     return makeAgentSubagentRunner({ factory, fleetBus: this.director?.fleet });
@@ -561,6 +584,18 @@ export class MultiAgentHost {
     if (this.coordinator) {
       // A coordinator already exists (subagents were spawned). Cannot
       // safely replace a running coordinator with a Director wrapper.
+      // Record WHY so callers (delegate tool) can render an actionable
+      // message instead of the prior opaque "Director could not be
+      // activated" — the user wants to know what to do, not just that
+      // a thing failed.
+      const status = this.coordinator.getStatus();
+      const running = status.subagents.filter((s) => s.status === 'running').length;
+      const idle = status.subagents.filter((s) => s.status === 'idle').length;
+      this.promotionBlockReason =
+        `Cannot promote to director: a non-director coordinator is already in use ` +
+        `(${running} running, ${idle} idle, ${status.pendingTasks} pending tasks). ` +
+        `Stop the existing subagents with /fleet kill <id> or wait for them to finish, ` +
+        `then retry — or restart wstack with --director to start in director mode.`;
       return null;
     }
     // Force director mode on so ensureCoordinator builds a Director.
@@ -589,6 +624,17 @@ export class MultiAgentHost {
    */
   isDirectorMode(): boolean {
     return !!this.director;
+  }
+
+  /**
+   * Why the most recent `promoteToDirector` call returned null. Cleared
+   * implicitly on the next successful promotion. The delegate tool reads
+   * this so the LLM sees the actual blocker (e.g. "3 running subagents,
+   * wait or /fleet kill") instead of a generic "Director could not be
+   * activated" message that gives no path forward.
+   */
+  getPromotionBlockReason(): string | null {
+    return this.promotionBlockReason;
   }
 
   /**

@@ -1732,10 +1732,22 @@ export function App({
         // Kill every running subagent on the first interrupt — without
         // this the parent agent.run() stays parked in `await delegate
         // → director.awaitTasks` forever and the "press again to exit"
-        // hint becomes a lie. terminateAll is fire-and-forget so a slow
-        // shutdown doesn't block the SIGINT handler.
+        // hint becomes a lie.
+        //
+        // We `await` terminateAll AND race a 1500ms cap so a stuck
+        // bridge or hung tool can't trap us in cleanup — the user
+        // pressed Ctrl+C; their patience is finite. The second
+        // Ctrl+C still forces exit immediately via the path above,
+        // so this race only matters for the polite-shutdown window.
         if (director) {
-          void director.terminateAll().catch(() => undefined);
+          const cap = new Promise<void>((resolve) => {
+            const t = setTimeout(resolve, 1500);
+            t.unref?.();
+          });
+          void Promise.race([
+            director.terminateAll().catch(() => undefined),
+            cap,
+          ]);
         }
         const droppedCount = stateRef.current.queue.length;
         if (droppedCount > 0) {
