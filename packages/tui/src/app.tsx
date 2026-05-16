@@ -1360,7 +1360,7 @@ export function App({
       offConfirmNeeded();
       if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
     };
-  }, [events]);
+  }, [events, agent.ctx.todos]);
 
   // Stable per-subagent label + color, assigned on first sighting and
   // shared between the FleetBus listener (history stream) and the
@@ -1389,6 +1389,94 @@ export function App({
     streamFleetRef.current = state.streamFleet;
   }, [state.streamFleet]);
 
+  // --- Subagent lifecycle entries (uniform for director + non-director) ---
+  // Wired to EventBus, not FleetBus, so /spawn-agent runs (which don't
+  // build a Director) also surface in the chat. The director path emits
+  // the same events through `MultiAgentHost`, so this single listener
+  // covers both modes and replaces the per-status history entry that
+  // previously lived inside the director.on('task.completed') hook.
+  useEffect(() => {
+    const offSpawned = events.on('subagent.spawned', (e) => {
+      const lbl = labelFor(e.subagentId, e.name);
+      dispatch({
+        type: 'fleetSpawn',
+        id: e.subagentId,
+        name: e.name,
+        provider: e.provider,
+        model: e.model,
+      });
+      const where = e.provider && e.model ? `${e.provider}/${e.model}` : 'spawned';
+      const desc = e.description ? ` — ${e.description.slice(0, 80)}` : '';
+      dispatch({
+        type: 'addEntry',
+        entry: {
+          kind: 'subagent',
+          agentLabel: lbl.label,
+          agentColor: lbl.color,
+          icon: '▶',
+          text: `${where}${desc}`,
+        },
+      });
+    });
+    const offStarted = events.on('subagent.task_started', (e) => {
+      const lbl = labelFor(e.subagentId);
+      dispatch({ type: 'fleetStart', id: e.subagentId, taskId: e.taskId });
+      const desc = e.description ? ` — ${e.description.slice(0, 80)}` : '';
+      dispatch({
+        type: 'addEntry',
+        entry: {
+          kind: 'subagent',
+          agentLabel: lbl.label,
+          agentColor: lbl.color,
+          icon: '●',
+          text: `task started${desc}`,
+        },
+      });
+    });
+    const offCompleted = events.on('subagent.task_completed', (e) => {
+      const lbl = labelFor(e.subagentId);
+      dispatch({
+        type: 'fleetDone',
+        id: e.subagentId,
+        status: e.status,
+        iterations: e.iterations,
+        toolCalls: e.toolCalls,
+      });
+      // Status-specific icon so timeout/stopped/failed are visually
+      // distinct from a plain success. Error tail (when present) is
+      // collapsed-whitespace and capped so a stack-trace from the
+      // provider doesn't blow up the chat line.
+      const icon =
+        e.status === 'success'
+          ? '✓'
+          : e.status === 'timeout'
+            ? '⏱'
+            : e.status === 'stopped'
+              ? '⊘'
+              : '✗';
+      const errSnip = e.error
+        ? ` — ${e.error.replace(/\s+/g, ' ').slice(0, 100)}${e.error.length > 100 ? '…' : ''}`
+        : '';
+      const secs = (e.durationMs / 1000).toFixed(e.durationMs < 10_000 ? 1 : 0);
+      dispatch({
+        type: 'addEntry',
+        entry: {
+          kind: 'subagent',
+          agentLabel: lbl.label,
+          agentColor: lbl.color,
+          icon,
+          text: `${e.status} (${e.iterations} iter · ${e.toolCalls} tools · ${secs}s)${errSnip}`,
+        },
+      });
+    });
+    return () => {
+      offSpawned();
+      offStarted();
+      offCompleted();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events]);
+
   // Install a dispatch-backed setter into the shared controller so the
   // `/fleet stream on|off` slash command can flip our reducer flag.
   // Restored to a noop on unmount so a late-arriving slash callback
@@ -1404,7 +1492,7 @@ export function App({
         fleetStreamController.enabled = enabled;
       };
     };
-  }, [fleetStreamController]);
+  }, [fleetStreamController, state.streamFleet]);
 
   // Keep the controller's mirror of `enabled` in sync when the toggle is
   // flipped from a TUI-side path (not the slash command).
@@ -1418,6 +1506,7 @@ export function App({
   // flooding React re-renders; other events dispatch immediately.
   // Seeds initial fleet state from director.status() on mount so the
   // panel reflects subagents spawned before the TUI attached.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: labelFor is ref-stable
   useEffect(() => {
     const d = director;
     if (!d) return;
@@ -1562,7 +1651,11 @@ export function App({
       }
     });
 
-    // Task completions come via the director (not FleetBus).
+    // Task completions arrive on the director's bus too, but the
+    // history entry is now produced by the `subagent.task_completed`
+    // EventBus listener (which fires uniformly for director and
+    // non-director paths). Here we only update fleet panel state +
+    // running cost — the chat-side entry would otherwise duplicate.
     const offDone = d.on('task.completed', (payload) => {
       dispatch({
         type: 'fleetDone',
@@ -1572,24 +1665,12 @@ export function App({
         toolCalls: payload.result.toolCalls,
       });
       dispatch({ type: 'fleetCost', cost: d.snapshot().total.cost });
-      if (streamFleetRef.current) {
-        // Drain remaining assistant text before the done line so the
-        // final chat is visible above the completion marker.
-        if (streamFlushTimer) {
-          clearTimeout(streamFlushTimer);
-          flushStreamBufs();
-        }
-        const lbl = labelFor(payload.result.subagentId);
-        dispatch({
-          type: 'addEntry',
-          entry: {
-            kind: 'subagent',
-            agentLabel: lbl.label,
-            agentColor: lbl.color,
-            icon: payload.result.status === 'success' ? '✓' : '✗',
-            text: `${payload.result.status} (${payload.result.iterations} iter · ${payload.result.toolCalls} tools)`,
-          },
-        });
+      // Drain any pending streaming text right before the completion
+      // entry is committed by the EventBus listener so the order
+      // "chat → done line" stays correct.
+      if (streamFleetRef.current && streamFlushTimer) {
+        clearTimeout(streamFlushTimer);
+        flushStreamBufs();
       }
     });
 

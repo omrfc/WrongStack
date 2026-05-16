@@ -24,7 +24,7 @@ import {
   DefaultSkillLoader,
   DefaultSystemPromptBuilder,
   DefaultTokenCounter,
-  Director,
+  type Director,
   EventBus,
   FLEET_ROSTER,
   type HealthRegistry,
@@ -70,7 +70,7 @@ import type { TerminalRenderer } from './renderer.js';
 import { SessionStats } from './session-stats.js';
 import { buildBuiltinSlashCommands } from './slash-commands/index.js';
 import { Spinner } from './spinner.js';
-import { fmtTok, patchConfig } from './utils.js';
+import { fmtTaskResultLine, fmtTok, patchConfig } from './utils.js';
 
 function resolveBundledSkillsDir(): string | undefined {
   try {
@@ -967,9 +967,8 @@ export async function main(argv: string[]): Promise<number> {
         lines.push(`  pending  ${p.taskId.slice(0, 8)} → ${p.description.slice(0, 60)}`);
       }
       for (const r of s.completed) {
-        lines.push(
-          `  ${r.status === 'success' ? color.green('✓') : color.red('✗')}        ${r.taskId.slice(0, 8)} ${r.iterations}it ${r.toolCalls}tc ${r.durationMs}ms`,
-        );
+        const fmt = fmtTaskResultLine(r, color);
+        lines.push(`  ${fmt.mark}  ${r.taskId.slice(0, 8)} ${fmt.stats}${fmt.tail}`);
       }
       return lines.join('\n');
     },
@@ -988,9 +987,9 @@ export async function main(argv: string[]): Promise<number> {
         if (s.completed.length > 0) {
           lines.push('', color.dim('  Completed'));
           for (const r of s.completed) {
-            const mark = r.status === 'success' ? color.green('✓') : color.red('✗');
+            const fmt = fmtTaskResultLine(r, color);
             lines.push(
-              `    ${mark} ${r.taskId.slice(0, 8)} → ${r.subagentId.slice(0, 8)} · ${r.iterations}it ${r.toolCalls}tc ${r.durationMs}ms`,
+              `    ${fmt.mark} ${r.taskId.slice(0, 8)} → ${r.subagentId.slice(0, 8)} · ${fmt.stats}${fmt.tail}`,
             );
           }
         }

@@ -187,6 +187,7 @@ export class MultiAgentHost {
       this.director.on('task.completed', ({ task, result }) => {
         this.results.push(result);
         this.pending.delete(task.id);
+        this.emitLifecycleCompleted(task.id, result);
       });
       this.coordinator = (
         this.director as unknown as { coordinator: MultiAgentCoordinator }
@@ -198,9 +199,26 @@ export class MultiAgentHost {
         ({ task, result }: { task: { id: string }; result: TaskResult }) => {
           this.results.push(result);
           this.pending.delete(task.id);
+          this.emitLifecycleCompleted(task.id, result);
         },
       );
     }
+    // Coordinator's `task.assigned` fires once per dispatch — relay it
+    // as a `subagent.task_started` so UIs can show "▶ AGENT#N started
+    // <description>" the instant work begins. The director path uses
+    // the same underlying coordinator so a single subscription covers
+    // both modes (director just wraps it without intercepting this
+    // event).
+    (this.coordinator as unknown as { on: Function }).on(
+      'task.assigned',
+      ({ task, subagentId }: { task: { id: string; description?: string }; subagentId: string }) => {
+        this.deps.events.emit('subagent.task_started', {
+          subagentId,
+          taskId: task.id,
+          description: task.description,
+        });
+      },
+    );
 
     // Phase 2: Build the runner — FleetBus is now available via
     // this.director?.fleet (set in Phase 1 for director mode).
@@ -361,6 +379,14 @@ export class MultiAgentHost {
       const subagentId = await this.director.spawn(subagentConfig);
       const taskId = randomUUID();
       this.pending.set(taskId, { description, subagentId });
+      this.deps.events.emit('subagent.spawned', {
+        subagentId,
+        taskId,
+        name: subagentConfig.name,
+        provider: opts?.provider,
+        model: opts?.model,
+        description,
+      });
       await this.director.assign({
         id: taskId,
         description,
@@ -373,6 +399,14 @@ export class MultiAgentHost {
     const spawned = await coord.spawn(subagentConfig);
     const taskId = randomUUID();
     this.pending.set(taskId, { description, subagentId: spawned.subagentId });
+    this.deps.events.emit('subagent.spawned', {
+      subagentId: spawned.subagentId,
+      taskId,
+      name: subagentConfig.name,
+      provider: opts?.provider,
+      model: opts?.model,
+      description,
+    });
     await coord.assign({
       id: taskId,
       description,
@@ -380,6 +414,26 @@ export class MultiAgentHost {
       maxToolCalls: 20,
     });
     return { subagentId: spawned.subagentId, taskId };
+  }
+
+  /**
+   * Relay a `task.completed` notification (from either the Director or
+   * the raw coordinator) to the EventBus so non-director TUIs and any
+   * other observer can react. We forward the full result shape rather
+   * than mutating the existing `task.completed` schema — coordination
+   * code already binds to that event, and adding subscribers there
+   * would change ordering semantics for those listeners.
+   */
+  private emitLifecycleCompleted(taskId: string, result: TaskResult): void {
+    this.deps.events.emit('subagent.task_completed', {
+      subagentId: result.subagentId,
+      taskId,
+      status: result.status,
+      iterations: result.iterations,
+      toolCalls: result.toolCalls,
+      durationMs: result.durationMs,
+      error: result.error,
+    });
   }
 
   status(): {

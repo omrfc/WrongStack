@@ -130,6 +130,35 @@ export interface EventMap {
     load: number;
     fatal: boolean;
   };
+  /**
+   * Subagent lifecycle events. Emitted by `MultiAgentHost` so the TUI can
+   * surface what's happening in the fleet without needing director-mode
+   * (which renders the live FleetPanel). These complement the FleetBus
+   * (director-only) by giving the TUI a uniform feed for both `/spawn`
+   * and director-orchestrated work.
+   */
+  'subagent.spawned': {
+    subagentId: string;
+    taskId: string;
+    name?: string;
+    provider?: string;
+    model?: string;
+    description?: string;
+  };
+  'subagent.task_started': {
+    subagentId: string;
+    taskId: string;
+    description?: string;
+  };
+  'subagent.task_completed': {
+    subagentId: string;
+    taskId: string;
+    status: 'success' | 'failed' | 'timeout' | 'stopped';
+    iterations: number;
+    toolCalls: number;
+    durationMs: number;
+    error?: string;
+  };
   'mcp.server.connected': { name: string; toolCount: number };
   'mcp.server.reconnected': { name: string; toolCount: number };
   'mcp.server.disconnected': { name: string; reason: string };
