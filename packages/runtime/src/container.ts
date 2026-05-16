@@ -31,6 +31,8 @@ export interface CreateContainerOptions {
   };
   compactor?: { preserveK?: number; eliseThreshold?: number };
   systemPrompt?: Partial<DefaultSystemPromptBuilderOptions>;
+  /** Bundled skills directory path (resolved at boot time). */
+  bundledSkillsDir?: string;
 }
 
 /**
@@ -57,7 +59,7 @@ export function createDefaultContainer(opts: CreateContainerOptions): Container 
   const memoryStore = new DefaultMemoryStore({ paths: wpaths });
   container.bind(TOKENS.MemoryStore, () => memoryStore);
 
-  const skillLoader = new DefaultSkillLoader({ paths: wpaths });
+  const skillLoader = new DefaultSkillLoader({ paths: wpaths, bundledDir: opts.bundledSkillsDir });
   container.bind(TOKENS.SkillLoader, () => skillLoader);
 
   if (opts.systemPrompt) {
