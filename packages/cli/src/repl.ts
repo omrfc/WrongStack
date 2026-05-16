@@ -1,5 +1,10 @@
 import type { Agent, AttachmentStore, SlashCommandRegistry, TokenCounter } from '@wrongstack/core';
 import { InputBuilder, color } from '@wrongstack/core';
+import {
+  readClipboardImage,
+  routeImagesForModel,
+  type VisionAdapters,
+} from '@wrongstack/runtime';
 import type { ReadlineInputReader } from './input-reader.js';
 import type { TerminalRenderer } from './renderer.js';
 import { theme } from './theme.js';
@@ -14,10 +19,13 @@ export interface ReplOptions {
   attachments: AttachmentStore;
   banner?: boolean;
   tokenCounter?: TokenCounter;
+  visionAdapters?: VisionAdapters;
   /** Model-specific max context window (tokens). Used for the context bar in turn summaries. */
   effectiveMaxContext?: number;
   /** Project / folder name shown in the banner. Usually `path.basename(projectRoot)`. */
   projectName?: string;
+  /** Resolve current model vision support. Falls back to provider capability when omitted. */
+  supportsVision?: () => boolean | Promise<boolean>;
 }
 
 export async function runRepl(opts: ReplOptions): Promise<number> {
@@ -63,6 +71,11 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
       }
       interrupts = 0;
 
+      if (trimmed === '/image' || trimmed === '/paste-image' || raw === '\x1bv') {
+        await pasteClipboardImage(builder, opts);
+        continue;
+      }
+
       if (trimmed.startsWith('/')) {
         try {
           const res = await opts.slashRegistry.dispatch(trimmed, opts.agent.ctx);
@@ -88,7 +101,26 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
         const startedAt = Date.now();
         const before = opts.tokenCounter?.total();
         const costBefore = opts.tokenCounter?.estimateCost().total ?? 0;
-        const result = await opts.agent.run(blocks, { signal: runCtrl.signal });
+        const routed = blocks.some((block) => block.type === 'image')
+          ? await routeImagesForModel(blocks, {
+              supportsVision: opts.supportsVision
+                ? await opts.supportsVision()
+                : opts.agent.ctx.provider.capabilities.vision,
+              adapters: opts.visionAdapters ?? [],
+              ctx: opts.agent.ctx,
+              signal: runCtrl.signal,
+              providerId: opts.agent.ctx.provider.id,
+              model: opts.agent.ctx.model,
+            })
+          : { blocks, route: 'none' as const, convertedImages: 0 };
+        if (routed.route === 'adapter') {
+          opts.renderer.write(
+            color.dim(
+              `  ↳ image analyzed via ${routed.adapterName ?? 'vision adapter'} (${routed.convertedImages} image${routed.convertedImages === 1 ? '' : 's'})\n`,
+            ),
+          );
+        }
+        const result = await opts.agent.run(routed.blocks, { signal: runCtrl.signal });
         if (result.status === 'aborted') {
           opts.renderer.writeWarning('Aborted.');
         } else if (result.status === 'failed') {
@@ -132,6 +164,23 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
     await opts.reader.close().catch(() => {
       /* best-effort */
     });
+  }
+}
+
+async function pasteClipboardImage(builder: InputBuilder, opts: ReplOptions): Promise<void> {
+  try {
+    const img = await readClipboardImage();
+    if (!img) {
+      opts.renderer.write(color.dim('  no image on clipboard\n'));
+      return;
+    }
+    const placeholder = await builder.appendImage(img.base64, img.mediaType);
+    const kb = (img.bytes / 1024).toFixed(0);
+    opts.renderer.write(color.dim(`  ↳ ${placeholder} (PNG ${kb}KB)\n`));
+  } catch (err) {
+    opts.renderer.writeError(
+      `Clipboard image error: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 

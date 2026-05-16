@@ -35,6 +35,7 @@ wstack mcp add filesystem
 
 # Add and enable immediately
 wstack mcp add github --enable
+wstack mcp add minimax-vision --enable
 
 # List configured servers
 wstack mcp list
@@ -54,6 +55,8 @@ wstack mcp list
 | `aws` | stdio | EC2, S3, Lambda, IAM, CloudFormation | AWS credentials |
 | `google-maps` | stdio | Directions, geocoding, places | `GOOGLE_MAPS_API_KEY` |
 | `sentinel` | streamable-http | Security vulnerability scanning | — |
+| `zai-vision` | stdio | Image and screenshot understanding for text-only models | `Z_AI_API_KEY` |
+| `minimax-vision` | stdio | MiniMax `understand_image` adapter for text-only models | `MINIMAX_API_KEY`, `uvx` |
 
 ## Manual Configuration
 

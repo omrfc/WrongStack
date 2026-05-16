@@ -143,6 +143,52 @@ export const sentinelServer = (): MCPServerConfig => ({
   permission: 'deny', // security tool — require explicit confirmation
 });
 
+/**
+ * Z.AI Vision MCP — image understanding fallback for text-only models.
+ * Requires Z_AI_API_KEY. Tools are read-only and safe to run automatically.
+ */
+export const zaiVisionServer = (): MCPServerConfig => ({
+  name: 'zai-vision',
+  description: 'Z.AI Vision MCP — image analysis and screenshot understanding',
+  transport: 'stdio',
+  command: 'npx',
+  args: ['-y', '@z_ai/mcp-server@latest'],
+  env: {
+    Z_AI_API_KEY: process.env.Z_AI_API_KEY ?? '',
+    Z_AI_MODE: process.env.Z_AI_MODE ?? 'ZAI',
+  },
+  allowedTools: [
+    'image_analysis',
+    'extract_text_from_screenshot',
+    'diagnose_error_screenshot',
+    'understand_technical_diagram',
+    'analyze_data_visualization',
+    'ui_diff_check',
+  ],
+  permission: 'auto',
+});
+
+/**
+ * MiniMax Token Plan MCP — web_search + understand_image.
+ * This preset exposes only the read-only image understanding tool by default.
+ * Requires MINIMAX_API_KEY and uvx on PATH.
+ */
+export const miniMaxVisionServer = (): MCPServerConfig => ({
+  name: 'minimax-vision',
+  description: 'MiniMax MCP — image understanding via understand_image',
+  transport: 'stdio',
+  command: 'uvx',
+  args: ['minimax-coding-plan-mcp', '-y'],
+  env: {
+    MINIMAX_API_KEY: process.env.MINIMAX_API_KEY ?? '',
+    MINIMAX_MCP_BASE_PATH: process.env.MINIMAX_MCP_BASE_PATH ?? './.wrongstack/minimax-output',
+    MINIMAX_API_HOST: process.env.MINIMAX_API_HOST ?? 'https://api.minimax.io',
+    MINIMAX_API_RESOURCE_MODE: process.env.MINIMAX_API_RESOURCE_MODE ?? 'url',
+  },
+  allowedTools: ['understand_image'],
+  permission: 'auto',
+});
+
 /** Everything bundled — full set of built-in servers. Useful for `wstack mcp add --all`. */
 export const allServers = (): Record<string, MCPServerConfig> => ({
   filesystem: { ...filesystemServer(), enabled: false },
@@ -155,4 +201,6 @@ export const allServers = (): Record<string, MCPServerConfig> => ({
   aws: { ...awsServer(), enabled: false },
   'google-maps': { ...googleMapsServer(), enabled: false },
   sentinel: { ...sentinelServer(), enabled: false },
+  'zai-vision': { ...zaiVisionServer(), enabled: false },
+  'minimax-vision': { ...miniMaxVisionServer(), enabled: false },
 });

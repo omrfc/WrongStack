@@ -47,6 +47,9 @@ importers:
       '@wrongstack/providers':
         specifier: workspace:*
         version: link:../providers
+      '@wrongstack/runtime':
+        specifier: workspace:*
+        version: link:../runtime
       '@wrongstack/tools':
         specifier: workspace:*
         version: link:../tools
@@ -191,6 +194,9 @@ importers:
       '@wrongstack/core':
         specifier: workspace:*
         version: link:../core
+      '@wrongstack/runtime':
+        specifier: workspace:*
+        version: link:../runtime
       ink:
         specifier: ^5.0.1
         version: 5.2.1(@types/react@18.3.28)(react@18.3.1)

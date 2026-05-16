@@ -1,4 +1,5 @@
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { playCompletionChime } from '@/lib/chime';
 import { cn } from '@/lib/utils';
 import { useConfigStore, useUIStore } from '@/stores';
 import type { WSServerMessage } from '@/types';
@@ -852,7 +853,7 @@ function PreferenceToggle({
       // Audible "yes you turned it on" — same logic as the Command Palette
       // toggle so users get the gesture-permission unlock for Web Audio.
       if (next) {
-        import('@/lib/chime').then((m) => m.playCompletionChime()).catch(() => {});
+        playCompletionChime();
       }
     }
   };

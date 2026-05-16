@@ -151,6 +151,47 @@ describe('runRepl', () => {
     expect(run).toHaveBeenCalled();
   });
 
+  it('uses the dynamic supportsVision resolver when routing image blocks', async () => {
+    const image = {
+      type: 'image' as const,
+      source: { type: 'base64' as const, media_type: 'image/png', data: 'AAAA' },
+    };
+    const run = vi.fn(
+      async (): Promise<RunResult> => ({
+        status: 'done',
+        iterations: 1,
+        finalText: 'ok',
+      }),
+    );
+    const agent = makeFakeAgent({
+      run,
+      ctx: {
+        provider: { id: 'p', capabilities: { vision: false } },
+        model: 'm',
+      } as unknown as Context,
+    });
+    const renderer = makeFakeRenderer();
+    const reader = makeFakeReader(['see this\n']);
+    const slashRegistry = makeFakeSlashRegistry();
+    const supportsVision = vi.fn(async () => true);
+
+    await runRepl({
+      agent,
+      renderer,
+      reader,
+      slashRegistry,
+      attachments: {
+        ...makeFakeAttachmentStore(),
+        expand: vi.fn(async () => [image]),
+      } as unknown as AttachmentStore,
+      banner: false,
+      supportsVision,
+    });
+
+    expect(supportsVision).toHaveBeenCalled();
+    expect(run).toHaveBeenCalledWith([image], expect.anything());
+  });
+
   it('skips empty lines without running agent', async () => {
     const run = vi.fn();
     const agent = makeFakeAgent({ run });

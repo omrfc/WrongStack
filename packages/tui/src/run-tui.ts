@@ -9,6 +9,7 @@ import type {
   SlashCommandRegistry,
   TokenCounter,
 } from '@wrongstack/core';
+import type { VisionAdapters } from '@wrongstack/runtime/vision';
 import { render } from 'ink';
 import React from 'react';
 import { App } from './app.js';
@@ -19,6 +20,9 @@ export interface RunTuiOptions {
   attachments: AttachmentStore;
   events: EventBus;
   tokenCounter?: TokenCounter;
+  visionAdapters?: VisionAdapters;
+  /** Resolve current model vision support. Falls back to provider capability when omitted. */
+  supportsVision?: () => boolean | Promise<boolean>;
   model: string;
   banner?: boolean;
   /** Persists the input queue across crashes; if omitted, the queue is in-memory only. */
@@ -238,6 +242,8 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           attachments: opts.attachments,
           events: opts.events,
           tokenCounter: opts.tokenCounter,
+          visionAdapters: opts.visionAdapters,
+          supportsVision: opts.supportsVision,
           model: opts.model,
           banner: opts.banner ?? true,
           queueStore: opts.queueStore,

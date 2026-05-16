@@ -19,6 +19,8 @@ import type {
 import { color } from '@wrongstack/core';
 import type { ProviderConfig, ResolvedProvider, WstackPaths } from '@wrongstack/core';
 import type { MCPRegistry } from '@wrongstack/mcp';
+import { createToolVisionAdapters } from '@wrongstack/runtime/vision';
+import { capabilitiesFor } from '@wrongstack/providers';
 import type { ReadlineInputReader } from './input-reader.js';
 import type { TerminalRenderer } from './renderer.js';
 import { runRepl } from './repl.js';
@@ -47,6 +49,7 @@ export interface ExecutionDeps {
   queueStore: import('@wrongstack/core').QueueStore;
   context: import('@wrongstack/core').Context;
   stats: SessionStats;
+  detachTodosCheckpoint?: () => void | Promise<void>;
   savedProviderCfg: ProviderConfig | undefined;
   resolvedProvider: ResolvedProvider | undefined;
   getPickableProviders: () => Promise<Array<{ id: string; family: string; models: string[] }>>;
@@ -88,6 +91,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     queueStore,
     context,
     stats,
+    detachTodosCheckpoint,
     savedProviderCfg,
     resolvedProvider,
     getPickableProviders,
@@ -99,6 +103,15 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
 
   let code = 0;
   try {
+    const visionAdapters = () => createToolVisionAdapters(agent.tools);
+    const supportsVision = async (): Promise<boolean> => {
+      try {
+        const caps = await capabilitiesFor(modelsRegistry, context.provider.id, context.model);
+        return caps.vision;
+      } catch {
+        return context.provider.capabilities.vision;
+      }
+    };
     // --prompt flag takes precedence: treat it like a positional query
     const promptFlag = typeof flags['prompt'] === 'string' ? flags['prompt'] : undefined;
     if (promptFlag) {
@@ -201,6 +214,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           slashRegistry,
           attachments,
           tokenCounter,
+          visionAdapters,
+          supportsVision,
           model: context.model,
           banner: !flags['no-banner'],
           queueStore,
@@ -254,6 +269,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         reader,
         slashRegistry,
         tokenCounter,
+        visionAdapters,
+        supportsVision,
         attachments,
         effectiveMaxContext,
         projectName: path.basename(projectRoot) || undefined,
@@ -266,6 +283,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         reader,
         slashRegistry,
         tokenCounter,
+        visionAdapters,
+        supportsVision,
         attachments,
         effectiveMaxContext,
         projectName: path.basename(projectRoot) || undefined,
@@ -273,6 +292,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     }
   } finally {
     stats.render(renderer);
+    await Promise.resolve(detachTodosCheckpoint?.()).catch(() => undefined);
     await mcpRegistry.stopAll();
     await session.append({
       type: 'session_end',

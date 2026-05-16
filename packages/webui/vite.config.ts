@@ -19,6 +19,15 @@ export default defineConfig({
     port: 3456,
     host: true,
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          return id.includes('node_modules') ? 'vendor' : undefined;
+        },
+      },
+    },
+  },
   define: {
     // Expose build info for dev convenience
     __DEV__: true,

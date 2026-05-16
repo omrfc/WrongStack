@@ -4,6 +4,7 @@ export * from './tool.js';
 export * from './provider.js';
 export * from './provider-runner.js';
 export * from './config.js';
+export type { Compactor, CompactReport } from './compactor.js';
 export * from './permission.js';
 export * from './session.js';
 export * from './attachment.js';

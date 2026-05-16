@@ -150,7 +150,6 @@ describe('tgStatusCommand', () => {
     const bot = makeBot();
     bot.health = vi.fn().mockResolvedValue({ ok: true, username: 'b' });
 
-    // biome-ignore lint: explicit undefined to test ?? fallback
     const cfg = makeConfig({ pollIntervalSec: undefined as unknown as number });
     const cmd = tgStatusCommand(bot, cfg);
     const res = await cmd.run('', null as never);

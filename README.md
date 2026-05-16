@@ -44,6 +44,12 @@ agent text and lifecycle summaries.
 honors default ignored directories consistently, and reports real total match
 counts in `output_mode: "count"`.
 
+**Image routing.** TUI `Alt+V` and CLI `/image` attach clipboard PNGs as real
+image blocks. Vision-capable models receive them natively; text-only models can
+fall back to safe read-only MCP/tool adapters that describe the image. If no
+route exists, WrongStack tells you to switch to a vision model or enable an
+image-understanding adapter instead of silently dropping the image.
+
 ### What's new in 0.2.0 — the autonomous fleet release
 
 Six weeks. One question: can a Director run for hours without the user
@@ -164,7 +170,7 @@ bubble. Concurrent-run lock prevents two streaming `agent.run` calls
 from corrupting session state. WebSocket `connect()` now rejects on
 `onerror`/`onclose` before `onopen` instead of hanging the UI forever.
 
-**Test coverage: 2045 tests** across 202 files. Five new dedicated
+**Test coverage: 2059 tests** across 203 files. Five new dedicated
 suites pin the regression duvarı: error classification (T1/T2/T7),
 abort-during-tool (T3), partial JSONL read (T6), coordinator races
 (T4/T5/M4/M5/T8), cost-bucket disjointness (M2). The plan-mode
@@ -362,7 +368,8 @@ wrongstack --tui --yolo "add unit tests for src/auth.ts"
 
 - Multi-line paste collapsed to `[pasted #1] (123 lines)` via bracketed paste mode (`\x1b[?2004h`) plus a chunk-size heuristic fallback
 - `@<query>` opens a fuzzy file-picker over the project root, arrow keys to navigate, Enter attaches as `[file #N]`
-- `Alt+V` reads an image from the clipboard (PowerShell on Windows, `osascript` on macOS, `wl-paste`/`xclip` on Linux), attaches as `[image #N]`
+- `Alt+V` or `/image` reads an image from the clipboard (PowerShell on Windows, `osascript` on macOS, `wl-paste`/`xclip` on Linux), attaches as `[image #N]`
+- Image input is routed before the run: native vision models receive the image directly; text-only models can use a registered vision adapter/MCP tool; otherwise the run fails with a clear unsupported-image message.
 - **Live status bar**: model · token in/out · cache hit % · cost · run state · `running: <tool> Ns (+N)` while tools execute · 4th line showing top-4 active subagents
 - **LiveActivityStrip** above the input: one line per running subagent showing the tool currently in flight, elapsed timer, iteration + tool-call counters, plus the last two compact tool/message summaries. Tool telemetry stays here and in FleetPanel instead of flooding chat history.
 - **Esc-to-steer**: mid-flight redirect that aborts the run, terminates the fleet (1.5s cap), and prepends a STEERING preamble (snapshot of in-flight tools, terminated subagents, last partial output + explicit authority grant) to the next user message
@@ -482,6 +489,9 @@ wrongstack help           # Help text
 wrongstack version        # Version
 ```
 
+Use `/image` or `/paste-image` to attach the current clipboard PNG to the next
+message. TUI users can also press `Alt+V`.
+
 ## Slash commands (in-REPL)
 
 `/init`, `/diag`, `/stats`, `/help`, `/clear`, `/context`, `/compact`, `/usage`, `/tools`, `/skill`, `/use`, `/model`, `/save`, `/resume`, `/exit`, `/spawn`, `/fleet`, `/agents`, `/steer`, `/goal`, `/director`, `/queue`, `/altscreen`, `/plan`
@@ -569,6 +579,79 @@ All four supported families implement **real streaming** end-to-end: provider `s
 ```
 
 `apiKey`-like fields (matched by the regex `/apikey|authtoken|bearer|secret|password|refreshtoken|sessionkey|access[_-]?token|private[_-]?key/i`) are auto-encrypted on first contact. Plaintext keys in older config files get migrated transparently on boot — you'll see a `[wstack] Encrypted N plaintext secret(s) in …` notice if migration ran.
+
+### Vision MCP adapters
+
+Text-only models can still work with images when an MCP server exposes a safe,
+read-only image-understanding tool. For example, Z.AI's Vision MCP server
+publishes tools such as `image_analysis`, `extract_text_from_screenshot`,
+`diagnose_error_screenshot`, and `understand_technical_diagram`.
+
+The easiest path is a built-in preset:
+
+```bash
+wstack mcp add zai-vision --enable
+wstack mcp add minimax-vision --enable
+```
+
+```jsonc
+{
+  "features": { "mcp": true },
+  "mcpServers": {
+    "zai-mcp-server": {
+      "name": "zai-mcp-server",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@z_ai/mcp-server@latest"],
+      "env": {
+        "Z_AI_API_KEY": "enc:v1:<iv>:<tag>:<ciphertext>",
+        "Z_AI_MODE": "ZAI"
+      },
+      "permission": "auto",
+      "allowedTools": [
+        "image_analysis",
+        "extract_text_from_screenshot",
+        "diagnose_error_screenshot",
+        "understand_technical_diagram",
+        "analyze_data_visualization",
+        "ui_diff_check"
+      ]
+    }
+  }
+}
+```
+
+When the active model lacks native vision, WrongStack writes pasted clipboard
+images to a temporary local file if the MCP tool expects `path` /
+`image_path` / `image_url` / `file_path`, invokes the adapter, replaces the
+image with the returned text description, and removes the temp file after the
+call.
+
+MiniMax's MCP server fits the same adapter shape. Its `understand_image` tool
+accepts a `prompt` plus `image_url`, and `image_url` may be either an HTTP URL
+or a local file path.
+
+```jsonc
+{
+  "features": { "mcp": true },
+  "mcpServers": {
+    "MiniMax": {
+      "name": "MiniMax",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["minimax-coding-plan-mcp", "-y"],
+      "env": {
+        "MINIMAX_API_KEY": "enc:v1:<iv>:<tag>:<ciphertext>",
+        "MINIMAX_MCP_BASE_PATH": "./.wrongstack/minimax-output",
+        "MINIMAX_API_HOST": "https://api.minimax.io",
+        "MINIMAX_API_RESOURCE_MODE": "url"
+      },
+      "permission": "auto",
+      "allowedTools": ["understand_image"]
+    }
+  }
+}
+```
 
 ### Project-level (`<project>/.wrongstack/AGENTS.md`)
 
@@ -977,7 +1060,7 @@ validation, and the system prompt builder. See
 
 ## Status
 
-- **2045 tests passing** across 202 test files (~12 s, 1 skipped)
+- **2059 tests passing** across 203 test files (~13 s, 1 skipped)
 - Coverage thresholds enforced in `vitest.config.ts`: ≥85 % lines / ≥85 % functions / ≥70 % branches / ≥82 % statements
 - All workspace packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles

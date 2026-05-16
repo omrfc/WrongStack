@@ -1,4 +1,5 @@
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { playCompletionChime } from '@/lib/chime';
 import { cn } from '@/lib/utils';
 import {
   useChatStore,
@@ -269,7 +270,7 @@ export function CommandPalette() {
           // they just signed up for (and so Web Audio gets the gesture
           // permission unlocked).
           if (next) {
-            import('@/lib/chime').then((m) => m.playCompletionChime()).catch(() => {});
+            playCompletionChime();
           }
         },
       },

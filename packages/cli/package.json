@@ -48,6 +48,7 @@
     "@wrongstack/mcp": "workspace:*",
     "@wrongstack/plug-lsp": "workspace:*",
     "@wrongstack/providers": "workspace:*",
+    "@wrongstack/runtime": "workspace:*",
     "@wrongstack/tools": "workspace:*",
     "@wrongstack/tui": "workspace:*",
     "@wrongstack/webui": "workspace:*",

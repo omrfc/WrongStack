@@ -22,6 +22,16 @@ function makeContext(): Context {
   });
 }
 
+async function waitForTodosCheckpoint(file: string, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const loaded = await loadTodosCheckpoint(file);
+    if (loaded) return loaded;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return loadTodosCheckpoint(file);
+}
+
 describe('todos-checkpoint', () => {
   it('round-trips todos through save and load', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-todos-'));
@@ -72,10 +82,9 @@ describe('todos-checkpoint', () => {
         { id: 'a', content: 'alpha', status: 'pending' },
       ]);
       // The save is debounced 150ms — wait then verify.
-      await new Promise((r) => setTimeout(r, 250));
-      const loaded = await loadTodosCheckpoint(file);
+      const loaded = await waitForTodosCheckpoint(file);
       expect(loaded).toEqual([{ id: 'a', content: 'alpha', status: 'pending' }]);
-      detach();
+      await detach();
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
@@ -89,8 +98,7 @@ describe('todos-checkpoint', () => {
       const detach = attachTodosCheckpoint(ctx.state, file, 'sess');
       ctx.state.replaceTodos([{ id: 'b', content: 'beta', status: 'completed' }]);
       // Detach immediately — the debounced write should still land.
-      detach();
-      await new Promise((r) => setTimeout(r, 50));
+      await detach();
       const loaded = await loadTodosCheckpoint(file);
       expect(loaded).toEqual([{ id: 'b', content: 'beta', status: 'completed' }]);
     } finally {

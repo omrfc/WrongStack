@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   calls and last two assistant text snippets per subagent. `LiveActivityStrip`
   and `FleetPanel` render those compact summaries so users can see what each
   worker is doing without flooding the transcript.
+- **Vision routing for image input.** Hosts can now route image blocks through
+  native model vision when available, or through pluggable
+  `VisionAdapter`s when the active model is text-only. Safe read-only
+  image-understanding tools, including MCP-wrapped tools, can be discovered as
+  adapters; path-based MCP tools are supported by writing pasted images to a
+  temporary local file for the duration of the tool call, including
+  MiniMax-style `understand_image` tools that accept local paths through
+  `image_url`. Plain CLI also gets `/image` / `/paste-image` clipboard
+  attachment support alongside TUI `Alt+V`.
 
 ### Changed
 
@@ -39,7 +48,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   native and `rg` backends, and `output_mode: "count"` now returns the total
   match count rather than the number of files with matches.
 - **Full test suite regression.** `pnpm test` is back to green:
-  2045 passing tests across 202 files, with 1 skipped.
+  2059 passing tests across 203 files, with 1 skipped.
+- **Release gate cleanup.** Todo checkpoints now await pending debounced
+  writes during detach/shutdown, closing the flaky full-suite failure in
+  `todos-checkpoint`. CLI compaction wiring also resolves model capabilities
+  through the active provider id. Director tool factories are split into a
+  single `director-tools` module, core storage no longer pulls crypto-only
+  secret-vault code into its bundle, and WebUI builds without the previous
+  chime import/chunk-size warnings.
 
 ## [0.2.0] — 2026-05-16
 

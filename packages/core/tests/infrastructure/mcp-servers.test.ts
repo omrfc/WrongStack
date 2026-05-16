@@ -9,8 +9,10 @@ import {
   filesystemServer,
   githubServer,
   googleMapsServer,
+  miniMaxVisionServer,
   sentinelServer,
   slackServer,
+  zaiVisionServer,
 } from '../../src/infrastructure/mcp-servers.js';
 import type { MCPServerConfig } from '../../src/types/config.js';
 
@@ -53,6 +55,8 @@ describe('built-in MCP server presets (V0-D)', () => {
     ['aws', awsServer],
     ['google-maps', googleMapsServer],
     ['sentinel', sentinelServer],
+    ['zai-vision', zaiVisionServer],
+    ['minimax-vision', miniMaxVisionServer],
   ];
 
   for (const [label, factory] of presets) {
@@ -74,11 +78,25 @@ describe('built-in MCP server presets (V0-D)', () => {
     expect(names).toContain('filesystem');
     expect(names).toContain('github');
     expect(names).toContain('context7');
+    expect(names).toContain('zai-vision');
+    expect(names).toContain('minimax-vision');
     // Each entry's key matches its config.name.
     for (const [key, cfg] of Object.entries(all)) {
       expect(key).toBe(cfg.name);
       assertValidShape(cfg);
     }
+  });
+
+  it('vision presets are read-only adapter candidates by default', () => {
+    const zai = zaiVisionServer();
+    expect(zai.permission).toBe('auto');
+    expect(zai.allowedTools).toContain('image_analysis');
+    expect(zai.allowedTools).toContain('diagnose_error_screenshot');
+
+    const minimax = miniMaxVisionServer();
+    expect(minimax.permission).toBe('auto');
+    expect(minimax.command).toBe('uvx');
+    expect(minimax.allowedTools).toEqual(['understand_image']);
   });
 
   it('every preset shipped without enabled:true so adoption stays opt-in', () => {

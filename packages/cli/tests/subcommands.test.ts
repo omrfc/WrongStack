@@ -557,6 +557,44 @@ describe('subcommands', () => {
     expect(text).toContain('disabled');
   });
 
+  it('mcp add lists built-in vision presets', async () => {
+    const rig = withRig();
+    const code = await subcommands['mcp']!(['add'], mkDeps({ renderer: rig.renderer }));
+    expect(code).toBe(1);
+    const text = stripAnsi(rig.out.buf);
+    expect(text).toContain('zai-vision');
+    expect(text).toContain('minimax-vision');
+  });
+
+  it('mcp add minimax-vision writes an enabled read-only preset', async () => {
+    const rig = withRig();
+    const paths = resolveWstackPaths({
+      projectRoot: tmp,
+      globalRoot: path.join(tmp, 'g'),
+      userHome: tmp,
+    });
+    await fs.mkdir(path.dirname(paths.globalConfig), { recursive: true });
+    await fs.writeFile(paths.globalConfig, JSON.stringify({ version: 1 }, null, 2));
+
+    const code = await subcommands['mcp']!(
+      ['add', 'minimax-vision', '--enable'],
+      mkDeps({ renderer: rig.renderer, paths }),
+    );
+
+    expect(code).toBe(0);
+    const written = JSON.parse(await fs.readFile(paths.globalConfig, 'utf8')) as {
+      mcpServers: Record<string, Record<string, unknown>>;
+    };
+    expect(written.mcpServers['minimax-vision']).toMatchObject({
+      name: 'minimax-vision',
+      transport: 'stdio',
+      command: 'uvx',
+      allowedTools: ['understand_image'],
+      permission: 'auto',
+      enabled: true,
+    });
+  });
+
   it('plugin lists configured plugins', async () => {
     const rig = withRig();
     const config = {

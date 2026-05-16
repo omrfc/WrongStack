@@ -1,99 +1,8 @@
 import * as fs from 'node:fs/promises';
-import { atomicWrite } from '@wrongstack/core';
+import { allServers, atomicWrite } from '@wrongstack/core';
 import type { SubcommandDeps, SubcommandHandler } from '../index.js';
 
-const BUILT_IN_MCP: Record<
-  string,
-  {
-    name: string;
-    transport: 'stdio' | 'sse' | 'streamable-http';
-    command?: string;
-    args?: string[];
-    url?: string;
-    permission: 'auto' | 'confirm' | 'deny';
-    description: string;
-    enabled?: boolean;
-  }
-> = {
-  filesystem: {
-    name: 'filesystem',
-    transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-filesystem', '.'],
-    permission: 'confirm',
-    description: 'Read, write, and navigate the local filesystem',
-  },
-  github: {
-    name: 'github',
-    transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-github'],
-    permission: 'confirm',
-    description: 'GitHub API — issues, PRs, repos, search',
-  },
-  context7: {
-    name: 'context7',
-    transport: 'streamable-http',
-    url: 'https://server.context7.ai/mcp',
-    permission: 'confirm',
-    description: 'Codebase-aware documentation and Q&A',
-  },
-  'brave-search': {
-    name: 'brave-search',
-    transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-brave-search'],
-    permission: 'confirm',
-    description: 'Web search (Brave)',
-  },
-  block: {
-    name: 'block',
-    transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-block'],
-    permission: 'confirm',
-    description: 'Postgres database via SQL',
-  },
-  everart: {
-    name: 'everart',
-    transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-everart'],
-    permission: 'confirm',
-    description: 'AI image generation',
-  },
-  slack: {
-    name: 'slack',
-    transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-slack'],
-    permission: 'confirm',
-    description: 'Slack messaging & channels',
-  },
-  aws: {
-    name: 'aws',
-    transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-aws'],
-    permission: 'confirm',
-    description: 'AWS — EC2, S3, Lambda, IAM',
-  },
-  'google-maps': {
-    name: 'google-maps',
-    transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-google-maps'],
-    permission: 'confirm',
-    description: 'Google Maps — directions, geocoding, places',
-  },
-  sentinel: {
-    name: 'sentinel',
-    transport: 'streamable-http',
-    url: 'https://mcp.sentinel.ai',
-    permission: 'deny',
-    description: 'Security vulnerability scanning',
-  },
-};
+const BUILT_IN_MCP = allServers();
 
 export const mcpCmd: SubcommandHandler = async (args, deps) => {
   const sub = args[0];
@@ -154,7 +63,7 @@ async function addMcpServer(args: string[], deps: SubcommandDeps): Promise<numbe
     return 1;
   }
   const serverCfg = { ...factory };
-  if (!enable) serverCfg.enabled = false;
+  serverCfg.enabled = enable;
   let existing: Record<string, unknown> = {};
   try {
     existing = JSON.parse(await fs.readFile(deps.paths.globalConfig, 'utf8'));

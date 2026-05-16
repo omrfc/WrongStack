@@ -17,6 +17,4 @@ import type { BuildContext } from './system-prompt.js';
  * });
  * ```
  */
-export interface SystemPromptContributor {
-  (ctx: BuildContext): Promise<TextBlock[]>;
-}
+export type SystemPromptContributor = (ctx: BuildContext) => Promise<TextBlock[]>;

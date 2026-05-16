@@ -537,16 +537,16 @@ export class Agent {
    */
   private async executeTools(toolUses: ToolUseBlock[]): Promise<void> {
     // Extension: beforeToolExecution — allow filtering/reordering tools
-    toolUses = await this.extensions.runBeforeToolExecution(this.ctx, toolUses);
+    const selectedToolUses = await this.extensions.runBeforeToolExecution(this.ctx, toolUses);
 
     const { outputs } = await this.toolExecutor.executeBatch(
-      toolUses,
+      selectedToolUses,
       this.ctx,
       this.executionStrategy,
     );
 
     // Post-processing: pipeline, session, events
-    const useById = new Map(toolUses.map((u) => [u.id, u]));
+    const useById = new Map(selectedToolUses.map((u) => [u.id, u]));
     for (const { result, tool, durationMs } of outputs) {
       // Handle pending confirm: block the agent loop and wait for TUI resolution
       if (result.type === 'tool_confirm_pending') {

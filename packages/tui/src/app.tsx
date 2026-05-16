@@ -12,6 +12,7 @@ import type {
   TokenCounter,
 } from '@wrongstack/core';
 import { InputBuilder, formatTodosList } from '@wrongstack/core';
+import { routeImagesForModel, type VisionAdapters } from '@wrongstack/runtime/vision';
 import { Box, useApp } from 'ink';
 import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { readClipboardImage } from './clipboard.js';
@@ -87,6 +88,9 @@ export interface AppProps {
   attachments: AttachmentStore;
   events: EventBus;
   tokenCounter?: TokenCounter;
+  visionAdapters?: VisionAdapters;
+  /** Resolve current model vision support. Falls back to provider capability when omitted. */
+  supportsVision?: () => boolean | Promise<boolean>;
   model: string;
   banner?: boolean;
   /** Persists the queue across crashes; rehydrated on mount, written on every mutation. */
@@ -946,6 +950,8 @@ export function App({
   attachments,
   events,
   tokenCounter,
+  visionAdapters = [],
+  supportsVision,
   model,
   banner = true,
   queueStore,
@@ -2667,7 +2673,28 @@ export function App({
       const startedAt = Date.now();
       const before = tokenCounter?.total();
       const costBefore = tokenCounter?.estimateCost().total ?? 0;
-      const result = await agent.run(blocks, { signal: ctrl.signal });
+      const routed = blocks.some((block) => block.type === 'image')
+        ? await routeImagesForModel(blocks, {
+            supportsVision: supportsVision
+              ? await supportsVision()
+              : agent.ctx.provider.capabilities.vision,
+            adapters: visionAdapters,
+            ctx: agent.ctx,
+            signal: ctrl.signal,
+            providerId: agent.ctx.provider.id,
+            model: agent.ctx.model,
+          })
+        : { blocks, route: 'none' as const, convertedImages: 0 };
+      if (routed.route === 'adapter') {
+        dispatch({
+          type: 'addEntry',
+          entry: {
+            kind: 'info',
+            text: `Image input analyzed via ${routed.adapterName ?? 'vision adapter'} (${routed.convertedImages} image${routed.convertedImages === 1 ? '' : 's'}).`,
+          },
+        });
+      }
+      const result = await agent.run(routed.blocks, { signal: ctrl.signal });
 
       // Per-iteration assistant text was already committed by the
       // `provider.response` listener as each LLM call finished. Safety net:
@@ -2733,6 +2760,8 @@ export function App({
       await runBlocks(head.blocks);
     }
   };
+  const runBlocksRef = useRef(runBlocks);
+  runBlocksRef.current = runBlocks;
 
   const submit = async () => {
     const raw = state.buffer;
@@ -2740,6 +2769,12 @@ export function App({
     if (!trimmed && state.placeholders.length === 0) return;
 
     dispatch({ type: 'resetInterrupts' });
+    if (trimmed === '/image' || trimmed === '/paste-image') {
+      dispatch({ type: 'clearInput' });
+      await pasteClipboardImage();
+      if (state.historyIndex > 0) dispatch({ type: 'historyPush', text: trimmed });
+      return;
+    }
 
     // Slash commands always dispatch immediately, even mid-iteration —
     // they don't conflict with a running agent.
@@ -2879,11 +2914,9 @@ export function App({
         b.appendText(ask);
       }
       const blocks = await b.submit();
-      await runBlocks(blocks);
+      await runBlocksRef.current(blocks);
     })();
-    // Empty deps: this is a strict one-shot mount effect.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [initialAsk, initialGoal]);
 
   const inputHint = useMemo(() => {
     if (state.status !== 'idle') return '';

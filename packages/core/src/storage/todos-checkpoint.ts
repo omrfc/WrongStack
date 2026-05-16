@@ -20,6 +20,8 @@ export interface TodosCheckpointFile {
   todos: TodoItem[];
 }
 
+export type TodosCheckpointDetach = () => Promise<void>;
+
 /** Read a checkpoint from disk. Returns null when the file doesn't
  *  exist or is corrupt — callers treat both cases as "no prior state".
  */
@@ -79,29 +81,43 @@ export function attachTodosCheckpoint(
   state: ConversationState,
   filePath: string,
   sessionId: string,
-): () => void {
+): TodosCheckpointDetach {
   let timer: NodeJS.Timeout | null = null;
   let pending: readonly TodoItem[] | null = null;
+  let writeChain: Promise<void> = Promise.resolve();
+
+  const enqueueWrite = (todos: readonly TodoItem[]) => {
+    writeChain = writeChain.then(() => saveTodosCheckpoint(filePath, sessionId, todos));
+    return writeChain;
+  };
+
   const flush = () => {
     timer = null;
     if (pending) {
-      void saveTodosCheckpoint(filePath, sessionId, pending);
+      const todos = pending;
       pending = null;
+      return enqueueWrite(todos);
     }
+    return writeChain;
   };
+
   const unsubscribe = state.onChange((change) => {
     if (change.kind !== 'todos_replaced') return;
     pending = change.todos;
     if (timer) clearTimeout(timer);
-    timer = setTimeout(flush, 150);
+    timer = setTimeout(() => {
+      void flush();
+    }, 150);
   });
-  return () => {
+  return async () => {
     unsubscribe();
     if (timer) {
       clearTimeout(timer);
       // Flush any pending write before detach so callers can safely
       // unsubscribe at shutdown without losing the last update.
-      flush();
+      await flush();
+    } else {
+      await writeChain;
     }
   };
 }

@@ -278,5 +278,7 @@ export {
   awsServer,
   googleMapsServer,
   sentinelServer,
+  zaiVisionServer,
+  miniMaxVisionServer,
   allServers,
 } from '../infrastructure/mcp-servers.js';

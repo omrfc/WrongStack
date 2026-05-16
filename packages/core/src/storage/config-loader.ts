@@ -1,5 +1,5 @@
 import * as fs from 'node:fs/promises';
-import { decryptConfigSecrets } from '../security/secret-vault.js';
+import { decryptConfigSecrets } from '../security/config-secrets.js';
 import type { Config, ConfigLoader } from '../types/config.js';
 import type { SecretVault } from '../types/secret-vault.js';
 import { safeParse } from '../utils/safe-json.js';

@@ -28,6 +28,14 @@
       "types": "./dist/host.d.ts",
       "import": "./dist/host.js"
     },
+    "./vision": {
+      "types": "./dist/vision.d.ts",
+      "import": "./dist/vision.js"
+    },
+    "./clipboard": {
+      "types": "./dist/clipboard.d.ts",
+      "import": "./dist/clipboard.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
