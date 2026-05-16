@@ -12,7 +12,17 @@ import { validateAgainstSchema } from '../utils/json-schema-validate.js';
  * 0.1.9: additive — `DirectorBudgetError` plus `FLEET_ROSTER` and the
  * pre-built fleet agent configs (Audit Log, Bug Hunter, Refactor Planner,
  * Security Scanner) now exported from `@wrongstack/core`.
- * Plugins pinning `apiVersion: "^0.1"` continue to load unchanged.
+ * 0.1.10: additive — extended-thinking stream events, core subpath
+ * exports, tool output size chips on `tool.executed`. Plugin contract
+ * unchanged otherwise; 0.1.x range still loads cleanly.
+ *
+ * Note: the package shipped as 0.2.0, but the *plugin contract* didn't
+ * change in a breaking way — `SubagentError`, `subagent.tool_executed`,
+ * `transcriptPath`, `planTool`, `delegate`, `runText`, and Director
+ * sessionWriter are all additive to the surface. We deliberately keep
+ * the kernel API at 0.1.10 so plugins pinning `apiVersion: "^0.1"`
+ * keep loading. Bump to 1.0 when we stabilize and want the freedom to
+ * remove deprecated surfaces.
  */
 export const KERNEL_API_VERSION = '0.1.10';
 

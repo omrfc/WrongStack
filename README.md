@@ -21,10 +21,14 @@ This pulls in the full stack — `@wrongstack/core`, `@wrongstack/providers`, `@
 
 After install, `wrongstack` is on your `PATH`. (`wstack` works too — it's an alias.)
 
-### What's new (post-0.1.10) — autonomous fleet hardening
+### What's new in 0.2.0 — the autonomous fleet release
 
-Five hardening waves + steering/goal UX. No breaking changes; CLI and
-plugin contracts unchanged.
+Six weeks. One question: can a Director run for hours without the user
+babysitting it? Answering it took a full pass over the coordination
+layer — every race fixed, every silent failure classified, every "what
+is the subagent doing right now?" question answered with a visible chip.
+No breaking changes; CLI flags, plugin API, and EventBus contract are
+backwards compatible.
 
 **`/goal <description>` — locked-in autonomous mode.** Hands the agent
 a task it MUST drive to a verifiable finish. The slash command prepends
@@ -35,6 +39,11 @@ anti-patterns: unhandled errors, "should I continue?" hedges, partial
 progress dressed up as success), and PERSISTENCE (three-angle rule
 for blockers). Only the user can stop it — Esc / `/steer` redirect,
 Ctrl+C / `/fleet kill` bail out.
+
+**`--goal` and `--ask` boot flags.** Launch goal mode directly from the
+shell — no need to type `/goal` after startup. `--goal` auto-enables
+`--tui` since goal mode depends on the steering surface. One-line fleet
+kickoff: `wstack --director --goal "audit packages/core for races"`.
 
 **`/steer <text>` and **`Esc`** — mid-flight redirect.** Aborts the
 active iteration, terminates running subagents (1.5s cap), drops
@@ -98,6 +107,40 @@ through `process.emitWarning('DirectorShutdownWarning')` instead of
 on-disk subagent JSONL. Lists available transcripts when called
 without an id, prints a compact event mix + first user message + last
 LLM response by default, appends `raw` to dump the full JSONL.
+
+**Session checkpoint system** — three new sidecar files turn `wstack
+resume <id>` into "kaldığım yerden devam" instead of just message
+replay: `<id>.todos.json` (ctx.todos mirror, 150ms debounced atomic
+write), `<id>.plan.json` (strategic roadmap maintained via the new
+`/plan` slash command), and `<id>/director-state.json` (live director
+task graph, written incrementally on every spawn/assign/complete).
+**`/fleet retry [taskId|all]`** finds tasks left mid-flight when the
+previous process died, respawns the matching subagent, and re-assigns
+— for crash recovery without re-running the whole session.
+
+**`/plan` slash command + `planTool`** — strategic roadmap parallel to
+todos. Six actions (`show|add|start|done|remove|clear`), items have
+`open` / `in_progress` / `done` status. The plan is mirrored to disk
+and surfaces a `📋 ⌛N ☐N ✓N` chip in the TUI status bar plus an
+"Active plan" block in the system prompt every turn — anchoring the
+LLM to the strategic intent across long autonomous runs.
+
+**`delegate` tool — autonomous multi-agent activation.** A new
+always-on built-in that bundles spawn + assign + await into one call.
+Registered in every CLI session regardless of `--director` mode: the
+first call auto-promotes to director mode under the hood, so the LLM
+no longer needs the user to "enable multi-agent" upfront. Accepts a
+roster role (`bug-hunter`, `security-scanner`, `refactor-planner`,
+`audit-log`) or an explicit `name`/`provider`/`model`. The system
+prompt builder detects this tool and injects a "Delegation" guide
+teaching the model when to delegate vs stay in-process.
+
+**WebUI polish** — collapsible tool input/output, expandable nested
+JSON, copy/download/error-stack toggles, per-message
+iterations/tools/elapsed/$ footer, multi-tool turns grouped under one
+bubble. Concurrent-run lock prevents two streaming `agent.run` calls
+from corrupting session state. WebSocket `connect()` now rejects on
+`onerror`/`onclose` before `onopen` instead of hanging the UI forever.
 
 **Test coverage: 1981 tests** across 195 files. Five new dedicated
 suites pin the regression duvarı: error classification (T1/T2/T7),
