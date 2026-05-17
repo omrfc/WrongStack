@@ -15,7 +15,7 @@ import {
   ToolRegistry,
   type WstackPaths,
 } from '@wrongstack/core';
-import { builtinToolsPack } from '@wrongstack/tools/pack';
+import { builtinToolsPack } from '@wrongstack/tools';
 import { parseArgs } from './arg-parser.js';
 import { bootConfig } from './boot-config.js';
 import { ReadlineInputReader } from './input-reader.js';

@@ -55,8 +55,7 @@ import {
 import { MCPRegistry } from '@wrongstack/mcp';
 import { capabilitiesFor, makeProviderFromConfig } from '@wrongstack/providers';
 import { createDefaultContainer } from '@wrongstack/runtime';
-import { forgetTool, rememberTool } from '@wrongstack/tools';
-import { builtinToolsPack } from '@wrongstack/tools/pack';
+import { builtinToolsPack, forgetTool, rememberTool } from '@wrongstack/tools';
 import { boot } from './boot.js';
 import { type ExecutionDeps, execute } from './execution.js';
 import type { ReadlineInputReader } from './input-reader.js';

@@ -25,7 +25,7 @@ let teardownState: {
 
 const plugin: Plugin = {
   name: PLUGIN_NAME,
-  version: '0.1.0',
+  version: '0.3.4',
   description: 'Telegram bridge — send/receive messages, get agent notifications.',
   apiVersion: '^0.1.10',
   capabilities: {

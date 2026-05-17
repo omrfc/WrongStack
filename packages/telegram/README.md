@@ -33,18 +33,22 @@ https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates
 
 Find your `chat.id` in the response.
 
-### 3. Enable the plugin
+### 3. Enable the official plugin
 
 ```bash
-wstack plugin add @wrongstack/telegram
+wstack plugin install telegram
 ```
 
-In a monorepo checkout, the package is already part of the workspace under
-`packages/telegram`. In an installed project, install it first if your package
-manager has not already pulled it in:
+`telegram` is the bundled official alias for `@wrongstack/telegram`. In
+WrongStack 0.3.4 and newer, the package is installed with the `wrongstack`
+umbrella package; this command only enables plugin loading in config and does
+not run npm.
+
+If you are installing the plugin into a custom host instead of the official
+CLI package, add it like a normal public package:
 
 ```bash
-pnpm add @wrongstack/telegram
+npm install @wrongstack/telegram
 ```
 
 ### 4. Configure

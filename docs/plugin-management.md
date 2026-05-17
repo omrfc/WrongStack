@@ -25,9 +25,9 @@ Official aliases currently include `telegram` -> `@wrongstack/telegram`
 and `lsp` -> `@wrongstack/plug-lsp`. `add`, `install`, and `enable` also set
 `features.plugins: true` in the global config.
 Changes are written to `~/.wrongstack/config.json`.
-Official plugins are bundled with the CLI package, so `install telegram`
-means "add the official plugin to config and enable plugin loading"; it does
-not shell out to npm.
+Official plugins are bundled with the CLI package and published as regular
+public packages, so `install telegram` means "add the official plugin to config
+and enable plugin loading"; it does not shell out to npm.
 
 The same management surface is available in an interactive session:
 
@@ -78,8 +78,9 @@ Plugin loading and plugin options are separate:
 
 ## Telegram
 
-The Telegram bridge lives in this repository as `packages/telegram` and is
-published as `@wrongstack/telegram`.
+The Telegram bridge lives in this repository as `packages/telegram`, is
+published as `@wrongstack/telegram`, and is bundled as the official `telegram`
+alias.
 
 ```bash
 wstack plugin install telegram

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-05-17
+
+### Added
+
+- **Official Telegram plugin release.** `@wrongstack/telegram` is now part of
+  the lockstep release train and is ready to publish as an official package.
+  The `telegram` official alias installs the bundled package through
+  `wstack plugin install telegram` / `/plugin install telegram`, registers
+  `telegram_read`, `telegram_send`, and exposes `/telegram:*` slash commands
+  after restart.
+
+### Changed
+
+- **Release docs refreshed for 0.3.4.** Root and package READMEs now present
+  the current install path, official plugin workflow, and Telegram publishing
+  status so npm consumers can enable the bridge without cloning the monorepo.
+- **Telegram package metadata aligned.** `@wrongstack/telegram` and its plugin
+  manifest now report `0.3.4`, matching the workspace packages included in
+  this release.
+
 ## [0.3.2] - 2026-05-17
 
 ### Added

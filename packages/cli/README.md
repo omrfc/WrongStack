@@ -10,7 +10,7 @@ Most users don't depend on this package directly — they install [`wrongstack`]
 npm install -g wrongstack
 ```
 
-The `wrongstack` umbrella package transitively installs `@wrongstack/cli` along with `core`, `providers`, `tools`, `mcp`, and `tui`.
+The `wrongstack` umbrella package transitively installs `@wrongstack/cli` along with `core`, `runtime`, `providers`, `tools`, `mcp`, `plug-lsp`, `telegram`, `tui`, and `webui`.
 
 ## Commands
 
@@ -31,7 +31,7 @@ wstack mcp add <preset>       # add an MCP server (see @wrongstack/mcp)
 wstack mcp list               # show configured MCP servers
 wstack plugin status          # show configured plugin enablement
 wstack plugin official        # list bundled plugin aliases
-wstack plugin install telegram # add the official Telegram plugin
+wstack plugin install telegram # add the official bundled Telegram plugin
 wstack plugin add @wrongstack/telegram      # enable a plugin
 wstack plugin disable @wrongstack/telegram  # keep config but skip loading
 wstack plugin remove @wrongstack/telegram   # remove from config.plugins

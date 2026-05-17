@@ -41,8 +41,7 @@ import {
   resolveContextWindowPolicy,
 } from '@wrongstack/core';
 import { buildProviderFactoriesFromRegistry, makeProviderFromConfig } from '@wrongstack/providers';
-import { forgetTool, rememberTool } from '@wrongstack/tools';
-import { builtinToolsPack } from '@wrongstack/tools/pack';
+import { builtinToolsPack, forgetTool, rememberTool } from '@wrongstack/tools';
 import { WebSocket, WebSocketServer } from 'ws';
 import { randomBytes } from 'node:crypto';
 import { createDefaultContainer } from '@wrongstack/runtime';
