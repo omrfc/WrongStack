@@ -3027,7 +3027,7 @@ export function App({
           suggestedPattern={state.confirm.suggestedPattern}
           onDecision={(decision) => {
             state.confirm!.resolve(decision);
-            dispatch({ type: 'confirmClose' });
+            setTimeout(() => dispatch({ type: 'confirmClose' }), 0);
           }}
         />
       ) : null}
