@@ -9,6 +9,24 @@ type Response2 = {
   body: ReadableStream<Uint8Array> | NodeJS.ReadableStream | null;
 };
 
+/** Validate fetchImpl response has required fields; normalize missing body to null. */
+function validateResponse(res: unknown): asserts res is Response2 {
+  const r = res as Record<string, unknown> | undefined;
+  if (r === undefined || typeof r.ok !== 'boolean' || typeof r.status !== 'number') {
+    throw new Error('fetchImpl returned invalid response shape — expected { ok, status, text, body }');
+  }
+  // If body is absent, null, or undefined on a plain object (not a native Response
+  // with a read-only getter), normalize it to null so callers can safely use it.
+  // Native Response objects always have a body getter — no mutation needed.
+  if (!('body' in r) || r.body === undefined) {
+    // Only set on plain objects — native Response.body is read-only
+    const proto = Object.getPrototypeOf(r);
+    if (proto === Object.prototype || proto === null) {
+      r.body = null;
+    }
+  }
+}
+
 async function safeText(res: Response2): Promise<string> {
   try {
     return await res.text();
@@ -50,12 +68,14 @@ export abstract class WireAdapter implements Provider {
 
     let httpRes: Response2;
     try {
-      httpRes = (await this.fetchImpl(url, {
+      const raw = await this.fetchImpl(url, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
         signal: opts.signal,
-      })) as unknown as Response2;
+      });
+      validateResponse(raw);
+      httpRes = raw as Response2;
     } catch (err) {
       if (opts.signal.aborted) throw err;
       throw new ProviderError(err instanceof Error ? err.message : String(err), 0, true, this.id, {

@@ -13,6 +13,7 @@ function mockFetchSpy() {
         usage: { prompt_tokens: 1, completion_tokens: 1 },
       }),
       text: async () => '',
+      body: null as ReadableStream<Uint8Array> | NodeJS.ReadableStream | null,
     };
   });
 }

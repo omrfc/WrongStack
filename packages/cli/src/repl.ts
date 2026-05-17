@@ -199,10 +199,16 @@ async function readPossiblyMultiline(opts: ReplOptions): Promise<string> {
 
   if (first.trim() === '"""') {
     const parts: string[] = [];
-    for (;;) {
-      const next = await opts.reader.readLine(contPrompt);
-      if (next.trim() === '"""') break;
-      parts.push(next);
+    try {
+      for (;;) {
+        const next = await opts.reader.readLine(contPrompt);
+        if (next.trim() === '"""') break;
+        parts.push(next);
+      }
+    } catch {
+      // EOF (Ctrl+D) during heredoc — user typed """ then quit.
+      // Return what we have; the outer catch breaks the main loop.
+      return parts.join('\n');
     }
     return parts.join('\n');
   }

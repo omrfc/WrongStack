@@ -24,6 +24,8 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
   private readonly trustFile: string;
   private readonly yolo: boolean;
   private readonly promptDelegate?: PermissionPolicyOptions['promptDelegate'];
+  /** Pre-compiled wildcard patterns — rebuilt on reload for O(1) lookup. */
+  private wildcardEntries: { pattern: string; value: TrustPolicy[string] }[] = [];
 
   constructor(opts: PermissionPolicyOptions) {
     this.trustFile = opts.trustFile;
@@ -38,6 +40,11 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
       if (parsed.ok && parsed.value) this.policy = parsed.value;
     } catch {
       this.policy = {};
+    }
+    // Pre-compile wildcard entries so findNamespaceEntry is O(k) instead of O(n*m)
+    this.wildcardEntries = [];
+    for (const [key, val] of Object.entries(this.policy)) {
+      if (key.includes('*')) this.wildcardEntries.push({ pattern: key, value: val });
     }
     this.loaded = true;
   }
@@ -158,10 +165,9 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
   }
 
   private findNamespaceEntry(toolName: string): TrustPolicy[string] | undefined {
-    for (const key of Object.keys(this.policy)) {
-      if (key.includes('*') && matchGlob(key, toolName)) {
-        return this.policy[key];
-      }
+    // Use pre-compiled wildcard entries — O(k) where k = wildcard count
+    for (const { pattern, value } of this.wildcardEntries) {
+      if (matchGlob(pattern, toolName)) return value;
     }
     return undefined;
   }

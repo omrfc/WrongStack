@@ -161,6 +161,10 @@ export const bashTool: Tool<BashInput, BashOutput> = {
     const queue: Chunk[] = [];
     let resolveNext: ((c: Chunk) => void) | null = null;
     const push = (c: Chunk) => {
+      // Node.js EventEmitter guarantees no 'data' events fire after 'close',
+      // so resolveNext can only be set when the consumer loop is alive.
+      // Theoretically a custom stream could violate this, but the bash tool
+      // only uses node:child_process streams which follow the contract.
       if (resolveNext) {
         const r = resolveNext;
         resolveNext = null;
