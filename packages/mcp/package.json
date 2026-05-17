@@ -37,6 +37,7 @@
     "@types/node": "^22.19.19",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
+    "undici": "^6.21.0",
     "vitest": "^4.1.6"
   },
   "publishConfig": {

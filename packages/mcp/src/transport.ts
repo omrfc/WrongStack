@@ -1,3 +1,5 @@
+import type { Dispatcher } from 'undici';
+import * as https from 'node:https';
 import * as net from 'node:net';
 import type { ConnectionState, JsonRpcResponse, MCPTool, ToolCallResult } from './client.js';
 import { normalizeMCPTools } from './tool-schema.js';
@@ -15,6 +17,13 @@ export interface HttpTransportOptions {
   headers?: Record<string, string>;
   startupTimeoutMs?: number;
   requestTimeoutMs?: number;
+  /**
+   * Per-request TLS configuration. When set, an https.Agent is created
+   * and passed to fetch via the `dispatch` option. This avoids globally
+   * disabling certificate validation (NODE_TLS_REJECT_UNAUTHORIZED) which
+   * would affect all provider API calls in the same process.
+   */
+  tls?: { ca?: string; rejectUnauthorized?: boolean };
 }
 
 /**
@@ -226,6 +235,8 @@ export class SSETransport {
   private headers: Record<string, string>;
   private timeout: number;
   private requestTimeout: number;
+  /** Per-request TLS agent — created once from HttpTransportOptions.tls */
+  private tlsAgent?: https.Agent;
   private nextId = 1;
   // NOTE: id-correlation via this map was scaffolded but never populated by
   // `httpPost` — JSON-RPC responses come back synchronously over HTTP, not
@@ -247,6 +258,12 @@ export class SSETransport {
     this.headers = { ...opts.headers };
     this.timeout = opts.startupTimeoutMs ?? 10_000;
     this.requestTimeout = opts.requestTimeoutMs ?? 60_000;
+    if (opts.tls) {
+      this.tlsAgent = new https.Agent({
+        ca: opts.tls.ca,
+        rejectUnauthorized: opts.tls.rejectUnauthorized,
+      });
+    }
   }
 
   getState(): ConnectionState {
@@ -299,10 +316,12 @@ export class SSETransport {
 
     try {
       const sseUrl = this.buildSSEUrl();
-      const response = await fetch(sseUrl, {
+      const fetchOpts: RequestInit = {
         headers: this.headers,
         signal,
-      });
+      };
+      if (this.tlsAgent) fetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
+      const response = await fetch(sseUrl, fetchOpts);
 
       if (!response.ok) {
         throw new Error(`SSE connect HTTP ${response.status}: ${response.statusText}`);
@@ -414,17 +433,19 @@ export class SSETransport {
     const body = JSON.stringify({ jsonrpc: '2.0', id, method, params });
 
     const timeoutSignal = createTimeoutSignal(this.abortController?.signal, this.requestTimeout);
-    try {
-      const res = await fetch(this.url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...this.headers,
-        },
-        body,
-        signal: timeoutSignal.signal,
-      });
+    const fetchOpts: RequestInit = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...this.headers,
+      },
+      body,
+      signal: timeoutSignal.signal,
+    };
+    if (this.tlsAgent) fetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
+    const res = await fetch(this.url, fetchOpts);
 
+    try {
       if (!res.ok) {
         // Cap the body — a misbehaving server could return megabytes of
         // HTML and that's not useful in an error message anyway.
@@ -471,35 +492,34 @@ export class SSETransport {
     const body = JSON.stringify({ jsonrpc: '2.0', id, method, params });
 
     const timeoutSignal = createTimeoutSignal(this.abortController?.signal, timeoutMs ?? this.requestTimeout);
-    try {
-      const res = await fetch(this.url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...this.headers,
-        },
-        body,
-        signal: timeoutSignal.signal,
-      });
+    const fetchOpts: RequestInit = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...this.headers,
+      },
+      body,
+      signal: timeoutSignal.signal,
+    };
+    if (this.tlsAgent) fetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
+    const res = await fetch(this.url, fetchOpts);
 
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-      }
-
-      let data: unknown;
-      try {
-        data = await res.json();
-      } catch (err) {
-        throw new Error(
-          `Invalid JSON-RPC response: ${err instanceof Error ? err.message : 'parse failed'}`,
-          { cause: err },
-        );
-      }
-      const result = assertMatchingJsonRpcResult(data, id, method);
-      return { jsonrpc: '2.0', id, result: result.result, error: result.error };
-    } finally {
-      timeoutSignal.dispose();
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     }
+
+    let data: unknown;
+    try {
+      data = await res.json();
+    } catch (err) {
+      throw new Error(
+        `Invalid JSON-RPC response: ${err instanceof Error ? err.message : 'parse failed'}`,
+        { cause: err },
+      );
+    }
+    const result = assertMatchingJsonRpcResult(data, id, method);
+    timeoutSignal.dispose();
+    return { jsonrpc: '2.0', id, result: result.result, error: result.error };
   }
 
   async close(): Promise<void> {
@@ -534,6 +554,8 @@ export class StreamableHTTPTransport {
   private headers: Record<string, string>;
   private timeout: number;
   private requestTimeout: number;
+  /** Per-request TLS agent — created once from HttpTransportOptions.tls */
+  private tlsAgent?: https.Agent;
   private nextId = 1;
   private tools: MCPTool[] = [];
   private abortController?: AbortController;
@@ -547,6 +569,12 @@ export class StreamableHTTPTransport {
     this.headers = { ...opts.headers };
     this.timeout = opts.startupTimeoutMs ?? 10_000;
     this.requestTimeout = opts.requestTimeoutMs ?? 60_000;
+    if (opts.tls) {
+      this.tlsAgent = new https.Agent({
+        ca: opts.tls.ca,
+        rejectUnauthorized: opts.tls.rejectUnauthorized,
+      });
+    }
   }
 
   getState(): ConnectionState {
@@ -597,7 +625,7 @@ export class StreamableHTTPTransport {
     const startupTimer = setTimeout(() => this.abortController?.abort(), this.timeout);
 
     try {
-      const initRes = await fetch(this.url, {
+      const initFetchOpts: RequestInit = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -615,7 +643,9 @@ export class StreamableHTTPTransport {
           },
         }),
         signal,
-      });
+      };
+      if (this.tlsAgent) initFetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
+      const initRes = await fetch(this.url, initFetchOpts);
 
       if (!initRes.ok) {
         throw new Error(`initialize HTTP ${initRes.status}: ${initRes.statusText}`);
@@ -680,19 +710,21 @@ export class StreamableHTTPTransport {
       : this.url;
 
     const timeoutSignal = createTimeoutSignal(this.abortController?.signal, this.requestTimeout);
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json, text/event-stream',
-          ...(this.sessionId ? { 'x-mcp-session': this.sessionId } : {}),
-          ...this.headers,
-        },
-        body,
-        signal: timeoutSignal.signal,
-      });
+    const fetchOpts: RequestInit = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream',
+        ...(this.sessionId ? { 'x-mcp-session': this.sessionId } : {}),
+        ...this.headers,
+      },
+      body,
+      signal: timeoutSignal.signal,
+    };
+    if (this.tlsAgent) fetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
+    const res = await fetch(url, fetchOpts);
 
+    try {
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }
@@ -724,19 +756,21 @@ export class StreamableHTTPTransport {
       : this.url;
 
     const timeoutSignal = createTimeoutSignal(this.abortController?.signal, timeoutMs ?? this.requestTimeout);
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json, text/event-stream',
-          ...(this.sessionId ? { 'x-mcp-session': this.sessionId } : {}),
-          ...this.headers,
-        },
-        body,
-        signal: timeoutSignal.signal,
-      });
+    const fetchOpts: RequestInit = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream',
+        ...(this.sessionId ? { 'x-mcp-session': this.sessionId } : {}),
+        ...this.headers,
+      },
+      body,
+      signal: timeoutSignal.signal,
+    };
+    if (this.tlsAgent) fetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
+    const res = await fetch(url, fetchOpts);
 
+    try {
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }
