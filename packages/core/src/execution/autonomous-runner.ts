@@ -2,6 +2,7 @@ import type { Agent, RunResult } from '../core/agent.js';
 import type { Context } from '../core/context.js';
 import { toWrongStackError } from '../types/errors.js';
 import type { DoneCondition } from '../types/multi-agent.js';
+import { compileUserRegex } from '../utils/regex-guard.js';
 
 type AutonomousResult = RunResult & { toolCalls: number; reason?: string };
 
@@ -16,8 +17,16 @@ export class DoneConditionChecker {
   private readonly compiledRegex: RegExp | null;
 
   constructor(private readonly condition: DoneCondition) {
-    this.compiledRegex =
-      condition.type === 'output_match' && condition.pattern ? new RegExp(condition.pattern) : null;
+    if (condition.type === 'output_match' && condition.pattern) {
+      const result = compileUserRegex(condition.pattern, '');
+      this.compiledRegex = result.ok ? result.regex : null;
+      if (!result.ok) {
+        // Log warning but don't throw — the done condition simply won't match
+        console.warn(`[DoneConditionChecker] Invalid regex pattern "${condition.pattern}": ${result.reason}`);
+      }
+    } else {
+      this.compiledRegex = null;
+    }
   }
 
   check(state: { iterations: number; toolCalls: number; lastOutput?: string }): DoneCheckResult {

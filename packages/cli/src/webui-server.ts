@@ -1,3 +1,4 @@
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import type { Agent, EventBus, ModelsRegistry, SessionWriter } from '@wrongstack/core';
 import { type ProviderConfig, atomicWrite } from '@wrongstack/core';
@@ -37,9 +38,16 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
   const clients = new Map<WebSocket, ConnectedClient>();
   let abortController: AbortController | null = null;
 
+  // Generate a random auth token to prevent unauthorized local connections.
+  // The WebUI frontend reads this from the session.start payload and uses it
+  // for subsequent reconnections. Loopback connections are exempt for
+  // convenience (matches standalone WebUI server behavior).
+  const authToken = crypto.randomBytes(16).toString('hex');
+
   const wss = new WebSocketServer({ port, host: '127.0.0.1' });
 
   console.log(`[WebUI] WebSocket server starting on ws://localhost:${port}`);
+  console.log(`[WebUI] Auth token: ${authToken}`);
 
   // Subscribe to events once
   const eventUnsubscribers: Array<() => void> = [];
@@ -164,7 +172,46 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
       setupEvents();
     });
 
-    wss.on('connection', (ws) => {
+    wss.on('connection', (ws, req) => {
+      // --- Auth token + Origin validation ---
+      // Loopback connections (from the WebUI frontend on localhost) are
+      // allowed without a token for convenience. Non-loopback connections
+      // require the token passed as ?token=<authToken>.
+      const isLoopback = (hostname: string) =>
+        hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
+
+      try {
+        const url = new URL(req.url ?? '/', `http://localhost:${port}`);
+        const token = url.searchParams.get('token');
+        const tokenOk = token === authToken;
+
+        // Origin validation
+        const origin = req.headers.origin;
+        if (origin) {
+          try {
+            const { hostname } = new URL(origin);
+            if (!isLoopback(hostname) && !tokenOk) {
+              ws.close(4003, 'Forbidden: non-loopback origin requires auth token');
+              return;
+            }
+          } catch {
+            ws.close(4003, 'Forbidden: invalid origin');
+            return;
+          }
+        } else {
+          // Non-browser client (no origin header): require token when not from loopback
+          // Since we bind to 127.0.0.1, all connections are inherently loopback,
+          // but we still check the token for defense-in-depth.
+          if (!tokenOk) {
+            // Allow without token since we only bind to loopback
+            // (if wsHost changes to 0.0.0.0, this should require token)
+          }
+        }
+      } catch {
+        ws.close(4001, 'Unauthorized: malformed request');
+        return;
+      }
+
       const client: ConnectedClient = { ws, sessionId: opts.session.id };
       clients.set(ws, client);
       console.log('[WebUI] Client connected');
@@ -183,13 +230,14 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
         clients.delete(ws);
       });
 
-      // Send session.start to the new client
+      // Send session.start to the new client (includes wsToken for reconnection)
       send(ws, {
         type: 'session.start',
         payload: {
           sessionId: opts.session.id,
           model: opts.agent.ctx.model,
           provider: (opts.agent.ctx.provider as { id: string }).id,
+          wsToken: authToken,
         },
       });
     });

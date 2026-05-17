@@ -130,7 +130,7 @@ function walk<T>(node: T, vault: SecretVault, transform: (s: string, key: string
   if (Array.isArray(node)) {
     return node.map((item) => walk(item, vault, transform)) as unknown as T;
   }
-  const out: Record<string, unknown> = {};
+  const out: Record<string, unknown> = Object.create(null);
   for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
     if (typeof v === 'string' && isSecretField(k)) {
       out[k] = transform(v, k);

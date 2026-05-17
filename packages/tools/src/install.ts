@@ -80,6 +80,27 @@ export const installTool: Tool<InstallInput, InstallOutput> = {
           p.trim(),
         )
       : [];
+
+    // Validate package names to prevent flag injection and path traversal.
+    // A name like "--ignore-scripts=false" would be interpreted as a flag;
+    // "file:../../etc/passwd" as a local path specifier.
+    const PKG_NAME_RE = /^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/i;
+    for (const pkg of pkgList) {
+      if (!PKG_NAME_RE.test(pkg) || pkg.startsWith('-')) {
+        yield {
+          type: 'final',
+          output: {
+            packages: pkgList,
+            exit_code: 1,
+            output: `Invalid package name "${pkg}". Names must match ${PKG_NAME_RE} and not start with "-".`,
+            dry_run: Boolean(input.dry_run),
+            truncated: false,
+          },
+        };
+        return;
+      }
+    }
+
     if (pkgList.length > 0) args.push(...pkgList);
 
     yield {

@@ -30,7 +30,13 @@ function getCachedGlob(pattern: string): RegExp {
   return re;
 }
 
+// Cap glob pattern length to prevent excessively long compiled regexes.
+const MAX_GLOB_PATTERN_LEN = 1024;
+
 export function compileGlob(pattern: string): RegExp {
+  if (pattern.length > MAX_GLOB_PATTERN_LEN) {
+    throw new Error(`Glob pattern exceeds ${MAX_GLOB_PATTERN_LEN} characters`);
+  }
   let i = 0;
   let re = '^';
   while (i < pattern.length) {

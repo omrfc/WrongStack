@@ -26,3 +26,4 @@ export {
   type ValidationError,
   type ValidationResult,
 } from './json-schema-validate.js';
+export { compileUserRegex, type CompileResult, type CompileFail } from './regex-guard.js';

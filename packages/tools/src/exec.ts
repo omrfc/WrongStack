@@ -41,7 +41,7 @@ const ALLOWED_COMMANDS: Record<string, string[]> = {
   cargo: ['--version', 'build', 'test', 'check'],
   rustc: ['--version'],
   go: ['version', 'run', 'build', 'test'],
-  python: ['--version', '-c'],
+  python: ['--version'],
   pip: ['--version', 'install', 'list'],
   docker: ['--version', 'ps', 'images', 'build'],
   kubectl: ['version', 'get', 'describe', 'logs'],
@@ -50,6 +50,36 @@ const ALLOWED_COMMANDS: Record<string, string[]> = {
 const MAX_ARGS = 20;
 const MAX_OUTPUT = 200_000;
 const TIMEOUT_MS = 30_000;
+
+// Per-command argument validation. Each entry is a list of regex patterns
+// that, if matched against any argument, will reject the invocation.
+// This blocks common injection vectors through allowlisted commands.
+const BLOCKED_ARG_PATTERNS: Record<string, RegExp[]> = {
+  // python -c/--command executes arbitrary code; python -m runs modules
+  python: [/-c$/, /^--command$/, /^-m$/, /^--module$/],
+  // git --exec=<cmd> runs arbitrary commands via upload-pack/receive-pack
+  git: [/^--exec=/, /^--upload-pack=/, /^--receive-pack=/],
+  // node -r/--require preloads arbitrary modules; --eval executes code
+  node: [/^-r$/, /^--require$/, /^-e$/, /^--eval$/, /^--prof-process$/],
+  // go run could execute arbitrary .go files; -ldflags could inject build-time code
+  go: [/^-ldflags$/],
+  // bun --preload is similar to node --require
+  bun: [/^--preload$/],
+};
+
+function validateArgs(cmd: string, args: string[]): string | null {
+  const blocked = BLOCKED_ARG_PATTERNS[cmd];
+  if (!blocked) return null;
+
+  for (const arg of args) {
+    for (const pattern of blocked) {
+      if (pattern.test(arg)) {
+        return `Blocked argument "${arg}" for command "${cmd}" (matches security pattern ${pattern})`;
+      }
+    }
+  }
+  return null;
+}
 
 interface ExecInput {
   command: string;
@@ -115,6 +145,20 @@ export const execTool: Tool<ExecInput, ExecOutput> = {
 
     const args = (input.args ?? []).slice(0, MAX_ARGS);
     const timeout = Math.max(1, Math.min(input.timeout ?? TIMEOUT_MS, TIMEOUT_MS));
+
+    // Validate args against per-command security patterns
+    const argError = validateArgs(cmd, args);
+    if (argError) {
+      return {
+        command: cmd,
+        args,
+        stdout: '',
+        stderr: argError,
+        exitCode: 1,
+        truncated: false,
+        allowed: false,
+      };
+    }
 
     // Resolve cwd inside the project root. Model-supplied paths like '/etc'
     // would otherwise let allowlisted commands operate anywhere on disk.

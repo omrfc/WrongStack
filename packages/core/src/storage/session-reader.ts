@@ -8,6 +8,7 @@ import type {
   SessionSearchQuery,
   SessionSummaryLite,
 } from '../types/session-reader.js';
+import { compileUserRegex } from '../utils/regex-guard.js';
 import type { SessionEvent, SessionMetadata, SessionStore } from '../types/session.js';
 
 /**
@@ -132,7 +133,11 @@ function buildMatcher(
   const ci = q.caseInsensitive ?? true;
   if (q.regex) {
     const flags = ci ? 'i' : '';
-    const re = new RegExp(q.query, flags);
+    const compiled = compileUserRegex(q.query, flags);
+    if (!compiled.ok) {
+      throw new Error(`Invalid search regex "${q.query}": ${compiled.reason}`);
+    }
+    const re = compiled.regex;
     return (text) => {
       const m = re.exec(text);
       return m ? { start: m.index, end: m.index + m[0].length } : null;

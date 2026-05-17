@@ -1,3 +1,4 @@
+import * as net from 'node:net';
 import type { ConnectionState, MCPTool, ToolCallResult } from './client.js';
 
 export type JsonRpcResult = {
@@ -12,6 +13,53 @@ export interface HttpTransportOptions {
   url: string;
   headers?: Record<string, string>;
   startupTimeoutMs?: number;
+}
+
+/**
+ * Validate that an MCP transport URL is not targeting private/internal
+ * addresses. This is a defense-in-depth SSRF check — MCP servers are
+ * typically local or LAN, but config manipulation could point to metadata
+ * endpoints (169.254.169.254) or internal services.
+ *
+ * The check is intentionally lighter than fetch.ts's assertNotPrivate:
+ * MCP URLs are admin-configured, not LLM-supplied, so we only block
+ * the most obvious attack vectors.
+ */
+function validateTransportUrl(rawUrl: string): void {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error(`MCP transport: invalid URL "${rawUrl}"`);
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`MCP transport: unsupported protocol "${url.protocol}" — only http/https allowed`);
+  }
+
+  const hostname = url.hostname;
+
+  // Block localhost variants
+  if (
+    hostname === 'localhost' ||
+    hostname === '0.0.0.0' ||
+    hostname === '::' ||
+    hostname === '[::1]'
+  ) {
+    return; // localhost is expected for local MCP servers — don't block
+  }
+
+  // Block cloud metadata endpoints (IMDS) — these are never valid MCP servers
+  const ipVersion = net.isIP(hostname);
+  if (ipVersion === 4) {
+    const parts = hostname.split('.').map(Number);
+    // 169.254.x.x (link-local / IMDS)
+    if (parts[0] === 169 && parts[1] === 254) {
+      throw new Error(
+        `MCP transport: blocked link-local/IMDS address "${hostname}" — likely not a valid MCP server`,
+      );
+    }
+  }
 }
 
 /**
@@ -134,6 +182,7 @@ export class SSETransport {
   private readonly toolsChangedListeners = new Set<(tools: MCPTool[]) => void>();
 
   constructor(opts: HttpTransportOptions) {
+    validateTransportUrl(opts.url);
     this.url = opts.url;
     this.headers = { ...opts.headers };
     this.timeout = opts.startupTimeoutMs ?? 10_000;
@@ -392,6 +441,7 @@ export class StreamableHTTPTransport {
   private readonly toolsChangedListeners = new Set<(tools: MCPTool[]) => void>();
 
   constructor(opts: HttpTransportOptions) {
+    validateTransportUrl(opts.url);
     this.url = opts.url;
     this.headers = { ...opts.headers };
     this.timeout = opts.startupTimeoutMs ?? 10_000;

@@ -116,7 +116,7 @@ export const scaffoldTool: Tool<ScaffoldInput, ScaffoldOutput> = {
 
     const builtIn = BUILT_IN_TEMPLATES[input.template];
     if (builtIn) {
-      return await handleBuiltIn(name, builtIn.files, cwd, input.dry_run ?? false, vars);
+      return await handleBuiltIn(name, builtIn.files, cwd, ctx, input.dry_run ?? false, vars);
     }
 
     return {
@@ -134,6 +134,7 @@ async function handleBuiltIn(
   name: string,
   templateFiles: Record<string, string>,
   cwd: string,
+  ctx: Parameters<Tool['execute']>[1],
   dryRun: boolean,
   vars: Record<string, string>,
 ): Promise<ScaffoldOutput> {
@@ -142,7 +143,15 @@ async function handleBuiltIn(
 
   for (const [filePath, content] of Object.entries(templateFiles)) {
     const resolvedPath = substituteVars(filePath, name, vars);
-    const fullPath = path.join(cwd, resolvedPath);
+    const joinedPath = path.join(cwd, resolvedPath);
+    // Ensure generated files cannot escape the project root via template variable injection (e.g. name containing "../")
+    const root = path.resolve(ctx.projectRoot);
+    const target = path.resolve(joinedPath);
+    const rel = path.relative(root, target);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      throw new Error(`scaffold: generated path "${resolvedPath}" would escape project root`);
+    }
+    const fullPath = target;
 
     if (!dryRun) {
       await fs.mkdir(path.dirname(fullPath), { recursive: true });

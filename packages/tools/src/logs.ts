@@ -115,6 +115,17 @@ async function dockerLogs(
     const sinceMap: Record<string, string> = { '1h': '1h', '6h': '6h', '24h': '24h' };
     args.push('--since', sinceMap[since] ?? '1h');
   }
+  // Validate service name to prevent container name injection.
+  // Docker container names are limited to [a-zA-Z0-9][a-zA-Z0-9._-]+.
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]+$/.test(service)) {
+    return {
+      source: `docker:${service}`,
+      entries: [],
+      total: 0,
+      truncated: false,
+      stream_mode: false,
+    };
+  }
   args.push('--timestamps', service);
 
   return new Promise((resolve) => {

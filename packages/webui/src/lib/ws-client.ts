@@ -25,6 +25,9 @@ export class WrongStackWebSocketClient {
   private messageQueue: WSClientMessage[] = [];
   private pendingConfirms: Map<string, PendingConfirm> = new Map();
   private sessionId: string | null = null;
+  /** Auth token received from server in session.start payload.
+   *  Used for reconnection so the client doesn't need to know the token upfront. */
+  private wsToken: string | null = null;
   /** Stored last close reason / error message so the UI can show "what
    *  went wrong" while reconnecting instead of a generic spinner. */
   private lastErrorText: string | undefined;
@@ -66,7 +69,13 @@ export class WrongStackWebSocketClient {
       this.setStatus({ state: 'connecting' });
 
       try {
-        this.ws = new WebSocket(this.url);
+        // Include auth token in URL if we have one (from session.start).
+        // Initial connect to loopback is exempt, but reconnections should
+        // carry the token for defense-in-depth.
+        const wsUrl = this.wsToken
+          ? `${this.url}${this.url.includes('?') ? '&' : '?'}token=${this.wsToken}`
+          : this.url;
+        this.ws = new WebSocket(wsUrl);
         this.ws.binaryType = 'arraybuffer';
 
         const connectTimeout = setTimeout(() => {
@@ -210,8 +219,11 @@ export class WrongStackWebSocketClient {
     }
 
     if (msg.type === 'session.start') {
-      const payload = msg.payload as { sessionId: string };
+      const payload = msg.payload as { sessionId: string; wsToken?: string };
       this.sessionId = payload.sessionId;
+      if (payload.wsToken) {
+        this.wsToken = payload.wsToken;
+      }
     }
 
     this.emit(msg);
