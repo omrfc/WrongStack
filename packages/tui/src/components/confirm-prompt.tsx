@@ -69,6 +69,7 @@ export function ConfirmPrompt({
   }, []);
 
   useInput((input, key) => {
+    console.log('[ConfirmPrompt] useInput received: input=', JSON.stringify(input), 'key=', JSON.stringify(key));
     if (input.length === 0) return; // ignore special keys — only accept explicit chars
     const ch = input.toLowerCase();
     if (ch === 'y') {
