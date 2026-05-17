@@ -145,6 +145,23 @@ describe('OpenAIProvider.stream', () => {
     expect(res.model).toBe('gpt-test');
   });
 
+  it('splits DeepSeek cache hit and miss tokens for pricing', async () => {
+    const sse = [
+      'data: {"id":"x","model":"deepseek-chat","choices":[{"index":0,"delta":{"content":"ok"}}]}',
+      '',
+      'data: {"id":"x","choices":[{"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":1000,"completion_tokens":20,"prompt_cache_hit_tokens":800,"prompt_cache_miss_tokens":200}}',
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n');
+    const provider = new OpenAIProvider({ apiKey: 'k', fetchImpl: mockFetch(sseBody(sse)) });
+    const res = await provider.complete(
+      { model: 'deepseek-chat', messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 },
+      { signal: new AbortController().signal },
+    );
+    expect(res.usage).toEqual({ input: 200, output: 20, cacheRead: 800 });
+  });
+
   it('parses tool_calls with arguments streamed in chunks', async () => {
     const sse = [
       'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"echo","arguments":"{\\"text\\":"}}]}}]}',

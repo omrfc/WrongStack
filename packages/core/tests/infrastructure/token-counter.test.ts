@@ -9,6 +9,13 @@ const m1: ResolvedModel = {
   cost: { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
 } as ResolvedModel;
 
+const deepseekChat: ResolvedModel = {
+  providerId: 'deepseek',
+  modelId: 'deepseek-chat',
+  capabilities: { tools: true, vision: false, reasoning: false, maxContext: 1_000_000 },
+  cost: { input: 0.14, output: 0.28, cache_read: 0.028 },
+} as ResolvedModel;
+
 describe('DefaultTokenCounter', () => {
   it('totals tokens without a registry', () => {
     const tc = new DefaultTokenCounter();
@@ -56,6 +63,15 @@ describe('DefaultTokenCounter', () => {
     // 1M cacheRead @ $0.3 + 1M cacheWrite @ $3.75 = $4.05
     expect(cost.input).toBeCloseTo(4.05, 4);
     expect(cost.output).toBe(0);
+  });
+
+  it('prices DeepSeek cache hits at cache_read instead of full input rate', () => {
+    const tc = new DefaultTokenCounter();
+    tc.accountWithModel({ input: 200_000, output: 20_000, cacheRead: 800_000 }, deepseekChat);
+    const cost = tc.estimateCost();
+    expect(cost.input).toBeCloseTo(0.0504, 4);
+    expect(cost.output).toBeCloseTo(0.0056, 4);
+    expect(cost.total).toBeCloseTo(0.056, 4);
   });
 
   it('uses cached price on subsequent account() calls', async () => {

@@ -686,6 +686,34 @@ describe('OpenAI preset - cached token usage', () => {
       cacheRead: 40,
     });
   });
+
+  it('extracts DeepSeek prompt cache hit and miss token usage', async () => {
+    const events = await collectFromPreset(
+      openaiWireFormat,
+      sseBody([
+        JSON.stringify({
+          model: 'deepseek-chat',
+          choices: [{ finish_reason: 'stop' }],
+          usage: {
+            prompt_tokens: 1000,
+            completion_tokens: 20,
+            prompt_cache_hit_tokens: 800,
+            prompt_cache_miss_tokens: 200,
+          },
+        }),
+        '[DONE]',
+      ]),
+      'deepseek-chat',
+    );
+    const stop = events.find((e) => e.type === 'message_stop');
+    expect((stop as { usage: { input: number; output: number; cacheRead: number } }).usage).toEqual(
+      {
+        input: 200,
+        output: 20,
+        cacheRead: 800,
+      },
+    );
+  });
 });
 
 describe('OpenAI preset - multiple tool calls', () => {
