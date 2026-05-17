@@ -16,6 +16,7 @@ import {
   type Config,
   type Logger,
   type ModelsRegistry,
+  type Tool,
   type WstackPaths,
 } from '@wrongstack/core';
 import type { DefaultSystemPromptBuilderOptions } from '@wrongstack/core';
@@ -27,7 +28,11 @@ export interface CreateContainerOptions {
   modelsRegistry: ModelsRegistry;
   permission?: {
     yolo?: boolean;
-    promptDelegate?: (tool: unknown, input: unknown, suggestedPattern: string) => Promise<'yes' | 'no' | 'always' | 'deny'>;
+    promptDelegate?: (
+      tool: Tool,
+      input: unknown,
+      suggestedPattern: string,
+    ) => Promise<'yes' | 'no' | 'always' | 'deny'>;
   };
   compactor?: { preserveK?: number; eliseThreshold?: number };
   systemPrompt?: Partial<DefaultSystemPromptBuilderOptions>;
@@ -70,7 +75,7 @@ export function createDefaultContainer(opts: CreateContainerOptions): Container 
     new DefaultPermissionPolicy({
       trustFile: wpaths.projectTrust,
       yolo: opts.permission?.yolo ?? false,
-      promptDelegate: opts.permission?.promptDelegate as any,
+      promptDelegate: opts.permission?.promptDelegate,
     }),
   );
 

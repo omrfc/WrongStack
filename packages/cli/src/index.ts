@@ -55,9 +55,6 @@ import {
 import { MCPRegistry } from '@wrongstack/mcp';
 import { capabilitiesFor, makeProviderFromConfig } from '@wrongstack/providers';
 import { createDefaultContainer } from '@wrongstack/runtime';
-import { setupProvider } from './wiring/provider.js';
-import { setupSession } from './wiring/session.js';
-import { createAgent, setupCompaction, setupPipelines } from './wiring/pipeline.js';
 import { forgetTool, rememberTool } from '@wrongstack/tools';
 import { builtinToolsPack } from '@wrongstack/tools/pack';
 import { boot } from './boot.js';
@@ -65,12 +62,16 @@ import { type ExecutionDeps, execute } from './execution.js';
 import type { ReadlineInputReader } from './input-reader.js';
 import { MultiAgentHost } from './multi-agent.js';
 import { makeConfirmAwaiter, makePromptDelegate } from './permission-prompt.js';
+import { runPluginManagementCommand } from './plugin-management.js';
 import { buildPickableProviders } from './provider-helpers.js';
 import type { TerminalRenderer } from './renderer.js';
 import { SessionStats } from './session-stats.js';
 import { buildBuiltinSlashCommands } from './slash-commands/index.js';
 import { Spinner } from './spinner.js';
 import { fmtTaskResultLine, fmtTok, patchConfig } from './utils.js';
+import { createAgent, setupCompaction, setupPipelines } from './wiring/pipeline.js';
+import { setupProvider } from './wiring/provider.js';
+import { setupSession } from './wiring/session.js';
 
 function resolveBundledSkillsDir(): string | undefined {
   try {
@@ -84,6 +85,24 @@ function resolveBundledSkillsDir(): string | undefined {
 
 import { CLI_VERSION } from './version.js';
 export { CLI_VERSION };
+
+type ContainerPromptDelegate = (
+  tool: unknown,
+  input: unknown,
+  suggestedPattern: string,
+) => Promise<'yes' | 'no' | 'always' | 'deny'>;
+
+function buildPluginOptions(config: Config): Record<string, Record<string, unknown>> {
+  const options: Record<string, Record<string, unknown>> = {};
+  for (const entry of config.plugins ?? []) {
+    if (typeof entry !== 'object') continue;
+    if (entry.options) options[entry.name] = { ...entry.options };
+  }
+  for (const [name, value] of Object.entries(config.extensions ?? {})) {
+    options[name] = { ...(options[name] ?? {}), ...value };
+  }
+  return options;
+}
 
 export async function main(argv: string[]): Promise<number> {
   const ctx = await boot(argv);
@@ -108,7 +127,10 @@ export async function main(argv: string[]): Promise<number> {
   // Build container via shared factory
   const container = createDefaultContainer({
     config, wpaths, logger, modelsRegistry,
-    permission: { yolo: config.yolo, promptDelegate: makePromptDelegate(reader) as any },
+    permission: {
+      yolo: config.yolo,
+      promptDelegate: makePromptDelegate(reader) as unknown as ContainerPromptDelegate,
+    },
     compactor: { preserveK: config.context.preserveK, eliseThreshold: config.context.eliseThreshold },
     bundledSkillsDir: config.features.skills ? resolveBundledSkillsDir() : undefined,
   });
@@ -402,6 +424,7 @@ export async function main(argv: string[]): Promise<number> {
   if (config.features.plugins && config.plugins && config.plugins.length > 0) {
     const resolvedPlugins: Plugin[] = [];
     for (const p of config.plugins) {
+      if (typeof p === 'object' && p.enabled === false) continue;
       const spec = typeof p === 'string' ? p : p.name;
       try {
         const mod = (await import(spec)) as { default?: Plugin };
@@ -412,13 +435,17 @@ export async function main(argv: string[]): Promise<number> {
     }
     if (resolvedPlugins.length > 0) {
       const { default: createApi } = await import('./plugin-api-factory.js');
+      const pluginOptions = buildPluginOptions(config);
+      const pluginConfig =
+        Object.keys(pluginOptions).length > 0
+          ? patchConfig(config, { extensions: pluginOptions } as Partial<Config>)
+          : config;
       await loadPlugins(resolvedPlugins, {
         log: logger,
-        // Each plugin's `configSchema` is validated against the matching
-        // `Config.extensions[name]` subtree before its `setup()` runs.
-        // The plugin then reads the same data through `api.config.extensions`
-        // (or, once L1-B lands, via `ConfigStore.getExtension(name)`).
-        pluginOptions: config.extensions ?? {},
+        // Each plugin's `configSchema` is validated against merged
+        // options from `plugins[].options` and `extensions[name]`.
+        // The merged view is also exposed as `api.config.extensions`.
+        pluginOptions,
         apiFactory: (plugin) =>
           createApi(plugin.name, {
             container,
@@ -428,7 +455,7 @@ export async function main(argv: string[]): Promise<number> {
             providerRegistry,
             slashCommandRegistry: slashRegistry,
             mcpRegistry,
-            config,
+            config: pluginConfig,
             log: logger,
             extensions: agent.extensions,
             sessionWriter: {
@@ -928,6 +955,22 @@ export async function main(argv: string[]): Promise<number> {
         `  Subagents → ${ss}`,
       ];
       return lines.join('\n');
+    },
+    onPlugin: async (args) => {
+      const parsed = args.length === 0 ? [] : args.split(/\s+/).filter(Boolean);
+      const result = await runPluginManagementCommand(parsed, {
+        config,
+        configPath: wpaths.globalConfig,
+      });
+      if (result.patch) {
+        const patch = result.patch as Partial<Config>;
+        config = patchConfig(config, patch);
+        configStore.update(patch);
+      }
+      if (result.restartRequired && result.code === 0) {
+        return `${result.message}\nRestart WrongStack to load or unload plugin code in this session.`;
+      }
+      return result.message;
     },
     onExit: () => {
       void mcpRegistry.stopAll();

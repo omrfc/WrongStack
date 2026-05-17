@@ -39,7 +39,9 @@ export function makeSpawnTool(director: Director, roster?: Record<string, Subage
       if (role && !base) {
         return { error: `unknown role "${role}". roster has: ${roster ? Object.keys(roster).join(', ') : '(empty)'}` };
       }
-      const cfg: SubagentConfig = { ...(base ?? { name: (i.name as string) ?? 'subagent' }) };
+      const cfg: SubagentConfig = base
+        ? instantiateRosterConfig(role!, base)
+        : { name: (i.name as string) ?? 'subagent' };
       if (typeof i.name === 'string') cfg.name = i.name;
       if (typeof i.provider === 'string') cfg.provider = i.provider;
       if (typeof i.model === 'string') cfg.model = i.model;
@@ -57,6 +59,15 @@ export function makeSpawnTool(director: Director, roster?: Record<string, Subage
         return { error: err instanceof Error ? err.message : String(err) };
       }
     },
+  };
+}
+
+function instantiateRosterConfig(role: string, base: SubagentConfig): SubagentConfig {
+  return {
+    ...base,
+    // Roster entries are templates. A director may spawn several
+    // workers with the same role, so never reuse the template id.
+    id: `${role}-${randomUUID().slice(0, 8)}`,
   };
 }
 

@@ -1,6 +1,6 @@
 import type {
-  Context,
   CompactReport,
+  Context,
   HealthRegistry,
   MemoryStore,
   MetricsSink,
@@ -17,10 +17,7 @@ export interface SlashCommandContext {
   registry: SlashCommandRegistry;
   toolRegistry: ToolRegistry;
   compactor?: {
-    compact(
-      ctx: Context,
-      opts?: { aggressive?: boolean },
-    ): Promise<CompactReport>;
+    compact(ctx: Context, opts?: { aggressive?: boolean }): Promise<CompactReport>;
   };
   sessionStore?: SessionStore;
   skillLoader?: SkillLoader;
@@ -68,6 +65,8 @@ export interface SlashCommandContext {
   onFleetLog?: (subagentId: string | undefined, mode: 'summary' | 'raw') => Promise<string>;
   /** Promote to director mode at runtime. Returns success message or null on failure. */
   onDirector?: () => Promise<string | null>;
+  /** Manage plugin config from the interactive slash menu. */
+  onPlugin?: (args: string) => Promise<string>;
   /**
    * Absolute path to the per-session plan JSON file. Read+written by the
    * `/plan` slash command. Optional — when omitted, `/plan` short-circuits
@@ -91,9 +90,10 @@ import { buildInitCommand } from './init.js';
 import { buildMemoryCommand } from './memory.js';
 import { buildMetricsCommand } from './metrics.js';
 import { buildPlanCommand } from './plan.js';
+import { buildPluginCommand } from './plugin.js';
 import { buildExitCommand, buildLoadCommand, buildSaveCommand } from './session.js';
 import { buildSkillCommand } from './skill.js';
-import { buildAgentsCommand, buildSpawnCommand, buildDirectorCommand } from './spawn-agents.js';
+import { buildAgentsCommand, buildDirectorCommand, buildSpawnCommand } from './spawn-agents.js';
 import { buildTodosCommand } from './todos.js';
 import { buildToolsCommand } from './tools.js';
 
@@ -106,6 +106,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildContextCommand(opts),
     buildToolsCommand(opts),
     buildSkillCommand(opts),
+    buildPluginCommand(opts),
     buildDiagCommand(opts),
     buildStatsCommand(opts),
     buildSpawnCommand(opts),

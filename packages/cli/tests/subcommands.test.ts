@@ -632,6 +632,150 @@ describe('subcommands', () => {
     expect(text).toContain('disabled');
   });
 
+  it('plugins is an alias for plugin', async () => {
+    const rig = withRig();
+    const config = {
+      providers: {},
+      log: { level: 'error' },
+      plugins: ['@wrongstack/telegram'],
+    } as unknown as Config;
+    const code = await subcommands['plugins']!(
+      ['list'],
+      mkDeps({ renderer: rig.renderer, config }),
+    );
+    expect(code).toBe(0);
+    expect(stripAnsi(rig.out.buf)).toContain('@wrongstack/telegram');
+  });
+
+  it('plugin status is an alias for list', async () => {
+    const rig = withRig();
+    const config = {
+      providers: {},
+      log: { level: 'error' },
+      plugins: [{ name: '@wrongstack/telegram', enabled: false }],
+    } as unknown as Config;
+    const code = await subcommands['plugin']!(
+      ['status'],
+      mkDeps({ renderer: rig.renderer, config }),
+    );
+
+    expect(code).toBe(0);
+    const text = stripAnsi(rig.out.buf);
+    expect(text).toContain('@wrongstack/telegram');
+    expect(text).toContain('disabled');
+  });
+
+  it('plugin add writes an enabled plugin entry', async () => {
+    const rig = withRig();
+    const paths = resolveWstackPaths({
+      projectRoot: tmp,
+      globalRoot: path.join(tmp, 'g'),
+      userHome: tmp,
+    });
+    const code = await subcommands['plugin']!(
+      ['add', '@wrongstack/telegram'],
+      mkDeps({ renderer: rig.renderer, paths }),
+    );
+
+    expect(code).toBe(0);
+    const written = JSON.parse(await fs.readFile(paths.globalConfig, 'utf8')) as {
+      plugins: unknown[];
+      features: { plugins: boolean };
+    };
+    expect(written.plugins).toEqual(['@wrongstack/telegram']);
+    expect(written.features.plugins).toBe(true);
+  });
+
+  it('plugin install resolves official aliases', async () => {
+    const rig = withRig();
+    const paths = resolveWstackPaths({
+      projectRoot: tmp,
+      globalRoot: path.join(tmp, 'g'),
+      userHome: tmp,
+    });
+    const code = await subcommands['plugin']!(
+      ['install', 'telegram'],
+      mkDeps({ renderer: rig.renderer, paths }),
+    );
+
+    expect(code).toBe(0);
+    const written = JSON.parse(await fs.readFile(paths.globalConfig, 'utf8')) as {
+      plugins: unknown[];
+      features: { plugins: boolean };
+    };
+    expect(written.plugins).toEqual(['@wrongstack/telegram']);
+    expect(written.features.plugins).toBe(true);
+  });
+
+  it('plugin official lists bundled aliases and config state', async () => {
+    const rig = withRig();
+    const config = {
+      providers: {},
+      log: { level: 'error' },
+      plugins: [{ name: '@wrongstack/telegram', enabled: false }],
+    } as unknown as Config;
+    const code = await subcommands['plugin']!(
+      ['official'],
+      mkDeps({ renderer: rig.renderer, config }),
+    );
+
+    expect(code).toBe(0);
+    const text = stripAnsi(rig.out.buf);
+    expect(text).toContain('telegram');
+    expect(text).toContain('@wrongstack/telegram');
+    expect(text).toContain('disabled');
+    expect(text).toContain('lsp');
+    expect(text).toContain('@wrongstack/plug-lsp');
+    expect(text).toContain('not configured');
+  });
+
+  it('plugin disable converts an entry into a disabled object', async () => {
+    const rig = withRig();
+    const paths = resolveWstackPaths({
+      projectRoot: tmp,
+      globalRoot: path.join(tmp, 'g'),
+      userHome: tmp,
+    });
+    await fs.mkdir(path.dirname(paths.globalConfig), { recursive: true });
+    await fs.writeFile(paths.globalConfig, JSON.stringify({ plugins: ['@wrongstack/telegram'] }));
+
+    const code = await subcommands['plugin']!(
+      ['disable', '@wrongstack/telegram'],
+      mkDeps({ renderer: rig.renderer, paths }),
+    );
+
+    expect(code).toBe(0);
+    const written = JSON.parse(await fs.readFile(paths.globalConfig, 'utf8')) as {
+      plugins: Array<{ name: string; enabled: boolean }>;
+    };
+    expect(written.plugins).toEqual([{ name: '@wrongstack/telegram', enabled: false }]);
+  });
+
+  it('plugin remove deletes a plugin entry', async () => {
+    const rig = withRig();
+    const paths = resolveWstackPaths({
+      projectRoot: tmp,
+      globalRoot: path.join(tmp, 'g'),
+      userHome: tmp,
+    });
+    await fs.mkdir(path.dirname(paths.globalConfig), { recursive: true });
+    await fs.writeFile(
+      paths.globalConfig,
+      JSON.stringify({ plugins: ['@wrongstack/telegram', 'other'] }),
+    );
+
+    const code = await subcommands['plugin']!(
+      ['remove', '@wrongstack/telegram'],
+      mkDeps({ renderer: rig.renderer, paths }),
+    );
+
+    expect(code).toBe(0);
+    const written = JSON.parse(await fs.readFile(paths.globalConfig, 'utf8')) as {
+      plugins: unknown[];
+    };
+    expect(written.plugins).toEqual(['other']);
+  });
+
   it('sessions reports empty when none exist', async () => {
     const rig = withRig();
     const sessionStore = {
@@ -829,14 +973,14 @@ describe('subcommands', () => {
     expect(stripAnsi(rig.err.buf)).toContain('only available in REPL');
   });
 
-  it('plugin warns on unimplemented subcommand', async () => {
+  it('plugin rejects unknown subcommand', async () => {
     const rig = withRig();
     const code = await subcommands['plugin']!(
-      ['install', 'foo'],
+      ['frobnicate', 'foo'],
       mkDeps({ renderer: rig.renderer }),
     );
-    expect(code).toBe(0);
-    expect(stripAnsi(rig.err.buf)).toContain('not implemented');
+    expect(code).toBe(1);
+    expect(stripAnsi(rig.err.buf)).toContain('Unknown plugin subcommand');
   });
 
   it('usage prints session token totals', async () => {

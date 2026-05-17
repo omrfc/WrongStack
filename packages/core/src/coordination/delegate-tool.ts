@@ -1,5 +1,6 @@
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import type { SubagentConfig, TaskResult } from '../types/multi-agent.js';
 import type { JSONSchema, Tool } from '../types/tool.js';
 import type { Director } from './director.js';
@@ -196,7 +197,7 @@ export function createDelegateTool(opts: CreateDelegateToolOptions): Tool {
             error: `Unknown role "${i.role}". Available: ${rosterIds.join(', ') || '(no roster configured)'}.`,
           };
         }
-        cfg = { ...base };
+        cfg = instantiateRosterConfig(i.role, base);
         if (i.systemPromptOverride) cfg.systemPromptOverride = i.systemPromptOverride;
         if (i.provider) cfg.provider = i.provider;
         if (i.model) cfg.model = i.model;
@@ -328,6 +329,15 @@ export function createDelegateTool(opts: CreateDelegateToolOptions): Tool {
         };
       }
     },
+  };
+}
+
+function instantiateRosterConfig(role: string, base: SubagentConfig): SubagentConfig {
+  return {
+    ...base,
+    // Roster entries are templates. Give each spawn a fresh id so
+    // parallel or repeated delegates can use the same role safely.
+    id: `${role}-${randomUUID().slice(0, 8)}`,
   };
 }
 

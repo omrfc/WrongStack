@@ -66,6 +66,25 @@ describe('DefaultMultiAgentCoordinator with runner', () => {
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
 
+  it('dispatches targeted tasks to the requested subagent', async () => {
+    const seen: string[] = [];
+    const runner: SubagentRunner = vi.fn(async (_task, ctx) => {
+      seen.push(ctx.subagentId);
+      return { result: ctx.subagentId, iterations: 1, toolCalls: 0 };
+    });
+    const coord = new DefaultMultiAgentCoordinator(makeConfig(), { runner });
+
+    await coord.spawn({ id: 'a1', name: 'A1' });
+    await coord.spawn({ id: 'a2', name: 'A2' });
+    const donePromise = waitForDone(coord);
+    await coord.assign({ id: 'task1', description: 'do work', subagentId: 'a2' });
+    const [result] = await donePromise;
+
+    expect(seen).toEqual(['a2']);
+    expect(result.subagentId).toBe('a2');
+    expect(result.result).toBe('a2');
+  });
+
   it('budget overflow surfaces as failed status', async () => {
     const runner: SubagentRunner = async (_task, ctx) => {
       ctx.budget.recordToolCall();

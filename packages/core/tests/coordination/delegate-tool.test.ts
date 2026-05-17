@@ -103,6 +103,28 @@ describe('createDelegateTool', () => {
     expect(out.result).toBe('done:audit src/parser.ts');
   });
 
+  it('can delegate the same roster role more than once', async () => {
+    director = buildLiveDirector();
+    const tool = createDelegateTool({ host: buildHost(director), roster: FLEET_ROSTER });
+
+    const first = (await tool.execute(
+      { role: 'security-scanner', task: 'scan command injection' },
+      null as never,
+      { signal: new AbortController().signal },
+    )) as { ok: boolean; subagentId?: string };
+    const second = (await tool.execute(
+      { role: 'security-scanner', task: 'scan path traversal' },
+      null as never,
+      { signal: new AbortController().signal },
+    )) as { ok: boolean; subagentId?: string };
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    expect(first.subagentId).toMatch(/^security-scanner-/);
+    expect(second.subagentId).toMatch(/^security-scanner-/);
+    expect(second.subagentId).not.toBe(first.subagentId);
+  });
+
   it('accepts name + provider + model without a roster role', async () => {
     director = buildLiveDirector();
     const tool = createDelegateTool({ host: buildHost(director), roster: FLEET_ROSTER });

@@ -56,6 +56,22 @@ describe('classifySubagentError — direct mapping', () => {
     expect(out.retryable).toBe(true);
   });
 
+  it('400 provider errors preserve invalid-request detail in the surfaced message', () => {
+    const err = new ProviderError('anthropic HTTP 400', 400, false, 'anthropic', {
+      body: {
+        type: 'invalid_request_error',
+        message: 'tools.3.input_schema.properties.foo.type is required',
+        requestId: 'req_1234567890',
+      },
+    });
+    const out = classifySubagentError(err);
+    expect(out.kind).toBe('unknown');
+    expect(out.retryable).toBe(false);
+    expect(out.message).toContain('anthropic invalid request (400)');
+    expect(out.message).toContain('tools.3.input_schema');
+    expect(out.message).toContain('[req req_1234567890]');
+  });
+
   it('BudgetExceededError(iterations) → budget_iterations', () => {
     const err = new BudgetExceededError('iterations', 10, 11);
     const out = classifySubagentError(err);

@@ -203,8 +203,8 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
 
   private tryDispatchNext(): void {
     while (this.canDispatch()) {
-      const subagentId = this.findIdleSubagent();
-      if (!subagentId) {
+      const dispatchable = this.takeNextDispatchableTask();
+      if (!dispatchable) {
         // No idle worker right now. If every spawned subagent is
         // stopped or mid-termination, the pending queue is dead —
         // a pending task can never start, so synthetic-complete it
@@ -219,8 +219,7 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
         }
         return;
       }
-      const task = this.pendingTasks.shift();
-      if (!task) return;
+      const { subagentId, task } = dispatchable;
       // Attach a catch so a synchronous throw inside runDispatched (rare —
       // e.g. provider misconfiguration before the first await) becomes a
       // visible failed task instead of an unhandled rejection that leaves
@@ -244,6 +243,21 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
     return this.inFlight < max && this.pendingTasks.length > 0;
   }
 
+  private takeNextDispatchableTask(): { subagentId: string; task: TaskSpec } | null {
+    for (let i = 0; i < this.pendingTasks.length; i++) {
+      const task = this.pendingTasks[i]!;
+      const subagentId = task.subagentId
+        ? this.isIdleSubagent(task.subagentId)
+          ? task.subagentId
+          : null
+        : this.findIdleSubagent();
+      if (!subagentId) continue;
+      this.pendingTasks.splice(i, 1);
+      return { subagentId, task };
+    }
+    return null;
+  }
+
   private findIdleSubagent(): string | null {
     for (const [id, s] of this.subagents) {
       // Skip subagents that are mid-termination — `stop()` set the
@@ -254,6 +268,11 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
       if (s.status === 'idle' && !this.terminating.has(id)) return id;
     }
     return null;
+  }
+
+  private isIdleSubagent(id: string): boolean {
+    const subagent = this.subagents.get(id);
+    return !!subagent && subagent.status === 'idle' && !this.terminating.has(id);
   }
 
   /**
@@ -545,11 +564,13 @@ export function classifySubagentError(
   const cause = err instanceof Error
     ? { name: err.name, message: err.message, stack: err.stack }
     : undefined;
-  const baseMessage = err instanceof Error ? err.message : String(err);
 
   if (err instanceof ProviderError) {
+    const baseMessage = err.describe();
     return providerErrorToSubagentError(err, baseMessage, cause);
   }
+
+  const baseMessage = err instanceof Error ? err.message : String(err);
 
   if (err instanceof BudgetExceededError) {
     const map: Record<BudgetExceededError['kind'], SubagentErrorKind> = {

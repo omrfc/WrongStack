@@ -14,6 +14,12 @@ export interface SlashCommand {
   aliases?: string[];
   description: string;
   /**
+   * Optional compact argument hint for interactive menus. This is not parsed
+   * by the registry; it only helps TUI/REPL surfaces show the expected shape,
+   * for example `[list|install <alias>|disable <name>]`.
+   */
+  argsHint?: string;
+  /**
    * Optional detailed help shown by `/help <name>`. Use this for usage,
    * arguments, examples, side-effects — anything that doesn't fit in
    * `description`. Renders verbatim, so format with line breaks.

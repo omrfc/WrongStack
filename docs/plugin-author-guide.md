@@ -92,7 +92,7 @@ capabilities: {
 }
 ```
 
-The loader uses this for diagnostics (`wstack plugins list` shows what
+The loader uses this for diagnostics (`wstack plugin list` shows what
 each plugin contributes) and for warning when a plugin calls
 `api.tools.register()` without declaring `tools: true` (L0-D check).
 Capabilities are advisory — they do not block at runtime — but lying is
@@ -119,9 +119,10 @@ with a clear error, and surfaces version mismatches before calling
 
 ## Config schema
 
-Plugin options come from `Config.plugins[<name>].options` (or
-`Config.extensions[<name>]` after L0-E). Declare a `configSchema` and the
-loader validates user input before calling `setup`:
+Plugin options come from either `plugins[].options` or
+`extensions[<name>]`. `extensions[<name>]` wins when both are present. Declare
+a `configSchema` and the loader validates the merged options before calling
+`setup`:
 
 ```ts
 configSchema: {

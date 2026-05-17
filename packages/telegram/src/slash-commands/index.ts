@@ -3,7 +3,7 @@ import type { TelegramBot } from '../bot.js';
 import type { TelegramPluginConfig } from '../config.js';
 
 // ---------------------------------------------------------------------------
-// /tg status
+// /telegram:status
 // ---------------------------------------------------------------------------
 
 export function tgStatusCommand(bot: TelegramBot, cfg: TelegramPluginConfig): SlashCommand {
@@ -11,7 +11,7 @@ export function tgStatusCommand(bot: TelegramBot, cfg: TelegramPluginConfig): Sl
     name: 'status',
     aliases: ['tgstat', 'tgs'],
     description: 'Show Telegram bot connection status and config',
-    help: `Usage: /tg status
+    help: `Usage: /telegram:status
 
 Shows whether the bot is connected, its username, polling interval,
 allowlist status, and notification settings.`,
@@ -34,7 +34,7 @@ allowlist status, and notification settings.`,
 }
 
 // ---------------------------------------------------------------------------
-// /tg send
+// /telegram:send
 // ---------------------------------------------------------------------------
 
 export function tgSendCommand(
@@ -44,18 +44,18 @@ export function tgSendCommand(
   return {
     name: 'send',
     description: 'Send a message to a Telegram chat',
-    help: `Usage: /tg send [chat_id] <message>
+    help: `Usage: /telegram:send [chat_id] <message>
 
 Send a message to a Telegram chat.
 - First argument (optional): chat or user ID. Uses notifyChatId from config when omitted.
 - Everything else: the message text.
 
 Examples:
-  /tg send 123456789 Build completed successfully ✓
-  /tg send Deploy finished — check staging`,
+  /telegram:send 123456789 Build completed successfully ✓
+  /telegram:send Deploy finished — check staging`,
     async run(args, _ctx) {
       if (!args.trim()) {
-        return { message: 'Usage: /tg send [chat_id] <message>' };
+        return { message: 'Usage: /telegram:send [chat_id] <message>' };
       }
 
       let chatId: string | number;
@@ -73,7 +73,7 @@ Examples:
       } else {
         return {
           message:
-            'No chat_id provided and no default notifyChatId configured.\nUsage: /tg send <chat_id> <message>',
+            'No chat_id provided and no default notifyChatId configured.\nUsage: /telegram:send <chat_id> <message>',
         };
       }
 
@@ -90,7 +90,7 @@ Examples:
 }
 
 // ---------------------------------------------------------------------------
-// /tg chatid
+// /telegram:chatid
 // ---------------------------------------------------------------------------
 
 export function tgChatIdCommand(defaultChatId?: string | number): SlashCommand {
@@ -98,7 +98,7 @@ export function tgChatIdCommand(defaultChatId?: string | number): SlashCommand {
   return {
     name: 'chatid',
     description: 'Show the configured default chat ID',
-    help: `Usage: /tg chatid
+    help: `Usage: /telegram:chatid
 
 Shows the current default notifyChatId used for notifications
 and the \`telegram_send\` tool when no chat_id is specified.`,

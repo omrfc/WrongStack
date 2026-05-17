@@ -16,7 +16,7 @@ describe('telegram config', () => {
   it('overrides defaults with user config', () => {
     const api = {
       config: {
-        plugins: {
+        extensions: {
           [PLUGIN_NAME]: {
             botToken: 'token123',
             notifyChatId: '999',
@@ -41,10 +41,71 @@ describe('telegram config', () => {
     expect(cfg.allowedChats).toEqual(['789']);
   });
 
-  it('partially overrides — missing fields stay at defaults', () => {
+  it('keeps legacy plugins.telegram options working', () => {
     const api = {
       config: {
         plugins: {
+          [PLUGIN_NAME]: {
+            botToken: 'legacy-token',
+            notifyChatId: '111',
+          },
+        },
+      },
+    };
+    const cfg = readTelegramConfig(api as Parameters<typeof readTelegramConfig>[0]);
+    expect(cfg.botToken).toBe('legacy-token');
+    expect(cfg.notifyChatId).toBe('111');
+  });
+
+  it('reads options from plugin object entries', () => {
+    const api = {
+      config: {
+        plugins: [
+          {
+            name: '@wrongstack/telegram',
+            options: {
+              botToken: 'entry-token',
+              notifyChatId: '222',
+              pollIntervalSec: 7,
+            },
+          },
+        ],
+      },
+    };
+    const cfg = readTelegramConfig(api as Parameters<typeof readTelegramConfig>[0]);
+    expect(cfg.botToken).toBe('entry-token');
+    expect(cfg.notifyChatId).toBe('222');
+    expect(cfg.pollIntervalSec).toBe(7);
+  });
+
+  it('lets extensions override plugin object options', () => {
+    const api = {
+      config: {
+        plugins: [
+          {
+            name: '@wrongstack/telegram',
+            options: {
+              botToken: 'entry-token',
+              notifyChatId: '222',
+            },
+          },
+        ],
+        extensions: {
+          [PLUGIN_NAME]: {
+            notifyChatId: '333',
+          },
+        },
+      },
+    };
+    const cfg = readTelegramConfig(api as Parameters<typeof readTelegramConfig>[0]);
+    expect(cfg.botToken).toBe('entry-token');
+    expect(cfg.notifyChatId).toBe('333');
+  });
+
+  it('partially overrides — missing fields stay at defaults', () => {
+    const api = {
+      config: {
+        extensions: {
           [PLUGIN_NAME]: {
             botToken: 'token456',
           },

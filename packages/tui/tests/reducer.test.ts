@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { reducer } from '../src/app.js';
+import { reducer, selectedSlashCommandLine } from '../src/app.js';
 
 function initial() {
   return {
@@ -64,14 +64,18 @@ describe('TUI reducer', () => {
 
   it('setBuffer + clearInput reset cursor and placeholders', () => {
     let s = initial();
+    s = reducer(s, { type: 'historyPush', text: 'older message' });
+    s = reducer(s, { type: 'historyUp' });
     s = reducer(s, { type: 'setBuffer', buffer: 'hello', cursor: 5 });
     s = reducer(s, { type: 'addPlaceholder', ph: '[pasted #1] (3 lines)' });
     expect(s.buffer).toBe('hello');
     expect(s.placeholders).toHaveLength(1);
+    expect(s.historyIndex).toBe(1);
     s = reducer(s, { type: 'clearInput' });
     expect(s.buffer).toBe('');
     expect(s.cursor).toBe(0);
     expect(s.placeholders).toEqual([]);
+    expect(s.historyIndex).toBe(0);
     expect(s.picker.open).toBe(false);
   });
 
@@ -251,5 +255,25 @@ describe('TUI reducer', () => {
     const before = s;
     s = reducer(s, { type: 'queueDelete', positions: [99, 0, -5] });
     expect(s).toBe(before);
+  });
+});
+
+describe('selectedSlashCommandLine', () => {
+  it('returns the selected command line for Enter dispatch', () => {
+    expect(
+      selectedSlashCommandLine({
+        open: true,
+        selected: 1,
+        matches: [
+          { name: 'help', description: 'Help', isBuiltin: true },
+          { name: 'init', description: 'Init', isBuiltin: true },
+        ],
+      }),
+    ).toBe('/init');
+  });
+
+  it('returns null when the slash picker has nothing to dispatch', () => {
+    expect(selectedSlashCommandLine({ open: false, selected: 0, matches: [] })).toBeNull();
+    expect(selectedSlashCommandLine({ open: true, selected: 0, matches: [] })).toBeNull();
   });
 });

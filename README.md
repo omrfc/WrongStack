@@ -972,7 +972,35 @@ The project tree stays clean — sessions, trust rules, logs, and caches never p
 
 ## Extending with plugins
 
-Drop a plugin in `config.plugins`:
+Manage plugins from the CLI:
+
+```bash
+wstack plugin list
+wstack plugin status
+wstack plugin official
+wstack plugin install telegram
+wstack plugin add @wrongstack/telegram
+wstack plugin disable @wrongstack/telegram
+wstack plugin enable @wrongstack/telegram
+wstack plugin remove @wrongstack/telegram
+```
+
+Inside REPL/TUI, use the same flow from the slash menu:
+
+```text
+/plugin official
+/plugin install telegram
+/plugin disable telegram
+/plugin enable telegram
+```
+
+`telegram` and `lsp` are bundled official aliases for
+`@wrongstack/telegram` and `@wrongstack/plug-lsp`. Config changes are written
+immediately; restart WrongStack to load or unload plugin code in the current
+session. Official plugin `install` adds the bundled package to config; it does
+not run npm.
+
+Or edit `config.plugins` manually:
 
 ```jsonc
 // ~/.wrongstack/config.json
@@ -980,11 +1008,17 @@ Drop a plugin in `config.plugins`:
   "version": 1,
   "provider": "anthropic",
   "model": "claude-opus-4-7",
-  "plugins": ["@yourorg/wrongstack-plug-typecheck"]
+  "features": { "plugins": true },
+  "plugins": ["@yourorg/wrongstack-plug-typecheck"],
+  "extensions": {
+    "your-plugin-name": {
+      "option": "value"
+    }
+  }
 }
 ```
 
-A plugin declares `apiVersion: "^1.0"` and gets the full `PluginAPI`: container, pipelines, events, tool/provider/MCP registries, config, logger. See `packages/core/src/plugin/` for the contract. Optional dependencies (`optionalDeps`) are silently skipped if not loaded; required ones (`dependsOn`) throw at boot.
+A plugin declares `apiVersion: "^1.0"` and gets the full `PluginAPI`: container, pipelines, events, tool/provider/MCP registries, config, logger. See `packages/core/src/plugin/` for the contract. Optional dependencies (`optionalDeps`) are silently skipped if not loaded; required ones (`dependsOn`) throw at boot. See [Plugin Management](docs/plugin-management.md) for slash/CLI enable-disable-install workflows and config layout.
 
 ## Packages
 
@@ -998,6 +1032,7 @@ A plugin declares `apiVersion: "^1.0"` and gets the full `PluginAPI`: container,
 | `@wrongstack/cli` | REPL, subcommands, slash commands, terminal renderer | [packages/cli](packages/cli/README.md) |
 | `@wrongstack/tui` | Ink-based TUI (paste collapse, @-picker, image paste) — lazy-loaded behind `--tui` | [packages/tui](packages/tui/README.md) |
 | `@wrongstack/plug-lsp` | LSP plugin: exposes language server protocol tools (`wrongstack-lsp-setup` binary) | [packages/plug-lsp](packages/plug-lsp/README.md) |
+| `@wrongstack/telegram` | Telegram plugin: send/read Telegram messages, notifications, and `/telegram:*` slash commands | [packages/telegram](packages/telegram/README.md) |
 | `@wrongstack/webui` | Standalone web UI (React + Radix + Tailwind frontend, `ws`-backed Node backend reusing the CLI's boot path) — `webui` binary, also reachable via `wrongstack --webui` | — |
 
 ## Architecture
@@ -1064,6 +1099,7 @@ plug in — see [`docs/architecture.md`](docs/architecture.md).
 | [`docs/architecture.md`](docs/architecture.md) | Package layout, the kernel primitives (Container/Pipeline/EventBus/RunController), the agent lifecycle, the L1-A reactive split |
 | [`docs/director-architecture.md`](docs/director-architecture.md) | Director orchestration: FleetBus, prompt layering, safety caps, per-subagent JSONL, shared scratchpad |
 | [`docs/plugin-author-guide.md`](docs/plugin-author-guide.md) | Building a plugin end-to-end: capabilities, dependencies, configSchema, teardown contract, testing |
+| [`docs/plugin-management.md`](docs/plugin-management.md) | User-facing plugin workflows: list/add/remove/enable/disable and config layout |
 | [`docs/provider-author-guide.md`](docs/provider-author-guide.md) | Adding an LLM provider declaratively via `WireFormatConfig`, stream-state design, vendor quirks |
 | [`docs/tool-author-guide.md`](docs/tool-author-guide.md) | Writing a tool: streaming `executeStream`, permission semantics, `cleanup` vs `registerAbortHook`, the mtime contract |
 

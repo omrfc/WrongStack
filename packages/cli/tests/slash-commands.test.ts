@@ -615,6 +615,58 @@ describe('built-in slash commands', () => {
     });
   });
 
+  describe('/plugin command', () => {
+    function makePluginRig(onPlugin?: SlashCommandContext['onPlugin']) {
+      const registry = new SlashCommandRegistry();
+      const toolRegistry = new ToolRegistry();
+      const renderer = new FakeRenderer();
+      const tokenCounter = new DefaultTokenCounter();
+      const compactor = new HybridCompactor({ preserveK: 5 });
+      const cmds = buildBuiltinSlashCommands({
+        registry,
+        toolRegistry,
+        compactor,
+        tokenCounter,
+        renderer: renderer as unknown as Parameters<
+          typeof buildBuiltinSlashCommands
+        >[0]['renderer'],
+        onPlugin,
+      });
+      for (const c of cmds) registry.register(c);
+      return { registry };
+    }
+
+    it('/plugin without handler reports unavailable', async () => {
+      const { registry } = makePluginRig(undefined);
+      const r = await registry.dispatch('/plugin', fakeCtx);
+      expect(r?.message).toContain('not available');
+    });
+
+    it('/plugin forwards arguments to plugin manager', async () => {
+      const onPlugin = vi.fn(async () => 'installed');
+      const { registry } = makePluginRig(onPlugin);
+      const r = await registry.dispatch('/plugin install telegram', fakeCtx);
+      expect(onPlugin).toHaveBeenCalledWith('install telegram');
+      expect(r?.message).toBe('installed');
+    });
+
+    it('/plugins alias forwards arguments too', async () => {
+      const onPlugin = vi.fn(async () => 'disabled');
+      const { registry } = makePluginRig(onPlugin);
+      const r = await registry.dispatch('/plugins disable lsp', fakeCtx);
+      expect(onPlugin).toHaveBeenCalledWith('disable lsp');
+      expect(r?.message).toBe('disabled');
+    });
+
+    it('/help plugin shows usage instructions', async () => {
+      const { registry } = makePluginRig(async () => 'ok');
+      const r = await registry.dispatch('/help plugin', fakeCtx);
+      expect(r?.message).toContain('/plugin');
+      expect(r?.message).toContain('/plugin official');
+      expect(r?.message).toContain('/plugin install');
+    });
+  });
+
   describe('/director runtime promotion', () => {
     function makeDirectorRig(onDirector?: SlashCommandContext['onDirector']) {
       const registry = new SlashCommandRegistry();
@@ -651,7 +703,9 @@ describe('built-in slash commands', () => {
     });
 
     it('/director when promotion succeeds returns the success message', async () => {
-      const { registry } = makeDirectorRig(async () => '✓ Promoted.\n  Roster: bug-hunter, security-scanner');
+      const { registry } = makeDirectorRig(
+        async () => '✓ Promoted.\n  Roster: bug-hunter, security-scanner',
+      );
       const r = await registry.dispatch('/director', fakeCtx);
       expect(r?.message).toContain('✓ Promoted');
       expect(r?.message).toContain('bug-hunter');

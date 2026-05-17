@@ -50,6 +50,7 @@ export const subcommands: Record<string, SubcommandHandler> = {
   models: modelsCmd,
   mcp: mcpCmd,
   plugin: pluginCmd,
+  plugins: pluginCmd,
   diag: diagCmd,
   doctor: doctorCmd,
   export: exportCmd,

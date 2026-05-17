@@ -8,7 +8,7 @@ Send messages, receive instructions, get notified when long tasks finish.
 - **`telegram_read`** — Agent reads incoming Telegram messages (newest first, filtered by chat, with ack support)
 - **`telegram_send`** — Agent sends messages via Telegram (HTML formatting, confirm permission)
 - **System prompt injection** — Unread messages appear in the agent's system prompt so it sees them naturally
-- **Slash commands** — `/tg status`, `/tg send`, `/tg chatid` in the TUI
+- **Slash commands** — `/telegram:status`, `/telegram:send`, `/telegram:chatid` in the TUI
 - **Event notifications** — Session end summaries and long tool completions forwarded to Telegram
 - **Allowlist filtering** — Restrict which users/chats can interact with the bot
 - **Zero dependencies** — Uses Node.js native `fetch`, no third-party Telegram libraries
@@ -33,13 +33,31 @@ https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates
 
 Find your `chat.id` in the response.
 
-### 3. Configure
+### 3. Enable the plugin
+
+```bash
+wstack plugin add @wrongstack/telegram
+```
+
+In a monorepo checkout, the package is already part of the workspace under
+`packages/telegram`. In an installed project, install it first if your package
+manager has not already pulled it in:
+
+```bash
+pnpm add @wrongstack/telegram
+```
+
+### 4. Configure
 
 In `~/.wrongstack/config.json` or `.wrongstack/config.json`:
 
 ```jsonc
 {
-  "plugins": {
+  "features": {
+    "plugins": true
+  },
+  "plugins": ["@wrongstack/telegram"],
+  "extensions": {
     "telegram": {
       "botToken": "123456789:ABCdefGHIjkl...",
       "notifyChatId": "987654321",
@@ -52,13 +70,13 @@ In `~/.wrongstack/config.json` or `.wrongstack/config.json`:
 }
 ```
 
-### 4. Install
+The `plugins` array controls loading. `extensions.telegram` stores this
+plugin's options.
 
-```bash
-pnpm add @wrongstack/telegram
-```
-
-The plugin loads automatically on next WrongStack start.
+The plugin loads on the next WrongStack start. Use
+`wstack plugin disable @wrongstack/telegram` and
+`wstack plugin enable @wrongstack/telegram` to turn it off/on without deleting
+the Telegram options.
 
 ## Configuration reference
 
@@ -112,9 +130,9 @@ Message text supports Telegram HTML: `<b>bold</b>`, `<i>italic</i>`, `<code>mono
 
 | Command | Description |
 |---|---|
-| `/tg status` | Bot connection health, polling config, allowlist stats, notification settings |
-| `/tg send [chat_id] <msg>` | Send a message from the terminal |
-| `/tg chatid` | Show the configured default chat ID |
+| `/telegram:status` | Bot connection health, polling config, allowlist stats, notification settings |
+| `/telegram:send [chat_id] <msg>` | Send a message from the terminal |
+| `/telegram:chatid` | Show the configured default chat ID |
 
 ## How it works
 

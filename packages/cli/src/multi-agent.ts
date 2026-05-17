@@ -291,7 +291,7 @@ export class MultiAgentHost {
 
       let subSession: SessionWriter;
       if (this.sessionFactory) {
-        const subagentName = subCfg.name ?? subCfg.id ?? `sub_${randomUUID().slice(0, 8)}`;
+        const subagentName = subCfg.id ?? subCfg.name ?? `sub_${randomUUID().slice(0, 8)}`;
         subSession = await this.sessionFactory.createSubagentSession({
           subagentId: subagentName,
           provider: subCfg.provider ?? config.provider,

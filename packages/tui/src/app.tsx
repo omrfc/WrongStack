@@ -12,16 +12,16 @@ import type {
   TokenCounter,
 } from '@wrongstack/core';
 import { InputBuilder, formatTodosList } from '@wrongstack/core';
-import { routeImagesForModel, type VisionAdapters } from '@wrongstack/runtime/vision';
+import { type VisionAdapters, routeImagesForModel } from '@wrongstack/runtime/vision';
 import { Box, useApp } from 'ink';
 import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { readClipboardImage } from './clipboard.js';
 import { ConfirmPrompt } from './components/confirm-prompt.js';
 import { FilePicker } from './components/file-picker.js';
 import { FleetPanel } from './components/fleet-panel.js';
-import { LiveActivityStrip } from './components/live-activity-strip.js';
 import { History, type HistoryEntry } from './components/history.js';
 import { Input, type KeyEvent } from './components/input.js';
+import { LiveActivityStrip } from './components/live-activity-strip.js';
 import { ModelPicker, type ProviderOption } from './components/model-picker.js';
 import { SlashMenu } from './components/slash-menu.js';
 import { StatusBar } from './components/status-bar.js';
@@ -80,6 +80,16 @@ export interface SlashCommandMatch {
   description: string;
   argsHint?: string;
   isBuiltin: boolean;
+}
+
+export function selectedSlashCommandLine(picker: {
+  open: boolean;
+  matches: SlashCommandMatch[];
+  selected: number;
+}): string | null {
+  if (!picker.open || picker.matches.length === 0) return null;
+  const picked = picker.matches[picker.selected];
+  return picked ? `/${picked.name}` : null;
 }
 
 export interface AppProps {
@@ -364,6 +374,7 @@ export function reducer(state: State, action: Action): State {
         buffer: '',
         cursor: 0,
         placeholders: [],
+        historyIndex: 0,
         picker: { open: false, query: '', matches: [], selected: 0 },
         slashPicker: { open: false, query: '', matches: [], selected: 0 },
       };
@@ -1070,6 +1081,18 @@ export function App({
   // closures) read this instead of capturing `state` to avoid stale closures.
   const stateRef = useRef<State>(state);
   stateRef.current = state;
+  const draftRef = useRef({ buffer: state.buffer, cursor: state.cursor });
+  draftRef.current = { buffer: state.buffer, cursor: state.cursor };
+
+  const setDraft = (buffer: string, cursor: number): void => {
+    draftRef.current = { buffer, cursor };
+    dispatch({ type: 'setBuffer', buffer, cursor });
+  };
+
+  const clearDraft = (): void => {
+    draftRef.current = { buffer: '', cursor: 0 };
+    dispatch({ type: 'clearInput' });
+  };
 
   // Session-elapsed clock. Mount time is fixed; we re-render once per
   // second to refresh the "⏱ 12:34" chip. The interval is cheap — one
@@ -1352,9 +1375,9 @@ export function App({
     }
     // Once any whitespace appears after the leading '/', the user has moved
     // past the command name into argument territory (e.g. `/model glm-5.1`).
-    // Keeping the picker open here is actively harmful: Enter would route to
-    // acceptSlashPickerSelection() and overwrite the typed args with just
-    // `/<cmd> `. Close the picker so Enter submits the full line.
+    // Keeping the picker open here is actively harmful: arrow keys would
+    // still target the command menu even though the user is typing args.
+    // Close it so Enter submits the full line.
     if (/\s/.test(trimmed)) {
       if (state.slashPicker.open) dispatch({ type: 'slashPickerClose' });
       return;
@@ -1371,7 +1394,7 @@ export function App({
       .map(({ cmd, owner }) => ({
         name: cmd.name,
         description: cmd.description,
-        argsHint: undefined as string | undefined,
+        argsHint: cmd.argsHint,
         isBuiltin: owner === 'core',
       }));
 
@@ -1418,7 +1441,8 @@ export function App({
     if (!builder) return;
 
     // Find the @-token span we're replacing.
-    const tok = detectAtToken(state.buffer, state.cursor);
+    const draft = draftRef.current;
+    const tok = detectAtToken(draft.buffer, draft.cursor);
     if (!tok) {
       dispatch({ type: 'pickerClose' });
       return;
@@ -1435,14 +1459,10 @@ export function App({
         data,
         meta: { filename: picked, label: picked },
       });
-      const before = state.buffer.slice(0, tok.start);
-      const after = state.buffer.slice(tok.end);
+      const before = draft.buffer.slice(0, tok.start);
+      const after = draft.buffer.slice(tok.end);
       const next = `${before}${placeholder}${after}`;
-      dispatch({
-        type: 'setBuffer',
-        buffer: next,
-        cursor: tok.start + placeholder.length,
-      });
+      setDraft(next, tok.start + placeholder.length);
       dispatch({ type: 'pickerClose' });
     } catch (err) {
       dispatch({
@@ -1463,7 +1483,7 @@ export function App({
     const picked = matches[selected];
     if (!picked) return;
     const cmd = picked.argsHint !== undefined ? `/${picked.name} ` : `/${picked.name}`;
-    dispatch({ type: 'setBuffer', buffer: cmd, cursor: cmd.length });
+    setDraft(cmd, cmd.length);
     dispatch({ type: 'slashPickerClose' });
   };
 
@@ -2216,13 +2236,14 @@ export function App({
   // so a wedged Ink loop can't trap the user.
   useEffect(() => {
     const onSigint = () => {
+      const current = stateRef.current;
       // Second (or later) Ctrl+C — exit no matter what. Status may be
       // 'aborting', 'running', or 'streaming'; the user has clearly
       // decided they want out. Try Ink's graceful exit first, then
       // hard-exit on a short timer in case the React tree is wedged.
-      if (state.interrupts >= 1) {
+      if (current.interrupts >= 1) {
         // Third press = hard kill, no waiting.
-        if (state.interrupts >= 2) {
+        if (current.interrupts >= 2) {
           process.exit(130);
         }
         try {
@@ -2250,7 +2271,7 @@ export function App({
       // restores the previous state cleanly with no side-effects.
       // Do this first so a single Ctrl+C from the model picker or
       // slash picker exits gracefully instead of doing nothing.
-      if (state.modelPicker.open) {
+      if (current.modelPicker.open) {
         dispatch({ type: 'modelPickerClose' });
         dispatch({
           type: 'addEntry',
@@ -2258,7 +2279,7 @@ export function App({
         });
         return;
       }
-      if (state.slashPicker.open) {
+      if (current.slashPicker.open) {
         dispatch({ type: 'slashPickerClose' });
         dispatch({
           type: 'addEntry',
@@ -2317,7 +2338,7 @@ export function App({
     return () => {
       process.off('SIGINT', onSigint);
     };
-  }, [state.interrupts, exit, onExit, director]);
+  }, [exit, onExit, director]);
 
   const handleKey = async (input: string, key: KeyEvent) => {
     // Note: we no longer block input while the agent is running. Enter
@@ -2412,8 +2433,16 @@ export function App({
         return;
       }
       if (isEnter) {
+        const now = Date.now();
+        if (now - lastEnterAtRef.current < 50) return;
+        lastEnterAtRef.current = now;
         inputGateRef.current = true;
-        acceptSlashPickerSelection();
+        const line = selectedSlashCommandLine(state.slashPicker);
+        if (line) {
+          void submit(line);
+        } else {
+          acceptSlashPickerSelection();
+        }
         inputGateRef.current = false;
         return;
       }
@@ -2421,7 +2450,7 @@ export function App({
       if (key.tab && state.slashPicker.matches.length > 0) {
         const sel = state.slashPicker.matches[state.slashPicker.selected];
         if (sel) {
-          dispatch({ type: 'setBuffer', buffer: `/${sel.name} `, cursor: sel.name.length + 2 });
+          setDraft(`/${sel.name} `, sel.name.length + 2);
           dispatch({ type: 'slashPickerClose' });
         }
         return;
@@ -2544,65 +2573,62 @@ export function App({
       return;
     }
 
+    const { buffer, cursor } = draftRef.current;
+
     if (key.backspace || key.delete) {
       if (key.ctrl) {
-        const { cursor, buffer } = state;
         if (key.backspace) {
           if (cursor === 0) return;
           const beforeCursor = buffer.slice(0, cursor);
           const lastWordStart = beforeCursor.lastIndexOf(' ') + 1;
           const next = buffer.slice(0, lastWordStart) + buffer.slice(cursor);
-          dispatch({ type: 'setBuffer', buffer: next, cursor: lastWordStart });
+          setDraft(next, lastWordStart);
         } else {
           if (cursor >= buffer.length) return;
           const afterCursor = buffer.slice(cursor);
           const nextWordStart = afterCursor.indexOf(' ');
           const end = nextWordStart === -1 ? buffer.length : cursor + nextWordStart + 1;
           const next = buffer.slice(0, cursor) + buffer.slice(end);
-          dispatch({ type: 'setBuffer', buffer: next, cursor });
+          setDraft(next, cursor);
         }
         return;
       }
-      if (state.cursor === 0) return;
-      const next = state.buffer.slice(0, state.cursor - 1) + state.buffer.slice(state.cursor);
-      dispatch({ type: 'setBuffer', buffer: next, cursor: state.cursor - 1 });
+      if (cursor === 0) return;
+      const next = buffer.slice(0, cursor - 1) + buffer.slice(cursor);
+      setDraft(next, cursor - 1);
       return;
     }
 
     if (key.leftArrow) {
       if (key.ctrl) {
-        const { cursor, buffer } = state;
         if (cursor === 0) return;
         const beforeCursor = buffer.slice(0, cursor);
         const prevWordStart = beforeCursor.lastIndexOf(' ');
         const target = prevWordStart === -1 ? 0 : prevWordStart + 1;
-        dispatch({ type: 'setBuffer', buffer, cursor: target });
+        setDraft(buffer, target);
         return;
       }
-      if (state.cursor > 0)
-        dispatch({ type: 'setBuffer', buffer: state.buffer, cursor: state.cursor - 1 });
+      if (cursor > 0) setDraft(buffer, cursor - 1);
       return;
     }
     if (key.rightArrow) {
       if (key.ctrl) {
-        const { cursor, buffer } = state;
         if (cursor >= buffer.length) return;
         const afterCursor = buffer.slice(cursor);
         const nextWordStart = afterCursor.indexOf(' ');
         const target = nextWordStart === -1 ? buffer.length : cursor + nextWordStart + 1;
-        dispatch({ type: 'setBuffer', buffer, cursor: target });
+        setDraft(buffer, target);
         return;
       }
-      if (state.cursor < state.buffer.length)
-        dispatch({ type: 'setBuffer', buffer: state.buffer, cursor: state.cursor + 1 });
+      if (cursor < buffer.length) setDraft(buffer, cursor + 1);
       return;
     }
     if (key.home) {
-      dispatch({ type: 'setBuffer', buffer: state.buffer, cursor: 0 });
+      setDraft(buffer, 0);
       return;
     }
     if (key.end) {
-      dispatch({ type: 'setBuffer', buffer: state.buffer, cursor: state.buffer.length });
+      setDraft(buffer, buffer.length);
       return;
     }
 
@@ -2618,25 +2644,24 @@ export function App({
       return;
     }
     if (key.ctrl && input === 'a') {
-      dispatch({ type: 'setBuffer', buffer: state.buffer, cursor: 0 });
+      setDraft(buffer, 0);
       return;
     }
     if (key.ctrl && input === 'e') {
-      dispatch({ type: 'setBuffer', buffer: state.buffer, cursor: state.buffer.length });
+      setDraft(buffer, buffer.length);
       return;
     }
     if (key.ctrl && input === 'u') {
-      dispatch({ type: 'setBuffer', buffer: '', cursor: 0 });
+      setDraft('', 0);
       return;
     }
     if (key.ctrl && input === 'w') {
       // Ctrl+W → delete word before cursor (same as Ctrl+Backspace).
-      const { cursor, buffer } = state;
       if (cursor === 0) return;
       const beforeCursor = buffer.slice(0, cursor);
       const lastWordStart = beforeCursor.lastIndexOf(' ') + 1;
       const next = buffer.slice(0, lastWordStart) + buffer.slice(cursor);
-      dispatch({ type: 'setBuffer', buffer: next, cursor: lastWordStart });
+      setDraft(next, lastWordStart);
       return;
     }
 
@@ -2668,16 +2693,14 @@ export function App({
         const lineCount = cleanInput.split('\n').length;
         dispatch({ type: 'addPlaceholder', ph: `${ph} (${lineCount} lines)` });
       } else {
-        const next =
-          state.buffer.slice(0, state.cursor) + cleanInput + state.buffer.slice(state.cursor);
-        dispatch({ type: 'setBuffer', buffer: next, cursor: state.cursor + cleanInput.length });
+        const next = buffer.slice(0, cursor) + cleanInput + buffer.slice(cursor);
+        setDraft(next, cursor + cleanInput.length);
       }
       return;
     }
 
-    const next =
-      state.buffer.slice(0, state.cursor) + cleanInput + state.buffer.slice(state.cursor);
-    dispatch({ type: 'setBuffer', buffer: next, cursor: state.cursor + cleanInput.length });
+    const next = buffer.slice(0, cursor) + cleanInput + buffer.slice(cursor);
+    setDraft(next, cursor + cleanInput.length);
   };
 
   /**
@@ -2785,16 +2808,19 @@ export function App({
   const runBlocksRef = useRef(runBlocks);
   runBlocksRef.current = runBlocks;
 
-  const submit = async () => {
-    const raw = state.buffer;
+  const submit = async (overrideRaw?: string) => {
+    const raw = overrideRaw ?? draftRef.current.buffer;
     const trimmed = raw.trim();
     if (!trimmed && state.placeholders.length === 0) return;
 
     dispatch({ type: 'resetInterrupts' });
+    const pushSubmittedHistory = () => {
+      if (trimmed) dispatch({ type: 'historyPush', text: trimmed });
+    };
     if (trimmed === '/image' || trimmed === '/paste-image') {
-      dispatch({ type: 'clearInput' });
+      pushSubmittedHistory();
+      clearDraft();
       await pasteClipboardImage();
-      if (state.historyIndex > 0) dispatch({ type: 'historyPush', text: trimmed });
       return;
     }
 
@@ -2802,8 +2828,8 @@ export function App({
     // they don't conflict with a running agent.
     if (trimmed.startsWith('/')) {
       dispatch({ type: 'addEntry', entry: { kind: 'user', text: trimmed } });
-      if (state.historyIndex > 0) dispatch({ type: 'historyPush', text: trimmed });
-      dispatch({ type: 'clearInput' });
+      pushSubmittedHistory();
+      clearDraft();
       try {
         const res = await slashRegistry.dispatch(trimmed, agent.ctx);
         if (res?.message) {
@@ -2875,12 +2901,13 @@ export function App({
       builder.appendText(toAppend);
     }
     if (steering) dispatch({ type: 'steerConsume' });
-    const blocks = await builder.submit();
     // The user sees their original text + a visual ↯ marker when
     // steering, not the full preamble — keeps the chat readable while
     // the model still gets the explicit instruction.
     const displayText = trimmed ? (steering ? `↯ ${trimmed}` : trimmed) : '(attachments only)';
-    dispatch({ type: 'clearInput' });
+    pushSubmittedHistory();
+    clearDraft();
+    const blocks = await builder.submit();
 
     if (state.status !== 'idle') {
       // Agent is busy — queue this message for the drainer to pick up.
@@ -2889,12 +2916,10 @@ export function App({
         entry: { kind: 'user', text: displayText, queued: true },
       });
       dispatch({ type: 'enqueue', item: { displayText, blocks } });
-      if (state.historyIndex > 0) dispatch({ type: 'historyPush', text: trimmed });
       return;
     }
 
     dispatch({ type: 'addEntry', entry: { kind: 'user', text: displayText } });
-    if (state.historyIndex > 0) dispatch({ type: 'historyPush', text: trimmed });
     await runBlocks(blocks);
   };
 

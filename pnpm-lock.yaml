@@ -50,6 +50,9 @@ importers:
       '@wrongstack/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@wrongstack/telegram':
+        specifier: workspace:*
+        version: link:../telegram
       '@wrongstack/tools':
         specifier: workspace:*
         version: link:../tools

@@ -29,6 +29,12 @@ wstack doctor                 # config/key/MCP/Node health check
 wstack export <session-id>    # render a session as markdown/JSON/plain text
 wstack mcp add <preset>       # add an MCP server (see @wrongstack/mcp)
 wstack mcp list               # show configured MCP servers
+wstack plugin status          # show configured plugin enablement
+wstack plugin official        # list bundled plugin aliases
+wstack plugin install telegram # add the official Telegram plugin
+wstack plugin add @wrongstack/telegram      # enable a plugin
+wstack plugin disable @wrongstack/telegram  # keep config but skip loading
+wstack plugin remove @wrongstack/telegram   # remove from config.plugins
 ```
 
 `--no-tui` forces REPL mode even when `--tui` is configured globally. The TUI uses Ink's alt-screen buffer by default so it can capture every keystroke (Ctrl+S/Q/Z/\\ included) and avoid live-region leaks into scrollback; pass `--no-alt-screen` if you specifically want completed chat to survive after exit.

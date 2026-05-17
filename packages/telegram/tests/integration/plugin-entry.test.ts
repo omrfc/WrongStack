@@ -27,7 +27,7 @@ const log: Logger = {
  * - tools registry
  * - slashCommands registry
  * - events bus
- * - config with plugins.telegram section
+ * - config with extensions.telegram section
  */
 function makeApi(): PluginAPI {
   const tools = new Map<string, Tool>();
@@ -100,7 +100,8 @@ function makeApi(): PluginAPI {
     config: {
       version: 1,
       cwd: process.cwd(),
-      plugins: {
+      plugins: ['@wrongstack/telegram'],
+      extensions: {
         [PLUGIN_NAME]: {
           botToken: 'test:t0k3n',
           notifyChatId: '999',
@@ -110,7 +111,6 @@ function makeApi(): PluginAPI {
           longToolThresholdMs: 0,
         },
       },
-      extensions: {},
     },
     log,
   } as unknown as PluginAPI;
@@ -208,7 +208,7 @@ describe('plugin entry', () => {
 
     // Use a very short poll interval so we don't wait long
     const api2 = makeApi();
-    (api2.config as Record<string, unknown>).plugins = {
+    (api2.config as Record<string, unknown>).extensions = {
       [PLUGIN_NAME]: {
         botToken: 'test:t0k3n',
         allowedUsers: [],

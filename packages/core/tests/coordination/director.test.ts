@@ -314,6 +314,25 @@ describe('Director orchestration', () => {
     expect(res.error).toMatch(/unknown role "nope"/);
   });
 
+  it('spawn_subagent can instantiate the same roster role repeatedly', async () => {
+    const { director: d } = buildDirector();
+    director = d;
+    const [spawn] = d.tools({
+      researcher: { id: 'researcher', name: 'Researcher', provider: 'anthropic', model: 'haiku' },
+    });
+
+    const first = (await spawn.execute({ role: 'researcher' }, null as never, {
+      signal: new AbortController().signal,
+    })) as { subagentId: string };
+    const second = (await spawn.execute({ role: 'researcher' }, null as never, {
+      signal: new AbortController().signal,
+    })) as { subagentId: string };
+
+    expect(first.subagentId).toMatch(/^researcher-/);
+    expect(second.subagentId).toMatch(/^researcher-/);
+    expect(second.subagentId).not.toBe(first.subagentId);
+  });
+
   it('FleetBus subscribe + filter routes events to the right handlers', async () => {
     const { director: d } = buildDirector();
     director = d;

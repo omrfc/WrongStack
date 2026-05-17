@@ -73,12 +73,34 @@ export const telegramConfigSchema = {
 export function readTelegramConfig(
   api: Pick<PluginAPI, 'config'>,
 ): Required<Omit<TelegramPluginConfig, 'notifyChatId'>> & Pick<TelegramPluginConfig, 'notifyChatId'> {
-  const raw = (api.config as unknown as Record<string, unknown>).plugins as
-    | Record<string, unknown>
-    | undefined;
-  const opts = (raw?.[PLUGIN_NAME] ?? {}) as TelegramPluginConfig;
+  const config = api.config as unknown as Record<string, unknown>;
+  const extensions = config.extensions as Record<string, unknown> | undefined;
+  const pluginEntries = config.plugins;
+  const legacyPlugins = pluginEntries as Record<string, unknown> | undefined;
+  const legacyOpts =
+    legacyPlugins && !Array.isArray(legacyPlugins) ? legacyPlugins[PLUGIN_NAME] : undefined;
+  const entryOpts = pluginOptionsFromEntries(pluginEntries);
+  const opts = {
+    ...((legacyOpts ?? entryOpts) as TelegramPluginConfig),
+    ...((extensions?.[PLUGIN_NAME] ?? {}) as TelegramPluginConfig),
+  };
   return {
     ...DEFAULT_CONFIG,
     ...opts,
   };
+}
+
+function pluginOptionsFromEntries(entries: unknown): TelegramPluginConfig | undefined {
+  if (!Array.isArray(entries)) return undefined;
+  const found = entries.find(
+    (entry) =>
+      typeof entry === 'object' &&
+      entry !== null &&
+      'name' in entry &&
+      ((entry as { name?: unknown }).name === '@wrongstack/telegram' ||
+        (entry as { name?: unknown }).name === PLUGIN_NAME),
+  ) as { name?: unknown; options?: unknown } | undefined;
+  return found?.options && typeof found.options === 'object'
+    ? (found.options as TelegramPluginConfig)
+    : undefined;
 }
