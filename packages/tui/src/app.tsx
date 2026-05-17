@@ -240,14 +240,14 @@ type State = {
     pickedProviderId?: string;
     hint?: string;
   };
-  /** Pending tool confirmation — shown in place of the input when active. */
-  confirm: {
+  /** Pending tool confirmations — queue to handle multiple tools requesting confirmation. */
+  confirmQueue: {
     toolUseId: string;
     toolName: string;
     input: unknown;
     suggestedPattern: string;
     resolve: (decision: 'yes' | 'no' | 'always' | 'deny') => void;
-  } | null;
+  }[];
   /** Incremented on /clear so the context chip re-reads from agent.ctx tokens. */
   contextChipVersion: number;
   /** Live fleet state: per-subagent entries from FleetBus events. Keyed by subagentId. */
@@ -307,7 +307,7 @@ type Action =
   | { type: 'historyPush'; text: string }
   | { type: 'historyUp' }
   | { type: 'historyDown' }
-  | { type: 'confirmOpen'; info: State['confirm'] }
+  | { type: 'confirmOpen'; info: State['confirmQueue'][0] }
   | { type: 'confirmClose' }
   | { type: 'resetContextChip' }
   // Fleet actions
@@ -609,9 +609,9 @@ export function reducer(state: State, action: Action): State {
         modelPicker: { ...state.modelPicker, hint: action.text },
       };
     case 'confirmOpen':
-      return { ...state, confirm: action.info };
+      return { ...state, confirmQueue: [...state.confirmQueue, action.info] };
     case 'confirmClose':
-      return { ...state, confirm: null };
+      return { ...state, confirmQueue: state.confirmQueue.slice(1) };
     case 'resetContextChip':
       return { ...state, contextChipVersion: state.contextChipVersion + 1 };
     // --- Fleet ---
@@ -1029,7 +1029,7 @@ export function App({
       modelOptions: [],
       selected: 0,
     },
-    confirm: null,
+    confirmQueue: [],
     contextChipVersion: 0,
     fleet: {},
     fleetCost: 0,
@@ -1319,7 +1319,7 @@ export function App({
   const prevEntriesCount = useRef(0);
   useEffect(() => {
     const anyOpenNow =
-      state.picker.open || state.slashPicker.open || state.modelPicker.open || !!state.confirm;
+      state.picker.open || state.slashPicker.open || state.modelPicker.open || state.confirmQueue.length > 0;
     const overlayClosed = prevAnyOverlayOpen.current && !anyOpenNow;
     const newEntryCommitted = state.entries.length > prevEntriesCount.current;
     prevAnyOverlayOpen.current = anyOpenNow;
@@ -1335,7 +1335,7 @@ export function App({
     state.picker.open,
     state.slashPicker.open,
     state.modelPicker.open,
-    state.confirm,
+    state.confirmQueue.length,
     state.entries.length,
   ]);
 
@@ -1856,15 +1856,9 @@ export function App({
       }
     });
     const offConfirmNeeded = events.on('tool.confirm_needed', (e) => {
-      dispatch({
-        type: 'addEntry',
-        entry: {
-          kind: 'confirm',
-          toolName: e.tool.name,
-          input: e.input,
-          suggestedPattern: e.suggestedPattern,
-        },
-      });
+      // Only show the ConfirmPrompt component — no duplicate history entry needed.
+      // The full ConfirmPrompt with y/n/a/d keys is rendered below;
+      // the history placeholder was redundant.
       dispatch({
         type: 'confirmOpen',
         info: {
@@ -1873,6 +1867,17 @@ export function App({
           input: e.input,
           suggestedPattern: e.suggestedPattern,
           resolve: e.resolve,
+        },
+      });
+    });
+    const offTrustPersisted = events.on('trust.persisted', (e) => {
+      const icon = e.decision === 'always' ? '✓' : '✗';
+      const label = e.decision === 'always' ? 'always allowed' : 'denied';
+      dispatch({
+        type: 'addEntry',
+        entry: {
+          kind: 'info',
+          text: `${icon} ${label}: ${e.tool}(${e.pattern})`,
         },
       });
     });
@@ -1885,6 +1890,7 @@ export function App({
       offProvErr();
       offProvResp();
       offConfirmNeeded();
+      offTrustPersisted();
       if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
     };
   }, [events, agent.ctx.todos]);
@@ -2242,26 +2248,17 @@ export function App({
       // decided they want out. Try Ink's graceful exit first, then
       // hard-exit on a short timer in case the React tree is wedged.
       if (current.interrupts >= 1) {
-        // Third press = hard kill, no waiting.
+        // Second ( later) Ctrl+C — exit immediately no matter what.
+        // Don't try Ink's graceful exit (it requires staying in the event
+        // loop and the React tree may be wedged). Just exit hard.
         if (current.interrupts >= 2) {
           process.exit(130);
         }
         try {
-          exit();
-          onExit(130);
+          process.exit(130);
         } catch {
           // ignore
         }
-        // Safety net: if Ink's waitUntilExit doesn't resolve within
-        // 500ms (a stuck delegate await, an unhandled promise), force
-        // exit so the user actually gets their shell back.
-        setTimeout(() => {
-          try {
-            process.exit(130);
-          } catch {
-            // ignore
-          }
-        }, 500).unref?.();
         dispatch({ type: 'interrupt' });
         return;
       }
@@ -2344,11 +2341,15 @@ export function App({
     // Note: we no longer block input while the agent is running. Enter
     // routes through the queue when busy (see submit()), but typing,
     // backspace, paste, and clipboard-image all stay live.
-    if (state.status === 'aborting') return;
+    // Exception: when status is 'aborting', all input is blocked — except
+    // Ctrl+C which the SIGINT handler processes directly (not through handleKey).
+    // We check interrupts here so the second Ctrl+C can still reach the handler
+    // even though status is 'aborting'.
+    if (state.status === 'aborting' && state.interrupts === 0) return;
     // Block all input while confirmation prompt is shown — the ConfirmPrompt
     // component handles y/n/a/d/escape/enter itself and Input's disabled prop
     // is not reliable when multiple useInput hooks are active.
-    if (state.confirm) return;
+    if (state.confirmQueue.length > 0) return;
 
     // Re-entrancy guard: block stale-second events from \r\n terminals.
     if (inputGateRef.current) return;
@@ -2497,7 +2498,7 @@ export function App({
     // the model exactly what it was mid-doing. Does NOT consume the
     // Ctrl+C exit ladder (interrupts counter untouched). When no run
     // is active, Esc falls through to normal text handling.
-    if (key.escape && state.status !== 'idle' && !state.confirm) {
+    if (key.escape && state.status !== 'idle' && state.confirmQueue.length === 0) {
       // Snapshot context BEFORE we mutate anything. The submit handler
       // replays this into the model prompt so the model isn't guessing.
       const runningTools = Array.from(state.runningTools.values()).map((t) => t.name);
@@ -2992,7 +2993,7 @@ export function App({
         value={state.buffer}
         cursor={state.cursor}
         placeholders={state.placeholders}
-        disabled={state.status === 'aborting' || !!state.confirm}
+        disabled={state.status === 'aborting' || state.confirmQueue.length > 0}
         hint={inputHint}
         onKey={handleKey}
       />
@@ -3020,17 +3021,23 @@ export function App({
           hint={state.modelPicker.hint}
         />
       ) : null}
-      {state.confirm ? (
-        <ConfirmPrompt
-          toolName={state.confirm.toolName}
-          input={state.confirm.input}
-          suggestedPattern={state.confirm.suggestedPattern}
-          onDecision={(decision) => {
-            state.confirm!.resolve(decision);
-            setTimeout(() => dispatch({ type: 'confirmClose' }), 0);
-          }}
-        />
-      ) : null}
+      {state.confirmQueue.length > 0 && (() => {
+        const head = state.confirmQueue[0]!;
+        let resolved = false;
+        return (
+          <ConfirmPrompt
+            toolName={head.toolName}
+            input={head.input}
+            suggestedPattern={head.suggestedPattern}
+            onDecision={(decision) => {
+              if (resolved) return;
+              resolved = true;
+              head.resolve(decision);
+              dispatch({ type: 'confirmClose' });
+            }}
+          />
+        );
+      })()}
       <StatusBar
         model={`${liveProvider}/${liveModel}`}
         state={state.status}

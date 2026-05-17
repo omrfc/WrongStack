@@ -73,6 +73,16 @@ export interface EventMap {
     resolve: (decision: 'yes' | 'no' | 'always' | 'deny') => void;
   };
   /**
+   * Fired after the user chooses 'always' or 'deny' on a confirmation prompt.
+   * The TUI can use this to show a brief notification that the decision was
+   * persisted to the trust file (e.g. "✓ always allowed popo.txt" / "✗ denied popo.txt").
+   */
+  'trust.persisted': {
+    tool: string;
+    pattern: string;
+    decision: 'always' | 'deny';
+  };
+  /**
    * `output` is a truncated preview of the tool's serialized result text
    * (capped at ~400 chars by the emitter). UIs render this inline in the
    * tool history line without re-fetching from the session log.

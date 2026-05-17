@@ -16,12 +16,22 @@ export class ToolExecutor {
 
   constructor(
     private readonly registry: { get(name: string): Tool | undefined; list(): Tool[] },
-    private readonly opts: ToolExecutorOptions,
+    private opts: ToolExecutorOptions,
   ) {
     this.iterationTimeoutMs = opts.iterationTimeoutMs ?? 300_000;
     this.serializer = createToolOutputSerializer({
       perIterationOutputCapBytes: opts.perIterationOutputCapBytes ?? 100_000,
     });
+  }
+
+  /**
+   * Clear the interactive confirm awaiter so the executor returns
+   * `ToolConfirmPendingResult` instead of blocking on stdin. Used by
+   * the CLI to switch from inline prompts (REPL) to event-driven
+   * confirmation (TUI) at runtime.
+   */
+  clearConfirmAwaiter(): void {
+    this.opts.confirmAwaiter = undefined;
   }
 
   /**

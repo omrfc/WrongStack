@@ -44,11 +44,15 @@ export const writeTool: Tool<WriteInput, WriteOutput> = {
       existed = stat.isFile();
       if (existed) {
         if (!ctx.hasRead(absPath)) {
-          throw new Error(
-            `write: file "${input.path}" exists but was not read in this session. Read it first.`,
-          );
+          // User approved this write (confirm → yes/always) but ctx has no
+          // read record. The model may call write without a prior explicit
+          // read. Read the file now so we can compute the diff and honor
+          // the user's intent to overwrite.
+          prev = await fs.readFile(absPath, 'utf8');
+          ctx.recordRead(absPath, stat.mtimeMs);
+        } else {
+          prev = await fs.readFile(absPath, 'utf8');
         }
-        prev = await fs.readFile(absPath, 'utf8');
       }
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {

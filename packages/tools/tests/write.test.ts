@@ -22,11 +22,16 @@ describe('write tool', () => {
     expect(await fs.readFile(path.join(sb.dir, 'new.txt'), 'utf8')).toBe('hello');
   });
 
-  it('blocks blind overwrite', async () => {
+  it('overwrites existing file without prior read (auto-reads internally)', async () => {
     await fs.writeFile(path.join(sb.dir, 'existing.txt'), 'old');
-    await expect(
-      writeTool.execute({ path: 'existing.txt', content: 'new' }, sb.ctx, { signal: newSignal() }),
-    ).rejects.toThrow(/not read/);
+    // Write tool auto-reads the file internally when not already recorded as read.
+    // This allows overwriting files the user approved via confirmation without
+    // requiring an explicit read tool call first.
+    const out = await writeTool.execute({ path: 'existing.txt', content: 'new' }, sb.ctx, {
+      signal: newSignal(),
+    });
+    expect(out.created).toBe(false);
+    expect(await fs.readFile(path.join(sb.dir, 'existing.txt'), 'utf8')).toBe('new');
   });
 
   it('overwrites after read', async () => {

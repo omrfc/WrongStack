@@ -607,7 +607,7 @@ export class Agent {
           toolUseId: result.toolUseId,
           suggestedPattern: result.suggestedPattern,
         });
-        // Persist trust rule when user picks "always" — mirrors the
+        // Persist trust/deny rule when user picks 'always' or 'deny' — mirrors the
         // promptDelegate path in DefaultPermissionPolicy.evaluate() so
         // event-driven confirmation (TUI/WebUI) gets the same trust-file
         // persistence as the CLI's inline prompt.
@@ -617,16 +617,63 @@ export class Agent {
               tool: tool!.name,
               pattern: result.suggestedPattern,
             });
+            this.events.emit('trust.persisted', {
+              tool: tool!.name,
+              pattern: result.suggestedPattern,
+              decision,
+            });
           } catch {
             // best-effort — trust persistence failure shouldn't block execution
           }
+        } else if (decision === 'deny') {
+          try {
+            await this.permission.deny({
+              tool: tool!.name,
+              pattern: result.suggestedPattern,
+            });
+            this.events.emit('trust.persisted', {
+              tool: tool!.name,
+              pattern: result.suggestedPattern,
+              decision,
+            });
+          } catch {
+            // best-effort — deny persistence failure shouldn't block execution
+          }
         }
-        // Re-run this single tool with the resolved decision
-        const reRunResult = await this.executeSingleWithDecision(
-          tool!,
-          { id: result.toolUseId, name: tool!.name, input: result.input },
-          decision,
-        );
+
+        // Re-run the tool with the resolved decision.
+        // Semantics:
+        //   'yes'     → execute tool once, no persistence (but soft-allow for retry)
+        //   'always'  → execute tool + persist allow rule (future calls auto-approved)
+        //   'no'      → return error, no persistence (but soft-deny for retry)
+        //   'deny'    → return error + persist deny rule (future calls auto-denied)
+        if (decision === 'yes') {
+          // Soft allow: prevent confirm prompt on LLM retry within this session
+          const p = this.permission as unknown as { allowOnce?(r: { tool: string; pattern: string }): void };
+          p.allowOnce?.({ tool: tool!.name, pattern: result.suggestedPattern });
+        } else if (decision === 'no') {
+          // Soft deny: prevent confirm prompt on LLM retry within this session
+          const p = this.permission as unknown as { denyOnce?(r: { tool: string; pattern: string }): void };
+          p.denyOnce?.({ tool: tool!.name, pattern: result.suggestedPattern });
+        }
+        const reRunResult =
+          decision === 'yes' || decision === 'always'
+            ? await this.executeSingleWithDecision(
+                tool!,
+                { id: result.toolUseId, name: tool!.name, input: result.input },
+              )
+            : {
+                result: {
+                  type: 'tool_result' as const,
+                  tool_use_id: result.toolUseId,
+                  content:
+                    decision === 'deny'
+                      ? `Tool "${tool!.name}" denied and blocked for this pattern.`
+                      : `Tool "${tool!.name}" denied by user.`,
+                  is_error: true,
+                },
+                durationMs: 0,
+              };
         const use = useById.get(reRunResult.result.tool_use_id);
         if (use) {
           await this.pipelines.toolCall.run({
@@ -721,21 +768,8 @@ export class Agent {
   private async executeSingleWithDecision(
     tool: Tool,
     use: { id: string; name: string; input: unknown },
-    decision: 'yes' | 'no' | 'always' | 'deny',
   ): Promise<{ result: ToolResultBlock; durationMs: number }> {
     const start = Date.now();
-    if (decision === 'no' || decision === 'deny') {
-      return {
-        result: {
-          type: 'tool_result',
-          tool_use_id: use.id,
-          content: `Tool "${tool.name}" denied by user.`,
-          is_error: true,
-        },
-        durationMs: Date.now() - start,
-      };
-    }
-    // 'yes' or 'always' — execute
     try {
       const result = await this.toolExecutor.executeTool(
         tool,

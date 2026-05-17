@@ -23,7 +23,33 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
   private loaded = false;
   private readonly trustFile: string;
   private readonly yolo: boolean;
-  private readonly promptDelegate?: PermissionPolicyOptions['promptDelegate'];
+  /**
+   * Session-scoped "soft deny" map. When the user presses 'n' (block once),
+   * the tool+pattern is added here. If the LLM retries in the same session,
+   * we return deny directly without asking again.
+   *
+   * Cleared on reload() since reload = fresh trust file snapshot.
+   */
+  private sessionDenied = new Map<string, boolean>();
+  /**
+   * Session-scoped "soft trust" map. When the user presses 'a' (allow once),
+   * the tool+pattern is added here. If the LLM retries in the same session,
+   * we return auto directly without asking again.
+   *
+   * Cleared on reload().
+   */
+  private sessionAllowed = new Map<string, boolean>();
+  /**
+   * Interactive prompt delegate. When set, `evaluate()` calls it to get a
+   * user decision synchronously (CLI REPL path). When cleared (TUI / WebUI),
+   * `evaluate()` returns `confirm` so the caller can emit
+   * `tool.confirm_needed` for the UI layer to handle.
+   *
+   * Mutable so the host can switch from CLI-prompt to event-driven
+   * confirmation at runtime (e.g. when `--goal` forces TUI mode after
+   * the agent was already constructed).
+   */
+  private promptDelegate?: PermissionPolicyOptions['promptDelegate'];
   /** Pre-compiled wildcard patterns — rebuilt on reload for O(1) lookup. */
   private wildcardEntries: { pattern: string; value: TrustPolicy[string] }[] = [];
 
@@ -31,6 +57,16 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     this.trustFile = opts.trustFile;
     this.yolo = opts.yolo ?? false;
     this.promptDelegate = opts.promptDelegate;
+  }
+
+  /**
+   * Replace (or clear) the interactive prompt delegate at runtime.
+   * Used by the CLI to switch from inline prompts (REPL) to event-driven
+   * confirmation (TUI) when the run mode is determined after the policy
+   * was constructed (e.g. `--goal` auto-flipping to TUI).
+   */
+  setPromptDelegate(delegate: PermissionPolicyOptions['promptDelegate']): void {
+    this.promptDelegate = delegate;
   }
 
   async reload(): Promise<void> {
@@ -46,10 +82,13 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     for (const [key, val] of Object.entries(this.policy)) {
       if (key.includes('*')) this.wildcardEntries.push({ pattern: key, value: val });
     }
+    // Clear session-scoped soft deny/allow — reload = fresh trust file snapshot
+    this.sessionDenied.clear();
+    this.sessionAllowed.clear();
     this.loaded = true;
   }
 
-  async evaluate(tool: Tool, input: unknown, _ctx: Context): Promise<PermissionDecision> {
+  async evaluate(tool: Tool, input: unknown, ctx: Context): Promise<PermissionDecision> {
     if (!this.loaded) await this.reload();
 
     // 1. Tool-namespace matching (mcp__server__* etc.)
@@ -60,6 +99,20 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
 
     // 3. Compute subject (the thing being matched)
     const subject = this.subjectFor(tool.name, input, tool.subjectKey);
+    const subjectKey = `${tool.name}::${subject ?? tool.name}`;
+
+    // 3a. Session soft deny — 'n' blocks this tool+pattern for the rest of
+    //     this session without writing to the trust file. Prevents LLM retry
+    //     from re-triggering the confirm prompt.
+    if (this.sessionDenied.has(subjectKey)) {
+      return { permission: 'deny', source: 'deny', reason: 'session soft deny (user pressed no)' };
+    }
+
+    // 3b. Session soft allow — 'y' auto-approves this tool+pattern for the
+    //     rest of this session without writing to the trust file.
+    if (this.sessionAllowed.has(subjectKey)) {
+      return { permission: 'auto', source: 'trust', reason: 'session soft allow (user pressed yes)' };
+    }
 
     // 4. Deny — absolute
     if (entry?.deny && subject && matchAny(entry.deny, subject)) {
@@ -69,7 +122,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
       return { permission: 'deny', source: 'default', reason: 'tool default deny' };
     }
 
-    // 5. Allow
+    // 5. Allow (trust file)
     if (entry?.allow && subject && matchAny(entry.allow, subject)) {
       return { permission: 'auto', source: 'trust', reason: 'matched allow pattern' };
     }
@@ -82,12 +135,20 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
       return { permission: 'auto', source: 'yolo' };
     }
 
-    // 7. Tool default
+    // 7. Smart bypass: write tool — if the file was already read in this
+    // session, the user has already seen the content. No confirm needed.
+    if (tool.name === 'write' && subject) {
+      if (ctx.hasRead(subject)) {
+        return { permission: 'auto', source: 'context', reason: 'file already read in this session' };
+      }
+    }
+
+    // 8. Tool default
     if (tool.permission === 'auto') {
       return { permission: 'auto', source: 'default' };
     }
 
-    // 8. Confirm — delegate to prompt
+    // 9. Confirm — delegate to prompt
     if (this.promptDelegate) {
       const decision = await this.promptDelegate(tool, input, subject ?? tool.name);
       if (decision === 'always') {
@@ -95,6 +156,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
         return { permission: 'auto', source: 'user', reason: 'user always-allowed' };
       }
       if (decision === 'deny') {
+        await this.deny({ tool: tool.name, pattern: subject ?? tool.name });
         return { permission: 'deny', source: 'user', reason: 'user denied' };
       }
       return { permission: decision === 'yes' ? 'auto' : 'deny', source: 'user' };
@@ -118,6 +180,35 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
       }
       throw err;
     }
+  }
+
+  /** Persist a deny rule — this tool+pattern pair is permanently blocked. */
+  async deny(rule: { tool: string; pattern: string }): Promise<void> {
+    if (!this.loaded) await this.reload();
+    const entry = this.policy[rule.tool] ?? {};
+    entry.deny = Array.from(new Set([...(entry.deny ?? []), rule.pattern]));
+    this.policy[rule.tool] = entry;
+    try {
+      await atomicWrite(this.trustFile, JSON.stringify(this.policy, null, 2));
+    } catch (err) {
+      // Revert in-memory state since disk write failed
+      const existing = this.policy[rule.tool];
+      if (existing?.deny) {
+        const idx = existing.deny.indexOf(rule.pattern);
+        if (idx !== -1) existing.deny.splice(idx, 1);
+      }
+      throw err;
+    }
+  }
+
+  /** Block this tool+pattern for the rest of this session (no trust file). */
+  denyOnce(rule: { tool: string; pattern: string }): void {
+    this.sessionDenied.set(`${rule.tool}::${rule.pattern}`, true);
+  }
+
+  /** Auto-approve this tool+pattern for the rest of this session (no trust file). */
+  allowOnce(rule: { tool: string; pattern: string }): void {
+    this.sessionAllowed.set(`${rule.tool}::${rule.pattern}`, true);
   }
 
   private subjectFor(toolName: string, input: unknown, subjectKey?: string): string | undefined {
@@ -194,6 +285,15 @@ export class AutoApprovePermissionPolicy implements PermissionPolicy {
   async trust(): Promise<void> {
     // No-op: subagent permission decisions are ephemeral and must not
     // pollute the leader's persisted trust file.
+  }
+  async deny(): Promise<void> {
+    // No-op: same as trust — subagent decisions are ephemeral.
+  }
+  denyOnce(): void {
+    // No-op: subagent decisions are ephemeral.
+  }
+  allowOnce(): void {
+    // No-op: subagent decisions are ephemeral.
   }
   async reload(): Promise<void> {
     // No-op: nothing to load.
