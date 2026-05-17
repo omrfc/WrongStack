@@ -345,52 +345,12 @@ function Entry({
     case 'turn-summary':
       return <Text dimColor>{entry.text}</Text>;
     case 'confirm':
+      // Confirmation is handled by ConfirmPrompt component, not here.
+      // This placeholder is intentionally minimal to avoid duplicating the UI.
       return (
-        <Box
-          flexDirection="column"
-          borderStyle="single"
-          borderTop={false}
-          borderLeft={false}
-          borderRight={false}
-          borderBottom={false}
-          paddingX={1}
-        >
-          <Box flexDirection="row">
-            <Text bold color="yellow">
-              ⚠ Confirm
-            </Text>
-            <Text> </Text>
-            <Text bold>{entry.toolName}</Text>
-          </Box>
-          {entry.input && typeof entry.input === 'object' ? (
-            <Text dimColor>
-              {Object.entries(entry.input as Record<string, unknown>)
-                .filter(([k]) => k !== 'content' && k !== 'new_string')
-                .map(([k, v]) => `${k}: ${String(v).slice(0, 80)}`)
-                .join('  ')}
-            </Text>
-          ) : null}
-          <Text dimColor>─────────────────</Text>
-          <Box flexDirection="row">
-            <Text>
-              <Text bold color="green">
-                [↵]
-              </Text>
-              <Text dimColor> yes </Text>
-              <Text bold color="red">
-                [Esc]
-              </Text>
-              <Text dimColor> no </Text>
-              <Text bold color="cyan">
-                [Ctrl+A]
-              </Text>
-              <Text dimColor> always ({entry.suggestedPattern}) </Text>
-              <Text bold color="red">
-                [Ctrl+D]
-              </Text>
-              <Text dimColor> deny</Text>
-            </Text>
-          </Box>
+        <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginY={1}>
+          <Text bold color="yellow">⚠ Confirm: {entry.toolName}</Text>
+          <Text dimColor>Waiting for y / n / a / d...</Text>
         </Box>
       );
     case 'banner':
