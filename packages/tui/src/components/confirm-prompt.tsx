@@ -1,5 +1,5 @@
 import { Box, Text, useInput } from 'ink';
-import type React from 'react';
+import React from 'react';
 
 export interface ConfirmPromptProps {
   toolName: string;
@@ -61,14 +61,22 @@ export function ConfirmPrompt({
   suggestedPattern,
   onDecision,
 }: ConfirmPromptProps): React.ReactElement {
-  useInput((_, key) => {
-    if (key.return) {
+  // Terminal bell on mount — alerts the user that action is required,
+  // especially important when the agent has been running autonomously
+  // and the user may not be staring at the terminal.
+  React.useEffect(() => {
+    process.stdout.write('\x07');
+  }, []);
+
+  useInput((input, key) => {
+    const ch = input.toLowerCase();
+    if (ch === 'y' || key.return) {
       onDecision('yes');
-    } else if (key.escape) {
+    } else if (ch === 'n' || key.escape) {
       onDecision('no');
-    } else if (key.ctrl && _.toLowerCase() === 'a') {
+    } else if (ch === 'a') {
       onDecision('always');
-    } else if (key.ctrl && _.toLowerCase() === 'd') {
+    } else if (ch === 'd') {
       onDecision('deny');
     }
   });
@@ -81,19 +89,19 @@ export function ConfirmPrompt({
   return (
     <Box
       flexDirection="column"
-      borderStyle="single"
-      borderTop={false}
-      borderLeft={false}
-      borderRight={false}
-      borderBottom={false}
+      borderStyle="round"
+      borderColor="yellow"
       paddingX={1}
+      marginY={1}
     >
       <Box flexDirection="row">
         <Text bold color="yellow">
-          ⚠ Confirm
+          ⚠ APPROVAL REQUIRED
         </Text>
         <Text> </Text>
-        <Text bold>{toolName}</Text>
+        <Text bold color="white">
+          {toolName}
+        </Text>
       </Box>
       {inputSummary ? <Text dimColor>{inputSummary}</Text> : null}
       {showDiff && diff ? (
@@ -105,21 +113,21 @@ export function ConfirmPrompt({
       <Box flexDirection="row">
         <Text>
           <Text bold color="green">
-            [↵]
+            [y]
           </Text>
-          <Text dimColor> yes </Text>
+          <Text dimColor>es </Text>
           <Text bold color="red">
-            [Esc]
+            [n]
           </Text>
-          <Text dimColor> no </Text>
+          <Text dimColor>o </Text>
           <Text bold color="cyan">
-            [Ctrl+A]
+            [a]
           </Text>
-          <Text dimColor> always ({suggestedPattern}) </Text>
+          <Text dimColor>lways ({suggestedPattern}) </Text>
           <Text bold color="red">
-            [Ctrl+D]
+            [d]
           </Text>
-          <Text dimColor> deny</Text>
+          <Text dimColor>eny</Text>
         </Text>
       </Box>
     </Box>

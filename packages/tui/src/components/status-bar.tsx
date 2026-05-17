@@ -1,6 +1,6 @@
 import type { TokenCounter } from '@wrongstack/core';
 import { Box, Text } from 'ink';
-import type React from 'react';
+import React from 'react';
 import type { GitInfo } from '../git-info.js';
 
 export interface TodoCounts {

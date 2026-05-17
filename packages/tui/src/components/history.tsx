@@ -1,6 +1,6 @@
 import { Box, Static, Text, useStdout } from 'ink';
-import type React from 'react';
-import { useEffect, useState } from 'react';
+import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { renderMarkdownTables } from '../markdown-table.js';
 import { ConfirmPrompt } from './confirm-prompt.js';
 
