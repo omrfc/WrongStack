@@ -1,7 +1,7 @@
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useUIStore } from '@/stores';
 import { AlertTriangle, FileEdit, Globe, ShieldAlert, Terminal, Wrench } from 'lucide-react';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { DiffView, diffFromToolInput } from './DiffView';
 import { Button } from './ui/button';
 import {
@@ -93,6 +93,7 @@ function SmartInputPreview({
 export function ConfirmDialog() {
   const { showConfirmDialog, confirmInfo, hideConfirm } = useUIStore();
   const { sendConfirm } = useWebSocket();
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   const handleConfirm = (decision: 'yes' | 'no' | 'always' | 'deny') => {
     if (confirmInfo) {
@@ -101,9 +102,8 @@ export function ConfirmDialog() {
     hideConfirm();
   };
 
-  // Keyboard shortcuts inside the dialog: y = yes, n = no, a = always,
-  // Esc = no (dismiss). Matches the CLI permission prompt so habits
-  // transfer directly.
+  // Keyboard shortcuts: y/n/a/d/Esc — matches the CLI and TUI permission
+  // prompts so muscle memory transfers directly across all surfaces.
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyboard handler; handleConfirm stable
   useEffect(() => {
     if (!showConfirmDialog) return;
@@ -120,9 +120,15 @@ export function ConfirmDialog() {
       } else if (e.key === 'a' || e.key === 'A') {
         e.preventDefault();
         handleConfirm('always');
+      } else if (e.key === 'd' || e.key === 'D') {
+        e.preventDefault();
+        handleConfirm('deny');
       }
     };
     window.addEventListener('keydown', onKey);
+    // Focus the dialog container so keyboard shortcuts work immediately
+    // without the user having to click into the dialog first.
+    dialogRef.current?.focus();
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showConfirmDialog, confirmInfo?.id]);
@@ -140,11 +146,11 @@ export function ConfirmDialog() {
 
   return (
     <Dialog open={showConfirmDialog} onOpenChange={() => hideConfirm()}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="sm:max-w-2xl border-yellow-500/50" ref={dialogRef} tabIndex={-1}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <ShieldAlert className="h-5 w-5 text-yellow-500" />
-            Confirm: {confirmInfo.toolName}
+            <ShieldAlert className="h-5 w-5 text-yellow-500 animate-pulse" />
+            Approval required: {confirmInfo.toolName}
           </DialogTitle>
           <DialogDescription>
             The agent wants to {isEdit ? 'modify a file' : 'run this tool'}. Review the request
@@ -191,9 +197,9 @@ export function ConfirmDialog() {
             variant="outline"
             size="sm"
             onClick={() => handleConfirm('deny')}
-            title="Reject this and all future calls matching the pattern"
+            title="Reject this and all future calls matching the pattern (d)"
           >
-            Deny always
+            Deny always <kbd className="ml-1 text-[10px] border rounded px-1 bg-background">d</kbd>
           </Button>
           <Button
             variant="outline"

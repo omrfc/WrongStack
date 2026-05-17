@@ -203,6 +203,35 @@ describe('ToolExecutor', () => {
     });
   });
 
+  describe('clearConfirmAwaiter', () => {
+    it('switches from awaiter to pending result', async () => {
+      policy.evaluate.mockResolvedValue(confirmDecision());
+      const tool = makeTool({ name: 'edit' });
+      const awaiter = vi.fn().mockResolvedValue('yes');
+      const executor = makeExecutor([tool], { confirmAwaiter: awaiter as never });
+
+      // With awaiter: calls it directly
+      const r1 = await executor.executeBatch(
+        [makeUse('edit', { path: 'a.ts' })],
+        makeCtx(),
+        'sequential',
+      );
+      expect(awaiter).toHaveBeenCalled();
+      expect((r1.outputs[0]!.result as ToolResultBlock).type).toBe('tool_result');
+
+      // After clear: returns pending result
+      executor.clearConfirmAwaiter();
+      awaiter.mockClear();
+      const r2 = await executor.executeBatch(
+        [makeUse('edit', { path: 'a.ts' })],
+        makeCtx(),
+        'sequential',
+      );
+      expect(awaiter).not.toHaveBeenCalled();
+      expect(r2.outputs[0]!.result.type).toBe('tool_confirm_pending');
+    });
+  });
+
   describe('executeBatch — tool execution error', () => {
     it('catches tool errors and returns error result', async () => {
       const tool = makeTool({

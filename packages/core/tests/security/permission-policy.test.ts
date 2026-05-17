@@ -72,4 +72,43 @@ describe('DefaultPermissionPolicy', () => {
     const raw = await fs.readFile(trustFile, 'utf8');
     expect(JSON.parse(raw)).toEqual({ edit: { allow: ['src/**'] } });
   });
+
+  it('promptDelegate resolves inline when set', async () => {
+    const p = new DefaultPermissionPolicy({
+      trustFile,
+      promptDelegate: async () => 'yes',
+    });
+    const decision = await p.evaluate(tool('edit'), { path: 'src/a.ts' }, {} as Context);
+    expect(decision.permission).toBe('auto');
+    expect(decision.source).toBe('user');
+  });
+
+  it('setPromptDelegate clears the delegate so evaluate returns confirm', async () => {
+    const p = new DefaultPermissionPolicy({
+      trustFile,
+      promptDelegate: async () => 'yes',
+    });
+    // Initially resolves inline
+    const d1 = await p.evaluate(tool('edit'), { path: 'src/a.ts' }, {} as Context);
+    expect(d1.permission).toBe('auto');
+
+    // Clear the delegate
+    p.setPromptDelegate(undefined);
+    const d2 = await p.evaluate(tool('edit'), { path: 'src/a.ts' }, {} as Context);
+    expect(d2.permission).toBe('confirm');
+    expect(d2.source).toBe('default');
+  });
+
+  it('setPromptDelegate can replace the delegate', async () => {
+    const p = new DefaultPermissionPolicy({ trustFile });
+    // No delegate → confirm
+    const d1 = await p.evaluate(tool('edit'), { path: 'src/a.ts' }, {} as Context);
+    expect(d1.permission).toBe('confirm');
+
+    // Set a delegate that always denies
+    p.setPromptDelegate(async () => 'no');
+    const d2 = await p.evaluate(tool('edit'), { path: 'src/a.ts' }, {} as Context);
+    expect(d2.permission).toBe('deny');
+    expect(d2.source).toBe('user');
+  });
 });

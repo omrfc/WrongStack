@@ -58,12 +58,15 @@ export class ReadlineInputReader implements InputReader {
     this.pending = true;
     try {
       const rl = this.ensure();
-      if ((rl as unknown as { _flushed?: boolean })._flushed) {
+      if (
+        (rl as unknown as { closed?: boolean }).closed ||
+        (rl as unknown as { _flushed?: boolean })._flushed
+      ) {
         rl.close();
         this.rl = undefined;
       }
       const fresh = this.ensure();
-      return new Promise<string>((resolve, reject) => {
+      return new Promise<string>((resolve) => {
         fresh.question(prompt ?? '> ', (line) => {
           if (line.trim()) {
             this.history.push(line);
@@ -71,7 +74,18 @@ export class ReadlineInputReader implements InputReader {
           }
           resolve(line);
         });
-        fresh.once('close', () => reject(new Error('EOF')));
+        // Ctrl+C closes the readline interface — resolve with empty
+        // string so callers treat it as cancel instead of crashing with
+        // an unhandled EOF error.
+        fresh.once('close', () => resolve(''));
+      }).then((result) => {
+        // Tear down after each prompt so the next call always starts
+        // fresh.  On Windows / Node ≥ 24 the interface can enter an
+        // internally-closed state after question() resolves; reusing it
+        // throws ERR_USE_AFTER_CLOSE.
+        this.rl?.close();
+        this.rl = undefined;
+        return result;
       });
     } finally {
       this.pending = false;
@@ -88,6 +102,13 @@ export class ReadlineInputReader implements InputReader {
       stdin.resume();
       const onData = (buf: Buffer) => {
         const key = buf.toString();
+        // Ctrl+C — treat as cancel (resolve with empty string).
+        if (key === '\x03') {
+          cleanup();
+          process.stdout.write('\n');
+          resolve('');
+          return;
+        }
         const opt = options.find(
           (o) => o.key.toLowerCase() === key.toLowerCase() || o.value === key,
         );
@@ -97,12 +118,18 @@ export class ReadlineInputReader implements InputReader {
           resolve(opt.value);
         }
       };
+      const onClose = () => {
+        cleanup();
+        resolve('');
+      };
       const cleanup = () => {
         stdin.off('data', onData);
+        stdin.off('close', onClose);
         if (stdin.isTTY) stdin.setRawMode(wasRaw);
         if (wasPaused) stdin.pause();
       };
       stdin.on('data', onData);
+      stdin.on('close', onClose);
     });
   }
 

@@ -408,6 +408,12 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
       (wssSecondary ? ` (and ws://[::1]:${wsPort})` : ''),
   );
 
+  // Pending permission confirmations. When the agent emits
+  // tool.confirm_needed, we store the resolve function here keyed by
+  // toolUseId. When the client sends tool.confirm_result back, we look
+  // it up and resolve — unblocking the agent loop.
+  const pendingConfirms = new Map<string, (d: 'yes' | 'no' | 'always' | 'deny') => void>();
+
   // Event subscriptions
   function setupEvents() {
     events.on('iteration.started', (e) => {
@@ -497,6 +503,20 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
       });
     });
 
+    events.on('tool.confirm_needed', (e) => {
+      const id = e.toolUseId ?? `confirm_${Date.now()}`;
+      pendingConfirms.set(id, e.resolve);
+      broadcast({
+        type: 'tool.confirm_needed',
+        payload: {
+          id,
+          toolName: e.tool?.name ?? 'unknown',
+          input: e.input,
+          suggestedPattern: e.suggestedPattern,
+        },
+      });
+    });
+
     events.on('error', (e) => {
       broadcast({
         type: 'error',
@@ -544,6 +564,15 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     ws.on('close', () => {
       clients.delete(ws);
       console.log('[WebUI] Client disconnected, total:', clients.size);
+      // If the client disconnects while a permission prompt is pending,
+      // resolve all pending confirms with 'no' so the agent loop doesn't
+      // hang forever waiting for a response that will never come.
+      if (pendingConfirms.size > 0) {
+        for (const [id, resolve] of pendingConfirms) {
+          resolve('no');
+          pendingConfirms.delete(id);
+        }
+      }
     });
 
     ws.on('error', (err) => {
@@ -642,6 +671,16 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
           if (runLock === thisRun) {
             runLock = null;
           }
+        }
+        break;
+      }
+
+      case 'tool.confirm_result': {
+        const { id, decision } = (msg as { payload: { id: string; decision: 'yes' | 'no' | 'always' | 'deny' } }).payload;
+        const resolve = pendingConfirms.get(id);
+        if (resolve) {
+          pendingConfirms.delete(id);
+          resolve(decision);
         }
         break;
       }

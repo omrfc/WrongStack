@@ -1,0 +1,19 @@
+{
+  "name": "@wrongstack/skills",
+  "version": "0.3.5",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "node -e \"process.exit(0)\"",
+    "typecheck": "node -e \"process.exit(0)\"",
+    "clean": "node -e \"process.exit(0)\""
+  }
+}

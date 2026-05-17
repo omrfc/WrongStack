@@ -15,7 +15,11 @@ export type ConfirmAwaiter = (
 
 export function makePromptDelegate(reader: InputReader) {
   return async (tool: Tool, input: unknown, suggestedPattern: string): Promise<PromptDecision> => {
-    process.stdout.write(`\n${theme.primary('▍')} ${theme.bold(tool.name)}\n`);
+    // Terminal bell (\x07) to alert the user that action is required.
+    // Without this, the prompt can be easily missed when output is
+    // scrolling or the user has switched to another window.
+    process.stdout.write('\x07');
+    process.stdout.write(`\n${theme.warn('⚠ APPROVAL REQUIRED')} ${theme.primary('│')} ${theme.bold(tool.name)}\n`);
     process.stdout.write(`${color.dim(stringifyInput(input))}\n`);
 
     if (tool.name === 'edit' && hasDiff(input)) {

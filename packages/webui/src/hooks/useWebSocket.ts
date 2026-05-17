@@ -1,5 +1,5 @@
 import { toast } from '@/components/Toaster';
-import { playCompletionChime } from '@/lib/chime';
+import { playCompletionChime, playPermissionChime } from '@/lib/chime';
 import { installFaviconVisibilityReset, setFaviconStatus } from '@/lib/favicon';
 import { ensureNotificationPermission, notifyIfHidden } from '@/lib/notify';
 import { type WrongStackWebSocketClient, getWSClient } from '@/lib/ws-client';
@@ -431,6 +431,31 @@ function installHandlers(ws: WrongStackWebSocketClient): () => void {
       input: payload.input,
       suggestedPattern: payload.suggestedPattern,
     });
+    // Always play the permission chime — the agent is blocked until the
+    // user responds, so awareness is critical regardless of sound prefs.
+    try {
+      playPermissionChime();
+    } catch {
+      /* audio policy may block */
+    }
+    // Lazy permission ask — request on the first confirm_needed event,
+    // not just after the first run completes, so the notification is
+    // available the very first time the agent needs approval.
+    void ensureNotificationPermission();
+    // Browser notification when tab is hidden — the agent can't proceed
+    // until the user approves, so they need to know even if they alt-tabbed.
+    // Uses a separate tag + requireInteraction so it doesn't get swallowed
+    // by run-completion notifications and stays visible until the user acts.
+    notifyIfHidden(
+      'WrongStack needs approval',
+      `Tool "${payload.toolName}" is waiting for your decision.`,
+      'wrongstack-confirm',
+    );
+    // Also update the favicon so the user sees the attention state in
+    // their tab bar even without a browser notification.
+    if (typeof document !== 'undefined' && document.hidden) {
+      setFaviconStatus('attention');
+    }
   });
 
   on('run.result', (msg) => {

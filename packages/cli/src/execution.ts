@@ -196,6 +196,12 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         );
       }
     } else if (flags.tui && !flags['no-tui']) {
+      // Switch from inline CLI prompts to event-driven confirmation.
+      // Without this, the permission prompt writes to stdout and blocks
+      // on stdin — both owned by Ink — making the prompt invisible and
+      // the input deadlocked. After this call, tool.confirm_needed events
+      // fire instead, which the TUI's ConfirmPrompt component handles.
+      agent.disableInteractiveConfirmation();
       const { runTui } = await import('@wrongstack/tui');
       renderer.setSilent(true);
       const banneredFamily = savedProviderCfg?.family ?? resolvedProvider?.family;

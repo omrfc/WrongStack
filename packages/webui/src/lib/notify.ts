@@ -38,7 +38,7 @@ export async function ensureNotificationPermission(): Promise<
   }
 }
 
-export function notifyIfHidden(title: string, body?: string): void {
+export function notifyIfHidden(title: string, body?: string, tag?: string): void {
   if (typeof document === 'undefined' || !document.hidden) return;
   if (permissionState !== 'granted') return;
   try {
@@ -46,10 +46,13 @@ export function notifyIfHidden(title: string, body?: string): void {
       body,
       icon: '/favicon.ico',
       // Tag-collapse: if multiple notifications stack while the tab is
-      // hidden, only the latest "WrongStack run" shows up so we don't
-      // litter the OS notification center.
-      tag: 'wrongstack-run',
-      // Auto-dismiss as soon as the user focuses the tab.
+      // hidden, only the latest with the same tag shows up so we don't
+      // litter the OS notification center. Permission alerts use a
+      // separate tag so they don't get swallowed by run-completion.
+      tag: tag ?? 'wrongstack-run',
+      // Require interaction for permission alerts — the agent is stuck
+      // until the user responds, so auto-dismiss would be harmful.
+      requireInteraction: tag === 'wrongstack-confirm',
     });
     n.onclick = () => {
       window.focus();

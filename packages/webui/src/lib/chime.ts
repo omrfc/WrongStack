@@ -50,3 +50,16 @@ export function playCompletionChime(): void {
   tone(659.25, 0, 0.18);
   tone(880, 0.12, 0.24);
 }
+
+/**
+ * Urgent chime for permission requests. Louder and more insistent than
+ * the completion chime — three ascending notes that say "hey, I need
+ * your input". Always plays regardless of soundOnComplete preference,
+ * because a missed permission prompt means the agent is stuck.
+ */
+export function playPermissionChime(): void {
+  // Three-note ascending: C5 → E5 → G5 (C major arpeggio, attention-getting)
+  tone(523.25, 0, 0.15);
+  tone(659.25, 0.1, 0.15);
+  tone(783.99, 0.2, 0.25);
+}

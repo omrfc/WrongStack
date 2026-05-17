@@ -1,0 +1,6 @@
+{
+  "name": "@wrongstack/skill-git-flow",
+  "version": "0.3.5",
+  "private": true,
+  "description": "Commit message style, branch hygiene, and safe history operations"
+}

@@ -3,16 +3,17 @@
  * runtime as an inline SVG data URL so it can be re-rendered with or without
  * a status badge.
  *
- *   setFaviconStatus('idle')    → plain "W" mark
- *   setFaviconStatus('running') → "W" + amber pulse dot (running indicator)
- *   setFaviconStatus('ready')   → "W" + green dot (run finished, tab hidden)
- *   setFaviconStatus('error')   → "W" + red dot (run failed, tab hidden)
+ *   setFaviconStatus('idle')      → plain "W" mark
+ *   setFaviconStatus('running')   → "W" + amber pulse dot (running indicator)
+ *   setFaviconStatus('ready')     → "W" + green dot (run finished, tab hidden)
+ *   setFaviconStatus('error')     → "W" + red dot (run failed, tab hidden)
+ *   setFaviconStatus('attention') → "W" + yellow dot (approval needed, tab hidden)
  *
  * The status auto-resets to 'idle' on the next visibilitychange where the
  * tab becomes visible — so the badge only persists while the user is away.
  */
 
-export type FaviconStatus = 'idle' | 'running' | 'ready' | 'error';
+export type FaviconStatus = 'idle' | 'running' | 'ready' | 'error' | 'attention';
 
 const BASE_BG = '#4f46e5'; // indigo-600, matches the topbar Zap mark.
 
@@ -24,6 +25,8 @@ function buildSvg(status: FaviconStatus): string {
       return '<circle cx="50" cy="14" r="14" fill="#ef4444" stroke="#fff" stroke-width="3" />';
     if (status === 'running')
       return '<circle cx="50" cy="14" r="14" fill="#f59e0b" stroke="#fff" stroke-width="3" />';
+    if (status === 'attention')
+      return '<circle cx="50" cy="14" r="14" fill="#eab308" stroke="#fff" stroke-width="3"><animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite"/></circle>';
     return '';
   })();
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
@@ -69,7 +72,7 @@ export function installFaviconVisibilityReset(): void {
   if (visibilityHookInstalled || typeof document === 'undefined') return;
   visibilityHookInstalled = true;
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && (currentStatus === 'ready' || currentStatus === 'error')) {
+    if (!document.hidden && (currentStatus === 'ready' || currentStatus === 'error' || currentStatus === 'attention')) {
       setFaviconStatus('idle');
     }
   });
