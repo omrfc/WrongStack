@@ -203,6 +203,26 @@ export class Agent {
       : undefined;
   }
 
+  /**
+   * Switch from inline CLI prompts to event-driven confirmation.
+   * Clears both the ToolExecutor's confirmAwaiter (so it returns
+   * `ToolConfirmPendingResult`) and the permission policy's
+   * promptDelegate (so `evaluate()` returns `confirm`).
+   *
+   * Call this before entering TUI or any mode where stdin is owned
+   * by a UI framework (Ink, WebUI WS bridge). Without this, the
+   * inline prompt writes to stdout and blocks on stdin — both of
+   * which are owned by the framework — making the prompt invisible
+   * and the input deadlocked.
+   */
+  disableInteractiveConfirmation(): void {
+    this.toolExecutor.clearConfirmAwaiter();
+    const policy = this.permission as unknown as { setPromptDelegate?: (d: undefined) => void };
+    if (typeof policy.setPromptDelegate === 'function') {
+      policy.setPromptDelegate(undefined);
+    }
+  }
+
   register(tool: Tool): void {
     this.tools.register(tool);
   }
@@ -579,14 +599,31 @@ export class Agent {
     // Post-processing: pipeline, session, events
     const useById = new Map(selectedToolUses.map((u) => [u.id, u]));
     for (const { result, tool, durationMs } of outputs) {
-      // Handle pending confirm: block the agent loop and wait for TUI resolution
+      // DEBUG: log all results to see if tool_confirm_pending is ever hit
+      console.log('[AGENT] tool result type:', result.type, tool?.name);
+      // Handle pending confirm: block the agent loop and wait for TUI/WebUI resolution
       if (result.type === 'tool_confirm_pending') {
+        console.log('[AGENT] tool_confirm_pending confirmed for:', tool?.name);
         const decision = await this.waitForConfirm({
           tool: tool!,
           input: result.input,
           toolUseId: result.toolUseId,
           suggestedPattern: result.suggestedPattern,
         });
+        // Persist trust rule when user picks "always" — mirrors the
+        // promptDelegate path in DefaultPermissionPolicy.evaluate() so
+        // event-driven confirmation (TUI/WebUI) gets the same trust-file
+        // persistence as the CLI's inline prompt.
+        if (decision === 'always') {
+          try {
+            await this.permission.trust({
+              tool: tool!.name,
+              pattern: result.suggestedPattern,
+            });
+          } catch {
+            // best-effort — trust persistence failure shouldn't block execution
+          }
+        }
         // Re-run this single tool with the resolved decision
         const reRunResult = await this.executeSingleWithDecision(
           tool!,
