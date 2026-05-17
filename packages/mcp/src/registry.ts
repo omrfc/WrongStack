@@ -251,6 +251,7 @@ export class MCPRegistry {
           url: slot.cfg.url,
           headers: slot.cfg.headers,
           startupTimeoutMs: slot.cfg.startupTimeoutMs,
+          requestTimeoutMs: slot.cfg.requestTimeoutMs,
         });
         if (slot.cfg.transport === 'stdio') {
           client.addExitListener(this.onChildExit);

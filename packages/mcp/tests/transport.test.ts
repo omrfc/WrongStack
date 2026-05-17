@@ -22,6 +22,19 @@ describe('SSEReader', () => {
     expect((seen[0] as { id: number }).id).toBe(2);
   });
 
+  it('dispatches only after a blank line and joins multi-line data', () => {
+    const r = new SSEReader();
+    const seen: unknown[] = [];
+    r.onMessage((m) => seen.push(m));
+    r.feed('event: message\r\n');
+    r.feed('data: {"jsonrpc":"2.0",\r\n');
+    r.feed('data: "id":3}\r\n');
+    expect(seen).toHaveLength(0);
+    r.feed('\r\n');
+    expect(seen).toHaveLength(1);
+    expect((seen[0] as { id: number }).id).toBe(3);
+  });
+
   it('ignores parse errors silently and continues with the next event', () => {
     const r = new SSEReader();
     const seen: unknown[] = [];
@@ -230,6 +243,32 @@ describe('StreamableHTTPTransport — connect/callTool with mocked fetch', () =>
         'initialize',
         'notifications/initialized',
         'tools/list',
+      ]);
+    } finally {
+      (globalThis as { fetch: typeof globalThis.fetch }).fetch = origFetch;
+    }
+  });
+
+  it('normalizes invalid tools from streamable-http tools/list', async () => {
+    const fetchImpl = mkFetch([
+      (_u, init) => jsonRes({ jsonrpc: '2.0', id: JSON.parse(init.body ?? '{}').id, result: {} }),
+      () => jsonRes({ jsonrpc: '2.0' }),
+      (_u, init) =>
+        jsonRes({
+          jsonrpc: '2.0',
+          id: JSON.parse(init.body ?? '{}').id,
+          result: {
+            tools: [{ name: 'ok' }, { name: '' }, { description: 'missing name' }],
+          },
+        }),
+    ]);
+    const origFetch = globalThis.fetch;
+    (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
+    try {
+      const t = new StreamableHTTPTransport({ name: 'x', url: 'https://m.test' });
+      await t.connect();
+      expect(t.listTools()).toEqual([
+        { name: 'ok', inputSchema: { type: 'object', properties: {} } },
       ]);
     } finally {
       (globalThis as { fetch: typeof globalThis.fetch }).fetch = origFetch;
@@ -491,7 +530,10 @@ describe('SSETransport — mocked connect + callTool', () => {
     }) as unknown as typeof globalThis.fetch;
   }
 
-  function jsonRes(body: unknown, init: { status?: number; headers?: Record<string, string> } = {}): Response {
+  function jsonRes(
+    body: unknown,
+    init: { status?: number; headers?: Record<string, string> } = {},
+  ): Response {
     return new Response(JSON.stringify(body), {
       status: init.status ?? 200,
       headers: { 'content-type': 'application/json', ...(init.headers ?? {}) },
@@ -618,6 +660,52 @@ describe('SSETransport — mocked connect + callTool', () => {
     }
   });
 
+  it('SSETransport rejects a mismatched JSON-RPC id', async () => {
+    const fetchImpl = mkFetch([
+      () => new Response('ok', { status: 200 }),
+      (_u, init) => {
+        const body = JSON.parse(init.body ?? '{}');
+        return jsonRes({ jsonrpc: '2.0', id: body.id + 100, result: {} });
+      },
+    ]);
+    const origFetch = globalThis.fetch;
+    (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
+    try {
+      const t = new SSETransport({ name: 'x', url: 'https://m.test' });
+      await expect(t.connect()).rejects.toThrow(/id mismatch/);
+    } finally {
+      (globalThis as { fetch: typeof globalThis.fetch }).fetch = origFetch;
+    }
+  });
+
+  it('SSETransport keeps request timeout active while reading the response body', async () => {
+    const fetchImpl = (async (_url: unknown, init?: { signal?: AbortSignal }) =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            init?.signal?.addEventListener(
+              'abort',
+              () => controller.error(new Error('body aborted')),
+              { once: true },
+            );
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )) as unknown as typeof globalThis.fetch;
+    const origFetch = globalThis.fetch;
+    (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
+    try {
+      const t = new SSETransport({ name: 'x', url: 'https://m.test', requestTimeoutMs: 20 });
+      await expect(
+        (
+          t as unknown as { httpPost: (method: string, params: unknown) => Promise<unknown> }
+        ).httpPost('tools/list', {}),
+      ).rejects.toThrow(/body aborted|timed out|Invalid JSON-RPC response/);
+    } finally {
+      (globalThis as { fetch: typeof globalThis.fetch }).fetch = origFetch;
+    }
+  });
+
   it('SSETransport httpPost truncates large error bodies', async () => {
     const largeBody = 'x'.repeat(2000);
     const fetchImpl = mkFetch([
@@ -637,9 +725,7 @@ describe('SSETransport — mocked connect + callTool', () => {
   });
 
   it('StreamableHTTPTransport postRaw throws on non-OK HTTP status', async () => {
-    const fetchImpl = mkFetch([
-      () => new Response('Gone', { status: 410, statusText: 'Gone' }),
-    ]);
+    const fetchImpl = mkFetch([() => new Response('Gone', { status: 410, statusText: 'Gone' })]);
     const origFetch = globalThis.fetch;
     (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
     try {
@@ -670,10 +756,11 @@ describe('SSETransport — mocked connect + callTool', () => {
   it('StreamableHTTPTransport handles NDJSON parse error in response', async () => {
     const fetchImpl = mkFetch([
       // Use a content-type that triggers the NDJSON parsing path
-      () => new Response('not json line 1\nalso not json\n', {
-        status: 200,
-        headers: { 'content-type': 'text/plain' },
-      }),
+      () =>
+        new Response('not json line 1\nalso not json\n', {
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+        }),
     ]);
     const origFetch = globalThis.fetch;
     (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
@@ -697,7 +784,12 @@ describe('SSETransport — mocked connect + callTool', () => {
         });
       },
       () => jsonRes({ jsonrpc: '2.0' }),
-      () => jsonRes({ jsonrpc: '2.0', result: { tools: [] } }),
+      (_u, init) =>
+        jsonRes({
+          jsonrpc: '2.0',
+          id: JSON.parse(init.body ?? '{}').id,
+          result: { tools: [] },
+        }),
     ]);
     const origFetch = globalThis.fetch;
     (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
@@ -725,12 +817,17 @@ describe('SSETransport — mocked connect + callTool', () => {
             },
           });
         }
-        return jsonRes({ jsonrpc: '2.0', result: {} });
+        return jsonRes({ jsonrpc: '2.0', id: body.id, result: {} });
       },
       // notifications/initialized
       () => jsonRes({ jsonrpc: '2.0' }),
       // tools/list
-      () => jsonRes({ jsonrpc: '2.0', result: { tools: [] } }),
+      (_u, init) =>
+        jsonRes({
+          jsonrpc: '2.0',
+          id: JSON.parse(init.body ?? '{}').id,
+          result: { tools: [] },
+        }),
     ]);
     const origFetch = globalThis.fetch;
     (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
@@ -779,5 +876,55 @@ describe('SSETransport — mocked connect + callTool', () => {
     // Should not throw — exceptions in dispatch are caught
     expect(() => r.feed('data: {"id":1}\n\n')).not.toThrow();
     expect(good).toHaveBeenCalledOnce();
+  });
+
+  it('StreamableHTTPTransport rejects a mismatched JSON-RPC id', async () => {
+    const fetchImpl = mkFetch([
+      (_u, init) => {
+        const body = JSON.parse(init.body ?? '{}');
+        return jsonRes({ jsonrpc: '2.0', id: body.id + 1, result: {} });
+      },
+    ]);
+    const origFetch = globalThis.fetch;
+    (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
+    try {
+      const t = new StreamableHTTPTransport({ name: 'x', url: 'https://m.test' });
+      await expect(t.connect()).rejects.toThrow(/id mismatch/);
+      expect(t.getState()).toBe('failed');
+    } finally {
+      (globalThis as { fetch: typeof globalThis.fetch }).fetch = origFetch;
+    }
+  });
+
+  it('StreamableHTTPTransport keeps request timeout active while reading the response body', async () => {
+    const fetchImpl = (async (_url: unknown, init?: { signal?: AbortSignal }) =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            init?.signal?.addEventListener(
+              'abort',
+              () => controller.error(new Error('body aborted')),
+              { once: true },
+            );
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'text/plain' } },
+      )) as unknown as typeof globalThis.fetch;
+    const origFetch = globalThis.fetch;
+    (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
+    try {
+      const t = new StreamableHTTPTransport({
+        name: 'x',
+        url: 'https://m.test',
+        requestTimeoutMs: 20,
+      });
+      await expect(
+        (
+          t as unknown as { postRaw: (method: string, params: unknown) => Promise<unknown> }
+        ).postRaw('tools/list', {}),
+      ).rejects.toThrow(/body aborted|timed out/);
+    } finally {
+      (globalThis as { fetch: typeof globalThis.fetch }).fetch = origFetch;
+    }
   });
 });

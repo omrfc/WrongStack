@@ -53,6 +53,22 @@ describe('MCPClient', () => {
     await expect(c.callTool('any', {})).rejects.toThrow(/not connected/);
   });
 
+  it('rejects unanswered stdio JSON-RPC requests after requestTimeoutMs', async () => {
+    const c = new MCPClient({
+      name: 'timeout-test',
+      transport: 'stdio',
+      command: 'noop',
+      requestTimeoutMs: 20,
+    });
+    await expect(
+      (c as unknown as { request: (method: string, params: unknown) => Promise<unknown> }).request(
+        'tools/list',
+        {},
+      ),
+    ).rejects.toThrow(/timed out/);
+    expect((c as unknown as { pending: Map<unknown, unknown> }).pending.size).toBe(0);
+  });
+
   it('close on idle client is a no-op', async () => {
     const c = new MCPClient({ name: 'idle', transport: 'stdio', command: 'noop' });
     await expect(c.close()).resolves.toBeUndefined();
@@ -131,6 +147,28 @@ describe('MCPClient', () => {
       expect(refreshed[0]?.tools[0]?.name).toBe('new_tool');
       // Cache is now invalidated to the new list
       expect(c.listTools()[0]?.name).toBe('new_tool');
+    });
+
+    it('filters invalid tools and defaults missing inputSchema during refresh', async () => {
+      const c = new MCPClient({ name: 'tlc-normalize', transport: 'stdio', command: 'noop' });
+      (c as unknown as { request: (method: string) => Promise<unknown> }).request = async () => ({
+        jsonrpc: '2.0',
+        id: 1,
+        result: {
+          tools: [
+            { name: '', inputSchema: {} },
+            { description: 'missing name', inputSchema: {} },
+            { name: 'valid' },
+          ],
+        },
+      });
+      (c as unknown as { onLine: (line: string) => void }).onLine(
+        JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }),
+      );
+      await new Promise((r) => setTimeout(r, 10));
+      expect(c.listTools()).toEqual([
+        { name: 'valid', inputSchema: { type: 'object', properties: {} } },
+      ]);
     });
 
     it('list_changed refresh failure is swallowed; cache stays intact', async () => {
@@ -221,22 +259,21 @@ describe('MCPClient', () => {
       });
       // Manually add a pending entry with a reject that throws
       const id = (c as unknown as { nextId: number }).nextId++;
-      (c as unknown as { pending: Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }> }).pending.set(
-        id,
-        {
-          resolve: () => {},
-          reject: () => {
-            throw new Error('reject handler error');
-          },
+      (
+        c as unknown as {
+          pending: Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>;
+        }
+      ).pending.set(id, {
+        resolve: () => {},
+        reject: () => {
+          throw new Error('reject handler error');
         },
-      );
+      });
       // failPending should not throw even when a reject handler throws
       expect(() =>
         (c as unknown as { failPending: (reason: string) => void }).failPending('test'),
       ).not.toThrow();
-      expect(
-        (c as unknown as { pending: Map<unknown, unknown> }).pending.size,
-      ).toBe(0);
+      expect((c as unknown as { pending: Map<unknown, unknown> }).pending.size).toBe(0);
     });
   });
 
@@ -292,7 +329,11 @@ describe('MCPClient', () => {
 
   describe('addDisconnectListener / removeDisconnectListener', () => {
     it('removeDisconnectListener on a never-added listener is safe', () => {
-      const c = new MCPClient({ name: 'remove-disconnect-never', transport: 'stdio', command: 'echo' });
+      const c = new MCPClient({
+        name: 'remove-disconnect-never',
+        transport: 'stdio',
+        command: 'echo',
+      });
       const handler = vi.fn();
       expect(() => c.removeDisconnectListener(handler)).not.toThrow();
     });
@@ -319,9 +360,7 @@ describe('MCPClient', () => {
   describe('listTools() — cache fallback behavior', () => {
     it('listTools returns _tools when non-empty', () => {
       const c = new MCPClient({ name: 'tools-nonempty', transport: 'stdio', command: 'echo' });
-      (c as unknown as { _tools: MCPTool[] })._tools = [
-        { name: 'cached_tool', inputSchema: {} },
-      ];
+      (c as unknown as { _tools: MCPTool[] })._tools = [{ name: 'cached_tool', inputSchema: {} }];
       const tools = c.listTools();
       expect(tools).toHaveLength(1);
       expect(tools[0]?.name).toBe('cached_tool');

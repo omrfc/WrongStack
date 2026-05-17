@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { buildChildEnv } from '@wrongstack/core';
+import { normalizeMCPTools } from './tool-schema.js';
 import { type HttpTransportOptions, SSETransport, StreamableHTTPTransport } from './transport.js';
 
 export type Transport = 'stdio' | 'sse' | 'streamable-http';
@@ -13,6 +14,7 @@ export interface MCPClientOptions {
   url?: string;
   headers?: Record<string, string>;
   startupTimeoutMs?: number;
+  requestTimeoutMs?: number;
 }
 
 export type ConnectionState =
@@ -73,7 +75,7 @@ export class MCPClient {
    */
   private readonly pending = new Map<
     number,
-    { resolve: (res: JsonRpcResponse) => void; reject: (err: Error) => void }
+    { resolve: (res: JsonRpcResponse) => void; reject: (err: Error) => void; timer: NodeJS.Timeout }
   >();
   private rxBuffer = '';
   private _tools: MCPTool[] = [];
@@ -191,17 +193,15 @@ export class MCPClient {
       this.state = 'failed';
     });
 
-    const timeout = this.opts.startupTimeoutMs ?? 10_000;
-    const initialize = await Promise.race([
-      this.request('initialize', {
+    const initialize = await this.request(
+      'initialize',
+      {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
         clientInfo: { name: 'wrongstack', version: '0.1.10' },
-      }),
-      new Promise<JsonRpcResponse>((_, rej) =>
-        setTimeout(() => rej(new Error('MCP initialize timeout')), timeout),
-      ),
-    ]);
+      },
+      this.opts.startupTimeoutMs ?? 10_000,
+    );
     if (initialize.error) {
       this.state = 'failed';
       throw new Error(`MCP initialize failed: ${initialize.error.message}`);
@@ -221,7 +221,7 @@ export class MCPClient {
       this._tools = [];
     } else {
       const result = toolsRes.result as { tools?: MCPTool[] } | undefined;
-      this._tools = result?.tools ?? [];
+      this._tools = normalizeMCPTools(result?.tools);
     }
     // Cache tools so reconnect can re-register without re-discovering
     this._toolsCache = this._tools;
@@ -238,6 +238,7 @@ export class MCPClient {
       url: this.opts.url,
       headers: this.opts.headers,
       startupTimeoutMs: this.opts.startupTimeoutMs,
+      requestTimeoutMs: this.opts.requestTimeoutMs,
     };
     this.sseTransport = new SSETransport(httpOpts);
     this.sseTransport.onDisconnect(() => {
@@ -286,6 +287,7 @@ export class MCPClient {
       url: this.opts.url,
       headers: this.opts.headers,
       startupTimeoutMs: this.opts.startupTimeoutMs,
+      requestTimeoutMs: this.opts.requestTimeoutMs,
     };
     this.httpTransport = new StreamableHTTPTransport(httpOpts);
     this.httpTransport.onDisconnect(() => {
@@ -396,15 +398,37 @@ export class MCPClient {
     this.state = 'disconnected';
   }
 
-  private request(method: string, params: unknown): Promise<JsonRpcResponse> {
+  private request(
+    method: string,
+    params: unknown,
+    timeoutMs = this.opts.requestTimeoutMs ?? 60_000,
+  ): Promise<JsonRpcResponse> {
     const id = this.nextId++;
     const req: JsonRpcRequest = { jsonrpc: '2.0', id, method, params };
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(
+          new Error(`MCP "${this.opts.name}" request "${method}" timed out after ${timeoutMs}ms`),
+        );
+      }, timeoutMs);
+      this.pending.set(id, {
+        resolve: (res) => {
+          clearTimeout(timer);
+          resolve(res);
+        },
+        reject: (err) => {
+          clearTimeout(timer);
+          reject(err);
+        },
+        timer,
+      });
       try {
         this.child?.stdin?.write(JSON.stringify(req) + '\n');
       } catch (err) {
+        const pending = this.pending.get(id);
         this.pending.delete(id);
+        if (pending) clearTimeout(pending.timer);
         reject(err);
       }
     });
@@ -420,6 +444,7 @@ export class MCPClient {
     const err = new Error(reason);
     for (const [, entry] of this.pending) {
       try {
+        clearTimeout(entry.timer);
         entry.reject(err);
       } catch {
         /* ignore */
@@ -515,9 +540,7 @@ export class MCPClient {
   private async handleToolsListChanged(): Promise<void> {
     try {
       const toolsRes = await this.request('tools/list', {});
-      const tools = ((toolsRes.result as { tools?: MCPTool[] } | undefined)?.tools ?? []).filter(
-        (t): t is MCPTool => !!t && typeof t.name === 'string',
-      );
+      const tools = normalizeMCPTools((toolsRes.result as { tools?: unknown } | undefined)?.tools);
       this._tools = tools;
       this._toolsCache = tools;
       for (const listener of this.toolsChangedListeners) {

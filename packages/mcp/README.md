@@ -72,7 +72,8 @@ wstack mcp list
       "enabled": true,
       "permission": "confirm",
       "allowedTools": ["read", "search"],
-      "startupTimeoutMs": 10000
+      "startupTimeoutMs": 10000,
+      "requestTimeoutMs": 60000
     }
   }
 }
@@ -99,6 +100,7 @@ interface MCPServerConfig {
   allowedTools?: string[];    // whitelist — undefined = all tools
   permission?: Permission;    // 'auto' | 'confirm' | 'deny'  (default: 'confirm')
   startupTimeoutMs?: number;  // default: 10000
+  requestTimeoutMs?: number;  // default: 60000
   description?: string;        // shown in `wstack mcp list`
 }
 ```
@@ -140,6 +142,7 @@ Check that:
 - The `command` is in your `PATH` (or use an absolute path)
 - `npx -y @modelcontextprotocol/server-filesystem .` works standalone
 - The `startupTimeoutMs` is sufficient for slow-starting servers
+- The `requestTimeoutMs` is sufficient for long-running tool calls
 
 ### Tools not appearing
 

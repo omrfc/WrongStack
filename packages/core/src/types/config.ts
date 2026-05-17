@@ -1,5 +1,5 @@
-import type { WireFamily } from './models-registry.js';
 import type { ContextWindowModeId } from './context-window.js';
+import type { WireFamily } from './models-registry.js';
 import type { Permission } from './tool.js';
 
 export interface ContextConfig {
@@ -100,6 +100,7 @@ export interface MCPServerConfig {
   allowedTools?: string[];
   permission?: Permission;
   startupTimeoutMs?: number;
+  requestTimeoutMs?: number;
 }
 
 export interface LogConfig {

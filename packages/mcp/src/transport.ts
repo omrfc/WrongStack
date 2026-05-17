@@ -1,5 +1,6 @@
 import * as net from 'node:net';
 import type { ConnectionState, MCPTool, ToolCallResult } from './client.js';
+import { normalizeMCPTools } from './tool-schema.js';
 
 export type JsonRpcResult = {
   jsonrpc: string;
@@ -13,6 +14,7 @@ export interface HttpTransportOptions {
   url: string;
   headers?: Record<string, string>;
   startupTimeoutMs?: number;
+  requestTimeoutMs?: number;
 }
 
 /**
@@ -34,7 +36,9 @@ function validateTransportUrl(rawUrl: string): void {
   }
 
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error(`MCP transport: unsupported protocol "${url.protocol}" — only http/https allowed`);
+    throw new Error(
+      `MCP transport: unsupported protocol "${url.protocol}" — only http/https allowed`,
+    );
   }
 
   const hostname = url.hostname;
@@ -82,6 +86,7 @@ const SSE_READER_MAX_BUFFER = 256 * 1024;
 
 export class SSEReader {
   private buffer = '';
+  private dataLines: string[] = [];
   private listeners: Array<
     (event: { jsonrpc?: string; method?: string; params?: unknown; id?: number }) => void
   > = [];
@@ -105,28 +110,51 @@ export class SSEReader {
     }
     let idx = this.buffer.indexOf('\n');
     while (idx !== -1) {
-      const line = this.buffer.slice(0, idx);
+      const line = this.buffer.slice(0, idx).replace(/\r$/, '');
       this.buffer = this.buffer.slice(idx + 1);
       idx = this.buffer.indexOf('\n');
 
-      if (line.startsWith('event:')) {
-        // track event type, ignore for now
-      } else if (line.startsWith('data:')) {
-        const data = line.slice(5).trim();
-        if (data) {
-          try {
-            const parsed = JSON.parse(data) as {
-              jsonrpc?: string;
-              method?: string;
-              params?: unknown;
-              id?: number;
-            };
-            this.dispatch(parsed);
-          } catch {
-            // ignore parse errors
-          }
-        }
-      }
+      this.processLine(line);
+    }
+  }
+
+  private processLine(line: string): void {
+    if (line === '') {
+      this.flush();
+      return;
+    }
+    if (line.startsWith(':')) return;
+
+    const colonIdx = line.indexOf(':');
+    const field = colonIdx === -1 ? line : line.slice(0, colonIdx);
+    let value = colonIdx === -1 ? '' : line.slice(colonIdx + 1);
+    if (value.startsWith(' ')) value = value.slice(1);
+
+    if (field === 'event') {
+      // The current transport only cares about JSON-RPC payloads in data
+      // fields. Event names are accepted for spec compatibility.
+    } else if (field === 'data') {
+      this.dataLines.push(value);
+    }
+  }
+
+  private flush(): void {
+    if (this.dataLines.length === 0) {
+      return;
+    }
+    const data = this.dataLines.join('\n').trim();
+    this.dataLines = [];
+    if (!data) return;
+    try {
+      const parsed = JSON.parse(data) as {
+        jsonrpc?: string;
+        method?: string;
+        params?: unknown;
+        id?: number;
+      };
+      this.dispatch(parsed);
+    } catch {
+      // ignore parse errors
     }
   }
 
@@ -147,12 +175,43 @@ export class SSEReader {
 
   reset(): void {
     this.buffer = '';
+    this.dataLines = [];
     this.listeners = [];
   }
 }
 
 function isJsonRpcResult(v: unknown): v is JsonRpcResult {
-  return typeof v === 'object' && v !== null && 'jsonrpc' in v;
+  if (typeof v !== 'object' || v === null) return false;
+  const r = v as JsonRpcResult;
+  if (r.jsonrpc !== '2.0') return false;
+  if (r.error !== undefined) {
+    return (
+      typeof r.error === 'object' &&
+      r.error !== null &&
+      typeof r.error.code === 'number' &&
+      typeof r.error.message === 'string'
+    );
+  }
+  return 'result' in r || r.id === undefined;
+}
+
+function assertMatchingJsonRpcResult(
+  data: unknown,
+  expectedId: number,
+  method: string,
+): JsonRpcResult {
+  if (!isJsonRpcResult(data)) {
+    throw new Error('Invalid JSON-RPC response: not a JSON-RPC 2.0 envelope');
+  }
+  if (data.id !== undefined && data.id !== expectedId) {
+    throw new Error(
+      `Invalid JSON-RPC response: id mismatch for ${method} (expected ${expectedId}, got ${data.id})`,
+    );
+  }
+  if (data.id === undefined && !method.startsWith('notifications/')) {
+    throw new Error(`Invalid JSON-RPC response: missing id for ${method}`);
+  }
+  return data;
 }
 
 /**
@@ -166,6 +225,7 @@ export class SSETransport {
   private url: string;
   private headers: Record<string, string>;
   private timeout: number;
+  private requestTimeout: number;
   private nextId = 1;
   // NOTE: id-correlation via this map was scaffolded but never populated by
   // `httpPost` — JSON-RPC responses come back synchronously over HTTP, not
@@ -186,6 +246,7 @@ export class SSETransport {
     this.url = opts.url;
     this.headers = { ...opts.headers };
     this.timeout = opts.startupTimeoutMs ?? 10_000;
+    this.requestTimeout = opts.requestTimeoutMs ?? 60_000;
   }
 
   getState(): ConnectionState {
@@ -216,7 +277,7 @@ export class SSETransport {
     try {
       const res = await this.httpPost('tools/list', {});
       if (!res.error) {
-        this.tools = (res.result as { tools?: MCPTool[] } | undefined)?.tools ?? [];
+        this.tools = normalizeMCPTools((res.result as { tools?: unknown } | undefined)?.tools);
         for (const cb of this.toolsChangedListeners) {
           try {
             cb([...this.tools]);
@@ -295,8 +356,8 @@ export class SSETransport {
       if (toolsRes.error) {
         this.tools = [];
       } else {
-        const result = toolsRes.result as { tools?: MCPTool[] } | undefined;
-        this.tools = result?.tools ?? [];
+        const result = toolsRes.result as { tools?: unknown } | undefined;
+        this.tools = normalizeMCPTools(result?.tools);
       }
 
       this.state = 'connected';
@@ -352,39 +413,41 @@ export class SSETransport {
     const id = this.nextId++;
     const body = JSON.stringify({ jsonrpc: '2.0', id, method, params });
 
-    const res = await fetch(this.url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...this.headers,
-      },
-      body,
-      signal: this.abortController?.signal,
-    });
-
-    if (!res.ok) {
-      // Cap the body — a misbehaving server could return megabytes of
-      // HTML and that's not useful in an error message anyway.
-      const body = await res.text();
-      const cap = 1024;
-      const snippet =
-        body.length > cap ? `${body.slice(0, cap)}… [${body.length} bytes total]` : body;
-      throw new Error(`HTTP ${res.status}: ${snippet}`);
-    }
-
-    let data: unknown;
+    const timeoutSignal = createTimeoutSignal(this.abortController?.signal, this.requestTimeout);
     try {
-      data = await res.json();
-    } catch (err) {
-      throw new Error(
-        `Invalid JSON-RPC response: ${err instanceof Error ? err.message : 'parse failed'}`,
-        { cause: err },
-      );
+      const res = await fetch(this.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...this.headers,
+        },
+        body,
+        signal: timeoutSignal.signal,
+      });
+
+      if (!res.ok) {
+        // Cap the body — a misbehaving server could return megabytes of
+        // HTML and that's not useful in an error message anyway.
+        const body = await res.text();
+        const cap = 1024;
+        const snippet =
+          body.length > cap ? `${body.slice(0, cap)}… [${body.length} bytes total]` : body;
+        throw new Error(`HTTP ${res.status}: ${snippet}`);
+      }
+
+      let data: unknown;
+      try {
+        data = await res.json();
+      } catch (err) {
+        throw new Error(
+          `Invalid JSON-RPC response: ${err instanceof Error ? err.message : 'parse failed'}`,
+          { cause: err },
+        );
+      }
+      return assertMatchingJsonRpcResult(data, id, method);
+    } finally {
+      timeoutSignal.dispose();
     }
-    if (!isJsonRpcResult(data)) {
-      throw new Error('Invalid JSON-RPC response: not a JSON-RPC envelope');
-    }
-    return data;
   }
 
   async callTool(name: string, input: unknown): Promise<ToolCallResult> {
@@ -433,6 +496,7 @@ export class StreamableHTTPTransport {
   private url: string;
   private headers: Record<string, string>;
   private timeout: number;
+  private requestTimeout: number;
   private nextId = 1;
   private tools: MCPTool[] = [];
   private abortController?: AbortController;
@@ -445,6 +509,7 @@ export class StreamableHTTPTransport {
     this.url = opts.url;
     this.headers = { ...opts.headers };
     this.timeout = opts.startupTimeoutMs ?? 10_000;
+    this.requestTimeout = opts.requestTimeoutMs ?? 60_000;
   }
 
   getState(): ConnectionState {
@@ -474,7 +539,7 @@ export class StreamableHTTPTransport {
     try {
       const res = await this.postRaw('tools/list', {});
       if (!res.error) {
-        this.tools = (res.result as { tools?: MCPTool[] } | undefined)?.tools ?? [];
+        this.tools = normalizeMCPTools((res.result as { tools?: unknown } | undefined)?.tools);
         for (const cb of this.toolsChangedListeners) {
           try {
             cb([...this.tools]);
@@ -542,6 +607,7 @@ export class StreamableHTTPTransport {
       if (!data) {
         throw new Error('Could not parse initialize response');
       }
+      data = assertMatchingJsonRpcResult(data, this.nextId - 1, 'initialize');
 
       if (data.error) {
         throw new Error(`initialize failed: ${data.error.message}`);
@@ -554,8 +620,8 @@ export class StreamableHTTPTransport {
       if (toolsRes.error) {
         this.tools = [];
       } else {
-        const result = toolsRes.result as { tools?: MCPTool[] } | undefined;
-        this.tools = result?.tools ?? [];
+        const result = toolsRes.result as { tools?: unknown } | undefined;
+        this.tools = normalizeMCPTools(result?.tools);
       }
 
       this.state = 'connected';
@@ -576,31 +642,39 @@ export class StreamableHTTPTransport {
       ? `${this.url}${this.url.includes('?') ? '&' : '?'}session=${this.sessionId}`
       : this.url;
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json, text/event-stream',
-        ...(this.sessionId ? { 'x-mcp-session': this.sessionId } : {}),
-        ...this.headers,
-      },
-      body,
-      signal: this.abortController?.signal,
-    });
+    const timeoutSignal = createTimeoutSignal(this.abortController?.signal, this.requestTimeout);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/event-stream',
+          ...(this.sessionId ? { 'x-mcp-session': this.sessionId } : {}),
+          ...this.headers,
+        },
+        body,
+        signal: timeoutSignal.signal,
+      });
 
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-    }
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
 
-    const text = await res.text();
-    const lines = text.split('\n').filter((l) => l.trim());
-    for (const line of lines) {
-      try {
-        const parsed = JSON.parse(line);
-        if (isJsonRpcResult(parsed)) return parsed;
-      } catch {}
+      const text = await res.text();
+      const lines = text.split('\n').filter((l) => l.trim());
+      for (const line of lines) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(line);
+        } catch {}
+        if (isJsonRpcResult(parsed)) {
+          return assertMatchingJsonRpcResult(parsed, id, method);
+        }
+      }
+      throw new Error('Could not parse response as JSON-RPC');
+    } finally {
+      timeoutSignal.dispose();
     }
-    throw new Error('Could not parse response as JSON-RPC');
   }
 
   async callTool(name: string, input: unknown): Promise<ToolCallResult> {
@@ -626,4 +700,28 @@ export class StreamableHTTPTransport {
     // reconnection in the registry, which would fight an explicit close().
     this.disconnectHandlers = [];
   }
+}
+
+function createTimeoutSignal(
+  parent: AbortSignal | undefined,
+  timeoutMs: number,
+): { signal: AbortSignal; dispose: () => void } {
+  const ctrl = new AbortController();
+  const onAbort = () => ctrl.abort(parent?.reason);
+  if (parent?.aborted) {
+    ctrl.abort(parent.reason);
+  } else {
+    parent?.addEventListener('abort', onAbort, { once: true });
+  }
+  const timer = setTimeout(
+    () => ctrl.abort(new Error(`MCP HTTP request timed out after ${timeoutMs}ms`)),
+    timeoutMs,
+  );
+  return {
+    signal: ctrl.signal,
+    dispose: () => {
+      clearTimeout(timer);
+      parent?.removeEventListener('abort', onAbort);
+    },
+  };
 }
