@@ -263,19 +263,24 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         modelsRegistry,
         globalConfigPath: wpaths.globalConfig,
       });
-      code = await runRepl({
-        agent,
-        renderer,
-        reader,
-        slashRegistry,
-        tokenCounter,
-        visionAdapters,
-        supportsVision,
-        attachments,
-        effectiveMaxContext,
-        projectName: path.basename(projectRoot) || undefined,
-      });
-      await webuiPromise;
+      try {
+        code = await runRepl({
+          agent,
+          renderer,
+          reader,
+          slashRegistry,
+          tokenCounter,
+          visionAdapters,
+          supportsVision,
+          attachments,
+          effectiveMaxContext,
+          projectName: path.basename(projectRoot) || undefined,
+        });
+      } finally {
+        // webuiPromise must be awaited regardless of whether runRepl threw,
+        // so the HTTP/WS server can shut down cleanly.
+        await webuiPromise.catch(() => undefined);
+      }
     } else {
       code = await runRepl({
         agent,
@@ -291,7 +296,9 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
       });
     }
   } finally {
-    stats.render(renderer);
+    // stats.render is synchronous but can throw — isolate it so cleanup
+    // always runs regardless.
+    try { stats.render(renderer); } catch (err) { /* best-effort */ }
     await Promise.resolve(detachTodosCheckpoint?.()).catch(() => undefined);
     await mcpRegistry.stopAll();
     await session.append({

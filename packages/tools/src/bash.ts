@@ -142,6 +142,7 @@ export const bashTool: Tool<BashInput, BashOutput> = {
             }
           }, 2000);
           timers.push(killTimer);
+          killTimer.unref?.(); // Don't keep event loop alive on clean exit
         } catch {
           /* ignore */
         }
