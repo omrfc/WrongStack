@@ -80,6 +80,10 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   const { config: baseConfig, vault, globalConfigPath, projectRoot, wpaths, logger } = boot;
   let config = baseConfig;
 
+  // Serialize concurrent config writes to prevent races between model.switch
+  // and key.add/key.update handlers that both read-modify-write globalConfigPath.
+  let configWriteLock: Promise<void> = Promise.resolve();
+
   console.log('[WebUI] Config loaded:', config.provider, '/', config.model);
 
   // ModelsRegistry
@@ -932,11 +936,14 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
 
           // Persist to global config file
           try {
-            const raw = await fs.readFile(globalConfigPath, 'utf8');
-            const parsed = JSON.parse(raw);
-            parsed.provider = newProvider;
-            parsed.model = newModel;
-            await atomicWrite(globalConfigPath, JSON.stringify(parsed, null, 2));
+            configWriteLock = configWriteLock.then(async () => {
+              const raw = await fs.readFile(globalConfigPath, 'utf8');
+              const parsed = JSON.parse(raw);
+              parsed.provider = newProvider;
+              parsed.model = newModel;
+              await atomicWrite(globalConfigPath, JSON.stringify(parsed, null, 2));
+            });
+            await configWriteLock;
           } catch (err) {
             console.warn('[WebUI] Failed to save config:', err);
           }
@@ -1479,15 +1486,18 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   }
 
   async function saveProviders(providers: Record<string, ProviderConfig>): Promise<void> {
-    let parsed: Record<string, unknown>;
-    try {
-      const raw = await fs.readFile(globalConfigPath, 'utf8');
-      parsed = JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      parsed = {};
-    }
-    parsed['providers'] = providers;
-    await atomicWrite(globalConfigPath, JSON.stringify(parsed, null, 2), { mode: 0o600 });
+    configWriteLock = configWriteLock.then(async () => {
+      let parsed: Record<string, unknown>;
+      try {
+        const raw = await fs.readFile(globalConfigPath, 'utf8');
+        parsed = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        parsed = {};
+      }
+      parsed['providers'] = providers;
+      await atomicWrite(globalConfigPath, JSON.stringify(parsed, null, 2), { mode: 0o600 });
+    });
+    await configWriteLock;
   }
 
   function normalizeKeys(cfg: ProviderConfig): ProviderApiKey[] {
