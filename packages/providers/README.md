@@ -10,7 +10,7 @@ Most providers ride a single declarative `WireFormatConfig` adapter; only the th
 pnpm add @wrongstack/providers @wrongstack/core
 ```
 
-`@wrongstack/core` is a peer of every provider — providers depend on the core `Provider` interface, message types, and tool format.
+`@wrongstack/core` provides the shared `Provider` interface, message types, and tool format.
 
 ## What's in here
 
@@ -37,13 +37,16 @@ import { AnthropicProvider } from '@wrongstack/providers';
 
 const provider = new AnthropicProvider({
   apiKey: process.env.ANTHROPIC_API_KEY!,
-  modelId: 'claude-sonnet-4-6',
 });
 
-const stream = provider.stream({
-  messages: [{ role: 'user', content: 'hello' }],
-  tools: [],
-});
+const stream = provider.stream(
+  {
+    model: 'claude-sonnet-4-6',
+    messages: [{ role: 'user', content: 'hello' }],
+    maxTokens: 512,
+  },
+  { signal: new AbortController().signal },
+);
 
 for await (const event of stream) {
   if (event.type === 'text_delta') process.stdout.write(event.text);
@@ -58,39 +61,48 @@ import { OpenAICompatibleProvider } from '@wrongstack/providers';
 const groq = new OpenAICompatibleProvider({
   id: 'groq',
   apiKey: process.env.GROQ_API_KEY!,
-  baseURL: 'https://api.groq.com/openai/v1',
-  modelId: 'llama-3.3-70b-versatile',
+  baseUrl: 'https://api.groq.com/openai/v1',
   capabilities: { tools: true, vision: false, maxContext: 128_000 },
 });
+
+const result = await groq.complete(
+  {
+    model: 'llama-3.3-70b-versatile',
+    messages: [{ role: 'user', content: 'hello' }],
+    maxTokens: 512,
+  },
+  { signal: new AbortController().signal },
+);
 ```
 
 ## Wire-format adapter (declarative)
 
-For a new provider that doesn't fit one of the existing presets, write a `WireFormatConfig` and plug it into `WireAdapter`. See [docs/provider-author-guide.md](../../docs/provider-author-guide.md) for the full spec.
+For a new provider that doesn't fit one of the existing presets, write a `WireFormatConfig` and plug it into `WireFormatProvider`. See [docs/provider-author-guide.md](../../docs/provider-author-guide.md) for the full spec.
 
 ```ts
-import { WireAdapter } from '@wrongstack/providers';
-import type { WireFormatConfig } from '@wrongstack/core';
+import { WireFormatProvider, type WireFormatConfig } from '@wrongstack/providers';
 
 const myWire: WireFormatConfig = {
-  family: 'openai',
-  endpoint: 'https://api.myprovider.com/v1/chat/completions',
-  authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
-  // tool format, message shape, stream parsing — see WireFormatConfig type
+  id: 'myprovider',
+  family: 'openai-compatible',
+  capabilities: { tools: true, parallelTools: true, vision: false, streaming: true, promptCache: false, systemPrompt: true, jsonMode: false, maxContext: 32_000, cacheControl: 'none' },
+  defaultBaseUrl: 'https://api.myprovider.com/v1',
+  buildUrl: (baseUrl) => `${baseUrl.replace(/\/+$/, '')}/chat/completions`,
+  buildHeaders: (apiKey) => ({ authorization: `Bearer ${apiKey}` }),
+  buildBody: (req) => ({ model: req.model, messages: req.messages, max_tokens: req.maxTokens, stream: true }),
+  createStreamState: (fallbackModel) => ({ model: fallbackModel, started: false }),
+  parseStreamEvent: () => [],
+  finalizeStream: () => [{ type: 'message_stop', stopReason: 'end_turn', usage: { input: 0, output: 0 } }],
 };
 
-const provider = new WireAdapter({
-  id: 'myprovider',
+const provider = new WireFormatProvider(myWire, {
   apiKey: '…',
-  modelId: 'my-model-1',
-  wire: myWire,
-  capabilities: { tools: true, maxContext: 32_000 },
 });
 ```
 
 ## Tool input parsing (`parseToolInput`)
 
-All four stream parsers (anthropic / openai / aggregate + the three OpenAI-compatible presets) run tool-call JSON through one canonical helper: [`_tool-input.ts`](src/_tool-input.ts). It guarantees the agent always receives a `Record<string, unknown>` for `tool_use.input`, never a parse-error or `null`. Invalid or non-object inputs are wrapped under `{ __raw: ... }` instead of crashing the provider runner.
+Anthropic/OpenAI-style stream parsers and the aggregate path run tool-call JSON through one canonical helper: [`_tool-input.ts`](src/_tool-input.ts). It guarantees the agent always receives a `Record<string, unknown>` for `tool_use.input`, never a parse-error or `null`. Invalid or non-object inputs are wrapped under `{ __raw: ... }` instead of crashing the provider runner.
 
 ## Capabilities
 

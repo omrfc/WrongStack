@@ -22,6 +22,7 @@ wiring, SSE parsing — is shared by `WireFormatProvider`.
 ### The shape
 
 ```ts
+import type { StreamEvent } from '@wrongstack/core';
 import type { WireFormatConfig } from '@wrongstack/providers';
 
 const config: WireFormatConfig<MyStreamState> = {
@@ -48,22 +49,29 @@ const config: WireFormatConfig<MyStreamState> = {
   },
 
   createStreamState(fallbackModel) {
-    return { model: fallbackModel, accumulated: '' };
+    return { model: fallbackModel, accumulated: '', started: false };
   },
 
   parseStreamEvent(msg, state) {
-    if (msg.data === '[DONE]') return [{ type: 'message_stop' }];
+    if (!msg.data || msg.data === '[DONE]') return [];
     const json = JSON.parse(msg.data);
+    const out: StreamEvent[] = [];
+    if (!state.started) {
+      state.started = true;
+      out.push({ type: 'message_start', model: state.model });
+    }
     const delta = json.choices?.[0]?.delta?.content;
     if (typeof delta === 'string') {
       state.accumulated += delta;
-      return [{ type: 'text_delta', text: delta }];
+      out.push({ type: 'text_delta', text: delta });
     }
-    return [];
+    return out;
   },
 
   finalizeStream(state) {
-    return [{ type: 'message_stop', usage: { input: 0, output: 0 } }];
+    return state.started
+      ? [{ type: 'message_stop', stopReason: 'end_turn', usage: { input: 0, output: 0 } }]
+      : [];
   },
 };
 ```
@@ -82,7 +90,7 @@ capabilities: {
   systemPrompt: true,    // accepts a system role separate from messages
   jsonMode: true,        // supports response_format=json_object
   maxContext: 128_000,   // model context window in tokens
-  cacheControl: 'none',  // 'ephemeral' for Anthropic-style cache_control blocks
+  cacheControl: 'none',  // 'native' | 'auto' | 'none'
 }
 ```
 
@@ -187,44 +195,85 @@ SSE events. The state struct is where you reassemble it:
 ```ts
 interface OpenAIStreamState {
   model: string;
-  toolCalls: Map<number, { id: string; name: string; args: string }>;
-  textIndex: number;
+  started: boolean;
+  toolCalls: Map<
+    number,
+    {
+      id?: string;
+      name?: string;
+      args: string;
+      emittedStart: boolean;
+      emittedArgLength: number;
+    }
+  >;
 }
 
 createStreamState(fallbackModel) {
-  return { model: fallbackModel, toolCalls: new Map(), textIndex: 0 };
+  return { model: fallbackModel, started: false, toolCalls: new Map() };
 },
 
 parseStreamEvent(msg, state) {
-  if (msg.data === '[DONE]') return [{ type: 'message_stop' }];
+  if (!msg.data || msg.data === '[DONE]') return [];
   const json = JSON.parse(msg.data);
+  const out: StreamEvent[] = [];
+  if (!state.started) {
+    state.started = true;
+    out.push({ type: 'message_start', model: state.model });
+  }
   const delta = json.choices?.[0]?.delta;
   if (delta?.tool_calls) {
     for (const tc of delta.tool_calls) {
-      const slot = state.toolCalls.get(tc.index) ?? { id: '', name: '', args: '' };
+      const slot = state.toolCalls.get(tc.index) ?? {
+        id: undefined,
+        name: undefined,
+        args: '',
+        emittedStart: false,
+        emittedArgLength: 0,
+      };
       if (tc.id) slot.id = tc.id;
       if (tc.function?.name) slot.name = tc.function.name;
       if (tc.function?.arguments) slot.args += tc.function.arguments;
       state.toolCalls.set(tc.index, slot);
+      if (!slot.emittedStart && slot.id && slot.name) {
+        slot.emittedStart = true;
+        out.push({ type: 'tool_use_start', id: slot.id, name: slot.name });
+      }
+      if (slot.emittedStart && slot.id && slot.emittedArgLength < slot.args.length) {
+        const partial = slot.args.slice(slot.emittedArgLength);
+        slot.emittedArgLength = slot.args.length;
+        out.push({ type: 'tool_use_input_delta', id: slot.id, partial });
+      }
     }
   }
-  // … emit deltas …
-  return [];
+  return out;
 },
 
 finalizeStream(state) {
   // Flush completed tool_use blocks with parsed arguments.
   const events: StreamEvent[] = [];
   for (const [_idx, tc] of state.toolCalls) {
-    events.push({
-      type: 'content_block_stop',
-      index: state.textIndex++,
-      block: { type: 'tool_use', id: tc.id, name: tc.name, input: JSON.parse(tc.args) },
-    });
+    if (!tc.id || !tc.name) continue;
+    if (!tc.emittedStart) {
+      events.push({ type: 'tool_use_start', id: tc.id, name: tc.name });
+    }
+    events.push({ type: 'tool_use_stop', id: tc.id, input: parseToolArgs(tc.args) });
   }
-  events.push({ type: 'message_stop' });
+  if (state.started) {
+    events.push({ type: 'message_stop', stopReason: 'tool_use', usage: { input: 0, output: 0 } });
+  }
   return events;
 },
+
+function parseToolArgs(raw: string): Record<string, unknown> {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : { __raw: value };
+  } catch {
+    return { __raw: raw };
+  }
+}
 ```
 
 The full implementations live in
@@ -263,20 +312,28 @@ prefer extending that rather than inlining a map.
 [`error-parse.ts`](../packages/providers/src/error-parse.ts) by default:
 
 - 4xx → `ProviderError` with `status` and parsed body
-- 429 → `ProviderError` with parsed `Retry-After`, `recoverable: true`
-- 5xx → `ProviderError` with `recoverable: true` so the retry policy kicks in
+- 429 → `ProviderError` with `retryable: true`
+- 5xx → `ProviderError` with `retryable: true` so the retry policy kicks in
 
 Override only when the vendor returns errors in a non-standard envelope:
 
 ```ts
+import { ProviderError } from '@wrongstack/core';
+
 normalizeError(status, body) {
   const j = JSON.parse(body);
-  return new ProviderError({
-    message: j.error?.message ?? body,
-    code: j.error?.code === 'context_length_exceeded' ? 'PROVIDER_CONTEXT_OVERFLOW' : 'PROVIDER_REQUEST_FAILED',
+  return new ProviderError(
+    j.error?.message ?? body,
     status,
-    recoverable: status === 429 || status >= 500,
-  });
+    status === 429 || status >= 500,
+    'my-llm',
+    {
+      body: {
+        type: j.error?.code,
+        message: j.error?.message,
+      },
+    },
+  );
 }
 ```
 
@@ -284,31 +341,46 @@ normalizeError(status, body) {
 
 ## Testing
 
-Provider tests use recorded SSE fixtures from real responses. Don't make
+Provider tests should use inline or checked-in SSE fixtures. Don't make
 live API calls in tests:
 
 ```ts
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { WireFormatProvider } from '@wrongstack/providers';
 import { myLlmConfig } from '../src/my-llm-config.js';
 
+function streamFromText(text: string): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(text));
+      controller.close();
+    },
+  });
+}
+
 describe('my-llm', () => {
   it('parses streaming text deltas', async () => {
-    const fetchImpl = vi.fn(async () => new Response(streamFromFixture('hello.sse'), {
-      status: 200,
-      headers: { 'content-type': 'text/event-stream' },
-    }));
+    const fetchImpl = vi.fn(async () =>
+      new Response(streamFromText('data: {"choices":[{"delta":{"content":"hello"}}]}\n\n'), {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
     const p = new WireFormatProvider(myLlmConfig, { apiKey: 'fake', fetchImpl });
     const events = [];
-    for await (const e of p.stream({ /* … */ })) events.push(e);
+    for await (const e of p.stream(
+      { model: 'my-model', messages: [], maxTokens: 100 },
+      { signal: new AbortController().signal },
+    )) {
+      events.push(e);
+    }
     expect(events.filter((e) => e.type === 'text_delta').length).toBeGreaterThan(0);
   });
 });
 ```
 
-Helper: [`packages/providers/tests/_fixtures/`](../packages/providers/tests/_fixtures/)
-has reusable SSE recordings keyed by scenario name. Add to it when
-testing your preset — keeps the bar consistent across providers.
+Keep tests deterministic: use inline or checked-in SSE fixtures and never
+make live API calls.
 
 ---
 

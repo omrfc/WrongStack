@@ -182,23 +182,29 @@ with `code`, `severity`, `recoverable`). `RunResult.error` is typed
 ## Providers — declarative wire formats
 
 A `Provider` adapts a model's HTTP API to the unified `complete` /
-`stream` interface. The three built-ins live as `WireFormatConfig` presets:
+`stream` interface. Declarative providers use `WireFormatConfig`
+presets, while the native Anthropic/OpenAI/Google classes keep custom
+constructor options and share the same canonical stream events:
 
 ```ts
 const config: WireFormatConfig<MyStreamState> = {
+  id: 'my-llm',
   family: 'openai-compatible',
-  buildRequestBody: (req) => ({ ... }),
-  parseResponse: (json) => ({ content, stopReason, usage, model }),
+  capabilities,
+  defaultBaseUrl: 'https://api.my-llm.com/v1',
+  buildUrl: (baseUrl, req) => `${baseUrl}/chat/completions`,
+  buildHeaders: (apiKey, req) => ({ authorization: `Bearer ${apiKey}` }),
+  buildBody: (req) => ({ model: req.model, messages: req.messages, stream: true }),
   createStreamState: () => ({ ... }),
-  parseStreamEvent: (event, state) => yieldDeltas(...),
-  finalizeStream: (state) => finalResponse(...),
+  parseStreamEvent: (event, state) => streamEvents,
+  finalizeStream: (state) => [{ type: 'message_stop', stopReason, usage }],
 };
 ```
 
 `WireFormatProvider` consumes the config and gives you a fully-wired
-`Provider`. The compat re-exports (`class AnthropicProvider extends
-WireFormatProvider`) keep the legacy `new AnthropicProvider(...)` shape
-working.
+`Provider`. The package also exports hand-written `AnthropicProvider`,
+`OpenAIProvider`, `GoogleProvider`, and `OpenAICompatibleProvider`
+classes for the common built-in transports.
 
 See [`provider-author-guide.md`](provider-author-guide.md) for writing
 a new one.

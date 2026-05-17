@@ -164,15 +164,25 @@ See [tool-author-guide.md](tool-author-guide.md) for the full Tool contract
 ### Register a provider factory
 
 ```ts
+import { WireFormatProvider } from '@wrongstack/providers';
+import { myWireFormat } from './my-wire-format.js';
+
 api.providers.register({
   type: 'my-llm',
   family: 'openai-compatible',
-  create: (cfg) => new MyProvider(cfg as MyProviderConfig),
+  create: (cfg) => {
+    const c = cfg as { apiKey: string; baseUrl?: string };
+    return new WireFormatProvider(myWireFormat, {
+      apiKey: c.apiKey,
+      baseUrl: c.baseUrl,
+    });
+  },
 });
 ```
 
-See [provider-author-guide.md](provider-author-guide.md) for writing
-`MyProvider` declaratively via `WireFormatConfig`.
+See [provider-author-guide.md](provider-author-guide.md) for writing the
+`myWireFormat` config and for cases that genuinely need a custom provider
+class.
 
 ### Add middleware to a pipeline
 

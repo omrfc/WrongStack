@@ -558,9 +558,9 @@ wrongstack models refresh         # force-refresh the 24h cache
 |--------|-----------|------------------------|
 | `anthropic` | Native Claude API + SSE | Anthropic, MiniMax, Kimi, Google Vertex (Anthropic) |
 | `openai` | Native OpenAI Chat Completions + SSE | OpenAI, Perplexity Agent, Vivgrid |
-| `openai-compatible` | OpenAI-spec endpoints + SSE | ~100 providers: Groq, DeepSeek, OpenRouter, Together, xAI, Cerebras, Ollama, Fireworks, Moonshot, GLM, Alibaba, … |
+| `openai-compatible` | OpenAI-spec endpoints + SSE | ~100 providers: Mistral, Groq, DeepSeek, OpenRouter, Together, xAI, Cerebras, Ollama, Fireworks, Moonshot, GLM, Alibaba, … |
 | `google` | Gemini `:streamGenerateContent?alt=sse` | Google AI Studio |
-| `unsupported` | Needs plugin | Mistral, Cohere, Bedrock, Vertex (non-Anthropic), Azure |
+| `unsupported` | Needs plugin | Cohere, Bedrock, Vertex (non-Anthropic), Azure |
 
 All four supported families implement **real streaming** end-to-end: provider `stream()` is the source of truth, `complete()` is just `aggregateStream(stream(...))`. Mid-stream aborts preserve any partial assistant text already received.
 

@@ -49,6 +49,7 @@ const FAMILY_BY_NPM: Record<string, WireFamily> = {
   '@ai-sdk/xai': 'openai-compatible',
   '@ai-sdk/cerebras': 'openai-compatible',
   '@ai-sdk/togetherai': 'openai-compatible',
+  '@ai-sdk/mistral': 'openai-compatible',
   '@ai-sdk/perplexity': 'openai-compatible',
   '@ai-sdk/deepinfra': 'openai-compatible',
   '@openrouter/ai-sdk-provider': 'openai-compatible',

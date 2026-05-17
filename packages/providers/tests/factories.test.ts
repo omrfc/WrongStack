@@ -39,6 +39,7 @@ const SAMPLE: ModelsDevPayload = {
     name: 'Mistral',
     npm: '@ai-sdk/mistral',
     env: ['MISTRAL_API_KEY'],
+    api: 'https://api.mistral.ai/v1',
     models: { 'mistral-large': { id: 'mistral-large', name: 'Mistral Large' } },
   },
 };
@@ -58,8 +59,8 @@ describe('buildProviderFactoriesFromRegistry', () => {
     expect(types).toContain('anthropic');
     expect(types).toContain('groq');
     expect(types).toContain('google');
+    expect(types).toContain('mistral');
     expect(types).toContain('openai-compatible');
-    expect(types).not.toContain('mistral'); // unsupported
   });
 
   it('anthropic factory builds an AnthropicProvider', async () => {
@@ -84,6 +85,14 @@ describe('buildProviderFactoriesFromRegistry', () => {
     const f = factories.find((x) => x.type === 'google');
     const provider = f!.create({ type: 'google', apiKey: 'AIza-test' });
     expect(provider.id).toBe('google');
+  });
+
+  it('mistral factory builds an openai-compatible provider from the catalog', async () => {
+    const registry = makeRegistry();
+    const factories = await buildProviderFactoriesFromRegistry({ registry });
+    const f = factories.find((x) => x.type === 'mistral');
+    const provider = f!.create({ type: 'mistral', apiKey: 'msk-test' });
+    expect(provider.id).toBe('mistral');
   });
 
   it('reads apiKey from env vars when not provided in config', async () => {
@@ -113,6 +122,6 @@ describe('buildProviderFactoriesFromRegistry', () => {
     const spy = vi.spyOn(logger, 'info');
     await buildProviderFactoriesFromRegistry({ registry, log: logger });
     const calls = spy.mock.calls.map((c) => String(c[0]));
-    expect(calls.some((m) => m.includes('mistral'))).toBe(true);
+    expect(calls.some((m) => m.includes('mistral'))).toBe(false);
   });
 });

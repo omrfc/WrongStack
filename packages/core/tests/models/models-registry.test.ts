@@ -74,7 +74,7 @@ describe('classifyFamily', () => {
     expect(classifyFamily('@ai-sdk/google')).toBe('google');
   });
   it('marks unknown as unsupported', () => {
-    expect(classifyFamily('@ai-sdk/mistral')).toBe('unsupported');
+    expect(classifyFamily('@ai-sdk/cohere')).toBe('unsupported');
     expect(classifyFamily(undefined)).toBe('unsupported');
   });
 });
@@ -104,7 +104,7 @@ describe('DefaultModelsRegistry', () => {
     const g = await reg.getProvider('google');
     expect(g?.family).toBe('google');
     const m = await reg.getProvider('mistral');
-    expect(m?.family).toBe('unsupported');
+    expect(m?.family).toBe('openai-compatible');
   });
 
   it('getModel returns capabilities + cost', async () => {
