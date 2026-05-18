@@ -69,6 +69,8 @@ export interface ExecutionDeps {
   };
   /** Query the live YOLO state from the permission policy. */
   getYolo?: () => boolean;
+  /** Query the live autonomy mode. */
+  getAutonomy?: () => import('./slash-commands/autonomy.js').AutonomyMode;
 }
 
 export async function execute(deps: ExecutionDeps): Promise<number> {
@@ -102,6 +104,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     fleetRoster,
     fleetStreamController,
     getYolo,
+    getAutonomy,
   } = deps;
 
   let code = 0;
@@ -285,6 +288,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           attachments,
           effectiveMaxContext,
           projectName: path.basename(projectRoot) || undefined,
+          getAutonomy,
         });
       } finally {
         // webuiPromise must be awaited regardless of whether runRepl threw,
@@ -303,6 +307,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         attachments,
         effectiveMaxContext,
         projectName: path.basename(projectRoot) || undefined,
+        getAutonomy,
       });
     }
   } finally {

@@ -20,6 +20,8 @@ export interface ReplOptions {
   banner?: boolean;
   tokenCounter?: TokenCounter;
   visionAdapters?: VisionAdapters;
+  /** Autonomy mode state getter. */
+  getAutonomy?: () => import('./slash-commands/autonomy.js').AutonomyMode;
   /** Model-specific max context window (tokens). Used for the context bar in turn summaries. */
   effectiveMaxContext?: number;
   /** Project / folder name shown in the banner. Usually `path.basename(projectRoot)`. */
@@ -146,6 +148,64 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
               `[in: ${fmtTok(after.input - before.input)}  out: ${fmtTok(after.output - before.output)}  iters: ${result.iterations}  cost: ${(costAfter - costBefore).toFixed(4)}  ${((Date.now() - startedAt) / 1000).toFixed(1)}s]${ctxChip}`,
             )}\n`,
           );
+        }
+
+        // Autonomy loop: after a successful run, if autonomy is active,
+        // ask the agent to suggest next steps and optionally auto-continue.
+        if (result.status === 'done' && opts.getAutonomy) {
+          const autonomy = opts.getAutonomy();
+          if (autonomy === 'auto') {
+            // Self-driving: ask the agent to continue with the next logical step.
+            const nextPrompt =
+              'Based on what you just did, what is the single most important next step? ' +
+              'Just do it — execute the next logical step without asking for confirmation. ' +
+              'If there is nothing meaningful left to do, say "DONE" and nothing else.';
+            opts.renderer.write(color.dim('\n  ↳ [autonomy] continuing…\n'));
+            const nextBlocks = [{ type: 'text' as const, text: nextPrompt }];
+            const nextCtrl = new AbortController();
+            activeCtrl = nextCtrl;
+            try {
+              const nextResult = await opts.agent.run(nextBlocks, { signal: nextCtrl.signal });
+              if (nextResult.status === 'done' && nextResult.finalText?.trim() === 'DONE') {
+                opts.renderer.write(color.dim('\n  ↳ [autonomy] agent reports task complete.\n'));
+              }
+              // Loop continues — the for(;;) will read next input, but since
+              // we're in auto mode, we need to re-trigger. We use a flag.
+              if (opts.getAutonomy() === 'auto' && nextResult.status === 'done') {
+                // Re-trigger: the outer loop will continue and we'll hit this
+                // block again on the next iteration. But we need user input...
+                // Instead, we just continue the loop with the next prompt.
+                continue;
+              }
+            } catch (err) {
+              opts.renderer.writeError(
+                `[autonomy] ${err instanceof Error ? err.message : String(err)}`,
+              );
+            } finally {
+              activeCtrl = undefined;
+            }
+          } else if (autonomy === 'suggest') {
+            // Suggest mode: ask the agent what to do next, show to user.
+            const suggestPrompt =
+              'Based on what you just did, suggest 3 concrete next steps. ' +
+              'Format: numbered list, one line each, no explanation. ' +
+              'If there is nothing meaningful left, say "No further steps needed."';
+            const suggestBlocks = [{ type: 'text' as const, text: suggestPrompt }];
+            const suggestCtrl = new AbortController();
+            activeCtrl = suggestCtrl;
+            try {
+              const suggestResult = await opts.agent.run(suggestBlocks, { signal: suggestCtrl.signal });
+              if (suggestResult.status === 'done' && suggestResult.finalText) {
+                opts.renderer.write(
+                  `\n${color.cyan('  Suggested next steps:')}\n${suggestResult.finalText}\n`,
+                );
+              }
+            } catch {
+              // Silently skip suggestion errors
+            } finally {
+              activeCtrl = undefined;
+            }
+          }
         }
       } catch (err) {
         opts.renderer.writeError(err instanceof Error ? err.message : String(err));

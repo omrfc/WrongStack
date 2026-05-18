@@ -40,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version consistency, git status.
 - **Release checklist.** `RELEASE.md` documents the full release process:
   pre-release checks, version bump, commit/tag, CI verification, post-release.
+- **Autonomy mode.** `/autonomy on|off|suggest|toggle` slash command for
+  self-driving agent behavior. In `auto` mode, the agent picks the next
+  logical step and continues after each turn. In `suggest` mode, it shows
+  next-step suggestions. TUI status bar shows an `∞ AUTO` or `∞ SUGGEST`
+  chip when active.
 
 ### Changed
 

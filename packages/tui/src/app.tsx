@@ -115,6 +115,8 @@ export interface AppProps {
    * provider/model sync.
    */
   getYolo?: () => boolean;
+  /** Query the live autonomy mode. */
+  getAutonomy?: () => 'off' | 'suggest' | 'auto';
   /** Surfaced in the startup banner. Falls back to "dev" when omitted. */
   appVersion?: string;
   /** Provider id shown in the banner ("openai", "anthropic", …). Defaults to "agent". */
@@ -976,6 +978,7 @@ export function App({
   queueStore,
   yolo = false,
   getYolo,
+  getAutonomy,
   appVersion,
   provider,
   family,
@@ -999,6 +1002,7 @@ export function App({
   const [liveModel, setLiveModel] = useState<string>(model);
   const [liveProvider, setLiveProvider] = useState<string>(provider ?? 'agent');
   const [yoloLive, setYoloLive] = useState<boolean>(yolo);
+  const [autonomyLive, setAutonomyLive] = useState<'off' | 'suggest' | 'auto'>(getAutonomy?.() ?? 'off');
   const [state, dispatch] = useReducer(reducer, {
     entries: banner
       ? [
@@ -2855,6 +2859,10 @@ export function App({
           const currentYolo = getYolo();
           if (currentYolo !== yoloLive) setYoloLive(currentYolo);
         }
+        if (getAutonomy) {
+          const currentAutonomy = getAutonomy();
+          if (currentAutonomy !== autonomyLive) setAutonomyLive(currentAutonomy);
+        }
         if (res?.exit) {
           exit();
           onExit(0);
@@ -3051,6 +3059,7 @@ export function App({
         hint={renderRunningTools(state.runningTools) || state.hint}
         queueCount={state.queue.length}
         yolo={yoloLive}
+        autonomy={autonomyLive}
         elapsedMs={elapsedMs}
         todos={todos}
         plan={planCounts ?? undefined}

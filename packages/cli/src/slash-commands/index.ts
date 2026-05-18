@@ -69,6 +69,8 @@ export interface SlashCommandContext {
   onPlugin?: (args: string) => Promise<string>;
   /** Toggle or query YOLO mode at runtime. Pass undefined to query, boolean to set. */
   onYolo?: (setTo?: boolean) => boolean;
+  /** Toggle or query autonomy mode. Pass undefined to query, AutonomyMode to set. */
+  onAutonomy?: (setTo?: import('./autonomy.js').AutonomyMode) => import('./autonomy.js').AutonomyMode;
   /**
    * Absolute path to the per-session plan JSON file. Read+written by the
    * `/plan` slash command. Optional — when omitted, `/plan` short-circuits
@@ -99,6 +101,7 @@ import { buildAgentsCommand, buildDirectorCommand, buildSpawnCommand } from './s
 import { buildTodosCommand } from './todos.js';
 import { buildToolsCommand } from './tools.js';
 import { buildYoloCommand } from './yolo.js';
+import { buildAutonomyCommand } from './autonomy.js';
 
 export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashCommand[] {
   return [
@@ -124,6 +127,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildSaveCommand(opts),
     buildLoadCommand(opts),
     buildYoloCommand(opts),
+    buildAutonomyCommand(opts),
     buildExitCommand(opts),
   ];
 }

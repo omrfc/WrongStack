@@ -31,6 +31,8 @@ export interface RunTuiOptions {
   yolo?: boolean;
   /** Query live YOLO state from the permission policy. */
   getYolo?: () => boolean;
+  /** Query the live autonomy mode. */
+  getAutonomy?: () => 'off' | 'suggest' | 'auto';
   /** Renders in the startup banner. Read from the CLI's package.json. */
   appVersion?: string;
   /** Provider id for the startup banner ("openai", "anthropic", ...). */
@@ -251,6 +253,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           queueStore: opts.queueStore,
           yolo: opts.yolo,
           getYolo: opts.getYolo,
+          getAutonomy: opts.getAutonomy,
           appVersion: opts.appVersion,
           provider: opts.provider,
           family: opts.family,

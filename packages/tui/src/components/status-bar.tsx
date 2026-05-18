@@ -101,6 +101,8 @@ export interface StatusBarProps {
    * `agent.ctx.projectRoot`.
    */
   projectName?: string;
+  /** Autonomy mode chip: 'off' | 'suggest' | 'auto'. */
+  autonomy?: 'off' | 'suggest' | 'auto';
 }
 
 /**
@@ -117,6 +119,7 @@ export function StatusBar({
   hint,
   queueCount = 0,
   yolo = false,
+  autonomy,
   elapsedMs,
   todos,
   plan,
@@ -138,6 +141,7 @@ export function StatusBar({
   // change at most once per session.
   const hasSecondLine =
     yolo ||
+    (autonomy && autonomy !== 'off') ||
     elapsedMs !== undefined ||
     (git !== null && git !== undefined) ||
     (projectName !== undefined && projectName.length > 0);
@@ -222,6 +226,14 @@ export function StatusBar({
             <Text color="red" bold>
               ⚠ YOLO
             </Text>
+          ) : null}
+          {autonomy && autonomy !== 'off' ? (
+            <>
+              {yolo ? <Text dimColor>│</Text> : null}
+              <Text color={autonomy === 'auto' ? 'yellow' : 'cyan'} bold>
+                ∞ {autonomy.toUpperCase()}
+              </Text>
+            </>
           ) : null}
           {elapsedMs !== undefined ? (
             <>

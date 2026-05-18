@@ -511,6 +511,8 @@ export async function main(argv: string[]): Promise<number> {
   // override via `WRONGSTACK_FLEET_MANIFEST` if they want a fixed path.
   const directorMode = flags['director'] === true;
   let director: Director | null = null;
+  // Autonomy mode: 'off' (default), 'suggest' (show next steps), 'auto' (self-driving)
+  let autonomyMode: import('./slash-commands/autonomy.js').AutonomyMode = 'off';
   // Convention: director artifacts all live under the same fleet root —
   //   <projectSessions>/<sessionId>/
   //     ├─ fleet.json              (manifest)
@@ -982,6 +984,13 @@ export async function main(argv: string[]): Promise<number> {
       }
       return policy.getYolo();
     },
+    onAutonomy: (setTo?) => {
+      if (setTo !== undefined) {
+        autonomyMode = setTo;
+        return setTo;
+      }
+      return autonomyMode;
+    },
     onExit: () => {
       void mcpRegistry.stopAll();
     },
@@ -1063,6 +1072,7 @@ export async function main(argv: string[]): Promise<number> {
       const policy = container.resolve(TOKENS.PermissionPolicy) as DefaultPermissionPolicy;
       return policy.getYolo();
     },
+    getAutonomy: () => autonomyMode,
   });
 }
 
