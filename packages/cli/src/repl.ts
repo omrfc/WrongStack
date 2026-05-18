@@ -7,6 +7,7 @@ import {
 } from '@wrongstack/runtime';
 import type { ReadlineInputReader } from './input-reader.js';
 import type { TerminalRenderer } from './renderer.js';
+import { getActiveSDDContext, trySaveSpecFromAIOutput, trySaveTasksFromAIOutput, getTaskListText, getTaskProgress, autoDetectTaskCompletion, getActiveSDDPhase, trySaveImplementationPlan } from './slash-commands/sdd.js';
 import { theme } from './theme.js';
 import { fmtTok } from './utils.js';
 import { CLI_VERSION } from './version.js';
@@ -28,6 +29,8 @@ export interface ReplOptions {
   projectName?: string;
   /** Resolve current model vision support. Falls back to provider capability when omitted. */
   supportsVision?: () => boolean | Promise<boolean>;
+  /** Skill loader for the skill generator wizard. */
+  skillLoader?: import('@wrongstack/core').SkillLoader;
 }
 
 export async function runRepl(opts: ReplOptions): Promise<number> {
@@ -83,6 +86,58 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
           const res = await opts.slashRegistry.dispatch(trimmed, opts.agent.ctx);
           if (res?.message) opts.renderer.write(`${res.message}\n`);
           if (res?.exit) break;
+
+          // ── runText: Auto-trigger AI after slash command ─────────────────
+          // When a slash command returns runText (e.g. /sdd new, /sdd approve),
+          // automatically send it to the AI agent so the conversation continues
+          // without the user having to type anything extra.
+          if (res?.runText) {
+            const runBlocks = [{ type: 'text' as const, text: res.runText }];
+            const runCtrl = new AbortController();
+            activeCtrl = runCtrl;
+            try {
+              const runResult = await opts.agent.run(runBlocks, { signal: runCtrl.signal });
+              if (runResult.status === 'done' && runResult.finalText) {
+                // SDD auto-detection: spec, implementation plan, tasks
+                const specSaved = await trySaveSpecFromAIOutput(runResult.finalText);
+                if (specSaved) {
+                  opts.renderer.write(
+                    `\n${color.cyan('  ✓ Spec detected and saved! Use /sdd approve to continue.')}\n`,
+                  );
+                }
+                const planSaved = trySaveImplementationPlan(runResult.finalText);
+                if (planSaved) {
+                  opts.renderer.write(
+                    `\n${color.cyan('  ✓ Implementation plan saved!')}\n`,
+                  );
+                }
+                const tasksSaved = await trySaveTasksFromAIOutput(runResult.finalText);
+                if (tasksSaved) {
+                  const progress = getTaskProgress();
+                  const count = progress?.total ?? 0;
+                  opts.renderer.write(
+                    `\n${color.cyan(`  ✓ ${count} tasks detected and saved! Use /sdd approve to execute.`)}\n`,
+                  );
+                }
+                // Auto-detect task completion during execution phase
+                const sddPhase = getActiveSDDPhase();
+                if (sddPhase === 'executing') {
+                  const autoCompleted = autoDetectTaskCompletion(runResult.finalText);
+                  if (autoCompleted > 0) {
+                    const progress = getTaskProgress();
+                    if (progress) {
+                      opts.renderer.write(
+                        `\n${color.cyan(`  ✓ ${autoCompleted} task(s) auto-completed! Progress: ${progress.completed}/${progress.total} (${progress.percent}%)`)}\n`,
+                      );
+                    }
+                  }
+                }
+              }
+            } catch (runErr) {
+              // Non-fatal — user can continue manually
+              opts.renderer.writeWarning('AI auto-trigger failed. You can continue manually.');
+            }
+          }
         } catch (err) {
           opts.renderer.writeError(err instanceof Error ? err.message : String(err));
         }
@@ -97,14 +152,44 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
       }
       const blocks = await builder.submit();
 
+      // ── SDD Session Integration ─────────────────────────────────────────
+      // When an SDD session is active, inject the session context so the AI
+      // knows to ask questions, generate specs, etc.
+      const sddContext = getActiveSDDContext();
+      const taskList = getTaskListText();
+      const taskProgress = getTaskProgress();
+      const sddPhase = getActiveSDDPhase();
+
+      let sddPrefix = '';
+      if (sddContext) {
+        sddPrefix = `[SDD SESSION ACTIVE]\n${sddContext}`;
+        if (taskList) {
+          sddPrefix += `\n\n**Current Task List:**\n${taskList}`;
+        }
+        if (taskProgress && taskProgress.total > 0) {
+          sddPrefix += `\n**Progress:** ${taskProgress.completed}/${taskProgress.total} (${taskProgress.percent}%)`;
+        }
+        if (sddPhase === 'executing' && taskProgress && taskProgress.percent === 100) {
+          sddPrefix += '\n\n**All tasks completed! Provide a summary of everything implemented.**';
+        }
+        sddPrefix += '\n\n---\nUser message:\n';
+      }
+
+      const effectiveBlocks = sddPrefix
+        ? [
+            { type: 'text' as const, text: sddPrefix },
+            ...blocks,
+          ]
+        : blocks;
+
       const runCtrl = new AbortController();
       activeCtrl = runCtrl;
       try {
         const startedAt = Date.now();
         const before = opts.tokenCounter?.total();
         const costBefore = opts.tokenCounter?.estimateCost().total ?? 0;
-        const routed = blocks.some((block) => block.type === 'image')
-          ? await routeImagesForModel(blocks, {
+        const routed = effectiveBlocks.some((block) => block.type === 'image')
+          ? await routeImagesForModel(effectiveBlocks, {
               supportsVision: opts.supportsVision
                 ? await opts.supportsVision()
                 : opts.agent.ctx.provider.capabilities.vision,
@@ -114,7 +199,7 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
               providerId: opts.agent.ctx.provider.id,
               model: opts.agent.ctx.model,
             })
-          : { blocks, route: 'none' as const, convertedImages: 0 };
+          : { blocks: effectiveBlocks, route: 'none' as const, convertedImages: 0 };
         if (routed.route === 'adapter') {
           opts.renderer.write(
             color.dim(
@@ -135,6 +220,56 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
           }
         } else if (result.status === 'max_iterations') {
           opts.renderer.writeWarning(`Hit max iterations (${result.iterations}).`);
+        }
+
+        // ── SDD Auto-Detection ──────────────────────────────────────────
+        // When an SDD session is active, auto-detect spec and task JSON
+        // in the AI output and save them to the session.
+        if (result.status === 'done' && result.finalText && sddContext) {
+          // Try to detect and save a spec
+          const specSaved = await trySaveSpecFromAIOutput(result.finalText);
+          if (specSaved) {
+            opts.renderer.write(
+              `\n${color.cyan('  ✓ Spec detected and saved! Use /sdd approve to continue.')}\n`,
+            );
+          }
+
+          // Try to save implementation plan (text before task JSON)
+          const planSaved = trySaveImplementationPlan(result.finalText);
+          if (planSaved) {
+            opts.renderer.write(
+              `\n${color.cyan('  ✓ Implementation plan saved!')}\n`,
+            );
+          }
+
+          // Try to detect and save tasks
+          const tasksSaved = await trySaveTasksFromAIOutput(result.finalText);
+          if (tasksSaved) {
+            const progress = getTaskProgress();
+            const count = progress?.total ?? 0;
+            opts.renderer.write(
+              `\n${color.cyan(`  ✓ ${count} tasks detected and saved! Use /sdd approve to execute.`)}\n`,
+            );
+          }
+
+          // Auto-detect task completion during execution phase
+          const phase = getActiveSDDPhase();
+          if (phase === 'executing') {
+            const autoCompleted = autoDetectTaskCompletion(result.finalText);
+            if (autoCompleted > 0) {
+              const progress = getTaskProgress();
+              if (progress) {
+                opts.renderer.write(
+                  `\n${color.cyan(`  ✓ ${autoCompleted} task(s) auto-completed! Progress: ${progress.completed}/${progress.total} (${progress.percent}%)`)}\n`,
+                );
+                if (progress.percent === 100) {
+                  opts.renderer.write(
+                    `\n${color.green('  🎉 All tasks completed! Use /sdd cancel to end the session.')}\n`,
+                  );
+                }
+              }
+            }
+          }
         }
         if (opts.tokenCounter && before) {
           const after = opts.tokenCounter.total();

@@ -117,6 +117,16 @@ export interface RunTuiOptions {
    * Ignored when `initialGoal` is also set.
    */
   initialAsk?: string;
+  /**
+   * SDD session context getter. When an SDD session is active, returns
+   * the AI prompt context to inject into user messages.
+   */
+  getSDDContext?: () => string | null;
+  /**
+   * Process AI output for SDD auto-detection (spec, tasks, plan).
+   * Returns displayable status messages.
+   */
+  onSDDOutput?: (output: string) => Promise<string[]>;
 }
 
 // Bracketed paste mode wraps any pasted text with these markers, letting us
@@ -270,6 +280,8 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           fleetStreamController: opts.fleetStreamController,
           initialGoal: opts.initialGoal,
           initialAsk: opts.initialAsk,
+          getSDDContext: opts.getSDDContext,
+          onSDDOutput: opts.onSDDOutput,
         }),
         { exitOnCtrlC: false },
       );

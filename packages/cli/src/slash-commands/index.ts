@@ -102,6 +102,13 @@ import { buildTodosCommand } from './todos.js';
 import { buildToolsCommand } from './tools.js';
 import { buildYoloCommand } from './yolo.js';
 import { buildAutonomyCommand } from './autonomy.js';
+import { buildSddCommand } from './sdd.js';
+import { buildSkillGeneratorCommand } from './skill-generator.js';
+import {
+  buildSkillInstallCommand,
+  buildSkillUpdateCommand,
+  buildSkillUninstallCommand,
+} from './skill-install.js';
 
 export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashCommand[] {
   return [
@@ -112,6 +119,10 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildContextCommand(opts),
     buildToolsCommand(opts),
     buildSkillCommand(opts),
+    buildSkillGeneratorCommand(opts),
+    buildSkillInstallCommand(opts),
+    buildSkillUpdateCommand(opts),
+    buildSkillUninstallCommand(opts),
     buildPluginCommand(opts),
     buildDiagCommand(opts),
     buildStatsCommand(opts),
@@ -124,6 +135,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildMemoryCommand(opts),
     buildTodosCommand(opts),
     buildPlanCommand(opts),
+    buildSddCommand(opts),
     buildSaveCommand(opts),
     buildLoadCommand(opts),
     buildYoloCommand(opts),

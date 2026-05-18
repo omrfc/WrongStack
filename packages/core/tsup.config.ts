@@ -17,6 +17,8 @@ export default defineConfig({
     'src/infrastructure/index.ts',
     'src/observability/index.ts',
     'src/extension/index.ts',
+    // Skill installer
+    'src/skills/index.ts',
   ],
   format: ['esm'],
   dts: true,

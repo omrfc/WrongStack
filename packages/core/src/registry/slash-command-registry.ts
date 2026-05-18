@@ -111,7 +111,7 @@ export class SlashCommandRegistry {
   async dispatch(
     line: string,
     ctx: Context,
-  ): Promise<{ exit?: boolean; message?: string; runText?: string } | null> {
+  ): Promise<{ exit?: boolean; message?: string; runText?: string; metadata?: Record<string, unknown> } | null> {
     if (!line.startsWith('/')) return null;
     const trimmed = line.slice(1);
     const spaceIdx = trimmed.indexOf(' ');

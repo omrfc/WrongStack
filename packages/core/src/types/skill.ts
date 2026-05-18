@@ -24,4 +24,6 @@ export interface SkillLoader {
   find(name: string): Promise<SkillManifest | undefined>;
   manifestText(): Promise<string>;
   readBody(name: string): Promise<string>;
+  /** Clear the internal cache so the next list/find re-reads from disk. */
+  invalidateCache(): void;
 }

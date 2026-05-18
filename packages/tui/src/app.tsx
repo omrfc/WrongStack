@@ -117,6 +117,18 @@ export interface AppProps {
   getYolo?: () => boolean;
   /** Query the live autonomy mode. */
   getAutonomy?: () => 'off' | 'suggest' | 'auto';
+  /**
+   * SDD session context getter. When an SDD session is active, returns
+   * the AI prompt context to inject into user messages so the model
+   * knows it's in a spec-building conversation.
+   */
+  getSDDContext?: () => string | null;
+  /**
+   * Process AI output for SDD auto-detection (spec, tasks, plan).
+   * Called after every agent.run() completes. Returns displayable
+   * status messages (e.g. "✓ Spec detected and saved!").
+   */
+  onSDDOutput?: (output: string) => Promise<string[]>;
   /** Surfaced in the startup banner. Falls back to "dev" when omitted. */
   appVersion?: string;
   /** Provider id shown in the banner ("openai", "anthropic", …). Defaults to "agent". */
@@ -979,6 +991,8 @@ export function App({
   yolo = false,
   getYolo,
   getAutonomy,
+  getSDDContext,
+  onSDDOutput,
   appVersion,
   provider,
   family,
@@ -2787,6 +2801,19 @@ export function App({
         });
       }
 
+      // ── SDD Auto-Detection ──────────────────────────────────────────
+      // Process AI output for spec, implementation plan, and task detection.
+      if (result.status === 'done' && result.finalText && onSDDOutput) {
+        try {
+          const sddMessages = await onSDDOutput(result.finalText);
+          for (const msg of sddMessages) {
+            dispatch({ type: 'addEntry', entry: { kind: 'info', text: msg } });
+          }
+        } catch {
+          // Non-fatal — SDD detection is best-effort
+        }
+      }
+
       if (tokenCounter && before) {
         const after = tokenCounter.total();
         const costAfter = tokenCounter.estimateCost().total;
@@ -2915,6 +2942,15 @@ export function App({
     // if useful, ask for clarification if needed". Plain user-role
     // text so accountability stays with the human who triggered it.
     const steering = state.steeringPending;
+
+    // ── SDD Context Injection ──────────────────────────────────────────
+    // When an SDD session is active, prepend the session context so the
+    // model knows it's in a spec-building conversation.
+    const sddContext = getSDDContext?.();
+    if (sddContext && trimmed) {
+      builder.appendText(`[SDD SESSION ACTIVE]\n${sddContext}\n\n---\nUser message:\n`);
+    }
+
     if (trimmed) {
       const toAppend = steering ? buildSteeringPreamble(state.steerSnapshot, trimmed) : trimmed;
       builder.appendText(toAppend);

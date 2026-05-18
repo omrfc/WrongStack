@@ -232,6 +232,27 @@ export {
   type TaskFlowEventName,
   type SpecDrivenDevOptions,
 } from '../sdd/task-flow.js';
+export { SpecStore, type SpecStoreOptions, type SpecIndexEntry } from '../sdd/spec-store.js';
+export { TaskGraphStore, type TaskGraphStoreOptions, type TaskGraphIndexEntry } from '../sdd/task-graph-store.js';
+export {
+  AISpecBuilder,
+  type AISpecBuilderOptions,
+  type AISpecPhase,
+  type AISpecSession,
+  type CollectedAnswer,
+} from '../sdd/spec-builder.js';
+export { SPEC_TEMPLATES, getTemplate, listTemplates, templateToMarkdown } from '../sdd/spec-templates.js';
+export { renderTaskGraph, renderProgress, renderTaskList, renderSpecAnalysis } from '../sdd/task-visualizer.js';
+export { analyzeCriticalPath, type CriticalPathAnalysis, type BottleneckTask } from '../sdd/critical-path.js';
+export { SpecVersioning, type SpecVersion, type SpecDiff } from '../sdd/spec-versioning.js';
+export {
+  AutoExecutor,
+  createAutoExecutor,
+  type AutoExecutorOptions,
+  type TaskExecutionContext,
+  type TaskExecutionResult,
+  type ExecutionSummary,
+} from '../sdd/auto-executor.js';
 
 // ---- Observability ----
 export {

@@ -1073,6 +1073,7 @@ export async function main(argv: string[]): Promise<number> {
       return policy.getYolo();
     },
     getAutonomy: () => autonomyMode,
+    skillLoader: config.features.skills ? skillLoader : undefined,
   });
 }
 

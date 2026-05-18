@@ -71,6 +71,8 @@ export interface ExecutionDeps {
   getYolo?: () => boolean;
   /** Query the live autonomy mode. */
   getAutonomy?: () => import('./slash-commands/autonomy.js').AutonomyMode;
+  /** Skill loader for the skill generator wizard. */
+  skillLoader?: import('@wrongstack/core').SkillLoader;
 }
 
 export async function execute(deps: ExecutionDeps): Promise<number> {
@@ -105,6 +107,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     fleetStreamController,
     getYolo,
     getAutonomy,
+    skillLoader,
   } = deps;
 
   let code = 0;
@@ -262,6 +265,35 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           fleetStreamController,
           initialGoal: goalFlag,
           initialAsk: askFlag,
+          getSDDContext: () => {
+            const { getActiveSDDContext } = require('./slash-commands/sdd.js');
+            return getActiveSDDContext();
+          },
+          onSDDOutput: async (output: string) => {
+            const { trySaveSpecFromAIOutput, trySaveImplementationPlan, trySaveTasksFromAIOutput, autoDetectTaskCompletion, getTaskProgress, getActiveSDDPhase } = require('./slash-commands/sdd.js');
+            const messages: string[] = [];
+            const specSaved = await trySaveSpecFromAIOutput(output);
+            if (specSaved) messages.push('✓ Spec detected and saved! Use /sdd approve to continue.');
+            const planSaved = trySaveImplementationPlan(output);
+            if (planSaved) messages.push('✓ Implementation plan saved!');
+            const tasksSaved = await trySaveTasksFromAIOutput(output);
+            if (tasksSaved) {
+              const progress = getTaskProgress();
+              const count = progress?.total ?? 0;
+              messages.push(`✓ ${count} tasks detected and saved! Use /sdd approve to execute.`);
+            }
+            const sddPhase = getActiveSDDPhase();
+            if (sddPhase === 'executing') {
+              const autoCompleted = autoDetectTaskCompletion(output);
+              if (autoCompleted > 0) {
+                const progress = getTaskProgress();
+                if (progress) {
+                  messages.push(`✓ ${autoCompleted} task(s) auto-completed! Progress: ${progress.completed}/${progress.total} (${progress.percent}%)`);
+                }
+              }
+            }
+            return messages;
+          },
         });
       } finally {
         renderer.setSilent(false);
@@ -289,6 +321,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           effectiveMaxContext,
           projectName: path.basename(projectRoot) || undefined,
           getAutonomy,
+          skillLoader,
         });
       } finally {
         // webuiPromise must be awaited regardless of whether runRepl threw,
@@ -308,6 +341,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         effectiveMaxContext,
         projectName: path.basename(projectRoot) || undefined,
         getAutonomy,
+        skillLoader,
       });
     }
   } finally {

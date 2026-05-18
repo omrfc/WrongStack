@@ -5,7 +5,7 @@ import type { SlashCommandContext } from './index.js';
 export function buildSkillCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'skill',
-    description: 'Show skill details or list available skills.',
+    description: 'Show skill details or list available skills. Use /skill-gen to create new skills.',
     async run(args) {
       if (!opts.skillLoader) return { message: 'No skill loader configured.' };
       if (!args.trim()) {

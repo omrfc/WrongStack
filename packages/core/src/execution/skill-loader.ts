@@ -97,6 +97,10 @@ export class DefaultSkillLoader implements SkillLoader {
     return entries;
   }
 
+  invalidateCache(): void {
+    this.cache = undefined;
+  }
+
   async readBody(name: string): Promise<string> {
     const m = await this.find(name);
     if (!m) throw new Error(`Skill "${name}" not found`);

@@ -35,10 +35,11 @@ export interface SlashCommand {
    * model immediately (e.g. `/steer <text>` builds a STEERING preamble
    * here and asks the TUI to run it as the next turn). The TUI prints
    * `message` first (if any) so the user sees the slash result before
-   * the model's response starts streaming.
+   * the model's response starts streaming. `{ metadata }` carries
+   * structured data for the REPL/TUI to act on (e.g. SDD session state).
    */
   run(
     args: string,
     ctx: Context,
-  ): Promise<{ exit?: boolean; message?: string; runText?: string } | void>;
+  ): Promise<{ exit?: boolean; message?: string; runText?: string; metadata?: Record<string, unknown> } | void>;
 }

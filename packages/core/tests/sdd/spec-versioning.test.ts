@@ -1,0 +1,172 @@
+import { describe, expect, it, beforeEach } from 'vitest';
+import { SpecVersioning } from '../../src/sdd/spec-versioning.js';
+import type { Specification } from '../../src/types/spec.js';
+import type { TaskGraph, TaskNode } from '../../src/types/task-graph.js';
+
+function makeSpec(overrides: Partial<Specification> = {}): Specification {
+  return {
+    id: 'spec-1',
+    title: 'Test Spec',
+    version: '1.0.0',
+    status: 'draft',
+    overview: 'Overview',
+    sections: [],
+    requirements: [
+      { id: 'REQ-1', type: 'functional', priority: 'high', description: 'Feature A', acceptanceCriteria: ['AC 1'] },
+      { id: 'REQ-2', type: 'functional', priority: 'medium', description: 'Feature B', acceptanceCriteria: [] },
+    ],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    ...overrides,
+  };
+}
+
+function makeGraph(nodes: TaskNode[] = []): TaskGraph {
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  return {
+    id: 'graph-1',
+    specId: 'spec-1',
+    title: 'Test Graph',
+    nodes: nodeMap,
+    edges: [],
+    rootNodes: nodes.map((n) => n.id),
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+function makeNode(id: string, specReqId?: string): TaskNode {
+  return {
+    id,
+    title: `Task ${id}`,
+    description: 'Description',
+    type: 'feature',
+    priority: 'high',
+    status: 'pending',
+    specRequirementId: specReqId,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+describe('SpecVersioning', () => {
+  let versioning: SpecVersioning;
+
+  beforeEach(() => {
+    versioning = new SpecVersioning();
+  });
+
+  it('records versions', () => {
+    const spec = makeSpec();
+    versioning.recordVersion(spec, 'Initial');
+    const history = versioning.getHistory('spec-1');
+    expect(history).toHaveLength(1);
+    expect(history[0]!.version).toBe('1.0.0');
+  });
+
+  it('returns empty history for unknown spec', () => {
+    expect(versioning.getHistory('unknown')).toEqual([]);
+  });
+
+  it('gets latest version', () => {
+    const spec1 = makeSpec({ version: '1.0.0' });
+    const spec2 = makeSpec({ version: '1.1.0' });
+    versioning.recordVersion(spec1);
+    versioning.recordVersion(spec2);
+    const latest = versioning.getLatest('spec-1');
+    expect(latest!.version).toBe('1.1.0');
+  });
+
+  it('gets specific version', () => {
+    const spec1 = makeSpec({ version: '1.0.0' });
+    const spec2 = makeSpec({ version: '1.1.0' });
+    versioning.recordVersion(spec1);
+    versioning.recordVersion(spec2);
+    const v = versioning.getVersion('spec-1', '1.0.0');
+    expect(v).toBeDefined();
+    expect(v!.version).toBe('1.0.0');
+  });
+
+  it('computes diff with added requirements', () => {
+    const old = makeSpec({ requirements: [] });
+    const updated = makeSpec({
+      requirements: [
+        { id: 'REQ-1', type: 'functional', priority: 'high', description: 'New', acceptanceCriteria: [] },
+      ],
+    });
+    const diff = versioning.diff(old, updated);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(0);
+    expect(diff.summary).toContain('1 added');
+  });
+
+  it('computes diff with removed requirements', () => {
+    const old = makeSpec();
+    const updated = makeSpec({ requirements: [] });
+    const diff = versioning.diff(old, updated);
+    expect(diff.removed).toHaveLength(2);
+    expect(diff.summary).toContain('2 removed');
+  });
+
+  it('computes diff with modified requirements', () => {
+    const old = makeSpec();
+    const updated = makeSpec({
+      requirements: [
+        { id: 'REQ-1', type: 'functional', priority: 'critical', description: 'Changed', acceptanceCriteria: [] },
+        { id: 'REQ-2', type: 'functional', priority: 'medium', description: 'Feature B', acceptanceCriteria: [] },
+      ],
+    });
+    const diff = versioning.diff(old, updated);
+    expect(diff.modified).toHaveLength(1);
+    expect(diff.modified[0]!.changes).toContain('description');
+    expect(diff.modified[0]!.changes).toContain('priority');
+  });
+
+  it('returns no changes for identical specs', () => {
+    const spec = makeSpec();
+    const diff = versioning.diff(spec, spec);
+    expect(diff.added).toHaveLength(0);
+    expect(diff.removed).toHaveLength(0);
+    expect(diff.modified).toHaveLength(0);
+    expect(diff.summary).toBe('No changes');
+  });
+
+  it('updates task graph with added requirements', () => {
+    const old = makeSpec({ requirements: [] });
+    const updated = makeSpec({
+      requirements: [
+        { id: 'REQ-1', type: 'functional', priority: 'high', description: 'New Feature', acceptanceCriteria: [] },
+      ],
+    });
+    const graph = makeGraph([]);
+    const result = versioning.updateTaskGraph(graph, old, updated);
+    expect(result.changes.length).toBeGreaterThan(0);
+    expect(result.graph.nodes.size).toBe(1);
+  });
+
+  it('updates task graph with removed requirements', () => {
+    const old = makeSpec();
+    const updated = makeSpec({ requirements: [] });
+    const node = makeNode('task-1', 'REQ-1');
+    const graph = makeGraph([node]);
+    const result = versioning.updateTaskGraph(graph, old, updated);
+    expect(result.changes.length).toBeGreaterThan(0);
+    expect(result.graph.nodes.size).toBe(0);
+  });
+
+  it('updates task graph with modified requirements', () => {
+    const old = makeSpec();
+    const updated = makeSpec({
+      requirements: [
+        { id: 'REQ-1', type: 'functional', priority: 'critical', description: 'Updated Feature', acceptanceCriteria: [] },
+        { id: 'REQ-2', type: 'functional', priority: 'medium', description: 'Feature B', acceptanceCriteria: [] },
+      ],
+    });
+    const node = makeNode('task-1', 'REQ-1');
+    const graph = makeGraph([node]);
+    const result = versioning.updateTaskGraph(graph, old, updated);
+    expect(result.changes.length).toBeGreaterThan(0);
+    expect(result.graph.nodes.get('task-1')!.title).toBe('Updated Feature');
+    expect(result.graph.nodes.get('task-1')!.priority).toBe('critical');
+  });
+});
