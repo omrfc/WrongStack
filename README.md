@@ -1115,6 +1115,19 @@ suite covers compactor hot paths, token estimation, JSON-schema
 validation, and the system prompt builder. See
 [`vitest.bench.config.ts`](vitest.bench.config.ts).
 
+## Examples
+
+See [`examples/`](examples/) for 6 categories of working examples:
+
+| # | Example | What it demonstrates |
+|---|---------|---------------------|
+| 01 | [Basic usage](examples/01-basic/) | Single-shot, REPL, session resume, YOLO |
+| 02 | [Tool usage](examples/02-tools/) | File editing, code search, git, tests |
+| 03 | [Multi-provider](examples/03-providers/) | Switching providers, custom endpoints |
+| 04 | [MCP integration](examples/04-mcp/) | Connecting MCP servers, using MCP tools |
+| 05 | [Multi-agent](examples/05-multi-agent/) | Director fleet, delegation, subagents |
+| 06 | [Real-world workflows](examples/06-real-world/) | Refactoring, testing, debugging, audits |
+
 ## Status
 
 - **2059 tests passing** across 203 test files (~13 s, 1 skipped)
