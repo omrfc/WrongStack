@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **YOLO mode documentation.** `docs/yolo-mode.md` covers the full permission
+  pipeline, runtime toggle, trust file interaction, subagent policy, and
+  security trade-offs.
+- **Skill writing guide.** `docs/skills.md` documents the SKILL.md frontmatter
+  format, three-layer discovery, description quality tips, and token budget
+  guidelines.
+- **Configuration reference.** `docs/configuration.md` is the authoritative
+  reference for every config field — type, default, and example for providers,
+  context, tools, MCP servers, features, plugins, logging, extensions, and
+  environment variables.
+- **Troubleshooting guide.** `docs/troubleshooting.md` covers common issues
+  (API key, rate limits, context overflow, MCP failures, permission prompts),
+  `wstack diag` usage, exit codes, debug logging, and state reset commands.
+- **`/yolo` slash command.** Runtime toggle for YOLO mode: `/yolo on`, `/yolo
+  off`, `/yolo toggle`, `/yolo` (status). Mutates the permission policy
+  immediately without restart.
+- **Live YOLO state in TUI status bar.** The `⚠ YOLO` chip now reflects the
+  current permission policy state after `/yolo` commands, not just the boot-time
+  flag.
+
+### Changed
+
+- **YOLO prompt defaults to Y.** The interactive "YOLO mode?" prompt at boot
+  now defaults to enabled (press Enter = YOLO on). Previously defaulted to off.
+
+### Fixed
+
+- **Duplicate `providers.list` case in WebUI switch.** A second handler for the
+  same message type was unreachable dead code — removed.
+- **`useExhaustiveDependencies` lint in TUI.** Removed unused `exit`/`onExit`
+  dependencies from the SIGINT `useEffect`.
+- **`useImportType` lint in TUI components.** Auto-fixed type-only React
+  imports across 7 component files.
+
 ## [0.4.1] - 2026-05-18
 
 ### Fixed

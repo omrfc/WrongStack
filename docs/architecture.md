@@ -423,5 +423,8 @@ the agent run.
 - **Building a plugin** → [plugin-author-guide.md](plugin-author-guide.md)
 - **Adding a new provider** → [provider-author-guide.md](provider-author-guide.md)
 - **Writing a tool** → [tool-author-guide.md](tool-author-guide.md)
+- **Writing a skill** → [skills.md](skills.md)
 - **YOLO mode** → [yolo-mode.md](yolo-mode.md)
+- **Configuration reference** → [configuration.md](configuration.md)
+- **Troubleshooting** → [troubleshooting.md](troubleshooting.md)
 - **Recent changes** → [`../CHANGELOG.md`](../CHANGELOG.md)
