@@ -14,6 +14,7 @@ import {
   type SecretVault,
   ToolRegistry,
   type WstackPaths,
+  TOKENS,
 } from '@wrongstack/core';
 import { builtinToolsPack } from '@wrongstack/tools';
 import { parseArgs } from './arg-parser.js';
@@ -24,6 +25,7 @@ import { runLaunchPrompts, runProjectCheck } from './pre-launch.js';
 import { TerminalRenderer } from './renderer.js';
 import { subcommands } from './subcommands/index.js';
 import { patchConfig } from './utils.js';
+import { createDefaultContainer } from '@wrongstack/runtime';
 
 export interface BootContext {
   config: Config;
@@ -88,11 +90,18 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
   // Quick path: subcommand dispatch
   const first = positional[0];
   if (first && subcommands[first]) {
-    const sessionStore = new DefaultSessionStore({ dir: wpaths.projectSessions });
-    const skillLoader = new DefaultSkillLoader({
-      paths: wpaths,
-      bundledDir: resolveBundledSkillsDir(),
+    // Create container to get the SAME skillLoader instance that the main
+    // interactive CLI uses. This ensures cache invalidation after
+    // /skill-install propagates correctly to /skill and other commands.
+    const container = createDefaultContainer({
+      config,
+      wpaths,
+      logger,
+      modelsRegistry,
+      bundledSkillsDir: config.features.skills ? resolveBundledSkillsDir() : undefined,
     });
+    const sessionStore = container.resolve(TOKENS.SessionStore);
+    const skillLoader = container.resolve(TOKENS.SkillLoader);
     const toolRegistryForSubcmd = new ToolRegistry();
     toolRegistryForSubcmd.registerAllOrThrow(
       [...(builtinToolsPack.tools ?? [])],
