@@ -1,6 +1,6 @@
 # WrongStack Architecture
 
-This document is a repository-level architecture map for WrongStack as scanned on 2026-05-16. It is written for maintainers, plugin authors, and contributors who need to understand how the monorepo fits together before changing runtime behavior.
+This document is a repository-level architecture map for WrongStack as scanned on 2026-05-18. It is written for maintainers, plugin authors, and contributors who need to understand how the monorepo fits together before changing runtime behavior.
 
 WrongStack is a TypeScript/Node.js agent platform. The user-facing product is a terminal AI coding agent, but the implementation is deliberately split into reusable packages: a small core runtime, provider adapters, built-in tools, MCP integration, terminal and browser UIs, and an optional multi-agent director layer.
 
@@ -54,11 +54,14 @@ packages/
   tui/              Ink/React terminal UI.
   webui/            Vite/React browser UI plus WebSocket backend.
   plug-lsp/         Language Server Protocol plugin with LSP-backed tools and commands.
+  runtime/          Default runtime implementations and host-level composition helpers.
+  telegram/         Telegram bridge plugin: send messages, receive prompts, get notified.
 
 docs/
   architecture.md           Lower-level architecture notes.
   director-architecture.md  Multi-agent director design and shipped status notes.
   plugin-author-guide.md    Plugin authoring guide.
+  plugin-management.md      Plugin management CLI commands and config.
   provider-author-guide.md  Provider authoring guide.
   tool-author-guide.md      Tool authoring guide.
 ```
@@ -71,14 +74,16 @@ The scan found the following package sizes:
 
 | Package | Source files | Test files | Primary responsibility |
 |---|---:|---:|---|
-| `@wrongstack/core` | 142 | 94 | Agent runtime, DI, storage, security, multi-agent coordination, observability. |
-| `@wrongstack/cli` | 54 | 14 | CLI boot, runtime assembly, REPL, slash commands, WebUI launcher. |
-| `@wrongstack/tools` | 39 | 39 | Built-in tools and meta-tools. |
-| `@wrongstack/webui` | 48 | 0 | Browser UI and standalone WebSocket backend. |
-| `@wrongstack/plug-lsp` | 41 | 17 | LSP runtime, tools, slash commands, server lifecycle. |
+| `@wrongstack/core` | 147 | 97 | Agent runtime, DI, storage, security, multi-agent coordination, observability. |
+| `@wrongstack/cli` | 59 | 15 | CLI boot, runtime assembly, REPL, slash commands, plugin management, WebUI launcher. |
+| `@wrongstack/tools` | 40 | 40 | Built-in tools and meta-tools. |
+| `@wrongstack/webui` | 49 | 8 | Browser UI and standalone WebSocket backend. |
+| `@wrongstack/plug-lsp` | 41 | 15 | LSP runtime, tools, slash commands, server lifecycle. |
 | `@wrongstack/providers` | 24 | 18 | Provider adapters, streaming parsers, tool wire conversions. |
 | `@wrongstack/tui` | 17 | 17 | Ink terminal UI components and state rendering. |
-| `@wrongstack/mcp` | 6 | 5 | MCP client, registry, transports, wrapping. |
+| `@wrongstack/mcp` | 7 | 5 | MCP client, registry, transports, wrapping. |
+| `@wrongstack/runtime` | 6 | 5 | Default runtime implementations, host composition, vision, clipboard. |
+| `@wrongstack/telegram` | 6 | 5 | Telegram bridge plugin with bot, tools, and slash commands. |
 
 ## Dependency Topology
 
@@ -91,6 +96,8 @@ flowchart BT
   Tools["@wrongstack/tools"]
   MCP["@wrongstack/mcp"]
   LSP["@wrongstack/plug-lsp"]
+  Runtime["@wrongstack/runtime"]
+  Telegram["@wrongstack/telegram"]
   CLI["@wrongstack/cli"]
   TUI["@wrongstack/tui"]
   WebUI["@wrongstack/webui"]
@@ -100,6 +107,8 @@ flowchart BT
   Tools --> Core
   MCP --> Core
   LSP -. peer .-> Core
+  Runtime --> Core
+  Telegram -. peer .-> Core
   TUI --> Core
   WebUI --> Core
   WebUI --> Providers
@@ -109,6 +118,7 @@ flowchart BT
   CLI --> Tools
   CLI --> MCP
   CLI --> LSP
+  CLI --> Runtime
   CLI --> TUI
   CLI --> WebUI
   App --> CLI
@@ -124,6 +134,8 @@ flowchart BT
 | `mcp` | Core `ToolRegistry`, `MCPServerConfig`, `EventBus`, `Logger`. | CLI prompts, TUI/WebUI layout. |
 | `cli` | Everything needed to assemble a product runtime. | Provider internals beyond factory construction. |
 | `tui` and `webui` | Agent events, slash command surfaces, session/model state. | Provider wire details, tool implementations. |
+| `runtime` | Core DI container, runtime composition, host-level wiring. | CLI flags, UI rendering, provider HTTP APIs. |
+| `telegram` | Core `Plugin`, `Tool`, `SlashCommandRegistry`, `EventBus`. | CLI boot, provider internals, UI layout. |
 
 ## Core Package Anatomy
 
@@ -132,41 +144,43 @@ flowchart BT
 ```text
 packages/core/src/
   kernel/          Container, tokens, pipeline, event bus, run controller.
-  core/            Agent, Context, ConversationState, prompt and request building.
+  core/            Agent, Context, ConversationState, prompt/request building, streaming response, provider runner.
   execution/       ToolExecutor, retry, error recovery, compaction, skills, autonomous runner.
-  storage/         Sessions, config, memory, queue, plans, todos, recovery, attachments.
-  security/        Permission policy, secret vault, secret scrubber.
+  storage/         Sessions, config, memory, queue, plans, todos, recovery, attachments, config migration.
+  security/        Permission policy, secret vault, secret scrubber, config secrets.
   registry/        Tool, provider, and slash command registries.
   plugin/          Plugin API and loader.
   extension/       Agent lifecycle extension registry.
-  coordination/    Multi-agent coordinator, Director, FleetBus, delegate tool, bridge, budgets.
+  coordination/    Multi-agent coordinator, Director, FleetBus, delegate tool, bridge, budgets, transport.
   models/          models.dev registry, model selection, modes.
   observability/   Metrics, traces, health, Prometheus, OTLP.
   sdd/             Spec-driven development parser, task generation, task flow.
   infrastructure/  Logger, token counter, path resolver, context manager, MCP presets.
   types/           Public type contracts.
-  utils/           Paths, JSON, glob, diff, color, atomic write, serializers.
+  defaults/        Backward-compatible re-export barrel for all default implementations.
+  utils/           Paths, JSON, glob, diff, color, atomic write, serializers, regex guard, token estimate.
 ```
 
 ### Core Area Sizes
 
 | Area | Files | Notes |
 |---|---:|---|
-| `types` | 37 | Public contracts. Keep these stable and additive when possible. |
-| `coordination` | 14 | Multi-agent orchestration, director, bridge, fleet, budgets. |
+| `types` | 38 | Public contracts. Keep these stable and additive when possible. |
+| `coordination` | 15 | Multi-agent orchestration, director, bridge, fleet, budgets, transport. |
 | `storage` | 14 | JSONL sessions, config, memory, checkpoints, recovery. |
-| `utils` | 13 | Shared helpers used across runtime code. |
+| `utils` | 15 | Shared helpers used across runtime code. |
 | `execution` | 11 | Tool execution, retry, compaction, skill loading. |
 | `observability` | 9 | Metrics/traces/health integrations. |
 | `core` | 9 | The agent loop and live run state. |
 | `kernel` | 6 | Low-level primitives. |
 | `infrastructure` | 6 | Logger, token counter, path resolver, context manager, MCP presets. |
 | `sdd` | 5 | Spec-driven development workflow. |
-| `security` | 4 | Vault, scrubber, permission policy. |
+| `security` | 5 | Vault, scrubber, permission policy, config secrets. |
 | `models` | 4 | Model registry, selector, modes. |
 | `registry` | 3 | Runtime registries. |
 | `extension` | 3 | Agent lifecycle hooks. |
 | `plugin` | 2 | Plugin API and loader. |
+| `defaults` | 1 | Backward-compatible re-export barrel. |
 
 ## Kernel Primitives
 
@@ -340,8 +354,8 @@ Key behaviors:
 
 The CLI boot path is split into two phases:
 
-1. `packages/cli/src/boot.ts` parses arguments, loads config, handles early subcommands, provider/model picking, and launch prompts.
-2. `packages/cli/src/index.ts` wires the runtime: container, providers, tools, events, sessions, prompt builder, MCP, plugins, multi-agent host, slash commands, and agent.
+1. `packages/cli/src/boot.ts` parses arguments, loads config, handles early subcommands, provider/model picking, and launch prompts. `pre-launch.ts` handles project-kind detection and AGENTS.md initialization prompts.
+2. `packages/cli/src/index.ts` wires the runtime: container, providers, tools, events, sessions, prompt builder, MCP, plugins, multi-agent host, slash commands, and agent. Session, provider, and pipeline wiring are factored into `wiring/session.ts`, `wiring/provider.ts`, and `wiring/pipeline.ts`.
 
 ```mermaid
 flowchart TD
@@ -706,10 +720,13 @@ packages/core/src/coordination/
   agent-subagent-runner.ts
   subagent-budget.ts
   agent-bridge.ts
+  agents.ts
   in-memory-transport.ts
+  transport.ts
   director.ts
   director-session.ts
   director-prompts.ts
+  director-tools.ts
   fleet-bus.ts
   fleet.ts
   delegate-tool.ts
@@ -847,6 +864,54 @@ packages/plug-lsp/src/
 
 The package declares `@wrongstack/core` as a peer dependency, keeping it plugin-like and avoiding a hard runtime copy of core.
 
+## Runtime Package
+
+`@wrongstack/runtime` is a transitional package that provides hosts with a stable import target for default implementations. It re-exports concrete implementations from `@wrongstack/core` subpaths and adds host-level composition helpers.
+
+```text
+packages/runtime/src/
+  index.ts       Re-exports from core/defaults, core/infrastructure, plus local modules.
+  pack.ts        WrongStackPack: bundled runtime configuration pack.
+  host.ts        RuntimeHost and RuntimeHostParts interfaces for host composition.
+  container.ts   Container setup helpers.
+  vision.ts      Vision/image processing utilities.
+  clipboard.ts   Clipboard integration.
+```
+
+The long-term boundary is:
+
+| Package | Responsibility |
+|---|---|
+| `@wrongstack/core` | Kernel, agent runtime, registries, public contracts. |
+| `@wrongstack/runtime` | Default storage, security, config, observability, compaction, models, skills, host composition. |
+
+Currently the implementations still physically live in `core` and are re-exported through `runtime`. This gives hosts a stable import path while later moves happen behind the facade.
+
+## Telegram Plugin
+
+`@wrongstack/telegram` is an official WrongStack plugin that bridges the agent to Telegram.
+
+```text
+packages/telegram/src/
+  index.ts              Plugin definition, setup, and teardown.
+  bot.ts                TelegramBot client: send, receive, HTML formatting.
+  config.ts             Plugin config schema and Telegram-specific settings.
+  slash-commands/       /telegram slash command registration.
+  tools/
+    telegram-send.ts    Tool: send messages to Telegram chats.
+    telegram-read.ts    Tool: read recent Telegram messages.
+```
+
+The plugin declares `@wrongstack/core` as a peer dependency and registers:
+
+| Surface | Registered items |
+|---|---|
+| Tools | `telegram-send`, `telegram-read` |
+| Slash commands | `/telegram` for status and configuration |
+| Events | Subscribes to agent events for notification forwarding |
+
+Official plugin alias: `wstack plugin install telegram`.
+
 ## Storage and Persistence
 
 WrongStack uses append-only JSONL for primary session truth and small JSON sidecars for fast lookups or resumable UI state.
@@ -869,6 +934,7 @@ flowchart TD
 | Component | Contract |
 |---|---|
 | `DefaultConfigLoader` | Deep-merges default/global/project/env/extra/CLI config, blocks prototype pollution keys, decrypts secrets. |
+| `ConfigMigration` | Versioned `{ from, to, migrate }` triples for evolving config schema. Migrations run sequentially at load time. |
 | `DefaultConfigStore` | Holds live runtime config and supports watchers for runtime switches. |
 | `DefaultSessionStore` | Creates/resumes/loads/lists/deletes JSONL sessions and writes summaries. |
 | `DefaultSessionReader` | Query/replay/search/export over stored sessions. |
@@ -901,7 +967,9 @@ Important controls visible in the repository:
 | Control | Location/behavior |
 |---|---|
 | Secret vault | `DefaultSecretVault` uses AES-256-GCM and a 32-byte local key file. |
+| Config secret decryption | `decryptConfigSecrets` / `encryptConfigSecrets` walk config objects and decrypt/encrypt apiKey-like fields in place. Per-field decrypt errors are swallowed to avoid killing entire config load. |
 | Plaintext migration | Config boot migrates plaintext secret-bearing fields to encrypted form. |
+| Config version migration | `config-migration.ts` provides a `{ from, to, migrate }` migration framework for evolving config schema across versions. |
 | Secret scrubbing | Tool outputs and errors are scrubbed before rendering/persisting. |
 | Permission prompts | `DefaultPermissionPolicy` supports deny/allow/auto/yolo/user confirmation. |
 | Trust file | Per-project trust policies are persisted and matched by tool/subject. |
@@ -1018,6 +1086,7 @@ flowchart TD
 | Add prompt context | `registerSystemPromptContributor`. |
 | React to agent lifecycle | `AgentExtension` hooks. |
 | Add a slash command | `api.slashCommands.register` or CLI slash-command module. |
+| Manage plugins at runtime | `/plugin` slash command or `wstack plugin` subcommand. Official aliases: `telegram`, `lsp`. |
 | Add external tool servers | MCP config or `api.mcp.start`. |
 | Replace storage/permissions/logging | DI container token override/decorator. |
 | Add metrics/traces | Bind tracer/sink or subscribe to `EventBus`. |
@@ -1036,6 +1105,8 @@ flowchart LR
   Vitest --> CliTests[cli tests]
   Vitest --> TuiTests[tui tests]
   Vitest --> LspTests[plug-lsp tests]
+  Vitest --> RuntimeTests[runtime tests]
+  Vitest --> TelegramTests[telegram tests]
   Bench[vitest bench] --> Perf[core perf benches]
 ```
 
@@ -1060,10 +1131,12 @@ Risk-oriented testing guidance:
 | Config/storage | Storage/config/session/recovery tests. |
 | CLI slash command | CLI tests and targeted REPL/slash command tests. |
 | TUI rendering | TUI component/reducer tests. |
-| WebUI behavior | Typecheck plus manual browser/WebSocket flow; package currently has no dedicated tests. |
+| WebUI behavior | Typecheck plus dedicated server/WS tests; package now has 8 test files covering lib utilities and server boot/auth. |
 | Multi-agent/director | Coordination and CLI multi-agent/director tests. |
 | MCP behavior | MCP registry/client/transport/wrap-tool tests. |
 | LSP plugin | Unit plus integration/e2e tests under `packages/plug-lsp/tests`. |
+| Runtime package | Typecheck plus runtime composition/pack/host tests. |
+| Telegram plugin | Plugin setup/teardown, bot integration, tool and slash command tests. |
 
 ## Common Change Recipes
 
@@ -1134,6 +1207,7 @@ The repository also contains historical and design-focused architecture docs:
 | `docs/tool-author-guide.md` | Tool contract details. |
 | `docs/provider-author-guide.md` | Provider contract details. |
 | `docs/plugin-author-guide.md` | Plugin authoring details. |
+| `docs/plugin-management.md` | Plugin management CLI commands and config workflow. |
 
 When implementation and design docs disagree, prefer the current source tree and tests, then update the relevant doc.
 
@@ -1146,13 +1220,16 @@ If you are new to the codebase, read in this order:
 3. `packages/core/src/kernel/{container,pipeline,events,tokens}.ts`
 4. `packages/core/src/execution/tool-executor.ts`
 5. `packages/cli/src/boot.ts`
-6. `packages/cli/src/index.ts`
-7. `packages/cli/src/execution.ts`
-8. `packages/tools/src/builtin.ts`
-9. `packages/providers/src/index.ts`
-10. `packages/core/src/plugin/{api,loader}.ts`
-11. `packages/core/src/extension/registry.ts`
-12. `packages/cli/src/multi-agent.ts`
-13. `packages/core/src/coordination/director.ts`
+6. `packages/cli/src/pre-launch.ts`
+7. `packages/cli/src/index.ts`
+8. `packages/cli/src/execution.ts`
+9. `packages/cli/src/wiring/{session,provider,pipeline}.ts`
+10. `packages/tools/src/builtin.ts`
+11. `packages/providers/src/index.ts`
+12. `packages/core/src/plugin/{api,loader}.ts`
+13. `packages/core/src/extension/registry.ts`
+14. `packages/cli/src/multi-agent.ts`
+15. `packages/cli/src/plugin-management.ts`
+16. `packages/core/src/coordination/director.ts`
 
-That path gives you the runtime loop first, then the boot assembly, then the extension and multi-agent layers.
+That path gives you the runtime loop first, then the boot assembly (including project detection and wiring), then the plugin management, extension, and multi-agent layers.

@@ -31,7 +31,7 @@ into emitting `git args="-c core.sshCommand=…"` or
 mitigations in this codebase exist to make those payloads ineffective even
 when permission prompts are approved out of habit.
 
-## Controls in place (as of 0.1.6)
+## Controls in place (as of 0.1.10)
 
 ### Sandbox boundary on shell-style tools
 

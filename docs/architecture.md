@@ -12,16 +12,18 @@ packages/
   providers/    Anthropic / OpenAI / Google / OpenAI-compatible adapters
   tools/        bash, read, write, edit, grep, …, plus the meta-tools
   mcp/          MCP client + registry + stdio/SSE/streamable-http transports
-  cli/          REPL, subcommands, interactive pickers, slash commands
+  cli/          REPL, subcommands, interactive pickers, slash commands, plugin management
   tui/          React/Ink terminal UI (lazy-loaded behind --tui)
   plug-lsp/     LSP bridge + language tooling + slash commands
+  runtime/      Default runtime implementations and host-level composition helpers
+  telegram/     Telegram bridge plugin — send messages, receive prompts, get notified
   webui/        Vite+React web UI served by the CLI
 apps/
   wrongstack/   bin entry — runs cli/main(argv)
 ```
 
 Each package depends only on what's below it. `core` depends on nothing
-WrongStack-internal; `providers`/`tools`/`mcp`/`plug-lsp` depend on `core`;
+WrongStack-internal; `providers`/`tools`/`mcp`/`plug-lsp`/`runtime`/`telegram` depend on `core`;
 `cli`/`tui` depend on everything beneath.
 
 ---

@@ -29,11 +29,16 @@ Built on the wrong stack. Shipped anyway. CLI AI coding agent.
 
     /help /clear /compact [aggressive] /usage /tools
     /skill [name] /use <provider> /model <name> /save /load /exit
+    /plugin [list|install|enable|disable|remove]
 
-## Built-in tools (8 + memory)
+## Built-in tools
 
-    read write edit glob grep bash fetch todo
-    remember forget
+    read write edit replace glob grep tree patch diff json
+    bash exec git
+    fetch search
+    lint format typecheck test install audit outdated logs document scaffold
+    todo plan tool-search tool-use batch-tool-use tool-help
+    context-manager memory mode
 
 ## Providers
 
