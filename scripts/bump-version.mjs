@@ -35,6 +35,8 @@ const FILES = [
   'packages/tools/package.json',
   'packages/plug-lsp/package.json',
   'packages/webui/package.json',
+  'packages/telegram/package.json',
+  'packages/skills/package.json',
   'apps/wrongstack/package.json',
 ];
 

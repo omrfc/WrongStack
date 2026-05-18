@@ -74,12 +74,16 @@ for (const dir of pkgDirs) {
 
   versions.add(pkg.version);
 
-  // Check dist exists
-  const distDir = resolve(ROOT, dir, 'dist');
-  if (!existsSync(distDir)) {
-    fail(`${dir}: dist/ not found — run "pnpm build" first`);
+  // Check dist exists (skip for private packages)
+  if (pkg.private) {
+    warn(`${name}@${pkg.version} — private, skipped dist check`);
   } else {
-    pass(`${name}@${pkg.version} — dist/ exists`);
+    const distDir = resolve(ROOT, dir, 'dist');
+    if (!existsSync(distDir)) {
+      fail(`${dir}: dist/ not found — run "pnpm build" first`);
+    } else {
+      pass(`${name}@${pkg.version} — dist/ exists`);
+    }
   }
 
   // Check for workspace: deps in dependencies (should be rewritten by pnpm publish)
