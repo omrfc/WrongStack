@@ -7,7 +7,11 @@ import type {
   SubagentRunner,
   TaskSpec,
 } from '../types/multi-agent.js';
-import { BudgetExceededError } from './subagent-budget.js';
+import {
+  BudgetExceededError,
+  BudgetThresholdDecision,
+  BudgetThresholdSignal,
+} from './subagent-budget.js';
 import type { FleetBus } from './fleet-bus.js';
 
 /**
@@ -85,13 +89,41 @@ export function makeAgentSubagentRunner(opts: AgentRunnerOptions): SubagentRunne
     // recordToolCall/recordUsage so the budget can short-circuit the run by
     // aborting the controller — the agent then unwinds cooperatively.
     const aborter = new AbortController();
+    // Inject the EventBus into the budget so it can emit budget.threshold_reached
+    // events when a soft limit is hit and the handler wants to ask the coordinator.
+    ctx.budget._events = events;
     let budgetError: BudgetExceededError | null = null;
 
-    const onBudgetError = (err: unknown) => {
-      // Any error from a budget operation (BudgetExceededError, TypeError from
-      // a malformed event payload, etc.) must abort the run. EventBus.emit()
-      // swallows listener throws, so we can't re-throw — set budgetError and
-      // abort the controller so the agent unwinds cooperatively.
+    /**
+     * Common error handler for all budget-triggered events. Distinguishes:
+     *   - BudgetExceededError → hard stop, set budgetError + abort
+     *   - BudgetThresholdSignal → soft stop: await the coordinator's
+     *     decision. If 'stop', abort. If 'extend', the signal handler
+     *     has already patched the budget so we can continue without
+     *     actually aborting the agent.
+     */
+    const onBudgetError = (err: unknown): void => {
+      if (err instanceof BudgetThresholdSignal) {
+        // Await the coordinator's verdict before deciding whether to abort.
+        err.decision
+          .then((decision) => {
+            if (decision === 'stop') {
+              budgetError = new BudgetExceededError(err.kind, err.limit, err.used);
+              aborter.abort();
+            }
+            // If 'extend': the budget limits were already patched by the
+            // BudgetThresholdSignal handler (checkLimit → onThreshold →
+            // coordinator extend → budget patched). Do NOT abort.
+            // The tool call that triggered the signal will be retried.
+          })
+          .catch(() => {
+            // If the decision promise rejects, treat as hard stop.
+            budgetError = new BudgetExceededError(err.kind, err.limit, err.used);
+            aborter.abort();
+          });
+        return;
+      }
+      // Hard stop (BudgetExceededError or other)
       aborter.abort();
       budgetError =
         err instanceof BudgetExceededError
@@ -141,7 +173,7 @@ export function makeAgentSubagentRunner(opts: AgentRunnerOptions): SubagentRunne
         try {
           ctx.budget.recordUsage(e.usage);
         } catch (e2) {
-          onBudgetError(e2);
+          void onBudgetError(e2);
         }
       }),
       events.on('iteration.started', () => {
@@ -149,7 +181,7 @@ export function makeAgentSubagentRunner(opts: AgentRunnerOptions): SubagentRunne
           ctx.budget.recordIteration();
           ctx.budget.checkTimeout();
         } catch (e) {
-          onBudgetError(e);
+          void onBudgetError(e);
         }
       }),
       // D3: cooperative timeout enforcement DURING a long tool call.
@@ -169,7 +201,7 @@ export function makeAgentSubagentRunner(opts: AgentRunnerOptions): SubagentRunne
         try {
           ctx.budget.checkTimeout();
         } catch (e) {
-          onBudgetError(e);
+          void onBudgetError(e);
         }
       }),
     );

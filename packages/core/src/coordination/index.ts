@@ -15,9 +15,12 @@ export {
 export {
   SubagentBudget,
   BudgetExceededError,
+  BudgetThresholdSignal,
   type BudgetKind,
   type BudgetLimits,
   type BudgetUsage,
+  type BudgetThresholdDecision,
+  type BudgetThresholdHandler,
 } from './subagent-budget.js';
 export {
   makeAgentSubagentRunner,

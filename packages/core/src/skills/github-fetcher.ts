@@ -125,7 +125,7 @@ async function extractTar(buf: Buffer, destDir: string): Promise<void> {
     // Parse ustar header
     const name = readTarString(buf, offset, 100); // name field
     const prefix = readTarString(buf, offset + 345, 155); // ustar prefix
-    const size = parseInt(readTarString(buf, offset + 124, 12).trim(), 8) || 0;
+    const size = Number.parseInt(readTarString(buf, offset + 124, 12).trim(), 8) || 0;
     const typeflag = buf[offset + 156] ?? 0;
 
     // Full path: prefix/name (ustar) or just name

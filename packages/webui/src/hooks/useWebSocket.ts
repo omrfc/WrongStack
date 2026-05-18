@@ -209,6 +209,24 @@ function installHandlers(ws: WrongStackWebSocketClient): () => void {
     useSessionStore.setState({ lastInputTokens: payload.after });
   });
 
+  on('provider.response', (msg) => {
+    const payload = msg.payload as {
+      usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+    };
+    const u = payload?.usage;
+    if (!u) return;
+    // Update lastInputTokens = the next-turn projected context size.
+    // input + cacheWrite = cost of building prefix cache for next turn.
+    // cacheRead = saved by the cache. The effective new-context size
+    // is input + cacheWrite - cacheRead (cache-read bytes are NOT
+    // re-sent, so they don't count toward the next input).
+    const delta =
+      (u.input ?? 0) + (u.cacheWrite ?? 0) - (u.cacheRead ?? 0);
+    if (delta > 0) {
+      useSessionStore.setState({ lastInputTokens: delta });
+    }
+  });
+
   on('context.repaired', (msg) => {
     const payload = msg.payload as {
       removedToolUses: string[];

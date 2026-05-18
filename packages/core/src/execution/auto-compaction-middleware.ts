@@ -26,11 +26,12 @@ export class AutoCompactionMiddleware {
   readonly name = 'AutoCompaction';
 
   private readonly compactor: Compactor;
+  private readonly estimator: (ctx: Context) => number;
   private readonly warnThreshold: number;
   private readonly softThreshold: number;
   private readonly hardThreshold: number;
-  private readonly maxContext: number;
-  private readonly estimator: (ctx: Context) => number;
+  /** Writable so model-switch can update the denominator without re-registering the middleware. */
+  private _maxContext: number;
   private readonly aggressiveOn: ContextWindowAggressiveOn;
   private readonly events?: EventBus;
   private readonly failureMode: CompactionFailureMode;
@@ -60,7 +61,7 @@ export class AutoCompactionMiddleware {
         ? { aggressiveOn: optsOrAggressiveOn, events }
         : optsOrAggressiveOn;
     this.compactor = compactor;
-    this.maxContext = maxContext;
+    this._maxContext = maxContext;
     this.estimator = estimator;
     this.warnThreshold = thresholds.warn;
     this.softThreshold = thresholds.soft;
@@ -71,10 +72,16 @@ export class AutoCompactionMiddleware {
     this.policyProvider = opts.policyProvider;
   }
 
+  /** Allow callers (e.g. model-switch in WebUI) to update the context window
+   *  denominator when the active model changes. */
+  setMaxContext(maxContext: number): void {
+    this._maxContext = maxContext;
+  }
+
   handler(): MiddlewareHandler<Context> {
     return async (ctx, next) => {
       const tokens = this.estimator(ctx);
-      const load = tokens / this.maxContext;
+      const load = tokens / this._maxContext;
       const policy = this.policyProvider?.(ctx);
       const thresholds = policy?.thresholds ?? {
         warn: this.warnThreshold,
@@ -112,7 +119,7 @@ export class AutoCompactionMiddleware {
         aggressive,
         level: pressure.level,
         tokens: pressure.tokens,
-        maxContext: this.maxContext,
+        maxContext: this._maxContext,
         load: pressure.load,
         fatal,
       });
@@ -124,7 +131,7 @@ export class AutoCompactionMiddleware {
           context: {
             level: pressure.level,
             tokens: pressure.tokens,
-            maxContext: this.maxContext,
+            maxContext: this._maxContext,
           },
           cause: err,
         });

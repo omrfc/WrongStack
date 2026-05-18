@@ -27,6 +27,7 @@ import {
   HybridCompactor,
   type ProviderApiKey,
   type ProviderConfig,
+  type Provider,
   ProviderRegistry,
   TOKENS,
   ToolRegistry,
@@ -227,9 +228,10 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   });
 
   // Auto-compaction
+  let autoCompactor: AutoCompactionMiddleware | undefined;
   if (config.context?.autoCompact !== false) {
     const effectiveMaxContext = config.context?.effectiveMaxContext ?? provider.capabilities.maxContext;
-    const autoCompactor = new AutoCompactionMiddleware(
+    autoCompactor = new AutoCompactionMiddleware(
       compactor,
       effectiveMaxContext,
       (ctx) => {
@@ -259,6 +261,19 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
       },
     );
     pipelines.contextWindow.use({ name: 'AutoCompaction', handler: autoCompactor.handler() });
+  }
+
+  /** Refresh AutoCompactionMiddleware denominator when the active model changes. */
+  async function updateAutoCompactionMaxContext(newProvider: Provider): Promise<void> {
+    if (!autoCompactor) return;
+    let newMaxContext = config.context?.effectiveMaxContext ?? newProvider.capabilities.maxContext;
+    try {
+      const m = await modelsRegistry.getModel(newProvider.id, context.model);
+      newMaxContext = m?.capabilities?.maxContext ?? newMaxContext;
+    } catch {
+      // best-effort: use provider capability
+    }
+    autoCompactor.setMaxContext(newMaxContext);
   }
 
   // Agent
@@ -364,21 +379,28 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     req: import('node:http').IncomingMessage;
   }) => {
     const origin = info.origin;
-    // Token check: extract from query string
     const url = info.req.url ?? '';
     const tokenMatch = url.match(/[?&]token=([^&]+)/);
     const providedToken = tokenMatch ? tokenMatch[1] : undefined;
     const tokenOk = providedToken === wsToken;
 
     if (!origin) {
-      // Non-browser clients: require token when not on loopback
+      // Non-browser clients (curl, scripts): require token unless on loopback.
+      // When wsHost=0.0.0.0 the server accepts connections from any network
+      // interface — token is mandatory in that case.
+      const remoteIp = info.req.socket.remoteAddress ?? '';
+      const isRemoteLoopback = remoteIp === '127.0.0.1' || remoteIp === '::1';
+      if (!isRemoteLoopback && wsHost === '0.0.0.0') return false; // LAN exposure without token = deny
       return tokenOk || wsHost === '127.0.0.1' || wsHost === '::1' || wsHost === 'localhost';
     }
     try {
       const { hostname } = new URL(origin);
-      // Loopback browser origins: allow without token
+      // Loopback browser origins: allow without token for convenience.
       if (isLoopback(hostname)) return true;
-      // Non-loopback origins: require token
+      // Non-loopback origins: token is mandatory when wsHost != loopback.
+      // When wsHost=0.0.0.0 the browser origin check gates LAN clients.
+      if (wsHost === '0.0.0.0') return tokenOk;
+      // For explicit LAN/wAN binds, require token for non-loopback origins.
       return tokenOk;
     } catch {
       return false;
@@ -973,6 +995,12 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
             ? providerRegistry.create({ ...providerCfg, type: newProvider })
             : makeProviderFromConfig(newProvider, providerCfg);
           context.provider = newProv;
+
+          // Update AutoCompactionMiddleware with the new model's maxContext so
+          // backend threshold triggers (warn/soft/hard) use the correct denominator.
+          // sessionStartPayload is called below (after this block) and uses
+          // the new provider for its modelsRegistry lookup.
+          updateAutoCompactionMaxContext?.(newProv);
 
           // Persist to global config file
           try {

@@ -299,7 +299,7 @@ export class AISpecBuilder {
       const raw = await fsp.readFile(this.sessionPath, 'utf8');
       const loaded = JSON.parse(raw) as AISpecSession;
       // Validate basic structure
-      if (loaded && loaded.id && loaded.phase && loaded.title) {
+      if (loaded?.id && loaded?.phase && loaded?.title) {
         this.session = loaded;
         return true;
       }

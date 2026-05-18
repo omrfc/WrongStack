@@ -123,6 +123,28 @@ export interface EventMap {
     outputLines?: number;
   };
   'token.threshold': { used: number; limit: number };
+  /**
+   * Fired when the subagent budget hits a soft limit and the coordinator
+   * is being asked for an extension. The coordinator should call `extend()`
+   * to grant more budget, or the promise auto-resolves to `deny` after
+   * `timeoutMs` (default 30s), treating it as a hard stop.
+   *
+   * This event lets the CLI/TUI observe budget pressure in real time,
+   * surface extension requests to users, and give the coordinator a
+   * hook to implement custom extension policy without coupling to the
+   * runner/budget classes.
+   */
+  'budget.threshold_reached': {
+    kind: 'iterations' | 'tool_calls' | 'tokens' | 'cost';
+    used: number;
+    limit: number;
+    /** Call to grant more of the same budget type. */
+    extend: (extra: Partial<{ maxIterations: number; maxToolCalls: number; maxTokens: number; maxCostUsd: number }>) => void;
+    /** Call to deny the extension — subagent will stop. */
+    deny: () => void;
+    /** Auto-resolves to deny after timeout. */
+    timeoutMs: number;
+  };
   'context.repaired': {
     ctx: Context;
     changed: boolean;
@@ -174,6 +196,19 @@ export interface EventMap {
     subagentId: string;
     taskId: string;
     description?: string;
+  };
+  /**
+   * Fired by `MultiAgentHost` when a subagent hits a soft budget limit
+   * and the coordinator is auto-extending. TUI renders this as a
+   * status-line notice: "⚡ agent#name hitting kind limit (used/limit) — extending".
+   * After the auto-extend the task either continues or the coordinator
+   * denies the extension and the task ends with 'budget_exhausted'.
+   */
+  'subagent.budget_warning': {
+    subagentId: string;
+    kind: string;
+    used: number;
+    limit: number;
   };
   /**
    * Per-tool-call event re-emitted from a subagent's own EventBus

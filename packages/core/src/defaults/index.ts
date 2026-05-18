@@ -191,6 +191,8 @@ export {
   REFACTOR_PLANNER_AGENT,
   SECURITY_SCANNER_AGENT,
   FLEET_ROSTER,
+  FLEET_ROSTER_BUDGETS,
+  applyRosterBudget,
   ALL_FLEET_AGENTS,
 } from '../coordination/fleet.js';
 

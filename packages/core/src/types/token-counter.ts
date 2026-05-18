@@ -11,6 +11,14 @@ export interface CacheStats {
 
 export interface TokenCounter {
   account(usage: Usage, model?: string): void;
+  /**
+   * Tokens from the most recently-accounted request (input + cacheRead).
+   * Use this for per-request context pressure tracking (e.g. status bar
+   * ctx bar) — tokenCounter.total() is cumulative across all requests
+   * and cannot be compared meaningfully against a per-request maxContext
+   * ceiling.
+   */
+  currentRequestTokens(): { input: number; cacheRead: number };
   total(): Usage;
   estimateCost(): { input: number; output: number; total: number; currency: 'USD' };
   cacheStats(): CacheStats;

@@ -217,6 +217,21 @@ export class MultiAgentHost {
         this.pending.delete(task.id);
         this.emitLifecycleCompleted(task.id, result);
       });
+      // Relay budget pressure events so the TUI can show real-time feedback.
+      // "⚡ agent#audit-log hitting tool_call limit (350/400) — extending..."
+      this.director.fleet.filter('budget.threshold_reached', (e) => {
+        const payload = e.payload as {
+          kind: string;
+          used: number;
+          limit: number;
+        };
+        this.deps.events.emit('subagent.budget_warning', {
+          subagentId: e.subagentId,
+          kind: payload.kind,
+          used: payload.used,
+          limit: payload.limit,
+        });
+      });
       this.coordinator = (
         this.director as unknown as { coordinator: MultiAgentCoordinator }
       ).coordinator;
@@ -529,6 +544,7 @@ export class MultiAgentHost {
   status(): {
     pending: { taskId: string; description: string; subagentId: string }[];
     completed: TaskResult[];
+    live: { subagentId: string; status: string; task?: string }[];
     summary: string;
   } {
     const pending = Array.from(this.pending.entries()).map(([taskId, v]) => ({
@@ -536,10 +552,22 @@ export class MultiAgentHost {
       description: v.description,
       subagentId: v.subagentId,
     }));
+    // Include live subagent statuses from the coordinator so /agents shows
+    // running agents even when they haven't produced a TaskResult yet.
+    const live: { subagentId: string; status: string; task?: string }[] = [];
+    if (this.coordinator) {
+      const s = this.coordinator.getStatus();
+      for (const a of s.subagents) {
+        live.push({ subagentId: a.id, status: a.status, task: a.currentTask });
+      }
+    }
+    const liveCount = live.filter((s) => s.status === 'running' || s.status === 'idle').length;
     const summary = !this.coordinator
       ? 'No subagents have been spawned.'
-      : `${pending.length} pending, ${this.results.length} completed.`;
-    return { pending, completed: this.results, summary };
+      : liveCount > 0
+        ? `${pending.length} pending, ${liveCount} active, ${this.results.length} completed.`
+        : `${pending.length} pending, ${this.results.length} completed.`;
+    return { pending, completed: this.results, live, summary };
   }
 
   /**

@@ -72,6 +72,13 @@ export interface FleetEntry {
    * visibility into the subagent's run.
    */
   transcriptPath?: string;
+  /**
+   * Most recent budget warning: subagent hit a soft limit and the
+   * coordinator is auto-extending. Rendered in FleetPanel as:
+   * "⚡ hitting tool_calls limit (350/400) — extending"
+   * Cleared on the next fleetDone or fleetStart.
+   */
+  budgetWarning?: { kind: string; used: number; limit: number; at: number };
 }
 
 /** A registered slash command matched against the user's current / query. */
@@ -372,6 +379,13 @@ type Action =
       status: FleetEntry['status'];
       iterations: number;
       toolCalls: number;
+    }
+  | {
+      type: 'fleetBudgetWarning';
+      id: string;
+      kind: string;
+      used: number;
+      limit: number;
     }
   | { type: 'fleetCost'; cost: number }
   | { type: 'setStreamFleet'; enabled: boolean };
@@ -705,6 +719,7 @@ export function reducer(state: State, action: Action): State {
             ...cur,
             status: 'running' as const,
             streamingText: '',
+            budgetWarning: undefined, // clear on restart
             startedAt: Date.now(),
           },
         },
@@ -794,6 +809,22 @@ export function reducer(state: State, action: Action): State {
             toolCalls: action.toolCalls,
             streamingText: '',
             currentTool: undefined,
+            budgetWarning: undefined, // clear on done/restart
+            lastEventAt: Date.now(),
+          },
+        },
+      };
+    }
+    case 'fleetBudgetWarning': {
+      const cur = state.fleet[action.id];
+      if (!cur) return state;
+      return {
+        ...state,
+        fleet: {
+          ...state.fleet,
+          [action.id]: {
+            ...cur,
+            budgetWarning: { kind: action.kind, used: action.used, limit: action.limit, at: Date.now() },
             lastEventAt: Date.now(),
           },
         },
@@ -1166,20 +1197,39 @@ export function App({
   // doc on Usage). Without this, prompt-cached turns would show only the
   // fresh-token delta and the chip would read 0% even when the context
   // was near the limit.
-  // Cumulative input from tokenCounter (updated every render via agent.run → tokenCounter.account)
-  const lastInputTokens = tokenCounter?.total().input ?? 0;
+  // Cumulative "effective context" from tokenCounter: fresh input tokens
+  // PLUS cached tokens that were sent as part of this prompt. All three
+  // contribute to context-window pressure — cache tokens are still tokens
+  // the model must process. (usage.input is disjoint from cacheRead/
+  // cacheWrite, so simple sum is correct.)
+  const totalCtxTokens =
+    (tokenCounter?.total().input ?? 0) +
+    (tokenCounter?.total().cacheRead ?? 0) +
+    (tokenCounter?.total().cacheWrite ?? 0);
 
-  // Prefer the CLI-resolved per-model maxContext (looks up the active
-  // model in the ModelsRegistry, so 1M-context variants report 1M rather
-  // than the provider family's 200k baseline). Fall back to the provider
-  // baseline when the CLI couldn't resolve it (e.g. unknown model id).
-  const maxContext = effectiveMaxContext ?? agent.ctx.provider.capabilities.maxContext;
+  // Per-model maxContext. CLI passes effectiveMaxContext (resolved via
+  // ModelsRegistry — correct for 1M-context variants). Fall back to
+  // agent.ctx.provider.capabilities.maxContext when not provided.
+  const maxContext =
+    effectiveMaxContext ?? agent.ctx.provider.capabilities.maxContext;
+
+  // Per-request context pressure: current prompt tokens (input + cacheRead).
+  // Unlike the cumulative tokenCounter.total() which grows across all turns,
+  // this tracks the live request's context weight — what actually determines
+  // how close we are to the maxContext ceiling.
+  // Cached tokens (cacheWrite) are excluded because they are an accounting
+  // artifact of THIS request (provider charges for them separately); they
+  // are already counted in usage.input as part of the prompt the model sees.
+  const currentContextTokens =
+    (tokenCounter?.currentRequestTokens()?.input ?? 0) +
+    (tokenCounter?.currentRequestTokens()?.cacheRead ?? 0);
+
   const contextWindow = useMemo(() => {
     void state.contextChipVersion;
-    return lastInputTokens > 0 && maxContext > 0
-      ? { used: lastInputTokens, max: maxContext }
+    return currentContextTokens > 0 && maxContext > 0
+      ? { used: currentContextTokens, max: maxContext }
       : undefined;
-  }, [lastInputTokens, maxContext, state.contextChipVersion]);
+  }, [currentContextTokens, maxContext, state.contextChipVersion]);
 
   // Todo counts come from the agent's context, which is mutated by
   // the `todo` tool. Re-read on each render — array access is O(N) on
@@ -2011,6 +2061,23 @@ export function App({
         },
       });
     });
+    // Budget pressure: subagent hit a soft limit and the coordinator
+    // is auto-extending. Surface as a fleet warning so the user can see
+    // "⚡ agent#bug-hunter hitting tool_calls limit (350/400) — extending".
+    const offBudgetWarning = events.on('subagent.budget_warning', (e) => {
+      const lbl = labelFor(e.subagentId);
+      dispatch({ type: 'fleetBudgetWarning', id: e.subagentId, kind: e.kind, used: e.used, limit: e.limit });
+      dispatch({
+        type: 'addEntry',
+        entry: {
+          kind: 'subagent',
+          agentLabel: lbl.label,
+          agentColor: lbl.color,
+          icon: '⚡',
+          text: `hitting ${e.kind} limit (${e.used}/${e.limit}) — extending`,
+        },
+      });
+    });
     // Always-on per-tool state surface. Director mode also gets a
     // FleetBus path, but this bridge fires regardless of mode so plain
     // `/spawn` still updates the live strip/panel without flooding chat.
@@ -2032,6 +2099,7 @@ export function App({
       offSpawned();
       offStarted();
       offCompleted();
+      offBudgetWarning();
       offTool();
     };
   }, [events, director]);

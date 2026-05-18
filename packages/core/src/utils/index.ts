@@ -15,6 +15,9 @@ export {
   estimateToolInputTokens,
   estimateToolResultTokens,
   estimateTextTokens,
+  estimateToolDefTokens,
+  estimateRequestTokens,
+  type RequestTokenBreakdown,
 } from './token-estimate.js';
 export {
   repairToolUseAdjacency,

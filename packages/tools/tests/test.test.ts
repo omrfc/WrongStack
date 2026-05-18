@@ -9,6 +9,7 @@ vi.mock('../src/_spawn-stream.js', async () => {
   const actual = await vi.importActual('../src/_spawn-stream.js');
   return {
     ...actual,
+    // biome-ignore lint/correctness/useYield: mock returns no partial lines
     spawnStream: vi.fn(async function* () {
       return { stdout: '', stderr: '', exitCode: 0, truncated: false };
     }),

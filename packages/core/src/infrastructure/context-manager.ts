@@ -3,6 +3,7 @@ import type { Compactor } from '../types/compactor.js';
 import type { Message } from '../types/messages.js';
 import type { Tool } from '../types/tool.js';
 import { repairToolUseAdjacency } from '../utils/message-invariants.js';
+import { estimateRequestTokens } from '../utils/token-estimate.js';
 
 /**
  * Context introspection and management tool.
@@ -32,6 +33,17 @@ export interface ContextManagerInput {
   text?: string;
   /** Inject after which index (for add_note). Defaults to prepend (0). */
   afterIndex?: number;
+  /**
+   * System prompt blocks for accurate total token estimation in check action.
+   * When provided, check returns the full API request estimate
+   * (messages + system + tools) instead of just message tokens.
+   */
+  systemPrompt?: unknown;
+  /**
+   * Registered tools for accurate total token estimation in check action.
+   * Each tool's name + description + inputSchema is counted.
+   */
+  tools?: { name: string; description?: string; inputSchema: unknown }[];
 }
 
 export interface ContextManagerResult {
@@ -146,13 +158,22 @@ export function createContextManagerTool(
 
       switch (input.action) {
         case 'check': {
+          // Prefer the full API request estimate when systemPrompt + tools are available.
+          // This is the accurate number for context-window bar display.
+          // Falls back to roughEstimate (messages-only) for backward compat and test environments.
+          const estimate = (input.systemPrompt != null && Array.isArray(input.tools))
+            ? estimateRequestTokens(messages, input.systemPrompt, input.tools)
+            : { total: beforeTokens, messages: beforeTokens, systemPrompt: 0, tools: 0 };
           return {
             action: 'check',
-            beforeTokens,
+            beforeTokens: estimate.total,
             messageCount: messages.length,
             notes: JSON.stringify({
               messages: messages.length,
-              tokens: beforeTokens,
+              tokens: estimate.total,
+              msgTokens: estimate.messages,
+              sysTokens: estimate.systemPrompt,
+              toolTokens: estimate.tools,
               readFiles: ctx.readFiles.size,
               todos: ctx.todos.length,
               inProgress: ctx.todos.filter((t) => t.status === 'in_progress').length,

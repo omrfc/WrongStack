@@ -310,7 +310,6 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
                 // Re-trigger: the outer loop will continue and we'll hit this
                 // block again on the next iteration. But we need user input...
                 // Instead, we just continue the loop with the next prompt.
-                continue;
               }
             } catch (err) {
               opts.renderer.writeError(

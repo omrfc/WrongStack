@@ -34,6 +34,53 @@ This pulls in the full stack — `@wrongstack/core`, `@wrongstack/runtime`, `@wr
 
 After install, `wrongstack` is on your `PATH`. (`wstack` works too — it's an alias.)
 
+### What's new in 0.4.x — autonomy, modes, and YOLO runtime toggle
+
+This release adds a self-driving agent mode, a runtime-toggleable YOLO
+flag, and a mode system — all while keeping full backwards compatibility.
+
+**Autonomy mode.** `/autonomy on|off|suggest|toggle` gives the agent
+self-driving capability. In `auto` mode it picks the next logical step
+and continues after each turn. In `suggest` mode it shows next-step
+suggestions without executing. The TUI status bar shows an `∞ AUTO` or
+`∞ SUGGEST` chip when active.
+
+**`/yolo` runtime toggle.** Flip YOLO mode on or off without restarting:
+`/yolo on`, `/yolo off`, `/yolo toggle`, `/yolo` (status). The TUI
+status bar `⚠ YOLO` chip now reflects the live permission policy state.
+
+**Mode system.** Eight built-in agent modes — `default`, `code-reviewer`,
+`code-auditor`, `architect`, `debugger`, `tester`, `devops`, `refactorer`
+— inject role-specific system prompts. Switch at runtime with the new
+`/mode` command or the provider/model picker. Modes are stored in
+`~/.wrongstack/modes/` and can be extended with custom prompts.
+
+**YOLO prompt defaults to Y.** The interactive "YOLO mode?" prompt at
+boot now defaults to enabled (press Enter = YOLO on). Previously
+defaulted to off.
+
+**TUI lint fixes.** Removed unused `exit`/`onExit` dependencies from
+the SIGINT `useEffect` (`useExhaustiveDependencies`), and auto-fixed
+type-only React imports across 7 component files (`useImportType`).
+
+**WebUI provider switch fix.** Removed duplicate `providers.list`
+case handler that was unreachable dead code.
+
+### What's new in 0.4.1
+
+**TUI context bar fix for OpenAI-compatible providers.** The ctx bar was
+reading `usage.input` which OpenAI-compatible providers don't populate
+(they use `usage.prompt_tokens` instead). Now reads
+`tokenCounter.total().input` directly, updated by `tokenCounter.account()`
+on every model call regardless of provider shape.
+
+### What's new in 0.3.4
+
+**Official Telegram plugin release.** `@wrongstack/telegram` joins the
+lockstep release train. Install via `wstack plugin install telegram` /
+`/plugin install telegram`. Registers `telegram_read`, `telegram_send`,
+and `/telegram:*` slash commands after restart.
+
 ### What's new in 0.3.2
 
 This patch release tightens the package architecture, improves context-window

@@ -4,6 +4,7 @@ import type {
   HealthRegistry,
   MemoryStore,
   MetricsSink,
+  ModeStore,
   Renderer,
   SessionStore,
   SkillLoader,
@@ -27,6 +28,7 @@ export interface SlashCommandContext {
   context?: Context;
   metricsSink?: MetricsSink;
   healthRegistry?: HealthRegistry;
+  modeStore?: ModeStore;
   onExit?: () => void;
   onClear?: () => void;
   onDiag?: () => string;
@@ -102,6 +104,7 @@ import { buildTodosCommand } from './todos.js';
 import { buildToolsCommand } from './tools.js';
 import { buildYoloCommand } from './yolo.js';
 import { buildAutonomyCommand } from './autonomy.js';
+import { buildModeCommand } from './mode.js';
 import { buildSddCommand } from './sdd.js';
 import { buildSkillGeneratorCommand } from './skill-generator.js';
 import {
@@ -140,6 +143,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildLoadCommand(opts),
     buildYoloCommand(opts),
     buildAutonomyCommand(opts),
+    buildModeCommand(opts),
     buildExitCommand(opts),
   ];
 }

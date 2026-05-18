@@ -1,5 +1,5 @@
 import { Box, Text } from 'ink';
-import React from 'react';
+import type React from 'react';
 import type { FleetEntry } from '../app.js';
 
 export interface FleetPanelProps {
@@ -157,6 +157,12 @@ export function FleetPanel({ entries, totalCost, roster }: FleetPanelProps): Rea
                 <Text dimColor>msg: {message}</Text>
               </Box>
             ))}
+            {/* Budget pressure warning */}
+            {entry.budgetWarning ? (
+              <Box paddingLeft={2}>
+                <Text color="yellow">⚡ hitting {entry.budgetWarning.kind} limit ({entry.budgetWarning.used}/{entry.budgetWarning.limit}) — extending</Text>
+              </Box>
+            ) : null}
             {/* Streaming tail for running agents */}
             {entry.status === 'running' && entry.streamingText ? (
               <Box paddingLeft={2}>

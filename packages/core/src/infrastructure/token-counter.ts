@@ -26,6 +26,9 @@ export class DefaultTokenCounter implements TokenCounter {
   private readonly providerId?: string;
   private readonly events?: EventBus;
   private priceCache = new Map<string, PriceEntry>();
+  /** Most recently accounted request's tokens. Used for per-request context pressure. */
+  private lastInput = 0;
+  private lastCacheRead = 0;
 
   constructor(opts: { registry?: ModelsRegistry; providerId?: string; events?: EventBus } = {}) {
     this.registry = opts.registry;
@@ -38,6 +41,9 @@ export class DefaultTokenCounter implements TokenCounter {
     this.output += usage.output;
     this.cacheRead += usage.cacheRead ?? 0;
     this.cacheWrite += usage.cacheWrite ?? 0;
+    // Snapshot per-request tokens for context pressure tracking.
+    this.lastInput = usage.input;
+    this.lastCacheRead = usage.cacheRead ?? 0;
 
     const price = model ? this.priceCache.get(model) : undefined;
     if (price) {
@@ -67,6 +73,9 @@ export class DefaultTokenCounter implements TokenCounter {
     this.output += usage.output;
     this.cacheRead += usage.cacheRead ?? 0;
     this.cacheWrite += usage.cacheWrite ?? 0;
+    // Snapshot per-request tokens for context pressure tracking.
+    this.lastInput = usage.input;
+    this.lastCacheRead = usage.cacheRead ?? 0;
     const price = priceFromModel(resolved);
     this.priceCache.set(resolved.modelId, price);
     this.applyPrice(usage, price);
@@ -79,6 +88,10 @@ export class DefaultTokenCounter implements TokenCounter {
       cacheRead: this.cacheRead,
       cacheWrite: this.cacheWrite,
     };
+  }
+
+  currentRequestTokens(): { input: number; cacheRead: number } {
+    return { input: this.lastInput, cacheRead: this.lastCacheRead };
   }
 
   estimateCost(): { input: number; output: number; total: number; currency: 'USD' } {

@@ -7,61 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+All items below ship in 0.4.x.
+
 ### Added
 
-- **YOLO mode documentation.** `docs/yolo-mode.md` covers the full permission
-  pipeline, runtime toggle, trust file interaction, subagent policy, and
-  security trade-offs.
-- **Skill writing guide.** `docs/skills.md` documents the SKILL.md frontmatter
-  format, three-layer discovery, description quality tips, and token budget
-  guidelines.
-- **Configuration reference.** `docs/configuration.md` is the authoritative
-  reference for every config field — type, default, and example for providers,
-  context, tools, MCP servers, features, plugins, logging, extensions, and
-  environment variables.
-- **Troubleshooting guide.** `docs/troubleshooting.md` covers common issues
-  (API key, rate limits, context overflow, MCP failures, permission prompts),
-  `wstack diag` usage, exit codes, debug logging, and state reset commands.
-- **Examples directory.** `examples/` with 6 categories: basic usage, tool
-  usage, multi-provider, MCP integration, multi-agent, and real-world
-  workflows. 15+ working examples organized per LLM-native conventions.
-- **`/yolo` slash command.** Runtime toggle for YOLO mode: `/yolo on`, `/yolo
-  off`, `/yolo toggle`, `/yolo` (status). Mutates the permission policy
-  immediately without restart.
-- **Live YOLO state in TUI status bar.** The `⚠ YOLO` chip now reflects the
-  current permission policy state after `/yolo` commands, not just the boot-time
-  flag.
-- **GitHub Release workflow.** `.github/workflows/release.yml` automates
-  typecheck → build → test → npm publish → GitHub Release on tag push.
-  Runs on all 3 platforms (Ubuntu, macOS, Windows).
-- **Cross-platform CI.** CI matrix now runs on Ubuntu, macOS, and Windows.
-- **npm publish check script.** `scripts/publish-check.mjs` validates all
-  workspace packages before publishing: required fields, dist existence,
-  version consistency, git status.
-- **Release checklist.** `RELEASE.md` documents the full release process:
-  pre-release checks, version bump, commit/tag, CI verification, post-release.
 - **Autonomy mode.** `/autonomy on|off|suggest|toggle` slash command for
-  self-driving agent behavior. In `auto` mode, the agent picks the next
-  logical step and continues after each turn. In `suggest` mode, it shows
-  next-step suggestions. TUI status bar shows an `∞ AUTO` or `∞ SUGGEST`
-  chip when active.
-- **Install scripts.** `scripts/install.sh` (macOS/Linux) and
-  `scripts/install.ps1` (Windows) for one-liner installation via curl/irm.
-  Detects Node.js version, auto-selects pnpm/npm, verifies install.
+  self-driving agent behavior. In `auto` mode the agent picks the next
+  logical step and continues after each turn. In `suggest` mode it shows
+  next-step suggestions without executing. TUI status bar shows an
+  `∞ AUTO` or `∞ SUGGEST` chip when active.
+- **`/yolo` slash command.** Runtime toggle for YOLO mode: `/yolo on`,
+  `/yolo off`, `/yolo toggle`, `/yolo` (status). Mutates the permission
+  policy immediately without restart.
+- **Live YOLO state in TUI status bar.** The `⚠ YOLO` chip now reflects
+  the current permission policy state after `/yolo` commands, not just
+  the boot-time flag.
+- **Mode system.** Eight built-in agent modes — `default`,
+  `code-reviewer`, `code-auditor`, `architect`, `debugger`, `tester`,
+  `devops`, `refactorer` — inject role-specific system prompts. Switch
+  at runtime with the new `/mode` command or provider/model picker.
+  Modes are stored in `~/.wrongstack/modes/`; custom modes can be added
+  by dropping a `*.md` file alongside the built-ins.
 
 ### Changed
 
-- **YOLO prompt defaults to Y.** The interactive "YOLO mode?" prompt at boot
-  now defaults to enabled (press Enter = YOLO on). Previously defaulted to off.
+- **YOLO prompt defaults to Y.** The interactive "YOLO mode?" prompt at
+  boot now defaults to enabled (press Enter = YOLO on). Previously
+  defaulted to off.
 
 ### Fixed
 
-- **Duplicate `providers.list` case in WebUI switch.** A second handler for the
-  same message type was unreachable dead code — removed.
-- **`useExhaustiveDependencies` lint in TUI.** Removed unused `exit`/`onExit`
-  dependencies from the SIGINT `useEffect`.
-- **`useImportType` lint in TUI components.** Auto-fixed type-only React
-  imports across 7 component files.
+- **Duplicate `providers.list` case in WebUI switch.** A second handler
+  for the same message type was unreachable dead code — removed.
+- **`useExhaustiveDependencies` lint in TUI.** Removed unused
+  `exit`/`onExit` dependencies from the SIGINT `useEffect`.
+- **`useImportType` lint in TUI components.** Auto-fixed type-only
+  React imports across 7 component files.
 
 ## [0.4.1] - 2026-05-18
 

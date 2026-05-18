@@ -10,6 +10,7 @@ import {
   type ProviderRegistry,
   type ToolRegistry,
   createDefaultPipelines,
+  estimateRequestTokens,
 } from '@wrongstack/core';
 import { capabilitiesFor } from '@wrongstack/providers';
 
@@ -65,34 +66,21 @@ export async function setupCompaction(params: {
   };
   provider: Provider;
   pipelines: AgentPipelines;
-}): Promise<number> {
+}): Promise<{ effectiveMaxContext: number; autoCompactor: AutoCompactionMiddleware | undefined }> {
   const { compactor, events, modelsRegistry, context, config, provider, pipelines } = params;
   const resolvedCaps = await capabilitiesFor(modelsRegistry, provider.id, context.model).catch(() => undefined);
   const effectiveMaxContext =
     config.context.effectiveMaxContext ??
     (resolvedCaps as { maxContext?: number } | undefined)?.maxContext ??
     provider.capabilities.maxContext;
+  let autoCompactor: AutoCompactionMiddleware | undefined;
   if (config.context.autoCompact !== false) {
-    const autoCompactor = new AutoCompactionMiddleware(
+    autoCompactor = new AutoCompactionMiddleware(
       compactor,
       effectiveMaxContext,
-      (ctx) => {
-        let total = 0;
-        for (const m of ctx.messages) {
-          if (typeof m.content === 'string') {
-            total += Math.ceil(m.content.length / 4);
-          } else if (Array.isArray(m.content)) {
-            for (const b of m.content) {
-              if (b.type === 'text') {
-                total += Math.ceil(b.text.length / 4);
-              } else if (b.type === 'tool_use' || b.type === 'tool_result') {
-                total += Math.ceil(JSON.stringify(b).length / 4);
-              }
-            }
-          }
-        }
-        return total;
-      },
+      // Use the full API request estimator: messages + system prompt + tool definitions.
+      // This matches what the provider actually counts as input tokens.
+      (ctx) => estimateRequestTokens(ctx.messages, ctx.systemPrompt, ctx.tools ?? []).total,
       {
         warn: config.context.warnThreshold,
         soft: config.context.softThreshold,
@@ -102,7 +90,7 @@ export async function setupCompaction(params: {
     );
     pipelines.contextWindow.use({ name: 'AutoCompaction', handler: autoCompactor.handler() });
   }
-  return effectiveMaxContext;
+  return { effectiveMaxContext, autoCompactor };
 }
 
 export function createAgent(params: {

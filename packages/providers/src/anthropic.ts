@@ -128,7 +128,6 @@ async function* parseAnthropicStream(
 
     switch (type) {
       case 'message_start': {
-        console.error('[DEBUG parseAnthropicStream] message_start:', JSON.stringify(ev));
         const message = ev['message'] as
           | {
               model?: string;

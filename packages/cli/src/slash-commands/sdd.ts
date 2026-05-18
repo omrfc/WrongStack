@@ -197,7 +197,7 @@ export function autoDetectTaskCompletion(aiOutput: string): number {
     if (sddDoneMatch?.[1]) {
       const target = sddDoneMatch[1].trim();
       const num = Number(target);
-      if (!isNaN(num) && num >= 1 && num <= pending.length) {
+      if (!Number.isNaN(num) && num >= 1 && num <= pending.length) {
         const node = pending[num - 1];
         if (node && node.status !== 'completed') {
           activeTaskTracker!.updateNodeStatus(node.id, 'completed');
@@ -602,7 +602,7 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
           const num = Number(restJoined);
           let matched = false;
 
-          if (!isNaN(num) && num >= 1 && num <= nodes.length) {
+          if (!Number.isNaN(num) && num >= 1 && num <= nodes.length) {
             const node = nodes[num - 1];
             if (node) {
               activeTaskTracker.updateNodeStatus(node.id, 'completed');

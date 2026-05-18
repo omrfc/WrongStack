@@ -60,3 +60,89 @@ export function estimateToolResultTokens(content: string | unknown): number {
 export function estimateTextTokens(text: string): number {
   return RoughTokenEstimate(text);
 }
+
+/**
+ * Rough estimate of tokens in a tool definition (name + description + schema).
+ * Accounts for the JSON-serialized inputSchema which is sent to the API
+ * but NOT included in roughEstimate(content).
+ */
+export function estimateToolDefTokens(tool: { name: string; description?: string; inputSchema: unknown }): number {
+  return RoughTokenEstimate(tool.name) +
+    RoughTokenEstimate(tool.description ?? '') +
+    RoughTokenEstimate(JSON.stringify(tool.inputSchema));
+}
+
+/**
+ * Estimate the total API request token count: system prompt + tool definitions
+ * + conversation messages. Use this for context-window bar calculations
+ * instead of roughEstimate (which only counts messages).
+ *
+ * The overhead ratio (overhead / messages) varies by conversation length:
+ *   - Short conversations (< 10 messages): ~30-50% overhead (large system+tools)
+ *   - Medium (10-50 messages): ~15-30%
+ *   - Long (> 50 messages): ~5-15%
+ *
+ * Returns { messages, systemPrompt, tools, total } for debugging display.
+ */
+export interface RequestTokenBreakdown {
+  messages: number;
+  systemPrompt: number;
+  tools: number;
+  total: number;
+}
+
+export function estimateRequestTokens(
+  messages: unknown,
+  systemPrompt: unknown,
+  tools: { name: string; description?: string; inputSchema: unknown }[],
+): RequestTokenBreakdown {
+  // Messages: apply the same logic as roughEstimate
+  let messagesTokens = 0;
+  if (typeof messages === 'string') {
+    messagesTokens = RoughTokenEstimate(messages);
+  } else if (Array.isArray(messages)) {
+    for (const m of messages) {
+      if (typeof m === 'object' && m !== null && 'content' in m) {
+        const content = (m as { content: unknown }).content;
+        if (typeof content === 'string') {
+          messagesTokens += RoughTokenEstimate(content);
+        } else if (Array.isArray(content)) {
+          for (const b of content) {
+            if (typeof b === 'object' && b !== null) {
+              if ((b as { type?: string }).type === 'text') {
+                messagesTokens += RoughTokenEstimate((b as { text: string }).text);
+              } else {
+                messagesTokens += RoughTokenEstimate(JSON.stringify(b));
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // System prompt
+  let systemTokens = 0;
+  if (typeof systemPrompt === 'string') {
+    systemTokens = RoughTokenEstimate(systemPrompt);
+  } else if (Array.isArray(systemPrompt)) {
+    for (const b of systemPrompt) {
+      if (typeof b === 'object' && b !== null && (b as { type?: string }).type === 'text') {
+        systemTokens += RoughTokenEstimate((b as { text: string }).text);
+      }
+    }
+  }
+
+  // Tool definitions
+  let toolsTokens = 0;
+  for (const t of tools) {
+    toolsTokens += estimateToolDefTokens(t);
+  }
+
+  return {
+    messages: messagesTokens,
+    systemPrompt: systemTokens,
+    tools: toolsTokens,
+    total: messagesTokens + systemTokens + toolsTokens,
+  };
+}

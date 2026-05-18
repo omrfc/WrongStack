@@ -1,5 +1,7 @@
 import { Box, Text, useInput, useStdin } from 'ink';
-import React, { useEffect } from 'react';
+import type React from 'react';
+import { useEffect } from 'react';
+import type { ReactNode } from 'react';
 
 export interface InputProps {
   prompt?: string;

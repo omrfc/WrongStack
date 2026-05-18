@@ -483,18 +483,24 @@ export const useSessionStore = create<SessionState>()(
 
       updateUsage: (usage) =>
         set((state) => {
-          // True total input this turn = fresh + cached subsets, since
-          // Usage is now disjoint across providers (see core's Usage doc).
-          // Without summing, prompt-cached turns under-report the ctx chip.
-          const totalInput = (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+          // totalTokens tracks cumulative session totals for the cost panel.
+          // These ARE intentionally additive across turns (session cost = sum).
+          const inputDelta = usage.input + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+          const cacheReadDelta = usage.cacheRead ?? 0;
+          const cacheWriteDelta = usage.cacheWrite ?? 0;
           return {
             totalTokens: {
               input: state.totalTokens.input + usage.input,
               output: state.totalTokens.output + usage.output,
-              cacheRead: (state.totalTokens.cacheRead ?? 0) + (usage.cacheRead ?? 0),
-              cacheWrite: (state.totalTokens.cacheWrite ?? 0) + (usage.cacheWrite ?? 0),
+              cacheRead: (state.totalTokens.cacheRead ?? 0) + cacheReadDelta,
+              cacheWrite: (state.totalTokens.cacheWrite ?? 0) + cacheWriteDelta,
             },
-            lastInputTokens: totalInput || state.lastInputTokens,
+            // lastInputTokens = the single most-recent turn's effective input
+            // (fresh + cached). This drives the ctx % chip in the topbar and
+            // is NOT additive — it's the latest provider response's token count.
+            // Use cacheWrite too because cache-write tokens were part of this
+            // turn's context cost (written to build the cache for next turn).
+            lastInputTokens: inputDelta || state.lastInputTokens,
           };
         }),
 

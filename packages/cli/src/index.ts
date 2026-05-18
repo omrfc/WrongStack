@@ -17,7 +17,7 @@ import {
   DefaultModeStore,
   DefaultModelsRegistry,
   DefaultPathResolver,
-  DefaultPermissionPolicy,
+  type DefaultPermissionPolicy,
   DefaultRetryPolicy,
   DefaultSecretScrubber,
   DefaultSessionStore,
@@ -393,7 +393,15 @@ export async function main(argv: string[]): Promise<number> {
 
   const pipelines = setupPipelines({ events, logger });
   const compactor = container.resolve(TOKENS.Compactor);
-  const effectiveMaxContext = await setupCompaction({ compactor, events, modelsRegistry, context, config, provider, pipelines });
+  const { effectiveMaxContext, autoCompactor } = await setupCompaction({ compactor, events, modelsRegistry, context, config, provider, pipelines });
+
+  // Refresh AutoCompactionMiddleware denominator when the active model changes.
+  const refreshMaxContext = async (providerId: string, modelId: string) => {
+    if (!autoCompactor) return;
+    const cap = await capabilitiesFor(modelsRegistry, providerId, modelId).catch(() => undefined);
+    const mc = (cap as { maxContext?: number } | undefined)?.maxContext ?? config.context.effectiveMaxContext ?? 200_000;
+    autoCompactor.setMaxContext(mc);
+  };
 
   // Helper: keep the spinner's context chip in sync
   const updateSpinnerContext = () => {
@@ -494,6 +502,9 @@ export async function main(argv: string[]): Promise<number> {
       // that subscribed via .watch() re-renders. Crucially, /diag now
       // reads the live provider via the store.
       configStore.update({ provider: providerId, model: modelId });
+      // Refresh AutoCompactionMiddleware denominator for the new model's
+      // maxContext so threshold triggers (warn/soft/hard) use the correct denominator.
+      void refreshMaxContext(resolvedProviderId, modelId);
       return null;
     } catch (err) {
       return err instanceof Error ? err.message : String(err);
@@ -629,6 +640,7 @@ export async function main(argv: string[]): Promise<number> {
     metricsSink,
     healthRegistry,
     planPath,
+    modeStore,
     fleetStreamController,
     onSpawn: async (description, spawnOpts) => {
       const { subagentId, taskId } = await multiAgentHost.spawn(description, spawnOpts);
@@ -642,8 +654,19 @@ export async function main(argv: string[]): Promise<number> {
     onAgents: () => {
       const s = multiAgentHost.status();
       const lines = [s.summary];
+      const STATUS_ICON: Record<string, string> = {
+        running: '●',
+        idle: '○',
+        stopped: '⊘',
+      };
+      for (const a of s.live) {
+        if (a.status === 'running' || a.status === 'idle') {
+          const task = a.task ? ` — ${a.task.slice(0, 60)}` : '';
+          lines.push(`  ${STATUS_ICON[a.status] ?? '?'}  ${a.subagentId.slice(0, 8)} ${a.status}${task}`);
+        }
+      }
       for (const p of s.pending) {
-        lines.push(`  pending  ${p.taskId.slice(0, 8)} → ${p.description.slice(0, 60)}`);
+        lines.push(`  ·  pending  ${p.taskId.slice(0, 8)} → ${p.description.slice(0, 60)}`);
       }
       for (const r of s.completed) {
         const fmt = fmtTaskResultLine(r, color);
@@ -655,11 +678,26 @@ export async function main(argv: string[]): Promise<number> {
       if (action === 'status') {
         const s = multiAgentHost.status();
         const lines = [color.bold('Fleet status'), `  ${s.summary}`];
+        const STATUS_ICON: Record<string, string> = {
+          running: '●',
+          idle: '○',
+          stopped: '⊘',
+        };
+        const liveActive = s.live.filter((a) => a.status === 'running' || a.status === 'idle');
+        if (liveActive.length > 0) {
+          lines.push('', color.dim('  Active'));
+          for (const a of liveActive) {
+            const task = a.task ? ` · ${a.task.slice(0, 50)}` : '';
+            lines.push(
+              `    ${STATUS_ICON[a.status] ?? '?'} ${a.subagentId.slice(0, 8)} ${a.status}${task}`,
+            );
+          }
+        }
         if (s.pending.length > 0) {
           lines.push('', color.dim('  Pending'));
           for (const p of s.pending) {
             lines.push(
-              `    ${p.taskId.slice(0, 8)} → ${p.subagentId.slice(0, 8)} · ${p.description.slice(0, 60)}`,
+              `    ·  ${p.taskId.slice(0, 8)} → ${p.subagentId.slice(0, 8)} · ${p.description.slice(0, 60)}`,
             );
           }
         }

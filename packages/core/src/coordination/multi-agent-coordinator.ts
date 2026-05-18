@@ -17,6 +17,7 @@ import type {
 } from '../types/multi-agent.js';
 import { ProviderError } from '../types/provider.js';
 import { BudgetExceededError, SubagentBudget } from './subagent-budget.js';
+import { applyRosterBudget } from './fleet.js';
 
 type SubagentStatus = 'running' | 'idle' | 'stopped' | 'error';
 
@@ -358,17 +359,21 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
     this.emit('task.assigned', { task, subagentId });
 
     // Budget combines coordinator defaults with per-subagent and per-task overrides.
-    // Precedence: task > subagent > coordinator default.
+    // Precedence: task > subagent > roster default > coordinator default.
+    const configWithRosterDefaults = applyRosterBudget(subagent.config);
     const budget = new SubagentBudget({
-      maxIterations: subagent.config.maxIterations ?? this.config.defaultBudget?.maxIterations,
+      maxIterations:
+        configWithRosterDefaults.maxIterations ?? this.config.defaultBudget?.maxIterations,
       maxToolCalls:
         task.maxToolCalls ??
-        subagent.config.maxToolCalls ??
+        configWithRosterDefaults.maxToolCalls ??
         this.config.defaultBudget?.maxToolCalls,
-      maxTokens: subagent.config.maxTokens ?? this.config.defaultBudget?.maxTokens,
-      maxCostUsd: subagent.config.maxCostUsd ?? this.config.defaultBudget?.maxCostUsd,
+      maxTokens:
+        configWithRosterDefaults.maxTokens ?? this.config.defaultBudget?.maxTokens,
+      maxCostUsd:
+        configWithRosterDefaults.maxCostUsd ?? this.config.defaultBudget?.maxCostUsd,
       timeoutMs:
-        task.timeoutMs ?? subagent.config.timeoutMs ?? this.config.defaultBudget?.timeoutMs,
+        task.timeoutMs ?? configWithRosterDefaults.timeoutMs ?? this.config.defaultBudget?.timeoutMs,
     });
     subagent.activeBudget = budget;
 

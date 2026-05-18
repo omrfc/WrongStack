@@ -68,6 +68,8 @@ export class FleetBus {
       'compaction.fired',
       'compaction.failed',
       'token.threshold',
+      // Subagent hit a soft budget limit — coordinator can extend or stop.
+      'budget.threshold_reached',
     ] as const;
     const offs: Array<() => void> = [];
     for (const t of FORWARDED_TYPES) {

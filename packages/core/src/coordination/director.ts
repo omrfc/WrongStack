@@ -339,6 +339,60 @@ export class Director {
       this.scheduleManifest();
     };
     this.coordinator.on('task.completed', this.taskCompletedListener);
+
+    // Wire budget.threshold_reached events from the FleetBus into the
+    // coordinator's task completion path. When a subagent hits a soft
+    // limit, the runner emits this event; we intercept it here, resolve
+    // the decision promise (via extend/deny), and let the normal
+    // task.completed flow handle the rest.
+    //
+    // Extension guard: a subagent that hits the same soft limit TWICE
+    // without completing its task is looping on a prompt/config issue,
+    // not running out of budget legitimately. After 2 extends we deny
+    // and let the task fail — the host agent should then split the work
+    // or narrow the scope. We track this per subagent+kind combination.
+    const extendCounts = new Map<string, number>();
+    this.fleet.filter('budget.threshold_reached', (e) => {
+      const payload = e.payload as {
+        kind: 'iterations' | 'tool_calls' | 'tokens' | 'cost';
+        used: number;
+        limit: number;
+        timeoutMs: number;
+        extend: (extra: Record<string, unknown>) => void;
+        deny: () => void;
+      };
+      const guardKey = `${e.subagentId}:${payload.kind}`;
+      const prior = extendCounts.get(guardKey) ?? 0;
+      if (prior >= 2) {
+        // Second extension denied — let the task fail so the host agent
+        // can react rather than spinning forever.
+        payload.deny();
+        extendCounts.delete(guardKey);
+        return;
+      }
+      // Auto-extend: grant 50% more of the triggering limit type,
+      // up to a reasonable cap. If no listener responds within
+      // timeoutMs, the event's own timer fires and denies.
+      extendCounts.set(guardKey, prior + 1);
+      setTimeout(() => {
+        const extra: Record<string, unknown> = {};
+        switch (payload.kind) {
+          case 'iterations':
+            extra.maxIterations = Math.min(payload.used + 50, 500);
+            break;
+          case 'tool_calls':
+            extra.maxToolCalls = Math.min(Math.ceil(payload.limit * 1.5), 1000);
+            break;
+          case 'tokens':
+            extra.maxTokens = Math.min(Math.ceil(payload.limit * 1.5), 500_000);
+            break;
+          case 'cost':
+            extra.maxCostUsd = Math.min(payload.limit * 1.5, 10);
+            break;
+        }
+        payload.extend(extra);
+      }, Math.min(payload.timeoutMs, 30_000));
+    });
   }
 
   /** Best-effort session-writer append. Swallows failures — the director

@@ -1,6 +1,6 @@
 import type { TokenCounter } from '@wrongstack/core';
 import { Box, Text } from 'ink';
-import React from 'react';
+import type React from 'react';
 import type { GitInfo } from '../git-info.js';
 
 export interface TodoCounts {
@@ -343,7 +343,8 @@ export function StatusBar({
 
 function ContextChip({ ctx }: { ctx: ContextWindow }): React.ReactElement {
   const ratio = Math.max(0, Math.min(1, ctx.used / ctx.max));
-  const pct = Math.round(ratio * 100);
+  const pct = Math.round(ratio * 100); // true percentage of max context
+  const filled = ratio === 0 ? 0 : Math.max(1, Math.round(ratio * 10)); // bar cells (min 1 so low usage still visible)
   // Colour ramp: cool while there's plenty of headroom, warn at the
   // two-thirds mark, alarm once we're inside the last 20% — the model
   // typically starts losing the head of the conversation around there.

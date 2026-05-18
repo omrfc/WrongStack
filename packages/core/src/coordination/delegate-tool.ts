@@ -164,170 +164,133 @@ export function createDelegateTool(opts: CreateDelegateToolOptions): Tool {
         return { ok: false, error: '`task` is required.' };
       }
 
-      let director = await opts.host.ensureDirector();
-      if (!director) {
-        director = await opts.host.promoteToDirector();
-      }
-      if (!director) {
-        // Prefer the host's structured reason (set by promoteToDirector
-        // when it refuses) so the calling model can see "3 subagents
-        // running, wait or /fleet kill" instead of a one-size-fits-all
-        // "could not activate" string. Fall back to the legacy message
-        // for hosts that don't implement the optional reason hook.
-        const reason = opts.host.getPromotionBlockReason?.();
-        return {
-          ok: false,
-          error:
-            reason ??
-            'Director could not be activated — multi-agent host already running in legacy non-director mode. Restart with `--director` for fleet support.',
-        };
-      }
+        try {
+          let director = await opts.host.ensureDirector();
+          if (!director) {
+            director = await opts.host.promoteToDirector();
+          }
+          if (!director) {
+            const reason = opts.host.getPromotionBlockReason?.();
+            return {
+              ok: false,
+              error:
+                reason ??
+                'Director could not be activated — multi-agent host already running in legacy non-director mode. Restart with `--director` for fleet support.',
+            };
+          }
 
-      const timeoutMs = i.timeoutMs ?? defaultTimeoutMs;
+          const timeoutMs = i.timeoutMs ?? defaultTimeoutMs;
 
-      // Resolve config: prefer roster role when provided, fall back to
-      // explicit name/provider/model. The two forms are intentionally
-      // exclusive to keep the surface narrow.
-      let cfg: SubagentConfig;
-      if (i.role) {
-        const base = opts.roster?.[i.role];
-        if (!base) {
-          return {
-            ok: false,
-            error: `Unknown role "${i.role}". Available: ${rosterIds.join(', ') || '(no roster configured)'}.`,
-          };
-        }
-        cfg = instantiateRosterConfig(i.role, base);
-        if (i.systemPromptOverride) cfg.systemPromptOverride = i.systemPromptOverride;
-        if (i.provider) cfg.provider = i.provider;
-        if (i.model) cfg.model = i.model;
-      } else {
-        if (!i.name) {
-          return {
-            ok: false,
-            error: 'Either `role` (from the roster) or `name` is required.',
-          };
-        }
-        cfg = {
-          name: i.name,
-          provider: i.provider,
-          model: i.model,
-          systemPromptOverride: i.systemPromptOverride,
-        };
-      }
+          let cfg: SubagentConfig;
+          if (i.role) {
+            const base = opts.roster?.[i.role];
+            if (!base) {
+              return {
+                ok: false,
+                error: `Unknown role "${i.role}". Available: ${rosterIds.join(', ') || '(no roster configured)'}.`,
+              };
+            }
+            cfg = instantiateRosterConfig(i.role, base);
+            if (i.systemPromptOverride) cfg.systemPromptOverride = i.systemPromptOverride;
+            if (i.provider) cfg.provider = i.provider;
+            if (i.model) cfg.model = i.model;
+          } else {
+            if (!i.name) {
+              return {
+                ok: false,
+                error: 'Either `role` (from the roster) or `name` is required.',
+              };
+            }
+            cfg = {
+              name: i.name,
+              provider: i.provider,
+              model: i.model,
+              systemPromptOverride: i.systemPromptOverride,
+            };
+          }
 
-      // Caller-supplied iteration / tool-call budgets win over both the
-      // role default and the coordinator default. This is how the
-      // orchestrator dials a long-running audit up to "as much as it
-      // needs" without us having to second-guess the right number
-      // anywhere lower in the stack.
-      if (typeof i.maxIterations === 'number' && i.maxIterations > 0) {
-        cfg.maxIterations = i.maxIterations;
-      }
-      if (typeof i.maxToolCalls === 'number' && i.maxToolCalls > 0) {
-        cfg.maxToolCalls = i.maxToolCalls;
-      }
+          if (typeof i.maxIterations === 'number' && i.maxIterations > 0) {
+            cfg.maxIterations = i.maxIterations;
+          }
+          if (typeof i.maxToolCalls === 'number' && i.maxToolCalls > 0) {
+            cfg.maxToolCalls = i.maxToolCalls;
+          }
 
-      // Timeout coordination (Fix 2). The subagent's internal `timeoutMs`
-      // is its OWN budget cap; the delegate's `timeoutMs` is the host's
-      // patience. If the host's patience runs out before the subagent's
-      // budget does, the host sees a `__timeout` with no result — but
-      // the subagent keeps running, burning compute the host can never
-      // observe. Force the subagent's internal cap to land ~30s BEFORE
-      // the host's timeout so the subagent always finishes (or
-      // exhausts) within the host's window and surfaces a real
-      // outcome instead of a silent loss.
-      const SUBAGENT_TIMEOUT_BUFFER_MS = 30_000;
-      const desiredSubTimeout = Math.max(30_000, timeoutMs - SUBAGENT_TIMEOUT_BUFFER_MS);
-      if (!cfg.timeoutMs || cfg.timeoutMs > desiredSubTimeout) {
-        cfg.timeoutMs = desiredSubTimeout;
-      }
+          const SUBAGENT_TIMEOUT_BUFFER_MS = 30_000;
+          const desiredSubTimeout = Math.max(30_000, timeoutMs - SUBAGENT_TIMEOUT_BUFFER_MS);
+          if (!cfg.timeoutMs || cfg.timeoutMs > desiredSubTimeout) {
+            cfg.timeoutMs = desiredSubTimeout;
+          }
 
-      try {
-        const subagentId = await director.spawn(cfg);
-        const taskId = await director.assign({
-          id: '',
-          description: i.task,
-          subagentId,
-        });
-        const result = await Promise.race<TaskResult | { __timeout: true }>([
-          director.awaitTasks([taskId]).then((r) => r[0] as TaskResult),
-          new Promise<{ __timeout: true }>((resolve) =>
-            setTimeout(() => resolve({ __timeout: true }), timeoutMs),
-          ),
-        ]);
-
-        if ('__timeout' in result) {
-          // Host gave up waiting. Subagent may still be running but the
-          // budget coordination above should have already capped it ~30s
-          // before this point. Try to extract whatever the subagent
-          // produced so far from its JSONL transcript.
-          const partial = await readSubagentPartial(opts, subagentId);
-          return {
-            ok: false,
-            stopReason: 'host_timeout',
-            error: `Subagent did not finish within ${timeoutMs}ms.`,
-            hint: 'Reduce scope of the next delegate, raise timeoutMs, or use spawn_subagent + await_tasks for long-running work.',
+          const subagentId = await director.spawn(cfg);
+          const taskId = await director.assign({
+            id: `${randomUUID()}`,
+            description: i.task,
             subagentId,
-            taskId,
-            partial,
+          });
+          const result = await Promise.race<TaskResult | { __timeout: true }>([
+            director.awaitTasks([taskId]).then((r) => {
+              if (!r[0]) throw new Error(`Task "${taskId}" not found in completed results`);
+              return r[0];
+            }),
+            new Promise<{ __timeout: true }>((resolve) =>
+              setTimeout(() => resolve({ __timeout: true }), timeoutMs),
+            ),
+          ]);
+
+          if ('__timeout' in result) {
+            const partial = await readSubagentPartial(opts, subagentId);
+            return {
+              ok: false,
+              stopReason: 'host_timeout',
+              error: `Subagent did not finish within ${timeoutMs}ms.`,
+              hint: 'Reduce scope of the next delegate, raise timeoutMs, or use spawn_subagent + await_tasks for long-running work.',
+              subagentId,
+              taskId,
+              partial,
+            };
+          }
+
+          const baseStopReason: StopReason =
+            result.status === 'success'
+              ? 'end_turn'
+              : result.status === 'timeout'
+                ? 'subagent_timeout'
+                : result.status === 'stopped'
+                  ? 'aborted'
+                  : 'budget_exhausted';
+          const partial =
+            result.status === 'success' ? undefined : await readSubagentPartial(opts, subagentId);
+
+          const errorKind = result.error?.kind;
+          const retryable = result.error?.retryable;
+          const backoffMs = result.error?.backoffMs;
+          return {
+            ok: result.status === 'success',
+            status: result.status,
+            stopReason: baseStopReason,
+            errorKind,
+            retryable,
+            backoffMs,
+            subagentId: result.subagentId,
+            taskId: result.taskId,
+            result: result.result,
+            error: result.error,
+            iterations: result.iterations,
+            toolCalls: result.toolCalls,
+            durationMs: result.durationMs,
+            ...(partial ? { partial } : {}),
+            ...(hintForKind(errorKind, retryable, backoffMs)
+              ? { hint: hintForKind(errorKind, retryable, backoffMs) }
+              : {}),
+          };
+        } catch (err) {
+          return {
+            ok: false,
+            stopReason: 'error' as const,
+            error: err instanceof Error ? err.message : String(err),
           };
         }
-
-        // Task completed — but "completed" can mean success, budget
-        // exhaustion (failed/timeout), or stop. Distinguish them so
-        // the host LLM can react differently:
-        //   - 'success' → end_turn, finalText reflects the actual answer
-        //   - 'failed'/'timeout' with iterations >= maxIterations → budget
-        //   - 'stopped' → user/director aborted
-        // For non-success, also pull partial output from JSONL because
-        // the runner throws on max_iterations and `result.result` ends
-        // up empty.
-        const baseStopReason: StopReason =
-          result.status === 'success'
-            ? 'end_turn'
-            : result.status === 'timeout'
-              ? 'subagent_timeout'
-              : result.status === 'stopped'
-                ? 'aborted'
-                : 'budget_exhausted';
-        const partial =
-          result.status === 'success' ? undefined : await readSubagentPartial(opts, subagentId);
-
-        // Lift the classified error envelope into top-level fields so a
-        // model reading this output can branch on `errorKind` / `retryable`
-        // without parsing a nested object. The original `error` envelope
-        // is preserved verbatim for callers that want the full record
-        // (including the `cause` stack for diagnostics).
-        const errorKind = result.error?.kind;
-        const retryable = result.error?.retryable;
-        const backoffMs = result.error?.backoffMs;
-        return {
-          ok: result.status === 'success',
-          status: result.status,
-          stopReason: baseStopReason,
-          errorKind,
-          retryable,
-          backoffMs,
-          subagentId: result.subagentId,
-          taskId: result.taskId,
-          result: result.result,
-          error: result.error,
-          iterations: result.iterations,
-          toolCalls: result.toolCalls,
-          durationMs: result.durationMs,
-          ...(partial ? { partial } : {}),
-          ...(hintForKind(errorKind, retryable, backoffMs)
-            ? { hint: hintForKind(errorKind, retryable, backoffMs) }
-            : {}),
-        };
-      } catch (err) {
-        return {
-          ok: false,
-          stopReason: 'error' as const,
-          error: err instanceof Error ? err.message : String(err),
-        };
-      }
     },
   };
 }
@@ -376,7 +339,7 @@ function hintForKind(
     case 'budget_tool_calls':
     case 'budget_tokens':
     case 'budget_cost':
-      return 'Subagent exhausted its budget. Raise the matching `max*` field on the next delegate or narrow task scope.';
+      return 'Subagent exhausted its budget. The coordinator may auto-extend; otherwise raise the matching `max*` field (e.g. maxToolCalls: 600) on the next delegate, or split the task.';
     case 'budget_timeout':
       return 'Subagent hit its wall-clock budget. Raise `timeoutMs` on the next delegate or split the task.';
     case 'aborted_by_parent':
