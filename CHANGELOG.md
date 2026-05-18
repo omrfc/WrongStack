@@ -5,7 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.1] - 2026-05-18
+
+### Fixed
+
+- **TUI context bar not rendering for OpenAI-compatible providers.** The ctx
+  bar was listening to `provider.response` events and reading `usage.input`,
+  but OpenAI-compatible providers populate `usage.prompt_tokens` instead —
+  `usage.input` was always 0, so the bar never showed. Now reads
+  `tokenCounter.total().input` directly, which is updated by
+  `tokenCounter.account()` on every model call regardless of provider shape.
 
 ## [0.3.4] - 2026-05-17
 
