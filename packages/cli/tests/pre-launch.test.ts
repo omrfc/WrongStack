@@ -171,7 +171,7 @@ describe('runLaunchPrompts', () => {
     const reader = makeReader(['r', '']);
     const result = await runLaunchPrompts({ renderer, reader });
     expect(result.mode).toBe('repl');
-    expect(result.yolo).toBe(false);
+    expect(result.yolo).toBe(true); // default is now Y
   });
 
   it('empty answer defaults to TUI mode', async () => {
@@ -184,6 +184,20 @@ describe('runLaunchPrompts', () => {
   it("'y' on yolo prompt enables YOLO mode", async () => {
     const renderer = makeRenderer();
     const reader = makeReader(['', 'y']);
+    const result = await runLaunchPrompts({ renderer, reader });
+    expect(result.yolo).toBe(true);
+  });
+
+  it("'n' on yolo prompt disables YOLO mode", async () => {
+    const renderer = makeRenderer();
+    const reader = makeReader(['', 'n']);
+    const result = await runLaunchPrompts({ renderer, reader });
+    expect(result.yolo).toBe(false);
+  });
+
+  it('empty answer on yolo prompt defaults to YOLO enabled', async () => {
+    const renderer = makeRenderer();
+    const reader = makeReader(['', '']);
     const result = await runLaunchPrompts({ renderer, reader });
     expect(result.yolo).toBe(true);
   });

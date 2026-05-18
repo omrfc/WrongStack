@@ -67,6 +67,8 @@ export interface SlashCommandContext {
   onDirector?: () => Promise<string | null>;
   /** Manage plugin config from the interactive slash menu. */
   onPlugin?: (args: string) => Promise<string>;
+  /** Toggle or query YOLO mode at runtime. Pass undefined to query, boolean to set. */
+  onYolo?: (setTo?: boolean) => boolean;
   /**
    * Absolute path to the per-session plan JSON file. Read+written by the
    * `/plan` slash command. Optional — when omitted, `/plan` short-circuits
@@ -96,6 +98,7 @@ import { buildSkillCommand } from './skill.js';
 import { buildAgentsCommand, buildDirectorCommand, buildSpawnCommand } from './spawn-agents.js';
 import { buildTodosCommand } from './todos.js';
 import { buildToolsCommand } from './tools.js';
+import { buildYoloCommand } from './yolo.js';
 
 export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashCommand[] {
   return [
@@ -120,6 +123,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildPlanCommand(opts),
     buildSaveCommand(opts),
     buildLoadCommand(opts),
+    buildYoloCommand(opts),
     buildExitCommand(opts),
   ];
 }

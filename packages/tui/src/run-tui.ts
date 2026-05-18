@@ -29,6 +29,8 @@ export interface RunTuiOptions {
   queueStore?: QueueStore;
   /** Surfaces the "⚠ YOLO" chip in the status bar. */
   yolo?: boolean;
+  /** Query live YOLO state from the permission policy. */
+  getYolo?: () => boolean;
   /** Renders in the startup banner. Read from the CLI's package.json. */
   appVersion?: string;
   /** Provider id for the startup banner ("openai", "anthropic", ...). */
@@ -248,6 +250,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           banner: opts.banner ?? true,
           queueStore: opts.queueStore,
           yolo: opts.yolo,
+          getYolo: opts.getYolo,
           appVersion: opts.appVersion,
           provider: opts.provider,
           family: opts.family,

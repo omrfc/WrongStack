@@ -67,6 +67,8 @@ export interface ExecutionDeps {
     enabled: boolean;
     setEnabled: (enabled: boolean) => void;
   };
+  /** Query the live YOLO state from the permission policy. */
+  getYolo?: () => boolean;
 }
 
 export async function execute(deps: ExecutionDeps): Promise<number> {
@@ -99,6 +101,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     director,
     fleetRoster,
     fleetStreamController,
+    getYolo,
   } = deps;
 
   let code = 0;
@@ -226,6 +229,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           banner: !flags['no-banner'],
           queueStore,
           yolo: !!config.yolo,
+          getYolo,
           appVersion: CLI_VERSION,
           provider: config.provider,
           family: banneredFamily,

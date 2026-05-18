@@ -973,6 +973,15 @@ export async function main(argv: string[]): Promise<number> {
       }
       return result.message;
     },
+    onYolo: (setTo?: boolean) => {
+      const policy = container.resolve(TOKENS.PermissionPolicy) as DefaultPermissionPolicy;
+      if (setTo !== undefined) {
+        policy.setYolo(setTo);
+        config = patchConfig(config, { yolo: setTo });
+        return setTo;
+      }
+      return policy.getYolo();
+    },
     onExit: () => {
       void mcpRegistry.stopAll();
     },
@@ -1050,6 +1059,10 @@ export async function main(argv: string[]): Promise<number> {
     director: director ?? null,
     fleetRoster: FLEET_ROSTER as Record<string, { name: string }>,
     fleetStreamController,
+    getYolo: () => {
+      const policy = container.resolve(TOKENS.PermissionPolicy) as DefaultPermissionPolicy;
+      return policy.getYolo();
+    },
   });
 }
 

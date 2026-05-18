@@ -107,6 +107,14 @@ export interface AppProps {
   queueStore?: QueueStore;
   /** Reflects the policy's --yolo flag for the status bar's "⚠ YOLO" chip. */
   yolo?: boolean;
+  /**
+   * Query the live YOLO state from the permission policy. Called after
+   * every slash-command dispatch so `/yolo off` (which mutates the
+   * policy inside the CLI) is immediately reflected in the status bar.
+   * Mirrors the `agent.ctx.model` → `setLiveModel` pattern used for
+   * provider/model sync.
+   */
+  getYolo?: () => boolean;
   /** Surfaced in the startup banner. Falls back to "dev" when omitted. */
   appVersion?: string;
   /** Provider id shown in the banner ("openai", "anthropic", …). Defaults to "agent". */
@@ -967,6 +975,7 @@ export function App({
   banner = true,
   queueStore,
   yolo = false,
+  getYolo,
   appVersion,
   provider,
   family,
@@ -989,6 +998,7 @@ export function App({
   // the slash command's message in history instead.
   const [liveModel, setLiveModel] = useState<string>(model);
   const [liveProvider, setLiveProvider] = useState<string>(provider ?? 'agent');
+  const [yoloLive, setYoloLive] = useState<boolean>(yolo);
   const [state, dispatch] = useReducer(reducer, {
     entries: banner
       ? [
@@ -2327,7 +2337,7 @@ export function App({
     return () => {
       process.off('SIGINT', onSigint);
     };
-  }, [exit, onExit, director]);
+  }, [director]);
 
   const handleKey = async (input: string, key: KeyEvent) => {
     // Note: we no longer block input while the agent is running. Enter
@@ -2841,6 +2851,10 @@ export function App({
         if (ctxModel && ctxModel !== liveModel) setLiveModel(ctxModel);
         const ctxProviderId = (agent.ctx.provider as { id?: string } | undefined)?.id;
         if (ctxProviderId && ctxProviderId !== liveProvider) setLiveProvider(ctxProviderId);
+        if (getYolo) {
+          const currentYolo = getYolo();
+          if (currentYolo !== yoloLive) setYoloLive(currentYolo);
+        }
         if (res?.exit) {
           exit();
           onExit(0);
@@ -3036,7 +3050,7 @@ export function App({
         tokenCounter={tokenCounter}
         hint={renderRunningTools(state.runningTools) || state.hint}
         queueCount={state.queue.length}
-        yolo={yolo}
+        yolo={yoloLive}
         elapsedMs={elapsedMs}
         todos={todos}
         plan={planCounts ?? undefined}

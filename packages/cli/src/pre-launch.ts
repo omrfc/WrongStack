@@ -154,12 +154,12 @@ export async function runLaunchPrompts(opts: {
   } else {
     const answer = (
       await reader.readLine(
-        `  ${color.amber('?')} YOLO mode ${color.dim('(auto-approve every tool call)')} ${color.dim('[y/N]')} `,
+        `  ${color.amber('?')} YOLO mode ${color.dim('(auto-approve every tool call)')} ${color.dim('[Y/n]')} `,
       )
     )
       .trim()
       .toLowerCase();
-    yolo = answer === 'y' || answer === 'yes';
+    yolo = answer !== 'n' && answer !== 'no';
   }
 
   renderer.write(

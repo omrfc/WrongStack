@@ -1045,31 +1045,6 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
         break;
       }
 
-      case 'providers.list': {
-        try {
-          const providers = await loadSavedProviders();
-          send(ws, {
-            type: 'providers.list',
-            payload: {
-              providers: Object.entries(providers).map(([id, cfg]) => ({
-                id,
-                family: cfg.family,
-                baseUrl: cfg.baseUrl,
-                apiKeys: normalizeKeys(cfg).map((k) => ({
-                  label: k.label,
-                  maskedKey: maskedKey(k.apiKey),
-                  isActive: k.label === cfg.activeKey,
-                  createdAt: k.createdAt ?? '',
-                })),
-              })),
-            },
-          });
-        } catch {
-          send(ws, { type: 'providers.list', payload: { providers: [] } });
-        }
-        break;
-      }
-
       case 'sessions.list': {
         // Per-project history. Sessions live under .wrongstack/sessions/ for
         // this project; we never enumerate cross-project state.

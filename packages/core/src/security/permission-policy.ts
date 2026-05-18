@@ -22,7 +22,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
   private policy: TrustPolicy = {};
   private loaded = false;
   private readonly trustFile: string;
-  private readonly yolo: boolean;
+  private yolo: boolean;
   /**
    * Session-scoped "soft deny" map. When the user presses 'n' (block once),
    * the tool+pattern is added here. If the LLM retries in the same session,
@@ -67,6 +67,16 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
    */
   setPromptDelegate(delegate: PermissionPolicyOptions['promptDelegate']): void {
     this.promptDelegate = delegate;
+  }
+
+  /** Toggle YOLO (auto-approve) mode at runtime. */
+  setYolo(enabled: boolean): void {
+    this.yolo = enabled;
+  }
+
+  /** Check whether YOLO mode is currently active. */
+  getYolo(): boolean {
+    return this.yolo;
   }
 
   async reload(): Promise<void> {

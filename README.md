@@ -1102,6 +1102,7 @@ plug in — see [`docs/architecture.md`](docs/architecture.md).
 | [`docs/plugin-management.md`](docs/plugin-management.md) | User-facing plugin workflows: list/add/remove/enable/disable and config layout |
 | [`docs/provider-author-guide.md`](docs/provider-author-guide.md) | Adding an LLM provider declaratively via `WireFormatConfig`, stream-state design, vendor quirks |
 | [`docs/tool-author-guide.md`](docs/tool-author-guide.md) | Writing a tool: streaming `executeStream`, permission semantics, `cleanup` vs `registerAbortHook`, the mtime contract |
+| [`docs/yolo-mode.md`](docs/yolo-mode.md) | YOLO (auto-approve) mode: permission pipeline, runtime toggle, trust file interaction, subagent policy, security trade-offs |
 
 ## Benchmarks
 
