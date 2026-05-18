@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {
   atomicWrite,
+  buildChildEnv,
   compileGlob,
   detectNewlineStyle,
   normalizeToLf,
@@ -227,7 +228,7 @@ async function globFiles(
 function checkRg(): Promise<boolean> {
   return new Promise((resolve) => {
     try {
-      const p = spawn('rg', ['--version'], { stdio: 'ignore' });
+      const p = spawn('rg', ['--version'], { env: buildChildEnv(), stdio: 'ignore' });
       p.on('error', () => resolve(false));
       p.on('close', (code) => resolve(code === 0));
     } catch {
@@ -238,7 +239,7 @@ function checkRg(): Promise<boolean> {
 
 function spawnRgFind(pattern: string, base: string): { promise: Promise<string[]> } {
   const args = ['--files', '--glob', pattern, base];
-  const child = spawn('rg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn('rg', args, { env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
   let buf = '';
   child.stdout?.on('data', (chunk: Buffer) => {
     buf += chunk.toString();

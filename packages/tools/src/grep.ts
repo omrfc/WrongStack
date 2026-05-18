@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Tool, ToolStreamEvent } from '@wrongstack/core';
-import { compileGlob } from '@wrongstack/core';
+import { buildChildEnv, compileGlob } from '@wrongstack/core';
 import { capSubject, compileUserRegex } from './_regex.js';
 import { isBinaryBuffer, safeResolve } from './_util.js';
 
@@ -84,7 +84,7 @@ export const grepTool: Tool<GrepInput, GrepOutput> = {
 async function detectRg(signal: AbortSignal): Promise<boolean> {
   return new Promise((resolve) => {
     try {
-      const p = spawn('rg', ['--version'], { stdio: 'ignore', signal });
+      const p = spawn('rg', ['--version'], { env: buildChildEnv(), stdio: 'ignore', signal });
       p.on('error', () => resolve(false));
       p.on('close', (code) => resolve(code === 0));
     } catch {
@@ -127,7 +127,7 @@ async function* runRgStream(
   const MAX_BUF_BYTES = 1_000_000;
   let bufOverflow = false;
 
-  const child = spawn('rg', args, { signal, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn('rg', args, { signal, env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
 
   type Chunk = { kind: 'out' | 'close' | 'error'; data: string };
   const queue: Chunk[] = [];

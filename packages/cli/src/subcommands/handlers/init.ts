@@ -1,6 +1,10 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { type Config, atomicWrite, color } from '@wrongstack/core';
+import {
+  DefaultSecretVault,
+  encryptConfigSecrets,
+} from '@wrongstack/core/security';
 import { detectProjectFacts, renderAgentsTemplate } from '../../slash-commands/helpers.js';
 import type { SubcommandDeps, SubcommandHandler } from '../index.js';
 
@@ -61,7 +65,11 @@ export const initCmd: SubcommandHandler = async (_args, deps) => {
   await fs.mkdir(deps.paths.globalRoot, { recursive: true });
   const config: Partial<Config> = { version: 1, provider: providerId, model: modelId };
   if (apiKey) config.apiKey = apiKey;
-  await atomicWrite(deps.paths.globalConfig, JSON.stringify(config, null, 2));
+  // Encrypt secret fields before writing to disk.
+  const keyFile = path.join(path.dirname(deps.paths.globalConfig), '.key');
+  const vault = new DefaultSecretVault({ keyFile });
+  const encrypted = encryptConfigSecrets(config, vault);
+  await atomicWrite(deps.paths.globalConfig, JSON.stringify(encrypted, null, 2));
   await fs.mkdir(path.join(deps.projectRoot, '.wrongstack'), { recursive: true });
   const agentsFile = path.join(deps.projectRoot, '.wrongstack', 'AGENTS.md');
   try {

@@ -1,7 +1,12 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import type { Agent, EventBus, ModelsRegistry, SessionWriter } from '@wrongstack/core';
 import { type ProviderConfig, atomicWrite } from '@wrongstack/core';
+import {
+  DefaultSecretVault,
+  encryptConfigSecrets,
+} from '@wrongstack/core/security';
 import { WebSocket, WebSocketServer } from 'ws';
 import { maskedKey, normalizeKeys, nowIso, writeKeysBack } from './provider-config-utils.js';
 
@@ -44,10 +49,9 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
   // convenience (matches standalone WebUI server behavior).
   const authToken = crypto.randomBytes(16).toString('hex');
 
-  const wss = new WebSocketServer({ port, host: '127.0.0.1' });
+  const wss = new WebSocketServer({ port, host: '127.0.0.1', maxPayload: 1 * 1024 * 1024 });
 
   console.log(`[WebUI] WebSocket server starting on ws://localhost:${port}`);
-  console.log(`[WebUI] Auth token: ${authToken}`);
 
   // Subscribe to events once
   const eventUnsubscribers: Array<() => void> = [];
@@ -199,12 +203,13 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
             return;
           }
         } else {
-          // Non-browser client (no origin header): require token when not from loopback
-          // Since we bind to 127.0.0.1, all connections are inherently loopback,
-          // but we still check the token for defense-in-depth.
+          // Non-browser client (no origin header): require token for
+          // defense-in-depth. Even though we bind to 127.0.0.1, a
+          // compromised local process or DNS rebinding attack could
+          // connect without an origin.
           if (!tokenOk) {
-            // Allow without token since we only bind to loopback
-            // (if wsHost changes to 0.0.0.0, this should require token)
+            ws.close(4003, 'Forbidden: auth token required for non-browser clients');
+            return;
           }
         }
       } catch {
@@ -659,7 +664,11 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
       parsed = {};
     }
     parsed.providers = providers;
-    await atomicWrite(opts.globalConfigPath, JSON.stringify(parsed, null, 2), { mode: 0o600 });
+    // Encrypt any plaintext secret-bearing fields before writing to disk.
+    const keyFile = path.join(path.dirname(opts.globalConfigPath), '.key');
+    const vault = new DefaultSecretVault({ keyFile });
+    const encrypted = encryptConfigSecrets(parsed, vault);
+    await atomicWrite(opts.globalConfigPath, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
   }
 
   function sendResult(ws: WebSocket, success: boolean, message: string): void {

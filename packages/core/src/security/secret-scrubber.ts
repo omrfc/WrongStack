@@ -41,13 +41,16 @@ const PATTERNS: Pattern[] = [
   { type: 'redis_uri', regex: /redis:\/\/[^\s"'`]+/g },
   {
     type: 'bearer_token',
-    regex: /(?<![A-Za-z0-9_.~+/-])Bearer\s+[A-Za-z0-9._~+/-]{20,}=*(?![A-Za-z0-9_.~+/-])/g,
+    // Bounded at 512 chars to prevent catastrophic backtracking on adversarial input.
+    // Negative lookahead is a simple single-char check — no backtracking risk.
+    regex: /(?<![A-Za-z0-9_.~+/-])Bearer\s+[A-Za-z0-9._~+/-]{20,512}=*(?![A-Za-z0-9_.~+/-])/g,
   },
   {
     type: 'high_entropy_env',
-    // Value-side word boundary + length gate to avoid matching short random strings
+    // Value bounded at 512 chars; negative lookahead simplified to avoid
+    // nested quantifier backtracking on adversarial input.
     regex:
-      /\b([A-Z_]{4,}(?:KEY|TOKEN|SECRET|PASSWORD|PWD))\s*[:=]\s*['"]?([A-Za-z0-9_/+=-]{20,})['"]?(?!\s*[A-Za-z_]{4,}(?:KEY|TOKEN|SECRET|PASSWORD|PWD))/g,
+      /\b([A-Z_]{4,}(?:KEY|TOKEN|SECRET|PASSWORD|PWD))\s*[:=]\s*['"]?([A-Za-z0-9_/+=-]{20,512})['"]?/g,
   },
 ];
 

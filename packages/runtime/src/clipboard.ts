@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { buildChildEnv } from '@wrongstack/core';
 
 export interface ClipboardImage {
   base64: string;
@@ -93,7 +94,7 @@ async function readPngFile(p: string): Promise<ClipboardImage | null> {
 
 function runCmd(cmd: string, args: string[]): Promise<string | null> {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, { env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     child.stdout.on('data', (c) => {
       out += String(c);
@@ -105,7 +106,7 @@ function runCmd(cmd: string, args: string[]): Promise<string | null> {
 
 function runCmdToFile(cmd: string, args: string[], outPath: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, { env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     const chunks: Buffer[] = [];
     child.stdout.on('data', (c: Buffer) => chunks.push(c));
     child.on('error', () => resolve(false));

@@ -77,13 +77,6 @@ export const bashTool: Tool<BashInput, BashOutput> = {
     // we always want detached on POSIX, only on Windows is it tied to the
     // explicit background flag.
     const detached = isWin ? !!input.background : true;
-    const child = spawn(shell, args, {
-      cwd: ctx.projectRoot,
-      env,
-      stdio: input.background ? 'ignore' : ['ignore', 'pipe', 'pipe'],
-      detached,
-      signal: opts.signal,
-    });
 
     if (input.background) {
       // Background mode: capture stdout/stderr with bounded buffers so a
@@ -131,6 +124,15 @@ export const bashTool: Tool<BashInput, BashOutput> = {
       };
       return;
     }
+
+    // Foreground mode: pipe stdout/stderr for streaming output.
+    const child = spawn(shell, args, {
+      cwd: ctx.projectRoot,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached,
+      signal: opts.signal,
+    });
 
     let buf = '';
     let pending = '';

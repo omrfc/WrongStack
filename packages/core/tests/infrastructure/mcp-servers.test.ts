@@ -106,4 +106,25 @@ describe('built-in MCP server presets (V0-D)', () => {
       expect(cfg.enabled, `${label} must not default to enabled:true`).not.toBe(true);
     }
   });
+
+  it('no preset embeds process.env API keys — prevents plaintext leakage to config files', () => {
+    // Presets must not read process.env at definition time. API keys
+    // should be configured by the user (encrypted via vault) and passed
+    // to MCP child processes through buildChildEnv's `extra` merge.
+    const secretPattern = /(?:KEY|TOKEN|SECRET|PASSWORD|PWD)/i;
+    for (const [label, factory] of presets) {
+      const cfg = factory();
+      if (!cfg.env) continue;
+      for (const [key, value] of Object.entries(cfg.env)) {
+        // Non-empty values that look like they came from process.env are a leak.
+        // Static defaults (like 'ZAI', 'url', paths) are fine.
+        if (value && secretPattern.test(key)) {
+          expect(
+            value,
+            `${label}: env.${key} looks like a secret — presets must not embed process.env values`,
+          ).toBe('');
+        }
+      }
+    }
+  });
 });

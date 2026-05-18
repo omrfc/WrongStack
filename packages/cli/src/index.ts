@@ -475,16 +475,22 @@ export async function main(argv: string[]): Promise<number> {
   // and rebuild the frozen config so other consumers see the new ids.
   const switchProviderAndModel = (providerId: string, modelId: string): string | null => {
     try {
-      const newCfg = config.providers?.[providerId] ?? {
+      console.error('[DEBUG] switchProviderAndModel called with:', { providerId, modelId });
+      const savedCfg = config.providers?.[providerId];
+      const resolvedProviderId = savedCfg?.type ?? providerId;
+      console.error('[DEBUG] switchProviderAndModel: resolvedProviderId:', resolvedProviderId, 'savedCfg.type:', savedCfg?.type);
+      const newCfg = savedCfg ?? {
         type: providerId,
         apiKey: config.apiKey,
         baseUrl: config.baseUrl,
       };
-      const cfgWithType = { ...newCfg, type: providerId };
+      const cfgWithType = { ...newCfg, type: resolvedProviderId };
+      console.error('[DEBUG] switchProviderAndModel: cfgWithType:', cfgWithType);
       const newProvider =
-        config.features.modelsRegistry && providerRegistry.has(providerId)
+        config.features.modelsRegistry && providerRegistry.has(resolvedProviderId)
           ? providerRegistry.create(cfgWithType)
-          : makeProviderFromConfig(providerId, cfgWithType);
+          : makeProviderFromConfig(resolvedProviderId, cfgWithType);
+      console.error('[DEBUG] switchProviderAndModel: new provider id:', newProvider.id, 'maxContext:', newProvider.capabilities.maxContext);
       context.provider = newProvider;
       context.model = modelId;
       config = patchConfig(config, { provider: providerId, model: modelId });

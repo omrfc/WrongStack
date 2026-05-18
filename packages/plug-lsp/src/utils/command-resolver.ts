@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { buildChildEnv } from '@wrongstack/core';
 
 export async function resolveServerCommand(command: string, cwd: string): Promise<string | null> {
   const local = await findLocalBinary(cwd, command);
@@ -28,7 +29,7 @@ export async function commandExistsOnPath(command: string): Promise<boolean> {
   const args =
     process.platform === 'win32' ? [command] : ['-lc', `command -v ${shellQuote(command)}`];
   return new Promise((resolve) => {
-    const child = spawn(probe, args, { stdio: 'ignore', windowsHide: true });
+    const child = spawn(probe, args, { env: buildChildEnv(), stdio: 'ignore', windowsHide: true });
     child.on('error', () => resolve(false));
     child.on('close', (code) => resolve(code === 0));
   });

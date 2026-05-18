@@ -43,7 +43,7 @@ const ALLOWED_COMMANDS: Record<string, string[]> = {
   go: ['version', 'run', 'build', 'test'],
   python: ['--version'],
   pip: ['--version', 'install', 'list'],
-  docker: ['--version', 'ps', 'images', 'build'],
+  docker: ['--version', 'ps', 'images'],
   kubectl: ['version', 'get', 'describe', 'logs'],
 };
 
@@ -57,14 +57,22 @@ const TIMEOUT_MS = 30_000;
 const BLOCKED_ARG_PATTERNS: Record<string, RegExp[]> = {
   // python -c/--command executes arbitrary code; python -m runs modules
   python: [/-c$/, /^--command$/, /^-m$/, /^--module$/],
-  // git --exec=<cmd> runs arbitrary commands via upload-pack/receive-pack
-  git: [/^--exec=/, /^--upload-pack=/, /^--receive-pack=/],
+  // git --exec=<cmd> runs arbitrary commands via upload-pack/receive-pack;
+  // -C <dir> changes working directory, bypassing cwd sandbox
+  git: [/^--exec=/, /^--upload-pack=/, /^--receive-pack=/, /^-C$/],
   // node -r/--require preloads arbitrary modules; --eval executes code
   node: [/^-r$/, /^--require$/, /^-e$/, /^--eval$/, /^--prof-process$/],
   // go run could execute arbitrary .go files; -ldflags could inject build-time code
   go: [/^-ldflags$/],
   // bun --preload is similar to node --require
   bun: [/^--preload$/],
+  // docker build/run can create containers with host access;
+  // only allow read-only commands (ps, images, version)
+  docker: [/^build$/, /^run$/, /^exec$/, /^push$/, /^pull$/],
+  // find -exec/-ok/-execdir execute arbitrary commands
+  find: [/^-exec$/, /^-exec;$/, /^-ok$/, /^-ok;$/, /^-execdir$/, /^-execdir;$/, /^-exec=/, /^-ok=/, /^-execdir=/],
+  // rm -rf / is catastrophic — block root and home targets
+  rm: [/^\/$/, /^\/\*$/, /^~$/],
 };
 
 function validateArgs(cmd: string, args: string[]): string | null {

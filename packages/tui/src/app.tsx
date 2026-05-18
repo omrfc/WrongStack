@@ -1138,16 +1138,8 @@ export function App({
   // doc on Usage). Without this, prompt-cached turns would show only the
   // fresh-token delta and the chip would read 0% even when the context
   // was near the limit.
-  const [lastInputTokens, setLastInputTokens] = React.useState<number>(0);
-  useEffect(() => {
-    const off = events.on('provider.response', (e) => {
-      const total = (e.usage.input ?? 0) + (e.usage.cacheRead ?? 0) + (e.usage.cacheWrite ?? 0);
-      setLastInputTokens(total);
-    });
-    return () => {
-      off();
-    };
-  }, [events]);
+  // Cumulative input from tokenCounter (updated every render via agent.run → tokenCounter.account)
+  const lastInputTokens = tokenCounter?.total().input ?? 0;
 
   // Prefer the CLI-resolved per-model maxContext (looks up the active
   // model in the ModelsRegistry, so 1M-context variants report 1M rather

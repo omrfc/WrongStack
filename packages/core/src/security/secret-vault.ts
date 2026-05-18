@@ -232,7 +232,7 @@ function walkCount<T>(node: T, vault: SecretVault, counter: { n: number }): T {
   if (Array.isArray(node)) {
     return node.map((item) => walkCount(item, vault, counter)) as unknown as T;
   }
-  const out: Record<string, unknown> = {};
+  const out: Record<string, unknown> = Object.create(null);
   for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
     if (typeof v === 'string' && isSecretField(k) && !vault.isEncrypted(v) && v.length > 0) {
       out[k] = vault.encrypt(v);
@@ -248,7 +248,15 @@ function walkCount<T>(node: T, vault: SecretVault, counter: { n: number }): T {
 
 /** Keys that, when written into a plain object, can poison the prototype
  *  chain. We never want user config to carry these. */
-const FORBIDDEN_PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const FORBIDDEN_PROTO_KEYS = new Set([
+  '__proto__',
+  'constructor',
+  'prototype',
+  '__defineGetter__',
+  '__defineSetter__',
+  '__lookupGetter__',
+  '__lookupSetter__',
+]);
 
 function deepMerge<T extends Record<string, unknown>>(a: T, b: Record<string, unknown>): T {
   const out: Record<string, unknown> = { ...a };

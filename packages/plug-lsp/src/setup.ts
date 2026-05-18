@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { buildChildEnv } from '@wrongstack/core';
 import { commandExistsOnPath, resolveServerCommand } from './utils/command-resolver.js';
 
 type PackageManager = 'pnpm' | 'npm' | 'yarn' | 'bun';
@@ -234,6 +235,7 @@ export function runCommand(command: string, args: string[], cwd: string): Promis
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
+      env: buildChildEnv(),
       stdio: 'inherit',
       shell,
       windowsHide: true,

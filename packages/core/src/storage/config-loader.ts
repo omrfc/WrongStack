@@ -73,7 +73,15 @@ function isPrimitiveArray(a: unknown[]): boolean {
   return a.every((v) => v === null || typeof v !== 'object');
 }
 
-const FORBIDDEN_PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const FORBIDDEN_PROTO_KEYS = new Set([
+  '__proto__',
+  'constructor',
+  'prototype',
+  '__defineGetter__',
+  '__defineSetter__',
+  '__lookupGetter__',
+  '__lookupSetter__',
+]);
 
 function deepMerge<T>(base: T, patch: Partial<T>): T {
   if (typeof base !== 'object' || base === null) return (patch as T) ?? base;

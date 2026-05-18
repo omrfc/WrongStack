@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { buildChildEnv } from '@wrongstack/core';
 import type { Tool } from '@wrongstack/core';
 
 type GitSubcommand =
@@ -193,6 +194,7 @@ function runGit(args: string[], cwd: string, signal: AbortSignal): Promise<GitOu
     const child = spawn('git', args, {
       cwd,
       signal,
+      env: buildChildEnv(),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 

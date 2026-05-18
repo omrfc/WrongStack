@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { buildChildEnv } from '../utils/child-env.js';
 import type { TextBlock } from '../types/blocks.js';
 import type { MemoryStore } from '../types/memory.js';
 import type { ModeStore } from '../types/mode.js';
@@ -470,6 +471,7 @@ summarize it, and let the tool result hold only the summary.`);
       try {
         proc = spawn('git', ['status', '--porcelain=v1', '--branch'], {
           cwd: root,
+          env: buildChildEnv(),
           stdio: ['ignore', 'pipe', 'ignore'],
         });
         let buf = '';

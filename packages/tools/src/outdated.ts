@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { buildChildEnv } from '@wrongstack/core';
 import type { Tool } from '@wrongstack/core';
 import { safeResolve } from './_util.js';
 
@@ -94,7 +95,7 @@ function runOutdated(
     let stderr = '';
     const MAX = 100_000;
 
-    const child = spawn(manager, args, { cwd, signal, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(manager, args, { cwd, signal, env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout?.on('data', (c) => {
       if (stdout.length < MAX) stdout += c.toString();
     });

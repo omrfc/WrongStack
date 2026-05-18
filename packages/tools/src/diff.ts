@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { buildChildEnv } from '@wrongstack/core';
 import type { Tool } from '@wrongstack/core';
 import { unifiedDiff } from '@wrongstack/core';
 import { safeResolve } from './_util.js';
@@ -114,7 +115,7 @@ function runGit(
     let stdout = '';
     let stderr = '';
 
-    const child = spawn('git', args, { cwd, signal, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('git', args, { cwd, signal, env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout?.on('data', (c) => {
       stdout += c.toString();
     });

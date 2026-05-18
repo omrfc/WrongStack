@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { buildChildEnv } from '@wrongstack/core';
 
 export interface GitInfo {
   branch: string;
@@ -69,6 +70,7 @@ function runGit(cwd: string, args: string[]): Promise<GitResult> {
     try {
       const child = spawn('git', args, {
         cwd,
+        env: buildChildEnv(),
         // Inherit stderr (silent) — we don't care about git's noise.
         stdio: ['ignore', 'pipe', 'ignore'],
         // Don't let a slow git hang the TUI.

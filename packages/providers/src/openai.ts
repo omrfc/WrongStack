@@ -245,6 +245,7 @@ async function* parseOpenAIStream(
     const u = obj['usage'] as
       | {
           prompt_tokens?: number;
+          input_tokens?: number;
           completion_tokens?: number;
           prompt_tokens_details?: { cached_tokens?: number };
           prompt_cache_hit_tokens?: number;
@@ -252,6 +253,7 @@ async function* parseOpenAIStream(
         }
       | undefined;
     if (u) {
+      console.error('[DEBUG parseOpenAIStream] usage received:', JSON.stringify(u));
       // Normalize to disjoint semantics: `input` is fresh-only (priced at
       // the full rate), `cacheRead` is the cached subset (priced at the
       // cache rate). OpenAI returns `prompt_tokens_details.cached_tokens`;
@@ -260,7 +262,7 @@ async function* parseOpenAIStream(
         u.prompt_cache_hit_tokens !== undefined || u.prompt_cache_miss_tokens !== undefined;
       const cached = u.prompt_tokens_details?.cached_tokens ?? u.prompt_cache_hit_tokens ?? 0;
       const promptTotal =
-        u.prompt_tokens ??
+        u.prompt_tokens ?? u.input_tokens ??
         (hasDeepSeekCacheFields
           ? (u.prompt_cache_hit_tokens ?? 0) + (u.prompt_cache_miss_tokens ?? 0)
           : usage.input + cached);
