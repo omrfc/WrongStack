@@ -34,6 +34,12 @@ export interface SlashCommandContext {
   onClear?: () => void;
   onDiag?: () => string;
   onStats?: () => string | null;
+  /**
+   * Generate a commit message by calling the LLM with the git diff.
+   * Receives the raw diff, returns a commit message string.
+   * When omitted /commit falls back to heuristics-only messages.
+   */
+  generateCommitMessage?: (diff: string) => Promise<string>;
   onSpawn?: (
     description: string,
     opts?: { provider?: string; model?: string; tools?: string[]; name?: string },
@@ -87,7 +93,11 @@ export type { ProjectFacts } from './helpers.js';
 export { detectProjectFacts, renderAgentsTemplate } from './helpers.js';
 
 import { buildClearCommand } from './clear.js';
-import { buildCommitCommand, buildGitcheckCommand, buildPushCommand } from './commit.js';
+import {
+  buildCommitCommand,
+  buildGitcheckCommand,
+  buildPushCommand,
+} from './commit.js';
 import { buildCompactCommand } from './compact.js';
 import { buildContextCommand } from './context.js';
 import { buildDiagCommand, buildStatsCommand } from './diag-stats.js';

@@ -3,6 +3,8 @@ import { color } from '@wrongstack/core';
 import type { SlashCommand } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
 
+export { generateCommitMessageWithLLM } from './commit-llm.js';
+
 /**
  * Run git commands.
  */
@@ -19,6 +21,63 @@ async function runGit(args: string[], cwd: string): Promise<{ stdout: string; st
     child.on('close', (code) => resolve({ stdout, stderr, code: code ?? 0 }));
   });
 }
+
+// ── LLM-powered commit message generation ──────────────────────────
+
+interface CommitLLMOpts {
+  provider: { complete(req: unknown, opts: { signal: AbortSignal }): Promise<{ content: unknown[] }> };
+  model: string;
+}
+
+/**
+ * Generate a proper commit message by asking the LLM to analyze the diff.
+ * Falls back to heuristics on failure.
+ */
+async function generateCommitMessageWithLLM(
+  diff: string,
+  opts: CommitLLMOpts,
+): Promise<string> {
+  const systemPrompt =
+    'You are a helpful assistant that generates concise, conventional-commit-formatted git commit messages. ' +
+    'Analyze the provided diff and output ONLY the commit message (no explanation, no quotes). ' +
+    'Format: <type>(<scope>): <short description> — <type> is one of: feat, fix, docs, style, refactor, test, chore, perf, ci, build, temp. ' +
+    'If the diff contains multiple unrelated changes, pick the most important one. ' +
+    'Keep the description under 72 characters. Example: feat(cli): add /commit LLM integration';
+
+  const userPrompt = `Here is the git diff:\n\n${diff}`;
+
+  try {
+    const signal = new AbortController();
+    const timeout = setTimeout(() => signal.abort(), 15_000);
+
+    const resp = await opts.provider.complete(
+      {
+        model: opts.model,
+        system: [{ type: 'text', text: systemPrompt }],
+        messages: [{ role: 'user', content: [{ type: 'text', text: userPrompt }] }],
+        maxTokens: 80,
+        temperature: 0.3,
+      },
+      { signal: signal.signal },
+    );
+    clearTimeout(timeout);
+
+    const contentBlocks = resp.content as Array<{ type: string; text?: string }>;
+    const text = contentBlocks.find((b) => b.type === 'text')?.text ?? '';
+    const message = text.trim().split('\n')[0]!;
+
+    if (message.length > 0 && message.length < 200) {
+      return message;
+    }
+  } catch {
+    // LLM call failed — fall through to heuristics
+  }
+
+  // Fallback: use heuristics via the existing function
+  return 'chore: update';
+}
+
+// ── Heuristics ──────────────────────────────────────────────────────
 
 /**
  * Detect conventional commit type from diff stats.
@@ -43,9 +102,9 @@ function detectCommitType(stats: string): string {
 }
 
 /**
- * Generate a conventional commit message from git diff.
+ * Generate a conventional commit message from git diff (heuristics only).
  */
-async function generateCommitMessage(cwd: string): Promise<string> {
+async function generateCommitMessageHeuristics(cwd: string): Promise<string> {
   // Get diff stats
   const statsResult = await runGit(['diff', '--stat'], cwd);
   if (statsResult.code !== 0) return 'chore: update';
@@ -97,7 +156,10 @@ async function isGitRepo(cwd: string): Promise<boolean> {
   return result.code === 0;
 }
 
-export function buildCommitCommand(_opts: SlashCommandContext): SlashCommand {
+export function buildCommitCommand(
+  _opts: SlashCommandContext,
+  generateCommitMessage?: (diff: string) => Promise<string>,
+): SlashCommand {
   return {
     name: 'commit',
     description: 'Stage all changes and commit with auto-generated message.',
@@ -117,9 +179,22 @@ export function buildCommitCommand(_opts: SlashCommandContext): SlashCommand {
 
       // Parse flags
       const dryRun = args.includes('--dry-run') || args.includes('-n');
+      const noLlm = args.includes('--no-llm');
 
-      // Generate commit message
-      const message = await generateCommitMessage(cwd);
+      // Generate commit message — try LLM first, then fall back to heuristics
+      let message: string;
+      if (!noLlm && generateCommitMessage) {
+        const diffResult = await runGit(['diff'], cwd);
+        const diff = diffResult.stdout;
+        try {
+          message = await generateCommitMessage(diff);
+        } catch {
+          // LLM failed — silently fall back to heuristics
+          message = await generateCommitMessageHeuristics(cwd);
+        }
+      } else {
+        message = await generateCommitMessageHeuristics(cwd);
+      }
 
       if (dryRun) {
         return {

@@ -2,6 +2,9 @@ import { writeFileSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
+import { spawn } from 'node:child_process';
+import type { CommitLLMProvider } from './slash-commands/commit-llm.js';
+import { generateCommitMessageWithLLM } from './slash-commands/commit-llm.js';
 import {
   Agent,
   AutoCompactionMiddleware,
@@ -1114,6 +1117,12 @@ export async function main(argv: string[]): Promise<number> {
       ].join('\n');
     },
     onStats: () => stats.format(),
+    generateCommitMessage: async (diff: string) => {
+      return generateCommitMessageWithLLM(diff, {
+        provider: context.provider as CommitLLMProvider,
+        model: context.model,
+      });
+    },
   });
   for (const cmd of slashCmds) slashRegistry.register(cmd);
 
