@@ -50,7 +50,7 @@ export class DefaultSessionStore implements SessionStore {
       );
     }
     try {
-      return new FileSessionWriter(id, handle, startedAt, meta, { dir: this.dir, filePath: file });
+      return new FileSessionWriter(id, handle, startedAt, meta, this.events, { dir: this.dir, filePath: file });
     } catch (err) {
       await handle.close().catch(() => {});
       throw err;
@@ -78,6 +78,7 @@ export class DefaultSessionStore implements SessionStore {
         model: data.metadata.model,
         provider: data.metadata.provider,
       },
+      this.events,
       { resumed: true, dir: this.dir, filePath: file },
     );
     return { writer, data };
@@ -302,11 +303,26 @@ class FileSessionWriter implements SessionWriter {
   private appendFailCount = 0;
   private lastAppendWarnAt = 0;
 
+  // Rewind support: track pending file changes and prompt index
+  private promptIndex = 0;
+  private pendingFileSnapshots: Array<{
+    path: string;
+    action: 'created' | 'modified' | 'deleted';
+    before: string | null;
+    after: string | null;
+  }> = [];
+
+  // Register a pending file change. Call recordFileChange() from tools.
+  recordFileChange(input: { path: string; action: 'created' | 'modified' | 'deleted'; before: string | null; after: string | null }): void {
+    this.pendingFileSnapshots.push(input);
+  }
+
   constructor(
     public readonly id: string,
     private readonly handle: fsp.FileHandle,
     private readonly startedAt: string,
     private readonly meta: Omit<SessionMetadata, 'startedAt'>,
+    private readonly events?: EventBus,
     opts: { resumed?: boolean; dir?: string; filePath?: string } = {},
   ) {
     this.resumed = opts.resumed ?? false;
@@ -409,6 +425,109 @@ class FileSessionWriter implements SessionWriter {
     } catch {
       // ignore
     }
+  }
+
+  async writeCheckpoint(promptIndex: number, promptPreview: string): Promise<void> {
+    // Flush pending file snapshots before checkpoint
+    const fileCount = this.pendingFileSnapshots.length;
+    if (fileCount > 0) {
+      await this.writeFileSnapshot(promptIndex, [...this.pendingFileSnapshots]);
+      this.pendingFileSnapshots = [];
+    }
+    this.promptIndex = promptIndex + 1;
+    await this.append({
+      type: 'checkpoint',
+      ts: new Date().toISOString(),
+      promptIndex,
+      promptPreview,
+    });
+    // Notify UIs so they can update checkpoint timelines
+    this.events?.emit('checkpoint.written', {
+      promptIndex,
+      promptPreview,
+      ts: new Date().toISOString(),
+      fileCount,
+    });
+  }
+
+  async writeFileSnapshot(
+    promptIndex: number,
+    files: import('../types/session.js').FileSnapshot[],
+  ): Promise<void> {
+    await this.append({
+      type: 'file_snapshot',
+      ts: new Date().toISOString(),
+      promptIndex,
+      files,
+    });
+  }
+
+  async truncateToCheckpoint(targetPromptIndex: number): Promise<number> {
+    if (!this.filePath) return 0;
+    const raw = await fsp.readFile(this.filePath, 'utf8');
+    const lines = raw.split('\n');
+    const kept: string[] = [];
+    let removedCount = 0;
+
+    // Find the line index of the target checkpoint and all later checkpoint events.
+    // Events at lines >= targetCheckpointLine are after the target and must be removed
+    // (except checkpoint/file_snapshot themselves which we track via promptIndex).
+    let targetCheckpointLine = -1;
+    let afterTarget = false;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]!;
+      if (!line.trim()) continue;
+
+      let event: { type?: string; promptIndex?: number };
+      try {
+        event = JSON.parse(line);
+      } catch {
+        kept.push(line);
+        continue;
+      }
+
+      if (event.type === 'checkpoint') {
+        if ((event as { promptIndex: number }).promptIndex === targetPromptIndex) {
+          targetCheckpointLine = kept.length; // where this checkpoint will be stored
+          afterTarget = true;
+        } else if ((event as { promptIndex: number }).promptIndex > targetPromptIndex) {
+          afterTarget = true;
+        }
+      }
+
+      if (event.promptIndex !== undefined && event.promptIndex > targetPromptIndex) {
+        removedCount++;
+      } else if (event.promptIndex === undefined) {
+        // Events without promptIndex (user_input, llm_response, session_start, etc.)
+        // are kept ONLY if we haven't passed the target checkpoint yet
+        if (!afterTarget || targetCheckpointLine === -1) {
+          kept.push(line);
+        } else {
+          removedCount++;
+        }
+      } else {
+        kept.push(line);
+      }
+    }
+
+    const truncated = kept.join('\n');
+    await fsp.writeFile(this.filePath, truncated + '\n', 'utf8');
+
+    await this.append({
+      type: 'rewound',
+      ts: new Date().toISOString(),
+      toPromptIndex: targetPromptIndex,
+      revertedFiles: [],
+    });
+
+    this.events?.emit('session.rewound', {
+      toPromptIndex: targetPromptIndex,
+      revertedFiles: [],
+      removedEvents: removedCount,
+    });
+
+    return removedCount;
   }
 }
 

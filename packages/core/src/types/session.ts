@@ -49,7 +49,17 @@ export type SessionEvent =
       durationMs: number;
       outputSize: number;
     }
-  | { type: 'message_truncated'; ts: string; before: number; after: number };
+  | { type: 'message_truncated'; ts: string; before: number; after: number }
+  | { type: 'checkpoint'; ts: string; promptIndex: number; promptPreview: string }
+  | { type: 'file_snapshot'; ts: string; promptIndex: number; files: FileSnapshot[] }
+  | { type: 'rewound'; ts: string; toPromptIndex: number; revertedFiles: string[] };
+
+export type FileSnapshot = {
+  path: string;
+  action: 'created' | 'modified' | 'deleted';
+  before: string | null;
+  after: string | null;
+};
 
 export interface SessionSummary {
   id: string;
@@ -98,4 +108,26 @@ export interface SessionWriter {
   readonly transcriptPath?: string;
   append(event: SessionEvent): Promise<void>;
   close(): Promise<void>;
+  /**
+   * Register a file change for later snapshotting.
+   * Called by write/edit/delete tools to track pending changes.
+   */
+  recordFileChange(input: { path: string; action: 'created' | 'modified' | 'deleted'; before: string | null; after: string | null }): void;
+  /**
+   * Write a checkpoint marker after a user input is processed.
+   * Also flushes any pending file snapshots.
+   */
+  writeCheckpoint(promptIndex: number, promptPreview: string): Promise<void>;
+  /**
+   * Write a file snapshot after file changes are detected.
+   * Called by the file watcher or tool interceptor.
+   */
+  writeFileSnapshot(promptIndex: number, files: import('./session.js').FileSnapshot[]): Promise<void>;
+  /**
+   * Truncate conversation history to a given checkpoint promptIndex.
+   * Called after rewind — removes user_input/llm_response/tool_result events
+   * that come after the target checkpoint, then writes a rewound event.
+   * Returns the number of events removed.
+   */
+  truncateToCheckpoint(promptIndex: number): Promise<number>;
 }

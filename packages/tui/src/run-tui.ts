@@ -118,6 +118,12 @@ export interface RunTuiOptions {
    */
   initialAsk?: string;
   /**
+   * Directory containing session JSONL files. Required for rewind
+   * functionality. When provided the TUI can list checkpoints and
+   * trigger a rewind via `/rewind` or Ctrl+R.
+   */
+  sessionsDir?: string;
+  /**
    * SDD session context getter. When an SDD session is active, returns
    * the AI prompt context to inject into user messages.
    */
@@ -282,6 +288,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           initialAsk: opts.initialAsk,
           getSDDContext: opts.getSDDContext,
           onSDDOutput: opts.onSDDOutput,
+          sessionsDir: opts.sessionsDir,
         }),
         { exitOnCtrlC: false },
       );

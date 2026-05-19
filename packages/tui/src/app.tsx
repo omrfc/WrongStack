@@ -4,6 +4,7 @@ import type {
   Agent,
   AttachmentStore,
   ContentBlock,
+  DefaultSessionRewinder,
   Director,
   EventBus,
   FleetEvent,
@@ -11,12 +12,13 @@ import type {
   SlashCommandRegistry,
   TokenCounter,
 } from '@wrongstack/core';
-import { InputBuilder, formatTodosList } from '@wrongstack/core';
+import { DefaultSessionRewinder as RewindEngine, InputBuilder, formatTodosList } from '@wrongstack/core';
 import { type VisionAdapters, routeImagesForModel } from '@wrongstack/runtime/vision';
 import { Box, useApp } from 'ink';
 import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { readClipboardImage } from './clipboard.js';
 import { ConfirmPrompt } from './components/confirm-prompt.js';
+import { CheckpointTimeline } from './components/checkpoint-timeline.js';
 import { FilePicker } from './components/file-picker.js';
 import { FleetPanel } from './components/fleet-panel.js';
 import { History, type HistoryEntry } from './components/history.js';
@@ -185,6 +187,8 @@ export interface AppProps {
    * launch the TUI and pre-populate one turn from a shell alias / script.
    */
   initialAsk?: string;
+  /** Directory for session JSONL files. Passed to App for /rewind. */
+  sessionsDir?: string;
 
   // --- Fleet ---
   /** Live director for fleet panel rendering. Null when director mode is off. */
@@ -290,6 +294,20 @@ type State = {
    * surfaces so chat history remains readable during multi-agent runs.
    */
   streamFleet: boolean;
+  /** Session checkpoints recorded by SessionWriter.writeCheckpoint() events. */
+  checkpoints: Array<{
+    promptIndex: number;
+    promptPreview: string;
+    ts: string;
+    fileCount: number;
+  }>;
+  /** Checkpoint timeline overlay — null when closed. */
+  rewindOverlay: { checkpoints: Array<{
+    promptIndex: number;
+    promptPreview: string;
+    ts: string;
+    fileCount: number;
+  }>; selected: number } | null;
 };
 
 type Action =
@@ -388,7 +406,12 @@ type Action =
       limit: number;
     }
   | { type: 'fleetCost'; cost: number }
-  | { type: 'setStreamFleet'; enabled: boolean };
+  | { type: 'setStreamFleet'; enabled: boolean }
+  | { type: 'checkpointReceived'; cp: State['checkpoints'][0] }
+  | { type: 'rewindOverlayOpen' }
+  | { type: 'rewindOverlayClose' }
+  | { type: 'rewindOverlayMove'; delta: number }
+  | { type: 'sessionRewound'; toPromptIndex: number };
 
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -836,6 +859,34 @@ export function reducer(state: State, action: Action): State {
     case 'setStreamFleet': {
       return { ...state, streamFleet: action.enabled };
     }
+    case 'checkpointReceived': {
+      const existing = state.checkpoints.find((c) => c.promptIndex === action.cp.promptIndex);
+      if (existing) return state;
+      return { ...state, checkpoints: [...state.checkpoints, action.cp] };
+    }
+    case 'rewindOverlayOpen': {
+      return {
+        ...state,
+        rewindOverlay: { checkpoints: state.checkpoints, selected: state.checkpoints.length - 1 },
+      };
+    }
+    case 'rewindOverlayClose': {
+      return { ...state, rewindOverlay: null };
+    }
+    case 'rewindOverlayMove': {
+      if (!state.rewindOverlay) return state;
+      const len = state.rewindOverlay.checkpoints.length;
+      if (len === 0) return { ...state, rewindOverlay: null };
+      const selected = Math.max(0, Math.min(len - 1, state.rewindOverlay.selected + action.delta));
+      return { ...state, rewindOverlay: { ...state.rewindOverlay, selected } };
+    }
+    case 'sessionRewound': {
+      return {
+        ...state,
+        checkpoints: state.checkpoints.filter((c) => c.promptIndex <= action.toPromptIndex),
+        rewindOverlay: null,
+      };
+    }
   }
 }
 
@@ -1038,6 +1089,7 @@ export function App({
   fleetStreamController,
   initialGoal,
   initialAsk,
+  sessionsDir,
 }: AppProps): React.ReactElement {
   const { exit } = useApp();
   // Reactive mirrors of agent.ctx.{model,provider.id} so the status bar
@@ -1093,6 +1145,8 @@ export function App({
     fleet: {},
     fleetCost: 0,
     streamFleet: true,
+    checkpoints: [],
+    rewindOverlay: null,
   });
 
   const builderRef = useRef<InputBuilder | null>(null);
@@ -1744,6 +1798,44 @@ export function App({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slashRegistry, director]);
 
+  // `/rewind` — open the checkpoint timeline overlay. If a checkpoint
+  // index is provided as argument, rewinds directly to it.
+  useEffect(() => {
+    const cmd = {
+      name: 'rewind',
+      description: 'Open checkpoint timeline to rewind session: /rewind [checkpoint-index]',
+      help: [
+        'Usage: /rewind [checkpoint-index]',
+        '',
+        'Opens a checkpoint timeline. Use ↑/↓ to navigate, Enter to rewind,',
+        'Esc to cancel. The session is reverted to the selected checkpoint',
+        'and conversation history is truncated — LLM continues fresh.',
+        '',
+        'If a checkpoint index is provided the timeline is skipped and',
+        'rewind happens immediately.',
+      ].join('\n'),
+      async run(args: string) {
+        const idx = parseInt(args.trim(), 10);
+        if (!isNaN(idx) && idx >= 0) {
+          handleRewindTo(idx);
+          return {};
+        }
+        // No arg — open the timeline overlay
+        const s = stateRef.current;
+        if (s.checkpoints.length === 0) {
+          return { message: 'No checkpoints in this session yet.' };
+        }
+        dispatch({ type: 'rewindOverlayOpen' });
+        return {};
+      },
+    };
+    slashRegistry.register(cmd);
+    return () => {
+      slashRegistry.unregister('rewind');
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slashRegistry, sessionsDir]);
+
   // `/goal <description>` — lock in a goal the agent must complete.
   // Identical mechanism to /steer (slash command returns runText that
   // the submit handler feeds through the normal agent.run pipeline),
@@ -2103,6 +2195,32 @@ export function App({
       offTool();
     };
   }, [events, director]);
+
+  // Checkpoint and session rewind event listeners — no director required.
+  useEffect(() => {
+    const offCheckpoint = events.on('checkpoint.written', (e) => {
+      dispatch({
+        type: 'checkpointReceived',
+        cp: {
+          promptIndex: e.promptIndex,
+          promptPreview: e.promptPreview,
+          ts: e.ts,
+          fileCount: e.fileCount,
+        },
+      });
+    });
+    const offRewound = events.on('session.rewound', (_e) => {
+      dispatch({ type: 'sessionRewound', toPromptIndex: 0 });
+      dispatch({ type: 'clearHistory' });
+      if (props.onClearHistory) {
+        props.onClearHistory(dispatch);
+      }
+    });
+    return () => {
+      offCheckpoint();
+      offRewound();
+    };
+  }, [events]);
 
   // Install a dispatch-backed setter into the shared controller so the
   // `/fleet stream on|off` slash command can flip our reducer flag.
@@ -3137,6 +3255,15 @@ export function App({
           selected={state.modelPicker.selected}
           pickedProviderId={state.modelPicker.pickedProviderId}
           hint={state.modelPicker.hint}
+        />
+      ) : null}
+      {state.rewindOverlay ? (
+        <CheckpointTimeline
+          checkpoints={state.rewindOverlay.checkpoints}
+          selected={state.rewindOverlay.selected}
+          onSelect={(i) => dispatch({ type: 'rewindOverlayMove', delta: i - state.rewindOverlay!.selected })}
+          onConfirm={(i) => handleRewindTo(state.rewindOverlay!.checkpoints[i]!.promptIndex)}
+          onClose={() => dispatch({ type: 'rewindOverlayClose' })}
         />
       ) : null}
       {state.confirmQueue.length > 0 && (() => {

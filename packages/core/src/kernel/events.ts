@@ -254,6 +254,14 @@ export interface EventMap {
   'mcp.server.reconnected': { name: string; toolCount: number };
   'mcp.server.disconnected': { name: string; reason: string };
   'token.cost_estimate_unavailable': { model: string };
+  /** Fired by SessionWriter.writeCheckpoint() after the checkpoint event is appended to JSONL. */
+  'checkpoint.written': { promptIndex: number; promptPreview: string; ts: string; fileCount: number };
+  /**
+   * Fired after a session rewind completes: files are reverted and the session
+   * history is truncated. The TUI listens to this to update its checkpoint
+   * list and clear history entries that are now invalid.
+   */
+  'session.rewound': { toPromptIndex: number; revertedFiles: string[]; removedEvents: number };
   error: { err: Error; phase: string };
 }
 
