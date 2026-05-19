@@ -4,7 +4,6 @@ import type {
   Agent,
   AttachmentStore,
   ContentBlock,
-  DefaultSessionRewinder,
   Director,
   EventBus,
   FleetEvent,
@@ -12,6 +11,7 @@ import type {
   SlashCommandRegistry,
   TokenCounter,
 } from '@wrongstack/core';
+import { DefaultSessionRewinder } from '@wrongstack/core';
 import { InputBuilder, formatTodosList } from '@wrongstack/core';
 import { type VisionAdapters, routeImagesForModel } from '@wrongstack/runtime/vision';
 import { Box, useApp } from 'ink';
@@ -1197,6 +1197,21 @@ export function App({
   const draftRef = useRef({ buffer: state.buffer, cursor: state.cursor });
   draftRef.current = { buffer: state.buffer, cursor: state.cursor };
 
+  // handleRewindTo must be declared before the /rewind useEffect (line 1803)
+  // so the closure can capture it. It is intentionally NOT in useCallback
+  // — each call needs a fresh rewinder referencing the current sessionsDir.
+  const handleRewindTo = React.useCallback(async (checkpointIndex: number) => {
+    const sessionId = agent.ctx.session.id;
+    if (!sessionId) return;
+    const rewinder = new DefaultSessionRewinder(sessionsDir ?? '');
+    // Revert file system changes first (read-only, safe to do eagerly).
+    await rewinder.rewindToCheckpoint(sessionId, checkpointIndex);
+    // Then truncate the conversation history — this fires session.rewound
+    // on the EventBus, which the useEffect at line 2212 listens to and
+    // dispatches sessionRewound + clearHistory.
+    await agent.ctx.session.truncateToCheckpoint(checkpointIndex);
+  }, [agent.ctx.session, sessionsDir]);
+
   const setDraft = (buffer: string, cursor: number): void => {
     draftRef.current = { buffer, cursor };
     dispatch({ type: 'setBuffer', buffer, cursor });
@@ -1800,6 +1815,7 @@ export function App({
 
   // `/rewind` — open the checkpoint timeline overlay. If a checkpoint
   // index is provided as argument, rewinds directly to it.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- handleRewindTo is stable via useCallback
   useEffect(() => {
     const cmd = {
       name: 'rewind',
@@ -1815,8 +1831,8 @@ export function App({
         'rewind happens immediately.',
       ].join('\n'),
       async run(args: string) {
-        const idx = parseInt(args.trim(), 10);
-        if (!isNaN(idx) && idx >= 0) {
+        const idx = Number.parseInt(args.trim(), 10);
+        if (!Number.isNaN(idx) && idx >= 0) {
           handleRewindTo(idx);
           return {};
         }
@@ -1833,8 +1849,7 @@ export function App({
     return () => {
       slashRegistry.unregister('rewind');
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slashRegistry, sessionsDir]);
+  }, [slashRegistry, handleRewindTo]);
 
   // `/goal <description>` — lock in a goal the agent must complete.
   // Identical mechanism to /steer (slash command returns runText that
@@ -2197,6 +2212,7 @@ export function App({
   }, [events, director]);
 
   // Checkpoint and session rewind event listeners — no director required.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- onClearHistory is stable
   useEffect(() => {
     const offCheckpoint = events.on('checkpoint.written', (e) => {
       dispatch({
@@ -2220,7 +2236,7 @@ export function App({
       offCheckpoint();
       offRewound();
     };
-  }, [events]);
+  }, [events, onClearHistory]);
 
   // Install a dispatch-backed setter into the shared controller so the
   // `/fleet stream on|off` slash command can flip our reducer flag.
