@@ -565,7 +565,7 @@ message. TUI users can also press `Alt+V`.
 
 ## Slash commands (in-REPL)
 
-`/init`, `/diag`, `/stats`, `/help`, `/clear`, `/context`, `/compact`, `/usage`, `/tools`, `/skill`, `/use`, `/model`, `/save`, `/resume`, `/exit`, `/spawn`, `/fleet`, `/agents`, `/steer`, `/goal`, `/director`, `/queue`, `/altscreen`, `/plan`
+`/init`, `/diag`, `/stats`, `/help`, `/clear`, `/context`, `/compact`, `/usage`, `/tools`, `/skill`, `/use`, `/model`, `/save`, `/resume`, `/exit`, `/spawn`, `/fleet`, `/agents`, `/steer`, `/goal`, `/director`, `/queue`, `/altscreen`, `/plan`, `/autonomy`, `/yolo`, `/mode`, `/image`, `/plugin`, `/telegram`
 
 | Command | Effect |
 |---|---|
@@ -578,9 +578,16 @@ message. TUI users can also press `Alt+V`.
 | `/goal <description>` | Lock in a goal the agent must drive to a verifiable finish — full autonomy preamble, anti-hedge constraints, three-angle persistence. Only Esc / `/steer` / Ctrl+C / `/fleet kill` can stop it. |
 | `/queue` | Show, clear, or delete entries from the in-flight message queue. |
 | `/altscreen on\|off` | Toggle the terminal alt-screen buffer. Default OFF (native scroll); `on` for full-screen mode. |
-| `/plan` | View / append to the per-session plan JSON file. |
-| `/model` | Two-step provider → model picker. |
-| `/use`, `/context`, `/compact`, `/usage`, `/tools`, `/skill` | Switch modes, inspect context, compact, show usage, list tools/skills. |
+| `/plan` | View / append to the per-session plan JSON file. Six actions: `show|add|start|done|remove|clear`. Items have `open` / `in_progress` / `done` status. Mirrored to disk; surfaces `📋 ⌛N ☐N ✓N` chip in TUI status bar. |
+| `/autonomy on\|off\|suggest\|toggle` | Self-driving agent mode. `on` picks the next logical step and continues after each turn; `suggest` shows next-step suggestions without executing. TUI shows `∞ AUTO` or `∞ SUGGEST` chip. |
+| `/yolo on\|off\|toggle` | Flip YOLO mode (auto-approve all tool calls) on or off without restarting. `/yolo` alone shows current status. TUI shows `⚠ YOLO` chip. |
+| `/mode` | Switch agent persona mode. Eight built-in modes: `default`, `code-reviewer`, `code-auditor`, `architect`, `debugger`, `tester`, `devops`, `refactorer`. Modes inject role-specific system prompts; stored in `~/.wrongstack/modes/` and can be extended with custom prompts. |
+| `/model` | Two-step provider → model picker. Switch at runtime without restart. |
+| `/image` or `/paste-image` | Attach the current clipboard PNG to the next message. TUI users can also press `Alt+V`. |
+| `/context mode <policy>` | Switch context-window mode: `balanced`, `frugal`, `deep`, `archival`. Use `/context mode` to list policies. `repair` to fix damaged tool-call adjacency. |
+| `/plugin install\|disable\|enable\|remove\|official <name>` | Manage plugins from REPL/TUI. `install` adds bundled package to config; does not run npm. Restart to load/unload plugin code. |
+| `/telegram send\|read\|chat\|attach` | Telegram plugin commands. `send <chatId> <message>`, `read <chatId> [limit]`, `chat` list recent chats, `attach <file>` send file. |
+| `/use`, `/compact`, `/usage`, `/tools`, `/skill`, `/save`, `/resume`, `/help`, `/clear`, `/stats`, `/diag`, `/exit` | Switch modes, compact context, show usage, list tools/skills, save session, resume session, help, clear screen, stats, diagnostics, exit REPL. |
 
 Context-window modes are separate from persona modes. Use `/context mode`
 to list policies and `/context mode frugal|balanced|deep|archival` to switch
