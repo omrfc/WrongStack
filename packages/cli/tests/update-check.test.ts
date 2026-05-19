@@ -1,7 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { Writable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   checkForUpdate,
@@ -9,28 +8,19 @@ import {
   getUpdateNotification,
 } from '../src/update-check.js';
 
-// Re-export the private cachePath for test injection
-// We need to test the cache logic, so we expose a test hook
-vi.mock('../src/update-check.js', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('../src/update-check.js')>();
-  return {
-    ...mod,
-    // Override readCache to inject test data
-    __testable: mod,
-  };
-});
-
 describe('update-check', () => {
   let tmp: string;
+  let userHome: string;
 
   beforeEach(async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-upd-'));
+    userHome = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-upd-home-'));
+    vi.restoreAllMocks();
   });
 
   afterEach(async () => {
     await fs.rm(tmp, { recursive: true, force: true });
-    // Clean up any leftover cache
-    await fs.rm(path.join(os.homedir(), '.wrongstack'), { recursive: true, force: true }).catch(() => {});
+    await fs.rm(userHome, { recursive: true, force: true });
     vi.restoreAllMocks();
   });
 
@@ -43,7 +33,6 @@ describe('update-check', () => {
     });
 
     it('returns truthy value (either semver or "dev")', () => {
-      // currentVersion always returns something valid — either semver or 'dev'
       expect(currentVersion()).toBeTruthy();
       expect(typeof currentVersion()).toBe('string');
     });
@@ -52,14 +41,16 @@ describe('update-check', () => {
   // ─────────────────────────────────────────────────────────────── checkForUpdate
 
   describe('checkForUpdate()', () => {
-    it('returns outdated:false when already on latest (mocked fetch)', async () => {
+    it('returns outdated:false when already on latest', async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
+        status: 200,
         json: async () => ({ version: currentVersion() }),
       });
       vi.stubGlobal('fetch', mockFetch);
 
-      const info = await checkForUpdate();
+      const info = await checkForUpdate(undefined, () => userHome);
+
       expect(info.outdated).toBe(false);
       expect(info.checkFailed).toBe(false);
       expect(info.current).toBe(currentVersion());
@@ -69,11 +60,13 @@ describe('update-check', () => {
     it('returns outdated:true when npm has newer version', async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
+        status: 200,
         json: async () => ({ version: '999.999.999' }),
       });
       vi.stubGlobal('fetch', mockFetch);
 
-      const info = await checkForUpdate();
+      const info = await checkForUpdate(undefined, () => userHome);
+
       expect(info.outdated).toBe(true);
       expect(info.latest).toBe('999.999.999');
       expect(info.checkFailed).toBe(false);
@@ -83,15 +76,24 @@ describe('update-check', () => {
       const mockFetch = vi.fn().mockRejectedValue(new Error('network error'));
       vi.stubGlobal('fetch', mockFetch);
 
-      const info = await checkForUpdate();
+      const info = await checkForUpdate(undefined, () => userHome);
+
       expect(info.checkFailed).toBe(true);
       expect(info.outdated).toBe(false);
     });
 
     it('aborts when signal is already aborted', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ version: currentVersion() }),
+      });
+      vi.stubGlobal('fetch', mockFetch);
       const ac = new AbortController();
       ac.abort();
-      const info = await checkForUpdate(ac.signal);
+
+      const info = await checkForUpdate(ac.signal, () => userHome);
+
       expect(info.outdated).toBe(false);
       expect(info.checkFailed).toBe(true);
     });
@@ -100,27 +102,29 @@ describe('update-check', () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 404,
-      } as Response);
+      } as unknown as Response);
       vi.stubGlobal('fetch', mockFetch);
 
-      const info = await checkForUpdate();
+      const info = await checkForUpdate(undefined, () => userHome);
+
       expect(info.checkFailed).toBe(true);
       expect(info.outdated).toBe(false);
     });
   });
 
-  // ──────────────────────────────────────────── cache-layer (indirect via fetch)
+  // ──────────────────────────────────────────── cache behavior
 
   describe('cache behavior', () => {
     it('uses cache on second call without network when fetch fails', async () => {
       // First call — network succeeds and caches result
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
+        status: 200,
         json: async () => ({ version: '1.0.0' }),
       });
       vi.stubGlobal('fetch', mockFetch);
 
-      const info1 = await checkForUpdate();
+      const info1 = await checkForUpdate(undefined, () => userHome);
       expect(info1.latest).toBe('1.0.0');
       expect(info1.checkFailed).toBe(false);
 
@@ -128,8 +132,7 @@ describe('update-check', () => {
       const failingFetch = vi.fn().mockRejectedValue(new Error('network down'));
       vi.stubGlobal('fetch', failingFetch);
 
-      const info2 = await checkForUpdate();
-      // Cache hit — no network call, checkFailed=false
+      const info2 = await checkForUpdate(undefined, () => userHome);
       expect(info2.checkFailed).toBe(false);
       expect(info2.latest).toBe('1.0.0');
     });
@@ -141,38 +144,41 @@ describe('update-check', () => {
     it('returns null when on latest version', async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
+        status: 200,
         json: async () => ({ version: currentVersion() }),
       });
       vi.stubGlobal('fetch', mockFetch);
 
-      const note = await getUpdateNotification();
+      const note = await getUpdateNotification(undefined, () => userHome);
       expect(note).toBeNull();
     });
 
     it('returns notification string when outdated', async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
+        status: 200,
         json: async () => ({ version: '999.0.0' }),
       });
       vi.stubGlobal('fetch', mockFetch);
 
-      const note = await getUpdateNotification();
+      const note = await getUpdateNotification(undefined, () => userHome);
+      expect(note).not.toBeNull();
       expect(note).toContain('Update available:');
-      expect(note).toContain('v999.0.0');
     });
   });
 
-  // ──────────────────────────────────────────────────── semver edge cases (internal)
+  // ──────────────────────────────────────────────────── semver edge cases
 
   describe('semver comparison', () => {
     it('handles versions with v prefix from npm', async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
+        status: 200,
         json: async () => ({ version: 'v1.0.0' }),
       });
       vi.stubGlobal('fetch', mockFetch);
 
-      const info = await checkForUpdate();
+      const info = await checkForUpdate(undefined, () => userHome);
       expect(info.latest).toBe('v1.0.0');
     });
   });

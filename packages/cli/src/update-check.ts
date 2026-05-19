@@ -10,9 +10,12 @@ export interface UpdateInfo {
   checkFailed: boolean;
 }
 
-/** Cache dosyasının path'i */
-function cachePath(): string {
-  return path.join(os.homedir(), '.wrongstack', 'update-cache.json');
+type HomeDirFn = () => string;
+const defaultHomeDir: HomeDirFn = () => os.homedir();
+
+/** Cache dosyasının path'i — test için inject edilebilir homeFn */
+export function cachePath(homeFn: HomeDirFn = defaultHomeDir): string {
+  return path.join(homeFn(), '.wrongstack', 'update-cache.json');
 }
 
 /** 24 saat TTL */
@@ -57,9 +60,9 @@ function isNewer(a: string, b: string): boolean {
 }
 
 /** Cache oku — süresi geçmişse null döner */
-async function readCache(): Promise<CacheEntry | null> {
+async function readCache(homeFn: HomeDirFn = defaultHomeDir): Promise<CacheEntry | null> {
   try {
-    const raw = await fs.readFile(cachePath(), 'utf8');
+    const raw = await fs.readFile(cachePath(homeFn), 'utf8');
     const entry = JSON.parse(raw) as CacheEntry;
     if (Date.now() - entry.timestamp > CACHE_TTL_MS) return null;
     return entry;
@@ -69,11 +72,11 @@ async function readCache(): Promise<CacheEntry | null> {
 }
 
 /** Cache yaz */
-async function writeCache(entry: CacheEntry): Promise<void> {
+async function writeCache(entry: CacheEntry, homeFn: HomeDirFn = defaultHomeDir): Promise<void> {
   try {
-    const dir = path.dirname(cachePath());
+    const dir = path.dirname(cachePath(homeFn));
     await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(cachePath(), JSON.stringify(entry, null, 2), 'utf8');
+    await fs.writeFile(cachePath(homeFn), JSON.stringify(entry, null, 2), 'utf8');
   } catch {
     // best-effort
   }
@@ -101,12 +104,21 @@ async function fetchLatestFromNpm(timeoutMs = 3000): Promise<string> {
 }
 
 /** Update bilgisini döner — cache-first, network fallback */
-export async function checkForUpdate(signal?: AbortSignal): Promise<UpdateInfo> {
+export async function checkForUpdate(
+  signal?: AbortSignal,
+  homeFn?: HomeDirFn,
+): Promise<UpdateInfo> {
   const current = currentVersion();
   const aborted = () => signal?.aborted ?? false;
+  const hf = homeFn ?? defaultHomeDir;
+
+  // Already aborted before we even start — skip network entirely
+  if (aborted()) {
+    return { current, latest: current, outdated: false, checkFailed: true };
+  }
 
   // Cache'e bak
-  const cached = await readCache();
+  const cached = await readCache(hf);
   if (cached && !cached.error) {
     return {
       current,
@@ -119,7 +131,7 @@ export async function checkForUpdate(signal?: AbortSignal): Promise<UpdateInfo> 
   // Network kontrolü
   try {
     const latest = await fetchLatestFromNpm();
-    await writeCache({ timestamp: Date.now(), latestVersion: latest });
+    await writeCache({ timestamp: Date.now(), latestVersion: latest }, hf);
 
     return {
       current,
@@ -148,8 +160,11 @@ export async function checkForUpdate(signal?: AbortSignal): Promise<UpdateInfo> 
 }
 
 /** Update varsa notification string'i döner, yoksa null */
-export async function getUpdateNotification(): Promise<string | null> {
-  const info = await checkForUpdate();
+export async function getUpdateNotification(
+  signal?: AbortSignal,
+  homeFn?: HomeDirFn,
+): Promise<string | null> {
+  const info = await checkForUpdate(signal, homeFn);
   if (info.outdated) {
     return `Update available: v${info.current} → v${info.latest}`;
   }
