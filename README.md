@@ -34,6 +34,25 @@ This pulls in the full stack — `@wrongstack/core`, `@wrongstack/runtime`, `@wr
 
 After install, `wrongstack` is on your `PATH`. (`wstack` works too — it's an alias.)
 
+### What's new in 0.5.x — session rewind & checkpoint system
+
+This release adds bounded session history traversal and improved crash recovery.
+
+**Session rewind.** Added `session.rewind()` to the agent API, enabling
+bounded history traversal. Sessions can now step back through their
+event log without losing the ability to resume from the latest state.
+
+**Session checkpoint system.** Session checkpoints now capture full
+context state for crash recovery, ensuring no work is lost if the
+process terminates unexpectedly.
+
+**CLI `config-history` bug fix.** Added missing `import os from 'node:os'`
+in the config history module that was causing typecheck failures.
+
+**Runtime `/vision` subpath rebuild.** The `@wrongstack/runtime/vision`
+subpath declaration was rebuilt to fix TUI typecheck failures caused
+by a missing `.d.ts` file.
+
 ### What's new in 0.4.x — autonomy, modes, and YOLO runtime toggle
 
 This release adds a self-driving agent mode, a runtime-toggleable YOLO
@@ -1197,7 +1216,7 @@ See [`examples/`](examples/) for 6 categories of working examples:
 
 ## Status
 
-- **2059 tests passing** across 203 test files (~13 s, 1 skipped)
+- **2616 tests passing** across 230 test files (~19 s, 2 skipped)
 - Coverage thresholds enforced in `vitest.config.ts`: ≥85 % lines / ≥85 % functions / ≥70 % branches / ≥82 % statements
 - All workspace packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles

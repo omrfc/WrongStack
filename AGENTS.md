@@ -1,49 +1,31 @@
 <!-- dfmt:v1 begin -->
 # Context Discipline — REQUIRED
 
-This project uses DFMT to keep large tool outputs from exhausting the
-context window. **Read this section at the start of every conversation
-in this project.**
+Read this section at the start of every conversation in this project.
 
-## Rule 1 — Prefer DFMT tools over native tools
+## Rule 1 — Prefer targeted reads over raw dumps
 
-Always use DFMT's MCP tools when an output might exceed 2 KB:
+Use `grep` with `context_lines` / `output_mode`, `glob` with patterns,
+and `read` with `offset`/`limit` instead of dumping entire files.
+When a tool output exceeds ~50 lines, prefer to specify exactly what
+you need rather than loading the whole result into context.
 
-| Native     | DFMT replacement |
-|------------|------------------|
-| `Bash`     | `dfmt_exec`      |
-| `Read`     | `dfmt_read`      |
-| `WebFetch` | `dfmt_fetch`     |
-| `Glob`     | `dfmt_glob`      |
-| `Grep`     | `dfmt_grep`      |
-| `Edit`     | `dfmt_edit`      |
-| `Write`    | `dfmt_write`     |
+## Rule 2 — On tool failure, report and fall back
 
-Include an `intent` argument on every call, describing what you need
-from the output. The `intent` lets DFMT return the relevant portion of
-a large output without flooding the context.
-
-## Rule 2 — On DFMT failure, report and fall back
-
-DFMT is a strong preference, not a hard dependency. If a `dfmt_*` tool
-errors, times out, or is unavailable, report the failure to the user
-(one short line — which call, what error) and continue with the native
-equivalent so the session is not blocked. The ban is on *silent*
-fallback — every switch must be announced. After a fallback, drop a
-brief `dfmt_remember` note tagged `gap` when practical. If the native
-tool is also denied (permission rule, sandbox refusal), stop and ask
-the user; do not retry blindly.
+If a tool errors or is unavailable, report the failure (one short line)
+and continue with the best available alternative. Do not silently
+retry with the same inputs.
 
 ## Rule 3 — Record user decisions
 
 When the user states a preference or correction ("use X instead of Y",
-"do not modify Z"), call `dfmt_remember` with a `decision` tag so the
-choice survives context compaction.
+"do not modify Z"), call `remember` with a note tagged `decision` so
+the choice survives context compaction. Example:
+`remember` tool with text like `[decision] use pnpm instead of npm`.
 
 ## Why these rules matter
 
-Some agents do not provide hooks to enforce these rules automatically.
-**Compliance is your responsibility as the agent.** A single raw shell
-output above 8 KB can push earlier context out of the window, erasing
-the conversation's history. Following the rules above preserves it.
+A single raw shell output above 8 KB can push earlier context out of the
+window, erasing the conversation's history. Following the rules above
+preserves it.
 <!-- dfmt:v1 end -->
