@@ -1,0 +1,297 @@
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import type {
+  DetectedDependency,
+  DetectionResult,
+  PackageManager,
+  TechStack,
+  TechStackInfo,
+} from './types.js';
+
+type SignatureMatcher = (files: string[], dirs: string[]) => boolean;
+
+interface StackSignature {
+  stack: TechStack;
+  packageManager: PackageManager;
+  manifestFiles: string[];
+  lockFiles: string[];
+  secondarySignatures?: SignatureMatcher;
+}
+
+const MATCHERS = {
+  pnpmWorkspace: (files: string[]) => files.includes('pnpm-workspace.yaml'),
+  gradlew: (_files: string[], dirs: string[]) => dirs.includes('gradlew'),
+  mavenWrapper: (_files: string[], dirs: string[]) => dirs.includes('.mvn'),
+  dotnetSdk: (files: string[]) => files.some((f) => f.endsWith('.csproj') || f.endsWith('.fsproj')),
+  yarnConfig: (files: string[]) => files.includes('.yarnrc') || files.includes('yarn.config.js'),
+  notPoetryLock: (files: string[]) => !files.includes('poetry.lock'),
+};
+
+const STACK_SIGNATURES: StackSignature[] = [
+  // Node.js variants - checked in order, first match wins
+  {
+    stack: 'nodejs',
+    packageManager: 'pnpm',
+    manifestFiles: ['package.json'],
+    lockFiles: ['pnpm-lock.yaml'],
+    secondarySignatures: (f) => MATCHERS.pnpmWorkspace(f),
+  },
+  {
+    stack: 'nodejs',
+    packageManager: 'bun',
+    manifestFiles: ['package.json'],
+    lockFiles: ['bun.lockb'],
+  },
+  {
+    stack: 'nodejs',
+    packageManager: 'yarn',
+    manifestFiles: ['package.json'],
+    lockFiles: ['yarn.lock'],
+    secondarySignatures: (f) => MATCHERS.yarnConfig(f),
+  },
+  {
+    stack: 'nodejs',
+    packageManager: 'npm',
+    manifestFiles: ['package.json'],
+    lockFiles: ['package-lock.json'],
+  },
+  // Python variants
+  {
+    stack: 'python',
+    packageManager: 'poetry',
+    manifestFiles: ['pyproject.toml'],
+    lockFiles: ['poetry.lock'],
+  },
+  {
+    stack: 'python',
+    packageManager: 'pip',
+    manifestFiles: ['requirements.txt', 'setup.py'],
+    lockFiles: ['requirements.txt'],
+  },
+  {
+    stack: 'python',
+    packageManager: 'pip',
+    manifestFiles: ['pyproject.toml'],
+    lockFiles: [],
+    secondarySignatures: (f) => MATCHERS.notPoetryLock(f),
+  },
+  // Rust
+  {
+    stack: 'rust',
+    packageManager: 'cargo',
+    manifestFiles: ['Cargo.toml'],
+    lockFiles: ['Cargo.lock'],
+  },
+  // Go
+  {
+    stack: 'go',
+    packageManager: 'go',
+    manifestFiles: ['go.mod'],
+    lockFiles: ['go.sum'],
+  },
+  // Java variants
+  {
+    stack: 'java',
+    packageManager: 'gradle',
+    manifestFiles: ['build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts'],
+    lockFiles: [],
+    secondarySignatures: (_f, d) => MATCHERS.gradlew(_f, d),
+  },
+  {
+    stack: 'java',
+    packageManager: 'maven',
+    manifestFiles: ['pom.xml'],
+    lockFiles: [],
+    secondarySignatures: (_f, d) => MATCHERS.mavenWrapper(_f, d),
+  },
+  // .NET
+  {
+    stack: 'dotnet',
+    packageManager: 'nuget',
+    manifestFiles: ['Directory.Build.props', 'Directory.Packages.props'],
+    lockFiles: ['packages.lock.json'],
+    secondarySignatures: (f) => MATCHERS.dotnetSdk(f),
+  },
+  {
+    stack: 'dotnet',
+    packageManager: 'nuget',
+    manifestFiles: ['*.csproj', '*.fsproj', '*.xproj'],
+    lockFiles: [],
+    secondarySignatures: (f) => MATCHERS.dotnetSdk(f),
+  },
+  // PHP
+  {
+    stack: 'php',
+    packageManager: 'composer',
+    manifestFiles: ['composer.json'],
+    lockFiles: ['composer.lock'],
+  },
+  // Ruby
+  {
+    stack: 'ruby',
+    packageManager: 'bundler',
+    manifestFiles: ['Gemfile'],
+    lockFiles: ['Gemfile.lock'],
+  },
+  // C++
+  {
+    stack: 'cpp',
+    packageManager: 'cmake',
+    manifestFiles: ['CMakeLists.txt'],
+    lockFiles: [],
+    secondarySignatures: (f) => f.includes('CMakeCache.txt') || f.includes('CMakePresets.json'),
+  },
+  // Swift
+  {
+    stack: 'swift',
+    packageManager: 'swiftpm',
+    manifestFiles: ['Package.swift'],
+    lockFiles: [],
+  },
+];
+
+const MONOREPO_INDICATORS: Record<string, string[]> = {
+  pnpm: ['pnpm-workspace.yaml'],
+  npm: ['lerna.json', 'nx.json'],
+  yarn: [],
+  bun: [],
+  cargo: [],
+  go: ['go.work'],
+  maven: [],
+  gradle: [],
+  nuget: ['Directory.Build.props'],
+  pip: [],
+  poetry: [],
+  bundler: [],
+  cmake: [],
+  swiftpm: [],
+  unknown: [],
+};
+
+export class TechStackDetector {
+  private cachedResults: Map<string, DetectionResult> = new Map();
+
+  async detect(projectRoot: string): Promise<DetectionResult> {
+    const cached = this.cachedResults.get(projectRoot);
+    if (cached) return cached;
+
+    const result: DetectionResult = {
+      timestamp: new Date().toISOString(),
+      projectRoot,
+      detectedStacks: [],
+      isMonorepo: false,
+      workspaceConfigs: [],
+    };
+
+    const entries = await readdir(projectRoot, { withFileTypes: true });
+    const files = entries.filter((e) => e.isFile()).map((e) => e.name);
+    const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+
+    const detectedPackageManagers = new Set<PackageManager>();
+
+    for (const signature of STACK_SIGNATURES) {
+      const detected = this.matchSignature(signature, files, dirs);
+      if (detected) {
+        // Skip if we already detected this package manager
+        if (!detectedPackageManagers.has(signature.packageManager)) {
+          detectedPackageManagers.add(signature.packageManager);
+          result.detectedStacks.push(detected);
+        }
+      }
+    }
+
+    result.isMonorepo = this.detectMonorepo(result.detectedStacks, dirs, files);
+
+    if (result.isMonorepo) {
+      result.workspaceConfigs = this.findWorkspaceConfigs(result.detectedStacks, dirs, files);
+    }
+
+    this.cachedResults.set(projectRoot, result);
+    return result;
+  }
+
+  private matchSignature(
+    signature: StackSignature,
+    files: string[],
+    dirs: string[]
+  ): TechStackInfo | null {
+    // Check manifest file exists
+    const manifestMatch = this.findMatchingManifest(signature.manifestFiles, files);
+    if (!manifestMatch) return null;
+
+    // Check lock file if required
+    const lockMatch =
+      signature.lockFiles.length === 0 ||
+      signature.lockFiles.some((lock) => files.includes(lock));
+
+    // Check secondary signatures
+    const hasSecondary =
+      signature.secondarySignatures && signature.secondarySignatures(files, dirs);
+
+    // Strict mode: if lock files are defined, at least one must exist
+    // OR a secondary signature must confirm the detection
+    const hasAnyConfirmation = lockMatch || hasSecondary;
+
+    if (signature.lockFiles.length > 0 && !hasAnyConfirmation) {
+      return null;
+    }
+
+    return {
+      stack: signature.stack,
+      packageManager: signature.packageManager,
+      manifestFile: manifestMatch,
+      dependencies: [],
+      projectPath: '',
+    };
+  }
+
+  private findMatchingManifest(manifests: string[], files: string[]): string | null {
+    for (const manifest of manifests) {
+      if (manifest.includes('*')) {
+        const regex = new RegExp('^' + manifest.replace('*', '.*') + '$');
+        const match = files.find((f) => regex.test(f));
+        if (match) return match;
+      } else if (files.includes(manifest)) {
+        return manifest;
+      }
+    }
+    return null;
+  }
+
+  private detectMonorepo(stacks: TechStackInfo[], dirs: string[], files: string[]): boolean {
+    // Multiple different stacks = monorepo
+    if (stacks.length > 1) return true;
+
+    // pnpm always has workspace config if monorepo
+    if (stacks.some((s) => s.packageManager === 'pnpm') && files.includes('pnpm-workspace.yaml')) {
+      return true;
+    }
+
+    // Check workspace indicator files
+    for (const stack of stacks) {
+      const indicators = MONOREPO_INDICATORS[stack.packageManager];
+      if (indicators && indicators.some((ind) => files.includes(ind) || dirs.includes(ind))) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private findWorkspaceConfigs(stacks: TechStackInfo[], dirs: string[], files: string[]): string[] {
+    const configs: string[] = [];
+    for (const stack of stacks) {
+      const indicators = MONOREPO_INDICATORS[stack.packageManager];
+      if (indicators) {
+        configs.push(...indicators.filter((ind) => files.includes(ind) || dirs.includes(ind)));
+      }
+    }
+    return [...new Set(configs)];
+  }
+
+  clearCache(): void {
+    this.cachedResults.clear();
+  }
+}
+
+export const defaultTechStackDetector = new TechStackDetector();

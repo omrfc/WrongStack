@@ -13,20 +13,16 @@ coverage/
 *.tsbuildinfo
 .turbo/
 .bun/
-
 .dfmt/
 .dfmc/
 .project/
-
 # Editor swap files
 *.swp
 *~
-
 # Vitest coverage
-coverage/
 coverage/**
-
 .reports/
-
 # Vitest benchmark output (V0-A)
 bench-results.json
+security-reports/
+security-reports/*

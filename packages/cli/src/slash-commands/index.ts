@@ -26,6 +26,10 @@ export interface SlashCommandContext {
   renderer: Renderer;
   memoryStore?: MemoryStore;
   context?: Context;
+  /** Working directory for the current session. */
+  cwd: string;
+  /** Project root (typically resolved from cwd). */
+  projectRoot: string;
   metricsSink?: MetricsSink;
   healthRegistry?: HealthRegistry;
   modeStore?: ModeStore;
@@ -86,6 +90,9 @@ export interface SlashCommandContext {
    * with a "not configured" message instead of crashing.
    */
   planPath?: string;
+  /** Direct access to the session's LLM provider and model, available even before the first agent run. */
+  llmProvider?: import('@wrongstack/core').Provider;
+  llmModel?: string;
 }
 
 // Re-export helpers for external consumers (pre-launch.ts)
@@ -119,6 +126,7 @@ import { buildAutonomyCommand } from './autonomy.js';
 import { buildModeCommand } from './mode.js';
 import { buildSddCommand } from './sdd.js';
 import { buildSkillGeneratorCommand } from './skill-generator.js';
+import { buildSecurityCommand } from './security.js';
 import {
   buildSkillInstallCommand,
   buildSkillUpdateCommand,
@@ -160,5 +168,6 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildCommitCommand(opts),
     buildGitcheckCommand(opts),
     buildPushCommand(opts),
+    buildSecurityCommand(opts),
   ];
 }

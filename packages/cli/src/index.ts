@@ -662,11 +662,15 @@ export async function main(argv: string[]): Promise<number> {
     renderer,
     memoryStore,
     context,
+    cwd,
+    projectRoot,
     metricsSink,
     healthRegistry,
     planPath,
     modeStore,
     fleetStreamController,
+    llmProvider: provider,
+    llmModel: config.model,
     onSpawn: async (description, spawnOpts) => {
       const { subagentId, taskId } = await multiAgentHost.spawn(description, spawnOpts);
       const tags: string[] = [];

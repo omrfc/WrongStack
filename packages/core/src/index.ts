@@ -4,6 +4,7 @@ export * from './utils/index.js';
 export * from './defaults/index.js';
 export * from './skills/index.js';
 export * from './storage/index.js';
+export * from './security-scanner/index.js';
 // Re-export safeParse explicitly at the top-level export for consumers
 // who import from '@wrongstack/core' directly (e.g. providers package).
 export { safeParse, safeStringify, sanitizeJsonString } from './utils/safe-json.js';
