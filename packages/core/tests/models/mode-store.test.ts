@@ -94,7 +94,9 @@ describe('DefaultModeStore', () => {
 
 describe('loadProjectModes', () => {
   it('returns empty when dir does not exist', async () => {
-    const modes = await loadProjectModes('/nonexistent');
+    // Use a path that Windows can resolve as definitely non-existent
+    const nonExistent = path.join(os.tmpdir(), 'wstack-non-existent-' + Date.now());
+    const modes = await loadProjectModes(nonExistent);
     expect(modes).toEqual([]);
   });
 

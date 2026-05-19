@@ -7,6 +7,7 @@ export * from './config.js';
 export type { Compactor, CompactReport } from './compactor.js';
 export * from './permission.js';
 export * from './session.js';
+export * from './session-rewinder.js';
 export * from './attachment.js';
 export * from '../security/secret-vault.js';
 export * from '../infrastructure/logger.js';

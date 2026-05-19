@@ -43,6 +43,13 @@ export function buildExitCommand(opts: SlashCommandContext): SlashCommand {
     aliases: ['quit', 'q'],
     description: 'Exit the REPL.',
     async run() {
+      // Check for uncommitted changes before exit
+      if (opts.onBeforeExit) {
+        const result = await opts.onBeforeExit();
+        if (result?.abort) {
+          return { message: result.message ?? 'Exit aborted.' };
+        }
+      }
       opts.onExit?.();
       return { exit: true };
     },

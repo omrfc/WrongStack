@@ -69,6 +69,14 @@ export const writeTool: Tool<WriteInput, WriteOutput> = {
     const stat = await fs.stat(absPath);
     ctx.recordRead(absPath, stat.mtimeMs);
 
+    // Record for session rewind
+    ctx.session.recordFileChange({
+      path: absPath,
+      action: existed ? 'modified' : 'created',
+      before: existed ? prev : null,
+      after: input.content,
+    });
+
     return {
       path: absPath,
       bytes_written: Buffer.byteLength(input.content, 'utf8'),

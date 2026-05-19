@@ -127,6 +127,14 @@ export const editTool: Tool<EditInput, EditOutput> = {
     const updated = await fs.stat(absPath);
     ctx.recordRead(absPath, updated.mtimeMs);
 
+    // Record for session rewind
+    ctx.session.recordFileChange({
+      path: absPath,
+      action: 'modified',
+      before: original,
+      after: newFile,
+    });
+
     const diff = unifiedDiff(original, newFile, {
       fromFile: input.path,
       toFile: input.path,

@@ -36,6 +36,7 @@ import { pluginCmd, usageCmd } from './handlers/plugin-usage.js';
 import { projectsCmd } from './handlers/projects.js';
 import { modelsCmd, providersCmd } from './handlers/providers-models.js';
 import { configCmd, sessionsCmd } from './handlers/sessions-config.js';
+import { rewindCmd } from './handlers/rewind.js';
 import { skillsCmd, toolsCmd } from './handlers/tools-skills.js';
 import { helpCmd, versionCmd } from './handlers/version-help.js';
 
@@ -44,6 +45,7 @@ export const subcommands: Record<string, SubcommandHandler> = {
   auth: authCmd,
   sessions: sessionsCmd,
   config: configCmd,
+  rewind: rewindCmd,
   tools: toolsCmd,
   skills: skillsCmd,
   providers: providersCmd,

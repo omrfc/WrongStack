@@ -1032,6 +1032,26 @@ export async function main(argv: string[]): Promise<number> {
     onExit: () => {
       void mcpRegistry.stopAll();
     },
+    onBeforeExit: async () => {
+      // Check for uncommitted changes directly
+      const { spawn } = await import('node:child_process');
+      const cwd = projectRoot;
+
+      const statusResult = await new Promise<{ stdout: string; code: number }>((resolve) => {
+        const child = spawn('git', ['status', '--porcelain'], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+        let stdout = '';
+        child.stdout?.on('data', (d) => (stdout += d));
+        child.on('close', (code) => resolve({ stdout, code: code ?? 0 }));
+      });
+
+      if (statusResult.stdout.trim().length > 0) {
+        const lines = statusResult.stdout.split('\n').filter(Boolean);
+        return {
+          abort: true,
+          message: `⚠ ${color.yellow(`${lines.length} uncommitted change${lines.length > 1 ? 's' : ''}`)} — type /commit to save before exit`,
+        };
+      }
+    },
     onClear: () => {
       // In TUI mode Ink owns the live area; writing `\x1b[2J` here would
       // fight Ink's cursor math and leave the status bar smeared. The

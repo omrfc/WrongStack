@@ -98,10 +98,45 @@ export async function runProjectCheck(opts: {
     return true;
   }
 
-  // 'empty' — no manifest, no AGENTS.md
-  renderer.write(
-    `\n  ${color.dim('○')} ${color.dim(`No project manifest in ${projectRoot} — running in a scratch directory.`)}\n`,
-  );
+  // 'empty' — no manifest, no AGENTS.md, possibly no git
+  const gitDir = path.join(projectRoot, '.git');
+  let hasGit = false;
+  try {
+    await fs.access(gitDir);
+    hasGit = true;
+  } catch {
+    // no git
+  }
+
+  if (!hasGit) {
+    renderer.write(
+      `\n  ${color.dim('○')} ${color.dim(`No project manifest in ${projectRoot} — running in a scratch directory.`)}\n`,
+    );
+    const answer = (
+      await reader.readLine(
+        `  ${color.amber('?')} No git repo found. ${color.bold('Initialize git?')} ${color.dim('[y/N]')} `,
+      )
+    )
+      .trim()
+      .toLowerCase();
+    if (answer === 'y' || answer === 'yes') {
+      try {
+        const { spawn } = await import('node:child_process');
+        await new Promise<void>((resolve, reject) => {
+          const child = spawn('git', ['init'], { cwd: projectRoot });
+          child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`git init failed with ${code}`))));
+        });
+        renderer.write(`  ${color.green('✓')} Git repository initialized\n`);
+      } catch (err) {
+        renderer.writeError(`git init failed: ${err instanceof Error ? err.message : String(err)}\n`);
+      }
+    }
+  } else {
+    renderer.write(
+      `\n  ${color.dim('○')} ${color.dim(`No project manifest in ${projectRoot} — running in a scratch directory.`)}\n`,
+    );
+  }
+
   const answer = (
     await reader.readLine(`  ${color.amber('?')} Continue anyway? ${color.dim('[Y/n]')} `)
   )

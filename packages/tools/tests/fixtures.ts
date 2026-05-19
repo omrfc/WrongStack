@@ -33,6 +33,7 @@ export async function mkSandbox(): Promise<Sandbox> {
       id: 'test',
       append: async () => undefined,
       close: async () => undefined,
+      recordFileChange: () => {},
     },
     messages,
   } as unknown as Context;

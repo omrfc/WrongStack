@@ -1,0 +1,25 @@
+{
+  "id": "git-commit-helper",
+  "phase": "approved",
+  "title": "Git Commit Helper",
+  "userIntent": "",
+  "projectContext": "Project: wrongstack-monorepo\nDescription: none\nDev Dependencies: @biomejs/biome, @types/node, @vitest/coverage-v8, tsup, typescript, vitest",
+  "answers": [
+    {
+      "question": "Commit tetikleyicileri ne olsun?",
+      "answer": "git status dirty ise uyar, exit öncesi sor"
+    },
+    {
+      "question": "Commit message nasıl üretilsin?",
+      "answer": "Otomatik üret, kullanıcı onaylasın"
+    },
+    {
+      "question": "Staging nasıl yapılsın?",
+      "answer": "Tüm değişen dosyaları otomatik staging (git add .)"
+    }
+  ],
+  "questionCount": 3,
+  "approved": true,
+  "createdAt": 1779172130942,
+  "updatedAt": 1779172500000
+}

@@ -124,7 +124,8 @@ describe('runProjectCheck', () => {
 
   it("'empty' kind + 'n' answer returns false (user bailed)", async () => {
     const dir = await mkTempDir();
-    const reader = makeReader(['n']);
+    // Two prompts: 'Initialize git?' then 'Continue anyway?'
+    const reader = makeReader(['n', 'n']);
 
     const result = await runProjectCheck({ projectRoot: dir, renderer, reader });
 
@@ -133,7 +134,8 @@ describe('runProjectCheck', () => {
 
   it("'empty' kind + 'Y' answer returns true", async () => {
     const dir = await mkTempDir();
-    const reader = makeReader(['y']);
+    // Two prompts: 'Initialize git?' then 'Continue anyway?'
+    const reader = makeReader(['n', 'y']);
 
     const result = await runProjectCheck({ projectRoot: dir, renderer, reader });
 
@@ -142,7 +144,8 @@ describe('runProjectCheck', () => {
 
   it("'empty' kind + empty answer defaults to continuing", async () => {
     const dir = await mkTempDir();
-    const reader = makeReader(['']);
+    // Two prompts: 'Initialize git?' (empty) then 'Continue anyway?' (empty)
+    const reader = makeReader(['', '']);
 
     const result = await runProjectCheck({ projectRoot: dir, renderer, reader });
 

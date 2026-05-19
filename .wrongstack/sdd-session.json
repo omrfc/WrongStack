@@ -1,0 +1,29 @@
+{
+  "id": "dbfa672c-7dc8-4bc9-bd71-b3c7dc99f37e",
+  "phase": "approved",
+  "title": "Session Rewind & Replay System",
+  "userIntent": "",
+  "projectContext": "Project: wrongstack-monorepo\nDescription: none\nDev Dependencies: @biomejs/biome, @types/node, @vitest/coverage-v8, tsup, typescript, vitest",
+  "answers": [
+    {
+      "question": "Bir session'da ne kaydedilmeli?",
+      "answer": "Dosya sistemi değişiklikleri (ekleme, silme, edit) — prompt bazlı"
+    },
+    {
+      "question": "Rewind granularity?",
+      "answer": "Prompt bazlı — her user_input bir checkpoint oluşturur"
+    },
+    {
+      "question": "Storage konumu?",
+      "answer": "Global: %USERPROFILE%/.wrongstack/sessions/"
+    },
+    {
+      "question": "Rewind için ne kullanılacak?",
+      "answer": "Direct revert — git değil, snapshot tabanlı"
+    }
+  ],
+  "questionCount": 5,
+  "approved": true,
+  "createdAt": 1779171659932,
+  "updatedAt": 1779172130942
+}

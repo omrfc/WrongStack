@@ -37,6 +37,10 @@ export {
 export { DefaultSessionReader } from './session-reader.js';
 export { SessionAnalyzer } from './session-analyzer.js';
 export {
+  DefaultSessionRewinder,
+  type SessionRewinderOptions,
+} from './session-rewinder.js';
+export {
   attachTodosCheckpoint,
   loadTodosCheckpoint,
   saveTodosCheckpoint,

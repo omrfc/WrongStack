@@ -30,6 +30,7 @@ export interface SlashCommandContext {
   healthRegistry?: HealthRegistry;
   modeStore?: ModeStore;
   onExit?: () => void;
+  onBeforeExit?: () => Promise<{ abort?: boolean; message?: string } | void>;
   onClear?: () => void;
   onDiag?: () => string;
   onStats?: () => string | null;
@@ -86,6 +87,7 @@ export type { ProjectFacts } from './helpers.js';
 export { detectProjectFacts, renderAgentsTemplate } from './helpers.js';
 
 import { buildClearCommand } from './clear.js';
+import { buildCommitCommand, buildGitcheckCommand, buildPushCommand } from './commit.js';
 import { buildCompactCommand } from './compact.js';
 import { buildContextCommand } from './context.js';
 import { buildDiagCommand, buildStatsCommand } from './diag-stats.js';
@@ -145,5 +147,8 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildAutonomyCommand(opts),
     buildModeCommand(opts),
     buildExitCommand(opts),
+    buildCommitCommand(opts),
+    buildGitcheckCommand(opts),
+    buildPushCommand(opts),
   ];
 }
