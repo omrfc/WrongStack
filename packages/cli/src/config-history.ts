@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import os from 'node:os';
 import { atomicWrite } from '@wrongstack/core';
 
 // ── Protected files/directories ────────────────────────────────────

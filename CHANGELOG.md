@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-05-19
+
+### Added
+
+- **Session rewind & checkpoint system.** Added `session.rewind()` to the
+  agent API, enabling bounded history traversal. Session checkpoints now
+  capture full context state for crash recovery.
+
+### Changed
+
+- **Package versions bumped to 0.5.3** across all workspace packages.
+
 ## [0.5.0] - 2026-05-18
 
 ### Added
