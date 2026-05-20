@@ -14,7 +14,9 @@ export interface TrustPolicy {
 export interface PermissionDecision {
   permission: Permission;
   reason?: string;
-  source: 'default' | 'trust' | 'yolo' | 'user' | 'deny' | 'context';
+  source: 'default' | 'trust' | 'yolo' | 'yolo_destructive' | 'user' | 'deny' | 'context';
+  /** Risk tier of the tool, if classified. */
+  riskTier?: 'safe' | 'standard' | 'destructive';
 }
 
 export interface PermissionPolicy {

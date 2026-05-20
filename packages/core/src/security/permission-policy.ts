@@ -10,6 +10,11 @@ import { safeParse } from '../utils/safe-json.js';
 export interface PermissionPolicyOptions {
   trustFile: string;
   yolo?: boolean;
+  /**
+   * When true, YOLO mode allows even `destructive` tools without confirm.
+   * Corresponds to the `--force-all-yolo` CLI flag.
+   */
+  forceAllYolo?: boolean;
   promptDelegate?: (
     tool: Tool,
     input: unknown,
@@ -23,6 +28,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
   private loaded = false;
   private readonly trustFile: string;
   private yolo: boolean;
+  private forceAllYolo: boolean;
   /**
    * Session-scoped "soft deny" map. When the user presses 'n' (block once),
    * the tool+pattern is added here. If the LLM retries in the same session,
@@ -56,6 +62,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
   constructor(opts: PermissionPolicyOptions) {
     this.trustFile = opts.trustFile;
     this.yolo = opts.yolo ?? false;
+    this.forceAllYolo = opts.forceAllYolo ?? false;
     this.promptDelegate = opts.promptDelegate;
   }
 
@@ -77,6 +84,16 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
   /** Check whether YOLO mode is currently active. */
   getYolo(): boolean {
     return this.yolo;
+  }
+
+  /** Toggle force-all-YOLO at runtime. */
+  setForceAllYolo(enabled: boolean): void {
+    this.forceAllYolo = enabled;
+  }
+
+  /** Check whether force-all-YOLO is active. */
+  getForceAllYolo(): boolean {
+    return this.forceAllYolo;
   }
 
   async reload(): Promise<void> {
@@ -140,8 +157,23 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
       return { permission: 'auto', source: 'trust' };
     }
 
-    // 6. YOLO
+    // 6. YOLO — but `destructive` tools still confirm unless force-all-yolo
     if (this.yolo) {
+      if (tool.riskTier === 'destructive' && !this.forceAllYolo) {
+        if (this.promptDelegate) {
+          const decision = await this.promptDelegate(tool, input, subject ?? tool.name);
+          if (decision === 'always') {
+            await this.trust({ tool: tool.name, pattern: subject ?? tool.name });
+            return { permission: 'auto', source: 'user', reason: 'destructive yolo always-allowed' };
+          }
+          if (decision === 'deny') {
+            await this.deny({ tool: tool.name, pattern: subject ?? tool.name });
+            return { permission: 'deny', source: 'user', reason: 'user denied destructive yolo' };
+          }
+          return { permission: decision === 'yes' ? 'auto' : 'deny', source: 'user' };
+        }
+        return { permission: 'confirm', source: 'yolo_destructive', reason: 'destructive tool needs explicit approval even in yolo mode' };
+      }
       return { permission: 'auto', source: 'yolo' };
     }
 

@@ -7,8 +7,15 @@ import type { ScanResult, Finding } from './scanner.js';
 import type { ReportOptions } from './report-generator.js';
 import type { Context } from '../core/context.js';
 import type { Provider, Request } from '../types/provider.js';
+import { ProviderError } from '../types/provider.js';
+import type { RetryPolicy } from '../types/retry-policy.js';
+import type { ErrorHandler } from '../types/error-handler.js';
 import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';
+import { sanitizeJsonString } from '../utils/safe-json.js';
+
+// Shared network error pattern — mirrors DefaultRetryPolicy.NETWORK_ERR_RE
+const NETWORK_ERR_RE = /ECONN|ETIMEDOUT|ETIME|ENOTFOUND|EAI_AGAIN|fetch failed/i;
 
 export interface SecurityScannerOptions {
   projectRoot: string;
@@ -49,6 +56,50 @@ export class SecurityScannerOrchestrator {
   private detector = defaultTechStackDetector;
   private reportGenerator = defaultReportGenerator;
   private gitignoreUpdater = defaultGitignoreUpdater;
+
+  constructor(private readonly retryPolicy?: RetryPolicy, private readonly errorHandler?: ErrorHandler) {}
+
+  /**
+   * Wraps provider.complete with retry logic using the injected RetryPolicy.
+   */
+  private async completeWithRetry(
+    provider: Provider,
+    request: Request,
+    abortController: AbortController,
+    attempt = 0,
+  ): Promise<Awaited<ReturnType<Provider['complete']>>> {
+    const signal = abortController.signal;
+    try {
+      return await provider.complete(request, { signal });
+    } catch (err) {
+      if (signal.aborted) throw err;
+
+      const isProviderErr = err instanceof ProviderError;
+      const policy = this.retryPolicy;
+      const errAsErr = isProviderErr ? err : err instanceof Error ? err : new Error(String(err));
+
+      // No policy or non-retryable error — rethrow immediately
+      if (!policy || !isProviderErr && !NETWORK_ERR_RE.test(errAsErr.message)) {
+        throw err;
+      }
+
+      const canRetry = policy.shouldRetry(errAsErr, attempt);
+      if (!canRetry) throw err;
+
+      // Classify via error handler if available
+      if (this.errorHandler) {
+        const classified = this.errorHandler.classify(err);
+        if (!classified.retryable) throw err;
+      }
+
+      const delay = Math.round(policy.delayMs(attempt));
+      const status = isProviderErr ? (err as ProviderError).status : 0;
+      console.warn(`[SecurityScanner] retry ${attempt + 1} after ${delay}ms (status=${status}) — ${errAsErr.message}`);
+
+      await new Promise<void>((resolve) => setTimeout(resolve, delay));
+      return this.completeWithRetry(provider, request, abortController, attempt + 1);
+    }
+  }
 
   /**
    * Run full security scan with LLM assistance.
@@ -164,13 +215,15 @@ Return ONLY the JSON object, no markdown, no explanation.`;
     };
 
     try {
-      const response = await provider.complete(request, { signal: new AbortController().signal });
+      const abortController = new AbortController();
+      const response = await this.completeWithRetry(provider, request, abortController);
       const text = response.content.filter(b => b.type === 'text').map(b => b.text).join('');
       
       // Parse JSON from response
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        const skillData = JSON.parse(jsonMatch[0]!);
+        const sanitized = sanitizeJsonString(jsonMatch[0]!) || jsonMatch[0]!;
+        const skillData = JSON.parse(sanitized);
         return {
           name: skillData.name || `security-scanner-${techStack.stack}`,
           description: skillData.description || `Security scanner for ${techStack.stack}`,
@@ -312,12 +365,14 @@ Return ONLY the JSON array. If no issues found, return [].`;
         maxTokens: 4096,
       };
       
-      const response = await provider.complete(request, { signal: new AbortController().signal });
+      const abortController = new AbortController();
+      const response = await this.completeWithRetry(provider, request, abortController);
       const text = response.content.filter(b => b.type === 'text').map(b => b.text).join('');
       
       const jsonMatch = text.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]!) as Array<{
+        const sanitized = sanitizeJsonString(jsonMatch[0]!) || jsonMatch[0]!;
+        const parsed = JSON.parse(sanitized) as Array<{
           file: string;
           line?: number;
           severity: 'critical' | 'high' | 'medium' | 'low';
@@ -405,7 +460,8 @@ Be specific about the vulnerabilities found and how to fix them.`;
         maxTokens: 8192,
       };
       
-      const response = await provider.complete(request, { signal: new AbortController().signal });
+      const abortController = new AbortController();
+      const response = await this.completeWithRetry(provider, request, abortController);
       return response.content.filter(b => b.type === 'text').map(b => b.text).join('');
     } catch (err) {
       console.error('LLM report synthesis failed:', err);

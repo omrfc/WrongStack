@@ -1,4 +1,4 @@
-import { readdir } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SlashCommand, Context, Provider } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
@@ -62,14 +62,15 @@ async function handleScan(args: string, ctx: Context, opts: SlashCommandContext)
 
   try {
     // Use active context if available, otherwise fall back to direct provider access
-    const orchestratorContext: SecurityScannerContext = ctx.provider ? ctx : { provider: opts.llmProvider!, model: opts.llmModel };
+    const orchestratorContext: SecurityScannerContext = ctx.provider
+      ? ctx
+      : { provider: opts.llmProvider!, model: opts.llmModel };
 
     if (!orchestratorContext.provider) {
       return { message: '❌ Security scan requires an active LLM provider. No provider configured.' };
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await (defaultOrchestrator.run as any)(orchestratorContext, {
+    const result = await defaultOrchestrator.run(orchestratorContext, {
       projectRoot,
       scanOptions: {
         depth: (options.depth as 'quick' | 'standard' | 'deep') || 'standard',
@@ -125,14 +126,15 @@ async function handleAudit(ctx: Context, opts: SlashCommandContext): Promise<{ m
 
   try {
     // Use active context if available, otherwise fall back to direct provider access
-    const orchestratorContext: SecurityScannerContext = ctx.provider ? ctx : { provider: opts.llmProvider!, model: opts.llmModel };
+    const orchestratorContext: SecurityScannerContext = ctx.provider
+      ? ctx
+      : { provider: opts.llmProvider!, model: opts.llmModel };
 
     if (!orchestratorContext.provider) {
       return { message: '❌ Security audit requires an active LLM provider. No provider configured.' };
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await (defaultOrchestrator.run as any)(orchestratorContext, {
+    const result = await defaultOrchestrator.run(orchestratorContext, {
       projectRoot,
       reportOptions: { format: 'markdown' },
     });
@@ -199,14 +201,12 @@ async function handleReport(reportId: string): Promise<{ message?: string }> {
 
     const index = parseInt(reportId, 10) - 1;
     if (!isNaN(index) && reports[index]) {
-      const { readFile } = await import('node:fs/promises');
       const content = await readFile(join(reportsDir, reports[index]), 'utf-8');
       return { message: `# Security Report\n\n${content}` };
     }
 
     const match = reports.find((r) => r.includes(reportId));
     if (match) {
-      const { readFile } = await import('node:fs/promises');
       const content = await readFile(join(reportsDir, match), 'utf-8');
       return { message: `# Security Report\n\n${content}` };
     }

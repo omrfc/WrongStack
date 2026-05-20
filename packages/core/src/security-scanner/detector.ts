@@ -187,16 +187,15 @@ export class TechStackDetector {
     const files = entries.filter((e) => e.isFile()).map((e) => e.name);
     const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
 
-    const detectedPackageManagers = new Set<PackageManager>();
+    const detectedStacks = new Set<TechStack>();
 
     for (const signature of STACK_SIGNATURES) {
       const detected = this.matchSignature(signature, files, dirs);
       if (detected) {
-        // Skip if we already detected this package manager
-        if (!detectedPackageManagers.has(signature.packageManager)) {
-          detectedPackageManagers.add(signature.packageManager);
-          result.detectedStacks.push(detected);
-        }
+        // First match wins per stack type (don't detect multiple PMs for the same stack)
+        if (detectedStacks.has(signature.stack)) continue;
+        detectedStacks.add(signature.stack);
+        result.detectedStacks.push(detected);
       }
     }
 
@@ -213,27 +212,27 @@ export class TechStackDetector {
   private matchSignature(
     signature: StackSignature,
     files: string[],
-    dirs: string[]
+    _dirs: string[]
   ): TechStackInfo | null {
-    // Check manifest file exists
+    // Check manifest file exists (this is the primary signal)
     const manifestMatch = this.findMatchingManifest(signature.manifestFiles, files);
     if (!manifestMatch) return null;
 
-    // Check lock file if required
-    const lockMatch =
-      signature.lockFiles.length === 0 ||
-      signature.lockFiles.some((lock) => files.includes(lock));
-
-    // Check secondary signatures
-    const hasSecondary =
-      signature.secondarySignatures && signature.secondarySignatures(files, dirs);
-
-    // Strict mode: if lock files are defined, at least one must exist
-    // OR a secondary signature must confirm the detection
-    const hasAnyConfirmation = lockMatch || hasSecondary;
-
-    if (signature.lockFiles.length > 0 && !hasAnyConfirmation) {
-      return null;
+    // For Node.js package managers, require lock file presence as a positive signal
+    // This disambiguates pnpm/yarn/bun from npm (which uses package-lock.json)
+    // For other ecosystems, the manifest alone is sufficient
+    if (signature.lockFiles.length > 0 && signature.stack === 'nodejs') {
+      const hasLockFile = signature.lockFiles.some((lock) => {
+        if (lock.includes('*')) {
+          const regex = new RegExp('^' + lock.replace('*', '.*') + '$');
+          return files.some((f) => regex.test(f));
+        }
+        return files.includes(lock);
+      });
+      // npm is the fallback PM when no specific lock file is present
+      if (!hasLockFile && signature.packageManager !== 'npm') {
+        return null;
+      }
     }
 
     return {

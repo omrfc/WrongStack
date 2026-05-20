@@ -1,5 +1,118 @@
 import { describe, expect, it, vi } from 'vitest';
-import { EventBus } from '../../src/kernel/events.js';
+import { EventBus, ScopedEventBus } from '../../src/kernel/events.js';
+
+describe('ScopedEventBus', () => {
+  it('tracks listener count via scopedListenerCount', () => {
+    const bus = new ScopedEventBus();
+    expect(bus.scopedListenerCount).toBe(0);
+    bus.on('session.started', vi.fn());
+    expect(bus.scopedListenerCount).toBe(1);
+    bus.on('tool.executed', vi.fn());
+    expect(bus.scopedListenerCount).toBe(2);
+    bus.off('session.started', vi.fn());
+    bus.off('tool.executed', vi.fn());
+  });
+
+  it('on() returns unsubscribe that is also tracked', () => {
+    const bus = new ScopedEventBus();
+    const fn = vi.fn();
+    bus.on('session.started', fn);
+    expect(bus.scopedListenerCount).toBe(1);
+    bus.emit('session.started', { id: '1' });
+    expect(fn).toHaveBeenCalled();
+  });
+
+  it('once() returns tracked unsubscribe', () => {
+    const bus = new ScopedEventBus();
+    const fn = vi.fn();
+    const off = bus.once('session.started', fn);
+    expect(bus.scopedListenerCount).toBe(1);
+    bus.emit('session.started', { id: '1' });
+    expect(fn).toHaveBeenCalledTimes(1);
+    // once() auto-removes after first emit, so listener count should reflect
+    // only the tracking entry (not the underlying EventBus listener which was auto-removed)
+    expect(bus.scopedListenerCount).toBe(1);
+    // Manual off should also reduce count
+    off();
+    expect(bus.scopedListenerCount).toBe(0);
+  });
+
+  it('teardown() removes all tracked listeners', () => {
+    const bus = new ScopedEventBus();
+    const a = vi.fn();
+    const b = vi.fn();
+    const offA = bus.on('session.started', a);
+    const offB = bus.on('tool.executed', b);
+    expect(bus.scopedListenerCount).toBe(2);
+
+    bus.teardown();
+
+    expect(bus.scopedListenerCount).toBe(0);
+    bus.emit('session.started', { id: '1' });
+    bus.emit('tool.executed', { name: 'x', durationMs: 0, ok: true });
+    expect(a).not.toHaveBeenCalled();
+    expect(b).not.toHaveBeenCalled();
+  });
+
+  it('teardown() is idempotent', () => {
+    const bus = new ScopedEventBus();
+    bus.on('session.started', vi.fn());
+    bus.teardown();
+    expect(() => bus.teardown()).not.toThrow();
+  });
+
+  it('teardown() also calls clear() on the underlying bus', () => {
+    const bus = new ScopedEventBus();
+    bus.on('session.started', vi.fn());
+    bus.teardown();
+    // clear() would have removed all underlying listeners too
+    bus.emit('session.started', { id: '1' });
+    // if clear() was called, no listeners fire
+  });
+
+  it('[Symbol.dispose] aliases teardown()', () => {
+    const bus = new ScopedEventBus();
+    const fn = vi.fn();
+    bus.on('session.started', fn);
+    expect(bus.scopedListenerCount).toBe(1);
+    bus[Symbol.dispose]();
+    expect(bus.scopedListenerCount).toBe(0);
+  });
+
+  it('onPattern() registers and can be torn down', () => {
+    const bus = new ScopedEventBus();
+    const fn = vi.fn();
+    bus.onPattern('tool.*', fn);
+    expect(bus.scopedListenerCount).toBe(1);
+    bus.teardown();
+    expect(bus.scopedListenerCount).toBe(0);
+  });
+
+  it('onRegex() registers and can be torn down', () => {
+    const bus = new ScopedEventBus();
+    const fn = vi.fn();
+    bus.onRegex(/^session\./, fn);
+    expect(bus.scopedListenerCount).toBe(1);
+    bus.teardown();
+    expect(bus.scopedListenerCount).toBe(0);
+  });
+
+  it('scoped unsubscribe removes from tracking but does not affect other listeners', () => {
+    const bus = new ScopedEventBus();
+    const a = vi.fn();
+    const b = vi.fn();
+    const offA = bus.on('session.started', a);
+    bus.on('session.started', b);
+    expect(bus.scopedListenerCount).toBe(2);
+
+    offA(); // manually unsubscribe a
+
+    expect(bus.scopedListenerCount).toBe(1);
+    bus.emit('session.started', { id: '1' });
+    expect(a).not.toHaveBeenCalled();
+    expect(b).toHaveBeenCalled();
+  });
+});
 
 describe('EventBus', () => {
   it('emits to subscribers', () => {

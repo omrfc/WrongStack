@@ -397,6 +397,114 @@ export class EventBus {
   }
 }
 
+// ── Scoped EventBus ─────────────────────────────────────────────────────────────
+
+/**
+ * A decorator over `EventBus` that records every listener registration
+ * (`.on`, `.once`, `.onPattern`, `.onRegex`) so that `teardown()` can
+ * remove all of them at once — preventing the memory leaks that occur
+ * when dynamic plugins or long-lived TUI/WebUI interfaces forget to
+ * call `.off()` during session termination.
+ *
+ * Usage:
+ * ```ts
+ * const bus = new ScopedEventBus();
+ * bus.on('tool.executed', handler1);   // tracked
+ * bus.on('provider.response', handler2); // tracked
+ * bus.onPattern('subagent.*', handler3); // tracked
+ * // ... later, when the plugin or session is torn down:
+ * bus.teardown(); // removes all three listeners
+ * ```
+ *
+ * Also implements `Disposable` (via `[Symbol.dispose]`) for use with
+ * the `using` keyword in Node ≥ 22, or can be used manually with
+ * `bus.teardown()`.
+ */
+export class ScopedEventBus extends EventBus {
+  private readonly registrations: Set<() => void> = new Set();
+
+  /**
+   * Identical to `EventBus.on` but the returned unsubscribe function is
+   * also registered so that `teardown()` will remove it automatically.
+   */
+  override on<E extends EventName>(event: E, fn: Listener<E>): () => void {
+    const unsub = super.on(event, fn);
+    this.registrations.add(unsub);
+    return () => {
+      this.registrations.delete(unsub);
+      unsub();
+    };
+  }
+
+  /**
+   * Identical to `EventBus.once` but the auto-remove is tracked so that
+   * `teardown()` will remove it automatically.
+   */
+  override once<E extends EventName>(event: E, fn: Listener<E>): () => void {
+    const unsub = super.once(event, fn);
+    this.registrations.add(unsub);
+    return () => {
+      this.registrations.delete(unsub);
+      unsub();
+    };
+  }
+
+  /**
+   * Identical to `EventBus.onPattern` but the returned unsubscribe function
+   * is also registered so that `teardown()` will remove it automatically.
+   */
+  override onPattern(pattern: string, fn: (event: string, payload: unknown) => void): () => void {
+    const unsub = super.onPattern(pattern, fn);
+    this.registrations.add(unsub);
+    return () => {
+      this.registrations.delete(unsub);
+      unsub();
+    };
+  }
+
+  /**
+   * Identical to `EventBus.onRegex` but the returned unsubscribe function
+   * is also registered so that `teardown()` will remove it automatically.
+   */
+  override onRegex(regex: RegExp, fn: (event: string, payload: unknown) => void): () => void {
+    const unsub = super.onRegex(regex, fn);
+    this.registrations.add(unsub);
+    return () => {
+      this.registrations.delete(unsub);
+      unsub();
+    };
+  }
+
+  /**
+   * Remove every listener that was registered through this scoped bus.
+   * Idempotent — calling it multiple times is safe.
+   *
+   * Also available as `[Symbol.dispose]` for explicit resource management:
+   * ```ts
+   * using scope = new ScopedEventBus();
+   * scope.on('tool.executed', handler);
+   * // automatically teardown()'d when scope exits
+   * ```
+   */
+  teardown(): void {
+    for (const unsub of this.registrations) {
+      try { unsub(); } catch { /* ignore — best effort */ }
+    }
+    this.registrations.clear();
+    this.clear();
+  }
+
+  /** Alias for `teardown()` — enables `using new ScopedEventBus()` in Node ≥ 22. */
+  [Symbol.dispose](): void {
+    this.teardown();
+  }
+
+  /** Number of tracked registrations. */
+  get scopedListenerCount(): number {
+    return this.registrations.size;
+  }
+}
+
 /**
  * Convert a glob-style pattern to a matcher function.
  * Only supports `*` at the end of a prefix — `'tool.*'` becomes

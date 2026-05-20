@@ -14,6 +14,7 @@ export {
 } from './pipeline.js';
 export {
   EventBus,
+  ScopedEventBus,
   type EventMap,
   type EventName,
   type Listener,
