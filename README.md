@@ -34,30 +34,17 @@ This pulls in the full stack — `@wrongstack/core`, `@wrongstack/runtime`, `@wr
 
 After install, `wrongstack` is on your `PATH`. (`wstack` works too — it's an alias.)
 
-### What's new in 0.5.x — session rewind, checkpoint system, and TUI paste fix
+### What's new in 0.5.5
 
-This release adds bounded session history traversal, improved crash recovery,
-and a TUI paste quality-of-life fix.
+Release notes for this version are in [CHANGELOG.md](CHANGELOG.md).
 
-**Session rewind.** Added `session.rewind()` to the agent API, enabling
-bounded history traversal. Sessions can now step back through their
-event log without losing the ability to resume from the latest state.
+### What's new in 0.5.4
 
-**Session checkpoint system.** Session checkpoints now capture full
-context state for crash recovery, ensuring no work is lost if the
-process terminates unexpectedly.
-
-**TUI multi-line paste fix.** Plain clipboard pastes with newlines
-(without bracketed-paste sequence) are now normalized to spaces instead
-of showing the verbose `[pasted #N N lines]` placeholder. Newlines still
-reach the agent — they just no longer visually pollute the input row.
-
-**CLI `config-history` bug fix.** Added missing `import os from 'node:os'`
-in the config history module that was causing typecheck failures.
-
-**Runtime `/vision` subpath rebuild.** The `@wrongstack/runtime/vision`
-subpath declaration was rebuilt to fix TUI typecheck failures caused
-by a missing `.d.ts` file.
+**TUI multi-line paste normalization.** Plain clipboard pastes with
+newlines (no bracketed-paste sequence) are now normalized to spaces
+instead of triggering the verbose `[pasted #N N lines]` placeholder.
+Newlines still reach the agent — they just no longer visually pollute
+the input row. Bracketed pastes continue to use InputBuilder as before.
 
 ### What's new in 0.4.x — autonomy, modes, and YOLO runtime toggle
 
