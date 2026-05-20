@@ -252,7 +252,7 @@ export class Director implements ICoordinator {
    * delegates spawn budgeting, manifest entries, and checkpointing to it
    * instead of managing those internally. All other behavior is unchanged.
    */
-  private readonly fleetManager?: FleetManager;
+  readonly fleetManager: FleetManager | undefined;
   /**
    * Director-side bridge endpoint. Subagents are wired to the same
    * in-memory transport so the director can `ask()` them synchronously

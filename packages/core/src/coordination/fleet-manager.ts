@@ -70,6 +70,10 @@ export class FleetManager implements IFleetManager {
     string,
     { subagentId: string; name: string; role?: string; provider?: string; model?: string; taskIds: string[] }
   >();
+  /** Pending tasks with their descriptions — populated by `addPendingTask`
+   *  and cleared by `removePendingTask`. Replaces the host-side `pending`
+   *  Map so task descriptions live in one place (FleetManager). */
+  private readonly pendingTasks = new Map<string, { subagentId: string; description: string }>();
   private readonly subagentMeta = new Map<string, { provider?: string; model?: string }>();
   private readonly priceLookups = new Map<string, { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }>();
 
@@ -192,9 +196,9 @@ export class FleetManager implements IFleetManager {
     if (!this.manifestPath) return null;
     const manifest = {
       version: 1,
-      directorId: this.directorRunId,
+      directorRunId: this.directorRunId,
       generatedAt: new Date().toISOString(),
-      subagents: Array.from(this.manifestEntries.values()).map((entry) => ({
+      children: Array.from(this.manifestEntries.values()).map((entry) => ({
         id: entry.subagentId,
         name: entry.name,
         role: entry.role,
@@ -239,5 +243,31 @@ export class FleetManager implements IFleetManager {
     } catch {
       // ignore
     }
+  }
+
+  // -----------------------------------------------------------------------
+  // Pending task management — eliminates host-side state duplication
+  // -----------------------------------------------------------------------
+
+  addPendingTask(taskId: string, subagentId: string, description: string): void {
+    this.pendingTasks.set(taskId, { subagentId, description });
+  }
+
+  removePendingTask(taskId: string): void {
+    this.pendingTasks.delete(taskId);
+  }
+
+  getFleetStatus(): {
+    pending: { taskId: string; description: string; subagentId: string }[];
+    live: { subagentId: string; status: string; task?: string }[];
+  } {
+    const pending = Array.from(this.pendingTasks.entries()).map(([taskId, v]) => ({
+      taskId,
+      description: v.description,
+      subagentId: v.subagentId,
+    }));
+    // live is populated by MultiAgentHost from the coordinator — fleet
+    // manager has no direct visibility into subagent status
+    return { pending, live: [] };
   }
 }

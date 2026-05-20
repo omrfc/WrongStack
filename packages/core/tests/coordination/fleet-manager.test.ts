@@ -225,11 +225,11 @@ describe('FleetManager', () => {
 
       const content = JSON.parse(await fsp.readFile(manifestPath, 'utf-8'));
       expect(content.version).toBe(1);
-      expect(content.subagents).toHaveLength(1);
-      expect(content.subagents[0].id).toBe('sub-1');
-      expect(content.subagents[0].name).toBe('worker');
-      expect(content.subagents[0].role).toBe('researcher');
-      expect(content.subagents[0].taskIds).toEqual(['task-1']);
+      expect(content.children).toHaveLength(1);
+      expect(content.children[0].id).toBe('sub-1');
+      expect(content.children[0].name).toBe('worker');
+      expect(content.children[0].role).toBe('researcher');
+      expect(content.children[0].taskIds).toEqual(['task-1']);
 
       await fsp.rm(tmpDir, { recursive: true, force: true });
     });

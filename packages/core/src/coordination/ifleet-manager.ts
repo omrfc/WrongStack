@@ -50,4 +50,27 @@ export interface IFleetManager {
    * or null when no manifest path is configured.
    */
   writeManifest(): Promise<string | null>;
+
+  /**
+   * Aggregate fleet-wide status: pending tasks with descriptions and
+   * live subagent snapshot from the coordinator. Used by
+   * `MultiAgentHost.status()` to eliminate host-side state duplication.
+   */
+  getFleetStatus(): {
+    pending: { taskId: string; description: string; subagentId: string }[];
+    live: { subagentId: string; status: string; task?: string }[];
+  };
+
+  /**
+   * Register a pending task with its description. Called by
+   * `MultiAgentHost.spawn()` after `_spawnAndAssign()` returns so
+   * the description is available in `status()` without host-side storage.
+   */
+  addPendingTask(taskId: string, subagentId: string, description: string): void;
+
+  /**
+   * Remove a pending task. Called when the task completes so the
+   * pending list stays accurate.
+   */
+  removePendingTask(taskId: string): void;
 }

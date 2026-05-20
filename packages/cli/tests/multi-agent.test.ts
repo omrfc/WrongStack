@@ -258,15 +258,25 @@ describe('MultiAgentHost', () => {
   });
 
   describe('director mode', () => {
-    it('isDirectorMode() is false by default and true when opt-in', () => {
-      const simple = new MultiAgentHost(makeDeps());
-      expect(simple.isDirectorMode()).toBe(false);
-      const directed = new MultiAgentHost(makeDeps(), { directorMode: true });
-      expect(directed.isDirectorMode()).toBe(false);
-      // isDirectorMode flips on after the lazy build kicks in (first spawn).
+    it('isDirectorMode() is false before first spawn (lazy build)', () => {
+      // Before any spawn, no Director exists yet — this holds for both
+      // directorMode: false (explicit opt-out) and the default (implicit).
+      const host = new MultiAgentHost(makeDeps());
+      expect(host.isDirectorMode()).toBe(false);
     });
 
-    it('manifest() returns null when director mode is off', async () => {
+    it('isDirectorMode() becomes true after first spawn (Director always built)', async () => {
+      // After the single-path refactoring, spawn() always builds a Director
+      // regardless of directorMode, so isDirectorMode() flips after spawn.
+      const directed = new MultiAgentHost(makeDeps(), { directorMode: true });
+      expect(directed.isDirectorMode()).toBe(false); // not yet built
+      await directed.spawn('a thing');
+      expect(directed.isDirectorMode()).toBe(true);
+      await directed.stopAll();
+    });
+
+    it('manifest() returns null when no manifestPath is configured', async () => {
+      // Without manifestPath the Director has nowhere to write.
       const host = new MultiAgentHost(makeDeps());
       await host.spawn('do thing');
       expect(await host.manifest()).toBeNull();
@@ -428,13 +438,15 @@ describe('MultiAgentHost', () => {
         await host.stopAll();
       });
 
-      it('returns null when subagents have already been spawned', async () => {
+      it('returns the existing Director if one is already built (spawn already called)', async () => {
+        // With the single-path refactoring, spawn() always builds a Director.
+        // promoteToDirector() after spawn returns that existing Director.
         const host = new MultiAgentHost(makeDeps());
-        // Spawn triggers lazy coordinator build; cannot promote after.
         await host.spawn('do something');
+        expect(host.isDirectorMode()).toBe(true);
         const director = await host.promoteToDirector();
-        expect(director).toBeNull();
-        expect(host.isDirectorMode()).toBe(false);
+        expect(director).not.toBeNull();
+        expect(host.isDirectorMode()).toBe(true);
         await host.stopAll();
       });
 

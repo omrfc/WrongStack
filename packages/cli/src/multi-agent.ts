@@ -12,10 +12,10 @@ import {
   type ConfigStore,
   type Container,
   Context,
-  DefaultMultiAgentCoordinator,
   Director,
   type DirectorSessionFactory,
   EventBus,
+  FleetManager,
   type MultiAgentCoordinator,
   type Provider,
   type ProviderRegistry,
@@ -141,22 +141,18 @@ export interface MultiAgentHostOptions {
  * so /agents can list everyone running.
  */
 export class MultiAgentHost {
-  private coordinator?: MultiAgentCoordinator;
-  /** Lazily built when `opts.directorMode` is set. Owns its own internal
-   *  coordinator; the host's `coordinator` field still points at it so
-   *  the rest of the methods don't need to branch. */
   private director?: Director;
+  /** Own FleetManager — created in buildDirector(), used for pending task
+   *  tracking so status() can show descriptions without host-side state. */
+  private fleetManager?: import('@wrongstack/core').FleetManager;
   /** Lazily built alongside the director — produces per-subagent JSONL
-   *  writers under `<sessionsRoot>/<runId>/`. Null in non-director mode. */
+   *  writers under `<sessionsRoot>/<runId>/`. Null without sessionsRoot. */
   private sessionFactory?: DirectorSessionFactory;
-  private readonly pending = new Map<string, { description: string; subagentId: string }>();
-  private readonly results: TaskResult[] = [];
   private readonly opts: MultiAgentHostOptions;
   /**
-   * Populated by `promoteToDirector` when it refuses to promote (typically
-   * because a non-director coordinator is already running). The delegate
+   * Populated by `promoteToDirector` when it refuses to promote. The delegate
    * tool reads this through `getPromotionBlockReason` to render an
-   * actionable error instead of a generic "could not activate director".
+   * actionable error instead of a generic "Director could not be activated".
    */
   private promotionBlockReason: string | null = null;
 
@@ -177,137 +173,91 @@ export class MultiAgentHost {
    * orchestration tools and `--director` becomes a no-op.
    */
   async ensureDirector(): Promise<Director | null> {
+    if (this.director) return this.director;
     if (!this.opts.directorMode) return null;
-    await this.ensureCoordinator();
+    await this.buildDirector();
     return this.director ?? null;
   }
 
-  private async ensureCoordinator(): Promise<MultiAgentCoordinator> {
-    if (this.coordinator) return this.coordinator;
+  /** Access the Director's internal coordinator. */
+  private getCoordinator(): MultiAgentCoordinator {
+    return (this.director as unknown as { coordinator: MultiAgentCoordinator }).coordinator;
+  }
+
+  private async buildDirector(): Promise<void> {
+    if (this.director) return; // Already built — idempotent.
     const config: Config = this.deps.configStore.get() as Config;
 
-    // Build the per-subagent session factory when both director mode and
-    // a sessions root are configured.
-    if (this.opts.directorMode && this.opts.sessionsRoot && !this.sessionFactory) {
+    // Create the FleetManager FIRST so we can pass it to the Director.
+    // The FleetManager owns pending task tracking (addPendingTask /
+    // removePendingTask) used by status(), plus manifest + checkpointing.
+    const fleetManager = new FleetManager({
+      manifestPath: this.opts.manifestPath,
+      sessionsRoot: this.opts.sessionsRoot,
+      directorRunId: this.opts.directorRunId,
+      stateCheckpointPath: this.opts.stateCheckpointPath,
+      sessionWriter: this.opts.sessionWriter,
+      directorBudget: this.opts.directorBudget,
+      manifestDebounceMs: 2000,
+      checkpointDebounceMs: this.opts.checkpointDebounceMs ?? 250,
+      maxSpawnDepth: 5,
+    });
+    this.fleetManager = fleetManager;
+
+    if (this.opts.sessionsRoot && !this.sessionFactory) {
       this.sessionFactory = makeDirectorSessionFactory({
         sessionsRoot: this.opts.sessionsRoot,
         directorRunId: this.opts.directorRunId,
       });
     }
 
-    // Phase 1: Build coordinator/Director WITHOUT a runner. The runner
-    // needs FleetBus which only exists after the Director is created.
-    //
-    // Default budget intentionally generous (4 hours / 200 iter / 1000 tools)
-    // so a subagent doesn't get cut off mid-audit just because nobody
-    // remembered to override the budget. Per-call overrides ride in
-    // through `delegate({ timeoutMs, maxIterations, maxToolCalls })` or
-    // `spawn_subagent({ maxIterations, ... })`. If a worker truly hangs,
-    // the user can ctrl+C or `/fleet kill <id>` — that's a better
-    // failure mode than "fleet looked busy, finished nothing".
     const coordinatorConfig = {
       coordinatorId: randomUUID(),
       doneCondition: { type: 'all_tasks_done' as const },
       maxConcurrent: 8,
-      // No defaultBudget. Caps land on a subagent ONLY when the
-      // orchestrator (delegate-tool / spawn_subagent) or the user
-      // (CLI flag) sets them explicitly. The prior defaults
-      // (1000 tools / 200 iter / 4h) silently killed long autonomous
-      // runs; for a "work until done" director we want no implicit
-      // ceilings. The orchestrator can still cap a single subagent
-      // by passing maxToolCalls/maxIterations through the spawn tool.
     };
 
-    if (this.opts.directorMode) {
-      // Default the scratchpad directory to `<sessionsRoot>/<directorRunId>/shared/`
-      // when both are available but the caller didn't provide an explicit path.
-      // This makes fleet coordination discoverable without requiring extra config.
-      const defaultScratchpad: string | undefined =
-        this.opts.sharedScratchpadPath ||
-        (this.opts.sessionsRoot && this.opts.directorRunId
-          ? path.join(this.opts.sessionsRoot, this.opts.directorRunId, 'shared')
-          : undefined);
-      this.director = new Director({
-        config: coordinatorConfig,
-        manifestPath: this.opts.manifestPath,
-        sharedScratchpadPath: defaultScratchpad,
-        stateCheckpointPath: this.opts.stateCheckpointPath,
-        sessionWriter: this.opts.sessionWriter,
-        directorBudget: this.opts.directorBudget,
-        maxBudgetExtensions: this.opts.maxBudgetExtensions,
-        checkpointDebounceMs: this.opts.checkpointDebounceMs,
-        sessionsRoot: this.opts.sessionsRoot,
-        directorRunId: this.opts.directorRunId,
-        // Autonomy: allow nested directors a few levels deep. Default
-        // is 2 (root + one tier of workers), which trips the moment a
-        // worker tries to recurse into "let me delegate the parser
-        // analysis to a tighter specialist". 5 lets the director
-        // structure work as deeply as the task requires without us
-        // having to pass a flag every time.
-        maxSpawnDepth: 5,
+    const defaultScratchpad: string | undefined =
+      this.opts.sharedScratchpadPath ||
+      (this.opts.sessionsRoot && this.opts.directorRunId
+        ? path.join(this.opts.sessionsRoot, this.opts.directorRunId, 'shared')
+        : undefined);
+    this.director = new Director({
+      config: coordinatorConfig,
+      manifestPath: this.opts.manifestPath,
+      sharedScratchpadPath: defaultScratchpad,
+      stateCheckpointPath: this.opts.stateCheckpointPath,
+      sessionWriter: this.opts.sessionWriter,
+      directorBudget: this.opts.directorBudget,
+      maxBudgetExtensions: this.opts.maxBudgetExtensions,
+      checkpointDebounceMs: this.opts.checkpointDebounceMs,
+      sessionsRoot: this.opts.sessionsRoot,
+      directorRunId: this.opts.directorRunId,
+      maxSpawnDepth: 5,
+      fleetManager, // pass so director.fleetManager is never undefined
+    });
+    this.director.on('task.completed', ({ task, result }) => {
+      this.fleetManager?.removePendingTask(task.id);
+      this.emitLifecycleCompleted(task.id, result);
+    });
+    this.director.fleet.filter('budget.threshold_reached', (e) => {
+      const payload = e.payload as { kind: string; used: number; limit: number };
+      this.deps.events.emit('subagent.budget_warning', {
+        subagentId: e.subagentId,
+        kind: payload.kind,
+        used: payload.used,
+        limit: payload.limit,
       });
-      this.director.on('task.completed', ({ task, result }) => {
-        this.results.push(result);
-        this.pending.delete(task.id);
-        this.emitLifecycleCompleted(task.id, result);
+    });
+    this.getCoordinator().on('task.assigned', ({ task, subagentId }: { task: { id: string; description?: string }; subagentId: string }) => {
+      this.deps.events.emit('subagent.task_started', {
+        subagentId,
+        taskId: task.id,
+        description: task.description,
       });
-      // Relay budget pressure events so the TUI can show real-time feedback.
-      // "⚡ agent#audit-log hitting tool_call limit (350/400) — extending..."
-      this.director.fleet.filter('budget.threshold_reached', (e) => {
-        const payload = e.payload as {
-          kind: string;
-          used: number;
-          limit: number;
-        };
-        this.deps.events.emit('subagent.budget_warning', {
-          subagentId: e.subagentId,
-          kind: payload.kind,
-          used: payload.used,
-          limit: payload.limit,
-        });
-      });
-      this.coordinator = (
-        this.director as unknown as { coordinator: MultiAgentCoordinator }
-      ).coordinator;
-    } else {
-      this.coordinator = new DefaultMultiAgentCoordinator(coordinatorConfig, {});
-      (this.coordinator as unknown as { on: Function }).on(
-        'task.completed',
-        ({ task, result }: { task: { id: string }; result: TaskResult }) => {
-          this.results.push(result);
-          this.pending.delete(task.id);
-          this.emitLifecycleCompleted(task.id, result);
-        },
-      );
-    }
-    // Coordinator's `task.assigned` fires once per dispatch — relay it
-    // as a `subagent.task_started` so UIs can show "▶ AGENT#N started
-    // <description>" the instant work begins. The director path uses
-    // the same underlying coordinator so a single subscription covers
-    // both modes (director just wraps it without intercepting this
-    // event).
-    (this.coordinator as unknown as { on: Function }).on(
-      'task.assigned',
-      ({ task, subagentId }: { task: { id: string; description?: string }; subagentId: string }) => {
-        this.deps.events.emit('subagent.task_started', {
-          subagentId,
-          taskId: task.id,
-          description: task.description,
-        });
-      },
-    );
-
-    // Phase 2: Build the runner — FleetBus is now available via
-    // this.director?.fleet (set in Phase 1 for director mode).
+    });
     const runner = this.buildSubagentRunner(config);
-
-    // Phase 3: Inject the runner into the coordinator.
-    const innerCoord: DefaultMultiAgentCoordinator = this.opts.directorMode
-      ? (this.director as unknown as { coordinator: DefaultMultiAgentCoordinator }).coordinator
-      : (this.coordinator as DefaultMultiAgentCoordinator);
-    innerCoord.setRunner(runner);
-
-    return this.coordinator;
+    this.getCoordinator().setRunner(runner);
   }
 
   /**
@@ -484,13 +434,9 @@ export class MultiAgentHost {
     description: string,
     opts?: { provider?: string; model?: string; tools?: string[]; name?: string },
   ): Promise<{ subagentId: string; taskId: string }> {
-    await this.ensureCoordinator();
-    // No implicit budget caps. The orchestrator (when it spawns
-    // through delegate / spawn_subagent) passes budgets sized to the
-    // task; the human-driven /spawn entrypoint defaults to "run
-    // until the work is done", because the human is right here and
-    // can interrupt with Esc / /steer / Ctrl+C. Setting maxToolCalls=20
-    // here would kill any non-trivial audit at iteration 21.
+    // Always build a Director (directorMode or not) so that spawn routes
+    // through the same code path. The Director handles all orchestration.
+    await this.buildDirector();
     const subagentConfig = {
       name: opts?.name ?? 'adhoc',
       role: 'general',
@@ -512,7 +458,9 @@ export class MultiAgentHost {
     // underlying coordinator directly would still execute the task, but
     // the manifest would be empty — that surprised the first test.
     const { subagentId, taskId } = await this._spawnAndAssign(subagentConfig);
-    this.pending.set(taskId, { description, subagentId });
+    // Track the pending task via FleetManager so status() can show descriptions
+    // without host-side state duplication.
+    this.fleetManager?.addPendingTask(taskId, subagentId, description);
     this.deps.events.emit('subagent.spawned', {
       subagentId,
       taskId,
@@ -538,18 +486,10 @@ export class MultiAgentHost {
     subagentConfig: { name: string; role?: string; provider?: string; model?: string; tools?: string[] },
   ): Promise<{ subagentId: string; taskId: string }> {
     const taskId = randomUUID();
-
-    if (this.director) {
-      // Director path — spawn returns string subagentId
-      const subagentId = await this.director.spawn(subagentConfig);
-      await this.director.assign({ id: taskId, description: '', subagentId });
-      return { subagentId, taskId };
-    }
-
-    // Raw coordinator path — spawn returns SpawnResult
-    const spawned = await this.coordinator!.spawn(subagentConfig);
-    await this.coordinator!.assign({ id: taskId, description: '', subagentId: spawned.subagentId });
-    return { subagentId: spawned.subagentId, taskId };
+    // Always goes through the Director — single code path after buildDirector()
+    const subagentId = await this.director!.spawn(subagentConfig);
+    await this.director!.assign({ id: taskId, description: '', subagentId });
+    return { subagentId, taskId };
   }
 
   /**
@@ -578,39 +518,26 @@ export class MultiAgentHost {
     live: { subagentId: string; status: string; task?: string }[];
     summary: string;
   } {
-    // Build the set of still-active subagent ids (running or idle) so we
-    // can filter out pending tasks whose worker has already been stopped.
     const activeSubagentIds = new Set<string>();
-    if (this.coordinator) {
-      const s = this.coordinator.getStatus();
+    const live: { subagentId: string; status: string; task?: string }[] = [];
+    if (this.director) {
+      const coord = this.getCoordinator();
+      const s = coord.getStatus();
       for (const a of s.subagents) {
         if (a.status === 'running' || a.status === 'idle') {
           activeSubagentIds.add(a.id);
         }
-      }
-    }
-    const pending = Array.from(this.pending.entries())
-      .filter(([, v]) => activeSubagentIds.has(v.subagentId))
-      .map(([taskId, v]) => ({
-        taskId,
-        description: v.description,
-        subagentId: v.subagentId,
-      }));
-    // Include live subagent statuses from the coordinator so /agents shows
-    // running agents even when they haven't produced a TaskResult yet.
-    const live: { subagentId: string; status: string; task?: string }[] = [];
-    if (this.coordinator) {
-      const s = this.coordinator.getStatus();
-      for (const a of s.subagents) {
         live.push({ subagentId: a.id, status: a.status, task: a.currentTask });
       }
     }
-    // In director mode, results live on the Director (no duplication here).
-    // In non-director mode, host state is the single source of truth.
-    const completed = this.director ? this.director.completedResults() : this.results;
+    // Pending tasks come from the host's FleetManager (passed to Director)
+    const fleetStatus = this.fleetManager?.getFleetStatus() ?? { pending: [], live: [] };
+    const pending = fleetStatus.pending.filter((p) => activeSubagentIds.has(p.subagentId));
+    // Results always from Director (single source of truth)
+    const completed = this.director ? this.director.completedResults() : [];
     const completedCount = completed.length;
     const liveCount = live.filter((s) => s.status === 'running' || s.status === 'idle').length;
-    const summary = !this.coordinator
+    const summary = !this.director
       ? 'No subagents have been spawned.'
       : liveCount > 0
         ? `${pending.length} pending, ${liveCount} active, ${completedCount} completed.`
@@ -639,9 +566,7 @@ export class MultiAgentHost {
     }>;
     totals: { tasks: number; iterations: number; toolCalls: number; durationMs: number };
   } {
-    // In director mode, read results from the Director (single source of truth).
-    // In non-director mode, host state is the only place results are tracked.
-    const completed = this.director ? this.director.completedResults() : this.results;
+    const completed = this.director ? this.director.completedResults() : [];
     const bySubagent = new Map<
       string,
       {
@@ -701,7 +626,10 @@ export class MultiAgentHost {
    */
   async manifest(): Promise<string | null> {
     if (!this.director) return null;
-    return this.director.writeManifest();
+    // Force a synchronous write — bypass the debounce timer so callers
+    // (including tests) get an immediate snapshot without polling.
+    await this.director.fleetManager?.writeManifest();
+    return this.director.fleetManager?.manifestPath ?? null;
   }
 
   /**
@@ -715,24 +643,8 @@ export class MultiAgentHost {
    */
   async promoteToDirector(): Promise<Director | null> {
     if (this.director) return this.director;
-    if (this.coordinator) {
-      // A coordinator already exists (subagents were spawned). Cannot
-      // safely replace a running coordinator with a Director wrapper.
-      // Record WHY so callers (delegate tool) can render an actionable
-      // message instead of the prior opaque "Director could not be
-      // activated" — the user wants to know what to do, not just that
-      // a thing failed.
-      const status = this.coordinator.getStatus();
-      const running = status.subagents.filter((s) => s.status === 'running').length;
-      const idle = status.subagents.filter((s) => s.status === 'idle').length;
-      this.promotionBlockReason =
-        `Cannot promote to director: a non-director coordinator is already in use ` +
-        `(${running} running, ${idle} idle, ${status.pendingTasks} pending tasks). ` +
-        `Stop the existing subagents with /fleet kill <id> or wait for them to finish, ` +
-        `then retry — or restart wstack with --director to start in director mode.`;
-      return null;
-    }
-    // Force director mode on so ensureCoordinator builds a Director.
+    // With the single-path refactoring, spawn() always builds a Director.
+    // So a "coordinator without director" state can no longer occur.
     this.opts.directorMode = true;
     // Derive fleet paths from fleetRoot when available.
     if (this.opts.fleetRoot && !this.opts.manifestPath) {
@@ -778,14 +690,14 @@ export class MultiAgentHost {
    * called /fleet kill before any /spawn, and there's nothing to do.
    */
   async kill(subagentId: string): Promise<boolean> {
-    if (!this.coordinator) return false;
-    await this.coordinator.stop(subagentId);
+    if (!this.director) return false;
+    await this.getCoordinator().stop(subagentId);
     return true;
   }
 
   async stopAll(): Promise<void> {
-    if (this.coordinator) {
-      await this.coordinator.stopAll();
+    if (this.director) {
+      await this.getCoordinator().stopAll();
     }
   }
 }
