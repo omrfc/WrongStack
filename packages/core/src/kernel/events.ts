@@ -421,56 +421,77 @@ export class EventBus {
  * `bus.teardown()`.
  */
 export class ScopedEventBus extends EventBus {
-  private readonly registrations: Set<() => void> = new Set();
+  // Track registrations by a unique counter key so that EventBus.once()'s
+  // internal listener-removal doesn't affect our tracking (once removes the
+  // fn from EventBus but we still need to call our unsub during teardown).
+  private readonly registrations = new Map<number, () => void>();
+  private nextKey = 0;
 
   /**
-   * Identical to `EventBus.on` but the returned unsubscribe function is
-   * also registered so that `teardown()` will remove it automatically.
-   */
-  override on<E extends EventName>(event: E, fn: Listener<E>): () => void {
-    const unsub = super.on(event, fn);
-    this.registrations.add(unsub);
-    return () => {
-      this.registrations.delete(unsub);
-      unsub();
-    };
-  }
-
-  /**
-   * Identical to `EventBus.once` but the auto-remove is tracked so that
+   * Identical to `EventBus.on` but the listener is tracked so that
    * `teardown()` will remove it automatically.
    */
-  override once<E extends EventName>(event: E, fn: Listener<E>): () => void {
-    const unsub = super.once(event, fn);
-    this.registrations.add(unsub);
+  override on<E extends EventName>(event: E, fn: Listener<E>): () => void {
+    const key = this.nextKey++;
+    const unsub = super.on(event, fn);
+    this.registrations.set(key, unsub);
     return () => {
-      this.registrations.delete(unsub);
+      this.registrations.delete(key);
       unsub();
     };
   }
 
   /**
-   * Identical to `EventBus.onPattern` but the returned unsubscribe function
-   * is also registered so that `teardown()` will remove it automatically.
+   * Identical to `EventBus.once` but the listener is tracked so that
+   * `teardown()` will remove it automatically.
+   *
+   * Uses EventBus's public API directly to avoid triggering our own `on()`
+   * override (which would consume a key slot for the wrapper, then orphan
+   * our registration entry under a different key).
+   */
+  override once<E extends EventName>(event: E, fn: Listener<E>): () => void {
+    const key = this.nextKey++;
+    const wrapper: Listener<E> = (payload) => {
+      // Bypass ScopedEventBus.on() — go straight to EventBus.off() so we
+      // don't recurse and don't consume another key.
+      EventBus.prototype.off.call(this, event, wrapper as Listener<EventName>);
+      (fn as Listener<E>)(payload);
+    };
+    // Use the EventBus prototype directly to register without triggering
+    // ScopedEventBus.on() which would consume a second key.
+    EventBus.prototype.on.call(this, event, wrapper as Listener<EventName>);
+    const unsub = () => {
+      this.registrations.delete(key);
+      EventBus.prototype.off.call(this, event, wrapper as Listener<EventName>);
+    };
+    this.registrations.set(key, unsub);
+    return unsub;
+  }
+
+  /**
+   * Identical to `EventBus.onPattern` but the listener is tracked so that
+   * `teardown()` will remove it automatically.
    */
   override onPattern(pattern: string, fn: (event: string, payload: unknown) => void): () => void {
+    const key = this.nextKey++;
     const unsub = super.onPattern(pattern, fn);
-    this.registrations.add(unsub);
+    this.registrations.set(key, unsub);
     return () => {
-      this.registrations.delete(unsub);
+      this.registrations.delete(key);
       unsub();
     };
   }
 
   /**
-   * Identical to `EventBus.onRegex` but the returned unsubscribe function
-   * is also registered so that `teardown()` will remove it automatically.
+   * Identical to `EventBus.onRegex` but the listener is tracked so that
+   * `teardown()` will remove it automatically.
    */
   override onRegex(regex: RegExp, fn: (event: string, payload: unknown) => void): () => void {
+    const key = this.nextKey++;
     const unsub = super.onRegex(regex, fn);
-    this.registrations.add(unsub);
+    this.registrations.set(key, unsub);
     return () => {
-      this.registrations.delete(unsub);
+      this.registrations.delete(key);
       unsub();
     };
   }
@@ -487,7 +508,7 @@ export class ScopedEventBus extends EventBus {
    * ```
    */
   teardown(): void {
-    for (const unsub of this.registrations) {
+    for (const unsub of this.registrations.values()) {
       try { unsub(); } catch { /* ignore — best effort */ }
     }
     this.registrations.clear();

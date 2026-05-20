@@ -172,7 +172,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
           }
           return { permission: decision === 'yes' ? 'auto' : 'deny', source: 'user' };
         }
-        return { permission: 'confirm', source: 'yolo_destructive', reason: 'destructive tool needs explicit approval even in yolo mode' };
+        return { permission: 'confirm', source: 'yolo_destructive', riskTier: 'destructive', reason: 'destructive tool needs explicit approval even in yolo mode' };
       }
       return { permission: 'auto', source: 'yolo' };
     }

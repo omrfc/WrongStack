@@ -1,3 +1,6 @@
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { describe, expect, it, beforeEach } from 'vitest';
 import { SecurityScanner } from '../../src/security-scanner/scanner.js';
 import type { GeneratedSkill, TechStackInfo, SecurityPattern } from '../../src/security-scanner/types.js';
@@ -33,6 +36,12 @@ describe('SecurityScanner', () => {
 
   describe('pattern matching', () => {
     it('detects hardcoded secrets', async () => {
+      // Create a real temp file with the secret pattern so gatherFiles finds something
+      const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-scanner-'));
+      const testFile = path.join(tmpDir, 'config.ts');
+      // Key must be 20+ alphanumeric chars only - underscores break the test regex pattern
+      await fs.writeFile(testFile, 'const apiKey = "sktestabcdefghij1234567890";\n');
+
       const patterns: SecurityPattern[] = [
         {
           id: 'hardcoded-api-key',
@@ -49,9 +58,12 @@ describe('SecurityScanner', () => {
       const skill = createMockSkill(patterns);
       const techStack = createMockTechStack();
 
-      const result = await scanner.scan('/test', skill, techStack);
+      const result = await scanner.scan(tmpDir, skill, techStack);
 
       expect(result.findings.some((f) => f.id.includes('hardcoded-api-key'))).toBe(true);
+      expect(result.scannedFiles).toBeGreaterThan(0);
+
+      await fs.rm(tmpDir, { recursive: true, force: true });
     });
 
     it('respects excludePaths option', async () => {

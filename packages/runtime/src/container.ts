@@ -28,6 +28,7 @@ export interface CreateContainerOptions {
   modelsRegistry: ModelsRegistry;
   permission?: {
     yolo?: boolean;
+    forceAllYolo?: boolean;
     promptDelegate?: (
       tool: Tool,
       input: unknown,
@@ -75,6 +76,7 @@ export function createDefaultContainer(opts: CreateContainerOptions): Container 
     new DefaultPermissionPolicy({
       trustFile: wpaths.projectTrust,
       yolo: opts.permission?.yolo ?? false,
+      forceAllYolo: opts.permission?.forceAllYolo ?? false,
       promptDelegate: opts.permission?.promptDelegate,
     }),
   );

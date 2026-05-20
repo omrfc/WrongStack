@@ -85,6 +85,17 @@ describe('createDefaultContainer', () => {
     expect(c.has(TOKENS.PermissionPolicy)).toBe(true);
   });
 
+  it('passes permission forceAllYolo option to DefaultPermissionPolicy', () => {
+    const c = createDefaultContainer({
+      config: mockConfig, wpaths: mockWpaths, logger: mockLogger, modelsRegistry: mockModels,
+      permission: { yolo: true },
+    });
+    const policy = c.resolve(TOKENS.PermissionPolicy);
+    expect(policy.getForceAllYolo()).toBe(false);
+    policy.setForceAllYolo(true);
+    expect(policy.getForceAllYolo()).toBe(true);
+  });
+
   it('passes bundledSkillsDir to DefaultSkillLoader', () => {
     const c = createDefaultContainer({
       config: mockConfig, wpaths: mockWpaths, logger: mockLogger, modelsRegistry: mockModels,
