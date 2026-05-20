@@ -107,6 +107,26 @@ export interface MultiAgentHostOptions {
    */
   stateCheckpointPath?: string;
   /**
+   * Fleet-wide cost ceiling for the director. When set, the director
+   * refuses any new spawn that would push total fleet spend above this
+   * limit. In-flight subagents complete normally; only new spawns are
+   * blocked. Only meaningful in director mode.
+   */
+  directorBudget?: {
+    maxCostUsd?: number;
+  };
+  /**
+   * Maximum auto-extensions per subagent per budget kind before the
+   * director denies further extensions. Default: 2. Only meaningful in
+   * director mode.
+   */
+  maxBudgetExtensions?: number;
+  /**
+   * Debounce window for state-checkpoint writes in milliseconds.
+   * Default: 250. Only meaningful in director mode.
+   */
+  checkpointDebounceMs?: number;
+  /**
    * Session writer the director forwards task lifecycle events to
    * (agent_spawned, task_created, task_completed, task_failed). The CLI
    * passes the same writer the host Agent uses so all events land in one
@@ -198,12 +218,25 @@ export class MultiAgentHost {
     };
 
     if (this.opts.directorMode) {
+      // Default the scratchpad directory to `<sessionsRoot>/<directorRunId>/shared/`
+      // when both are available but the caller didn't provide an explicit path.
+      // This makes fleet coordination discoverable without requiring extra config.
+      const defaultScratchpad: string | undefined =
+        this.opts.sharedScratchpadPath ||
+        (this.opts.sessionsRoot && this.opts.directorRunId
+          ? path.join(this.opts.sessionsRoot, this.opts.directorRunId, 'shared')
+          : undefined);
       this.director = new Director({
         config: coordinatorConfig,
         manifestPath: this.opts.manifestPath,
-        sharedScratchpadPath: this.opts.sharedScratchpadPath,
+        sharedScratchpadPath: defaultScratchpad,
         stateCheckpointPath: this.opts.stateCheckpointPath,
         sessionWriter: this.opts.sessionWriter,
+        directorBudget: this.opts.directorBudget,
+        maxBudgetExtensions: this.opts.maxBudgetExtensions,
+        checkpointDebounceMs: this.opts.checkpointDebounceMs,
+        sessionsRoot: this.opts.sessionsRoot,
+        directorRunId: this.opts.directorRunId,
         // Autonomy: allow nested directors a few levels deep. Default
         // is 2 (root + one tier of workers), which trips the moment a
         // worker tries to recurse into "let me delegate the parser
@@ -547,11 +580,24 @@ export class MultiAgentHost {
     live: { subagentId: string; status: string; task?: string }[];
     summary: string;
   } {
-    const pending = Array.from(this.pending.entries()).map(([taskId, v]) => ({
-      taskId,
-      description: v.description,
-      subagentId: v.subagentId,
-    }));
+    // Build the set of still-active subagent ids (running or idle) so we
+    // can filter out pending tasks whose worker has already been stopped.
+    const activeSubagentIds = new Set<string>();
+    if (this.coordinator) {
+      const s = this.coordinator.getStatus();
+      for (const a of s.subagents) {
+        if (a.status === 'running' || a.status === 'idle') {
+          activeSubagentIds.add(a.id);
+        }
+      }
+    }
+    const pending = Array.from(this.pending.entries())
+      .filter(([, v]) => activeSubagentIds.has(v.subagentId))
+      .map(([taskId, v]) => ({
+        taskId,
+        description: v.description,
+        subagentId: v.subagentId,
+      }));
     // Include live subagent statuses from the coordinator so /agents shows
     // running agents even when they haven't produced a TaskResult yet.
     const live: { subagentId: string; status: string; task?: string }[] = [];

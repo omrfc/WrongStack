@@ -24,6 +24,8 @@ export interface SessionResult {
   queueStore: QueueStore;
   planPath: string;
   detachTodosCheckpoint: () => void;
+  /** Director state checkpoint from the prior run — null if this is not a resume. */
+  priorFleetState?: import('@wrongstack/core').DirectorStateSnapshot;
 }
 
 export async function setupSession(params: {
@@ -101,10 +103,11 @@ export async function setupSession(params: {
   const planPath = path.join(wpaths.projectSessions, `${session!.id}.plan.json`);
   context.state.setMeta('plan.path', planPath);
 
+  let dirState;
   if (resumeId) {
     try {
       const fleetRoot = path.join(wpaths.projectSessions, session!.id);
-      const dirState = await loadDirectorState(path.join(fleetRoot, 'director-state.json'));
+      dirState = await loadDirectorState(path.join(fleetRoot, 'director-state.json'));
       if (dirState) {
         const tCounts: Record<string, number> = {};
         for (const t of dirState.tasks) tCounts[t.status] = (tCounts[t.status] ?? 0) + 1;
@@ -122,5 +125,5 @@ export async function setupSession(params: {
     } catch { /* ignore */ }
   }
 
-  return { session: session!, sessionRef, context, restoredMessages, attachments, recoveryLock, queueStore, planPath, detachTodosCheckpoint };
+  return { session: session!, sessionRef, context, restoredMessages, attachments, recoveryLock, queueStore, planPath, detachTodosCheckpoint, priorFleetState: dirState ?? undefined };
 }

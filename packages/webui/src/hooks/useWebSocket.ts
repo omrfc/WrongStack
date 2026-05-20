@@ -95,6 +95,13 @@ function installHandlers(ws: WrongStackWebSocketClient): () => void {
               if (b.type === 'text' && typeof b.text === 'string') {
                 text += (text ? '\n' : '') + b.text;
               } else if (b.type === 'tool_use') {
+                // Flush any accumulated text before emitting the tool_use
+                // so assistant messages that mix text + tool_use don't lose
+                // their text portion.
+                if (text) {
+                  chat.addMessage({ role: m.role as 'user' | 'assistant', content: text });
+                  text = '';
+                }
                 chat.addMessage({
                   role: 'tool',
                   content: '',
@@ -102,7 +109,6 @@ function installHandlers(ws: WrongStackWebSocketClient): () => void {
                   toolInput: b.input,
                   toolUseId: String(b.id ?? ''),
                 });
-                text = '';
               } else if (b.type === 'tool_result') {
                 const all = useChatStore.getState().messages;
                 let last: { id: string } | undefined;

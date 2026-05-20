@@ -62,6 +62,13 @@ export interface CreateDelegateToolOptions {
    * JSONLs at `<sessionsRoot>/<runId>/<subagentId>.jsonl`.
    */
   directorRunId?: string;
+  /**
+   * Buffer subtracted from the caller's `timeoutMs` before passing it
+   * to the subagent. Gives the host a window to detect a subagent that
+   * has gone silent and surface a partial result rather than a generic
+   * timeout. Default: 30_000 ms.
+   */
+  subagentTimeoutBufferMs?: number;
 }
 
 /**
@@ -216,7 +223,7 @@ export function createDelegateTool(opts: CreateDelegateToolOptions): Tool {
             cfg.maxToolCalls = i.maxToolCalls;
           }
 
-          const SUBAGENT_TIMEOUT_BUFFER_MS = 30_000;
+          const SUBAGENT_TIMEOUT_BUFFER_MS = opts.subagentTimeoutBufferMs ?? 30_000;
           const desiredSubTimeout = Math.max(30_000, timeoutMs - SUBAGENT_TIMEOUT_BUFFER_MS);
           if (!cfg.timeoutMs || cfg.timeoutMs > desiredSubTimeout) {
             cfg.timeoutMs = desiredSubTimeout;
@@ -280,8 +287,8 @@ export function createDelegateTool(opts: CreateDelegateToolOptions): Tool {
             toolCalls: result.toolCalls,
             durationMs: result.durationMs,
             ...(partial ? { partial } : {}),
-            ...(hintForKind(errorKind, retryable, backoffMs)
-              ? { hint: hintForKind(errorKind, retryable, backoffMs) }
+            ...(hintForKind(errorKind, retryable, backoffMs, partial)
+              ? { hint: hintForKind(errorKind, retryable, backoffMs, partial) }
               : {}),
           };
         } catch (err) {
@@ -322,6 +329,7 @@ function hintForKind(
   kind: string | undefined,
   retryable: boolean | undefined,
   backoffMs: number | undefined,
+  partial?: { lastAssistantText?: string },
 ): string | undefined {
   if (!kind) return undefined;
   switch (kind) {
@@ -338,16 +346,31 @@ function hintForKind(
     case 'budget_iterations':
     case 'budget_tool_calls':
     case 'budget_tokens':
-    case 'budget_cost':
-      return 'Subagent exhausted its budget. The coordinator may auto-extend; otherwise raise the matching `max*` field (e.g. maxToolCalls: 600) on the next delegate, or split the task.';
-    case 'budget_timeout':
-      return 'Subagent hit its wall-clock budget. Raise `timeoutMs` on the next delegate or split the task.';
+    case 'budget_cost': {
+      const base = 'Subagent exhausted its budget. The coordinator may auto-extend; otherwise raise the matching `max*` field (e.g. maxToolCalls: 600) on the next delegate, or split the task.';
+      if (partial?.lastAssistantText) {
+        return `${base}\n\nPartial output produced before budget hit:\n${partial.lastAssistantText}`;
+      }
+      return base;
+    }
+    case 'budget_timeout': {
+      const base = 'Subagent hit its wall-clock budget. Raise `timeoutMs` on the next delegate or split the task.';
+      if (partial?.lastAssistantText) {
+        return `${base}\n\nPartial output produced before timeout:\n${partial.lastAssistantText}`;
+      }
+      return base;
+    }
     case 'aborted_by_parent':
       return 'Subagent was aborted (user Ctrl+C, parent unwound, or sibling failure cascade). Not retryable until the abort condition is resolved.';
     case 'empty_response':
       return 'Subagent ended its turn with no text and no tool calls. Almost always a prompt / config issue — clarify the task or check the model.';
-    case 'tool_failed':
-      return 'A tool inside the subagent returned ok:false. Inspect `partial.lastAssistantText` for the agent reasoning, then retry with corrected inputs.';
+    case 'tool_failed': {
+      const base = 'A tool inside the subagent returned ok:false. Retry with corrected inputs.';
+      if (partial?.lastAssistantText) {
+        return `${base}\n\nAgent reasoning before failure:\n${partial.lastAssistantText}`;
+      }
+      return base;
+    }
     case 'bridge_failed':
       return 'Parent-child bridge transport failed. This is rare — restart the session and retry.';
     default:

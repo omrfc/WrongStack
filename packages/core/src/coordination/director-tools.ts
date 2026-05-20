@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { SubagentConfig, TaskSpec } from '../types/multi-agent.js';
 import type { JSONSchema, Tool } from '../types/tool.js';
-import { type Director, DirectorBudgetError } from './director.js';
+import { type Director, DirectorBudgetError, DirectorCostCapError } from './director.js';
 
 // ---------------------------------------------------------------------------
 // Director-facing tool factories.
@@ -54,6 +54,9 @@ export function makeSpawnTool(director: Director, roster?: Record<string, Subage
         return { subagentId, provider: cfg.provider, model: cfg.model, name: cfg.name };
       } catch (err) {
         if (err instanceof DirectorBudgetError) {
+          return { error: err.message, kind: err.kind, limit: err.limit, observed: err.observed };
+        }
+        if (err instanceof DirectorCostCapError) {
           return { error: err.message, kind: err.kind, limit: err.limit, observed: err.observed };
         }
         return { error: err instanceof Error ? err.message : String(err) };
@@ -195,5 +198,79 @@ export function makeFleetUsageTool(director: Director): Tool {
     mutating: false,
     inputSchema: { type: 'object', properties: {}, required: [] },
     async execute() { return director.snapshot(); },
+  };
+}
+
+/**
+ * Read a subagent's JSONL transcript and return the last assistant text,
+ * stop reason, and tool-use count. The director can call this on a
+ * running or timed-out subagent to see what it actually produced without
+ * having to wait for natural completion.
+ */
+export function makeFleetSessionTool(director: Director): Tool {
+  return {
+    name: 'fleet_session',
+    description:
+      'Read a subagent\'s JSONL transcript and extract its last assistant text, stop reason, and tool-use count. Use this to see what a running or timed-out subagent actually produced.',
+    permission: 'auto',
+    mutating: false,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        subagentId: { type: 'string', description: 'Subagent id to read the transcript of.' },
+        /** Number of trailing lines to return (last N JSONL lines). Default: all. */
+        tail: { type: 'number', description: 'Number of trailing JSONL lines to return. Omit for the full transcript.' },
+      },
+      required: ['subagentId'],
+    },
+    async execute(input: unknown) {
+      const i = input as { subagentId: string; tail?: number };
+      const result = await director.readSession(i.subagentId, i.tail);
+      if (!result) {
+        return {
+          error: `fleet_session: transcript unavailable for "${i.subagentId}". Is sessionsRoot configured?`,
+        };
+      }
+      return result;
+    },
+  };
+}
+
+/**
+ * Health snapshot per subagent — budget pressure (how close to limits),
+ * last activity timestamp, and current status. Lets the director make
+ * smarter routing decisions without having to call fleet_usage + fleet_status separately.
+ */
+export function makeFleetHealthTool(director: Director): Tool {
+  return {
+    name: 'fleet_health',
+    description:
+      'Per-subagent health report: budget pressure (pct of limits consumed), last activity timestamp, and current status. Use to decide whether to assign more work to a subagent or spawn a fresh one.',
+    permission: 'auto',
+    mutating: false,
+    inputSchema: { type: 'object', properties: {}, required: [] },
+    async execute() {
+      const status = director.status();
+      const snapshot = director.snapshot();
+      const subagents = status.subagents ?? [];
+      const perSubagent = snapshot.perSubagent ?? {};
+      return {
+        subagents: subagents.map((s) => {
+          const usage = perSubagent[s.id];
+          return {
+            id: s.id,
+            status: s.status,
+            lastEventAt: usage?.lastEventAt,
+            // Budget pressure: fraction of each limit consumed if we have it.
+            // BudgetWarning events carry used/limit ratios; surface them here.
+            budgetPressure: {
+              iterations: usage?.iterations,
+              toolCalls: usage?.toolCalls,
+              costUsd: usage?.cost,
+            },
+          };
+        }),
+      };
+    },
   };
 }

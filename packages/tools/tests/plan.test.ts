@@ -103,4 +103,52 @@ describe('planTool', () => {
     expect(out.count).toBe(0);
     expect(out.open).toBe(0);
   });
+
+  it('template_use applies a template', async () => {
+    const out = await planTool.execute(
+      { action: 'template_use', template: 'bug-fix' },
+      sb.ctx,
+      { signal: newSignal() },
+    );
+    expect(out.ok).toBe(true);
+    expect(out.count).toBeGreaterThan(0);
+    expect(out.message).toContain('bug-fix');
+
+    const raw = JSON.parse(await fs.readFile(sb.planPath, 'utf8')) as {
+      items: Array<{ title: string }>;
+    };
+    expect(raw.items.length).toBeGreaterThan(0);
+    expect(raw.items[0]!.title).toBeDefined();
+  });
+
+  it('template_use with unknown template returns ok=false', async () => {
+    const out = await planTool.execute(
+      { action: 'template_use', template: 'nonexistent' },
+      sb.ctx,
+      { signal: newSignal() },
+    );
+    expect(out.ok).toBe(false);
+    expect(out.message).toContain('Unknown template');
+  });
+
+  it('promote creates todos and updates plan', async () => {
+    // Set up a mock state.replaceTodos
+    const replacedTodos: unknown[] = [];
+    sb.ctx.state = {
+      replaceTodos(todos: unknown[]) {
+        replacedTodos.push(...todos);
+      },
+    } as unknown as Context['state'];
+
+    await planTool.execute({ action: 'add', title: 'Build feature' }, sb.ctx, { signal: newSignal() });
+    const out = await planTool.execute(
+      { action: 'promote', target: '1', subtasks: ['Write tests', 'Implement'] },
+      sb.ctx,
+      { signal: newSignal() },
+    );
+    expect(out.ok).toBe(true);
+    expect(out.todos).toBeDefined();
+    expect(out.todos!.length).toBe(3); // 1 parent + 2 subtasks
+    expect(replacedTodos.length).toBe(3);
+  });
 });

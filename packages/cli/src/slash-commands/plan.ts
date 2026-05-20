@@ -1,8 +1,12 @@
 import {
   addPlanItem,
   clearPlan,
+  deriveTodosFromPlanItem,
   emptyPlan,
   formatPlan,
+  formatPlanTemplates,
+  formatTodosList,
+  getPlanTemplate,
   loadPlan,
   type PlanFile,
   removePlanItem,
@@ -26,7 +30,8 @@ import type { SlashCommandContext } from './index.js';
 export function buildPlanCommand(opts: SlashCommandContext & { planPath?: string }): SlashCommand {
   return {
     name: 'plan',
-    description: 'Strategic plan board: /plan [show|add <title>|done <id|#>|remove <id|#>|clear]',
+    description:
+      'Strategic plan board: /plan [show|add <title>|start <id|#>|done <id|#>|remove <id|#>|promote <id|#> [subtask ...]|derive <id|#>|template [list|use <name>]|clear]',
     async run(args) {
       const planPath = opts.planPath;
       if (!planPath) return { message: 'Plan storage is not configured for this session.' };
@@ -71,6 +76,51 @@ export function buildPlanCommand(opts: SlashCommandContext & { planPath?: string
           await savePlan(planPath, updated);
           return { message: formatPlan(updated) };
         }
+        case 'promote': {
+          if (!restJoined) return { message: 'Usage: /plan promote <id|index> [subtask ...]' };
+          const [target, ...subtasks] = restJoined.split(/\s+/);
+          if (!target) return { message: 'Usage: /plan promote <id|index> [subtask ...]' };
+          const derived = deriveTodosFromPlanItem(plan, target, subtasks.length > 0 ? subtasks : undefined);
+          if (!derived) return { message: `No plan item matched "${target}".` };
+          await savePlan(planPath, derived.plan);
+          if (ctx) {
+            ctx.state.replaceTodos(derived.todos);
+          }
+          return {
+            message: `Promoted to ${derived.todos.length} todo(s):\n${formatTodosList(derived.todos)}\n\n${formatPlan(derived.plan)}`,
+          };
+        }
+        case 'derive': {
+          if (!restJoined) return { message: 'Usage: /plan derive <id|index>' };
+          const derived = deriveTodosFromPlanItem(plan, restJoined);
+          if (!derived) return { message: `No plan item matched "${restJoined}".` };
+          await savePlan(planPath, derived.plan);
+          if (ctx) {
+            ctx.state.replaceTodos(derived.todos);
+          }
+          return {
+            message: `Derived ${derived.todos.length} todo(s):\n${formatTodosList(derived.todos)}\n\n${formatPlan(derived.plan)}`,
+          };
+        }
+        case 'template': {
+          const subVerb = rest[0] ?? '';
+          const subRest = rest.slice(1).join(' ').trim();
+          if (subVerb === '' || subVerb === 'list') {
+            return { message: formatPlanTemplates() };
+          }
+          if (subVerb === 'use') {
+            if (!subRest) return { message: 'Usage: /plan template use <template-name>' };
+            const template = getPlanTemplate(subRest);
+            if (!template) return { message: `Unknown template "${subRest}". Use /plan template list to see available templates.` };
+            let updated = plan;
+            for (const item of template.items) {
+              ({ plan: updated } = addPlanItem(updated, item.title, item.details));
+            }
+            await savePlan(planPath, updated);
+            return { message: `Applied template "${template.name}" (${template.items.length} items):\n${formatPlan(updated)}` };
+          }
+          return { message: `Unknown template subcommand "${subVerb}". Try: list | use <name>` };
+        }
         case 'clear': {
           const updated = clearPlan(plan);
           await savePlan(planPath, updated);
@@ -78,7 +128,7 @@ export function buildPlanCommand(opts: SlashCommandContext & { planPath?: string
         }
         default:
           return {
-            message: `Unknown subcommand "${verb}". Try: show | add <title> | start <id|#> | done <id|#> | remove <id|#> | clear`,
+            message: `Unknown subcommand "${verb}". Try: show | add <title> | start <id|#> | done <id|#> | remove <id|#> | promote <id|#> | derive <id|#> | template [list|use <name>] | clear`,
           };
       }
     },

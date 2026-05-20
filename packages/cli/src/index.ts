@@ -400,6 +400,7 @@ export async function main(argv: string[]): Promise<number> {
   const queueStore = sessResult.queueStore;
   const planPath = sessResult.planPath;
   const detachTodosCheckpoint = sessResult.detachTodosCheckpoint;
+  const priorFleetState = sessResult.priorFleetState;
 
   const stats = new SessionStats(events, tokenCounter);
 
@@ -545,7 +546,7 @@ export async function main(argv: string[]): Promise<number> {
   // works and the FleetBus is available for observability hooks. Manifest
   // path defaults to `<projectSessions>/<sessionId>/fleet.json`; users can
   // override via `WRONGSTACK_FLEET_MANIFEST` if they want a fixed path.
-  const directorMode = flags['director'] === true;
+  const directorMode = flags['director'] === true || typeof flags['resume'] === 'string';
   let director: Director | null = null;
   // Autonomy mode: 'off' (default), 'suggest' (show next steps), 'auto' (self-driving)
   let autonomyMode: import('./slash-commands/autonomy.js').AutonomyMode = 'off';
@@ -628,6 +629,9 @@ export async function main(argv: string[]): Promise<number> {
     // so `spawn_subagent` can accept `role: 'bug-hunter'` shortcuts.
     director = await multiAgentHost.ensureDirector();
     if (director) {
+      // If we resumed a prior run, inject the checkpoint snapshot so the
+      // director's in-memory state mirrors the pre-crash fleet.
+      if (priorFleetState) director.setCheckpointState(priorFleetState);
       for (const tool of director.tools(FLEET_ROSTER)) {
         toolRegistry.register(tool);
       }

@@ -81,9 +81,16 @@ export {
   setPlanItemStatus,
   clearPlan,
   formatPlan,
+  deriveTodosFromPlanItem,
   type PlanItem,
   type PlanFile,
 } from '../storage/plan-store.js';
+export {
+  listPlanTemplates,
+  getPlanTemplate,
+  formatPlanTemplates,
+  type PlanTemplate,
+} from '../storage/plan-templates.js';
 export {
   DirectorStateCheckpoint,
   loadDirectorState,

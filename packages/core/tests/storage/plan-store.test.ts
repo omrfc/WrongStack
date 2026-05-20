@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addPlanItem,
   clearPlan,
+  deriveTodosFromPlanItem,
   emptyPlan,
   formatPlan,
   loadPlan,
@@ -68,5 +69,50 @@ describe('plan-store', () => {
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it('deriveTodosFromPlanItem creates todos from plan item', () => {
+    let plan = emptyPlan('s');
+    ({ plan } = addPlanItem(plan, 'Refactor auth', 'Extract JWT logic'));
+    ({ plan } = addPlanItem(plan, 'Add OAuth2'));
+
+    const derived = deriveTodosFromPlanItem(plan, '1');
+    expect(derived).not.toBeNull();
+    expect(derived!.todos).toHaveLength(1);
+    expect(derived!.todos[0]!.content).toBe('Refactor auth');
+    expect(derived!.todos[0]!.status).toBe('in_progress');
+    expect(derived!.todos[0]!.activeForm).toBe('Refactor auth');
+    // Plan item should be marked in_progress
+    expect(derived!.plan.items[0]!.status).toBe('in_progress');
+  });
+
+  it('deriveTodosFromPlanItem with subtasks creates multiple todos', () => {
+    let plan = emptyPlan('s');
+    ({ plan } = addPlanItem(plan, 'Build feature'));
+
+    const derived = deriveTodosFromPlanItem(plan, '1', ['Write tests', 'Implement', 'Deploy']);
+    expect(derived).not.toBeNull();
+    expect(derived!.todos).toHaveLength(4); // 1 parent + 3 subtasks
+    expect(derived!.todos[0]!.content).toBe('Build feature');
+    expect(derived!.todos[1]!.content).toBe('Write tests');
+    expect(derived!.todos[2]!.content).toBe('Implement');
+    expect(derived!.todos[3]!.content).toBe('Deploy');
+  });
+
+  it('deriveTodosFromPlanItem returns null for invalid target', () => {
+    const plan = emptyPlan('s');
+    const derived = deriveTodosFromPlanItem(plan, '999');
+    expect(derived).toBeNull();
+  });
+
+  it('deriveTodosFromPlanItem does not change done items', () => {
+    let plan = emptyPlan('s');
+    ({ plan } = addPlanItem(plan, 'Done item'));
+    plan = setPlanItemStatus(plan, '1', 'done');
+
+    const derived = deriveTodosFromPlanItem(plan, '1');
+    expect(derived).not.toBeNull();
+    expect(derived!.plan.items[0]!.status).toBe('done'); // stays done
+    expect(derived!.todos[0]!.status).toBe('in_progress'); // but todo is in_progress
   });
 });

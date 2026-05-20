@@ -142,6 +142,54 @@ function matchIndex(plan: PlanFile, idOrIndex: string): number {
 }
 
 /**
+ * Promote a plan item to a set of todo items.
+ * The plan item is marked 'in_progress' (if not already done) and its
+ * title + details become the first todo; additional subtasks are appended.
+ * Returns the derived todo list so the caller can pass it to `todoTool`
+ * or `ctx.state.replaceTodos()`.
+ */
+export function deriveTodosFromPlanItem(
+  plan: PlanFile,
+  idOrIndex: string,
+  subtasks?: string[],
+): { plan: PlanFile; todos: Array<{ id: string; content: string; status: 'pending' | 'in_progress' | 'completed'; activeForm?: string }> } | null {
+  const idx = matchIndex(plan, idOrIndex);
+  if (idx === -1) return null;
+
+  const item = plan.items[idx];
+  if (!item) return null;
+
+  // Mark the plan item in_progress if it wasn't already done
+  let updatedPlan = plan;
+  if (item.status !== 'done') {
+    updatedPlan = setPlanItemStatus(plan, idOrIndex, 'in_progress');
+  }
+
+  const todos: Array<{ id: string; content: string; status: 'pending' | 'in_progress' | 'completed'; activeForm?: string }> = [];
+
+  // First todo from the plan item itself
+  todos.push({
+    id: `todo_${Date.now()}_plan`,
+    content: item.title,
+    status: 'in_progress',
+    activeForm: item.title,
+  });
+
+  // Optional subtasks
+  if (subtasks && subtasks.length > 0) {
+    for (const st of subtasks) {
+      todos.push({
+        id: `todo_${Date.now()}_${randomUUID().slice(0, 6)}`,
+        content: st,
+        status: 'pending',
+      });
+    }
+  }
+
+  return { plan: updatedPlan, todos };
+}
+
+/**
  * Optional: attach a state-listener so meta operations (storing a plan
  * id on ctx.meta) trigger a save. Currently a stub — plans don't live
  * on Context, but this keeps the API surface symmetric with the todos

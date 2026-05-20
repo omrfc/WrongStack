@@ -1350,12 +1350,69 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
       case 'todos.clear': {
         // Manual override — the agent normally curates this list via
         // TodoWrite, but the user might want a clean slate without losing
-        // the rest of the context. Drop the array in place so any code
-        // path still holding a reference sees the change (`length = 0`
-        // mutates instead of replacing).
-        context.todos.length = 0;
+        // the rest of the context. Use state.replaceTodos so observers
+        // (checkpoint writer) stay in sync.
+        context.state.replaceTodos([]);
         sendResult(ws, true, 'Todos cleared');
         broadcast({ type: 'todos.updated', payload: { todos: [] } });
+        break;
+      }
+
+      case 'plan.get': {
+        // On-demand plan snapshot — used when a UI surface first mounts
+        // and needs to render the live plan without waiting for the next
+        // tool.executed to broadcast.
+        const planPath = (context.meta as Record<string, unknown>)['plan.path'];
+        if (typeof planPath === 'string' && planPath) {
+          try {
+            const { loadPlan } = await import('@wrongstack/core');
+            const plan = await loadPlan(planPath);
+            send(ws, {
+              type: 'plan.updated',
+              payload: { plan: plan ?? { version: 1, sessionId: session.id, updatedAt: new Date().toISOString(), items: [] } },
+            });
+          } catch {
+            send(ws, {
+              type: 'plan.updated',
+              payload: { plan: { version: 1, sessionId: session.id, updatedAt: new Date().toISOString(), items: [] } },
+            });
+          }
+        } else {
+          send(ws, {
+            type: 'plan.updated',
+            payload: { plan: null, error: 'Plan storage is not configured for this session.' },
+          });
+        }
+        break;
+      }
+
+      case 'plan.template_use': {
+        const { template } = (msg as { payload: { template: string } }).payload;
+        const planPath = (context.meta as Record<string, unknown>)['plan.path'];
+        if (typeof planPath !== 'string' || !planPath) {
+          sendResult(ws, false, 'Plan storage is not configured for this session.');
+          break;
+        }
+        try {
+          const { getPlanTemplate, loadPlan, savePlan, emptyPlan, addPlanItem, formatPlan } = await import('@wrongstack/core');
+          const tpl = getPlanTemplate(template);
+          if (!tpl) {
+            sendResult(ws, false, `Unknown template "${template}".`);
+            break;
+          }
+          let plan = (await loadPlan(planPath)) ?? emptyPlan(session.id);
+          for (const item of tpl.items) {
+            ({ plan } = addPlanItem(plan, item.title, item.details));
+          }
+          await savePlan(planPath, plan);
+          sendResult(ws, true, `Applied template "${tpl.name}" — ${tpl.items.length} items added.`);
+          broadcast({
+            type: 'plan.updated',
+            payload: { plan },
+          });
+        } catch (err) {
+          sendResult(ws, false, err instanceof Error ? err.message : String(err));
+        }
         break;
       }
 

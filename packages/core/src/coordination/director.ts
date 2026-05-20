@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { DirectorStateCheckpoint } from '../storage/director-state.js';
+import { DirectorStateCheckpoint, type DirectorStateSnapshot } from '../storage/director-state.js';
 import type { BridgeMessage } from '../types/agent-bridge.js';
 import type {
   CoordinatorStatus,
@@ -24,7 +24,7 @@ import {
 import { FleetBus, type FleetUsage, FleetUsageAggregator } from './fleet-bus.js';
 import { InMemoryBridgeTransport } from './in-memory-transport.js';
 import { DefaultMultiAgentCoordinator } from './multi-agent-coordinator.js';
-import { makeAskTool, makeAssignTool, makeAwaitTasksTool, makeFleetStatusTool, makeFleetUsageTool, makeRollUpTool, makeSpawnTool, makeTerminateTool } from './director-tools.js';
+import { makeAskTool, makeAssignTool, makeAwaitTasksTool, makeFleetHealthTool, makeFleetSessionTool, makeFleetStatusTool, makeFleetUsageTool, makeRollUpTool, makeSpawnTool, makeTerminateTool } from './director-tools.js';
 
 /**
  * Director — high-level orchestrator that owns a `MultiAgentCoordinator`,
@@ -126,6 +126,51 @@ export interface DirectorOptions {
    * writes (the manifest will then only be written on `shutdown()`).
    */
   manifestDebounceMs?: number;
+  /**
+   * Fleet-wide cost ceiling. When set, `spawn()` refuses any new subagent
+   * that would push the fleet's total cost above this limit. The cap
+   * is checked BEFORE the spawn is recorded — a refused spawn must not
+   * leak partial state into the manifest or fleet bus. Let in-flight
+   * tasks complete; refuse new spawns only. When `maxCostUsd` is absent
+   * or Infinity, no cost cap applies.
+   */
+  directorBudget?: {
+    /**
+     * Maximum total USD the fleet may spend across all subagents.
+     * Default: Infinity (no cap).
+     */
+    maxCostUsd?: number;
+  };
+  /**
+   * Maximum auto-extensions per subagent per budget kind before the
+   * director denies further extensions. A subagent hitting the same
+   * soft limit repeatedly (e.g. 3× budget.threshold_reached for
+   * tool_calls) is likely looping on a prompt/config issue, not
+   * making legitimate progress. Default: 2. Set to Infinity to
+   * disable the cap (use with caution — a misconfigured subagent
+   * could burn unlimited budget).
+   */
+  maxBudgetExtensions?: number;
+  /**
+   * Debounce window for state-checkpoint writes. Default: 250ms.
+   * Bursts of spawn/assign/complete events collapse into one disk
+   * hit. Higher values reduce write amplification on fast machines;
+   * lower values improve crash-recovery fidelity (less state lost
+   * on sudden process exit).
+   */
+  checkpointDebounceMs?: number;
+  /**
+   * Sessions root directory for per-subagent JSONL transcripts.
+   * When set, the director can read subagent transcripts directly for
+   * `fleet_session` tool — no bridge round-trip needed. Path convention:
+   * `<sessionsRoot>/<directorRunId>/<subagentId>.jsonl`.
+   */
+  sessionsRoot?: string;
+  /**
+   * Director run id — namespaced under `sessionsRoot` to locate per-subagent
+   * JSONLs. Defaults to the director's own `id` when omitted.
+   */
+  directorRunId?: string;
 }
 
 /**
@@ -146,6 +191,27 @@ export class DirectorBudgetError extends Error {
     );
     this.name = 'DirectorBudgetError';
     this.kind = kind;
+    this.limit = limit;
+    this.observed = observed;
+  }
+}
+
+/**
+ * Thrown by `Director.spawn()` when the fleet-wide cost cap is exceeded.
+ * Distinct from `DirectorBudgetError` (spawn count/depth) — this is a
+ * dollar-denominated ceiling that tracks cumulative spend across all
+ * subagents in the fleet.
+ */
+export class DirectorCostCapError extends Error {
+  readonly kind: 'max_cost_usd';
+  readonly limit: number;
+  readonly observed: number;
+  constructor(limit: number, observed: number) {
+    super(
+      `Director cost cap exceeded: total fleet spend ${observed.toFixed(4)} exceeds maxCostUsd ${limit.toFixed(4)}`,
+    );
+    this.name = 'DirectorCostCapError';
+    this.kind = 'max_cost_usd';
     this.limit = limit;
     this.observed = observed;
   }
@@ -224,6 +290,14 @@ export class Director {
   /** Debounce timer for periodic manifest writes. */
   private manifestTimer: NodeJS.Timeout | null = null;
   private readonly manifestDebounceMs: number;
+  /** Fleet-wide cost cap. Infinity means no cap. */
+  private readonly maxCostUsd: number;
+  /** Max auto-extensions per subagent per budget kind before denying. */
+  private readonly maxBudgetExtensions: number;
+  /** Sessions root for direct subagent JSONL reads (fleet_session tool). */
+  private readonly sessionsRoot?: string;
+  /** Director run id for JSONL path resolution. */
+  private readonly directorRunId: string;
   /** Resolves task descriptions back from `assign()` so completion events
    *  can also carry a human-readable title. */
   private readonly taskDescriptions = new Map<string, string>();
@@ -251,13 +325,18 @@ export class Director {
     this.spawnDepth = opts.spawnDepth ?? 0;
     this.sessionWriter = opts.sessionWriter ?? null;
     this.manifestDebounceMs = opts.manifestDebounceMs ?? 2000;
+    this.maxCostUsd = opts.directorBudget?.maxCostUsd ?? Number.POSITIVE_INFINITY;
+    this.maxBudgetExtensions = opts.maxBudgetExtensions ?? 2;
+    this.sessionsRoot = opts.sessionsRoot;
+    this.directorRunId = opts.directorRunId ?? this.id;
     this.stateCheckpoint = opts.stateCheckpointPath
       ? new DirectorStateCheckpoint(opts.stateCheckpointPath, {
           directorRunId: this.id,
           maxSpawns: opts.maxSpawns,
           spawnDepth: this.spawnDepth,
           maxSpawnDepth: this.maxSpawnDepth,
-        })
+          directorBudget: opts.directorBudget,
+        }, opts.checkpointDebounceMs ?? 250)
       : null;
     if (this.sharedScratchpadPath) {
       // Create the directory eagerly so subagents that try to write
@@ -346,11 +425,12 @@ export class Director {
     // the decision promise (via extend/deny), and let the normal
     // task.completed flow handle the rest.
     //
-    // Extension guard: a subagent that hits the same soft limit TWICE
-    // without completing its task is looping on a prompt/config issue,
-    // not running out of budget legitimately. After 2 extends we deny
-    // and let the task fail — the host agent should then split the work
-    // or narrow the scope. We track this per subagent+kind combination.
+    // Extension guard: a subagent that hits the same soft limit
+    // `maxBudgetExtensions` times without completing its task is looping
+    // on a prompt/config issue, not running out of budget legitimately.
+    // After the configured number of extends we deny and let the task
+    // fail — the host agent should then split the work or narrow the
+    // scope. We track this per subagent+kind combination.
     const extendCounts = new Map<string, number>();
     this.fleet.filter('budget.threshold_reached', (e) => {
       const payload = e.payload as {
@@ -363,8 +443,8 @@ export class Director {
       };
       const guardKey = `${e.subagentId}:${payload.kind}`;
       const prior = extendCounts.get(guardKey) ?? 0;
-      if (prior >= 2) {
-        // Second extension denied — let the task fail so the host agent
+      if (prior >= this.maxBudgetExtensions) {
+        // Auto-extend cap hit — let the task fail so the host agent
         // can react rather than spinning forever.
         payload.deny();
         extendCounts.delete(guardKey);
@@ -437,6 +517,16 @@ export class Director {
     }
     if (this.spawnCount >= this.maxSpawns) {
       throw new DirectorBudgetError('max_spawns', this.maxSpawns, this.spawnCount + 1);
+    }
+    // Fleet-wide cost cap: refuse spawn if current total already meets/exceeds
+    // the cap. In-flight tasks are left to complete; we only block new spawns.
+    // A subagent's own budget cost is tracked as it runs — this cap is the
+    // director's ceiling on total fleet spend across all workers.
+    if (this.maxCostUsd < Number.POSITIVE_INFINITY) {
+      const totalCost = this.usage.snapshot().total?.cost ?? 0;
+      if (totalCost >= this.maxCostUsd) {
+        throw new DirectorCostCapError(this.maxCostUsd, totalCost);
+      }
     }
     const result = await this.coordinator.spawn(config);
     this.spawnCount += 1;
@@ -638,6 +728,11 @@ export class Director {
       await this.stateCheckpoint
         .flush()
         .catch((err) => this.logShutdownError('state_checkpoint_flush', err));
+      // Release the lock so a subsequent --resume can claim this checkpoint.
+      // Without this, the next director run sees a stale lock and refuses.
+      await this.stateCheckpoint
+        .releaseLock()
+        .catch((err) => this.logShutdownError('state_checkpoint_lock_release', err));
     }
   }
 
@@ -758,6 +853,67 @@ export class Director {
     return Array.from(this.completed.values());
   }
 
+  /**
+   * Inject a previously-saved checkpoint snapshot. Call this right after
+   * constructing a Director during a `--resume` run so the in-memory state
+   * (subagents, tasks, waiters) reflects the pre-crash reality instead of
+   * starting from a blank slate. The director then resumes from there —
+   * completing any in-flight tasks and ignoring tasks that already reached
+   * a terminal state in the prior run.
+   */
+  setCheckpointState(snapshot: DirectorStateSnapshot): void {
+    this.stateCheckpoint?.resume(snapshot);
+  }
+
+  /**
+   * Read a subagent's JSONL transcript directly from disk (no bridge
+   * round-trip needed). Returns the last assistant text, stop reason,
+   * tool-use count, and line count — or null if the file is unavailable.
+   * Requires `sessionsRoot` to be set on construction.
+   */
+  async readSession(subagentId: string, tail?: number): Promise<{
+    lastAssistantText?: string;
+    lastStopReason?: string;
+    toolUsesObserved: number;
+    events: number;
+    path?: string;
+  } | null> {
+    if (!this.sessionsRoot) return null;
+    const filePath = path.join(this.sessionsRoot, this.directorRunId, `${subagentId}.jsonl`);
+    let raw: string;
+    try {
+      raw = await fsp.readFile(filePath, 'utf8');
+    } catch {
+      return null;
+    }
+    const lines = raw.split('\n').filter((l) => l.trim());
+    const targetLines = tail ? lines.slice(-tail) : lines;
+    let lastAssistantText: string | undefined;
+    let lastStopReason: string | undefined;
+    let toolUses = 0;
+    for (const line of targetLines) {
+      try {
+        const ev = JSON.parse(line) as { type?: string; text?: string; stopReason?: string };
+        if (ev.type === 'assistant' && typeof ev.text === 'string') {
+          lastAssistantText = ev.text;
+        } else if (ev.type === 'stop' && ev.stopReason) {
+          lastStopReason = ev.stopReason;
+        } else if (ev.type === 'tool_use') {
+          toolUses++;
+        }
+      } catch {
+        // skip malformed lines
+      }
+    }
+    return {
+      lastAssistantText,
+      lastStopReason,
+      toolUsesObserved: toolUses,
+      events: targetLines.length,
+      path: filePath,
+    };
+  }
+
   snapshot(): FleetUsage {
     return this.usage.snapshot();
   }
@@ -841,8 +997,28 @@ export class Director {
       makeTerminateTool(this),
       makeFleetStatusTool(this),
       makeFleetUsageTool(this),
+      makeFleetSessionTool(this),
+      makeFleetHealthTool(this),
     ];
     return t;
+  }
+
+  /**
+   * Attempt to acquire the checkpoint lock. Must be called before
+   * resuming — if another director process is alive, this returns
+   * false and the caller should not proceed with the resume.
+   */
+  async acquireCheckpointLock(): Promise<boolean> {
+    return this.stateCheckpoint ? this.stateCheckpoint.acquireLock() : true;
+  }
+
+  /**
+   * Resume from a prior checkpoint snapshot (loaded via
+   * `loadDirectorState()`). Re-attach to the fleet mid-flight so
+   * subsequent spawn/assign calls update the checkpoint normally.
+   */
+  resumeFromCheckpoint(snapshot: DirectorStateSnapshot): void {
+    this.stateCheckpoint?.resume(snapshot);
   }
 }
 

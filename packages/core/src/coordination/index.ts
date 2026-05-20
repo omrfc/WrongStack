@@ -2,6 +2,7 @@
 export {
   Director,
   DirectorBudgetError,
+  DirectorCostCapError,
 } from './director.js';
 export {
   createDelegateTool,

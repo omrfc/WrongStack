@@ -40,6 +40,9 @@ export interface DirectorStateSnapshot {
   maxSpawns?: number;
   spawnDepth: number;
   maxSpawnDepth: number;
+  directorBudget?: {
+    maxCostUsd?: number;
+  };
   subagents: DirectorSubagentState[];
   tasks: DirectorTaskState[];
   /** Aggregated usage snapshot. Optional — populated by the Director on save when available. */
@@ -63,14 +66,85 @@ export async function loadDirectorState(filePath: string): Promise<DirectorState
 }
 
 /**
+ * Lock file entry written when a director starts. Prevents two directors
+ * from resuming the same run — the second one sees the lock and refuses
+ * rather than corrupting the checkpoint by writing concurrently.
+ */
+export interface DirectorStateLock {
+  pid: number;
+  hostname: string;
+  startedAt: string;
+}
+
+/**
+ * Write a lock file to claim this checkpoint. Returns false if the lock
+ * is already held by a live process; returns true if the lock was acquired
+ * (either the file didn't exist, or the previous holder is dead).
+ */
+export async function acquireDirectorStateLock(
+  lockPath: string,
+  processId = process.pid,
+): Promise<boolean> {
+  let existing: string | undefined;
+  try {
+    existing = await fsp.readFile(lockPath, 'utf8');
+  } catch {
+    // No lock file — we're safe to claim
+  }
+
+  if (existing) {
+    try {
+      const lock = JSON.parse(existing) as DirectorStateLock;
+      // Check if the process is still alive
+      try {
+        process.kill(lock.pid, 0);
+        // Signal success means the process is alive — another director
+        // owns this checkpoint. Refuse.
+        return false;
+      } catch {
+        // ESRCH means the process is dead — stale lock. We'll overwrite.
+      }
+    } catch {
+      // Malformed lock — treat as stale.
+    }
+  }
+
+  const lock: DirectorStateLock = {
+    pid: processId,
+    hostname: require('node:os').hostname(),
+    startedAt: new Date().toISOString(),
+  };
+  await atomicWrite(lockPath, JSON.stringify(lock), { mode: 0o600 });
+  return true;
+}
+
+/**
+ * Remove the lock file. Call this on graceful Director.shutdown() so the
+ * next director run can claim the checkpoint without stale-lock checks.
+ */
+export async function releaseDirectorStateLock(lockPath: string): Promise<void> {
+  try {
+    await fsp.unlink(lockPath);
+  } catch {
+    // ignore
+  }
+}
+
+/**
  * In-memory accumulator with atomic-write checkpoint. The Director keeps
  * an instance, mutates it on every spawn/assign/complete/fail event, and
  * the instance debounces writes so a burst of activity collapses into a
  * single disk hit.
+ *
+ * Supports crash recovery: use `loadDirectorState()` to read an existing
+ * checkpoint, then call `DirectorStateCheckpoint.resume(snapshot)` to
+ * re-attach to a fleet mid-flight. The lock mechanism ensures no two
+ * directors can claim the same checkpoint.
  */
 export class DirectorStateCheckpoint {
   private snapshot: DirectorStateSnapshot;
   private readonly filePath: string;
+  private readonly lockPath: string;
   private timer: NodeJS.Timeout | null = null;
   private readonly debounceMs: number;
   private writing = false;
@@ -83,10 +157,15 @@ export class DirectorStateCheckpoint {
       maxSpawns?: number;
       spawnDepth: number;
       maxSpawnDepth: number;
+      directorBudget?: {
+        maxCostUsd?: number;
+      };
     },
     debounceMs = 250,
   ) {
     this.filePath = filePath;
+    // Lock file lives alongside the checkpoint — `<path>.lock`
+    this.lockPath = `${filePath}.lock`;
     this.debounceMs = debounceMs;
     this.snapshot = {
       version: 1,
@@ -96,9 +175,38 @@ export class DirectorStateCheckpoint {
       maxSpawns: init.maxSpawns,
       spawnDepth: init.spawnDepth,
       maxSpawnDepth: init.maxSpawnDepth,
+      directorBudget: init.directorBudget,
       subagents: [],
       tasks: [],
     };
+  }
+
+  /**
+   * Attempt to acquire the lock for this checkpoint. Call this before
+   * resuming a crashed director run. If it returns false, another
+   * director process is still running this fleet — do not resume.
+   */
+  async acquireLock(): Promise<boolean> {
+    return acquireDirectorStateLock(this.lockPath);
+  }
+
+  /**
+   * Release the lock on graceful shutdown. Call `flush()` first to ensure
+   * the final checkpoint state is on disk before removing the lock.
+   * Without this, the next resume will see a stale-lock and refuse.
+   */
+  async releaseLock(): Promise<void> {
+    return releaseDirectorStateLock(this.lockPath);
+  }
+
+  /**
+   * Resume from a snapshot previously loaded via `loadDirectorState()`.
+   * Use this when `--resume <runId>` is triggered — the snapshot has
+   * the full fleet state (subagents, tasks) from before the crash; the
+   * checkpoint continues from there.
+   */
+  resume(snapshot: DirectorStateSnapshot): void {
+    this.snapshot = snapshot;
   }
 
   current(): DirectorStateSnapshot {
