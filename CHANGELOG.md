@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2026-05-19
+
+### Fixed
+
+- **TUI multi-line paste normalization.** Plain clipboard pastes with
+  newlines (no bracketed-paste sequence) are now normalized to spaces
+  instead of triggering the verbose `[pasted #N N lines]` placeholder.
+  Newlines still reach the agent — they just no longer visually pollute
+  the input row. Bracketed pastes continue to use InputBuilder as before.
+
+### Changed
+
+- **Package versions bumped to 0.5.4** across all workspace packages.
+
 ## [0.5.3] - 2026-05-19
 
 ### Added

@@ -34,9 +34,10 @@ This pulls in the full stack — `@wrongstack/core`, `@wrongstack/runtime`, `@wr
 
 After install, `wrongstack` is on your `PATH`. (`wstack` works too — it's an alias.)
 
-### What's new in 0.5.x — session rewind & checkpoint system
+### What's new in 0.5.x — session rewind, checkpoint system, and TUI paste fix
 
-This release adds bounded session history traversal and improved crash recovery.
+This release adds bounded session history traversal, improved crash recovery,
+and a TUI paste quality-of-life fix.
 
 **Session rewind.** Added `session.rewind()` to the agent API, enabling
 bounded history traversal. Sessions can now step back through their
@@ -45,6 +46,11 @@ event log without losing the ability to resume from the latest state.
 **Session checkpoint system.** Session checkpoints now capture full
 context state for crash recovery, ensuring no work is lost if the
 process terminates unexpectedly.
+
+**TUI multi-line paste fix.** Plain clipboard pastes with newlines
+(without bracketed-paste sequence) are now normalized to spaces instead
+of showing the verbose `[pasted #N N lines]` placeholder. Newlines still
+reach the agent — they just no longer visually pollute the input row.
 
 **CLI `config-history` bug fix.** Added missing `import os from 'node:os'`
 in the config history module that was causing typecheck failures.
