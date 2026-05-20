@@ -109,7 +109,7 @@ User Input
 
 **Director is not an Agent.** `Director` is a coordinator + observability surface. To make it LLM-driven, construct an `Agent` with `director.tools()` registered. This keeps the construction symmetric with how other agents are built and avoids smuggling an LLM dependency into core.
 
-**Budget is explicit.** No implicit caps. The orchestrator picks budgets per task. `SubagentBudget` enforces hard stops; `DirectorBudgetError` enforces fleet-wide spawn caps.
+**Budget is explicit.** No implicit caps. The orchestrator picks budgets per task. `SubagentBudget` enforces hard stops; `FleetSpawnBudgetError` enforces fleet-wide spawn caps.
 
 **State survives crashes.** `DirectorStateCheckpoint` writes incremental snapshots on every mutation. `fleet.json` is the final manifest. Per-subagent JSONLs provide full replay capability.
 
@@ -132,12 +132,12 @@ User Input
 | Item | Description | Status |
 |------|-------------|--------|
 | `maxSpawnDepth` enforcement | Enforced in `Director.spawn()` before coordinator touch | ✅ Shipped |
-| Fleet-wide cost cap (`directorBudget.maxCostUsd`) | `DirectorCostCapError` + cost check before spawn | ✅ Shipped |
+| Fleet-wide cost cap (`directorBudget.maxCostUsd`) | `FleetSpawnBudgetError` + cost check before spawn | ✅ Shipped |
 | `maxBudgetExtensions` configurable | `DirectorOptions.maxBudgetExtensions` replaces hardcoded 2 | ✅ Shipped |
 | `checkpointDebounceMs` configurable | Passed through to `DirectorStateCheckpoint` | ✅ Shipped |
 | `fleet_session` tool | Director can read subagent JSONL mid-flight | ✅ Shipped |
 | `fleet_health` tool | Per-subagent budget pressure + liveness snapshot | ✅ Shipped |
-| `DirectorCostCapError` surfaced in `spawn_subagent` tool | LLM sees structured `{ error, kind, limit, observed }` | ✅ Shipped |
+| `FleetSpawnBudgetError` surfaced in `spawn_subagent` tool | LLM sees structured `{ error, kind, limit, observed }` | ✅ Shipped |
 | `--resume <runId>` | Crash recovery: re-attach to live subagents via lock files | 🔲 Pending |
 | Hostile-prompt test pack | Verify bridge contract prevents parent-context exfiltration | 🔲 Pending |
 | `wstack sessions ls <runId>` | CLI command to list session artifacts | 🔲 Pending |
@@ -170,7 +170,7 @@ A `redirect` tool that sends a new task description to a running subagent via th
 
 #### Fleet-wide cost cap ✅ Shipped (0.1.8)
 
-`DirectorOptions.directorBudget.maxCostUsd` sets a dollar-denominated ceiling. `DirectorCostCapError` is thrown before the spawn is recorded — in-flight tasks complete, only new spawns are blocked. Surfaced to the LLM as `{ error, kind: 'max_cost_usd', limit, observed }`.
+`DirectorOptions.directorBudget.maxCostUsd` sets a dollar-denominated ceiling. `FleetSpawnBudgetError` is thrown before the spawn is recorded — in-flight tasks complete, only new spawns are blocked. Surfaced to the LLM as `{ error, kind: 'max_cost_usd', limit, observed }`.
 
 #### Auto-extend guard configurable ✅ Shipped (0.1.8)
 
@@ -299,7 +299,7 @@ In `fleet-bus.ts` line 50-73, `FORWARDED_TYPES` is a const array listing every e
 | F4 | `checkpointDebounceMs` in `DirectorOptions` | `director.ts`, `director-state.ts` | ✅ Done |
 | F6 | `fleet_session` tool | `director-tools.ts`, `director.ts` | ✅ Done |
 | F7 | `fleet_health` tool | `director-tools.ts`, `director.ts` | ✅ Done |
-| — | `DirectorCostCapError` exported + surfaced in `spawn_subagent` tool | `director.ts`, `director-tools.ts` | ✅ Done |
+| — | `FleetSpawnBudgetError` exported + surfaced in `spawn_subagent` tool | `director.ts`, `director-tools.ts` | ✅ Done |
 | — | `MultiAgentHostOptions` extended with `directorBudget`, `maxBudgetExtensions`, `checkpointDebounceMs` | `packages/cli/src/multi-agent.ts` | ✅ Done |
 
 ### 🔲 Remaining — Phase 6 Completion

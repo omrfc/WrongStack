@@ -29,6 +29,7 @@ import {
   createDefaultPipelines,
   makeAgentSubagentRunner,
   makeDirectorSessionFactory,
+  NULL_FLEET_BUS,
 } from '@wrongstack/core';
 import type { TextBlock } from '@wrongstack/core';
 import { makeProviderFromConfig } from '@wrongstack/providers';
@@ -429,7 +430,7 @@ export class MultiAgentHost {
       return { agent, events, dispose };
     };
 
-    return makeAgentSubagentRunner({ factory, fleetBus: this.director?.fleet });
+    return makeAgentSubagentRunner({ factory, fleetBus: this.director?.fleet ?? NULL_FLEET_BUS });
   }
 
   /**
@@ -510,34 +511,10 @@ export class MultiAgentHost {
     // so the director's manifest entries get populated. Calling the
     // underlying coordinator directly would still execute the task, but
     // the manifest would be empty — that surprised the first test.
-    if (this.director) {
-      const subagentId = await this.director.spawn(subagentConfig);
-      const taskId = randomUUID();
-      this.pending.set(taskId, { description, subagentId });
-      this.deps.events.emit('subagent.spawned', {
-        subagentId,
-        taskId,
-        name: subagentConfig.name,
-        provider: opts?.provider,
-        model: opts?.model,
-        description,
-        transcriptPath,
-      });
-      await this.director.assign({
-        id: taskId,
-        description,
-        subagentId,
-        // No maxToolCalls — same reasoning as the spawn config above.
-        // The director / orchestrator owns the budget decision.
-      });
-      return { subagentId, taskId };
-    }
-    const coord = this.coordinator!;
-    const spawned = await coord.spawn(subagentConfig);
-    const taskId = randomUUID();
-    this.pending.set(taskId, { description, subagentId: spawned.subagentId });
+    const { subagentId, taskId } = await this._spawnAndAssign(subagentConfig);
+    this.pending.set(taskId, { description, subagentId });
     this.deps.events.emit('subagent.spawned', {
-      subagentId: spawned.subagentId,
+      subagentId,
       taskId,
       name: subagentConfig.name,
       provider: opts?.provider,
@@ -545,12 +522,33 @@ export class MultiAgentHost {
       description,
       transcriptPath,
     });
-    await coord.assign({
-      id: taskId,
-      description,
-      subagentId: spawned.subagentId,
-      // No maxToolCalls — see comment on the director branch above.
-    });
+    return { subagentId, taskId };
+  }
+
+  /**
+   * Common spawn + assign logic shared by both director mode and raw
+   * coordinator mode. Extracts the identical body from the two branches
+   * in `spawn()` so future changes (e.g. adding a new field to both
+   * paths) are made in one place.
+   *
+   * Returns `{ subagentId, taskId }`. Caller holds `pending` tracking
+   * and event emission — the helper only talks to the coordinator.
+   */
+  private async _spawnAndAssign(
+    subagentConfig: { name: string; role?: string; provider?: string; model?: string; tools?: string[] },
+  ): Promise<{ subagentId: string; taskId: string }> {
+    const taskId = randomUUID();
+
+    if (this.director) {
+      // Director path — spawn returns string subagentId
+      const subagentId = await this.director.spawn(subagentConfig);
+      await this.director.assign({ id: taskId, description: '', subagentId });
+      return { subagentId, taskId };
+    }
+
+    // Raw coordinator path — spawn returns SpawnResult
+    const spawned = await this.coordinator!.spawn(subagentConfig);
+    await this.coordinator!.assign({ id: taskId, description: '', subagentId: spawned.subagentId });
     return { subagentId: spawned.subagentId, taskId };
   }
 
@@ -607,13 +605,17 @@ export class MultiAgentHost {
         live.push({ subagentId: a.id, status: a.status, task: a.currentTask });
       }
     }
+    // In director mode, results live on the Director (no duplication here).
+    // In non-director mode, host state is the single source of truth.
+    const completed = this.director ? this.director.completedResults() : this.results;
+    const completedCount = completed.length;
     const liveCount = live.filter((s) => s.status === 'running' || s.status === 'idle').length;
     const summary = !this.coordinator
       ? 'No subagents have been spawned.'
       : liveCount > 0
-        ? `${pending.length} pending, ${liveCount} active, ${this.results.length} completed.`
-        : `${pending.length} pending, ${this.results.length} completed.`;
-    return { pending, completed: this.results, live, summary };
+        ? `${pending.length} pending, ${liveCount} active, ${completedCount} completed.`
+        : `${pending.length} pending, ${completedCount} completed.`;
+    return { pending, completed, live, summary };
   }
 
   /**
@@ -637,6 +639,9 @@ export class MultiAgentHost {
     }>;
     totals: { tasks: number; iterations: number; toolCalls: number; durationMs: number };
   } {
+    // In director mode, read results from the Director (single source of truth).
+    // In non-director mode, host state is the only place results are tracked.
+    const completed = this.director ? this.director.completedResults() : this.results;
     const bySubagent = new Map<
       string,
       {
@@ -647,7 +652,7 @@ export class MultiAgentHost {
         lastStatus: string;
       }
     >();
-    for (const r of this.results) {
+    for (const r of completed) {
       const cur = bySubagent.get(r.subagentId) ?? {
         tasks: 0,
         iterations: 0,

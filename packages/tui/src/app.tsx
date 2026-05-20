@@ -14,6 +14,7 @@ import type {
 import { DefaultSessionRewinder } from '@wrongstack/core';
 import { InputBuilder, formatTodosList } from '@wrongstack/core';
 import { type VisionAdapters, routeImagesForModel } from '@wrongstack/runtime/vision';
+import { getProcessRegistry } from '@wrongstack/tools';
 import { Box, useApp } from 'ink';
 import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { readClipboardImage } from './clipboard.js';
@@ -30,6 +31,8 @@ import { StatusBar } from './components/status-bar.js';
 import { searchFiles } from './file-search.js';
 import { type GitInfo, readGitInfo } from './git-info.js';
 import { createQueueSlashCommand } from './queue-slash.js';
+import { createKillSlashCommand } from './kill-slash.js';
+import { createPsSlashCommand } from './ps-slash.js';
 
 export interface QueueItem {
   id: number;
@@ -1686,6 +1689,25 @@ export function App({
     };
   }, [slashRegistry]);
 
+  // Register /kill (list/kill tracked bash/exec processes) and /ps (list only).
+  useEffect(() => {
+    slashRegistry.register(createKillSlashCommand());
+    slashRegistry.register(createPsSlashCommand());
+    return () => {
+      slashRegistry.unregister('kill');
+      slashRegistry.unregister('ps');
+    };
+  }, [slashRegistry]);
+
+  // Kill all tracked bash/exec processes when the TUI unmounts.
+  // This fires on natural exit, Ctrl+C, and any other unmount path,
+  // ensuring no orphaned child processes survive after the session ends.
+  useEffect(() => {
+    return () => {
+      getProcessRegistry().killAll();
+    };
+  }, []);
+
   // Register `/altscreen on|off` — runtime escape valve for the
   // alt-screen scrollback limitation. In alt-screen mode the terminal's
   // native scrollback is disabled, so users can't review old chat
@@ -2474,9 +2496,9 @@ export function App({
       // decided they want out. Try Ink's graceful exit first, then
       // hard-exit on a short timer in case the React tree is wedged.
       if (current.interrupts >= 1) {
-        // Second ( later) Ctrl+C — exit immediately no matter what.
-        // Don't try Ink's graceful exit (it requires staying in the event
-        // loop and the React tree may be wedged). Just exit hard.
+        // Second (or later) Ctrl+C — force-kill all processes and exit.
+        // This is the "you really mean it" exit path.
+        getProcessRegistry().killAll({ force: true });
         if (current.interrupts >= 2) {
           process.exit(130);
         }
@@ -2531,6 +2553,11 @@ export function App({
           });
           void Promise.race([director.terminateAll().catch(() => undefined), cap]);
         }
+        // Kill all tracked bash/exec processes from the process registry.
+        // This ensures runaway child processes (including background bashes
+        // that outlive the agent iteration) are cleaned up on Ctrl+C.
+        const killed = getProcessRegistry().killAll();
+        const procTag = killed.length > 0 ? ` + killed ${killed.length} process${killed.length === 1 ? '' : 'es'}` : '';
         const droppedCount = stateRef.current.queue.length;
         if (droppedCount > 0) {
           dispatch({ type: 'queueClear' });
@@ -2538,7 +2565,7 @@ export function App({
             type: 'addEntry',
             entry: {
               kind: 'warn',
-              text: `Iteration cancelled${director ? ' + fleet terminated' : ''}. Dropped ${droppedCount} queued message${droppedCount === 1 ? '' : 's'}. Press Ctrl+C again to exit.`,
+              text: `Iteration cancelled${director ? ' + fleet terminated' : ''}${procTag}. Dropped ${droppedCount} queued message${droppedCount === 1 ? '' : 's'}. Press Ctrl+C again to exit.`,
             },
           });
         } else {
@@ -2546,14 +2573,18 @@ export function App({
             type: 'addEntry',
             entry: {
               kind: 'warn',
-              text: `Iteration cancelled${director ? ' + fleet terminated' : ''}. Press Ctrl+C again to exit.`,
+              text: `Iteration cancelled${director ? ' + fleet terminated' : ''}${procTag}. Press Ctrl+C again to exit.`,
             },
           });
         }
       } else {
+        // No active ctrl (agent idle, or activeCtrlRef wasn't set).
+        // Still kill any lingering bash/exec processes and exit.
+        const killed = getProcessRegistry().killAll();
+        const procTag = killed.length > 0 ? ` Killed ${killed.length} process${killed.length === 1 ? '' : 'es'}.` : '';
         dispatch({
           type: 'addEntry',
-          entry: { kind: 'warn', text: 'Press Ctrl+C again to exit.' },
+          entry: { kind: 'warn', text: `Press Ctrl+C again to exit.${procTag}` },
         });
       }
     };
@@ -3351,6 +3382,7 @@ export function App({
         context={contextWindow}
         projectName={projectName}
         subagentCount={Object.keys(state.fleet).length}
+        processCount={getProcessRegistry().activeCount}
       />
       {director ? (
         <FleetPanel entries={state.fleet} totalCost={state.fleetCost} roster={fleetRoster} />

@@ -42,6 +42,8 @@ export default defineConfig({
     'src/tool-help.ts',
     'src/memory.ts',
     'src/mode.ts',
+    'src/process-registry.ts',
+    'src/circuit-breaker.ts',
   ],
   format: ['esm'],
   dts: true,

@@ -872,7 +872,7 @@ calling them when building each Agent.
 
 - **`DirectorOptions.maxSpawns`** — lifetime cap on `Director.spawn()`
   calls. Default: `Infinity` (off). The N+1-th spawn rejects with a
-  new `DirectorBudgetError`, status `subagents` reflect only the
+  new `FleetSpawnBudgetError`, status `subagents` reflect only the
   spawns that actually landed, no partial manifest entries are
   written. Use this to stop a runaway leader from billing tokens
   forever.
@@ -883,7 +883,7 @@ calling them when building each Agent.
   `spawnDepth >= maxSpawnDepth` (default `2`), `spawn()` refuses.
   This stops a hostile or confused prompt from constructing an
   infinitely-deep director chain.
-- **`DirectorBudgetError`** — new typed error class with
+- **`FleetSpawnBudgetError`** — new typed error class with
   `kind: 'max_spawns' | 'max_spawn_depth'`, `limit`, `observed`.
   Exported from `@wrongstack/core`. The `spawn_subagent` tool catches
   this case and returns a structured `{ error, kind, limit, observed }`
@@ -900,7 +900,7 @@ calling them when building each Agent.
 
 - **`KERNEL_API_VERSION` advanced to `0.1.9`** (was `0.1.1`) to
   advertise the new additive surfaces above (Director, FleetBus,
-  prompt composers, `DirectorBudgetError`, `FLEET_ROSTER`). Plugins
+  prompt composers, `FleetSpawnBudgetError`, `FLEET_ROSTER`). Plugins
   pinning `apiVersion: "^0.1"` continue to load unchanged.
 - **`@wrongstack/core/package.json` `wrongstackApiVersion`** updated
   to `0.1.9` in lockstep. `wstack version` and `wstack diag` now

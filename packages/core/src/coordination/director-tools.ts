@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { SubagentConfig, TaskSpec } from '../types/multi-agent.js';
 import type { JSONSchema, Tool } from '../types/tool.js';
-import { type Director, DirectorBudgetError, DirectorCostCapError } from './director.js';
+import { type Director, FleetSpawnBudgetError, FleetCostCapError } from './director.js';
 
 // ---------------------------------------------------------------------------
 // Director-facing tool factories.
@@ -53,10 +53,10 @@ export function makeSpawnTool(director: Director, roster?: Record<string, Subage
         const subagentId = await director.spawn(cfg);
         return { subagentId, provider: cfg.provider, model: cfg.model, name: cfg.name };
       } catch (err) {
-        if (err instanceof DirectorBudgetError) {
+        if (err instanceof FleetSpawnBudgetError) {
           return { error: err.message, kind: err.kind, limit: err.limit, observed: err.observed };
         }
-        if (err instanceof DirectorCostCapError) {
+        if (err instanceof FleetCostCapError) {
           return { error: err.message, kind: err.kind, limit: err.limit, observed: err.observed };
         }
         return { error: err instanceof Error ? err.message : String(err) };

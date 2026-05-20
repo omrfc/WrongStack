@@ -32,6 +32,7 @@
   "dependencies": {
     "@wrongstack/core": "workspace:*",
     "@wrongstack/runtime": "workspace:*",
+    "@wrongstack/tools": "workspace:*",
     "ink": "^5.0.1",
     "react": "^18.3.1"
   },

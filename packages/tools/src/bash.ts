@@ -4,6 +4,7 @@ import type { Tool, ToolStreamEvent } from '@wrongstack/core';
 import { stripAnsi } from '@wrongstack/core';
 import { buildChildEnv } from './_env.js';
 import { truncateMiddle } from './_util.js';
+import { getProcessRegistry } from './process-registry.js';
 
 interface BashInput {
   command: string;
@@ -15,7 +16,8 @@ interface BashOutput {
   output: string;
   exit_code: number | null;
   timed_out: boolean;
-  pid?: number;
+  pid?: number | null;
+  error?: string;
 }
 
 const MAX_OUTPUT = 32_768;
@@ -60,6 +62,23 @@ export const bashTool: Tool<BashInput, BashOutput> = {
   },
   async *executeStream(input, ctx, opts): AsyncGenerator<ToolStreamEvent<BashOutput>> {
     if (!input?.command) throw new Error('bash: command is required');
+
+    const registry = getProcessRegistry();
+    if (!registry.beforeCall()) {
+      yield {
+        type: 'final',
+        output: {
+          output: '',
+          exit_code: 1,
+          timed_out: false,
+          pid: null,
+          error:
+            'bash: circuit breaker open — too many consecutive failures or slow calls. Use /kill to inspect or /kill reset to recover.',
+        },
+      };
+      return;
+    }
+
     const timeoutMs = Math.max(1, Math.min(input.timeout_ms ?? DEFAULT_TIMEOUT, 600_000));
 
     const isWin = os.platform() === 'win32';
@@ -78,6 +97,8 @@ export const bashTool: Tool<BashInput, BashOutput> = {
     // explicit background flag.
     const detached = isWin ? !!input.background : true;
 
+    const startedAt = Date.now();
+
     if (input.background) {
       // Background mode: capture stdout/stderr with bounded buffers so a
       // malicious command can't write unbounded output. Apply MAX_OUTPUT cap.
@@ -91,6 +112,17 @@ export const bashTool: Tool<BashInput, BashOutput> = {
         signal: opts.signal,
       });
       const pid = child.pid;
+      if (typeof pid === 'number') {
+        registry.register({
+          pid,
+          name: 'bash',
+          command: input.command,
+          startedAt: Date.now(),
+          sessionId: ctx.session?.id,
+          child,
+        });
+        child.on('close', () => registry.unregister(pid));
+      }
       child.stdout?.on('data', (chunk: Buffer) => {
         if (!truncated) {
           const remain = MAX_OUTPUT - buf.length;
@@ -110,7 +142,7 @@ export const bashTool: Tool<BashInput, BashOutput> = {
         }
       });
       child.on('close', () => {
-        /* async generator — nothing to yield after close in background mode */
+        registry.afterCall(Date.now() - startedAt, false);
       });
       if (typeof pid === 'number') child.unref();
       yield {
@@ -134,6 +166,19 @@ export const bashTool: Tool<BashInput, BashOutput> = {
       signal: opts.signal,
     });
 
+    // Register with global registry so Ctrl+C / /kill can find and kill it.
+    const pid = child.pid;
+    if (typeof pid === 'number') {
+      registry.register({
+        pid,
+        name: 'bash',
+        command: input.command,
+        startedAt: Date.now(),
+        sessionId: ctx.session?.id,
+        child,
+      });
+    }
+
     let buf = '';
     let pending = '';
     let timedOut = false;
@@ -148,9 +193,6 @@ export const bashTool: Tool<BashInput, BashOutput> = {
         }
       } else {
         try {
-          // Kill the process group, not just the shell — pid is positive,
-          // group id is the negated pid. Without this a runaway grandchild
-          // ('sleep 9999 & disown') survives bash termination.
           if (typeof child.pid === 'number') {
             try {
               process.kill(-child.pid, 'SIGTERM');
@@ -176,7 +218,7 @@ export const bashTool: Tool<BashInput, BashOutput> = {
             }
           }, 2000);
           timers.push(killTimer);
-          killTimer.unref?.(); // Don't keep event loop alive on clean exit
+          killTimer.unref?.();
         } catch {
           /* ignore */
         }
@@ -185,9 +227,7 @@ export const bashTool: Tool<BashInput, BashOutput> = {
     timers.push(timer);
     timer.unref?.();
 
-    // Bridge the EventEmitter-style child to an async iterator. We push
-    // chunks into a queue and let the generator pull them; this lets us
-    // yield 'partial_output' events to the executor at flush boundaries.
+    // Bridge the EventEmitter-style child to an async iterator.
     type Chunk =
       | { kind: 'data'; text: string }
       | { kind: 'end'; code: number | null }
@@ -195,10 +235,6 @@ export const bashTool: Tool<BashInput, BashOutput> = {
     const queue: Chunk[] = [];
     let resolveNext: ((c: Chunk) => void) | null = null;
     const push = (c: Chunk) => {
-      // Node.js EventEmitter guarantees no 'data' events fire after 'close',
-      // so resolveNext can only be set when the consumer loop is alive.
-      // Theoretically a custom stream could violate this, but the bash tool
-      // only uses node:child_process streams which follow the contract.
       if (resolveNext) {
         const r = resolveNext;
         resolveNext = null;
@@ -235,12 +271,16 @@ export const bashTool: Tool<BashInput, BashOutput> = {
       pending += text;
       push({ kind: 'data', text });
     });
+
     child.on('error', (err) => {
       for (const t of timers) clearTimeout(t);
+      registry.afterCall(Date.now() - startedAt, true);
       push({ kind: 'error', err });
     });
     child.on('close', (code) => {
       for (const t of timers) clearTimeout(t);
+      if (typeof pid === 'number') registry.unregister(pid);
+      registry.afterCall(Date.now() - startedAt, code !== 0 && code !== null);
       push({ kind: 'end', code });
     });
 
@@ -264,9 +304,6 @@ export const bashTool: Tool<BashInput, BashOutput> = {
           };
           return;
         }
-        // Decide whether to flush. Time-based OR size-based to keep latency
-        // low for slow-emitting commands without overwhelming the TUI for
-        // chatty ones.
         const now = Date.now();
         if (pending.length >= STREAM_FLUSH_BYTES || now - lastFlush >= STREAM_FLUSH_INTERVAL_MS) {
           const text = flush();

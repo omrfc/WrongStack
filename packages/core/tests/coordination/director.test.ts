@@ -643,8 +643,8 @@ describe('Director orchestration', () => {
   });
 
   describe('safety caps (Phase 6)', () => {
-    it('maxSpawns refuses the N+1-th spawn with DirectorBudgetError', async () => {
-      const { DirectorBudgetError } = await import('../../src/coordination/director.js');
+    it('maxSpawns refuses the N+1-th spawn with FleetSpawnBudgetError', async () => {
+      const { FleetSpawnBudgetError } = await import('../../src/coordination/director.js');
       const dir = new Director({
         config: { coordinatorId: 'cap', doneCondition: { type: 'all_tasks_done' } },
         runner: async () => ({ result: 'ok', iterations: 1, toolCalls: 0 }),
@@ -658,9 +658,9 @@ describe('Director orchestration', () => {
       } catch (e) {
         caught = e;
       }
-      expect(caught).toBeInstanceOf(DirectorBudgetError);
-      expect((caught as InstanceType<typeof DirectorBudgetError>).kind).toBe('max_spawns');
-      expect((caught as InstanceType<typeof DirectorBudgetError>).limit).toBe(2);
+      expect(caught).toBeInstanceOf(FleetSpawnBudgetError);
+      expect((caught as InstanceType<typeof FleetSpawnBudgetError>).kind).toBe('max_spawns');
+      expect((caught as InstanceType<typeof FleetSpawnBudgetError>).limit).toBe(2);
       // Status should reflect only the two spawns that actually landed.
       const s = dir.status();
       expect(s.subagents.length).toBe(2);
@@ -668,7 +668,7 @@ describe('Director orchestration', () => {
     });
 
     it('maxSpawnDepth refuses spawn when director is too deep', async () => {
-      const { DirectorBudgetError } = await import('../../src/coordination/director.js');
+      const { FleetSpawnBudgetError } = await import('../../src/coordination/director.js');
       // A "nested" director at depth >= cap — it cannot spawn at all.
       const dir = new Director({
         config: { coordinatorId: 'deep', doneCondition: { type: 'all_tasks_done' } },
@@ -682,8 +682,8 @@ describe('Director orchestration', () => {
       } catch (e) {
         caught = e;
       }
-      expect(caught).toBeInstanceOf(DirectorBudgetError);
-      expect((caught as InstanceType<typeof DirectorBudgetError>).kind).toBe('max_spawn_depth');
+      expect(caught).toBeInstanceOf(FleetSpawnBudgetError);
+      expect((caught as InstanceType<typeof FleetSpawnBudgetError>).kind).toBe('max_spawn_depth');
       await dir.shutdown();
     });
 

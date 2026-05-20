@@ -1,8 +1,8 @@
 // Coordination domain: multi-agent orchestration, director, fleet bus, agents
 export {
   Director,
-  DirectorBudgetError,
-  DirectorCostCapError,
+  FleetSpawnBudgetError,
+  FleetCostCapError,
 } from './director.js';
 export {
   createDelegateTool,
@@ -64,3 +64,12 @@ export {
   FLEET_ROSTER,
   ALL_FLEET_AGENTS,
 } from './fleet.js';
+export type {
+  ICoordinator,
+} from './icoordinator.js';
+export type {
+  IFleetManager,
+} from './ifleet-manager.js';
+export {
+  NULL_FLEET_BUS,
+} from './null-fleet-bus.js';

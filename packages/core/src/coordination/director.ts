@@ -14,6 +14,7 @@ import type {
 import type { SessionWriter } from '../types/session.js';
 import type { JSONSchema, Tool } from '../types/tool.js';
 import { InMemoryAgentBridge } from './agent-bridge.js';
+import { ICoordinator } from './icoordinator.js';
 import {
   DEFAULT_DIRECTOR_PREAMBLE,
   DEFAULT_SUBAGENT_BASELINE,
@@ -83,7 +84,7 @@ export interface DirectorOptions {
    * lifetime. Default: unlimited. Acts as a hard fleet-wide cost cap —
    * a runaway leader that keeps spawning workers gets cut off cleanly
    * instead of burning provider tokens until the user kills the
-   * process. The N+1-th spawn call rejects with a `DirectorBudgetError`.
+   * process. The N+1-th spawn call rejects with a `FleetSpawnBudgetError`.
    */
   maxSpawns?: number;
   /**
@@ -179,7 +180,7 @@ export interface DirectorOptions {
  * the `spawn_subagent` tool surface — can recognize the budget case and
  * report it cleanly instead of treating it like an unexpected failure.
  */
-export class DirectorBudgetError extends Error {
+export class FleetSpawnBudgetError extends Error {
   readonly kind: 'max_spawns' | 'max_spawn_depth';
   readonly limit: number;
   readonly observed: number;
@@ -189,7 +190,7 @@ export class DirectorBudgetError extends Error {
         ? `Director spawn budget exceeded: tried to spawn #${observed} but maxSpawns is ${limit}`
         : `Director spawn depth budget exceeded: this director is at depth ${observed} and maxSpawnDepth is ${limit}`,
     );
-    this.name = 'DirectorBudgetError';
+    this.name = 'FleetSpawnBudgetError';
     this.kind = kind;
     this.limit = limit;
     this.observed = observed;
@@ -198,11 +199,11 @@ export class DirectorBudgetError extends Error {
 
 /**
  * Thrown by `Director.spawn()` when the fleet-wide cost cap is exceeded.
- * Distinct from `DirectorBudgetError` (spawn count/depth) — this is a
+ * Distinct from `FleetSpawnBudgetError` (spawn count/depth) — this is a
  * dollar-denominated ceiling that tracks cumulative spend across all
  * subagents in the fleet.
  */
-export class DirectorCostCapError extends Error {
+export class FleetCostCapError extends Error {
   readonly kind: 'max_cost_usd';
   readonly limit: number;
   readonly observed: number;
@@ -210,14 +211,16 @@ export class DirectorCostCapError extends Error {
     super(
       `Director cost cap exceeded: total fleet spend ${observed.toFixed(4)} exceeds maxCostUsd ${limit.toFixed(4)}`,
     );
-    this.name = 'DirectorCostCapError';
+    this.name = 'FleetCostCapError';
     this.kind = 'max_cost_usd';
     this.limit = limit;
     this.observed = observed;
   }
 }
 
-export class Director {
+export class Director implements ICoordinator {
+  /** Alias for the ICoordinator contract. `id` is retained for backward compatibility. */
+  get coordinatorId(): string { return this.id; }
   readonly id: string;
   readonly fleet: FleetBus;
   readonly usage: FleetUsageAggregator;
@@ -513,10 +516,10 @@ export class Director {
     // Enforce safety caps BEFORE touching the coordinator — a refused
     // spawn must not leak partial state into the manifest or fleet bus.
     if (this.spawnDepth >= this.maxSpawnDepth) {
-      throw new DirectorBudgetError('max_spawn_depth', this.maxSpawnDepth, this.spawnDepth);
+      throw new FleetSpawnBudgetError('max_spawn_depth', this.maxSpawnDepth, this.spawnDepth);
     }
     if (this.spawnCount >= this.maxSpawns) {
-      throw new DirectorBudgetError('max_spawns', this.maxSpawns, this.spawnCount + 1);
+      throw new FleetSpawnBudgetError('max_spawns', this.maxSpawns, this.spawnCount + 1);
     }
     // Fleet-wide cost cap: refuse spawn if current total already meets/exceeds
     // the cap. In-flight tasks are left to complete; we only block new spawns.
@@ -525,7 +528,7 @@ export class Director {
     if (this.maxCostUsd < Number.POSITIVE_INFINITY) {
       const totalCost = this.usage.snapshot().total?.cost ?? 0;
       if (totalCost >= this.maxCostUsd) {
-        throw new DirectorCostCapError(this.maxCostUsd, totalCost);
+        throw new FleetCostCapError(this.maxCostUsd, totalCost);
       }
     }
     const result = await this.coordinator.spawn(config);
@@ -988,8 +991,11 @@ export class Director {
    * still permission-checked normally.
    */
   tools(roster?: Record<string, SubagentConfig>): Tool[] {
+    // Use stored roster as default — allows `director.tools()` to be
+    // called without args when the roster was passed at construction.
+    const effectiveRoster = roster ?? this.roster;
     const t: Tool[] = [
-      makeSpawnTool(this, roster),
+      makeSpawnTool(this, effectiveRoster),
       makeAssignTool(this),
       makeAwaitTasksTool(this),
       makeAskTool(this),

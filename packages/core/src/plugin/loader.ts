@@ -14,7 +14,7 @@ const pluginApiMap = new WeakMap<Plugin, PluginAPI>();
  * (PluginAPI, types/plugin) changes in a way that breaks existing setup
  * functions. Plugins declare `apiVersion: "^1.0"` to opt into this contract.
  *
- * 0.1.9: additive — `DirectorBudgetError` plus `FLEET_ROSTER` and the
+ * 0.1.9: additive — `FleetSpawnBudgetError|FleetCostCapError` plus `FLEET_ROSTER` and the
  * pre-built fleet agent configs (Audit Log, Bug Hunter, Refactor Planner,
  * Security Scanner) now exported from `@wrongstack/core`.
  * 0.1.10: additive — extended-thinking stream events, core subpath

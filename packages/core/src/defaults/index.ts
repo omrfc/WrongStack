@@ -141,7 +141,7 @@ export {
 // ---- Coordination (multi-agent) ----
 export {
   Director,
-  DirectorBudgetError,
+  FleetSpawnBudgetError,
 } from '../coordination/director.js';
 export {
   createDelegateTool,
@@ -202,6 +202,13 @@ export {
   applyRosterBudget,
   ALL_FLEET_AGENTS,
 } from '../coordination/fleet.js';
+export type {
+  ICoordinator,
+} from '../coordination/icoordinator.js';
+export type {
+  IFleetManager,
+} from '../coordination/ifleet-manager.js';
+export { NULL_FLEET_BUS } from '../coordination/null-fleet-bus.js';
 
 // ---- Models ----
 export {

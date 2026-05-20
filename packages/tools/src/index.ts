@@ -31,6 +31,8 @@ export { batchToolUseTool } from './batch-tool-use.js';
 export { toolHelpTool } from './tool-help.js';
 export { rememberTool, forgetTool } from './memory.js';
 export { createModeTool } from './mode.js';
+export { getProcessRegistry, _resetProcessRegistry, type KillOpts, type RegistryStats, type TrackedProcess } from './process-registry.js';
+export { CircuitBreaker, type CircuitBreakerSnapshot, type CircuitBreakerConfig } from './circuit-breaker.js';
 
 // builtinTools moved to './builtin.ts' so consumers that only need a subset of
 // tools don't transitively import all 30. Use `@wrongstack/tools/builtin`.

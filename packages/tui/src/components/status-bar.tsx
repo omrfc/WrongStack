@@ -103,6 +103,8 @@ export interface StatusBarProps {
   projectName?: string;
   /** Autonomy mode chip: 'off' | 'suggest' | 'auto'. */
   autonomy?: 'off' | 'suggest' | 'auto';
+  /** Number of tracked bash/exec processes from the process registry. */
+  processCount?: number;
 }
 
 /**
@@ -129,6 +131,7 @@ export function StatusBar({
   subagentCount = 0,
   context,
   projectName,
+  processCount,
 }: StatusBarProps): React.ReactElement {
   const usage = tokenCounter?.total();
   const cost = tokenCounter?.estimateCost();
@@ -184,10 +187,6 @@ export function StatusBar({
             <Text>
               ↑{' '}
               <Text color="cyan">
-                {/* Total tokens sent: fresh `input` + the two cached subsets.
-                    Usage is disjoint, so this sum is the true uplink count
-                    the user wants to see — without it, prompt-cached turns
-                    look artificially cheap on this chip. */}
                 {fmtTok(usage.input + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0))}
               </Text>{' '}
               ↓ <Text color="cyan">{fmtTok(usage.output)}</Text>
@@ -210,6 +209,12 @@ export function StatusBar({
           <>
             <Text dimColor>│</Text>
             <Text color="cyan">⌛ queued: {queueCount}</Text>
+          </>
+        ) : null}
+        {typeof processCount === 'number' && processCount > 0 ? (
+          <>
+            <Text dimColor>│</Text>
+            <Text color="red">⚡ {processCount} process{processCount === 1 ? '' : 'es'}</Text>
           </>
         ) : null}
         {hint ? (
@@ -343,11 +348,7 @@ export function StatusBar({
 
 function ContextChip({ ctx }: { ctx: ContextWindow }): React.ReactElement {
   const ratio = Math.max(0, Math.min(1, ctx.used / ctx.max));
-  const pct = Math.round(ratio * 100); // true percentage of max context
-  const filled = ratio === 0 ? 0 : Math.max(1, Math.round(ratio * 10)); // bar cells (min 1 so low usage still visible)
-  // Colour ramp: cool while there's plenty of headroom, warn at the
-  // two-thirds mark, alarm once we're inside the last 20% — the model
-  // typically starts losing the head of the conversation around there.
+  const pct = Math.round(ratio * 100);
   const color = ratio >= 0.85 ? 'red' : ratio >= 0.65 ? 'yellow' : 'cyan';
   return (
     <Text>
@@ -365,11 +366,6 @@ function ContextChip({ ctx }: { ctx: ContextWindow }): React.ReactElement {
 const FILLED = '█';
 const EMPTY = '░';
 
-/**
- * Render a ratio 0..1 as a width-N block bar. We round to the nearest
- * cell rather than flooring so a 5% bar still shows one filled cell —
- * otherwise low-usage sessions look identical to an empty start.
- */
 export function renderProgress(ratio: number, width: number): string {
   const clamped = Math.max(0, Math.min(1, ratio));
   const filled = clamped === 0 ? 0 : Math.max(1, Math.round(clamped * width));

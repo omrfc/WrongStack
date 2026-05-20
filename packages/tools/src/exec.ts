@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import * as path from 'node:path';
 import type { Tool } from '@wrongstack/core';
 import { buildChildEnv } from './_env.js';
+import { getProcessRegistry } from './process-registry.js';
 
 const ALLOWED_COMMANDS: Record<string, string[]> = {
   node: ['--version', '-r', '--input-type=module'],
@@ -127,6 +128,19 @@ export const execTool: Tool<ExecInput, ExecOutput> = {
     required: ['command'],
   },
   async execute(input, ctx, opts) {
+    const registry = getProcessRegistry();
+    if (!registry.canProceed) {
+      return {
+        command: input.command,
+        args: input.args ?? [],
+        stdout: '',
+        stderr: 'Circuit breaker is open — too many consecutive failures. Use /kill reset to recover.',
+        exitCode: 1,
+        truncated: false,
+        allowed: false,
+      };
+    }
+
     const cmd = input.command.trim();
     if (!cmd)
       return {
@@ -202,6 +216,7 @@ function runCommand(
     let stdout = '';
     let stderr = '';
     let killed = false;
+    const startedAt = Date.now();
 
     const child = spawn(cmd, args, {
       cwd,
@@ -209,9 +224,18 @@ function runCommand(
       env: buildChildEnv(sessionId),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+
+    const registry = getProcessRegistry();
+    const pid = child.pid;
+    if (typeof pid === 'number') {
+      const fullCommand = `${cmd} ${args.join(' ')}`;
+      registry.register({ pid, name: 'exec', command: fullCommand, startedAt: Date.now(), sessionId, child });
+    }
+
     const timer = setTimeout(() => {
       killed = true;
-      child.kill('SIGTERM');
+      if (typeof pid === 'number') registry.kill(pid);
+      else child.kill('SIGTERM');
     }, timeout);
 
     child.stdout?.on('data', (chunk: Buffer) => {
@@ -224,12 +248,16 @@ function runCommand(
 
     child.on('close', (code) => {
       clearTimeout(timer);
+      if (typeof pid === 'number') registry.unregister(pid);
+      const durationMs = Date.now() - startedAt;
+      const exitCode = killed ? 124 : (code ?? 1);
+      registry.afterCall(durationMs, exitCode !== 0);
       resolve({
         command: cmd,
         args,
         stdout: stdout.slice(0, MAX_OUTPUT),
         stderr: stderr.slice(0, MAX_OUTPUT),
-        exitCode: killed ? 124 : (code ?? 1),
+        exitCode,
         truncated: stdout.length >= MAX_OUTPUT || stderr.length >= MAX_OUTPUT,
         allowed: true,
       });
@@ -237,6 +265,8 @@ function runCommand(
 
     child.on('error', (err) => {
       clearTimeout(timer);
+      if (typeof pid === 'number') registry.unregister(pid);
+      registry.afterCall(Date.now() - startedAt, true);
       resolve({
         command: cmd,
         args,

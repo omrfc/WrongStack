@@ -155,6 +155,14 @@
     "./mode": {
       "types": "./dist/mode.d.ts",
       "import": "./dist/mode.js"
+    },
+    "./process-registry": {
+      "types": "./dist/process-registry.d.ts",
+      "import": "./dist/process-registry.js"
+    },
+    "./circuit-breaker": {
+      "types": "./dist/circuit-breaker.d.ts",
+      "import": "./dist/circuit-breaker.js"
     }
   },
   "files": [

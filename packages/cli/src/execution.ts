@@ -151,6 +151,9 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         result = await agent.run(query, { signal: ctrl.signal });
       } finally {
         process.off('SIGINT', onSigint);
+        // Clean up any lingering bash/exec processes.
+        const { getProcessRegistry } = await import('@wrongstack/tools');
+        getProcessRegistry().killAll();
       }
       const after = tokenCounter.total();
       const costAfter = tokenCounter.estimateCost().total;
