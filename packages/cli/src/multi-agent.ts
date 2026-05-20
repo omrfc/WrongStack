@@ -12,6 +12,7 @@ import {
   type ConfigStore,
   type Container,
   Context,
+  DefaultMultiAgentCoordinator,
   Director,
   type DirectorSessionFactory,
   EventBus,
@@ -179,9 +180,12 @@ export class MultiAgentHost {
     return this.director ?? null;
   }
 
-  /** Access the Director's internal coordinator. */
-  private getCoordinator(): MultiAgentCoordinator {
-    return (this.director as unknown as { coordinator: MultiAgentCoordinator }).coordinator;
+  /** Access the Director's internal coordinator. Returns the concrete
+   *  `DefaultMultiAgentCoordinator` so callers can use class-only surface
+   *  (`on`, `setRunner`) that isn't part of the `MultiAgentCoordinator`
+   *  interface. */
+  private getCoordinator(): DefaultMultiAgentCoordinator {
+    return (this.director as unknown as { coordinator: DefaultMultiAgentCoordinator }).coordinator;
   }
 
   private async buildDirector(): Promise<void> {
@@ -628,8 +632,9 @@ export class MultiAgentHost {
     if (!this.director) return null;
     // Force a synchronous write — bypass the debounce timer so callers
     // (including tests) get an immediate snapshot without polling.
-    await this.director.fleetManager?.writeManifest();
-    return this.director.fleetManager?.manifestPath ?? null;
+    // `writeManifest()` returns the absolute path on success, or null
+    // when no manifest path is configured on the FleetManager.
+    return (await this.director.fleetManager?.writeManifest()) ?? null;
   }
 
   /**

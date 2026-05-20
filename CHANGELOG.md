@@ -5,19 +5,110 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.5] - 2026-05-20
+## [0.5.7] - 2026-05-20
 
 ### Added
 
--
+- **Autonomous continue — model-driven self-iteration continuation.**
+  New module `core/continue-to-next-iteration.ts` parses `[continue]`
+  / `[next step]` / `[proceed]` / `[done]` markers from model output
+  (marker must be on its own line) and drives the next iteration
+  internally. Public surface:
+  - `parseContinueDirective(text)` returns `'continue' | 'stop' | 'none'`.
+  - `makeContinueToNextIterationTool()` — explicit tool-call signal as
+    an alternative to text markers.
+  - `setAutonomousContinue(ctx)` / `consumeAutonomousContinue(ctx)` —
+    runtime helpers used by tool implementations.
+  - `Agent` accepts `AgentInit.autonomousContinue?: boolean` (default
+    `false`); each iteration calls `consumeAutonomousContinue(ctx)`
+    first to clear stale flags, then `processResponse()` parses text
+    markers and returns the directive.
+
+- **`DoneCondition` type `'directive'` + `AutonomousRunner` integration.**
+  `types/multi-agent.ts` adds `{ type: 'directive', autonomous?: boolean,
+  maxIterations?: number }` so fleets can let the model decide when a
+  run is done. `AutonomousRunner` accepts
+  `enableAutonomousContinue?: boolean` and, when both flags are set,
+  passes `autonomousContinue: true` into `agent.run()` so iterations
+  happen inside the agent loop (no outer re-invocation). Existing
+  `iterations` / `tool_calls` / `output_match` modes are unchanged.
+
+- **`FleetManager` — extracted fleet-level policy from `Director`.**
+  New `coordination/fleet-manager.ts` owns the `FleetBus`,
+  `FleetUsageAggregator`, spawn caps (count + depth + cost),
+  per-subagent metadata, the manifest entries, the state checkpoint
+  writer, and the pending-task map. `IFleetManager` interface in
+  `coordination/ifleet-manager.ts` keeps the implementation swappable.
+  `Director` accepts optional `fleetManager?: FleetManager` in
+  `DirectorOptions`; when provided it delegates `canSpawn` /
+  `recordSpawn` / `addTaskToSubagent`, when omitted it builds its own
+  (backwards compatible). Re-exported from `@wrongstack/core` so
+  external hosts (CLI) can construct one directly.
+
+- **Exec tool circuit breaker + process registry + `/kill` + `/ps`.**
+  - `exec` tool now checks `registry.canProceed` before spawning and
+    reports duration + exit code to the circuit breaker via
+    `afterCall`. Non-zero exits count as failure; timeouts count as
+    slow calls.
+  - New singleton `getProcessRegistry()` tracks every bash/exec child
+    process with PID, name, command, and `sessionId`. `kill(pid)`
+    sends SIGTERM to the process group on POSIX and cleans up;
+    `killAll()` / `killSession()` provide batch ops;
+    `forceBreakerOpen()` / `forceBreakerReset()` back the `/kill`
+    force/reset modes; `stats()` exposes active count + breaker state
+    for `/ps`.
+  - New TUI slash commands `/kill [pid] [force|reset]` and `/ps`.
+  - Status bar shows live active-process count and breaker state.
+
+- **Todos architecture documentation
+  (`docs/todos_architecture.md`).** Long-form reference covering the
+  todos data model, invariants, state-layer interactions, persistence
+  semantics, and the relationship with the plan system. Companion
+  `wrongstack sessions fleet [runId]` command lists manifest,
+  checkpoint, and per-subagent transcripts for any past fleet run.
 
 ### Changed
 
--
+- **`MultiAgentHost`: single spawn path via Director.** `/spawn` and
+  delegate calls go through `Director` unconditionally —
+  `ensureCoordinator()`, the host-side `coordinator` field, and the
+  `spawnViaDirector` / `spawnViaCoordinator` branch in
+  `_spawnAndAssign()` were removed. The previous host-side
+  `pending: Map<taskId,…>` moved to
+  `FleetManager.addPendingTask` / `removePendingTask` /
+  `getFleetStatus()` so task descriptions live in one place.
+  `MultiAgentHost.manifest()` bypasses the debounce timer via
+  `fleetManager.writeManifest()` and returns the written path
+  directly. `promoteToDirector()` is now idempotent — the
+  "coordinator already exists" guard is gone since spawn always
+  builds a Director.
+
+- **Package versions bumped to 0.5.7** across all workspace packages
+  (`apps/wrongstack`, `@wrongstack/cli`, `@wrongstack/core`,
+  `@wrongstack/mcp`, `@wrongstack/plug-lsp`, `@wrongstack/providers`,
+  `@wrongstack/runtime`, `@wrongstack/skills`, `@wrongstack/telegram`,
+  `@wrongstack/tools`, `@wrongstack/tui`, `@wrongstack/webui`).
 
 ### Fixed
 
--
+- **`MultiAgentHost.getCoordinator()` typing.** Now returns the
+  concrete `DefaultMultiAgentCoordinator` instead of the
+  `MultiAgentCoordinator` interface so callers can use class-only
+  surface (`on`, `setRunner`) without `unknown` casts. `manifest()`
+  no longer reaches into the private `FleetManager.manifestPath` —
+  it uses the path returned by `writeManifest()`.
+
+## [0.5.5] - 2026-05-20
+
+### Changed
+
+- **Package versions bumped to 0.5.5** across all workspace packages.
+
+### Removed
+
+- **Deprecated `new_features.md`** scratch file from the repo root
+  (its contents had been folded into the changelog and architecture
+  docs).
 
 ## [0.5.4] - 2026-05-19
 

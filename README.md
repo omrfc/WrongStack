@@ -13,17 +13,6 @@ Provider catalog comes from [models.dev](https://models.dev) — no hardcoded pr
 
 ## Install
 
-**Quick install** (macOS/Linux):
-```bash
-curl -fsSL https://wrongstack.com/install.sh | bash
-```
-
-**Windows** (PowerShell):
-```powershell
-irm https://wrongstack.com/install.ps1 | iex
-```
-
-**npm/pnpm:**
 ```bash
 npm install -g wrongstack
 # or
@@ -34,9 +23,39 @@ This pulls in the full stack — `@wrongstack/core`, `@wrongstack/runtime`, `@wr
 
 After install, `wrongstack` is on your `PATH`. (`wstack` works too — it's an alias.)
 
-### What's new in 0.5.5
+### What's new in 0.5.7
 
-Release notes for this version are in [CHANGELOG.md](CHANGELOG.md).
+**Single spawn path via Director + FleetManager.** The old dual-mode
+spawn logic (directorMode vs plain coordinator) collapsed into one
+path. Every `/spawn` and `delegate` now goes through `Director` with
+spawn budgeting, manifest writing, and pending-task tracking owned by
+the extracted `FleetManager`. Host-side state duplication is gone,
+`MultiAgentHost.manifest()` is immediate (no debounce wait), and
+`promoteToDirector()` is idempotent.
+
+**Autonomous continue — model-driven self-iteration.** Agents can now
+end a turn with `[continue]` / `[next step]` / `[proceed]` / `[done]`
+markers (each on its own line) to drive their own iteration loop,
+without an outer harness re-invoking them. Pair with the new
+`doneCondition: { type: 'directive', autonomous: true }` for fleets
+that decide when they're done from inside the loop. Off by default —
+opt in via `AgentInit.autonomousContinue` or
+`AutonomousRunner.enableAutonomousContinue`.
+
+**Exec tool circuit breaker + process registry.** The `exec` tool now
+participates in the same circuit-breaker / process-registry surface
+that `bash` uses: failures and timeouts trip the breaker, every spawn
+is tracked by PID, and the TUI status bar shows the live process
+count and breaker state. New slash commands:
+- `/ps` — list active processes and breaker status.
+- `/kill [pid] [force|reset]` — terminate a process, force the
+  breaker open, or reset it after a known-bad run.
+
+**Todos architecture documentation.** Added a long-form
+`docs/todos_architecture.md` covering the data model, state layer,
+persistence, tool integration, and how todos relate to plans.
+Companion `wrongstack sessions fleet [runId]` command lists manifest,
+checkpoint, and per-subagent transcripts for any past fleet run.
 
 ### What's new in 0.5.4
 
