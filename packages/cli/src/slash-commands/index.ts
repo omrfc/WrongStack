@@ -93,6 +93,17 @@ export interface SlashCommandContext {
   /** Direct access to the session's LLM provider and model, available even before the first agent run. */
   llmProvider?: import('@wrongstack/core').Provider;
   llmModel?: string;
+  /** StatusBar visibility config — loaded from ~/.wrongstack/statusline.json */
+  statuslineConfig?: {
+    get: () => Promise<import('./statusline.js').StatuslineConfig>;
+    set: (cfg: import('./statusline.js').StatuslineConfig) => Promise<void>;
+  };
+  /**
+   * Current list of hidden status bar items. Written by the /statusline command
+   * so the TUI can update without a restart.
+   */
+  statuslineHiddenItems?: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>;
+  setStatuslineHiddenItems?: (items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>) => void;
 }
 
 // Re-export helpers for external consumers (pre-launch.ts)
@@ -127,6 +138,7 @@ import { buildModeCommand } from './mode.js';
 import { buildSddCommand } from './sdd.js';
 import { buildSkillGeneratorCommand } from './skill-generator.js';
 import { buildSecurityCommand } from './security.js';
+import { buildStatuslineCommand } from './statusline.js';
 import {
   buildSkillInstallCommand,
   buildSkillUpdateCommand,
@@ -169,5 +181,12 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildGitcheckCommand(opts),
     buildPushCommand(opts),
     buildSecurityCommand(opts),
+    buildStatuslineCommand({
+      cwd: opts.cwd,
+      hiddenItems: opts.statuslineHiddenItems ?? [],
+      setHiddenItems: opts.setStatuslineHiddenItems ?? (() => {}),
+      getConfig: opts.statuslineConfig?.get ?? (async () => ({})),
+      setConfig: opts.statuslineConfig?.set ?? (async () => {}),
+    }),
   ];
 }

@@ -69,6 +69,7 @@ import { buildPickableProviders } from './provider-helpers.js';
 import type { TerminalRenderer } from './renderer.js';
 import { SessionStats } from './session-stats.js';
 import { buildBuiltinSlashCommands } from './slash-commands/index.js';
+import { buildStatuslineCommand, loadStatuslineConfig, saveStatuslineConfig } from './slash-commands/statusline.js';
 import { Spinner } from './spinner.js';
 import { fmtTaskResultLine, fmtTok, patchConfig } from './utils.js';
 import { createAgent, setupCompaction, setupPipelines } from './wiring/pipeline.js';
@@ -657,6 +658,25 @@ export async function main(argv: string[]): Promise<number> {
     },
   };
 
+  // Statusline config — loaded once and shared with /statusline slash command
+  const statuslineConfigDeps = {
+    get: () => loadStatuslineConfig(),
+    set: (cfg: import('./slash-commands/statusline.js').StatuslineConfig) => saveStatuslineConfig(cfg),
+  };
+
+  // Statusline hidden items — derived from the config file, kept in sync with the TUI
+  const hiddenItemsFromConfig = await loadStatuslineConfig();
+  const hiddenItemsList: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'> = [];
+  const ALL_ITEMS = ['todos', 'plan', 'fleet', 'git', 'elapsed', 'context', 'cost'] as const;
+  for (const k of ALL_ITEMS) {
+    if (!hiddenItemsFromConfig[k]) hiddenItemsList.push(k);
+  }
+  const statuslineHiddenItems = hiddenItemsList;
+  let currentHiddenItems = [...statuslineHiddenItems];
+  const setStatuslineHiddenItems = (items: typeof statuslineHiddenItems) => {
+    currentHiddenItems = items;
+  };
+
   const slashCmds = buildBuiltinSlashCommands({
     registry: slashRegistry,
     toolRegistry,
@@ -676,6 +696,7 @@ export async function main(argv: string[]): Promise<number> {
     fleetStreamController,
     llmProvider: provider,
     llmModel: config.model,
+    statuslineConfig: statuslineConfigDeps,
     onSpawn: async (description, spawnOpts) => {
       const { subagentId, taskId } = await multiAgentHost.spawn(description, spawnOpts);
       const tags: string[] = [];
@@ -1166,6 +1187,8 @@ export async function main(argv: string[]): Promise<number> {
     director: director ?? null,
     fleetRoster: FLEET_ROSTER as Record<string, { name: string }>,
     fleetStreamController,
+    statuslineHiddenItems,
+    setStatuslineHiddenItems,
     getYolo: () => {
       const policy = container.resolve(TOKENS.PermissionPolicy) as DefaultPermissionPolicy;
       return policy.getYolo();

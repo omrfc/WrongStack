@@ -67,6 +67,9 @@ export interface ExecutionDeps {
     enabled: boolean;
     setEnabled: (enabled: boolean) => void;
   };
+  /** Status bar hidden items controller (passed to TUI). */
+  statuslineHiddenItems: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>;
+  setStatuslineHiddenItems: (items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>) => void;
   /** Query the live YOLO state from the permission policy. */
   getYolo?: () => boolean;
   /** Query the live autonomy mode. */
@@ -105,6 +108,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     director,
     fleetRoster,
     fleetStreamController,
+    statuslineHiddenItems,
+    setStatuslineHiddenItems,
     getYolo,
     getAutonomy,
     skillLoader,
@@ -266,6 +271,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             dispatch({ type: 'resetContextChip' });
           },
           fleetStreamController,
+          statuslineHiddenItems,
+          setStatuslineHiddenItems,
           initialGoal: goalFlag,
           initialAsk: askFlag,
           getSDDContext: () => {

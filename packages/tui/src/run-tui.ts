@@ -96,10 +96,24 @@ export interface RunTuiOptions {
    * the App installs a dispatch-backed `setEnabled` here on mount so
    * both sides stay synchronized.
    */
+  /**
+   * Shared controller for the `/fleet stream on|off` toggle. The slash
+   * command runs in the CLI process and needs to flip TUI reducer state;
+   * the App installs a dispatch-backed `setEnabled` here on mount so
+   * both sides stay synchronized.
+   */
   fleetStreamController?: {
     enabled: boolean;
     setEnabled: (enabled: boolean) => void;
   };
+  /**
+   * Controller for status bar hidden items. App installs a dispatch-backed
+   * setter on mount so the /statusline slash command can update the TUI's
+   * visible bar without a round-trip. The initial value is loaded from
+   * the config file before App mounts.
+   */
+  statuslineHiddenItems: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>;
+  setStatuslineHiddenItems: (items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>) => void;
 
   /**
    * If set, the App boots straight into goal mode — the text is wrapped
@@ -284,6 +298,8 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
             ? (dispatch) => opts.onClearHistory!(dispatch)
             : undefined,
           fleetStreamController: opts.fleetStreamController,
+          statuslineHiddenItems: opts.statuslineHiddenItems,
+          setStatuslineHiddenItems: opts.setStatuslineHiddenItems,
           initialGoal: opts.initialGoal,
           initialAsk: opts.initialAsk,
           getSDDContext: opts.getSDDContext,

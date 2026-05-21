@@ -207,6 +207,14 @@ export interface AppProps {
     enabled: boolean;
     setEnabled: (enabled: boolean) => void;
   };
+  /**
+   * Controller for status bar hidden items. App installs a dispatch-backed
+   * setter on mount so the /statusline slash command can update the TUI's
+   * visible bar without a round-trip. The initial value is loaded from
+   * the config file before App mounts.
+   */
+  statuslineHiddenItems: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>;
+  setStatuslineHiddenItems: (items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>) => void;
 }
 
 type DraftEntry = HistoryEntry extends infer T
@@ -1094,6 +1102,8 @@ export function App({
   fleetRoster,
   onClearHistory,
   fleetStreamController,
+  statuslineHiddenItems,
+  setStatuslineHiddenItems,
   initialGoal,
   initialAsk,
   sessionsDir,
@@ -1107,6 +1117,18 @@ export function App({
   const [liveProvider, setLiveProvider] = useState<string>(provider ?? 'agent');
   const [yoloLive, setYoloLive] = useState<boolean>(yolo);
   const [autonomyLive, setAutonomyLive] = useState<'off' | 'suggest' | 'auto'>(getAutonomy?.() ?? 'off');
+  const [hiddenItems, setHiddenItems] = useState(statuslineHiddenItems);
+
+  // Sync when parent re-loads from config file (e.g., after /statusline reset)
+  useEffect(() => {
+    setHiddenItems(statuslineHiddenItems);
+  }, [statuslineHiddenItems]);
+
+  // Push local changes back to the parent controller so /statusline sees them
+  useEffect(() => {
+    setStatuslineHiddenItems(hiddenItems);
+  }, [setStatuslineHiddenItems]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [state, dispatch] = useReducer(reducer, {
     entries: banner
       ? [
@@ -3383,6 +3405,7 @@ export function App({
         projectName={projectName}
         subagentCount={Object.keys(state.fleet).length}
         processCount={getProcessRegistry().activeCount}
+        hiddenItems={hiddenItems}
       />
       {director ? (
         <FleetPanel entries={state.fleet} totalCost={state.fleetCost} roster={fleetRoster} />

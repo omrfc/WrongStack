@@ -105,6 +105,8 @@ export interface StatusBarProps {
   autonomy?: 'off' | 'suggest' | 'auto';
   /** Number of tracked bash/exec processes from the process registry. */
   processCount?: number;
+  /** Items to hide from the status bar. */
+  hiddenItems?: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>;
 }
 
 /**
@@ -132,7 +134,9 @@ export function StatusBar({
   context,
   projectName,
   processCount,
+  hiddenItems,
 }: StatusBarProps): React.ReactElement {
+  const hiddenSet = new Set(hiddenItems);
   const usage = tokenCounter?.total();
   const cost = tokenCounter?.estimateCost();
   const cache = tokenCounter?.cacheStats();
@@ -240,7 +244,7 @@ export function StatusBar({
               </Text>
             </>
           ) : null}
-          {elapsedMs !== undefined ? (
+          {elapsedMs !== undefined && !hiddenSet.has('elapsed') ? (
             <>
               {yolo ? <Text dimColor>│</Text> : null}
               <Text dimColor>⏱ {fmtElapsed(elapsedMs)}</Text>
