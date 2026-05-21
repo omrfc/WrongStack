@@ -55,7 +55,10 @@ export class ExtensionRegistry {
     ctx: Parameters<SystemPromptContributor>[0],
   ): Promise<TextBlock[]> {
     const blocks: TextBlock[] = [];
-    for (const c of this.promptContributors) {
+    // Snapshot before iterating so mid-iteration registration doesn't cause
+    // skipped or duplicate contributor invocations during this phase.
+    const snapshot = [...this.promptContributors];
+    for (const c of snapshot) {
       try {
         const contributed = await c(ctx);
         blocks.push(...contributed);

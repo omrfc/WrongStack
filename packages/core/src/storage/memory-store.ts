@@ -28,12 +28,13 @@ export class DefaultMemoryStore implements MemoryStore {
    * issue order. Different scopes still proceed in parallel.
    *
    * The chain tracks only the last pending write. If a write fails, its
-   * error is caught and swallowed (line 43) so the chain stays alive for
-   * subsequent calls. A crash between atomicWrite() and backup copy leaves
-   * the file at its new content with no backup — acceptable for an optional
-   * backup whose worst case is losing a memory consolidation pass.
+   * error is caught and swallowed so the chain stays alive for subsequent
+   * calls. The error is stored in `writeErrors` so callers can learn about
+   * it on the next read operation.
    */
   private readonly writeChain = new Map<MemoryScope, Promise<unknown>>();
+  /** Last write error per scope — surfaced as warnings on the next readAll(). */
+  private readonly writeErrors = new Map<MemoryScope, Error>();
 
   constructor(opts: MemoryStoreOptions) {
     this.files = {
@@ -45,17 +46,18 @@ export class DefaultMemoryStore implements MemoryStore {
 
   private async runSerialized<T>(scope: MemoryScope, work: () => Promise<T>): Promise<T> {
     const prior = this.writeChain.get(scope) ?? Promise.resolve();
-    // Swallow prior errors here so one failed write doesn't poison the
-    // chain — the failed call has already rejected to its own caller.
+    // Capture prior error so we can surface it, but don't block the chain.
+    prior.catch((err) => {
+      this.writeErrors.set(scope, err as Error);
+    });
     const next = prior.catch(() => undefined).then(work);
-    this.writeChain.set(scope, next);
+    this.writeChain.set(scope, next as Promise<unknown>);
     try {
       return await next;
+    } catch (err) {
+      this.writeErrors.set(scope, err as Error);
+      throw err;
     } finally {
-      // Clear the chain reference once this call finishes so memory doesn't
-      // grow unboundedly across long-lived processes. If another call
-      // queued behind us, it's already captured in next; the map entry
-      // serves only as the "what should the next caller wait on" pointer.
       if (this.writeChain.get(scope) === next) {
         this.writeChain.delete(scope);
       }
@@ -65,6 +67,10 @@ export class DefaultMemoryStore implements MemoryStore {
   async readAll(): Promise<string> {
     const parts: string[] = [];
     for (const scope of ['project-agents', 'project-memory', 'user-memory'] as MemoryScope[]) {
+      const writeErr = this.writeErrors.get(scope);
+      if (writeErr) {
+        parts.push(`> ⚠️ Memory write error (${labelOf(scope)}): ${writeErr.message}`);
+      }
       const body = await this.read(scope);
       if (body.trim()) parts.push(`## ${labelOf(scope)}\n\n${body.trim()}`);
     }

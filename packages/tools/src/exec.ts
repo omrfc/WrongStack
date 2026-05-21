@@ -66,7 +66,7 @@ const BLOCKED_ARG_PATTERNS: Record<string, RegExp[]> = {
   // go run could execute arbitrary .go files; -ldflags could inject build-time code
   go: [/^-ldflags$/],
   // bun --preload is similar to node --require
-  bun: [/^--preload$/],
+  bun: [/^--preload$/, /^run$/, /^bunx$/, /^create$/, /^init$/],
   // docker build/run can create containers with host access;
   // only allow read-only commands (ps, images, version)
   docker: [/^build$/, /^run$/, /^exec$/, /^push$/, /^pull$/],
@@ -74,6 +74,13 @@ const BLOCKED_ARG_PATTERNS: Record<string, RegExp[]> = {
   find: [/^-exec$/, /^-exec;$/, /^-ok$/, /^-ok;$/, /^-execdir$/, /^-execdir;$/, /^-exec=/, /^-ok=/, /^-execdir=/],
   // rm -rf / is catastrophic — block root and home targets
   rm: [/^\/$/, /^\/\*$/, /^~$/],
+  // npm run/exec/create/pack/publish can execute arbitrary scripts or publish malware
+  npm: [/^run$/, /^exec$/, /^create$/, /^init$/, /^pack$/, /^publish$/, /^deploy$/],
+  // pnpm run/dlx/exec/create can execute arbitrary scripts
+  pnpm: [/^run$/, /^dlx$/, /^exec$/, /^create$/, /^init$/, /^pack$/, /^publish$/, /^deploy$/],
+  // npx should only be used for --version; any package name is a vector for
+  // malicious package execution (typosquatting, dependency confusion)
+  npx: [/^[^\s]+$/],
 };
 
 function validateArgs(cmd: string, args: string[]): string | null {

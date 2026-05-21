@@ -1,7 +1,6 @@
-import { writeFileSync } from 'node:fs';
-import * as fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
+import * as fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import type { CommitLLMProvider } from './slash-commands/commit-llm.js';
 import { generateCommitMessageWithLLM } from './slash-commands/commit-llm.js';
@@ -30,12 +29,8 @@ import {
   type Director,
   EventBus,
   FLEET_ROSTER,
-  type HealthRegistry,
   HybridCompactor,
-  InMemoryMetricsSink,
-  type MetricsServerHandle,
   type MetricsSink,
-  type Plugin,
   type ProviderRegistry,
   QueueStore,
   RecoveryLock,
@@ -52,8 +47,6 @@ import {
   loadPlan,
   loadPlugins,
   loadTodosCheckpoint,
-  startMetricsServer,
-  wireMetricsToEvents,
 } from '@wrongstack/core';
 import { MCPRegistry } from '@wrongstack/mcp';
 import { capabilitiesFor, makeProviderFromConfig } from '@wrongstack/providers';
@@ -73,6 +66,8 @@ import { buildStatuslineCommand, loadStatuslineConfig, saveStatuslineConfig } fr
 import { Spinner } from './spinner.js';
 import { fmtTaskResultLine, fmtTok, patchConfig } from './utils.js';
 import { createAgent, setupCompaction, setupPipelines } from './wiring/pipeline.js';
+import { setupMetrics } from './wiring/metrics.js';
+import { setupPlugins } from './wiring/plugins.js';
 import { setupProvider } from './wiring/provider.js';
 import { setupSession } from './wiring/session.js';
 
@@ -94,18 +89,6 @@ type ContainerPromptDelegate = (
   input: unknown,
   suggestedPattern: string,
 ) => Promise<'yes' | 'no' | 'always' | 'deny'>;
-
-function buildPluginOptions(config: Config): Record<string, Record<string, unknown>> {
-  const options: Record<string, Record<string, unknown>> = {};
-  for (const entry of config.plugins ?? []) {
-    if (typeof entry !== 'object') continue;
-    if (entry.options) options[entry.name] = { ...entry.options };
-  }
-  for (const [name, value] of Object.entries(config.extensions ?? {})) {
-    options[name] = { ...(options[name] ?? {}), ...value };
-  }
-  return options;
-}
 
 export async function main(argv: string[]): Promise<number> {
   const ctx = await boot(argv);
@@ -224,87 +207,11 @@ export async function main(argv: string[]): Promise<number> {
   const events = new EventBus();
   events.setLogger(logger);
 
-  // Observability — opt-in via --metrics. Writes a snapshot to
-  // <session-dir>/metrics.json on shutdown so users get a post-run summary
-  // without standing up a scrape endpoint. The sink is also exposed via the
-  // /metrics slash command for live inspection mid-session.
-  let metricsSink: MetricsSink | undefined;
-  let healthRegistry: HealthRegistry | undefined;
-  let metricsServerHandle: MetricsServerHandle | undefined;
-  // --metrics-port implies --metrics (you can't scrape what isn't recorded).
-  const metricsPortFlag = flags['metrics-port'];
-  const metricsPort =
-    typeof metricsPortFlag === 'string' && metricsPortFlag.length > 0
-      ? Number.parseInt(metricsPortFlag, 10)
-      : undefined;
-  if (metricsPort !== undefined && !flags.metrics) flags.metrics = true;
-  if (flags.metrics) {
-    metricsSink = new InMemoryMetricsSink();
-    wireMetricsToEvents(events, metricsSink);
-    healthRegistry = new DefaultHealthRegistry();
-    healthRegistry.register({
-      name: 'session-store',
-      check: async () => {
-        try {
-          await fs.access(wpaths.projectSessions);
-          return { status: 'healthy' };
-        } catch (e) {
-          return { status: 'unhealthy', detail: e instanceof Error ? e.message : 'access denied' };
-        }
-      },
-    });
-    healthRegistry.register({
-      name: 'provider',
-      check: async () => ({
-        status: 'healthy',
-        data: { id: config.provider, model: config.model },
-      }),
-    });
-
-    const dumpMetrics = () => {
-      if (!metricsSink) return;
-      try {
-        const out = path.join(wpaths.projectSessions, 'metrics.json');
-        const snap = metricsSink.snapshot();
-        // Sync write — async fs APIs can't survive process.exit().
-        writeFileSync(out, JSON.stringify(snap, null, 2));
-      } catch {
-        // Snapshot is best-effort — never block shutdown on it.
-      }
-    };
-    process.on('exit', dumpMetrics);
-    process.on('SIGINT', () => {
-      dumpMetrics();
-      process.exit(130);
-    });
-
-    // L3-C: optional Prometheus scrape endpoint. Bound to 127.0.0.1 by
-    // default — operators who want network-visible metrics set
-    // METRICS_HOST=0.0.0.0 explicitly. Failure to bind is logged but does
-    // not fail the run; the in-process sink keeps recording.
-    if (metricsPort !== undefined && Number.isFinite(metricsPort)) {
-      try {
-        metricsServerHandle = await startMetricsServer({
-          port: metricsPort,
-          host: process.env.METRICS_HOST ?? '127.0.0.1',
-          sink: metricsSink,
-          // V2-C: mount /healthz on the same listener so k8s probes can
-          // hit one endpoint per pod for both observability and liveness.
-          healthRegistry,
-        });
-        logger.info(
-          `metrics endpoint listening on ${metricsServerHandle.url} (healthz on same port)`,
-        );
-        process.on('exit', () => {
-          void metricsServerHandle?.close().catch(() => {});
-        });
-      } catch (err) {
-        logger.warn(
-          `metrics endpoint failed to start: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
-  }
+  // Metrics wiring — extracted to wiring/metrics.ts
+  const { metricsSink, healthRegistry, metricsServerHandle } = (() => {
+    const ms = setupMetrics({ flags, wpaths, events, logger, config: { provider: config.provider, model: config.model } });
+    return ms;
+  })();
 
   // Spinner: visible "thinking…" line during each model request.
   const spinner = new Spinner();
@@ -454,55 +361,22 @@ export async function main(argv: string[]): Promise<number> {
   // Slash registry — created before plugins so plugins can register commands.
   const slashRegistry = new SlashCommandRegistry();
 
-  // Plugins
-  if (config.features.plugins && config.plugins && config.plugins.length > 0) {
-    const resolvedPlugins: Plugin[] = [];
-    for (const p of config.plugins) {
-      if (typeof p === 'object' && p.enabled === false) continue;
-      const spec = typeof p === 'string' ? p : p.name;
-      try {
-        const mod = (await import(spec)) as { default?: Plugin };
-        if (mod.default) resolvedPlugins.push(mod.default);
-      } catch (err) {
-        logger.warn(`Plugin "${spec}" failed to load`, err);
-      }
-    }
-    if (resolvedPlugins.length > 0) {
-      const { default: createApi } = await import('./plugin-api-factory.js');
-      const pluginOptions = buildPluginOptions(config);
-      const pluginConfig =
-        Object.keys(pluginOptions).length > 0
-          ? patchConfig(config, { extensions: pluginOptions } as Partial<Config>)
-          : config;
-      await loadPlugins(resolvedPlugins, {
-        log: logger,
-        // Each plugin's `configSchema` is validated against merged
-        // options from `plugins[].options` and `extensions[name]`.
-        // The merged view is also exposed as `api.config.extensions`.
-        pluginOptions,
-        apiFactory: (plugin) =>
-          createApi(plugin.name, {
-            container,
-            events,
-            pipelines: pipelines as unknown as Parameters<typeof createApi>[1]['pipelines'],
-            toolRegistry,
-            providerRegistry,
-            slashCommandRegistry: slashRegistry,
-            mcpRegistry,
-            config: pluginConfig,
-            log: logger,
-            extensions: agent.extensions,
-            sessionWriter: {
-              transcriptPath: context.session.transcriptPath,
-              append: (e: Record<string, unknown> & { type: string; ts: string }) =>
-                context.session.append(e as Parameters<typeof context.session.append>[0]),
-            },
-            metricsSink,
-            configStore,
-          }),
-      });
-    }
-  }
+  // Plugins — extracted to wiring/plugins.ts
+  await setupPlugins({
+    config,
+    container,
+    events,
+    pipelines,
+    toolRegistry,
+    providerRegistry,
+    slashCommandRegistry: slashRegistry,
+    mcpRegistry,
+    log: logger,
+    agent: agent,
+    sessionWriter: context.session,
+    metricsSink,
+    configStore,
+  });
 
   // Build provider+model switch as a single callback. The TUI picker
   // calls this after the user confirms a (provider, model) pair; we

@@ -409,9 +409,11 @@ async function readSubagentPartial(
     candidates.push(path.join(opts.sessionsRoot, opts.directorRunId, `${subagentId}.jsonl`));
   } else {
     try {
-      const runDirs = await fsp.readdir(opts.sessionsRoot);
-      for (const r of runDirs) {
-        candidates.push(path.join(opts.sessionsRoot, r, `${subagentId}.jsonl`));
+      const entries = await fsp.readdir(opts.sessionsRoot, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          candidates.push(path.join(opts.sessionsRoot, entry.name, `${subagentId}.jsonl`));
+        }
       }
     } catch {
       return undefined;
