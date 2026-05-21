@@ -7,6 +7,19 @@ import { defaultOrchestrator } from '@wrongstack/core';
 /** Accepts a full Context (active agent run) or just provider+model (pre-agent session). */
 type SecurityScannerContext = Context | { provider: Provider; model?: string };
 
+function getProviderFromContext(ctx: Context, opts: SlashCommandContext): { provider: Provider; model?: string } | null {
+  // Prefer opts.llmProvider (passed from setupProvider in index.ts) over ctx.provider,
+  // because ctx.provider may exist on the Context class but not be fully initialized
+  // before the first agent run. opts.llmProvider is always the live provider instance.
+  if (opts.llmProvider && typeof opts.llmProvider.complete === 'function') {
+    return { provider: opts.llmProvider, model: opts.llmModel };
+  }
+  if (ctx.provider && typeof (ctx.provider as Provider).complete === 'function') {
+    return { provider: ctx.provider, model: ctx.model };
+  }
+  return null;
+}
+
 export function buildSecurityCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'security',
@@ -61,16 +74,12 @@ async function handleScan(args: string, ctx: Context, opts: SlashCommandContext)
   const projectRoot = ctx.projectRoot || opts.projectRoot;
 
   try {
-    // Use active context if available, otherwise fall back to direct provider access
-    const orchestratorContext: SecurityScannerContext = ctx.provider
-      ? ctx
-      : { provider: opts.llmProvider!, model: opts.llmModel };
-
-    if (!orchestratorContext.provider) {
+    const providerInfo = getProviderFromContext(ctx, opts);
+    if (!providerInfo) {
       return { message: '❌ Security scan requires an active LLM provider. No provider configured.' };
     }
 
-    const result = await defaultOrchestrator.run(orchestratorContext, {
+    const result = await defaultOrchestrator.run(providerInfo, {
       projectRoot,
       scanOptions: {
         depth: (options.depth as 'quick' | 'standard' | 'deep') || 'standard',
@@ -125,16 +134,12 @@ async function handleAudit(ctx: Context, opts: SlashCommandContext): Promise<{ m
   const projectRoot = ctx.projectRoot || opts.projectRoot;
 
   try {
-    // Use active context if available, otherwise fall back to direct provider access
-    const orchestratorContext: SecurityScannerContext = ctx.provider
-      ? ctx
-      : { provider: opts.llmProvider!, model: opts.llmModel };
-
-    if (!orchestratorContext.provider) {
+    const providerInfo = getProviderFromContext(ctx, opts);
+    if (!providerInfo) {
       return { message: '❌ Security audit requires an active LLM provider. No provider configured.' };
     }
 
-    const result = await defaultOrchestrator.run(orchestratorContext, {
+    const result = await defaultOrchestrator.run(providerInfo, {
       projectRoot,
       reportOptions: { format: 'markdown' },
     });
