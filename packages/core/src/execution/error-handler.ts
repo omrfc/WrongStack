@@ -60,7 +60,7 @@ export function buildRecoveryStrategies(opts?: {
         // body.retryAfterMs; fall back to 5s when absent.
         const delayMs = err.body?.retryAfterMs ?? 5_000;
         // Clamp between 1s and 60s.
-        const delay = Math.max(1_000, Math.min(delayMs, 60_000));
+        const delay = Math.min(60_000, Math.max(1_000, delayMs));
         await new Promise((r) => setTimeout(r, delay));
         return { action: 'retry', reason: 'rate_limit_backoff' };
       },

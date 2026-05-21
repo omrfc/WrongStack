@@ -1,5 +1,6 @@
 import type { SlashCommand } from '../types/slash-command.js';
 import type { Context } from '../core/context.js';
+import type { Provider } from '../types/provider.js';
 import { defaultOrchestrator } from './orchestrator.js';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -58,13 +59,24 @@ Show a previous security report.
   };
 }
 
+function getProviderFromContext(ctx: Context): { provider: Provider; model?: string } | null {
+  if (ctx.provider && typeof ctx.provider.complete === 'function') {
+    return { provider: ctx.provider, model: ctx.model };
+  }
+  return null;
+}
+
 async function handleScan(args: string, ctx: Context): Promise<{ message?: string; metadata?: Record<string, unknown> }> {
   const options = parseArgs(args);
   const projectRoot = ctx.projectRoot || ctx.cwd || process.cwd();
 
   try {
-    // Pass ctx (with provider) to orchestrator for LLM access
-    const result = await defaultOrchestrator.run(ctx, {
+    const providerInfo = getProviderFromContext(ctx);
+    if (!providerInfo) {
+      return { message: '❌ Security scan requires an active LLM provider. No provider configured.' };
+    }
+
+    const result = await defaultOrchestrator.run(providerInfo, {
       projectRoot,
       scanOptions: {
         depth: (options.depth as 'quick' | 'standard' | 'deep') || 'standard',
@@ -119,7 +131,12 @@ async function handleAudit(ctx: Context): Promise<{ message?: string; metadata?:
   const projectRoot = ctx.projectRoot || ctx.cwd || process.cwd();
 
   try {
-    const result = await defaultOrchestrator.run(ctx, {
+    const providerInfo = getProviderFromContext(ctx);
+    if (!providerInfo) {
+      return { message: '❌ Security audit requires an active LLM provider. No provider configured.' };
+    }
+
+    const result = await defaultOrchestrator.run(providerInfo, {
       projectRoot,
       reportOptions: { format: 'markdown' },
     });

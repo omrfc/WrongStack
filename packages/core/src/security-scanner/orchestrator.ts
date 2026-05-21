@@ -110,7 +110,7 @@ export class SecurityScannerOrchestrator {
     options: SecurityScannerOptions,
   ): Promise<FullScanResult> {
     const { projectRoot, reportOptions, skipGitignore, model: explicitModel } = options;
-    const provider = 'provider' in ctx ? ctx.provider : ctx;
+    const provider = 'provider' in ctx && ctx.provider ? ctx.provider : (ctx as unknown as Provider);
     const model = explicitModel ?? ('model' in ctx ? ctx.model : undefined);
 
     // Step 1: Detect tech stack (static, fast)
