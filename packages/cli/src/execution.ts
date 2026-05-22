@@ -336,6 +336,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         port: Number.parseInt(String(flags.port ?? '3457'), 10),
         modelsRegistry,
         globalConfigPath: wpaths.globalConfig,
+        subscribeEternalIteration,
       });
       try {
         code = await runRepl({

@@ -32,6 +32,16 @@ interface WebUIOptions {
   port?: number;
   modelsRegistry?: ModelsRegistry;
   globalConfigPath?: string;
+  /**
+   * Subscribe to live per-iteration events from the eternal-autonomy
+   * engine. When provided, the WebUI broadcasts each iteration to every
+   * connected client. Observability-only — starting the loop still goes
+   * through REPL/TUI or the `--eternal` flag (the WebUI has no slash
+   * command dispatch surface yet).
+   */
+  subscribeEternalIteration?: (
+    fn: (entry: import('@wrongstack/core').JournalEntry) => void,
+  ) => () => void;
 }
 
 interface ConnectedClient {
@@ -169,6 +179,31 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
         });
       }),
     );
+
+    // eternal-autonomy iteration events. Each iteration the engine
+    // completes lands here and is fanned out to every connected client
+    // so the frontend can render a live timeline of the autonomous loop.
+    // The unsubscribe is collected into eventUnsubscribers so a reconnect
+    // or shutdown tears it down cleanly with the rest of the subscriptions.
+    if (opts.subscribeEternalIteration) {
+      eventUnsubscribers.push(
+        opts.subscribeEternalIteration((entry) => {
+          broadcast({
+            type: 'eternal.iteration',
+            payload: {
+              iteration: entry.iteration,
+              at: entry.at,
+              source: entry.source,
+              task: entry.task,
+              status: entry.status,
+              note: entry.note,
+              tokens: entry.tokens,
+              costUsd: entry.costUsd,
+            },
+          });
+        }),
+      );
+    }
   }
 
   return new Promise<void>((resolve) => {
