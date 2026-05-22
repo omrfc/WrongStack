@@ -9,6 +9,7 @@ export {
   FleetManager,
   type FleetManagerOptions,
 } from './coordination/fleet-manager.js';
+export { createMcpControlTool, type MCPRegistryHandle } from './tools/mcp-control.js';
 // Re-export safeParse explicitly at the top-level export for consumers
 // who import from '@wrongstack/core' directly (e.g. providers package).
 export { safeParse, safeStringify, sanitizeJsonString } from './utils/safe-json.js';
@@ -93,6 +94,15 @@ export type { SecretVault } from './types/secret-vault.js';
 export type { Compactor, CompactReport } from './types/compactor.js';
 export { DefaultSecretScrubber } from './security/secret-scrubber.js';
 export type { SecretScrubber } from './types/secret-scrubber.js';
+export {
+  HybridCompactor,
+  IntelligentCompactor,
+  SelectiveCompactor,
+  AutoCompactionMiddleware,
+  type CompactorOptions,
+  type IntelligentCompactorOptions,
+  type SelectiveCompactorOptions,
+} from './defaults/index.js';
 export {
   CONTEXT_WINDOW_MODES,
   DEFAULT_CONTEXT_WINDOW_MODE_ID,
