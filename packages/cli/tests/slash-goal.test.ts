@@ -92,11 +92,23 @@ describe('/goal slash command', () => {
   it('/goal set writes the file and reports back', async () => {
     const { registry } = rig(tmp);
     const result = await registry.dispatch('/goal set Ship release v2', fakeCtx);
-    expect(result?.message).toContain('Goal set');
+    expect(result?.message).toContain('Goal locked');
     expect(result?.message).toContain('Ship release v2');
+    expect(result?.runText).toContain('GOAL — LOCKED IN');
+    expect(result?.runText).toContain('Ship release v2');
     const onDisk = await loadGoal(goalFilePath(tmp));
     expect(onDisk?.goal).toBe('Ship release v2');
     expect(onDisk?.iterations).toBe(0);
+  });
+
+  it('/goal <text> without "set" prefix is treated as setting the goal', async () => {
+    const { registry } = rig(tmp);
+    const result = await registry.dispatch('/goal rewrite the auth module', fakeCtx);
+    expect(result?.message).toContain('Goal locked');
+    expect(result?.message).toContain('rewrite the auth module');
+    expect(result?.runText).toContain('rewrite the auth module');
+    const onDisk = await loadGoal(goalFilePath(tmp));
+    expect(onDisk?.goal).toBe('rewrite the auth module');
   });
 
   it('/goal set with existing goal preserves the iteration counter', async () => {
@@ -177,9 +189,12 @@ describe('/goal slash command', () => {
     expect(result?.message).toContain('Spent: $0.0750');
   });
 
-  it('rejects unknown subcommands without crashing', async () => {
+  it('a single unknown word becomes the goal text (merged TUI semantics)', async () => {
     const { registry } = rig(tmp);
     const result = await registry.dispatch('/goal explode', fakeCtx);
-    expect(result?.message).toMatch(/Unknown subcommand/);
+    expect(result?.message).toContain('Goal locked');
+    expect(result?.runText).toBeDefined();
+    const onDisk = await loadGoal(goalFilePath(tmp));
+    expect(onDisk?.goal).toBe('explode');
   });
 });

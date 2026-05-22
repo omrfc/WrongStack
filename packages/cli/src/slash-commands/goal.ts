@@ -7,7 +7,20 @@ import {
   saveGoal,
 } from '@wrongstack/core';
 import type { SlashCommand } from '@wrongstack/core';
+import { buildGoalPreamble } from '@wrongstack/tui';
 import type { SlashCommandContext } from './index.js';
+
+const KNOWN_VERBS = new Set([
+  '',
+  'show',
+  'status',
+  'set',
+  'new',
+  'clear',
+  'reset',
+  'journal',
+  'log',
+]);
 
 export function buildGoalCommand(opts: SlashCommandContext): SlashCommand {
   return {
@@ -33,7 +46,14 @@ export function buildGoalCommand(opts: SlashCommandContext): SlashCommand {
       const restJoined = rest.join(' ').trim();
       const goalPath = goalFilePath(opts.projectRoot);
 
-      switch (verb) {
+      // If the first token isn't a known verb, treat the entire args
+      // string as the goal text — `/goal rewrite the auth module` should
+      // work the same as `/goal set rewrite the auth module`. This makes
+      // the merged /goal compatible with the TUI's former plain-text form.
+      const verbForDispatch = verb && !KNOWN_VERBS.has(verb) ? 'set' : verb;
+      const setText = verbForDispatch === 'set' && !KNOWN_VERBS.has(verb) ? trimmed : restJoined;
+
+      switch (verbForDispatch) {
         case '':
         case 'show':
         case 'status': {
@@ -50,7 +70,7 @@ export function buildGoalCommand(opts: SlashCommandContext): SlashCommand {
 
         case 'set':
         case 'new': {
-          if (!restJoined) {
+          if (!setText) {
             const msg = 'Usage: /goal set <mission text>';
             opts.renderer.writeWarning(msg);
             return { message: msg };
@@ -60,12 +80,15 @@ export function buildGoalCommand(opts: SlashCommandContext): SlashCommand {
           // The new mission gets a fresh setAt but keeps the prior iterations
           // count so journal entries remain sequentially numbered.
           const next = existing
-            ? { ...existing, goal: restJoined, setAt: new Date().toISOString(), lastActivityAt: new Date().toISOString() }
-            : emptyGoal(restJoined);
+            ? { ...existing, goal: setText, setAt: new Date().toISOString(), lastActivityAt: new Date().toISOString() }
+            : emptyGoal(setText);
           await saveGoal(goalPath, next);
-          const msg = `${color.green('Goal set:')} ${restJoined}\n${color.dim(`Stored in ${goalPath}`)}`;
+          const shortGoal = setText.length > 80 ? `${setText.slice(0, 80)}…` : setText;
+          const msg = `🎯 ${color.green('Goal locked:')} ${shortGoal}\n${color.dim(`Stored in ${goalPath} — Esc / /steer to redirect, Ctrl+C to stop.`)}`;
           opts.renderer.write(msg);
-          return { message: msg };
+          // Inject the lock-in preamble so the next turn runs with full-
+          // autonomy framing — same behavior the TUI's former /goal had.
+          return { message: msg, runText: buildGoalPreamble(setText) };
         }
 
         case 'clear':
@@ -119,6 +142,8 @@ export function buildGoalCommand(opts: SlashCommandContext): SlashCommand {
         }
 
         default: {
+          // Unreachable — verbForDispatch is either '' (show), a known
+          // verb, or 'set' (when the first token isn't a known verb).
           const msg = `Unknown subcommand "${verb}". Try: show | set <text> | clear | journal [N]`;
           opts.renderer.writeWarning(msg);
           return { message: msg };

@@ -1916,48 +1916,11 @@ export function App({
     };
   }, [slashRegistry, handleRewindTo]);
 
-  // `/goal <description>` — lock in a goal the agent must complete.
-  // Identical mechanism to /steer (slash command returns runText that
-  // the submit handler feeds through the normal agent.run pipeline),
-  // but the preamble is a HARDER contract: full autonomy grant, an
-  // explicit "this is done" bar, anti-hedge anti-patterns, and a
-  // persistence protocol for blockers. The actual unlimited-budget
-  // hardening lives at the coordinator layer (no defaultBudget, no
-  // hardcoded /spawn caps, autoExtendLimit on the Agent); this
-  // preamble's job is to remove the MODEL's tendency to self-throttle.
-  useEffect(() => {
-    const cmd = {
-      name: 'goal',
-      description:
-        'Lock in a goal — no budgets, no hedging, no premature done. /goal <description>',
-      help: [
-        'Usage: /goal <description>',
-        '',
-        'Hands the agent a task it must drive to a verifiable finish.',
-        'Adds a preamble to the next turn that grants full autonomy',
-        '(unlimited subagents, any provider/model, retry-until-it-works),',
-        'spells out what "done" actually means, and forbids hedge-style',
-        'completions ("I believe this works", "should I continue?").',
-        '',
-        'Combine with /steer to redirect mid-goal, or Ctrl+C / /fleet kill',
-        'to bail out — only the user can stop a /goal.',
-      ].join('\n'),
-      async run(args: string) {
-        const goal = args.trim();
-        if (!goal) return { message: 'Usage: /goal <description>' };
-        const preamble = buildGoalPreamble(goal);
-        const shortGoal = goal.length > 80 ? `${goal.slice(0, 80)}…` : goal;
-        return {
-          message: `🎯 Goal locked: ${shortGoal}\n   Agent will work until verifiably complete. Esc / /steer to redirect, Ctrl+C to stop.`,
-          runText: preamble,
-        };
-      },
-    };
-    slashRegistry.register(cmd);
-    return () => {
-      slashRegistry.unregister('goal');
-    };
-  }, [slashRegistry]);
+  // `/goal` is registered as a CLI builtin (packages/cli/src/slash-commands/
+  // goal.ts) which handles both the preamble lock-in (the former TUI
+  // behavior) and goal.json persistence for /autonomy eternal. The TUI
+  // does NOT register its own /goal here — that would collide with the
+  // builtin and throw "already registered" on mount.
 
   // Register the TUI-only `/model` command — opens a two-step picker
   // (provider → model). All work is local state mutation; the actual
