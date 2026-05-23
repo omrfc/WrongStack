@@ -71,6 +71,12 @@ export const toolSearchTool: Tool<ToolSearchInput, ToolSearchOutput> = {
       ) {
         return false;
       }
+      if (input.tags && input.tags.length > 0) {
+        const toolCat = (t.category ?? '').toLowerCase();
+        if (!input.tags.some((tag: string) => toolCat.includes(tag.toLowerCase()))) {
+          return false;
+        }
+      }
       if (input.permission && t.permission !== input.permission) {
         return false;
       }
