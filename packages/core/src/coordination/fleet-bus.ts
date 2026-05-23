@@ -47,40 +47,24 @@ export class FleetBus {
    * subagent teardown so the listeners don't outlive the run.
    */
   attach(subagentId: string, bus: EventBus, taskId?: string): () => void {
-    const FORWARDED_TYPES = [
-      'tool.started',
-      'tool.executed',
-      'tool.progress',
-      'tool.confirm_needed',
-      'iteration.started',
-      'iteration.completed',
-      'provider.text_delta',
-      // Subagent extended-thinking output. Forwarded so the FleetPanel /
-      // /fleet log can surface "the planner is thinking…" instead of a
-      // silent gap between iteration.started and the first text_delta.
-      'provider.thinking_delta',
-      'provider.response',
-      'provider.retry',
-      'provider.error',
-      'session.started',
-      'session.ended',
-      'session.damaged',
-      'compaction.fired',
-      'compaction.failed',
-      'token.threshold',
-      // Subagent hit a soft budget limit — coordinator can extend or stop.
-      'budget.threshold_reached',
-    ] as const;
-    const offs: Array<() => void> = [];
-    for (const t of FORWARDED_TYPES) {
-      offs.push(
-        bus.on(t, (payload: unknown) => {
-          this.emit({ subagentId, taskId, ts: Date.now(), type: t, payload });
-        }),
-      );
-    }
+    // Subscribe to every event on the subagent's EventBus and re-emit with
+    // attribution. We use onPattern('*') rather than a hardcoded event list
+    // so new event types are automatically forwarded without needing to update
+    // this function. The payload is typed as `unknown` in the FleetEvent — use
+    // the type guard in the handler to narrow it.
+    //
+    // Skip subagent lifecycle events (subagent.*) — those are emitted by
+    // MultiAgentHost on the parent EventBus, not on the subagent's own bus.
+    // Forwarding them would create duplicate fleet events for the same logical
+    // occurrence. Use the parent EventBus path (events.on('subagent.*')) for
+    // lifecycle events instead.
+    const off = bus.onPattern('*', (type, payload) => {
+      if (type.startsWith('subagent.')) return;
+      this.emit({ subagentId, taskId, ts: Date.now(), type, payload });
+    });
+
     return () => {
-      for (const off of offs) off();
+      off();
     };
   }
 

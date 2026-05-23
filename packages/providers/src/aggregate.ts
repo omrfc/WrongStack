@@ -82,16 +82,27 @@ export async function aggregateStream(
       }
       case 'thinking_start': {
         currentTextIndex = -1;
-        currentThinkingIndex = thinkingBuffers.length;
-        thinkingBuffers.push({
-          textBuf: '',
-          ...(ev.providerMeta ? { providerMeta: ev.providerMeta } : {}),
-        });
+        // If a thinking block was already started by thinking_signature before
+        // this event arrived (e.g. due to out-of-order delivery), reuse it so
+        // signature and content end up in the same block rather than creating
+        // duplicate thinking entries in the response.
+        if (currentThinkingIndex === -1 || !thinkingBuffers[currentThinkingIndex]) {
+          currentThinkingIndex = thinkingBuffers.length;
+          thinkingBuffers.push({ textBuf: '' });
+        }
+        // Always set providerMeta on the target block (thinking_start may carry
+        // metadata even when the prior signature event did not).
+        if (ev.providerMeta && currentThinkingIndex >= 0) {
+          thinkingBuffers[currentThinkingIndex]!.providerMeta = ev.providerMeta;
+        }
         blockOrder.push({ kind: 'thinking', idx: currentThinkingIndex });
         break;
       }
       case 'thinking_delta': {
-        if (currentThinkingIndex === -1) {
+        // Ensure a thinking buffer exists before appending. If thinking_signature
+        // created the block (currentThinkingIndex >= 0), reuse it so the
+        // signature and content end up in the same buffer.
+        if (currentThinkingIndex === -1 || !thinkingBuffers[currentThinkingIndex]) {
           currentThinkingIndex = thinkingBuffers.length;
           thinkingBuffers.push({ textBuf: '' });
           blockOrder.push({ kind: 'thinking', idx: currentThinkingIndex });
@@ -101,7 +112,10 @@ export async function aggregateStream(
         break;
       }
       case 'thinking_signature': {
-        if (currentThinkingIndex === -1) {
+        // Ensure a thinking buffer exists before storing the signature. This
+        // handles out-of-order delivery where thinking_signature arrives before
+        // thinking_start.
+        if (currentThinkingIndex === -1 || !thinkingBuffers[currentThinkingIndex]) {
           currentThinkingIndex = thinkingBuffers.length;
           thinkingBuffers.push({ textBuf: '' });
           blockOrder.push({ kind: 'thinking', idx: currentThinkingIndex });

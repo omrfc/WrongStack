@@ -143,8 +143,32 @@ export class IntelligentCompactor implements Compactor {
     try {
       summaryText = await this.callSummarizer(toSummarize, ctx);
     } catch {
-      // Fallback: generic placeholder if summarizer fails
-      summaryText = `[${toSummarize.length} earlier turns omitted — key decisions and file states preserved in context]`;
+      // Fallback: extract lightweight metadata from the omitted messages so
+      // the context at least retains structural information even when the
+      // LLM summarizer is unavailable (network outage, model down, etc.).
+      const toolNames = new Set<string>();
+      const filePaths = new Set<string>();
+      let userTurns = 0, assistantTurns = 0;
+      for (const m of toSummarize) {
+        if (m.role === 'user') userTurns++;
+        else if (m.role === 'assistant') {
+          assistantTurns++;
+          if (Array.isArray(m.content)) {
+            for (const b of m.content) {
+              if (b.type === 'tool_use') toolNames.add((b as { name: string }).name ?? 'unknown');
+            }
+          }
+        }
+        // Scan for file paths
+        const text = typeof m.content === 'string' ? m.content : '';
+        const matches = text.matchAll(/(?:[\w.,\-/@]+\/)*[\w.,\-/@]+\.\w+/g);
+        for (const m_ of matches) filePaths.add(m_[0]!);
+      }
+      const parts: string[] = [`${toSummarize.length} turns (${userTurns} user, ${assistantTurns} assistant)`];
+      if (toolNames.size > 0) parts.push(`tools: ${[...toolNames].join(', ')}`);
+      if (filePaths.size > 0) parts.push(`files: ${[...filePaths].slice(0, 10).join(', ')}`);
+      summaryText = parts.join(' | ');
+      if (!summaryText) summaryText = `${toSummarize.length} earlier turns omitted`;
     }
 
     const summaryMsg: Message = {
