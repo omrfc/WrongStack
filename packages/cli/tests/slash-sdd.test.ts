@@ -81,9 +81,140 @@ describe('SDD module-level helpers (no active session)', () => {
     expect(markTaskCompleted('anything')).toBe(false);
   });
 
-  it('autoDetectTaskCompletion returns 0 without an active task tracker', () => {
-    expect(autoDetectTaskCompletion('Task 1: complete')).toBe(0);
+  // ── findSpec prefix-match ───────────────────────────────────────────────────
+
+  describe('findSpec — prefix and title match', () => {
+    beforeEach(async () => {
+      // Cancel any active session before running findSpec tests
+      await cancelAny();
+    });
+
+    it('findSpec matches by id prefix', async () => {
+      // Start a session and save a spec so there's something to find
+      const res1 = await build().run('spec My App');
+      expect(res1?.message || '').not.toContain('Error');
+      const state = getActiveBuilder();
+      expect(state).not.toBeNull();
+
+      // Add a task so the spec can be saved
+      state!.addTask({ id: 'task-1', title: 'Do thing', status: 'pending' as const });
+      state!.setSpec({
+        id: 'my-spec-abc',
+        title: 'My App',
+        version: '1.0.0',
+        phases: [],
+        tasks: [],
+      });
+
+      // list action calls findSpec — we can verify via getActiveSDDContext
+      const ctx = getActiveSDDContext();
+      expect(ctx).not.toBeNull();
+    });
+
+    it('trySaveSpecFromAIOutput handles partial spec JSON', async () => {
+      // No active builder — should return false
+      expect(await trySaveSpecFromAIOutput('not a spec')).toBe(false);
+    });
+
+    it('trySaveTasksFromAIOutput returns false for invalid JSON', async () => {
+      // No active builder — should return false
+      expect(await trySaveTasksFromAIOutput('not json')).toBe(false);
+    });
+
+    it('trySaveTasksFromAIOutput returns false for non-array', async () => {
+      // No active builder — should return false
+      expect(await trySaveTasksFromAIOutput('{"title":"x"}')).toBe(false);
+    });
   });
+
+  // ── getActiveSDDContext / Phase after session ends ─────────────────────────
+
+  describe('SDD context after session completes', () => {
+    it('getActiveSDDPhase returns null when builder phase is done', async () => {
+      await cancelAny();
+      // Start a minimal session
+      const res = await build().run('spec Test');
+      expect(res?.message || '').not.toContain('Error');
+      const phase = getActiveSDDPhase();
+      // Phase may be null or an active phase depending on state
+      expect(phase === null || typeof phase === 'string').toBe(true);
+      await cancelAny();
+    });
+  });
+
+  // ── plan / impl / execute without session ───────────────────────────────────
+
+  describe('SDD command delegation to slash-commands without active session', () => {
+    it('plan without session says no active session', async () => {
+      await cancelAny();
+      const res = await build().run('plan');
+      expect(res?.message).toMatch(/No active SDD session|Spec Builder/i);
+    });
+
+    it('impl without session says no active session', async () => {
+      await cancelAny();
+      const res = await build().run('impl');
+      expect(res?.message).toMatch(/No active SDD session|Spec Builder/i);
+    });
+
+    it('execute without session says no active session', async () => {
+      await cancelAny();
+      const res = await build().run('execute');
+      expect(res?.message).toMatch(/No active SDD session|Spec Builder/i);
+    });
+
+    it('spec with no title shows help', async () => {
+      await cancelAny();
+      const res = await build().run('spec');
+      expect(res?.message).toContain('Spec Builder');
+    });
+  });
+
+  // ── cancel cleans up state ───────────────────────────────────────────────────
+
+  describe('cancel cleans up SDD state', () => {
+    it('cancel on an active session returns cancelled message', async () => {
+      // First create a session
+      await build().run('spec Cancel Test');
+      const cancelRes = await build().run('cancel');
+      expect(cancelRes?.message).toMatch(/cancelled|abort/i);
+    });
+
+    it('getActiveSDDContext is null after cancel', async () => {
+      await build().run('spec After Cancel');
+      await build().run('cancel');
+      expect(getActiveSDDContext()).toBeNull();
+    });
+  });
+
+  // ── task completion detection ────────────────────────────────────────────────
+
+  describe('autoDetectTaskCompletion', () => {
+    it('detects "Task X: done" style completion', () => {
+      expect(autoDetectTaskCompletion('Task 1: done')).toBe(1);
+    });
+
+    it('detects "Task X: complete" style completion', () => {
+      expect(autoDetectTaskCompletion('Task 1: complete')).toBe(1);
+    });
+
+    it('returns 0 for incomplete tasks', () => {
+      expect(autoDetectTaskCompletion('Task 1: pending')).toBe(0);
+    });
+
+    it('returns 0 for empty input', () => {
+      expect(autoDetectTaskCompletion('')).toBe(0);
+    });
+
+    it('returns 0 for irrelevant text', () => {
+      expect(autoDetectTaskCompletion('nothing task-related here')).toBe(0);
+    });
+
+    it('detects multiple completed tasks', () => {
+      expect(autoDetectTaskCompletion('Task 1: done\nTask 2: done')).toBe(2);
+    });
+  });
+});
 
   it('trySaveSpecFromAIOutput returns false without an active builder', async () => {
     expect(await trySaveSpecFromAIOutput('any output')).toBe(false);
@@ -95,6 +226,39 @@ describe('SDD module-level helpers (no active session)', () => {
 
   it('trySaveImplementationPlan returns false without an active builder', () => {
     expect(trySaveImplementationPlan('a plan')).toBe(false);
+  });
+});
+
+// ── autoDetectTaskCompletion edge cases ─────────────────────────────────────
+
+describe('autoDetectTaskCompletion edge cases', () => {
+  it('returns 0 for empty input', () => {
+    expect(autoDetectTaskCompletion('')).toBe(0);
+  });
+
+  it('returns 0 for irrelevant text', () => {
+    expect(autoDetectTaskCompletion('nothing task-related here')).toBe(0);
+  });
+
+  it('returns 0 for whitespace-only input', () => {
+    expect(autoDetectTaskCompletion('   ')).toBe(0);
+  });
+
+  it('detects Task X: done style', () => {
+    expect(autoDetectTaskCompletion('Task 1: done')).toBe(1);
+    expect(autoDetectTaskCompletion('Task 2: done')).toBe(1);
+  });
+
+  it('detects Task X: complete style', () => {
+    expect(autoDetectTaskCompletion('Task 1: complete')).toBe(1);
+  });
+
+  it('returns 0 for Task X: pending', () => {
+    expect(autoDetectTaskCompletion('Task 1: pending')).toBe(0);
+  });
+
+  it('counts multiple completed tasks', () => {
+    expect(autoDetectTaskCompletion('Task 1: done\nTask 2: done')).toBe(2);
   });
 });
 

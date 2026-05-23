@@ -115,4 +115,87 @@ describe('plan-store', () => {
     expect(derived!.plan.items[0]!.status).toBe('done'); // stays done
     expect(derived!.todos[0]!.status).toBe('in_progress'); // but todo is in_progress
   });
+
+  it('loadPlan returns null when version !== 1', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-plan-'));
+    const file = path.join(dir, 'v2.json');
+    try {
+      await fs.writeFile(file, JSON.stringify({ version: 2, sessionId: 's', items: [] }));
+      expect(await loadPlan(file)).toBeNull();
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('loadPlan returns null when items is not an array', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-plan-'));
+    const file = path.join(dir, 'no-array.json');
+    try {
+      await fs.writeFile(file, JSON.stringify({ version: 1, sessionId: 's', items: 'not array' }));
+      expect(await loadPlan(file)).toBeNull();
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('removePlanItem matches by title (case-insensitive partial)', () => {
+    let plan = emptyPlan('s');
+    ({ plan } = addPlanItem(plan, 'Fix bug in auth module'));
+    ({ plan } = addPlanItem(plan, 'Write unit tests'));
+    ({ plan } = addPlanItem(plan, 'Update docs'));
+    // "bug in auth" should match the first item (case-insensitive, partial)
+    plan = removePlanItem(plan, 'BUG IN');
+    expect(plan.items).toHaveLength(2);
+    expect(plan.items[0]!.title).toBe('Write unit tests');
+    expect(plan.items[1]!.title).toBe('Update docs');
+  });
+
+  it('setPlanItemStatus matches by title', () => {
+    let plan = emptyPlan('s');
+    ({ plan } = addPlanItem(plan, 'Refactor DB layer'));
+    ({ plan } = addPlanItem(plan, 'Add logging'));
+    // Match "db layer" (case-insensitive, partial) → index 0
+    plan = setPlanItemStatus(plan, 'DB LAYER', 'done');
+    expect(plan.items[0]!.status).toBe('done');
+    expect(plan.items[1]!.status).toBe('open');
+  });
+
+  it('deriveTodosFromPlanItem with subtasks appends multiple todos', () => {
+    let plan = emptyPlan('s');
+    ({ plan } = addPlanItem(plan, 'Deploy v2'));
+    const derived = deriveTodosFromPlanItem(plan, '1', ['Build', 'Test', 'Ship']);
+    expect(derived).not.toBeNull();
+    // 1 from plan item + 3 subtasks = 4 todos
+    expect(derived!.todos).toHaveLength(4);
+    expect(derived!.todos[0]!.content).toBe('Deploy v2');
+    expect(derived!.todos[1]!.content).toBe('Build');
+    expect(derived!.todos[2]!.content).toBe('Test');
+    expect(derived!.todos[3]!.content).toBe('Ship');
+  });
+
+  it('deriveTodosFromPlanItem does not change status when item is already done', () => {
+    let plan = emptyPlan('s');
+    ({ plan } = addPlanItem(plan, 'Old completed task'));
+    plan = setPlanItemStatus(plan, '1', 'done');
+    const before = plan.items[0]!.status;
+    const derived = deriveTodosFromPlanItem(plan, '1');
+    expect(derived).not.toBeNull();
+    expect(derived!.plan.items[0]!.status).toBe(before); // still done
+  });
+
+  it('deriveTodosFromPlanItem matches by title (case-insensitive)', () => {
+    let plan = emptyPlan('s');
+    ({ plan } = addPlanItem(plan, 'Migrate to PostgreSQL'));
+    const derived = deriveTodosFromPlanItem(plan, 'POSTGRESQL');
+    expect(derived).not.toBeNull();
+    expect(derived!.todos[0]!.content).toBe('Migrate to PostgreSQL');
+  });
+
+  it('attachPlanCheckpoint returns a noop function', () => {
+    const { attachPlanCheckpoint } = await import('../../src/storage/plan-store.js');
+    // attachPlanCheckpoint takes a ConversationState, filePath, sessionId but just returns noop
+    const noop = attachPlanCheckpoint({} as import('../../src/core/conversation-state.js').ConversationState, '/tmp/plan.json', 'session-1');
+    expect(typeof noop).toBe('function');
+    expect(noop()).toBeUndefined();
+  });
 });

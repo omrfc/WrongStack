@@ -49,10 +49,10 @@ describe('formatTool', () => {
 
   it('uses biome when neither biome.json nor .prettierrc exists (fallback)', async () => {
     // detectFixer falls through to return 'biome' when neither file is found
-    const ctx = { cwd: '/', tools: [], projectRoot: '/' } as any;
+    const ctx = { cwd: tmp, tools: [], projectRoot: tmp } as any;
     const result = await formatTool.execute({ fixer: 'auto' }, ctx, makeOpts());
     // biome is the fallback when nothing is detected
-    expect(result).toHaveProperty('fixer');
+    expect(result.fixer).toBe('biome');
   });
 
   it('detects biome from biome.json in cwd', async () => {

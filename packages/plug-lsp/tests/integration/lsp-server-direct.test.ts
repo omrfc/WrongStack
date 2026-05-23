@@ -23,7 +23,7 @@ const log: Logger = {
 };
 
 describe('LSPServer direct API', () => {
-  it.skip('covers lifecycle, notifications, request wrappers, and shutdown idempotency', async () => {
+  it('covers lifecycle, notifications, request wrappers, and shutdown idempotency', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plug-lsp-server-'));
     const file = path.join(root, 'a.ts');
     const uri = pathToUri(file);

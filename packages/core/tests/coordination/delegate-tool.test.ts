@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {
   createDelegateTool,
+  hintForKind,
   type DelegateHost,
 } from '../../src/coordination/delegate-tool.js';
 import { Director } from '../../src/coordination/director.js';
@@ -403,5 +407,166 @@ describe('createDelegateTool', () => {
 
     await director.shutdown();
     await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // hintForKind coverage — all error kinds + the default retryable path
+  // ─────────────────────────────────────────────────────────────────
+
+  it('hintForKind surfaces provider_rate_limit with backoff hint', () => {
+    // Direct unit test — tests the function in isolation
+    const hint = hintForKind('provider_rate_limit', true, 2000, undefined);
+    expect(hint).toMatch(/rate.limit/i);
+    expect(hint).toMatch(/2000ms|backoff/i);
+  });
+
+  it('hintForKind surfaces provider_5xx with retry hint', () => {
+    const hint = hintForKind('provider_5xx', true, 3000, undefined);
+    expect(hint).toMatch(/retry/i);
+    expect(hint).toMatch(/3000ms|backoff|transient/i);
+  });
+
+  it('hintForKind surfaces provider_timeout hint', () => {
+    const hint = hintForKind('provider_timeout', true, 0, undefined);
+    expect(hint).toMatch(/timeout/i);
+    expect(hint).toMatch(/network|retry/i);
+  });
+
+  it('hintForKind surfaces provider_auth hint (non-retryable)', () => {
+    const hint = hintForKind('provider_auth', false, 0, undefined);
+    expect(hint).toMatch(/cannot retry|credentials|API key/i);
+  });
+
+  it('hintForKind surfaces context_overflow hint', () => {
+    const hint = hintForKind('context_overflow', false, 0, undefined);
+    expect(hint).toMatch(/context|model limit|largerContext|split/i);
+  });
+
+  it('hintForKind surfaces budget_iterations hint with partial output', () => {
+    const hint = hintForKind('budget_iterations', false, 0, { lastAssistantText: 'working on it' });
+    expect(hint).toMatch(/budget|exhausted|maxIterations/i);
+    expect(hint).toMatch(/partial output|working on it/i);
+  });
+
+  it('hintForKind surfaces budget_timeout hint', () => {
+    const hint = hintForKind('budget_timeout', false, 0, undefined);
+    expect(hint).toMatch(/wall.clock|timeoutMs|split/i);
+  });
+
+  it('hintForKind surfaces aborted_by_parent hint', () => {
+    const hint = hintForKind('aborted_by_parent', false, 0, undefined);
+    expect(hint).toMatch(/aborted|retryable|Ctrl/i);
+  });
+
+  it('hintForKind surfaces empty_response hint', () => {
+    const hint = hintForKind('empty_response', false, 0, undefined);
+    expect(hint).toMatch(/empty|no text|no tool calls|prompt|config/i);
+  });
+
+  it('hintForKind surfaces tool_failed hint with partial', () => {
+    const hint = hintForKind('tool_failed', false, 0, { lastAssistantText: 'trying to fix' });
+    expect(hint).toMatch(/tool.*failed|ok:false|retry/i);
+    expect(hint).toMatch(/trying to fix|reasoning/i);
+  });
+
+  it('hintForKind surfaces bridge_failed hint', () => {
+    const hint = hintForKind('bridge_failed', false, 0, undefined);
+    expect(hint).toMatch(/bridge|transport|restart/i);
+  });
+
+  it('hintForKind default case returns retryable fallback', () => {
+    const hint = hintForKind('unknown_kind', true, 0, undefined);
+    expect(hint).toMatch(/retryable|try again/i);
+  });
+
+  it('hintForKind returns undefined for success path (no kind)', () => {
+    expect(hintForKind(undefined, false, 0, undefined)).toBeUndefined();
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // readSubagentPartial — no directorRunId, scan sessionsRoot dirs
+  // ─────────────────────────────────────────────────────────────────
+
+  it('readSubagentPartial scans sessionsRoot subdirs when no directorRunId is set', async () => {
+    const runner = vi.fn(
+      () =>
+        new Promise<SubagentRunOutcome>(() => {
+          /* never resolves — forces timeout */
+        }),
+    );
+    director = new Director({
+      config: { coordinatorId: 'scan-test', doneCondition: { type: 'all_tasks_done' }, maxConcurrent: 1 },
+      runner,
+    });
+
+    // Create a sessionsRoot with some subdirectories (run dirs)
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'delegate-scan-'));
+    const runId = 'run-abc';
+    const subagentDir = path.join(tmpRoot, runId);
+    await fs.mkdir(subagentDir, { recursive: true });
+
+    const jsonl = [
+      JSON.stringify({ type: 'llm_response', stopReason: 'end_turn', content: [{ type: 'text', text: 'scan result' }] }),
+      JSON.stringify({ type: 'tool_use', name: 'read', id: 't1' }),
+    ].join('\n');
+
+    // Intercept spawn to write JSONL before timeout fires
+    const origSpawn = director.spawn.bind(director);
+    director.spawn = async (config, priceLookup) => {
+      const id = await origSpawn(config, priceLookup);
+      await fs.writeFile(path.join(subagentDir, `${id}.jsonl`), jsonl);
+      return id;
+    };
+
+    const tool = createDelegateTool({
+      host: buildHost(director),
+      roster: FLEET_ROSTER,
+      sessionsRoot: tmpRoot,
+      // NO directorRunId — forces the scan path (lines 411-420)
+    });
+
+    const out = (await tool.execute(
+      { role: 'bug-hunter', task: 'scan', timeoutMs: 50 },
+      null as never,
+      { signal: new AbortController().signal },
+    )) as { ok: boolean; partial?: { lastAssistantText?: string; events?: number } };
+
+    expect(out.ok).toBe(false);
+    expect(out.partial).toBeDefined();
+    expect(out.partial?.lastAssistantText).toMatch(/scan result/);
+    expect(out.partial?.events).toBeGreaterThan(0);
+
+    await director.shutdown();
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  it('readSubagentPartial gracefully skips unreadable sessionsRoot entries', async () => {
+    // sessionsRoot exists but readdir fails (permissions) — should return undefined, not throw
+    const runner = vi.fn(
+      () =>
+        new Promise<SubagentRunOutcome>(() => {
+          /* never resolves */
+        }),
+    );
+    director = new Director({
+      config: { coordinatorId: 'skip-test', doneCondition: { type: 'all_tasks_done' }, maxConcurrent: 1 },
+      runner,
+    });
+    const tool = createDelegateTool({
+      host: buildHost(director),
+      roster: FLEET_ROSTER,
+      // Point to a path where readdir will fail: a file instead of a dir
+      sessionsRoot: __filename, // It's a file, not a directory — readdir will throw
+      // No directorRunId — tries to scan
+    });
+    const out = (await tool.execute(
+      { role: 'bug-hunter', task: 'x', timeoutMs: 50 },
+      null as never,
+      { signal: new AbortController().signal },
+    )) as { ok: boolean; error?: string };
+    // Should get a timeout error, not a crash from the readdir failure
+    expect(out.ok).toBe(false);
+    expect(out.error).toMatch(/did not finish|timeout/i);
+    await director.shutdown();
   });
 });

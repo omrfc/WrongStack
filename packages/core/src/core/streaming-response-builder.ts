@@ -234,10 +234,14 @@ export async function streamProviderToResponse(
           handleTextDelta(state, ev.text);
           events.emit('provider.text_delta', { ctx, text: ev.text });
           break;
-        case 'tool_use_start':
-          handleToolUseStart(state, ev as Parameters<typeof handleToolUseStart>[1]);
-          events.emit('provider.tool_use_start', { ctx, id: ev.id, name: ev.name });
+        case 'tool_use_start': {
+          const idVal = ev.id;
+          const nameVal = ev.name;
+          handleToolUseStart(state, { id: idVal, name: nameVal });
+          const emittedPayload = { ctx, id: idVal ?? 'unknown', name: nameVal ?? 'unknown' };
+          events.emit('provider.tool_use_start', emittedPayload);
           break;
+        }
         case 'tool_use_input_delta':
           handleToolUseInputDelta(state, ev as Parameters<typeof handleToolUseInputDelta>[1]);
           break;

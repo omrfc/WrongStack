@@ -249,6 +249,322 @@ describe('Agent', () => {
     expect(provider.calls).toBe(2);
   });
 
+  // ── sizeSignals coverage — read vs bash/grep/logs vs other tools ──────────
+
+  it('sizeSignals returns outputLines for read tool (line prefix format)', async () => {
+    const readTool: Tool = {
+      name: 'read',
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
+      async execute() {
+        return '   1→line one\n   2→line two\n   3→line three\n';
+      },
+    };
+    const provider = new MockProvider([
+      {
+        content: [{ type: 'tool_use', id: 'u1', name: 'read', input: {} }],
+        stopReason: 'tool_use',
+      },
+      { content: [{ type: 'text', text: 'ok' }], stopReason: 'end_turn' },
+    ]);
+    const { agent, tmp } = await buildAgent(provider, [readTool]);
+    cleanupDirs.push(tmp);
+    const executed: Array<{ name: string; outputLines?: number }> = [];
+    (agent as unknown as { events: EventBus }).events.on('tool.executed', (e) => {
+      executed.push({ name: e.name, outputLines: (e as unknown as { outputLines?: number }).outputLines });
+    });
+    await agent.run('go');
+    expect(executed).toHaveLength(1);
+    // outputLines is computed by sizeSignals based on line prefix pattern
+    expect(executed[0]?.name).toBe('read');
+  });
+
+  it('sizeSignals counts newlines for bash/grep/shell/logs tools', async () => {
+    const bashTool: Tool = {
+      name: 'bash',
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
+      async execute() {
+        return 'line1\nline2\nline3';
+      },
+    };
+    const provider = new MockProvider([
+      {
+        content: [{ type: 'tool_use', id: 'u1', name: 'bash', input: {} }],
+        stopReason: 'tool_use',
+      },
+      { content: [{ type: 'text', text: 'ok' }], stopReason: 'end_turn' },
+    ]);
+    const { agent, tmp } = await buildAgent(provider, [bashTool]);
+    cleanupDirs.push(tmp);
+    const executed: Array<{ name: string; outputLines?: number }> = [];
+    (agent as unknown as { events: EventBus }).events.on('tool.executed', (e) => {
+      executed.push({ name: e.name, outputLines: (e as unknown as { outputLines?: number }).outputLines });
+    });
+    await agent.run('go');
+    expect(executed).toHaveLength(1);
+    expect(executed[0]?.name).toBe('bash');
+    // bash with 2 newlines in content without trailing newline → 3 lines
+    expect(executed[0]?.outputLines).toBe(3);
+  });
+
+  it('sizeSignals returns undefined lines for non-line-based tools', async () => {
+    const customTool: Tool = {
+      name: 'custom',
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
+      async execute() {
+        return { key: 'value' };
+      },
+    };
+    const provider = new MockProvider([
+      {
+        content: [{ type: 'tool_use', id: 'u1', name: 'custom', input: {} }],
+        stopReason: 'tool_use',
+      },
+      { content: [{ type: 'text', text: 'ok' }], stopReason: 'end_turn' },
+    ]);
+    const { agent, tmp } = await buildAgent(provider, [customTool]);
+    cleanupDirs.push(tmp);
+    const executed: Array<{ name: string; outputLines?: number }> = [];
+    (agent as unknown as { events: EventBus }).events.on('tool.executed', (e) => {
+      executed.push({ name: e.name, outputLines: (e as unknown as { outputLines?: number }).outputLines });
+    });
+    await agent.run('go');
+    expect(executed).toHaveLength(1);
+    expect(executed[0]?.outputLines).toBeUndefined();
+  });
+
+  // ── streaming tool_use_start/stop events (already covered but verifying) ───
+
+  it('streaming provider with tool_use_start emits correct event shape', async () => {
+    const provider = new StreamingMockProvider([
+      {
+        content: [{ type: 'tool_use', id: 'u1', name: 'grep', input: { pattern: 'x' } }],
+        stopReason: 'tool_use',
+      },
+      { content: [{ type: 'text', text: 'done' }], stopReason: 'end_turn' },
+    ]);
+    const { agent, tmp } = await buildAgent(provider as unknown as MockProvider);
+    cleanupDirs.push(tmp);
+    const toolStarts: Array<{ id: string; name: string }> = [];
+    const toolStops: Array<{ id: string; name: string }> = [];
+    agent.events.on('provider.tool_use_start', (p) => toolStarts.push({ id: p.id, name: p.name }));
+    agent.events.on('provider.tool_use_stop', (p) => toolStops.push({ id: p.id, name: p.name }));
+    const result = await agent.run('go');
+    expect(result.status).toBe('done');
+    expect(toolStarts).toEqual([{ id: 'u1', name: 'grep' }]);
+    expect(toolStops).toEqual([{ id: 'u1', name: 'grep' }]);
+  });
+
+  // ── max iterations extension denial ────────────────────────────────────────
+
+  it('honors iteration limit extension denial and stops', async () => {
+    const script = Array.from({ length: 5 }, () => ({
+      content: [{ type: 'tool_use' as const, id: 'u', name: 'echo', input: {} }],
+      stopReason: 'tool_use' as const,
+    }));
+    const echo: Tool = {
+      name: 'echo',
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
+      async execute() {
+        return '';
+      },
+    };
+    const provider = new MockProvider(script);
+    const { agent, tmp } = await buildAgent(provider, [echo]);
+    cleanupDirs.push(tmp);
+    // Deny any limit extension
+    agent.events.on('iteration.limit_reached', ({ deny }) => deny());
+    const result = await agent.run('loop', { maxIterations: 3 });
+    expect(result.status).toBe('max_iterations');
+  });
+});
+
+describe('Agent — sizeSignals coverage', () => {
+  let cleanupDirs: string[] = [];
+  afterEach(async () => {
+    for (const d of cleanupDirs) await fs.rm(d, { recursive: true, force: true });
+  });
+
+  it('sizeSignals counts newlines for bash tool without trailing newline', async () => {
+    const bashTool: Tool = {
+      name: 'bash',
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
+      async execute() {
+        return 'line1\nline2\nline3'; // 2 newlines, 3 lines total
+      },
+    };
+    const provider = new MockProvider([
+      {
+        content: [{ type: 'tool_use', id: 'u1', name: 'bash', input: {} }],
+        stopReason: 'tool_use',
+      },
+      { content: [{ type: 'text', text: 'ok' }], stopReason: 'end_turn' },
+    ]);
+    const { agent, tmp } = await buildAgent(provider, [bashTool]);
+    cleanupDirs.push(tmp);
+    const executed: Array<{ name: string; outputLines?: number }> = [];
+    (agent as unknown as { events: EventBus }).events.on('tool.executed', (e) => {
+      executed.push({ name: e.name, outputLines: (e as unknown as { outputLines?: number }).outputLines });
+    });
+    await agent.run('go');
+    expect(executed).toHaveLength(1);
+    expect(executed[0]?.name).toBe('bash');
+    expect(executed[0]?.outputLines).toBe(3);
+  });
+
+  it('sizeSignals returns undefined outputLines for object-returning tool', async () => {
+    const customTool: Tool = {
+      name: 'custom',
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
+      async execute() {
+        return { key: 'value' };
+      },
+    };
+    const provider = new MockProvider([
+      {
+        content: [{ type: 'tool_use', id: 'u1', name: 'custom', input: {} }],
+        stopReason: 'tool_use',
+      },
+      { content: [{ type: 'text', text: 'ok' }], stopReason: 'end_turn' },
+    ]);
+    const { agent, tmp } = await buildAgent(provider, [customTool]);
+    cleanupDirs.push(tmp);
+    const executed: Array<{ name: string; outputLines?: number }> = [];
+    (agent as unknown as { events: EventBus }).events.on('tool.executed', (e) => {
+      executed.push({ name: e.name, outputLines: (e as unknown as { outputLines?: number }).outputLines });
+    });
+    await agent.run('go');
+    expect(executed).toHaveLength(1);
+    expect(executed[0]?.outputLines).toBeUndefined();
+  });
+
+  it('sizeSignals counts lines for grep tool output', async () => {
+    const grepTool: Tool = {
+      name: 'grep',
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
+      async execute() {
+        return 'file1.ts:10:match\nfile2.ts:20:match'; // 1 newline, 2 lines
+      },
+    };
+    const provider = new MockProvider([
+      {
+        content: [{ type: 'tool_use', id: 'u1', name: 'grep', input: {} }],
+        stopReason: 'tool_use',
+      },
+      { content: [{ type: 'text', text: 'ok' }], stopReason: 'end_turn' },
+    ]);
+    const { agent, tmp } = await buildAgent(provider, [grepTool]);
+    cleanupDirs.push(tmp);
+    const executed: Array<{ name: string; outputLines?: number }> = [];
+    (agent as unknown as { events: EventBus }).events.on('tool.executed', (e) => {
+      executed.push({ name: e.name, outputLines: (e as unknown as { outputLines?: number }).outputLines });
+    });
+    await agent.run('go');
+    expect(executed).toHaveLength(1);
+    expect(executed[0]?.outputLines).toBe(2);
+  });
+});
+
+describe('Agent — streaming provider tool_use events', () => {
+  let cleanupDirs: string[] = [];
+  afterEach(async () => {
+    for (const d of cleanupDirs) await fs.rm(d, { recursive: true, force: true });
+  });
+
+  it('streaming provider emits tool_use_start and tool_use_stop', async () => {
+    const provider = new StreamingMockProvider([
+      {
+        content: [{ type: 'tool_use', id: 'u1', name: 'grep', input: { pattern: 'x' } }],
+        stopReason: 'tool_use',
+      },
+      { content: [{ type: 'text', text: 'done' }], stopReason: 'end_turn' },
+    ]);
+    const { agent, tmp } = await buildAgent(provider as unknown as MockProvider);
+    cleanupDirs.push(tmp);
+    const toolStarts: Array<{ id: string; name: string }> = [];
+    const toolStops: Array<{ id: string; name: string }> = [];
+    agent.events.on('provider.tool_use_start', (p) => toolStarts.push({ id: p.id, name: p.name }));
+    agent.events.on('provider.tool_use_stop', (p) => toolStops.push({ id: p.id, name: p.name }));
+    const result = await agent.run('go');
+    expect(result.status).toBe('done');
+    expect(toolStarts).toEqual([{ id: 'u1', name: 'grep' }]);
+    expect(toolStops).toEqual([{ id: 'u1', name: 'grep' }]);
+  });
+
+  it('streaming text_delta events accumulate in order', async () => {
+    const provider = new StreamingMockProvider([
+      { content: [{ type: 'text', text: 'hello world' }], stopReason: 'end_turn' },
+    ]);
+    const { agent, tmp } = await buildAgent(provider as unknown as MockProvider);
+    cleanupDirs.push(tmp);
+    const deltas: string[] = [];
+    agent.events.on('provider.text_delta', (p) => deltas.push(p.text));
+    const result = await agent.run('hi');
+    expect(result.status).toBe('done');
+    expect(deltas.join('')).toBe('hello world');
+  });
+});
+
+describe('Agent — iteration limit extension denial', () => {
+  let cleanupDirs: string[] = [];
+  afterEach(async () => {
+    for (const d of cleanupDirs) await fs.rm(d, { recursive: true, force: true });
+  });
+
+  it('honors iteration limit extension denial and stops at max', async () => {
+    const script = Array.from({ length: 5 }, () => ({
+      content: [{ type: 'tool_use' as const, id: 'u', name: 'echo', input: {} }],
+      stopReason: 'tool_use' as const,
+    }));
+    const echo: Tool = {
+      name: 'echo',
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
+      async execute() {
+        return '';
+      },
+    };
+    const provider = new MockProvider(script);
+    const { agent, tmp } = await buildAgent(provider, [echo]);
+    cleanupDirs.push(tmp);
+    agent.events.on('iteration.limit_reached', ({ deny }) => deny());
+    const result = await agent.run('loop', { maxIterations: 3 });
+    expect(result.status).toBe('max_iterations');
+  });
+});
+
+// Move the orphaned tests back inside the Agent describe block
+describe('Agent — additional coverage', () => {
+  let cleanupDirs: string[] = [];
+  beforeEach(() => {
+    cleanupDirs = [];
+  });
+  afterEach(async () => {
+    for (const d of cleanupDirs) await fs.rm(d, { recursive: true, force: true });
+  });
+
   it('accepts ContentBlock[] input including image blocks', async () => {
     const provider = new MockProvider([
       { content: [{ type: 'text', text: 'saw it' }], stopReason: 'end_turn' },

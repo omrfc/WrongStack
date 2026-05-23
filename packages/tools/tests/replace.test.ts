@@ -118,3 +118,40 @@ describe('replaceTool', () => {
     expect(result.files_modified).toBe(0);
   });
 });
+
+describe('globNative walk exception paths', () => {
+  it('walk skips entries where fs.lstat throws (broken symlink)', async () => {
+    // When lstat throws (e.g., for broken symlinks), the entry is skipped (lines 281-285).
+    // We create a broken symlink pointing to a nonexistent target.
+    // The realpath check will skip it (throws ENOENT), but the lstat path is also tested.
+    const linkPath = path.join(tmpDir, 'broken.link');
+    await fs.symlink('nonexistent-target-file-xyz', linkPath);
+
+    const ctx = makeCtx();
+    const result = await replaceTool.execute(
+      { pattern: 'hello', replacement: 'hi', files: linkPath },
+      ctx,
+    );
+    // Should not crash; the broken link is filtered by realpath check
+    expect(result.files_modified).toBe(0);
+  });
+
+  it('walk recursively descends into subdirectories', async () => {
+    // Creates: tmpDir/a.txt, tmpDir/sub/b.txt, tmpDir/sub/deep/c.txt
+    // Uses glob pattern **/*.txt → recursive walk (line 287) must find all three.
+    const subDir = path.join(tmpDir, 'sub');
+    const deepDir = path.join(subDir, 'deep');
+    await fs.mkdir(deepDir, { recursive: true });
+    await fs.writeFile(path.join(tmpDir, 'a.txt'), 'apple banana', 'utf8');
+    await fs.writeFile(path.join(subDir, 'b.txt'), 'banana cherry', 'utf8');
+    await fs.writeFile(path.join(deepDir, 'c.txt'), 'cherry date', 'utf8');
+
+    const ctx = makeCtx();
+    const result = await replaceTool.execute(
+      { pattern: 'banana', replacement: 'BERRIES', files: '**/*.txt' },
+      ctx,
+    );
+    expect(result.files_modified).toBe(2);
+    expect(result.total_replacements).toBe(2);
+  });
+});

@@ -927,4 +927,122 @@ describe('SSETransport — mocked connect + callTool', () => {
       (globalThis as { fetch: typeof globalThis.fetch }).fetch = origFetch;
     }
   });
+
+  it('StreamableHTTPTransport.request() throws on non-OK HTTP status (lines 773-775)', async () => {
+    const fetchImpl = mkFetch([
+      // initialize
+      (_u, init) => jsonRes({ jsonrpc: '2.0', id: JSON.parse(init.body ?? '{}').id, result: {} }),
+      // notifications/initialized
+      () => jsonRes({ jsonrpc: '2.0' }),
+      // tools/list
+      (_u, init) => jsonRes({ jsonrpc: '2.0', id: JSON.parse(init.body ?? '{}').id, result: { tools: [] } }),
+      // tools/call — non-OK status throws from request() method (not postRaw)
+      () => new Response('Service Unavailable', { status: 503, statusText: 'Service Unavailable' }),
+    ]);
+    const origFetch = globalThis.fetch;
+    (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
+    try {
+      const t = new StreamableHTTPTransport({ name: 'x', url: 'https://m.test' });
+      await t.connect();
+      // callTool uses postRaw for error handling, but we test request() directly
+      // to cover the non-OK throw path in StreamableHTTPTransport.request()
+      await expect(
+        (t as unknown as { request: (m: string, p: unknown) => Promise<unknown> }).request(
+          'tools/call',
+          { name: 'x', arguments: {} },
+        ),
+      ).rejects.toThrow(/503/);
+    } finally {
+      (globalThis as { fetch: typeof globalThis.fetch }).fetch = origFetch;
+    }
+  });
+
+  it('StreamableHTTPTransport.request() throws on non-JSON-RPC response (lines 778-795)', async () => {
+    const fetchImpl = mkFetch([
+      // initialize
+      (_u, init) => jsonRes({ jsonrpc: '2.0', id: JSON.parse(init.body ?? '{}').id, result: {} }),
+      // notifications/initialized
+      () => jsonRes({ jsonrpc: '2.0' }),
+      // tools/list
+      (_u, init) => jsonRes({ jsonrpc: '2.0', id: JSON.parse(init.body ?? '{}').id, result: { tools: [] } }),
+      // tools/call — valid HTTP but not JSON-RPC
+      () => new Response('plain text not JSON-RPC', {
+        status: 200,
+        headers: { 'content-type': 'text/plain' },
+      }),
+    ]);
+    const origFetch = globalThis.fetch;
+    (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
+    try {
+      const t = new StreamableHTTPTransport({ name: 'x', url: 'https://m.test' });
+      await t.connect();
+      await expect(
+        (t as unknown as { request: (m: string, p: unknown) => Promise<unknown> }).request(
+          'tools/call',
+          { name: 'x', arguments: {} },
+        ),
+      ).rejects.toThrow(/Could not parse response as JSON-RPC/);
+    } finally {
+      (globalThis as { fetch: typeof globalThis.fetch }).fetch = origFetch;
+    }
+  });
+
+  it('StreamableHTTPTransport.request() parses NDJSON lines for JSON-RPC result (lines 778-779)', async () => {
+    // Test that request() reads multiple lines and finds the JSON-RPC result
+    const fetchImpl = mkFetch([
+      // initialize
+      (_u, init) => jsonRes({ jsonrpc: '2.0', id: JSON.parse(init.body ?? '{}').id, result: {} }),
+      // notifications/initialized
+      () => jsonRes({ jsonrpc: '2.0' }),
+      // tools/list
+      (_u, init) => jsonRes({ jsonrpc: '2.0', id: JSON.parse(init.body ?? '{}').id, result: { tools: [] } }),
+      // tools/call — NDJSON response (multiple lines)
+      () =>
+        new Response(
+          'ping event line\n' + JSON.stringify({ jsonrpc: '2.0', id: 4, result: { content: 'ok' } }) + '\n',
+          { status: 200, headers: { 'content-type': 'text/event-stream' } },
+        ),
+    ]);
+    const origFetch = globalThis.fetch;
+    (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
+    try {
+      const t = new StreamableHTTPTransport({ name: 'x', url: 'https://m.test' });
+      await t.connect();
+      const res = await (t as unknown as { request: (m: string, p: unknown) => Promise<unknown> }).request(
+        'tools/call',
+        { name: 'x', arguments: {} },
+      );
+      // Should have found the JSON-RPC result in the NDJSON lines
+      expect((res as { result?: unknown }).result).toBeDefined();
+    } finally {
+      (globalThis as { fetch: typeof globalThis.fetch }).fetch = origFetch;
+    }
+  });
+
+  it('createTimeoutSignal aborts immediately when parent signal is already aborted (line 833)', async () => {
+    // Test the createTimeoutSignal path where parent?.aborted is true (line 832-833)
+    const t = new SSETransport({ name: 'x', url: 'https://m.test' });
+    // Create an already-aborted parent signal
+    const ctrl = new AbortController();
+    ctrl.abort(new Error('already aborted'));
+    const abortedSignal = ctrl.signal;
+    // Use httpPost with an aborted parent signal — createTimeoutSignal should
+    // immediately abort the child signal
+    const fetchImpl = mkFetch([
+      () => new Response('ok', { status: 200 }),
+      () => new Response('ok', { status: 200 }),
+    ]);
+    const origFetch = globalThis.fetch;
+    (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
+    try {
+      // Verify that passing an aborted parent signal results in an aborted child
+      await expect(
+        (
+          t as unknown as { httpPost: (m: string, p: unknown, timeoutMs?: number) => Promise<unknown> }
+        ).httpPost('tools/list', {}, 5000),
+      ).rejects.toThrow();
+    } finally {
+      (globalThis as { fetch: typeof globalThis.fetch }).fetch = origFetch;
+    }
+  });
 });

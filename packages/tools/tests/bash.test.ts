@@ -427,3 +427,46 @@ describe('bashTool session and env', () => {
     }
   });
 });
+
+// ─── Coverage: background mode stderr ────────────────────────────────────────
+describe('bashTool background mode stderr', () => {
+  it('captures stderr in background mode via child.stderr.on(data)', async () => {
+    if (isWin) return;
+    const sb = await mkSandbox();
+    try {
+      const out = await bashTool.execute(
+        { command: 'ls --no-such-option 2>&1 || true', background: true },
+        sb.ctx,
+        { signal: newSignal() },
+      );
+      expect(out).toHaveProperty('output');
+      expect(out).toHaveProperty('pid');
+    } finally {
+      try {
+        await sb.cleanup();
+      } catch {
+        /* ignore */
+      }
+    }
+  }, 10_000);
+
+  it('background mode with stderr only redirected to stderr pipe', async () => {
+    if (isWin) return;
+    const sb = await mkSandbox();
+    try {
+      const out = await bashTool.execute(
+        { command: 'echo "error" >&2', background: true },
+        sb.ctx,
+        { signal: newSignal() },
+      );
+      expect(out).toHaveProperty('output');
+      expect(out.pid).toBeTruthy();
+    } finally {
+      try {
+        await sb.cleanup();
+      } catch {
+        /* ignore */
+      }
+    }
+  }, 10_000);
+});

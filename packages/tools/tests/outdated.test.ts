@@ -11,6 +11,19 @@ vi.mock('node:child_process', async (orig) => {
   };
 });
 
+const fsMocks = vi.hoisted(() => ({
+  stat: vi.fn<() => Promise<{ isFile: () => boolean }>>(),
+  statSync: vi.fn(),
+}));
+
+vi.mock('node:fs/promises', () => ({
+  stat: fsMocks.stat,
+}));
+
+vi.mock('node:fs', () => ({
+  statSync: fsMocks.statSync,
+}));
+
 import { outdatedTool } from '../src/outdated.js';
 
 const makeCtx = () => ({ cwd: '/fake', tools: [], projectRoot: '/fake' }) as any;
@@ -148,5 +161,66 @@ describe('outdatedTool', () => {
     spawnMocks.spawn.mockImplementation(() => childWithStdout(big, 1));
     const result = await outdatedTool.execute({}, makeCtx(), makeOpts());
     expect(result.truncated).toBe(true);
+  });
+});
+
+describe('detectManager via fs stat mocks', () => {
+  beforeEach(() => {
+    spawnMocks.spawn.mockImplementation(() => childWithStdout('', 0));
+    fsMocks.stat.mockReset();
+  });
+
+  it('detects pnpm when pnpm-lock.yaml stat succeeds', async () => {
+    // stat for pnpm-lock.yaml succeeds → returns 'pnpm'
+    // stat for yarn.lock throws → falls through
+    fsMocks.stat.mockImplementationOnce(async (path: string) => {
+      if (String(path).endsWith('pnpm-lock.yaml')) return { isFile: () => true } as any;
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    }).mockImplementationOnce(async (path: string) => {
+      // Second call is for yarn.lock — should throw
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+    const result = await outdatedTool.execute({}, makeCtx(), makeOpts());
+    expect(spawnMocks.spawn).toHaveBeenCalledWith(
+      'pnpm',
+      expect.any(Array),
+      expect.any(Object),
+    );
+  });
+
+  it('detects yarn when yarn.lock stat succeeds', async () => {
+    // stat for pnpm-lock.yaml throws → falls through
+    // stat for yarn.lock succeeds → returns 'yarn'
+    fsMocks.stat.mockImplementationOnce(async (path: string) => {
+      if (String(path).endsWith('pnpm-lock.yaml')) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    }).mockImplementationOnce(async (path: string) => {
+      if (String(path).endsWith('yarn.lock')) return { isFile: () => true } as any;
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+    const result = await outdatedTool.execute({}, makeCtx(), makeOpts());
+    expect(spawnMocks.spawn).toHaveBeenCalledWith(
+      'yarn',
+      expect.any(Array),
+      expect.any(Object),
+    );
+  });
+});
+
+describe('runOutdated stderr collection', () => {
+  it('collects stderr data via child.stderr.on("data")', async () => {
+    class ChildWithBoth extends EventEmitter {
+      stdout = new EventEmitter();
+      stderr = new EventEmitter();
+    }
+    const child = new ChildWithBoth();
+    spawnMocks.spawn.mockImplementationOnce(() => child);
+    setImmediate(() => {
+      child.stdout.emit('data', Buffer.from('{}'));
+      child.stderr.emit('data', Buffer.from('npm warn something'));
+      child.emit('close', 0);
+    });
+    const result = await outdatedTool.execute({}, makeCtx(), makeOpts());
+    expect(result).toHaveProperty('exit_code');
   });
 });

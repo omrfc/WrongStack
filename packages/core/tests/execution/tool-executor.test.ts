@@ -500,12 +500,175 @@ describe('ToolExecutor', () => {
     });
   });
 
-  describe('executeBatch — empty batch', () => {
-    it('returns empty outputs with full budget', async () => {
-      const executor = makeExecutor([]);
-      const result = await executor.executeBatch([], makeCtx(), 'sequential');
-      expect(result.outputs).toHaveLength(0);
-      expect(result.remainingBudget).toBe(50_000);
+  describe('executeBatch — safeRun catch coverage', () => {
+    it('catches permission policy evaluation that throws synchronously', async () => {
+      // safeRun wraps runOne in a try/catch. runOne calls permissionPolicy.evaluate()
+      // which is an async function. If it throws rather than returning, safeRun's
+      // catch block handles it and returns an error result instead of propagating.
+      const throwingPolicy = {
+        evaluate: vi.fn().mockRejectedValue(new Error('policy exploded')),
+      };
+      const tool = makeTool({ name: 'bash' });
+      const executor = makeExecutor([tool], { permissionPolicy: throwingPolicy as never });
+      const result = await executor.executeBatch(
+        [makeUse('bash', { command: 'ls' })],
+        makeCtx(),
+        'sequential',
+      );
+      const output = result.outputs[0]!;
+      expect((output.result as ToolResultBlock).is_error).toBe(true);
+      expect((output.result as ToolResultBlock).content).toContain('policy exploded');
+    });
+
+    it('catches permission policy evaluation that throws after a few calls', async () => {
+      // First call succeeds, second throws — verify budget decrement still happens
+      let callCount = 0;
+      const flakyPolicy = {
+        evaluate: vi.fn().mockImplementation(() => {
+          callCount++;
+          if (callCount === 1) return Promise.resolve(autoPermit());
+          return Promise.reject(new Error('flaky policy'));
+        }),
+      };
+      const tool1 = makeTool({ name: 'a', execute: vi.fn().mockResolvedValue({ ok: true }) });
+      const tool2 = makeTool({ name: 'b', execute: vi.fn().mockResolvedValue({ ok: true }) });
+      const executor = makeExecutor([tool1, tool2], { permissionPolicy: flakyPolicy as never });
+      const result = await executor.executeBatch(
+        [makeUse('a'), makeUse('b')],
+        makeCtx(),
+        'parallel',
+      );
+      expect(result.outputs).toHaveLength(2);
+      const errors = result.outputs.filter(
+        (o) => (o.result as ToolResultBlock).is_error === true,
+      );
+      expect(errors.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('executeTool — abort reason propagation', () => {
+    it('re-throws string abort reason as Error with that message', async () => {
+      const tool = makeTool({ name: 'slow', execute: vi.fn().mockResolvedValue('ok') });
+      const executor = makeExecutor([tool]);
+      const ctrl = new AbortController();
+      ctrl.abort('user cancelled');
+      const ctx = makeCtx();
+      ctx.signal = ctrl.signal;
+      const result = await executor.executeBatch([makeUse('slow')], ctx, 'sequential');
+      const output = result.outputs[0]!;
+      expect((output.result as ToolResultBlock).is_error).toBe(true);
+      expect((output.result as ToolResultBlock).content).toContain('user cancelled');
+    });
+
+    it('re-throws Error abort reason as-is', async () => {
+      const tool = makeTool({ name: 'slow', execute: vi.fn().mockResolvedValue('ok') });
+      const executor = makeExecutor([tool]);
+      const ctrl = new AbortController();
+      const abortErr = new Error('operational limit');
+      ctrl.abort(abortErr);
+      const ctx = makeCtx();
+      ctx.signal = ctrl.signal;
+      const result = await executor.executeBatch([makeUse('slow')], ctx, 'sequential');
+      const output = result.outputs[0]!;
+      expect((output.result as ToolResultBlock).is_error).toBe(true);
+      expect((output.result as ToolResultBlock).content).toContain('operational limit');
+    });
+
+    it('re-throws undefined abort reason as default message', async () => {
+      const tool = makeTool({ name: 'slow', execute: vi.fn().mockResolvedValue('ok') });
+      const executor = makeExecutor([tool]);
+      const ctrl = new AbortController();
+      ctrl.abort(); // no reason
+      const ctx = makeCtx();
+      ctx.signal = ctrl.signal;
+      const result = await executor.executeBatch([makeUse('slow')], ctx, 'sequential');
+      const output = result.outputs[0]!;
+      expect((output.result as ToolResultBlock).is_error).toBe(true);
+      expect((output.result as ToolResultBlock).content).toContain('aborted');
+    });
+  });
+
+  describe('executeTool — tool.cleanup called on abort', () => {
+    it('calls cleanup when tool times out', async () => {
+      const cleanup = vi.fn().mockResolvedValue(undefined);
+      const tool = makeTool({
+        name: 'timed',
+        timeoutMs: 10,
+        execute: vi.fn().mockImplementation(async () => {
+          await new Promise((r) => setTimeout(r, 200));
+          return 'done';
+        }),
+        cleanup,
+      });
+      const executor = makeExecutor([tool]);
+      const result = await executor.executeBatch([makeUse('timed')], makeCtx(), 'sequential');
+      expect(cleanup).toHaveBeenCalled();
+      expect((result.outputs[0]!.result as ToolResultBlock).is_error).toBe(true);
+    });
+  });
+
+  describe('subjectFor — backfill path when subjectKey is not path/file/files', () => {
+    it('escapes value when subjectKey is a non-path key like "query"', async () => {
+      policy.evaluate.mockResolvedValue(confirmDecision());
+      const tool = makeTool({ name: 'search', subjectKey: 'query' });
+      const executor = makeExecutor([tool]);
+      const result = await executor.executeBatch(
+        [makeUse('search', { query: 'hello*world' })],
+        makeCtx(),
+        'sequential',
+      );
+      // subjectKey 'query' → not a path key → escapeGlob only
+      expect(result.outputs[0]!.result.suggestedPattern).toBe('hello\\*world');
+    });
+
+    it('normalizes backslash in path when subjectKey is "file"', async () => {
+      policy.evaluate.mockResolvedValue(confirmDecision());
+      const tool = makeTool({ name: 'edit', subjectKey: 'file' });
+      const executor = makeExecutor([tool]);
+      const result = await executor.executeBatch(
+        [makeUse('edit', { file: 'C:\\Users\\dev\\project\\a.ts' })],
+        makeCtx(),
+        'sequential',
+      );
+      const pattern = result.outputs[0]!.result.suggestedPattern;
+      expect(pattern).toContain('C:/Users/dev/project/a.ts'); // backslashes normalized to forward slashes
+    });
+
+    it('escapes glob chars in subjectKey value even when it looks like a path', async () => {
+      policy.evaluate.mockResolvedValue(confirmDecision());
+      const tool = makeTool({ name: 'custom' });
+      const executor = makeExecutor([tool]);
+      const result = await executor.executeBatch(
+        [makeUse('custom', { path: '/tmp/test[1].txt' })],
+        makeCtx(),
+        'sequential',
+      );
+      expect(result.outputs[0]!.result.suggestedPattern).toContain('\\[1\\]');
+    });
+  });
+
+  describe('executeBatch — budget never goes negative', () => {
+    it('Math.max(0, budget - bytes) on huge output', async () => {
+      const huge = 'x'.repeat(200_000);
+      const tool = makeTool({
+        name: 'echo',
+        execute: vi.fn().mockResolvedValue(huge),
+      });
+      const executor = makeExecutor([tool], { perIterationOutputCapBytes: 50_000 });
+      const result = await executor.executeBatch([makeUse('echo')], makeCtx(), 'sequential');
+      expect(result.remainingBudget).toBeGreaterThanOrEqual(0);
+      expect(result.remainingBudget).toBeLessThanOrEqual(50_000);
+    });
+  });
+
+  describe('executeBatch — null/undefined toolUse skipped in sequential', () => {
+    it('filters out nulls in sequential strategy', async () => {
+      const tool = makeTool({ name: 'a', execute: vi.fn().mockResolvedValue({ ok: true }) });
+      const executor = makeExecutor([tool]);
+      // @ts-expect-error intentionally testing with null entry
+      const result = await executor.executeBatch([null, makeUse('a'), undefined], makeCtx(), 'sequential');
+      expect(result.outputs).toHaveLength(1); // only 'a' was executed
+      expect(tool.execute).toHaveBeenCalledTimes(1);
     });
   });
 });

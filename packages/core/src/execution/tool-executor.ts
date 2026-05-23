@@ -252,6 +252,22 @@ export class ToolExecutor {
       throw err;
     } finally {
       clearTimeout(timer);
+      // If the tool completed successfully (no error thrown) but the combined
+      // signal was aborted (e.g. timeout), the catch block above never fired.
+      // Call cleanup here and then throw so the caller sees the abort.
+      if (combined.aborted) {
+        if (typeof tool.cleanup === 'function') {
+          try {
+            await tool.cleanup(input, ctx);
+          } catch {
+            /* swallow */
+          }
+        }
+        const reason = combined.reason instanceof Error
+          ? combined.reason
+          : new Error(typeof combined.reason === 'string' ? combined.reason : 'aborted');
+        throw reason;
+      }
     }
   }
 
@@ -328,9 +344,8 @@ export class ToolExecutor {
     if (subjectKey) {
       const v = obj[subjectKey];
       if (typeof v === 'string') {
-        return subjectKey === 'path' || subjectKey === 'file' || subjectKey === 'files'
-          ? normalizePath(v)
-          : escapeGlob(v);
+        const isPathKey = subjectKey === 'path' || subjectKey === 'file' || subjectKey === 'files';
+        return isPathKey ? normalizePath(v) : escapeGlob(v);
       }
     }
 

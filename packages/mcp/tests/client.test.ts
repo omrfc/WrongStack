@@ -394,4 +394,144 @@ describe('MCPClient', () => {
       expect(c.getState()).toBe('failed');
     });
   });
+
+  describe('request() — stdio stdin.write() throws', () => {
+    it('request() rejects when stdin.write throws', async () => {
+      // Lines 436-439: the catch block handles stdin.write() throwing.
+      // Create a client that has a child process with a throwing stdin.
+      const c = new MCPClient({
+        name: 'stdin-throws',
+        transport: 'stdio',
+        command: 'node',
+        args: ['-e', 'process.stdin.resume()'],
+      });
+      // Access the private child field after construction (child is assigned during connect()).
+      // Use any-cast to bypass TypeScript privacy — we need the actual object reference.
+      const cAny = c as unknown as Record<string, unknown>;
+      // After construction, child may be set if connectStdio was called (it is on construction
+      // via connect()). But we need to replace stdin with a throwing one.
+      // Directly set child to a mock process with a throwing stdin.write.
+      const mockStdin = {
+        write: () => { throw new Error('EPIPE broken pipe'); },
+        on: () => {},
+        removeListener: () => {},
+      };
+      const mockChild = {
+        stdin: mockStdin,
+        stdout: { on: () => {} },
+        stderr: { on: () => {} },
+        on: () => {},
+        kill: () => {},
+      };
+      // Set the private child field directly
+      Object.defineProperty(cAny, 'child', {
+        value: mockChild,
+        writable: true,
+        configurable: true,
+      });
+      // Also set _drainPending to false so the normal write path is taken
+      Object.defineProperty(cAny, '_drainPending', { value: false, configurable: true });
+      await expect(
+        (c as unknown as { request: (m: string, p: unknown) => Promise<unknown> }).request(
+          'tools/list',
+          {},
+        ),
+      ).rejects.toThrow(/EPIPE|stdin/);
+      expect((c as unknown as { pending: Map<unknown, unknown> }).pending.size).toBe(0);
+    });
+  });
+
+  describe('notify() — drain backpressure paths', () => {
+    it('notify() skips when _drainPending is already true (line 472-478)', async () => {
+      const c = new MCPClient({
+        name: 'drain-backpressure',
+        transport: 'stdio',
+        command: 'node',
+        args: ['-e', 'process.stdin.resume()'],
+        startupTimeoutMs: 500,
+      });
+      // Manually set _drainPending to true to simulate a concurrent notify already waiting
+      (c as unknown as { _drainPending: boolean })._drainPending = true;
+      // Also set _lastNotifySkipped to false to verify it gets set
+      (c as unknown as { _lastNotifySkipped: boolean })._lastNotifySkipped = false;
+      // Call notify — should skip and set _lastNotifySkipped to true
+      await expect(
+        (c as unknown as { notify: (m: string, p: unknown) => Promise<void> }).notify(
+          'notifications/initialized',
+          {},
+        ),
+      ).resolves.toBeUndefined();
+      expect((c as unknown as { _lastNotifySkipped: boolean })._lastNotifySkipped).toBe(true);
+    });
+
+    it('notify() throws when drain times out (lines 491-496)', async () => {
+      const c = new MCPClient({
+        name: 'drain-timeout',
+        transport: 'stdio',
+        command: 'node',
+        args: ['-e', 'process.stdin.resume()'],
+        startupTimeoutMs: 500,
+      });
+      // Set _drainPending = false so write() is called; write returns false to trigger
+      // the drain-wait path, but stdin.once never fires 'drain' so the timeout fires.
+      Object.defineProperty(c as unknown as Record<string, unknown>, '_drainPending', { value: false, configurable: true });
+      const cAny = c as unknown as Record<string, unknown>;
+      Object.defineProperty(cAny, 'child', {
+        value: {
+          stdin: {
+            write: () => false, // backpressure triggers drain wait
+            on: () => {},
+            removeListener: () => {},
+            once: (_event: string, _cb: () => void) => {}, // never fires drain — timeout fires
+          },
+          on: () => {},
+          kill: () => {},
+        },
+        writable: true,
+        configurable: true,
+      });
+      // The notify should eventually time out the drain wait
+      await expect(
+        (c as unknown as { notify: (m: string, p: unknown) => Promise<void> }).notify(
+          'notifications/initialized',
+          {},
+        ),
+      ).rejects.toThrow(/drain timeout/);
+    });
+
+    it('notify() throws wrapped error when write throws after backpressure (lines 501-505)', async () => {
+      const c = new MCPClient({
+        name: 'notify-write-throw',
+        transport: 'stdio',
+        command: 'echo',
+        args: ['x'],
+      });
+      const cAny = c as unknown as Record<string, unknown>;
+      let callCount = 0;
+      Object.defineProperty(cAny, 'child', {
+        value: {
+          stdin: {
+            write: (_s: string) => {
+              callCount++;
+              if (callCount > 1) throw new Error('pipe error');
+              return false; // backpressure on first call
+            },
+            on: () => {},
+          },
+          on: () => {},
+          kill: () => {},
+        },
+        writable: true,
+        configurable: true,
+      });
+      Object.defineProperty(cAny, '_drainPending', { value: false, configurable: true });
+      // First call hits backpressure, second throws
+      await expect(
+        (c as unknown as { notify: (m: string, p: unknown) => Promise<void> }).notify(
+          'test',
+          {},
+        ),
+      ).rejects.toThrow(/notify.*failed/);
+    });
+  });
 });

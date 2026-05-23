@@ -325,7 +325,7 @@ type StopReason =
  * failed, good luck". Returns undefined for success / unknown kinds —
  * the caller checks for presence before including in output.
  */
-function hintForKind(
+export function hintForKind(
   kind: string | undefined,
   retryable: boolean | undefined,
   backoffMs: number | undefined,

@@ -328,4 +328,84 @@ describe('thinking-mode round-trip', () => {
     expect(res.content[0]).toEqual({ type: 'thinking', thinking: 'working... almost there' });
     expect(res.content[1]).toEqual({ type: 'text', text: '42' });
   });
+
+  it('OpenAIProvider closes thinking before emitting tool_use_start when both arrive (lines 202-203)', async () => {
+    // Lines 202-203: when tool_calls arrive while thinkingOpen is true,
+    // we must emit thinking_stop before tool_use_start.
+    const sse = [
+      'data: {"id":"x","choices":[{"index":0,"delta":{"reasoning_content":"thinking..."}}]}',
+      '',
+      // tool_calls arrive while thinkingOpen is true — must close thinking first
+      'data: {"id":"x","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"echo","arguments":"{\\"x\\":1}"}}]}}]}',
+      '',
+      'data: {"id":"x","choices":[{"index":0,"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n');
+    const provider = new OpenAIProvider({ apiKey: 'k', fetchImpl: mockFetch(sseBody(sse)) });
+    const res = await provider.complete(
+      { model: 'm', messages: [{ role: 'user', content: 'go' }], maxTokens: 100 },
+      { signal: new AbortController().signal },
+    );
+    // Both thinking and tool should appear
+    expect(res.content).toHaveLength(2);
+    expect(res.content[0]).toEqual({ type: 'thinking', thinking: 'thinking...' });
+    expect(res.content[1]).toMatchObject({ type: 'tool_use', id: 'c1', name: 'echo' });
+  });
+
+  it('OpenAIProvider yields thinking_stop at end-of-stream when thinkingOpen is true (line 277)', async () => {
+    // Line 276-278: if thinkingOpen is still true when the stream ends,
+    // we must yield thinking_stop before message_stop.
+    const sse = [
+      'data: {"id":"x","choices":[{"index":0,"delta":{"reasoning_content":"ongoing thought"}}]}',
+      '',
+      // Stream ends WITHOUT a final content/text event — thinking still open
+      'data: {"id":"x","choices":[{"index":0,"finish_reason":"end_turn"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n');
+    const provider = new OpenAIProvider({ apiKey: 'k', fetchImpl: mockFetch(sseBody(sse)) });
+    const events: StreamEvent[] = [];
+    for await (const ev of provider.stream(
+      { model: 'm', messages: [{ role: 'user', content: 'x' }], maxTokens: 100 },
+      { signal: new AbortController().signal },
+    )) {
+      events.push(ev);
+    }
+    const stopIdx = events.findIndex((e) => e.type === 'thinking_stop');
+    expect(stopIdx).toBeGreaterThan(0); // thinking_stop appears after thinking_start/delta
+    // Should not have text after the thinking block
+    expect(events.filter((e) => e.type === 'text_delta')).toHaveLength(0);
+  });
+
+  it('OpenAIProvider emits tool_use_stop for entries that never had tool_use_start (line 281-282)', async () => {
+    // Line 281-282: when id/name arrive in a later chunk (after arguments already
+    // populated argBuf), emittedStart is still false when we process that chunk,
+    // so we emit tool_use_start + tool_use_stop at end-of-stream.
+    const sse = [
+      // First chunk: index 0 with arguments but NO id/name (emittedStart stays false)
+      'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"x\\":"}}]}}]}',
+      '',
+      // Second chunk: same index but id/name arrive here
+      'data: {"id":"x","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c_late","function":{"name":"echo","arguments":"\\"hi\\""}}]}}]}',
+      '',
+      'data: {"id":"x","choices":[{"index":0,"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n');
+    const provider = new OpenAIProvider({ apiKey: 'k', fetchImpl: mockFetch(sseBody(sse)) });
+    const res = await provider.complete(
+      { model: 'm', messages: [{ role: 'user', content: 'go' }], maxTokens: 100 },
+      { signal: new AbortController().signal },
+    );
+    // Should produce exactly one tool_use block with id/name from the second chunk
+    expect(res.content).toHaveLength(1);
+    const tool = res.content[0] as { type: string; id?: string; name?: string };
+    expect(tool.type).toBe('tool_use');
+    expect(tool.id).toBe('c_late');
+    expect(tool.name).toBe('echo');
+  });
 });

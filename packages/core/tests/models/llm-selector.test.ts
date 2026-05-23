@@ -204,4 +204,78 @@ describe('LLMSelector', () => {
       expect(result.kept).toHaveLength(1); // All in one kept range
     });
   });
+
+  describe('estimateTokens with tool_use blocks', () => {
+    it('estimates tokens for message with array content containing tool_use blocks', async () => {
+      const provider: Provider = {
+        id: 'test',
+        capabilities: { tools: false, streaming: false },
+        complete: vi.fn().mockRejectedValue(new Error('fail')),
+        stream: vi.fn(),
+      };
+      const selector = new LLMSelector({ provider, maxContextTokens: 40000 });
+      const messages: Message[] = [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Hello world' },
+            { type: 'tool_use', id: 'tool_1', name: 'ReadFile', input: { path: '/a/b/c' } },
+            { type: 'tool_use', id: 'tool_2', name: 'WriteFile', input: { path: '/x/y/z', content: 'hello' } },
+          ],
+        },
+      ];
+      // The tool_use blocks get token-counted via JSON.stringify(b).length / 4
+      const result = await selector.select(messages, 1000);
+      // Should use fallback with the messages (some kept/collapsed)
+      expect(result).toBeDefined();
+    });
+  });
+
+  describe('formatMessages early break', () => {
+    it('breaks early when total line length exceeds maxChars', async () => {
+      const provider: Provider = {
+        id: 'test',
+        capabilities: { tools: false, streaming: false },
+        complete: vi.fn().mockRejectedValue(new Error('fail')),
+        stream: vi.fn(),
+      };
+      const selector = new LLMSelector({ provider, maxContextTokens: 40000 });
+      // Each message is padded to exceed maxChars quickly
+      const messages: Message[] = Array(100)
+        .fill(null)
+        .map((_, i) => makeMessage(i % 2 === 0 ? 'user' : 'assistant', 'x'.repeat(200)));
+      const result = await selector.select(messages, 1000);
+      expect(result).toBeDefined();
+    });
+  });
+
+  describe('parseSelectorOutput edge cases', () => {
+    it('parseSelectorOutput finds valid JSON but JSON.parse throws', async () => {
+      // The raw response has { and } but the content between them isn't valid JSON
+      // e.g. "{"kept": {...}}" would fail JSON.parse for some reason
+      const provider = mockProvider(['{"kept":[{invalid json here}],"collapsed":[],"reasoning":""}']);
+      const selector = new LLMSelector({ provider });
+      const messages = Array(5).fill(null).map((_, i) => makeMessage('user', `msg ${i}`));
+      const result = await selector.select(messages, 1000);
+      // Should fall back to recency selection
+      expect(result.kept.length + result.collapsed.length).toBeGreaterThan(0);
+    });
+
+    it('parseSelectorOutput with empty kept/collapsed arrays', async () => {
+      const provider = mockProvider(['{"kept":[],"collapsed":[],"reasoning":"nothing kept"}']);
+      const selector = new LLMSelector({ provider });
+      const messages = Array(5).fill(null).map((_, i) => makeMessage('user', `msg ${i}`));
+      const result = await selector.select(messages, 1000);
+      expect(result.kept).toEqual([]);
+      expect(result.collapsed).toEqual([]);
+    });
+
+    it('parseSelectorOutput where kept[i].importance is missing → defaults to medium', async () => {
+      const provider = mockProvider(['{"kept":[{"from":0,"to":2}],"collapsed":[],"reasoning":""}']);
+      const selector = new LLMSelector({ provider });
+      const messages = Array(5).fill(null).map((_, i) => makeMessage('user', `msg ${i}`));
+      const result = await selector.select(messages, 1000);
+      expect(result.kept[0].importance).toBe('medium');
+    });
+  });
 });

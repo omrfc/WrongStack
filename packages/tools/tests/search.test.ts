@@ -127,3 +127,53 @@ describe('searchTool', () => {
     expect(Array.isArray(result.results)).toBe(true);
   });
 });
+
+describe('fetchWithTimeout error path', () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('calls clearTimeout(timer) in the catch block when fetch throws', async () => {
+    // Mock fetch to reject so the catch block in fetchWithTimeout is exercised.
+    // This covers lines 272-275 (clearTimeout in catch path).
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error('Network error');
+    }) as unknown as typeof globalThis.fetch;
+
+    const ctx = {} as any;
+    const result = await searchTool.execute({ query: 'test', source: 'duckduckgo' }, ctx, makeOpts());
+    // Should return fallback result from the catch block, not throw
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].title).toBe('Search unavailable');
+  });
+});
+
+describe('anySignal already-aborted', () => {
+  it('calls controller.abort() immediately when a passed signal is already aborted', async () => {
+    // When anySignal receives an already-aborted signal, it calls
+    // controller.abort() right away (lines 281-283). This causes fetch to
+    // reject immediately, exercising the catch block with clearTimeout.
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error('Should not be called - already aborted');
+    }) as unknown as typeof globalThis.fetch;
+
+    const ac = new AbortController();
+    ac.abort(); // abort BEFORE passing to execute
+
+    const ctx = {} as any;
+    const result = await searchTool.execute(
+      { query: 'test', source: 'duckduckgo' },
+      ctx,
+      { signal: ac.signal },
+    );
+    // Should get fallback result, not throw, because anySignal immediately aborted
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].title).toBe('Search unavailable');
+  });
+});

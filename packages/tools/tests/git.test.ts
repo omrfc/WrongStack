@@ -288,3 +288,103 @@ describe('gitTool stdout capping', () => {
     expect(result.stderr.length).toBeLessThanOrEqual(100000);
   });
 });
+
+describe('gitTool findGitDir bounds via real fs', () => {
+  it('findGitDir respects projectRoot bound — outside projectRoot is not searched', async () => {
+    // Create a directory structure where projectRoot has no .git,
+    // but a sibling of cwd does. findGitDir must not cross projectRoot.
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), 'git-bound-'));
+    try {
+      const projectRoot = path.join(base, 'proj');
+      await fs.mkdir(projectRoot, { recursive: true });
+
+      // Create a sibling directory with a valid .git
+      const siblingGit = path.join(base, 'sibling', '.git');
+      await fs.mkdir(path.join(siblingGit, 'refs', 'heads'), { recursive: true });
+      await fs.writeFile(path.join(siblingGit, 'HEAD'), 'ref: refs/heads/main\n');
+
+      const cwd = path.join(projectRoot, 'sub');
+      await fs.mkdir(cwd, { recursive: true });
+
+      const ctx = { cwd, tools: [], projectRoot } as any;
+      const result = await gitTool.execute({ command: 'status' }, ctx, makeOpts());
+      // projectRoot has no .git, sibling does but is outside projectRoot
+      // → findGitDir returns null, exitCode 128
+      expect(result.exitCode).toBe(128);
+    } finally {
+      await fs.rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it('findGitDir finds .git in a parent directory of cwd within projectRoot', async () => {
+    // projectRoot has .git; cwd is a subdirectory of projectRoot
+    // findGitDir should find it by walking up
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), 'git-find-'));
+    try {
+      const gitDir = path.join(base, '.git');
+      await fs.mkdir(path.join(gitDir, 'refs', 'heads'), { recursive: true });
+      await fs.writeFile(path.join(gitDir, 'HEAD'), 'ref: refs/heads/main\n');
+
+      const cwd = path.join(base, 'src', 'utils');
+      await fs.mkdir(cwd, { recursive: true });
+
+      const ctx = { cwd, tools: [], projectRoot: base } as any;
+      const result = await gitTool.execute({ command: 'status' }, ctx, makeOpts());
+      // Should find .git and execute successfully
+      expect(result.exitCode).toBe(0);
+    } finally {
+      await fs.rm(base, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('gitTool buildArgs edge cases', () => {
+  it('buildArgs handles files as array', async () => {
+    // Array files are split and trimmed (lines 137-139)
+    const ctx = makeCtx(process.cwd());
+    const result = await gitTool.execute(
+      { command: 'status', files: ['a.ts', 'b.ts'] },
+      ctx,
+      makeOpts(),
+    );
+    expect(result.exitCode).toBe(0);
+  });
+
+  it('buildArgs handles commit with dry_run and message and files', async () => {
+    // All three conditional paths in buildArgs commit case (lines 156-162)
+    const ctx = makeCtx(process.cwd());
+    const result = await gitTool.execute(
+      { command: 'commit', dry_run: true, message: 'chore: test', files: 'x.txt' },
+      ctx,
+      makeOpts(),
+    );
+    // dry_run without message should still work (dry_run only adds --dry-run --porcelain)
+    expect(result).toHaveProperty('exitCode');
+  });
+});
+
+describe('gitTool runGit stdout/stderr MAX_OUTPUT cap', () => {
+  it('stdout is capped at MAX_OUTPUT and truncated flag is set', async () => {
+    const ctx = makeCtx(process.cwd());
+    // Request a very large log that will exceed 100000 chars of output
+    const result = await gitTool.execute(
+      { command: 'log', format: 'oneline', limit: 10000 },
+      ctx,
+      makeOpts(),
+    );
+    // If output is huge it will be truncated; if small it won't
+    expect(typeof result.truncated).toBe('boolean');
+    expect(result.stdout.length).toBeLessThanOrEqual(100000);
+  });
+
+  it('stderr is capped at MAX_OUTPUT even when stdout is small', async () => {
+    const ctx = makeCtx(process.cwd());
+    // Use an invalid git command to produce stderr output without much stdout
+    const result = await gitTool.execute(
+      { command: 'log', format: 'oneline', limit: 1 },
+      ctx,
+      makeOpts(),
+    );
+    expect(result.stderr.length).toBeLessThanOrEqual(100000);
+  });
+});

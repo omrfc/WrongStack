@@ -137,4 +137,57 @@ describe('edit tool', () => {
     );
     expect(first.replacements).toBe(1);
   });
+
+  describe('lineNumbersFor multi-match', () => {
+    it('lineNumbersFor converts indices to correct line numbers for multiple matches', async () => {
+      // A file with three matches of "foo" at different lines.
+      // lineNumbersFor should return the correct line numbers for each match index.
+      const file = path.join(sb.dir, 'multi.txt');
+      const content = 'line1 foo\nline2 foo\nline3 foo\n';
+      await fs.writeFile(file, content);
+      await readTool.execute({ path: 'multi.txt' }, sb.ctx, { signal: newSignal() });
+
+      // Attempt an edit with 'foo' but without replace_all — this should throw
+      // with the line numbers of the matches. We exercise it through the error message.
+      await expect(
+        editTool.execute({ path: 'multi.txt', old_string: 'foo', new_string: 'bar' }, sb.ctx, {
+          signal: newSignal(),
+        }),
+      ).rejects.toThrow(/matched 3 times/);
+    });
+  });
+
+  describe('findSimilarity long-needle near-match', () => {
+    it('findSimilarity is called and returns a hint when needle >= 20 chars has a near match', async () => {
+      // The probe (first 40 chars of needle) must appear in the file for findSimilarity to return a line.
+      // File contains the probe directly so findSimilarity finds it.
+      const file = path.join(sb.dir, 'near.txt');
+      const fileContent = 'Hello world testingzzz different suffix here is the rest of the file';
+      await fs.writeFile(file, fileContent);
+      // needle = same as file content with a trailing change
+      const needle = 'Hello world testingzzz different suffix here is not there';
+      await readTool.execute({ path: 'near.txt' }, sb.ctx, { signal: newSignal() });
+
+      await expect(
+        editTool.execute({ path: 'near.txt', old_string: needle, new_string: 'replaced' }, sb.ctx, {
+          signal: newSignal(),
+        }),
+      ).rejects.toThrow(/Nearest match near line/);
+    });
+
+    it('findSimilarity returns undefined when needle >= 20 chars with no near match in file', async () => {
+      // Needle >= 20 chars but no probe match at all in the file
+      // findSimilarity returns undefined → no "near line" hint in error
+      const file = path.join(sb.dir, 'far.txt');
+      const needle = 'zzzz no match in this file at all xxxx'; // 35 chars, probe won't be found
+      await fs.writeFile(file, 'completely unrelated content');
+      await readTool.execute({ path: 'far.txt' }, sb.ctx, { signal: newSignal() });
+
+      await expect(
+        editTool.execute({ path: 'far.txt', old_string: needle, new_string: 'replaced' }, sb.ctx, {
+          signal: newSignal(),
+        }),
+      ).rejects.toThrow(/no match/);
+    });
+  });
 });
