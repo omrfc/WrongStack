@@ -69,7 +69,7 @@ export async function setupSlashCommands(params: SlashCommandsDeps): Promise<voi
     currentHiddenItems = items;
   };
 
-  buildBuiltinSlashCommands({
+  const commands = buildBuiltinSlashCommands({
     registry: slashRegistry,
     toolRegistry,
     compactor,
@@ -111,4 +111,8 @@ export async function setupSlashCommands(params: SlashCommandsDeps): Promise<voi
       return lines.length > 0 ? lines.join('\n') : 'No active subagents.';
     },
   });
+
+  for (const cmd of commands) {
+    slashRegistry.register(cmd);
+  }
 }

@@ -108,7 +108,15 @@ export class AutoCompactionMiddleware {
     pressure: { level: 'warn' | 'soft' | 'hard'; tokens: number; load: number },
   ): Promise<void> {
     try {
-      await this.compactor.compact(ctx, { aggressive });
+      const report = await this.compactor.compact(ctx, { aggressive });
+      this.events?.emit('compaction.fired', {
+        level: pressure.level,
+        tokens: pressure.tokens,
+        load: pressure.load,
+        maxContext: this._maxContext,
+        report,
+        aggressive,
+      });
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       const fatal =

@@ -24,6 +24,8 @@ export const BOOLEAN_FLAGS = new Set([
   'webui',
   'no-check',
   'director',
+  'no-hints',
+  'hints',
 ]);
 
 // ------------------------------------------------------------------ main args

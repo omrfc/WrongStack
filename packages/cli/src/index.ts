@@ -651,8 +651,44 @@ export async function main(argv: string[]): Promise<number> {
       const tag = tags.length > 0 ? ` (${tags.join(' / ')})` : '';
       return `Spawned subagent ${subagentId}${tag} for task ${taskId}. Use /agents to track progress.`;
     },
-    onAgents: () => {
+    onAgents: (subagentId?: string) => {
       const s = multiAgentHost.status();
+      // When given a specific subagent id, return a live monitor view.
+      if (subagentId) {
+        const live = s.live.find((a) => a.subagentId === subagentId);
+        const completed = s.completed.filter((r) => r.subagentId === subagentId);
+        const pending = s.pending.filter((p) => p.subagentId === subagentId);
+        if (!live && completed.length === 0 && pending.length === 0) {
+          return `No subagent found with id "${subagentId}".`;
+        }
+        const STATUS_ICON: Record<string, string> = {
+          running: '●',
+          idle: '○',
+          stopped: '⊘',
+        };
+        const lines: string[] = [color.bold(`Agent ${subagentId.slice(0, 8)}`)];
+        if (live) {
+          lines.push(`  ${STATUS_ICON[live.status] ?? '?'}  status: ${live.status}`);
+          if (live.task) lines.push(`  task: ${live.task}`);
+        }
+        for (const p of pending) {
+          lines.push(`  ·  pending: ${p.taskId.slice(0, 8)} → ${p.description.slice(0, 60)}`);
+        }
+        for (const r of completed) {
+          const fmt = fmtTaskResultLine(r, color);
+          lines.push(`  ${fmt.mark}  ${r.taskId.slice(0, 8)} ${fmt.stats}${fmt.tail}`);
+        }
+        // Also surface per-subagent cost from fleet_usage if director is active.
+        if (director) {
+          const snap = director.snapshot();
+          const per = snap.perSubagent?.[subagentId];
+          if (per?.cost) lines.push(`  cost: ${per.cost.toFixed(4)}`);
+          if (per?.iterations) lines.push(`  iterations: ${per.iterations}`);
+          if (per?.toolCalls) lines.push(`  toolCalls: ${per.toolCalls}`);
+        }
+        return lines.join('\n');
+      }
+      // No id — return the summary table.
       const lines = [s.summary];
       const STATUS_ICON: Record<string, string> = {
         running: '●',

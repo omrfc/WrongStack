@@ -32,7 +32,7 @@ WrongStack's REPL supports ~30 built-in slash commands. Each is a first-class ci
 | `/plugin` | `plugin.ts` | Manage plugins: list, official, install, enable, disable, remove |
 | `/mcp` | `mcp.ts` | MCP servers: list, add, remove, enable, disable, restart (REPL only) |
 | `/spawn` | `spawn-agents.ts` | Spawn an isolated subagent for a task |
-| `/agents` | `spawn-agents.ts` | Show status of all spawned subagents |
+| `/agents` | `spawn-agents.ts` | Show all spawned subagents; with an id, show detailed live monitor view |
 | `/director` | `spawn-agents.ts` | Promote to director mode (fleet orchestration) |
 | `/fleet` | `fleet.ts` | Fleet control: status, usage, kill, manifest, retry, log, stream |
 | `/sdd` | `sdd.ts` | AI-driven spec-driven development workflow |
@@ -103,7 +103,7 @@ interface SlashCommandContext {
 
   // Multi-agent
   onSpawn?: (task: string, opts?: { provider?, model?, tools?: string[], name?: string }) => Promise<string>;
-  onAgents?: () => string;
+  onAgents?: (subagentId?: string) => string;  // no id = summary table; with id = detailed monitor view
   onFleet?: (action: 'status'|'usage'|'kill'|'manifest', target?: string) => Promise<string>;
   onFleetRetry?: (taskId?: string) => Promise<string>;
   onFleetLog?: (id: string | undefined, mode: 'summary'|'raw') => Promise<string>;

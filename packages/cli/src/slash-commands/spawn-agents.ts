@@ -30,10 +30,11 @@ export function buildSpawnCommand(opts: SlashCommandContext): SlashCommand {
 export function buildAgentsCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'agents',
-    description: 'Show status of spawned subagents.',
-    async run() {
+    description: 'Show status of spawned subagents. With an id, show live monitor view.',
+    async run(args) {
       if (!opts.onAgents) return { message: 'Multi-agent is not enabled in this session.' };
-      return { message: opts.onAgents() };
+      const subagentId = args.trim() || undefined;
+      return { message: await opts.onAgents(subagentId) };
     },
   };
 }

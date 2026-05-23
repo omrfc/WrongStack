@@ -24,6 +24,7 @@ import {
   DefaultSkillLoader,
   DefaultSystemPromptBuilder,
   DefaultTokenCounter,
+  estimateRequestTokens,
   EventBus,
   HybridCompactor,
   type ProviderApiKey,
@@ -276,16 +277,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     autoCompactor = new AutoCompactionMiddleware(
       compactor,
       effectiveMaxContext,
-      (ctx) => {
-        let total = 0;
-        for (const m of ctx.messages) {
-          if (typeof m.content === 'string') total += Math.ceil(m.content.length / 4);
-          else if (Array.isArray(m.content)) {
-            for (const b of m.content) total += Math.ceil(JSON.stringify(b).length / 4);
-          }
-        }
-        return total;
-      },
+      (ctx) => estimateRequestTokens(ctx.messages, ctx.systemPrompt, ctx.tools ?? []).total,
       {
         warn: initialContextPolicy.thresholds.warn,
         soft: initialContextPolicy.thresholds.soft,

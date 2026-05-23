@@ -48,7 +48,7 @@ export function wireMetricsToEvents(events: EventBus, sink: MetricsSink): () => 
     events.on('token.threshold', (e) => sink.gauge('agent.tokens.used', e.used)),
     events.on('compaction.fired', (e) => {
       sink.counter('compaction.fired.total');
-      sink.histogram('compaction.reduction_tokens', e.before - e.after);
+      sink.histogram('compaction.reduction_tokens', e.report.before - e.report.after);
     }),
     events.on('mcp.server.connected', (e) =>
       sink.counter('mcp.connects.total', 1, { server: e.name }),

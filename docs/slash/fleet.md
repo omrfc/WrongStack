@@ -13,6 +13,8 @@
 | `/fleet usage` | Per-subagent iterations, tool calls, duration, cost rollup |
 | `/fleet kill <id>` | Terminate a running subagent |
 | `/fleet manifest` | Print the director `fleet.json` manifest |
+| `/fleet concurrency` | Show the current concurrent-subagent ceiling |
+| `/fleet concurrency N` | Set the concurrent ceiling to N (≥ 1) |
 | `/fleet retry` | List interrupted tasks from last run |
 | `/fleet retry <taskId>` | Re-spawn matching subagent for one task |
 | `/fleet retry all` | Re-assign every interrupted task |

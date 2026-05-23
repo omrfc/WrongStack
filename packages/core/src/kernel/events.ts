@@ -164,7 +164,20 @@ export interface EventMap {
     removedToolResults: string[];
     removedMessages: number;
   };
-  'compaction.fired': { before: number; after: number };
+  'compaction.fired': {
+    /** Threshold level that triggered compaction (warn / soft / hard). */
+    level: 'warn' | 'soft' | 'hard';
+    /** Tokens estimated before compaction ran. */
+    tokens: number;
+    /** Fraction of maxContext at the time compaction fired. */
+    load: number;
+    /** Provider's max context window in tokens. */
+    maxContext: number;
+    /** Full compaction report from the compactor. */
+    report: { before: number; after: number; reductions: { phase: string; saved: number }[] };
+    /** Whether aggressive (summary) mode was used. */
+    aggressive: boolean;
+  };
   /**
    * Fired when the auto-compaction middleware's compactor.compact() call
    * throws. Compaction is best-effort by design so we don't crash the agent

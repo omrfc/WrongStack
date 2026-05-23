@@ -21,6 +21,7 @@ import { parseArgs } from './arg-parser.js';
 import { bootConfig } from './boot-config.js';
 import { ReadlineInputReader } from './input-reader.js';
 import { runPicker, saveToGlobalConfig } from './picker.js';
+import { printLaunchHints } from './launch-hints.js';
 import { runLaunchPrompts, runProjectCheck } from './pre-launch.js';
 import { TerminalRenderer } from './renderer.js';
 import { subcommands } from './subcommands/index.js';
@@ -208,6 +209,8 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
       flags['no-tui'] = true;
     }
     if (choices.yolo !== config.yolo) config = patchConfig(config, { yolo: choices.yolo });
+
+    printLaunchHints(renderer, flags);
   }
 
   return {

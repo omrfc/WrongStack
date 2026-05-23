@@ -2178,6 +2178,45 @@ export function App({
     };
   }, [events, onClearHistory]);
 
+  // --- Leader agent compaction events → chat history ---
+  useEffect(() => {
+    const offFired = events.on('compaction.fired', (e) => {
+      const { level, tokens, load, maxContext, report, aggressive } = e as {
+        level: string;
+        tokens: number;
+        load: number;
+        maxContext: number;
+        report: { before: number; after: number; reductions: { phase: string; saved: number }[] };
+        aggressive: boolean;
+      };
+      const pct = (load * 100).toFixed(0);
+      const before = report.before;
+      const after = report.after;
+      const saved = before - after;
+      const table = [
+        `▸ context compacted at ${level} (${pct}% of ${maxContext.toLocaleString()} tok)`,
+        `  tokens before  ${before.toLocaleString().padStart(8)}`,
+        `  tokens after   ${after.toLocaleString().padStart(8)}`,
+        `  saved         ${saved.toLocaleString().padStart(8)}  (${((saved / before) * 100).toFixed(1)}%)`,
+      ];
+      for (const line of table) {
+        dispatch({ type: 'addEntry', entry: { kind: 'info', text: line } });
+      }
+    });
+    const offFailed = events.on('compaction.failed', (e) => {
+      const { level, load, maxContext, fatal } = e as { level: string; load: number; maxContext: number; fatal: boolean };
+      const pct = (load * 100).toFixed(0);
+      const text = fatal
+        ? `✗ compaction failed at ${level} (${pct}% of ${maxContext.toLocaleString()} tok) — FATAL`
+        : `⚠ compaction failed at ${level} (${pct}% of ${maxContext.toLocaleString()} tok) — continuing`;
+      dispatch({ type: 'addEntry', entry: { kind: fatal ? 'error' : 'warn', text } });
+    });
+    return () => {
+      offFired();
+      offFailed();
+    };
+  }, [events]);
+
   // Install a dispatch-backed setter into the shared controller so the
   // `/fleet stream on|off` slash command can flip our reducer flag.
   // Restored to a noop on unmount so a late-arriving slash callback
@@ -2311,6 +2350,11 @@ export function App({
         case 'iteration.started':
           dispatch({ type: 'fleetStart', id: e.subagentId });
           break;
+        case 'session.started':
+          // First event a subagent emits — treat as start so the fleet
+          // panel is populated even if no iteration.started fires yet.
+          dispatch({ type: 'fleetStart', id: e.subagentId });
+          break;
         case 'provider.text_delta': {
           const p = e.payload as { text?: string };
           if (p?.text) {
@@ -2321,6 +2365,40 @@ export function App({
             if (streamFlushTimer) clearTimeout(streamFlushTimer);
             streamFlushTimer = setTimeout(flushStreamBufs, FLUSH_MS * 4);
           }
+          break;
+        }
+        case 'provider.thinking_delta': {
+          // Extended thinking output — same buffering as text_delta so
+          // it gets flushed into recentMessages and (when streaming is
+          // on) injected into leader history.
+          const p = e.payload as { text?: string };
+          if (p?.text) {
+            streamBuf.set(e.subagentId, (streamBuf.get(e.subagentId) ?? '') + p.text);
+            if (streamFlushTimer) clearTimeout(streamFlushTimer);
+            streamFlushTimer = setTimeout(flushStreamBufs, FLUSH_MS * 4);
+          }
+          break;
+        }
+        case 'provider.retry': {
+          const p = e.payload as { attempt?: number; delayMs?: number };
+          dispatch({
+            type: 'addEntry',
+            entry: {
+              kind: 'warn',
+              text: `subagent retry ${p?.attempt ?? '?'}${p?.delayMs ? ` (${p.delayMs}ms)` : ''}`,
+            },
+          });
+          break;
+        }
+        case 'provider.error': {
+          const p = e.payload as { description?: string };
+          dispatch({
+            type: 'addEntry',
+            entry: {
+              kind: 'error',
+              text: `subagent error${p?.description ? `: ${p.description}` : ''}`,
+            },
+          });
           break;
         }
         case 'tool.started': {
@@ -2360,6 +2438,35 @@ export function App({
         case 'session.ended':
           // Subagent finished — leave status update to task.completed.
           break;
+        case 'compaction.fired':
+          dispatch({
+            type: 'addEntry',
+            entry: { kind: 'info', text: 'subagent compaction triggered' },
+          });
+          break;
+        case 'compaction.failed':
+          dispatch({
+            type: 'addEntry',
+            entry: { kind: 'warn', text: 'subagent compaction failed' },
+          });
+          break;
+        case 'token.threshold':
+          dispatch({
+            type: 'addEntry',
+            entry: { kind: 'info', text: 'subagent token threshold reached' },
+          });
+          break;
+        case 'budget.threshold_reached': {
+          const p = e.payload as { kind?: string; used?: number; limit?: number };
+          dispatch({
+            type: 'fleetBudgetWarning',
+            id: e.subagentId,
+            kind: p?.kind ?? 'unknown',
+            used: p?.used ?? 0,
+            limit: p?.limit ?? 0,
+          });
+          break;
+        }
       }
     });
 

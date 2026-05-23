@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "goal": "%100 otonom, sdd dahil bir projeyi fikirden ürüne testler dahil tamamlayacak ve bu süreçte gerekirse asla durmayacak, subagentlar spwan ederek director modundaki agentin kararlar aldığı kullanıcıya gerçekten gerekmedikçe soru sormayan, llm gücü ile karar verip subagentin tıkandığı yerde ona cevap verecek bir director sistem istiyorum. ayrıca subagentları /agents ile ile görsek de bunların live olarak ne yaptıklarını da monitörlemek istiyorum /agents agent-id monitor vs gibi chat ekranımda aksin istiyorum",
+  "setAt": "2026-05-23T07:38:59.647Z",
+  "lastActivityAt": "2026-05-23T07:38:59.647Z",
+  "iterations": 0,
+  "engineState": "idle",
+  "goalState": "active",
+  "todoAttempts": {},
+  "journal": []
+}

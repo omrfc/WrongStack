@@ -150,7 +150,7 @@ describe('wireMetricsToEvents', () => {
     const bus = new EventBus();
     const { sink, counter, histogram } = makeSink();
     wireMetricsToEvents(bus, sink);
-    bus.emit('compaction.fired', { before: 100_000, after: 40_000 });
+    bus.emit('compaction.fired', { report: { before: 100_000, after: 40_000, reductions: [] } });
     expect(counter).toHaveBeenCalledWith('compaction.fired.total');
     expect(histogram).toHaveBeenCalledWith('compaction.reduction_tokens', 60_000);
   });

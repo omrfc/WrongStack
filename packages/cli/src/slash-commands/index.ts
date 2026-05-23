@@ -48,7 +48,7 @@ export interface SlashCommandContext {
     description: string,
     opts?: { provider?: string; model?: string; tools?: string[]; name?: string },
   ) => Promise<string>;
-  onAgents?: () => string;
+  onAgents?: (subagentId?: string) => string;
   onFleet?: (
     action: 'status' | 'usage' | 'kill' | 'manifest' | 'concurrency',
     target?: string,

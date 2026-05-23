@@ -21,11 +21,13 @@ afterEach(async () => {
   await fs.rm(tmp, { recursive: true, force: true });
 });
 
-function initGitRepo() {
-  execFileSync('git', ['init', '-q'], { cwd: tmp });
-  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tmp });
-  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: tmp });
-  execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: tmp });
+function initGitRepo(): void {
+  // Use execSync to avoid Windows spawn issues; git init is fast and synchronous
+  const { execSync } = require('node:child_process');
+  execSync('git init -q', { cwd: tmp, stdio: 'ignore' });
+  execSync('git config user.email test@example.com', { cwd: tmp, stdio: 'ignore' });
+  execSync('git config user.name Test', { cwd: tmp, stdio: 'ignore' });
+  execSync('git config commit.gpgsign false', { cwd: tmp, stdio: 'ignore' });
 }
 
 function ctxFor(dir: string) {

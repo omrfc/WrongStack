@@ -30,10 +30,16 @@ describe('Git commit helper functions', () => {
     });
   }
 
-  async function initGitRepo() {
-    await runGit(['init']);
-    await runGit(['config', 'user.email', 'test@test.com']);
-    await runGit(['config', 'user.name', 'Test']);
+  async function initGitRepo(): Promise<void> {
+    const { execSync } = await import('node:child_process');
+    // Use execSync to avoid Windows spawn stdin issues with git
+    try {
+      execSync('git init -q', { cwd: tmp, stdio: 'ignore' });
+      execSync('git config user.email test@test.com', { cwd: tmp, stdio: 'ignore' });
+      execSync('git config user.name Test', { cwd: tmp, stdio: 'ignore' });
+    } catch {
+      // ignore errors — tests handle them
+    }
   }
 
   describe('detectCommitType', () => {

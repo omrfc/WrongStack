@@ -22,7 +22,7 @@ export class HybridCompactor implements Compactor {
   private readonly estimator: (text: string) => number;
 
   constructor(opts: CompactorOptions = {}) {
-    this.preserveK = opts.preserveK ?? 10;
+    this.preserveK = opts.preserveK ?? 5;
     this.eliseThreshold = opts.eliseThreshold ?? 2000;
     this.estimator = opts.estimator ?? estimateTextTokens;
   }
@@ -83,6 +83,31 @@ export class HybridCompactor implements Compactor {
         preserveStart = i;
       }
     }
+
+    // Ensure tool_use/tool_result protocol pairs are preserved together.
+    // Walk forward through the preserved window: if an assistant message
+    // at or after preserveStart contains a tool_use, also preserve the
+    // immediately following message (the tool_result) so neither is elided.
+    for (let i = preserveStart; i < messages.length; i++) {
+      const m = messages[i];
+      if (!m || typeof m.content === 'string' || !Array.isArray(m.content)) continue;
+      const hasToolUse = m.content.some((b) => b.type === 'tool_use');
+      if (hasToolUse && i + 1 < messages.length) {
+        const next = messages[i + 1];
+        if (
+          next &&
+          next.role === 'user' &&
+          typeof next.content !== 'string' &&
+          Array.isArray(next.content) &&
+          next.content.some((b) => b.type === 'tool_result')
+        ) {
+          // Extend preserveStart to cover the tool_result as well so
+          // the protocol pair stays complete and readable.
+          preserveStart = i + 1;
+        }
+      }
+    }
+
     let saved = 0;
     let changed = false;
     const nextMessages = new Array(messages.length);
@@ -105,7 +130,7 @@ export class HybridCompactor implements Compactor {
         const elided: ToolResultBlock = {
           type: 'tool_result',
           tool_use_id: b.tool_use_id,
-          content: `[elided: ~${tokens} tokens removed. Call the tool again if needed.]`,
+          content: `[elided: ~${tokens} tokens]`,
           is_error: b.is_error,
         };
         return elided;

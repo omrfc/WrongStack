@@ -3,7 +3,8 @@
  * Avoids repeated stringification of tool input objects.
  */
 
-const RoughTokenEstimate = (text: string): number => Math.max(1, Math.ceil(text.length / 4));
+const RoughTokenEstimate = (text: string, charsPerToken = 3.5): number =>
+  Math.max(1, Math.ceil(text.length / charsPerToken));
 
 /**
  * Cache of computed estimates keyed by the stringified input — not the
