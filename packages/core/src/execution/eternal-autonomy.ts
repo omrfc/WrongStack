@@ -127,6 +127,8 @@ export interface EternalAutonomyOptions {
   transientBackoffBaseMs?: number;
   /** Ceiling for the exponential backoff. Default 60_000 (60 s). */
   transientBackoffMaxMs?: number;
+  /** Called when the eternal loop stops for any reason (manual stop, goal complete, etc.). */
+  onEternalStop?: () => void;
 }
 
 export type EternalEngineState = 'idle' | 'running' | 'stopped';

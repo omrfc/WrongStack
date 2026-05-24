@@ -450,7 +450,7 @@ export class MultiAgentHost {
   private subagentToolRegistry(allow?: string[]): ToolRegistry {
     if (!allow || allow.length === 0) return this.deps.toolRegistry;
     // Build a filtered registry by cloning and registering the allowed tools.
-    const sub = this.deps.toolRegistry.clone();
+    const sub = (this.deps.toolRegistry as ToolRegistry).clone();
     for (const t of this.filterTools(allow)) sub.register(t);
     return sub;
   }

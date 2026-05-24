@@ -167,7 +167,7 @@ export class ToolRegistry {
    */
   clone(): ToolRegistry {
     const copy = new ToolRegistry();
-    copy.registerAll(this.listWithOwner().map(({ tool, owner }) => tool), owner);
+    for (const { tool, owner } of this.listWithOwner()) copy.register(tool, owner);
     return copy;
   }
 }
