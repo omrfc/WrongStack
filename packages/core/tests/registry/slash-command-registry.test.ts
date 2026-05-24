@@ -233,11 +233,24 @@ describe('SlashCommandRegistry', () => {
     expect(ran).toBe(true);
   });
 
-  it('builtin re-registration throws', () => {
+  it('builtin re-registration is a silent no-op', () => {
     const r = new SlashCommandRegistry();
     r.register({ name: 'help', description: '', async run() {} }, 'core');
-    expect(() => r.register({ name: 'help', description: '', async run() {} }, 'core')).toThrow(
-      /Built-in slash command.*already registered/,
+    // Same owner re-registering is intentionally a no-op (supports React
+    // Strict Mode double-mount and plugin hot-reload in dev). The second
+    // call does not throw and does not replace the original command.
+    expect(() => r.register({ name: 'help', description: '', async run() {} }, 'core')).not.toThrow();
+    // Original registration is still there
+    expect(r.get('help')).toBeDefined();
+  });
+
+  it('cross-owner re-registration on same name throws', () => {
+    const r = new SlashCommandRegistry();
+    r.register({ name: 'help', description: '', async run() {} }, 'core');
+    // Different owner using the same bare name throws to prevent silent
+    // shadowing that would confuse users.
+    expect(() => r.register({ name: 'help', description: '', async run() {} }, 'some-plugin')).toThrow(
+      /already registered/,
     );
   });
 
