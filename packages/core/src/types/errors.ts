@@ -208,7 +208,7 @@ export class PluginError extends WrongStackError {
       code: opts.code,
       subsystem: 'plugin',
       severity: 'error',
-      recoverable: opts.code === 'PLUGIN_MISSING_DEPENDENCY',
+      recoverable: opts.code === ERROR_CODES.PLUGIN_MISSING_DEPENDENCY,
       context: { plugin: opts.pluginName, ...opts.context },
       cause: opts.cause,
     });
@@ -236,8 +236,8 @@ export class AgentError extends WrongStackError {
       message: opts.message,
       code: opts.code,
       subsystem: 'agent',
-      severity: opts.code === 'AGENT_ABORTED' ? 'warning' : 'error',
-      recoverable: opts.recoverable ?? opts.code === 'AGENT_ITERATION_LIMIT',
+      severity: opts.code === ERROR_CODES.AGENT_ABORTED ? 'warning' : 'error',
+      recoverable: opts.recoverable ?? opts.code === ERROR_CODES.AGENT_ITERATION_LIMIT,
       context: opts.context,
       cause: opts.cause,
     });
@@ -253,13 +253,13 @@ export class AgentError extends WrongStackError {
  */
 export function toWrongStackError(
   err: unknown,
-  code: Extract<ErrorCode, 'AGENT_RUN_FAILED' | 'AGENT_ABORTED' | 'UNKNOWN'> = 'AGENT_RUN_FAILED',
+  code: Extract<ErrorCode, 'AGENT_RUN_FAILED' | 'AGENT_ABORTED' | 'UNKNOWN'> = ERROR_CODES.AGENT_RUN_FAILED,
 ): WrongStackError {
   if (err instanceof WrongStackError) return err;
   const message = err instanceof Error ? err.message : String(err);
   return new AgentError({
     message,
-    code: code === 'UNKNOWN' ? 'AGENT_RUN_FAILED' : code,
+    code: code === 'UNKNOWN' ? ERROR_CODES.AGENT_RUN_FAILED : code,
     cause: err,
   });
 }
@@ -281,8 +281,8 @@ export class SessionError extends WrongStackError {
       message: opts.message,
       code: opts.code,
       subsystem: 'session',
-      severity: opts.code === 'SESSION_WRITE_FAILED' ? 'error' : 'warning',
-      recoverable: opts.code !== 'SESSION_CORRUPTED',
+      severity: opts.code === ERROR_CODES.SESSION_WRITE_FAILED ? 'error' : 'warning',
+      recoverable: opts.code !== ERROR_CODES.SESSION_CORRUPTED,
       context: { sessionId: opts.sessionId, ...opts.context },
       cause: opts.cause,
     });

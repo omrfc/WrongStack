@@ -1,6 +1,6 @@
 import type { ContentBlock, TextBlock } from './blocks.js';
 import type { ErrorCode } from './errors.js';
-import { WrongStackError } from './errors.js';
+import { WrongStackError, ERROR_CODES } from './errors.js';
 import type { Message } from './messages.js';
 import type { Tool } from './tool.js';
 
@@ -190,12 +190,12 @@ function truncate(s: string, n: number): string {
 }
 
 function providerStatusToCode(status: number, type?: string): ErrorCode {
-  if (status === 0) return 'PROVIDER_NETWORK_ERROR';
-  if (type === 'rate_limit_error' || status === 429) return 'PROVIDER_RATE_LIMITED';
-  if (type === 'authentication_error' || status === 401) return 'PROVIDER_AUTH_FAILED';
-  if (type === 'overloaded_error' || status === 529) return 'PROVIDER_OVERLOADED';
-  if (type === 'invalid_request_error' || status === 400) return 'PROVIDER_INVALID_REQUEST';
-  if (status === 408) return 'PROVIDER_NETWORK_ERROR';
-  if (status >= 500) return 'PROVIDER_SERVER_ERROR';
-  return 'PROVIDER_INVALID_REQUEST';
+  if (status === 0) return ERROR_CODES.PROVIDER_NETWORK_ERROR;
+  if (type === 'rate_limit_error' || status === 429) return ERROR_CODES.PROVIDER_RATE_LIMITED;
+  if (type === 'authentication_error' || status === 401) return ERROR_CODES.PROVIDER_AUTH_FAILED;
+  if (type === 'overloaded_error' || status === 529) return ERROR_CODES.PROVIDER_OVERLOADED;
+  if (type === 'invalid_request_error' || status === 400) return ERROR_CODES.PROVIDER_INVALID_REQUEST;
+  if (status === 408) return ERROR_CODES.PROVIDER_NETWORK_ERROR;
+  if (status >= 500) return ERROR_CODES.PROVIDER_SERVER_ERROR;
+  return ERROR_CODES.PROVIDER_INVALID_REQUEST;
 }
