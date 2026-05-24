@@ -1,17 +1,15 @@
 import { ProviderError } from '../types/provider.js';
+import { NETWORK_ERR_RE } from './regex-patterns.js';
 import type { RetryPolicy } from '../types/retry-policy.js';
 
 export class DefaultRetryPolicy implements RetryPolicy {
-  private static readonly NETWORK_ERR_RE =
-    /ECONN|ETIMEDOUT|ETIME|ENOTFOUND|EAI_AGAIN|fetch failed/i;
-
   shouldRetry(err: Error | ProviderError, attempt: number): boolean {
     if (err instanceof ProviderError) {
       if (!err.retryable) return false;
       return attempt < this.maxAttempts(err);
     }
     const msg = err.message ?? '';
-    const isNetwork = DefaultRetryPolicy.NETWORK_ERR_RE.test(msg);
+    const isNetwork = NETWORK_ERR_RE.test(msg);
     if (isNetwork) return attempt < 2;
     return false;
   }

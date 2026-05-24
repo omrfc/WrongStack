@@ -1,7 +1,7 @@
 import type { Context } from '../core/context.js';
 import type { ErrorHandler, RecoveryDecision } from '../types/error-handler.js';
 import { ProviderError } from '../types/provider.js';
-
+import { NETWORK_ERR_RE } from './regex-patterns.js';
 import type { Compactor } from '../types/compactor.js';
 import type { ModelsRegistry } from '../types/models-registry.js';
 
@@ -20,7 +20,6 @@ export interface RecoveryStrategy {
 
 // Package-level compiled regex for hot paths — avoids repeated compilation.
 const CONTEXT_OVERFLOW_RE = /context|too long|tokens/i;
-const NETWORK_ERR_RE = /ECONN|ETIMEDOUT|ETIME|ENOTFOUND|EAI_AGAIN|fetch failed/i;
 
 /**
  * Builds the ordered list of recovery strategies used by DefaultErrorHandler.

@@ -8,15 +8,13 @@ import type { ReportOptions } from './report-generator.js';
 import type { Context } from '../core/context.js';
 import type { Provider, Request } from '../types/provider.js';
 import { ProviderError } from '../types/provider.js';
+import { NETWORK_ERR_RE } from '../execution/regex-patterns.js';
 import type { RetryPolicy } from '../types/retry-policy.js';
 import type { ErrorHandler } from '../types/error-handler.js';
 import { readFile, readdir, mkdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { atomicWrite } from '../utils/atomic-write.js';
 import { sanitizeJsonString } from '../utils/safe-json.js';
-
-// Shared network error pattern — mirrors DefaultRetryPolicy.NETWORK_ERR_RE
-const NETWORK_ERR_RE = /ECONN|ETIMEDOUT|ETIME|ENOTFOUND|EAI_AGAIN|fetch failed/i;
 
 export interface SecurityScannerOptions {
   projectRoot: string;
