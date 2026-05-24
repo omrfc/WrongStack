@@ -169,7 +169,8 @@ export function formatGoal(goal: GoalFile, journalLimit = 10): string {
   lines.push(`Set: ${goal.setAt}`);
   lines.push(`Last activity: ${goal.lastActivityAt}`);
   lines.push(`Iterations: ${goal.iterations}`);
-  lines.push(`Mission: ${goal.goalState ?? 'active'}`);
+  const stateLabel = goal.goalState ?? 'active';
+  lines.push(`State: ${stateLabel}${goal.iterations > 0 ? ` (iteration #${goal.iterations})` : ''}`);
   lines.push(`Engine: ${goal.engineState}`);
   const usage = summarizeUsage(goal);
   if (usage.iterationsWithUsage > 0) {

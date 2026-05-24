@@ -107,6 +107,34 @@ export interface StatusBarProps {
   processCount?: number;
   /** Items to hide from the status bar. */
   hiddenItems?: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>;
+  /**
+   * Live iteration stage from the eternal engine. When set, renders a
+   * chip like `⏸ decide` or `▶ execute(todo:fix-auth)` next to the
+   * autonomy chip on line 2.
+   */
+  eternalStage?: {
+    phase: 'idle';
+  } | {
+    phase: 'decide';
+    reason: string;
+  } | {
+    phase: 'execute';
+    task: string;
+  } | {
+    phase: 'reflect';
+    status: 'success' | 'failure' | 'aborted' | 'skipped';
+    note?: string;
+  } | {
+    phase: 'sleep';
+    ms: number;
+  } | {
+    phase: 'paused';
+  } | {
+    phase: 'stopped';
+  } | {
+    phase: 'error';
+    message: string;
+  } | null;
 }
 
 /**
@@ -135,6 +163,7 @@ export function StatusBar({
   projectName,
   processCount,
   hiddenItems,
+  eternalStage,
 }: StatusBarProps): React.ReactElement {
   const hiddenSet = new Set(hiddenItems);
   const usage = tokenCounter?.total();
@@ -249,9 +278,15 @@ export function StatusBar({
               </Text>
             </>
           ) : null}
+          {eternalStage ? (
+            <>
+              {yolo || (autonomy && autonomy !== 'off') ? <Text dimColor>│</Text> : null}
+              <EternalStageChip stage={eternalStage} />
+            </>
+          ) : null}
           {elapsedMs !== undefined && !hiddenSet.has('elapsed') ? (
             <>
-              {yolo ? <Text dimColor>│</Text> : null}
+              {yolo || (autonomy && autonomy !== 'off') || eternalStage ? <Text dimColor>│</Text> : null}
               <Text dimColor>⏱ {fmtElapsed(elapsedMs)}</Text>
             </>
           ) : null}
@@ -353,6 +388,40 @@ export function StatusBar({
       ) : null}
     </Box>
   );
+}
+
+function EternalStageChip({
+  stage,
+}: {
+  stage: NonNullable<StatusBarProps['eternalStage']>;
+}): React.ReactElement {
+  switch (stage.phase) {
+    case 'idle':
+      return <Text dimColor>⬜ idle</Text>;
+    case 'decide':
+      return <Text color="cyan">⬇ decide: {stage.reason}</Text>;
+    case 'execute':
+      return (
+        <Text color="green">
+          ▶ <Text bold>execute</Text>
+          {stage.task ? `(${stage.task})` : ''}
+        </Text>
+      );
+    case 'reflect':
+      return (
+        <Text color={stage.status === 'success' ? 'green' : stage.status === 'failure' ? 'red' : 'yellow'}>
+          ↩ reflect: {stage.status}
+        </Text>
+      );
+    case 'sleep':
+      return <Text dimColor>💤 sleep {Math.round(stage.ms / 1000)}s</Text>;
+    case 'paused':
+      return <Text color="yellow">⏸ paused</Text>;
+    case 'stopped':
+      return <Text dimColor>■ stopped</Text>;
+    case 'error':
+      return <Text color="red">⚠ error: {stage.message}</Text>;
+  }
 }
 
 function ContextChip({ ctx }: { ctx: ContextWindow }): React.ReactElement {

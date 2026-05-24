@@ -3764,6 +3764,7 @@ export function App({
         subagentCount={Object.keys(state.fleet).length}
         processCount={getProcessRegistry().activeCount}
         hiddenItems={hiddenItems}
+        eternalStage={state.eternalStage}
       />
       {director ? (
         <FleetPanel entries={state.fleet} totalCost={state.fleetCost} roster={fleetRoster} />

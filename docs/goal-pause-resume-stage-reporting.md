@@ -1,6 +1,22 @@
 # `/goal pause` / `/goal resume` + Iteration Stage Reporting
 
-## Context
+## Status: ✅ Implemented
+
+### Implementation summary (2026-05-24)
+
+All features from this design are fully implemented:
+
+- **`goalState: 'paused'`** — added to `GoalState` type in `goal-store.ts`
+- **`/goal pause` / `/goal resume`** — implemented in `slash-commands/goal.ts`
+  - Writes `goalState: 'paused'` to goal.json; engine exits loop gracefully via existing `missionState !== 'active'` guard
+  - `/goal resume` clears `goalState: 'active'` and loop continues from next iteration
+- **`onStage` callback** — `EternalAutonomyEngine` fires it at each phase transition (idle → decide → execute → reflect → sleep/paused/stopped)
+- **`state.eternalStage`** — plumbed through `app.tsx` via `subscribeEternalStage` → reducer → StatusBar
+- **EternalStageChip** — renders in status bar line 2 after autonomy chip, showing phase-specific labels:
+  - `⬜ idle`, `⬇ decide: {reason}`, `▶ execute({task})`, `↩ reflect: {status}`, `💤 sleep {N}s`, `⏸ paused`, `■ stopped`, `⚠ error: {message}`
+- **`formatGoal`** — updated to show `State: {stateLabel} (iteration #{n})` instead of `Mission:`
+
+## Original Design
 
 When running `/autonomy eternal` with a goal, the engine loops through a
 sense-decide-execute-reflect cycle. The user has no visibility into which
