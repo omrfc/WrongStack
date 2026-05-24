@@ -23,6 +23,47 @@ This pulls in the full stack — `@wrongstack/core`, `@wrongstack/runtime`, `@wr
 
 After install, `wrongstack` is on your `PATH`. (`wstack` works too — it's an alias.)
 
+### What's new in 0.6.6
+
+**`/sdd` — Spec-Driven Development workflow.** New slash command in
+`packages/cli/src/slash-commands/sdd.ts` that guides the agent through
+the SDD loop: `parse` → `analyze` → `generate` → `track` → `execute`.
+Accepts a markdown spec file path as argument (e.g. `/sdd docs/my-feature.md`).
+The command reads the spec, generates tasks via `TaskGenerator`, and
+displays task status inline. Built on `SpecParser`, `TaskTracker`,
+`TaskGenerator`, and `TaskFlow` from `@wrongstack/core/sdd`.
+
+**`/goal pause` and `/goal resume`.** Two new subcommands for the goal
+system:
+- `/goal pause` — sets `goalState: 'paused'` in `goal.json`. The eternal
+  engine sees this on its next iteration start (via `goalState !== 'active'`
+  guard) and exits gracefully after the current iteration finishes — no
+  AbortController kill, no work torn mid-task.
+- `/goal resume` — flips `goalState` back to `'active'`. The engine resumes
+  on the next `/autonomy eternal` invocation or immediately if already running.
+
+**`IterationStage` pipeline + TUI stage chip.** `EternalAutonomyEngine`
+now calls an `onStage` callback at each phase transition
+(`decide → execute → reflect → sleep`). The CLI wires a `stageListeners`
+Set and exposes `subscribeEternalStage` to the TUI, which dispatches into
+`state.eternalStage` for live rendering. The TUI status bar shows the
+current phase label (e.g. `⟳ DECIDE`, `⚡ EXECUTE`, `◎ REFLECT`) updating
+every tick.
+
+**`GoalFile.goalState` field.** `goal-store.ts` now models the goal
+lifecycle with three states: `'active' | 'paused' | 'done'`. All existing
+goal files continue working — missing `goalState` defaults to `'active'`
+for backwards compatibility.
+
+**`SlashCommandRegistry` double-register guard relaxed.** Built-in slash
+commands that re-register (e.g. TUI + CLI both mounting the same command)
+now silently no-op instead of throwing. This protects against React Strict
+Mode double-mounts in development and plugin hot-reload scenarios. Third-party
+commands using the same bare name from different owners still throw to
+prevent accidental shadowing.
+
+For earlier release notes, see [CHANGELOG.md](CHANGELOG.md).
+
 ### What's new in 0.6.5
 
 **`/autonomy parallel` — parallel subagent fan-out mode.** The
