@@ -590,7 +590,7 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
           const title = rest.filter(a => !a.startsWith('-')).join(' ').trim() || 'Untitled Feature';
 
           // Check for existing session and offer to resume (unless --force)
-          if (!sddState.getBuilder() && !forceFlag) {
+          if (!sessionState.getBuilder() && !forceFlag) {
             const sessionPath = path.join(projectRoot, '.wrongstack', 'sdd-session.json');
             try {
               await fsp.access(sessionPath);
@@ -1327,7 +1327,7 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
         }
 
         case 'cancel': {
-          // Always try to delete the session file from disk
+          // Always try to delete the session file and store dirs from disk
           const sessionPath = path.join(projectRoot, '.wrongstack', 'sdd-session.json');
           let deletedFromDisk = false;
           try {
@@ -1335,6 +1335,16 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
             deletedFromDisk = true;
           } catch {
             // No file on disk
+          }
+          try {
+            await fsp.rm(path.join(projectRoot, '.wrongstack', 'specs'), { recursive: true, force: true });
+          } catch {
+            // No specs dir
+          }
+          try {
+            await fsp.rm(path.join(projectRoot, '.wrongstack', 'task-graphs'), { recursive: true, force: true });
+          } catch {
+            // No task-graphs dir
           }
 
           const cancelBuilder = sddState.getBuilder();
