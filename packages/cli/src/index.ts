@@ -1430,12 +1430,15 @@ if (isMain) {
       // hang if a plugin or MCP server leaks. Avoids libuv UV_HANDLE_CLOSING
       // assertions seen on Windows when process.exit() races with handle teardown.
       process.exitCode = c;
-      setTimeout(() => process.exit(c), 200).unref();
+      // 500ms grace: let undici TLS, log flushes, and plugin teardown complete.
+      // The unref() prevents this timer from keeping the event loop alive
+      // if everything else finishes first.
+      setTimeout(() => process.exit(c), 500).unref();
     },
     (err) => {
       process.stderr.write((err instanceof Error ? err.stack : String(err)) + '\n');
       process.exitCode = 1;
-      setTimeout(() => process.exit(1), 200).unref();
+      setTimeout(() => process.exit(1), 500).unref();
     },
   );
 }

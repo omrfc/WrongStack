@@ -497,7 +497,8 @@ async function readSubagentPartial(
           }
         }
       } catch {
-        // skip
+        // malformed JSONL line — skip (e.g. partial write at end of file)
+        continue;
       }
     }
     return {

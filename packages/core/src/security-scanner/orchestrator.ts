@@ -117,6 +117,7 @@ export class SecurityScannerOrchestrator {
     if (detectionResult.detectedStacks.length === 0) {
       throw new Error(`No supported tech stack detected in ${projectRoot}`);
     }
+    // Non-null assertion is intentional — guard above guarantees non-empty array.
     const techStack = detectionResult.detectedStacks[0]!;
 
     // Step 2: Generate project-specific security skill via LLM
