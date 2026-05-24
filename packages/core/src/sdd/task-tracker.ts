@@ -108,6 +108,10 @@ export class TaskTracker {
 
     if (status === 'completed') {
       node.completedAt = now;
+      node.startedAt = node.startedAt ?? now; // ensure startedAt is set
+    }
+    if (status === 'in_progress') {
+      node.startedAt = now;
     }
 
     this.transitions.push({ from, to: status, timestamp: now, reason });
@@ -123,6 +127,25 @@ export class TaskTracker {
     }
 
     this.graph.updatedAt = now;
+    this.persist();
+  }
+
+  /**
+   * Update node fields (title, description, priority, estimateHours, tags).
+   * Does NOT change status. Use updateNodeStatus for status changes.
+   */
+  updateNode(id: string, patch: Partial<Pick<TaskNode, 'title' | 'description' | 'priority' | 'estimateHours' | 'tags'>>): void {
+    if (!this.graph) throw new Error('No graph loaded');
+    const node = this.graph.nodes.get(id);
+    if (!node) throw new Error(`Node ${id} not found`);
+
+    if (patch.title !== undefined) node.title = patch.title;
+    if (patch.description !== undefined) node.description = patch.description;
+    if (patch.priority !== undefined) node.priority = patch.priority;
+    if (patch.estimateHours !== undefined) node.estimateHours = patch.estimateHours;
+    if (patch.tags !== undefined) node.tags = patch.tags;
+    node.updatedAt = Date.now();
+    this.graph.updatedAt = node.updatedAt;
     this.persist();
   }
 

@@ -15,7 +15,7 @@ export function buildAutonomyCommand(opts: SlashCommandContext): SlashCommand {
       '  /autonomy off        Disabled — agent stops after each turn (default)',
       '  /autonomy suggest    Show next-step suggestions after each turn',
       '  /autonomy on         Auto-continue — agent picks next step and proceeds',
-      '  /autonomy eternal    Sittin-sene mode — runs forever against /goal',
+      '  /autonomy eternal    Goal-driven loop — runs forever against /goal',
       '  /autonomy parallel   Parallel mode — 4-8 agents per tick, fan-out parallelism',
       '  /autonomy stop       Stop eternal mode (no-op for other modes)',
       '  /autonomy toggle     Cycle: off → suggest → auto → eternal → parallel → off',
@@ -30,6 +30,9 @@ export function buildAutonomyCommand(opts: SlashCommandContext): SlashCommand {
       '  parallel — Fan-out 4–8 subagents per tick. Each tick decomposes the goal,',
       '             spawns N agents, awaits results, aggregates. Requires /goal.',
       '             Force-enables YOLO. Runs until /autonomy stop or Ctrl+C twice.',
+      '',
+      'Eternal stage flow: decide → execute → reflect → sleep | paused | stopped',
+      'Stage shown in real-time. Use /goal pause to pause, /goal resume to continue.',
       '',
       'In auto/eternal/parallel modes the agent works autonomously. Press Esc to redirect,',
       'Ctrl+C to stop the active iteration. /autonomy stop ends the eternal loop.',
@@ -50,7 +53,7 @@ export function buildAutonomyCommand(opts: SlashCommandContext): SlashCommand {
           off: `${color.green('OFF')} ${color.dim('(agent stops after each turn)')}`,
           suggest: `${color.cyan('SUGGEST')} ${color.dim('(shows next-step suggestions)')}`,
           auto: `${color.yellow('AUTO')} ${color.dim('(self-driving — Esc to redirect, Ctrl+C to stop)')}`,
-          eternal: `${color.red('ETERNAL')} ${color.dim('(sittin-sene — goal-driven, YOLO, until /autonomy stop)')}`,
+          eternal: `${color.red('ETERNAL')} ${color.dim('(goal-driven loop — YOLO, until /autonomy stop)')}`,
           'eternal-parallel': `${color.magenta('PARALLEL')} ${color.dim('(4-8 subagents per tick — fan-out, until /autonomy stop)')}`,
         };
         const lines: string[] = [`Autonomy mode: ${labels[current] ?? current}`];

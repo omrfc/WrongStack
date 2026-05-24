@@ -7,7 +7,7 @@ import {
 } from '@wrongstack/runtime';
 import type { ReadlineInputReader } from './input-reader.js';
 import type { TerminalRenderer } from './renderer.js';
-import { getActiveSDDContext, trySaveSpecFromAIOutput, trySaveTasksFromAIOutput, getTaskListText, getTaskProgress, autoDetectTaskCompletion, getActiveSDDPhase, trySaveImplementationPlan } from './slash-commands/sdd.js';
+import { getActiveSDDContext, trySaveSpecFromAIOutput, trySaveTasksFromAIOutput, getTaskListText, getTaskProgress, autoDetectTaskCompletion, getActiveSDDPhase, trySaveImplementationPlan, renderTaskListWithProgress, getCurrentTask, getCurrentExecutingContext, advanceToNextTask } from './slash-commands/sdd.js';
 import { theme } from './theme.js';
 import { fmtTok } from './utils.js';
 import { CLI_VERSION } from './version.js';
@@ -243,8 +243,19 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
                     const progress = getTaskProgress();
                     if (progress) {
                       opts.renderer.write(
-                        `\n${color.cyan(`  ✓ ${autoCompleted} task(s) auto-completed! Progress: ${progress.completed}/${progress.total} (${progress.percent}%)`)}\n`,
+                        `\n${color.cyan(`  ✓ ${autoCompleted} task(s) auto-completed! Progress: ${progress.completed}/${progress.total} (${progress.percentComplete}%)`)}\n`,
                       );
+                      // Show live task list after auto-completion
+                      const taskList = renderTaskListWithProgress();
+                      if (taskList) {
+                        opts.renderer.write(`\n${color.dim(taskList)}\n`);
+                      }
+                    }
+                  } else {
+                    // Still show task list even if nothing was auto-completed
+                    const taskList = renderTaskListWithProgress();
+                    if (taskList) {
+                      opts.renderer.write(`\n${color.dim(taskList)}\n`);
                     }
                   }
                 }
@@ -279,13 +290,20 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
       let sddPrefix = '';
       if (sddContext) {
         sddPrefix = `[SDD SESSION ACTIVE]\n${sddContext}`;
+        // During executing phase: tell AI exactly which task it's working on
+        if (sddPhase === 'executing') {
+          const currentCtx = getCurrentExecutingContext();
+          if (currentCtx) {
+            sddPrefix += `\n\n${currentCtx}`;
+          }
+        }
         if (taskList) {
           sddPrefix += `\n\n**Current Task List:**\n${taskList}`;
         }
         if (taskProgress && taskProgress.total > 0) {
-          sddPrefix += `\n**Progress:** ${taskProgress.completed}/${taskProgress.total} (${taskProgress.percent}%)`;
+          sddPrefix += `\n**Progress:** ${taskProgress.completed}/${taskProgress.total} (${taskProgress.percentComplete}%)`;
         }
-        if (sddPhase === 'executing' && taskProgress && taskProgress.percent === 100) {
+        if (sddPhase === 'executing' && taskProgress && taskProgress.percentComplete === 100) {
           sddPrefix += '\n\n**All tasks completed! Provide a summary of everything implemented.**';
         }
         sddPrefix += '\n\n---\nUser message:\n';
@@ -376,13 +394,26 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
               const progress = getTaskProgress();
               if (progress) {
                 opts.renderer.write(
-                  `\n${color.cyan(`  ✓ ${autoCompleted} task(s) auto-completed! Progress: ${progress.completed}/${progress.total} (${progress.percent}%)`)}\n`,
+                  `\n${color.cyan(`  ✓ ${autoCompleted} task(s) auto-completed! Progress: ${progress.completed}/${progress.total} (${progress.percentComplete}%)`)}\n`,
                 );
-                if (progress.percent === 100) {
+                if (progress.percentComplete === 100) {
                   opts.renderer.write(
                     `\n${color.green('  🎉 All tasks completed! Use /sdd cancel to end the session.')}\n`,
                   );
                 }
+              }
+              // Auto-advance: set the next ready task to in_progress
+              advanceToNextTask();
+              // Show updated task list after auto-advance
+              const taskList = renderTaskListWithProgress();
+              if (taskList) {
+                opts.renderer.write(`\n${color.dim(taskList)}\n`);
+              }
+            } else {
+              // Still show task list even if nothing was auto-completed
+              const taskList = renderTaskListWithProgress();
+              if (taskList) {
+                opts.renderer.write(`\n${color.dim(taskList)}\n`);
               }
             }
           }

@@ -17,6 +17,9 @@ questioning → spec_review → implementation → task_review → executing →
 5. **`/sdd approve`** — Approve spec → moves to `implementation`. AI generates implementation plan + tasks.
 6. **`/sdd approve`** — Approve tasks → moves to `executing`. AI executes tasks one by one.
 7. **`/sdd done <N>`** — Mark a task done by number or fuzzy title match.
+8. **`/sdd tasks`** — View live progress with a progress bar, sorted by status.
+9. **`/sdd next`** — See the next task the AI should work on (and what's blocking it).
+10. **`/sdd critical`** — Analyze which tasks are on the critical path and causing bottlenecks.
 
 ## Auto-detection patterns
 
@@ -35,15 +38,41 @@ The session can auto-detect task completion from AI output:
 | `/sdd approve` | Advance to next phase |
 | `/sdd spec` | Show current session's spec |
 | `/sdd plan` | Show implementation plan |
-| `/sdd tasks` | Show task list with progress |
-| `/sdd done <N>` | Mark task done |
-| `/sdd status` | Full session status |
+| `/sdd tasks` | Show task list with progress bar (sorted by status) |
+| `/sdd next` | Show the next executable task + blockers |
+| `/sdd done <N>` | Mark task done (by number or fuzzy title match) |
+| `/sdd undo` | Undo last task completion |
+| `/sdd skip <N>` | Skip a task back to pending |
+| `/sdd fail <N>` | Mark a task as failed |
+| `/sdd review <N>` | Send a task to review |
+| `/sdd edit <N> <text>` | Edit task title or description |
+| `/sdd graph` | Visualize task dependency graph |
+| `/sdd critical` | Analyze critical path + bottlenecks |
+| `/sdd status` | Full session status with phase, spec preview, and task breakdown |
 | `/sdd cancel` | Cancel and delete session |
 | `/sdd list` | List saved specs |
 | `/sdd show <id>` | Show saved spec details |
 | `/sdd templates` | List available templates |
 | `/sdd from <template-id>` | Create draft from template |
 | `/sdd version <id>` | Show version history |
+
+## Goal & Eternal Mode
+
+`/sdd` pairs with `/goal` for autonomous execution:
+
+| Command | Effect |
+|---------|--------|
+| `/goal set <text>` | Set an autonomous mission |
+| `/goal pause` | Pause at end of current iteration |
+| `/goal resume` | Resume a paused goal |
+| `/goal journal [N]` | Show recent journal entries |
+| `/goal clear` | Clear goal and stop eternal mode |
+| `/autonomy eternal` | Run the goal loop indefinitely |
+| `/autonomy stop` | Stop eternal mode |
+
+**Eternal stage flow:** `decide → execute → reflect → sleep | paused | stopped`
+
+The stage is shown in real-time during `/autonomy eternal` mode. Use `/goal pause` to gracefully stop after the current iteration.
 
 ## Storage
 

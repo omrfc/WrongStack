@@ -11,6 +11,7 @@ import {
   renderTaskGraph,
   renderTaskList,
   renderSpecAnalysis,
+  renderProgress,
   listTemplates,
   templateToMarkdown,
   getTemplate,
@@ -22,6 +23,7 @@ import {
   type TaskGraphIndexEntry,
   type SpecVersion,
   type AISpecPhase,
+  type TaskProgress,
 } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
 
@@ -51,6 +53,9 @@ class SDDState {
   private taskStore: DefaultTaskStore | null = null;
   private taskTracker: TaskTracker | null = null;
   private taskGraphId: string | null = null;
+  private sessionStartTime: number = Date.now();
+  private phaseStartTime: number = Date.now();
+  private versioning: SpecVersioning | null = null;
 
   getBuilder(): AISpecBuilder | null { return this.builder; }
   setBuilder(b: AISpecBuilder | null) { this.builder = b; }
@@ -60,6 +65,13 @@ class SDDState {
   setTaskTracker(t: TaskTracker | null) { this.taskTracker = t; }
   getTaskGraphId(): string | null { return this.taskGraphId; }
   setTaskGraphId(id: string | null) { this.taskGraphId = id; }
+  getSessionStartTime(): number { return this.sessionStartTime; }
+  setSessionStartTime(t: number) { this.sessionStartTime = t; }
+  setPhaseStartTime(t: number) { this.phaseStartTime = t; }
+  getPhaseStartTime(): number { return this.phaseStartTime; }
+  getSessionElapsed(): number { return Date.now() - this.sessionStartTime; }
+  getPhaseElapsed(): number { return Date.now() - this.phaseStartTime; }
+  getVersioning(): SpecVersioning { return this.versioning ?? (this.versioning = new SpecVersioning()); }
 
   clearTaskState(): void {
     this.taskStore = null;
@@ -136,7 +148,33 @@ export async function trySaveTasksFromAIOutput(aiOutput: string): Promise<boolea
   const validTasks = tasks.filter(t => t && typeof t === 'object' && typeof t.title === 'string' && t.title.length > 0);
   if (validTasks.length === 0) return false;
 
-  // Create task graph from parsed tasks
+  // If tasks already exist, append to the existing tracker instead of replacing
+  const existingTracker = sddState.getTaskTracker();
+  if (existingTracker) {
+    for (const task of validTasks) {
+      const title = String(task.title);
+      const description = String(task.description ?? '');
+      const type = (['feature', 'bugfix', 'refactor', 'docs', 'test', 'chore']
+        .includes(String(task.type)) ? String(task.type) : 'feature') as 'feature' | 'bugfix' | 'refactor' | 'docs' | 'test' | 'chore';
+      const priority = (['critical', 'high', 'medium', 'low']
+        .includes(String(task.priority)) ? String(task.priority) : 'medium') as 'critical' | 'high' | 'medium' | 'low';
+      const estimateHours = Number(task.estimateHours) || 2;
+      const tags = Array.isArray(task.tags) ? task.tags.map(String) : [];
+
+      existingTracker.addNode({
+        title,
+        description,
+        type,
+        priority,
+        status: 'pending',
+        estimateHours,
+        tags,
+      });
+    }
+    return true;
+  }
+
+  // Create task graph from parsed tasks (first time)
   const store = new DefaultTaskStore();
   const tracker = new TaskTracker({ store });
   const graph = await tracker.createGraph(session.spec.id, session.spec.title);
@@ -175,16 +213,63 @@ export async function trySaveTasksFromAIOutput(aiOutput: string): Promise<boolea
 /**
  * Get the current task progress. Returns null if no tasks.
  */
-export function getTaskProgress(): { total: number; completed: number; pending: number; percent: number } | null {
+export function getTaskProgress(): TaskProgress | null {
   const tracker = sddState.getTaskTracker();
   if (!tracker) return null;
-  const progress = tracker.getProgress();
+  return tracker.getProgress();
+}
+
+/**
+ * Get the currently in-progress task node, if any.
+ */
+export function getCurrentTask(): { id: string; title: string; description: string; priority: string; estimateHours: number; tags: string[]; startedAt: number | undefined } | null {
+  const tracker = sddState.getTaskTracker();
+  if (!tracker) return null;
+  const nodes = tracker.getAllNodes({ status: ['in_progress'] });
+  if (nodes.length === 0) return null;
+  const n = nodes[0]!;
   return {
-    total: progress.total,
-    completed: progress.completed,
-    pending: progress.pending,
-    percent: progress.percentComplete,
+    id: n.id,
+    title: n.title,
+    description: n.description,
+    priority: n.priority,
+    estimateHours: n.estimateHours ?? 0,
+    tags: n.tags ?? [],
+    startedAt: n.startedAt,
   };
+}
+
+/**
+ * Advance the tracker to the next ready task — find all pending tasks
+ * whose blockers are all completed, pick the first one, and set it to
+ * in_progress. Called automatically after autoDetectTaskCompletion.
+ */
+export function advanceToNextTask(): boolean {
+  const tracker = sddState.getTaskTracker();
+  if (!tracker) return false;
+  const pending = tracker.getAllNodes({ status: ['pending'] });
+  for (const n of pending) {
+    if (tracker.canStart(n.id)) {
+      tracker.updateNodeStatus(n.id, 'in_progress');
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Format elapsed milliseconds as a human-readable string.
+ */
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const remS = s % 60;
+  if (m < 60) return remS > 0 ? `${m}m ${remS}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  const remM = m % 60;
+  return `${h}h ${remM}m`;
 }
 
 /**
@@ -202,6 +287,76 @@ export function getTaskListText(): string | null {
   });
 
   return lines.join('\n');
+}
+
+/**
+ * Render the current task list with a progress bar for AI context.
+ * Called by the REPL after auto-detection to show live progress.
+ * Includes elapsed time for in_progress tasks.
+ */
+export function renderTaskListWithProgress(): string | null {
+  const tracker = sddState.getTaskTracker();
+  if (!tracker) return null;
+  const nodes = tracker.getAllNodes();
+  if (nodes.length === 0) return null;
+
+  const progress = tracker.getProgress();
+  const phase = sddState.getPhase();
+  const phaseLabel: Record<string, string> = {
+    questioning: '❓ Questioning',
+    spec_review: '📋 Spec Review',
+    implementation: '🏗️ Implementation',
+    task_review: '📝 Task Review',
+    executing: '⚡ Executing',
+    done: '✅ Done',
+  };
+
+  const lines = [
+    `**${phaseLabel[phase ?? ''] ?? phase} — Task Status**`,
+    '',
+    renderProgress(progress),
+    '',
+  ];
+
+  // Sort: in_progress first, then pending, others last
+  const sorted = [...nodes].sort((a, b) => {
+    const order: Record<string, number> = { in_progress: 0, pending: 1, review: 2, blocked: 3, failed: 4, completed: 5 };
+    return (order[a.status] ?? 6) - (order[b.status] ?? 6);
+  });
+
+  for (let i = 0; i < sorted.length; i++) {
+    const n = sorted[i]!;
+    const status = n.status === 'completed' ? '✅' : n.status === 'in_progress' ? '🔄' : n.status === 'failed' ? '❌' : n.status === 'blocked' ? '🚫' : n.status === 'review' ? '👁' : '⏳';
+    const title = n.title.length > 50 ? n.title.slice(0, 49) + '…' : n.title;
+    let elapsed = '';
+    if (n.status === 'in_progress' && n.startedAt) {
+      elapsed = ` · ${formatElapsed(Date.now() - n.startedAt)}`;
+    }
+    lines.push(`${i + 1}. ${status} ${title}${elapsed}`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Returns a rich context snippet describing the current executing task.
+ * Injected into the AI prompt every turn during executing phase so the
+ * AI always knows exactly what it's working on.
+ */
+export function getCurrentExecutingContext(): string | null {
+  const tracker = sddState.getTaskTracker();
+  if (!tracker) return null;
+  const nodes = tracker.getAllNodes({ status: ['in_progress'] });
+  if (nodes.length === 0) return null;
+  const n = nodes[0]!;
+  const elapsed = n.startedAt ? ` · elapsed: ${formatElapsed(Date.now() - n.startedAt)}` : '';
+  const progress = tracker.getProgress();
+  return [
+    `**NOW EXECUTING:** "${n.title}"${elapsed}`,
+    `Description: ${n.description.split('\n')[0] ?? '(none)'}`,
+    `Priority: ${n.priority} · Est: ${n.estimateHours ?? 0}h · Tags: ${(n.tags ?? []).join(', ') || 'none'}`,
+    `Progress: ${progress.completed}/${progress.total} tasks (${progress.percentComplete}%)`,
+  ].join('\n');
 }
 
 /**
@@ -318,6 +473,8 @@ export function autoDetectTaskCompletion(aiOutput: string): number {
  * Try to save implementation plan from AI output during implementation phase.
  * Extracts the text before the JSON task array as the implementation plan.
  * Returns true if a plan was saved.
+ * Only saves if the content differs from the current plan to avoid
+ * overwriting a real plan with conversational AI output mid-implementation.
  */
 export function trySaveImplementationPlan(aiOutput: string): boolean {
   const builder = sddState.getBuilder();
@@ -325,23 +482,55 @@ export function trySaveImplementationPlan(aiOutput: string): boolean {
   const session = builder.getSession();
   if (session.phase !== 'implementation') return false;
 
+  const current = session.implementation ?? '';
+
   // Try to find the JSON array and extract text before it
   const jsonMatch = aiOutput.match(/```json\s*\[/);
   if (jsonMatch?.index && jsonMatch.index > 0) {
     const plan = aiOutput.substring(0, jsonMatch.index).trim();
-    if (plan.length > 50) { // Must be substantial
+    // Skip if it looks like conversational/explanatory output
+    if (
+      plan.length > 50 &&
+      plan !== current &&
+      !isExplanatoryText(plan)
+    ) {
       builder.setImplementation(plan);
       return true;
     }
   }
 
-  // If no JSON found, save the whole output as the plan
-  if (aiOutput.length > 100 && !aiOutput.includes('```json')) {
+  // If no JSON found, save only if it's substantive and different
+  if (aiOutput.length > 100 && !aiOutput.includes('```json') && aiOutput !== current && !isExplanatoryText(aiOutput)) {
     builder.setImplementation(aiOutput.trim());
     return true;
   }
 
   return false;
+}
+
+/**
+ * Returns true if the text looks like conversational/explanatory output
+ * rather than a structured implementation plan.
+ */
+function isExplanatoryText(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    lower.startsWith("i'") ||
+    lower.startsWith("i will") ||
+    lower.startsWith("let me") ||
+    lower.startsWith("here's my") ||
+    lower.startsWith("here is my") ||
+    lower.startsWith("i'm going to") ||
+    lower.startsWith("first, let me") ||
+    lower.startsWith("sure") ||
+    lower.startsWith("of course") ||
+    lower.startsWith("okay") ||
+    lower.startsWith("ok,") ||
+    lower.startsWith("sounds good") ||
+    lower.startsWith("no problem") ||
+    // Skip if mostly code-like with minimal prose
+    (text.split('\n').length < 3 && !text.includes('.'))
+  );
 }
 
 /**
@@ -383,7 +572,7 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
 
       const specStore = new SpecStore({ baseDir: specsDir });
       const graphStore = new TaskGraphStore({ baseDir: graphsDir });
-      const versioning = new SpecVersioning();
+      const versioning = sddState.getVersioning();
 
       const [verb, ...rest] = args.trim().split(/\s+/);
       const restJoined = rest.join(' ').trim();
@@ -446,6 +635,9 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
             maxQuestions: 10,
             sessionPath: path.join(projectRoot, '.wrongstack', 'sdd-session.json'),
           }));
+          // Reset session and phase timers for the new session
+          sddState.setSessionStartTime(Date.now());
+          sddState.setPhaseStartTime(Date.now());
           const builder = sddState.getBuilder()!;
           builder.startSession(title);
 
@@ -499,6 +691,7 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
             await builder.saveSpec();
             versioning.recordVersion(spec, 'Initial spec approved');
             builder.approve(); // spec_review → implementation
+            sddState.setPhaseStartTime(Date.now()); // reset phase timer
 
             const implPrompt = builder.getAIPrompt();
             return {
@@ -515,11 +708,34 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
 
           if (phase === 'task_review') {
             builder.approve(); // task_review → executing
+            sddState.setPhaseStartTime(Date.now()); // reset phase timer
+
+            // Auto-start the first ready task when entering executing phase
+            advanceToNextTask();
 
             const execPrompt = builder.getAIPrompt();
             return {
               message: '✅ Tasks approved! The AI will now execute them one by one.',
               runText: `[SDD SESSION ACTIVE]\n${execPrompt}\n\n---\nUser message:\nStart executing the tasks one by one.`,
+            };
+          }
+
+          if (phase === 'implementation') {
+            const session = builder.getSession();
+            const plan = session.implementation;
+            if (!plan) {
+              return {
+                message: 'No implementation plan yet. The AI is still generating it. Try again shortly.',
+              };
+            }
+            return {
+              message: [
+                `╭─── Implementation Plan ───────────────────────────────╮`,
+                '',
+                ...plan.split('\n').map(l => `  ${l}`),
+                '',
+                `╰${'─'.repeat(55)}╯`,
+              ].join('\n'),
             };
           }
 
@@ -629,19 +845,51 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
           }
 
           const progress = taskTracker.getProgress();
+          const builder = sddState.getBuilder();
+          const phase = builder?.getPhase() ?? 'unknown';
+          const phaseLabel: Record<string, string> = {
+            questioning: '❓ Questioning',
+            spec_review: '📋 Spec Review',
+            implementation: '🏗️ Implementation',
+            task_review: '📝 Task Review',
+            executing: '⚡ Executing',
+            done: '✅ Done',
+          };
+
           const lines = [
-            `═══ Task List (${progress.completed}/${progress.total} done) ═══`,
+            `╭─── ${phaseLabel[phase] ?? phase} ───────────────────────────╮`,
             '',
+            renderProgress(progress),
+            '',
+            `  #    Status  Priority  Task`,
+            `  ${'─'.repeat(49)}`,
           ];
 
-          for (let i = 0; i < nodes.length; i++) {
-            const n = nodes[i]!;
-            const status = n.status === 'completed' ? '✅' : n.status === 'in_progress' ? '🔄' : n.status === 'failed' ? '❌' : '⏳';
-            lines.push(`${i + 1}. ${status} [${n.priority}] ${n.title}`);
-            if (n.description) {
-              lines.push(`   ${n.description.split('\n')[0]}`);
+          // Sort: in_progress first, then pending, then others
+          const sorted = [...nodes].sort((a, b) => {
+            const order: Record<string, number> = { in_progress: 0, pending: 1, review: 2, blocked: 3, failed: 4, completed: 5 };
+            return (order[a.status] ?? 6) - (order[b.status] ?? 6);
+          });
+
+          for (let i = 0; i < sorted.length; i++) {
+            const n = sorted[i]!;
+            const status = n.status === 'completed' ? '✅' : n.status === 'in_progress' ? '🔄' : n.status === 'failed' ? '❌' : n.status === 'blocked' ? '🚫' : n.status === 'review' ? '👁' : '⏳';
+            const num = `${i + 1}`.padStart(3);
+            const prio = n.priority.slice(0, 4).padEnd(5);
+            const title = n.title.length > 36 ? n.title.slice(0, 35) + '…' : n.title;
+            const elapsed = n.status === 'in_progress' && n.startedAt ? ` (${formatElapsed(Date.now() - n.startedAt)})` : '';
+            lines.push(`  ${num}  ${status}     ${prio}   ${title}${elapsed}`);
+            if (n.description && n.status !== 'completed') {
+              const first = n.description.split('\n')[0]!;
+              const truncated = first.length > 42 ? first.slice(0, 41) + '…' : first;
+              lines.push(`        ↳ ${truncated}`);
             }
           }
+
+          lines.push('');
+          lines.push(`  Commands: /sdd done <N> · /sdd skip <N> · /sdd fail <N> · /sdd review <N>`);
+          lines.push(`             /sdd next · /sdd status · /sdd edit <N> · /sdd approve`);
+          lines.push(`╰${'─'.repeat(54)}╯`);
 
           return { message: lines.join('\n') };
         }
@@ -688,8 +936,243 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
 
           const remaining = doneTracker.getProgress();
           return {
-            message: `✅ Task completed! ${remaining.completed}/${remaining.total} done (${remaining.percentComplete}%)`,
+            message: `✅ Task marked done! (${remaining.completed}/${remaining.total} — ${remaining.percentComplete}%)`,
           };
+        }
+
+        case 'skip': {
+          const skipTracker = sddState.getTaskTracker();
+          if (!skipTracker) return { message: 'No tasks to skip.' };
+          if (!restJoined) return { message: 'Usage: /sdd skip <task title or number>' };
+
+          const nodes = skipTracker.getAllNodes({ status: ['pending', 'in_progress', 'blocked'] });
+          const num = Number(restJoined);
+          let matched = false;
+
+          if (!Number.isNaN(num) && num >= 1 && num <= nodes.length) {
+            const node = nodes[num - 1];
+            if (node) {
+              skipTracker.updateNodeStatus(node.id, 'pending');
+              matched = true;
+            }
+          }
+          if (!matched) {
+            const match = nodes.find(n =>
+              n.title.toLowerCase().includes(restJoined.toLowerCase()) ||
+              restJoined.toLowerCase().includes(n.title.toLowerCase())
+            );
+            if (match) {
+              skipTracker.updateNodeStatus(match.id, 'pending');
+              matched = true;
+            }
+          }
+
+          if (!matched) return { message: `No task matching "${restJoined}".` };
+
+          const progress = skipTracker.getProgress();
+          return {
+            message: `⏭ Task skipped — moved to pending. (${progress.completed}/${progress.total} — ${progress.percentComplete}%)`,
+          };
+        }
+
+        case 'fail': {
+          const failTracker = sddState.getTaskTracker();
+          if (!failTracker) return { message: 'No tasks to fail.' };
+          if (!restJoined) return { message: 'Usage: /sdd fail <task title or number>' };
+
+          const nodes = failTracker.getAllNodes({ status: ['pending', 'in_progress'] });
+          const num = Number(restJoined);
+          let matched = false;
+
+          if (!Number.isNaN(num) && num >= 1 && num <= nodes.length) {
+            const node = nodes[num - 1];
+            if (node) {
+              failTracker.updateNodeStatus(node.id, 'failed');
+              matched = true;
+            }
+          }
+          if (!matched) {
+            const match = nodes.find(n =>
+              n.title.toLowerCase().includes(restJoined.toLowerCase()) ||
+              restJoined.toLowerCase().includes(n.title.toLowerCase())
+            );
+            if (match) {
+              failTracker.updateNodeStatus(match.id, 'failed');
+              matched = true;
+            }
+          }
+
+          if (!matched) return { message: `No pending/in-progress task matching "${restJoined}".` };
+
+          const progress = failTracker.getProgress();
+          return {
+            message: `❌ Task marked as failed. (${progress.failed} failed · ${progress.completed}/${progress.total} done)`,
+          };
+        }
+
+        case 'review': {
+          const reviewTracker = sddState.getTaskTracker();
+          if (!reviewTracker) return { message: 'No tasks to review.' };
+          if (!restJoined) return { message: 'Usage: /sdd review <task title or number>' };
+
+          const nodes = reviewTracker.getAllNodes();
+          const num = Number(restJoined);
+          let matched = false;
+
+          // Match by number (within sorted visible list)
+          const sorted = [...nodes].sort((a, b) => {
+            const order: Record<string, number> = { in_progress: 0, pending: 1, review: 2, blocked: 3, failed: 4, completed: 5 };
+            return (order[a.status] ?? 6) - (order[b.status] ?? 6);
+          });
+
+          if (!Number.isNaN(num) && num >= 1 && num <= sorted.length) {
+            const node = sorted[num - 1];
+            if (node) {
+              reviewTracker.updateNodeStatus(node.id, 'review');
+              matched = true;
+            }
+          }
+          if (!matched) {
+            const match = nodes.find(n =>
+              n.title.toLowerCase().includes(restJoined.toLowerCase()) ||
+              restJoined.toLowerCase().includes(n.title.toLowerCase())
+            );
+            if (match) {
+              reviewTracker.updateNodeStatus(match.id, 'review');
+              matched = true;
+            }
+          }
+
+          if (!matched) return { message: `No task matching "${restJoined}".` };
+
+          const progress = reviewTracker.getProgress();
+          return {
+            message: `👁 Task sent to review. (${progress.review} in review)`,
+          };
+        }
+
+        case 'edit': {
+          const editTracker = sddState.getTaskTracker();
+          if (!editTracker) return { message: 'No tasks to edit.' };
+          if (!restJoined) return { message: 'Usage: /sdd edit <N> <new title or description>' };
+
+          // Parse: /sdd edit <N> <new content>
+          const parts = restJoined.split(/\s+/);
+          const num = Number(parts[0]);
+          if (Number.isNaN(num)) return { message: 'Usage: /sdd edit <N> <new title or description>' };
+
+          const nodes = editTracker.getAllNodes();
+          if (num < 1 || num > nodes.length) return { message: `Task #${num} not found.` };
+
+          const node = nodes[num - 1];
+          if (!node) return { message: `Task #${num} not found.` };
+
+          const newContent = parts.slice(1).join(' ');
+          if (!newContent) return { message: 'Provide new title or description content.' };
+
+          // Update title if content looks like a title (short) or description if longer
+          if (newContent.length < 60) {
+            editTracker.updateNode(node.id, { title: newContent });
+          } else {
+            editTracker.updateNode(node.id, { description: newContent });
+          }
+
+          return { message: `✏️ Task #${num} updated: "${newContent.slice(0, 50)}${newContent.length > 50 ? '…' : ''}"` };
+        }
+
+        case 'undo': {
+          const undoTracker = sddState.getTaskTracker();
+          if (!undoTracker) {
+            return { message: 'No tasks to undo.' };
+          }
+          // Find the most recently completed task from transitions
+          const completed = undoTracker.getAllNodes({ status: ['completed'] });
+          if (completed.length === 0) {
+            return { message: 'No completed tasks to undo.' };
+          }
+          // Pop the last completed node (most recently completed)
+          const last = completed[completed.length - 1]!;
+          undoTracker.updateNodeStatus(last.id, 'pending');
+          const progress = undoTracker.getProgress();
+          return {
+            message: `↩ Undo: "${last.title}" back to pending. (${progress.completed}/${progress.total} — ${progress.percentComplete}%)`,
+          };
+        }
+
+        // ── Next Task Preview ─────────────────────────────────────────────
+
+        case 'next': {
+          const nextTracker = sddState.getTaskTracker();
+          if (!nextTracker) {
+            return { message: 'No tasks generated yet. Use /sdd new to start.' };
+          }
+
+          const pending = nextTracker.getAllNodes({ status: ['pending', 'in_progress'] });
+          if (pending.length === 0) {
+            const allDone = nextTracker.getProgress();
+            if (allDone.completed === allDone.total) {
+              return { message: '🎉 All tasks completed! Run /sdd status for the full summary.' };
+            }
+            return { message: 'No pending tasks.' };
+          }
+
+          // Find the next executable task (pending with all blockers completed)
+          const next = pending.find(n => nextTracker.canStart(n.id));
+          if (!next) {
+            // All pending tasks are blocked
+            const blocked = pending.filter(n => {
+              const blockers = nextTracker.getBlockers(n.id);
+              return blockers.some(id => nextTracker.getNode(id)?.status !== 'completed');
+            });
+            if (blocked.length > 0) {
+              return {
+                message: [
+                  `🚫 ${blocked.length} task(s) blocked — waiting on dependencies:`,
+                  ...blocked.map((b, i) => {
+                    const blockers = nextTracker.getBlockers(b.id);
+                    const blockerNames = blockers
+                      .map(id => nextTracker.getNode(id)?.title ?? '?')
+                      .join(', ');
+                    return `  ${i + 1}. ${b.title} (blocked by: ${blockerNames})`;
+                  }),
+                ].join('\n'),
+              };
+            }
+            return { message: 'No next task found.' };
+          }
+
+          const progress = nextTracker.getProgress();
+          const blockers = nextTracker.getBlockers(next.id);
+          const blockedBy = blockers
+            .filter(id => nextTracker.getNode(id)?.status !== 'completed')
+            .map(id => nextTracker.getNode(id)?.title ?? '?')
+            .join(', ');
+
+          const lines = [
+            `╭─── NEXT TASK ───────────────────────────────────────────╮`,
+            '',
+            `  🔄 ${next.title}`,
+          ];
+
+          if (next.description) {
+            const first = next.description.split('\n')[0]!;
+            lines.push(`     ↳ ${first}`);
+          }
+
+          const taskElapsed = next.startedAt ? ` ⏱ ${formatElapsed(Date.now() - next.startedAt)}` : '';
+          lines.push(`  Priority: ${next.priority}  |  Est: ${next.estimateHours}h  |  Tags: ${(next.tags ?? []).join(', ') || 'none'}${taskElapsed}`);
+
+          if (blockedBy) {
+            lines.push(`  Blocked by: ${blockedBy}`);
+          }
+
+          lines.push('');
+          lines.push(`  ── Progress: ${progress.completed}/${progress.total} (${progress.percentComplete}%) ──`);
+          lines.push('');
+          lines.push(`  Run /sdd done <task title or number> when done.`);
+          lines.push(`╰${'─'.repeat(55)}╯`);
+
+          return { message: lines.join('\n') };
         }
 
         // ── Session Management ─────────────────────────────────────────────
@@ -709,36 +1192,138 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
             executing: '⚡',
             done: '✅',
           };
+          const phaseLabel: Record<AISpecPhase, string> = {
+            questioning: 'Questioning',
+            spec_review: 'Spec Review',
+            implementation: 'Implementation',
+            task_review: 'Task Review',
+            executing: 'Executing',
+            done: 'Done',
+          };
 
           const progress = getTaskProgress();
+          const sessionElapsed = sddState.getSessionElapsed();
+          const phaseElapsed = sddState.getPhaseElapsed();
           const lines = [
-            '═══ SDD Session Status ═══',
+            `╭─── SDD: ${session.title} ────────────────────────────────╮`,
             '',
-            `Feature: "${session.title}"`,
-            `Phase: ${phaseEmoji[session.phase]} ${session.phase}`,
-            `Questions asked: ${session.questionCount}`,
+            `  ${phaseEmoji[session.phase]} Phase: ${phaseLabel[session.phase]}  ⏱ ${formatElapsed(phaseElapsed)}`,
+            `  ⏱ Session: ${formatElapsed(sessionElapsed)}  |  ❝ Questions: ${session.questionCount}`,
           ];
 
           if (session.spec) {
-            lines.push(`Spec: ${session.spec.title} (${session.spec.requirements.length} requirements)`);
-            lines.push(`  Requirements: ${session.spec.requirements.map(r => r.description).join(', ')}`);
-          }
-
-          if (session.implementation) {
-            const planPreview = session.implementation.split('\n').slice(0, 3).join(' ');
-            lines.push(`Implementation: ${planPreview}${session.implementation.length > 100 ? '...' : ''}`);
+            lines.push('');
+            lines.push(`  📋 Spec: ${session.spec.title}`);
+            lines.push(`     ${session.spec.requirements.length} requirements`);
+            // Show requirements as compact list
+            const reqs = session.spec.requirements.slice(0, 4);
+            for (const r of reqs) {
+              lines.push(`     • [${r.priority}] ${r.description.length > 42 ? r.description.slice(0, 41) + '…' : r.description}`);
+            }
+            if (session.spec.requirements.length > 4) {
+              lines.push(`     + ${session.spec.requirements.length - 4} more requirements`);
+            }
           }
 
           if (progress && progress.total > 0) {
-            lines.push(`Tasks: ${progress.completed}/${progress.total} (${progress.percent}%)`);
+            lines.push('');
+            lines.push(renderProgress(progress));
+            lines.push(`  Task breakdown:`);
+            if (progress.inProgress > 0) lines.push(`    🔄 ${progress.inProgress} in progress`);
+            if (progress.pending > 0) lines.push(`    ⏳ ${progress.pending} pending`);
+            if (progress.blocked > 0) lines.push(`    🚫 ${progress.blocked} blocked`);
+            if (progress.failed > 0) lines.push(`    ❌ ${progress.failed} failed`);
+            if (progress.review > 0) lines.push(`    👁 ${progress.review} in review`);
+
+            // Show next 3 pending tasks
+            const tracker = sddState.getTaskTracker();
+            if (tracker) {
+              const pending = tracker.getAllNodes({ status: ['pending', 'in_progress'] });
+              const nextTasks = pending
+                .filter(n => n.status === 'pending' && tracker.canStart(n.id))
+                .slice(0, 3);
+              if (nextTasks.length > 0) {
+                lines.push('');
+                lines.push(`  Up next:`);
+                nextTasks.forEach((t, i) => {
+                  lines.push(`    ${i + 1}. ${t.title}`);
+                });
+              }
+            }
+
+            lines.push('');
+            lines.push(`  Commands: /sdd tasks · /sdd next · /sdd approve · /sdd cancel`);
+          } else {
+            lines.push('');
+            lines.push(`  Commands: /sdd plan · /sdd approve · /sdd cancel`);
           }
 
-          lines.push('', `Session ID: ${session.id}`);
-          lines.push('Commands: /sdd plan · /sdd tasks · /sdd approve · /sdd cancel');
+          lines.push(`╰${'─'.repeat(56)}╯`);
+          lines.push('');
+          lines.push(`  Session ID: ${session.id.slice(0, 8)}…`);
 
           return {
             message: lines.join('\n'),
           };
+        }
+
+        // ── Task Graph Visualization ──────────────────────────────────────
+
+        case 'graph': {
+          const graphTracker = sddState.getTaskTracker();
+          if (!graphTracker) {
+            return { message: 'No tasks generated yet. Use /sdd new to start.' };
+          }
+
+          const graphId = sddState.getTaskGraphId();
+          if (!graphId) {
+            // Show basic list view
+            const nodes = graphTracker.getAllNodes();
+            if (nodes.length === 0) {
+              return { message: 'No tasks in the current graph.' };
+            }
+            const progress = graphTracker.getProgress();
+            const lines = [renderProgress(progress), ''];
+            const sorted = [...nodes].sort((a, b) => {
+              const order: Record<string, number> = { in_progress: 0, pending: 1, review: 2, blocked: 3, failed: 4, completed: 5 };
+              return (order[a.status] ?? 6) - (order[b.status] ?? 6);
+            });
+            for (let i = 0; i < sorted.length; i++) {
+              const n = sorted[i]!;
+              const status = n.status === 'completed' ? '✅' : n.status === 'in_progress' ? '🔄' : n.status === 'failed' ? '❌' : n.status === 'blocked' ? '🚫' : n.status === 'review' ? '👁' : '⏳';
+              lines.push(`${i + 1}. ${status} [${n.priority}] ${n.title}`);
+            }
+            return { message: lines.join('\n') };
+          }
+
+          // Try to load from store
+          try {
+            const graphStore = new TaskGraphStore({ baseDir: path.join(projectRoot, '.wrongstack', 'task-graphs') });
+            const stored = await graphStore.load(graphId);
+            if (stored) {
+              return { message: renderTaskGraph(stored, { compact: false }) };
+            }
+          } catch {
+            // fall through to basic view
+          }
+
+          // Basic fallback
+          const nodes = graphTracker.getAllNodes();
+          if (nodes.length === 0) {
+            return { message: 'No tasks in the current graph.' };
+          }
+          const progress = graphTracker.getProgress();
+          const lines = [renderProgress(progress), ''];
+          const sorted = [...nodes].sort((a, b) => {
+            const order: Record<string, number> = { in_progress: 0, pending: 1, review: 2, blocked: 3, failed: 4, completed: 5 };
+            return (order[a.status] ?? 6) - (order[b.status] ?? 6);
+          });
+          for (let i = 0; i < sorted.length; i++) {
+            const n = sorted[i]!;
+            const status = n.status === 'completed' ? '✅' : n.status === 'in_progress' ? '🔄' : n.status === 'failed' ? '❌' : n.status === 'blocked' ? '🚫' : n.status === 'review' ? '👁' : '⏳';
+            lines.push(`${i + 1}. ${status} [${n.priority}] ${n.title}`);
+          }
+          return { message: lines.join('\n') };
         }
 
         case 'cancel': {
@@ -947,6 +1532,82 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
           };
         }
 
+        case 'critical':
+        case 'bottleneck': {
+          const critTracker = sddState.getTaskTracker();
+          if (!critTracker) {
+            return { message: 'No tasks generated yet. Use /sdd new to start.' };
+          }
+
+          const graphId = sddState.getTaskGraphId();
+          if (!graphId) {
+            return { message: 'No task graph found. Generate tasks first.' };
+          }
+
+          try {
+            const graphStore = new TaskGraphStore({ baseDir: path.join(projectRoot, '.wrongstack', 'task-graphs') });
+            const graph = await graphStore.load(graphId);
+            if (!graph) {
+              return { message: 'Could not load task graph.' };
+            }
+
+            const analysis = analyzeCriticalPath(graph);
+            const lines = [
+              `╭─── Critical Path Analysis ───────────────────────────────╮`,
+              '',
+              `  Critical path length: ${analysis.criticalPath.length} tasks`,
+              `  Estimated total time: ${analysis.totalHours}h`,
+              '',
+            ];
+
+            if (analysis.criticalPath.length > 0) {
+              lines.push(`  🔴 Critical path:`);
+              analysis.criticalPath.forEach((taskId, i) => {
+                const node = graph.nodes.get(taskId);
+                if (node) {
+                  lines.push(`    ${i + 1}. ${node.title} [${node.priority}] — ${node.estimateHours}h`);
+                }
+              });
+            }
+
+            if (analysis.bottlenecks.length > 0) {
+              lines.push('');
+              lines.push(`  🚫 Bottlenecks (blocking most downstream):`);
+              analysis.bottlenecks.forEach((bt) => {
+                const node = graph.nodes.get(bt.taskId);
+                if (node) {
+                  lines.push(`    • ${node.title} (blocks ${bt.blockedCount} task(s))`);
+                }
+              });
+            }
+
+            if (analysis.parallelGroups.length > 0) {
+              lines.push('');
+              lines.push(`  ⚡ Parallel groups (can run concurrently):`);
+              analysis.parallelGroups.forEach((group, i) => {
+                const names = group.map(id => graph.nodes.get(id)?.title ?? '?').join(' | ');
+                lines.push(`    Group ${i + 1}: ${names}`);
+              });
+            }
+
+            if (analysis.readyTasks.length > 0) {
+              lines.push('');
+              lines.push(`  ✅ Ready to start now:`);
+              analysis.readyTasks.forEach((taskId) => {
+                const node = graph.nodes.get(taskId);
+                if (node) {
+                  lines.push(`    • ${node.title}`);
+                }
+              });
+            }
+
+            lines.push(`╰${'─'.repeat(55)}╯`);
+            return { message: lines.join('\n') };
+          } catch {
+            return { message: 'Could not analyze critical path.' };
+          }
+        }
+
         default:
           return {
             message: `Unknown command "${verb}".\n\n${sddHelp()}`,
@@ -976,45 +1637,67 @@ function sddHelp(): string {
     '  │  /sdd spec           Show current session\'s spec         │',
     '  │  /sdd plan           Show implementation plan            │',
     '  │  /sdd execute        Execute generated tasks             │',
-    '  └──────────────────────────────────────────────────────────┘',
+    '  └────────────────────────────────────────────────────────┘',
     '',
-    '  ┌─ 📋 Task Management ────────────────────────────────────┐',
-    '  │  /sdd tasks          Show current task list              │',
-    '  │  /sdd done <N>       Mark task complete (by # or name)   │',
-    '  └──────────────────────────────────────────────────────────┘',
+    '  ┌─ ⏸ Goal Lifecycle ─────────────────────────────────────┐',
+    '  │  /sdd goal            Show current goal + journal         │',
+    '  │  /sdd goal set <text> Set autonomous mission             │',
+    '  │  /sdd goal pause      Pause at end of current iteration  │',
+    '  │  /sdd goal resume     Resume a paused goal               │',
+    '  │  /sdd goal journal [N] Show recent journal entries       │',
+    '  │  /sdd goal clear      Clear goal + stop eternal mode    │',
+    '  └─────────────────────────────────────────────────────────┘',
     '',
-    '  ┌─ 📊 Info ───────────────────────────────────────────────┐',
-    '  │  /sdd status         Show session status                 │',
+    '  ┌─ 📡 Eternal Stage ──────────────────────────────────────┐',
+    '  │  decide → execute → reflect → sleep | paused | stopped  │',
+    '  │  Stage shown in real-time during /sdd goal mode         │',
+    '  └─────────────────────────────────────────────────────────┘',
+    '',
+    '  ┌─ 🔧 Task Lifecycle ────────────────────────────────────┐',
+    '  │  /sdd tasks          Show task list + progress bar      │',
+    '  │  /sdd next           Show next executable task          │',
+    '  │  /sdd done <N>       Complete a task                   │',
+    '  │  /sdd skip <N>        Skip a task (back to pending)       │',
+    '  │  /sdd fail <N>        Mark task as failed               │',
+    '  │  /sdd review <N>      Send task to review              │',
+    '  │  /sdd edit <N> <txt>  Edit task title or description   │',
+    '  │  /sdd undo           Undo last completion              │',
+    '  └─────────────────────────────────────────────────────────┘',
+    '',
+    '  ┌─ 📊 Session Info ──────────────────────────────────────┐',
+    '  │  /sdd status         Full session status + tasks preview │',
     '  │  /sdd cancel         Cancel session                      │',
-    '  └──────────────────────────────────────────────────────────┘',
+    '  └─────────────────────────────────────────────────────────┘',
     '',
-    '  ┌─ 📁 Spec History ───────────────────────────────────────┐',
+    '  ┌─ 📁 Spec History ─────────────────────────────────────┐',
     '  │  /sdd list           List saved specs                    │',
     '  │  /sdd show <id>      Show spec details                   │',
     '  │  /sdd templates      List available templates            │',
     '  │  /sdd from <tmpl>    Create from template                │',
     '  │  /sdd version <id>   Show version history                │',
-    '  └──────────────────────────────────────────────────────────┘',
+    '  └─────────────────────────────────────────────────────────┘',
     '',
-    '  ┌─ 💡 Quick Start ────────────────────────────────────────┐',
-    '  │                                                          │',
-    '  │  1. /sdd new Auth System                                 │',
-    '  │     → AI starts asking questions                         │',
-    '  │                                                          │',
-    '  │  2. Just type your answers naturally                     │',
-    '  │     → AI continues the interview                         │',
-    '  │                                                          │',
-    '  │  3. AI generates spec (auto-detected)                    │',
-    '  │     → /sdd approve                                       │',
-    '  │                                                          │',
-    '  │  3. AI generates implementation + tasks                  │',
-    '  │     → /sdd approve                                       │',
-    '  │                                                          │',
-    '  │  4. AI executes tasks one by one                         │',
-    '  │     → /sdd tasks (view progress)                         │',
-    '  │     → /sdd done 1 (manual completion)                    │',
-    '  │                                                          │',
-    '  └──────────────────────────────────────────────────────────┘',
+    '  ┌─ 💡 Quick Start ───────────────────────────────────────┐',
+    '  │                                                         │',
+    '  │  1. /sdd new Auth System                                │',
+    '  │     → AI starts asking questions                        │',
+    '  │                                                         │',
+    '  │  2. Just type your answers naturally                    │',
+    '  │     → AI continues the interview                        │',
+    '  │                                                         │',
+    '  │  3. AI generates spec (auto-detected)                   │',
+    '  │     → /sdd approve                                    │',
+    '  │                                                         │',
+    '  │  3. AI generates implementation + tasks                 │',
+    '  │     → /sdd approve                                    │',
+    '  │                                                         │',
+    '  │  4. AI executes tasks one by one                        │',
+    '  │     → /sdd tasks (view progress)                       │',
+    '  │     → /sdd done 1 (mark task complete)                  │',
+    '  │                                                         │',
+    '  └─────────────────────────────────────────────────────────┘',
+    '',
+    '  Tip: tasks are shown with progress bar after each AI turn.',
     '',
   ].join('\n');
 }

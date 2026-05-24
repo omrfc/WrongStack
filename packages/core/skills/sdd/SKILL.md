@@ -28,21 +28,20 @@ Every non-trivial change starts with a spec. The spec is the source of truth.
 5. /sdd execute <id>         → Run tasks (or execute manually)
 ```
 
-## /sdd command reference
+## Task lifecycle commands
 
 | Command | What it does |
 |---------|--------------|
-| `/sdd new [title]` | Interactive spec builder |
-| `/sdd from <template>` | Create from template (feature, bugfix, refactor, infra, cli-command) |
-| `/sdd list` | List saved specs |
-| `/sdd show <id>` | Show spec + completeness |
-| `/sdd tasks <id>` | Generate task graph |
-| `/sdd graph <id>` | ASCII visualization |
-| `/sdd status <id>` | Task list by status |
-| `/sdd critical <id>` | Critical path + bottlenecks |
-| `/sdd execute <id>` | Auto-execute tasks |
-| `/sdd approve <id>` | Approve pending tasks |
-| `/sdd version <id>` | Version history |
+| `/sdd tasks` | Show task list with progress bar (sorted: in_progress → pending → review → blocked → failed → completed) |
+| `/sdd next` | Show next executable task + blockers |
+| `/sdd done <N>` | Complete a task (by number or fuzzy title match) |
+| `/sdd skip <N>` | Skip a task back to pending |
+| `/sdd fail <N>` | Mark a task as failed |
+| `/sdd review <N>` | Send a task to review |
+| `/sdd edit <N> <text>` | Edit task title (short text) or description (long text) |
+| `/sdd undo` | Undo last task completion |
+| `/sdd graph` | ASCII task dependency visualization |
+| `/sdd critical` | Critical path analysis + bottlenecks |
 
 ## Spec templates
 
@@ -91,6 +90,23 @@ The critical path finds:
 - **Parallel groups** that can run concurrently
 - **Ready tasks** that can start immediately
 - **Execution order** respecting all dependencies
+
+## Goal & Eternal Mode
+
+`/sdd` pairs with `/goal` for autonomous execution:
+
+| Command | What it does |
+|---------|--------------|
+| `/goal set <text>` | Set an autonomous mission |
+| `/goal pause` | Pause at end of current iteration |
+| `/goal resume` | Resume a paused goal |
+| `/goal journal [N]` | Show recent journal entries |
+| `/goal clear` | Clear goal and stop eternal mode |
+| `/autonomy eternal` | Run goal loop indefinitely |
+| `/autonomy stop` | Stop eternal mode |
+
+**Eternal stage flow:** `decide → execute → reflect → sleep | paused | stopped`
+Stage shown in real-time. Pause stops after current iteration completes.
 
 ## Anti-patterns
 

@@ -409,8 +409,9 @@ describe('buildSddCommand new + cancel', () => {
   it('status after new shows the active session details', async () => {
     await build().run('new StatusTest');
     const res = await build().run('status');
-    expect(res?.message).toContain('SDD Session Status');
+    expect(res?.message).toContain('SDD:');
     expect(res?.message).toContain('StatusTest');
+    expect(res?.message).toContain('Questioning');
   });
 
   it('plan after new reports no implementation yet', async () => {

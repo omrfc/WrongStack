@@ -3,6 +3,8 @@ dist/
 coverage/
 .DS_Store
 *.log
+check-lines.cjs
+check-lines.js
 .env
 .env.local
 .wrongstack/sessions/

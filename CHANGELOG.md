@@ -5,6 +5,72 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.6] - 2026-05-24
+
+### Added
+
+- **`/sdd` slash command — Spec-Driven Development workflow.** New
+  slash command in `packages/cli/src/slash-commands/sdd.ts` that
+  guides the agent through the SDD loop: `parse` → `analyze` →
+  `generate` → `track` → `execute`. Accepts a markdown spec file
+  path as argument (e.g. `/sdd docs/my-feature.md`). The command
+  reads the spec, generates tasks via `TaskGenerator`, and displays
+  task status inline. Built on `SpecParser`, `TaskTracker`,
+  `TaskGenerator`, and `TaskFlow` from `@wrongstack/core/sdd`.
+
+- **`/goal pause` and `/goal resume`.** Two new subcommands for the
+  goal system:
+  - `/goal pause` — sets `goalState: 'paused'` in `goal.json`. The
+    eternal engine sees this on its next iteration start (via
+    `goalState !== 'active'` guard) and exits gracefully after the
+    current iteration finishes — no AbortController kill, no work
+    torn mid-task.
+  - `/goal resume` — flips `goalState` back to `'active'`. The engine
+    resumes on the next `/autonomy eternal` invocation or immediately
+    if already running.
+
+- **`IterationStage` pipeline + TUI stage chip.** `EternalAutonomyEngine`
+  now calls an `onStage` callback at each phase transition
+  (`decide → execute → reflect → sleep`). The CLI wires a
+  `stageListeners` Set and exposes `subscribeEternalStage` to the
+  TUI, which dispatches into `state.eternalStage` for live rendering.
+  The TUI status bar shows the current phase label (e.g. `⟳ DECIDE`,
+  `⚡ EXECUTE`, `◎ REFLECT`) updating every tick.
+
+- **`GoalFile.goalState` field.** `goal-store.ts` now models the
+  goal lifecycle with three states: `'active' | 'paused' | 'done'`.
+  All existing goal files continue working — missing `goalState`
+  defaults to `'active'` for backwards compatibility.
+
+### Changed
+
+- **`SlashCommandRegistry` double-register guard relaxed.** Built-in
+  slash commands that re-register (e.g. TUI + CLI both mounting the
+  same command) now silently no-op instead of throwing. This
+  protects against React Strict Mode double-mounts in development and
+  plugin hot-reload scenarios without needing TUI-specific cleanup
+  workarounds. Third-party commands using the same bare name from
+  different owners still throw to prevent accidental shadowing.
+
+### Fixed
+
+- **`SlashCommandRegistry` same-owner re-registration was mischaracterized
+  as an error.** The implementation (lines 36–40 of
+  `slash-command-registry.ts`) silently ignores same-owner re-registration
+  by design — intentional for React Strict Mode double-mount and
+  plugin hot-reload. The test expectation was wrong; it now splits
+  into two cases: same-owner → silent no-op, different owner with same
+  name → throws to prevent shadowing.
+
+### Changed — versions
+
+- **All workspace packages bumped 0.6.5 → 0.6.6**: `wrongstack`,
+  `@wrongstack/cli`, `@wrongstack/core`, `@wrongstack/mcp`,
+  `@wrongstack/plug-lsp`, `@wrongstack/providers`,
+  `@wrongstack/runtime`, `@wrongstack/skills`,
+  `@wrongstack/telegram`, `@wrongstack/tools`, `@wrongstack/tui`,
+  `@wrongstack/webui`. `@wrongstack/plugins` remains at `0.1.0`.
+
 ## [0.6.5] - 2026-05-23
 
 ### Added

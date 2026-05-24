@@ -362,7 +362,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
               if (autoCompleted > 0) {
                 const progress = getTaskProgress();
                 if (progress) {
-                  messages.push(`✓ ${autoCompleted} task(s) auto-completed! Progress: ${progress.completed}/${progress.total} (${progress.percent}%)`);
+                  messages.push(`✓ ${autoCompleted} task(s) auto-completed! Progress: ${progress.completed}/${progress.total} (${progress.percentComplete}%)`);
                 }
               }
             }

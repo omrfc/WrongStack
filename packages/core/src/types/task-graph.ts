@@ -18,6 +18,7 @@ export interface TaskNode {
   children?: string[];
   createdAt: number;
   updatedAt: number;
+  startedAt?: number;   // set when status → in_progress
   completedAt?: number;
   metadata?: Record<string, unknown>;
 }
