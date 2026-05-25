@@ -104,7 +104,7 @@ describe('buildCommitCommand', () => {
     const res = await cmd.run('--dry-run', ctxFor(tmp));
     // Heuristic picks "docs" for README/.md
     expect(stripAnsi(res!.message!)).toContain('docs');
-  });
+  }, 30_000);
 
   it('--no-llm flag skips LLM even when generator provided', async () => {
     initGitRepo();

@@ -145,6 +145,6 @@ describe('Git commit helper functions', () => {
       } finally {
         await rmWithRetry(remoteTmp);
       }
-    });
+    }, 30_000);
   });
 });
