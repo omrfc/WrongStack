@@ -1,0 +1,240 @@
+/**
+ * Smart agent dispatcher.
+ *
+ * Routes a free-form task description to the best agent in the catalog using a
+ * two-stage strategy:
+ *
+ *   1. Heuristic — keyword/phrase scoring against each agent's `capability`
+ *      metadata. Deterministic, instant, no provider call. Multi-word phrases
+ *      score higher than single words (they're more specific signals).
+ *
+ *   2. LLM fallback — when the heuristic is ambiguous (confidence below the
+ *      threshold, or no keyword hit at all) an injected `classifier` resolves
+ *      the tie. The classifier is provider-agnostic: callers wire it to any
+ *      `complete(prompt) => text` function via `makeLLMClassifier`, so core
+ *      stays free of provider dependencies and the path is unit-testable.
+ *
+ * If neither stage yields a confident pick, the dispatcher falls back to the
+ * `executor` generalist rather than failing.
+ */
+import {
+  AGENT_CATALOG,
+  ALL_AGENT_DEFINITIONS,
+  type AgentDefinition,
+} from './agents/index.js';
+
+/** Default agent used when nothing else matches — the generalist builder. */
+export const DEFAULT_DISPATCH_ROLE = 'executor';
+
+export interface DispatchCandidate {
+  role: string;
+  name: string;
+  score: number;
+  /** Capability keywords that matched the task text. */
+  matched: string[];
+}
+
+export type DispatchMethod = 'heuristic' | 'llm' | 'fallback';
+
+export interface DispatchResult {
+  role: string;
+  definition: AgentDefinition;
+  /** 0..1 — heuristic margin, or 1 when an LLM made a definite choice. */
+  confidence: number;
+  method: DispatchMethod;
+  /** Human-readable explanation of why this agent was chosen. */
+  reason: string;
+  /** Runner-up candidates (top heuristic scorers), best-first. */
+  alternatives: DispatchCandidate[];
+}
+
+/**
+ * Provider-agnostic classifier seam. Given the task and the candidate agents
+ * (role + summary), return the chosen role (and optional reason), or null to
+ * decline. Wire via `makeLLMClassifier`.
+ */
+export type DispatchClassifier = (
+  task: string,
+  candidates: { role: string; name: string; summary: string }[],
+) => Promise<{ role: string; reason?: string } | null>;
+
+export interface DispatchOptions {
+  /** Optional LLM fallback for ambiguous tasks. */
+  classifier?: DispatchClassifier;
+  /** Heuristic confidence below this triggers the classifier. Default 0.4. */
+  confidenceThreshold?: number;
+  /** How many top candidates to offer the classifier. Default 6. */
+  maxCandidates?: number;
+  /** Override the catalog (testing). Defaults to the full `AGENT_CATALOG`. */
+  catalog?: Record<string, AgentDefinition>;
+}
+
+function normalize(text: string): string {
+  return ` ${text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+}
+
+/**
+ * Score every agent against the task. A keyword hit adds 1 point; a multi-word
+ * keyword phrase adds points equal to its word count (more specific = stronger
+ * signal). Returns candidates sorted best-first, zero-score agents dropped.
+ */
+export function scoreAgents(
+  task: string,
+  catalog: Record<string, AgentDefinition> = AGENT_CATALOG,
+): DispatchCandidate[] {
+  const hay = normalize(task);
+  const out: DispatchCandidate[] = [];
+  for (const def of Object.values(catalog)) {
+    const role = def.config.role;
+    if (!role) continue;
+    let score = 0;
+    const matched: string[] = [];
+    for (const kw of def.capability.keywords) {
+      const needle = normalize(kw);
+      // needle is padded with spaces, so this is a whole-token(s) match.
+      if (hay.includes(needle.trimEnd() + ' ') || hay.includes(' ' + needle.trimStart())) {
+        const words = kw.trim().split(/\s+/).length;
+        score += words;
+        matched.push(kw);
+      }
+    }
+    if (score > 0) {
+      out.push({ role, name: def.config.name, score, matched });
+    }
+  }
+  out.sort((a, b) => b.score - a.score);
+  return out;
+}
+
+/**
+ * Heuristic confidence from the score distribution: the margin between the top
+ * candidate and the runner-up, scaled by the top score's strength. A clear
+ * winner (high top, low second) approaches 1; a near-tie approaches 0.
+ */
+function heuristicConfidence(candidates: DispatchCandidate[]): number {
+  if (candidates.length === 0) return 0;
+  const top = candidates[0]!.score;
+  const second = candidates[1]?.score ?? 0;
+  // Strength factor: a single weak match (score 1) shouldn't read as confident.
+  const strength = Math.min(1, top / 3);
+  const margin = (top - second + 1) / (top + 1);
+  return Math.min(1, strength * margin);
+}
+
+/**
+ * Route a task to the best agent. Async because the LLM fallback may run; the
+ * pure-heuristic path resolves without awaiting anything.
+ */
+export async function dispatchAgent(
+  task: string,
+  opts: DispatchOptions = {},
+): Promise<DispatchResult> {
+  const catalog = opts.catalog ?? AGENT_CATALOG;
+  const threshold = opts.confidenceThreshold ?? 0.4;
+  const maxCandidates = opts.maxCandidates ?? 6;
+
+  const candidates = scoreAgents(task, catalog);
+  const confidence = heuristicConfidence(candidates);
+  const top = candidates[0];
+
+  // Confident heuristic pick — done, no provider call.
+  if (top && confidence >= threshold) {
+    return {
+      role: top.role,
+      definition: catalog[top.role]!,
+      confidence,
+      method: 'heuristic',
+      reason: `Matched keywords: ${top.matched.slice(0, 4).join(', ')}`,
+      alternatives: candidates.slice(1, maxCandidates),
+    };
+  }
+
+  // Ambiguous or no signal — ask the classifier if one is wired.
+  if (opts.classifier) {
+    // Offer the classifier the top heuristic candidates; if there were none,
+    // offer the whole catalog so it can still choose.
+    const pool = (candidates.length > 0
+      ? candidates.slice(0, maxCandidates).map((c) => catalog[c.role]!)
+      : ALL_AGENT_DEFINITIONS
+    ).map((d) => ({
+      role: d.config.role as string,
+      name: d.config.name,
+      summary: d.capability.summary,
+    }));
+    try {
+      const choice = await opts.classifier(task, pool);
+      if (choice && catalog[choice.role]) {
+        return {
+          role: choice.role,
+          definition: catalog[choice.role]!,
+          confidence: 1,
+          method: 'llm',
+          reason: choice.reason ?? 'Selected by LLM classifier',
+          alternatives: candidates.slice(0, maxCandidates).filter((c) => c.role !== choice.role),
+        };
+      }
+    } catch {
+      // Classifier failure must not break dispatch — fall through to fallback.
+    }
+  }
+
+  // Best heuristic guess if we have one, else the generalist.
+  if (top) {
+    return {
+      role: top.role,
+      definition: catalog[top.role]!,
+      confidence,
+      method: 'heuristic',
+      reason: `Weak match (${top.matched.slice(0, 3).join(', ') || 'low signal'})`,
+      alternatives: candidates.slice(1, maxCandidates),
+    };
+  }
+  const fallbackRole = catalog[DEFAULT_DISPATCH_ROLE]
+    ? DEFAULT_DISPATCH_ROLE
+    : Object.keys(catalog)[0]!;
+  return {
+    role: fallbackRole,
+    definition: catalog[fallbackRole]!,
+    confidence: 0,
+    method: 'fallback',
+    reason: 'No keyword signal; defaulting to the generalist Executor',
+    alternatives: [],
+  };
+}
+
+/**
+ * Build a `DispatchClassifier` from a minimal `complete(prompt) => text`
+ * function. The caller supplies the provider call; this owns the prompt and
+ * the parsing. Keeps `dispatcher` free of any provider import.
+ */
+export function makeLLMClassifier(
+  complete: (prompt: string) => Promise<string>,
+): DispatchClassifier {
+  return async (task, candidates) => {
+    const list = candidates.map((c, i) => `${i + 1}. ${c.role} — ${c.summary}`).join('\n');
+    const prompt = `You are an agent router. Pick the single best agent for the task.
+
+Task:
+${task}
+
+Agents:
+${list}
+
+Reply with ONLY a compact JSON object: {"role":"<one role id from the list>","reason":"<short why>"}.
+Do not add prose, markdown, or code fences.`;
+    const raw = (await complete(prompt)).trim();
+    // Tolerate accidental code fences / surrounding text — extract first {...}.
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      const parsed = JSON.parse(match[0]) as { role?: unknown; reason?: unknown };
+      if (typeof parsed.role !== 'string') return null;
+      const role = parsed.role.trim();
+      const valid = candidates.some((c) => c.role === role);
+      if (!valid) return null;
+      return { role, reason: typeof parsed.reason === 'string' ? parsed.reason : undefined };
+    } catch {
+      return null;
+    }
+  };
+}

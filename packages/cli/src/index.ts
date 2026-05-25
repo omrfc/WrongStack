@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import type { CommitLLMProvider } from './slash-commands/commit-llm.js';
 import { generateCommitMessageWithLLM } from './slash-commands/commit-llm.js';
+import { makeProviderClassifier } from './slash-commands/dispatch-llm.js';
 import {
   Agent,
   AutoCompactionMiddleware,
@@ -1268,6 +1269,10 @@ export async function main(argv: string[]): Promise<number> {
         model: context.model,
       });
     },
+    onDispatchClassify: makeProviderClassifier(
+      context.provider as CommitLLMProvider,
+      context.model,
+    ),
   });
   for (const cmd of slashCmds) slashRegistry.register(cmd);
 

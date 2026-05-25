@@ -23,6 +23,7 @@ import { createToolVisionAdapters } from '@wrongstack/runtime/vision';
 import { capabilitiesFor } from '@wrongstack/providers';
 import type { ReadlineInputReader } from './input-reader.js';
 import type { TerminalRenderer } from './renderer.js';
+import { FleetStatusLine } from './fleet-statusline.js';
 import { runRepl } from './repl.js';
 import type { SessionStats } from './session-stats.js';
 import { fmtTok } from './utils.js';
@@ -172,6 +173,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
   } = deps;
 
   let code = 0;
+  let fleetStatusLine: FleetStatusLine | null = null;
   try {
     const visionAdapters = () => createToolVisionAdapters(agent.tools);
     const supportsVision = async (): Promise<boolean> => {
@@ -198,6 +200,15 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     const askFlag = typeof flags['ask'] === 'string' ? flags['ask'] : undefined;
     if ((goalFlag || askFlag) && positional.length === 0 && !promptFlag) {
       flags.tui = true;
+    }
+    // Live fleet status line for the plain terminal. The TUI owns its own
+    // per-agent surface (and Ink owns stdout), so only run this on the
+    // non-TUI paths: single-shot, plain REPL, and webui-backed REPL.
+    const enteringTui =
+      !(positional.length > 0 || promptFlag) && !!flags.tui && flags['no-tui'] !== true;
+    if (!enteringTui) {
+      fleetStatusLine = new FleetStatusLine({ events });
+      fleetStatusLine.start();
     }
     if (positional.length > 0 || promptFlag) {
       const query = positional.join(' ');
@@ -431,6 +442,9 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
       });
     }
   } finally {
+    // Tear down the live fleet status line first so the scroll region is
+    // restored before any end-of-session output prints.
+    fleetStatusLine?.stop();
     // stats.render is synchronous but can throw — isolate it so cleanup
     // always runs regardless.
     try { stats.render(renderer); } catch (err) { /* best-effort */ }

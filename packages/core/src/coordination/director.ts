@@ -478,6 +478,16 @@ export class Director implements ICoordinator {
     // fail — the host agent should then split the work or narrow the
     // scope. We track this per subagent+kind combination.
     const extendCounts = new Map<string, number>();
+    // Per-subagent progress heartbeat: counts tool executions so the timeout
+    // kind can extend indefinitely WHILE the agent is doing work, yet still
+    // deny a wedged agent that produces no new tool calls between grants.
+    // Wall-clock time always advances, so timeout alone is never a reliable
+    // "stuck" signal — tool activity is.
+    const progressBySubagent = new Map<string, number>();
+    const lastTimeoutProgress = new Map<string, number>();
+    this.fleet.filter('tool.executed', (e) => {
+      progressBySubagent.set(e.subagentId, (progressBySubagent.get(e.subagentId) ?? 0) + 1);
+    });
     this.fleet.filter('budget.threshold_reached', (e) => {
       const payload = e.payload as {
         kind: 'iterations' | 'tool_calls' | 'tokens' | 'cost' | 'timeout';
@@ -487,6 +497,26 @@ export class Director implements ICoordinator {
         extend: (extra: Record<string, unknown>) => void;
         deny: () => void;
       };
+      // Timeout is governed by the heartbeat, not the extension cap. While the
+      // subagent keeps executing tools it never dies on wall-clock time; once
+      // it stops making progress between grants, it's genuinely stuck → deny.
+      if (payload.kind === 'timeout') {
+        const progress = progressBySubagent.get(e.subagentId) ?? 0;
+        const lastProgress = lastTimeoutProgress.get(e.subagentId) ?? -1;
+        if (progress <= lastProgress) {
+          payload.deny();
+          return;
+        }
+        lastTimeoutProgress.set(e.subagentId, progress);
+        setImmediate(() => {
+          // Generous extension with a 24 h hard ceiling so a runaway can't
+          // extend forever even while spuriously emitting tool calls.
+          payload.extend({
+            timeoutMs: Math.min(Math.ceil(payload.limit * 2), 24 * 60 * 60_000),
+          });
+        });
+        return;
+      }
       const guardKey = `${e.subagentId}:${payload.kind}`;
       const prior = extendCounts.get(guardKey) ?? 0;
       if (prior >= this.maxBudgetExtensions) {
@@ -518,12 +548,8 @@ export class Director implements ICoordinator {
           case 'cost':
             extra.maxCostUsd = Math.min(payload.limit * 2, 25);
             break;
-          case 'timeout':
-            // Cap at 2 h so a runaway task can't extend itself
-            // indefinitely; combined with `maxBudgetExtensions` this
-            // bounds the worst case to (limit * 2^N) clamped.
-            extra.timeoutMs = Math.min(Math.ceil(payload.limit * 2), 2 * 60 * 60_000);
-            break;
+          // 'timeout' is handled earlier via the heartbeat path and returns
+          // before reaching this switch.
         }
         payload.extend(extra);
       });

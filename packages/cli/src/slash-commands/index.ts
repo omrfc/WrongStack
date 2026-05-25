@@ -74,6 +74,12 @@ export interface SlashCommandContext {
    */
   onFleetSpawn?: (role: string) => Promise<string>;
   /**
+   * Optional LLM classifier for `/fleet dispatch`. When wired, the smart
+   * dispatcher uses it to resolve ambiguous routing decisions; without it the
+   * dispatcher is heuristic-only. Built from the session provider in the host.
+   */
+  onDispatchClassify?: import('@wrongstack/core').DispatchClassifier;
+  /**
    * Toggle subagent activity streaming into the leader's history. The
    * TUI installs the actual setter on mount via a shared controller;
    * before that, calls are buffered into the initial-value field so

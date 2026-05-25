@@ -1,6 +1,18 @@
-import { color } from '@wrongstack/core';
-import { type SlashCommand, type CoordinatorStatus, type FleetUsage } from '@wrongstack/core';
+import { color, dispatchAgent, AGENTS_BY_PHASE } from '@wrongstack/core';
+import { type SlashCommand, type CoordinatorStatus, type FleetUsage, type AgentPhase } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
+
+const PHASE_ORDER: { phase: AgentPhase; label: string }[] = [
+  { phase: 'discovery', label: '1 · Discovery' },
+  { phase: 'planning', label: '2 · Planning' },
+  { phase: 'build', label: '3 · Build' },
+  { phase: 'verify', label: '4 · Verify' },
+  { phase: 'review', label: '5 · Review' },
+  { phase: 'domain', label: '6 · Domain' },
+  { phase: 'knowledge', label: '7 · Knowledge' },
+  { phase: 'delivery', label: '8 · Delivery & Ops' },
+  { phase: 'meta', label: '9 · Meta' },
+];
 
 /**
  * /fleet — live fleet observability and control.
@@ -26,6 +38,8 @@ export function buildFleetCommand(opts: SlashCommandContext): SlashCommand {
       'Usage:',
       '  /fleet              Show fleet status (default)',
       '  /fleet status       Same as /fleet (verbose status)',
+      '  /fleet list         List the agent roster grouped by phase',
+      '  /fleet dispatch <task>  Route a task to the best agent and spawn it',
       '  /fleet spawn <role> [count]  Spawn N subagents of a role (default 1)',
       '  /fleet terminate <subagentId>  Stop a specific subagent by id',
       '  /fleet kill         Stop all running subagents',
@@ -245,12 +259,69 @@ export function buildFleetCommand(opts: SlashCommandContext): SlashCommand {
         return { message: msg };
       }
 
+      // ── /fleet list ──────────────────────────────────────────────────────
+      if (cmd === 'list' || cmd === 'roster' || cmd === 'agents') {
+        const lines: string[] = [`${color.bold('Agent Roster')} ${color.dim('(spawn with /fleet spawn <role>)')}`];
+        for (const { phase, label } of PHASE_ORDER) {
+          const defs = AGENTS_BY_PHASE[phase];
+          if (!defs || defs.length === 0) continue;
+          lines.push('');
+          lines.push(color.cyan(`  Phase ${label}`));
+          for (const def of defs) {
+            const role = (def.config.role ?? '').padEnd(18);
+            lines.push(`    ${color.bold(role)} ${color.dim(def.capability.summary)}`);
+          }
+        }
+        const msg = lines.join('\n');
+        opts.renderer.write(msg);
+        return { message: msg };
+      }
+
+      // ── /fleet dispatch <task> ───────────────────────────────────────────
+      if (cmd === 'dispatch' || cmd === 'route') {
+        const task = subargs.join(' ').trim();
+        if (!task) {
+          const msg = `Usage: /fleet dispatch <task description> — routes the task to the best agent.`;
+          opts.renderer.writeWarning(msg);
+          return { message: msg };
+        }
+        const decision = await dispatchAgent(task, { classifier: opts.onDispatchClassify });
+        const pct = Math.round(decision.confidence * 100);
+        const lines: string[] = [];
+        lines.push(
+          `${color.bold('→ ' + decision.role)} ${color.dim(`(${decision.method}, ${pct}% confidence)`)}`,
+        );
+        lines.push(`  ${color.dim(decision.definition.capability.summary)}`);
+        lines.push(`  ${color.dim('why:')} ${decision.reason}`);
+        if (decision.alternatives.length > 0) {
+          const alts = decision.alternatives.slice(0, 3).map((a) => a.role).join(', ');
+          lines.push(`  ${color.dim('alternatives:')} ${alts}`);
+        }
+        if (opts.onFleetSpawn) {
+          try {
+            const id = await opts.onFleetSpawn(decision.role);
+            lines.push(`  ${color.green('✓ spawned')} ${color.bold(decision.role)} as ${color.dim(id)}`);
+          } catch (err) {
+            lines.push(
+              `  ${color.amber('⚠ spawn failed:')} ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        } else {
+          lines.push(`  ${color.dim('(no fleet active — run /autonomy parallel or --director to spawn)')}`);
+        }
+        const msg = lines.join('\n');
+        opts.renderer.write(msg);
+        return { message: msg };
+      }
+
       // ── /fleet help ───────────────────────────────────────────────────────
       if (cmd === 'help' || cmd === '?') {
         const msg = [
           `${color.bold('Fleet Commands')}`,
           `  ${color.dim('/fleet')}              Show fleet status (default)`,
           `  ${color.dim('/fleet status')}       Same as /fleet (verbose status)`,
+          `  ${color.dim('/fleet list')}         List the agent roster grouped by phase`,
+          `  ${color.dim('/fleet dispatch <task>')}  Route a task to the best agent and spawn it`,
           `  ${color.dim('/fleet spawn <role> [count]')}  Spawn N subagents of a role (default 1)`,
           `  ${color.dim('/fleet terminate <subagentId>')}  Stop a specific subagent by id`,
           `  ${color.dim('/fleet kill')}         Stop all running subagents`,
@@ -262,7 +333,7 @@ export function buildFleetCommand(opts: SlashCommandContext): SlashCommand {
       }
 
       // ── Unknown command ───────────────────────────────────────────────────
-      const valid = ['status', 'usage', 'spawn', 'terminate', 'kill', 'retry', 'journal'];
+      const valid = ['status', 'list', 'dispatch', 'usage', 'spawn', 'terminate', 'kill', 'retry', 'journal'];
       const msg = `Unknown subcommand "${cmd}". Valid subcommands: ${valid.join(', ')}. Run /fleet with no args to see status, or /fleet help for usage.`;
       opts.renderer.writeWarning(msg);
       return { message: msg };

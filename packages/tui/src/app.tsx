@@ -1520,6 +1520,9 @@ export function App({
         elapsedMs: Math.max(0, nowTick - e.startedAt),
         toolCalls: e.toolCalls,
         running: e.status === 'running',
+        // Last/current action, so the 4th line shows what each agent is
+        // doing right now (e.g. "▶ 12s · 8t · bash") rather than just counts.
+        tool: e.currentTool?.name,
       };
     });
   }, [state.fleet, nowTick]);

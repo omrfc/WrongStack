@@ -63,7 +63,49 @@ export {
   SECURITY_SCANNER_AGENT,
   FLEET_ROSTER,
   ALL_FLEET_AGENTS,
+  FLEET_ROSTER_BUDGETS,
+  applyRosterBudget,
+  type FleetRosterBudget,
 } from './fleet.js';
+export {
+  ALL_AGENT_DEFINITIONS,
+  AGENT_CATALOG,
+  AGENTS_BY_PHASE,
+  getAgentDefinition,
+  DISCOVERY_AGENTS,
+  PLANNING_AGENTS,
+  BUILD_AGENTS,
+  VERIFY_AGENTS,
+  REVIEW_AGENTS,
+  DOMAIN_AGENTS,
+  KNOWLEDGE_AGENTS,
+  DELIVERY_AGENTS,
+  META_AGENTS,
+  TOOLS as AGENT_TOOL_PRESETS,
+  LIGHT_BUDGET,
+  MEDIUM_BUDGET,
+  HEAVY_BUDGET,
+  type AgentDefinition,
+  type AgentCapability,
+  type AgentBudgetTier,
+  type AgentPhase,
+} from './agents/index.js';
+export {
+  dispatchAgent,
+  scoreAgents,
+  makeLLMClassifier,
+  DEFAULT_DISPATCH_ROLE,
+  type DispatchResult,
+  type DispatchCandidate,
+  type DispatchClassifier,
+  type DispatchOptions,
+  type DispatchMethod,
+} from './dispatcher.js';
+export {
+  attachAutoExtend,
+  type AutoExtendPolicy,
+  type AutoExtendCeiling,
+} from './auto-extend.js';
 export type {
   ICoordinator,
 } from './icoordinator.js';

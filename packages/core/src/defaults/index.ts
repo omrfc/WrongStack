@@ -221,7 +221,34 @@ export {
   FLEET_ROSTER_BUDGETS,
   applyRosterBudget,
   ALL_FLEET_AGENTS,
+  type FleetRosterBudget,
 } from '../coordination/fleet.js';
+export {
+  ALL_AGENT_DEFINITIONS,
+  AGENT_CATALOG,
+  AGENTS_BY_PHASE,
+  getAgentDefinition,
+  type AgentDefinition,
+  type AgentCapability,
+  type AgentBudgetTier,
+  type AgentPhase,
+} from '../coordination/agents/index.js';
+export {
+  dispatchAgent,
+  scoreAgents,
+  makeLLMClassifier,
+  DEFAULT_DISPATCH_ROLE,
+  type DispatchResult,
+  type DispatchCandidate,
+  type DispatchClassifier,
+  type DispatchOptions,
+  type DispatchMethod,
+} from '../coordination/dispatcher.js';
+export {
+  attachAutoExtend,
+  type AutoExtendPolicy,
+  type AutoExtendCeiling,
+} from '../coordination/auto-extend.js';
 export type {
   ICoordinator,
 } from '../coordination/icoordinator.js';

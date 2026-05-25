@@ -153,4 +153,37 @@ describe('buildFleetCommand', () => {
     expect(res?.message).toContain('Unknown subcommand "frobulate"');
     expect(res?.message).toContain('status');
   });
+
+  it('list renders the roster grouped by phase', async () => {
+    const cmd = buildFleetCommand(ctx());
+    const res = await cmd.run('list', ctx());
+    expect(res?.message).toMatch(/Agent Roster/);
+    expect(res?.message).toMatch(/Phase 1 . Discovery/);
+    expect(res?.message).toContain('debugger');
+    expect(res?.message).toContain('security-reviewer');
+  });
+
+  it('dispatch routes a task to an agent and spawns it', async () => {
+    const onFleetSpawn = vi.fn().mockResolvedValue('sub-xyz');
+    const cmd = buildFleetCommand({ ...ctx(), onFleetSpawn });
+    const res = await cmd.run('dispatch fix the crash when the app starts', ctx());
+    expect(onFleetSpawn).toHaveBeenCalledWith('debugger');
+    expect(res?.message).toContain('debugger');
+    expect(res?.message).toContain('spawned');
+  });
+
+  it('dispatch without a task reports usage', async () => {
+    const cmd = buildFleetCommand(ctx());
+    const res = await cmd.run('dispatch', ctx());
+    expect(res?.message).toContain('Usage: /fleet dispatch');
+  });
+
+  it('dispatch uses the LLM classifier when wired and heuristic is weak', async () => {
+    const onDispatchClassify = vi.fn().mockResolvedValue({ role: 'architect', reason: 'design' });
+    const onFleetSpawn = vi.fn().mockResolvedValue('sub-1');
+    const cmd = buildFleetCommand({ ...ctx(), onDispatchClassify, onFleetSpawn });
+    const res = await cmd.run('dispatch ponder the shape of this thing', ctx());
+    expect(onDispatchClassify).toHaveBeenCalled();
+    expect(res?.message).toContain('architect');
+  });
 });

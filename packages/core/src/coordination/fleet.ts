@@ -4,6 +4,7 @@
  * for the director's roster.
  */
 import type { SubagentConfig } from '../types/multi-agent.js';
+import { ALL_AGENT_DEFINITIONS } from './agents/index.js';
 
 /**
  * Audit Log Agent — analyzes session logs, event streams, and traces.
@@ -194,12 +195,20 @@ Working rules:
   // Budgets are set by the orchestrator per task — see fleet.ts header.
 };
 
-/** All pre-built agents in a map for easy lookup by role. */
+/**
+ * All agents in a map for easy lookup by role. The four legacy pre-built
+ * agents plus the phase 1-9 catalog (`ALL_AGENT_DEFINITIONS`). Catalog roles
+ * are guaranteed collision-free by the catalog builder; none overlap the
+ * legacy four.
+ */
 export const FLEET_ROSTER: Record<string, SubagentConfig> = {
   'audit-log': AUDIT_LOG_AGENT,
   'bug-hunter': BUG_HUNTER_AGENT,
   'refactor-planner': REFACTOR_PLANNER_AGENT,
   'security-scanner': SECURITY_SCANNER_AGENT,
+  ...Object.fromEntries(
+    ALL_AGENT_DEFINITIONS.map((d) => [d.config.role as string, d.config] as const),
+  ),
 };
 
 // ---------------------------------------------------------------------------
@@ -230,6 +239,9 @@ export const FLEET_ROSTER_BUDGETS: Record<string, FleetRosterBudget> = {
   'bug-hunter': { timeoutMs: 10 * 60 * 60 * 1000, maxIterations: 8000, maxToolCalls: 20000 },
   'refactor-planner': { timeoutMs: 7.5 * 60 * 60 * 1000, maxIterations: 6000, maxToolCalls: 18000 },
   'security-scanner': { timeoutMs: 10 * 60 * 60 * 1000, maxIterations: 8000, maxToolCalls: 20000 },
+  ...Object.fromEntries(
+    ALL_AGENT_DEFINITIONS.map((d) => [d.config.role as string, d.budget] as const),
+  ),
 };
 
 /**

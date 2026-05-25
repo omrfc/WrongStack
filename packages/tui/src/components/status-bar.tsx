@@ -50,6 +50,8 @@ export interface FleetAgentDetail {
   toolCalls: number;
   /** True when the subagent is actively iterating. */
   running: boolean;
+  /** Current/last tool the subagent invoked, shown as its live action. */
+  tool?: string;
 }
 
 export interface ContextWindow {
@@ -400,6 +402,12 @@ export function StatusBar({
               <Text dimColor>{fmtElapsed(a.elapsedMs)}</Text>
               <Text dimColor>{' · '}</Text>
               <Text dimColor>{a.toolCalls}t</Text>
+              {a.tool ? (
+                <>
+                  <Text dimColor>{' · '}</Text>
+                  <Text color="cyan">{a.tool}</Text>
+                </>
+              ) : null}
             </Text>
           ))}
         </Box>
