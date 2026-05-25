@@ -3824,6 +3824,7 @@ export function App({
       })()}
       <StatusBar
         model={`${liveProvider}/${liveModel}`}
+        version={appVersion}
         state={state.status}
         tokenCounter={tokenCounter}
         hint={renderRunningTools(state.runningTools) || state.hint}

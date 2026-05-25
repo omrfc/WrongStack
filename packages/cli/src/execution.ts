@@ -207,7 +207,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     const enteringTui =
       !(positional.length > 0 || promptFlag) && !!flags.tui && flags['no-tui'] !== true;
     if (!enteringTui) {
-      fleetStatusLine = new FleetStatusLine({ events });
+      fleetStatusLine = new FleetStatusLine({ events, version: CLI_VERSION });
       fleetStatusLine.start();
     }
     if (positional.length > 0 || promptFlag) {

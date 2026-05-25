@@ -36,6 +36,23 @@ describe('renderFleetLine', () => {
     expect(line).toContain('bash');
   });
 
+  it('prefixes a WS version chip when version is provided', () => {
+    const states = stateMap(
+      { id: 'a', name: 'Debugger', status: 'running', iterations: 1, toolCalls: 0, startedAt: 0 },
+    );
+    const line = strip(renderFleetLine(states, 1000, 200, '0.7.0'));
+    expect(line).toContain('WS v0.7.0');
+    // The version chip leads the line, before the fleet counts.
+    expect(line.indexOf('WS v0.7.0')).toBeLessThan(line.indexOf('fleet'));
+  });
+
+  it('omits the version chip when version is not provided', () => {
+    const states = stateMap(
+      { id: 'a', name: 'Debugger', status: 'running', iterations: 1, toolCalls: 0, startedAt: 0 },
+    );
+    expect(strip(renderFleetLine(states, 1000, 200))).not.toContain('WS v');
+  });
+
   it('caps the line to terminal width', () => {
     const many: FleetAgentState[] = Array.from({ length: 6 }, (_, i) => ({
       id: `a${i}`,

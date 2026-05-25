@@ -34,6 +34,8 @@ export interface FleetStatusLineOptions {
   throttleMs?: number;
   /** Inject a clock for tests. */
   now?: () => number;
+  /** App version (e.g. "0.7.0") prefixed as a `WS v…` chip on the pinned line. */
+  version?: string;
 }
 
 function fmtElapsed(ms: number): string {
@@ -55,6 +57,7 @@ export function renderFleetLine(
   states: Map<string, FleetAgentState>,
   now: number,
   columns: number,
+  version?: string,
 ): string {
   const all = [...states.values()];
   if (all.length === 0) return '';
@@ -62,7 +65,9 @@ export function renderFleetLine(
   const done = all.filter((a) => a.status === 'done').length;
   const failed = all.filter((a) => a.status === 'failed').length;
 
+  const versionChip = version ? `${color.bold('WS')}${color.dim(` v${version}`)} ${color.dim('│')} ` : '';
   const counts =
+    versionChip +
     `${color.cyan('⟳ fleet')} ` +
     `${color.yellow(`▶${running.length}`)} ` +
     `${color.green(`✓${done}`)}` +
@@ -119,6 +124,7 @@ export class FleetStatusLine {
   private readonly out: NodeJS.WriteStream;
   private readonly throttleMs: number;
   private readonly now: () => number;
+  private readonly version?: string;
   private readonly states = new Map<string, FleetAgentState>();
   private readonly unsubs: Array<() => void> = [];
   private active = false;
@@ -139,6 +145,7 @@ export class FleetStatusLine {
     this.out = opts.out ?? process.stdout;
     this.throttleMs = opts.throttleMs ?? 150;
     this.now = opts.now ?? Date.now;
+    this.version = opts.version;
   }
 
   /** Subscribe to host fleet events. No terminal output until a subagent spawns. */
@@ -272,7 +279,7 @@ export class FleetStatusLine {
     if (!this.active || !this.isTty()) return;
     if (!force) this.lastPaint = this.now();
     else this.lastPaint = this.now();
-    const line = renderFleetLine(this.states, this.now(), this.out.columns ?? 80);
+    const line = renderFleetLine(this.states, this.now(), this.out.columns ?? 80, this.version);
     this.out.write('\x1b7'); // save cursor
     this.out.write(`\x1b[${this.rows};1H`); // last row
     this.out.write('\x1b[2K'); // clear

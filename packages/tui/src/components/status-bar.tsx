@@ -63,6 +63,12 @@ export interface ContextWindow {
 
 export interface StatusBarProps {
   model: string;
+  /**
+   * App version string (e.g. "0.7.0"). When set, renders a compact
+   * `WS v0.7.0` chip at the head of line 1 so the running build is always
+   * visible, not just in the startup banner.
+   */
+  version?: string;
   state: 'idle' | 'running' | 'streaming' | 'aborting';
   tokenCounter?: TokenCounter;
   hint?: string;
@@ -156,6 +162,7 @@ export interface StatusBarProps {
  */
 export function StatusBar({
   model,
+  version,
   state,
   tokenCounter,
   hint,
@@ -217,6 +224,15 @@ export function StatusBar({
       borderRight={false}
     >
       <Box flexDirection="row" gap={2}>
+        {version ? (
+          <>
+            <Text>
+              <Text color="blue" bold>WS</Text>
+              <Text dimColor> v{version}</Text>
+            </Text>
+            <Text dimColor>│</Text>
+          </>
+        ) : null}
         <Text color={stateColor}>● {stateLabel}</Text>
         <Text dimColor>│</Text>
         <Text color="magenta">{model}</Text>
