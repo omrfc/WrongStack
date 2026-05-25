@@ -11,6 +11,10 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
+// Some plugin tools shell out to git (execSync) during execute(); that spawn
+// overhead pushes these tests past the 5s default on Windows.
+vi.setConfig({ testTimeout: 30_000 });
+
 // ---------------------------------------------------------------------------
 // Minimal Plugin type mirror (avoids needing @wrongstack/core to be built)
 // ---------------------------------------------------------------------------
