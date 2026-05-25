@@ -5,6 +5,76 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-05-26
+
+### Added
+
+- **46-agent fleet roster + smart dispatcher.** The Director now ships
+  with a 46-role agent catalog. A smart dispatcher routes each task to
+  the best-matching role instead of spawning generic subagents. Catalog
+  integrity and per-role spawnability are guarded by end-to-end tests
+  (`agent-catalog.test.ts`, `dispatcher.test.ts`).
+
+- **Per-role agents in eternal-parallel mode.** Each parallel slot now
+  builds a real, role-specific agent and routes its slot task through
+  the smart dispatcher, so `/autonomy parallel` fans out to specialised
+  agents rather than identical clones.
+
+- **Graphical fleet monitor dashboard (Ctrl+F).** The TUI gains a
+  full-screen fleet monitor showing per-subagent status, plus a
+  fleet-wide token-totals gauge aggregating usage across the roster.
+
+- **"⚡ extended ×N" auto-extension badge.** When a delegate's budget
+  auto-extends, the extension count is now surfaced as a badge across
+  all fleet UIs (TUI monitor, `/fleet status`, `/agents`).
+
+- **WS version chip in the status bar.** The TUI status bar and the
+  pinned REPL fleet line now show the current WrongStack version.
+
+### Changed
+
+- **Lint cleanups (Biome, no behaviour change).** Applied verified-safe
+  auto-fixes across the monorepo: `forEach` → `for...of`, `isNaN` →
+  `Number.isNaN`, optional chaining, `import type` / `export type`,
+  `Number` namespace usage, and removal of dead `try/catch`. The one
+  intentional guarded throw-in-`finally` (`noUnsafeFinally`) is
+  documented inline rather than suppressed.
+
+### Fixed
+
+- **Delegate auto-extend now actually grants headroom (never-die
+  timeouts).** Director budget auto-extension was not reliably
+  extending the underlying budget; it now grants real headroom for all
+  budget kinds (iterations, tool-calls, tokens, cost, timeout), so a
+  long-running delegate is no longer killed mid-task by a stale cap.
+  Proven by `auto-extend.test.ts`, `delegate-timeout-e2e.test.ts`, and
+  `budget-wildcard-negotiation.test.ts`.
+
+- **`mcp/client` drain-timeout `removeListener` crash.** Added optional
+  chaining to `removeListener` calls in the notify-drain timeout path so
+  teardown no longer throws when the listener was already detached.
+
+### Tests
+
+- **Coordination test suite expanded.** New end-to-end coverage for the
+  46-agent catalog, dispatcher routing-health, the never-die timeout
+  chain, parallel eternal engine, and the multi-agent coordinator
+  runner.
+
+- **Windows CI timeout hardening.** Raised timeouts and added retry
+  logic for `fs.rm` ENOTEMPTY/EBUSY in commit slash tests and plugin
+  git-spawn tests, addressing flakiness from slow Windows process
+  teardown.
+
+### Changed — versions
+
+- **All workspace packages bumped 0.7.0 → 0.7.1**: `wrongstack`,
+  `@wrongstack/cli`, `@wrongstack/core`, `@wrongstack/mcp`,
+  `@wrongstack/plug-lsp`, `@wrongstack/providers`,
+  `@wrongstack/runtime`, `@wrongstack/skills`,
+  `@wrongstack/telegram`, `@wrongstack/tools`, `@wrongstack/tui`,
+  `@wrongstack/webui`.
+
 ## [0.7.0] - 2026-05-25
 
 ### Added

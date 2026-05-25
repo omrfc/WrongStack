@@ -146,6 +146,8 @@ BEGIN.]
 
 Architecture: Host EventBus (always-on bridge) → Leader Agent (Director) + FleetBus (director-only fan-in) → `DefaultMultiAgentCoordinator` → `AgentSubagentRunner` per task (fresh Agent + Context + EventBus, full isolation) → per-subagent JSONL transcripts on disk.
 
+**46-agent roster + smart dispatcher.** The Director draws from a 46-role agent catalog; a smart dispatcher routes each task to the best-matching role instead of spawning generic clones. The TUI fleet monitor (**Ctrl+F**) shows per-subagent status and a fleet-wide token gauge, and auto-extended budgets surface as a `⚡ extended ×N` badge across all fleet UIs.
+
 **`--director` flag** launches the full fleet roster from the CLI directly:
 ```bash
 wrongstack --director "audit src/ for security issues"
@@ -271,13 +273,13 @@ Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. Wha
 
 ---
 
-## What's new in 0.7.0
+## What's new in 0.7.1
 
-**SDD UX enhancements — task lifecycle, progress tracking, phase context, REPL live updates.** The Spec-Driven Development workflow now surfaces live task progress in the REPL, phase context in the agent loop, and improved lifecycle tracking. `[GOAL_COMPLETE]` marker support added to the eternal engine for clean exits.
+**46-agent fleet roster + smart dispatcher.** The Director ships with a 46-role agent catalog and a smart dispatcher that routes each task to the best-matching role instead of spawning generic clones. In eternal-parallel mode, every slot now builds a real per-role agent and routes its task through the dispatcher.
 
-**12 latent bugs fixed** across core, MCP, CLI, tools, and providers — including agent-bridge TOCTOU, director spawn counting, MCP client race conditions, and the Google provider undefined fnName serialization.
+**Graphical fleet monitor (Ctrl+F).** A full-screen TUI dashboard shows per-subagent status plus a fleet-wide token-totals gauge. Auto-extended delegate budgets surface as a `⚡ extended ×N` badge across all fleet UIs, and the status bar now shows the WrongStack version.
 
-**Delegate tool budgets raised x10** (from 8–15 min to 7.5–10 hours), `coordinator.remove()` added to properly clean up subagent entries, and error codes centralized to `ERROR_CODES` const object.
+**Never-die timeouts fixed.** Director budget auto-extension now grants real headroom for all budget kinds (iterations, tool-calls, tokens, cost, timeout), so long-running delegates are no longer killed mid-task by a stale cap. Also fixed an `mcp/client` drain-timeout crash and applied a sweep of verified-safe Biome lint fixes.
 
 For earlier release notes, see [CHANGELOG.md](CHANGELOG.md).
 
@@ -387,6 +389,7 @@ wrongstack --provider openrouter --model anthropic/claude-opus-4-7
 | **Ctrl+C** × 1 | Cancel current iteration + terminate fleet (1.5s cap) |
 | **Ctrl+C** × 2 | Force-exit Ink loop |
 | **Ctrl+C** × 3 | Hard `process.exit(130)` |
+| **Ctrl+F** | Toggle the graphical fleet monitor — per-subagent status + fleet-wide token gauge |
 | `/fleet kill <id>` | Stop one specific subagent |
 
 ## Subcommands
