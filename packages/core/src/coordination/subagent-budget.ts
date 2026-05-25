@@ -143,7 +143,13 @@ export class SubagentBudget {
   }
 
   constructor(limits: BudgetLimits = {}) {
-    this.limits = Object.freeze({ ...limits });
+    // NOT frozen: `negotiateExtension` patches these limits in place when the
+    // coordinator grants an auto-extension. Freezing made every granted
+    // extension throw `TypeError: Cannot assign to read only property` in
+    // strict mode, which the runner caught as a hard stop — so extensions
+    // silently became kills. The `readonly limits: Readonly<BudgetLimits>`
+    // typing still blocks external mutation at compile time.
+    this.limits = { ...limits };
   }
 
   start(): void {
@@ -180,7 +186,12 @@ export class SubagentBudget {
     // that nobody resolves, the agent would race past it synchronously,
     // and the run would "succeed" past its budget.
     const bus = this._events;
-    if (!bus || bus.listenerCount('budget.threshold_reached') === 0) {
+    // hasListenerFor (not listenerCount) so a FleetBus `onPattern('*')`
+    // forwarder counts as a listener. listenerCount ignores wildcards, which
+    // made every delegated subagent hard-stop on a soft limit instead of
+    // negotiating an extension — the auto-extend path was dead on the real
+    // delegate/director flow.
+    if (!bus || !bus.hasListenerFor('budget.threshold_reached')) {
       throw new BudgetExceededError(kind, limit, used);
     }
     // Already negotiating an extension for this kind — the first signal
@@ -233,7 +244,7 @@ export class SubagentBudget {
           // for a scripted agent (and our budget-enforcement tests) to
           // happily finish past its budget.
           const bus = this._events;
-          if (!bus || bus.listenerCount('budget.threshold_reached') === 0) {
+          if (!bus || !bus.hasListenerFor('budget.threshold_reached')) {
             return Promise.resolve('stop');
           }
           return new Promise<BudgetThresholdDecision>((resolve) => {

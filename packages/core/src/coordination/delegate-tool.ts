@@ -229,9 +229,14 @@ export function createDelegateTool(opts: CreateDelegateToolOptions): Tool {
           }
 
           const SUBAGENT_TIMEOUT_BUFFER_MS = opts.subagentTimeoutBufferMs ?? 60_000;
-          const desiredSubTimeout = Math.max(30_000, timeoutMs - SUBAGENT_TIMEOUT_BUFFER_MS);
-          if (!cfg.timeoutMs || cfg.timeoutMs > desiredSubTimeout) {
-            cfg.timeoutMs = desiredSubTimeout;
+          // Only FILL IN a budget timeout when the config has none — never
+          // clamp a generous roster/generic budget DOWN to the host's await
+          // window. The old `cfg.timeoutMs > desiredSubTimeout` clamp is what
+          // capped 10h roster agents at ~4 minutes. The host await below is
+          // heartbeat-based, so the subagent's own (auto-extending) budget is
+          // the real ceiling.
+          if (!cfg.timeoutMs) {
+            cfg.timeoutMs = Math.max(30_000, timeoutMs - SUBAGENT_TIMEOUT_BUFFER_MS);
           }
 
           const subagentId = await director.spawn(cfg);
@@ -240,15 +245,39 @@ export function createDelegateTool(opts: CreateDelegateToolOptions): Tool {
             description: i.task,
             subagentId,
           });
-          const result = await Promise.race<TaskResult | { __timeout: true }>([
-            director.awaitTasks([taskId]).then((r) => {
-              if (!r[0]) throw new Error(`Task "${taskId}" not found in completed results`);
-              return r[0];
-            }),
-            new Promise<{ __timeout: true }>((resolve) =>
-              setTimeout(() => resolve({ __timeout: true }), timeoutMs),
-            ),
-          ]);
+          // Heartbeat-aware host await: `timeoutMs` is treated as a SILENCE
+          // tolerance, not a hard wall-clock cap. The deadline resets every
+          // time the subagent emits a tool/iteration event, so a subagent
+          // that keeps making progress is never killed for being slow —
+          // only a genuinely stalled one (no events for `timeoutMs`) trips
+          // the host timeout. Mirrors the budget's heartbeat auto-extend.
+          const dir = director;
+          const result = await new Promise<TaskResult | { __timeout: true }>((resolve) => {
+            let settled = false;
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const finish = (value: TaskResult | { __timeout: true }) => {
+              if (settled) return;
+              settled = true;
+              if (timer) clearTimeout(timer);
+              offTool();
+              offIter();
+              resolve(value);
+            };
+            const arm = () => {
+              if (timer) clearTimeout(timer);
+              timer = setTimeout(() => finish({ __timeout: true }), timeoutMs);
+            };
+            const bump = (e: { subagentId: string }) => {
+              if (e.subagentId === subagentId) arm();
+            };
+            const offTool = dir.fleet.filter('tool.executed', bump);
+            const offIter = dir.fleet.filter('iteration.started', bump);
+            arm();
+            dir
+              .awaitTasks([taskId])
+              .then((r) => finish(r[0] ?? { __timeout: true }))
+              .catch(() => finish({ __timeout: true }));
+          });
 
           if ('__timeout' in result) {
             const partial = await readSubagentPartial(opts, subagentId);

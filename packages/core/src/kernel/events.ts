@@ -442,6 +442,19 @@ export class EventBus {
   wildcardCount(): number {
     return this.wildcards.length;
   }
+
+  /**
+   * True if anything would receive an emit for `event` — a named listener
+   * OR a wildcard/regex pattern that matches the event name. Unlike
+   * `listenerCount`, this DOES account for wildcards, so callers that gate
+   * behavior on "is anyone listening?" (e.g. SubagentBudget deciding whether
+   * to negotiate a soft limit vs hard-stop) don't misfire when the only
+   * subscriber is a pattern listener like the FleetBus's `onPattern('*')`.
+   */
+  hasListenerFor(event: string): boolean {
+    if ((this.listeners.get(event as EventName)?.size ?? 0) > 0) return true;
+    return this.wildcards.some((w) => w.match(event));
+  }
 }
 
 // ── Scoped EventBus ─────────────────────────────────────────────────────────────
