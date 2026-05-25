@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   AGENT_CATALOG,
+  ALL_AGENT_DEFINITIONS,
+  DEFAULT_DISPATCH_ROLE,
   dispatchAgent,
   scoreAgents,
   makeLLMClassifier,
@@ -16,6 +18,48 @@ describe('catalog', () => {
       expect(def.capability.keywords.length).toBeGreaterThan(0);
       expect(def.budget.timeoutMs).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('catalog routing health', () => {
+  it('every agent is reachable: it tops the scoreboard for a task built from its own keywords', () => {
+    const unreachable: Array<{ role: string; winner: string; targetScore: number; topScore: number }> = [];
+    for (const def of ALL_AGENT_DEFINITIONS) {
+      const role = def.config.role as string;
+      // A task that contains exactly this agent's signal words. The agent
+      // matches all of them, so no sibling should be able to strictly outscore
+      // it on its own vocabulary — if one does, the agent is shadowed and can
+      // never win even on a perfectly on-topic request.
+      const task = def.capability.keywords.join(', ');
+      const ranked = scoreAgents(task);
+      const top = ranked[0];
+      const mine = ranked.find((c) => c.role === role);
+      if (!top || !mine || mine.score !== top.score) {
+        unreachable.push({
+          role,
+          winner: top?.role ?? '(none)',
+          targetScore: mine?.score ?? 0,
+          topScore: top?.score ?? 0,
+        });
+      }
+    }
+    expect(unreachable, JSON.stringify(unreachable, null, 2)).toEqual([]);
+  });
+
+  it('no two agents share an identical keyword set (which would make routing order-dependent)', () => {
+    const bySet = new Map<string, string[]>();
+    for (const def of ALL_AGENT_DEFINITIONS) {
+      const key = [...def.capability.keywords].map((k) => k.trim()).sort().join('|');
+      const arr = bySet.get(key) ?? [];
+      arr.push(def.config.role as string);
+      bySet.set(key, arr);
+    }
+    const collisions = [...bySet.values()].filter((roles) => roles.length > 1);
+    expect(collisions, JSON.stringify(collisions)).toEqual([]);
+  });
+
+  it('the fallback role exists in the catalog so dispatch can never resolve to an unknown agent', () => {
+    expect(AGENT_CATALOG[DEFAULT_DISPATCH_ROLE]).toBeDefined();
   });
 });
 
