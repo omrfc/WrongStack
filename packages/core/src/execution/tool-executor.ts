@@ -273,6 +273,7 @@ export class ToolExecutor {
         const reason = combined.reason instanceof Error
           ? combined.reason
           : new Error(typeof combined.reason === 'string' ? combined.reason : 'aborted');
+        // biome-ignore lint/correctness/noUnsafeFinally: guarded by `!caught` — only runs when the tool returned cleanly but the signal aborted, so there is no in-flight exception to override.
         throw reason;
       }
     }
