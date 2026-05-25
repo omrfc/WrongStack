@@ -66,6 +66,26 @@ The stage chip disappears when the loop is not running.
 
 After 3 consecutive failures (or 3 consecutive `brainstorm` source iterations that return "nothing to do"), the engine forces a brainstorm rotation to break out of loops.
 
+## Parallel mode — dispatch routing
+
+In `eternal-parallel` mode each tick decomposes the goal into N slot tasks
+(pending todos → git-dirty files → leader-brainstormed) and fans them out. Each
+slot task is routed through the smart dispatcher (`dispatchAgent`) to the
+best-fit agent in the 46-agent catalog:
+
+- the slot spawns **in-role** — the role's budget tier applies (via
+  `applyRosterBudget`) and the role's tools/persona prompt are attached for any
+  real per-role factory
+- a concise persona line (`Acting agent: <name> — <summary>`) is injected into
+  the slot's task so the role lands even with the default shared-agent factory
+- the journal summary shows `role→task` per slot (visible in `/goal journal`)
+
+Routing is **heuristic-only by default** — keyword scoring against each agent's
+capability metadata, instant and with no extra provider call per tick. A task
+with no signal falls back to the `executor` generalist. The engine accepts an
+optional `dispatchClassifier` for LLM fallback, and `dispatch: false` restores
+the legacy generic (`slot-xxxxxx`) fan-out.
+
 ## Status output
 
 When running `/autonomy` with no args in the CLI REPL, shows:
