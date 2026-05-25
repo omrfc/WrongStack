@@ -236,6 +236,21 @@ export interface EventMap {
     limit: number;
   };
   /**
+   * Emitted when the coordinator/director actually GRANTS a budget
+   * extension to a subagent (the resolution of a `budget.threshold_reached`
+   * negotiation). Distinct from `subagent.budget_warning`, which fires when
+   * a limit is merely *hit*. UIs use this to render a persistent "⚡ extended
+   * ×N" badge so users can see how often an agent self-extended to stay
+   * alive. `totalExtensions` is the cumulative count for this subagent across
+   * all kinds; `newLimit` is the patched value for `kind`.
+   */
+  'subagent.budget_extended': {
+    subagentId: string;
+    kind: string;
+    newLimit: number;
+    totalExtensions: number;
+  };
+  /**
    * Per-tool-call event re-emitted from a subagent's own EventBus
    * onto the host EventBus, so the TUI / non-director surfaces can
    * render "AGENT#1 ● bash 250ms" without having to subscribe to

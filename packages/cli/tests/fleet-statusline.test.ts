@@ -53,6 +53,21 @@ describe('renderFleetLine', () => {
     expect(strip(renderFleetLine(states, 1000, 200))).not.toContain('WS v');
   });
 
+  it('renders a ⚡N extension badge for an agent that self-extended', () => {
+    const states = stateMap(
+      { id: 'a', name: 'Debugger', status: 'running', iterations: 5, toolCalls: 20, extensions: 3, startedAt: 0 },
+    );
+    const line = strip(renderFleetLine(states, 1000, 200));
+    expect(line).toContain('⚡3');
+  });
+
+  it('omits the extension badge when an agent has not extended', () => {
+    const states = stateMap(
+      { id: 'a', name: 'Debugger', status: 'running', iterations: 5, toolCalls: 20, startedAt: 0 },
+    );
+    expect(strip(renderFleetLine(states, 1000, 200))).not.toContain('⚡');
+  });
+
   it('caps the line to terminal width', () => {
     const many: FleetAgentState[] = Array.from({ length: 6 }, (_, i) => ({
       id: `a${i}`,
@@ -108,6 +123,17 @@ describe('FleetStatusLine', () => {
     // Status line painted at the bottom row.
     expect(all).toContain('\x1b[24;1H');
     expect(strip(all)).toContain('Debugger');
+    sl.stop();
+  });
+
+  it('surfaces a budget_extended event as a ⚡N badge', () => {
+    const events = new EventBus();
+    const out = new FakeTty();
+    const sl = new FleetStatusLine({ events, out: out as unknown as NodeJS.WriteStream, throttleMs: 0 });
+    sl.start();
+    events.emit('subagent.spawned', { subagentId: 's1', taskId: 't1', name: 'Debugger' });
+    events.emit('subagent.budget_extended', { subagentId: 's1', kind: 'timeout', newLimit: 480000, totalExtensions: 2 });
+    expect(strip(out.all())).toContain('⚡2');
     sl.stop();
   });
 

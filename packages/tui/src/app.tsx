@@ -86,6 +86,13 @@ export interface FleetEntry {
    * Cleared on the next fleetDone or fleetStart.
    */
   budgetWarning?: { kind: string; used: number; limit: number; at: number };
+  /**
+   * Cumulative auto-extension grants for this subagent. Surfaced as a
+   * persistent "⚡×N" badge in the monitor and 4th status line so the user
+   * can see how often never-die kept the agent alive. Survives across tasks
+   * within the same subagent entry (unlike `budgetWarning`, which clears).
+   */
+  extensions?: number;
 }
 
 /** A registered slash command matched against the user's current / query. */
@@ -525,6 +532,11 @@ type Action =
       kind: string;
       used: number;
       limit: number;
+    }
+  | {
+      type: 'fleetBudgetExtended';
+      id: string;
+      totalExtensions: number;
     }
   | { type: 'fleetCost'; cost: number; input?: number; output?: number }
   | { type: 'setStreamFleet'; enabled: boolean }
@@ -1021,6 +1033,23 @@ export function reducer(state: State, action: Action): State {
           [action.id]: {
             ...cur,
             budgetWarning: { kind: action.kind, used: action.used, limit: action.limit, at: Date.now() },
+            lastEventAt: Date.now(),
+          },
+        },
+      };
+    }
+    case 'fleetBudgetExtended': {
+      const cur = state.fleet[action.id];
+      if (!cur) return state;
+      return {
+        ...state,
+        fleet: {
+          ...state.fleet,
+          [action.id]: {
+            ...cur,
+            // The director sends the authoritative cumulative count; trust it
+            // over a local increment so a dropped event can't desync the badge.
+            extensions: action.totalExtensions,
             lastEventAt: Date.now(),
           },
         },
@@ -1541,6 +1570,7 @@ export function App({
         // Last/current action, so the 4th line shows what each agent is
         // doing right now (e.g. "▶ 12s · 8t · bash") rather than just counts.
         tool: e.currentTool?.name,
+        extensions: e.extensions,
       };
     });
   }, [state.fleet, nowTick]);
@@ -2343,6 +2373,22 @@ export function App({
         },
       });
     });
+    // Granted extension — bump the persistent ⚡×N badge and log the grant
+    // so the chat history shows the never-die handshake completing.
+    const offBudgetExtended = events.on('subagent.budget_extended', (e) => {
+      const lbl = labelFor(e.subagentId);
+      dispatch({ type: 'fleetBudgetExtended', id: e.subagentId, totalExtensions: e.totalExtensions });
+      dispatch({
+        type: 'addEntry',
+        entry: {
+          kind: 'subagent',
+          agentLabel: lbl.label,
+          agentColor: lbl.color,
+          icon: '⚡',
+          text: `extended ${e.kind} → ${e.newLimit} (×${e.totalExtensions})`,
+        },
+      });
+    });
     // Periodic progress snapshot so the user can see what each subagent
     // is doing in the main chat history without opening the FleetPanel.
     // Format: "AGENT#2 💬 L25 · 47 tools · $0.023 · doing bash..."
@@ -2382,6 +2428,7 @@ export function App({
       offStarted();
       offCompleted();
       offBudgetWarning();
+      offBudgetExtended();
       offIterationSummary();
       offTool();
     };

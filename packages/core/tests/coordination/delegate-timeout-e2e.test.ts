@@ -105,6 +105,41 @@ describe('delegate timeout never-die (end-to-end)', () => {
     }
   });
 
+  it('emits budget.extended on the FleetBus and increments extensionsFor on a grant', async () => {
+    const director = makeDirector();
+    const bus = new EventBus();
+    const detach = director.fleet.attach('sub-ext', bus);
+    const extendedEvents: Array<{ kind: string; newLimit: number; totalExtensions: number }> = [];
+    const offExtended = director.fleet.filter('budget.extended', (e) => {
+      extendedEvents.push(e.payload as { kind: string; newLimit: number; totalExtensions: number });
+    });
+    try {
+      // Heartbeat so the timeout grant is allowed (progress > lastProgress).
+      bus.emit('tool.executed', { id: 't1', name: 'bash', durationMs: 5, ok: true });
+
+      const budget = wireBudget(bus, { timeoutMs: 5 });
+      await new Promise((r) => setTimeout(r, 15));
+
+      let signal: BudgetThresholdSignal | null = null;
+      try {
+        budget.checkTimeout();
+      } catch (e) {
+        signal = e as BudgetThresholdSignal;
+      }
+      const decision = await signal!.decision;
+      expect(decision).not.toBe('stop');
+
+      // The grant broadcast a budget.extended event and bumped the counter.
+      expect(extendedEvents.length).toBeGreaterThan(0);
+      expect(extendedEvents[0]!.kind).toBe('timeout');
+      expect(extendedEvents[0]!.totalExtensions).toBe(1);
+      expect(director.extensionsFor('sub-ext')).toBe(1);
+    } finally {
+      offExtended();
+      detach();
+    }
+  });
+
   it('denies a timeout when the subagent has made no progress since the last grant', async () => {
     const director = makeDirector();
     const bus = new EventBus();

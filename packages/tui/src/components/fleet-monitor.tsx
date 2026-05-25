@@ -176,6 +176,9 @@ export function FleetMonitor({
               <Text dimColor>
                 L{e.iterations} {e.toolCalls}t
               </Text>
+              {e.extensions && e.extensions > 0 ? (
+                <Text color="yellow">⚡×{e.extensions}</Text>
+              ) : null}
             </Box>
             <Box flexDirection="row" gap={1}>
               <Text dimColor>{'  '}</Text>

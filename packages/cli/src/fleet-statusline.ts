@@ -25,6 +25,8 @@ export interface FleetAgentState {
   lastTool?: string;
   startedAt: number;
   endedAt?: number;
+  /** Cumulative budget auto-extensions — rendered as a "⚡N" suffix. */
+  extensions?: number;
 }
 
 export interface FleetStatusLineOptions {
@@ -80,10 +82,11 @@ export function renderFleetLine(
     .map((a) => {
       const elapsed = fmtElapsed(Math.max(0, now - a.startedAt));
       const tool = a.lastTool ? ` ${color.dim(a.lastTool)}` : '';
+      const ext = a.extensions && a.extensions > 0 ? ` ${color.yellow(`⚡${a.extensions}`)}` : '';
       return (
         `${color.bold(a.name)} ` +
         `${color.yellow('▶')} ${color.dim(elapsed)} ` +
-        `${color.dim(`L${a.iterations}`)} ${color.dim(`${a.toolCalls}t`)}${tool}`
+        `${color.dim(`L${a.iterations}`)} ${color.dim(`${a.toolCalls}t`)}${tool}${ext}`
       );
     });
 
@@ -192,6 +195,12 @@ export class FleetStatusLine {
         s.iterations = e.iteration;
         if (typeof e.toolCalls === 'number') s.toolCalls = e.toolCalls;
         if (e.currentTool) s.lastTool = e.currentTool;
+        this.schedulePaint();
+      }),
+      this.events.on('subagent.budget_extended', (e) => {
+        const s = ensure(e.subagentId);
+        s.extensions = e.totalExtensions;
+        this.activate();
         this.schedulePaint();
       }),
       this.events.on('subagent.task_completed', (e) => {

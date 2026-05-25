@@ -337,6 +337,9 @@ export class Director implements ICoordinator {
   /** Snapshot of which subagent owns each task — drives state-checkpoint
    *  status updates without re-walking the manifest. */
   private readonly taskOwners = new Map<string, string>();
+  /** Cumulative auto-extension grants per subagent (all budget kinds). Lets
+   *  /fleet render "⚡ extended ×N" without replaying the event stream. */
+  private readonly extendTotals = new Map<string, number>();
   /**
    * Handle to the coordinator-side `task.completed` listener so we can
    * unsubscribe in `shutdown()`. Without this, repeated Director
@@ -511,9 +514,9 @@ export class Director implements ICoordinator {
         setImmediate(() => {
           // Generous extension with a 24 h hard ceiling so a runaway can't
           // extend forever even while spuriously emitting tool calls.
-          payload.extend({
-            timeoutMs: Math.min(Math.ceil(payload.limit * 2), 24 * 60 * 60_000),
-          });
+          const newLimit = Math.min(Math.ceil(payload.limit * 2), 24 * 60 * 60_000);
+          this.recordExtension(e.subagentId, e.taskId, 'timeout', newLimit);
+          payload.extend({ timeoutMs: newLimit });
         });
         return;
       }
@@ -541,25 +544,53 @@ export class Director implements ICoordinator {
         const extra: Record<string, unknown> = {};
         const base = Math.max(payload.limit, payload.used);
         const grow = (ceiling: number) => Math.min(Math.ceil(base * 1.5), ceiling);
+        let newLimit = base;
         switch (payload.kind) {
           case 'iterations':
-            extra.maxIterations = grow(50_000);
+            newLimit = grow(50_000);
+            extra.maxIterations = newLimit;
             break;
           case 'tool_calls':
-            extra.maxToolCalls = grow(100_000);
+            newLimit = grow(100_000);
+            extra.maxToolCalls = newLimit;
             break;
           case 'tokens':
-            extra.maxTokens = grow(5_000_000);
+            newLimit = grow(5_000_000);
+            extra.maxTokens = newLimit;
             break;
           case 'cost':
-            extra.maxCostUsd = Math.min(base * 1.5, 100);
+            newLimit = Math.min(base * 1.5, 100);
+            extra.maxCostUsd = newLimit;
             break;
           // 'timeout' is handled earlier via the heartbeat path and returns
           // before reaching this switch.
         }
+        this.recordExtension(e.subagentId, e.taskId, payload.kind, newLimit);
         payload.extend(extra);
       });
     });
+  }
+
+  /**
+   * Record a granted budget extension and broadcast it on the FleetBus so
+   * the host can re-emit `subagent.budget_extended` for live UI badges.
+   * Called from both the timeout heartbeat path and the per-kind grant path.
+   */
+  private recordExtension(subagentId: string, taskId: string | undefined, kind: string, newLimit: number): void {
+    const total = (this.extendTotals.get(subagentId) ?? 0) + 1;
+    this.extendTotals.set(subagentId, total);
+    this.fleet.emit({
+      subagentId,
+      taskId,
+      ts: Date.now(),
+      type: 'budget.extended',
+      payload: { kind, newLimit, totalExtensions: total },
+    });
+  }
+
+  /** Cumulative auto-extension count for one subagent (0 when never extended). */
+  extensionsFor(subagentId: string): number {
+    return this.extendTotals.get(subagentId) ?? 0;
   }
 
   /** Best-effort session-writer append. Swallows failures — the director
@@ -936,7 +967,16 @@ export class Director implements ICoordinator {
   }
 
   status(): CoordinatorStatus {
-    return this.coordinator.getStatus();
+    const base = this.coordinator.getStatus();
+    // Enrich each row with its cumulative auto-extension count so /fleet can
+    // render "⚡×N" without a separate lookup.
+    return {
+      ...base,
+      subagents: base.subagents.map((s) => ({
+        ...s,
+        extensions: this.extendTotals.get(s.id) ?? 0,
+      })),
+    };
   }
 
   /**

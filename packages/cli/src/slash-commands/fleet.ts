@@ -87,8 +87,9 @@ export function buildFleetCommand(opts: SlashCommandContext): SlashCommand {
                   : sa.status === 'idle'
                     ? color.dim(sa.status.padEnd(10))
                     : color.dim(sa.status.padEnd(10));
+              const ext = sa.extensions && sa.extensions > 0 ? `${color.yellow(`⚡×${sa.extensions}`)} ` : '';
               const task = sa.currentTask ?? color.dim('—');
-              lines.push(`  ${id} ${name} ${statusColor} ${task}`);
+              lines.push(`  ${id} ${name} ${statusColor} ${ext}${task}`);
             }
           }
           const msg = lines.join('\n');

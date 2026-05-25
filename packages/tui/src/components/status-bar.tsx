@@ -52,6 +52,8 @@ export interface FleetAgentDetail {
   running: boolean;
   /** Current/last tool the subagent invoked, shown as its live action. */
   tool?: string;
+  /** Cumulative budget auto-extensions granted — rendered as "⚡×N". */
+  extensions?: number;
 }
 
 export interface ContextWindow {
@@ -422,6 +424,12 @@ export function StatusBar({
                 <>
                   <Text dimColor>{' · '}</Text>
                   <Text color="cyan">{a.tool}</Text>
+                </>
+              ) : null}
+              {a.extensions && a.extensions > 0 ? (
+                <>
+                  <Text dimColor>{' · '}</Text>
+                  <Text color="yellow">⚡×{a.extensions}</Text>
                 </>
               ) : null}
             </Text>

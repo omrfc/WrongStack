@@ -255,6 +255,9 @@ export interface CoordinatorStatus {
     name: string;
     status: 'running' | 'idle' | 'stopped' | 'error';
     currentTask?: string;
+    /** Cumulative budget auto-extensions granted to this subagent, when the
+     *  status is produced by a Director that tracks them. */
+    extensions?: number;
   }[];
   pendingTasks: number;
   completedTasks: number;

@@ -264,6 +264,19 @@ export class MultiAgentHost {
         limit: payload.limit,
       });
     });
+    // The director resolves a threshold negotiation by granting an extension
+    // and broadcasting budget.extended on the FleetBus. Bridge it to the host
+    // bus so the TUI monitor / REPL fleet line can show a "⚡ extended ×N"
+    // badge — the live proof that never-die kept the agent running.
+    this.director.fleet.filter('budget.extended', (e) => {
+      const payload = e.payload as { kind: string; newLimit: number; totalExtensions: number };
+      this.deps.events.emit('subagent.budget_extended', {
+        subagentId: e.subagentId,
+        kind: payload.kind,
+        newLimit: payload.newLimit,
+        totalExtensions: payload.totalExtensions,
+      });
+    });
     this.getCoordinator().on('task.assigned', ({ task, subagentId }: { task: { id: string; description?: string }; subagentId: string }) => {
       this.deps.events.emit('subagent.task_started', {
         subagentId,
