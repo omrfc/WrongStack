@@ -4,6 +4,9 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { color } from '@wrongstack/core';
 
+// Git init/spawn overhead pushes these tests past the 5s default on Windows.
+vi.setConfig({ testTimeout: 30_000 });
+
 // We can't easily test slash commands without the full wiring,
 // so we test the helper functions directly
 

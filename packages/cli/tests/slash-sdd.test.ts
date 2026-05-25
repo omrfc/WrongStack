@@ -25,11 +25,24 @@ beforeEach(async () => {
   process.chdir(tmp);
 });
 
+async function rmWithRetry(dir: string): Promise<void> {
+  for (let i = 0; i < 5; i++) {
+    try {
+      await fs.rm(dir, { recursive: true, force: true });
+      return;
+    } catch (err: unknown) {
+      if (i === 4) throw err;
+      // ENOTEMPTY/EBUSY on Windows: give the OS a moment to release handles
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
+}
+
 afterEach(async () => {
   process.chdir(prevCwd);
   // Defer the rm so the OS can fully release the cwd handle on Windows.
   await new Promise((r) => setImmediate(r));
-  await fs.rm(tmp, { recursive: true, force: true });
+  await rmWithRetry(tmp);
 });
 
 function fakeCtx() {
