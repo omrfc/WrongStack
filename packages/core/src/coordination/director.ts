@@ -526,27 +526,33 @@ export class Director implements ICoordinator {
         extendCounts.delete(guardKey);
         return;
       }
-      // Auto-extend: grant 2× the triggering limit type, up to a
-      // generous cap so genuinely large tasks get room to finish.
-      // Resolved on the next tick so listeners can override (e.g. a
-      // deny-listener for cost overrun). Timeout case extends the
-      // wall-clock budget — the runner picks up the new `limits.timeoutMs`
-      // and re-arms its watchdog timer.
+      // Auto-extend: grant +50% ABOVE the current limit, up to a generous
+      // absolute ceiling. The new limit is computed from `max(limit, used)`
+      // so the patch always lands strictly above where the agent already is
+      // — the old `min(used+100, 800)` / `min(limit*2, 1500)` caps could
+      // resolve BELOW a large roster budget (8000 iters / 20000 tools),
+      // making the "extension" a no-op reduction that just burned a slot
+      // toward the deny cap. With +50% × maxBudgetExtensions the worst-case
+      // growth stays bounded (~7.6× at the default 5), so the loop guard
+      // still holds. Resolved on the next tick so other listeners can
+      // override (e.g. a deny-listener for cost overrun).
       extendCounts.set(guardKey, prior + 1);
       setImmediate(() => {
         const extra: Record<string, unknown> = {};
+        const base = Math.max(payload.limit, payload.used);
+        const grow = (ceiling: number) => Math.min(Math.ceil(base * 1.5), ceiling);
         switch (payload.kind) {
           case 'iterations':
-            extra.maxIterations = Math.min(payload.used + 100, 800);
+            extra.maxIterations = grow(50_000);
             break;
           case 'tool_calls':
-            extra.maxToolCalls = Math.min(Math.ceil(payload.limit * 2), 1500);
+            extra.maxToolCalls = grow(100_000);
             break;
           case 'tokens':
-            extra.maxTokens = Math.min(Math.ceil(payload.limit * 2), 800_000);
+            extra.maxTokens = grow(5_000_000);
             break;
           case 'cost':
-            extra.maxCostUsd = Math.min(payload.limit * 2, 25);
+            extra.maxCostUsd = Math.min(base * 1.5, 100);
             break;
           // 'timeout' is handled earlier via the heartbeat path and returns
           // before reaching this switch.

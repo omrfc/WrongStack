@@ -74,6 +74,37 @@ describe('delegate timeout never-die (end-to-end)', () => {
     }
   });
 
+  it('extends a tool_calls budget ABOVE the current limit (no reduction)', async () => {
+    const director = makeDirector();
+    const bus = new EventBus();
+    const detach = director.fleet.attach('sub-tc', bus);
+    try {
+      const budget = wireBudget(bus, { timeoutMs: 60_000 });
+      // Patch in a tool_calls limit (wireBudget only sets timeout).
+      (budget.limits as { maxToolCalls?: number }).maxToolCalls = 2;
+
+      let signal: BudgetThresholdSignal | null = null;
+      // Record tool calls until the budget trips its soft limit.
+      for (let i = 0; i < 5 && !signal; i++) {
+        try {
+          budget.recordToolCall();
+        } catch (e) {
+          signal = e as BudgetThresholdSignal;
+        }
+      }
+      expect(signal).toBeInstanceOf(BudgetThresholdSignal);
+
+      const decision = await signal!.decision;
+      expect(decision).not.toBe('stop');
+      // The grant must be strictly above the old limit of 2 — the old
+      // min(used+100, 800)/min(limit*2, 1500) formula could land below a
+      // large roster budget; the new max(limit,used)*1.5 never reduces.
+      expect(budget.limits.maxToolCalls!).toBeGreaterThan(2);
+    } finally {
+      detach();
+    }
+  });
+
   it('denies a timeout when the subagent has made no progress since the last grant', async () => {
     const director = makeDirector();
     const bus = new EventBus();
