@@ -108,6 +108,17 @@ export class InputBuilder {
     return placeholder;
   }
 
+  /**
+   * Whether `appendPaste(text)` would collapse the text to a placeholder
+   * (rather than inlining it). Lets a frontend decide where to route a paste
+   * — e.g. collapsed pastes become a pill, while inlined ones can be shown
+   * in the editable input row — without calling `appendPaste` first (which
+   * mutates the display buffer).
+   */
+  wouldCollapse(text: string): boolean {
+    return this.shouldCollapse(text);
+  }
+
   /** Reset display and ref list. Does NOT clear the store itself. */
   reset(): void {
     this.display = '';

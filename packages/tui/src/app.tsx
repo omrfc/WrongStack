@@ -31,6 +31,7 @@ import { ModelPicker, type ProviderOption } from './components/model-picker.js';
 import { SlashMenu } from './components/slash-menu.js';
 import { StatusBar } from './components/status-bar.js';
 import { searchFiles } from './file-search.js';
+import { feedPaste } from './paste-accumulator.js';
 import { type GitInfo, readGitInfo } from './git-info.js';
 import { createQueueSlashCommand } from './queue-slash.js';
 import { createKillSlashCommand } from './kill-slash.js';
@@ -1333,6 +1334,20 @@ export function App({
   if (builderRef.current === null) {
     builderRef.current = new InputBuilder({ store: attachments });
   }
+
+  // Bracketed-paste accumulator. A single paste can be delivered across
+  // several stdin/keypress events: only the first carries the \x1b[200~
+  // begin marker and only the last carries \x1b[201~. We buffer every
+  // fragment here between those markers and finalize once, so a paste never
+  // fragments into multiple placeholders or leaks newlines into the buffer.
+  // `null` means "not currently inside a paste".
+  const pasteAccumRef = useRef<string | null>(null);
+  // Safety net: if the closing \x1b[201~ marker never arrives (a terminal
+  // dropped it, or Ink split the escape across chunks), flush the buffered
+  // payload after a short idle period so accumulation can't swallow input
+  // indefinitely. Real pastes deliver all fragments back-to-back, well
+  // inside this window.
+  const pasteFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const activeCtrlRef = useRef<AbortController | null>(null);
   // Prevent re-entrant handleKey: some terminals emit \r\n as two separate
@@ -2900,6 +2915,27 @@ export function App({
     };
   }, [director]);
 
+  // Finalize a fully-assembled paste payload. A collapse-worthy paste (long
+  // or many-lined) or any multi-line paste becomes a `[pasted #N] (N lines)`
+  // pill above the input — the content lives in the InputBuilder and is
+  // expanded at submit. A short single-line paste is inserted straight into
+  // the editable row so the user can see and edit it; it must NOT also go
+  // through the builder, or it would be duplicated when the draft buffer is
+  // appended at submit.
+  const commitPaste = async (full: string): Promise<void> => {
+    const builder = builderRef.current;
+    if (!builder || !full) return;
+    if (builder.wouldCollapse(full) || full.includes('\n')) {
+      const lineCount = full.split('\n').length;
+      const ph = await builder.appendPaste(full);
+      dispatch({ type: 'addPlaceholder', ph: `${ph ?? '[pasted]'} (${lineCount} lines)` });
+      return;
+    }
+    const { buffer, cursor } = draftRef.current;
+    const next = buffer.slice(0, cursor) + full + buffer.slice(cursor);
+    setDraft(next, cursor + full.length);
+  };
+
   const handleKey = async (input: string, key: KeyEvent) => {
     // Note: we no longer block input while the agent is running. Enter
     // routes through the queue when busy (see submit()), but typing,
@@ -2916,6 +2952,33 @@ export function App({
 
     // Re-entrancy guard: block stale-second events from \r\n terminals.
     if (inputGateRef.current) return;
+
+    // ── Bracketed-paste accumulation ──────────────────────────────────
+    // Must run before the Enter/key handling below: a paste split across
+    // events can land a fragment that is exactly "\n", which would
+    // otherwise be read as Enter and submit mid-paste. The begin marker
+    // (\x1b[200~, or a bare [200~ when Ink ate the ESC) opens accumulation;
+    // we swallow every fragment until the end marker (\x1b[201~ / [201~),
+    // then finalize the whole payload at once.
+    if (input) {
+      const paste = feedPaste(pasteAccumRef.current, input);
+      if (paste) {
+        pasteAccumRef.current = paste.accum;
+        if (pasteFlushTimerRef.current) clearTimeout(pasteFlushTimerRef.current);
+        if (paste.complete !== null) {
+          pasteFlushTimerRef.current = null;
+          await commitPaste(paste.complete);
+          return;
+        }
+        pasteFlushTimerRef.current = setTimeout(() => {
+          pasteFlushTimerRef.current = null;
+          const full = pasteAccumRef.current;
+          pasteAccumRef.current = null;
+          if (full) void commitPaste(full);
+        }, 250);
+        return;
+      }
+    }
 
     // Some terminals emit \r\n for Enter as two separate stdin events.
     // \r arrives with key.return=true (handled below); \n may arrive as
@@ -3315,56 +3378,28 @@ export function App({
 
     if (!input || key.ctrl || key.meta) return;
 
-    // Strip bracketed-paste markers if the terminal sent them through.
-    // The wrapped payload is always treated as a paste regardless of size.
-    let bracketedPaste = false;
-    let cleanInput = input;
-    // The ESC byte (\x1b) of a bracketed-paste marker is sometimes consumed
-    // by Ink's keypress parser before it reaches us, leaving a bare `[200~`
-    // / `[201~` in the input string. Match the ESC optionally so we strip
-    // both forms — otherwise the bare marker leaks into the buffer.
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: bracketed paste escape sequences are intentional
-    if (/\x1b?\[20[01]~/.test(input)) {
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: bracketed paste escape sequences are intentional
-      cleanInput = input.replace(/\x1b?\[200~/g, '').replace(/\x1b?\[201~/g, '');
-      bracketedPaste = true;
-    }
-
-    // Paste detection: chunks larger than threshold or bracketed pastes
-    // are routed through InputBuilder. Plain multi-line pastes (no bracket
-    // sequence) are inserted as-is — without triggering the visual
-    // "[pasted #N N lines]" placeholder — so the input stays a clean
-    // single logical line while the content carries the newlines through
-    // to the agent.
-    if (bracketedPaste || cleanInput.length > PASTE_THRESHOLD_CHARS) {
-      const builder = builderRef.current;
-      if (!builder) return;
-      const ph = await builder.appendPaste(cleanInput);
-      if (ph) {
-        const lineCount = cleanInput.split('\n').length;
-        dispatch({ type: 'addPlaceholder', ph: `${ph} (${lineCount} lines)` });
-      } else if (cleanInput.includes('\n')) {
-        // Small paste with multiple lines — still show a placeholder.
-        const lineCount = cleanInput.split('\n').length;
-        dispatch({ type: 'addPlaceholder', ph: `[pasted] (${lineCount} lines)` });
-      } else {
-        const next = buffer.slice(0, cursor) + cleanInput + buffer.slice(cursor);
-        setDraft(next, cursor + cleanInput.length);
-      }
+    // Non-bracketed large paste: some terminals (notably older Windows
+    // consoles) don't emit \x1b[200~ markers, so a paste arrives as one big
+    // text chunk. Bracketed pastes are already handled by the accumulation
+    // guard near the top of handleKey; route big unmarked chunks through the
+    // same finalizer so they collapse to a pill consistently.
+    if (input.length > PASTE_THRESHOLD_CHARS) {
+      await commitPaste(input);
       return;
     }
 
-    // Plain multi-line paste (no bracket sequence, below paste threshold).
-    // Strip newlines to spaces so the input row stays visually single-line.
-    if (cleanInput.includes('\n')) {
-      const normalized = cleanInput.replace(/\r?\n/g, ' ');
+    // Plain multi-line paste below the threshold. Strip newlines to spaces
+    // so the input row stays visually single-line while the content still
+    // carries through to the agent.
+    if (input.includes('\n')) {
+      const normalized = input.replace(/\r?\n/g, ' ');
       const next = buffer.slice(0, cursor) + normalized + buffer.slice(cursor);
       setDraft(next, cursor + normalized.length);
       return;
     }
 
-    const next = buffer.slice(0, cursor) + cleanInput + buffer.slice(cursor);
-    setDraft(next, cursor + cleanInput.length);
+    const next = buffer.slice(0, cursor) + input + buffer.slice(cursor);
+    setDraft(next, cursor + input.length);
   };
 
   /**

@@ -65,6 +65,19 @@ describe('InputBuilder', () => {
     expect(builder.isEmpty).toBe(false);
   });
 
+  it('wouldCollapse mirrors appendPaste collapse decision without mutating state', async () => {
+    const { builder } = makeBuilder(); // thresholds: 3 lines / 50 chars
+    expect(builder.wouldCollapse('short')).toBe(false);
+    expect(builder.wouldCollapse('a'.repeat(50))).toBe(true);
+    expect(builder.wouldCollapse('one\ntwo\nthree')).toBe(true);
+    // Predicate is pure — it must not append anything to the display.
+    expect(builder.text).toBe('');
+    // And it agrees with the actual appendPaste outcome.
+    expect(await builder.appendPaste('short')).toBeNull();
+    builder.reset();
+    expect(await builder.appendPaste('a'.repeat(50))).toBe('[pasted #1]');
+  });
+
   it('numbers placeholders independently per kind', async () => {
     const { builder } = makeBuilder();
     await builder.appendPaste('x'.repeat(100));
