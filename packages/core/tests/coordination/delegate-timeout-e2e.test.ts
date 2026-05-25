@@ -1,0 +1,107 @@
+import { describe, expect, it } from 'vitest';
+import { Director } from '../../src/coordination/director.js';
+import { EventBus } from '../../src/kernel/events.js';
+import {
+  SubagentBudget,
+  BudgetThresholdSignal,
+} from '../../src/coordination/subagent-budget.js';
+import type {
+  SubagentRunContext,
+  SubagentRunOutcome,
+  TaskSpec,
+} from '../../src/types/multi-agent.js';
+
+/**
+ * End-to-end proof of the never-die timeout chain that two bugs had broken:
+ *
+ *   budget.checkTimeout()
+ *     → emits budget.threshold_reached on the subagent's own EventBus
+ *       → FleetBus.attach's onPattern('*') forwards it to the Director's FleetBus
+ *         → Director's filter('budget.threshold_reached') auto-extends (timeout
+ *            kind, heartbeat-gated)
+ *           → budget patches limits in place → subagent keeps running
+ *
+ * Uses the REAL Director (its auto-extend handler), the REAL FleetBus wiring,
+ * and a REAL SubagentBudget — only the agent run itself is stubbed.
+ */
+function makeDirector(): Director {
+  const runner = async (
+    _task: TaskSpec,
+    _ctx: SubagentRunContext,
+  ): Promise<SubagentRunOutcome> => ({ iterations: 1, toolCalls: 1 });
+  return new Director({
+    config: { coordinatorId: 'e2e', doneCondition: { type: 'all_tasks_done' }, maxConcurrent: 4 },
+    runner,
+  });
+}
+
+/** Wire a budget the way makeAgentSubagentRunner does. */
+function wireBudget(bus: EventBus, limits: { timeoutMs: number }): SubagentBudget {
+  const budget = new SubagentBudget(limits);
+  budget._events = bus;
+  budget.onThreshold = ({ requestDecision }) => requestDecision();
+  budget.start();
+  return budget;
+}
+
+describe('delegate timeout never-die (end-to-end)', () => {
+  it('auto-extends a timeout while the subagent is making progress', async () => {
+    const director = makeDirector();
+    const bus = new EventBus();
+    const detach = director.fleet.attach('sub-1', bus);
+    try {
+      // Heartbeat: a tool ran, so the director sees progress for sub-1.
+      bus.emit('tool.executed', { id: 't1', name: 'bash', durationMs: 5, ok: true });
+
+      const budget = wireBudget(bus, { timeoutMs: 5 });
+      await new Promise((r) => setTimeout(r, 15)); // exceed 5ms
+
+      let signal: BudgetThresholdSignal | null = null;
+      try {
+        budget.checkTimeout();
+      } catch (e) {
+        signal = e as BudgetThresholdSignal;
+      }
+      expect(signal).toBeInstanceOf(BudgetThresholdSignal);
+
+      const decision = await signal!.decision;
+      // The director granted an extension instead of stopping.
+      expect(decision).not.toBe('stop');
+      expect((decision as { extend: { timeoutMs: number } }).extend.timeoutMs).toBeGreaterThan(5);
+      expect(budget.limits.timeoutMs!).toBeGreaterThan(5);
+    } finally {
+      detach();
+    }
+  });
+
+  it('denies a timeout when the subagent has made no progress since the last grant', async () => {
+    const director = makeDirector();
+    const bus = new EventBus();
+    const detach = director.fleet.attach('sub-2', bus);
+    try {
+      // First timeout: no tool has run yet, but the first grant is always
+      // allowed (progress 0 > lastProgress -1).
+      const budget = wireBudget(bus, { timeoutMs: 5 });
+      await new Promise((r) => setTimeout(r, 15));
+      let sig1: BudgetThresholdSignal | null = null;
+      try {
+        budget.checkTimeout();
+      } catch (e) {
+        sig1 = e as BudgetThresholdSignal;
+      }
+      expect(await sig1!.decision).not.toBe('stop');
+
+      // Second timeout with STILL no new tool activity → director denies.
+      await new Promise((r) => setTimeout(r, budget.limits.timeoutMs! + 10));
+      let sig2: BudgetThresholdSignal | null = null;
+      try {
+        budget.checkTimeout();
+      } catch (e) {
+        sig2 = e as BudgetThresholdSignal;
+      }
+      expect(await sig2!.decision).toBe('stop');
+    } finally {
+      detach();
+    }
+  });
+});
