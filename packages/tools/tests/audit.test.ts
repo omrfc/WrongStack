@@ -16,6 +16,7 @@ const makeCtx = () => ({ cwd: '/fake', tools: [], projectRoot: '/fake' }) as any
 const makeOpts = () => ({ signal: new AbortController().signal });
 
 function fakeSpawnStream(stdout: string, exitCode = 0) {
+  // biome-ignore lint/correctness/useYield: test mock doesn't need actual yield
   return async function* () {
     return { stdout, stderr: '', exitCode, truncated: false };
   };

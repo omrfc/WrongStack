@@ -185,8 +185,10 @@ export class ReportGenerator {
     const groups: Record<string, Finding[]> = {};
 
     for (const finding of findings) {
-      const group = groups[finding.category] ?? (groups[finding.category] = []);
-      group.push(finding);
+      if (groups[finding.category] === undefined) {
+        groups[finding.category] = [];
+      }
+      groups[finding.category]!.push(finding);
     }
 
     return groups;

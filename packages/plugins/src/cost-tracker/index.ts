@@ -112,7 +112,10 @@ const plugin: Plugin = {
       sessionCost.totalTokens += totalTokens;
       sessionCost.totalCostUsd += costUsd;
 
-      const slot = (sessionCost.byModel[model] ??= { tokens: 0, costUsd: 0, requests: 0 });
+      if (sessionCost.byModel[model] === undefined) {
+        sessionCost.byModel[model] = { tokens: 0, costUsd: 0, requests: 0 };
+      }
+      const slot = sessionCost.byModel[model]!;
       slot.tokens += totalTokens;
       slot.costUsd += costUsd;
       slot.requests += 1;
@@ -253,6 +256,7 @@ const plugin: Plugin = {
     });
 
     // Write cost data to session log on shutdown
+    // biome-ignore lint/suspicious/noExplicitAny: event name is a string literal
     api.onEvent('session.close' as any, async () => {
       if (sessionCost.requests.length > 0) {
         await api.session.append({

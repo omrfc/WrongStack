@@ -45,6 +45,7 @@ async function duckduckgoSearch(query: string, numResults: number): Promise<Sear
   const resultRe = /<a class="result__a" href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
   let m: RegExpExecArray | null;
 
+  // biome-ignore lint/suspicious/noAssignInExpressions: while-loop condition requires assignment
   while ((m = resultRe.exec(html)) !== null && results.length < numResults) {
     const url = m[1];
     if (!url) continue;

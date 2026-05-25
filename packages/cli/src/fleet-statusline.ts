@@ -98,6 +98,7 @@ export function renderFleetLine(
   // absorbs them.
   const max = Math.max(20, columns - 1);
   // Rough visible-length guard: count only non-ANSI chars.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences are valid here
   const visible = line.replace(/\x1b\[[0-9;]*m/g, '');
   if (visible.length > max) {
     // Re-truncate the visible portion; rebuild without trailing partial codes.

@@ -40,8 +40,8 @@ describe('Git commit helper functions', () => {
       const child = spawn('git', args, { cwd: tmp, stdio: ['ignore', 'pipe', 'pipe'] });
       let stdout = '';
       let stderr = '';
-      child.stdout?.on('data', (d) => (stdout += d));
-      child.stderr?.on('data', (d) => (stderr += d));
+      child.stdout?.on('data', (d) => { stdout += d; });
+      child.stderr?.on('data', (d) => { stderr += d; });
       child.on('close', (code) => resolve({ stdout, stderr, code: code ?? 0 }));
     });
   }

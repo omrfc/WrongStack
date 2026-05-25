@@ -184,7 +184,10 @@ const plugin: Plugin = {
 
         const byFile: Record<string, ShellCheckIssue[]> = {};
         for (const issue of issues) {
-          (byFile[issue.file] ??= []).push(issue);
+          if (byFile[issue.file] === undefined) {
+            byFile[issue.file] = [];
+          }
+          byFile[issue.file]!.push(issue);
         }
 
         const errorCount = issues.filter((i) => i.level === 'error').length;
@@ -262,7 +265,10 @@ const plugin: Plugin = {
 
         const byFile: Record<string, ShellCheckIssue[]> = {};
         for (const issue of issues) {
-          (byFile[issue.file] ??= []).push(issue);
+          if (byFile[issue.file] === undefined) {
+            byFile[issue.file] = [];
+          }
+          byFile[issue.file]!.push(issue);
         }
 
         return {

@@ -3,7 +3,8 @@ import type { TodoItem } from '../../src/core/context.js';
 import { formatTodosList } from '../../src/utils/todos-format.js';
 
 // Strip ANSI escapes so assertions match regardless of color codes.
-const stripAnsi = (s: string): string => s.replace(/\[[0-9;]*m/g, '');
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences are valid here
+const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, '');
 
 describe('todos-format / formatTodosList', () => {
   it('returns "No todos." for empty list', () => {

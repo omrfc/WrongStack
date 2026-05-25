@@ -71,7 +71,12 @@ class SDDState {
   getPhaseStartTime(): number { return this.phaseStartTime; }
   getSessionElapsed(): number { return Date.now() - this.sessionStartTime; }
   getPhaseElapsed(): number { return Date.now() - this.phaseStartTime; }
-  getVersioning(): SpecVersioning { return this.versioning ?? (this.versioning = new SpecVersioning()); }
+  getVersioning(): SpecVersioning {
+    if (this.versioning === null) {
+      this.versioning = new SpecVersioning();
+    }
+    return this.versioning;
+  }
 
   clearTaskState(): void {
     this.taskStore = null;

@@ -482,7 +482,7 @@ export function ChatInput() {
       handleSubmit(e);
     }
     },
-    [slashSuggestions, atMention, promptHistory, historyIdx, setInput, setHistoryIdx, setSlashIndex, slashIndex, input, handleSubmit],
+    [slashSuggestions, atMention, promptHistory, historyIdx, runSlashCommand, handleSubmit],
   );
 
   const adjustTextareaHeight = () => {

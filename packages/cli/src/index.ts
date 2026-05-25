@@ -1214,7 +1214,7 @@ export async function main(argv: string[]): Promise<number> {
       const statusResult = await new Promise<{ stdout: string; code: number }>((resolve, reject) => {
         const child = spawn('git', ['status', '--porcelain'], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
         let stdout = '';
-        child.stdout?.on('data', (d) => (stdout += d));
+        child.stdout?.on('data', (d) => { stdout += d; });
         child.on('error', reject);
         child.on('close', (code) => resolve({ stdout, code: code ?? 0 }));
       });

@@ -11,7 +11,8 @@ import {
 // Strip ANSI color codes so masking assertions don't depend on terminal
 // support — the production `maskedKey` wraps slices in `color.dim` which
 // embeds escape sequences when the env supports color.
-const stripAnsi = (s: string): string => s.replace(/\[[0-9;]*m/g, '');
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences are valid here
+const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, '');
 
 describe('normalizeKeys', () => {
   it('returns a deep-copied list when apiKeys is already populated', () => {

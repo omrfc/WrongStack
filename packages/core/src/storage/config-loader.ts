@@ -50,19 +50,23 @@ const BEHAVIOR_DEFAULTS: Omit<Config, 'provider' | 'model'> = {
 const ENV_MAP: Record<string, (cfg: PartialConfig, val: string) => void> = {
   WRONGSTACK_PROVIDER: (c, v) => {
     c.provider = v;
-    (c._envSource ??= new Set()).add('provider');
+    if (c._envSource === undefined) c._envSource = new Set();
+    c._envSource.add('provider');
   },
   WRONGSTACK_MODEL: (c, v) => {
     c.model = v;
-    (c._envSource ??= new Set()).add('model');
+    if (c._envSource === undefined) c._envSource = new Set();
+    c._envSource.add('model');
   },
   WRONGSTACK_API_KEY: (c, v) => {
     c.apiKey = v;
-    (c._envSource ??= new Set()).add('apiKey');
+    if (c._envSource === undefined) c._envSource = new Set();
+    c._envSource.add('apiKey');
   },
   WRONGSTACK_BASE_URL: (c, v) => {
     c.baseUrl = v;
-    (c._envSource ??= new Set()).add('baseUrl');
+    if (c._envSource === undefined) c._envSource = new Set();
+    c._envSource.add('baseUrl');
   },
   WRONGSTACK_LOG_LEVEL: (c, v) => {
     if (!c.log) c.log = { level: 'info' };

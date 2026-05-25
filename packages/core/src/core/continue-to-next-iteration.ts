@@ -80,7 +80,7 @@ export function parseContinueDirective(text: string): ContinueDirective {
   let match: RegExpExecArray | null;
   let lastDirective: ContinueDirective = 'none';
 
-  // eslint-disable-next-line no-cond-assign
+  // biome-ignore lint/suspicious/noAssignInExpressions: while-loop condition requires assignment
   while ((match = LINE_MARKERS.exec(text)) !== null) {
     const value = (match[1] ?? '').toLowerCase();
     if (value === 'continue' || value === 'next step' || value === 'proceed') {

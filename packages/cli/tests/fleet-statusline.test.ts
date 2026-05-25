@@ -7,7 +7,7 @@ import {
 } from '../src/fleet-statusline.js';
 
 function strip(s: string): string {
-  // eslint-disable-next-line no-control-regex
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences are valid here
   return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
 }
 
