@@ -1179,6 +1179,10 @@ export async function main(argv: string[]): Promise<number> {
             compactor: container.resolve(TOKENS.Compactor) as import('@wrongstack/core').Compactor,
             maxContextTokens: effectiveMaxContext > 0 ? effectiveMaxContext : undefined,
             onIteration: broadcastEternalIteration,
+            // Real per-role factory: each dispatched slot runs as a fresh,
+            // isolated agent with the role's filtered tools + persona prompt
+            // (instead of sharing the leader agent's Context).
+            subagentFactory: multiAgentHost.makeSubagentFactory(config),
           });
         }
         void parallelEngine.prime?.();

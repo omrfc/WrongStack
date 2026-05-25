@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import {
   Agent,
+  type AgentFactory,
   AutoApprovePermissionPolicy,
   type Config,
   type ConfigStore,
@@ -18,22 +19,23 @@ import {
   EventBus,
   FleetManager,
   type MultiAgentCoordinator,
+  NULL_FLEET_BUS,
   type Provider,
   type ProviderRegistry,
   type SessionWriter,
+  type SubagentConfig,
   type SystemPromptBuilder,
   TOKENS,
   type TaskResult,
   type TokenCounter,
   type Tool,
-  type ToolRegistry,
+  ToolRegistry,
   createDefaultPipelines,
   makeAgentSubagentRunner,
   makeDirectorSessionFactory,
-  NULL_FLEET_BUS,
 } from '@wrongstack/core';
-import { ToolExecutor } from '@wrongstack/core/execution';
 import type { TextBlock } from '@wrongstack/core';
+import { ToolExecutor } from '@wrongstack/core/execution';
 import { makeProviderFromConfig } from '@wrongstack/providers';
 
 export interface MultiAgentDeps {
@@ -277,29 +279,33 @@ export class MultiAgentHost {
         totalExtensions: payload.totalExtensions,
       });
     });
-    this.getCoordinator().on('task.assigned', ({ task, subagentId }: { task: { id: string; description?: string }; subagentId: string }) => {
-      this.deps.events.emit('subagent.task_started', {
+    this.getCoordinator().on(
+      'task.assigned',
+      ({
+        task,
         subagentId,
-        taskId: task.id,
-        description: task.description,
-      });
-    });
+      }: { task: { id: string; description?: string }; subagentId: string }) => {
+        this.deps.events.emit('subagent.task_started', {
+          subagentId,
+          taskId: task.id,
+          description: task.description,
+        });
+      },
+    );
     const runner = this.buildSubagentRunner(config);
     this.getCoordinator().setRunner(runner);
   }
 
   /**
-   * Build the per-subagent runner: agent factory → runner. Extracted so
-   * ensureCoordinator stays focused on orchestration setup.
+   * Build a per-role subagent factory: given a SubagentConfig, construct a
+   * fresh, isolated Agent with the role's filtered tools and (when the config
+   * carries one) the role's persona as an appended system-prompt block. Public
+   * so the autonomy-parallel engine can reuse the exact same agent-construction
+   * path the director/spawn flow uses — each parallel slot then runs as a real,
+   * specialized, concurrency-safe agent instead of sharing the leader's Context.
    */
-  private buildSubagentRunner(config: Config): ReturnType<typeof makeAgentSubagentRunner> {
-    const factory = async (subCfg: {
-      id?: string;
-      name?: string;
-      model?: string;
-      provider?: string;
-      tools?: string[];
-    }) => {
+  makeSubagentFactory(config: Config): AgentFactory {
+    return async (subCfg: SubagentConfig) => {
       const events = new EventBus();
       const provider = await this.buildSubagentProvider(config, subCfg.provider);
 
@@ -315,6 +321,14 @@ export class MultiAgentHost {
         // meaningless to a single delegated subtask.
         subagent: true,
       });
+
+      // Append the role persona, when supplied. The dispatcher/parallel engine
+      // routes a slot to a catalog role and passes that role's prompt through
+      // `systemPromptOverride`; appending it here makes the slot agent actually
+      // adopt the role. Roster spawns that don't set it are unaffected.
+      if (subCfg.systemPromptOverride) {
+        baseSystem.push({ type: 'text', text: subCfg.systemPromptOverride });
+      }
 
       let subSession: SessionWriter;
       if (this.sessionFactory) {
@@ -427,8 +441,17 @@ export class MultiAgentHost {
 
       return { agent, events, dispose };
     };
+  }
 
-    return makeAgentSubagentRunner({ factory, fleetBus: this.director?.fleet ?? NULL_FLEET_BUS });
+  /**
+   * Build the per-subagent runner from the factory. Extracted so
+   * ensureCoordinator stays focused on orchestration setup.
+   */
+  private buildSubagentRunner(config: Config): ReturnType<typeof makeAgentSubagentRunner> {
+    return makeAgentSubagentRunner({
+      factory: this.makeSubagentFactory(config),
+      fleetBus: this.director?.fleet ?? NULL_FLEET_BUS,
+    });
   }
 
   /**
@@ -462,8 +485,11 @@ export class MultiAgentHost {
 
   private subagentToolRegistry(allow?: string[]): ToolRegistry {
     if (!allow || allow.length === 0) return this.deps.toolRegistry;
-    // Build a filtered registry by cloning and registering the allowed tools.
-    const sub = (this.deps.toolRegistry as ToolRegistry).clone();
+    // Build a *filtered* registry containing only the allow-listed tools.
+    // Start from an empty registry (not a clone of the full one — cloning
+    // copies every tool, defeating the filter and throwing a duplicate
+    // error when we re-register the allowed slice).
+    const sub = new ToolRegistry();
     for (const t of this.filterTools(allow)) sub.register(t);
     return sub;
   }
@@ -529,9 +555,13 @@ export class MultiAgentHost {
    * Returns `{ subagentId, taskId }`. Caller holds `pending` tracking
    * and event emission — the helper only talks to the coordinator.
    */
-  private async _spawnAndAssign(
-    subagentConfig: { name: string; role?: string; provider?: string; model?: string; tools?: string[] },
-  ): Promise<{ subagentId: string; taskId: string }> {
+  private async _spawnAndAssign(subagentConfig: {
+    name: string;
+    role?: string;
+    provider?: string;
+    model?: string;
+    tools?: string[];
+  }): Promise<{ subagentId: string; taskId: string }> {
     const taskId = randomUUID();
     // Always goes through the Director — single code path after buildDirector()
     const subagentId = await this.director!.spawn(subagentConfig);

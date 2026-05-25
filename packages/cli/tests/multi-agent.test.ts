@@ -13,13 +13,17 @@ vi.mock('@wrongstack/providers', () => ({
 }));
 
 import {
+  type Config,
   type ConfigStore,
   Container,
   EventBus,
   ProviderRegistry,
   type SessionWriter,
+  type SubagentConfig,
   type SystemPromptBuilder,
+  TOKENS,
   type TokenCounter,
+  type Tool,
   ToolRegistry,
 } from '@wrongstack/core';
 import { type MultiAgentDeps, MultiAgentHost } from '../src/multi-agent.js';
@@ -522,7 +526,11 @@ describe('MultiAgentHost', () => {
 
         const host = new MultiAgentHost(makeDeps(), { fleetRoot });
         await host.promoteToDirector();
-        const { taskId } = await host.spawn('routed', { name: 'router', provider: 'anthropic', model: 'claude' });
+        const { taskId } = await host.spawn('routed', {
+          name: 'router',
+          provider: 'anthropic',
+          model: 'claude',
+        });
         expect(taskId).toBeTruthy();
 
         // The manifest should reflect the spawn even though we promoted
@@ -531,7 +539,9 @@ describe('MultiAgentHost', () => {
         const written = await host.manifest();
         expect(written).toBe(path.join(fleetRoot, 'fleet.json'));
         const raw = await fs.readFile(written!, 'utf8');
-        const parsed = JSON.parse(raw) as { children: { name: string; provider: string; model: string }[] };
+        const parsed = JSON.parse(raw) as {
+          children: { name: string; provider: string; model: string }[];
+        };
         const child = parsed.children.find((c) => c.name === 'router');
         expect(child).toBeDefined();
         expect(child!.provider).toBe('anthropic');
@@ -540,5 +550,91 @@ describe('MultiAgentHost', () => {
         await fs.rm(tmpRoot, { recursive: true, force: true });
       });
     });
+  });
+});
+
+describe('MultiAgentHost.makeSubagentFactory', () => {
+  function fakeTool(name: string): Tool {
+    return {
+      name,
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
+      async execute() {
+        return '';
+      },
+    };
+  }
+
+  function depsWithTools(): MultiAgentDeps {
+    const deps = makeDeps();
+    deps.toolRegistry.register(fakeTool('read'));
+    deps.toolRegistry.register(fakeTool('grep'));
+    deps.toolRegistry.register(fakeTool('bash'));
+    // The Agent constructor resolves TOKENS.Logger from the container;
+    // bind a noop logger so factory-built agents can construct.
+    const logger = {
+      level: 'info' as const,
+      error() {},
+      warn() {},
+      info() {},
+      debug() {},
+      trace() {},
+      child() {
+        return logger;
+      },
+    };
+    deps.container.bind(TOKENS.Logger, () => logger);
+    return deps;
+  }
+
+  const config = { provider: 'anthropic', model: 'claude', apiKey: 'fake' } as unknown as Config;
+
+  const slotCfg: SubagentConfig = {
+    id: 'slot-1',
+    name: 'sec',
+    role: 'security-reviewer',
+    tools: ['read', 'grep'],
+    systemPromptOverride: 'PERSONA-SENTINEL-XYZ',
+  };
+
+  it('returns an isolated runner triple { agent, events, dispose }', async () => {
+    const host = new MultiAgentHost(depsWithTools());
+    const factory = host.makeSubagentFactory(config);
+    const built = await factory(slotCfg);
+    expect(built.agent).toBeDefined();
+    expect(built.events).toBeInstanceOf(EventBus);
+    expect(typeof built.dispose).toBe('function');
+    await built.dispose?.();
+  });
+
+  it('scopes the agent context to the filtered tool allow-list', async () => {
+    const host = new MultiAgentHost(depsWithTools());
+    const { agent, dispose } = await host.makeSubagentFactory(config)(slotCfg);
+    const names = agent.ctx.tools.map((t) => t.name).sort();
+    expect(names).toEqual(['grep', 'read']);
+    expect(names).not.toContain('bash');
+    await dispose?.();
+  });
+
+  it('appends the role persona to the agent system prompt', async () => {
+    const host = new MultiAgentHost(depsWithTools());
+    const { agent, dispose } = await host.makeSubagentFactory(config)(slotCfg);
+    const promptText = agent.ctx.systemPrompt.map((b) => b.text).join('\n');
+    expect(promptText).toContain('PERSONA-SENTINEL-XYZ');
+    await dispose?.();
+  });
+
+  it('builds a distinct, fresh Agent + Context per invocation (no shared leader)', async () => {
+    const host = new MultiAgentHost(depsWithTools());
+    const factory = host.makeSubagentFactory(config);
+    const a = await factory({ ...slotCfg, id: 'slot-a' });
+    const b = await factory({ ...slotCfg, id: 'slot-b' });
+    expect(a.agent).not.toBe(b.agent);
+    expect(a.agent.ctx).not.toBe(b.agent.ctx);
+    expect(a.events).not.toBe(b.events);
+    await a.dispose?.();
+    await b.dispose?.();
   });
 });
