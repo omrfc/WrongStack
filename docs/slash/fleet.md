@@ -72,7 +72,7 @@ Press **Ctrl+F** in the TUI to toggle a full graphical fleet dashboard
 ╭─ FLEET MONITOR │ ▶2 ✓5 · Ctrl+F to close ─╮
 │ concurrency [██████░░░░] 3/5   $0.420     │
 │                                           │
-│ ▶ Debugger     1m02s  ███████░░░ L25 14t  │
+│ ▶ Debugger     1m02s  ███████░░░ L25 14t ⚡×3 │
 │   ▁▂▃▅▇█▇▅ bash                           │
 │ ▶ E2E         8s      █░░░░░░░░░ L3  2t    │
 │   ▁▂▁▁ read                               │
@@ -94,6 +94,18 @@ heartbeat-aware: while an agent keeps executing tools it never dies on
 wall-clock time (24 h hard ceiling); only an agent making no progress between
 grants is denied. Non-director hosts can attach the same policy via
 `attachAutoExtend(eventBus)`.
+
+### Extension badge (`⚡×N`)
+
+Every granted extension is broadcast as `subagent.budget_extended` and counted
+per subagent. The cumulative count surfaces as a `⚡×N` badge so you can see how
+often never-die kept an agent alive:
+
+- TUI status-bar 4th line and the Ctrl+F monitor — `⚡×N` next to each agent
+- plain-REPL pinned fleet line — `⚡N` suffix
+- `/fleet status` — `⚡×N` column (from `Director.extensionsFor(id)` /
+  the enriched `CoordinatorStatus`)
+- chat history — `AGENT#k ⚡ extended <kind> → <newLimit> (×N)`
 
 ## Code reference
 
