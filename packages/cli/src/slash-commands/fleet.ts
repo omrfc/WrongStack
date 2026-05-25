@@ -46,6 +46,7 @@ export function buildFleetCommand(opts: SlashCommandContext): SlashCommand {
       '  /fleet usage        Token and cost breakdown across the fleet',
       '  /fleet journal      Show recent journal entries from /goal journal',
       '',
+      'In the TUI, press Ctrl+F to open the graphical fleet monitor.',
       'Works during /autonomy parallel mode and standalone director sessions.',
     ].join('\n'),
     async run(args) {

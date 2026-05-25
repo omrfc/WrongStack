@@ -63,6 +63,30 @@ subagents live (`⟳ fleet ▶2 ✓3 │ Debugger ▶ 1m02s L25 14t bash`) via a
 scroll region. The TUI's 4th status-bar line shows the same per-agent detail,
 including each agent's current tool.
 
+## Graphical monitor (TUI)
+
+Press **Ctrl+F** in the TUI to toggle a full graphical fleet dashboard
+(`packages/tui/src/components/fleet-monitor.tsx`):
+
+```
+╭─ FLEET MONITOR │ ▶2 ✓5 · Ctrl+F to close ─╮
+│ concurrency [██████░░░░] 3/5   $0.420     │
+│                                           │
+│ ▶ Debugger     1m02s  ███████░░░ L25 14t  │
+│   ▁▂▃▅▇█▇▅ bash                           │
+│ ▶ E2E         8s      █░░░░░░░░░ L3  2t    │
+│   ▁▂▁▁ read                               │
+│ ✓ Security    success ██████████ L40 31t  │
+│                                           │
+│ timeline                                  │
+│  8s ago   ● E2E spawned                   │
+│  40s ago  ✓ Security success (31t)        │
+╰───────────────────────────────────────────╯
+```
+
+Shows a concurrency + cost gauge, a relative-load progress bar and activity
+sparkline per agent, and a recent-event timeline. Esc also closes it.
+
 ## Never-die timeouts
 
 Subagent budgets auto-extend on a soft-limit. Timeout specifically is
@@ -75,6 +99,7 @@ grants is denied. Non-director hosts can attach the same policy via
 
 - `packages/cli/src/slash-commands/fleet.ts` — `/fleet` incl. `list` / `dispatch`
 - `packages/cli/src/fleet-statusline.ts` — plain-REPL live status line
+- `packages/tui/src/components/fleet-monitor.tsx` — graphical TUI dashboard (Ctrl+F)
 - `packages/core/src/coordination/agents/` — 42-agent catalog (phases 1-9)
 - `packages/core/src/coordination/dispatcher.ts` — heuristic + LLM routing
 - `packages/core/src/coordination/auto-extend.ts` — heartbeat auto-extend policy

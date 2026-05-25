@@ -22,6 +22,7 @@ import { ConfirmPrompt } from './components/confirm-prompt.js';
 import { CheckpointTimeline } from './components/checkpoint-timeline.js';
 import { FilePicker } from './components/file-picker.js';
 import { FleetPanel } from './components/fleet-panel.js';
+import { FleetMonitor } from './components/fleet-monitor.js';
 import { History, type HistoryEntry } from './components/history.js';
 import { Input, type KeyEvent } from './components/input.js';
 import { LiveActivityStrip } from './components/live-activity-strip.js';
@@ -379,6 +380,8 @@ type State = {
    * surfaces so chat history remains readable during multi-agent runs.
    */
   streamFleet: boolean;
+  /** When true, the full graphical fleet monitor overlay is shown (Ctrl+F). */
+  monitorOpen: boolean;
   /** Session checkpoints recorded by SessionWriter.writeCheckpoint() events. */
   checkpoints: Array<{
     promptIndex: number;
@@ -523,6 +526,7 @@ type Action =
     }
   | { type: 'fleetCost'; cost: number }
   | { type: 'setStreamFleet'; enabled: boolean }
+  | { type: 'toggleMonitor' }
   | { type: 'checkpointReceived'; cp: State['checkpoints'][0] }
   | { type: 'rewindOverlayOpen' }
   | { type: 'rewindOverlayClose' }
@@ -1026,6 +1030,9 @@ export function reducer(state: State, action: Action): State {
     case 'setStreamFleet': {
       return { ...state, streamFleet: action.enabled };
     }
+    case 'toggleMonitor': {
+      return { ...state, monitorOpen: !state.monitorOpen };
+    }
     case 'checkpointReceived': {
       const existing = state.checkpoints.find((c) => c.promptIndex === action.cp.promptIndex);
       if (existing) return state;
@@ -1276,6 +1283,7 @@ export function App({
     fleet: {},
     fleetCost: 0,
     streamFleet: true,
+    monitorOpen: false,
     checkpoints: [],
     rewindOverlay: null,
     eternalStage: null,
@@ -3080,6 +3088,20 @@ export function App({
       return;
     }
 
+    // Ctrl+F toggles the full graphical fleet monitor overlay. Global —
+    // works whether or not the agent is running, so the user can pop the
+    // dashboard mid-run to watch subagents.
+    if (key.ctrl && input === 'f') {
+      dispatch({ type: 'toggleMonitor' });
+      return;
+    }
+    // Esc closes the monitor when it's the only thing open (the busy-state
+    // Esc handler above already returned when a run was active).
+    if (key.escape && state.monitorOpen) {
+      dispatch({ type: 'toggleMonitor' });
+      return;
+    }
+
     if (isEnter) {
       // Re-entrancy protection for terminals that emit `\r\n` as two
       // separate stdin events: ignore Enter pressed within 50ms of the
@@ -3812,7 +3834,9 @@ export function App({
         eternalStage={state.eternalStage}
         goalSummary={state.goalSummary}
       />
-      {director ? (
+      {state.monitorOpen ? (
+        <FleetMonitor entries={state.fleet} totalCost={state.fleetCost} nowTick={nowTick} />
+      ) : director ? (
         <FleetPanel entries={state.fleet} totalCost={state.fleetCost} roster={fleetRoster} />
       ) : null}
     </Box>
