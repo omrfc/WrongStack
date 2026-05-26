@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`/agents monitor|on|off`** — agents monitor overlay now has a slash-command interface in addition to `Ctrl+Shift+M`:
+  - `/agents monitor` — open the overlay
+  - `/agents on` — open the overlay
+  - `/agents off` — close the overlay
+  - `/agents` (plain) — subagent status summary (unchanged)
+
+  Uses the same shared-controller pattern as `/fleet stream` — safe to call before TUI mount.
+
 ## [0.7.3] - 2026-05-26
 
 ### Changed — versions
