@@ -468,11 +468,11 @@ describe('SelectiveCompactor', () => {
   });
 
   describe('roughTokenEstimate', () => {
-    it('estimates token count as ceiling of length/4', () => {
+    it('estimates token count as ceiling of length/3.5', () => {
       const provider = makeFakeProvider([]);
       const compactor = new SelectiveCompactor({ provider });
       const result = (compactor as any).roughTokenEstimate('abcdefgh');
-      expect(result).toBe(2); // ceil(8/4)
+      expect(result).toBe(3); // ceil(8/3.5)
     });
 
     it('returns minimum 1 for empty string', () => {

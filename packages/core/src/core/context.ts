@@ -125,6 +125,14 @@ export class Context implements RunEnv {
     this.fileMtimes.set(absPath, mtimeMs);
   }
 
+  /** Clear accumulated file-read metadata after compaction or at boundaries
+   *  where stale read history could cause tools to skip legitimate re-reads.
+   *  The agent re-populates this naturally on the next file access. */
+  clearFileTracking(): void {
+    this.readFiles.clear();
+    this.fileMtimes.clear();
+  }
+
   hasRead(absPath: string): boolean {
     return this.readFiles.has(absPath);
   }

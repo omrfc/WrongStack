@@ -38,6 +38,14 @@ export class AutoCompactionMiddleware {
   private readonly policyProvider?: AutoCompactionOptions['policyProvider'];
 
   /**
+   * Overhead factor applied to the rough message-token estimate to produce a
+   * figure comparable to the real API request size (system prompt + tool defs).
+   * Without this factor, raw message tokens undercount real load by 15-50% in
+   * short conversations, causing premature compaction triggers.
+   */
+  private static readonly OVERHEAD_FACTOR = 1.3;
+
+  /**
    * @param compactor        Compactor to use for compaction.
    * @param maxContext       Provider's max context window in tokens.
    * @param estimator        Token estimation function.
@@ -80,7 +88,8 @@ export class AutoCompactionMiddleware {
 
   handler(): MiddlewareHandler<Context> {
     return async (ctx, next) => {
-      const tokens = this.estimator(ctx);
+      const rawTokens = this.estimator(ctx);
+      const tokens = Math.ceil(rawTokens * AutoCompactionMiddleware.OVERHEAD_FACTOR);
       const load = tokens / this._maxContext;
       const policy = this.policyProvider?.(ctx);
       const thresholds = policy?.thresholds ?? {
@@ -117,6 +126,9 @@ export class AutoCompactionMiddleware {
         report,
         aggressive,
       });
+      // Stale file-read metadata from before the compaction boundary is no
+      // longer useful and would cause hasRead() to skip legitimate re-reads.
+      ctx.clearFileTracking();
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       const fatal =

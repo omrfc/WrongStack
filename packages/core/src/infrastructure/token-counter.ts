@@ -10,6 +10,8 @@ interface PriceEntry {
   cacheWrite?: number;
 }
 
+const PRICE_CACHE_MAX_SIZE = 100;
+
 /**
  * Token counter that derives pricing from the ModelsRegistry instead of a
  * hardcoded table. If a model is unknown to the registry (or the registry is
@@ -49,6 +51,11 @@ export class DefaultTokenCounter implements TokenCounter {
     if (price) {
       this.applyPrice(usage, price);
     } else if (this.registry && this.providerId && model) {
+      // Evict oldest entry when cache is full before async lookup.
+      if (this.priceCache.size >= PRICE_CACHE_MAX_SIZE) {
+        const keys = [...this.priceCache.keys()];
+        this.priceCache.delete(keys[0]!);
+      }
       // Async lookup — populate cache, but don't block this call.
       void this.registry
         .getModel(this.providerId, model)
@@ -77,6 +84,10 @@ export class DefaultTokenCounter implements TokenCounter {
     this.lastInput = usage.input;
     this.lastCacheRead = usage.cacheRead ?? 0;
     const price = priceFromModel(resolved);
+    if (this.priceCache.size >= PRICE_CACHE_MAX_SIZE) {
+      const keys = [...this.priceCache.keys()];
+      this.priceCache.delete(keys[0]!);
+    }
     this.priceCache.set(resolved.modelId, price);
     this.applyPrice(usage, price);
   }

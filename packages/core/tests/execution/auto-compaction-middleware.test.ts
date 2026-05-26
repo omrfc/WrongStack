@@ -20,6 +20,7 @@ function mockContext(tokenEstimate: number): Context {
     model: 'test',
     tools: [],
     meta: {},
+    clearFileTracking: () => {},
   } as unknown as Context;
 }
 
@@ -121,7 +122,7 @@ describe('AutoCompactionMiddleware', () => {
     const mw = new AutoCompactionMiddleware(
       compactor,
       10000,
-      simpleEstimator(8000),
+      simpleEstimator(6800), // 68% raw → 88.4% adjusted: between soft(75%) and hard(90%)
       {
         warn: 0.5,
         soft: 0.75,
@@ -130,7 +131,7 @@ describe('AutoCompactionMiddleware', () => {
       'hard',
     );
 
-    const ctx = mockContext(0); // 80% — between soft and hard
+    const ctx = mockContext(0); // 88.4% adjusted: between soft and hard, aggressiveOn=hard
     await mw.handler()(ctx, async (c) => c);
 
     expect(compactor.compactCalls).toHaveLength(1);

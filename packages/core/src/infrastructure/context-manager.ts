@@ -212,6 +212,7 @@ export function createContextManagerTool(
             };
           }
           const report = await opts.compactor.compact(ctx);
+          ctx.clearFileTracking();
           const repair = applyMessages([...ctx.messages]);
           const afterTokens = repair.changed ? roughEstimate(ctx.messages) : report.after;
           const repaired = report.repaired ?? (repair.changed ? repair : undefined);
@@ -243,6 +244,7 @@ export function createContextManagerTool(
           }
           const copy = [...messages];
           const removed = copy.splice(from, to - from + 1);
+          ctx.clearFileTracking();
           const repair = applyMessages(copy);
           const afterTokens = roughEstimate(ctx.messages);
           return {
@@ -307,6 +309,7 @@ export function createContextManagerTool(
           };
           const copy = [...messages];
           copy.splice(from, to - from + 1, summaryMsg);
+          ctx.clearFileTracking();
           const repair = applyMessages(copy);
           const afterTokens = roughEstimate(ctx.messages);
           return {
