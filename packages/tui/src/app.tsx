@@ -23,6 +23,7 @@ import { CheckpointTimeline } from './components/checkpoint-timeline.js';
 import { FilePicker } from './components/file-picker.js';
 import { FleetPanel } from './components/fleet-panel.js';
 import { FleetMonitor } from './components/fleet-monitor.js';
+import { AgentsMonitor } from './components/agents-monitor.js';
 import { History, type HistoryEntry } from './components/history.js';
 import { Input, type KeyEvent } from './components/input.js';
 import { LiveActivityStrip } from './components/live-activity-strip.js';
@@ -392,6 +393,8 @@ type State = {
   streamFleet: boolean;
   /** When true, the full graphical fleet monitor overlay is shown (Ctrl+F). */
   monitorOpen: boolean;
+  /** When true, the agents monitor overlay is shown (Ctrl+Shift+M). */
+  agentsMonitorOpen: boolean;
   /** Session checkpoints recorded by SessionWriter.writeCheckpoint() events. */
   checkpoints: Array<{
     promptIndex: number;
@@ -542,6 +545,7 @@ type Action =
   | { type: 'fleetCost'; cost: number; input?: number; output?: number }
   | { type: 'setStreamFleet'; enabled: boolean }
   | { type: 'toggleMonitor' }
+  | { type: 'toggleAgentsMonitor' }
   | { type: 'checkpointReceived'; cp: State['checkpoints'][0] }
   | { type: 'rewindOverlayOpen' }
   | { type: 'rewindOverlayClose' }
@@ -1072,6 +1076,9 @@ export function reducer(state: State, action: Action): State {
     case 'toggleMonitor': {
       return { ...state, monitorOpen: !state.monitorOpen };
     }
+    case 'toggleAgentsMonitor': {
+      return { ...state, agentsMonitorOpen: !state.agentsMonitorOpen };
+    }
     case 'checkpointReceived': {
       const existing = state.checkpoints.find((c) => c.promptIndex === action.cp.promptIndex);
       if (existing) return state;
@@ -1325,6 +1332,7 @@ export function App({
     fleetTokens: { input: 0, output: 0 },
     streamFleet: true,
     monitorOpen: false,
+    agentsMonitorOpen: false,
     checkpoints: [],
     rewindOverlay: null,
     eternalStage: null,
@@ -2073,6 +2081,20 @@ export function App({
       slashRegistry.unregister('rewind');
     };
   }, [slashRegistry, handleRewindTo]);
+
+  // `/agents monitor` — opens the agents monitor overlay (Ctrl+Shift+M).
+  useEffect(() => {
+    const cmd = {
+      name: 'agents',
+      description: 'Toggle the agents monitor overlay.',
+      async run() {
+        dispatch({ type: 'toggleAgentsMonitor' });
+        return { message: undefined };
+      },
+    };
+    slashRegistry.register(cmd);
+    return () => { slashRegistry.unregister('agents'); };
+  }, [slashRegistry]);
 
   // `/goal` is registered as a CLI builtin (packages/cli/src/slash-commands/
   // goal.ts) which handles both the preamble lock-in (the former TUI
@@ -3297,10 +3319,19 @@ export function App({
       dispatch({ type: 'toggleMonitor' });
       return;
     }
+    // Ctrl+Shift+M toggles the agents monitor overlay.
+    if (key.ctrl && key.shift && input === 'M') {
+      dispatch({ type: 'toggleAgentsMonitor' });
+      return;
+    }
     // Esc closes the monitor when it's the only thing open (the busy-state
     // Esc handler above already returned when a run was active).
     if (key.escape && state.monitorOpen) {
       dispatch({ type: 'toggleMonitor' });
+      return;
+    }
+    if (key.escape && state.agentsMonitorOpen) {
+      dispatch({ type: 'toggleAgentsMonitor' });
       return;
     }
 
@@ -4020,6 +4051,14 @@ export function App({
         eternalStage={state.eternalStage}
         goalSummary={state.goalSummary}
       />
+      {state.agentsMonitorOpen ? (
+        <AgentsMonitor
+          entries={state.fleet}
+          totalCost={state.fleetCost}
+          totalTokens={state.fleetTokens}
+          nowTick={nowTick}
+        />
+      ) : null}
       {state.monitorOpen ? (
         <FleetMonitor
           entries={state.fleet}
