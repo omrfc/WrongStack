@@ -3,7 +3,9 @@
  * factory is created lazily on the first `/spawn` so users who never use
  * subagents don't pay the construction cost.
  */
-import { randomUUID } from 'node:crypto';
+import {makeACPSubagentRunner, ACP_AGENT_COMMANDS} from '@wrongstack/acp';
+import type {SubagentRunner, SubagentRunContext, TaskSpec} from '@wrongstack/core';
+import {randomUUID} from 'node:crypto';
 import * as path from 'node:path';
 import {
   Agent,
@@ -201,6 +203,15 @@ export class MultiAgentHost {
     return (this.director as unknown as { coordinator: DefaultMultiAgentCoordinator }).coordinator;
   }
 
+  /** Public accessor for the Director — used by buildRoutingRunner. */
+  getDirector(): Director | undefined {
+    return this.director;
+  }
+
+  private async ensureCoordinator(config: Config): Promise<void> {
+    await this.buildDirector();
+  }
+
   private async buildDirector(): Promise<void> {
     if (this.director) return; // Already built — idempotent.
     const config: Config = this.deps.configStore.get() as Config;
@@ -292,7 +303,7 @@ export class MultiAgentHost {
         });
       },
     );
-    const runner = this.buildSubagentRunner(config);
+    const runner = await this.buildSubagentRunner(config);
     this.getCoordinator().setRunner(runner);
   }
 
@@ -444,14 +455,24 @@ export class MultiAgentHost {
   }
 
   /**
-   * Build the per-subagent runner from the factory. Extracted so
-   * ensureCoordinator stays focused on orchestration setup.
+   * Build the per-subagent runner.
+   *
+   * ACP agents (provider: 'acp') get their own runner via
+   * makeACPSubagentRunner — they run external processes and don't go
+   * through the Agent factory. Regular agents use the standard
+   * makeAgentSubagentRunner path.
    */
-  private buildSubagentRunner(config: Config): ReturnType<typeof makeAgentSubagentRunner> {
-    return makeAgentSubagentRunner({
-      factory: this.makeSubagentFactory(config),
-      fleetBus: this.director?.fleet ?? NULL_FLEET_BUS,
-    });
+  async buildSubagentRunner(config: Config): Promise<SubagentRunner> {
+    // Detect which subagent type(s) will be spawned. If any ACP agent
+    // is configured in the roster, we use a routing runner that branches
+    // per spawn based on the subagent config's provider.
+    return buildRoutingRunner(config, this);
+  }
+
+  async buildACPRunner(subagentId: string): Promise<SubagentRunner> {
+    const cmd = ACP_AGENT_COMMANDS[subagentId];
+    if (!cmd) throw new Error(`Unknown ACP agent: ${subagentId}`);
+    return makeACPSubagentRunner(cmd);
   }
 
   /**
@@ -473,6 +494,31 @@ export class MultiAgentHost {
       ...newCfg,
       type: providerId,
     });
+  }
+
+  async spawnACP(
+    subagentId: string,
+    task: string,
+    config: Config,
+  ): Promise<string> {
+    const taskId = randomUUID();
+    await this.ensureCoordinator(config);
+    const coordinator = this.getCoordinator();
+
+    const acpRunner = await this.buildACPRunner(subagentId);
+    coordinator.setRunner(acpRunner);
+    await coordinator.spawn({
+      id: subagentId,
+      name: subagentId,
+      role: subagentId,
+      provider: 'acp',
+    });
+    await coordinator.assign({
+      id: taskId,
+      description: task,
+    });
+
+    return taskId;
   }
 
   /** Returns a tool slice for the subagent — full set unless restricted. */
@@ -812,6 +858,27 @@ export class MultiAgentHost {
     }
   }
 }
+
+/**
+ * Routing runner — dispatches tasks to standard or ACP runner based on provider.
+ */
+function buildRoutingRunner(config: Config, host: MultiAgentHost): SubagentRunner {
+  const standardRunner = makeAgentSubagentRunner({
+    factory: host.makeSubagentFactory(config),
+    fleetBus: host.getDirector()?.fleet ?? NULL_FLEET_BUS,
+  });
+
+  return async (task: TaskSpec, ctx: SubagentRunContext) => {
+    const subCfg = ctx.config;
+    if (subCfg.provider === 'acp') {
+      const cacheKey = subCfg.role ?? subCfg.name ?? subCfg.id!;
+      // ACP subagents share a runner per role (process is pooled per subagentId)
+      return host.buildACPRunner(cacheKey).then((r) => r(task, ctx));
+    }
+    return standardRunner(task, ctx);
+  };
+}
+
 // Workaround: TOKENS reference satisfies unused-import lint without being
 // active runtime usage — included for clarity that the coordinator
 // shares the container's permission policy etc. via the agent factory.

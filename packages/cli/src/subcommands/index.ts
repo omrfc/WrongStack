@@ -27,6 +27,7 @@ export interface SubcommandDeps {
   userHome: string;
 }
 
+import { acpCmd } from './handlers/acp.js';
 import { authCmd } from './handlers/auth.js';
 import { updateCmd } from './handlers/update.js';
 import { diagCmd, doctorCmd } from './handlers/diag-doctor.js';
@@ -42,6 +43,7 @@ import { skillsCmd, toolsCmd } from './handlers/tools-skills.js';
 import { helpCmd, versionCmd } from './handlers/version-help.js';
 
 export const subcommands: Record<string, SubcommandHandler> = {
+  acp: acpCmd,
   init: initCmd,
   auth: authCmd,
   update: updateCmd,

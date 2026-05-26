@@ -1,0 +1,106 @@
+/**
+ * WrongStackACPServer — ACP server-side entry point.
+ *
+ * Exposes WrongStack as an ACP-compatible agent. ACP clients (Zed, JetBrains,
+ * VS Code ACP extension) spawn this as a subprocess, send JSON-RPC messages
+ * over stdio, and receive tool responses.
+ *
+ * Usage:
+ *   node dist/agent/wrongstack-acp-agent.js
+ *
+ * Or via the CLI:
+ *   wstack acp-server
+ *
+ * Startup: sends `[wstack-acp]\n` to stdout so the client knows which process
+ * is the ACP server before protocol messages begin.
+ */
+import {StdioTransport} from './stdio-transport.js';
+import {ACPToolsRegistry} from './tools-registry.js';
+import {ACPProtocolHandler} from './protocol-handler.js';
+import type {Tool} from '@wrongstack/core';
+
+export interface WrongStackACPServerOptions {
+  /**
+   * Initial tool set. Typically loaded from the WrongStack tool registry
+   * via `api.tools.list()` so the ACP server exposes exactly the tools the
+   * CLI has configured.
+   */
+  tools: Tool[];
+  /**
+   * Owner label for tool metadata. Passed to ACPToolsRegistry.
+   * @default 'wrongstack'
+   */
+  owner?: string;
+}
+
+export class WrongStackACPServer {
+  private readonly transport: StdioTransport;
+  private readonly registry: ACPToolsRegistry;
+  private readonly handler: ACPProtocolHandler;
+  private running = false;
+
+  constructor(opts: WrongStackACPServerOptions) {
+    this.transport = new StdioTransport();
+    this.registry = new ACPToolsRegistry(opts.owner);
+    this.registry.register(opts.tools);
+    this.handler = new ACPProtocolHandler(
+      this.transport,
+      this.registry,
+      /* TODO: load WrongStack Context */ {},
+    );
+  }
+
+  /**
+   * Start the server. Blocks until the client disconnects.
+   *
+   * 1. Send the startup marker `[wstack-acp]` so the client
+   *    knows which stdout line is the protocol boundary.
+   * 2. Loop: read messages, dispatch to handler, until EOF or error.
+   */
+  async start(): Promise<void> {
+    this.transport.sendStartupMarker();
+    this.running = true;
+
+    // Handle messages via callback + read loop hybrid
+    this.transport.onMessage((msg) => {
+      void this.handler.handleMessage(msg); // fire-and-forget; ordering is per-message
+    });
+
+    while (this.running) {
+      const msg = await this.transport.read();
+      if (!msg) break; // EOF
+      const terminal = await this.handler.handleMessage(msg);
+      if (terminal) break;
+    }
+
+    this.transport.close();
+  }
+
+  /** Stop the server. */
+  stop(): void {
+    this.running = false;
+    this.transport.close();
+  }
+}
+
+/**
+ * Bootstrap function for `node dist/agent/wrongstack-acp-agent.js`.
+ * Instantiates the server with the default tool set.
+ *
+ * Tool loading: the ACP agent is a subprocess without the full CLI context,
+ * so it needs to receive its tools from the parent via environment or a
+ * pre-main bootstrap. For now, it uses an empty tool set unless tools are
+ * explicitly passed via constructor options.
+ *
+ * In practice the CLI will instantiate and run WrongStackACPServer directly,
+ * passing `api.tools.list()` as the tool set.
+ */
+async function main(): Promise<void> {
+  const server = new WrongStackACPServer({tools: []});
+  await server.start();
+}
+
+main().catch((err) => {
+  process.stderr.write(`[wstack-acp fatal] ${err}\n`);
+  process.exit(1);
+});

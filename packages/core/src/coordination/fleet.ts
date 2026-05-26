@@ -275,3 +275,104 @@ export function applyRosterBudget(cfg: SubagentConfig): SubagentConfig {
 
 /** Quick-access list for spawning all at once. */
 export const ALL_FLEET_AGENTS = Object.values(FLEET_ROSTER);
+
+// ---------------------------------------------------------------------------
+// ACP external agents — WrongStack spawns these as subagents via ACP protocol.
+// Each agent runs its own loop; WrongStack sends tasks as ACP messages and
+// receives results. These don't go through makeAgentSubagentRunner — they
+// are handled by makeACPSubagentRunner in the CLI multi-agent layer.
+// ---------------------------------------------------------------------------
+
+/**
+ * Cline — ACP-compatible coding agent by @asonix.
+ * Spawned as: `npx @agentify/cline`
+ */
+export const CLINE_AGENT: SubagentConfig = {
+  id: 'cline',
+  name: 'Cline',
+  role: 'cline',
+  prompt: `You are Cline, a coding agent. You help write, edit, and navigate code.
+You operate by receiving tasks via ACP and returning results.
+When asked to code, make focused changes and explain them briefly.`,
+  provider: 'acp',
+};
+
+/**
+ * Gemini CLI — Google's ACP-compatible command-line agent.
+ * Spawned as: `gemini` (when gemini CLI is installed and in PATH)
+ */
+export const GEMINI_CLI_AGENT: SubagentConfig = {
+  id: 'gemini-cli',
+  name: 'Gemini CLI',
+  role: 'gemini-cli',
+  prompt: `You are Gemini CLI, a coding agent powered by Google's Gemini model.
+You help with code generation, editing, debugging, and best practices.
+You operate by receiving tasks via ACP and returning results.`,
+  provider: 'acp',
+};
+
+/**
+ * GitHub Copilot (public preview) — ACP-compatible Copilot CLI agent.
+ * Spawned as: `gh copilot` (when gh CLI with copilot extension is installed)
+ */
+export const COPILOT_AGENT: SubagentConfig = {
+  id: 'copilot',
+  name: 'GitHub Copilot',
+  role: 'copilot',
+  prompt: `You are GitHub Copilot, an AI coding assistant.
+You help write, explain, refactor, and review code.
+You operate by receiving tasks via ACP and returning results.`,
+  provider: 'acp',
+};
+
+/**
+ * OpenHands — AI coding agent by all-in.ai, ACP-compatible.
+ * Spawned as: `openhands` (when installed)
+ */
+export const OPENHANDS_AGENT: SubagentConfig = {
+  id: 'openhands',
+  name: 'OpenHands',
+  role: 'openhands',
+  prompt: `You are OpenHands, an AI coding agent that can use tools to interact
+with files, terminals, browsers, and other resources.
+You operate by receiving tasks via ACP and returning results.`,
+  provider: 'acp',
+};
+
+/**
+ * Goose — IDE agent by ExoRL, ACP-compatible.
+ * Spawned as: `goose` (when goose CLI is installed)
+ */
+export const GOOSE_AGENT: SubagentConfig = {
+  id: 'goose',
+  name: 'Goose',
+  role: 'goose',
+  prompt: `You are Goose, an AI agent that helps with coding tasks.
+You operate by receiving tasks via ACP and returning results.
+Focus on writing high-quality, well-tested code.`,
+  provider: 'acp',
+};
+
+/** All ACP external agents. */
+export const ACP_AGENTS: SubagentConfig[] = [
+  CLINE_AGENT,
+  GEMINI_CLI_AGENT,
+  COPILOT_AGENT,
+  OPENHANDS_AGENT,
+  GOOSE_AGENT,
+];
+
+// ACP agents share the same generous budgets as the built-in fleet agents.
+// External ACP agents may need more time than typical in-process subagents
+// since they run their own loops and may do tool-call round-trips.
+FLEET_ROSTER_BUDGETS['cline'] = {timeoutMs: 10 * 60 * 60 * 1000, maxIterations: 8000, maxToolCalls: 20000};
+FLEET_ROSTER_BUDGETS['gemini-cli'] = {timeoutMs: 10 * 60 * 60 * 1000, maxIterations: 8000, maxToolCalls: 20000};
+FLEET_ROSTER_BUDGETS['copilot'] = {timeoutMs: 10 * 60 * 60 * 1000, maxIterations: 8000, maxToolCalls: 20000};
+FLEET_ROSTER_BUDGETS['openhands'] = {timeoutMs: 10 * 60 * 60 * 1000, maxIterations: 8000, maxToolCalls: 20000};
+FLEET_ROSTER_BUDGETS['goose'] = {timeoutMs: 10 * 60 * 60 * 1000, maxIterations: 8000, maxToolCalls: 20000};
+
+/** Extended roster including ACP agents. */
+export const FLEET_ROSTER_WITHACP: Record<string, SubagentConfig> = {
+  ...FLEET_ROSTER,
+  ...Object.fromEntries(ACP_AGENTS.map((a) => [a.role as string, a])),
+};
