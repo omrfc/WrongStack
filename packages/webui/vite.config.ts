@@ -42,7 +42,9 @@ export default defineConfig({
     },
   },
   define: {
-    // Expose build info for dev convenience
-    __DEV__: true,
+    // NODE_ENV is set by Vite; 'development' only when in dev mode.
+    // In production builds this resolves to false, keeping dev-only
+    // code paths inactive in the browser bundle.
+    __DEV__: JSON.stringify(process.env.NODE_ENV === 'development'),
   },
 });
