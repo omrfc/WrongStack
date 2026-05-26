@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fmtElapsed, renderProgress } from '../src/components/status-bar.js';
+import { fmtElapsed, renderProgress, stateChip } from '../src/components/status-bar.js';
 
 describe('fmtElapsed', () => {
   it('renders mm:ss under one hour', () => {
@@ -23,6 +23,25 @@ describe('fmtElapsed', () => {
   it('pads seconds and minutes with leading zeros under an hour', () => {
     expect(fmtElapsed(3_000)).toBe('00:03');
     expect(fmtElapsed(63_000)).toBe('01:03');
+  });
+});
+
+describe('stateChip', () => {
+  it('shows plain idle when no background agents are running', () => {
+    expect(stateChip('idle', 0)).toEqual({ label: 'idle', color: 'cyan' });
+  });
+
+  it('surfaces the live agent count when idle but background agents run', () => {
+    expect(stateChip('idle', 1)).toEqual({ label: 'agents ▶1', color: 'magenta' });
+    expect(stateChip('idle', 3)).toEqual({ label: 'agents ▶3', color: 'magenta' });
+  });
+
+  it('keeps foreground states regardless of fleet count', () => {
+    // A running/streaming foreground already implies activity — the chip
+    // reflects the foreground, not the background fleet.
+    expect(stateChip('running', 5)).toEqual({ label: 'thinking…', color: 'green' });
+    expect(stateChip('streaming', 5)).toEqual({ label: 'thinking…', color: 'green' });
+    expect(stateChip('aborting', 5)).toEqual({ label: 'aborting…', color: 'yellow' });
   });
 });
 

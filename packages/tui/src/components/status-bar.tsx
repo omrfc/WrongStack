@@ -189,8 +189,7 @@ export function StatusBar({
   const usage = tokenCounter?.total();
   const cost = tokenCounter?.estimateCost();
   const cache = tokenCounter?.cacheStats();
-  const stateColor = state === 'idle' ? 'cyan' : state === 'aborting' ? 'yellow' : 'green';
-  const stateLabel = state === 'idle' ? 'idle' : state === 'aborting' ? 'aborting…' : 'thinking…';
+  const { label: stateLabel, color: stateColor } = stateChip(state, fleet?.running ?? 0);
 
   // Line 2 is *session context* — slow-moving facts about where you
   // are: the project, the branch, the elapsed clock, YOLO chip. These
@@ -489,6 +488,27 @@ function ContextChip({ ctx }: { ctx: ContextWindow }): React.ReactElement {
       </Text>
     </Text>
   );
+}
+
+/**
+ * Compute the leading state chip (label + Ink color) for the status bar.
+ *
+ * The foreground loop reports 'idle' between turns, but background subagents
+ * can still be running — e.g. between eternal/parallel autonomy iterations,
+ * or a fleet spawned outside a foreground run. Showing plain "idle" then is
+ * misleading, so when `fleetRunning > 0` and the foreground is idle we surface
+ * the live agent count (`agents ▶N`) in a distinct color instead.
+ */
+export function stateChip(
+  state: 'idle' | 'running' | 'streaming' | 'aborting',
+  fleetRunning: number,
+): { label: string; color: string } {
+  if (state === 'idle' && fleetRunning > 0) {
+    return { label: `agents ▶${fleetRunning}`, color: 'magenta' };
+  }
+  if (state === 'idle') return { label: 'idle', color: 'cyan' };
+  if (state === 'aborting') return { label: 'aborting…', color: 'yellow' };
+  return { label: 'thinking…', color: 'green' };
 }
 
 const FILLED = '█';

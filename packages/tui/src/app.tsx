@@ -2900,8 +2900,53 @@ export function App({
           });
         }
       } else {
-        // No active ctrl (agent idle, or activeCtrlRef wasn't set).
-        // Still kill any lingering bash/exec processes and exit.
+        // No foreground (runBlocks) controller. We may still have background
+        // work with no AbortController of its own: an autonomy engine driving
+        // iterations, or a fleet of subagents. Eternal/parallel loops never
+        // set activeCtrlRef, so this branch is the ONLY place their Ctrl+C is
+        // handled — the first press must actually stop that work (and return
+        // to the prompt), not merely announce "press again to exit".
+        const fleetRunning = Object.values(current.fleet).filter(
+          (e) => e.status === 'running',
+        ).length;
+        const autonomyRunning =
+          eternalLoopRunningRef.current ||
+          parallelLoopRunningRef.current ||
+          getEternalEngine?.()?.currentState === 'running' ||
+          getParallelEngine?.()?.currentState === 'running';
+        if (autonomyRunning || fleetRunning > 0) {
+          // Halt the engines first — eternal's stop() aborts the in-flight
+          // iteration; both flip their persisted state to 'stopped'. Then
+          // flip autonomy off so the driver loop won't start another
+          // iteration, and terminate the fleet + tracked processes.
+          getEternalEngine?.()?.stop();
+          getParallelEngine?.()?.stop();
+          if (autonomyRunning) switchAutonomy?.('off');
+          if (director) {
+            const cap = new Promise<void>((resolve) => {
+              const t = setTimeout(resolve, 1500);
+              t.unref?.();
+            });
+            void Promise.race([director.terminateAll().catch(() => undefined), cap]);
+          }
+          const killed = getProcessRegistry().killAll();
+          const bits: string[] = [];
+          if (autonomyRunning) bits.push('autonomy stopped');
+          if (fleetRunning > 0)
+            bits.push(`${fleetRunning} agent${fleetRunning === 1 ? '' : 's'} terminated`);
+          if (killed.length > 0)
+            bits.push(`${killed.length} process${killed.length === 1 ? '' : 'es'} killed`);
+          dispatch({
+            type: 'addEntry',
+            entry: {
+              kind: 'warn',
+              text: `${bits.join(' + ') || 'Background work stopped'}. Press Ctrl+C again to exit.`,
+            },
+          });
+          return;
+        }
+        // Truly idle — nothing running. Kill any lingering processes and arm
+        // the second-press exit.
         const killed = getProcessRegistry().killAll();
         const procTag = killed.length > 0 ? ` Killed ${killed.length} process${killed.length === 1 ? '' : 'es'}.` : '';
         dispatch({
@@ -2914,7 +2959,7 @@ export function App({
     return () => {
       process.off('SIGINT', onSigint);
     };
-  }, [director]);
+  }, [director, getEternalEngine, getParallelEngine, switchAutonomy]);
 
   // Finalize a fully-assembled paste payload. A collapse-worthy paste (long
   // or many-lined) or any multi-line paste becomes a `[pasted #N] (N lines)`
@@ -3412,6 +3457,12 @@ export function App({
   const runBlocks = async (blocks: ContentBlock[]): Promise<void> => {
     const ctrl = new AbortController();
     activeCtrlRef.current = ctrl;
+    // Each run starts a fresh interrupt cycle: 1st Ctrl+C aborts, 2nd exits.
+    // submit() already resets, but queue-drain / runText / autonomy paths
+    // re-enter runBlocks without going through submit — without this reset a
+    // stale counter from a prior abort would make the next run's first
+    // Ctrl+C force-exit instead of aborting.
+    dispatch({ type: 'resetInterrupts' });
     dispatch({ type: 'status', status: 'running' });
 
     try {
