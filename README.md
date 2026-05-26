@@ -273,13 +273,9 @@ Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. Wha
 
 ---
 
-## What's new in 0.7.1
+## What's new in 0.7.2
 
-**46-agent fleet roster + smart dispatcher.** The Director ships with a 46-role agent catalog and a smart dispatcher that routes each task to the best-matching role instead of spawning generic clones. In eternal-parallel mode, every slot now builds a real per-role agent and routes its task through the dispatcher.
-
-**Graphical fleet monitor (Ctrl+F).** A full-screen TUI dashboard shows per-subagent status plus a fleet-wide token-totals gauge. Auto-extended delegate budgets surface as a `⚡ extended ×N` badge across all fleet UIs, and the status bar now shows the WrongStack version.
-
-**Never-die timeouts fixed.** Director budget auto-extension now grants real headroom for all budget kinds (iterations, tool-calls, tokens, cost, timeout), so long-running delegates are no longer killed mid-task by a stale cap. Also fixed an `mcp/client` drain-timeout crash and applied a sweep of verified-safe Biome lint fixes.
+Minor version bump — all workspace packages updated to `0.7.2`. No functional changes in this release.
 
 For earlier release notes, see [CHANGELOG.md](CHANGELOG.md).
 

@@ -38,3 +38,5 @@ AGENTS.md
 .cursorrules
 .claude/
 .editorconfig
+
+*.mjs
