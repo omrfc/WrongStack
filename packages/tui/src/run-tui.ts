@@ -167,6 +167,15 @@ export interface RunTuiOptions {
    */
   statuslineHiddenItems: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>;
   setStatuslineHiddenItems: (items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>) => void;
+  /**
+   * Controller for the agents monitor overlay. App installs a dispatch-backed
+   * setter on mount so the `/agents on|off` slash command can toggle the
+   * overlay without a round-trip.
+   */
+  agentsMonitorController?: {
+    visible: boolean;
+    setVisible: (visible: boolean) => void;
+  };
 
   /**
    * If set, the App boots straight into goal mode — the text is wrapped
@@ -358,6 +367,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           fleetStreamController: opts.fleetStreamController,
           statuslineHiddenItems: opts.statuslineHiddenItems,
           setStatuslineHiddenItems: opts.setStatuslineHiddenItems,
+          agentsMonitorController: opts.agentsMonitorController,
           initialGoal: opts.initialGoal,
           initialAsk: opts.initialAsk,
           getSDDContext: opts.getSDDContext,

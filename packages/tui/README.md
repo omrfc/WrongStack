@@ -71,7 +71,8 @@ process.exit(exitCode);
 | `↑` / `↓` | History navigation when buffer empty |
 | `@` | File picker |
 | `/` (at start) | Slash command picker |
-| `Esc` | Close any picker / dialog |
+| `Ctrl+Shift+M` | Toggle agents monitor overlay |
+| `Esc` | Close any picker / dialog / agents monitor |
 | `Ctrl+L` | Clear screen (TUI keeps state — equivalent to scrolling) |
 
 ## Options worth knowing

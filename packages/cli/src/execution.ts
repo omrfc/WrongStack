@@ -71,6 +71,11 @@ export interface ExecutionDeps {
   /** Status bar hidden items controller (passed to TUI). */
   statuslineHiddenItems: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>;
   setStatuslineHiddenItems: (items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>) => void;
+  /** Agents monitor overlay controller (passed to TUI). */
+  agentsMonitorController?: {
+    visible: boolean;
+    setVisible: (visible: boolean) => void;
+  };
   /** Query the live YOLO state from the permission policy. */
   getYolo?: () => boolean;
   /** Query the live autonomy mode. */
@@ -162,6 +167,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     fleetStreamController,
     statuslineHiddenItems,
     setStatuslineHiddenItems,
+    agentsMonitorController,
     getYolo,
     getAutonomy,
     onAutonomy,
@@ -353,6 +359,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           fleetStreamController,
           statuslineHiddenItems,
           setStatuslineHiddenItems,
+          agentsMonitorController,
           initialGoal: goalFlag,
           initialAsk: askFlag,
           projectRoot,

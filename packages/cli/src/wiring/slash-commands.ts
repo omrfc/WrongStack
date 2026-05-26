@@ -37,6 +37,11 @@ export interface SlashCommandsDeps {
   model: string;
   multiAgentHost: MultiAgentHost;
   fleetStreamController: { enabled: boolean; setEnabled(enabled: boolean): void };
+  /** Controller for the agents monitor overlay (optional). */
+  agentsMonitorController?: {
+    visible: boolean;
+    setVisible: (visible: boolean) => void;
+  };
   compactor: { compact(ctx: Context, opts?: { aggressive?: boolean }): Promise<CompactReport> };
 }
 
@@ -49,7 +54,7 @@ export async function setupSlashCommands(params: SlashCommandsDeps): Promise<voi
   const { slashRegistry, toolRegistry, sessionStore, skillLoader, tokenCounter, renderer,
     memoryStore, context, cwd, projectRoot, metricsSink, healthRegistry,
     planPath, modeStore, provider, model, multiAgentHost, fleetStreamController,
-    compactor } = params;
+    agentsMonitorController, compactor } = params;
 
   const statuslineConfigDeps: StatuslineConfigDeps = {
     get: () => loadStatuslineConfig(),
@@ -91,6 +96,7 @@ export async function setupSlashCommands(params: SlashCommandsDeps): Promise<voi
     statuslineConfig: statuslineConfigDeps,
     statuslineHiddenItems: [...currentHiddenItems],
     setStatuslineHiddenItems,
+    agentsMonitorController,
     onSpawn: async (description, spawnOpts) => {
       const { subagentId, taskId } = await multiAgentHost.spawn(description, spawnOpts);
       const tags: string[] = [];

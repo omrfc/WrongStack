@@ -42,4 +42,42 @@ describe('buildAgentsCommand', () => {
     expect(onAgents).toHaveBeenCalledWith(undefined);
     expect(res?.message).toBe('summary');
   });
+
+  it('/agents monitor opens the overlay (does not call onAgents)', async () => {
+    const onAgents = vi.fn().mockReturnValue('summary');
+    const setVisible = vi.fn();
+    const cmd = buildAgentsCommand({ onAgents, agentsMonitorController: { visible: false, setVisible } } as never);
+    const res = await cmd.run('monitor', ctx());
+    expect(setVisible).toHaveBeenCalledWith(true);
+    expect(onAgents).not.toHaveBeenCalled();
+    expect(res?.message).toBe('Agents monitor shown.');
+  });
+
+  it('/agents on sets visible=true on controller', async () => {
+    const setVisible = vi.fn();
+    const cmd = buildAgentsCommand({ agentsMonitorController: { visible: false, setVisible } } as never);
+    const res = await cmd.run('on', ctx());
+    expect(setVisible).toHaveBeenCalledWith(true);
+    expect(res?.message).toBe('Agents monitor shown.');
+  });
+
+  it('/agents off sets visible=false on controller', async () => {
+    const setVisible = vi.fn();
+    const cmd = buildAgentsCommand({ agentsMonitorController: { visible: true, setVisible } } as never);
+    const res = await cmd.run('off', ctx());
+    expect(setVisible).toHaveBeenCalledWith(false);
+    expect(res?.message).toBe('Agents monitor hidden.');
+  });
+
+  it('/agents on works without controller', async () => {
+    const cmd = buildAgentsCommand({} as never);
+    const res = await cmd.run('on', ctx());
+    expect(res?.message).toContain('Agents monitor');
+  });
+
+  it('/agents off works without controller', async () => {
+    const cmd = buildAgentsCommand({} as never);
+    const res = await cmd.run('off', ctx());
+    expect(res?.message).toContain('Agents monitor');
+  });
 });

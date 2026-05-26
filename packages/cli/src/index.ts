@@ -654,6 +654,17 @@ export async function main(argv: string[]): Promise<number> {
     currentHiddenItems = items;
   };
 
+  // Shared controller for the `/agents on|off` toggle. The TUI
+  // replaces `setVisible` with a dispatch-backed setter on mount; before
+  // that the no-op setter just keeps `visible` in sync so callers see a
+  // stable view even when invoked from a non-TUI surface.
+  const agentsMonitorController = {
+    visible: false,
+    setVisible(visible: boolean) {
+      this.visible = visible;
+    },
+  };
+
   const slashCmds = buildBuiltinSlashCommands({
     registry: slashRegistry,
     toolRegistry,
@@ -674,6 +685,9 @@ export async function main(argv: string[]): Promise<number> {
     llmProvider: provider,
     llmModel: config.model,
     statuslineConfig: statuslineConfigDeps,
+    statuslineHiddenItems: [...currentHiddenItems],
+    setStatuslineHiddenItems,
+    agentsMonitorController,
     onSpawn: async (description, spawnOpts) => {
       const { subagentId, taskId } = await multiAgentHost.spawn(description, spawnOpts);
       const tags: string[] = [];

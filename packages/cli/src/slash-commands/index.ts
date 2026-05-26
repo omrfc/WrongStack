@@ -151,6 +151,17 @@ export interface SlashCommandContext {
    */
   statuslineHiddenItems?: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>;
   setStatuslineHiddenItems?: (items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>) => void;
+  /**
+   * Controller for the agents monitor overlay. The TUI installs the actual
+   * setter on mount via a shared controller; before that, calls are buffered
+   * into the initial-value field so `/agents off` issued before mount still takes effect.
+   */
+  agentsMonitorController?: {
+    /** Current state, readable for the slash command's reply. */
+    visible: boolean;
+    /** Replaced by the TUI on mount with a dispatch-backed setter. */
+    setVisible: (visible: boolean) => void;
+  };
   /** Manage MCP servers: add, remove, enable, disable, restart. */
   onMcp?: (args: string) => Promise<string>;
   /**

@@ -32,7 +32,7 @@ WrongStack's REPL supports ~30 built-in slash commands. Each is a first-class ci
 | `/plugin` | `plugin.ts` | Manage plugins: list, official, install, enable, disable, remove |
 | `/mcp` | `mcp.ts` | MCP servers: list, add, remove, enable, disable, restart (REPL only) |
 | `/spawn` | `spawn-agents.ts` | Spawn an isolated subagent for a task |
-| `/agents` | `spawn-agents.ts` | Show all spawned subagents; with an id, show detailed live monitor view |
+| `/agents` | `spawn-agents.ts` | Show all spawned subagents; `/agents monitor|on|off` toggles the overlay; with an id, show detailed live monitor view |
 | `/director` | `spawn-agents.ts` | Promote to director mode (fleet orchestration) |
 | `/fleet` | `fleet.ts` | Fleet control: status, usage, kill, manifest, retry, log, stream |
 | `/sdd` | `sdd.ts` | AI-driven spec-driven development workflow |

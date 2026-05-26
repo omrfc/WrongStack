@@ -22,6 +22,15 @@ Returns a summary of what was spawned.
 
 Shows status of all spawned subagents: their name, current task, status (pending/running/done/failed), and iteration count.
 
+**Monitor overlay:**
+```
+/agents monitor  — open the agents monitor overlay (Ctrl+Shift+M)
+/agents on       — show the agents monitor overlay
+/agents off      — hide the agents monitor overlay
+```
+
+The monitor overlay shows every known subagent with status, elapsed time, iteration/tool counts, an activity sparkline, the current tool, a global concurrency gauge, token/cost totals, and a compact event timeline.
+
 **With an id:**
 ```
 /agents <subagent-id>

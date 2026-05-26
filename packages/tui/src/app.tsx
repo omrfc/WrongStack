@@ -284,6 +284,15 @@ export interface AppProps {
    */
   statuslineHiddenItems: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>;
   setStatuslineHiddenItems: (items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>) => void;
+  /**
+   * Controller for the agents monitor overlay. App installs a dispatch-backed
+   * setter on mount so the `/agents on|off` slash command can toggle the
+   * overlay without a round-trip.
+   */
+  agentsMonitorController?: {
+    visible: boolean;
+    setVisible: (visible: boolean) => void;
+  };
 }
 
 type DraftEntry = HistoryEntry extends infer T
@@ -1242,6 +1251,7 @@ export function App({
   fleetStreamController,
   statuslineHiddenItems,
   setStatuslineHiddenItems,
+  agentsMonitorController,
   initialGoal,
   initialAsk,
   sessionsDir,
@@ -2098,13 +2108,23 @@ export function App({
     };
   }, [slashRegistry, handleRewindTo]);
 
-  // `/agents monitor` — opens the agents monitor overlay (Ctrl+Shift+M).
+  // `/agents` — bare `/agents` and `/agents monitor` toggle the overlay.
+  // `/agents <id>` falls through to the CLI builtin (same-name registration
+  // from the same 'core' owner is a no-op per SlashCommandRegistry semantics,
+  // so we own the bare/monitor forms here and let the builtin handle IDs).
   useEffect(() => {
     const cmd = {
       name: 'agents',
       description: 'Toggle the agents monitor overlay.',
-      async run() {
-        dispatch({ type: 'toggleAgentsMonitor' });
+      async run(args: string) {
+        const arg = args.trim().toLowerCase();
+        if (!arg || arg === 'monitor') {
+          dispatch({ type: 'toggleAgentsMonitor' });
+          return { message: undefined };
+        }
+        // Any other arg falls through to the CLI builtin (same owner
+        // 'core' re-registration = silently ignored). The builtin handles
+        // onAgents UUID lookups and /agents on|off.
         return { message: undefined };
       },
     };
@@ -2138,28 +2158,6 @@ export function App({
       slashRegistry.unregister('model');
     };
   }, [slashRegistry, getPickableProviders, switchProviderAndModel]);
-
-  // TUI-only `/agents monitor` command — toggles the agents monitor overlay.
-  // The CLI builtin `/agents` handles all other sub-commands; we intercept only
-  // "monitor" so the TUI can open/close it without touching the fleet panel used
-  // by the director/eternal loop.
-  useEffect(() => {
-    const cmd = {
-      name: 'agents',
-      description: 'Open or close the agents monitor overlay.',
-      async run(args: string) {
-        if (args.trim().toLowerCase() === 'monitor') {
-          dispatch({ type: 'toggleAgentsMonitor' });
-          return { message: 'Agents monitor toggled.' };
-        }
-        return { message: 'Usage: /agents monitor' };
-      },
-    };
-    slashRegistry.register(cmd);
-    return () => {
-      slashRegistry.unregister('agents');
-    };
-  }, [slashRegistry]);
 
   // Register the TUI-only `/autonomy` command — opens a single-step picker.
   // When the user types `/autonomy` with no arg, the picker appears.
@@ -2605,6 +2603,31 @@ export function App({
   useEffect(() => {
     if (fleetStreamController) fleetStreamController.enabled = state.streamFleet;
   }, [state.streamFleet, fleetStreamController]);
+
+  // Install a dispatch-backed setter into the shared controller so the
+  // `/agents on|off` slash command can toggle our overlay flag.
+  // Restored to a noop on unmount so a late-arriving slash callback
+  // doesn't dispatch into a torn-down React tree.
+  useEffect(() => {
+    if (!agentsMonitorController) return;
+    agentsMonitorController.visible = state.agentsMonitorOpen;
+    agentsMonitorController.setVisible = (visible: boolean) => {
+      if (visible !== state.agentsMonitorOpen) {
+        dispatch({ type: 'toggleAgentsMonitor' });
+      }
+    };
+    return () => {
+      agentsMonitorController.setVisible = (visible: boolean) => {
+        agentsMonitorController.visible = visible;
+      };
+    };
+  }, [agentsMonitorController, state.agentsMonitorOpen]);
+
+  // Keep the controller's mirror of `visible` in sync when the toggle is
+  // flipped from a TUI-side path (not the slash command).
+  useEffect(() => {
+    if (agentsMonitorController) agentsMonitorController.visible = state.agentsMonitorOpen;
+  }, [state.agentsMonitorOpen, agentsMonitorController]);
 
   // Track double-Esc for input buffer clearing.
   const lastEscAtRef = useRef(0);
@@ -3371,7 +3394,9 @@ export function App({
       return;
     }
     // Ctrl+Shift+M toggles the agents monitor overlay.
-    if (key.ctrl && key.shift && input === 'M') {
+    // Some terminals don't set key.shift for Ctrl+Shift+letter combos, so
+    // we also accept Ctrl+Shift+m (lowercase) as a fallback.
+    if (key.ctrl && input.toLowerCase() === 'm' && (key.shift || input === 'm')) {
       dispatch({ type: 'toggleAgentsMonitor' });
       return;
     }
@@ -3946,7 +3971,7 @@ export function App({
     }
     const pasteContent = pasteParts.length > 0 ? pasteParts.join('\n') : undefined;
     pushSubmittedHistory();
-    clearPlaceholdersOnly();
+    clearDraft();
     const blocks = await builder.submit();
 
     if (state.status !== 'idle') {
