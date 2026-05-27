@@ -8,6 +8,9 @@
  */
 
 import { execSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type { FileSymbols, Symbol as IndexSymbol, SymbolLang } from './schema.js';
 import { detectLang } from './ts-parser.js';
 
@@ -236,7 +239,16 @@ print(json.dumps([s.to_dict() for s in syms]))
 
 function syncPyParse(filePath: string, lang: SymbolLang): FileSymbols {
 	try {
-		const stdout = execSync(`python -c "${PY_PARSE_SCRIPT.replace(/"/g, '\\"')}" "${filePath}"`, {
+		// Write the parser to a temp .py and run it as a script. Passing the
+		// whole 200-line program via `python -c "..."` breaks under cmd.exe on
+		// Windows (embedded newlines truncate the command), so the child saw a
+		// mangled script and emitted nothing. A real file sidesteps all quoting.
+		const tmpDir = path.join(os.tmpdir(), 'ws-py-parse');
+		mkdirSync(tmpDir, { recursive: true });
+		const scriptPath = path.join(tmpDir, 'parse.py');
+		writeFileSync(scriptPath, PY_PARSE_SCRIPT, 'utf8');
+
+		const stdout = execSync(`python "${scriptPath}" "${filePath}"`, {
 			timeout: 15_000,
 			encoding: 'utf8',
 			windowsHide: true,

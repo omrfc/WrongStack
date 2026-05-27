@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   type-parameter list uses `*ast.FieldList`, so Go files — tests included —
   index correctly.
 
+- **Python symbol indexing actually works now.** The Python parser passed its
+  ~200-line `ast` program via `python -c "..."`; under cmd.exe on Windows the
+  embedded newlines truncated the command, so the child ran a mangled script
+  and emitted nothing. The program is now written to a temp `.py` file and run
+  as a script, sidestepping all shell quoting.
+
 ## [0.7.8] - 2026-05-28
 
 ### Added
