@@ -134,6 +134,9 @@ importers:
 
   packages/plug-lsp:
     dependencies:
+      '@wrongstack/tools':
+        specifier: workspace:*
+        version: link:../tools
       vscode-languageserver-protocol:
         specifier: ^3.17.5
         version: 3.17.5
