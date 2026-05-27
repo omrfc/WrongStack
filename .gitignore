@@ -106,3 +106,5 @@ AGENTS.md
 /output.txt
 /cb_test_*.json
 /test_manifest.json
+# Stray local scratch dir (never commit)
+/tmp/
