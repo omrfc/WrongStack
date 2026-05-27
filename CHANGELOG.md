@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.9] - 2026-05-28
+
 ### Fixed
 
 - **Go symbol indexing actually works now.** The `codebase-index` Go parser
