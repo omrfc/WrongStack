@@ -33,6 +33,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Node's built-in module, experimental since 22.5) — no native addon and
   no extra npm dependency.
 
+- **`/btw <note>` — non-aborting mid-run steering ("by the way").** Stashes a
+  short note on the live run context that the agent folds into its work at the
+  next iteration boundary (between tool batches) — without aborting like
+  `/steer` does. Notes accumulate (cap 20) and are delivered together. Backed
+  by `setBtwNote` / `consumeBtwNotes` / `buildBtwBlock` in `@wrongstack/core`;
+  the agent loop drains the queue before building each request and appends the
+  note to the prior user turn to avoid consecutive same-role messages.
+
 - **`/agents monitor|on|off`** — the agents monitor overlay now has a
   slash-command interface in addition to `Ctrl+Shift+M`:
   - `/agents monitor` — open the overlay
@@ -47,6 +55,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   task batching.
 
 ### Changed
+
+- **Launch hints now rotate one category per boot.** Instead of dumping every
+  category at startup, the CLI shows a single category (Autonomy, fleet,
+  Steering, …) and advances to the next on the following launch via a tiny
+  round-robin cursor at `<cacheDir>/hint-cursor`. `/help` still lists
+  everything; `--no-hints` / `WRONGSTACK_NO_HINTS=1` still suppress.
 
 - **Per-project state migrated to `~/.wrongstack/projects/<hash>/`.** All
   per-project state — `goal.json`, sessions, `specs/`, `task-graphs/`,

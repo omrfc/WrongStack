@@ -210,7 +210,9 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
     }
     if (choices.yolo !== config.yolo) config = patchConfig(config, { yolo: choices.yolo });
 
-    printLaunchHints(renderer, flags);
+    printLaunchHints(renderer, flags, {
+      cursorFile: path.join(wpaths.cacheDir, 'hint-cursor'),
+    });
   }
 
   return {

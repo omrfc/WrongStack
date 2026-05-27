@@ -5,13 +5,19 @@
  * runtime controls this build ships with. Suppress with `--no-hints` or
  * `WRONGSTACK_NO_HINTS=1`.
  *
+ * Rather than dumping every category at once, each launch shows ONE
+ * category and rotates to the next on the following launch (round-robin
+ * via a tiny persisted cursor). So you see Autonomy one boot, the fleet
+ * the next, MCP/plugins after that — bite-sized, and the whole set still
+ * comes around quickly. `/help` lists everything on demand.
+ *
  * The list is intentionally hand-curated rather than auto-derived from
  * the slash-command registry: a one-line blurb tuned for each entry
- * lands better than `command.description` boilerplate, and the groups
- * preserve the mental model (autonomy → fleet → steering → mode/context
- * → daily ops).
+ * lands better than `command.description` boilerplate.
  */
 
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { color } from '@wrongstack/core';
 import type { TerminalRenderer } from './renderer.js';
 
@@ -49,6 +55,7 @@ const GROUPS: readonly HintGroup[] = [
     items: [
       { key: 'Esc (while busy)', blurb: 'soft interrupt — next message carries a STEERING preamble' },
       { key: '/steer <text>', blurb: 'mid-flight redirect, works when Esc is eaten by tmux' },
+      { key: '/btw <note>', blurb: 'non-aborting nudge — agent folds it in at its next step' },
       { key: 'Ctrl+C × 1 / × 2 / × 3', blurb: 'cancel iteration · force-exit Ink · hard exit(130)' },
     ],
   },
@@ -81,6 +88,12 @@ const GROUPS: readonly HintGroup[] = [
  */
 export const HINT_COUNT: number = GROUPS.reduce((n, g) => n + g.items.length, 0);
 
+/** Number of rotating categories. */
+export const HINT_GROUP_COUNT: number = GROUPS.length;
+
+/** Category titles, in rotation order. Exported for tests. */
+export const HINT_GROUP_TITLES: readonly string[] = GROUPS.map((g) => g.title);
+
 function shouldSuppress(flags: Record<string, string | boolean>): boolean {
   if (flags['no-hints'] === true) return true;
   if (flags['hints'] === false) return true;
@@ -89,30 +102,75 @@ function shouldSuppress(flags: Record<string, string | boolean>): boolean {
   return false;
 }
 
+export interface LaunchHintOptions {
+  /**
+   * File holding the rotation cursor. When set, each call advances it so
+   * consecutive launches show different categories (round-robin). Missing
+   * or unreadable file starts the rotation at the first category.
+   */
+  readonly cursorFile?: string;
+  /**
+   * Force a specific category index (wraps around). Overrides the cursor.
+   * Mainly for tests and `--hints`-style explicit selection.
+   */
+  readonly groupIndex?: number;
+}
+
+const wrap = (n: number): number => ((n % GROUPS.length) + GROUPS.length) % GROUPS.length;
+
 /**
- * Print the launch-hints block to `renderer`. No-op when suppressed
- * via `--no-hints` or `WRONGSTACK_NO_HINTS=1`.
+ * Pick the category to show. Priority: explicit `groupIndex` → persisted
+ * round-robin cursor → random. Advancing the cursor is best-effort; any
+ * filesystem error falls back to a random category so a boot is never
+ * blocked on hint bookkeeping.
+ */
+function pickGroupIndex(opts: LaunchHintOptions): number {
+  if (typeof opts.groupIndex === 'number') return wrap(opts.groupIndex);
+  if (opts.cursorFile) {
+    try {
+      let current = 0;
+      try {
+        const parsed = Number.parseInt(fs.readFileSync(opts.cursorFile, 'utf8').trim(), 10);
+        if (Number.isFinite(parsed)) current = wrap(parsed);
+      } catch {
+        // No cursor yet — start at the first category.
+      }
+      fs.mkdirSync(path.dirname(opts.cursorFile), { recursive: true });
+      fs.writeFileSync(opts.cursorFile, String(wrap(current + 1)));
+      return current;
+    } catch {
+      // Fall through to random on any FS error.
+    }
+  }
+  return Math.floor(Math.random() * GROUPS.length);
+}
+
+/**
+ * Print one rotating category of launch hints to `renderer`. No-op when
+ * suppressed via `--no-hints` or `WRONGSTACK_NO_HINTS=1`.
  */
 export function printLaunchHints(
   renderer: Pick<TerminalRenderer, 'write'>,
   flags: Record<string, string | boolean>,
+  opts: LaunchHintOptions = {},
 ): void {
   if (shouldSuppress(flags)) return;
+
+  const idx = pickGroupIndex(opts);
+  const group = GROUPS[idx];
+  if (!group) return;
 
   const lines: string[] = [];
   lines.push('');
   lines.push(
-    `  ${color.cyan('◆')} ${color.bold(`WrongStack — ${HINT_COUNT} things you can do here`)}`,
+    `  ${color.cyan('◆')} ${color.bold(group.title)} ${color.dim(`(${idx + 1}/${GROUPS.length} · more each launch)`)}`,
   );
-  for (const group of GROUPS) {
-    lines.push(`  ${color.dim('─')} ${color.cyan(group.title)}`);
-    for (const item of group.items) {
-      lines.push(`     ${color.bold(item.key)}  ${color.dim('—')} ${color.dim(item.blurb)}`);
-    }
+  for (const item of group.items) {
+    lines.push(`     ${color.bold(item.key)}  ${color.dim('—')} ${color.dim(item.blurb)}`);
   }
   lines.push('');
   lines.push(
-    `  ${color.dim(`tip: hide this with ${color.bold('--no-hints')} or ${color.bold('WRONGSTACK_NO_HINTS=1')}`)}`,
+    `  ${color.dim(`${color.bold('/help')} lists everything · hide with ${color.bold('--no-hints')}`)}`,
   );
   lines.push('');
 

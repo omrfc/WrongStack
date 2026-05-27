@@ -211,6 +211,7 @@ import { buildTodosCommand } from './todos.js';
 import { buildToolsCommand } from './tools.js';
 import { buildYoloCommand } from './yolo.js';
 import { buildAutonomyCommand } from './autonomy.js';
+import { buildBtwCommand } from './btw.js';
 import { buildGoalCommand } from './goal.js';
 import { buildModeCommand } from './mode.js';
 import { buildSddCommand } from './sdd.js';
@@ -256,6 +257,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildYoloCommand(opts),
     buildAutonomyCommand(opts),
     buildGoalCommand(opts),
+    buildBtwCommand(opts),
     buildModeCommand(opts),
     buildExitCommand(opts),
     buildCommitCommand(opts),

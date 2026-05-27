@@ -28,6 +28,12 @@ export {
   type ContinueDirective,
   makeContinueToNextIterationTool,
 } from './core/continue-to-next-iteration.js';
+export {
+  setBtwNote,
+  consumeBtwNotes,
+  pendingBtwCount,
+  buildBtwBlock,
+} from './core/btw.js';
 export { Context, type ContextInit, type RunOptions, type TodoItem } from './core/context.js';
 export { extractRunEnv, type RunEnv } from './core/run-env.js';
 export {

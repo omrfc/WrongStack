@@ -1,6 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { HINT_COUNT, printLaunchHints } from '../src/launch-hints.js';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { stripAnsi } from '@wrongstack/core';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  HINT_COUNT,
+  HINT_GROUP_COUNT,
+  HINT_GROUP_TITLES,
+  printLaunchHints,
+} from '../src/launch-hints.js';
 
 function makeRenderer(): { write: ReturnType<typeof vi.fn>; output: () => string } {
   const write = vi.fn();
@@ -26,22 +34,57 @@ describe('printLaunchHints', () => {
     expect(HINT_COUNT).toBeGreaterThanOrEqual(20);
   });
 
-  it('prints the header with the hint count and key feature mentions', () => {
+  it('shows ONE category per launch, not the whole list', () => {
     const r = makeRenderer();
-    printLaunchHints(r, {});
+    printLaunchHints(r, {}, { groupIndex: 0 });
     const out = r.output();
-    expect(out).toContain(`WrongStack — ${HINT_COUNT} things you can do here`);
-    // Anchor a sample of high-value features from each group
+    // Header names the category and its position in the rotation.
+    expect(out).toContain(HINT_GROUP_TITLES[0] as string);
+    expect(out).toContain(`(1/${HINT_GROUP_COUNT}`);
+    // Autonomy group is shown…
     expect(out).toContain('/goal');
-    expect(out).toContain('/autonomy eternal');
-    expect(out).toContain('--director');
-    expect(out).toContain('/fleet');
-    expect(out).toContain('/steer');
-    expect(out).toContain('/mode');
-    expect(out).toContain('/context mode');
-    expect(out).toContain('/mcp');
-    expect(out).toContain('/plugin');
-    expect(out).toContain('--no-hints');
+    // …but a hint unique to a different group is NOT.
+    expect(out).not.toContain('/mcp');
+    expect(out).toContain('/help');
+  });
+
+  it('rotates to a different category on the next index', () => {
+    const r0 = makeRenderer();
+    printLaunchHints(r0, {}, { groupIndex: 0 });
+    const r1 = makeRenderer();
+    printLaunchHints(r1, {}, { groupIndex: 1 });
+    expect(r0.output()).not.toEqual(r1.output());
+    expect(r1.output()).toContain(HINT_GROUP_TITLES[1] as string);
+  });
+
+  it('wraps groupIndex out of range', () => {
+    const r = makeRenderer();
+    printLaunchHints(r, {}, { groupIndex: HINT_GROUP_COUNT });
+    // Index N wraps to 0.
+    expect(r.output()).toContain(`(1/${HINT_GROUP_COUNT}`);
+  });
+
+  it('advances a persisted cursor across launches (round-robin)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wstack-hints-'));
+    const cursorFile = path.join(dir, 'sub', 'hint-cursor');
+    try {
+      const seen: string[] = [];
+      for (let i = 0; i < HINT_GROUP_COUNT; i++) {
+        const r = makeRenderer();
+        printLaunchHints(r, {}, { cursorFile });
+        // First non-empty content line after the header carries the title.
+        const header = r
+          .output()
+          .split('\n')
+          .find((l) => l.includes(`(${i + 1}/${HINT_GROUP_COUNT}`));
+        expect(header).toBeTruthy();
+        seen.push(header as string);
+      }
+      // Every launch showed a distinct position in the rotation.
+      expect(new Set(seen).size).toBe(HINT_GROUP_COUNT);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('skips output when --no-hints is set', () => {
@@ -60,20 +103,12 @@ describe('printLaunchHints', () => {
   it('treats WRONGSTACK_NO_HINTS=0 / false as not suppressed', () => {
     process.env.WRONGSTACK_NO_HINTS = '0';
     const r1 = makeRenderer();
-    printLaunchHints(r1, {});
+    printLaunchHints(r1, {}, { groupIndex: 0 });
     expect(r1.write).toHaveBeenCalled();
 
     process.env.WRONGSTACK_NO_HINTS = 'false';
     const r2 = makeRenderer();
-    printLaunchHints(r2, {});
+    printLaunchHints(r2, {}, { groupIndex: 0 });
     expect(r2.write).toHaveBeenCalled();
-  });
-
-  it('renders one line per hint plus group headers', () => {
-    const r = makeRenderer();
-    printLaunchHints(r, {});
-    const lines = r.output().split('\n').filter((l) => l.trim().length > 0);
-    // Header (1) + group headers (>=5) + hints (HINT_COUNT) + tip footer (1)
-    expect(lines.length).toBeGreaterThanOrEqual(HINT_COUNT + 5);
   });
 });

@@ -21,6 +21,7 @@ import type { SecretScrubber } from '../types/secret-scrubber.js';
 import type { Tool } from '../types/tool.js';
 import type { ToolExecutorLike } from '../types/tool-executor.js';
 import { repairToolUseAdjacency } from '../utils/message-invariants.js';
+import { buildBtwBlock, consumeBtwNotes } from './btw.js';
 import { consumeAutonomousContinue, parseContinueDirective, type ContinueDirective } from './continue-to-next-iteration.js';
 import type { Context, RunOptions } from './context.js';
 import { requestLimitExtension } from './iteration-limit.js';
@@ -426,6 +427,10 @@ export class Agent {
         await this.extensions.runBeforeIteration(this.ctx, i);
 
         this.events.emit('iteration.started', { ctx: this.ctx, index: i });
+
+        // Drain any `/btw` notes the user stashed mid-run and fold them into
+        // the conversation before this iteration's request is built.
+        this.injectPendingBtwNotes();
 
         const req = await this.buildAndRunRequestPipeline(opts);
 
@@ -845,6 +850,33 @@ export class Agent {
 
     // Extension: afterToolExecution — inspect or react to tool results
     await this.extensions.runAfterToolExecution(this.ctx, outputs);
+  }
+
+  /**
+   * Fold any pending `/btw` notes into the conversation. Called at the top of
+   * each iteration so a note set mid-run reaches the model on its next turn.
+   *
+   * To stay valid across all provider wire families we never create two
+   * consecutive user messages: if the last message is a user turn (e.g. the
+   * tool_result block from the previous iteration) we append the note as an
+   * extra text block on that turn; otherwise we add a fresh user message.
+   */
+  private injectPendingBtwNotes(): void {
+    const notes = consumeBtwNotes(this.ctx);
+    if (notes.length === 0) return;
+    const block: TextBlock = { type: 'text', text: buildBtwBlock(notes) };
+
+    const messages = this.ctx.messages;
+    const last = messages[messages.length - 1];
+    if (last && last.role === 'user') {
+      const content: ContentBlock[] =
+        typeof last.content === 'string'
+          ? [{ type: 'text', text: last.content }, block]
+          : [...last.content, block];
+      this.ctx.state.replaceMessages([...messages.slice(0, -1), { ...last, content }]);
+    } else {
+      this.ctx.state.appendMessage({ role: 'user', content: [block] });
+    }
   }
 
   private waitForConfirm(info: {
