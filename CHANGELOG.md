@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Go symbol indexing actually works now.** The `codebase-index` Go parser
+  was doubly broken: it invoked `go run script.go target.go`, so the toolchain
+  treated the target as a second package file (`named files must all be in one
+  directory`) and refused `*_test.go` outright; and the embedded parser program
+  referenced a non-existent `ast.TypeParams` type, so it never compiled. The
+  source is now piped over stdin (no target file on the command line) and the
+  type-parameter list uses `*ast.FieldList`, so Go files — tests included —
+  index correctly.
+
 ## [0.7.8] - 2026-05-28
 
 ### Added

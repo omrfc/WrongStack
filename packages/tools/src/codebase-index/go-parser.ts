@@ -8,8 +8,9 @@
  */
 
 import { execSync } from 'node:child_process';
+import * as os from 'node:os';
 import * as path from 'node:path';
-import { mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import type { FileSymbols, Symbol as IndexSymbol, SymbolLang } from './schema.js';
 import { detectLang } from './ts-parser.js';
 
@@ -38,6 +39,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"strings"
 )
@@ -52,17 +54,13 @@ type Sym struct {
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Print("[]")
-		return
-	}
-	src, err := os.ReadFile(os.Args[1])
+	src, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		fmt.Print("[]")
 		return
 	}
 	fset := token.NewFileSet()
-	node, err := parser.ParseFile(fset, os.Args[1], src, 0)
+	node, err := parser.ParseFile(fset, "src.go", src, 0)
 	if err != nil {
 		fmt.Print("[]")
 		return
@@ -206,7 +204,7 @@ func formatMethods(fields []*ast.Field) string {
 	return formatFields(fields)
 }
 
-func formatTypeParams(tp *ast.TypeParams) string {
+func formatTypeParams(tp *ast.FieldList) string {
 	if tp == nil || len(tp.List) == 0 {
 		return ""
 	}
@@ -255,25 +253,24 @@ func formatType(t ast.Expr) string {
 }
 `;
 
-function syncGoParse(filePath: string, _content: string, lang: SymbolLang): FileSymbols {
-	// Write script to a temp file so we can pass filePath as os.Args[1]
-	const tmpDir = path.join(process.env.TEMP ?? '/tmp', 'ws-go-parse');
+function syncGoParse(filePath: string, content: string, lang: SymbolLang): FileSymbols {
+	// Feed the source over stdin — never pass the target .go file as a CLI arg.
+	// `go run script.go target.go` makes the toolchain treat target.go as a
+	// second package file ("named files must all be in one directory") and
+	// refuses *_test.go outright. Reading from stdin sidesteps both, and lets
+	// us parse the in-memory content without touching disk.
+	const tmpDir = path.join(os.tmpdir(), 'ws-go-parse');
 	try {
 		mkdirSync(tmpDir, { recursive: true });
 		const scriptPath = path.join(tmpDir, 'parse.go');
 		writeFileSync(scriptPath, GO_PARSE_SCRIPT, 'utf8');
 
-		let stdout: string;
-		try {
-			stdout = execSync(`go run "${scriptPath}" "${filePath}"`, {
-				timeout: 15_000,
-				encoding: 'utf8',
-				windowsHide: true,
-			});
-		} finally {
-			// Clean up temp script
-			try { unlinkSync(scriptPath); } catch { /* ignore */ }
-		}
+		const stdout = execSync(`go run "${scriptPath}"`, {
+			input: content,
+			timeout: 15_000,
+			encoding: 'utf8',
+			windowsHide: true,
+		});
 
 		if (!stdout.trim()) {
 			return { file: filePath, lang, symbols: [], mtimeMs: Date.now() };
