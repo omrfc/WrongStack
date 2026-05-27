@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.8] - 2026-05-28
+
+### Added
+
+- **`/btw <note>` — non-aborting mid-run steering ("by the way").** Stashes a
+  short note on the live run context that the agent folds into its work at the
+  next iteration boundary (between tool batches) — without aborting like
+  `/steer` does. Notes accumulate (cap 20) and are delivered together. Backed
+  by `setBtwNote` / `consumeBtwNotes` / `buildBtwBlock` in `@wrongstack/core`;
+  the agent loop drains the queue before building each request and appends the
+  note to the prior user turn to avoid consecutive same-role messages.
+
+### Changed
+
+- **Launch hints now rotate one category per boot.** Instead of dumping every
+  category at startup, the CLI shows a single category (Autonomy, fleet,
+  Steering, …) and advances to the next on the following launch via a tiny
+  round-robin cursor at `<cacheDir>/hint-cursor`. `/help` still lists
+  everything; `--no-hints` / `WRONGSTACK_NO_HINTS=1` still suppress.
+
+### Fixed
+
+- **ESM dist no longer crashes on load.** The `@wrongstack/tools` build keeps
+  the TypeScript compiler API external instead of inlining ~9 MB of CJS that
+  relies on `require`/`__filename`/`__dirname`; `typescript` now ships as a
+  runtime dependency.
+
+- **A plain `wrongstack` launch no longer drops into ACP mode.** The ACP agent
+  module ran its `main()` at import time, so the CLI importing
+  `WrongStackACPServer` started an ACP server and hijacked stdin. The auto-start
+  is now guarded behind a main-module check, keeping the import side-effect-free.
+
+- **`node:sqlite` is loaded lazily and its experimental warning silenced.** The
+  codebase-index no longer pulls SQLite in at CLI boot, so the
+  `ExperimentalWarning` is gone from every launch, and a runtime without
+  `node:sqlite` fails only when the index is actually used (with a clear
+  message) rather than crashing at startup.
+
+### Internal
+
+- Cleared the Biome lint baseline across the workspace: alias the `Symbol`
+  schema type to stop shadowing the global, replace assign-in-expression
+  regex loops, fix a stale `handleKeyDown` hook dependency, and drop a dead
+  suppression comment.
+
 ## [0.7.6] - 2026-05-27
 
 > Consolidates everything since 0.7.3. The intermediate `0.7.4` and `0.7.5`
@@ -33,14 +78,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Node's built-in module, experimental since 22.5) — no native addon and
   no extra npm dependency.
 
-- **`/btw <note>` — non-aborting mid-run steering ("by the way").** Stashes a
-  short note on the live run context that the agent folds into its work at the
-  next iteration boundary (between tool batches) — without aborting like
-  `/steer` does. Notes accumulate (cap 20) and are delivered together. Backed
-  by `setBtwNote` / `consumeBtwNotes` / `buildBtwBlock` in `@wrongstack/core`;
-  the agent loop drains the queue before building each request and appends the
-  note to the prior user turn to avoid consecutive same-role messages.
-
 - **`/agents monitor|on|off`** — the agents monitor overlay now has a
   slash-command interface in addition to `Ctrl+Shift+M`:
   - `/agents monitor` — open the overlay
@@ -55,12 +92,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   task batching.
 
 ### Changed
-
-- **Launch hints now rotate one category per boot.** Instead of dumping every
-  category at startup, the CLI shows a single category (Autonomy, fleet,
-  Steering, …) and advances to the next on the following launch via a tiny
-  round-robin cursor at `<cacheDir>/hint-cursor`. `/help` still lists
-  everything; `--no-hints` / `WRONGSTACK_NO_HINTS=1` still suppress.
 
 - **Per-project state migrated to `~/.wrongstack/projects/<hash>/`.** All
   per-project state — `goal.json`, sessions, `specs/`, `task-graphs/`,
