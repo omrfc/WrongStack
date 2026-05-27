@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   appendJournal,
@@ -114,9 +115,12 @@ describe('goal-store', () => {
     expect(out).toContain('tests red');
   });
 
-  it('goalFilePath resolves under projectRoot/.wrongstack', () => {
+  it('goalFilePath resolves to ~/.wrongstack/projects/<hash>/goal.json', () => {
     const p = goalFilePath('/projects/foo');
-    expect(p.replace(/\\/g, '/')).toBe('/projects/foo/.wrongstack/goal.json');
+    const expected = path.join(os.homedir(), '.wrongstack', 'projects',
+      createHash('sha256').update(path.resolve('/projects/foo')).digest('hex').slice(0, 12),
+      'goal.json');
+    expect(p.replace(/\\/g, '/')).toBe(expected.replace(/\\/g, '/'));
   });
 
   it('summarizeUsage aggregates tokens + cost across the journal', () => {

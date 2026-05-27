@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent } from '../../src/core/agent.js';
 import { EternalAutonomyEngine } from '../../src/execution/eternal-autonomy.js';
 import { EventBus } from '../../src/kernel/events.js';
-import { emptyGoal, loadGoal, saveGoal } from '../../src/storage/goal-store.js';
+import { emptyGoal, goalFilePath, loadGoal, saveGoal } from '../../src/storage/goal-store.js';
 
 interface MockAgentSetup {
   todos?: Array<{ id: string; content: string; status: 'pending' | 'in_progress' | 'completed' }>;
@@ -69,8 +69,9 @@ describe('EternalAutonomyEngine', () => {
   beforeEach(async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-eternal-'));
     projectRoot = tmp;
-    goalPath = path.join(projectRoot, '.wrongstack', 'goal.json');
-    await fs.mkdir(path.join(projectRoot, '.wrongstack'), { recursive: true });
+    goalPath = goalFilePath(projectRoot);
+    // goalFilePath uses ~/.wrongstack so ensure that dir exists
+    await fs.mkdir(path.dirname(goalPath), { recursive: true });
     await saveGoal(goalPath, emptyGoal('Make the project better'));
   });
 
