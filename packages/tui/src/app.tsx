@@ -1761,10 +1761,13 @@ export function App({
     prevEntriesCount.current = state.entries.length;
     if (overlayClosed || newEntryCommitted) {
       try {
-        // \x1b[H\x1b[J clears from (0,0) to end-of-screen so no ghost
-        // rows remain regardless of cursor position. \x1b[J alone would
-        // leave corrupted rows above the cursor behind.
-        process.stdout.write('\x1b[H\x1b[J');
+        // \x1b[J = erase from cursor to end of screen. The cursor sits at the
+        // top of log-update's live region, so this clears the stale live
+        // region only and leaves committed Static history (in scrollback)
+        // untouched. Do NOT prefix with \x1b[H: homing to (0,0) wipes the
+        // visible committed output and forces the input/status bar to redraw
+        // at the top of the viewport instead of staying pinned to the bottom.
+        process.stdout.write('\x1b[J');
       } catch {
         // stdout might be detached during shutdown — ignore.
       }
