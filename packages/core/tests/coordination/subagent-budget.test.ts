@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BudgetExceededError, SubagentBudget } from '../../src/coordination/subagent-budget.js';
+import { BudgetExceededError, SubagentBudget, BudgetThresholdSignal } from '../../src/coordination/subagent-budget.js';
+import { EventBus } from '../../src/kernel/events.js';
 
 describe('SubagentBudget', () => {
   it('records iterations and throws when over limit', () => {
@@ -137,6 +138,73 @@ describe('SubagentBudget', () => {
     expect(b._onThreshold).toBe(handler);
   });
 
+  it('mode getter returns the constructor argument', () => {
+    const bAuto = new SubagentBudget({ maxIterations: 10 }, 'auto');
+    const bSync = new SubagentBudget({ maxIterations: 10 }, 'sync');
+    expect(bAuto.mode).toBe('auto');
+    expect(bSync.mode).toBe('sync');
+    expect(bAuto.mode).not.toBe('sync');
+  });
+
+  it('sync mode hard-stops on timeout even when a listener is present', () => {
+    const bus = new EventBus();
+    bus.on('budget.threshold_reached', ({ extend }) => extend({ timeoutMs: 999_999 }));
+    const b = new SubagentBudget({ timeoutMs: 5 }, 'sync');
+    (b as unknown as { _events: EventBus })._events = bus;
+    b.onThreshold = ({ requestDecision }) => requestDecision();
+    b.start();
+    // Advance clock manually past the limit
+    (b as unknown as { startTime: number }).startTime = Date.now() - 1000;
+    expect(() => b.checkTimeout()).toThrow(/timeout/i);
+  });
+
+  it('sync mode hard-stops when onThreshold is set and mode is sync', () => {
+    const bus = new EventBus();
+    bus.on('budget.threshold_reached', ({ extend }) => extend({ maxIterations: 999 }));
+    const b = new SubagentBudget({ maxIterations: 2 }, 'sync');
+    (b as unknown as { _events: EventBus })._events = bus; // has a real listener
+    b.onThreshold = () => 'continue'; // handler that would normally soft-stop
+    b.recordIteration();
+    b.recordIteration();
+    // Even though there's a listener and a handler, 'sync' forces a hard stop
+    expect(() => b.recordIteration()).toThrow(BudgetExceededError);
+  });
+
+  it('auto mode with no listener hard-stops (no coordinator to ask)', () => {
+    const bus = new EventBus(); // no listeners registered
+    const b = new SubagentBudget({ maxIterations: 2 }, 'auto');
+    (b as unknown as { _events: EventBus })._events = bus;
+    b.onThreshold = ({ requestDecision }) => requestDecision();
+    b.recordIteration();
+    b.recordIteration();
+    // No listener → hasListenerFor is false → BudgetExceededError, hard stop
+    expect(() => b.recordIteration()).toThrow(BudgetExceededError);
+  });
+
+  it('auto mode soft-negotiates when bus has a wildcard listener', async () => {
+    const bus = new EventBus();
+    bus.onPattern('*', (type, payload) => {
+      if (type === 'budget.threshold_reached') {
+        (payload as { extend: (e: { maxIterations: number }) => void }).extend({ maxIterations: 999 });
+      }
+    });
+    const b = new SubagentBudget({ maxIterations: 2 }, 'auto');
+    (b as unknown as { _events: EventBus })._events = bus;
+    b.onThreshold = ({ requestDecision }) => requestDecision();
+    b.recordIteration();
+    b.recordIteration();
+
+    let signal: BudgetThresholdSignal | null = null;
+    try {
+      b.recordIteration();
+    } catch (e) {
+      signal = e as BudgetThresholdSignal;
+    }
+    expect(signal).toBeInstanceOf(BudgetThresholdSignal);
+    const decision = await signal!.decision;
+    expect(decision).toEqual({ extend: { maxIterations: 999 } });
+  });
+
   it('checkLimit throws synchronously for timeout kind without calling _onThreshold', async () => {
     const b = new SubagentBudget({ timeoutMs: 50 });
     b.start();
@@ -147,25 +215,8 @@ describe('SubagentBudget', () => {
     expect(() => b.checkTimeout()).toThrow(/timeout/);
   });
 
-  it('checkLimitAsync handler returns throw → throws BudgetExceededError synchronously via checkLimit', () => {
-    // checkLimit calls checkLimitAsync as fire-and-forget, but when _onThreshold
-    // returns 'throw', checkLimitAsync throws synchronously (budget error)
-    // This is only testable when checkLimit itself is called.
-    // Since checkLimit for non-timeout when handler is set uses checkLimitAsync,
-    // we need to test checkLimit's synchronous throw path by using timeout kind.
-    // For non-timeout with handler configured, checkLimit does void checkLimitAsync.
-    // The synchronous throw only happens when kind === 'timeout' or !_onThreshold.
-    // To test the 'throw' path from _onThreshold we need a different approach.
-    // Instead, test via recordIteration which calls checkLimit.
-    const b = new SubagentBudget({ maxIterations: 2, maxToolCalls: 2, maxTokens: 10, maxCostUsd: 1 });
-    b.onThreshold = () => 'throw';
-    b.recordIteration(); // 1
-    b.recordIteration(); // 2 (= limit)
-    // The void checkLimitAsync call won't throw synchronously here.
-    // The 'throw' return from _onThreshold is handled in checkLimitAsync which
-    // throws synchronously - but because checkLimit does void checkLimitAsync,
-    // the throw becomes an unhandled rejection.
-    // Instead, test the synchronous path when !_onThreshold (no handler).
+  it('checkLimitAsync _onThreshold returns throw → throws BudgetExceededError synchronously via checkLimit', () => {
+    // Deliberately test only the 'no handler' path — the 'sync' mode path is covered above.
     const b2 = new SubagentBudget({ maxIterations: 2 });
     b2.recordIteration();
     b2.recordIteration();

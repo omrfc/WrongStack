@@ -311,6 +311,121 @@ describe('FleetManager', () => {
   });
 
   // -------------------------------------------------------------------------
+  // scheduleManifest() — debounce behavior
+  // -------------------------------------------------------------------------
+
+  describe('scheduleManifest()', () => {
+    it('writes immediately when manifestDebounceMs is 0 (synchronous flush)', async () => {
+      const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'fm-debounce-'));
+      const manifestPath = path.join(tmpDir, 'sync.json');
+      const fm = new FleetManager({ manifestPath, manifestDebounceMs: 0 });
+      fm.recordSpawn('sub-1', makeConfig());
+      await fm.flushManifest();
+      const content = await fsp.readFile(manifestPath, 'utf8');
+      expect(content).toContain('sub-1');
+      await fsp.rm(tmpDir, { recursive: true, force: true });
+    });
+
+    it('does nothing when manifestDebounceMs is negative', () => {
+      const fm = new FleetManager({ manifestDebounceMs: -1 });
+      // Should not throw and should not write (no path configured)
+      expect(() => fm.scheduleManifest()).not.toThrow();
+    });
+
+    it('schedules a deferred write for positive debounce', async () => {
+      const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'fm-debounce-'));
+      const manifestPath = path.join(tmpDir, 'deferred.json');
+      const fm = new FleetManager({ manifestPath, manifestDebounceMs: 50 });
+      fm.recordSpawn('sub-1', makeConfig());
+
+      // File should not exist yet (timer is pending)
+      await expect(fsp.access(manifestPath)).rejects.toThrow();
+
+      // Wait for debounce to fire
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      const content = await fsp.readFile(manifestPath, 'utf8');
+      expect(content).toContain('sub-1');
+      await fsp.rm(tmpDir, { recursive: true, force: true });
+    });
+
+    it('collapses multiple rapid calls into one write', async () => {
+      const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'fm-debounce-'));
+      const manifestPath = path.join(tmpDir, 'burst.json');
+      const fm = new FleetManager({ manifestPath, manifestDebounceMs: 50 });
+      fm.recordSpawn('sub-1', makeConfig());
+      fm.recordSpawn('sub-2', makeConfig());
+      fm.recordSpawn('sub-3', makeConfig());
+
+      // Single timer, not three
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      const content = await fsp.readFile(manifestPath, 'utf8');
+      expect(content).toContain('sub-1');
+      expect(content).toContain('sub-2');
+      expect(content).toContain('sub-3');
+      await fsp.rm(tmpDir, { recursive: true, force: true });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // flushManifest() — immediate bypass
+  // -------------------------------------------------------------------------
+
+  describe('flushManifest()', () => {
+    it('writes immediately, bypassing the debounce timer', async () => {
+      const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'fm-flush-'));
+      const manifestPath = path.join(tmpDir, 'immediate.json');
+      const fm = new FleetManager({ manifestPath, manifestDebounceMs: 50 });
+      fm.recordSpawn('sub-1', makeConfig());
+
+      // File should not exist yet (timer is pending with 5s delay)
+      await expect(fsp.access(manifestPath)).rejects.toThrow();
+
+      // flushManifest() should write immediately despite the long debounce
+      await fm.flushManifest();
+
+      const content = await fsp.readFile(manifestPath, 'utf8');
+      expect(content).toContain('sub-1');
+      await fsp.rm(tmpDir, { recursive: true, force: true });
+    });
+
+    it('clears a pending debounce timer', async () => {
+      const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'fm-flush-'));
+      const manifestPath = path.join(tmpDir, 'clear-timer.json');
+      const fm = new FleetManager({ manifestPath, manifestDebounceMs: 50 });
+
+      // Record first spawn and flush — clears any pending write, file gets sub-1
+      fm.recordSpawn('sub-1', makeConfig());
+      await fm.flushManifest();
+      const content = await fsp.readFile(manifestPath, 'utf8');
+      expect(content).toContain('sub-1');
+
+      // Second spawn starts a new debounce timer (5 s). scheduleManifest()
+      // should return immediately (defer) without writing anything.
+      fm.recordSpawn('sub-2', makeConfig());
+
+      // File should still only have sub-1 — new timer hasn't fired
+      const afterContent = await fsp.readFile(manifestPath, 'utf8');
+      expect(afterContent).toContain('sub-1');
+      expect(afterContent).not.toContain('sub-2');
+
+      // Wait long enough for the new timer to fire naturally
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const finalContent = await fsp.readFile(manifestPath, 'utf8');
+      expect(finalContent).toContain('sub-2');
+
+      await fsp.rm(tmpDir, { recursive: true, force: true });
+    });
+
+    it('is a no-op when no manifest path is configured', () => {
+      const fm = new FleetManager();
+      // Should not throw
+      expect(() => fm.flushManifest()).not.toThrow();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // IFleetManager contract — ensure the class fulfills the interface
   // -------------------------------------------------------------------------
 

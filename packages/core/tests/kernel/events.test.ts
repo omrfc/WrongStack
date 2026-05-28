@@ -97,6 +97,15 @@ describe('ScopedEventBus', () => {
     expect(bus.scopedListenerCount).toBe(0);
   });
 
+  it('onAny() registers and can be torn down', () => {
+    const bus = new ScopedEventBus();
+    const fn = vi.fn();
+    bus.onAny(fn);
+    expect(bus.scopedListenerCount).toBe(1);
+    bus.teardown();
+    expect(bus.scopedListenerCount).toBe(0);
+  });
+
   it('scoped unsubscribe removes from tracking but does not affect other listeners', () => {
     const bus = new ScopedEventBus();
     const a = vi.fn();
@@ -244,6 +253,29 @@ describe('EventBus', () => {
   it('setLogger accepts logger', () => {
     const bus = new EventBus();
     expect(() => bus.setLogger({ error: () => {} })).not.toThrow();
+  });
+
+  it('onAny() is an alias for onPattern("*") and receives all events', () => {
+    const bus = new EventBus();
+    const fn = vi.fn();
+    bus.onAny(fn);
+    bus.emit('session.started', { id: '1' });
+    bus.emit('tool.executed', { name: 'x', durationMs: 0, ok: true });
+    bus.emit('error', { err: new Error('boom'), phase: 'test' });
+    expect(fn).toHaveBeenCalledTimes(3);
+    expect(fn).toHaveBeenCalledWith('session.started', { id: '1' });
+    expect(fn).toHaveBeenCalledWith('tool.executed', { name: 'x', durationMs: 0, ok: true });
+  });
+
+  it('onAny() returns working unsubscribe', () => {
+    const bus = new EventBus();
+    const fn = vi.fn();
+    const off = bus.onAny(fn);
+    bus.emit('session.started', { id: '1' });
+    expect(fn).toHaveBeenCalledTimes(1);
+    off();
+    bus.emit('session.started', { id: '2' });
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 
   it('emits error event with error and phase', () => {

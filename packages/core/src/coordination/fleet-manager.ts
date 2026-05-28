@@ -8,6 +8,7 @@ import { DirectorStateCheckpoint } from '../storage/director-state.js';
 import { FleetBus, FleetUsageAggregator } from './fleet-bus.js';
 import type { FleetUsage } from './fleet-bus.js';
 import type { IFleetManager } from './ifleet-manager.js';
+import type { DefaultMultiAgentCoordinator } from './multi-agent-coordinator.js';
 
 /** Options for constructing a FleetManager. */
 export interface FleetManagerOptions {
@@ -77,6 +78,8 @@ export class FleetManager implements IFleetManager {
   private readonly pendingTasks = new Map<string, { subagentId: string; description: string }>();
   private readonly subagentMeta = new Map<string, { provider?: string; model?: string }>();
   private readonly priceLookups = new Map<string, { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }>();
+  /** The coordinator (wired via setCoordinator by Director after construction). */
+  private coordinator: DefaultMultiAgentCoordinator | null = null;
 
   constructor(opts: FleetManagerOptions = {}) {
     this.manifestPath = opts.manifestPath;
@@ -105,7 +108,10 @@ export class FleetManager implements IFleetManager {
     this.fleet = new FleetBus();
     this.usage = new FleetUsageAggregator(
       this.fleet,
-      (id) => this.priceLookups.get(id),
+      (id, provider, model) => {
+        if (provider && model) return this.priceLookups.get(`${provider}/${model}`);
+        return undefined;
+      },
       (id) => this.subagentMeta.get(id),
     );
   }
@@ -116,6 +122,15 @@ export class FleetManager implements IFleetManager {
 
   get fleetBus(): FleetBus {
     return this.fleet;
+  }
+
+  /**
+   * Wire the coordinator after Director construction. The coordinator
+   * is not available when FleetManager is constructed standalone.
+   * Once set, `getFleetStats()` delegates to `coordinator.getStats()`.
+   */
+  setCoordinator(coordinator: DefaultMultiAgentCoordinator): void {
+    this.coordinator = coordinator;
   }
 
   snapshot(): FleetUsage {
@@ -166,7 +181,9 @@ export class FleetManager implements IFleetManager {
       provider: config.provider,
       model: config.model,
     });
-    if (priceLookup) this.priceLookups.set(subagentId, priceLookup);
+    if (priceLookup && config.provider && config.model) {
+      this.priceLookups.set(`${config.provider}/${config.model}`, priceLookup);
+    }
     this.manifestEntries.set(subagentId, {
       subagentId,
       name: config.name,
@@ -226,9 +243,22 @@ export class FleetManager implements IFleetManager {
   /**
    * Debounced manifest write. Call after any state mutation
    * (spawn, assign, complete) so a burst collapses into one write.
+   * When `manifestDebounceMs` is 0, writes are synchronous (no debounce).
    */
   scheduleManifest(): void {
-    if (!this.manifestPath || this.manifestDebounceMs <= 0) return;
+    if (!this.manifestPath) return;
+    if (this.manifestDebounceMs === 0) {
+      // 0 means instant flush — write synchronously, no timer.
+      void this.writeManifest().catch((err) => {
+        const detail = err instanceof Error ? err.message : String(err);
+        process.emitWarning(
+          `FleetManager manifest write failed: ${detail}`,
+          'FleetManagerWarning',
+        );
+      });
+      return;
+    }
+    if (this.manifestDebounceMs < 0) return;
     if (this.manifestTimer) return;
     this.manifestTimer = setTimeout(() => {
       this.manifestTimer = null;
@@ -244,6 +274,25 @@ export class FleetManager implements IFleetManager {
         );
       });
     }, this.manifestDebounceMs);
+  }
+
+  /**
+   * Bypass the debounce timer and write the manifest immediately.
+   * Clears any pending debounce timer before writing.
+   */
+  async flushManifest(): Promise<void> {
+    if (!this.manifestPath) return;
+    if (this.manifestTimer) {
+      clearTimeout(this.manifestTimer);
+      this.manifestTimer = null;
+    }
+    await this.writeManifest().catch((err) => {
+      const detail = err instanceof Error ? err.message : String(err);
+      process.emitWarning(
+        `FleetManager manifest write failed: ${detail}`,
+        'FleetManagerWarning',
+      );
+    });
   }
 
   /** Best-effort session event writer. Swallows failures. */
@@ -266,6 +315,36 @@ export class FleetManager implements IFleetManager {
 
   removePendingTask(taskId: string): void {
     this.pendingTasks.delete(taskId);
+  }
+
+  getFleetStats(): {
+    total: number;
+    running: number;
+    idle: number;
+    stopped: number;
+    inFlight: number;
+    pending: number;
+    completed: number;
+    subagentStatuses: { subagentId: string; taskId: string; status: string; assigned: boolean }[];
+  } {
+    if (!this.coordinator) {
+      return {
+        total: 0, running: 0, idle: 0, stopped: 0,
+        inFlight: 0, pending: 0, completed: 0,
+        subagentStatuses: [],
+      };
+    }
+    const stats = this.coordinator.getStats();
+    const subagentStatuses: { subagentId: string; taskId: string; status: string; assigned: boolean }[] = [];
+    for (const [subagentId, s] of this.coordinator['subagents']) {
+      subagentStatuses.push({
+        subagentId,
+        taskId: s.currentTask ?? '',
+        status: s.status,
+        assigned: s.context.parentBridge !== null,
+      });
+    }
+    return { ...stats, subagentStatuses };
   }
 
   getFleetStatus(): {

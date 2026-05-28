@@ -188,6 +188,17 @@ export interface DirectorOptions {
    * (same behavior as before this field was added).
    */
   fleetManager?: FleetManager;
+  /**
+   * Optional LLM classifier for the smart dispatcher. When set, the
+   * `spawn_subagent` tool can accept a free-form `description` field
+   * and the director will automatically route to the best-matching
+   * catalog agent using `dispatchAgent()`. When omitted, routing is
+   * pure heuristic (no provider call) — sufficient for most tasks.
+   *
+   * Build from a `complete(prompt) => string` function using
+   * `makeLLMClassifier(complete)` from the dispatcher module.
+   */
+  dispatchClassifier?: import('../coordination/dispatcher.js').DispatchClassifier;
 }
 
 /**
@@ -348,6 +359,8 @@ export class Director implements ICoordinator {
    * default cap.
    */
   private taskCompletedListener: ((payload: { task: TaskSpec; result: TaskResult }) => void) | null = null;
+  /** Optional LLM classifier for smart dispatch. Passed from options. */
+  readonly dispatchClassifier?: import('../coordination/dispatcher.js').DispatchClassifier;
 
   constructor(opts: DirectorOptions) {
     this.id = opts.config.coordinatorId || randomUUID();
@@ -361,6 +374,7 @@ export class Director implements ICoordinator {
     this.spawnDepth = opts.spawnDepth ?? 0;
     this.sessionWriter = opts.sessionWriter ?? null;
     this.manifestDebounceMs = opts.manifestDebounceMs ?? 2000;
+    this.dispatchClassifier = opts.dispatchClassifier;
     this.maxFleetCostUsd = opts.directorBudget?.maxCostUsd ?? Number.POSITIVE_INFINITY;
     this.maxBudgetExtensions = opts.maxBudgetExtensions ?? 5;
     this.sessionsRoot = opts.sessionsRoot;
@@ -400,7 +414,10 @@ export class Director implements ICoordinator {
       this.fleet = new FleetBus();
       this.usage = new FleetUsageAggregator(
         this.fleet,
-        (id) => this.priceLookups.get(id),
+        (id, provider, model) => {
+          if (provider && model) return this.priceLookups.get(`${provider}/${model}`);
+          return undefined;
+        },
         (id) => this.subagentMeta.get(id),
       );
     }
@@ -408,6 +425,8 @@ export class Director implements ICoordinator {
       { ...opts.config, coordinatorId: this.id },
       { runner: opts.runner },
     );
+    this.coordinator.setFleetBus(this.fleet);
+    this.fleetManager?.setCoordinator(this.coordinator);
     // Mirror coordinator completion events into the waiter table. This
     // lets `awaitTasks([...])` resolve on the *next* completion event
     // without polling — and the `completed` cache covers the case where
@@ -464,7 +483,14 @@ export class Director implements ICoordinator {
               title,
             },
       );
-      this.scheduleManifest();
+      // Flush immediately on task completion — the result should be
+      // visible in the manifest without waiting for the debounce window.
+      // Use flushManifest() so any pending debounce timer is also cleared.
+      if (this.fleetManager) {
+        this.fleetManager.flushManifest();
+      } else {
+        this.scheduleManifest();
+      }
     };
     this.coordinator.on('task.completed', this.taskCompletedListener);
 
@@ -605,10 +631,18 @@ export class Director implements ICoordinator {
   }
 
   /** Debounced manifest writer. A burst of spawn/assign/complete events
-   *  collapses into one write. Set `manifestDebounceMs` to 0 to disable. */
+   *  collapses into one write. Set `manifestDebounceMs` to 0 to write
+   *  synchronously (no debounce); set to negative to disable entirely. */
   private scheduleManifest(): void {
-    if (!this.manifestPath || this.manifestDebounceMs <= 0) return;
-    if (this.manifestTimer) return;
+    if (!this.manifestPath) return;
+    if (this.manifestDebounceMs === 0) {
+      // 0 means instant flush — write synchronously, no timer.
+      void this.writeManifest().catch((err) =>
+        this.logShutdownError('manifest_write_debounced', err),
+      );
+      return;
+    }
+    if (this.manifestDebounceMs < 0) return;
     this.manifestTimer = setTimeout(() => {
       this.manifestTimer = null;
       void this.writeManifest().catch((err) =>
@@ -655,7 +689,7 @@ export class Director implements ICoordinator {
       }
     }
     let result: { subagentId: string };
-      result = await this.coordinator.spawn(config);
+    result = await this.coordinator.spawn(config);
     // Record with FleetManager when available; otherwise manage inline.
     if (this.fleetManager) {
       this.fleetManager.recordSpawn(result.subagentId, config, priceLookup);
@@ -665,7 +699,9 @@ export class Director implements ICoordinator {
         provider: config.provider,
         model: config.model,
       });
-      if (priceLookup) this.priceLookups.set(result.subagentId, priceLookup);
+      if (priceLookup && config.provider && config.model) {
+        this.priceLookups.set(`${config.provider}/${config.model}`, priceLookup);
+      }
     }
     // Auto-wire a bridge per spawn — same transport as the director, so
     // `director.ask(subagentId, …)` and the subagent's own `bridge.send()`

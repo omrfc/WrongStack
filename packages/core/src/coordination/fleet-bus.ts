@@ -36,29 +36,27 @@ export class FleetBus {
   private readonly any = new Set<FleetHandler>();
 
   /**
-   * Hook a subagent's EventBus into the fleet. EventBus is strongly
-   * typed and doesn't expose an `onAny` hook, so we subscribe to the
-   * canonical set of event types a subagent emits during a run. New
-   * event types added to the kernel must be added here too — but the
-   * cost is a tiny single line per type, and the explicit list keeps
-   * the wire format clear.
+   * Hook a subagent's EventBus into the fleet. Uses `onAny()` (an alias for
+   * `onPattern('*')`) to forward all events with subagent attribution, so
+   * new kernel event types are automatically forwarded without any manual
+   * registration. `subagent.*` events are excluded because they originate
+   * from MultiAgentHost on the parent bus, not the subagent's own bus.
    *
    * Returns a disposer that detaches every subscription; call on
    * subagent teardown so the listeners don't outlive the run.
    */
   attach(subagentId: string, bus: EventBus, taskId?: string): () => void {
     // Subscribe to every event on the subagent's EventBus and re-emit with
-    // attribution. We use onPattern('*') rather than a hardcoded event list
-    // so new event types are automatically forwarded without needing to update
-    // this function. The payload is typed as `unknown` in the FleetEvent — use
-    // the type guard in the handler to narrow it.
+    // attribution via the onAny() alias for onPattern('*'). The payload is
+    // typed as `unknown` in the FleetEvent — use the type guard in the
+    // handler to narrow it.
     //
     // Skip subagent lifecycle events (subagent.*) — those are emitted by
     // MultiAgentHost on the parent EventBus, not on the subagent's own bus.
     // Forwarding them would create duplicate fleet events for the same logical
     // occurrence. Use the parent EventBus path (events.on('subagent.*')) for
     // lifecycle events instead.
-    const off = bus.onPattern('*', (type, payload) => {
+    const off = bus.onAny((type, payload) => {
       if (type.startsWith('subagent.')) return;
       this.emit({ subagentId, taskId, ts: Date.now(), type, payload });
     });
@@ -181,6 +179,8 @@ export class FleetUsageAggregator {
     private readonly bus: FleetBus,
     private readonly priceLookup?: (
       subagentId: string,
+      provider?: string,
+      model?: string,
     ) => { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | undefined,
     private readonly metaLookup?: (
       subagentId: string,
@@ -239,7 +239,7 @@ export class FleetUsageAggregator {
     this.total.output += usage.output ?? 0;
     this.total.cacheRead += usage.cacheRead ?? 0;
     this.total.cacheWrite += usage.cacheWrite ?? 0;
-    const price = this.priceLookup?.(e.subagentId);
+    const price = this.priceLookup?.(e.subagentId, snap.provider, snap.model);
     if (price) {
       const delta =
         ((usage.input ?? 0) / 1_000_000) * (price.input ?? 0) +

@@ -324,6 +324,21 @@ export interface EventMap {
    * list and clear history entries that are now invalid.
    */
   'session.rewound': { toPromptIndex: number; revertedFiles: string[]; removedEvents: number };
+  /**
+   * Fired by the multi-agent coordinator on FleetBus whenever subagent
+   * counts change (spawn/stop/complete). The TUI subscribes to render
+   * live fleet counters without polling.
+   */
+  'coordinator.stats': {
+    total: number;
+    running: number;
+    idle: number;
+    stopped: number;
+    inFlight: number;
+    pending: number;
+    completed: number;
+    subagentStatuses: { subagentId: string; taskId: string; status: string; assigned: boolean }[];
+  };
   error: { err: Error; phase: string };
 }
 
@@ -369,6 +384,17 @@ export class EventBus {
     return () => {
       this.off(event, wrapper as Listener<EventName>);
     };
+  }
+
+  /**
+   * Subscribe to all events, regardless of name. Short-hand for
+   * `onPattern('*')`. Use for logging, debugging, or forwarding every
+   * event to another bus (as FleetBus does).
+   *
+   * Returns an unsubscribe function.
+   */
+  onAny(fn: (event: string, payload: unknown) => void): () => void {
+    return this.onPattern('*', fn);
   }
 
   /**
@@ -541,6 +567,22 @@ export class ScopedEventBus extends EventBus {
     };
     this.registrations.set(key, unsub);
     return unsub;
+  }
+
+  /**
+   * Subscribe to all events. Alias for `onPattern('*')` — the listener is
+   * tracked so that `teardown()` will remove it automatically.
+   */
+  override onAny(fn: (event: string, payload: unknown) => void): () => void {
+    const key = this.nextKey++;
+    // Call EventBus.onPattern directly so the wrapper-consumption in
+    // ScopedEventBus.on() doesn't re-enter and create a second registration slot.
+    const unsub = EventBus.prototype.onPattern.call(this, '*', fn);
+    this.registrations.set(key, unsub);
+    return () => {
+      this.registrations.delete(key);
+      unsub();
+    };
   }
 
   /**

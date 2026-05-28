@@ -85,13 +85,11 @@ export function scoreAgents(
   const hay = normalize(task);
   const out: DispatchCandidate[] = [];
   for (const def of Object.values(catalog)) {
-    const role = def.config.role;
-    if (!role) continue;
+    if (!def?.config?.role) continue;
     let score = 0;
     const matched: string[] = [];
     for (const kw of def.capability.keywords) {
       const needle = normalize(kw);
-      // needle is padded with spaces, so this is a whole-token(s) match.
       if (hay.includes(needle.trimEnd() + ' ') || hay.includes(' ' + needle.trimStart())) {
         const words = kw.trim().split(/\s+/).length;
         score += words;
@@ -99,7 +97,7 @@ export function scoreAgents(
       }
     }
     if (score > 0) {
-      out.push({ role, name: def.config.name, score, matched });
+      out.push({ role: def.config.role, name: def.config.name, score, matched });
     }
   }
   out.sort((a, b) => b.score - a.score);

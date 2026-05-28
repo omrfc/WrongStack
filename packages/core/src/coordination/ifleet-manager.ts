@@ -52,6 +52,12 @@ export interface IFleetManager {
   writeManifest(): Promise<string | null>;
 
   /**
+   * Bypass the debounce timer and write the manifest immediately.
+   * Clears any pending debounce timer before writing.
+   */
+  flushManifest(): Promise<void>;
+
+  /**
    * Aggregate fleet-wide status: pending tasks with descriptions and
    * live subagent snapshot from the coordinator. Used by
    * `MultiAgentHost.status()` to eliminate host-side state duplication.
@@ -73,4 +79,29 @@ export interface IFleetManager {
    * pending list stays accurate.
    */
   removePendingTask(taskId: string): void;
+
+  /**
+   * Wire the coordinator so `getFleetStats()` can delegate to it.
+   * Called by `Director` after constructing the coordinator so
+   * FleetManager's stats reflect live subagent data.
+   */
+  setCoordinator(coordinator: { getStats(): { total: number; running: number; idle: number; stopped: number; inFlight: number; pending: number; completed: number } }): void;
+
+  /**
+   * Coordinator stats snapshot for the TUI and monitoring tools.
+   * Returns actionable counts (total/running/idle/stopped/inFlight/
+   * pending/completed) plus per-subagent status details.
+   * Delegates to the coordinator when available; returns zeros
+   * if the coordinator has not yet been set.
+   */
+  getFleetStats(): {
+    total: number;
+    running: number;
+    idle: number;
+    stopped: number;
+    inFlight: number;
+    pending: number;
+    completed: number;
+    subagentStatuses: { subagentId: string; taskId: string; status: string; assigned: boolean }[];
+  };
 }

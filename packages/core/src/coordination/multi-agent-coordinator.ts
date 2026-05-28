@@ -45,6 +45,7 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
   readonly coordinatorId: string;
   readonly config: MultiAgentConfig;
   private runner?: SubagentRunner;
+  private fleetBus?: import('./fleet-bus.js').FleetBus;
 
   private readonly subagents = new Map<string, SubagentEntry>();
 
@@ -76,6 +77,15 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
    */
   setRunner(runner: SubagentRunner): void {
     this.runner = runner;
+  }
+
+  /**
+   * Wire a FleetBus for director-mode event emission. Call after the
+   * FleetManager is constructed so the coordinator can emit lifecycle
+   * events the TUI and monitoring tools subscribe to.
+   */
+  setFleetBus(fleet: import('./fleet-bus.js').FleetBus): void {
+    this.fleetBus = fleet;
   }
 
   /**
@@ -122,6 +132,20 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
 
     this.emit('subagent.started', { subagent: { ...subagent, id } });
 
+    this.fleetBus?.emit({
+      subagentId: id,
+      ts: Date.now(),
+      type: 'subagent.assigned',
+      payload: {
+        subagentId: id,
+        name: subagent.name,
+        provider: subagent.provider,
+        model: subagent.model,
+      },
+    });
+
+    this.emitCoordinatorStats();
+
     return { subagentId: id, agentId: id };
   }
 
@@ -167,6 +191,15 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
     subagent.context.parentBridge = null;
 
     this.emit('subagent.stopped', { subagentId, reason: 'stopped by coordinator' });
+
+    this.fleetBus?.emit({
+      subagentId,
+      ts: Date.now(),
+      type: 'subagent.stopped',
+      payload: { subagentId, reason: 'stopped by coordinator' },
+    });
+
+    this.emitCoordinatorStats();
   }
 
   async stopAll(): Promise<void> {
@@ -218,6 +251,23 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
       pending: this.pendingTasks.length,
       completed: this.completedResults.length,
     };
+  }
+
+  /** Emit a reactive coordinator.stats event on FleetBus so the TUI can subscribe. */
+  private emitCoordinatorStats(): void {
+    const stats = this.getStats();
+    const subagentStatuses = Array.from(this.subagents.entries()).map(([id, s]) => ({
+      subagentId: id,
+      taskId: s.currentTask ?? '',
+      status: s.status,
+      assigned: s.context.parentBridge !== null,
+    }));
+    this.fleetBus?.emit({
+      subagentId: this.coordinatorId,
+      ts: Date.now(),
+      type: 'coordinator.stats',
+      payload: { ...stats, subagentStatuses },
+    });
   }
 
   getStatus(): CoordinatorStatus {
@@ -437,7 +487,16 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
     task.subagentId = subagentId;
     subagent.context.tasks.push(task);
 
+    this.fleetBus?.emit({
+      subagentId,
+      taskId: task.id,
+      ts: Date.now(),
+      type: 'subagent.running',
+      payload: { subagentId, taskId: task.id },
+    });
+
     this.emit('task.assigned', { task, subagentId });
+    this.emitCoordinatorStats();
 
     // Budget combines coordinator defaults with per-subagent and per-task overrides.
     // Precedence: task > subagent (raw, no roster fills) > coordinator default > roster default.
@@ -666,6 +725,13 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
       if (subagent.abortController.signal.aborted) {
         subagent.abortController = new AbortController();
       }
+
+      this.fleetBus?.emit({
+        subagentId: result.subagentId,
+        ts: Date.now(),
+        type: 'subagent.idle',
+        payload: { subagentId: result.subagentId },
+      });
     }
     // Clear the terminating flag now that the worker has a terminal
     // TaskResult on record. Subsequent stop() calls re-add it; new
@@ -677,7 +743,26 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
       result,
     });
 
+    this.fleetBus?.emit({
+      subagentId: result.subagentId,
+      taskId: result.taskId,
+      ts: Date.now(),
+      type: 'subagent.completed',
+      payload: {
+        subagentId: result.subagentId,
+        taskId: result.taskId,
+        status: result.status,
+        iterations: result.iterations,
+        toolCalls: result.toolCalls,
+        durationMs: result.durationMs,
+      },
+    });
+
     this.tryDispatchNext();
+
+    // Emit after tryDispatchNext so the stats reflect the post-dispatch
+    // state (either a new running subagent, or idle if the queue is drained).
+    this.emitCoordinatorStats();
 
     if (this.isDone()) {
       this.emit('done', {

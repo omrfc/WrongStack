@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { SubagentConfig, TaskSpec } from '../types/multi-agent.js';
 import type { JSONSchema, Tool } from '../types/tool.js';
 import { type Director, FleetSpawnBudgetError, FleetCostCapError } from './director.js';
+import { dispatchAgent } from './dispatcher.js';
+import type { AgentDefinition } from './agents/index.js';
 
 // ---------------------------------------------------------------------------
 // Director-facing tool factories.
@@ -14,8 +16,9 @@ export function makeSpawnTool(director: Director, roster?: Record<string, Subage
   const inputSchema: JSONSchema = {
     type: 'object',
     properties: {
-      role: { type: 'string', description: 'Roster role id (preferred). When set, the spawn uses the matching config from the roster and ignores other fields.' },
-      name: { type: 'string', description: 'Display name for the subagent. Required when not using roster.' },
+      role: { type: 'string', description: 'Roster role id. When set, the spawn uses the matching config from the roster and ignores other fields.' },
+      description: { type: 'string', description: 'Free-form task description. When `role` is not set, the director uses the smart dispatcher to route this to the best-matching catalog agent. Use this when you don\'t know the exact role name.' },
+      name: { type: 'string', description: 'Display name for the subagent. Used as a fallback when description-based dispatch does not resolve a role.' },
       provider: { type: 'string', description: 'Provider id (e.g. "anthropic", "openai"). Defaults to the leader provider when omitted.' },
       model: { type: 'string', description: 'Model id within the provider. Defaults to the leader model when omitted.' },
       systemPromptOverride: { type: 'string', description: 'Extra prompt text appended after the role-base prompt.' },
@@ -28,20 +31,49 @@ export function makeSpawnTool(director: Director, roster?: Record<string, Subage
   return {
     name: 'spawn_subagent',
     description: 'Create a new subagent under this director. Returns the subagent id.',
-    usageHint: 'Either pass `role` (matches the roster) OR pass `name` + optional `provider`/`model`. Returns `{ subagentId }`.',
+    usageHint: 'Pass `role` (matches the roster), `description` (smart dispatch to best agent), or `name` + `provider`/`model`. Returns `{ subagentId }`.',
     permission: 'auto',
     mutating: false,
     inputSchema,
     async execute(input: unknown) {
       const i = (input ?? {}) as Record<string, unknown>;
       const role = typeof i.role === 'string' ? i.role : undefined;
-      const base: SubagentConfig | undefined = role && roster ? roster[role] : undefined;
-      if (role && !base) {
-        return { error: `unknown role "${role}". roster has: ${roster ? Object.keys(roster).join(', ') : '(empty)'}` };
+      const description = typeof i.description === 'string' ? i.description : undefined;
+
+      // Resolve base config from roster, explicit role, or dispatch-by-description
+      let cfg: SubagentConfig | undefined;
+
+      if (role && roster) {
+        const base = roster[role];
+        if (!base) return { error: `unknown role "${role}". roster has: ${Object.keys(roster).join(', ')}` };
+        cfg = instantiateRosterConfig(role, base);
+      } else if (description && !role) {
+        // Smart dispatch: route description to best catalog agent using dispatcher
+        const dispatchResult = await dispatchAgent(description, {
+          classifier: director.dispatchClassifier,
+          catalog: roster as unknown as Record<string, AgentDefinition> | undefined,
+        });
+        const dispatchRole = dispatchResult.role;
+        // If we have a matching roster entry for the dispatched role, use it
+        if (roster && roster[dispatchRole]) {
+          cfg = instantiateRosterConfig(dispatchRole, roster[dispatchRole]!);
+        } else {
+          // Dispatch found a catalog agent but there's no roster entry — use the
+          // catalog definition's config as a base template (role name + defaults).
+          // We must not mutate the original definition, so spread it.
+          const def = dispatchResult.definition;
+          cfg = {
+            name: def.config.name ?? dispatchRole,
+            role: dispatchRole,
+            provider: def.config.provider,
+            model: def.config.model,
+          };
+        }
       }
-      const cfg: SubagentConfig = base
-        ? instantiateRosterConfig(role!, base)
-        : { name: (i.name as string) ?? 'subagent' };
+
+      // Fall back to name-only config when neither role nor description dispatch resolved
+      cfg ??= { name: (i.name as string) ?? 'subagent' };
+
       if (typeof i.name === 'string') cfg.name = i.name;
       if (typeof i.provider === 'string') cfg.provider = i.provider;
       if (typeof i.model === 'string') cfg.model = i.model;
@@ -51,7 +83,7 @@ export function makeSpawnTool(director: Director, roster?: Record<string, Subage
       if (typeof i.maxCostUsd === 'number') cfg.maxCostUsd = i.maxCostUsd;
       try {
         const subagentId = await director.spawn(cfg);
-        return { subagentId, provider: cfg.provider, model: cfg.model, name: cfg.name };
+        return { subagentId, provider: cfg.provider, model: cfg.model, name: cfg.name, role: cfg.role };
       } catch (err) {
         if (err instanceof FleetSpawnBudgetError) {
           return { error: err.message, kind: err.kind, limit: err.limit, observed: err.observed };
@@ -182,11 +214,24 @@ export function makeTerminateTool(director: Director): Tool {
 export function makeFleetStatusTool(director: Director): Tool {
   return {
     name: 'fleet_status',
-    description: "Snapshot of the fleet — every subagent's current status, pending vs. completed task counts.",
+    description: "Snapshot of the fleet — every subagent's current status, coordinator counts (total/running/idle/stopped), pending task descriptions, and usage rollup.",
     permission: 'auto',
     mutating: false,
     inputSchema: { type: 'object', properties: {}, required: [] },
-    async execute() { return director.status(); },
+    async execute() {
+      const base = director.status();
+      const fm = director.fleetManager;
+      const stats = fm?.getFleetStats();
+      const fleetStatus = fm?.getFleetStatus();
+      return {
+        subagents: base.subagents,
+        coordinatorStats: stats
+          ? { total: stats.total, running: stats.running, idle: stats.idle, stopped: stats.stopped }
+          : undefined,
+        pending: fleetStatus?.pending ?? [],
+        usage: fm?.snapshot(),
+      };
+    },
   };
 }
 

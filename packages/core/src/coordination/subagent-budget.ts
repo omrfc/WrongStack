@@ -27,6 +27,21 @@ export interface BudgetLimits {
   timeoutMs?: number;
 }
 
+/**
+ * Controls how the budget behaves when `onThreshold` is set and a limit is hit.
+ *
+ * `'auto'` — emit `budget.threshold_reached` on the EventBus and wait for a
+ * coordinator response (extend/stop). If no listener responds within
+ * `DECISION_TIMEOUT_MS` the decision defaults to `'stop'`.
+ * `'sync'` — do not emit any event; treat the threshold as a hard stop and
+ * throw `BudgetExceededError` synchronously. Useful for fire-and-forget
+ * subagents that have an `onThreshold` handler for logging/metrics but are
+ * not wired into a coordinator.
+ *
+ * @default 'auto'
+ */
+export type BudgetNegotiationMode = 'auto' | 'sync';
+
 export interface BudgetUsage {
   iterations: number;
   toolCalls: number;
@@ -89,11 +104,19 @@ export type BudgetThresholdHandler = (info: {
  * runaway agent can't drain the cost ceiling of its siblings. All record/check
  * methods are O(1) and safe to call from hot paths.
  *
- * Behavior: `record*` methods check the limit and throw synchronously when
- * no `onThreshold` handler is configured. When a handler IS configured,
- * `checkLimit` delegates to it and any async work (coordinator decision)
- * is fire-and-forget via `void` — the thrown error is always synchronous
- * so event handlers in tests (which use `expect(...).toThrow`) work correctly.
+ * Behavior without `onThreshold`: hard stops synchronously on every limit hit.
+ *
+ * Behavior with `onThreshold` and `_mode === 'auto'`: emits `budget.threshold_reached`
+ * on the EventBus and throws `BudgetThresholdSignal`. The coordinator's verdict
+ * (extend/stop) resolves the embedded promise. If no listener responds within
+ * `DECISION_TIMEOUT_MS` the decision defaults to `'stop'`.
+ *
+ * Behavior with `onThreshold` and `_mode === 'sync'`: throws `BudgetExceededError`
+ * synchronously regardless of EventBus state or listener presence. This is useful
+ * for fire-and-forget subagents that have an `onThreshold` handler for logging/metrics
+ * but are not wired into a coordinator — the `'sync'` mode makes the hard-stop
+ * behavior explicit and means tests can use `expect().toThrow()` even without
+ * a fully-wired EventBus.
  */
 export class SubagentBudget {
   readonly limits: Readonly<BudgetLimits>;
@@ -110,30 +133,37 @@ export class SubagentBudget {
    * same kind are no-ops — without this dedup, every `recordIteration`
    * after the limit is reached spawns a fresh decision Promise (until
    * the first one lands and patches limits), flooding the FleetBus
-   * with redundant threshold events. Cleared in `checkLimitAsync`'s
+   * with redundant threshold events. Cleared in `negotiateExtension`'s
    * `finally`.
    */
   private readonly pendingExtensions: Set<BudgetKind> = new Set();
   /**
-   * Hard cap on how long `checkLimitAsync` waits for the coordinator to
+   * Hard cap on how long `negotiateExtension` waits for the coordinator to
    * respond before defaulting to 'stop'. Without this fallback an absent
    * or hung listener (Director not built / event filter detached mid-run)
-   * leaves the budget over-limit and never enforces anything, since
-   * `checkLimit` returns synchronously via `void this.checkLimitAsync`.
-   * Raised from 30s to 60s to give subagents more headroom before
-   * the threshold negotiation times out and triggers a hard stop.
+   * leaves the budget over-limit and never enforces anything.
    */
   private static readonly DECISION_TIMEOUT_MS = 60_000;
   /**
    * Injected by the runner when wiring the budget to its EventBus.
-   * Used by `checkLimitAsync` to emit `budget.threshold_reached` events.
+   * Used to emit `budget.threshold_reached` events in `'auto'` mode.
    */
   _events?: EventBus;
 
   /**
+   * Negotiation mode — controls whether a threshold hit tries to emit
+   * `budget.threshold_reached` and wait for a coordinator decision, or
+   * falls straight through to a synchronous hard stop.
+   *
+   * `'auto'` (default) — emit on the EventBus and wait; times out to 'stop'.
+   * `'sync'` — throw `BudgetExceededError` immediately regardless of listeners.
+   */
+  private _mode: BudgetNegotiationMode;
+
+  /**
    * Optional callback for soft-limit handling. When set, the budget will
-   * call this instead of throwing when a limit is first reached. The
-   * handler decides whether to throw, continue, or ask the coordinator.
+   * invoke it rather than throw immediately. The handler decides whether to
+   * throw synchronously, continue, or ask the coordinator for an extension.
    */
   get onThreshold(): BudgetThresholdHandler | undefined {
     return this._onThreshold;
@@ -142,7 +172,13 @@ export class SubagentBudget {
     this._onThreshold = fn;
   }
 
-  constructor(limits: BudgetLimits = {}) {
+  /** Returns the current negotiation mode. */
+  get mode(): BudgetNegotiationMode {
+    return this._mode;
+  }
+
+  constructor(limits: BudgetLimits = {}, mode: BudgetNegotiationMode = 'auto') {
+    this._mode = mode;
     // NOT frozen: `negotiateExtension` patches these limits in place when the
     // coordinator grants an auto-extension. Freezing made every granted
     // extension throw `TypeError: Cannot assign to read only property` in
@@ -167,46 +203,31 @@ export class SubagentBudget {
   }
 
   /**
-   * Synchronous budget check — always throws synchronously so callers
-   * (especially test event handlers using `expect().toThrow()`) get an
-   * unhandled rejection when the budget is exceeded without a handler.
-   * When `onThreshold` IS configured, the actual async threshold-handling
-   * is dispatched as a fire-and-forget promise.
+   * Synchronous budget check. Always throws synchronously so callers (especially
+   * test event handlers using `expect().toThrow()`) get an unhandled rejection
+   * when the budget is exceeded without a handler.
+   *
+   * Decision table:
+   * - no `onThreshold` handler         → throw `BudgetExceededError` (hard stop, always)
+   * - `mode === 'sync'`               → throw `BudgetExceededError` (hard stop, always)
+   * - `mode === 'auto'` + no listener  → throw `BudgetExceededError` (hard stop; no one to ask)
+   * - `mode === 'auto'` + listener     → throw `BudgetThresholdSignal` with async decision promise
    */
   private checkLimit(kind: BudgetKind, used: number, limit: number): void {
-    // No threshold handler → hard stop, throw synchronously.
     if (!this._onThreshold) {
       throw new BudgetExceededError(kind, limit, used);
     }
-    // No EventBus or no listener for the threshold event → there's no
-    // coordinator to ask. Fall back to the hard-stop contract so callers
-    // that only set `onThreshold` but never wire a Director (or whose
-    // FleetBus relay is detached) still get budget enforcement. Without
-    // this guard the BudgetThresholdSignal path would await a decision
-    // that nobody resolves, the agent would race past it synchronously,
-    // and the run would "succeed" past its budget.
+    if (this._mode === 'sync') {
+      throw new BudgetExceededError(kind, limit, used);
+    }
+    // 'auto' mode: only negotiate when a listener is present for the threshold event.
+    // hasListenerFor (not listenerCount) so a FleetBus `onPattern('*')` forwarder counts.
     const bus = this._events;
-    // hasListenerFor (not listenerCount) so a FleetBus `onPattern('*')`
-    // forwarder counts as a listener. listenerCount ignores wildcards, which
-    // made every delegated subagent hard-stop on a soft limit instead of
-    // negotiating an extension — the auto-extend path was dead on the real
-    // delegate/director flow.
     if (!bus || !bus.hasListenerFor('budget.threshold_reached')) {
       throw new BudgetExceededError(kind, limit, used);
     }
-    // Already negotiating an extension for this kind — the first signal
-    // is in flight; the runner is awaiting its decision and will either
-    // patch limits (we continue) or abort the run (we unwind). Don't
-    // throw a fresh signal — it would queue duplicate decisions and spam
-    // the FleetBus.
     if (this.pendingExtensions.has(kind)) return;
     this.pendingExtensions.add(kind);
-    // Throw `BudgetThresholdSignal` carrying the decision Promise. The
-    // runner's catch handler awaits the promise: `stop` triggers an
-    // abort so the run actually unwinds; `extend` leaves the (already
-    // patched) limits in place and the agent continues. The previous
-    // `void this.checkLimitAsync(...)` pattern silently produced an
-    // unhandled rejection on stop and let the agent run past budget.
     const decision = this.negotiateExtension(kind, used, limit);
     throw new BudgetThresholdSignal(kind, limit, used, decision);
   }
@@ -218,8 +239,8 @@ export class SubagentBudget {
    * `pendingExtensions` slot in `finally`.
    *
    * The 'continue' return from a sync handler is treated as
-   * `{ extend: {} }` — keep going without patching, next overrun will
-   * fire a fresh signal.
+   * `{ extend: {} }` — keep going without patching; next overrun fires
+   * a fresh signal.
    */
   private async negotiateExtension(
     kind: BudgetKind,
@@ -231,18 +252,10 @@ export class SubagentBudget {
         kind,
         used,
         limit,
-        // Inject a requestDecision helper the handler can call to emit the
-        // budget.threshold_reached event and wait for the coordinator's verdict.
-        // A hard fallback timer guarantees the promise eventually resolves
-        // even if no listener responds — without it, an absent/detached
-        // Director would leave the budget permanently in "asking" state.
         requestDecision: (): Promise<BudgetThresholdDecision> => {
-          // No EventBus wired OR no listener registered → there's nobody
-          // to grant an extension. Fall straight through to 'stop' so the
-          // runner aborts immediately. Without this short-circuit the run
-          // would idle for the 30s fallback before failing — long enough
-          // for a scripted agent (and our budget-enforcement tests) to
-          // happily finish past its budget.
+          // No EventBus wired OR no listener registered → nobody to grant
+          // an extension. Fall straight through to 'stop' so the runner
+          // aborts immediately rather than idling for 60s before failing.
           const bus = this._events;
           if (!bus || !bus.hasListenerFor('budget.threshold_reached')) {
             return Promise.resolve('stop');
@@ -282,9 +295,8 @@ export class SubagentBudget {
       const decision = await result;
       if (decision === 'stop') return 'stop';
 
-      // 'extend' — patch the in-place limits BEFORE resolving so the
-      // runner's continue path sees the new ceiling. The frozen-object
-      // cast mirrors the original implementation.
+      // 'extend' — patch in-place limits BEFORE resolving so the runner's
+      // continue path sees the new ceiling.
       const ext = decision.extend;
       if (ext.maxIterations !== undefined) {
         (this.limits as Record<string, unknown>).maxIterations = ext.maxIterations;
@@ -336,21 +348,17 @@ export class SubagentBudget {
   }
 
   /**
-   * Wall-clock budget check. Unlike other limits, timeout is treated as a
-   * warning-only event — it NEVER hard-stops the subagent. When the
-   * elapsed time exceeds timeoutMs, emits `budget.threshold_reached` with
-   * kind='timeout' so the Director can decide whether to extend or warn.
-   * Call this from the iteration loop so a hung tool gets a chance to
-   * negotiate more time before the coordinator's Promise.race kills it.
+   * Wall-clock budget check. Unlike other limits, timeout check passes through
+   * `checkLimit` and is subject to the same negotiation-mode decision table.
+   * In practice, `'sync'` mode (the usual test configuration) means a timeout
+   * immediately throws `BudgetExceededError`. In production with a coordinator,
+   * a timeout emits `budget.threshold_reached` so the Director can decide whether
+   * to extend or abort.
    */
   checkTimeout(): void {
     if (this.startTime === null || this.limits.timeoutMs === undefined) return;
     const elapsed = Date.now() - this.startTime;
     if (elapsed > this.limits.timeoutMs) {
-      // Route through the same negotiation path as all other soft limits.
-      // BudgetThresholdSignal → onBudgetError in the runner → coordinator
-      // decision → extend or warn. Never throw a hard BudgetExceededError
-      // for timeout.
       void this.checkLimit('timeout', elapsed, this.limits.timeoutMs);
     }
   }
