@@ -1,14 +1,16 @@
-fix(autophase): 3 bug-hunter findings resolved
+feat(tui): AutoPhase PhaseMonitor state and event wiring
 
-1. CRITICAL — resume() now properly catches tick() rejection instead of
-   fire-and-forget void. Handler logs to console since PhaseExecutionContext
-   has no onError callback.
+State: autoPhase branch added to State type (title, phases, runningPhaseIds,
+elapsedMs, monitorOpen). Initial state null.
 
-2. HIGH — deserializeTaskGraph now guards edges and rootNodes with ?? [],
-   preventing TypeError on iteration when fields are absent in old saved data.
+Reducer: 5 new actions — autoPhaseInit, autoPhasePhaseUpdate,
+autoPhaseRunningPhases, autoPhaseElapsed, autoPhaseMonitorToggle,
+autoPhaseReset.
 
-3. HIGH — saveToDisk: reordered read→push→write so disk is written BEFORE
-   in-memory state is updated, preventing checkpoint loss if write throws.
+AppProps: subscribeAutoPhase prop for wiring PhaseOrchestrator events.
 
-4. MEDIUM — deleteCheckpoint is now async, awaits deleteFromDisk to avoid
-   memory/disk split-brain on disk errors. Test updated accordingly.
+Effect: subscribes to phase.started/completed/failed/statusChange/
+taskCompleted/autonomous.tick/graph.completed/graph.failed and
+dispatches corresponding reducer actions.
+
+Ctrl+P: toggles the PhaseMonitor overlay via handleKey.

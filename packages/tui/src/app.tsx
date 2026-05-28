@@ -192,6 +192,14 @@ export interface AppProps {
     }) => void,
   ) => () => void;
   /**
+   * Subscribe to AutoPhase phase/task events from the PhaseOrchestrator.
+   * Drives `state.autoPhase` used by the PhaseMonitor component.
+   * Handlers receive the event name and payload from PhaseEventMap.
+   */
+  subscribeAutoPhase?: (
+    handler: (event: string, payload: unknown) => void,
+  ) => () => void;
+  /**
    * SDD session context getter. When an SDD session is active, returns
    * the AI prompt context to inject into user messages so the model
    * knows it's in a spec-building conversation.
@@ -463,6 +471,25 @@ type State = {
   } | null;
   /** Loaded from .wrongstack/goal.json on mount for startup banner. */
   goalSummary: GoalSummary;
+  /** AutoPhase orchestrator state — rendered by PhaseMonitor. */
+  autoPhase: {
+    /** AutoPhase graph title. */
+    title: string;
+    /** Per-phase task summary, keyed by phaseId. */
+    phases: Record<string, {
+      name: string;
+      status: string;
+      completedTasks: number;
+      totalTasks: number;
+      startedAt?: number;
+    }>;
+    /** Active phase IDs (running phases). */
+    runningPhaseIds: string[];
+    /** Elapsed ms since graph start — drives the elapsed counter. */
+    elapsedMs: number;
+    /** True while the monitor overlay is open (Ctrl+P). */
+    monitorOpen: boolean;
+  } | null;
 };
 
 type Action =
@@ -607,7 +634,13 @@ type Action =
     phase: 'error';
     message: string;
   }}
-  | { type: 'goalSummary'; summary: GoalSummary };
+  | { type: 'goalSummary'; summary: GoalSummary }
+  | { type: 'autoPhaseInit'; title: string }
+  | { type: 'autoPhasePhaseUpdate'; phaseId: string; name: string; status: string; completedTasks: number; totalTasks: number; startedAt?: number }
+  | { type: 'autoPhaseRunningPhases'; phaseIds: string[] }
+  | { type: 'autoPhaseElapsed'; ms: number }
+  | { type: 'autoPhaseMonitorToggle' }
+  | { type: 'autoPhaseReset' };
 
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -1197,6 +1230,55 @@ export function reducer(state: State, action: Action): State {
     case 'goalSummary': {
       return { ...state, goalSummary: action.summary };
     }
+    case 'autoPhaseInit': {
+      return {
+        ...state,
+        autoPhase: {
+          title: action.title,
+          phases: {},
+          runningPhaseIds: [],
+          elapsedMs: 0,
+          monitorOpen: false,
+        },
+      };
+    }
+    case 'autoPhasePhaseUpdate': {
+      if (!state.autoPhase) return state;
+      return {
+        ...state,
+        autoPhase: {
+          ...state.autoPhase,
+          phases: {
+            ...state.autoPhase.phases,
+            [action.phaseId]: {
+              name: action.name,
+              status: action.status,
+              completedTasks: action.completedTasks,
+              totalTasks: action.totalTasks,
+              startedAt: action.startedAt,
+            },
+          },
+        },
+      };
+    }
+    case 'autoPhaseRunningPhases': {
+      if (!state.autoPhase) return state;
+      return {
+        ...state,
+        autoPhase: { ...state.autoPhase, runningPhaseIds: action.phaseIds },
+      };
+    }
+    case 'autoPhaseElapsed': {
+      if (!state.autoPhase) return state;
+      return { ...state, autoPhase: { ...state.autoPhase, elapsedMs: action.ms } };
+    }
+    case 'autoPhaseMonitorToggle': {
+      if (!state.autoPhase) return state;
+      return { ...state, autoPhase: { ...state.autoPhase, monitorOpen: !state.autoPhase.monitorOpen } };
+    }
+    case 'autoPhaseReset': {
+      return { ...state, autoPhase: null };
+    }
   }
 }
 
@@ -1299,6 +1381,7 @@ export function App({
   getParallelEngine,
   subscribeEternalIteration,
   subscribeEternalStage,
+  subscribeAutoPhase,
   getSDDContext,
   onSDDOutput,
   appVersion,
@@ -1431,6 +1514,7 @@ export function App({
     rewindOverlay: null,
     eternalStage: null,
     goalSummary: null,
+    autoPhase: null,
   });
 
   const builderRef = useRef<InputBuilder | null>(null);
@@ -2618,6 +2702,74 @@ export function App({
     };
   }, [events, onClearHistory]);
 
+  // --- AutoPhase phase/task events → PhaseMonitor ---
+  useEffect(() => {
+    if (!subscribeAutoPhase) return;
+
+    const handler = (event: string, payload: unknown) => {
+      switch (event) {
+        case 'phase.started': {
+          const p = payload as { phaseId: string; name: string };
+          dispatch({ type: 'autoPhasePhaseUpdate', phaseId: p.phaseId, name: p.name, status: 'running', completedTasks: 0, totalTasks: 0, startedAt: Date.now() });
+          break;
+        }
+        case 'phase.completed': {
+          const p = payload as { phaseId: string; name: string; durationMs: number };
+          dispatch({ type: 'autoPhasePhaseUpdate', phaseId: p.phaseId, name: p.name, status: 'completed', completedTasks: 0, totalTasks: 0 });
+          break;
+        }
+        case 'phase.failed': {
+          const p = payload as { phaseId: string; name: string; error?: string };
+          dispatch({ type: 'autoPhasePhaseUpdate', phaseId: p.phaseId, name: p.name, status: 'failed', completedTasks: 0, totalTasks: 0 });
+          break;
+        }
+        case 'phase.statusChange': {
+          const p = payload as { phaseId: string; name: string; from: string; to: string };
+          const status = p.to === 'running' ? 'running' : p.to;
+          dispatch({ type: 'autoPhasePhaseUpdate', phaseId: p.phaseId, name: p.name, status, completedTasks: 0, totalTasks: 0 });
+          break;
+        }
+        case 'phase.taskCompleted': {
+          const p = payload as { phaseId: string; taskId: string; taskTitle: string };
+          const existing = stateRef.current.autoPhase?.phases[p.phaseId];
+          if (existing) {
+            dispatch({
+              type: 'autoPhasePhaseUpdate',
+              phaseId: p.phaseId,
+              name: existing.name,
+              status: existing.status,
+              completedTasks: existing.completedTasks + 1,
+              totalTasks: existing.totalTasks,
+            });
+          }
+          break;
+        }
+        case 'autonomous.tick': {
+          const p = payload as { activePhases: Array<{ id: string }>; queuedPhases: Array<{ id: string }> };
+          dispatch({ type: 'autoPhaseRunningPhases', phaseIds: p.activePhases.map((ph) => ph.id) });
+          // Update elapsed time
+          const ap = stateRef.current.autoPhase;
+          if (ap) {
+            const firstPhase = ap.phases[Object.keys(ap.phases)[0] ?? ''];
+            const elapsed = ap.elapsedMs > 0 ? ap.elapsedMs + 1000 : Date.now() - (firstPhase?.startedAt ?? Date.now());
+            dispatch({ type: 'autoPhaseElapsed', ms: elapsed });
+          }
+          break;
+        }
+        case 'graph.completed': {
+          dispatch({ type: 'autoPhaseReset' });
+          break;
+        }
+        case 'graph.failed': {
+          dispatch({ type: 'autoPhaseReset' });
+          break;
+        }
+      }
+    };
+
+    return subscribeAutoPhase(handler);
+  }, [subscribeAutoPhase]);
+
   // --- Leader agent compaction events → chat history ---
   useEffect(() => {
     const offFired = events.on('compaction.fired', (e) => {
@@ -3338,6 +3490,12 @@ export function App({
         }
       }
       // Any other key while picker is open: ignore.
+      return;
+    }
+
+    // AutoPhase monitor toggle — Ctrl+P
+    if (key.ctrl && input === 'p') {
+      dispatch({ type: 'autoPhaseMonitorToggle' });
       return;
     }
 
