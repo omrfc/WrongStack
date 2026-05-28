@@ -84,9 +84,10 @@ export const installTool: Tool<InstallInput, InstallOutput> = {
     // Validate package names to prevent flag injection and path traversal.
     // A name like "--ignore-scripts=false" would be interpreted as a flag;
     // "file:../../etc/passwd" as a local path specifier.
+    // Cap at 200 chars to prevent ReDoS on the regex engine (npm's max is 214).
     const PKG_NAME_RE = /^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/i;
     for (const pkg of pkgList) {
-      if (!PKG_NAME_RE.test(pkg) || pkg.startsWith('-')) {
+      if (!PKG_NAME_RE.test(pkg) || pkg.startsWith('-') || pkg.length > 200) {
         yield {
           type: 'final',
           output: {

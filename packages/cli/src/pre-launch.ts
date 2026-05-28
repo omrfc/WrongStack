@@ -163,20 +163,40 @@ export interface LaunchModeChoices {
   mode: 'tui' | 'repl';
   /** Auto-approve every tool call (no permission prompts). */
   yolo: boolean;
+  /** Start with Director mode on (fleet manifest + scratchpad enabled). */
+  director: boolean;
+  /** Initial autonomy mode. 'off' = stops after each turn; 'auto' = self-driving. */
+  autonomy: 'off' | 'auto';
 }
 
 /**
- * Ask for interactive mode (TUI vs REPL) and YOLO. Either prompt is
- * skipped when the corresponding CLI flag was already pinned. Returns
- * the resolved pair.
+ * Thrown by runLaunchPrompts when the user presses q to cancel.
+ * Caught by boot.ts so it can exit cleanly without process.exit().
+ */
+export class LaunchAbortedError extends Error {
+  readonly exitCode = 0;
+  constructor() {
+    super('Launch cancelled by user');
+    this.name = 'LaunchAbortedError';
+  }
+}
+
+/**
+ * Ask for interactive mode (TUI vs REPL), YOLO, Director, and Autonomy.
+ * Each prompt is skipped when the corresponding option is pinned via CLI
+ * flag. Returns the resolved set.
+ *
+ * @throws LaunchAbortedError when the user presses q to cancel.
  */
 export async function runLaunchPrompts(opts: {
   renderer: TerminalRenderer;
   reader: ReadlineInputReader;
   modePinned?: 'tui' | 'repl';
   yoloPinned?: boolean;
+  directorPinned?: boolean;
+  autonomyPinned?: 'off' | 'auto';
 }): Promise<LaunchModeChoices> {
-  const { renderer, reader, modePinned, yoloPinned } = opts;
+  const { renderer, reader, modePinned, yoloPinned, directorPinned, autonomyPinned } = opts;
 
   let mode: 'tui' | 'repl';
   if (modePinned) {
@@ -191,7 +211,7 @@ export async function runLaunchPrompts(opts: {
       .toLowerCase();
     if (answer === 'q') {
       renderer.write(color.dim('  Goodbye!\n'));
-      process.exit(0);
+      throw new LaunchAbortedError();
     }
     mode = answer === 'r' || answer === 'repl' ? 'repl' : 'tui';
   }
@@ -209,14 +229,55 @@ export async function runLaunchPrompts(opts: {
       .toLowerCase();
     if (answer === 'q') {
       renderer.write(color.dim('  Goodbye!\n'));
-      process.exit(0);
+      throw new LaunchAbortedError();
     }
     yolo = answer !== 'n' && answer !== 'no';
   }
 
+  let director: boolean;
+  if (directorPinned !== undefined) {
+    director = directorPinned;
+  } else {
+    const answer = (
+      await reader.readLine(
+        `  ${color.amber('?')} Director mode ${color.dim('(fleet manifest + multi-agent orchestration)')} ${color.dim('[Y/n/q]')} `,
+      )
+    )
+      .trim()
+      .toLowerCase();
+    if (answer === 'q') {
+      renderer.write(color.dim('  Goodbye!\n'));
+      throw new LaunchAbortedError();
+    }
+    director = answer !== 'n' && answer !== 'no';
+  }
+
+  let autonomy: 'off' | 'auto';
+  if (autonomyPinned !== undefined) {
+    autonomy = autonomyPinned;
+  } else {
+    const answer = (
+      await reader.readLine(
+        `  ${color.amber('?')} Autonomy mode ${color.dim('(auto-continue — agent picks next step)')} ${color.dim('[Y/n/q]')} `,
+      )
+    )
+      .trim()
+      .toLowerCase();
+    if (answer === 'q') {
+      renderer.write(color.dim('  Goodbye!\n'));
+      throw new LaunchAbortedError();
+    }
+    autonomy = answer !== 'n' && answer !== 'no' ? 'auto' : 'off';
+  }
+
+  const badges: string[] = [];
+  if (yolo) badges.push(color.yellow('YOLO'));
+  if (director) badges.push(color.cyan('DIRECTOR'));
+  if (autonomy !== 'off') badges.push(color.magenta(`AUTONOMY:${autonomy.toUpperCase()}`));
+  const badgeStr = badges.length > 0 ? ` (${badges.join(' · ')})` : '';
   renderer.write(
-    `\n  ${color.green('▶')} Launching in ${color.bold(mode.toUpperCase())} mode${yolo ? color.yellow(' (YOLO)') : ''}\n\n`,
+    `\n  ${color.green('▶')} Launching in ${color.bold(mode.toUpperCase())} mode${badgeStr}\n\n`,
   );
 
-  return { mode, yolo };
+  return { mode, yolo, director, autonomy };
 }

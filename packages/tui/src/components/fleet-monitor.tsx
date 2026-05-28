@@ -28,7 +28,9 @@ const SPARK = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
 /**
  * Bucket recent tool executions into a fixed number of time bins ending at
- * `now`, returning a per-bin count. Drives the per-agent activity sparkline.
+ * `now`, returning a per-bin count. Drives the per-agent activity sparkline
+ * in the Agents (live) monitor; exported here because it was historically
+ * defined alongside the fleet monitor.
  */
 export function bucketActivity(
   recentTools: ReadonlyArray<{ at: number }>,
@@ -67,10 +69,16 @@ function fmtTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
+function fmtCost(n: number): string {
+  if (n === 0) return '—';
+  return `$${n.toFixed(3)}`;
+}
+
 /**
- * Full graphical fleet dashboard (Ctrl+F). Header counts, a concurrency +
- * token/cost gauge, a per-agent block with a relative-load progress bar and
- * an activity sparkline, and a compact event timeline.
+ * Fleet orchestration dashboard (Ctrl+F). Concurrency gauge, fleet totals,
+ * a compact one-line-per-agent table, and a recent-events timeline. Live
+ * per-agent context (current tool / streaming tail) lives in the Agents
+ * monitor (Ctrl+G) — this view is for "how the fleet is doing overall".
  */
 export function FleetMonitor({
   entries,
@@ -81,22 +89,22 @@ export function FleetMonitor({
 }: FleetMonitorProps): React.ReactElement {
   const all = Object.values(entries);
   const running = all.filter((e) => e.status === 'running');
+  const idle = all.filter((e) => e.status === 'idle').length;
   const done = all.filter((e) => e.status === 'success').length;
   const failed = all.filter((e) => e.status === 'failed' || e.status === 'timeout').length;
 
   const concurrencyRatio = maxConcurrent > 0 ? running.length / maxConcurrent : 0;
-  // Per-agent load bar normalizes tool calls against the busiest agent so the
-  // bars are comparable at a glance — who's doing the most work right now.
-  const maxTools = Math.max(1, ...all.map((e) => e.toolCalls));
 
-  // Active first (running → idle), then most-recently-finished, capped.
+  // Sort: running → idle → recently-finished (newest first).
   const ordered = [...all].sort((a, b) => {
     const ra = a.status === 'running' ? 0 : a.status === 'idle' ? 1 : 2;
     const rb = b.status === 'running' ? 0 : b.status === 'idle' ? 1 : 2;
     if (ra !== rb) return ra - rb;
+    if (ra === 2) return b.lastEventAt - a.lastEventAt;
     return a.startedAt - b.startedAt;
   });
-  const shown = ordered.slice(0, 8);
+  const shown = ordered.slice(0, 12);
+  const overflow = all.length - shown.length;
 
   // Timeline: spawn + terminal-status events across all agents, newest first.
   const events: Array<{ at: number; icon: string; color: string; text: string }> = [];
@@ -121,26 +129,27 @@ export function FleetMonitor({
     }
   }
   events.sort((a, b) => b.at - a.at);
-  const timeline = events.slice(0, 6);
+  const timeline = events.slice(0, 8);
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
-      {/* Header */}
+      {/* Header — orchestration identity, distinct from AGENTS · LIVE */}
       <Box flexDirection="row" gap={1}>
         <Text bold color="cyan">
-          FLEET MONITOR
+          FLEET · ORCHESTRATION
         </Text>
         <Text dimColor>│</Text>
         <Text color="yellow">▶{running.length}</Text>
+        <Text dimColor>○{idle}</Text>
         <Text color="green">✓{done}</Text>
         {failed > 0 ? <Text color="red">✗{failed}</Text> : null}
         <Text dimColor>· Ctrl+F to close</Text>
       </Box>
 
-      {/* Concurrency + token/cost gauge */}
+      {/* Concurrency + totals gauge */}
       <Box flexDirection="row" gap={1}>
         <Text dimColor>concurrency</Text>
-        <Text color="cyan">[{renderProgress(concurrencyRatio, 10)}]</Text>
+        <Text color="cyan">[{renderProgress(concurrencyRatio, 12)}]</Text>
         <Text dimColor>
           {running.length}/{maxConcurrent}
         </Text>
@@ -157,37 +166,40 @@ export function FleetMonitor({
         <Text dimColor>No subagents yet — spawn with /fleet spawn or /fleet dispatch.</Text>
       ) : null}
 
-      {/* Per-agent blocks */}
-      {shown.map((e) => {
-        const s = STATUS[e.status];
-        const elapsed =
-          e.status === 'running' ? fmtElapsed(Math.max(0, nowTick - e.startedAt)) : e.status;
-        const spark = sparkline(bucketActivity(e.recentTools, nowTick));
-        const tool = e.currentTool?.name ?? e.recentTools[e.recentTools.length - 1]?.name ?? '';
-        return (
-          <Box key={e.id} flexDirection="column">
-            <Box flexDirection="row" gap={1}>
-              <Text color={s.color} bold>
-                {s.icon}
-              </Text>
-              <Text bold>{e.name.padEnd(12).slice(0, 12)}</Text>
-              <Text dimColor>{elapsed.padEnd(7).slice(0, 7)}</Text>
-              <Text color="cyan">{renderProgress(e.toolCalls / maxTools, 10)}</Text>
-              <Text dimColor>
-                L{e.iterations} {e.toolCalls}t
-              </Text>
-              {e.extensions && e.extensions > 0 ? (
-                <Text color="yellow">⚡×{e.extensions}</Text>
-              ) : null}
-            </Box>
-            <Box flexDirection="row" gap={1}>
-              <Text dimColor>{'  '}</Text>
-              <Text color="green">{spark}</Text>
-              {tool ? <Text dimColor>{tool}</Text> : null}
-            </Box>
+      {/* Compact one-line-per-agent table */}
+      {shown.length > 0 ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Box flexDirection="row" gap={1}>
+            <Text dimColor>{'  '}</Text>
+            <Text dimColor>{'name'.padEnd(16)}</Text>
+            <Text dimColor>{'status'.padEnd(10)}</Text>
+            <Text dimColor>{'L/t'.padEnd(8)}</Text>
+            <Text dimColor>{'elapsed'.padEnd(8)}</Text>
+            <Text dimColor>cost</Text>
           </Box>
-        );
-      })}
+          {shown.map((e) => {
+            const s = STATUS[e.status];
+            const elapsed =
+              e.status === 'running'
+                ? fmtElapsed(Math.max(0, nowTick - e.startedAt))
+                : fmtElapsed(Math.max(0, nowTick - e.lastEventAt)) + ' ago';
+            return (
+              <Box key={e.id} flexDirection="row" gap={1}>
+                <Text color={s.color}>{s.icon}</Text>
+                <Text>{e.name.padEnd(16).slice(0, 16)}</Text>
+                <Text color={s.color}>{e.status.padEnd(10)}</Text>
+                <Text dimColor>{`L${e.iterations} ${e.toolCalls}t`.padEnd(8)}</Text>
+                <Text dimColor>{elapsed.padEnd(8).slice(0, 8)}</Text>
+                <Text color="yellow">{fmtCost(e.cost)}</Text>
+                {e.extensions && e.extensions > 0 ? (
+                  <Text color="yellow"> ⚡×{e.extensions}</Text>
+                ) : null}
+              </Box>
+            );
+          })}
+          {overflow > 0 ? <Text dimColor>{`  … +${overflow} more`}</Text> : null}
+        </Box>
+      ) : null}
 
       {/* Timeline */}
       {timeline.length > 0 ? (

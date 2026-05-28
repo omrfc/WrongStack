@@ -318,9 +318,32 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
  * subagent capability override, not a deny-bypass).
  */
 export class AutoApprovePermissionPolicy implements PermissionPolicy {
+  /**
+   * Tools that are too dangerous to auto-approve even in a delegated
+   * subagent context. Subagents run non-interactively under a director
+   * and cannot answer prompts, but inherited authorization does not
+   * imply blanket permission for destructive or privilege-escalating
+   * operations. These tools remain at their declared `permission`
+   * level so the leader must explicitly allow them per-spawn.
+   */
+  private static readonly DENY = new Set([
+    'bash',     // arbitrary shell — use exec for constrained shell
+    'write',    // arbitrary file write
+    'scaffold', // arbitrary file generation outside project root
+    'patch',    // arbitrary diff application
+    'install',  // installs from arbitrary package sources
+    'exec',     // restricted shell but with arbitrary command args
+  ]);
+
   async evaluate(tool: Tool): Promise<PermissionDecision> {
-    if (tool.permission === 'deny') {
-      return { permission: 'deny', source: 'default', reason: 'tool default deny' };
+    if (tool.permission === 'deny' || AutoApprovePermissionPolicy.DENY.has(tool.name)) {
+      return {
+        permission: 'deny',
+        source: 'subagent_guard',
+        reason: AutoApprovePermissionPolicy.DENY.has(tool.name)
+          ? `tool ${tool.name} is not auto-approved for subagents — ask the leader to allow it explicitly`
+          : 'tool default deny',
+      };
     }
     return { permission: 'auto', source: 'yolo' };
   }

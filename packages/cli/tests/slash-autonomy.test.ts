@@ -113,13 +113,92 @@ describe('/autonomy slash command', () => {
     expect(startSpy).not.toHaveBeenCalled();
   });
 
-  it('forces YOLO on and calls onEternalStart when goal exists', async () => {
+  it('forces YOLO on and calls onEternalStart when goal exists (no confirm wired = legacy launch)', async () => {
     await saveGoal(goalFilePath(tmp), emptyGoal('mission'));
     const { registry, getMode, startSpy, yoloSpy } = rig(tmp);
     await registry.dispatch('/autonomy eternal', fakeCtx);
     expect(getMode()).toBe('eternal');
     expect(startSpy).toHaveBeenCalledOnce();
     expect(yoloSpy).toHaveBeenCalledWith(true);
+  });
+
+  it('prompts to confirm an existing fresh goal when confirm callback is wired', async () => {
+    await saveGoal(goalFilePath(tmp), emptyGoal('old fresh mission'));
+    const reg = rig(tmp);
+    const confirmSpy = vi.fn(async (_q: string, _d?: boolean) => true);
+    (reg.ctx as { confirm?: unknown }).confirm = confirmSpy;
+    await reg.registry.dispatch('/autonomy eternal', fakeCtx);
+    expect(confirmSpy).toHaveBeenCalledOnce();
+    const [question, defaultYes] = confirmSpy.mock.calls[0]!;
+    expect(question).toMatch(/old fresh mission/);
+    expect(defaultYes).toBe(true);
+    expect(reg.getMode()).toBe('eternal');
+    expect(reg.startSpy).toHaveBeenCalledOnce();
+  });
+
+  it('confirm prompt for a stale goal defaults to NO and warns when declined', async () => {
+    let stale = emptyGoal('stale mission');
+    stale = appendJournal(stale, { source: 'todo', task: 'old work', status: 'success' });
+    await saveGoal(goalFilePath(tmp), stale);
+    const reg = rig(tmp);
+    const confirmSpy = vi.fn(async (_q: string, _d?: boolean) => false);
+    (reg.ctx as { confirm?: unknown }).confirm = confirmSpy;
+    const result = await reg.registry.dispatch('/autonomy eternal', fakeCtx);
+    const [question, defaultYes] = confirmSpy.mock.calls[0]!;
+    expect(question).toMatch(/Stale goal/);
+    expect(question).toMatch(/1 iterations/);
+    expect(defaultYes).toBe(false);
+    expect(reg.getMode()).toBe('off');
+    expect(reg.startSpy).not.toHaveBeenCalled();
+    expect(result?.message).toMatch(/Skipped/);
+    expect(result?.message).toMatch(/--keep/);
+  });
+
+  it('confirm returning null (user pressed q) cancels without changing mode', async () => {
+    await saveGoal(goalFilePath(tmp), emptyGoal('mission'));
+    const reg = rig(tmp);
+    (reg.ctx as { confirm?: unknown }).confirm = vi.fn(async () => null);
+    const result = await reg.registry.dispatch('/autonomy eternal', fakeCtx);
+    expect(reg.getMode()).toBe('off');
+    expect(reg.startSpy).not.toHaveBeenCalled();
+    expect(result?.message).toMatch(/Cancelled/);
+  });
+
+  it('/autonomy eternal --keep skips the confirm prompt', async () => {
+    let stale = emptyGoal('stale mission');
+    stale = appendJournal(stale, { source: 'todo', task: 'old work', status: 'success' });
+    await saveGoal(goalFilePath(tmp), stale);
+    const reg = rig(tmp);
+    const confirmSpy = vi.fn(async () => true);
+    (reg.ctx as { confirm?: unknown }).confirm = confirmSpy;
+    await reg.registry.dispatch('/autonomy eternal --keep', fakeCtx);
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(reg.getMode()).toBe('eternal');
+    expect(reg.startSpy).toHaveBeenCalledOnce();
+  });
+
+  it('/autonomy eternal --new aborts with instructions and does not launch', async () => {
+    await saveGoal(goalFilePath(tmp), emptyGoal('existing mission'));
+    const reg = rig(tmp);
+    const confirmSpy = vi.fn(async () => true);
+    (reg.ctx as { confirm?: unknown }).confirm = confirmSpy;
+    const result = await reg.registry.dispatch('/autonomy eternal --new', fakeCtx);
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(reg.getMode()).toBe('off');
+    expect(reg.startSpy).not.toHaveBeenCalled();
+    expect(result?.message).toMatch(/New mission requested/);
+    expect(result?.message).toMatch(/\/goal clear/);
+  });
+
+  it('legacy stale-goal hard-error still applies when confirm callback is missing', async () => {
+    let stale = emptyGoal('stale mission');
+    stale = appendJournal(stale, { source: 'todo', task: 'old work', status: 'success' });
+    await saveGoal(goalFilePath(tmp), stale);
+    const reg = rig(tmp);
+    const result = await reg.registry.dispatch('/autonomy eternal', fakeCtx);
+    expect(result?.message).toMatch(/Stale goal detected/);
+    expect(reg.getMode()).toBe('off');
+    expect(reg.startSpy).not.toHaveBeenCalled();
   });
 
   it('/autonomy stop signals stop and resets mode to off', async () => {

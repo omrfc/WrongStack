@@ -103,6 +103,54 @@ describe('AnthropicProvider', () => {
     expect(body?.['tools'] as unknown[]).toHaveLength(1);
   });
 
+  it('uses Bearer auth for non-Anthropic baseUrls (kimi-for-coding etc.)', async () => {
+    const spy = vi.fn(async (_url: unknown, init?: { headers?: Record<string, string> }) => ({
+      ok: true,
+      status: 200,
+      headers: init?.headers,
+      json: async () => ({
+        content: [{ type: 'text', text: 'ok' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+      text: async () => '',
+    }));
+    const p = new AnthropicProvider({
+      apiKey: 'sk-kimi-XYZ',
+      baseUrl: 'https://api.kimi.com/coding/v1',
+      fetchImpl: spy as unknown as typeof fetch,
+    });
+    await p.complete(
+      { model: 'k2p6', messages: [{ role: 'user', content: 'x' }], maxTokens: 1 },
+      { signal: new AbortController().signal },
+    );
+    const hdrs = (spy.mock.calls[0]![1] as { headers: Record<string, string> }).headers;
+    expect(hdrs['authorization']).toBe('Bearer sk-kimi-XYZ');
+    expect(hdrs['x-api-key']).toBeUndefined();
+  });
+
+  it('keeps x-api-key for default Anthropic baseUrl', async () => {
+    const spy = vi.fn(async (_url: unknown, init?: { headers?: Record<string, string> }) => ({
+      ok: true,
+      status: 200,
+      headers: init?.headers,
+      json: async () => ({
+        content: [{ type: 'text', text: 'ok' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+      text: async () => '',
+    }));
+    const p = new AnthropicProvider({ apiKey: 'sk-ant-XYZ', fetchImpl: spy as unknown as typeof fetch });
+    await p.complete(
+      { model: 'm', messages: [{ role: 'user', content: 'x' }], maxTokens: 1 },
+      { signal: new AbortController().signal },
+    );
+    const hdrs = (spy.mock.calls[0]![1] as { headers: Record<string, string> }).headers;
+    expect(hdrs['x-api-key']).toBe('sk-ant-XYZ');
+    expect(hdrs['authorization']).toBeUndefined();
+  });
+
   it('non-2xx with 500 is retryable', async () => {
     const fetchImpl = mockFetch({}, 500) as unknown as typeof fetch;
     const p = new AnthropicProvider({ apiKey: 'k', fetchImpl });

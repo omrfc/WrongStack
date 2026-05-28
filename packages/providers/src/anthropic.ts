@@ -26,6 +26,15 @@ export interface AnthropicProviderOptions {
 const DEFAULT_BASE = 'https://api.anthropic.com';
 const DEFAULT_VERSION = '2023-06-01';
 
+function isAnthropicHost(baseUrl: string): boolean {
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase();
+    return host === 'api.anthropic.com' || host.endsWith('.anthropic.com');
+  } catch {
+    return false;
+  }
+}
+
 export class AnthropicProvider extends WireAdapter {
   override readonly id = 'anthropic';
   override readonly capabilities: Capabilities = capabilitiesForFamily('anthropic');
@@ -47,9 +56,18 @@ export class AnthropicProvider extends WireAdapter {
   protected override buildHeaders(req: Request): Record<string, string> {
     const headers: Record<string, string> = {
       ...super.buildHeaders(req),
-      'x-api-key': this.apiKey,
       'anthropic-version': this.opts.apiVersion ?? DEFAULT_VERSION,
     };
+    if (isAnthropicHost(this.baseUrl)) {
+      headers['x-api-key'] = this.apiKey;
+    } else {
+      // Third-party Anthropic-compatible proxies (kimi-for-coding,
+      // zai-coding-plan, anyrouter, …) reject `x-api-key` and require
+      // `Authorization: Bearer`. This mirrors Claude Code's
+      // ANTHROPIC_AUTH_TOKEN switch — triggered automatically when the
+      // baseUrl is not Anthropic-owned.
+      headers['authorization'] = `Bearer ${this.apiKey}`;
+    }
     if (this.opts.beta && this.opts.beta.length > 0) {
       headers['anthropic-beta'] = this.opts.beta.join(',');
     }

@@ -16,7 +16,9 @@ export function buildAutonomyCommand(opts: SlashCommandContext): SlashCommand {
       '  /autonomy suggest    Show next-step suggestions after each turn',
       '  /autonomy on         Auto-continue — agent picks next step and proceeds',
       '  /autonomy eternal    Goal-driven loop — runs forever against /goal',
+      '                       (prompts to confirm an existing goal; `--keep` to skip prompt)',
       '  /autonomy parallel   Parallel mode — 4-8 agents per tick, fan-out parallelism',
+      '                       (prompts to confirm an existing goal; `--keep` to skip prompt)',
       '  /autonomy stop       Stop eternal mode (no-op for other modes)',
       '  /autonomy toggle     Cycle: off → suggest → auto → eternal → parallel → off',
       '',
@@ -38,7 +40,12 @@ export function buildAutonomyCommand(opts: SlashCommandContext): SlashCommand {
       'Ctrl+C to stop the active iteration. /autonomy stop ends the eternal loop.',
     ].join('\n'),
     async run(args) {
-      const arg = args.trim().toLowerCase();
+      // First token is the action; everything after it is treated as
+      // modifiers (e.g. `eternal --keep`, `parallel --new`). Pre-split so
+      // both halves are available throughout the dispatch.
+      const parts = args.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      const arg = parts[0] ?? '';
+      const modifiers = parts.slice(1);
 
       if (!opts.onAutonomy) {
         const msg = 'Autonomy mode is not available in this session.';
@@ -143,21 +150,69 @@ export function buildAutonomyCommand(opts: SlashCommandContext): SlashCommand {
 
       // Both eternal and parallel modes require a goal.
       if (newMode === 'eternal' || newMode === 'eternal-parallel') {
+        // Honor explicit short-circuits: `--keep` skips the confirm,
+        // `--new` aborts with instructions to reset the goal first.
+        const wantKeep = modifiers.includes('--keep') || modifiers.includes('keep');
+        const wantNew = modifiers.includes('--new') || modifiers.includes('new');
+
         const goal = await loadGoal(goalFilePath(opts.projectRoot));
         if (!goal) {
           const msg = `${color.red('Eternal/parallel mode requires a goal.')} Run \`/goal set <mission>\` first.`;
           opts.renderer.writeWarning(msg);
           return { message: msg };
         }
-        const isStale = goal.iterations > 0 || goal.engineState === 'running';
-        if (isStale) {
+
+        if (wantNew) {
           const msg =
-            `${color.amber('Stale goal detected.')} Previous mission has ${goal.iterations} iterations ` +
-            `(engineState: ${goal.engineState}). Clear it first: ${color.bold('/goal clear')}, ` +
-            `then set a new one: ${color.bold('/goal set <mission>')}.`;
+            `${color.amber('New mission requested.')} Clear the current goal first: ${color.bold('/goal clear')}, ` +
+            `then ${color.bold('/goal set <mission>')}, then re-run ${color.bold(`/autonomy ${newMode}`)}.`;
           opts.renderer.writeWarning(msg);
           return { message: msg };
         }
+
+        const isStale = goal.iterations > 0 || goal.engineState === 'running';
+
+        // Existing goal — confirm before launching so an old mission
+        // doesn't get reanimated unintentionally. `--keep` bypasses the
+        // prompt. When the host didn't wire a `confirm` callback (tests,
+        // non-TTY), fall back to the old behaviour: launch if fresh,
+        // hard-error if stale.
+        if (!wantKeep) {
+          if (opts.confirm) {
+            const goalPreview = goal.goal.length > 80
+              ? `${goal.goal.slice(0, 77)}…`
+              : goal.goal;
+            const detail = isStale
+              ? `${color.amber('Stale goal')} (${goal.iterations} iterations, engineState: ${goal.engineState}): "${goalPreview}". Continue with this mission?`
+              : `Existing goal: "${goalPreview}". Use this mission?`;
+            const defaultYes = !isStale;
+            const answer = await opts.confirm(detail, defaultYes);
+            if (answer === null) {
+              const msg = `${color.dim('Cancelled.')} Autonomy mode unchanged.`;
+              opts.renderer.write(msg);
+              return { message: msg };
+            }
+            if (!answer) {
+              const msg =
+                `${color.amber('Skipped.')} To start a new mission: ${color.bold('/goal clear')} → ` +
+                `${color.bold('/goal set <mission>')} → ${color.bold(`/autonomy ${newMode}`)}. ` +
+                `To force the existing one: ${color.bold(`/autonomy ${newMode} --keep`)}.`;
+              opts.renderer.write(msg);
+              return { message: msg };
+            }
+          } else if (isStale) {
+            // No confirm callback — keep the pre-prompt behaviour so the
+            // engine never auto-resumes a stale mission in non-interactive
+            // contexts. Tests rely on this path.
+            const msg =
+              `${color.amber('Stale goal detected.')} Previous mission has ${goal.iterations} iterations ` +
+              `(engineState: ${goal.engineState}). Clear it first: ${color.bold('/goal clear')}, ` +
+              `then set a new one: ${color.bold('/goal set <mission>')}.`;
+            opts.renderer.writeWarning(msg);
+            return { message: msg };
+          }
+        }
+
         if (!opts.onEternalStart) {
           const msg = 'Eternal mode controller is not wired in this session.';
           opts.renderer.writeWarning(msg);

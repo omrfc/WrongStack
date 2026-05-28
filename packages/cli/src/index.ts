@@ -500,7 +500,15 @@ export async function main(argv: string[]): Promise<number> {
         : undefined;
   let director: Director | null = null;
   // Autonomy mode: 'off' (default), 'suggest' (show next steps), 'auto' (self-driving)
-  let autonomyMode: import('./slash-commands/autonomy.js').AutonomyMode = 'off';
+  // Initial value can be pinned via the launch prompt (or `--autonomy <mode>`),
+  // which sets `flags['autonomy']` before we wire up. Keep the ref in sync
+  // so the autonomy prompt contributor sees the same value from turn 1.
+  let autonomyMode: import('./slash-commands/autonomy.js').AutonomyMode = (() => {
+    const v = flags['autonomy'];
+    if (v === 'auto' || v === 'suggest' || v === 'eternal' || v === 'eternal-parallel') return v;
+    return 'off';
+  })();
+  autonomyModeRef.current = autonomyMode;
   // Eternal-autonomy engine instance — lazy, created when /autonomy eternal is invoked.
   // Lives at function scope so /autonomy stop and SIGINT handlers can reach it.
   let eternalEngine: import('@wrongstack/core').EternalAutonomyEngine | null = null;
@@ -693,6 +701,25 @@ export async function main(argv: string[]): Promise<number> {
     statuslineHiddenItems: [...currentHiddenItems],
     setStatuslineHiddenItems,
     agentsMonitorController,
+    confirm: async (question, defaultYes = true): Promise<boolean | null> => {
+      // Non-TTY / piped stdin → don't block. For destructive or surprising
+      // actions (e.g. starting eternal mode against a stale goal) the safe
+      // non-interactive default is `false` — auto-confirming destructive
+      // operations in scripts is dangerous. `null` signals "no user to ask"
+      // only when the caller explicitly needs to distinguish cancel from
+      // deny (which /autonomy eternal doesn't).
+      if (!process.stdin.isTTY) return false;
+      const hint = defaultYes ? '[Y/n/q]' : '[y/N/q]';
+      try {
+        const raw = await reader.readLine(`  ${color.amber('?')} ${question} ${color.dim(hint)} `);
+        const ans = raw.trim().toLowerCase();
+        if (ans === 'q' || ans === 'quit' || ans === 'cancel') return null;
+        if (ans === '') return defaultYes;
+        return ans === 'y' || ans === 'yes';
+      } catch {
+        return false;
+      }
+    },
     onSpawn: async (description, spawnOpts) => {
       const { subagentId, taskId } = await multiAgentHost.spawn(description, spawnOpts);
       const tags: string[] = [];

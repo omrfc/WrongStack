@@ -391,6 +391,23 @@ type State = {
   contextChipVersion: number;
   /** Live fleet state: per-subagent entries from FleetBus events. Keyed by subagentId. */
   fleet: Record<string, FleetEntry>;
+  /**
+   * Leader-loop activity, synthesized for the AgentsMonitor overlay so the
+   * user can see leader iteration / tool counts alongside subagent rows.
+   * Driven by EventBus `iteration.started`/`iteration.completed`/`tool.started`/`tool.executed`.
+   * Always present; renders as AGENT#0 LEADER in the monitor regardless of
+   * whether any subagents exist.
+   */
+  leader: {
+    iterations: number;
+    toolCalls: number;
+    recentTools: Array<{ name: string; ok?: boolean; durationMs?: number; at: number }>;
+    currentTool?: { name: string; startedAt: number };
+    startedAt: number;
+    lastEventAt: number;
+    /** True while inside an iteration (between iteration.started and iteration.completed). */
+    iterating: boolean;
+  };
   /** Fleet-wide accumulated cost. */
   fleetCost: number;
   /** Fleet-wide token totals from the usage aggregator, for the monitor gauge. */
@@ -555,6 +572,10 @@ type Action =
       totalExtensions: number;
     }
   | { type: 'fleetCost'; cost: number; input?: number; output?: number }
+  | { type: 'leaderIterStart' }
+  | { type: 'leaderIterEnd' }
+  | { type: 'leaderToolStart'; name: string }
+  | { type: 'leaderToolEnd'; name: string; ok?: boolean; durationMs?: number }
   | { type: 'setStreamFleet'; enabled: boolean }
   | { type: 'toggleMonitor' }
   | { type: 'toggleAgentsMonitor' }
@@ -1089,6 +1110,50 @@ export function reducer(state: State, action: Action): State {
             : state.fleetTokens,
       };
     }
+    case 'leaderIterStart': {
+      return {
+        ...state,
+        leader: {
+          ...state.leader,
+          iterations: state.leader.iterations + 1,
+          iterating: true,
+          lastEventAt: Date.now(),
+        },
+      };
+    }
+    case 'leaderIterEnd': {
+      return {
+        ...state,
+        leader: { ...state.leader, iterating: false, lastEventAt: Date.now() },
+      };
+    }
+    case 'leaderToolStart': {
+      return {
+        ...state,
+        leader: {
+          ...state.leader,
+          currentTool: { name: action.name, startedAt: Date.now() },
+          lastEventAt: Date.now(),
+        },
+      };
+    }
+    case 'leaderToolEnd': {
+      const now = Date.now();
+      const recentTools = [
+        ...state.leader.recentTools,
+        { name: action.name, ok: action.ok, durationMs: action.durationMs, at: now },
+      ].slice(-8);
+      return {
+        ...state,
+        leader: {
+          ...state.leader,
+          toolCalls: state.leader.toolCalls + 1,
+          currentTool: undefined,
+          recentTools,
+          lastEventAt: now,
+        },
+      };
+    }
     case 'setStreamFleet': {
       return { ...state, streamFleet: action.enabled };
     }
@@ -1348,6 +1413,15 @@ export function App({
     confirmQueue: [],
     contextChipVersion: 0,
     fleet: {},
+    leader: {
+      iterations: 0,
+      toolCalls: 0,
+      recentTools: [],
+      currentTool: undefined,
+      startedAt: Date.now(),
+      lastEventAt: Date.now(),
+      iterating: false,
+    },
     fleetCost: 0,
     fleetTokens: { input: 0, output: 0 },
     streamFleet: true,
@@ -1568,6 +1642,34 @@ export function App({
     }
     return { running, idle, pending: 0, completed };
   }, [state.fleet]);
+
+  // Synthesize LEADER as AGENT#0 and prepend to the live fleet so the
+  // monitor / FleetPanel are never empty even when no subagents have been
+  // spawned. The 'leader' key can't collide with subagent IDs (those are
+  // ULIDs). status maps from the high-level run state — streaming/running/
+  // iterating → 'running', else 'idle'.
+  const entriesWithLeader = useMemo<Record<string, FleetEntry>>(() => {
+    const leaderEntry: FleetEntry = {
+      id: 'leader',
+      name: 'LEADER',
+      provider,
+      model,
+      status:
+        state.status === 'running' || state.status === 'streaming' || state.leader.iterating
+          ? 'running'
+          : 'idle',
+      streamingText: '',
+      iterations: state.leader.iterations,
+      toolCalls: state.leader.toolCalls,
+      recentTools: state.leader.recentTools,
+      recentMessages: [],
+      cost: 0,
+      startedAt: state.leader.startedAt,
+      lastEventAt: state.leader.lastEventAt,
+      currentTool: state.leader.currentTool,
+    };
+    return { leader: leaderEntry, ...state.fleet };
+  }, [state.fleet, state.leader, state.status, provider, model]);
 
   // Stable per-subagent label + color, assigned on first sighting and
   // shared between the FleetBus listener (history stream) and the
@@ -2207,6 +2309,13 @@ export function App({
     });
     const offToolStart = events.on('tool.started', (e) => {
       dispatch({ type: 'toolStarted', id: e.id, name: e.name });
+      dispatch({ type: 'leaderToolStart', name: e.name });
+    });
+    const offIterStart = events.on('iteration.started', () => {
+      dispatch({ type: 'leaderIterStart' });
+    });
+    const offIterEnd = events.on('iteration.completed', () => {
+      dispatch({ type: 'leaderIterEnd' });
     });
     const offToolProgress = events.on('tool.progress', (e) => {
       // Only `partial_output` becomes the live tail. Other event kinds
@@ -2247,6 +2356,9 @@ export function App({
       // Clear the live tail for this tool — the final entry is now in
       // <Static>, no need to keep mirroring it below.
       dispatch({ type: 'toolStreamClear', name: e.name });
+      // Mirror into the leader-only counter so the AgentsMonitor's LEADER
+      // row stays live even when no subagents exist.
+      dispatch({ type: 'leaderToolEnd', name: e.name, ok: e.ok, durationMs: e.durationMs });
       // Echo the current todo list into chat whenever the `todo` tool
       // mutates ctx.todos — same format as `/todos list`. Snapshotted from
       // agent.ctx.todos at this point (the tool executor has already
@@ -2326,6 +2438,8 @@ export function App({
     return () => {
       offDelta();
       offToolStart();
+      offIterStart();
+      offIterEnd();
       offToolProgress();
       offTool();
       offRetry();
@@ -4161,7 +4275,7 @@ export function App({
       />
       {state.agentsMonitorOpen ? (
         <AgentsMonitor
-          entries={state.fleet}
+          entries={entriesWithLeader}
           totalCost={state.fleetCost}
           totalTokens={state.fleetTokens}
           nowTick={nowTick}

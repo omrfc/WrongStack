@@ -18,11 +18,12 @@ import {
 } from '@wrongstack/core';
 import { builtinToolsPack } from '@wrongstack/tools';
 import { parseArgs } from './arg-parser.js';
+import { LaunchAbortedError, runLaunchPrompts } from './pre-launch.js';
 import { bootConfig } from './boot-config.js';
 import { ReadlineInputReader } from './input-reader.js';
 import { runPicker, saveToGlobalConfig } from './picker.js';
 import { printLaunchHints } from './launch-hints.js';
-import { runLaunchPrompts, runProjectCheck } from './pre-launch.js';
+import { runProjectCheck } from './pre-launch.js';
 import { TerminalRenderer } from './renderer.js';
 import { subcommands } from './subcommands/index.js';
 import { patchConfig } from './utils.js';
@@ -194,13 +195,41 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
     }
   }
 
-  // Mode + YOLO prompts
+  // Mode + YOLO + Director + Autonomy prompts
   if (isInteractiveTTY) {
     let modePinned: 'tui' | 'repl' | undefined;
     if (flags['no-tui']) modePinned = 'repl';
     else if (flags['tui']) modePinned = 'tui';
     const yoloPinned: boolean | undefined = flags['yolo'] === true ? true : undefined;
-    const choices = await runLaunchPrompts({ renderer, reader, modePinned, yoloPinned });
+    let directorPinned: boolean | undefined;
+    if (flags['director'] === true || typeof flags['resume'] === 'string') directorPinned = true;
+    else if (flags['no-director'] === true) directorPinned = false;
+    let autonomyPinned: 'off' | 'auto' | undefined;
+    if (flags['no-autonomy'] === true) autonomyPinned = 'off';
+    else if (flags['eternal'] === true) autonomyPinned = 'off'; // --eternal starts engine directly, skips launch-prompt autonomy
+    else if (typeof flags['autonomy'] === 'string') {
+      const v = (flags['autonomy'] as string).toLowerCase();
+      autonomyPinned = v === 'off' || v === 'no' || v === 'false' ? 'off' : 'auto';
+    } else if (flags['autonomy'] === true) {
+      autonomyPinned = 'auto';
+    }
+    let choices: Awaited<ReturnType<typeof runLaunchPrompts>>;
+    try {
+      choices = await runLaunchPrompts({
+        renderer,
+        reader,
+        modePinned,
+        yoloPinned,
+        directorPinned,
+        autonomyPinned,
+      });
+    } catch (err) {
+      if (err instanceof LaunchAbortedError) {
+        await reader.close();
+        return 0;
+      }
+      throw err;
+    }
     if (choices.mode === 'tui') {
       flags['tui'] = true;
       flags['no-tui'] = false;
@@ -209,6 +238,8 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
       flags['no-tui'] = true;
     }
     if (choices.yolo !== config.yolo) config = patchConfig(config, { yolo: choices.yolo });
+    if (choices.director) flags['director'] = true;
+    flags['autonomy'] = choices.autonomy;
 
     printLaunchHints(renderer, flags, {
       cursorFile: path.join(wpaths.cacheDir, 'hint-cursor'),

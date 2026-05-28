@@ -135,6 +135,14 @@ export interface SlashCommandContext {
   /** Stop the eternal/parallel autonomy engine (mid-iteration abort + flag flip). */
   onEternalStop?: () => void;
   /**
+   * Ask the user a yes/no question on the REPL. Returns `true`/`false` for
+   * Y/N answers, `null` when the user cancels (q). Resolves to `defaultYes`
+   * on non-TTY / EOF so non-interactive callers don't hang. Slash commands
+   * use this for destructive or surprising actions (e.g. starting eternal
+   * mode against a stale goal).
+   */
+  confirm?: (question: string, defaultYes?: boolean) => Promise<boolean | null>;
+  /**
    * Absolute path to the per-session plan JSON file. Read+written by the
    * `/plan` slash command. Optional — when omitted, `/plan` short-circuits
    * with a "not configured" message instead of crashing.

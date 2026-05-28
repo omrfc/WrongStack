@@ -25,6 +25,10 @@ export const BOOLEAN_FLAGS = new Set([
   'webui',
   'no-check',
   'director',
+  'no-director',
+  'no-autonomy',
+  'autonomy',
+  'eternal',
   'no-hints',
   'hints',
 ]);
