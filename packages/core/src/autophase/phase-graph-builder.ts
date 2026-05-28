@@ -1,5 +1,6 @@
 import type { PhaseGraph, PhaseNode, PhaseTemplate } from './types.js';
 import type { TaskGraph } from '../types/task-graph.js';
+import type { TaskStore } from '../sdd/task-tracker.js';
 import { DefaultTaskStore, TaskTracker } from '../sdd/index.js';
 
 export interface PhaseGraphBuilderOptions {
@@ -11,6 +12,8 @@ export interface PhaseGraphBuilderOptions {
   autonomous?: boolean;
   /** Başarısızlıkta dur */
   stopOnFailure?: boolean;
+  /** Harici TaskStore (opsiyonel) */
+  externalTaskStore?: TaskStore;
 }
 
 /**
@@ -43,8 +46,8 @@ export class PhaseGraphBuilder {
       const phaseId = crypto.randomUUID();
       phaseIds.push(phaseId);
 
-      // Task graph oluştur
-      const store = new DefaultTaskStore();
+      // Harici store veya yeni DefaultTaskStore kullan
+      const store = this.opts.externalTaskStore ?? new DefaultTaskStore();
       const tracker = new TaskTracker({ store });
       const taskGraph = await tracker.createGraph(phaseId, `${tmpl.name} Tasks`);
 

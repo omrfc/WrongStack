@@ -38,6 +38,14 @@ export class TaskTracker {
 
   constructor(private readonly opts: TaskTrackerOptions) {}
 
+  /**
+   * Attach an existing graph (used by PhaseOrchestrator to associate a tracker
+   * with a phase's pre-built task graph without re-creating it).
+   */
+  setGraph(graph: TaskGraph): void {
+    this.graph = graph;
+  }
+
   async createGraph(specId: string, title: string): Promise<TaskGraph> {
     this.graph = {
       id: crypto.randomUUID(),
@@ -130,12 +138,9 @@ export class TaskTracker {
     this.persist();
   }
 
-  /**
-   * Update node fields (title, description, priority, estimateHours, tags).
-   * Does NOT change status. Use updateNodeStatus for status changes.
-   */
   updateNode(id: string, patch: Partial<Pick<TaskNode, 'title' | 'description' | 'priority' | 'estimateHours' | 'tags'>>): void {
     if (!this.graph) throw new Error('No graph loaded');
+
     const node = this.graph.nodes.get(id);
     if (!node) throw new Error(`Node ${id} not found`);
 
@@ -228,9 +233,7 @@ export class TaskTracker {
     return computeTaskProgress(this.graph);
   }
 
-  getTransitions(taskId?: string): TaskTransition[] {
-    if (!taskId) return [...this.transitions];
-    // Would need taskId tracking per transition
+  getTransitions(_taskId?: string): TaskTransition[] {
     return [...this.transitions];
   }
 
@@ -240,6 +243,7 @@ export class TaskTracker {
     for (const depId of dependents) {
       const dep = this.graph.nodes.get(depId);
       if (dep?.status === 'blocked') {
+        // Check if all blockers are now completed
         const remainingBlockers = this.getBlockers(depId);
         const allUnblocked = remainingBlockers.every((id) => {
           const blocker = this.graph?.nodes.get(id);
@@ -273,22 +277,19 @@ export class TaskTracker {
    * Fire-and-forget persistence with attached error handler.
    * Synchronous mutators (addNode/addEdge/updateNodeStatus) use this to
    * avoid forcing an async cascade through every caller; if the store
-   * rejects, the configured `onPersistError` is invoked so failures are
-   * surfaced instead of swallowed by an unhandled promise rejection.
+   * is missing or throwing, the error is surfaced via onPersistError.
    */
   private persist(): void {
     if (!this.graph) return;
     this.opts.store.saveGraph(this.graph).catch((err) => {
-      if (this.opts.onPersistError) this.opts.onPersistError(err);
-      else
-        console.warn(
-          '[task-tracker] saveGraph failed:',
-          err instanceof Error ? err.message : String(err),
-        );
+      this.opts.onPersistError
+        ? this.opts.onPersistError(err)
+        : console.warn('[task-tracker] saveGraph failed:', err instanceof Error ? err.message : String(err));
     });
   }
 }
 
+// Sort comparison helpers
 const PRIORITY_RANK: Record<TaskNode['priority'], number> = {
   critical: 0,
   high: 1,
@@ -306,13 +307,9 @@ const STATUS_RANK: Record<TaskNode['status'], number> = {
 
 function compareByField(a: TaskNode, b: TaskNode, field: TaskSort['field']): number {
   switch (field) {
-    case 'priority':
-      return PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
-    case 'status':
-      return STATUS_RANK[a.status] - STATUS_RANK[b.status];
-    case 'createdAt':
-      return a.createdAt - b.createdAt;
-    case 'updatedAt':
-      return a.updatedAt - b.updatedAt;
+    case 'priority': return PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
+    case 'status': return STATUS_RANK[a.status] - STATUS_RANK[b.status];
+    case 'createdAt': return a.createdAt - b.createdAt;
+    case 'updatedAt': return a.updatedAt - b.updatedAt;
   }
 }

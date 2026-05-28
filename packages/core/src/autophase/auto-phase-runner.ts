@@ -1,4 +1,4 @@
-import type { EventBus } from '../kernel/events.js';
+import { EventBus } from '../kernel/events.js';
 import type { TaskNode } from '../types/task-graph.js';
 import { PhaseGraphBuilder } from './phase-graph-builder.js';
 import { PhaseOrchestrator } from './phase-orchestrator.js';
@@ -51,6 +51,29 @@ export class AutoPhaseRunner {
   private opts: AutoPhaseRunnerOptions;
   private progressInterval: ReturnType<typeof setInterval> | null = null;
 
+  private readonly graphCompletedHandler = (payload: unknown) => {
+    const p = payload as { graphId: string; durationMs: number };
+    if (this.graph && p.graphId === this.graph.id) {
+      this.opts.onComplete?.(this.graph);
+      this.cleanup();
+    }
+  };
+
+  private readonly graphFailedHandler = (payload: unknown) => {
+    const p = payload as { graphId: string; failedPhaseId: string; error: string };
+    if (this.graph && p.graphId === this.graph.id) {
+      const failedPhase = this.graph.phases.get(p.failedPhaseId);
+      if (failedPhase) {
+        this.opts.onFail?.(this.graph, failedPhase, new Error(p.error));
+      }
+      this.cleanup();
+    }
+  };
+
+  /** Stores the unsubscribe function returned by EventBus.on() */
+  private unsubscribeCompleted: (() => void) | null = null;
+  private unsubscribeFailed: (() => void) | null = null;
+
   constructor(opts: AutoPhaseRunnerOptions) {
     this.opts = opts;
   }
@@ -102,32 +125,16 @@ export class AutoPhaseRunner {
       }, 2000);
     }
 
-    // Event listeners for completion/failure
-    const events = this.opts.events;
-    if (events) {
-      (events.on as (event: string, handler: (payload: unknown) => void) => void)(
-        'graph.completed',
-        (payload: unknown) => {
-          const p = payload as { graphId: string; durationMs: number };
-          if (this.graph && p.graphId === this.graph.id) {
-            this.opts.onComplete?.(this.graph);
-            this.cleanup();
-          }
-        },
-      );
-      (events.on as (event: string, handler: (payload: unknown) => void) => void)(
-        'graph.failed',
-        (payload: unknown) => {
-          const p = payload as { graphId: string; failedPhaseId: string; error: string };
-          if (this.graph && p.graphId === this.graph.id) {
-            const failedPhase = this.graph.phases.get(p.failedPhaseId);
-            if (failedPhase) {
-              this.opts.onFail?.(this.graph, failedPhase, new Error(p.error));
-            }
-            this.cleanup();
-          }
-        },
-      );
+    // Register event listeners using the untyped surface to handle custom events
+    if (this.opts.events) {
+      const events = this.opts.events as EventBus;
+      const onUntyped = events.on as unknown as (
+        event: string,
+        handler: (payload: unknown) => void,
+      ) => () => void;
+      // Store the unsubscribe functions for proper cleanup
+      this.unsubscribeCompleted = onUntyped('graph.completed', this.graphCompletedHandler);
+      this.unsubscribeFailed = onUntyped('graph.failed', this.graphFailedHandler);
     }
 
     await this.orchestrator.start();
@@ -177,6 +184,11 @@ export class AutoPhaseRunner {
       clearInterval(this.progressInterval);
       this.progressInterval = null;
     }
+    // Use the unsubscribe functions returned by EventBus.on() instead of .off()
+    this.unsubscribeCompleted?.();
+    this.unsubscribeCompleted = null;
+    this.unsubscribeFailed?.();
+    this.unsubscribeFailed = null;
   }
 }
 

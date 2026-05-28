@@ -37,6 +37,8 @@ export class PhaseOrchestrator {
   private paused = false;
   private runningPhases = new Set<string>();
   private tickInterval: ReturnType<typeof setInterval> | null = null;
+  private trackerCache = new Map<string, TaskTracker>();
+  private taskRetryCounts = new Map<string, number>();
 
   constructor(opts: PhaseOrchestratorOptions) {
     this.graph = opts.graph;
@@ -71,6 +73,11 @@ export class PhaseOrchestrator {
       const batch = readyPhases.slice(0, this.opts.maxConcurrentPhases);
       await Promise.all(batch.map((p) => this.startPhase(p)));
 
+      // Faz gecikmesi uygula
+      if (this.opts.phaseDelayMs > 0) {
+        await this.delay(this.opts.phaseDelayMs);
+      }
+
       // Yeni ready fazları kontrol et (bir faz tamamlanınca sonrakiler ready olur)
       readyPhases = this.getReadyPhases().filter(
         (p) => !this.runningPhases.has(p.id) && p.status !== 'completed' && p.status !== 'failed',
@@ -91,7 +98,6 @@ export class PhaseOrchestrator {
   /** Devam et — yeni fazlar başlayabilir */
   resume(): void {
     this.paused = false;
-    // Hemen bir tick çalıştır
     void this.tick();
   }
 
@@ -102,7 +108,6 @@ export class PhaseOrchestrator {
       clearInterval(this.tickInterval);
       this.tickInterval = null;
     }
-    // Aktif fazları durdur
     for (const phaseId of this.runningPhases) {
       const phase = this.graph.phases.get(phaseId);
       if (phase) {
@@ -117,20 +122,22 @@ export class PhaseOrchestrator {
     if (this.stopped || this.paused) return;
 
     const active = this.getActivePhases();
-    const ready = this.getReadyPhases();
+    const queued = this.getReadyPhases();
 
     this.emit('autonomous.tick', {
       activePhases: active.map((p) => p.id),
-      queuedPhases: ready.map((p) => p.id),
+      queuedPhases: queued.map((p) => p.id),
     });
 
-    this.ctx.onTick?.({ activePhases: active, readyPhases: ready });
+    this.ctx.onTick?.({ activePhases: active, readyPhases: queued });
 
     // Yeni faz başlatma slotu var mı?
     const availableSlots = this.opts.maxConcurrentPhases - active.length;
-    if (availableSlots > 0 && ready.length > 0) {
-      for (const phase of ready.slice(0, availableSlots)) {
-        await this.startPhase(phase);
+    if (availableSlots > 0 && queued.length > 0) {
+      for (const phase of queued.slice(0, availableSlots)) {
+        if (phase.status === 'pending') {
+          await this.startPhase(phase);
+        }
       }
     }
 
@@ -163,10 +170,8 @@ export class PhaseOrchestrator {
     this.emit('phase.started', { phaseId: phase.id, name: phase.name });
 
     try {
-      // Fazın task graph'ını çalıştır
       await this.executePhaseTasks(phase);
 
-      // Task'lar bitti — fazı tamamla
       const failedTasks = this.getFailedTaskCount(phase);
       const completedTasks = this.getCompletedTaskCount(phase);
 
@@ -181,6 +186,7 @@ export class PhaseOrchestrator {
         phase.completedAt = Date.now();
         phase.actualDurationMs = Date.now() - (phase.startedAt ?? Date.now());
         this.runningPhases.delete(phase.id);
+        this.graph.activePhaseIds = this.graph.activePhaseIds.filter((id) => id !== phase.id);
         this.emit('phase.failed', {
           phaseId: phase.id,
           name: phase.name,
@@ -192,6 +198,7 @@ export class PhaseOrchestrator {
         phase.completedAt = Date.now();
         phase.actualDurationMs = Date.now() - (phase.startedAt ?? Date.now());
         this.runningPhases.delete(phase.id);
+        this.graph.activePhaseIds = this.graph.activePhaseIds.filter((id) => id !== phase.id);
         this.graph.completedPhaseIds.push(phase.id);
         this.emit('phase.completed', {
           phaseId: phase.id,
@@ -205,6 +212,7 @@ export class PhaseOrchestrator {
       phase.completedAt = Date.now();
       phase.actualDurationMs = Date.now() - (phase.startedAt ?? Date.now());
       this.runningPhases.delete(phase.id);
+      this.graph.activePhaseIds = this.graph.activePhaseIds.filter((id) => id !== phase.id);
       this.graph.failedPhaseIds.push(phase.id);
       this.emit('phase.failed', {
         phaseId: phase.id,
@@ -216,7 +224,6 @@ export class PhaseOrchestrator {
   }
 
   private async executePhaseTasks(phase: PhaseNode): Promise<void> {
-    const graph = phase.taskGraph;
     const pendingTasks = this.getExecutableTasks(phase);
 
     while (pendingTasks.length > 0 && !this.stopped) {
@@ -238,7 +245,6 @@ export class PhaseOrchestrator {
         }
       }
 
-      // Yeni executable task'ları ekle
       const newReady = this.getExecutableTasks(phase);
       pendingTasks.length = 0;
       pendingTasks.push(...newReady);
@@ -246,10 +252,8 @@ export class PhaseOrchestrator {
   }
 
   private async executeSingleTask(task: TaskNode, phase: PhaseNode): Promise<unknown> {
-    // Task status'unu güncelle
     const tracker = this.getTrackerForPhase(phase);
     tracker.updateNodeStatus(task.id, 'in_progress');
-
     return this.ctx.executeTask(task, phase.id);
   }
 
@@ -265,13 +269,28 @@ export class PhaseOrchestrator {
 
   private markTaskFailed(phase: PhaseNode, task: TaskNode, error: unknown): void {
     const tracker = this.getTrackerForPhase(phase);
-    tracker.updateNodeStatus(task.id, 'failed', error instanceof Error ? error.message : String(error));
-    this.emit('phase.taskFailed', {
-      phaseId: phase.id,
-      taskId: task.id,
-      taskTitle: task.title,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    const taskKey = `${phase.id}:${task.id}`;
+    const currentRetries = this.taskRetryCounts.get(taskKey) ?? 0;
+
+    if (currentRetries < this.opts.maxRetries) {
+      this.taskRetryCounts.set(taskKey, currentRetries + 1);
+      tracker.updateNodeStatus(task.id, 'pending', `Retry ${currentRetries + 1}/${this.opts.maxRetries}`);
+      this.emit('phase.taskRetrying', {
+        phaseId: phase.id,
+        taskId: task.id,
+        taskTitle: task.title,
+        attempt: currentRetries + 1,
+        maxRetries: this.opts.maxRetries,
+      });
+    } else {
+      tracker.updateNodeStatus(task.id, 'failed', error instanceof Error ? error.message : String(error));
+      this.emit('phase.taskFailed', {
+        phaseId: phase.id,
+        taskId: task.id,
+        taskTitle: task.title,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -282,18 +301,16 @@ export class PhaseOrchestrator {
     for (const phase of this.graph.phases.values()) {
       if (phase.status !== 'pending') continue;
 
-      // Tüm dependency'ler tamamlandı mı?
       const depsDone = phase.dependsOn.every((depId) => {
         const dep = this.graph.phases.get(depId);
         return dep?.status === 'completed' || dep?.status === 'skipped';
       });
 
-      if (depsDone) {
+      if (depsDone || phase.parallelizable) {
         ready.push(phase);
       }
     }
 
-    // Priority sırala
     const prioOrder = { critical: 0, high: 1, medium: 2, low: 3 };
     ready.sort((a, b) => (prioOrder[a.priority] ?? 4) - (prioOrder[b.priority] ?? 4));
 
@@ -316,23 +333,23 @@ export class PhaseOrchestrator {
   }
 
   private getTrackerForPhase(phase: PhaseNode): TaskTracker {
-    // Phase'nin task graph'ı üzerinden tracker oluştur
+    if (this.trackerCache.has(phase.id)) {
+      return this.trackerCache.get(phase.id)!;
+    }
+
     const store = new DefaultTaskStore();
     const tracker = new TaskTracker({ store });
-    // Graph'ı yükle — TaskTracker'da graph private olduğu için
-    // createGraph çağrısı yerine doğrudan atama yapalım
-    (tracker as unknown as { graph: unknown }).graph = phase.taskGraph;
+    tracker.setGraph(phase.taskGraph);
+    this.trackerCache.set(phase.id, tracker);
     return tracker;
   }
 
   private getFailedTaskCount(phase: PhaseNode): number {
-    const tracker = this.getTrackerForPhase(phase);
-    return tracker.getAllNodes({ status: ['failed'] }).length;
+    return this.getTrackerForPhase(phase).getAllNodes({ status: ['failed'] }).length;
   }
 
   private getCompletedTaskCount(phase: PhaseNode): number {
-    const tracker = this.getTrackerForPhase(phase);
-    return tracker.getAllNodes({ status: ['completed'] }).length;
+    return this.getTrackerForPhase(phase).getAllNodes({ status: ['completed'] }).length;
   }
 
   private updatePhaseStatus(phase: PhaseNode, status: PhaseStatus): void {
@@ -464,5 +481,9 @@ export class PhaseOrchestrator {
       emitAsync: async () => [],
       waitFor: async () => {},
     } as unknown as EventBus;
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

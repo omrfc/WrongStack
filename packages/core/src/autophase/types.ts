@@ -107,6 +107,7 @@ export interface PhaseEventMap {
   'phase.failed': { phaseId: string; name: string; error?: string };
   'phase.taskCompleted': { phaseId: string; taskId: string; taskTitle: string };
   'phase.taskFailed': { phaseId: string; taskId: string; taskTitle: string; error: string };
+  'phase.taskRetrying': { phaseId: string; taskId: string; taskTitle: string; attempt: number; maxRetries: number };
   'phase.allTasksDone': { phaseId: string; completed: number; failed: number };
   'graph.completed': { graphId: string; durationMs: number };
   'graph.failed': { graphId: string; failedPhaseId: string; error: string };
