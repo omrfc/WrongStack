@@ -30,7 +30,7 @@
   "scripts": {
     "build": "tsup",
     "setup": "node ./dist/setup.js",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "pnpm --filter @wrongstack/tools run build && tsc --noEmit",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
