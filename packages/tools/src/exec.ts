@@ -76,7 +76,7 @@ const BLOCKED_ARG_PATTERNS: Record<string, RegExp[]> = {
   // and glob patterns that could expand to dangerous targets.
   // `rm -rf ./src/*` expands to project files; `rm -rf ../../` escapes upward;
   // `rm -rf /*` targets the filesystem root. All are blocked.
-  rm: [/^\//, /^~\//, /^~\$/, /^\.$/, /^\.{1,2}$/, /\*$/, /\/$/, /\/\*$/, /\.\//],
+  rm: [/^\//, /^~\//, /^~$/, /^\.$/, /^\.\.$/, /\*$/, /\/$/, /\/\*$/, /\.\//],
   // npm run/exec/create/pack/publish can execute arbitrary scripts or publish malware
   npm: [/^run$/, /^exec$/, /^create$/, /^init$/, /^pack$/, /^publish$/, /^deploy$/],
   // pnpm run/dlx/exec/create can execute arbitrary scripts

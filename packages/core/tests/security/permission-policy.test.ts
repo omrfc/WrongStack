@@ -215,7 +215,7 @@ describe('AutoApprovePermissionPolicy', () => {
       async execute() { return 'x'; },
     } as Tool);
     expect(denied.permission).toBe('deny');
-    expect(denied.source).toBe('default');
+    expect(denied.source).toBe('subagent_guard');
   });
 
   it('trust / deny / denyOnce / allowOnce / reload are all no-ops', async () => {
