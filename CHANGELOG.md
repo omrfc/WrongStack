@@ -127,7 +127,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no extra npm dependency.
 
 - **`/agents monitor|on|off`** — the agents monitor overlay now has a
-  slash-command interface in addition to `Ctrl+Shift+M`:
+  slash-command interface in addition to `Ctrl+G`:
   - `/agents monitor` — open the overlay
   - `/agents on` — open the overlay
   - `/agents off` — close the overlay
