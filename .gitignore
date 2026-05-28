@@ -36,6 +36,7 @@ AGENTS.md
 .cursorrules
 .claude/
 .editorconfig
+.antigravitycli/
 
 # ---------------------------------------------------------------------------
 # Repo-root scratch / debug / test-output files.
@@ -108,3 +109,6 @@ AGENTS.md
 /test_manifest.json
 # Stray local scratch dir (never commit)
 /tmp/
+
+
+*.db

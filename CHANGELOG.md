@@ -4,8 +4,33 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.8.0] - 2026-05-28
 
-## [Unreleased]
+### Added
+
+- **Agents monitor overlay — `Ctrl+G` or `/agents monitor|on|off`.** The
+  TUI shows a minimised agents panel above the input when agents run,
+  independent of the full fleet monitor (`Ctrl+F`).
+
+- **`/agents stream on|off`** — subagent `provider.text_delta` text output
+  lands in the leader's chat history when streaming is enabled.
+
+- **`tool.executed` events injected into chat history when streaming is on.**
+  The `tool.executed` handler dispatches a `subagent`-kind entry
+  (`→ <tool> ✓/✗ (ms)`) to the leader's chat history whenever
+  `streamFleetRef.current` is true.
+
+- **`ask_subagent` synchronous question tool.** Director agents can ask a
+  subagent a follow-up question and receive the answer in the same turn.
+
+### Changed
+
+- **All workspace packages bumped 0.7.9 → 0.8.0**: `wrongstack`,
+  `@wrongstack/cli`, `@wrongstack/core`, `@wrongstack/mcp`,
+  `@wrongstack/plug-lsp`, `@wrongstack/providers`, `@wrongstack/runtime`,
+  `@wrongstack/skills`, `@wrongstack/telegram`, `@wrongstack/tools`,
+  `@wrongstack/tui`, `@wrongstack/webui`. `@wrongstack/plugins` stays at
+  `0.1.0`; `@wrongstack/acp` stays at `0.0.1`.
 
 ## [0.7.9] - 2026-05-28
 

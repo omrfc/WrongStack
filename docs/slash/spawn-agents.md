@@ -24,10 +24,14 @@ Shows status of all spawned subagents: their name, current task, status (pending
 
 **Monitor overlay:**
 ```
-/agents monitor  — open the agents monitor overlay (Ctrl+Shift+M)
-/agents on       — show the agents monitor overlay
-/agents off      — hide the agents monitor overlay
+/agents monitor     — open the agents monitor overlay
+/agents on          — show the agents monitor overlay
+/agents off         — hide the agents monitor overlay
+/agents stream on   — show subagent text output in chat history
+/agents stream off  — hide subagent text output from chat history (default)
 ```
+
+**Note:** The agents monitor overlay is available in the TUI via **Ctrl+G**. In plain REPL, use `/agents monitor` to open it.
 
 The monitor overlay shows every known subagent with status, elapsed time, iteration/tool counts, an activity sparkline, the current tool, a global concurrency gauge, token/cost totals, and a compact event timeline.
 
@@ -112,7 +116,7 @@ The TUI subscribes to all FleetBus events from every subagent. The following eve
 | `budget.threshold_reached` | FleetPanel shows `⚡ hitting <kind> limit (used/limit)` |
 | `task.completed` | FleetPanel status → `success`/`failed`/`timeout`; cost finalized |
 
-### `/fleet stream` — subagent output in leader chat history
+### `/fleet stream on|off` — subagent output in leader chat history
 
 By default, subagent activity is **hidden** from the leader's scrollback to keep it clean. Enable live streaming:
 
@@ -121,7 +125,18 @@ By default, subagent activity is **hidden** from the leader's scrollback to keep
 /fleet stream off  # hide (default)
 ```
 
-Streaming appends subagent text to leader chat as `info`-kind entries prefixed with the subagent name/label.
+Streaming appends subagent text to leader chat as `info`-kind entries prefixed with the subagent name/label. The same toggle is available via `/agents stream on|off`.
+
+### Asking a stuck subagent
+
+When a subagent seems stuck, the director can ask it a one-shot question using `ask_subagent`. This bridges directly to the running subagent and returns its response without terminating or respawning:
+
+```
+Tool: ask_subagent
+Input: { "subagentId": "abc123", "question": "What step are you on and why has no tool been called in 30s?" }
+```
+
+The subagent responds synchronously — the director gets the answer in the same turn and can decide whether to continue, give a hint, or terminate.
 
 ## Code reference
 

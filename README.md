@@ -276,14 +276,11 @@ Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. Wha
 
 ---
 
-## What's new in 0.7.6
+## What's new in 0.8.0
 
-- **`codebase-index` — SQLite-backed code symbol search.** Three new builtin
-  tools (`codebase-index`, `codebase-search`, `codebase-stats`) build an
-  incremental, multi-language symbol index (TS/JS, Go, Python, Rust, JSON,
-  YAML) with BM25-ranked search and cross-reference tracking. Storage is
-  Node's built-in `node:sqlite` — no native addon, no extra dependency.
-- **Per-project state moved to `~/.wrongstack/projects/<hash>/`.** Goal,
+- **Agents monitor overlay (`Ctrl+G` or `/agents monitor|on|off`).** A minimised agents panel above the input, independent of the full fleet monitor (`Ctrl+F`).
+  Subagent `provider.text_delta` text lands in the leader's chat history when enabled.
+- **`/agents stream on|off`.|`/agents stream on|off`.
   sessions, specs, task-graphs, plan, and memory now live under a per-machine
   hashed project directory; the only repo-committed file is
   `.wrongstack/AGENTS.md`.

@@ -2818,6 +2818,20 @@ export function App({
             outputLines: p?.outputLines,
           });
           dispatch({ type: 'fleetToolEnd', id: e.subagentId });
+          // Also inject into leader chat history when stream is enabled.
+          if (streamFleetRef.current && p?.name) {
+            const lbl = labelFor(e.subagentId);
+            dispatch({
+              type: 'addEntry',
+              entry: {
+                kind: 'subagent',
+                agentLabel: lbl.label,
+                agentColor: lbl.color,
+                icon: '🔧',
+                text: `→ ${p.name} ${p.ok === false ? '✗' : '✓'}${p.durationMs != null ? ` (${p.durationMs}ms)` : ''}`,
+              },
+            });
+          }
           break;
         }
         case 'provider.response': {
@@ -3392,10 +3406,8 @@ export function App({
       dispatch({ type: 'toggleMonitor' });
       return;
     }
-    // Ctrl+Shift+M toggles the agents monitor overlay.
-    // Some terminals don't set key.shift for Ctrl+Shift+letter combos, so
-    // we also accept Ctrl+Shift+m (lowercase) as a fallback.
-    if (key.ctrl && input.toLowerCase() === 'm' && (key.shift || input === 'm')) {
+    // Ctrl+G toggles the agents monitor overlay.
+    if (key.ctrl && input === 'g') {
       dispatch({ type: 'toggleAgentsMonitor' });
       return;
     }

@@ -48,6 +48,16 @@ export interface ReplOptions {
   supportsVision?: () => boolean | Promise<boolean>;
   /** Skill loader for the skill generator wizard. */
   skillLoader?: import('@wrongstack/core').SkillLoader;
+  /** Controller for the agents monitor overlay. */
+  agentsMonitorController?: {
+    visible: boolean;
+    setVisible: (visible: boolean) => void;
+  };
+  /** Controller for fleet stream (subagent output to history). */
+  fleetStreamController?: {
+    enabled: boolean;
+    setEnabled: (enabled: boolean) => void;
+  };
 }
 
 export async function runRepl(opts: ReplOptions): Promise<number> {

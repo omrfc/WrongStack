@@ -425,6 +425,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           getEternalEngine,
           getParallelEngine,
           skillLoader,
+          agentsMonitorController,
+          fleetStreamController,
         });
       } finally {
         // webuiPromise must be awaited regardless of whether runRepl threw,
@@ -448,6 +450,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         getEternalEngine,
         getParallelEngine,
         skillLoader,
+        agentsMonitorController,
+        fleetStreamController,
       });
     }
   } finally {

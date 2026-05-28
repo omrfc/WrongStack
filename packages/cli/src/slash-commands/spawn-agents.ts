@@ -33,11 +33,13 @@ export function buildAgentsCommand(opts: SlashCommandContext): SlashCommand {
     description:
       'Show status of spawned subagents. /agents monitor opens the agents monitor overlay. /agents on|off toggles the overlay.',
     help: [
-      'Usage: /agents [monitor|on|off]',
-      '       /agents         — show subagent status summary',
+      'Usage: /agents [monitor|on|off|stream on|stream off]',
+      '       /agents          — show subagent status summary',
       '       /agents monitor  — open the agents monitor overlay',
       '       /agents on       — show the agents monitor overlay',
       '       /agents off      — hide the agents monitor overlay',
+      '       /agents stream on   — show subagent text output in chat history',
+      '       /agents stream off  — hide subagent text output from chat history',
     ].join('\n'),
     async run(args) {
       const arg = args.trim().toLowerCase();
@@ -49,6 +51,14 @@ export function buildAgentsCommand(opts: SlashCommandContext): SlashCommand {
       if (arg === 'off') {
         opts.agentsMonitorController?.setVisible(false);
         return { message: 'Agents monitor hidden.' };
+      }
+      if (arg === 'stream on') {
+        opts.fleetStreamController?.setEnabled(true);
+        return { message: 'Agent stream enabled — subagent activity visible in history.' };
+      }
+      if (arg === 'stream off') {
+        opts.fleetStreamController?.setEnabled(false);
+        return { message: 'Agent stream disabled — subagent activity hidden from history.' };
       }
       // Empty/whitespace → summary; any other non-empty string → specific agent lookup
       if (!opts.onAgents) return { message: 'Multi-agent is not enabled in this session.' };
