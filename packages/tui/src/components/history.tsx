@@ -75,10 +75,22 @@ export interface HistoryProps {
 
 export function History({ entries, streamingText, toolStream }: HistoryProps): React.ReactElement {
   const { stdout } = useStdout();
-  // Terminal width drives table column sizing. We snapshot it at render
-  // time; Static-emitted entries won't reflow on resize, which is fine
-  // — they're already in scrollback at the width they were drawn for.
-  const termWidth = stdout?.columns ?? 80;
+  // Track terminal dimensions imperatively so that every resize triggers a
+  // re-render. We snapshot into state rather than deriving directly from
+  // useStdout because Static children receive `termWidth` as a prop — if
+  // the parent doesn't re-render on resize, the stale value gets baked
+  // into committed scrollback entries. This ensures Entry components in
+  // both Static (committed) and live-streaming regions use the current
+  // width for table wrapping etc.
+  const [termSize, setTermSize] = useState({ columns: stdout?.columns ?? 80, rows: stdout?.rows ?? 24 });
+  useEffect(() => {
+    const handleResize = () => {
+      setTermSize({ columns: stdout?.columns ?? 80, rows: stdout?.rows ?? 24 });
+    };
+    process.stdout.on('resize', handleResize);
+    return () => { process.stdout.off('resize', handleResize); };
+  }, [stdout]);
+  const termWidth = termSize.columns;
   const tail = streamingText ? tailForDisplay(streamingText, MAX_STREAM_DISPLAY_CHARS) : '';
   const toolTail = toolStream?.text
     ? tailForDisplay(toolStream.text, MAX_STREAM_DISPLAY_CHARS)

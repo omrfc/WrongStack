@@ -401,18 +401,21 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
     if (!useAltScreen) {
       const onResize = () => {
         try {
-          // \x1b[J = erase from cursor to end of screen. Does NOT touch
-          // anything above the cursor, so committed Static history in
-          // scrollback is preserved. Ink's useStdout subscriber will
-          // immediately re-render the live region at the new width, and
-          // log-update's stale line-count tracker gets a clean slate to
-          // draw onto.
-          stdout.write('\x1b[J');
+          // \x1b[H = move cursor to home (0,0). \x1b[J = erase from cursor
+          // to end of screen. Doing both ensures the ENTIRE live region is
+          // cleared before Ink re-renders at the new dimensions. Without
+          // \x1b[H first, log-update's stale line-count tracker clears only
+          // from wherever the cursor happened to be, leaving corrupted
+          // rows above that point untouched.
+          stdout.write('\x1b[H\x1b[J');
         } catch {
           // stdout might be detached mid-shutdown — ignore.
         }
       };
-      stdout.on('resize', onResize);
+      // Use process.stdout for resize events (not the `stdout` alias) because
+      // process.stdout is the net.Socket that emits 'resize' regardless of
+      // which buffer Ink is rendering into. The detach also uses `stdout`.
+      process.stdout.on('resize', onResize);
       detachResize = () => stdout.off('resize', onResize);
     }
 

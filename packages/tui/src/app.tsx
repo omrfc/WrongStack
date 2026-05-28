@@ -1761,7 +1761,10 @@ export function App({
     prevEntriesCount.current = state.entries.length;
     if (overlayClosed || newEntryCommitted) {
       try {
-        process.stdout.write('\x1b[J');
+        // \x1b[H\x1b[J clears from (0,0) to end-of-screen so no ghost
+        // rows remain regardless of cursor position. \x1b[J alone would
+        // leave corrupted rows above the cursor behind.
+        process.stdout.write('\x1b[H\x1b[J');
       } catch {
         // stdout might be detached during shutdown — ignore.
       }
@@ -2627,22 +2630,22 @@ export function App({
       const before = report.before;
       const after = report.after;
       const saved = before - after;
-      // `tokens` and `load` are the overhead-adjusted figures the threshold
-      // check fires on (raw messages × 1.3 + system/tools); `report.before`
-      // is the raw message-only count. Surface both so the percentage and
-      // the byte numbers stop looking contradictory.
+      // `tokens` / `load` come from the middleware's full-request estimator
+      // (messages + system + tools); `report.before` is the compactor's
+      // message-only count. They are different views of the same moment, so
+      // label them explicitly to avoid the "98k tokens but 73% load?" confusion.
       if (saved <= 0) {
         dispatch({
           type: 'addEntry',
           entry: {
             kind: 'info',
-            text: `▸ compaction skipped at ${level} — load ${pct}% (${tokens.toLocaleString()} of ${maxContext.toLocaleString()} tok, incl. ~1.3× overhead). preserveK protects recent turns; nothing to elide.`,
+            text: `▸ compaction skipped at ${level} — load ${pct}% (${tokens.toLocaleString()} of ${maxContext.toLocaleString()} tok). preserveK protects recent turns; nothing to elide.`,
           },
         });
         return;
       }
       const table = [
-        `▸ context compacted at ${level} — load ${pct}% (${tokens.toLocaleString()} of ${maxContext.toLocaleString()} tok, incl. ~1.3× overhead)`,
+        `▸ context compacted at ${level} — load ${pct}% (${tokens.toLocaleString()} of ${maxContext.toLocaleString()} tok, full request)`,
         `  msg tokens before ${before.toLocaleString().padStart(8)}`,
         `  msg tokens after  ${after.toLocaleString().padStart(8)}`,
         `  saved            ${saved.toLocaleString().padStart(8)}  (${((saved / before) * 100).toFixed(1)}%)`,
@@ -2655,8 +2658,8 @@ export function App({
       const { level, load, maxContext, fatal } = e as { level: string; load: number; maxContext: number; fatal: boolean };
       const pct = (load * 100).toFixed(0);
       const text = fatal
-        ? `✗ compaction failed at ${level} — load ${pct}% of ${maxContext.toLocaleString()} tok (incl. overhead) — FATAL`
-        : `⚠ compaction failed at ${level} — load ${pct}% of ${maxContext.toLocaleString()} tok (incl. overhead) — continuing`;
+        ? `✗ compaction failed at ${level} — load ${pct}% of ${maxContext.toLocaleString()} tok — FATAL`
+        : `⚠ compaction failed at ${level} — load ${pct}% of ${maxContext.toLocaleString()} tok — continuing`;
       dispatch({ type: 'addEntry', entry: { kind: fatal ? 'error' : 'warn', text } });
     });
     return () => {
