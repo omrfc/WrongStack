@@ -230,6 +230,9 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+      undici:
+        specifier: ^7.25.0
+        version: 7.25.0
     devDependencies:
       '@types/node':
         specifier: ^22.19.19
