@@ -38,7 +38,7 @@ export async function saveToGlobalConfig(
     // Backup before writing — pass homeFn so it backs up the right config
     await backupCurrent(homeFn);
 
-    await atomicWrite(configPath, JSON.stringify(existing, null, 2));
+    await atomicWrite(configPath, JSON.stringify(existing, null, 2), { mode: 0o600 });
 
     // Record in history — best-effort (never blocks save)
     try {

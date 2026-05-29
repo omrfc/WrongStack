@@ -7,7 +7,7 @@
  * Extracts: class, function, async function, const, var, import, import_from
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -248,7 +248,9 @@ function syncPyParse(filePath: string, lang: SymbolLang): FileSymbols {
 		const scriptPath = path.join(tmpDir, 'parse.py');
 		writeFileSync(scriptPath, PY_PARSE_SCRIPT, 'utf8');
 
-		const stdout = execSync(`python "${scriptPath}" "${filePath}"`, {
+		// argv-array form: no shell, so a hostile filename (e.g. one containing
+		// shell metacharacters or command substitution) cannot inject commands.
+		const stdout = execFileSync('python', [scriptPath, filePath], {
 			timeout: 15_000,
 			encoding: 'utf8',
 			windowsHide: true,

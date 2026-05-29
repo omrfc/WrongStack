@@ -174,7 +174,7 @@ async function upsertPlugin(
   };
   existing.plugins = plugins;
   existing.features = features;
-  await atomicWrite(deps.configPath, JSON.stringify(existing, null, 2));
+  await atomicWrite(deps.configPath, JSON.stringify(existing, null, 2), { mode: 0o600 });
   return {
     code: 0,
     level: 'info',
@@ -197,7 +197,7 @@ async function removePlugin(
     return errorResult(`Plugin "${spec}" not in config.`);
   }
   existing.plugins = next;
-  await atomicWrite(deps.configPath, JSON.stringify(existing, null, 2));
+  await atomicWrite(deps.configPath, JSON.stringify(existing, null, 2), { mode: 0o600 });
   return {
     code: 0,
     level: 'info',

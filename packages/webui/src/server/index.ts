@@ -49,12 +49,21 @@ import { decryptConfigSecrets, encryptConfigSecrets } from '@wrongstack/core/sec
 import { buildProviderFactoriesFromRegistry, makeProviderFromConfig } from '@wrongstack/providers';
 import { builtinToolsPack, forgetTool, rememberTool } from '@wrongstack/tools';
 import { WebSocket, WebSocketServer } from 'ws';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createDefaultContainer } from '../../../runtime/src/container.js';
 import { bootConfig, patchConfig, type BootResult } from './boot.js';
+import { AutoPhaseWebSocketHandler } from './autophase-ws-handler.js';
 
 // Re-export types
 export type { WebUIOptions, BackendServices } from './types.js';
+
+// CSP for served HTML. script-src is 'self' only — the production bundle has no
+// inline scripts, so 'unsafe-inline' is dropped (defeats injected-script XSS).
+// style-src keeps 'unsafe-inline' because Radix/React inject inline styles at
+// runtime. object-src/base-uri/frame-ancestors/form-action are tightened as
+// defense-in-depth (frame-ancestors complements X-Frame-Options: DENY).
+const HTML_CSP =
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'";
 
 // Internal message types
 interface WSServerMessage {
@@ -343,6 +352,9 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   });
   console.log('[WebUI] Agent initialized');
 
+  // AutoPhase handler — manages AutoPhaseRunner lifecycle via WS messages
+  const autoPhaseHandler = new AutoPhaseWebSocketHandler(agent, context, logger, wpaths.projectTaskGraphs);
+
   // Helper: build the rich session.start payload from current runtime state.
   // Centralised so initial connect, post-/new, and post-model.switch all
   // broadcast the same shape — frontend treats this as the single source of
@@ -426,6 +438,39 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   const isLoopback = (hostname: string) =>
     hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
 
+  // Constant-time token comparison: avoids leaking the token byte-by-byte via
+  // response timing. Length mismatch short-circuits (lengths aren't secret).
+  const tokenMatches = (provided: string | undefined): boolean => {
+    if (!provided) return false;
+    const a = Buffer.from(provided);
+    const b = Buffer.from(wsToken);
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(a, b);
+  };
+
+  // DNS-rebinding defense: the browser puts the *name it dialed* in the Host
+  // header. A page on evil.com that rebinds DNS to 127.0.0.1 still sends
+  // `Host: evil.com:<port>`, so requiring a loopback Host rejects rebinding
+  // regardless of the bind address. The legitimate same-machine client dials
+  // 127.0.0.1/localhost/[::1], so this never blocks real usage on a loopback
+  // bind. When the operator deliberately exposes the socket (wsHost set to a
+  // LAN/0.0.0.0 address) the Host will legitimately be non-loopback, so we
+  // only enforce the loopback-Host requirement on a loopback bind.
+  const hostHeaderOk = (req: import('node:http').IncomingMessage): boolean => {
+    const boundToLoopback = wsHost === '127.0.0.1' || wsHost === '::1' || wsHost === 'localhost';
+    if (!boundToLoopback) return true; // operator opted into wider exposure
+    const hostHeader = (req.headers.host ?? '').trim();
+    if (!hostHeader) return false;
+    // Strip the port (handle bare host, host:port, and [::1]:port).
+    let hostname: string;
+    try {
+      hostname = new URL(`http://${hostHeader}`).hostname;
+    } catch {
+      return false;
+    }
+    return isLoopback(hostname);
+  };
+
   const verifyClient = (info: {
     origin: string;
     secure: boolean;
@@ -435,7 +480,12 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     const url = info.req.url ?? '';
     const tokenMatch = url.match(/[?&]token=([^&]+)/);
     const providedToken = tokenMatch ? tokenMatch[1] : undefined;
-    const tokenOk = providedToken === wsToken;
+    const tokenOk = tokenMatches(providedToken);
+
+    // DNS-rebinding guard runs first on a loopback bind — independent of token
+    // and Origin. Blocks a rebound attacker page (Host = attacker domain) even
+    // though the TCP peer is 127.0.0.1.
+    if (!hostHeaderOk(info.req)) return false;
 
     if (!origin) {
       // Non-browser clients (curl, scripts): require token unless on loopback.
@@ -448,27 +498,33 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     }
     try {
       const { hostname } = new URL(origin);
-      // Loopback browser origins: allow without token for convenience.
+      // Loopback browser origins: allow without token (bootstrap — the token is
+      // delivered in session.start and replayed on reconnect). The Host-header
+      // guard above already rejects cross-site/rebinding pages here.
       if (isLoopback(hostname)) return true;
-      // Non-loopback origins: token is mandatory when wsHost != loopback.
-      // When wsHost=0.0.0.0 the browser origin check gates LAN clients.
-      if (wsHost === '0.0.0.0') return tokenOk;
-      // For explicit LAN/wAN binds, require token for non-loopback origins.
+      // Non-loopback origins: token is mandatory.
       return tokenOk;
     } catch {
       return false;
     }
   };
+  // Cap inbound frame size (8 MiB) so a single oversized message can't exhaust
+  // memory. Agent messages are small; large pastes/attachments stay well under.
+  const WS_MAX_PAYLOAD = 8 * 1024 * 1024;
   const wssPrimary = new WebSocketServer({
     port: wsPort,
     host: wsHost,
     verifyClient,
+    maxPayload: WS_MAX_PAYLOAD,
   } as ConstructorParameters<typeof WebSocketServer>[0]);
   const wssSecondary =
     wsHost === '127.0.0.1'
-      ? new WebSocketServer({ port: wsPort, host: '::1', verifyClient } as ConstructorParameters<
-          typeof WebSocketServer
-        >[0])
+      ? new WebSocketServer({
+          port: wsPort,
+          host: '::1',
+          verifyClient,
+          maxPayload: WS_MAX_PAYLOAD,
+        } as ConstructorParameters<typeof WebSocketServer>[0])
       : null;
   const clients = new Map<WebSocket, ConnectedClient>();
 
@@ -646,6 +702,9 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     void sessionStartPayload().then((payload) => {
       send(ws, { type: 'session.start', payload });
     });
+
+    // Register this client with the AutoPhase handler so it receives phase events
+    autoPhaseHandler.addClient(ws);
 
     ws.on('message', async (data) => {
       if (!checkRateLimit(ws)) {
@@ -1653,6 +1712,14 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
         });
         break;
       }
+
+      default:
+        if (msg.type.startsWith('autophase.')) {
+          // Delegate all AutoPhase lifecycle messages to the handler
+          await autoPhaseHandler.handleMessage(msg as { type: string; payload?: Record<string, unknown> });
+        } else {
+          send(ws, { type: 'error', payload: { phase: 'handleMessage', message: `Unknown message type: ${msg.type}` } });
+        }
     }
   }
 
@@ -1885,10 +1952,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
 
       if (ext === '.html') {
         res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader(
-          'Content-Security-Policy',
-          "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:; font-src 'self' data:",
-        );
+        res.setHeader('Content-Security-Policy', HTML_CSP);
       }
 
       const fileContent = await fs.readFile(resolvedPath);
@@ -1903,6 +1967,10 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
             'Content-Type': 'text/html',
             'X-Content-Type-Options': 'nosniff',
             'X-Frame-Options': 'DENY',
+            'Referrer-Policy': 'strict-origin-when-cross-origin',
+            // SPA fallback previously shipped no CSP — apply the same policy as
+            // the direct .html branch so deep-linked routes aren't unprotected.
+            'Content-Security-Policy': HTML_CSP,
           });
           res.end(fileContent);
         } catch {

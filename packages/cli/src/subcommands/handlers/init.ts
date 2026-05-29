@@ -78,7 +78,8 @@ export const initCmd: SubcommandHandler = async (_args, deps) => {
   // Encrypt secret fields before writing to disk.
   const vault = new DefaultSecretVault({ keyFile: deps.paths.secretsKey });
   const encrypted = encryptConfigSecrets(config, vault);
-  await atomicWrite(deps.paths.globalConfig, JSON.stringify(encrypted, null, 2));
+  // mode 0o600: the global config holds (encrypted) secrets — owner-only.
+  await atomicWrite(deps.paths.globalConfig, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
   await fs.mkdir(path.join(deps.projectRoot, '.wrongstack'), { recursive: true });
   const agentsFile = path.join(deps.projectRoot, '.wrongstack', 'AGENTS.md');
   const projectFacts = await detectProjectFacts(deps.projectRoot);

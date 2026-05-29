@@ -2,7 +2,7 @@ import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { SessionStore } from '../types/session.js';
-import { ensureDir } from '../utils/atomic-write.js';
+import { atomicWrite, ensureDir } from '../utils/atomic-write.js';
 
 /**
  * Per-project lockfile used for crash detection. The CLI writes one of
@@ -141,11 +141,11 @@ export class RecoveryLock {
       hostname: this.hostname,
       startedAt: new Date().toISOString(),
     };
-    // Atomic write: write to .tmp and rename. Important on Windows
-    // where a partial write of `active.json` would be readable.
-    const tmp = `${this.file}.tmp`;
-    await fsp.writeFile(tmp, JSON.stringify(lock), { mode: 0o600 });
-    await fsp.rename(tmp, this.file);
+    // Atomic write via the shared primitive: unique temp name + exclusive
+    // ('wx') create + fsync + rename-with-retry (Windows-safe). A fixed `.tmp`
+    // name with a plain writeFile/rename raced between concurrent runs and
+    // could leave a torn/half-written `active.json`.
+    await atomicWrite(this.file, JSON.stringify(lock), { mode: 0o600 });
   }
 
   /**

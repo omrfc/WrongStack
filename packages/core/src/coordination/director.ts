@@ -555,6 +555,18 @@ export class Director implements ICoordinator {
         extendCounts.delete(guardKey);
         return;
       }
+      // Fleet-wide cost ceiling also bounds per-subagent cost auto-extensions.
+      // spawn() only checks maxFleetCostUsd when creating a NEW subagent; without
+      // this, already-running subagents could each extend their per-agent cost
+      // budget and collectively blow past a small fleet cap. Re-check here and
+      // deny the extension once the aggregate fleet spend reaches the cap.
+      if (payload.kind === 'cost' && this.maxFleetCostUsd < Number.POSITIVE_INFINITY) {
+        const totalCost = this.usage.snapshot().total?.cost ?? 0;
+        if (totalCost >= this.maxFleetCostUsd) {
+          payload.deny();
+          return;
+        }
+      }
       // Auto-extend: grant +50% ABOVE the current limit, up to a generous
       // absolute ceiling. The new limit is computed from `max(limit, used)`
       // so the patch always lands strictly above where the agent already is

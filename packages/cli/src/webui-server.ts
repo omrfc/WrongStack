@@ -221,10 +221,34 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
       const isLoopback = (hostname: string) =>
         hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
 
+      // Constant-time token compare (length mismatch short-circuits).
+      const tokenMatches = (provided: string | null): boolean => {
+        if (!provided) return false;
+        const a = Buffer.from(provided);
+        const b = Buffer.from(authToken);
+        return a.length === b.length && crypto.timingSafeEqual(a, b);
+      };
+
       try {
         const url = new URL(req.url ?? '/', `http://localhost:${port}`);
         const token = url.searchParams.get('token');
-        const tokenOk = token === authToken;
+        const tokenOk = tokenMatches(token);
+
+        // DNS-rebinding defense: the server is bound to loopback, so the Host
+        // header of any legitimate client is a loopback name. A rebound
+        // attacker page sends `Host: <attacker-domain>` even though the socket
+        // peer is 127.0.0.1 — reject it.
+        const hostHeader = (req.headers.host ?? '').trim();
+        let hostOk = false;
+        try {
+          hostOk = !!hostHeader && isLoopback(new URL(`http://${hostHeader}`).hostname);
+        } catch {
+          hostOk = false;
+        }
+        if (!hostOk) {
+          ws.close(4003, 'Forbidden: non-loopback Host header');
+          return;
+        }
 
         // Origin validation
         const origin = req.headers.origin;

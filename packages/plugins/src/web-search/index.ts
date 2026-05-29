@@ -5,8 +5,9 @@
  * - web_search: Search the web with caching and deduplication
  * - web_fetch: Fetch a URL and return content as markdown
  */
-import type { Plugin } from '@wrongstack/core';
+import { lookup } from 'node:dns/promises';
 import { isIPv4, isIPv6 } from 'node:net';
+import type { Plugin } from '@wrongstack/core';
 
 const API_VERSION = '^0.1.10';
 
@@ -65,44 +66,105 @@ async function duckduckgoSearch(query: string, numResults: number): Promise<Sear
   return results;
 }
 
+/** True if an IPv4 literal is in a private / loopback / link-local / reserved range. */
+function isPrivateIPv4(host: string): boolean {
+  const parts = host.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
+  const [a, b] = parts as [number, number, number, number];
+  return (
+    a === 0 || // 0.0.0.0/8 "this host"
+    a === 10 || // private
+    a === 127 || // loopback
+    (a === 100 && b >= 64 && b <= 127) || // CGNAT 100.64/10
+    (a === 169 && b === 254) || // link-local incl. 169.254.169.254 (cloud IMDS)
+    (a === 172 && b >= 16 && b <= 31) || // private
+    (a === 192 && b === 168) || // private
+    a >= 224 // multicast / reserved
+  );
+}
+
+/** True if an IPv6 literal is loopback / unique-local / link-local / unspecified / mapped-private. */
+function isPrivateIPv6(raw: string): boolean {
+  const host = raw.toLowerCase();
+  if (host === '::1' || host === '::') return true; // loopback / unspecified
+  // IPv4-mapped (::ffff:a.b.c.d) and IPv4-compatible — check the embedded v4.
+  const mapped = host.match(/(?:::ffff:)?(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped?.[1]) return isPrivateIPv4(mapped[1]);
+  if (host.startsWith('fc') || host.startsWith('fd')) return true; // fc00::/7 ULA
+  if (host.startsWith('fe8') || host.startsWith('fe9') || host.startsWith('fea') || host.startsWith('feb'))
+    return true; // fe80::/10 link-local
+  return false;
+}
+
+function assertSafeIp(ip: string): void {
+  if (isIPv4(ip) && isPrivateIPv4(ip)) {
+    throw new Error(`Blocked private/loopback address: ${ip}`);
+  }
+  if (isIPv6(ip) && isPrivateIPv6(ip)) {
+    throw new Error(`Blocked private/loopback address: ${ip}`);
+  }
+}
+
 /**
- * Lightweight SSRF guard — blocks localhost and private IP targets.
- * Mirrors the main fetch tool's assertNotPrivate() but without DNS
- * resolution (the plugin's web_fetch is a convenience wrapper, not
- * the primary fetch tool).
+ * SSRF guard. Validates the scheme, blocks literal private/loopback hosts
+ * (IPv4 and IPv6, including IPv4-mapped IPv6 and cloud-metadata addresses),
+ * and — critically — resolves the hostname via DNS and rejects if ANY
+ * resolved address is private. Called on the initial URL and re-called on
+ * every redirect hop so a 302 to http://169.254.169.254 cannot bypass it.
  */
-function assertSafeUrl(rawUrl: string): void {
+async function assertSafeUrl(rawUrl: string): Promise<void> {
   const u = new URL(rawUrl);
   if (u.protocol !== 'http:' && u.protocol !== 'https:') {
     throw new Error(`Unsupported protocol: ${u.protocol}`);
   }
-  const host = u.hostname.startsWith('[') && u.hostname.endsWith(']')
-    ? u.hostname.slice(1, -1)
-    : u.hostname;
-  if (host === 'localhost' || host.endsWith('.localhost') || host === '0.0.0.0') {
+  const host =
+    u.hostname.startsWith('[') && u.hostname.endsWith(']') ? u.hostname.slice(1, -1) : u.hostname;
+  if (host === 'localhost' || host.endsWith('.localhost') || host === '' || host === '0.0.0.0') {
     throw new Error('Blocked localhost target');
   }
-  if (isIPv4(host)) {
-    const parts = host.split('.').map(Number);
-    const [a, b] = parts as [number, number, number, number];
-    if (a === 0 || a === 10 || a === 127 ||
-        (a === 169 && b === 254) ||
-        (a === 172 && b >= 16 && b <= 31) ||
-        (a === 192 && b === 168) ||
-        a >= 224) {
-      throw new Error(`Blocked private/loopback address: ${host}`);
-    }
+  // Literal IP target: validate directly.
+  if (isIPv4(host) || isIPv6(host)) {
+    assertSafeIp(host);
+    return;
   }
+  // Hostname: resolve and reject if any address is private (defeats a name
+  // that points at an internal IP). Note: a TOCTOU window remains since the
+  // global fetch() re-resolves; acceptable for this single-tenant convenience
+  // tool, and redirect hops are re-validated below.
+  let addrs: Array<{ address: string }>;
+  try {
+    addrs = await lookup(host, { all: true });
+  } catch {
+    throw new Error(`Could not resolve host: ${host}`);
+  }
+  for (const { address } of addrs) assertSafeIp(address);
 }
 
 async function fetchUrl(url: string, format: 'markdown' | 'text'): Promise<string> {
-  assertSafeUrl(url);
-  const resp = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (compatible; WrongStack/1.0; +https://wrongstack.com)',
-      'Accept': format === 'text' ? 'text/plain' : 'text/html',
-    },
-  });
+  // Manual redirect handling: re-validate every hop against the SSRF guard so
+  // an external site cannot redirect us onto an internal/metadata endpoint.
+  const MAX_REDIRECTS = 5;
+  let currentUrl = url;
+  let resp: Response | undefined;
+  for (let i = 0; i <= MAX_REDIRECTS; i++) {
+    await assertSafeUrl(currentUrl);
+    resp = await fetch(currentUrl, {
+      redirect: 'manual',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; WrongStack/1.0; +https://wrongstack.com)',
+        Accept: format === 'text' ? 'text/plain' : 'text/html',
+      },
+    });
+    if (resp.status >= 300 && resp.status < 400) {
+      const loc = resp.headers.get('location');
+      if (!loc) break;
+      currentUrl = new URL(loc, currentUrl).toString();
+      if (i === MAX_REDIRECTS) throw new Error('Too many redirects');
+      continue;
+    }
+    break;
+  }
+  if (!resp) throw new Error(`Failed to fetch ${url}`);
 
   if (!resp.ok) throw new Error(`Failed to fetch ${url}: ${resp.status} ${resp.statusText}`);
 

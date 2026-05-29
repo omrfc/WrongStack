@@ -77,7 +77,7 @@ async function addMcpServer(args: string[], deps: SubcommandDeps): Promise<numbe
     deps.renderer.writeWarning(`Server "${name}" already in config. Updating.\n`);
   mcpServers[name] = serverCfg as unknown as Record<string, unknown>;
   existing.mcpServers = mcpServers;
-  await atomicWrite(deps.paths.globalConfig, JSON.stringify(existing, null, 2));
+  await atomicWrite(deps.paths.globalConfig, JSON.stringify(existing, null, 2), { mode: 0o600 });
   const verb = enable ? 'Enabled' : 'Added (disabled — set enabled:true to activate)';
   deps.renderer.writeInfo(
     `${verb} "${name}" (${serverCfg.transport}). Config written to ${deps.paths.globalConfig}.\n`,
@@ -101,7 +101,7 @@ async function removeMcpServer(name: string, deps: SubcommandDeps): Promise<numb
   }
   delete mcpServers[name];
   existing.mcpServers = mcpServers;
-  await atomicWrite(deps.paths.globalConfig, JSON.stringify(existing, null, 2));
+  await atomicWrite(deps.paths.globalConfig, JSON.stringify(existing, null, 2), { mode: 0o600 });
   deps.renderer.writeInfo(`Removed "${name}" from config.\n`);
   return 0;
 }
