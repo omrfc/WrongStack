@@ -59,8 +59,20 @@ const BLOCKED_ARG_PATTERNS: Record<string, RegExp[]> = {
   // python -c/--command executes arbitrary code; python -m runs modules
   python: [/-c$/, /^--command$/, /^-m$/, /^--module$/],
   // git --exec=<cmd> runs arbitrary commands via upload-pack/receive-pack;
-  // -C <dir> changes working directory, bypassing cwd sandbox
-  git: [/^--exec=/, /^--upload-pack=/, /^--receive-pack=/, /^-C$/],
+  // -C <dir> changes working directory, bypassing cwd sandbox;
+  // -c/--config <k>=<v> injects config that runs commands
+  // (e.g. core.sshCommand, core.pager, http.proxy, alias.x=!cmd).
+  git: [
+    /^--exec=/,
+    /^--upload-pack=/,
+    /^--receive-pack=/,
+    /^-C$/,
+    /^-c$/,
+    /^--config$/,
+    /^-c=/,
+    /^--config=/,
+    /^--config-env=/,
+  ],
   // node -r/--require preloads arbitrary modules; --eval executes code
   node: [/^-r$/, /^--require$/, /^-e$/, /^--eval$/, /^--prof-process$/],
   // go run could execute arbitrary .go files; -ldflags could inject build-time code
