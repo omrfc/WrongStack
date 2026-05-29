@@ -92,15 +92,34 @@ async function readPngFile(p: string): Promise<ClipboardImage | null> {
   }
 }
 
+/**
+ * Hard ceiling for a clipboard subprocess. Reading the clipboard must never
+ * hang the TUI: on a headless/loaded CI runner the PowerShell/xclip/wl-paste
+ * read can stall indefinitely (no display, slow shell start). After this we
+ * kill the child and resolve the safe default.
+ */
+const CLIPBOARD_CMD_TIMEOUT_MS = 5_000;
+
 function runCmd(cmd: string, args: string[]): Promise<string | null> {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
+    let settled = false;
+    const finish = (value: string | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      finish(null);
+    }, CLIPBOARD_CMD_TIMEOUT_MS);
     child.stdout.on('data', (c) => {
       out += String(c);
     });
-    child.on('error', () => resolve(null));
-    child.on('exit', (code) => resolve(code === 0 ? out : null));
+    child.on('error', () => finish(null));
+    child.on('exit', (code) => finish(code === 0 ? out : null));
   });
 }
 
@@ -108,15 +127,26 @@ function runCmdToFile(cmd: string, args: string[], outPath: string): Promise<boo
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     const chunks: Buffer[] = [];
+    let settled = false;
+    const finish = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      finish(false);
+    }, CLIPBOARD_CMD_TIMEOUT_MS);
     child.stdout.on('data', (c: Buffer) => chunks.push(c));
-    child.on('error', () => resolve(false));
+    child.on('error', () => finish(false));
     child.on('exit', async (code) => {
-      if (code !== 0 || chunks.length === 0) return resolve(false);
+      if (code !== 0 || chunks.length === 0) return finish(false);
       try {
         await fs.writeFile(outPath, Buffer.concat(chunks));
-        resolve(true);
+        finish(true);
       } catch {
-        resolve(false);
+        finish(false);
       }
     });
   });
