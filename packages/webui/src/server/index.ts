@@ -53,6 +53,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createDefaultContainer } from '../../../runtime/src/container.js';
 import { bootConfig, patchConfig, type BootResult } from './boot.js';
 import { AutoPhaseWebSocketHandler } from './autophase-ws-handler.js';
+import { WorktreeWebSocketHandler } from './worktree-ws-handler.js';
 
 // Re-export types
 export type { WebUIOptions, BackendServices } from './types.js';
@@ -354,7 +355,18 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
 
   // AutoPhase handler — manages AutoPhaseRunner lifecycle via WS messages.
   // Stored under the per-project autophase dir (not the shared SDD task-graphs).
-  const autoPhaseHandler = new AutoPhaseWebSocketHandler(agent, context, logger, wpaths.projectAutophase);
+  const autoPhaseHandler = new AutoPhaseWebSocketHandler(
+    agent,
+    context,
+    logger,
+    wpaths.projectAutophase,
+    events,
+    projectRoot,
+  );
+
+  // Worktree handler — subscribes to the shared EventBus `worktree.*` events
+  // and streams live swim-lane / DAG state to connected clients.
+  const worktreeHandler = new WorktreeWebSocketHandler(events, logger);
 
   // Helper: build the rich session.start payload from current runtime state.
   // Centralised so initial connect, post-/new, and post-model.switch all
@@ -706,6 +718,8 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
 
     // Register this client with the AutoPhase handler so it receives phase events
     autoPhaseHandler.addClient(ws);
+    // …and the worktree handler for live isolation lanes.
+    worktreeHandler.addClient(ws);
 
     ws.on('message', async (data) => {
       if (!checkRateLimit(ws)) {

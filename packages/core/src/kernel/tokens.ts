@@ -16,6 +16,7 @@ import type { SessionStore } from '../types/session.js';
 import type { SkillLoader } from '../types/skill.js';
 import type { SystemPromptBuilder } from '../types/system-prompt.js';
 import type { TokenCounter } from '../types/token-counter.js';
+import type { WorktreeManager } from '../worktree/worktree-manager.js';
 import type { Token } from './container.js';
 
 const t = <T>(name: string): Token<T> => Symbol(name) as Token<T>;
@@ -41,4 +42,6 @@ export const TOKENS = {
   ModeStore: t<ModeStore>('ModeStore'),
   /** Replaces the entire provider call layer — retry, streaming, tracing. */
   ProviderRunner: t<ProviderRunner>('ProviderRunner'),
+  /** Optional git-worktree lifecycle manager (per-phase isolation in AutoPhase). */
+  WorktreeManager: t<WorktreeManager>('WorktreeManager'),
 } as const;

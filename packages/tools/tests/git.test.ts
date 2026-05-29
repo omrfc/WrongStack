@@ -369,6 +369,82 @@ describe('gitTool buildArgs edge cases', () => {
   });
 });
 
+describe('gitTool worktree hardening', () => {
+  it('rejects a worktree path that escapes the project root', async () => {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), 'wt-escape-'));
+    try {
+      const ctx = { cwd: base, tools: [], projectRoot: base } as any;
+      const result = await gitTool.execute(
+        { command: 'worktree', worktreeAction: 'add', worktreePath: '../../etc/evil', newBranch: true, branch: 'x' },
+        ctx,
+        makeOpts(),
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(/escapes project root/);
+    } finally {
+      await fs.rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects flag-injection branch names', async () => {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), 'wt-flag-'));
+    try {
+      const ctx = { cwd: base, tools: [], projectRoot: base } as any;
+      const result = await gitTool.execute(
+        { command: 'worktree', worktreeAction: 'add', worktreePath: 'wt', branch: '--upload-pack=evil', newBranch: true },
+        ctx,
+        makeOpts(),
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(/unsafe branch/);
+    } finally {
+      await fs.rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects flag-injection worktree paths', async () => {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), 'wt-flagp-'));
+    try {
+      const ctx = { cwd: base, tools: [], projectRoot: base } as any;
+      const result = await gitTool.execute(
+        { command: 'worktree', worktreeAction: 'add', worktreePath: '--force', newBranch: true, branch: 'x' },
+        ctx,
+        makeOpts(),
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toMatch(/unsafe worktree path/);
+    } finally {
+      await fs.rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it('adds a worktree with the path before the new branch (correct arg order)', async () => {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), 'wt-add-'));
+    try {
+      const { spawnSync } = await import('node:child_process');
+      const env = { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@t' };
+      if (spawnSync('git', ['init', '-q', base], { stdio: 'ignore' }).status !== 0) return; // git absent
+      await fs.writeFile(path.join(base, 'seed.txt'), 'seed\n');
+      spawnSync('git', ['-C', base, 'add', '-A'], { stdio: 'ignore', env });
+      spawnSync('git', ['-C', base, 'commit', '-q', '-m', 'init'], { stdio: 'ignore', env });
+
+      const wtDir = path.join(base, '.wrongstack', 'worktrees', 'wt1');
+      const ctx = { cwd: base, tools: [], projectRoot: base } as any;
+      const result = await gitTool.execute(
+        { command: 'worktree', worktreeAction: 'add', worktreePath: wtDir, newBranch: true, branch: 'wstack/ap/wt1' },
+        ctx,
+        makeOpts(),
+      );
+      expect(result.exitCode).toBe(0);
+      // A linked worktree carries a `.git` *file* (gitlink), not a directory.
+      const dotGit = await fs.stat(path.join(wtDir, '.git'));
+      expect(dotGit.isFile()).toBe(true);
+    } finally {
+      await fs.rm(base, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('gitTool runGit stdout/stderr MAX_OUTPUT cap', () => {
   it('stdout is capped at MAX_OUTPUT and truncated flag is set', async () => {
     const ctx = makeCtx(process.cwd());

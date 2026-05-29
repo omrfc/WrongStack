@@ -430,6 +430,42 @@ export interface WSAutoPhaseState {
   payload: Record<string, unknown>;
 }
 
+/** One worktree lane in the swim-lane / DAG view. */
+export interface WorktreeHandleView {
+  handleId: string;
+  ownerId: string;
+  ownerLabel: string;
+  branch: string;
+  baseBranch: string;
+  status:
+    | 'allocating'
+    | 'active'
+    | 'committing'
+    | 'merging'
+    | 'merged'
+    | 'needs-review'
+    | 'failed';
+  insertions: number;
+  deletions: number;
+  files: number;
+  conflictFiles?: string[];
+  allocatedAt: number;
+  lastEventAt: number;
+  recentActivity: Array<{ kind: string; text: string; at: number }>;
+}
+
+/** Full worktree snapshot (broadcast on a timer, see worktree-ws-handler.ts). */
+export interface WSWorktreeState {
+  type: 'worktree.state';
+  payload: { worktrees: WorktreeHandleView[]; baseBranch: string };
+}
+
+/** Incremental worktree lifecycle event — drives the flowing activity strip. */
+export interface WSWorktreeEvent {
+  type: 'worktree.event';
+  payload: { kind: string; handleId: string; text: string; at: number };
+}
+
 export type WSClientMessage =
   | WSUserMessage
   | WSToolConfirmResult
@@ -512,7 +548,9 @@ export type WSServerMessage =
   | WSFilesList
   | WSTodosUpdated
   | WSModesList
-  | WSAutoPhaseState;
+  | WSAutoPhaseState
+  | WSWorktreeState
+  | WSWorktreeEvent;
 
 // Helper to broadcast to all clients
 export type BroadcastFn = (msg: WSServerMessage) => void;

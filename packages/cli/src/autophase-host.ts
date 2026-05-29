@@ -16,11 +16,14 @@
  * single-thread turn injection.
  */
 
+import { spawn } from 'node:child_process';
 import {
   AutoPhasePlanner,
+  buildChildEnv,
   PhaseGraphBuilder,
   PhaseOrchestrator,
   PhaseStore,
+  WorktreeManager,
   type Config,
   type EventBus,
   type PhaseGraph,
@@ -28,6 +31,26 @@ import {
   type TaskNode,
 } from '@wrongstack/core';
 import type { MultiAgentHost } from './multi-agent.js';
+
+/** Default parallel-phase concurrency once worktree isolation is available. */
+const WORKTREE_PHASE_CONCURRENCY = 4;
+
+/** Run a git command, returning trimmed stdout (empty string on failure). */
+function gitText(args: string[], cwd: string): Promise<{ code: number; out: string }> {
+  return new Promise((resolve) => {
+    let out = '';
+    const child = spawn('git', args, { cwd, env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    child.stdout?.on('data', (c: Buffer) => { out += c.toString(); });
+    child.stderr?.on('data', (c: Buffer) => { out += c.toString(); });
+    child.on('error', () => resolve({ code: 1, out }));
+    child.on('close', (code) => resolve({ code: code ?? 1, out: out.trim() }));
+  });
+}
+
+async function isGitRepo(cwd: string): Promise<boolean> {
+  const { code, out } = await gitText(['rev-parse', '--is-inside-work-tree'], cwd);
+  return code === 0 && out.trim() === 'true';
+}
 
 export interface AutoPhaseHostDeps {
   multiAgentHost: MultiAgentHost;
@@ -37,6 +60,16 @@ export interface AutoPhaseHostDeps {
   events: EventBus;
   /** Directory for per-project phase-graph JSON (wpaths.projectAutophase). */
   storeDir: string;
+  /** Project root — base for git-worktree isolation. */
+  projectRoot: string;
+  /**
+   * Enable per-phase git-worktree isolation (default true). When on and the
+   * project is a git repo, parallelizable phases run in isolated worktrees and
+   * merge back sequentially. Disable with WRONGSTACK_AUTOPHASE_WORKTREES=0.
+   */
+  worktrees?: boolean;
+  /** Max parallel phases when worktrees are active (default 4). */
+  maxConcurrentPhases?: number;
   /** Optional progress logger (rendered to the user during start). */
   log?: (line: string) => void;
 }
@@ -58,6 +91,8 @@ export interface AutoPhaseHostHooks {
   onAutoPhaseResume: () => void;
   onAutoPhaseStop: () => void;
   getAutoPhaseRunner: () => AutoPhaseRunnerView | null;
+  /** Backs the /worktree slash command (list / merge / prune / clean). */
+  onWorktree: (action: 'list' | 'merge' | 'prune' | 'clean', target?: string) => Promise<string>;
 }
 
 interface ActiveRun {
@@ -80,9 +115,14 @@ export function createAutoPhaseHost(deps: AutoPhaseHostDeps): AutoPhaseHostHooks
   const log = deps.log ?? (() => {});
 
   /** Run a single prompt to completion in a throwaway subagent; return its text. */
-  async function runOnce(prompt: string, label: string, signal: AbortSignal): Promise<string> {
+  async function runOnce(
+    prompt: string,
+    label: string,
+    signal: AbortSignal,
+    cwd?: string,
+  ): Promise<string> {
     const factory = deps.multiAgentHost.makeSubagentFactory(deps.getConfig());
-    const built = await factory({ name: label });
+    const built = await factory({ name: label, cwd });
     try {
       const result = (await built.agent.run(prompt, { signal })) as RunResult;
       if (result.status !== 'done') {
@@ -158,17 +198,30 @@ export function createAutoPhaseHost(deps: AutoPhaseHostDeps): AutoPhaseHostHooks
       }).build();
       await persist(graph);
 
+      // Per-phase git-worktree isolation. When enabled and inside a git repo,
+      // each phase runs in its own worktree+branch so parallelizable phases
+      // execute concurrently and merge back sequentially. Otherwise fall back
+      // to the legacy single-tree, single-phase, single-task behavior.
+      const worktreesEnabled =
+        deps.worktrees !== false && process.env['WRONGSTACK_AUTOPHASE_WORKTREES'] !== '0';
+      let worktrees: WorktreeManager | undefined;
+      if (worktreesEnabled && (await isGitRepo(deps.projectRoot))) {
+        worktrees = new WorktreeManager({ projectRoot: deps.projectRoot, events: deps.events });
+        log(`🌿 Worktree isolation on — up to ${deps.maxConcurrentPhases ?? WORKTREE_PHASE_CONCURRENCY} phases run in parallel.`);
+      }
+
       // 3) RUN (background)
       const orchestrator = new PhaseOrchestrator({
         graph,
         ctx: {
-          executeTask: async (task, phaseId) => {
+          executeTask: async (task, phaseId, env) => {
             const phase = graph.phases.get(phaseId);
             const phaseName = phase?.name ?? phaseId;
             return runOnce(
               buildTaskPrompt(task, phaseName, goal),
               `autophase-${phaseName}-${task.title}`.slice(0, 48),
               abort.signal,
+              env?.cwd,
             );
           },
           onPhaseComplete: (phase) => {
@@ -181,11 +234,13 @@ export function createAutoPhaseHost(deps: AutoPhaseHostDeps): AutoPhaseHostHooks
           },
         },
         events: deps.events,
+        worktrees,
         autonomous: true,
-        maxConcurrentPhases: 1,
-        // Sequential within a phase: each todo is a full-tool agent editing the
-        // shared working tree, and todos in a phase typically build on one
-        // another. Running two at once risks concurrent writes / lost edits.
+        // With isolation, parallelizable phases run concurrently; without it,
+        // stay strictly sequential to protect the shared working tree.
+        maxConcurrentPhases: worktrees ? (deps.maxConcurrentPhases ?? WORKTREE_PHASE_CONCURRENCY) : 1,
+        // Sequential within a phase: each todo is a full-tool agent and todos in
+        // a phase typically build on one another (they share the phase worktree).
         maxConcurrentTasks: 1,
       });
 
@@ -247,6 +302,52 @@ export function createAutoPhaseHost(deps: AutoPhaseHostDeps): AutoPhaseHostHooks
         getProgress: () => a.orchestrator.getProgress(),
         isRunning: () => a.orchestrator.isRunning(),
       };
+    },
+
+    async onWorktree(action, target) {
+      const root = deps.projectRoot;
+      if (!(await isGitRepo(root))) return '⚠ Not a git repository — worktrees unavailable.';
+
+      switch (action) {
+        case 'list': {
+          const { out } = await gitText(['worktree', 'list'], root);
+          return out || 'No worktrees.';
+        }
+        case 'prune': {
+          await gitText(['worktree', 'prune'], root);
+          const { out } = await gitText(['worktree', 'list'], root);
+          return `Pruned stale worktree entries.\n${out}`;
+        }
+        case 'merge': {
+          if (!target) return 'Usage: /worktree merge <branch>';
+          if (target.startsWith('-')) return `Refusing unsafe branch name: ${target}`;
+          const base = (await gitText(['rev-parse', '--abbrev-ref', 'HEAD'], root)).out || 'HEAD';
+          await gitText(['merge', '--squash', target], root);
+          const commit = await gitText(['commit', '-m', `merge ${target} (squash)`], root);
+          if (commit.code !== 0 && !/nothing to commit/i.test(commit.out)) {
+            await gitText(['reset', '--hard', 'HEAD'], root);
+            return `⚠ Merge of "${target}" into ${base} hit conflicts and was rolled back.\n${commit.out}`;
+          }
+          return `✓ Merged "${target}" into ${base} (squash).`;
+        }
+        case 'clean': {
+          // Remove all wstack-managed worktrees + branches.
+          const list = (await gitText(['worktree', 'list', '--porcelain'], root)).out;
+          const dirs = list
+            .split('\n')
+            .filter((l) => l.startsWith('worktree '))
+            .map((l) => l.slice('worktree '.length))
+            .filter((d) => d.includes('.wrongstack') && d.includes('worktrees'));
+          for (const d of dirs) await gitText(['worktree', 'remove', '--force', d], root);
+          await gitText(['worktree', 'prune'], root);
+          const branches = (await gitText(['branch', '--list', 'wstack/ap/*'], root)).out
+            .split('\n').map((b) => b.replace(/^[*+]?\s*/, '').trim()).filter(Boolean);
+          for (const b of branches) await gitText(['branch', '-D', b], root);
+          return `🧹 Removed ${dirs.length} worktree(s) and ${branches.length} branch(es).`;
+        }
+        default:
+          return `Unknown worktree action: ${action}`;
+      }
     },
   };
 }

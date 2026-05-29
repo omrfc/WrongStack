@@ -10,8 +10,9 @@ import {
   useHistoryStore,
   useSessionStore,
   useUIStore,
+  useWorktreeStore,
 } from '@/stores';
-import type { WSServerMessage } from '@/types';
+import type { WorktreeHandleView, WSServerMessage } from '@/types';
 import { useCallback, useEffect, useRef } from 'react';
 
 /**
@@ -781,6 +782,16 @@ function installHandlers(ws: WrongStackWebSocketClient): () => void {
       isError: true,
     });
     useChatStore.getState().setLoading(false);
+  });
+
+  // ── Worktree isolation lanes ──────────────────────────────────────────────
+  on('worktree.state', (msg) => {
+    const p = msg.payload as { worktrees: WorktreeHandleView[]; baseBranch: string };
+    useWorktreeStore.getState().setSnapshot(p.worktrees ?? [], p.baseBranch ?? '');
+  });
+  on('worktree.event', (msg) => {
+    const p = msg.payload as { kind: string; handleId: string; text: string; at: number };
+    useWorktreeStore.getState().pushEvent(p);
   });
 
   return () => {

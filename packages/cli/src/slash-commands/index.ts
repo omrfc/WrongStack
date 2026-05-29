@@ -210,6 +210,13 @@ export interface SlashCommandContext {
     getProgress: () => import('@wrongstack/core').PhaseProgress | null;
     isRunning: () => boolean;
   } | null;
+  /**
+   * Manage git worktrees used for per-phase AutoPhase isolation.
+   * `list` shows current worktrees, `merge <branch>` squash-merges a branch
+   * into HEAD, `prune` removes stale entries, `clean` removes all
+   * wstack-managed worktrees + branches. Backs the /worktree command.
+   */
+  onWorktree?: (action: 'list' | 'merge' | 'prune' | 'clean', target?: string) => Promise<string>;
 }
 
 // Re-export helpers for external consumers (pre-launch.ts)
@@ -255,6 +262,7 @@ import {
   buildSkillUninstallCommand,
 } from './skill-install.js';
 import { buildAutoPhaseCommand } from './autophase.js';
+import { buildWorktreeCommand } from './worktree.js';
 
 export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashCommand[] {
   return [
@@ -297,6 +305,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildSecurityCommand(opts),
     buildFixCommand(opts),
     buildAutoPhaseCommand(opts),
+    buildWorktreeCommand(opts),
     buildStatuslineCommand({
       cwd: opts.cwd,
       hiddenItems: opts.statuslineHiddenItems ?? [],

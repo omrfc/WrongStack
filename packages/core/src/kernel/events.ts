@@ -339,6 +339,45 @@ export interface EventMap {
     completed: number;
     subagentStatuses: { subagentId: string; taskId: string; status: string; assigned: boolean }[];
   };
+  /**
+   * Git-worktree lifecycle, emitted by WorktreeManager. AutoPhase allocates one
+   * worktree per phase so parallelizable phases run isolated, then merges them
+   * back sequentially. The WebUI/TUI subscribe to render live swim-lanes/DAG.
+   */
+  'worktree.allocated': {
+    handleId: string;
+    ownerId: string;
+    ownerLabel: string;
+    slug: string;
+    dir: string;
+    branch: string;
+    baseBranch: string;
+  };
+  'worktree.committed': {
+    handleId: string;
+    ownerId: string;
+    branch: string;
+    committed: boolean;
+    insertions: number;
+    deletions: number;
+    files: number;
+    sha?: string;
+  };
+  'worktree.merged': {
+    handleId: string;
+    ownerId: string;
+    branch: string;
+    baseBranch: string;
+    squash: boolean;
+  };
+  'worktree.conflict': {
+    handleId: string;
+    ownerId: string;
+    branch: string;
+    conflictFiles: string[];
+  };
+  'worktree.released': { handleId: string; ownerId: string; branch: string; kept: boolean };
+  'worktree.failed': { handleId: string; ownerId: string; branch?: string; error: string };
   error: { err: Error; phase: string };
 }
 

@@ -686,6 +686,7 @@ export async function main(argv: string[]): Promise<number> {
     getConfig: () => config,
     events,
     storeDir: wpaths.projectAutophase,
+    projectRoot,
     log: (line) => renderer.write(`${line}\n`),
   });
 
@@ -1389,6 +1390,7 @@ export async function main(argv: string[]): Promise<number> {
     onAutoPhaseResume: autoPhaseHost.onAutoPhaseResume,
     onAutoPhaseStop: autoPhaseHost.onAutoPhaseStop,
     getAutoPhaseRunner: autoPhaseHost.getAutoPhaseRunner,
+    onWorktree: autoPhaseHost.onWorktree,
   });
   for (const cmd of slashCmds) slashRegistry.register(cmd);
 

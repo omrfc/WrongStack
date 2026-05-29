@@ -53,6 +53,8 @@ export interface WstackPaths {
   inProjectAgentsFile: string;
   /** <project>/.wrongstack/skills — committed project skills. */
   inProjectSkills: string;
+  /** <project>/.wrongstack/worktrees — git worktrees for per-phase isolation (gitignored). */
+  inProjectWorktrees: string;
   /** Stable hash for the project root. */
   projectHash: string;
   /** ~/.wrongstack/projects/<hash>/goal.json — goal persistence */
@@ -104,6 +106,7 @@ export function resolveWstackPaths(opts: WstackPathOptions): WstackPaths {
     projectLocalConfig: path.join(projectDir, 'config.local.json'),
     inProjectAgentsFile: path.join(opts.projectRoot, '.wrongstack', 'AGENTS.md'),
     inProjectSkills: path.join(opts.projectRoot, '.wrongstack', 'skills'),
+    inProjectWorktrees: path.join(opts.projectRoot, '.wrongstack', 'worktrees'),
     projectHash: hash,
     projectGoal: path.join(projectDir, 'goal.json'),
     projectSpecs: path.join(projectDir, 'specs'),

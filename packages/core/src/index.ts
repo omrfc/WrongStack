@@ -154,3 +154,15 @@ export {
   type PhaseFilter,
   type PhaseSort,
 } from './autophase/index.js';
+
+export {
+  WorktreeManager,
+  assertSafePath,
+  type WorktreeHandle,
+  type WorktreeStatus,
+  type WorktreeManagerOptions,
+  type AllocateOpts,
+  type MergeOpts,
+  type MergeResult,
+  type WorktreeRunResult,
+} from './worktree/index.js';

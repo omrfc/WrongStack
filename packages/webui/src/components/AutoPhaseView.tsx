@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { useWorktreeStore } from '@/stores';
 import { PhasePanel } from './PhasePanel';
 import { TaskBoard } from './TaskBoard';
+import { WorktreeLanes } from './WorktreeLanes';
+import { WorktreeGraph } from './WorktreeGraph';
 import type { PhaseItem } from './PhasePanel';
 import type { TaskItem } from './TaskBoard';
 import type { WSServerMessage } from '@/types';
@@ -60,34 +63,68 @@ export function AutoPhaseView(): React.ReactElement {
   );
 
   const activePhase = state.phases.find((p) => p.id === state.activePhaseId);
+  const worktrees = useWorktreeStore((s) => s.worktrees);
+  const baseBranch = useWorktreeStore((s) => s.baseBranch);
+  const [showGraph, setShowGraph] = useState(false);
 
   return (
-    <div className="flex h-full w-full">
-      {/* Sol Panel — Fazlar */}
-      <PhasePanel
-        phases={state.phases}
-        activePhaseId={state.activePhaseId}
-        onPhaseClick={handlePhaseClick}
-        overallPercent={state.overallPercent}
-        autonomous={state.autonomous}
-        onToggleAutonomous={handleToggleAutonomous}
-      />
+    <div className="flex h-full w-full flex-col">
+      <div className="flex min-h-0 flex-1">
+        {/* Sol Panel — Fazlar */}
+        <PhasePanel
+          phases={state.phases}
+          activePhaseId={state.activePhaseId}
+          onPhaseClick={handlePhaseClick}
+          overallPercent={state.overallPercent}
+          autonomous={state.autonomous}
+          onToggleAutonomous={handleToggleAutonomous}
+        />
 
-      {/* Sağ Panel — Görevler */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {activePhase ? (
-          <TaskBoard
-            phaseName={activePhase.name}
-            phaseStatus={activePhase.status}
-            tasks={state.tasks}
-            onTaskStatusChange={handleTaskStatusChange}
-          />
-        ) : (
-          <div className="flex items-center justify-center h-full text-muted-foreground">
-            <p>Bir faz seçin</p>
-          </div>
-        )}
+        {/* Sağ Panel — Görevler */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          {activePhase ? (
+            <TaskBoard
+              phaseName={activePhase.name}
+              phaseStatus={activePhase.status}
+              tasks={state.tasks}
+              onTaskStatusChange={handleTaskStatusChange}
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center text-muted-foreground">
+              <p>Bir faz seçin</p>
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Alt bant — git worktree izolasyon kulvarları / DAG */}
+      {worktrees.length > 0 ? (
+        <div>
+          <div className="flex items-center justify-end gap-2 px-4 pt-2 text-xs">
+            <button
+              type="button"
+              onClick={() => setShowGraph(false)}
+              className={`rounded px-2 py-0.5 ${!showGraph ? 'bg-[--color-primary]/20 text-[--color-primary]' : 'text-[--color-text-dark-secondary]'}`}
+            >
+              Lanes
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowGraph(true)}
+              className={`rounded px-2 py-0.5 ${showGraph ? 'bg-[--color-primary]/20 text-[--color-primary]' : 'text-[--color-text-dark-secondary]'}`}
+            >
+              Graph
+            </button>
+          </div>
+          {showGraph ? (
+            <div className="px-4 pb-3">
+              <WorktreeGraph worktrees={worktrees} baseBranch={baseBranch} />
+            </div>
+          ) : (
+            <WorktreeLanes worktrees={worktrees} baseBranch={baseBranch} />
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, resolve, sep } from 'node:path';
 import { buildChildEnv } from '@wrongstack/core';
 import type { Tool } from '@wrongstack/core';
 
@@ -132,6 +132,13 @@ export const gitTool: Tool<GitInput, GitOutput> = {
       };
     }
 
+    // Validate worktree paths/branches before touching the filesystem: reject
+    // flag injection and any path that escapes the project root.
+    if (input.command === 'worktree') {
+      const guard = validateWorktreeInput(input, ctx.projectRoot);
+      if (guard) return guard;
+    }
+
     // Bound the search at projectRoot so a non-git project doesn't drift
     // into a parent repo (e.g. ~/repos/.git) and operate on the wrong tree.
     const gitDir = findGitDir(ctx.cwd, ctx.projectRoot);
@@ -150,13 +157,50 @@ export const gitTool: Tool<GitInput, GitOutput> = {
   },
 };
 
+/**
+ * Reject worktree inputs that could inject git flags or escape the project
+ * root. Returns a `GitOutput` describing the rejection, or `null` if safe.
+ */
+function validateWorktreeInput(input: GitInput, projectRoot: string): GitOutput | null {
+  const reject = (stderr: string): GitOutput => ({
+    command: 'worktree',
+    stdout: '',
+    stderr,
+    exitCode: 1,
+    truncated: false,
+  });
+
+  // Flag injection: a leading '-' would be parsed as a git option.
+  if (input.branch?.startsWith('-')) return reject(`unsafe branch name: ${input.branch}`);
+  if (input.worktreePath?.startsWith('-')) {
+    return reject(`unsafe worktree path: ${input.worktreePath}`);
+  }
+
+  // Path escape: add/remove targets must resolve inside the project root.
+  if (
+    (input.worktreeAction === 'add' || input.worktreeAction === 'remove') &&
+    input.worktreePath
+  ) {
+    const root = resolve(projectRoot);
+    const abs = resolve(root, input.worktreePath);
+    if (abs !== root && !abs.startsWith(root + sep)) {
+      return reject(`unsafe worktree path (escapes project root): ${input.worktreePath}`);
+    }
+  }
+
+  return null;
+}
+
 function findGitDir(cwd: string, projectRoot: string): string | null {
   const root = projectRoot;
   let dir = cwd;
   for (let i = 0; i < 20; i++) {
     try {
       const stat = statSync(`${dir}/.git`);
-      if (stat.isDirectory()) return dir;
+      // A normal repo has a `.git` directory; a linked worktree has a `.git`
+      // *file* (gitlink pointing at the main repo). Accept both so the tool
+      // operates inside a worktree when a subagent's cwd is a worktree dir.
+      if (stat.isDirectory() || stat.isFile()) return dir;
     } catch {
       // continue
     }
@@ -222,14 +266,18 @@ function buildArgs(input: GitInput): string[] {
       switch (input.worktreeAction) {
         case 'list':
           return ['worktree', 'list'];
-        case 'add':
-          return [
-            'worktree',
-            'add',
-            ...(input.newBranch ? ['-b'] : []),
-            ...(input.branch ? [input.branch] : []),
-            input.worktreePath ?? '',
-          ].filter(Boolean);
+        case 'add': {
+          // git worktree add [-b <new-branch>] <path> [<commit-ish>]
+          // The path comes BEFORE the branch/commit-ish. With --newBranch the
+          // branch is the name to create (`-b <branch> <path>`); without it the
+          // branch is an existing branch/commit to check out (`<path> <branch>`).
+          if (!input.worktreePath) return ['worktree', 'list'];
+          const add = ['worktree', 'add'];
+          if (input.newBranch && input.branch) add.push('-b', input.branch);
+          add.push(input.worktreePath);
+          if (!input.newBranch && input.branch) add.push(input.branch);
+          return add;
+        }
         case 'remove':
           return [
             'worktree',

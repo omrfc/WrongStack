@@ -26,6 +26,8 @@ import { FleetMonitor } from './components/fleet-monitor.js';
 import { AgentsMonitor } from './components/agents-monitor.js';
 import { PhaseMonitor } from './components/phase-monitor.js';
 import { PhasePanel } from './components/phase-panel.js';
+import { WorktreePanel, type WorktreeRow } from './components/worktree-panel.js';
+import { WorktreeMonitor } from './components/worktree-monitor.js';
 import { History, type HistoryEntry } from './components/history.js';
 import { Input, type KeyEvent } from './components/input.js';
 import { LiveActivityStrip } from './components/live-activity-strip.js';
@@ -492,6 +494,12 @@ type State = {
     /** True while the monitor overlay is open (Ctrl+P). */
     monitorOpen: boolean;
   } | null;
+  /** Git-worktree isolation state — rendered by WorktreePanel/WorktreeMonitor. */
+  worktrees: Record<string, WorktreeRow & { baseBranch?: string }>;
+  /** Base branch worktrees fork from (for the monitor header). */
+  worktreeBase?: string;
+  /** True while the worktree monitor overlay is open (Ctrl+T). */
+  worktreeMonitorOpen: boolean;
 };
 
 type Action =
@@ -642,7 +650,10 @@ type Action =
   | { type: 'autoPhaseRunningPhases'; phaseIds: string[] }
   | { type: 'autoPhaseElapsed'; ms: number }
   | { type: 'autoPhaseMonitorToggle' }
-  | { type: 'autoPhaseReset' };
+  | { type: 'autoPhaseReset' }
+  | { type: 'worktreeUpsert'; handleId: string; row: Partial<WorktreeRow & { baseBranch?: string }>; baseBranch?: string }
+  | { type: 'worktreeRemove'; handleId: string }
+  | { type: 'worktreeMonitorToggle' };
 
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -1289,6 +1300,34 @@ export function reducer(state: State, action: Action): State {
     case 'autoPhaseReset': {
       return { ...state, autoPhase: null };
     }
+    case 'worktreeUpsert': {
+      const prev = state.worktrees[action.handleId];
+      const merged: WorktreeRow & { baseBranch?: string } = {
+        branch: '',
+        ownerLabel: '',
+        status: 'active',
+        insertions: 0,
+        deletions: 0,
+        files: 0,
+        allocatedAt: Date.now(),
+        ...prev,
+        ...action.row,
+      };
+      return {
+        ...state,
+        worktrees: { ...state.worktrees, [action.handleId]: merged },
+        worktreeBase: action.baseBranch ?? state.worktreeBase,
+      };
+    }
+    case 'worktreeRemove': {
+      if (!state.worktrees[action.handleId]) return state;
+      const next = { ...state.worktrees };
+      delete next[action.handleId];
+      return { ...state, worktrees: next };
+    }
+    case 'worktreeMonitorToggle': {
+      return { ...state, worktreeMonitorOpen: !state.worktreeMonitorOpen };
+    }
   }
 }
 
@@ -1525,6 +1564,8 @@ export function App({
     eternalStage: null,
     goalSummary: null,
     autoPhase: null,
+    worktrees: {},
+    worktreeMonitorOpen: false,
   });
 
   const builderRef = useRef<InputBuilder | null>(null);
@@ -2774,6 +2815,46 @@ export function App({
           dispatch({ type: 'autoPhaseReset' });
           break;
         }
+        case 'worktree.allocated': {
+          const p = payload as { handleId: string; ownerLabel: string; branch: string; baseBranch: string };
+          dispatch({
+            type: 'worktreeUpsert',
+            handleId: p.handleId,
+            baseBranch: p.baseBranch,
+            row: { branch: p.branch, ownerLabel: p.ownerLabel, baseBranch: p.baseBranch, status: 'active', allocatedAt: Date.now() },
+          });
+          break;
+        }
+        case 'worktree.committed': {
+          const p = payload as { handleId: string; insertions: number; deletions: number; files: number };
+          dispatch({
+            type: 'worktreeUpsert',
+            handleId: p.handleId,
+            row: { insertions: p.insertions, deletions: p.deletions, files: p.files, status: 'committing' },
+          });
+          break;
+        }
+        case 'worktree.merged': {
+          const p = payload as { handleId: string };
+          dispatch({ type: 'worktreeUpsert', handleId: p.handleId, row: { status: 'merged' } });
+          break;
+        }
+        case 'worktree.conflict': {
+          const p = payload as { handleId: string; conflictFiles: string[] };
+          dispatch({ type: 'worktreeUpsert', handleId: p.handleId, row: { status: 'needs-review', conflictFiles: p.conflictFiles } });
+          break;
+        }
+        case 'worktree.failed': {
+          const p = payload as { handleId: string };
+          dispatch({ type: 'worktreeUpsert', handleId: p.handleId, row: { status: 'failed' } });
+          break;
+        }
+        case 'worktree.released': {
+          const p = payload as { handleId: string; kept: boolean };
+          // Keep conflicted/failed (kept) worktrees visible; drop clean ones.
+          if (!p.kept) dispatch({ type: 'worktreeRemove', handleId: p.handleId });
+          break;
+        }
       }
     };
 
@@ -3506,6 +3587,12 @@ export function App({
     // AutoPhase monitor toggle — Ctrl+P
     if (key.ctrl && input === 'p') {
       dispatch({ type: 'autoPhaseMonitorToggle' });
+      return;
+    }
+
+    // Worktree monitor toggle — Ctrl+T (Ctrl+W is taken by delete-word).
+    if (key.ctrl && input === 't') {
+      dispatch({ type: 'worktreeMonitorToggle' });
       return;
     }
 
@@ -4452,6 +4539,13 @@ export function App({
           nowTick={nowTick}
           onClose={() => dispatch({ type: 'autoPhaseMonitorToggle' })}
         />
+      ) : state.worktreeMonitorOpen ? (
+        <WorktreeMonitor
+          worktrees={state.worktrees}
+          baseBranch={state.worktreeBase}
+          nowTick={nowTick}
+          onClose={() => dispatch({ type: 'worktreeMonitorToggle' })}
+        />
       ) : state.monitorOpen ? (
         <FleetMonitor
           entries={state.fleet}
@@ -4468,6 +4562,9 @@ export function App({
           runningPhaseIds={state.autoPhase.runningPhaseIds}
           nowTick={nowTick}
         />
+      ) : null}
+      {Object.keys(state.worktrees).length > 0 && !state.worktreeMonitorOpen && !state.monitorOpen ? (
+        <WorktreePanel worktrees={state.worktrees} nowTick={nowTick} />
       ) : null}
     </Box>
   );

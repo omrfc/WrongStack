@@ -330,6 +330,13 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           'graph.failed',
           'agent.assigned',
           'agent.released',
+          // Git-worktree isolation lifecycle → TUI worktree panel/monitor.
+          'worktree.allocated',
+          'worktree.committed',
+          'worktree.merged',
+          'worktree.conflict',
+          'worktree.released',
+          'worktree.failed',
         ];
         // AutoPhase events are emitted on the untyped surface of the bus
         // (the orchestrator casts `emit` to a string-keyed signature), so we

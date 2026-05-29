@@ -121,8 +121,15 @@ export type PhaseEventName = keyof PhaseEventMap;
 // ─── Phase Execution Context ────────────────────────────────────────────────
 
 export interface PhaseExecutionContext {
-  /** Bir görevi çalıştır — AI agent tarafından yapılır */
-  executeTask: (task: TaskNode, phaseId: string) => Promise<unknown>;
+  /**
+   * Bir görevi çalıştır — AI agent tarafından yapılır. `env`, fazın git
+   * worktree'sine (varsa) işaret eder; agent'ı izole çalışma dizininde koştur.
+   */
+  executeTask: (
+    task: TaskNode,
+    phaseId: string,
+    env?: { cwd?: string; branch?: string },
+  ) => Promise<unknown>;
   /** Bir faz tamamlandığında çağrılır */
   onPhaseComplete?: (phase: PhaseNode) => void;
   /** Bir faz başarısız olduğunda çağrılır */
@@ -148,6 +155,12 @@ export interface AutoPhaseOptions {
   stopOnFailure?: boolean;
   /** Event bus */
   events?: import('../kernel/events.js').EventBus;
+  /**
+   * Opsiyonel git-worktree yöneticisi. Verilirse her faz kendi
+   * worktree+branch'inde izole çalışır ve tamamlanınca ana branch'e sıralı
+   * squash-merge edilir. Yoksa davranış değişmez (paylaşılan working tree).
+   */
+  worktrees?: import('../worktree/worktree-manager.js').WorktreeManager;
 }
 
 // ─── Phase Filter / Sort ────────────────────────────────────────────────────

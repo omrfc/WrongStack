@@ -320,8 +320,12 @@ export class MultiAgentHost {
       const events = new EventBus();
       const provider = await this.buildSubagentProvider(config, subCfg.provider);
 
+      // Per-subagent cwd (defaults to the factory cwd). AutoPhase points this
+      // at a phase's git worktree so isolated checkouts don't collide.
+      const subCwd = subCfg.cwd ?? this.deps.cwd;
+
       const baseSystem: TextBlock[] = await this.deps.systemPromptBuilder.build({
-        cwd: this.deps.cwd,
+        cwd: subCwd,
         projectRoot: this.deps.projectRoot,
         tools: this.filterTools(subCfg.tools),
         model: subCfg.model ?? config.model,
@@ -364,7 +368,7 @@ export class MultiAgentHost {
         session: subSession,
         signal: new AbortController().signal,
         tokenCounter: this.deps.tokenCounter,
-        cwd: this.deps.cwd,
+        cwd: subCwd,
         projectRoot: this.deps.projectRoot,
         model: subCfg.model ?? config.model,
         tools: this.filterTools(subCfg.tools),

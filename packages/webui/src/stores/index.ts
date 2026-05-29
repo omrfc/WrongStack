@@ -748,3 +748,31 @@ export const useHistoryStore = create<HistoryState>()((set) => ({
     })),
   clearHistory: () => set({ entries: [] }),
 }));
+
+// ── Worktree store (live backend state; not persisted) ──────────────────────
+
+import type { WorktreeHandleView } from '../types.js';
+
+interface WorktreeActivity {
+  handleId: string;
+  kind: string;
+  text: string;
+  at: number;
+}
+
+interface WorktreeState {
+  worktrees: WorktreeHandleView[];
+  baseBranch: string;
+  /** Bounded rolling activity feed for the flowing strip / ticker. */
+  activity: WorktreeActivity[];
+  setSnapshot: (worktrees: WorktreeHandleView[], baseBranch: string) => void;
+  pushEvent: (e: WorktreeActivity) => void;
+}
+
+export const useWorktreeStore = create<WorktreeState>()((set) => ({
+  worktrees: [],
+  baseBranch: '',
+  activity: [],
+  setSnapshot: (worktrees, baseBranch) => set({ worktrees, baseBranch }),
+  pushEvent: (e) => set((s) => ({ activity: [...s.activity, e].slice(-40) })),
+}));

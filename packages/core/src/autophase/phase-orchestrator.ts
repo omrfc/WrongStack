@@ -1,5 +1,6 @@
 import type { EventBus } from '../kernel/events.js';
 import type { TaskNode } from '../types/task-graph.js';
+import type { WorktreeHandle, WorktreeManager } from '../worktree/worktree-manager.js';
 import { TaskTracker } from '../sdd/task-tracker.js';
 import { DefaultTaskStore } from '../sdd/task-generator.js';
 import type {
@@ -31,7 +32,7 @@ export interface PhaseOrchestratorOptions extends AutoPhaseOptions {
 export class PhaseOrchestrator {
   private graph: PhaseGraph;
   private ctx: PhaseExecutionContext;
-  private opts: Required<AutoPhaseOptions>;
+  private opts: Required<Omit<AutoPhaseOptions, 'worktrees'>>;
   private events: EventBus;
   private stopped = false;
   private paused = false;
@@ -40,10 +41,20 @@ export class PhaseOrchestrator {
   private trackerCache = new Map<string, TaskTracker>();
   private taskRetryCounts = new Map<string, number>();
 
+  // ── Git-worktree isolation (optional) ──────────────────────────────────────
+  private readonly worktrees?: WorktreeManager;
+  /** Per-phase worktree handles, keyed by phase id. */
+  private readonly phaseWorktrees = new Map<string, WorktreeHandle>();
+  /** Serializes all merges back to the base branch (one at a time). */
+  private mergeQueue: Promise<void> = Promise.resolve();
+  /** Per-phase merge promise, so a phase merges only after its deps do. */
+  private readonly phaseMergePromise = new Map<string, Promise<void>>();
+
   constructor(opts: PhaseOrchestratorOptions) {
     this.graph = opts.graph;
     this.ctx = opts.ctx;
     this.events = opts.events ?? this.createNoopEventBus();
+    this.worktrees = opts.worktrees;
     this.opts = {
       maxConcurrentPhases: opts.maxConcurrentPhases ?? 1,
       maxConcurrentTasks: opts.maxConcurrentTasks ?? 2,
@@ -84,10 +95,20 @@ export class PhaseOrchestrator {
       );
     }
 
+    // Tüm worktree merge'lerinin (arka planda, sıralı) bitmesini bekle ki
+    // graph "completed" ilan edilmeden önce değişiklikler ana branch'e inmiş olsun.
+    await this.drainMerges();
+
     // Autonomous tick loop (gerçek zamanlı monitoring için)
     if (this.opts.autonomous) {
       this.tickInterval = setInterval(() => this.tick(), 1000);
     }
+  }
+
+  /** Bekleyen tüm faz merge'lerini (dep-sıralı + global seri) bekle. */
+  private async drainMerges(): Promise<void> {
+    await Promise.allSettled([...this.phaseMergePromise.values()]);
+    await this.mergeQueue.catch(() => {});
   }
 
   /** Duraklat — aktif fazlar çalışmaya devam eder ama yeni faz başlamaz */
@@ -114,6 +135,12 @@ export class PhaseOrchestrator {
       const phase = this.graph.phases.get(phaseId);
       if (phase) {
         this.updatePhaseStatus(phase, 'paused');
+      }
+    }
+    // Preserve any live worktrees for inspection rather than discarding work.
+    if (this.worktrees) {
+      for (const handle of this.worktrees.list()) {
+        void this.worktrees.release(handle, { keep: true }).catch(() => {});
       }
     }
   }
@@ -169,6 +196,20 @@ export class PhaseOrchestrator {
     this.runningPhases.add(phase.id);
     this.graph.activePhaseIds.push(phase.id);
 
+    // Allocate an isolated git worktree for this phase, if a manager is wired.
+    // Allocation failure degrades gracefully to the shared working tree.
+    if (this.worktrees && !this.phaseWorktrees.has(phase.id)) {
+      try {
+        const handle = await this.worktrees.allocate(phase.id, {
+          slugHint: phase.name,
+          ownerLabel: phase.name,
+        });
+        if (handle.status === 'active') this.phaseWorktrees.set(phase.id, handle);
+      } catch {
+        // Manager already emitted worktree.failed; run on the shared tree.
+      }
+    }
+
     this.emit('phase.started', { phaseId: phase.id, name: phase.name });
 
     try {
@@ -195,6 +236,7 @@ export class PhaseOrchestrator {
           error: `${failedTasks} task(s) failed`,
         });
         this.ctx.onPhaseFail?.(phase, new Error(`${failedTasks} task(s) failed`));
+        await this.keepWorktreeForReview(phase);
       } else {
         this.updatePhaseStatus(phase, 'completed');
         phase.completedAt = Date.now();
@@ -208,6 +250,9 @@ export class PhaseOrchestrator {
           durationMs: phase.actualDurationMs,
         });
         this.ctx.onPhaseComplete?.(phase);
+        // Commit the phase's work in its worktree and queue the merge back into
+        // the base branch (dependency-ordered + globally serialized).
+        await this.commitAndEnqueueMerge(phase);
       }
     } catch (error) {
       this.updatePhaseStatus(phase, 'failed');
@@ -222,7 +267,68 @@ export class PhaseOrchestrator {
         error: error instanceof Error ? error.message : String(error),
       });
       this.ctx.onPhaseFail?.(phase, error instanceof Error ? error : new Error(String(error)));
+      await this.keepWorktreeForReview(phase);
     }
+  }
+
+  // ─── Worktree integration ───────────────────────────────────────────────────
+
+  /**
+   * Commit the phase's worktree changes, then enqueue the merge back into the
+   * base branch. Merges run dependency-ordered (a phase merges only after its
+   * `dependsOn` phases) and globally serialized (one at a time) to avoid
+   * concurrent writes to the base tree.
+   */
+  private async commitAndEnqueueMerge(phase: PhaseNode): Promise<void> {
+    const handle = this.phaseWorktrees.get(phase.id);
+    if (!this.worktrees || !handle) return;
+
+    try {
+      await this.worktrees.commitAll(handle, `autophase(${phase.name}): ${phase.id}`);
+    } catch {
+      // commit failure is non-fatal; the merge step will report a clean tree.
+    }
+
+    const depPromises = phase.dependsOn
+      .map((d) => this.phaseMergePromise.get(d))
+      .filter((p): p is Promise<void> => Boolean(p));
+
+    const merged = (async () => {
+      await Promise.allSettled(depPromises); // dependency-ordered
+      // Chain onto the global queue so only one merge touches base at a time.
+      this.mergeQueue = this.mergeQueue.then(() => this.mergeOne(phase, handle));
+      await this.mergeQueue;
+    })();
+    this.phaseMergePromise.set(phase.id, merged);
+  }
+
+  /** Squash-merge one phase. Conflicts mark the worktree needs-review (run continues). */
+  private async mergeOne(phase: PhaseNode, handle: WorktreeHandle): Promise<void> {
+    if (!this.worktrees) return;
+    try {
+      const result = await this.worktrees.merge(handle, { squash: true });
+      // merge() already emitted worktree.merged / worktree.conflict and set status.
+      // Clean merge → remove the worktree; conflict → release(keep) preserves it.
+      await this.worktrees.release(handle, { keep: !result.ok });
+    } catch (err) {
+      this.emit('phase.failed', {
+        phaseId: phase.id,
+        name: phase.name,
+        error: `worktree merge failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
+  /** A failed phase keeps its worktree on disk for inspection (no merge). */
+  private async keepWorktreeForReview(phase: PhaseNode): Promise<void> {
+    const handle = this.phaseWorktrees.get(phase.id);
+    if (!this.worktrees || !handle) return;
+    try {
+      await this.worktrees.commitAll(handle, `autophase(${phase.name}) [failed]: ${phase.id}`);
+    } catch {
+      // best effort
+    }
+    await this.worktrees.release(handle, { keep: true }).catch(() => {});
   }
 
   private async executePhaseTasks(phase: PhaseNode): Promise<void> {
@@ -256,7 +362,8 @@ export class PhaseOrchestrator {
   private async executeSingleTask(task: TaskNode, phase: PhaseNode): Promise<unknown> {
     const tracker = this.getTrackerForPhase(phase);
     tracker.updateNodeStatus(task.id, 'in_progress');
-    return this.ctx.executeTask(task, phase.id);
+    const handle = this.phaseWorktrees.get(phase.id);
+    return this.ctx.executeTask(task, phase.id, { cwd: handle?.dir, branch: handle?.branch });
   }
 
   private markTaskCompleted(phase: PhaseNode, task: TaskNode): void {

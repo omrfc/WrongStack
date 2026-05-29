@@ -1,14 +1,25 @@
+import { spawnSync } from 'node:child_process';
 import type { WebSocket } from 'ws';
 import {
   AutoPhasePlanner,
   PhaseGraphBuilder,
   PhaseOrchestrator,
   PhaseStore,
+  WorktreeManager,
   type PhaseGraph,
   type PhaseProgress,
   type PhaseTemplate,
 } from '@wrongstack/core';
-import type { Agent, Context, Logger } from '@wrongstack/core';
+import type { Agent, Context, EventBus, Logger } from '@wrongstack/core';
+
+function isGitRepo(cwd: string): boolean {
+  try {
+    const r = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd, encoding: 'utf8' });
+    return r.status === 0 && r.stdout.trim() === 'true';
+  } catch {
+    return false;
+  }
+}
 
 interface WSClient {
   ws: WebSocket;
@@ -40,12 +51,16 @@ export class AutoPhaseWebSocketHandler {
   private broadcastInterval: ReturnType<typeof setInterval> | null = null;
   /** Aborts in-flight task agents when the run is stopped. */
   private abort: AbortController | null = null;
+  /** Optional per-phase git-worktree isolation (lazily created at start). */
+  private worktrees: WorktreeManager | null = null;
 
   constructor(
     private agent: Agent,
     private context: Context,
     private logger: Logger,
     storeDir: string,
+    private events?: EventBus,
+    private projectRoot?: string,
   ) {
     this.store = new PhaseStore({ baseDir: storeDir });
   }
@@ -154,12 +169,27 @@ export class AutoPhaseWebSocketHandler {
     this.abort = new AbortController();
     await this.store.save(graph);
 
+    // Per-phase git-worktree isolation, when enabled and inside a git repo.
+    // The shared agent/context means we can't run phases in parallel here
+    // (we swap a single context.cwd per task), so phases stay sequential —
+    // but each phase still commits + squash-merges back through its own
+    // worktree, and the lifecycle events drive the live swim-lane/DAG view.
+    if (
+      !this.worktrees &&
+      this.events &&
+      this.projectRoot &&
+      process.env['WRONGSTACK_AUTOPHASE_WORKTREES'] !== '0' &&
+      isGitRepo(this.projectRoot)
+    ) {
+      this.worktrees = new WorktreeManager({ projectRoot: this.projectRoot, events: this.events });
+    }
+
     this.orchestrator = new PhaseOrchestrator({
       graph,
       ctx: {
-        executeTask: async (task, phaseId) => {
+        executeTask: async (task, phaseId, env) => {
           this.logger.info(`[AutoPhase] [${phaseId}] Executing: ${task.title}`);
-          const result = await this.executeTaskWithAgent(task, phaseId);
+          const result = await this.executeTaskWithAgent(task, phaseId, env);
           this.logger.info(`[AutoPhase] [${phaseId}] Completed: ${task.title}`);
           return result;
         },
@@ -174,10 +204,13 @@ export class AutoPhaseWebSocketHandler {
           this.broadcastState();
         },
       },
+      worktrees: this.worktrees ?? undefined,
       autonomous,
+      // Must stay 1: phase tasks run on the single shared context whose cwd we
+      // swap per phase, so parallel phases would race on context.cwd.
       maxConcurrentPhases: 1,
       // Sequential within a phase: each todo is a full-tool agent editing the
-      // shared working tree, so running two at once risks concurrent writes.
+      // phase worktree, so running two at once risks concurrent writes.
       maxConcurrentTasks: 1,
     });
 
@@ -246,12 +279,24 @@ export class AutoPhaseWebSocketHandler {
     return this.defaultPhases();
   }
 
-  private async executeTaskWithAgent(task: import('@wrongstack/core').TaskNode, phaseId: string): Promise<unknown> {
+  private async executeTaskWithAgent(
+    task: import('@wrongstack/core').TaskNode,
+    phaseId: string,
+    env?: { cwd?: string; branch?: string },
+  ): Promise<unknown> {
     // Task'ı agent'a çalıştır
     const prompt = `Execute task: ${task.title}\n\nDescription: ${task.description}\nPhase: ${phaseId}\nPriority: ${task.priority}\nType: ${task.type}`;
     const signal = this.abort?.signal ?? new AbortController().signal;
-    const result = await this.agent.run(prompt, { signal });
-    return result;
+    // Redirect the shared context's cwd at the phase worktree for the duration
+    // of this task. Safe because phases/tasks run strictly sequentially here;
+    // tools read `ctx.cwd` live, so the agent operates inside the worktree.
+    const prevCwd = this.context.cwd;
+    if (env?.cwd) this.context.cwd = env.cwd;
+    try {
+      return await this.agent.run(prompt, { signal });
+    } finally {
+      this.context.cwd = prevCwd;
+    }
   }
 
   private async handleTaskStatusChange(taskId: string, status: string): Promise<void> {
