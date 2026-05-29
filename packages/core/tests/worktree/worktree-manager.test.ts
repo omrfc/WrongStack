@@ -1,12 +1,18 @@
-import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { WorktreeManager, assertSafePath, type RunResult } from '../../src/worktree/worktree-manager.js';
+import { describe, expect, it } from 'vitest';
+import {
+  type RunResult,
+  WorktreeManager,
+  assertSafePath,
+} from '../../src/worktree/worktree-manager.js';
 
 /** Records every git invocation and returns scripted results. */
-function stubRunner(script: (args: string[]) => RunResult = () => ({ code: 0, stdout: '', stderr: '' })) {
+function stubRunner(
+  script: (args: string[]) => RunResult = () => ({ code: 0, stdout: '', stderr: '' }),
+) {
   const calls: Array<{ args: string[]; cwd: string }> = [];
   const run = async (args: string[], cwd: string): Promise<RunResult> => {
     calls.push({ args, cwd });
@@ -27,7 +33,9 @@ const GIT_ENV = {
 describe('WorktreeManager (stubbed git)', () => {
   it('allocates with `worktree add -b <branch> <dir> <base>` (path before commit-ish)', async () => {
     const { calls, run } = stubRunner((args) =>
-      args[0] === 'rev-parse' ? { code: 0, stdout: 'main\n', stderr: '' } : { code: 0, stdout: '', stderr: '' },
+      args[0] === 'rev-parse'
+        ? { code: 0, stdout: 'main\n', stderr: '' }
+        : { code: 0, stdout: '', stderr: '' },
     );
     const wm = new WorktreeManager({ projectRoot: '/proj', run });
     const h = await wm.allocate('phase-1', { slugHint: 'Build API' });
@@ -41,7 +49,9 @@ describe('WorktreeManager (stubbed git)', () => {
 
   it('namespaces the branch and sanitizes the slug', async () => {
     const { run } = stubRunner((args) =>
-      args[0] === 'rev-parse' ? { code: 0, stdout: 'main\n', stderr: '' } : { code: 0, stdout: '', stderr: '' },
+      args[0] === 'rev-parse'
+        ? { code: 0, stdout: 'main\n', stderr: '' }
+        : { code: 0, stdout: '', stderr: '' },
     );
     const wm = new WorktreeManager({ projectRoot: '/proj', run });
     const h = await wm.allocate('p', { slugHint: 'Feature: Auth/API!!' });
@@ -54,7 +64,9 @@ describe('WorktreeManager (stubbed git)', () => {
     const events: Array<{ name: string; payload: any }> = [];
     const fakeBus = { emit: (name: string, payload: any) => events.push({ name, payload }) } as any;
     const { run } = stubRunner((args) =>
-      args[0] === 'rev-parse' ? { code: 0, stdout: 'main\n', stderr: '' } : { code: 0, stdout: '', stderr: '' },
+      args[0] === 'rev-parse'
+        ? { code: 0, stdout: 'main\n', stderr: '' }
+        : { code: 0, stdout: '', stderr: '' },
     );
     const wm = new WorktreeManager({ projectRoot: '/proj', events: fakeBus, run });
     const h = await wm.allocate('p1', { slugHint: 'x' });
@@ -77,9 +89,51 @@ describe('WorktreeManager (stubbed git)', () => {
     expect(events).toContain('worktree.failed');
   });
 
+  it('commitAll injects a fallback identity when git has no user.name/email', async () => {
+    const { calls, run } = stubRunner((args) => {
+      if (args[0] === 'rev-parse') return { code: 0, stdout: 'main\n', stderr: '' };
+      // diff --cached --quiet exits 1 → there ARE staged changes to commit
+      if (args[0] === 'diff' && args.includes('--cached'))
+        return { code: 1, stdout: '', stderr: '' };
+      if (args[0] === 'config') return { code: 0, stdout: '', stderr: '' }; // no identity set
+      if (args[0] === 'show') return { code: 0, stdout: '2\t1\tnew.txt\n', stderr: '' };
+      return { code: 0, stdout: '', stderr: '' };
+    });
+    const wm = new WorktreeManager({ projectRoot: '/proj', run });
+    const h = await wm.allocate('p', { slugHint: 'x' });
+    const res = await wm.commitAll(h, 'msg');
+    expect(res.committed).toBe(true);
+    const commit = calls.map((c) => c.args).find((a) => a.includes('commit'));
+    expect(commit).toBeTruthy();
+    expect(commit!).toContain('-c');
+    expect(commit!.join(' ')).toMatch(/user\.name=/);
+    expect(commit!.join(' ')).toMatch(/user\.email=/);
+    // -c flags must precede the `commit` subcommand
+    expect(commit!.indexOf('-c')).toBeLessThan(commit!.indexOf('commit'));
+  });
+
+  it('commitAll does NOT override an existing git identity', async () => {
+    const { calls, run } = stubRunner((args) => {
+      if (args[0] === 'rev-parse') return { code: 0, stdout: 'main\n', stderr: '' };
+      if (args[0] === 'diff' && args.includes('--cached'))
+        return { code: 1, stdout: '', stderr: '' };
+      if (args[0] === 'config')
+        return { code: 0, stdout: args.includes('user.email') ? 'me@x\n' : 'Me\n', stderr: '' };
+      if (args[0] === 'show') return { code: 0, stdout: '1\t0\tf\n', stderr: '' };
+      return { code: 0, stdout: '', stderr: '' };
+    });
+    const wm = new WorktreeManager({ projectRoot: '/proj', run });
+    const h = await wm.allocate('p', { slugHint: 'x' });
+    await wm.commitAll(h, 'msg');
+    const commit = calls.map((c) => c.args).find((a) => a.includes('commit'));
+    expect(commit).toEqual(['commit', '-m', 'msg']);
+  });
+
   it('list()/get() reflect the registry', async () => {
     const { run } = stubRunner((args) =>
-      args[0] === 'rev-parse' ? { code: 0, stdout: 'main\n', stderr: '' } : { code: 0, stdout: '', stderr: '' },
+      args[0] === 'rev-parse'
+        ? { code: 0, stdout: 'main\n', stderr: '' }
+        : { code: 0, stdout: '', stderr: '' },
     );
     const wm = new WorktreeManager({ projectRoot: '/proj', run });
     await wm.allocate('a', { slugHint: 'a' });
@@ -157,7 +211,10 @@ describe.skipIf(!gitAvailable)('WorktreeManager (real repo)', () => {
 
       // Base also edits line2 → conflict on squash-merge.
       await fs.writeFile(path.join(base, 'seed.txt'), 'line1\nBASE\nline3\n');
-      spawnSync('git', ['-C', base, 'commit', '-aqm', 'edit on base'], { stdio: 'ignore', env: GIT_ENV });
+      spawnSync('git', ['-C', base, 'commit', '-aqm', 'edit on base'], {
+        stdio: 'ignore',
+        env: GIT_ENV,
+      });
 
       const m = await wm.merge(h, { squash: true });
       expect(m.ok).toBe(false);

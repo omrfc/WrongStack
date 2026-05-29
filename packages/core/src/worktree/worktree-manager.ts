@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
-import { buildChildEnv } from '../utils/child-env.js';
 import type { EventBus } from '../kernel/events.js';
+import { buildChildEnv } from '../utils/child-env.js';
 
 /**
  * Lifecycle of a single worktree handle.
@@ -177,7 +177,8 @@ export class WorktreeManager {
       return { committed: false };
     }
 
-    const committed = await this.runGit(['commit', '-m', message], handle.dir);
+    const idArgs = await this.identityArgs(handle.dir);
+    const committed = await this.runGit([...idArgs, 'commit', '-m', message], handle.dir);
     if (committed.code !== 0) {
       this.fail(handle, committed.stderr || 'git commit failed');
       return { committed: false };
@@ -228,7 +229,8 @@ export class WorktreeManager {
     if (squash) {
       // --squash stages the changes but does not commit; finish the commit.
       const msg = opts.message ?? `merge ${handle.branch} (squash)`;
-      const commit = await this.runGit(['commit', '-m', msg], this.projectRoot);
+      const idArgs = await this.identityArgs(this.projectRoot);
+      const commit = await this.runGit([...idArgs, 'commit', '-m', msg], this.projectRoot);
       // A no-op squash (empty diff) returns nonzero "nothing to commit" — fine.
       if (commit.code !== 0 && !/nothing to commit/i.test(commit.stdout + commit.stderr)) {
         this.fail(handle, commit.stderr || 'squash commit failed');
@@ -252,8 +254,7 @@ export class WorktreeManager {
    * are left on disk for inspection.
    */
   async release(handle: WorktreeHandle, opts: { keep?: boolean } = {}): Promise<void> {
-    const keep =
-      opts.keep || handle.status === 'needs-review' || handle.status === 'failed';
+    const keep = opts.keep || handle.status === 'needs-review' || handle.status === 'failed';
     if (!keep) {
       await this.runGit(['worktree', 'remove', '--force', handle.dir], this.projectRoot);
       await this.runGit(['branch', '-D', handle.branch], this.projectRoot);
@@ -325,12 +326,32 @@ export class WorktreeManager {
     return { insertions, deletions, files, sha };
   }
 
+  /**
+   * `git -c user.*` fallback so commits succeed on machines and CI runners
+   * that have no global git identity configured. Returns `[]` when both
+   * `user.name` and `user.email` are already set (the common case), so a real
+   * user's identity is never overridden. The worktree branch commits are
+   * squashed away on merge, so the fallback identity never reaches the base
+   * branch history.
+   */
+  private async identityArgs(cwd: string): Promise<string[]> {
+    const name = (await this.runGit(['config', 'user.name'], cwd)).stdout.trim();
+    const email = (await this.runGit(['config', 'user.email'], cwd)).stdout.trim();
+    if (name && email) return [];
+    return [
+      '-c',
+      `user.name=${name || 'WrongStack AutoPhase'}`,
+      '-c',
+      `user.email=${email || 'autophase@wrongstack.local'}`,
+    ];
+  }
+
   private async unmergedFiles(): Promise<string[]> {
-    const res = await this.runGit(
-      ['diff', '--name-only', '--diff-filter=U'],
-      this.projectRoot,
-    );
-    return res.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+    const res = await this.runGit(['diff', '--name-only', '--diff-filter=U'], this.projectRoot);
+    return res.stdout
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
   }
 
   private emitCommitted(handle: WorktreeHandle, committed: boolean): void {
