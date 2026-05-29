@@ -136,6 +136,18 @@ async function extractTar(buf: Buffer, destDir: string): Promise<void> {
     if (relPath && relPath !== '.' && relPath !== '..') {
       const destPath = path.join(destDir, relPath);
 
+      // Zip-slip guard: reject any entry whose resolved path escapes destDir
+      // (e.g. a crafted entry name like `x/../../../etc/cron.d/evil`). GitHub
+      // tarballs are built from git trees and so cannot carry `..` components,
+      // but this extractor is generic — never trust archive entry names.
+      const resolvedDest = path.resolve(destPath);
+      const resolvedRoot = path.resolve(destDir);
+      if (resolvedDest !== resolvedRoot && !resolvedDest.startsWith(resolvedRoot + path.sep)) {
+        // Skip the entry entirely; advance past its data below.
+        offset += 512 + Math.ceil(size / 512) * 512;
+        continue;
+      }
+
       // typeflag: '0' or '\0' = regular file, '5' = directory
       if (typeflag === 0x35 || typeflag === 0) {
         // Directory
