@@ -59,18 +59,16 @@ export class DefaultSessionStore implements SessionStore {
 
   async resume(id: string): Promise<ResumedSession> {
     const file = path.join(this.dir, `${id}.jsonl`);
-    try {
-      await fsp.access(file, fsp.constants.R_OK);
-    } catch {
-      throw new Error(
-        `Session "${id}" not found — the session file does not exist or was deleted.`,
-        { cause: new Error('ENOENT') },
-      );
-    }
     const data = await this.load(id);
     let handle: fsp.FileHandle;
+    // Use 'r+' (read-write, file must exist) instead of 'a' (append, creates
+    // if missing). This avoids a TOCTOU race: with 'a', if the file is deleted
+    // between the old fsp.access() check and this open(), the load() above
+    // would have read an empty-recreated file (returning 0 messages instead of
+    // failing), then 'r+' throws ENOENT and we surface a clear error to the
+    // caller instead of silently resuming an empty session.
     try {
-      handle = await fsp.open(file, 'a', 0o600);
+      handle = await fsp.open(file, 'r+', 0o600);
     } catch (err) {
       throw new Error(
         `Failed to open session "${id}" for append: ${err instanceof Error ? err.message : String(err)}`,

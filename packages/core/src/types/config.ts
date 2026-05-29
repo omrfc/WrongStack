@@ -135,6 +135,11 @@ export interface FeaturesConfig {
   skills: boolean;
 }
 
+export interface AutonomyConfig {
+  /** ms to wait before auto-proceeding in 'auto' mode. Default: 45000. */
+  autoProceedDelayMs?: number;
+}
+
 export interface Config {
   version: 1;
   provider: string;
@@ -150,6 +155,8 @@ export interface Config {
   features: FeaturesConfig;
   yolo?: boolean;
   cwd?: string;
+  /** Autonomy mode configuration (auto-proceed delay, etc.). */
+  autonomy?: AutonomyConfig;
   /**
    * Per-plugin namespaced config sections. Each plugin reads its own
    * subtree via `ConfigStore.getExtension(pluginName)`. Plugins should

@@ -217,6 +217,8 @@ export interface SlashCommandContext {
    * wstack-managed worktrees + branches. Backs the /worktree command.
    */
   onWorktree?: (action: 'list' | 'merge' | 'prune' | 'clean', target?: string) => Promise<string>;
+  /** Config store for reading/writing config sections at runtime (e.g. settings menu). */
+  configStore?: import('@wrongstack/core').ConfigStore;
 }
 
 // Re-export helpers for external consumers (pre-launch.ts)
@@ -263,6 +265,7 @@ import {
 } from './skill-install.js';
 import { buildAutoPhaseCommand } from './autophase.js';
 import { buildWorktreeCommand } from './worktree.js';
+import { buildSettingsCommand } from './settings.js';
 
 export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashCommand[] {
   return [
@@ -306,6 +309,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildFixCommand(opts),
     buildAutoPhaseCommand(opts),
     buildWorktreeCommand(opts),
+    buildSettingsCommand(opts),
     buildStatuslineCommand({
       cwd: opts.cwd,
       hiddenItems: opts.statuslineHiddenItems ?? [],

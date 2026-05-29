@@ -35,7 +35,7 @@ export const outdatedTool: Tool<OutdatedInput, OutdatedOutput> = {
   usageHint:
     'Set `check` to filter specific packages. `format` as list or table. `include_deprecated` shows deprecated packages.',
   permission: 'auto',
-  mutating: false,
+  mutating: true,
   timeoutMs: 60_000,
   inputSchema: {
     type: 'object',

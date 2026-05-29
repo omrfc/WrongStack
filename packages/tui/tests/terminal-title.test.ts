@@ -71,7 +71,7 @@ describe('startTerminalTitle', () => {
     const t = lastTitle(out)!;
     expect(t).toBeTruthy();
     // marquee scrolls the app name; the ✦ marker or app text appears
-    expect(/WrongStack|✦|opus/.test(t)).toBe(true);
+    expect(/WrongStack|✦/.test(t)).toBe(true);
     stop();
   });
 
@@ -117,7 +117,7 @@ describe('startTerminalTitle', () => {
     });
     vi.advanceTimersByTime(60);
     stop();
-    expect(lastTitle(out)).toBe('WS · claude-opus-4-8');
+    expect(lastTitle(out)).toBe('WS');
     // After stop, further events must not write anything new.
     const before = out.writes.length;
     events.emit('tool.started', { name: 'bash', id: 'z' } as never);
@@ -125,7 +125,7 @@ describe('startTerminalTitle', () => {
     expect(out.writes.length).toBe(before);
   });
 
-  it('shortens a dated/bracketed model id', () => {
+  it('uses app name in the stop title', () => {
     const events = new EventBus();
     const out = fakeStdout(true);
     const stop = startTerminalTitle({
@@ -135,6 +135,6 @@ describe('startTerminalTitle', () => {
       intervalMs: 50,
     });
     stop();
-    expect(lastTitle(out)).toBe('WrongStack · claude-haiku-4-5');
+    expect(lastTitle(out)).toBe('WrongStack');
   });
 });

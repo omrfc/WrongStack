@@ -152,6 +152,8 @@ export interface StatusBarProps {
     iterations: number;
     lastTask?: string;
     lastStatus?: string;
+    /** Seconds remaining in the auto-proceed countdown. null = not counting. */
+  autoProceedCountdown?: number | null;
   } | null;
 }
 
@@ -184,6 +186,7 @@ export function StatusBar({
   hiddenItems,
   eternalStage,
   goalSummary,
+  autoProceedCountdown,
 }: StatusBarProps): React.ReactElement {
   const hiddenSet = new Set(hiddenItems);
   const usage = tokenCounter?.total();

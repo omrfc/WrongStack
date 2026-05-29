@@ -13,6 +13,7 @@ import type {
   Provider,
   WstackPaths,
   EventBus,
+  ConfigStore,
 } from '@wrongstack/core';
 import type { CompactReport } from '@wrongstack/core';
 import { buildBuiltinSlashCommands } from '../slash-commands/index.js';
@@ -47,6 +48,7 @@ export interface SlashCommandsDeps {
     setVisible: (visible: boolean) => void;
   };
   compactor: { compact(ctx: Context, opts?: { aggressive?: boolean }): Promise<CompactReport> };
+  configStore: ConfigStore;
 }
 
 export interface StatuslineConfigDeps {
@@ -58,7 +60,7 @@ export async function setupSlashCommands(params: SlashCommandsDeps): Promise<voi
   const { slashRegistry, toolRegistry, paths, sessionStore, skillLoader, tokenCounter, renderer,
     events, memoryStore, context, cwd, projectRoot, metricsSink, healthRegistry,
     planPath, modeStore, provider, model, multiAgentHost, fleetStreamController,
-    agentsMonitorController, compactor } = params;
+    agentsMonitorController, compactor, configStore } = params;
 
   const statuslineConfigDeps: StatuslineConfigDeps = {
     get: () => loadStatuslineConfig(),
@@ -122,6 +124,7 @@ export async function setupSlashCommands(params: SlashCommandsDeps): Promise<voi
       }
       return lines.length > 0 ? lines.join('\n') : 'No active subagents.';
     },
+    configStore,
   });
 
   for (const cmd of commands) {

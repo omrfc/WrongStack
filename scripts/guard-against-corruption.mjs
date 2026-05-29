@@ -1,0 +1,93 @@
+#!/usr/bin/env node
+import { readFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+const MAX_FILES = parseInt(process.env.GUARD_MAX_FILES ?? '', 10) || 20;
+const FORCE_FLAG = process.argv.includes('--force');
+const VERBOSE = process.argv.includes('--verbose') || process.argv.includes('-v');
+const CORRUPTION_FRAGMENT = "{ type: 'worktreeMonitorToggle' }";
+const SCAN_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts', '.json', '.jsonc', '.md', '.yml', '.yaml', '.sh', '.ps1']);
+const SKIP_GLOBS = ['**/node_modules/**', '**/dist/**', '**/.git/**', '**/coverage/**', '**/*.min.js', 'pnpm-lock.yaml', 'package-lock.json', 'yarn.lock', 'scripts/guard-against-corruption.mjs'];
+function log(...args) { if (VERBOSE) console.error('[guard]', ...args); }
+function isScannable(filePath) {
+  const base = filePath.split('/').pop() ?? filePath;
+  const ext = '.' + (base.split('.').pop() ?? '');
+  if (SCAN_EXTS.has(ext)) {
+    if (base === 'guard-against-corruption.mjs') return false;
+    return true;
+  }
+  return false;
+}
+function getStagedFiles() {
+  try {
+    const out = execSync('git diff --cached --name-only --diff-filter=ACMR', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+    return out.trim().split('\n').filter(Boolean);
+  } catch { return []; }
+}
+function getFileContent(filePath) {
+  try { return readFileSync(filePath, 'utf-8'); } catch { return ''; }
+}
+function findCorruptionInStagedFiles(stagedFiles) {
+  const findings = [];
+  for (const file of stagedFiles) {
+    if (!isScannable(file)) continue;
+    const content = getFileContent(file);
+    const lines = content.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes(CORRUPTION_FRAGMENT)) {
+        findings.push({ file, line: i + 1, snippet: lines[i].slice(0, 120) });
+      }
+    }
+  }
+  return findings;
+}
+function main() {
+  log('Starting corruption guard...');
+  const stagedFiles = getStagedFiles();
+  log('Staged files: ' + stagedFiles.length);
+  if (stagedFiles.length === 0) {
+    console.error('[guard] No staged files - nothing to check.');
+    return 0;
+  }
+  const corruption = findCorruptionInStagedFiles(stagedFiles);
+  if (corruption.length > 0) {
+    console.error('');
+    console.error('============================================================');
+    console.error('  BLOCKED  --  CORRUPTION PATTERN DETECTED');
+    console.error('============================================================');
+    const uniqueFiles = new Set(corruption.map(c => c.file)).size;
+    console.error('  Found ' + corruption.length + ' infected line(s) across ' + uniqueFiles + ' file(s).');
+    console.error('');
+    for (const { file, line, snippet } of corruption.slice(0, 20)) {
+      console.error('  ' + file + ':' + line);
+      console.error('    -> ' + JSON.stringify(snippet.trim()));
+    }
+    if (corruption.length > 20) console.error('  ... and ' + (corruption.length - 20) + ' more.');
+    console.error('');
+    console.error('  Fix: git checkout HEAD -- <infected-files>');
+    console.error('  Then re-apply your intended changes carefully.');
+    console.error('');
+    return 1;
+  }
+  const totalChanged = (() => {
+    try {
+      const out = execSync('git status --porcelain', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+      return out.trim().split('\n').filter(Boolean).length;
+    } catch { return 0; }
+  })();
+  if (totalChanged > MAX_FILES && !FORCE_FLAG) {
+    console.error('');
+    console.error('============================================================');
+    console.error('  FLAGGED  --  SUSPICIOUS MASS-CHANGE');
+    console.error('============================================================');
+    console.error('  ' + totalChanged + ' files changed (threshold: ' + MAX_FILES + ').');
+    console.error('  This often means a broken global find/replace ran wild.');
+    console.error('  Review with `git status` before committing.');
+    console.error('  To override: git commit --no-verify');
+    console.error('  Or set GUARD_MAX_FILES=' + (totalChanged + 1));
+    console.error('');
+    return 2;
+  }
+  log('All checks passed (' + stagedFiles.length + ' staged, ' + totalChanged + ' total changed).');
+  return 0;
+}
+process.exit(main());

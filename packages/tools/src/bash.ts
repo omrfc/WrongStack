@@ -4,6 +4,7 @@ import type { Tool, ToolStreamEvent } from '@wrongstack/core';
 import { stripAnsi } from '@wrongstack/core';
 import { buildChildEnv } from './_env.js';
 import { truncateMiddle } from './_util.js';
+import { redactCommand } from './process-registry.js';
 import { getProcessRegistry } from './process-registry.js';
 
 interface BashInput {
@@ -116,7 +117,7 @@ export const bashTool: Tool<BashInput, BashOutput> = {
         registry.register({
           pid,
           name: 'bash',
-          command: input.command,
+          command: redactCommand(input.command),
           startedAt: Date.now(),
           sessionId: ctx.session?.id,
           child,
@@ -172,7 +173,7 @@ export const bashTool: Tool<BashInput, BashOutput> = {
       registry.register({
         pid,
         name: 'bash',
-        command: input.command,
+        command: redactCommand(input.command),
         startedAt: Date.now(),
         sessionId: ctx.session?.id,
         child,

@@ -251,7 +251,7 @@ const plugin: Plugin = {
         required: ['query'],
       },
       permission: 'auto',
-      mutating: false,
+      mutating: true,
       async execute(input: Record<string, unknown>) {
         const query = input['query'];
         if (!query || typeof query !== 'string' || query.trim() === '') {

@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import * as path from 'node:path';
 import type { Tool } from '@wrongstack/core';
 import { buildChildEnv } from './_env.js';
-import { getProcessRegistry } from './process-registry.js';
+import { getProcessRegistry, redactCommand } from './process-registry.js';
 
 const ALLOWED_COMMANDS: Record<string, string[]> = {
   node: ['--version', '-r', '--input-type=module'],
@@ -251,7 +251,7 @@ function runCommand(
     const pid = child.pid;
     if (typeof pid === 'number') {
       const fullCommand = `${cmd} ${args.join(' ')}`;
-      registry.register({ pid, name: 'exec', command: fullCommand, startedAt: Date.now(), sessionId, child });
+      registry.register({ pid, name: 'exec', command: redactCommand(fullCommand), startedAt: Date.now(), sessionId, child });
     }
 
     const timer = setTimeout(() => {

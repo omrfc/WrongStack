@@ -4,6 +4,45 @@ import os from 'node:os';
 import { atomicWrite, FsError, ERROR_CODES } from '@wrongstack/core';
 import { isSecretField } from '@wrongstack/core/security';
 
+// ── UID ownership ──────────────────────────────────────────────────────────
+
+type UidFn = () => string | number | undefined;
+const defaultUidFn: UidFn = () => os.userInfo().uid;
+
+async function getFileUid(filePath: string): Promise<string | number | undefined> {
+  try {
+    const stat = await fs.stat(filePath);
+    return stat.uid;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Verify the calling process owns config.json before allowing a write operation.
+ * Guards against one user on a shared multi-user system overwriting another's config.
+ *
+ * On Windows, .uid is always undefined on the UserInfo object, and the NT ACL
+ * model already restricts writes — so we skip the check on win32.
+ * On Unix, we compare the process euid against the file's uid.
+ * If config.json doesn't exist yet, we allow the write (first-time setup).
+ */
+async function checkConfigOwnership(
+  homeFn: HomeDirFn,
+  uidFn: UidFn = defaultUidFn,
+): Promise<boolean> {
+  if (os.platform() === 'win32') return true; // ACLs handle this on Windows
+
+  const cfg = configPath(homeFn);
+  const fileUid = await getFileUid(cfg);
+  if (fileUid === undefined) return true; // file doesn't exist yet — allow
+
+  const callerUid = uidFn();
+  if (callerUid === undefined) return true; // can't determine — allow, don't block
+
+  return fileUid === callerUid;
+}
+
 // ── Protected files/directories ────────────────────────────────────
 // These are NEVER touched by any operation in this module.
 // Guards against bugs (glob patterns, typos, race conditions)
@@ -310,6 +349,13 @@ export async function restoreFromHistory(
   const entry = await getHistoryEntry(id, homeFn);
   if (!entry) return { ok: false, backupId: null, error: 'History entry not found' };
 
+  // Ownership guard — refuse to write config.json if the calling process
+  // does not own the file. Prevents one user on a multi-user system from
+  // overwriting another user's config via a shared wrongstack install.
+  if (!(await checkConfigOwnership(homeFn))) {
+    return { ok: false, backupId: null, error: 'Operation denied: config file is not owned by current user' };
+  }
+
   await backupCurrent(homeFn);
 
   let oldCfg: Record<string, unknown> = {};
@@ -357,6 +403,13 @@ export async function restoreLast(homeFn: HomeDirFn = defaultHomeDir): Promise<{
     lastCfg = JSON.parse(raw);
   } catch {
     return { ok: false, error: 'No prior backup found' };
+  }
+
+  // Ownership guard — refuse to write config.json if the calling process
+  // does not own the file. Prevents one user on a multi-user system from
+  // overwriting another user's config via a shared wrongstack install.
+  if (!(await checkConfigOwnership(homeFn))) {
+    return { ok: false, error: 'Operation denied: config file is not owned by current user' };
   }
 
   await backupCurrent(homeFn);

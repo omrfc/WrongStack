@@ -171,7 +171,7 @@ const plugin: Plugin = {
         required: ['files'],
       },
       permission: 'auto',
-      mutating: false,
+      mutating: true,
       async execute(input: Record<string, unknown>) {
         const files = input['files'] as string[];
         const severity = (input['severity'] as ShellCheckIssue['level']) ?? 'warning';
@@ -246,7 +246,7 @@ const plugin: Plugin = {
         },
       },
       permission: 'auto',
-      mutating: false,
+      mutating: true,
       async execute(input: Record<string, unknown>) {
         const dir = (input['directory'] as string) ?? '.';
         const pattern = (input['pattern'] as string) ?? '';

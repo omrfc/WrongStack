@@ -50,7 +50,10 @@ const PATTERNS: Pattern[] = [
     type: 'bearer_token',
     // Anchored with alternation instead of negative lookahead — avoids V8
     // backtracking risk on adversarial input. Bounded at 512 chars.
-    regex: /(?:^|[^A-Za-z0-9_.~+/-])Bearer\s+[A-Za-z0-9._~+/-]{20,512}=*(?:$|[^A-Za-z0-9_.~+/-])/g,
+    // Min 12 chars: some OAuth providers issue shorter-lived tokens (< 20
+    // chars). A 12-char base64 string has ~71 bits of entropy — above the
+    // threshold where random strings are unlikely to produce false matches.
+    regex: /(?:^|[^A-Za-z0-9_.~+/-])Bearer\s+[A-Za-z0-9._~+/-]{12,512}=*(?:$|[^A-Za-z0-9_.~+/-])/g,
   },
   {
     type: 'high_entropy_env',

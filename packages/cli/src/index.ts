@@ -715,6 +715,7 @@ export async function main(argv: string[]): Promise<number> {
     statuslineHiddenItems: [...currentHiddenItems],
     setStatuslineHiddenItems,
     agentsMonitorController,
+    configStore,
     confirm: async (question, defaultYes = true): Promise<boolean | null> => {
       // Non-TTY / piped stdin → don't block. For destructive or surprising
       // actions (e.g. starting eternal mode against a stale goal) the safe

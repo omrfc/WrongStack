@@ -11,6 +11,12 @@ export function normalizeMCPTools(value: unknown): MCPTool[] {
       t.inputSchema && typeof t.inputSchema === 'object' && !Array.isArray(t.inputSchema)
         ? (t.inputSchema as Record<string, unknown>)
         : { type: 'object', properties: {} };
+    // Log when a tool's schema is absent or invalid — this could indicate a
+    // broken, misbehaving, or (if the server is untrusted) adversarial MCP
+    // server trying to confuse the LLM with misleading type info.
+    if (!t.inputSchema || typeof t.inputSchema !== 'object' || Array.isArray(t.inputSchema)) {
+      console.warn(`[mcp] Tool "${t.name}" has no/invalid inputSchema — defaulting to empty object`);
+    }
     tools.push({
       name: t.name,
       ...(typeof t.description === 'string' ? { description: t.description } : {}),

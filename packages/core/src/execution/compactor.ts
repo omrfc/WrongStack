@@ -24,7 +24,7 @@ export interface CompactorOptions {
  * @deprecated Import from '../types/default-config.js' instead.
  *             This re-export exists for backward compatibility.
  */
-export { DEFAULT_TOOLS_CONFIG, DEFAULT_CONTEXT_CONFIG } from '../types/default-config.js';
+export { DEFAULT_TOOLS_CONFIG, DEFAULT_CONTEXT_CONFIG, DEFAULT_AUTONOMY_CONFIG } from '../types/default-config.js';
 
 export class HybridCompactor implements Compactor {
   private readonly preserveK: number;

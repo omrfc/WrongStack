@@ -125,6 +125,7 @@ export {
   type CompactorOptions,
   DEFAULT_TOOLS_CONFIG,
   DEFAULT_CONTEXT_CONFIG,
+  DEFAULT_AUTONOMY_CONFIG,
 } from '../execution/compactor.js';
 export {
   IntelligentCompactor,

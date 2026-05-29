@@ -15,13 +15,6 @@ import type { EventBus } from '@wrongstack/core';
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const setTitle = (s: string): string => `\x1b]0;${s}\x07`;
 
-/** Strip a provider's date suffix / path so the title stays short. */
-function shortModel(model?: string): string {
-  if (!model) return '';
-  const base = model.split('/').pop() ?? model;
-  return base.replace(/-\d{8}$/, '').replace(/\[.*?\]$/, '');
-}
-
 /** A marquee window over `text`, advancing by `offset`. */
 function marquee(text: string, offset: number, width: number): string {
   const padded = `${text}   `;
@@ -46,9 +39,8 @@ export function startTerminalTitle(opts: TerminalTitleOptions): () => void {
   }
 
   const app = opts.appName ?? 'WrongStack';
-  const model = shortModel(opts.model);
   const idleAfter = opts.idleAfterMs ?? 3500;
-  const suffix = model ? ` · ${model}` : '';
+  const suffix = ` · ${app}`;
 
   let frame = 0;
   let scroll = 0;
@@ -101,6 +93,6 @@ export function startTerminalTitle(opts: TerminalTitleOptions): () => void {
   return () => {
     clearInterval(timer);
     for (const off of offs) off();
-    write(setTitle(model ? `${app} · ${model}` : app));
+    write(setTitle(app));
   };
 }

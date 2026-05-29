@@ -18,3 +18,8 @@ export const DEFAULT_CONTEXT_CONFIG = Object.freeze({
   preserveK: 10,
   eliseThreshold: 2000,
 });
+
+/** Default autonomy config — auto-proceed delay etc. */
+export const DEFAULT_AUTONOMY_CONFIG = Object.freeze({
+  autoProceedDelayMs: 45_000,
+});

@@ -71,7 +71,7 @@ export function createMcpControlTool(opts: CreateMcpControlToolOptions): Tool {
       'Manage MCP server lifecycle: list available servers, search by name or capability, enable or disable servers at runtime, restart running servers.',
     category: 'mcp',
     permission: 'auto',
-    mutating: false,
+    mutating: true,
     riskTier: 'standard',
     inputSchema,
     async execute(raw, ctx) {

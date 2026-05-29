@@ -24,6 +24,11 @@ export interface HttpTransportOptions {
    * and passed to fetch via the `dispatch` option. This avoids globally
    * disabling certificate validation (NODE_TLS_REJECT_UNAUTHORIZED) which
    * would affect all provider API calls in the same process.
+   * ⚠️ Setting `rejectUnauthorized: false` disables TLS verification for this
+   * transport only — an active network attacker between the client and the
+   * MCP server can read and modify tool calls and responses. Only use this
+   * for local development with self-signed certificates; production MCP
+   * servers must present a valid certificate.
    */
   tls?: { ca?: string; rejectUnauthorized?: boolean };
 }

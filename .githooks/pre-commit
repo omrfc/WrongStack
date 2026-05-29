@@ -1,0 +1,5 @@
+#!/bin/sh
+# .githooks/pre-commit
+# Guards against known corruption patterns and suspicious mass-changes
+node scripts/guard-against-corruption.mjs --verbose
+exit $?

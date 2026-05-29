@@ -185,8 +185,12 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
       }
     }
 
-    // 8. Tool default
-    if (tool.permission === 'auto') {
+    // 8. Tool default — but mutating tools need confirmation even with
+    // auto-permission (e.g. shellcheck makes network calls; a remote WebSocket
+    // client must not be able to trigger them without the user seeing the
+    // tool.confirm_needed prompt). Non-mutating auto tools (read-only
+    // heuristics, schema checks) are still safe to shortcut.
+    if (tool.permission === 'auto' && !tool.mutating) {
       return { permission: 'auto', source: 'default' };
     }
 

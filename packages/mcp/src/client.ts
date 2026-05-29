@@ -393,12 +393,16 @@ export class MCPClient {
         ]);
       }
     }
+    // Reject pending requests BEFORE closing transports. This matters for
+    // in-flight HTTP requests: they are not yet in `this.pending` (waiting
+    // for a response from the network), so failPending() must run while the
+    // transport is still alive. After this, the transport close is safe to
+    // call even on a never-started or HTTP-only client — the exit handler
+    // may have already run failPending, but calling it again with the same
+    // pending set is a no-op (failPending guards on `this.pending.size`).
+    this.failPending(`MCP "${this.opts.name}" closed`);
     this.sseTransport?.close();
     this.httpTransport?.close();
-    // Reject anything still awaiting the (now-dead) transport. Safe to call
-    // unconditionally — the stdio exit handler runs failPending too, but
-    // close() may be invoked on a never-started or HTTP-only client.
-    this.failPending(`MCP "${this.opts.name}" closed`);
     this.state = 'disconnected';
   }
 
