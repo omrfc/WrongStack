@@ -1,6 +1,7 @@
 import * as dns from 'node:dns/promises';
 import * as net from 'node:net';
 import type { Tool, ToolStreamEvent } from '@wrongstack/core';
+import { Agent } from 'undici';
 import { truncateMiddle } from './_util.js';
 
 interface FetchInput {
@@ -19,6 +20,77 @@ const MAX_BYTES = 131_072;
 const TIMEOUT_MS = 20_000;
 
 const ALLOW_PRIVATE = process.env['WRONGSTACK_FETCH_ALLOW_PRIVATE'] === '1';
+
+type LookupCallback = (
+  err: NodeJS.ErrnoException | null,
+  address?: string | Array<{ address: string; family: number }>,
+  family?: number,
+) => void;
+
+/**
+ * DNS lookup used by the undici dispatcher below. It performs the SINGLE name
+ * resolution that the TCP connection actually uses, and rejects if any
+ * resolved address is private/loopback/link-local. Because the connection
+ * reuses exactly this result, there is no DNS-rebinding TOCTOU window between
+ * the security check and the connect — closing the gap the old code documented
+ * (validate with one dns.lookup, then let fetch re-resolve independently).
+ * TLS still validates the certificate against the hostname (SNI is set by
+ * undici from the URL), so pinning the IP does not weaken cert checking.
+ */
+function guardedLookup(
+  hostname: string,
+  options: { all?: boolean; family?: number },
+  callback: LookupCallback,
+): void {
+  dns
+    .lookup(hostname, { all: true })
+    .then((records) => {
+      const family = options?.family;
+      const byFamily =
+        family === 4 || family === 6 ? records.filter((r) => r.family === family) : records;
+      const list = byFamily.length > 0 ? byFamily : records;
+      if (!ALLOW_PRIVATE) {
+        for (const r of list) {
+          const bad = r.family === 4 ? isPrivateIPv4(r.address) : isPrivateIPv6(r.address);
+          if (bad) {
+            callback(
+              Object.assign(new Error(`fetch: resolved to private address ${r.address}`), {
+                code: 'EAI_FAIL',
+              }),
+            );
+            return;
+          }
+        }
+      }
+      if (options?.all) {
+        callback(
+          null,
+          list.map((r) => ({ address: r.address, family: r.family })),
+        );
+        return;
+      }
+      const first = list[0];
+      if (!first) {
+        callback(
+          Object.assign(new Error(`fetch: no address for ${hostname}`), { code: 'ENOTFOUND' }),
+        );
+        return;
+      }
+      callback(null, first.address, first.family);
+    })
+    .catch((err) => callback(err as NodeJS.ErrnoException));
+}
+
+// Reused across requests; guardedLookup re-validates on every new connection,
+// so connection pooling is safe. Literal-IP targets bypass lookup entirely and
+// are caught by assertNotPrivate's pre-check instead.
+let pinnedAgent: Agent | undefined;
+function getPinnedDispatcher(): Agent {
+  if (!pinnedAgent) {
+    pinnedAgent = new Agent({ connect: { lookup: guardedLookup as never } });
+  }
+  return pinnedAgent;
+}
 
 async function fetchWithRedirectLimit(
   url: string,
@@ -43,11 +115,19 @@ async function fetchWithRedirectLimit(
     }
     await assertNotPrivate(parsed.hostname);
 
-    const res = await fetch(currentUrl, {
-      redirect: 'manual',
+    // The dispatcher pins the connection to the IP guardedLookup validated —
+    // no independent re-resolution, so DNS rebinding can't swap in a private
+    // address between check and connect. `dispatcher` is a runtime option of
+    // Node's undici-backed global fetch but isn't in lib.dom's RequestInit, and
+    // our undici Agent's type differs from the @types/node copy — hence the
+    // cast. (Verified: global fetch invokes the Agent's custom lookup.)
+    const init = {
+      redirect: 'manual' as const,
       signal,
       headers,
-    });
+      dispatcher: getPinnedDispatcher(),
+    };
+    const res = await fetch(currentUrl, init as unknown as RequestInit);
     if (res.status < 300 || res.status > 399) {
       return res;
     }
@@ -197,14 +277,12 @@ async function assertNotPrivate(hostname: string): Promise<void> {
       throw new Error(`fetch: blocked private/loopback address "${host}"`);
     }
   } else {
-    // Hostname — resolve and check every record. This is best-effort against
-    // DNS rebinding; Node's fetch() does its own DNS resolution afterward,
-    // so a rebinding attack between lookup and fetch is theoretically possible
-    // (TOCTOU: attacker's DNS returns public IP for our lookup, then 169.254.x.x
-    // for the real fetch). Each redirect target is re-checked before following.
-    // SECURITY: A stricter fix would pin the resolved IP via a custom undici
-    // Agent with a `connect` callback that resolves DNS once and reuses the
-    // result. Until then, this remains an accepted risk for single-tenant use.
+    // Hostname — pre-flight check: resolve and reject if any record is private,
+    // so we fail fast with a clear error before opening a socket. The
+    // authoritative anti-rebinding control is guardedLookup on the pinned
+    // undici dispatcher (see getPinnedDispatcher): it performs the single
+    // resolution the connection actually uses, so there is no TOCTOU between
+    // this check and the connect. Each redirect target is re-checked too.
     try {
       const records = await dns.lookup(host, { all: true });
       for (const r of records) {
