@@ -7,7 +7,7 @@
  * Extracts: package, func, type, const, var
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -275,7 +275,9 @@ function syncGoParse(filePath: string, content: string, lang: SymbolLang): FileS
 		const scriptPath = path.join(tmpDir, 'parse.go');
 		writeFileSync(scriptPath, GO_PARSE_SCRIPT, 'utf8');
 
-		const stdout = execSync(`go run "${scriptPath}"`, {
+		// argv-array form (no shell): avoids any quoting/metachar issues in the
+		// temp script path. The target source is fed via stdin, not as an arg.
+		const stdout = execFileSync('go', ['run', scriptPath], {
 			input: content,
 			timeout: 15_000,
 			encoding: 'utf8',

@@ -7,7 +7,7 @@
  * The regex fallback extracts: fn, struct, enum, trait, impl, type, const, static, mod
  */
 
-import { execSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import * as path from 'node:path';
 import type { FileSymbols, Symbol as IndexSymbol, SymbolLang } from './schema.js';
 
@@ -36,13 +36,21 @@ export { detectLang } from './ts-parser.js';
 
 function checkNativeParser(): boolean {
   try {
-    execSync('rustc --version', { stdio: 'pipe' });
-    // Check if our syn-parser crate is available
+    execFileSync('rustc', ['--version'], { stdio: 'pipe' });
+    // Check if our syn-parser crate is available. argv-array form (no shell)
+    // so a cwd path containing spaces or shell metacharacters can't break out.
     const toolsDir = path.join(process.cwd(), 'tools');
     try {
-      execSync(
-        'cargo metadata --no-deps --format-version 1 --manifest-path ' +
+      execFileSync(
+        'cargo',
+        [
+          'metadata',
+          '--no-deps',
+          '--format-version',
+          '1',
+          '--manifest-path',
           path.join(toolsDir, 'Cargo.toml'),
+        ],
         { stdio: 'pipe' },
       );
       return true;

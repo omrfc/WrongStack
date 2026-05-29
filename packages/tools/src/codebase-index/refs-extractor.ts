@@ -9,7 +9,7 @@
  * - Python: inline `python -c` script using ast to walk Call, Name, Attribute, Subscript, Import, ImportFrom
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
 import { mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
 import type { Ref, SymbolLang } from './schema.js';
@@ -227,7 +227,8 @@ async function extractGoRefs(filePath: string): Promise<Ref[]> {
 
     let stdout: string;
     try {
-      stdout = execSync(`go run "${scriptPath}" "${filePath}"`, {
+      // argv-array form: no shell, so a hostile filename cannot inject commands.
+      stdout = execFileSync('go', ['run', scriptPath, filePath], {
         timeout: 30_000,
         encoding: 'utf8',
         windowsHide: true,
@@ -252,12 +253,26 @@ async function extractGoRefs(filePath: string): Promise<Ref[]> {
 // ─── Python reference extraction via child process ────────────────────────────
 
 async function extractPyRefs(filePath: string): Promise<Ref[]> {
+  const tmpDir = path.join(process.env.TEMP ?? '/tmp', 'ws-py-refs');
   try {
-    const stdout = execSync(`python -c "${PY_REFS_SCRIPT.replace(/"/g, '\\"')}" "${filePath}"`, {
-      timeout: 30_000,
-      encoding: 'utf8',
-      windowsHide: true,
-    });
+    mkdirSync(tmpDir, { recursive: true });
+    // Write the parser to a temp .py and run it as a script. Passing it via
+    // `python -c "<script>"` required interpolating into a shell command
+    // string, which let a hostile filename inject commands. Running argv-array
+    // (no shell) with the script on disk closes that and avoids quoting issues.
+    const scriptPath = path.join(tmpDir, 'refs.py');
+    writeFileSync(scriptPath, PY_REFS_SCRIPT, 'utf8');
+
+    let stdout: string;
+    try {
+      stdout = execFileSync('python', [scriptPath, filePath], {
+        timeout: 30_000,
+        encoding: 'utf8',
+        windowsHide: true,
+      });
+    } finally {
+      try { unlinkSync(scriptPath); } catch { /* ignore */ }
+    }
 
     if (!stdout.trim()) return [];
     const raw = JSON.parse(stdout.trim()) as Array<{ toName: string; callType: string; line: number }>;
