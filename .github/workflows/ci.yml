@@ -21,6 +21,9 @@ permissions:
 jobs:
   gate:
     strategy:
+      # Don't cancel the other OS legs when one fails — we want every
+      # platform's result (a flake on one runner shouldn't mask the rest).
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
