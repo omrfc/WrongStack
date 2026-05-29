@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-05-29
+
+### Added
+
+- **TUI worktree monitor (`Ctrl+W`).** The worktree monitor overlay now responds to `Ctrl+W` for closing, in addition to `Escape`. When the worktree monitor is open, `Ctrl+W` closes it; when closed, `Ctrl+W` performs the normal "delete word before cursor" behavior.
+
+- **Fleet panel redesigned — max 4 lines, running agents only.** The FleetPanel rendered below the status bar has been simplified to show at most 4 lines: a fleet summary line plus up to 3 running agents with just their name and current tool. Idle and finished agents are no longer listed, reducing visual clutter.
+
+- **TUI keyboard shortcuts documented in README.** The Mid-flight controls table in README now includes all monitor toggle shortcuts: `Ctrl+F` (fleet), `Ctrl+G` (agents), `Ctrl+T` (worktree), `Ctrl+P` (phase), and `Ctrl+W` (close worktree).
+
+### Changed
+
+- **Fleet panel max lines reduced.** FleetPanel now shows a maximum of 4 lines instead of listing all agents with full details.
+
+### Fixed
+
+- **`worktree-monitor.tsx`: Ctrl+W now actually closes the monitor.** The UI previously showed "Ctrl+W / Esc to close" but only `Escape` was being handled. Now `Ctrl+W` properly closes the worktree monitor when it's open.
+
 ## [0.8.6] - 2026-05-29
 
 ### Added

@@ -276,7 +276,7 @@ Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. Wha
 
 ---
 
-## What's new in 0.8.4
+## What's new in 0.9.0
 
 - **AutoPhase autonomous workflow.** `/autophase start [title]` breaks a project into ordered phases (Discovery → Design → Implementation → Testing → Deployment) and runs them autonomously, with a live phase/task view in the web UI. Run `/autophase` for the full subcommand list.
 
