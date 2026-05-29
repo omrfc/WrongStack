@@ -73,6 +73,16 @@ function parseToolArguments(
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>;
     }
+    // Salvage case: parsed value is a string (scalar) but contains a serialized JSON object.
+    if (typeof parsed === 'string') {
+      const trimmed = parsed.trim();
+      if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+        const parsed2 = JSON.parse(trimmed) as unknown;
+        if (parsed2 && typeof parsed2 === 'object' && !Array.isArray(parsed2)) {
+          return parsed2 as Record<string, unknown>;
+        }
+      }
+    }
     // JSON parsed but is a scalar/array — wrap so the tool gets a stable
     // object shape, but flag it as a parse anomaly so callers can detect.
     opts.onParseFailure?.({ toolName, toolCallId, raw });
@@ -86,6 +96,15 @@ function parseToolArguments(
         const parsed = JSON.parse(sanitized) as unknown;
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
           return parsed as Record<string, unknown>;
+        }
+        if (typeof parsed === 'string') {
+          const trimmed = parsed.trim();
+          if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+            const parsed2 = JSON.parse(trimmed) as unknown;
+            if (parsed2 && typeof parsed2 === 'object' && !Array.isArray(parsed2)) {
+              return parsed2 as Record<string, unknown>;
+            }
+          }
         }
       } catch {
         // fall through

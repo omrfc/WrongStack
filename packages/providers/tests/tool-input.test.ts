@@ -41,6 +41,16 @@ describe('parseToolInput (provider stream → canonical Record<string, unknown>)
     expect(r).toEqual({ __raw: '{not valid json' });
   });
 
+  it('salvages valid JSON objects wrapped inside a JSON string scalar', () => {
+    // Escaped string that parses to a valid JSON string scalar containing an object:
+    // "{\"calls\":[{\"tool\":\"bash\",\"input\":{}}]}"
+    const input = '"{\\"calls\\":[{\\"tool\\":\\"bash\\",\\"input\\":{}}]}"';
+    const r = parseToolInput(input);
+    expect(r).toEqual({
+      calls: [{ tool: 'bash', input: {} }],
+    });
+  });
+
   it('result is always a plain object (callers can index by key)', () => {
     const cases = ['', '{}', '[]', '"x"', '42', 'null', 'true', '{bad'];
     for (const c of cases) {

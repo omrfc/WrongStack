@@ -135,6 +135,27 @@ describe('tool-format conversions', () => {
     });
   });
 
+  it('contentFromOpenAI salvages valid JSON objects wrapped in string arguments', () => {
+    const content = contentFromOpenAI({
+      message: {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'tc1',
+            type: 'function',
+            function: { name: 'read', arguments: '"{\\"path\\":\\"a\\"}"' },
+          },
+        ],
+      },
+      finish_reason: 'tool_calls',
+    });
+    expect(content[0]).toMatchObject({
+      type: 'tool_use',
+      input: { path: 'a' },
+    });
+  });
+
   it('contentFromOpenAI emits an empty text block when message is empty', () => {
     const content = contentFromOpenAI({
       message: { role: 'assistant', content: null },
