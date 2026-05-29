@@ -80,6 +80,14 @@ export const replaceTool: Tool<ReplaceInput, ReplaceOutput> = {
     const filesInput = Array.isArray(input.files) ? input.files.join(',') : input.files;
     const fileList = await resolveFiles(filesInput, ctx, globRe);
 
+    // Resolve the project root through realpath ONCE so the sandbox check
+    // below compares like-for-like with realpath(file). The project root
+    // itself can be a symlink or short name — e.g. macOS temp dirs live under
+    // /var -> /private/var, and Windows CI runners expose an 8.3 short name
+    // (C:\Users\RUNNER~1\...). Comparing realpath(file) against the raw root
+    // then makes every legitimately-inside file look "outside" and skips it.
+    const realRoot = await fs.realpath(ctx.projectRoot).catch(() => ctx.projectRoot);
+
     const results: ReplaceOutput['results'] = [];
     let totalReplacements = 0;
 
@@ -104,7 +112,7 @@ export const replaceTool: Tool<ReplaceInput, ReplaceOutput> = {
       } catch {
         continue;
       }
-      const rel = path.relative(ctx.projectRoot, realPath);
+      const rel = path.relative(realRoot, realPath);
       if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
 
       // Now stat the real target so we use its mode for atomicWrite.

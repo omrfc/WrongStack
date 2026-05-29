@@ -72,6 +72,29 @@ describe('replaceTool', () => {
     expect(content).toBe('hello wstack');
   });
 
+  it('replaces when the project root is a symlink (CI tmpdir / short-name case)', async () => {
+    // Repro of the CI failure: realpath(file) resolves through the symlinked
+    // root, so comparing it against a non-normalized projectRoot made every
+    // legitimately-inside file look "outside" and skipped it (files_modified=0).
+    const realRoot = path.join(tmpDir, 'real');
+    const linkRoot = path.join(tmpDir, 'link');
+    await fs.mkdir(realRoot, { recursive: true });
+    try {
+      await fs.symlink(realRoot, linkRoot, os.platform() === 'win32' ? 'junction' : 'dir');
+    } catch {
+      return; // environment can't create symlinks/junctions — skip
+    }
+    const filePath = path.join(linkRoot, 'test.txt');
+    await fs.writeFile(filePath, 'hello world', 'utf8');
+    const ctx = { cwd: linkRoot, tools: [], projectRoot: linkRoot } as any;
+    const result = await replaceTool.execute(
+      { pattern: 'world', replacement: 'wstack', files: filePath },
+      ctx,
+    );
+    expect(result.files_modified).toBe(1);
+    expect(await fs.readFile(filePath, 'utf8')).toBe('hello wstack');
+  });
+
   it('returns empty results when no matches', async () => {
     const filePath = path.join(tmpDir, 'test.txt');
     await fs.writeFile(filePath, 'hello world', 'utf8');

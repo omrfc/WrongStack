@@ -133,18 +133,44 @@ async function dockerLogs(
     let stdout = '';
     let stderr = '';
     const MAX = 200_000;
+    let settled = false;
+
+    const empty = (): LogsOutput => ({
+      source: `docker:${service}`,
+      entries: [],
+      total: 0,
+      truncated: false,
+      stream_mode: false,
+    });
+    const finish = (result: LogsOutput) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
 
     const child = spawn('docker', args, { cwd, signal, env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+
+    // `docker logs --tail N` reads recent lines and exits — fast when the
+    // daemon is up. But if the daemon is unreachable (common on CI runners
+    // with no running Docker), the CLI can hang on the socket connection and
+    // emit neither `close` nor `error`. Kill it and return empty so the tool
+    // (and its tests) never hang.
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      finish(empty());
+    }, DOCKER_LOGS_TIMEOUT_MS);
+
     child.stdout?.on('data', (c) => {
       if (stdout.length < MAX) stdout += c.toString();
     });
     child.stderr?.on('data', (c) => {
       if (stderr.length < MAX) stderr += c.toString();
     });
-    child.on('close', (code) => {
+    child.on('close', () => {
       const output = stdout + stderr;
       const entries = parseLogLines(output, filterRe);
-      resolve({
+      finish({
         source: `docker:${service}`,
         entries,
         total: entries.length,
@@ -152,17 +178,15 @@ async function dockerLogs(
         stream_mode: false,
       });
     });
-    child.on('error', (e) => {
-      resolve({
-        source: `docker:${service}`,
-        entries: [],
-        total: 0,
-        truncated: false,
-        stream_mode: false,
-      });
-    });
+    child.on('error', () => finish(empty()));
   });
 }
+
+/**
+ * Hard ceiling for a `docker logs` read. The daemon may be unreachable on CI
+ * (no Docker running), where the CLI hangs on the socket without ever exiting.
+ */
+const DOCKER_LOGS_TIMEOUT_MS = 3_000;
 
 // Hard cap on tail-window size — `lines: 0` historically meant "all" and
 // happily buffered an entire multi-GB log into memory. Cap at 100k lines;
