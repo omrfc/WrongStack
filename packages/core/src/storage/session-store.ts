@@ -31,26 +31,50 @@ export class DefaultSessionStore implements SessionStore {
     this.events = opts.events;
   }
 
+  /**
+   * Compute the shard directory for a session ID.
+   * Session IDs start with a timestamp (e.g. `2026-05-30T10-00-00-00000000-a1b2`).
+   * Shards by year/month to keep readdir fast with large session counts.
+   * Returns a path relative to this.dir, e.g. `2026/05`.
+   */
+  private shardPath(id: string): string {
+    // id format: YYYY-MM-DDTHH-mm-ss-ffffff-XX
+    const parts = id.split('-');
+    if (parts.length >= 2) {
+      const year = parts[0];
+      const month = parts[1];
+      return `${year}/${month}`;
+    }
+    return 'misc';
+  }
+
+  /** Join session ID to a shard-aware absolute path. */
+  private sessionPath(id: string, ext: '.jsonl' | '.summary.json'): string {
+    return path.join(this.dir, this.shardPath(id), `${id}${ext}`);
+  }
+
+  private async ensureShardDir(id: string): Promise<string> {
+    const shard = path.join(this.dir, this.shardPath(id));
+    await ensureDir(shard);
+    return shard;
+  }
+
   async create(meta: Omit<SessionMetadata, 'startedAt'>): Promise<SessionWriter> {
-    await ensureDir(this.dir);
     const startedAt = new Date().toISOString();
     const id = meta.id ?? `${startedAt.replace(/[:.]/g, '-')}-${randomBytes(2).toString('hex')}`;
-    const file = path.join(this.dir, `${id}.jsonl`);
+    const shardDir = await this.ensureShardDir(id);
+    const file = path.join(shardDir, `${id}.jsonl`);
     let handle: fsp.FileHandle;
     try {
       handle = await fsp.open(file, 'a', 0o600);
     } catch (err) {
-      // Preserve cause + errno so callers can branch on EACCES vs EMFILE
-      // vs ENOSPC etc. instead of substring-matching the error message.
       throw new Error(
         `Failed to open session file: ${err instanceof Error ? err.message : String(err)}`,
-        {
-          cause: err,
-        },
+        { cause: err },
       );
     }
     try {
-      return new FileSessionWriter(id, handle, startedAt, meta, this.events, { dir: this.dir, filePath: file });
+      return new FileSessionWriter(id, handle, startedAt, meta, this.events, { dir: shardDir, filePath: file });
     } catch (err) {
       await handle.close().catch(() => {});
       throw err;
@@ -58,15 +82,9 @@ export class DefaultSessionStore implements SessionStore {
   }
 
   async resume(id: string): Promise<ResumedSession> {
-    const file = path.join(this.dir, `${id}.jsonl`);
+    const file = this.sessionPath(id, '.jsonl');
     const data = await this.load(id);
     let handle: fsp.FileHandle;
-    // Use 'r+' (read-write, file must exist) instead of 'a' (append, creates
-    // if missing). This avoids a TOCTOU race: with 'a', if the file is deleted
-    // between the old fsp.access() check and this open(), the load() above
-    // would have read an empty-recreated file (returning 0 messages instead of
-    // failing), then 'r+' throws ENOENT and we surface a clear error to the
-    // caller instead of silently resuming an empty session.
     try {
       handle = await fsp.open(file, 'r+', 0o600);
     } catch (err) {
@@ -75,9 +93,6 @@ export class DefaultSessionStore implements SessionStore {
         { cause: err },
       );
     }
-    // Mirror create(): if writer construction throws, the handle would
-    // leak. Constructor is non-throwing today but the asymmetry would
-    // become a real handle leak the moment validation lands here.
     try {
       const writer = new FileSessionWriter(
         id,
@@ -89,7 +104,7 @@ export class DefaultSessionStore implements SessionStore {
           provider: data.metadata.provider,
         },
         this.events,
-        { resumed: true, dir: this.dir, filePath: file },
+        { resumed: true, dir: path.join(this.dir, this.shardPath(id)), filePath: file },
       );
       return { writer, data };
     } catch (err) {
@@ -99,16 +114,13 @@ export class DefaultSessionStore implements SessionStore {
   }
 
   async load(id: string): Promise<SessionData> {
-    const file = path.join(this.dir, `${id}.jsonl`);
+    const file = this.sessionPath(id, '.jsonl');
     const raw = await fsp.readFile(file, 'utf8');
     const lines = raw.split('\n').filter((l) => l.trim());
     const events: SessionEvent[] = [];
     for (const line of lines) {
       try {
         const parsed: unknown = JSON.parse(line);
-        // Session JSONL is on-disk user-writable state; downstream replay
-        // trusts `e.type` / `e.ts` etc. and would TypeError on a malformed
-        // shape. Validate the discriminator + timestamp before pushing.
         if (
           parsed !== null &&
           typeof parsed === 'object' &&
@@ -117,8 +129,6 @@ export class DefaultSessionStore implements SessionStore {
         ) {
           events.push(parsed as SessionEvent);
         }
-        // else: skip — a hand-edited file with a partial object should not
-        // crash replay, just lose that one event.
       } catch {
         // skip malformed JSON
       }
@@ -131,16 +141,12 @@ export class DefaultSessionStore implements SessionStore {
   async list(limit = 20): Promise<SessionSummary[]> {
     try {
       await ensureDir(this.dir);
-      const files = await fsp.readdir(this.dir);
-      const ids = files.filter((f) => f.endsWith('.jsonl')).map((f) => f.replace(/\.jsonl$/, ''));
-      // Read all manifests in parallel; fall back to full load only for
-      // sessions that haven't been closed cleanly (or predate the manifest).
+      const ids = await this.collectSessionIds(this.dir);
       const sessions = await Promise.all(ids.map((id) => this.summaryFor(id).catch(() => null)));
       const out = sessions.filter((s): s is SessionSummary => s !== null);
       out.sort((a, b) => {
         if (a.startedAt < b.startedAt) return 1;
         if (a.startedAt > b.startedAt) return -1;
-        // Equal timestamps — use id as tiebreaker for stable sort
         return a.id.localeCompare(b.id);
       });
       return out.slice(0, limit);
@@ -149,22 +155,32 @@ export class DefaultSessionStore implements SessionStore {
     }
   }
 
+  /** Recursively collect all session IDs from shard subdirectories. */
+  private async collectSessionIds(dir: string): Promise<string[]> {
+    const ids: string[] = [];
+    const entries = await fsp.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        ids.push(...(await this.collectSessionIds(full)));
+      } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+        ids.push(entry.name.replace(/\.jsonl$/, ''));
+      }
+    }
+    return ids;
+  }
+
   private async summaryFor(id: string): Promise<SessionSummary> {
-    const manifest = path.join(this.dir, `${id}.summary.json`);
+    const manifest = this.sessionPath(id, '.summary.json');
     try {
       const raw = await fsp.readFile(manifest, 'utf8');
       return JSON.parse(raw) as SessionSummary;
     } catch {
-      // Manifest missing/corrupt — fall back to a full parse and backfill
-      // the manifest so the next `list()` hits the fast path.
-      const full = path.join(this.dir, `${id}.jsonl`);
+      const full = this.sessionPath(id, '.jsonl');
       const stat = await fsp.stat(full);
       const summary = await this.summarize(id, stat.mtime.toISOString());
       await atomicWrite(manifest, JSON.stringify(summary), { mode: 0o600 })
         .catch((err) => {
-          // Best-effort manifest write — list() falls back to full parse
-          // on next invocation, so surface the error for diagnostics but
-          // don't fail the listing.
           console.warn(
             `[session-store] Failed to write manifest for "${id}":`,
             err instanceof Error ? err.message : String(err),
@@ -175,13 +191,14 @@ export class DefaultSessionStore implements SessionStore {
   }
 
   async delete(id: string): Promise<void> {
-    await fsp.unlink(path.join(this.dir, `${id}.jsonl`));
-    await fsp.unlink(path.join(this.dir, `${id}.summary.json`)).catch(() => undefined);
+    await fsp.unlink(this.sessionPath(id, '.jsonl'));
+    await fsp.unlink(this.sessionPath(id, '.summary.json')).catch(() => undefined);
   }
 
   async clearHistory(id: string): Promise<void> {
-    const file = path.join(this.dir, `${id}.jsonl`);
-    const meta = path.join(this.dir, `${id}.summary.json`);
+    await this.ensureShardDir(id);
+    const file = this.sessionPath(id, '.jsonl');
+    const meta = this.sessionPath(id, '.summary.json');
     const record = `${JSON.stringify({
       type: 'session_start',
       ts: new Date().toISOString(),
@@ -230,6 +247,7 @@ export class DefaultSessionStore implements SessionStore {
       endedAt: end?.ts,
       model: start?.model,
       provider: start?.provider,
+      pendingToolUses: end?.pendingToolUses,
     };
   }
 
@@ -257,8 +275,6 @@ export class DefaultSessionStore implements SessionStore {
         };
       } else if (e.type === 'tool_result') {
         if (!openToolUses.has(e.id)) {
-          // Orphan tool_result: tool_use was never seen. Skip to avoid
-          // corrupting the replayed message sequence.
           this.events?.emit('session.damaged', {
             sessionId,
             detail: `Orphan tool_result "${e.id}" has no matching tool_use`,
@@ -279,7 +295,6 @@ export class DefaultSessionStore implements SessionStore {
           if (Array.isArray(last.content)) {
             last.content.push(...content);
           } else if (typeof last.content === 'string') {
-            // Convert string content to blocks and append
             last.content = [{ type: 'text', text: last.content }, ...content];
           } else {
             messages.push({ role: 'user', content });
@@ -294,8 +309,6 @@ export class DefaultSessionStore implements SessionStore {
         sessionId,
         detail: `${openToolUses.size} tool_use blocks without matching results - replay repaired`,
       });
-      // Damaged sessions still load; the repair pass below removes orphan
-      // protocol blocks before the transcript can reach a provider.
     }
     const repaired = repairToolUseAdjacency(messages);
     if (repaired.report.changed) {
@@ -319,9 +332,6 @@ class FileSessionWriter implements SessionWriter {
   private tokenIn = 0;
   private tokenOut = 0;
   private readonly filePath: string;
-  /** Public accessor for the JSONL path — required by SessionWriter so
-   *  observability surfaces (`/fleet log`, FleetPanel) can locate the
-   *  transcript without recomputing the path from session metadata. */
   get transcriptPath(): string | undefined {
     return this.filePath || undefined;
   }
@@ -330,7 +340,6 @@ class FileSessionWriter implements SessionWriter {
   private appendFailCount = 0;
   private lastAppendWarnAt = 0;
 
-  // Rewind support: track pending file changes and prompt index
   private promptIndex = 0;
   private pendingFileSnapshots: Array<{
     path: string;
@@ -338,15 +347,16 @@ class FileSessionWriter implements SessionWriter {
     before: string | null;
     after: string | null;
   }> = [];
+  /** Tracks open tool_use IDs during the current run to serialize on close for resume. */
+  private openToolUses = new Set<string>();
 
-  // Register a pending file change. Call recordFileChange() from tools.
   recordFileChange(input: { path: string; action: 'created' | 'modified' | 'deleted'; before: string | null; after: string | null }): void {
     this.pendingFileSnapshots.push(input);
   }
 
   constructor(
     public readonly id: string,
-    private readonly handle: fsp.FileHandle,
+    private handle: fsp.FileHandle,
     private readonly startedAt: string,
     private readonly meta: Omit<SessionMetadata, 'startedAt'>,
     private readonly events?: EventBus,
@@ -363,8 +373,10 @@ class FileSessionWriter implements SessionWriter {
       provider: meta.provider ?? 'unknown',
       tokenTotal: 0,
     };
-    // Session start is written lazily on first append to avoid sync I/O
-    // in constructor and eliminate reliance on FileHandle.fd private property.
+  }
+
+  get pendingToolUses(): string[] {
+    return Array.from(this.openToolUses);
   }
 
   private async writeSessionStartLazy(): Promise<void> {
@@ -377,18 +389,15 @@ class FileSessionWriter implements SessionWriter {
     })}\n`;
     try {
       if (this.filePath) {
-        // Use fs.promises.writeFile directly to avoid FileHandle.fd private access
         await fsp.writeFile(this.filePath, record, { flag: 'a', mode: 0o600 });
       }
     } catch {
-      // best-effort; session will still be usable without the start event logged
+      // best-effort
     }
   }
 
   async append(event: SessionEvent): Promise<void> {
     if (this.closed) return;
-    // Guard against concurrent append calls racing on lazy initialization.
-    // Set initDone BEFORE the await so a second caller sees it and skips.
     if (!this.initDone) {
       this.initDone = true;
       await this.writeSessionStartLazy();
@@ -397,9 +406,6 @@ class FileSessionWriter implements SessionWriter {
     try {
       await this.handle.appendFile(`${JSON.stringify(event)}\n`, 'utf8');
     } catch (err) {
-      // A persistent failure (full disk, broken pipe) would otherwise log
-      // once per appended event — which for a chatty agent run is a lot.
-      // Debounce to one log per 5 s and surface the suppressed count.
       this.appendFailCount++;
       const now = Date.now();
       if (now - this.lastAppendWarnAt > 5000) {
@@ -416,13 +422,13 @@ class FileSessionWriter implements SessionWriter {
     }
   }
 
-  /**
-   * Watch events as they're appended and keep the summary state hot, so
-   * `close()` can flush a `<id>.summary.json` manifest without re-reading
-   * the JSONL. `list()` reads only manifests, turning a per-session full
-   * parse into a single stat+read.
-   */
   private observeForSummary(event: SessionEvent): void {
+    // Track open tool uses so we can serialize them on close for resume.
+    if (event.type === 'tool_use') {
+      this.openToolUses.add(event.id);
+    } else if (event.type === 'tool_result') {
+      this.openToolUses.delete(event.id);
+    }
     if (event.type === 'user_input' && this.summary.title === '(empty session)') {
       this.summary = { ...this.summary, title: userInputTitle(event.content) };
     } else if (event.type === 'llm_response') {
@@ -430,7 +436,6 @@ class FileSessionWriter implements SessionWriter {
       this.tokenOut += event.usage.output;
       this.summary = { ...this.summary, tokenTotal: this.tokenIn + this.tokenOut };
     } else if (event.type === 'session_end') {
-      // session_end usage is the canonical total — prefer it if non-zero.
       const total = event.usage.input + event.usage.output;
       if (total > 0) this.summary = { ...this.summary, tokenTotal: total };
     }
@@ -444,7 +449,7 @@ class FileSessionWriter implements SessionWriter {
       try {
         await atomicWrite(this.manifestFile, JSON.stringify(this.summary), { mode: 0o600 });
       } catch {
-        // manifest write is best-effort; list() falls back to full load.
+        // manifest write is best-effort
       }
     }
     try {
@@ -455,7 +460,6 @@ class FileSessionWriter implements SessionWriter {
   }
 
   async writeCheckpoint(promptIndex: number, promptPreview: string): Promise<void> {
-    // Flush pending file snapshots before checkpoint
     const fileCount = this.pendingFileSnapshots.length;
     if (fileCount > 0) {
       await this.writeFileSnapshot(promptIndex, [...this.pendingFileSnapshots]);
@@ -468,7 +472,6 @@ class FileSessionWriter implements SessionWriter {
       promptIndex,
       promptPreview,
     });
-    // Notify UIs so they can update checkpoint timelines
     this.events?.emit('checkpoint.written', {
       promptIndex,
       promptPreview,
@@ -496,9 +499,6 @@ class FileSessionWriter implements SessionWriter {
     const kept: string[] = [];
     let removedCount = 0;
 
-    // Find the line index of the target checkpoint and all later checkpoint events.
-    // Events at lines >= targetCheckpointLine are after the target and must be removed
-    // (except checkpoint/file_snapshot themselves which we track via promptIndex).
     let targetCheckpointLine = -1;
     let afterTarget = false;
 
@@ -516,7 +516,7 @@ class FileSessionWriter implements SessionWriter {
 
       if (event.type === 'checkpoint') {
         if ((event as { promptIndex: number }).promptIndex === targetPromptIndex) {
-          targetCheckpointLine = kept.length; // where this checkpoint will be stored
+          targetCheckpointLine = kept.length;
           afterTarget = true;
         } else if ((event as { promptIndex: number }).promptIndex > targetPromptIndex) {
           afterTarget = true;
@@ -526,8 +526,6 @@ class FileSessionWriter implements SessionWriter {
       if (event.promptIndex !== undefined && event.promptIndex > targetPromptIndex) {
         removedCount++;
       } else if (event.promptIndex === undefined) {
-        // Events without promptIndex (user_input, llm_response, session_start, etc.)
-        // are kept ONLY if we haven't passed the target checkpoint yet
         if (!afterTarget || targetCheckpointLine === -1) {
           kept.push(line);
         } else {
@@ -539,12 +537,20 @@ class FileSessionWriter implements SessionWriter {
     }
 
     const truncated = kept.join('\n');
-    // NOTE: cannot use atomicWrite() here. The writer holds an append-mode
-    // FileHandle on this.filePath (see resume/create), and on Windows
-    // `rename(tmp, target)` fails with EPERM when `target` has an open
-    // handle. truncateToCheckpoint is only invoked from an explicit /rewind,
-    // so the small crash window is acceptable.
-    await fsp.writeFile(this.filePath, truncated + '\n', 'utf8');
+    // Windows EPERM fix: close the append-mode handle, write via temp file
+    // and rename, then reopen. This is needed because rename() fails on
+    // Windows when the target has an open file handle.
+    const tmpPath = `${this.filePath}.rewind.tmp`;
+    await fsp.writeFile(tmpPath, truncated + '\n', 'utf8');
+    try {
+      await this.handle.close();
+      await fsp.rename(tmpPath, this.filePath);
+      // Re-open in append mode for continued use of this file.
+      this.handle = await fsp.open(this.filePath, 'a', 0o600);
+    } catch (err) {
+      await fsp.unlink(tmpPath).catch(() => undefined);
+      throw err;
+    }
 
     await this.append({
       type: 'rewound',

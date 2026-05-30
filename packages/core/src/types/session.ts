@@ -9,6 +9,8 @@ export interface SessionMetadata {
   provider?: string;
   startedAt: string;
   endedAt?: string;
+  /** Set when a session is closed with open tool calls — used to restore pending state on resume. */
+  pendingToolUses?: string[];
 }
 
 export type SessionEvent =
@@ -27,7 +29,7 @@ export type SessionEvent =
   | { type: 'tool_result'; ts: string; id: string; content: unknown; isError: boolean }
   | { type: 'compaction'; ts: string; before: number; after: number }
   | { type: 'error'; ts: string; message: string; phase: string }
-  | { type: 'session_end'; ts: string; usage: Usage }
+  | { type: 'session_end'; ts: string; usage: Usage; pendingToolUses?: string[] }
   | { type: 'mode_changed'; ts: string; from: string; to: string }
   | { type: 'task_created'; ts: string; taskId: string; title: string }
   | { type: 'task_updated'; ts: string; taskId: string; status: string }
@@ -112,6 +114,9 @@ export interface SessionWriter {
    * having to recompute the path from session metadata.
    */
   readonly transcriptPath?: string;
+  /** IDs of tool_use blocks that have been sent but not yet received a tool_result.
+   * Used by the REPL to serialize pending state into `session_end` for proper resume. */
+  readonly pendingToolUses: string[];
   append(event: SessionEvent): Promise<void>;
   close(): Promise<void>;
   /**
