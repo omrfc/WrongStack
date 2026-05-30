@@ -218,6 +218,16 @@ export interface RunTuiOptions {
   subscribeAutoPhase?: (
     handler: (event: string, payload: unknown) => void,
   ) => () => void;
+  /**
+   * Read the persisted autonomy settings (defaultMode, autoProceedDelayMs).
+   * Used by the SettingsPicker in the TUI on mount and after Ctrl+S toggle.
+   */
+  getSettings?: () => { mode: 'off' | 'suggest' | 'auto'; delayMs: number };
+  /**
+   * Persist autonomy settings changes. Returns null on success, or an
+   * error string on failure (so the TUI can display it as a hint).
+   */
+  saveSettings?: (s: { mode: 'off' | 'suggest' | 'auto'; delayMs: number }) => string | null;
 }
 
 // Bracketed paste mode wraps any pasted text with these markers, letting us
@@ -395,6 +405,8 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           onSDDOutput: opts.onSDDOutput,
           sessionsDir: opts.sessionsDir,
           projectRoot: opts.projectRoot,
+          getSettings: opts.getSettings,
+          saveSettings: opts.saveSettings,
         }),
         { exitOnCtrlC: false },
       );
