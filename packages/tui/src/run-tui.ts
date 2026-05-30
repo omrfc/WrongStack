@@ -227,7 +227,7 @@ export interface RunTuiOptions {
    * Persist autonomy settings changes. Returns null on success, or an
    * error string on failure (so the TUI can display it as a hint).
    */
-  saveSettings?: (s: { mode: 'off' | 'suggest' | 'auto'; delayMs: number }) => string | null;
+  saveSettings?: (s: { mode: 'off' | 'suggest' | 'auto'; delayMs: number }) => string | null | Promise<string | null>;
 }
 
 // Bracketed paste mode wraps any pasted text with these markers, letting us

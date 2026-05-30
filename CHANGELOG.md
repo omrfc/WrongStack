@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.4] - 2026-05-30
+
+### Fixed
+
+- **`slash commands: guard `opts.paths` before use.** `autophase.ts`, `goal.ts`, and `sdd.ts` now check `if (!opts.paths)` and return early with a clear message instead of crashing when `paths` is not configured in the slash command context. Affects the `/autophase`, `/goal`, and `/sdd` commands when invoked in environments where the paths layer hasn't been wired up yet.
+
+- **TUI `SettingsPicker` reads persisted settings on mount.** The TUI now calls the new `getSettings` prop (wired to `loadAutonomySetting`) when the settings overlay opens, so the picker reflects the actual persisted values — mode and delay — rather than always starting from defaults.
+
+- **`saveSettings` made async-compatible.** `saveSettings` in the TUI options now returns `string | null | Promise<string | null>` instead of just `string | null`. This resolves a type mismatch when the implementation delegates to `persistAutonomySetting` (an async function) in the CLI executor.
+
 ## [0.9.0] - 2026-05-29
 
 ### Added

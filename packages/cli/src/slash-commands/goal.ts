@@ -51,6 +51,7 @@ export function buildGoalCommand(opts: SlashCommandContext): SlashCommand {
       const [verbRaw, ...rest] = trimmed.split(/\s+/);
       const verb = (verbRaw ?? '').toLowerCase();
       const restJoined = rest.join(' ').trim();
+      if (!opts.paths) return { message: 'Goal not available — paths not configured.' };
       const goalPath = opts.paths.projectGoal;
 
       // If the first token isn't a known verb, treat the entire args

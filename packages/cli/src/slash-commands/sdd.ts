@@ -571,6 +571,7 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
       'AI-driven SDD: /sdd [new|approve|execute|cancel|status|list|show|templates]',
     async run(args) {
       const ctx = opts.context;
+      if (!opts.paths) return { message: 'SDD not available — paths not configured.' };
       const specsDir = opts.paths.projectSpecs;
       const graphsDir = opts.paths.projectTaskGraphs;
 

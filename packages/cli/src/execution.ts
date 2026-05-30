@@ -409,13 +409,12 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
               rawMode === 'suggest' || rawMode === 'auto' ? rawMode : 'off';
             return { mode, delayMs: autonomy?.autoProceedDelayMs ?? 45_000 };
           },
-          saveSettings: async (s: { mode: 'off' | 'suggest' | 'auto'; delayMs: number }) => {
+          async saveSettings(s: { mode: 'off' | 'suggest' | 'auto'; delayMs: number }) {
             try {
               await persistAutonomySetting(
                 {
                   configStore,
                   globalConfigPath: wpaths.globalConfig,
-                  // Autonomy fields are not secrets — pass-through vault.
                   vault: { encrypt: (v) => v, decrypt: (v) => v, isEncrypted: () => false },
                 },
                 (autonomy) => {

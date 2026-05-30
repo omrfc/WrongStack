@@ -6,6 +6,7 @@ import type { SlashCommandContext } from './index.js';
 
 function getStore(opts: SlashCommandContext): PhaseStore {
   // Per-project: ~/.wrongstack/projects/<hash>/autophase
+  if (!opts.paths) throw new Error('PhaseStore not available — paths not configured.');
   return new PhaseStore({ baseDir: opts.paths.projectAutophase });
 }
 

@@ -204,6 +204,16 @@ export interface AppProps {
     handler: (event: string, payload: unknown) => void,
   ) => () => void;
   /**
+   * Read the persisted autonomy settings (defaultMode, autoProceedDelayMs).
+   * Used by the SettingsPicker in the TUI on mount and after Ctrl+S toggle.
+   */
+  getSettings?: () => { mode: 'off' | 'suggest' | 'auto'; delayMs: number };
+  /**
+   * Persist autonomy settings changes. Returns null on success, or an
+   * error string on failure (so the TUI can display it as a hint).
+   */
+  saveSettings?: (s: { mode: 'off' | 'suggest' | 'auto'; delayMs: number }) => string | null | Promise<string | null>;
+  /**
    * SDD session context getter. When an SDD session is active, returns
    * the AI prompt context to inject into user messages so the model
    * knows it's in a spec-building conversation.

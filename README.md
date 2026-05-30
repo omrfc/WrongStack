@@ -276,6 +276,14 @@ Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. Wha
 
 ---
 
+## What's new in 0.9.4
+
+- **`/autophase`, `/goal`, and `/sdd` no longer crash when paths are unconfigured.** All three slash commands now guard `opts.paths` before use and return a clear error message rather than throwing when the paths layer hasn't been wired into the command context.
+
+- **TUI settings overlay reflects persisted values on open.** The TUI's `/settings` overlay now calls `getSettings` (wired to `loadAutonomySetting`) on mount so the mode and delay fields show the actual saved values instead of always starting from defaults.
+
+- **`saveSettings` return type is now async-compatible.** `saveSettings` in `RunTuiOptions` returns `string | null | Promise<string | null>` so the async `persistAutonomySetting` implementation in the CLI executor no longer causes a type mismatch.
+
 ## What's new in 0.9.2
 
 - **`/settings` works in the TUI — now with a real overlay.** The old menu blocked on `readline`, which can't run under Ink (Ink owns stdin) — so in the TUI it hung invisibly and every keypress redrew the status bar into the chat history. Two fixes: (1) the builtin `/settings` is now argument-driven and non-blocking (`/settings`, `/settings delay <seconds>`, `/settings mode <off|suggest|auto>`, `/settings defaults`) — works in REPL + headless; (2) the TUI registers a keyboard-driven overlay (`↑/↓` field · `←/→` change · `Enter` save · `Esc` cancel) for autonomy mode and auto-proceed delay, matching the `/model` and `/autonomy` pickers.
