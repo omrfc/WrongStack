@@ -8,7 +8,54 @@ version: 1.1.0
 
 # Skill Creator — WrongStack
 
-Guide the user through creating a new skill. You are the wizard — ask questions, validate answers, write the file.
+## Overview
+
+Guides the creation of new WrongStack skills. A skill is a Markdown file with YAML frontmatter — the first sentence of the description is the trigger. You are the wizard: ask questions, validate answers, write the file.
+
+## Rules
+
+1. First sentence of `description` = trigger — this is the only thing the skill loader matches on.
+2. Name must be kebab-case: `my-skill`, `docker-deploy` — lowercase, hyphens only.
+3. Skills live in `.wrongstack/skills/<name>/SKILL.md` (project level).
+4. After the trigger sentence, add `Triggers: user says "X", "Y", "Z".`.
+5. Content must be actionable — rules, patterns, anti-patterns, not just prose.
+6. End with "Skills in scope" listing related skills for delegation.
+7. Don't let skill names collide with existing skills.
+
+## Patterns
+
+### Do
+
+```markdown
+---
+name: docker-deploy
+description: |
+  Use this skill when deploying Docker containers to a production cluster.
+  Triggers: user says "docker", "container", "deploy", "dockerfile", "image".
+version: 1.0.0
+---
+
+# Docker Deploy — WrongStack
+
+## Overview
+...
+## Rules
+...
+## Patterns
+...
+## Skills in scope
+```
+
+### Don't
+
+```markdown
+---
+name: MySkill # ❌ PascalCase
+name: my_skill      # ❌ underscore
+description: |
+  This skill is about Docker.  # ❌ no trigger sentence
+---
+```
 
 ## Skill format
 
@@ -58,49 +105,7 @@ Skills live in directories under these paths (priority order):
 
 For user-created skills: always use path 1 (project level).
 
-## Naming Rules
-
-- **kebab-case**: `my-skill`, `docker-deploy`, `api-testing`
-- Lowercase letters, numbers, hyphens only
-- No spaces, no underscores, no uppercase
-- Directory name = skill name
-
-## The Trigger — the most important part
-
-The **first sentence** of the `description` is the trigger. This is the **only** thing the skill loader matches on.
-
-```
-# ✅ Good — specific trigger that can be matched
-Use this skill when deploying Docker containers to a production cluster.
-
-# ❌ Bad — vague, can't be matched
-This skill is about Docker deployment.
-
-# ✅ Good — pattern-matchable
-Use this skill when writing or reviewing React 19+ code.
-
-# ❌ Bad — too broad
-This skill is about code.
-```
-
-After the trigger sentence, add `Triggers: user says "X", "Y", "Z".` so agents know when to delegate.
-
-## Description rules
-
-- First sentence = trigger condition
-- Second sentence = what it covers
-- Triggers list = specific keywords or phrases
-- Multi-line descriptions use YAML block scalar (`|`)
-
-## Content Guidelines
-
-- **Rules**: concrete do/don't rules, not vague advice
-- **Patterns**: actual code examples, not pseudocode
-- **Anti-patterns**: show what NOT to do with real code
-- **Workflows**: step-by-step, actionable, not theoretical
-- **Skills in scope**: list related skills at the bottom for delegation
-
-## Creation Workflow
+## Workflow
 
 1. **Ask the name** — suggest kebab-case, validate format
 2. **Ask the trigger** — "What situation should activate this skill?"
@@ -116,14 +121,6 @@ Before writing the file, verify:
 - [ ] Description has a clear trigger sentence
 - [ ] Content is actionable (rules, patterns, not just prose)
 - [ ] File will be placed in `.wrongstack/skills/`
-
-## Existing skills (don't collide)
-
-```
-audit-log, bug-hunter, git-flow, multi-agent, node-modern,
-prompt-engineering, react-modern, refactor-planner, sdd,
-security-scanner, skill-creator, typescript-strict
-```
 
 ## Skills in scope
 

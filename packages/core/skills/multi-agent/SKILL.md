@@ -9,6 +9,48 @@ version: 1.1.0
 
 # Multi-Agent Coordination — WrongStack
 
+## Overview
+
+Coordinates parallel AI agent execution for tasks that benefit from fanning out. Leader delegates narrow subtasks to workers, collects structured results, and synthesizes a unified output.
+
+## Rules
+
+1. Subagents share nothing — no memory, no session state, no variable scope.
+2. Leader must aggregate results — don't let worker output go unprocessed.
+3. Narrow task scope per subagent — broad tasks cause `budget_exhausted`.
+4. Role must match task — don't use `bug-hunter` to write docs.
+5. Check `stopReason` on every result: `end_turn` (clean), `budget_exhausted` (retry), `error` (surface), `aborted` (don't retry).
+6. Don't fan out single atomic tasks under 5 tool calls — overhead exceeds benefit.
+
+## Patterns
+
+### Do
+
+```typescript
+// ✅ Good — narrow, focused task per subagent
+batch_tool_use([
+  { tool: "delegate", input: { task: "Audit auth/session.ts for null-deref bugs", role: "bug-hunter" }},
+  { tool: "delegate", input: { task: "Audit auth/token.ts for null-deref bugs", role: "bug-hunter" }},
+  { tool: "delegate", input: { task: "Audit auth/refresh.ts for null-deref bugs", role: "bug-hunter" }},
+])
+
+// ✅ Leader passes artifact explicitly
+// Subagent B gets subagent A's output as part of the task description
+```
+
+### Don't
+
+```typescript
+// ❌ Bad — too broad, will exhaust budget
+{ task: "Audit all packages for bugs" }
+
+// ❌ Bad — no aggregation
+// Subagents return results, leader pastes raw output without synthesis
+
+// ❌ Bad — role mismatch
+{ task: "Write documentation for the API", role: "bug-hunter" }
+```
+
 ## When to fan out
 
 ✅ Good fits:

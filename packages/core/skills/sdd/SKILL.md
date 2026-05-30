@@ -9,7 +9,18 @@ version: 2.1.0
 
 # Spec-Driven Development — WrongStack
 
-Every non-trivial change starts with a spec. The spec is the source of truth.
+## Overview
+
+Every non-trivial change starts with a spec. The spec is the source of truth — it defines what to build, how to verify it, and what counts as done. SDD uses `/sdd` slash commands to create specs, generate task graphs, and track execution.
+
+## Rules
+
+1. Every non-trivial task needs a spec before writing code — you'll rewrite it anyway.
+2. Spec must have acceptance criteria — without them, you can't know when it's done.
+3. Tasks must have dependencies — everything is a dependency of something.
+4. Spec must be specific: "Users authenticate via OAuth2 with PKCE" not "improve auth".
+5. Skipping `/sdd` for urgent tasks backfires — the spec is what makes "urgent" possible.
+6. When the spec reveals a multi-file refactor, delegate to `refactor-planner` first.
 
 ## When to use
 

@@ -11,6 +11,54 @@ version: 1.1.0
 
 Analyzes session logs, event streams, and system traces to surface patterns, anomalies, and actionable insights.
 
+## Overview
+
+Parses WrongStack session JSONL files to extract tool usage patterns, error distributions, cost trends, and context anomalies. Produces a structured report with prioritized findings.
+
+## Rules
+
+1. Always parse from the source JSONL — never summarize what you didn't read.
+2. Analyze one session at a time, or aggregate with clear labeling per session.
+3. Cite specific data in reports: iteration numbers, tool names, error messages.
+4. Flag repeated failures (same tool,5+ times) as a real issue, not noise.
+5. Report cost trends in context of iteration count — a spike means context growth.
+
+## Patterns
+
+### Do
+
+```json
+// ✅ Good — parse tool call counts from session JSONL
+{
+  "iterations": 23,
+  "toolCalls": [
+    { "tool": "read", "count": 142, "failures": 3 },
+    { "tool": "bash", "count": 89, "failures": 12 }
+  ],
+  "costPerIteration": [0.04, 0.04, 0.11, 0.18]
+}
+```
+
+```typescript
+// ✅ Extract error distribution
+const errorsByType = events
+  .filter(e => e.type === 'error')
+  .reduce((acc, e) => {
+    acc[e.error.type] = (acc[e.error.type] || 0) + 1;
+    return acc;
+  }, {});
+```
+
+### Don't
+
+```typescript
+// ❌ Bad — report without citing data
+"bash had some failures" // no count, no iteration, no error type
+
+// ❌ Bad — mix sessions without labeling
+// Analyzed 3 sessions together with no per-session breakdown
+```
+
 ## Workflow
 
 ```
@@ -23,24 +71,48 @@ Analyzes session logs, event streams, and system traces to surface patterns, ano
 ## What to look for
 
 ### Tool usage patterns
-- Over-used tools (100+ calls to the same tool = possibly a loop)
-- Tools that consistently fail (repeated failures = bug or misconfiguration)
-- Unusual tool sequences (e.g., 50 writes in a row with no reads)
+- **Over-used tools**: 100+ calls to the same tool = possibly a loop
+- **Consistent failures**: same tool failing 5x+ = bug or misconfiguration
+- **Unusual sequences**: 50 writes in a row with no reads = wrong approach
+- **Tool entropy**: too many different tools in one iteration = unfocused task
 
 ### Error patterns
-- Same error repeating across iterations
-- Error rate by type: what's most common?
-- Errors clustered in specific packages or tools
+- **Same error repeating**: `ToolExecutionError`47x across iterations = systemic issue
+- **Error clustering**: all errors in `bash` tool = command timeout pattern
+- **Error rate by type**: which error type is most common?
+- **Error distribution**: are errors clustered in specific packages or tools?
 
 ### Cost patterns
-- Tokens per iteration: is it growing?
-- Which provider/model combination is most expensive?
-- Any unexpected cost spikes?
+- **Token growth**: tokens/iteration trending up = context bloat
+- **Provider cost**: which model is most expensive per call?
+- **Cost spikes**: sudden3x increase = large file reads or excessive tool calls
+- **Iteration cost variance**: avg $0.04/iter → $0.11/iter = context growing
 
 ### Context management
-- Iterations with very high tool count (possible loop)
-- Context compaction triggered frequently
-- Session that keeps restarting
+- **High tool count per iteration**: >50 tool calls = possible loop or unfocused task
+- **Compaction events**: context compaction triggered 3x in one session = too much context
+- **Session restart**: same session restarting multiple times = crash loop
+- **Long iterations**: single iteration >5min = stuck or waiting on something
+
+## Session file structure
+
+WrongStack session logs are JSONL files. Each line is a JSON event. Key event types:
+
+```
+{"type": "iteration_start", "iteration": 1, "timestamp": "..."}
+{"type": "tool_call", "tool": "read", "input": {"path": "src/index.ts"}, "duration_ms": 12}
+{"type": "tool_result", "tool": "read", "output_lines": 45}
+{"type": "error", "error": {"type": "ToolExecutionError", "message": "...", "tool": "bash"}}
+{"type": "compaction", "reason": "context_near_limit", "tokens_removed": 1200}
+{"type": "cost", "input_tokens": 3400, "output_tokens": 890, "cost_usd": 0.11}
+{"type": "iteration_end", "iteration": 1, "stop_reason": "end_turn"}
+```
+
+When reading a session file:
+1. `grep` for event types you need (e.g., `grep '"type": "error"' session.jsonl`)
+2. `read` the full file for detailed analysis
+3. Track iteration boundaries via `iteration_start` / `iteration_end` events
+4. Sum `cost_usd` per iteration for cost trend analysis
 
 ## Input
 
@@ -64,7 +136,7 @@ Analyzes session logs, event streams, and system traces to surface patterns, ano
 - Cost: $X.XX
 
 ### Top Errors (by count)
-1. `ToolExecutionError` — 47x —集中在 `bash` tool, command timeout
+1. `ToolExecutionError` — 47x — concentrated in `bash` tool, command timeout
 2. `PermissionDenied` — 12x — `exec` tool, no trust file entry
 
 ### Tool Usage
@@ -94,3 +166,4 @@ Analyzes session logs, event streams, and system traces to surface patterns, ano
 
 - `bug-hunter` — for turning audit findings into concrete bugs to fix
 - `refactor-planner` — for addressing systemic issues found in logs
+- `security-scanner` — for security-adjacent findings (leaked keys, injection patterns in logs)

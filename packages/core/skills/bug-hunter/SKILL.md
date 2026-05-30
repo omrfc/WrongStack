@@ -11,6 +11,19 @@ version: 1.1.0
 
 Scans code for bugs and code smells. Outputs a prioritized hit list with file:line references.
 
+## Overview
+
+Grep/read across target files to surface bugs, anti-patterns, and quality issues. Classifies by severity (critical/high/medium/low) and reports with file:line + fix suggestion.
+
+## Rules
+
+1. Always include `file:line` in every finding — no line reference = can't be fixed.
+2. Never scan `node_modules` — waste of time, false positives.
+3. Don't report style issues as bugs — those are lint findings.
+4. If >30% of findings are noise, note the false positive rate in the report.
+5. Don't flag deprecated APIs without severity — some deprecations are acceptable.
+6. Sort output: critical > high > medium > low.
+
 ## Workflow
 
 ```
@@ -30,23 +43,25 @@ Scans code for bugs and code smells. Outputs a prioritized hit list with file:li
 | **Medium** | Error handling gap, type unsafety | Fix soon |
 | **Low** | Style, minor code smell | Consider fixing |
 
-## Bug patterns to find
+## Patterns
 
-```
-| Pattern | Regex hint | Severity |
-|---------|------------|----------|
-| Uncaught promise | /\.then\([^]*\.catch/ but missing catch | high |
-| Event listener leak | `on(` without `off/removeListener` | high |
-| Hardcoded secret | `[A-Za-z0-9/+=]{40}` in config or code | critical |
-| unsafe any | `: any\b` or `as any` | medium |
-| innerHTML assignment | `innerHTML\s*=` | high |
-| Missing await | `await` not used on async call | high |
-| Unhandled rejection | `process.on('unhandledRejection'` | medium |
-| SQL concatenation | `"SELECT * FROM " + table` | critical |
-| Shell injection | `exec(\`cmd ${input}\`)` | critical |
+### Do
+
+```typescript
+// ✅ FIXED — use textContent instead of innerHTML
+element.textContent = userInput;
+
+// ✅ FIXED — parameterized query
+db.query("SELECT * FROM users WHERE id = $1", [userId]);
+
+// ✅ FIXED — proper await with catch
+await fetchData().catch(err => console.error(err));
+
+// ✅ FIXED — execFile with args array
+execFile('echo', [userInput], { signal: AbortSignal.timeout(5000) });
 ```
 
-## Real examples
+### Don't
 
 ```typescript
 // ❌ CRITICAL — hardcoded API key
@@ -63,13 +78,21 @@ exec(`echo ${userInput}`);
 
 // ❌ HIGH — unsafe any
 const data: any = response.json();
-
-// ✅ FIXED — use textContent
-element.textContent = userInput;
-
-// ✅ FIXED — parameterized query
-db.query("SELECT * FROM users WHERE id = $1", [userId]);
 ```
+
+### Bug patterns to find
+
+| Pattern | Regex hint | Severity |
+|---------|------------|----------|
+| Uncaught promise | `\.then\(` without `.catch` | high |
+| Event listener leak | `on(` without `off/removeListener` | high |
+| Hardcoded secret | `[A-Za-z0-9/+=]{40}` in config or code | critical |
+| unsafe any | `: any\b` or `as any` | medium |
+| innerHTML assignment | `innerHTML\s*=` | high |
+| Missing await | `await` not used on async call | high |
+| Unhandled rejection | `process.on('unhandledRejection'` | medium |
+| SQL concatenation | `"SELECT * FROM " + table` | critical |
+| Shell injection | `exec(\`cmd ${input}\`)` | critical |
 
 ## Anti-patterns
 

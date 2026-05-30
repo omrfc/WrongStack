@@ -9,7 +9,52 @@ version: 1.1.0
 
 # Security Scanner — WrongStack
 
-Scans code, configs, and dependencies for security issues.
+## Overview
+
+Scans code, configs, and dependencies for security issues. Reports with severity (CRITICAL/HIGH/MEDIUM/LOW) and concrete remediation steps. Pairs with `npm audit` for supply chain scanning.
+
+## Rules
+
+1. Always provide remediation — "found X" without "do Y" is useless.
+2. Verify regex matches before flagging — generic patterns cause false positives.
+3. Don't scan `node_modules` — use `npm audit` for supply chain issues.
+4. Don't flag test fixtures — mock credentials in tests are acceptable.
+5. Always run dependency audit — supply chain is a real attack vector.
+6. Flag config issues (TLS disabled, HTTP in production) as CRITICAL.
+
+## Patterns
+
+### Do
+
+```typescript
+// ✅ SAFE — parameterized query
+db.query("SELECT * FROM users WHERE id = $1", [userId]);
+
+// ✅ SAFE — escape user input
+element.textContent = userInput;
+
+// ✅ SAFE — execFile with args array
+execFile('find', ['.', '-name', userInput], { signal: AbortSignal.timeout(5000) });
+```
+
+### Don't
+
+```typescript
+// ❌ CRITICAL — hardcoded AWS credentials
+const awsKey = "[REDACTED:aws_access_key]";
+
+// ❌ CRITICAL — private key committed
+const pem = "-----BEGIN RSA PRIVATE KEY-----\nMIIE...";
+
+// ❌ HIGH — XSS via innerHTML
+element.innerHTML = userInput;
+
+// ❌ HIGH — shell injection
+exec(`find . -name ${userInput}`);
+
+// ❌ HIGH — SQL injection
+const query = "SELECT * FROM users WHERE id = " + userId;
+```
 
 ## Workflow
 

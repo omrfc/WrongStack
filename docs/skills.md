@@ -72,20 +72,25 @@ The loader scans each directory for subdirectories containing `SKILL.md`. Files 
 
 ## Bundled skills
 
-WrongStack ships with 11 bundled skills:
+WrongStack ships with 16 bundled skills:
 
 | Skill | Description |
 |---|---|
+| `api-design` | REST API design, error codes, pagination, auth patterns |
 | `audit-log` | Log parsing, anomaly detection, pattern recognition across sessions |
 | `bug-hunter` | Systematic bug and code smell detection, severity ranking |
+| `docker-deploy` | Docker containerization, multi-stage builds, image scanning |
 | `git-flow` | Commit message style, branch hygiene, safe history operations |
 | `multi-agent` | Leader/worker roles, task delegation, done conditions, result aggregation |
 | `node-modern` | Node.js ≥ 22 idioms: ESM-only, native fetch, AbortSignal patterns |
+| `observability` | Structured logging, traces, metrics, redaction, instrumentation |
 | `prompt-engineering` | System prompt design, tool descriptions, task instructions for LLMs |
 | `react-modern` | React 19+ Server Components, useTransition, Suspense, the `use` hook |
 | `refactor-planner` | Dependency mapping, risk assessment, phased planning, migration strategy |
 | `sdd` | Spec parsing, task graph generation, dependency tracking, done-condition execution |
 | `security-scanner` | Code and configuration security vulnerability scanning |
+| `skill-creator` | Guide to creating new WrongStack skills with YAML frontmatter |
+| `testing` | vitest patterns, mocking, coverage, unit/integration/e2e test strategy |
 | `typescript-strict` | Strict null checks, exhaustive switch, branded types, discriminated unions |
 
 Override any bundled skill by creating a project- or user-level skill with the same `name`.

@@ -9,7 +9,55 @@ version: 1.1.0
 
 # Refactor Planner — WrongStack
 
-Analyzes code structure and produces a phased refactoring plan with risk assessment, dependency ordering, and rollback strategy.
+## Overview
+
+Analyzes code structure and produces a phased refactoring plan with risk assessment, dependency ordering, and rollback strategy. Use for multi-file refactors, breaking up large modules, or addressing technical debt.
+
+## Rules
+
+1. Always build a dependency graph before planning — assumptions cause wasted work.
+2. Always include a rollback strategy — every refactor can fail.
+3. Never skip Phase 1 (low-risk quick wins) — momentum matters.
+4. Never over-phase — if a task takes <1h, merge it with related tasks.
+5. Rate each module by: cyclomatic complexity, test coverage, fan-out, public API surface.
+6. Never ignore team constraints — parallelization only works if reviewers exist.
+
+## Patterns
+
+### Do
+
+```json
+// ✅ Good — risk assessment checklist
+{
+  "module": "src/auth/session.ts",
+  "size": 450,
+  "cyclomatic": 12,
+  "testCoverage": 65,
+  "fanOut": 8,
+  "publicAPI": true,
+  "dependencies": ["core", "providers"],
+  "dependents": ["cli", "tui", "webui"]
+}
+```
+
+```text
+// ✅ Good — dependency graph (most important part)
+config.ts → logger.ts → path-resolver.ts
+     ↓           ↓
+  secret-vault.ts    session-store.ts
+     ↓                    ↓
+     └────────→  agent.ts  ←←←
+```
+
+### Don't
+
+```json
+// ❌ Bad — no dependency graph
+// "Refactor the auth layer" — with no graph, order is guessed
+
+// ❌ Bad — no rollback strategy
+// "We'll figure it out if something breaks" — plan for failure
+```
 
 ## When to use
 

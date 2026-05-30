@@ -9,6 +9,57 @@ version: 1.1.0
 
 # Git Workflow — WrongStack
 
+## Overview
+
+Guides commit messages, branch hygiene, PR strategy, and merge decisions. WrongStack uses pnpm workspaces — use `pnpm -r` for recursive commands across packages.
+
+## Rules
+
+1. One concern per commit — never mix logic changes with lockfile updates.
+2. Never force-push shared branches — use `--force-with-lease` on own branches only.
+3. Always branch from `main` or a stable release tag.
+4. Small, frequent commits with clear messages beat large, vague ones.
+5. Rebase onto `main` before PR when safe for cleaner history.
+6. Delete branches after merge unless shared or releasing.
+
+## Patterns
+
+### Do
+
+```bash
+# ✅ Good commit — what and why
+fix: correct race condition in token refresh
+
+Retry logic now respects backoff multiplier. Without this,
+repeated failures would hammer the provider instead of backing off.
+
+Fix #123
+
+# ✅ Topic branch naming
+feat/login
+fix/session-leak
+refactor/auth-layer
+
+# ✅ Feature branch → rebase → fast-forward merge
+git rebase main && git merge --ff-only feature
+```
+
+### Don't
+
+```bash
+# ❌ Bad — what, not why
+git commit -m "fix: fixed bug"
+
+# ❌ Bad — WIP commit left in main
+git commit -m "WIP"
+
+# ❌ Bad — force-push to shared branch
+git push --force origin main
+
+# ❌ Bad — mega-commit across 15 packages
+git commit -m "Update stuff"
+```
+
 ## Commit messages
 
 Format: `type: short description`
@@ -85,3 +136,4 @@ git rebase main && git merge --ff-only feature
 
 - `refactor-planner` — when a refactor involves multiple git-managed changes
 - `multi-agent` — for fleet-wide version audits across packages
+- `bug-hunter` — for spotting bugs at commit time before they reach main

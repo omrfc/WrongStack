@@ -9,6 +9,67 @@ version: 1.1.0
 
 # TypeScript Strict Mode — WrongStack
 
+## Overview
+
+Strict TypeScript patterns for WrongStack: exhaustive switch, branded types, discriminated unions, and `noUncheckedIndexedAccess`. WrongStack uses `strict: true` with additional strictness flags.
+
+## Rules
+
+1. Never silence errors with `as any` — use `as unknown as T` only at trust boundaries with a comment.
+2. Don't use `!` non-null assertion — silence the type checker without explanation.
+3. Always annotate return types on exported functions — hides errors otherwise.
+4. Use `Promise<unknown>` or generics instead of `Promise<any>`.
+5. Be specific with types — `Function` and `Object` are too broad.
+6. Enable `noUncheckedIndexedAccess` — always handle the `undefined` case on array/object access.
+
+## Patterns
+
+### Do
+
+```ts
+// ✅ Exhaustive switch with assertNever
+function assertNever(x: never): never {
+  throw new Error(`Unhandled: ${JSON.stringify(x)}`);
+}
+switch (block.type) {
+  case 'text': return renderText(block);
+  case 'tool_use': return renderToolUse(block);
+  case 'error': return renderError(block);
+  default: return assertNever(block);
+}
+
+// ✅ Branded types for invariants
+type UserId = string & { readonly __brand: 'UserId' };
+type SessionId = string & { readonly __brand: 'SessionId' };
+
+// ✅ Discriminated union
+type Result =
+  | { status: 'success'; data: User }
+  | { status: 'error'; error: Error }
+  | { status: 'loading' };
+
+// ✅ noUncheckedIndexedAccess — always handle undefined
+const first = items.at(0);
+if (first) console.log(first.toUpperCase());
+```
+
+### Don't
+
+```ts
+// ❌ Non-null assertion — silences the type checker
+console.log(name!.toUpperCase());
+
+// ❌ Promise<any> — loses type safety
+async function fetchUser(): Promise<any> { ... }
+
+// ❌ Too broad
+const handler: Function = () => {};
+const data: Object = {};
+
+// ❌ Missing return type on export
+export function processData(data: string) { ... }
+```
+
 ## Non-negotiable rules
 
 ```json
@@ -22,7 +83,43 @@ version: 1.1.0
 
 Never silence errors with `as any`. Use `as unknown as T` only at trust boundaries with a comment.
 
-## Common patterns
+## Workflow — applying strict TypeScript
+
+Apply strict TypeScript in this order:
+
+```
+1. tsconfig.json          → enable strict flags first
+2. Per-file patterns     → apply the patterns below
+3. CI gate → tsc --noEmit must pass
+```
+
+**Step 1 — tsconfig.json** (the foundation):
+```json
+{
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitReturns": true,
+    "exactOptionalPropertyTypes": true,
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext"
+  }
+}
+```
+
+**Step 2 — Per-file patterns** (after tsconfig):
+- Add `assertNever` for exhaustive switches
+- Create branded types for invariant strings (UserId, SessionId)
+- Use discriminated unions instead of optional fields
+- Handle `T | undefined` on every array/object access
+
+**Step 3 — CI gate**:
+```bash
+pnpm run typecheck   # must pass before merge
+```
+
+## Patterns
 
 ### Exhaustive switch
 
