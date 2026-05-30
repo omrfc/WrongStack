@@ -57,7 +57,9 @@ describe('web-search plugin', () => {
     expect(tool).toBeDefined();
     expect(tool?.name).toBe('web_search');
     expect(tool?.permission).toBe('auto');
-    expect(tool?.mutating).toBe(false);
+    // web_search makes outbound network calls — declared mutating so the
+    // permission policy gates it instead of silently auto-approving.
+    expect(tool?.mutating).toBe(true);
     const schema = tool?.inputSchema as { required: string[]; properties: Record<string, unknown> };
     expect(schema.required).toContain('query');
     expect(schema.properties['query']).toBeDefined();

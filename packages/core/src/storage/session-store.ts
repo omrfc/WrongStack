@@ -31,32 +31,14 @@ export class DefaultSessionStore implements SessionStore {
     this.events = opts.events;
   }
 
-  /**
-   * Compute the shard directory for a session ID.
-   * Session IDs start with a timestamp (e.g. `2026-05-30T10-00-00-00000000-a1b2`).
-   * Shards by year/month to keep readdir fast with large session counts.
-   * Returns a path relative to this.dir, e.g. `2026/05`.
-   */
-  private shardPath(id: string): string {
-    // id format: YYYY-MM-DDTHH-mm-ss-ffffff-XX
-    const parts = id.split('-');
-    if (parts.length >= 2) {
-      const year = parts[0];
-      const month = parts[1];
-      return `${year}/${month}`;
-    }
-    return 'misc';
-  }
-
-  /** Join session ID to a shard-aware absolute path. */
+  /** Join session ID to its absolute path within the store directory. */
   private sessionPath(id: string, ext: '.jsonl' | '.summary.json'): string {
-    return path.join(this.dir, this.shardPath(id), `${id}${ext}`);
+    return path.join(this.dir, `${id}${ext}`);
   }
 
-  private async ensureShardDir(id: string): Promise<string> {
-    const shard = path.join(this.dir, this.shardPath(id));
-    await ensureDir(shard);
-    return shard;
+  private async ensureShardDir(_id: string): Promise<string> {
+    await ensureDir(this.dir);
+    return this.dir;
   }
 
   async create(meta: Omit<SessionMetadata, 'startedAt'>): Promise<SessionWriter> {
@@ -86,7 +68,7 @@ export class DefaultSessionStore implements SessionStore {
     const data = await this.load(id);
     let handle: fsp.FileHandle;
     try {
-      handle = await fsp.open(file, 'r+', 0o600);
+      handle = await fsp.open(file, 'a', 0o600);
     } catch (err) {
       throw new Error(
         `Failed to open session "${id}" for append: ${err instanceof Error ? err.message : String(err)}`,
@@ -104,7 +86,7 @@ export class DefaultSessionStore implements SessionStore {
           provider: data.metadata.provider,
         },
         this.events,
-        { resumed: true, dir: path.join(this.dir, this.shardPath(id)), filePath: file },
+        { resumed: true, dir: this.dir, filePath: file },
       );
       return { writer, data };
     } catch (err) {

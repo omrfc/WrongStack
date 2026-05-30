@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DefaultConfigLoader } from '../../src/storage/config-loader.js';
 import { resolveWstackPaths } from '../../src/utils/wstack-paths.js';
 
@@ -138,11 +138,17 @@ describe('DefaultConfigLoader', () => {
     await expect(l.load()).rejects.toThrow(/thresholds/);
   });
 
-  it('rejects unknown context-window modes', async () => {
+  it('ignores unknown context-window modes and uses the default', async () => {
     const { loader: l, paths } = loader();
     await fs.mkdir(path.dirname(paths.globalConfig), { recursive: true });
     await fs.writeFile(paths.globalConfig, JSON.stringify({ context: { mode: 'tiny' } }));
-    await expect(l.load()).rejects.toThrow(/context\.mode/);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const cfg = await l.load();
+      expect(cfg.context.mode).toBe('balanced');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('ignores malformed JSON gracefully', async () => {
@@ -341,13 +347,21 @@ describe('DefaultConfigLoader', () => {
     await expect(l.load()).rejects.toThrow(/warn < soft < hard/);
   });
 
-  it('throws when context.mode is an unknown id', async () => {
+  it('falls back to the default when context.mode is an unknown id', async () => {
     const { loader: l, paths } = loader();
     await fs.mkdir(path.dirname(paths.globalConfig), { recursive: true });
     await fs.writeFile(
       paths.globalConfig,
       JSON.stringify({ context: { mode: 'lightning-fast' } }),
     );
-    await expect(l.load()).rejects.toThrow(/context\.mode must be one of/);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const cfg = await l.load();
+      // Unknown mode must not brick the CLI — it is replaced by the default.
+      expect(cfg.context.mode).toBe('balanced');
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('lightning-fast'));
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

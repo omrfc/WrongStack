@@ -57,7 +57,9 @@ describe('outdatedTool', () => {
   it('has correct metadata', () => {
     expect(outdatedTool.name).toBe('outdated');
     expect(outdatedTool.permission).toBe('auto');
-    expect(outdatedTool.mutating).toBe(false);
+    // outdated reaches the network (registry queries) — declared mutating so the
+    // permission policy gates it rather than auto-approving the side effect.
+    expect(outdatedTool.mutating).toBe(true);
   });
 
   it('handles default params', async () => {

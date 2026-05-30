@@ -309,8 +309,15 @@ export class DefaultConfigLoader implements ConfigLoader {
       throw new Error('Config: context thresholds must satisfy warn < soft < hard');
     }
     if (c.mode !== undefined && !isContextWindowModeId(c.mode)) {
+      // An unknown mode (typo or value from an older/renamed scheme) should not
+      // brick the CLI — unlike the numeric thresholds above there is a safe
+      // default. Warn and fall back rather than throwing.
       const known = listContextWindowModes().map((m) => m.id).join(', ');
-      throw new Error(`Config: context.mode must be one of: ${known}`);
+      console.warn(
+        `[config] Ignoring unknown context.mode "${c.mode}" (expected one of: ${known}); ` +
+          `falling back to "${DEFAULT_CONTEXT_WINDOW_MODE_ID}".`,
+      );
+      c.mode = DEFAULT_CONTEXT_WINDOW_MODE_ID;
     }
   }
 

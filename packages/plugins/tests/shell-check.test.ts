@@ -52,7 +52,10 @@ describe('shell-check plugin', () => {
     expect(tool).toBeDefined();
     expect(tool?.name).toBe('shellcheck');
     expect(tool?.permission).toBe('auto');
-    expect(tool?.mutating).toBe(false);
+    // shellcheck has observable side effects (spawns processes / network), so it
+    // is declared mutating to trip the permission confirmation gate. See
+    // permission-policy `tool.permission === 'auto' && !tool.mutating`.
+    expect(tool?.mutating).toBe(true);
   });
 
   it('setup does not throw', () => {

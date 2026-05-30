@@ -49,8 +49,10 @@ describe('createMcpControlTool', () => {
     expect(tool.permission).toBe('auto');
   });
 
-  it('is non-mutating', () => {
-    expect(tool.mutating).toBe(false);
+  it('is mutating (writes config + spawns MCP servers)', () => {
+    // mcp_control enable/disable writes the config file and spawns/kills MCP
+    // server processes, so it must trip the permission confirmation gate.
+    expect(tool.mutating).toBe(true);
   });
 
   it('has riskTier "standard"', () => {

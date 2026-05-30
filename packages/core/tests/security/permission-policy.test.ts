@@ -8,13 +8,13 @@ import {
 } from '../../src/security/permission-policy.js';
 import type { Context, Tool } from '../../src/types/index.js';
 
-function tool(name: string, permission: 'auto' | 'confirm' | 'deny' = 'confirm', riskTier?: 'safe' | 'standard' | 'destructive'): Tool {
+function tool(name: string, permission: 'auto' | 'confirm' | 'deny' = 'confirm', riskTier?: 'safe' | 'standard' | 'destructive', mutating = true): Tool {
   return {
     name,
     description: name,
     inputSchema: { type: 'object' },
     permission,
-    mutating: true,
+    mutating,
     riskTier,
     async execute() {
       return 'ok';
@@ -40,8 +40,20 @@ describe('DefaultPermissionPolicy', () => {
 
   it('passes through auto for auto-permission tools', async () => {
     const p = new DefaultPermissionPolicy({ trustFile });
-    const decision = await p.evaluate(tool('read', 'auto'), { path: 'a.ts' }, {} as Context);
+    // Read-only (non-mutating) auto tools short-circuit to auto; mutating auto
+    // tools are gated to confirm (covered by the next test).
+    const decision = await p.evaluate(
+      tool('read', 'auto', undefined, false),
+      { path: 'a.ts' },
+      {} as Context,
+    );
     expect(decision.permission).toBe('auto');
+  });
+
+  it('gates mutating auto-permission tools to confirm', async () => {
+    const p = new DefaultPermissionPolicy({ trustFile });
+    const decision = await p.evaluate(tool('web_search', 'auto'), {}, {} as Context);
+    expect(decision.permission).toBe('confirm');
   });
 
   it('deny is absolute even when allowed', async () => {
