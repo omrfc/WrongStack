@@ -59,6 +59,14 @@ export interface PluginAPIInit {
    */
   configStore?: { watch(cb: (next: unknown, prev: unknown) => void): () => void };
   log: Logger;
+  /**
+   * Whether this plugin is first-party ("official"). Set by the host based on
+   * the plugin's load source (e.g. shipped in the built-in factory list), NOT
+   * self-declared by the plugin. Official plugins may register bare slash
+   * command names and override built-ins; external plugins are namespaced.
+   * Defaults to false.
+   */
+  official?: boolean;
 }
 
 export class DefaultPluginAPI implements PluginAPI {
@@ -117,9 +125,10 @@ export class DefaultPluginAPI implements PluginAPI {
     this.mcp = init.mcpRegistry ?? noopMcp;
 
     const scr = init.slashCommandRegistry;
+    const official = init.official === true;
     this.slashCommands = scr
       ? {
-          register: (cmd) => scr.register(cmd, owner),
+          register: (cmd) => scr.register(cmd, owner, { official }),
           unregister: (name) => scr.unregister(name),
           get: (name) => scr.get(name),
           list: () => scr.list(),

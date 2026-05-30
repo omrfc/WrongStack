@@ -170,3 +170,8 @@ export {
 // Built-in plugins
 export { createPromptsPlugin } from './plugins/prompts-plugin.js';
 export { createSyncPlugin } from './plugins/sync-plugin.js';
+export { createGitPlugin } from './plugins/git-plugin.js';
+export { createObservabilityPlugin } from './plugins/observability-plugin.js';
+export { createSecurityPlugin } from './plugins/security-plugin.js';
+export { createSkillsPlugin } from './plugins/skills-plugin.js';
+export { createPlanPlugin } from './plugins/plan-plugin.js';

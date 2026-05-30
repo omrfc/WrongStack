@@ -1,19 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildMetricsCommand } from '../src/slash-commands/metrics.js';
-import { buildHealthCommand } from '../src/slash-commands/health.js';
+import {
+  buildMetricsCommand,
+  buildHealthCommand,
+} from '../../src/plugins/observability-plugin.js';
 
 // ── /metrics ────────────────────────────────────────────────────────────────
 
 describe('buildMetricsCommand', () => {
   it('reports "metrics not enabled" when no sink', async () => {
-    const cmd = buildMetricsCommand({} as never);
+    const cmd = buildMetricsCommand(undefined);
     const res = await cmd.run('', {} as never);
     expect(res.message).toContain('Metrics not enabled');
   });
 
   it('reports "no metrics recorded" when series is empty', async () => {
     const sink = { snapshot: () => ({ series: [] }) };
-    const cmd = buildMetricsCommand({ metricsSink: sink } as never);
+    const cmd = buildMetricsCommand(sink as never);
     const res = await cmd.run('', {} as never);
     expect(res.message).toContain('No metrics recorded');
   });
@@ -43,7 +45,7 @@ describe('buildMetricsCommand', () => {
         ],
       }),
     };
-    const cmd = buildMetricsCommand({ metricsSink: sink } as never);
+    const cmd = buildMetricsCommand(sink as never);
     const res = await cmd.run('', {} as never);
     const out = res.message ?? '';
     expect(out).toContain('# latency_ms');
@@ -63,7 +65,7 @@ describe('buildMetricsCommand', () => {
 
 describe('buildHealthCommand', () => {
   it('reports "health checks not enabled" without registry', async () => {
-    const cmd = buildHealthCommand({} as never);
+    const cmd = buildHealthCommand(undefined);
     const res = await cmd.run('', {} as never);
     expect(res.message).toContain('Health checks not enabled');
   });
@@ -80,7 +82,7 @@ describe('buildHealthCommand', () => {
         ],
       }),
     };
-    const cmd = buildHealthCommand({ healthRegistry: registry } as never);
+    const cmd = buildHealthCommand(registry as never);
     const res = await cmd.run('', {} as never);
     const out = res.message ?? '';
     expect(out).toContain('overall: unhealthy');

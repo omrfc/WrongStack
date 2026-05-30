@@ -229,25 +229,16 @@ export type { ProjectFacts } from './helpers.js';
 export { detectProjectFacts, renderAgentsTemplate } from './helpers.js';
 
 import { buildClearCommand } from './clear.js';
-import {
-  buildCommitCommand,
-  buildGitcheckCommand,
-  buildPushCommand,
-} from './commit.js';
 import { buildCompactCommand } from './compact.js';
 import { buildContextCommand } from './context.js';
 import { buildDiagCommand, buildStatsCommand } from './diag-stats.js';
 import { buildFleetCommand } from './fleet.js';
-import { buildHealthCommand } from './health.js';
 import { buildHelpCommand } from './help.js';
 import { buildInitCommand } from './init.js';
 import { buildMcpSlashCommand } from './mcp.js';
 import { buildMemoryCommand } from './memory.js';
-import { buildMetricsCommand } from './metrics.js';
-import { buildPlanCommand } from './plan.js';
 import { buildPluginCommand } from './plugin.js';
 import { buildExitCommand, buildLoadCommand, buildSaveCommand } from './session.js';
-import { buildSkillCommand } from './skill.js';
 import { buildAgentsCommand, buildDirectorCommand, buildSpawnCommand } from './spawn-agents.js';
 import { buildTodosCommand } from './todos.js';
 import { buildToolsCommand } from './tools.js';
@@ -257,20 +248,11 @@ import { buildBtwCommand } from './btw.js';
 import { buildGoalCommand } from './goal.js';
 import { buildModeCommand } from './mode.js';
 import { buildSddCommand } from './sdd.js';
-import { buildSkillGeneratorCommand } from './skill-generator.js';
-import { buildSecurityCommand } from './security.js';
 import { buildStatuslineCommand } from './statusline.js';
 import { buildFixCommand } from './fix.js';
-import {
-  buildSkillInstallCommand,
-  buildSkillUpdateCommand,
-  buildSkillUninstallCommand,
-} from './skill-install.js';
 import { buildAutoPhaseCommand } from './autophase.js';
 import { buildWorktreeCommand } from './worktree.js';
 import { buildSettingsCommand } from './settings.js';
-import { buildPromptsCommand } from './prompts.js';
-import { buildSyncCommand } from './sync.js';
 
 export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashCommand[] {
   return [
@@ -280,11 +262,6 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildCompactCommand(opts),
     buildContextCommand(opts),
     buildToolsCommand(opts),
-    buildSkillCommand(opts),
-    buildSkillGeneratorCommand(opts),
-    buildSkillInstallCommand(opts),
-    buildSkillUpdateCommand(opts),
-    buildSkillUninstallCommand(opts),
     buildPluginCommand(opts),
     buildMcpSlashCommand(opts),
     buildDiagCommand(opts),
@@ -293,11 +270,8 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildAgentsCommand(opts),
     buildDirectorCommand(opts),
     buildFleetCommand(opts),
-    buildMetricsCommand(opts),
-    buildHealthCommand(opts),
     buildMemoryCommand(opts),
     buildTodosCommand(opts),
-    buildPlanCommand(opts),
     buildSddCommand(opts),
     buildSaveCommand(opts),
     buildLoadCommand(opts),
@@ -307,16 +281,10 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildBtwCommand(opts),
     buildModeCommand(opts),
     buildExitCommand(opts),
-    buildCommitCommand(opts),
-    buildGitcheckCommand(opts),
-    buildPushCommand(opts),
-    buildSecurityCommand(opts),
     buildFixCommand(opts),
     buildAutoPhaseCommand(opts),
     buildWorktreeCommand(opts),
     buildSettingsCommand(opts),
-    buildPromptsCommand(opts),
-    buildSyncCommand(opts),
     buildStatuslineCommand({
       cwd: opts.cwd,
       hiddenItems: opts.statuslineHiddenItems ?? [],

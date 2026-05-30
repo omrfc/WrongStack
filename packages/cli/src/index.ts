@@ -434,6 +434,8 @@ export async function main(argv: string[]): Promise<number> {
     agent: agent,
     sessionWriter: context.session,
     metricsSink,
+    healthRegistry,
+    skillLoader: config.features.skills ? skillLoader : undefined,
     configStore,
     paths: wpaths,
   });

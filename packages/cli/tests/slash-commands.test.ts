@@ -726,43 +726,4 @@ describe('built-in slash commands', () => {
     });
   });
 
-  describe('/security command', () => {
-    it('/security without args shows help', async () => {
-      const { registry } = makeRig();
-      const r = await registry.dispatch('/security', fakeCtx);
-      expect(r?.message).toContain('/security');
-      expect(r?.message).toContain('scan');
-      expect(r?.message).toContain('audit');
-    });
-
-    it('/security scan without provider shows error', async () => {
-      const { registry } = makeRig();
-      const ctxNoProvider = {
-        messages: [],
-        todos: [],
-        systemPrompt: [],
-        readFiles: new Set(),
-        fileMtimes: new Map(),
-        model: 'test-model',
-        cwd: '/tmp',
-        projectRoot: '/proj',
-      } as unknown as Context;
-      const r = await registry.dispatch('/security scan', ctxNoProvider);
-      expect(r?.message).toContain('❌');
-      expect(r?.message).toContain('provider');
-    });
-
-    it('/security report shows no reports message', async () => {
-      const { registry } = makeRig();
-      const r = await registry.dispatch('/security report', fakeCtx);
-      expect(r?.message).toContain('📭');
-      expect(r?.message).toContain('No security reports');
-    });
-
-    it('/security appears in /help listing', async () => {
-      const { registry } = makeRig();
-      const r = await registry.dispatch('/help', fakeCtx);
-      expect(r?.message).toContain('/security');
-    });
-  });
 });

@@ -7,7 +7,7 @@ import {
   buildCommitCommand,
   buildGitcheckCommand,
   buildPushCommand,
-} from '../src/slash-commands/commit.js';
+} from '../../src/plugins/git-plugin.js';
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences are valid here
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, '');
@@ -36,23 +36,27 @@ afterEach(async () => {
 });
 
 function initGitRepo(): void {
-  // Use execSync to avoid Windows spawn issues; git init is fast and synchronous
-  const { execSync } = require('node:child_process');
-  execSync('git init -q', { cwd: tmp, stdio: 'ignore' });
-  execSync('git config user.email test@example.com', { cwd: tmp, stdio: 'ignore' });
-  execSync('git config user.name Test', { cwd: tmp, stdio: 'ignore' });
-  execSync('git config commit.gpgsign false', { cwd: tmp, stdio: 'ignore' });
+  // execFileSync (no shell) keeps args un-interpolated and Windows-safe.
+  execFileSync('git', ['init', '-q'], { cwd: tmp, stdio: 'ignore' });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tmp, stdio: 'ignore' });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: tmp, stdio: 'ignore' });
+  execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: tmp, stdio: 'ignore' });
 }
 
-function ctxFor(dir: string) {
-  return { session: { id: 's1' }, cwd: dir } as never;
+/**
+ * Build a fake session context. `provider` is the structural LLM provider the
+ * plugin reads off `ctx.provider` (a `complete()` callable); omit it to force
+ * the heuristic path.
+ */
+function ctxFor(dir: string, provider?: unknown) {
+  return { session: { id: 's1' }, cwd: dir, model: 'test-model', provider } as never;
 }
 
 // ── /commit ─────────────────────────────────────────────────────────────────
 
 describe('buildCommitCommand', () => {
   it('reports "not a git repo" when run outside a repository', async () => {
-    const cmd = buildCommitCommand({} as never);
+    const cmd = buildCommitCommand();
     const res = await cmd.run('', ctxFor(tmp));
     expect(res?.message).toContain('Not a git repository');
   });
@@ -62,7 +66,7 @@ describe('buildCommitCommand', () => {
     await fs.writeFile(path.join(tmp, 'a.txt'), 'first');
     execFileSync('git', ['add', '.'], { cwd: tmp });
     execFileSync('git', ['commit', '-m', 'initial'], { cwd: tmp });
-    const cmd = buildCommitCommand({} as never);
+    const cmd = buildCommitCommand();
     const res = await cmd.run('', ctxFor(tmp));
     expect(res?.message).toContain('Nothing to commit');
   });
@@ -74,7 +78,7 @@ describe('buildCommitCommand', () => {
     execFileSync('git', ['add', '.'], { cwd: tmp });
     execFileSync('git', ['commit', '-m', 'init'], { cwd: tmp });
     await fs.writeFile(path.join(tmp, 'a.test.ts'), 'test2');
-    const cmd = buildCommitCommand({} as never);
+    const cmd = buildCommitCommand();
     const res = await cmd.run('--dry-run', ctxFor(tmp));
     const clean = stripAnsi(res!.message!);
     expect(clean).toContain('Would commit:');
@@ -84,39 +88,45 @@ describe('buildCommitCommand', () => {
     expect(log.split('\n').length).toBe(1);
   }, 30_000);
 
-  it('uses LLM-provided message when generator supplied', async () => {
+  it('uses LLM-provided message when the session provider is available', async () => {
     initGitRepo();
     await fs.writeFile(path.join(tmp, 'src.ts'), 'code');
-    const gen = vi.fn().mockResolvedValue('feat: llm-suggested message');
-    const cmd = buildCommitCommand({} as never, gen);
-    const res = await cmd.run('--dry-run', ctxFor(tmp));
-    expect(gen).toHaveBeenCalled();
+    const complete = vi.fn(async () => ({
+      content: [{ type: 'text' as const, text: 'feat: llm-suggested message' }],
+      model: 'test-model',
+    }));
+    const cmd = buildCommitCommand();
+    const res = await cmd.run('--dry-run', ctxFor(tmp, { complete }));
+    expect(complete).toHaveBeenCalled();
     expect(stripAnsi(res!.message!)).toContain('feat: llm-suggested message');
   });
 
-  it('falls back to heuristics when LLM throws', async () => {
+  it('falls back to heuristics when the LLM throws', async () => {
     initGitRepo();
     await fs.writeFile(path.join(tmp, 'README.md'), 'docs1');
     execFileSync('git', ['add', '.'], { cwd: tmp });
     execFileSync('git', ['commit', '-m', 'init'], { cwd: tmp });
     await fs.writeFile(path.join(tmp, 'README.md'), 'docs2');
-    const gen = vi.fn().mockRejectedValue(new Error('llm down'));
-    const cmd = buildCommitCommand({} as never, gen);
-    const res = await cmd.run('--dry-run', ctxFor(tmp));
+    const complete = vi.fn().mockRejectedValue(new Error('llm down'));
+    const cmd = buildCommitCommand();
+    const res = await cmd.run('--dry-run', ctxFor(tmp, { complete }));
     // Heuristic picks "docs" for README/.md
     expect(stripAnsi(res!.message!)).toContain('docs');
   }, 30_000);
 
-  it('--no-llm flag skips LLM even when generator provided', async () => {
+  it('--no-llm flag skips the LLM even when a provider is available', async () => {
     initGitRepo();
     await fs.writeFile(path.join(tmp, 'tsconfig.json'), '{}');
     execFileSync('git', ['add', '.'], { cwd: tmp });
     execFileSync('git', ['commit', '-m', 'init'], { cwd: tmp });
     await fs.writeFile(path.join(tmp, 'tsconfig.json'), '{ "x": 1 }');
-    const gen = vi.fn().mockResolvedValue('feat: should not be used');
-    const cmd = buildCommitCommand({} as never, gen);
-    const res = await cmd.run('--no-llm --dry-run', ctxFor(tmp));
-    expect(gen).not.toHaveBeenCalled();
+    const complete = vi.fn(async () => ({
+      content: [{ type: 'text' as const, text: 'feat: should not be used' }],
+      model: 'test-model',
+    }));
+    const cmd = buildCommitCommand();
+    const res = await cmd.run('--no-llm --dry-run', ctxFor(tmp, { complete }));
+    expect(complete).not.toHaveBeenCalled();
     // tsconfig.json triggers "chore"
     expect(stripAnsi(res!.message!)).toContain('chore');
   });
@@ -124,7 +134,7 @@ describe('buildCommitCommand', () => {
   it('-n shortcut is treated as --dry-run', async () => {
     initGitRepo();
     await fs.writeFile(path.join(tmp, 'thing'), 'x');
-    const cmd = buildCommitCommand({} as never);
+    const cmd = buildCommitCommand();
     const res = await cmd.run('-n', ctxFor(tmp));
     expect(stripAnsi(res!.message!)).toContain('Would commit');
   });
@@ -132,7 +142,7 @@ describe('buildCommitCommand', () => {
   it('actually commits and reports the short SHA when not dry-run', async () => {
     initGitRepo();
     await fs.writeFile(path.join(tmp, 'a.txt'), 'first');
-    const cmd = buildCommitCommand({} as never);
+    const cmd = buildCommitCommand();
     const res = await cmd.run('', ctxFor(tmp));
     const clean = stripAnsi(res!.message!);
     expect(clean).toContain('Committed');
@@ -145,7 +155,7 @@ describe('buildCommitCommand', () => {
     initGitRepo();
     execFileSync('git', ['remote', 'add', 'origin', 'https://example.com/x.git'], { cwd: tmp });
     await fs.writeFile(path.join(tmp, 'a.txt'), 'first');
-    const cmd = buildCommitCommand({} as never);
+    const cmd = buildCommitCommand();
     const res = await cmd.run('', ctxFor(tmp));
     expect(stripAnsi(res!.message!)).toContain('/push');
   });
@@ -153,7 +163,7 @@ describe('buildCommitCommand', () => {
   it('does not mention /push when no remote configured', async () => {
     initGitRepo();
     await fs.writeFile(path.join(tmp, 'a.txt'), 'first');
-    const cmd = buildCommitCommand({} as never);
+    const cmd = buildCommitCommand();
     const res = await cmd.run('', ctxFor(tmp));
     expect(stripAnsi(res!.message!)).not.toContain('/push');
   });
@@ -163,7 +173,7 @@ describe('buildCommitCommand', () => {
 
 describe('buildGitcheckCommand', () => {
   it('emits empty string outside a git repo', async () => {
-    const cmd = buildGitcheckCommand({} as never);
+    const cmd = buildGitcheckCommand();
     const res = await cmd.run('', ctxFor(tmp));
     expect(res?.message).toBe('');
   });
@@ -173,7 +183,7 @@ describe('buildGitcheckCommand', () => {
     await fs.writeFile(path.join(tmp, 'a.txt'), 'first');
     execFileSync('git', ['add', '.'], { cwd: tmp });
     execFileSync('git', ['commit', '-m', 'initial'], { cwd: tmp });
-    const cmd = buildGitcheckCommand({} as never);
+    const cmd = buildGitcheckCommand();
     const res = await cmd.run('', ctxFor(tmp));
     expect(res?.message).toBe('');
   });
@@ -181,7 +191,7 @@ describe('buildGitcheckCommand', () => {
   it('reports change count with singular form', async () => {
     initGitRepo();
     await fs.writeFile(path.join(tmp, 'one.txt'), 'x');
-    const cmd = buildGitcheckCommand({} as never);
+    const cmd = buildGitcheckCommand();
     const res = await cmd.run('', ctxFor(tmp));
     expect(stripAnsi(res!.message!)).toContain('1 uncommitted change');
     expect(stripAnsi(res!.message!)).not.toContain('changes');
@@ -191,7 +201,7 @@ describe('buildGitcheckCommand', () => {
     initGitRepo();
     await fs.writeFile(path.join(tmp, 'one.txt'), 'x');
     await fs.writeFile(path.join(tmp, 'two.txt'), 'y');
-    const cmd = buildGitcheckCommand({} as never);
+    const cmd = buildGitcheckCommand();
     const res = await cmd.run('', ctxFor(tmp));
     expect(stripAnsi(res!.message!)).toContain('2 uncommitted changes');
   });
@@ -201,19 +211,19 @@ describe('buildGitcheckCommand', () => {
 
 describe('buildPushCommand', () => {
   it('exposes name "push"', () => {
-    const cmd = buildPushCommand({} as never);
+    const cmd = buildPushCommand();
     expect(cmd.name).toBe('push');
   });
 
   it('reports "not a git repository" when run outside a repo', async () => {
-    const cmd = buildPushCommand({} as never);
+    const cmd = buildPushCommand();
     const res = await cmd.run('', ctxFor(tmp));
     expect(res?.message).toMatch(/Not a git repository|no remote|push failed/i);
   });
 
   it('reports "no remote configured" when repo has no remote', async () => {
     initGitRepo();
-    const cmd = buildPushCommand({} as never);
+    const cmd = buildPushCommand();
     const res = await cmd.run('', ctxFor(tmp));
     expect(res?.message).toContain('No remote configured');
   });
@@ -221,7 +231,7 @@ describe('buildPushCommand', () => {
   it('--dry-run with a remote shows "would push to <remote>"', async () => {
     initGitRepo();
     execFileSync('git', ['remote', 'add', 'origin', 'https://example.com/x.git'], { cwd: tmp });
-    const cmd = buildPushCommand({} as never);
+    const cmd = buildPushCommand();
     const res = await cmd.run('--dry-run', ctxFor(tmp));
     const clean = stripAnsi(res!.message!);
     expect(clean).toContain('Would push');
@@ -231,7 +241,7 @@ describe('buildPushCommand', () => {
   it('--dry-run -f shows "(force)" marker', async () => {
     initGitRepo();
     execFileSync('git', ['remote', 'add', 'origin', 'https://example.com/x.git'], { cwd: tmp });
-    const cmd = buildPushCommand({} as never);
+    const cmd = buildPushCommand();
     const res = await cmd.run('--dry-run --force', ctxFor(tmp));
     const clean = stripAnsi(res!.message!);
     expect(clean).toContain('force');
@@ -240,17 +250,9 @@ describe('buildPushCommand', () => {
   it('-n shortcut is treated as --dry-run for push too', async () => {
     initGitRepo();
     execFileSync('git', ['remote', 'add', 'origin', 'https://example.com/x.git'], { cwd: tmp });
-    const cmd = buildPushCommand({} as never);
+    const cmd = buildPushCommand();
     const res = await cmd.run('-n', ctxFor(tmp));
     expect(stripAnsi(res!.message!)).toContain('Would push');
-  });
-
-  it('actual push to a broken remote reports "push failed" (skipped — git can hang on bad URLs)', () => {
-    // Intentionally skipped: depending on git config and platform, attempting to
-    // push to a bogus URL can block for tens of seconds before reporting
-    // failure, which makes this test flaky in CI. The --dry-run path above
-    // already exercises the args/branch resolution logic.
-    expect(true).toBe(true);
   });
 
   it('pushes successfully to a local bare-repo remote and reports the short SHA', async () => {
@@ -267,7 +269,7 @@ describe('buildPushCommand', () => {
     execFileSync('git', ['remote', 'add', 'origin', bare], { cwd: tmp });
 
     try {
-      const cmd = buildPushCommand({} as never);
+      const cmd = buildPushCommand();
       const res = await cmd.run('', ctxFor(tmp));
       const clean = stripAnsi(res!.message!);
       // Either success path ("Pushed to origin (branch)") or a graceful

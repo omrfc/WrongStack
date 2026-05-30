@@ -127,6 +127,65 @@ describe('setupPlugins', () => {
     });
   });
 
+  // ── built-in plugins: enabled by default, opt-out via config ──────────────
+
+  const EXPECTED_BUILTINS = [
+    'wstack-prompts',
+    'wstack-sync',
+    'wstack-git',
+    'wstack-observability',
+    'wstack-security',
+    'wstack-skills',
+    'wstack-plan',
+  ];
+
+  function fakePaths() {
+    return {
+      globalRoot: '/g',
+      globalConfig: '/g/config.json',
+      globalSkills: '/g/skills',
+      globalPrompts: '/g/prompts',
+      globalMemory: '/g/memory.md',
+      historyFile: '/g/history',
+      syncConfig: '/g/sync.json',
+      projectPlan: '/p/plan.json',
+    } as never;
+  }
+
+  it('loads all built-in plugins by default when paths are provided', async () => {
+    const deps = { ...baseDeps(), paths: fakePaths() };
+    await setupPlugins(deps as never);
+    expect(loadPluginsMock).toHaveBeenCalledTimes(1);
+    const [plugins] = loadPluginsMock.mock.calls[0]!;
+    const names = (plugins as Array<{ name: string }>).map((p) => p.name);
+    expect(names).toEqual(expect.arrayContaining(EXPECTED_BUILTINS));
+  });
+
+  it('opts a single built-in out via config.plugins { enabled: false }', async () => {
+    const deps = {
+      ...baseDeps({ plugins: [{ name: 'wstack-git', enabled: false }] as never }),
+      paths: fakePaths(),
+    };
+    await setupPlugins(deps as never);
+    const [plugins] = loadPluginsMock.mock.calls[0]!;
+    const names = (plugins as Array<{ name: string }>).map((p) => p.name);
+    expect(names).not.toContain('wstack-git');
+    // the rest stay enabled by default
+    expect(names).toContain('wstack-prompts');
+    expect(names).toContain('wstack-plan');
+  });
+
+  it('features.plugins:false disables built-ins too', async () => {
+    const deps = {
+      ...baseDeps({
+        features: { mcp: true, plugins: false, memory: true, modelsRegistry: true, skills: true },
+      }),
+      paths: fakePaths(),
+    };
+    await setupPlugins(deps as never);
+    expect(loadPluginsMock).not.toHaveBeenCalled();
+  });
+
   it('apiFactory injects sessionWriter wrapper that delegates append', async () => {
     const deps = baseDeps({ plugins: ['virtual:test-plugin'] as never });
     await setupPlugins(deps);

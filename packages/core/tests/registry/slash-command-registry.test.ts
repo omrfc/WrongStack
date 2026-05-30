@@ -45,10 +45,54 @@ describe('SlashCommandRegistry', () => {
     expect(calls).toBe(3);
   });
 
-  it('rejects duplicate from different owner', () => {
+  it('an external plugin reusing a builtin name is namespaced, not rejected', async () => {
     const r = new SlashCommandRegistry();
-    r.register({ name: 'x', description: '', async run() {} });
-    expect(() => r.register({ name: 'x', description: '', async run() {} }, 'plugin')).toThrow();
+    let builtinRan = false;
+    let pluginRan = false;
+    r.register({ name: 'x', description: '', async run() { builtinRan = true; } });
+    // External plugin (no official flag) registering the same bare name does
+    // NOT throw — it is isolated under its namespace and cannot shadow `/x`.
+    expect(() =>
+      r.register({ name: 'x', description: '', async run() { pluginRan = true; } }, 'plugin'),
+    ).not.toThrow();
+    // Bare `/x` still routes to the builtin.
+    await r.dispatch('/x', {} as Context);
+    expect(builtinRan).toBe(true);
+    expect(pluginRan).toBe(false);
+    // The plugin's copy is only reachable namespaced.
+    await r.dispatch('/plugin:x', {} as Context);
+    expect(pluginRan).toBe(true);
+  });
+
+  it('an official plugin overrides a builtin by bare name (last write wins)', async () => {
+    const r = new SlashCommandRegistry();
+    let which = '';
+    r.register({ name: 'commit', description: '', async run() { which = 'builtin'; } });
+    r.register(
+      { name: 'commit', description: '', async run() { which = 'official'; } },
+      'wstack-git',
+      { official: true },
+    );
+    await r.dispatch('/commit', {} as Context);
+    expect(which).toBe('official');
+    // Still reachable under its namespace too.
+    await r.dispatch('/wstack-git:commit', {} as Context);
+    expect(which).toBe('official');
+  });
+
+  it('a builtin does not clobber a bare name already claimed by an official plugin', async () => {
+    const r = new SlashCommandRegistry();
+    let which = '';
+    // Official plugin registers first...
+    r.register(
+      { name: 'sync', description: '', async run() { which = 'official'; } },
+      'wstack-sync',
+      { official: true },
+    );
+    // ...then a builtin with the same name loads — the plugin's override holds.
+    r.register({ name: 'sync', description: '', async run() { which = 'builtin'; } });
+    await r.dispatch('/sync', {} as Context);
+    expect(which).toBe('official');
   });
 
   it('plugin commands get namespaced names', async () => {
@@ -217,6 +261,45 @@ describe('SlashCommandRegistry', () => {
     expect(r.ownerOf('other:cmd')).toBe('core');
   });
 
+  it('an official plugin command is invocable by bare name and namespaced', async () => {
+    const r = new SlashCommandRegistry();
+    let received = '';
+    // Mirrors how built-in plugins (wstack-prompts, wstack-sync) register:
+    // official => bare name claimed, plus the namespaced alias.
+    r.register(
+      {
+        name: 'prompts',
+        description: '',
+        async run(args) {
+          received = args;
+        },
+      },
+      'wstack-prompts',
+      { official: true },
+    );
+    // Reachable bare...
+    expect(r.get('prompts')?.name).toBe('prompts');
+    const res = await r.dispatch('/prompts list', {} as Context);
+    expect(res).toEqual({});
+    expect(received).toBe('list');
+    // ...and namespaced.
+    await r.dispatch('/wstack-prompts:prompts view', {} as Context);
+    expect(received).toBe('view');
+  });
+
+  it('an external plugin command is NOT invocable by bare name', async () => {
+    const r = new SlashCommandRegistry();
+    let ran = false;
+    r.register({ name: 'deploy', description: '', async run() { ran = true; } }, 'acme');
+    // Bare `/deploy` is unknown — external plugins are namespaced only.
+    const res = await r.dispatch('/deploy', {} as Context);
+    expect(res?.message).toMatch(/Unknown/);
+    expect(ran).toBe(false);
+    // Only the namespaced form works.
+    await r.dispatch('/acme:deploy', {} as Context);
+    expect(ran).toBe(true);
+  });
+
   it('dispatch parses /owner:cmd without args', async () => {
     const r = new SlashCommandRegistry();
     let ran = false;
@@ -244,14 +327,20 @@ describe('SlashCommandRegistry', () => {
     expect(r.get('help')).toBeDefined();
   });
 
-  it('cross-owner re-registration on same name throws', () => {
+  it('an external plugin cannot shadow a builtin bare name', async () => {
     const r = new SlashCommandRegistry();
-    r.register({ name: 'help', description: '', async run() {} }, 'core');
-    // Different owner using the same bare name throws to prevent silent
-    // shadowing that would confuse users.
-    expect(() => r.register({ name: 'help', description: '', async run() {} }, 'some-plugin')).toThrow(
-      /already registered/,
-    );
+    let builtinRan = false;
+    r.register({ name: 'help', description: '', async run() { builtinRan = true; } }, 'core');
+    // An external plugin with the same name is namespaced, not rejected, and
+    // cannot take over the bare `/help`.
+    expect(() =>
+      r.register({ name: 'help', description: '', async run() {} }, 'some-plugin'),
+    ).not.toThrow();
+    await r.dispatch('/help', {} as Context);
+    expect(builtinRan).toBe(true);
+    expect(r.ownerOf('help')).toBe('core');
+    // The plugin's variant lives only under its namespace.
+    expect(r.ownerOf('some-plugin:help')).toBe('some-plugin');
   });
 
   it('listWithOwner returns empty when no commands', () => {

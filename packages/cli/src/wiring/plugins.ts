@@ -11,6 +11,8 @@ import type {
   SessionWriter,
   ExtensionRegistry,
   MetricsSinkView,
+  HealthRegistry,
+  SkillLoader,
   Plugin,
 } from '@wrongstack/core';
 import { loadPlugins } from '@wrongstack/core';
@@ -31,6 +33,10 @@ export interface PluginsWiringDeps {
   agent: { extensions?: ExtensionRegistry };
   sessionWriter: SessionWriter;
   metricsSink?: MetricsSinkView;
+  /** Health registry — injected so the observability built-in can run /health. */
+  healthRegistry?: HealthRegistry;
+  /** Skill loader — injected so the skills built-in can list/read skills. */
+  skillLoader?: SkillLoader;
   configStore: ConfigStore;
   /** Resolved WstackPaths — injected so built-in plugins can init stores. */
   paths?: {
@@ -62,6 +68,26 @@ export const BUILTIN_PLUGIN_FACTORIES: (() => Promise<Plugin>)[] = [
     const { createSyncPlugin } = await import('@wrongstack/core');
     return createSyncPlugin();
   },
+  async () => {
+    const { createGitPlugin } = await import('@wrongstack/core');
+    return createGitPlugin();
+  },
+  async () => {
+    const { createObservabilityPlugin } = await import('@wrongstack/core');
+    return createObservabilityPlugin();
+  },
+  async () => {
+    const { createSecurityPlugin } = await import('@wrongstack/core');
+    return createSecurityPlugin();
+  },
+  async () => {
+    const { createSkillsPlugin } = await import('@wrongstack/core');
+    return createSkillsPlugin();
+  },
+  async () => {
+    const { createPlanPlugin } = await import('@wrongstack/core');
+    return createPlanPlugin();
+  },
 ];
 
 export async function setupPlugins(params: PluginsWiringDeps): Promise<void> {
@@ -77,19 +103,38 @@ export async function setupPlugins(params: PluginsWiringDeps): Promise<void> {
     agent,
     sessionWriter,
     metricsSink,
+    healthRegistry,
+    skillLoader,
     configStore,
     pipelines,
     paths,
   } = params;
 
-  // ── 1. Load built-in plugins (prompts, sync, etc.) only when paths are
+  // ── 1. Load built-in plugins (prompts, sync, git, …) only when paths are
   // available — they need WstackPaths to initialise their stores.
+  //
+  // Built-ins are ENABLED BY DEFAULT. A user can opt a specific one out by
+  // adding `{ name: 'wstack-git', enabled: false }` to `config.plugins`
+  // (or disable all plugins with `config.features.plugins === false`).
   const builtinPlugins: Plugin[] = [];
-  if (paths) {
+  const disabledBuiltins = new Set(
+    (config.plugins ?? [])
+      .filter(
+        (p): p is { name: string; enabled?: boolean } =>
+          typeof p === 'object' && p.enabled === false,
+      )
+      .map((p) => p.name),
+  );
+  if (paths && config.features?.plugins !== false) {
     for (const factory of BUILTIN_PLUGIN_FACTORIES) {
       try {
         const plugin = await factory();
-        if (plugin) builtinPlugins.push(plugin);
+        if (!plugin) continue;
+        if (disabledBuiltins.has(plugin.name)) {
+          log.info(`[setupPlugins] built-in plugin "${plugin.name}" disabled by config`);
+          continue;
+        }
+        builtinPlugins.push(plugin);
       } catch (err) {
         log.warn('[setupPlugins] builtin plugin failed to load:', err);
       }
@@ -115,28 +160,32 @@ export async function setupPlugins(params: PluginsWiringDeps): Promise<void> {
   const allPlugins = [...builtinPlugins, ...userPlugins];
   if (allPlugins.length === 0) return;
 
-  let pluginOptions = buildPluginOptions(config);
+  const pluginOptions = buildPluginOptions(config);
 
-  // Inject paths and configStore into plugin options so built-in plugins can
-  // wire up their stores without circular imports.
-  if (paths) {
-    pluginOptions = {
-      ...pluginOptions,
-      'wstack-prompts': { ...pluginOptions['wstack-prompts'], paths },
-      'wstack-sync': { ...pluginOptions['wstack-sync'], paths, configStore },
-    };
-  }
-
-  const pluginConfig =
-    Object.keys(pluginOptions).length > 0
-      ? patchConfig(config, { extensions: pluginOptions } as Partial<Config>)
-      : config;
+  // Built-in plugins read their host dependencies off the TOP LEVEL of the
+  // config object they receive (e.g. prompts/sync use `config.paths` /
+  // `config.configStore`, observability uses `config.metricsSink` /
+  // `config.healthRegistry`). Inject them here so each can wire up its store or
+  // view without a circular import. User plugins never see these — they only
+  // read their own namespaced `config.extensions[name]` options.
+  const pluginConfig = patchConfig(config, {
+    extensions: pluginOptions,
+    paths,
+    configStore,
+    metricsSink,
+    healthRegistry,
+    skillLoader,
+  } as Partial<Config>);
 
   await loadPlugins(allPlugins, {
     log,
     pluginOptions,
     apiFactory: (plugin) =>
       createApi(plugin.name, {
+        // First-party plugins come from BUILTIN_PLUGIN_FACTORIES — trust them
+        // ("official") so they can claim bare slash command names (/prompts,
+        // /sync) and override built-ins. User plugins stay namespaced.
+        official: builtinPlugins.includes(plugin),
         container,
         events,
         pipelines: pipelines as unknown as Parameters<typeof createApi>[1]['pipelines'],
