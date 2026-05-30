@@ -8,6 +8,7 @@ import type {
   Agent,
   AttachmentStore,
   Config,
+  ConfigStore,
   Director,
   EventBus,
   ModelsRegistry,
@@ -17,6 +18,7 @@ import type {
   TokenCounter,
 } from '@wrongstack/core';
 import { color } from '@wrongstack/core';
+import { persistAutonomySetting } from './settings-menu.js';
 import type { ProviderConfig, ResolvedProvider, WstackPaths } from '@wrongstack/core';
 import type { MCPRegistry } from '@wrongstack/mcp';
 import { createToolVisionAdapters } from '@wrongstack/runtime/vision';
@@ -36,6 +38,8 @@ export interface ExecutionDeps {
   attachments: AttachmentStore;
   tokenCounter: TokenCounter;
   config: Config;
+  /** Live config store — used to read/persist `/settings` values from the TUI. */
+  configStore: ConfigStore;
   renderer: TerminalRenderer;
   reader: ReadlineInputReader;
   session: SessionWriter;
@@ -143,6 +147,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     attachments,
     tokenCounter,
     config,
+    configStore,
     renderer,
     reader,
     session,
@@ -394,6 +399,34 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           switchAutonomy: (mode: 'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-parallel') => {
             onAutonomy?.(mode);
             return null;
+          },
+          getSettings: () => {
+            const autonomy = configStore.get().autonomy as
+              | { autoProceedDelayMs?: number; defaultMode?: string }
+              | undefined;
+            const rawMode = autonomy?.defaultMode;
+            const mode: 'off' | 'suggest' | 'auto' =
+              rawMode === 'suggest' || rawMode === 'auto' ? rawMode : 'off';
+            return { mode, delayMs: autonomy?.autoProceedDelayMs ?? 45_000 };
+          },
+          saveSettings: async (s: { mode: 'off' | 'suggest' | 'auto'; delayMs: number }) => {
+            try {
+              await persistAutonomySetting(
+                {
+                  configStore,
+                  globalConfigPath: wpaths.globalConfig,
+                  // Autonomy fields are not secrets — pass-through vault.
+                  vault: { encrypt: (v) => v, decrypt: (v) => v, isEncrypted: () => false },
+                },
+                (autonomy) => {
+                  autonomy.defaultMode = s.mode;
+                  autonomy.autoProceedDelayMs = s.delayMs;
+                },
+              );
+              return null;
+            } catch (err) {
+              return err instanceof Error ? err.message : String(err);
+            }
           },
           effectiveMaxContext,
           // Default OFF so the terminal's native scrollback works for chat

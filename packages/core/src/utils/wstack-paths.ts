@@ -29,6 +29,8 @@ export interface WstackPaths {
   globalMemory: string;
   /** ~/.wrongstack/skills — user-global skills. */
   globalSkills: string;
+  /** ~/.wrongstack/prompts — user-global prompt library. */
+  globalPrompts: string;
   /** ~/.wrongstack/cache — fetched data (models.dev, etc.). */
   cacheDir: string;
   /** ~/.wrongstack/cache/models.dev.json */
@@ -69,6 +71,8 @@ export interface WstackPaths {
   projectPlan: string;
   /** ~/.wrongstack/projects/<hash>/autophase — AutoPhase phase-graph JSON files */
   projectAutophase: string;
+  /** ~/.wrongstack/sync.json — CloudSync configuration */
+  syncConfig: string;
 }
 
 export function projectHash(absRoot: string): string {
@@ -94,6 +98,7 @@ export function resolveWstackPaths(opts: WstackPathOptions): WstackPaths {
     secretsKey: path.join(globalRoot, '.key'),
     globalMemory: path.join(globalRoot, 'memory.md'),
     globalSkills: path.join(globalRoot, 'skills'),
+    globalPrompts: path.join(globalRoot, 'prompts'),
     cacheDir: path.join(globalRoot, 'cache'),
     modelsCache: path.join(globalRoot, 'cache', 'models.dev.json'),
     historyFile: path.join(globalRoot, 'history'),
@@ -114,5 +119,6 @@ export function resolveWstackPaths(opts: WstackPathOptions): WstackPaths {
     projectSddSession: path.join(projectDir, 'sdd-session.json'),
     projectPlan: path.join(projectDir, 'plan.json'),
     projectAutophase: path.join(projectDir, 'autophase'),
+    syncConfig: path.join(globalRoot, 'sync.json'),
   };
 }

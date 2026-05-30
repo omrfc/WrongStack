@@ -166,3 +166,7 @@ export {
   type MergeResult,
   type WorktreeRunResult,
 } from './worktree/index.js';
+
+// Built-in plugins
+export { createPromptsPlugin } from './plugins/prompts-plugin.js';
+export { createSyncPlugin } from './plugins/sync-plugin.js';

@@ -276,6 +276,22 @@ Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. Wha
 
 ---
 
+## What's new in 0.9.2
+
+- **`/settings` works in the TUI — now with a real overlay.** The old menu blocked on `readline`, which can't run under Ink (Ink owns stdin) — so in the TUI it hung invisibly and every keypress redrew the status bar into the chat history. Two fixes: (1) the builtin `/settings` is now argument-driven and non-blocking (`/settings`, `/settings delay <seconds>`, `/settings mode <off|suggest|auto>`, `/settings defaults`) — works in REPL + headless; (2) the TUI registers a keyboard-driven overlay (`↑/↓` field · `←/→` change · `Enter` save · `Esc` cancel) for autonomy mode and auto-proceed delay, matching the `/model` and `/autonomy` pickers.
+
+- **WebUI can list saved providers.** A new `providers.saved` WebSocket message returns every saved provider (`id`, `family`, `baseUrl`) with its stored keys as `{ label, maskedKey, isActive, createdAt }`. Only masked key values cross the wire — raw secrets stay server-side.
+
+## What's new in 0.9.1
+
+- **Corruption guard pre-commit hook.** A new `scripts/guard-against-corruption.mjs` runs on every commit and blocks two patterns of damage: the known `worktreeMonitorToggle` corruption fragment in any staged file, and suspicious mass-changes (>20 files by default, tunable via `GUARD_MAX_FILES`, override with `--force`). Auto-wired through `postinstall` so a fresh `pnpm install` activates the guard with zero setup.
+
+- **`/settings` interactive menu.** New slash command opens a terminal picker for the two most-asked-for runtime knobs: auto-proceed delay (seconds the agent waits in `auto` autonomy before continuing) and default autonomy mode (`off` / `suggest` / `auto`). Persisted to `~/.wrongstack/config.json`.
+
+- **Three security tightenings.** Mutating `auto`-permission tools now require user confirmation (a remote WS client can no longer trigger network-side-effect tools without a prompt). `bash` and `exec` redact secret-bearing CLI flags (`--token=…`, `TOKEN=…`, `--github-token=…`, …) before registering the process, so `/ps` and crash dumps never leak. `config.json` rollback on POSIX refuses to write when the calling euid does not own the file.
+
+- **Windows build memory fix.** `build`, `typecheck`, and `test:coverage` now prepend `cross-env NODE_OPTIONS=--max-old-space-size=4096` so the monorepo's typecheck and coverage passes stop OOM'ing on Windows.
+
 ## What's new in 0.9.0
 
 - **AutoPhase autonomous workflow.** `/autophase start [title]` breaks a project into ordered phases (Discovery → Design → Implementation → Testing → Deployment) and runs them autonomously, with a live phase/task view in the web UI. Run `/autophase` for the full subcommand list.
@@ -357,7 +373,7 @@ wrongstack --provider openrouter --model anthropic/claude-opus-4-7
 
 ## Slash commands
 
-`/init` `/diag` `/stats` `/help` `/clear` `/context` `/compact` `/usage` `/tools` `/skill` `/use` `/model` `/save` `/resume` `/exit` `/spawn` `/fleet` `/agents` `/steer` `/goal` `/director` `/queue` `/altscreen` `/plan` `/autonomy` `/yolo` `/mode` `/image` `/plugin` `/telegram` `/sdd`
+`/init` `/diag` `/stats` `/help` `/clear` `/context` `/compact` `/usage` `/tools` `/skill` `/use` `/model` `/save` `/resume` `/exit` `/spawn` `/fleet` `/agents` `/steer` `/goal` `/director` `/queue` `/altscreen` `/plan` `/autonomy` `/yolo` `/mode` `/image` `/plugin` `/telegram` `/sdd` `/settings`
 
 | Command | Effect |
 |---|---|
@@ -380,6 +396,7 @@ wrongstack --provider openrouter --model anthropic/claude-opus-4-7
 | `/plugin install\|disable\|enable\|remove\|official [name]` | Manage plugins. `install` adds bundled package to config (no npm). Restart to load/unload |
 | `/telegram send\|read\|chat\|attach` | Telegram plugin: `send <chatId> <message>`, `read <chatId> [limit]`, `chat` list recent, `attach <file>` send file |
 | `/sdd <path-to-spec.md>` | Spec-Driven Development workflow: `parse → analyze → generate → track → execute`. Built on `SpecParser`, `TaskTracker`, `TaskGenerator`, `TaskFlow` |
+| `/settings` | View or change settings (non-blocking, works in REPL + TUI): `/settings` (show), `/settings delay <seconds>`, `/settings mode <off\|suggest\|auto>`, `/settings defaults`; persists to `~/.wrongstack/config.json` |
 | `/use`, `/compact`, `/usage`, `/tools`, `/skill`, `/save`, `/resume`, `/help`, `/clear`, `/stats`, `/diag`, `/exit` | Switch modes, compact context, show usage, list tools/skills, save/resume session, help, clear, stats, diagnostics, exit REPL |
 
 ### Mid-flight controls

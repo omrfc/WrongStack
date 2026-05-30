@@ -435,6 +435,7 @@ export async function main(argv: string[]): Promise<number> {
     sessionWriter: context.session,
     metricsSink,
     configStore,
+    paths: wpaths,
   });
 
   // Build provider+model switch as a single callback. The TUI picker
@@ -1444,6 +1445,7 @@ export async function main(argv: string[]): Promise<number> {
     attachments,
     tokenCounter,
     config,
+    configStore,
     renderer,
     reader,
     session,

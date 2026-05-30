@@ -19,8 +19,9 @@ import type {
 export interface SlashCommandContext {
   registry: SlashCommandRegistry;
   toolRegistry: ToolRegistry;
-  /** Resolved path helpers — use instead of constructing paths inline. */
-  paths: WstackPaths;
+  /** Resolved path helpers — use instead of constructing paths inline.
+   *  Optional for unit tests that don't exercise commands requiring paths. */
+  paths?: WstackPaths;
   compactor?: {
     compact(ctx: Context, opts?: { aggressive?: boolean }): Promise<CompactReport>;
   };
@@ -268,6 +269,8 @@ import {
 import { buildAutoPhaseCommand } from './autophase.js';
 import { buildWorktreeCommand } from './worktree.js';
 import { buildSettingsCommand } from './settings.js';
+import { buildPromptsCommand } from './prompts.js';
+import { buildSyncCommand } from './sync.js';
 
 export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashCommand[] {
   return [
@@ -312,6 +315,8 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildAutoPhaseCommand(opts),
     buildWorktreeCommand(opts),
     buildSettingsCommand(opts),
+    buildPromptsCommand(opts),
+    buildSyncCommand(opts),
     buildStatuslineCommand({
       cwd: opts.cwd,
       hiddenItems: opts.statuslineHiddenItems ?? [],

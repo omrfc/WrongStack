@@ -126,8 +126,23 @@ async function showDefaults(deps: SettingsMenuDeps): Promise<void> {
   await deps.reader.readLine('');
 }
 
-async function mutateAutonomyConfig(
-  deps: SettingsMenuDeps,
+/** The subset of {@link SettingsMenuDeps} needed to persist a setting —
+ *  no renderer/reader, so this is safe to call from non-interactive surfaces
+ *  (the TUI, headless runs, the arg-driven `/settings` slash command). */
+export interface PersistSettingDeps {
+  configStore: ConfigStore;
+  globalConfigPath: string;
+  vault: SecretVault;
+}
+
+/**
+ * Read the config file, apply `mutator` to its `autonomy` block, and write it
+ * back atomically (then mirror into the in-memory config store). Pure I/O — no
+ * terminal interaction — so it works identically under the plain REPL and the
+ * Ink TUI.
+ */
+export async function persistAutonomySetting(
+  deps: PersistSettingDeps,
   mutator: (autonomy: { autoProceedDelayMs?: number; defaultMode?: string }) => void,
 ): Promise<void> {
   let raw: string;
@@ -162,6 +177,14 @@ async function mutateAutonomyConfig(
 
   // Also update the in-memory config store so changes are immediately visible
   deps.configStore.update({ autonomy: decrypted.autonomy as Parameters<typeof deps.configStore.update>[0]['autonomy'] });
+}
+
+/** Interactive-menu adapter over {@link persistAutonomySetting}. */
+function mutateAutonomyConfig(
+  deps: SettingsMenuDeps,
+  mutator: (autonomy: { autoProceedDelayMs?: number; defaultMode?: string }) => void,
+): Promise<void> {
+  return persistAutonomySetting(deps, mutator);
 }
 
 function formatDelay(ms: number): string {

@@ -1131,6 +1131,30 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
         break;
       }
 
+    case 'providers.saved': {
+      const saved = await loadSavedProviders();
+      send(ws, {
+        type: 'providers.saved',
+        payload: {
+          providers: Object.entries(saved).map(([id, cfg]) => {
+            const keys = normalizeKeys(cfg);
+            return {
+              id,
+              family: cfg.family ?? id,
+              baseUrl: cfg.baseUrl,
+              apiKeys: keys.map((k) => ({
+                label: k.label,
+                maskedKey: maskedKey(k.apiKey),
+                isActive: k.label === cfg.activeKey,
+                createdAt: k.createdAt,
+              })),
+            };
+          }),
+        },
+      });
+      break;
+    }
+
       case 'provider.models': {
         const providerId = (msg as { payload: { providerId: string } }).payload.providerId;
         const provider = await modelsRegistry.getProvider(providerId);

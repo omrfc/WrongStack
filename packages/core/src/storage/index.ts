@@ -85,3 +85,14 @@ export {
   type GoalFile,
   type JournalEntry,
 } from './goal-store.js';
+export {
+  DefaultPromptStore,
+  type PromptStore,
+  type PromptEntry,
+} from './prompt-store.js';
+export {
+  CloudSync,
+  type SyncResult,
+  ALL_SYNC_CATEGORIES,
+} from './cloud-sync.js';
+export { type SyncConfig, type SyncCategory } from '../types/config.js';

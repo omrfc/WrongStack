@@ -10,6 +10,8 @@ coverage/
 .wrongstack/memory.md
 .wrongstack/trust.json
 .wrongstack/config.local.*
+.wrongstack/sync-state.json
+.wrongstack/sync.json
 *.tsbuildinfo
 .turbo/
 .bun/

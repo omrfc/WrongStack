@@ -5,6 +5,17 @@ import type { Config, Logger } from '@wrongstack/core';
 // loadPlugins is the one external function we care about — capture its
 // invocations to confirm setupPlugins wires options & API factory correctly.
 const loadPluginsMock = vi.fn().mockResolvedValue(undefined);
+
+vi.mock('virtual:broken-plugin', () => {
+  throw new Error('boom');
+}, { virtual: true } as never);
+
+// A virtual ESM module that setupPlugins can dynamically import.
+vi.mock('virtual:test-plugin', () => ({
+  default: { name: 'virtual:test-plugin', register: vi.fn() },
+}), { virtual: true } as never);
+
+// Mock @wrongstack/core: replace loadPlugins so we can observe calls
 vi.mock('@wrongstack/core', async (orig) => {
   const actual = (await orig()) as Record<string, unknown>;
   return { ...actual, loadPlugins: (...args: unknown[]) => loadPluginsMock(...args) };
@@ -14,15 +25,6 @@ vi.mock('@wrongstack/mcp', () => ({ MCPRegistry: class {} }));
 vi.mock('../src/plugin-api-factory.js', () => ({
   default: vi.fn(() => ({ kind: 'fake-api' })),
 }));
-
-// A virtual ESM module that setupPlugins can dynamically import.
-vi.mock('virtual:test-plugin', () => ({
-  default: { name: 'virtual:test-plugin', register: vi.fn() },
-}), { virtual: true } as never);
-
-vi.mock('virtual:broken-plugin', () => {
-  throw new Error('boom');
-}, { virtual: true } as never);
 
 function fakeLogger(): Logger {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), child: vi.fn(), setLevel: vi.fn() } as unknown as Logger;
@@ -62,28 +64,31 @@ describe('setupPlugins', () => {
       plugins: ['virtual:test-plugin'] as never,
     });
     await setupPlugins(deps);
+    // plugins feature disabled → loadPlugins not called at all
     expect(loadPluginsMock).not.toHaveBeenCalled();
   });
 
-  it('returns early when no plugins list', async () => {
+  it('returns early when no plugins list (no paths → no built-in plugins)', async () => {
+    // paths not provided → built-in plugins skipped; no user plugins → early return
     await setupPlugins(baseDeps());
     expect(loadPluginsMock).not.toHaveBeenCalled();
   });
 
-  it('returns early when plugins list is empty', async () => {
+  it('returns early when plugins list is empty (no paths → no built-in plugins)', async () => {
     await setupPlugins(baseDeps({ plugins: [] as never }));
     expect(loadPluginsMock).not.toHaveBeenCalled();
   });
 
-  it('skips object plugins explicitly disabled', async () => {
+  it('skips object plugins explicitly disabled (no paths → no built-in plugins)', async () => {
     const deps = baseDeps({
       plugins: [{ name: 'virtual:test-plugin', enabled: false }] as never,
     });
     await setupPlugins(deps);
+    // no paths → no built-ins, no user plugins → early return
     expect(loadPluginsMock).not.toHaveBeenCalled();
   });
 
-  it('warns and continues when a plugin import fails', async () => {
+  it('warns and continues when a plugin import fails (no paths)', async () => {
     const deps = baseDeps({ plugins: ['virtual:broken-plugin'] as never });
     await setupPlugins(deps);
     expect(deps.log.warn).toHaveBeenCalledWith(
@@ -93,12 +98,14 @@ describe('setupPlugins', () => {
     expect(loadPluginsMock).not.toHaveBeenCalled();
   });
 
-  it('loads string-form plugin and forwards to loadPlugins', async () => {
+  it('loads string-form plugin (no paths → no built-in plugins)', async () => {
     const deps = baseDeps({ plugins: ['virtual:test-plugin'] as never });
     await setupPlugins(deps);
     expect(loadPluginsMock).toHaveBeenCalledTimes(1);
     const [plugins, opts] = loadPluginsMock.mock.calls[0]!;
+    // only the user plugin; no built-ins since paths not provided
     expect(plugins).toHaveLength(1);
+    expect(plugins[0].name).toBe('virtual:test-plugin');
     expect(opts.log).toBe(deps.log);
     expect(typeof opts.apiFactory).toBe('function');
   });

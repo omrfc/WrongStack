@@ -140,6 +140,17 @@ export interface AutonomyConfig {
   autoProceedDelayMs?: number;
 }
 
+export type SyncCategory = 'settings' | 'skills' | 'prompts' | 'memory' | 'history';
+
+export interface SyncConfig {
+  enabled: boolean;
+  repo: string;
+  /** GitHub token (fine-grained PAT). Encrypted at rest via SecretVault. */
+  githubToken: string;
+  categories: SyncCategory[];
+  lastSyncedAt?: string;
+}
+
 export interface Config {
   version: 1;
   provider: string;
@@ -157,6 +168,11 @@ export interface Config {
   cwd?: string;
   /** Autonomy mode configuration (auto-proceed delay, etc.). */
   autonomy?: AutonomyConfig;
+  /**
+   * Cloud sync configuration. Stored separately in sync.json to avoid
+   * accidentally committing the GitHub token to project configs.
+   */
+  sync?: SyncConfig;
   /**
    * Per-plugin namespaced config sections. Each plugin reads its own
    * subtree via `ConfigStore.getExtension(pluginName)`. Plugins should
