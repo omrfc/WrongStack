@@ -152,9 +152,12 @@ export interface StatusBarProps {
     iterations: number;
     lastTask?: string;
     lastStatus?: string;
-    /** Seconds remaining in the auto-proceed countdown. null = not counting. */
-  autoProceedCountdown?: number | null;
   } | null;
+  /**
+   * Seconds remaining in the auto-proceed countdown. null = not counting.
+   * Rendered as a chip on line 2 when non-null.
+   */
+  autoProceedCountdown?: number | null;
 }
 
 /**

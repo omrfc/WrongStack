@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import {
   type ConfigStore,
+  type SecretVault,
   color,
   decryptConfigSecrets,
   encryptConfigSecrets,
@@ -14,6 +15,7 @@ export interface SettingsMenuDeps {
   reader: ReadlineInputReader;
   configStore: ConfigStore;
   globalConfigPath: string;
+  vault: SecretVault;
 }
 
 /**
@@ -150,12 +152,12 @@ async function mutateAutonomyConfig(
     parsed = {};
   }
 
-  const decrypted = decryptConfigSecrets(parsed) as Record<string, unknown>;
+  const decrypted = decryptConfigSecrets(parsed, deps.vault) as Record<string, unknown>;
   const autonomy = (decrypted.autonomy as Record<string, unknown>) ?? {};
   mutator(autonomy as { autoProceedDelayMs?: number; defaultMode?: string });
   decrypted.autonomy = autonomy;
 
-  const encrypted = encryptConfigSecrets(decrypted);
+  const encrypted = encryptConfigSecrets(decrypted, deps.vault);
   await atomicWrite(deps.globalConfigPath, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
 
   // Also update the in-memory config store so changes are immediately visible

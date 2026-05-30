@@ -218,7 +218,9 @@ export interface SlashCommandContext {
    */
   onWorktree?: (action: 'list' | 'merge' | 'prune' | 'clean', target?: string) => Promise<string>;
   /** Config store for reading/writing config sections at runtime (e.g. settings menu). */
-  configStore?: import('@wrongstack/core').ConfigStore;
+  configStore: import('@wrongstack/core').ConfigStore;
+  /** Terminal reader for interactive user input (e.g. settings menu, auth menu). */
+  reader: import('@wrongstack/core').InputReader;
 }
 
 // Re-export helpers for external consumers (pre-launch.ts)

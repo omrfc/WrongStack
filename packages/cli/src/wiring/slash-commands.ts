@@ -14,6 +14,7 @@ import type {
   WstackPaths,
   EventBus,
   ConfigStore,
+  InputReader,
 } from '@wrongstack/core';
 import type { CompactReport } from '@wrongstack/core';
 import { buildBuiltinSlashCommands } from '../slash-commands/index.js';
@@ -29,6 +30,7 @@ export interface SlashCommandsDeps {
   skillLoader: SkillLoader | undefined;
   tokenCounter: TokenCounter;
   renderer: Renderer;
+  reader: InputReader;
   events: EventBus;
   memoryStore: MemoryStore;
   context: Context;
@@ -58,7 +60,7 @@ export interface StatuslineConfigDeps {
 
 export async function setupSlashCommands(params: SlashCommandsDeps): Promise<void> {
   const { slashRegistry, toolRegistry, paths, sessionStore, skillLoader, tokenCounter, renderer,
-    events, memoryStore, context, cwd, projectRoot, metricsSink, healthRegistry,
+    reader, events, memoryStore, context, cwd, projectRoot, metricsSink, healthRegistry,
     planPath, modeStore, provider, model, multiAgentHost, fleetStreamController,
     agentsMonitorController, compactor, configStore } = params;
 
@@ -125,6 +127,7 @@ export async function setupSlashCommands(params: SlashCommandsDeps): Promise<voi
       return lines.length > 0 ? lines.join('\n') : 'No active subagents.';
     },
     configStore,
+    reader,
   });
 
   for (const cmd of commands) {
