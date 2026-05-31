@@ -214,7 +214,7 @@ export class SubagentBudget {
    *
    * Returns the kinds that were found to be exceeded (for logging/debugging).
    */
-  private checkLimits(): { kind: BudgetKind; used: number; limit: number }[] {
+  private checkLimits(elapsedMs?: number): { kind: BudgetKind; used: number; limit: number }[] {
     const exceeded: { kind: BudgetKind; used: number; limit: number }[] = [];
 
     if (this.limits.maxIterations !== undefined && this.iterations > this.limits.maxIterations) {
@@ -229,6 +229,10 @@ export class SubagentBudget {
     }
     if (this.limits.maxCostUsd !== undefined && this.costUsd > this.limits.maxCostUsd) {
       exceeded.push({ kind: 'cost', used: this.costUsd, limit: this.limits.maxCostUsd });
+    }
+    // Wall-clock timeout: called from checkTimeout() with elapsedMs.
+    if (elapsedMs !== undefined && this.limits.timeoutMs !== undefined && elapsedMs > this.limits.timeoutMs) {
+      exceeded.push({ kind: 'timeout', used: elapsedMs, limit: this.limits.timeoutMs });
     }
 
     if (exceeded.length === 0) return [];
@@ -249,36 +253,42 @@ export class SubagentBudget {
       throw new BudgetExceededError(first.kind, first.limit, first.used);
     }
 
-    // A negotiation is already in flight — don't start another.
-    // The existing conversation with the coordinator will handle ALL exceeded
-    // kinds when it resolves. Subsequent checkLimits() calls are NOOPs.
-    if (this._pendingNegotiation) return [];
+    // Start a negotiation for each exceeded kind that doesn't already have one.
+    // The first exceeded kind throws BudgetThresholdSignal so the caller sees
+    // the soft-limit event. Subsequent exceeded kinds (in the same call) start
+    // their own negotiations silently — they won't throw again.
+    for (const entry of exceeded) {
+      if (this._pendingNegotiations.has(entry.kind)) continue; // already negotiating this kind
+      const decision = this._negotiateExtension(entry.kind, exceeded);
+      this._pendingNegotiations.set(entry.kind, decision);
+    }
 
-    // Start exactly ONE negotiation for all exceeded kinds.
-    const decision = this._negotiateExtension(exceeded);
-    this._pendingNegotiation = decision;
     const first = exceeded[0]!;
+    const decision = this._pendingNegotiations.get(first.kind)!;
     throw new BudgetThresholdSignal(first.kind, first.limit, first.used, decision);
   }
 
   /**
-   * Single in-flight negotiation Promise. Guards against concurrent
-   * negotiations for different budget kinds. Cleared in `_negotiateExtension`'s
-   * `finally` block.
+   * Per-kind in-flight negotiation Promises. Each budget kind can have its
+   * own concurrent negotiation — e.g. iterations and timeout can both
+   * be exceeded simultaneously without blocking each other. The same kind
+   * cannot start two concurrent negotiations (dedup guard).
+   * Cleared in `_negotiateExtension`'s `finally` block.
    */
-  private _pendingNegotiation: Promise<BudgetThresholdDecision> | null = null;
+  private _pendingNegotiations = new Map<BudgetKind, Promise<BudgetThresholdDecision>>();
 
   /**
    * Drive the threshold handler to a decision. Resolves with `'stop'`
    * (signal the runner to abort) or `{ extend: ... }` (limits already
    * patched in-place; the runner should not abort). Clears the
-   * `_pendingNegotiation` slot in `finally`.
+   * per-kind slot in `_pendingNegotiations` in `finally`.
    *
    * The 'continue' return from a sync handler is treated as
    * `{ extend: {} }` — keep going without patching; next overrun fires
    * a fresh signal.
    */
   private async _negotiateExtension(
+    kind: BudgetKind,
     exceeded: { kind: BudgetKind; used: number; limit: number }[],
   ): Promise<BudgetThresholdDecision> {
     try {
@@ -351,7 +361,7 @@ export class SubagentBudget {
       }
       return decision;
     } finally {
-      this._pendingNegotiation = null;
+      this._pendingNegotiations.delete(kind);
     }
   }
 
@@ -373,19 +383,21 @@ export class SubagentBudget {
   }
 
   /**
-   * Wall-clock budget check. Unlike other limits, timeout check passes through
-   * `checkLimits` and is subject to the same negotiation-mode decision table.
-   * In practice, `'sync'` mode (the usual test configuration) means a timeout
-   * immediately throws `BudgetExceededError`. In production with a coordinator,
-   * a timeout emits `budget.threshold_reached` so the Director can decide whether
-   * to extend or abort.
+   * Wall-clock budget check. Unlike other limits, timeout is always a hard stop
+   * — wall-clock time cannot be "extended" by the coordinator, so it throws
+   * synchronously rather than entering the negotiation flow.
+   *
+   * Decision table:
+   * - no `onThreshold` handler         → throw `BudgetExceededError`
+   * - `mode === 'sync'`               → throw `BudgetExceededError`
+   * - `mode === 'auto'` + no listener  → throw `BudgetExceededError`
+   * - `mode === 'auto'` + listener     → throw `BudgetExceededError` (timeout is not extendable)
    */
   checkTimeout(): void {
     if (this.startTime === null || this.limits.timeoutMs === undefined) return;
     const elapsed = Date.now() - this.startTime;
-    if (elapsed > this.limits.timeoutMs) {
-      void this.checkLimits();
-    }
+    if (elapsed <= this.limits.timeoutMs) return;
+    void this.checkLimits(elapsed);
   }
 
   /** Returns true if a timeout has occurred without throwing. Useful for races. */
