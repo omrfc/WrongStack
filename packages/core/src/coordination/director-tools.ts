@@ -384,17 +384,19 @@ export function makeCollabDebugTool(director: Director): Tool {
 
 /**
  * Tool for subagents to emit structured events on the FleetBus.
- * Agents use this in collaborative debugging sessions: BugHunter emits bug.found,
- * RefactorPlanner emits refactor.plan, Critic emits critic.evaluation.
- * Events are routed to all other agents in the collab session automatically.
+ * Any agent can emit any event type; the Director routes it to all listeners.
+ * Common event types in collaborative sessions:
+ *   bug.found        — BugHunter emits per-finding
+ *   refactor.plan    — RefactorPlanner emits per-plan
+ *   critic.evaluation — Critic emits per-evaluation
+ *
+ * The payload structure is event-type-specific. Use null for empty payloads.
  */
 export function makeFleetEmitTool(director: Director): Tool {
   return {
     name: 'fleet_emit',
     description:
-      'Emit a structured event on the FleetBus. Use this when you find a bug (bug.found), ' +
-      'complete a refactor plan (refactor.plan), or finish an evaluation (critic.evaluation). ' +
-      'Events are routed to other agents in the collab session.',
+      'Emit a structured event on the FleetBus. Any subagent can emit any event type; the Director routes it to all listeners. Use it to stream findings, progress updates, or final results to other agents in real time.',
     permission: 'auto',
     mutating: false,
     inputSchema: {
@@ -402,22 +404,22 @@ export function makeFleetEmitTool(director: Director): Tool {
       properties: {
         type: {
           type: 'string',
-          description: 'Event type: bug.found | refactor.plan | critic.evaluation',
+          description: 'Event type string (e.g. bug.found, refactor.plan, critic.evaluation, progress, result).',
         },
         payload: {
           type: 'object',
-          description: 'Event payload matching the event type.',
+          description: 'Event payload. Structure depends on event type. Use null if no payload.',
         },
       },
-      required: ['type', 'payload'],
+      required: ['type'],
     },
     async execute(input: unknown) {
-      const i = input as { type: string; payload: Record<string, unknown> };
+      const i = input as { type: string; payload?: Record<string, unknown> | null };
       director.fleet.emit({
         subagentId: director.id,
         ts: Date.now(),
         type: i.type,
-        payload: i.payload,
+        payload: i.payload ?? {},
       });
       return { ok: true, event: i.type };
     },
