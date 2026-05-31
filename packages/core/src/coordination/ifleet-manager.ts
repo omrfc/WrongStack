@@ -37,6 +37,26 @@ export interface IFleetManager {
   canSpawn(config: SubagentConfig): { kind: 'max_spawns' | 'max_spawn_depth' | 'max_cost_usd'; limit: number; observed: number } | null;
 
   /**
+   * Assign a memorable nickname (e.g. "Einstein (Bug Hunter)"), mark it
+   * as used so it is never reused, then record the spawn. The nickname
+   * is written back to `config.name` so the coordinator and manifest both
+   * see the human-readable name.
+   *
+   * Returns the assigned nickname string.
+   */
+  assignNicknameAndRecord(
+    subagentId: string,
+    config: SubagentConfig,
+    priceLookup?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number },
+  ): string;
+
+  /**
+   * Readonly view of already-assigned nickname keys. Used by `Director.spawn()`
+   * to avoid assigning the same nickname twice across the fleet.
+   */
+  readonly usedNicknames: ReadonlySet<string>;
+
+  /**
    * Called after a spawn succeeds. Records metadata for the usage
    * aggregator and manifest.
    *

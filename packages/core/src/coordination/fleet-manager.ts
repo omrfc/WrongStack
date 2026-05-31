@@ -2,6 +2,7 @@ import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { atomicWrite } from '../utils/atomic-write.js';
+import { assignNickname } from './subagent-nicknames.js';
 import type { SubagentConfig } from '../types/multi-agent.js';
 import type { SessionWriter } from '../types/session.js';
 import { DirectorStateCheckpoint } from '../storage/director-state.js';
@@ -78,6 +79,8 @@ export class FleetManager implements IFleetManager {
   private readonly pendingTasks = new Map<string, { subagentId: string; description: string }>();
   private readonly subagentMeta = new Map<string, { provider?: string; model?: string }>();
   private readonly priceLookups = new Map<string, { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }>();
+  /** Tracks which nickname keys are already assigned — prevents collisions. */
+  private readonly usedNicknames = new Set<string>();
   /** The coordinator (wired via setCoordinator by Director after construction). */
   private coordinator: DefaultMultiAgentCoordinator | null = null;
 
@@ -167,6 +170,39 @@ export class FleetManager implements IFleetManager {
       }
     }
     return null;
+  }
+
+  /**
+   * Assign a memorable nickname (e.g. "Einstein (Bug Hunter)") to the config,
+   * record it so the same name is never reused, then record the spawn.
+   *
+   * Call this INSTEAD of `recordSpawn` when you want automatic nicknames.
+   * The nickname is written back to `config.name` BEFORE the coordinator
+   * sees the config, so the manifest, logs, and fleet UI all show it.
+   */
+  assignNicknameAndRecord(
+    subagentId: string,
+    config: SubagentConfig,
+    priceLookup?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number },
+  ): string {
+    const role = config.role ?? 'subagent';
+    const nickname = assignNickname(role, this.usedNicknames);
+    // Extract the base key (e.g. "einstein") from the pool to mark it used.
+    const baseKey = nickname.split(' ')[0]!.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    this.usedNicknames.add(baseKey);
+    // Write the full nickname back into config so the coordinator
+    // and manifest both see the human name.
+    config.name = nickname;
+    this.recordSpawn(subagentId, config, priceLookup);
+    return nickname;
+  }
+
+  /**
+   * Returns the set of already-assigned nickname keys — useful for debugging
+   * and testing.
+   */
+  get usedNicknames(): ReadonlySet<string> {
+    return this.usedNicknames;
   }
 
   /**

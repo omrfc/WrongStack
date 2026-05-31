@@ -4,6 +4,7 @@ import type { JSONSchema, Tool } from '../types/tool.js';
 import { type Director, FleetSpawnBudgetError, FleetCostCapError } from './director.js';
 import { dispatchAgent } from './dispatcher.js';
 import type { AgentDefinition } from './agents/index.js';
+import type { CollabSessionOptions } from './collab-debug.js';
 
 // ---------------------------------------------------------------------------
 // Director-facing tool factories.
@@ -263,7 +264,6 @@ export function makeFleetSessionTool(director: Director): Tool {
       type: 'object',
       properties: {
         subagentId: { type: 'string', description: 'Subagent id to read the transcript of.' },
-        /** Number of trailing lines to return (last N JSONL lines). Default: all. */
         tail: { type: 'number', description: 'Number of trailing JSONL lines to return. Omit for the full transcript.' },
       },
       required: ['subagentId'],
@@ -306,8 +306,6 @@ export function makeFleetHealthTool(director: Director): Tool {
             id: s.id,
             status: s.status,
             lastEventAt: usage?.lastEventAt,
-            // Budget pressure: fraction of each limit consumed if we have it.
-            // BudgetWarning events carry used/limit ratios; surface them here.
             budgetPressure: {
               iterations: usage?.iterations,
               toolCalls: usage?.toolCalls,
@@ -316,6 +314,112 @@ export function makeFleetHealthTool(director: Director): Tool {
           };
         }),
       };
+    },
+  };
+}
+
+/**
+ * Collaborative debugging session: BugHunter, RefactorPlanner, and Critic
+ * run in parallel on the same target files, with findings flowing through
+ * the FleetBus (bug.found → refactor.plan → critic.evaluation).
+ *
+ * Returns a structured CollabDebugReport containing all bug findings,
+ * refactor plans, critic evaluations, and an overall verdict.
+ */
+export function makeCollabDebugTool(director: Director): Tool {
+  return {
+    name: 'collab_debug',
+    description:
+      'Start a collaborative debugging session: BugHunter, RefactorPlanner, and Critic ' +
+      'run in parallel on the same target files. BugHunter finds bugs and emits bug.found events. ' +
+      'RefactorPlanner listens for bug.found and emits refactor.plan events. ' +
+      'Critic evaluates both and emits critic.evaluation events. ' +
+      'Returns a structured report with overall verdict (approve / needs_revision / reject).',
+    permission: 'auto',
+    mutating: false,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        targetPaths: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'File paths / glob patterns to scan for bugs.',
+        },
+        timeoutMs: {
+          type: 'number',
+          description: 'Timeout in ms. Default: 600000 (10 minutes).',
+        },
+      },
+      required: ['targetPaths'],
+    },
+    async execute(input: unknown) {
+      const i = input as { targetPaths?: string[]; timeoutMs?: number };
+      if (!i.targetPaths?.length) {
+        return { error: 'collab_debug: targetPaths is required and must be non-empty.' };
+      }
+      const options: CollabSessionOptions = {
+        targetPaths: i.targetPaths,
+        timeoutMs: i.timeoutMs,
+      };
+      try {
+        const report = await director.spawnCollab(options);
+        return {
+          sessionId: report.sessionId,
+          overallVerdict: report.overallVerdict,
+          bugCount: report.bugs.length,
+          planCount: report.refactorPlans.length,
+          evaluationCount: report.evaluations.length,
+          summary: report.summary,
+          bugs: report.bugs,
+          refactorPlans: report.refactorPlans,
+          evaluations: report.evaluations,
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { error: 'collab_debug failed: ' + msg };
+      }
+    },
+  };
+}
+
+/**
+ * Tool for subagents to emit structured events on the FleetBus.
+ * Agents use this in collaborative debugging sessions: BugHunter emits bug.found,
+ * RefactorPlanner emits refactor.plan, Critic emits critic.evaluation.
+ * Events are routed to all other agents in the collab session automatically.
+ */
+export function makeFleetEmitTool(director: Director): Tool {
+  return {
+    name: 'fleet_emit',
+    description:
+      'Emit a structured event on the FleetBus. Use this when you find a bug (bug.found), ' +
+      'complete a refactor plan (refactor.plan), or finish an evaluation (critic.evaluation). ' +
+      'Events are routed to other agents in the collab session.',
+    permission: 'auto',
+    mutating: false,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        type: {
+          type: 'string',
+          description: 'Event type: bug.found | refactor.plan | critic.evaluation',
+        },
+        payload: {
+          type: 'object',
+          description: 'Event payload matching the event type.',
+        },
+      },
+      required: ['type', 'payload'],
+    },
+    async execute(input: unknown) {
+      const i = input as { type: string; payload: Record<string, unknown> };
+      director.fleet.emit({
+        subagentId: director.id,
+        ts: Date.now(),
+        type: i.type,
+        payload: i.payload,
+      });
+      return { ok: true, event: i.type };
     },
   };
 }

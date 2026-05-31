@@ -260,6 +260,8 @@ describe('Director orchestration', () => {
       'ask_subagent',
       'assign_task',
       'await_tasks',
+      'collab_debug',
+      'fleet_emit',
       'fleet_health',
       'fleet_session',
       'fleet_status',
@@ -550,7 +552,7 @@ describe('Director orchestration', () => {
     return { director: d, runner };
   }
 
-  it('director.tools() exposes ask_subagent + roll_up alongside the existing six', async () => {
+  it('director.tools() exposes all 12 tools including collab_debug and fleet_emit', async () => {
     const { director: d } = buildDirector();
     director = d;
     const tools = d.tools();
@@ -559,6 +561,8 @@ describe('Director orchestration', () => {
       'ask_subagent',
       'assign_task',
       'await_tasks',
+      'collab_debug',
+      'fleet_emit',
       'fleet_health',
       'fleet_session',
       'fleet_status',

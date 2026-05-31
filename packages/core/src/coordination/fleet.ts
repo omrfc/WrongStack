@@ -196,6 +196,48 @@ Working rules:
 };
 
 /**
+ * Critic Agent — evaluates code quality, architecture decisions, and
+ * refactoring plans against project conventions and engineering standards.
+ * Use for: real-time evaluation of bug reports, refactor plans, and
+ * architectural proposals during collaborative debugging sessions.
+ */
+export const CRITIC_AGENT: SubagentConfig = {
+  id: 'critic',
+  name: 'Critic',
+  role: 'critic',
+  prompt: `You are the Critic agent. Your job is to evaluate code quality,
+architectural decisions, and proposed changes against project conventions,
+engineering standards, and known quality gates. You do not write code —
+you judge it.
+
+Scope:
+- Evaluate bug severity and fix quality from Bug Hunter reports
+- Score refactoring plans from Refactor Planner (risk, completeness, trade-offs)
+- Flag gaps in test coverage, error handling, and edge case coverage
+- Assess whether a proposed change aligns with existing project patterns
+- Detect over-engineering or under-engineering relative to the problem scope
+
+Input format you accept:
+{ "task": "evaluate | score | review", "subject": "bug_report | refactor_plan | diff", "focus": "correctness | maintainability | risk | all" }
+
+Output: Markdown critic report:
+- ## Overall Score (0-10 with rationale)
+- ## Strengths (what's solid)
+- ## Weaknesses (what needs work)
+- ## Specific Concerns (with file:line when applicable)
+- ## Verdict: **Approve / Needs Revision / Reject**
+
+Working rules:
+- Be specific — "looks fine" is not a review. Cite concrete evidence.
+- When scoring, explain the delta from a perfect score.
+- If you have no basis to evaluate a concern, say so rather than speculating.
+- Prioritise correctness over style; correctness issues block approval.
+- Score thresholds: ≥7 = Approve, 4-6 = Needs Revision, <4 = Reject`,
+
+  // Budgets are set by the orchestrator per task — see fleet.ts header.
+};
+
+/**
  * All agents in a map for easy lookup by role. The four legacy pre-built
  * agents plus the phase 1-9 catalog (`ALL_AGENT_DEFINITIONS`). Catalog roles
  * are guaranteed collision-free by the catalog builder; none overlap the
@@ -206,6 +248,7 @@ export const FLEET_ROSTER: Record<string, SubagentConfig> = {
   'bug-hunter': BUG_HUNTER_AGENT,
   'refactor-planner': REFACTOR_PLANNER_AGENT,
   'security-scanner': SECURITY_SCANNER_AGENT,
+  'critic': CRITIC_AGENT,
   ...Object.fromEntries(
     ALL_AGENT_DEFINITIONS.map((d) => [d.config.role as string, d.config] as const),
   ),
@@ -239,6 +282,7 @@ export const FLEET_ROSTER_BUDGETS: Record<string, FleetRosterBudget> = {
   'bug-hunter': { timeoutMs: 10 * 60 * 60 * 1000, maxIterations: 8000, maxToolCalls: 20000 },
   'refactor-planner': { timeoutMs: 7.5 * 60 * 60 * 1000, maxIterations: 6000, maxToolCalls: 18000 },
   'security-scanner': { timeoutMs: 10 * 60 * 60 * 1000, maxIterations: 8000, maxToolCalls: 20000 },
+  'critic': { timeoutMs: 5 * 60 * 60 * 1000, maxIterations: 4000, maxToolCalls: 12000 },
   ...Object.fromEntries(
     ALL_AGENT_DEFINITIONS.map((d) => [d.config.role as string, d.budget] as const),
   ),

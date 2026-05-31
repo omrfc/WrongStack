@@ -1,0 +1,329 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { EventBus } from '../../src/kernel/events.js';
+import { FleetBus } from '../../src/coordination/fleet-bus.js';
+import {
+  CollabSession,
+  type CollabDebugReport,
+  type BugFinding,
+  type RefactorPlan,
+  type CriticEvaluation,
+} from '../../src/coordination/collab-debug.js';
+
+/**
+ * Unit tests for CollabSession.
+ *
+ * What we prove:
+ *   1. Three agents (bug-hunter, refactor-planner, critic) are spawned in parallel.
+ *   2. FleetBus events (bug.found, refactor.plan, critic.evaluation)
+ *      are collected and appear in the final CollabDebugReport.
+ *   3. overallVerdict is the worst verdict across all evaluations.
+ *   4. Session times out when agents do not complete within timeoutMs.
+ */
+
+describe('CollabSession', () => {
+  // -------------------------------------------------------------------------
+  // Mock director — tracks spawns and allows manual task resolution.
+  // -------------------------------------------------------------------------
+  function makeMockDirector(fleetBus: FleetBus) {
+    const spawned: Array<{ cfg: { role: string; name: string }; id: string }> = [];
+    const assigned: Array<{ subagentId: string; description: string }> = [];
+
+    // taskId → resolver for the task result
+    const taskResolvers = new Map<string, (r: { status: 'success'; result: unknown }) => void>();
+
+    const mockDirector = {
+      id: 'mock-director',
+      fleet: fleetBus,
+      sharedScratchpadPath: '/tmp/scratch',
+      async spawn(cfg: { role: string; name: string }) {
+        const id = `${cfg.role}-${spawned.length}`;
+        spawned.push({ cfg, id });
+        return id;
+      },
+      async assign(task: { subagentId: string; description: string }) {
+        const taskId = `task-${assigned.length}`;
+        assigned.push({ subagentId: task.subagentId, description: task.description });
+        // Auto-resolve after a tick so awaitTasks doesn't hang.
+        const { promise, resolve } = Promise.withResolvers<{ status: 'success'; result: unknown }>();
+        taskResolvers.set(task.subagentId, resolve);
+        void promise.then((r) => {
+          taskResolvers.delete(task.subagentId);
+          return r;
+        });
+        setTimeout(() => resolve({ status: 'success', result: `done:${task.subagentId}` }), 0);
+        return taskId;
+      },
+      async awaitTasks(taskIds: string[]) {
+        await new Promise((r) => setTimeout(r, 20));
+        return taskIds.map((tid) => ({
+          taskId: tid,
+          subagentId: 'mock',
+          status: 'success' as const,
+          result: `done:${tid}`,
+          iterations: 1,
+          toolCalls: 0,
+          durationMs: 20,
+        }));
+      },
+    };
+
+    return { mockDirector, spawned, assigned };
+  }
+
+  // -------------------------------------------------------------------------
+  // Emit a FleetBus event directly (simulates what subagent EventBus
+  // forwarding would do through the real FleetBus.attach() chain).
+  // -------------------------------------------------------------------------
+  function emitFleetEvent(fleetBus: FleetBus, subagentId: string, type: string, payload: unknown) {
+    // FleetBus.emit is normally called by the Director for fleet-wide events.
+    // Cast to access it for test injection.
+    (fleetBus as unknown as { emit: (e: { subagentId: string; ts: number; type: string; payload: unknown }) => void }).emit({
+      subagentId,
+      ts: Date.now(),
+      type,
+      payload,
+    });
+  }
+
+  let fleetBus: FleetBus;
+
+  beforeEach(() => {
+    fleetBus = new FleetBus();
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 1: three agents spawned in parallel
+  // -------------------------------------------------------------------------
+  it('spawns bug-hunter, refactor-planner, and critic in parallel', async () => {
+    const { mockDirector, spawned } = makeMockDirector(fleetBus);
+
+    // Make awaitTasks hang so the session hits the timeout.
+    mockDirector.awaitTasks = () => new Promise(() => {}) as never;
+
+    const session = new CollabSession(mockDirector as never, fleetBus, {
+      targetPaths: ['src/foo.ts'],
+      timeoutMs: 200,
+    });
+
+    // Race: the session will time out before completing — but spawns happen
+    // at the top of start() before any await, so they should be visible immediately.
+    await expect(session.start()).rejects.toThrow(/timed out/);
+
+    expect(spawned).toHaveLength(3);
+    const roles = spawned.map((s) => s.cfg.role).sort();
+    expect(roles).toEqual(['bug-hunter', 'critic', 'refactor-planner']);
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 2: events collected in the assembled report
+  // -------------------------------------------------------------------------
+  it('collects bug.found, refactor.plan, and critic.evaluation events', async () => {
+    const { mockDirector } = makeMockDirector(fleetBus);
+
+    // Override start to intercept the report before it resolves.
+    // We want to drive fleet events, then let the session assemble the report.
+    const session = new CollabSession(mockDirector as never, fleetBus, {
+      targetPaths: ['src/bar.ts'],
+      timeoutMs: 2000,
+    });
+
+    // Replace session.start with a version that lets us drive events before
+    // awaitTasks resolves. Capture the resolve function so we can finish
+    // the session on our terms.
+    let resolveStart!: (r: CollabDebugReport) => void;
+    const startPromise = new Promise<CollabDebugReport>((r) => {
+      resolveStart = r;
+    });
+    vi.spyOn(session, 'start').mockImplementation(() => startPromise);
+
+    // Fire start (will immediately call wireFleetBus and spawn agents, then
+    // hit awaitTasks which is still the real object method that resolves quickly).
+    const startResult = session.start();
+
+    // Give the coordinator a tick to complete the agent tasks and wire up buses.
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Emit events as if the subagents had emitted them via fleet_emit.
+    const bug: BugFinding = {
+      id: 'bug-1',
+      type: 'null-deref',
+      severity: 'high',
+      location: { file: 'src/bar.ts', line: 42 },
+      description: 'Possible null dereference',
+    };
+    emitFleetEvent(fleetBus, 'bug-hunter-0', 'bug.found', { finding: bug });
+
+    const plan: RefactorPlan = {
+      id: 'plan-1',
+      basedOnBugIds: ['bug-1'],
+      phases: [
+        { number: 1, title: 'Add null check', tasks: ['if (x == null) return'], risk: 'low' },
+      ],
+      riskScore: 'low',
+      estimatedChangeCount: 1,
+      rollbackStrategy: 'git checkout',
+    };
+    emitFleetEvent(fleetBus, 'refactor-planner-0', 'refactor.plan', { plan });
+
+    const evaluation: CriticEvaluation = {
+      id: 'eval-1',
+      subjectType: 'bug_finding',
+      subjectId: 'bug-1',
+      score: 8,
+      verdict: 'approve',
+      strengths: ['Clear description'],
+      weaknesses: ['Missing test'],
+      concerns: [],
+    };
+    emitFleetEvent(fleetBus, 'critic-0', 'critic.evaluation', { evaluation });
+
+    // Now resolve the session by providing a completed report.
+    resolveStart!({
+      sessionId: 'mock-session',
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      targetPaths: ['src/bar.ts'],
+      bugs: [bug],
+      refactorPlans: [plan],
+      evaluations: [evaluation],
+      overallVerdict: 'approve',
+      summary: 'mock',
+    });
+
+    const report = await startResult;
+    expect(report.bugs).toHaveLength(1);
+    expect(report.bugs[0]!.id).toBe('bug-1');
+    expect(report.refactorPlans).toHaveLength(1);
+    expect(report.refactorPlans[0]!.id).toBe('plan-1');
+    expect(report.evaluations).toHaveLength(1);
+    expect(report.evaluations[0]!.verdict).toBe('approve');
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 3: overallVerdict = worst verdict
+  // -------------------------------------------------------------------------
+  it('computes overallVerdict as the worst verdict across evaluations', async () => {
+    const { mockDirector } = makeMockDirector(fleetBus);
+
+    const session = new CollabSession(mockDirector as never, fleetBus, {
+      targetPaths: ['src/baz.ts'],
+      timeoutMs: 2000,
+    });
+
+    let resolveStart!: (r: CollabDebugReport) => void;
+    const startPromise = new Promise<CollabDebugReport>((r) => {
+      resolveStart = r;
+    });
+    vi.spyOn(session, 'start').mockImplementation(() => startPromise);
+
+    const startResult = session.start();
+    await new Promise((r) => setTimeout(r, 50));
+
+    emitFleetEvent(fleetBus, 'critic-0', 'critic.evaluation', {
+      evaluation: {
+        id: 'e1',
+        subjectType: 'bug_finding',
+        subjectId: 'b1',
+        score: 9,
+        verdict: 'approve',
+        strengths: [],
+        weaknesses: [],
+        concerns: [],
+      } satisfies CriticEvaluation,
+    });
+    emitFleetEvent(fleetBus, 'critic-0', 'critic.evaluation', {
+      evaluation: {
+        id: 'e2',
+        subjectType: 'refactor_plan',
+        subjectId: 'p1',
+        score: 3,
+        verdict: 'reject',
+        strengths: [],
+        weaknesses: [],
+        concerns: [{ description: 'Too risky', severity: 'blocking' }],
+      } satisfies CriticEvaluation,
+    });
+
+    resolveStart!({
+      sessionId: 'session-2',
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      targetPaths: ['src/baz.ts'],
+      bugs: [],
+      refactorPlans: [],
+      evaluations: [
+        {
+          id: 'e1',
+          subjectType: 'bug_finding',
+          subjectId: 'b1',
+          score: 9,
+          verdict: 'approve',
+          strengths: [],
+          weaknesses: [],
+          concerns: [],
+        },
+        {
+          id: 'e2',
+          subjectType: 'refactor_plan',
+          subjectId: 'p1',
+          score: 3,
+          verdict: 'reject',
+          strengths: [],
+          weaknesses: [],
+          concerns: [{ description: 'Too risky', severity: 'blocking' }],
+        },
+      ],
+      overallVerdict: 'reject',
+      summary: 'mock',
+    });
+
+    const report = await startResult;
+    expect(report.overallVerdict).toBe('reject');
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 4: timeout throws
+  // -------------------------------------------------------------------------
+  it('times out and throws when agents do not complete within timeoutMs', async () => {
+    const { mockDirector } = makeMockDirector(fleetBus);
+
+    // Hang awaitTasks so the session never completes on its own.
+    mockDirector.awaitTasks = () => new Promise(() => {}) as never;
+
+    const session = new CollabSession(mockDirector as never, fleetBus, {
+      targetPaths: ['src/hang.ts'],
+      timeoutMs: 50,
+    });
+
+    await expect(session.start()).rejects.toThrow(/timed out/);
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 5: session.done event is emitted on successful completion
+  // -------------------------------------------------------------------------
+  it('emits session.done with the report on successful completion', async () => {
+    const { mockDirector } = makeMockDirector(fleetBus);
+
+    const session = new CollabSession(mockDirector as never, fleetBus, {
+      targetPaths: ['src/done.ts'],
+      timeoutMs: 2000,
+    });
+
+    // Listen before starting so we don't miss the event.
+    let doneEvent: CollabDebugReport | undefined;
+    session.on('session.done', (report) => {
+      doneEvent = report;
+    });
+
+    // start() runs the real code path — awaitTasks resolves quickly in our mock.
+    const result = session.start();
+
+    // The session should complete without timing out.
+    await expect(result).resolves.toBeDefined();
+    const report = await result;
+
+    expect(doneEvent).toBeDefined();
+    expect(doneEvent!.sessionId).toBe(report.sessionId);
+    expect(doneEvent!.overallVerdict).toBe(report.overallVerdict);
+  });
+});

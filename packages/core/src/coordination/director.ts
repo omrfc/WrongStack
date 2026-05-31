@@ -24,10 +24,12 @@ import {
   rosterSummaryFromConfigs,
 } from './director-prompts.js';
 import { FleetBus, type FleetUsage, FleetUsageAggregator } from './fleet-bus.js';
-import type { FleetManager } from './fleet-manager.js';
+import { FleetManager } from './fleet-manager.js';
+import { assignNickname } from './subagent-nicknames.js';
 import { InMemoryBridgeTransport } from './in-memory-transport.js';
 import { DefaultMultiAgentCoordinator } from './multi-agent-coordinator.js';
-import { makeAskTool, makeAssignTool, makeAwaitTasksTool, makeFleetHealthTool, makeFleetSessionTool, makeFleetStatusTool, makeFleetUsageTool, makeRollUpTool, makeSpawnTool, makeTerminateTool } from './director-tools.js';
+import { makeAskTool, makeAssignTool, makeAwaitTasksTool, makeCollabDebugTool, makeFleetEmitTool, makeFleetHealthTool, makeFleetSessionTool, makeFleetStatusTool, makeFleetUsageTool, makeRollUpTool, makeSpawnTool, makeTerminateTool } from './director-tools.js';
+import { CollabSession, type CollabSessionOptions, type CollabDebugReport } from './collab-debug.js';
 
 /**
  * Director — high-level orchestrator that owns a `MultiAgentCoordinator`,
@@ -310,6 +312,8 @@ export class Director implements ICoordinator {
       taskIds: string[];
     }
   >();
+  /** Tracks assigned nicknames so the same name is never reused in one fleet. */
+  private readonly _usedNicknames = new Set<string>();
   private readonly manifestPath?: string;
   private readonly roster?: Record<string, SubagentConfig>;
   private readonly directorPreamble: string;
@@ -701,10 +705,30 @@ export class Director implements ICoordinator {
       }
     }
     let result: { subagentId: string };
+    // If the config came from the roster with the default "role-as-name" pattern,
+    // upgrade to a memorable nickname before the coordinator sees it. This ensures
+    // the manifest, fleet UI, and session logs all display human names like
+    // "Einstein (Bug Hunter)" instead of "bug-hunter".
+    const needsNickname = config.name === config.role || !config.name || config.name === 'subagent';
+    if (needsNickname) {
+      const role = config.role ?? 'subagent';
+      if (this.fleetManager) {
+        // FleetManager owns the used-nicknames set — ask it to assign + record atomically.
+        // assignNicknameAndRecord writes the nickname into config.name before recording.
+        this.fleetManager.assignNicknameAndRecord('', config, priceLookup);
+      } else {
+        config.name = assignNickname(role, this._usedNicknames);
+        this._usedNicknames.add(config.name.split(' ')[0]!.toLowerCase().replace(/[^a-z0-9-]/g, '-'));
+      }
+    }
     result = await this.coordinator.spawn(config);
     // Record with FleetManager when available; otherwise manage inline.
     if (this.fleetManager) {
-      this.fleetManager.recordSpawn(result.subagentId, config, priceLookup);
+      // When needsNickname was true, assignNicknameAndRecord already recorded the spawn.
+      // Otherwise we still need to record metadata here.
+      if (!needsNickname) {
+        this.fleetManager.recordSpawn(result.subagentId, config, priceLookup);
+      }
     } else {
       this.spawnCount += 1;
       this.subagentMeta.set(result.subagentId, {
@@ -1199,6 +1223,8 @@ export class Director implements ICoordinator {
       makeFleetUsageTool(this),
       makeFleetSessionTool(this),
       makeFleetHealthTool(this),
+      makeCollabDebugTool(this),
+      makeFleetEmitTool(this),
     ];
     return t;
   }
@@ -1210,6 +1236,18 @@ export class Director implements ICoordinator {
    */
   async acquireCheckpointLock(): Promise<boolean> {
     return this.stateCheckpoint ? this.stateCheckpoint.acquireLock() : true;
+  }
+
+  /**
+   * Start a collaborative debugging session: BugHunter, RefactorPlanner,
+   * and Critic run in parallel on the same target files, with findings
+   * flowing through the FleetBus (bug.found → refactor.plan →
+   * critic.evaluation). Returns a structured CollabDebugReport when all
+   * three agents complete or the session times out.
+   */
+  async spawnCollab(options: CollabSessionOptions): Promise<CollabDebugReport> {
+    const session = new CollabSession(this, this.fleet, options);
+    return session.start();
   }
 
   /**
