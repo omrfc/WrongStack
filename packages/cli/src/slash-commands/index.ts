@@ -40,6 +40,8 @@ export interface SlashCommandContext {
   metricsSink?: MetricsSink;
   healthRegistry?: HealthRegistry;
   modeStore?: ModeStore;
+  /** Input reader for interactive pickers (arrow key navigation etc.). */
+  inputReader?: import('@wrongstack/core').InputReader;
   onExit?: () => void;
   onBeforeExit?: () => Promise<{ abort?: boolean; message?: string } | void>;
   onClear?: () => void;

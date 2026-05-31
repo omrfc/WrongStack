@@ -129,7 +129,7 @@ export function FleetMonitor({
     }
   }
   events.sort((a, b) => b.at - a.at);
-  const timeline = events.slice(0, 8);
+  const timeline = events.slice(0, 20);
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>

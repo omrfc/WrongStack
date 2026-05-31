@@ -60,9 +60,11 @@ export function FleetPanel({ entries, totalCost, roster }: FleetPanelProps): Rea
         );
       })}
 
-      {/* Overflow indicator */}
+      {/* Overflow indicator — show count and the first overflowed agent name */}
       {overflow > 0 ? (
-        <Text dimColor>  +{overflow} more running</Text>
+        <Text dimColor>
+          {' '}+{overflow}: {running[3]?.name?.slice(0, 12) ?? 'agent'}…
+        </Text>
       ) : null}
     </Box>
   );

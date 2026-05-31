@@ -1065,8 +1065,8 @@ export function reducer(state: State, action: Action): State {
     case 'fleetDelta': {
       const cur = state.fleet[action.id];
       if (!cur) return state;
-      // Keep only the last ~200 chars for display
-      const appended = (cur.streamingText + action.text).slice(-200);
+      // Keep last 500 chars of streaming text for display (refactor plans are verbose)
+      const appended = (cur.streamingText + action.text).slice(-500);
       return {
         ...state,
         fleet: {

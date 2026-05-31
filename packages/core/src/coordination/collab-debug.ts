@@ -352,13 +352,14 @@ export class CollabSession extends EventEmitter {
   }
 
   private async spawnAgent(role: string, taskBrief: string): Promise<string> {
+    // fleet_emit is required so BugHunter/RefactorPlanner/Critic can emit events
+    // in real-time (bug.found / refactor.plan / critic.evaluation). Other agents
+    // use scratchpad JSON output as a fallback for parseAndEmit post-processing.
     const cfg: SubagentConfig = {
       id: `${role}-${this.sessionId}`,
       name: role,
       role,
-      // No fleet_emit tool — agents output structured JSON, the Director parses
-      // results and emits FleetBus events. This keeps the agent simple and the
-      // routing deterministic.
+      tools: ['fleet_emit', 'read', 'grep', 'glob', 'bash', 'write'],
     };
     const subagentId = await this.director.spawn(cfg);
     await this.director.assign({
@@ -370,7 +371,6 @@ export class CollabSession extends EventEmitter {
   }
 
   private buildBugHunterTask(): string {
-    const paths = this.options.targetPaths.join(', ');
     const scratchpad = this.director.sharedScratchpadPath ?? '/tmp';
     const fileContents = this.snapshot.files
       .map((f) => `=== ${f.path} ===\n${f.content}`)
@@ -378,46 +378,61 @@ export class CollabSession extends EventEmitter {
     return (
       `You are BugHunter. Scan the following files for bugs and code smells.\n\n` +
       `Target files:\n${fileContents}\n\n` +
-      `For each bug found, write ONE valid JSON line to the scratchpad with this exact structure:\n` +
-      `{ "finding": { "id": "<uuid>", "type": "<pattern>", "severity": "<critical|high|medium|low>", ` +
-      `"location": { "file": "<path>", "line": <n> }, "description": "<explain>", "suggestedFix": "<optional>" } }.\n` +
+      `For each bug found, emit it using the fleet_emit tool immediately — do NOT wait until the end:\n` +
+      `{ "type": "bug.found", "payload": { "finding": { "id": "<uuid>", "type": "<pattern>", ` +
+      `"severity": "<critical|high|medium|low>", ` +
+      `"location": { "file": "<path>", "line": <n> }, "description": "<explain>", "suggestedFix": "<optional>" } } }\n\n` +
       `After scanning all files, write your full markdown bug report to the shared scratchpad at:\n` +
-      `${scratchpad}/bug-hunter-report-${this.sessionId}.md`
+      `${scratchpad}/bug-hunter-report-${this.sessionId}.md\n\n` +
+      `Important: emit each finding as soon as you find it, using fleet_emit with type "bug.found". ` +
+      `Do not batch findings or wait for the scan to complete before emitting.`
     );
   }
 
   private buildRefactorPlannerTask(): string {
     const scratchpad = this.director.sharedScratchpadPath ?? '/tmp';
+    const bugHunterReportPath = `${scratchpad}/bug-hunter-report-${this.sessionId}.md`;
     const fileContents = this.snapshot.files
       .map((f) => `=== ${f.path} ===\n${f.content}`)
       .join('\n\n');
     return (
       `You are RefactorPlanner. Plan refactorings for the following files.\n\n` +
       `Target files:\n${fileContents}\n\n` +
-      `Listen for bug.found events from BugHunter on the fleet bus. ` +
-      `For each bug, create a refactor plan and write one JSON line per plan:\n` +
-      `{ "plan": { "id": "<uuid>", "basedOnBugIds": ["<bug-id>"], "phases": [...], "riskScore": "<low|medium|high>", ` +
-      `"estimatedChangeCount": <n>, "rollbackStrategy": "<text>" } }.\n` +
-      `After planning, write your full markdown plan to:\n` +
-      `${scratchpad}/refactor-plan-${this.sessionId}.md`
+      `Read the BugHunter report at: ${bugHunterReportPath}\n` +
+      `It contains bug findings with file:line locations. For each bug, create a refactor plan.\n\n` +
+      `For each bug you can address, emit a refactor plan using the fleet_emit tool:\n` +
+      `{ "type": "refactor.plan", "payload": { "plan": { "id": "<uuid>", "basedOnBugIds": ["<bug-id>"], ` +
+      `"phases": [{ "number": 1, "title": "<phase>", "tasks": ["<task>"], "risk": "<low|medium|high>" }], ` +
+      `"riskScore": "<low|medium|high>", "estimatedChangeCount": <n>, "rollbackStrategy": "<text>" } } }\n\n` +
+      `Also write your full markdown plan to:\n` +
+      `${scratchpad}/refactor-plan-${this.sessionId}.md\n\n` +
+      `Important: emit each plan immediately using fleet_emit with type "refactor.plan". ` +
+      `Do not wait until planning is complete before emitting.`
     );
   }
 
   private buildCriticTask(): string {
     const scratchpad = this.director.sharedScratchpadPath ?? '/tmp';
+    const bugHunterReportPath = `${scratchpad}/bug-hunter-report-${this.sessionId}.md`;
+    const refactorPlanPath = `${scratchpad}/refactor-plan-${this.sessionId}.md`;
     const fileContents = this.snapshot.files
       .map((f) => `=== ${f.path} ===\n${f.content}`)
       .join('\n\n');
     return (
-      `You are Critic. Evaluate bug findings and refactor plans as they arrive via fleet bus events.\n\n` +
+      `You are Critic. Evaluate bug findings and refactor plans from the BugHunter and RefactorPlanner reports.\n\n` +
       `Target files:\n${fileContents}\n\n` +
-      `Subscribe to bug.found events (from BugHunter) and refactor.plan events (from RefactorPlanner). ` +
-      `For each subject, write one JSON line per evaluation:\n` +
-      `{ "evaluation": { "id": "<uuid>", "subjectType": "<bug_finding|refactor_plan>", ` +
-      `"subjectId": "<id>", "score": <0-10>, "verdict": "<approve|needs_revision|reject>", ` +
-      `"strengths": [...], "weaknesses": [...], "concerns": [...] } }.\n` +
+      `Read the BugHunter report at: ${bugHunterReportPath}\n` +
+      `Read the RefactorPlanner report at: ${refactorPlanPath}\n\n` +
+      `For each bug and refactor plan, evaluate and emit your evaluation using fleet_emit:\n` +
+      `{ "type": "critic.evaluation", "payload": { "evaluation": { "id": "<uuid>", ` +
+      `"subjectType": "<bug_finding|refactor_plan>", "subjectId": "<id>", ` +
+      `"score": <0-10>, "verdict": "<approve|needs_revision|reject>", ` +
+      `"strengths": ["<strength>"], "weaknesses": ["<weakness>"], ` +
+      `"concerns": [{ "description": "<concern>", "severity": "<blocking|advisory>" }] } } }\n\n` +
       `After all evaluations, write your markdown critic report to:\n` +
-      `${scratchpad}/critic-report-${this.sessionId}.md`
+      `${scratchpad}/critic-report-${this.sessionId}.md\n\n` +
+      `Important: emit each evaluation immediately using fleet_emit with type "critic.evaluation". ` +
+      `Do not wait until you have read all reports before emitting.`
     );
   }
 
