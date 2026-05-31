@@ -1,12 +1,10 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 const MAX_FILES = parseInt(process.env.GUARD_MAX_FILES ?? '', 10) || 20;
 const FORCE_FLAG = process.argv.includes('--force');
 const VERBOSE = process.argv.includes('--verbose') || process.argv.includes('-v');
 const CORRUPTION_FRAGMENT = "{ type: 'worktreeMonitorToggle' }";
 const SCAN_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts', '.json', '.jsonc', '.md', '.yml', '.yaml', '.sh', '.ps1']);
-const SKIP_GLOBS = ['**/node_modules/**', '**/dist/**', '**/.git/**', '**/coverage/**', '**/*.min.js', 'pnpm-lock.yaml', 'package-lock.json', 'yarn.lock', 'scripts/guard-against-corruption.mjs'];
 function log(...args) { if (VERBOSE) console.error('[guard]', ...args); }
 function isScannable(filePath) {
   const base = filePath.split('/').pop() ?? filePath;
@@ -23,18 +21,29 @@ function getStagedFiles() {
     return out.trim().split('\n').filter(Boolean);
   } catch { return []; }
 }
-function getFileContent(filePath) {
-  try { return readFileSync(filePath, 'utf-8'); } catch { return ''; }
-}
+/**
+ * Scan only the staged DIFF (not the full file content) for the corruption
+ * pattern. Only added lines (+ prefix) are scanned to avoid false-positives
+ * from pre-existing code in modified files.
+ */
 function findCorruptionInStagedFiles(stagedFiles) {
   const findings = [];
   for (const file of stagedFiles) {
     if (!isScannable(file)) continue;
-    const content = getFileContent(file);
-    const lines = content.split('\n');
+    let diff;
+    try {
+      diff = execSync(`git diff --cached -- "${file}"`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+    } catch {
+      continue;
+    }
+    const lines = diff.split('\n');
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].includes(CORRUPTION_FRAGMENT)) {
-        findings.push({ file, line: i + 1, snippet: lines[i].slice(0, 120) });
+      const line = lines[i];
+      // Only scan added lines (+ prefix) to avoid false positives from context lines
+      if (line?.startsWith('+') && !line.startsWith('+++')) {
+        if (line.includes(CORRUPTION_FRAGMENT)) {
+          findings.push({ file, line: i + 1, snippet: line.slice(0, 120) });
+        }
       }
     }
   }
