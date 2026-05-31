@@ -31,10 +31,19 @@ export interface IFleetManager {
 
   /**
    * Called before a spawn is recorded. Returns a reason string if the
-   * spawn should be rejected (budget cap, depth limit, cost cap, etc.),
-   * or null to proceed. Director.spawn() calls this internally.
+   * spawn should be rejected (budget cap, depth limit, cost cap, context
+   * overload, etc.), or null to proceed. Director.spawn() calls this
+   * internally.
    */
-  canSpawn(config: SubagentConfig): { kind: 'max_spawns' | 'max_spawn_depth' | 'max_cost_usd'; limit: number; observed: number } | null;
+  canSpawn(config: SubagentConfig): { kind: 'max_spawns' | 'max_spawn_depth' | 'max_cost_usd' | 'max_context_load'; limit: number; observed: number } | null;
+
+  /**
+   * Update the leader agent's current context pressure (tokens used in the
+   * full API request: messages + systemPrompt + toolDefs). The fleet manager
+   * checks this before allowing a new spawn to prevent the leader from
+   * overflowing its context window while orchestrating subagents.
+   */
+  setLeaderContextPressure(tokens: number): void;
 
   /**
    * Assign a memorable nickname (e.g. "Einstein (Bug Hunter)"), mark it

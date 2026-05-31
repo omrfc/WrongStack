@@ -201,6 +201,21 @@ export interface DirectorOptions {
    * `makeLLMClassifier(complete)` from the dispatcher module.
    */
   dispatchClassifier?: import('../coordination/dispatcher.js').DispatchClassifier;
+  /**
+   * Maximum context load (as a fraction of maxContext) the leader agent
+   * is allowed to reach before a new spawn is rejected. Default: 0.85.
+   * When the leader's context pressure exceeds this threshold, spawning
+   * a new subagent is refused — the leader must compact first.
+   * Only used when no `fleetManager` is provided (inline mode).
+   * Set to 1.0 to disable this check.
+   */
+  maxLeaderContextLoad?: number;
+  /**
+   * Provider's max context window in tokens. Used with `maxLeaderContextLoad`
+   * to compute the absolute token threshold. Default: 128_000.
+   * Only used when no `fleetManager` is provided (inline mode).
+   */
+  maxContext?: number;
 }
 
 /**
@@ -247,6 +262,27 @@ export class FleetCostCapError extends Error {
   }
 }
 
+/**
+ * Thrown by `Director.spawn()` when the leader agent's context pressure
+ * exceeds the configured threshold. The leader must compact before a new
+ * subagent can be spawned — the context window is too full to safely
+ * orchestrate additional agents.
+ */
+export class FleetContextOverflowError extends Error {
+  readonly kind: 'max_context_load';
+  readonly limit: number;
+  readonly observed: number;
+  constructor(limit: number, observed: number) {
+    super(
+      `Leader context overflow: leader has ${observed} tokens in flight (limit: ${limit}). Compact the leader context before spawning more subagents.`,
+    );
+    this.name = 'FleetContextOverflowError';
+    this.kind = 'max_context_load';
+    this.limit = limit;
+    this.observed = observed;
+  }
+}
+
 export class Director implements ICoordinator {
   /** Alias for the ICoordinator contract. `id` is retained for backward compatibility. */
   get coordinatorId(): string { return this.id; }
@@ -261,6 +297,28 @@ export class Director implements ICoordinator {
    * injected; otherwise own FleetUsageAggregator.
    */
   readonly usage: FleetUsageAggregator;
+
+  /**
+   * Update the leader agent's current context pressure (full request tokens:
+   * messages + systemPrompt + toolDefs). The director checks this before every
+   * spawn — if the pressure exceeds `maxLeaderContextLoad * maxContext`,
+   * spawning is refused with a `FleetContextOverflowError`.
+   *
+   * Call this after each leader agent iteration to keep the pressure current.
+   * The compactor's `CompactReport.fullRequestTokensAfter` is a natural source.
+   */
+  setLeaderContextPressure(tokens: number): void {
+    this.leaderContextPressure = tokens;
+    // Mirror to FleetManager when available so the check is centralized.
+    this.fleetManager?.setLeaderContextPressure(tokens);
+  }
+
+  /**
+   * Read the leader agent's current context pressure.
+   */
+  getLeaderContextPressure(): number {
+    return this.leaderContextPressure;
+  }
   /**
    * Optional fleet-level policy container. When provided the Director
    * delegates spawn budgeting, manifest entries, and checkpointing to it
@@ -365,6 +423,12 @@ export class Director implements ICoordinator {
   private taskCompletedListener: ((payload: { task: TaskSpec; result: TaskResult }) => void) | null = null;
   /** Optional LLM classifier for smart dispatch. Passed from options. */
   readonly dispatchClassifier?: import('../coordination/dispatcher.js').DispatchClassifier;
+  /** Leader agent's current context pressure (full request tokens). */
+  private leaderContextPressure = 0;
+  /** Maximum context load fraction before spawn is refused. */
+  private readonly maxLeaderContextLoad: number;
+  /** Provider's max context window in tokens. */
+  private readonly maxContext: number;
 
   constructor(opts: DirectorOptions) {
     this.id = opts.config.coordinatorId || randomUUID();
@@ -381,6 +445,8 @@ export class Director implements ICoordinator {
     this.dispatchClassifier = opts.dispatchClassifier;
     this.maxFleetCostUsd = opts.directorBudget?.maxCostUsd ?? Number.POSITIVE_INFINITY;
     this.maxBudgetExtensions = opts.maxBudgetExtensions ?? 5;
+    this.maxLeaderContextLoad = opts.maxLeaderContextLoad ?? 0.85;
+    this.maxContext = opts.maxContext ?? 128_000;
     this.sessionsRoot = opts.sessionsRoot;
     this.directorRunId = opts.directorRunId ?? this.id;
     this.stateCheckpoint = opts.stateCheckpointPath
@@ -689,6 +755,7 @@ export class Director implements ICoordinator {
         if (rejection.kind === 'max_spawn_depth') throw new FleetSpawnBudgetError('max_spawn_depth', rejection.limit, rejection.observed);
         if (rejection.kind === 'max_spawns') throw new FleetSpawnBudgetError('max_spawns', rejection.limit, rejection.observed);
         if (rejection.kind === 'max_cost_usd') throw new FleetCostCapError(rejection.limit, rejection.observed);
+        if (rejection.kind === 'max_context_load') throw new FleetContextOverflowError(rejection.limit, rejection.observed);
       }
     } else {
       if (this.spawnDepth >= this.maxSpawnDepth) {
@@ -701,6 +768,14 @@ export class Director implements ICoordinator {
         const totalCost = this.usage.snapshot().total?.cost ?? 0;
         if (totalCost >= this.maxFleetCostUsd) {
           throw new FleetCostCapError(this.maxFleetCostUsd, totalCost);
+        }
+      }
+      // Context pressure check: reject spawn if leader context is too full.
+      // maxLeaderContextLoad === 1.0 disables this check.
+      if (this.maxLeaderContextLoad < 1.0) {
+        const threshold = this.maxContext * this.maxLeaderContextLoad;
+        if (this.leaderContextPressure >= threshold) {
+          throw new FleetContextOverflowError(threshold, this.leaderContextPressure);
         }
       }
     }

@@ -7,6 +7,7 @@ import {
   estimateTextTokens,
   estimateToolInputTokens,
   estimateToolResultTokens,
+  estimateRequestTokens,
 } from '../utils/token-estimate.js';
 import { repairToolUseAdjacency } from '../utils/message-invariants.js';
 
@@ -39,6 +40,7 @@ export class HybridCompactor implements Compactor {
 
   async compact(ctx: Context, opts: { aggressive?: boolean } = {}): Promise<CompactReport> {
     const beforeTokens = this.estimateMessages(ctx.messages);
+    const beforeFull = this.estimateFullRequest(ctx);
     const reductions: CompactReport['reductions'] = [];
     const policy = readContextWindowPolicy(ctx);
     const preserveK = policy?.preserveK ?? this.preserveK;
@@ -60,9 +62,12 @@ export class HybridCompactor implements Compactor {
     }
 
     const afterTokens = this.estimateMessages(ctx.messages);
+    const afterFull = this.estimateFullRequest(ctx);
     return {
       before: beforeTokens,
       after: afterTokens,
+      fullRequestTokensBefore: beforeFull,
+      fullRequestTokensAfter: afterFull,
       reductions,
       repaired: repaired.report.changed
         ? {
@@ -72,6 +77,15 @@ export class HybridCompactor implements Compactor {
           }
         : undefined,
     };
+  }
+
+  /**
+   * Estimate the full API request token count: messages + systemPrompt + toolDefs.
+   * This is the accurate figure for context-window pressure monitoring.
+   */
+  private estimateFullRequest(ctx: Context): number {
+    const breakdown = estimateRequestTokens(ctx.messages, ctx.systemPrompt, ctx.tools);
+    return breakdown.total;
   }
 
   private eliseOldToolResults(

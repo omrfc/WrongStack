@@ -24,6 +24,19 @@ export interface FleetManagerOptions {
   manifestDebounceMs?: number;
   checkpointDebounceMs?: number;
   directorBudget?: { maxCostUsd?: number };
+  /**
+   * Maximum context load (as a fraction of maxContext) the leader agent
+   * is allowed to reach before a new spawn is rejected. Default: 0.85.
+   * When the leader's context pressure exceeds this threshold, spawning
+   * a new subagent is refused — the leader must compact first.
+   * Set to 1.0 to disable this check.
+   */
+  maxLeaderContextLoad?: number;
+  /**
+   * Provider's max context window in tokens. Used with `maxLeaderContextLoad`
+   * to compute the absolute token threshold. Default: 128_000.
+   */
+  maxContext?: number;
 }
 
 /**
@@ -83,6 +96,12 @@ export class FleetManager implements IFleetManager {
   private readonly _usedNicknames = new Set<string>();
   /** The coordinator (wired via setCoordinator by Director after construction). */
   private coordinator: DefaultMultiAgentCoordinator | null = null;
+  /** Leader agent's current context pressure (full request tokens). */
+  private leaderContextPressure = 0;
+  /** Maximum context load fraction before spawn is refused. */
+  private readonly maxLeaderContextLoad: number;
+  /** Provider's max context window in tokens. */
+  private readonly maxContext: number;
 
   constructor(opts: FleetManagerOptions = {}) {
     this.manifestPath = opts.manifestPath;
@@ -94,6 +113,8 @@ export class FleetManager implements IFleetManager {
     this.sessionWriter = opts.sessionWriter ?? null;
     this.manifestDebounceMs = opts.manifestDebounceMs ?? 2000;
     this.maxFleetCostUsd = opts.directorBudget?.maxCostUsd ?? Number.POSITIVE_INFINITY;
+    this.maxLeaderContextLoad = opts.maxLeaderContextLoad ?? 0.85;
+    this.maxContext = opts.maxContext ?? 128_000;
     this.stateCheckpoint = opts.stateCheckpointPath
       ? new DirectorStateCheckpoint(
           opts.stateCheckpointPath,
@@ -156,7 +177,7 @@ export class FleetManager implements IFleetManager {
    * which cap was exceeded. Does NOT throw — the caller decides
    * how to surface the rejection.
    */
-  canSpawn(config: SubagentConfig): { kind: 'max_spawns' | 'max_spawn_depth' | 'max_cost_usd'; limit: number; observed: number } | null {
+  canSpawn(config: SubagentConfig): { kind: 'max_spawns' | 'max_spawn_depth' | 'max_cost_usd' | 'max_context_load'; limit: number; observed: number } | null {
     if (this.spawnDepth >= this.maxSpawnDepth) {
       return { kind: 'max_spawn_depth', limit: this.maxSpawnDepth, observed: this.spawnDepth };
     }
@@ -169,7 +190,23 @@ export class FleetManager implements IFleetManager {
         return { kind: 'max_cost_usd', limit: this.maxFleetCostUsd, observed: totalCost };
       }
     }
+    // Context pressure check: reject spawn if leader context is too full.
+    // maxLeaderContextLoad === 1.0 disables this check.
+    if (this.maxLeaderContextLoad < 1.0) {
+      const threshold = this.maxContext * this.maxLeaderContextLoad;
+      if (this.leaderContextPressure >= threshold) {
+        return {
+          kind: 'max_context_load',
+          limit: threshold,
+          observed: this.leaderContextPressure,
+        };
+      }
+    }
     return null;
+  }
+
+  setLeaderContextPressure(tokens: number): void {
+    this.leaderContextPressure = tokens;
   }
 
   /**

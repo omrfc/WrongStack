@@ -8,6 +8,7 @@ import {
   estimateTextTokens,
   estimateToolInputTokens,
   estimateToolResultTokens,
+  estimateRequestTokens,
 } from '../utils/token-estimate.js';
 import { repairToolUseAdjacency } from '../utils/message-invariants.js';
 
@@ -87,9 +88,11 @@ export class IntelligentCompactor implements Compactor {
 
   async compact(ctx: Context, opts: { aggressive?: boolean } = {}): Promise<CompactReport> {
     const beforeTokens = this.estimateTokens(ctx.messages);
+    const beforeFull = this.estimateFullRequest(ctx);
     const reductions: CompactReport['reductions'] = [];
 
-    const load = beforeTokens / this.maxContext;
+    // Use full request tokens for threshold decisions — messages alone are inaccurate.
+    const load = beforeFull / this.maxContext;
     // Past hardThreshold, force aggressive regardless of caller preference —
     // the alternative (lightweight elision) is unlikely to recover enough.
     const aggressive =
@@ -113,9 +116,12 @@ export class IntelligentCompactor implements Compactor {
     if (repaired.report.changed) ctx.state.replaceMessages(repaired.messages);
 
     const afterTokens = this.estimateTokens(ctx.messages);
+    const afterFull = this.estimateFullRequest(ctx);
     return {
       before: beforeTokens,
       after: afterTokens,
+      fullRequestTokensBefore: beforeFull,
+      fullRequestTokensAfter: afterFull,
       reductions,
       repaired: repaired.report.changed
         ? {
@@ -125,6 +131,15 @@ export class IntelligentCompactor implements Compactor {
           }
         : undefined,
     };
+  }
+
+  /**
+   * Estimate the full API request token count: messages + systemPrompt + toolDefs.
+   * This is the accurate figure for context-window pressure monitoring.
+   */
+  private estimateFullRequest(ctx: Context): number {
+    const breakdown = estimateRequestTokens(ctx.messages, ctx.systemPrompt, ctx.tools);
+    return breakdown.total;
   }
 
   private async summarizeAncientTurns(ctx: Context): Promise<number> {
@@ -143,33 +158,35 @@ export class IntelligentCompactor implements Compactor {
     try {
       summaryText = await this.callSummarizer(toSummarize, ctx);
     } catch {
-      // Fallback: extract lightweight metadata from the omitted messages so
-      // the context at least retains structural information even when the
-      // LLM summarizer is unavailable (network outage, model down, etc.).
-      const toolNames = new Set<string>();
-      const filePaths = new Set<string>();
-      let userTurns = 0;
-      let assistantTurns = 0;
+      // Fallback: preserve user/assistant text content while eliding tool results.
+      // This keeps semantic information (instructions, decisions, conclusions)
+      // without the token overhead of large tool outputs. Unlike the LLM summarizer,
+      // this rule-based approach cannot fail and preserves factual content.
+      const preservedMessages: Message[] = [];
       for (const m of toSummarize) {
-        if (m.role === 'user') userTurns++;
-        else if (m.role === 'assistant') {
-          assistantTurns++;
-          if (Array.isArray(m.content)) {
-            for (const b of m.content) {
-              if (b.type === 'tool_use') toolNames.add((b as { name: string }).name ?? 'unknown');
-            }
-          }
+        if (m.role === 'system') continue; // skip existing summaries
+        if (typeof m.content === 'string') {
+          preservedMessages.push(m);
+        } else if (Array.isArray(m.content)) {
+          const textParts = m.content.filter(isTextBlock);
+          const toolParts = m.content.filter((b) => b.type === 'tool_use' || b.type === 'tool_result');
+          // Keep text content; replace tool calls with a lightweight marker.
+          const next: Message = {
+            role: m.role,
+            content: [
+              ...textParts,
+              ...(toolParts.length > 0
+                ? [{ type: 'text' as const, text: `[${toolParts.length} tool call(s) omitted]` }]
+ : []),
+            ],
+          };
+          preservedMessages.push(next);
         }
-        // Scan for file paths
-        const text = typeof m.content === 'string' ? m.content : '';
-        const matches = text.matchAll(/(?:[\w.,\-/@]+\/)*[\w.,\-/@]+\.\w+/g);
-        for (const m_ of matches) filePaths.add(m_[0]!);
       }
-      const parts: string[] = [`${toSummarize.length} turns (${userTurns} user, ${assistantTurns} assistant)`];
-      if (toolNames.size > 0) parts.push(`tools: ${[...toolNames].join(', ')}`);
-      if (filePaths.size > 0) parts.push(`files: ${[...filePaths].slice(0, 10).join(', ')}`);
-      summaryText = parts.join(' | ');
-      if (!summaryText) summaryText = `${toSummarize.length} earlier turns omitted`;
+      summaryText = preservedMessages
+        .map((m) => `[${m.role}]: ${typeof m.content === 'string' ? m.content : m.content.filter(isTextBlock).map((b) => b.text).join(' ')}`)
+        .join('\n');
+      if (!summaryText) summaryText = `${toSummarize.length} earlier turns (semantic content preserved)`;
     }
 
     const summaryMsg: Message = {

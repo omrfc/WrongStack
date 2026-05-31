@@ -128,17 +128,7 @@ export class SubagentBudget {
   private startTime: number | null = null;
   private _onThreshold: BudgetThresholdHandler | undefined;
   /**
-   * Tracks which budget kinds currently have an extension request
-   * in flight. While a kind is here, further `checkLimit` calls for the
-   * same kind are no-ops — without this dedup, every `recordIteration`
-   * after the limit is reached spawns a fresh decision Promise (until
-   * the first one lands and patches limits), flooding the FleetBus
-   * with redundant threshold events. Cleared in `negotiateExtension`'s
-   * `finally`.
-   */
-  private readonly pendingExtensions: Set<BudgetKind> = new Set();
-  /**
-   * Hard cap on how long `negotiateExtension` waits for the coordinator to
+   * Hard cap on how long `_negotiateExtension` waits for the coordinator to
    * respond before defaulting to 'stop'. Without this fallback an absent
    * or hung listener (Director not built / event filter detached mid-run)
    * leaves the budget over-limit and never enforces anything.
@@ -213,49 +203,92 @@ export class SubagentBudget {
    * - `mode === 'auto'` + no listener  → throw `BudgetExceededError` (hard stop; no one to ask)
    * - `mode === 'auto'` + listener     → throw `BudgetThresholdSignal` with async decision promise
    */
-  private checkLimit(kind: BudgetKind, used: number, limit: number): void {
+  /**
+   * Collects all exceeded budget kinds into a single NOOP-free negotiation.
+   * Called by recordIteration / recordToolCall / recordUsage — each may call
+   * this for its own kind. The first call starts the negotiation and stores
+   * the Promise in _pendingNegotiation. Subsequent calls for DIFFERENT
+   * kinds (while a negotiation is in flight) are NOOPs — they don't start
+   * new conversations with the coordinator. This prevents an EventBus flood
+   * when multiple budget kinds are exceeded simultaneously in one iteration.
+   *
+   * Returns the kinds that were found to be exceeded (for logging/debugging).
+   */
+  private checkLimits(): { kind: BudgetKind; used: number; limit: number }[] {
+    const exceeded: { kind: BudgetKind; used: number; limit: number }[] = [];
+
+    if (this.limits.maxIterations !== undefined && this.iterations > this.limits.maxIterations) {
+      exceeded.push({ kind: 'iterations', used: this.iterations, limit: this.limits.maxIterations });
+    }
+    if (this.limits.maxToolCalls !== undefined && this.toolCalls > this.limits.maxToolCalls) {
+      exceeded.push({ kind: 'tool_calls', used: this.toolCalls, limit: this.limits.maxToolCalls });
+    }
+    const totalTokens = this.tokenInput + this.tokenOutput;
+    if (this.limits.maxTokens !== undefined && totalTokens > this.limits.maxTokens) {
+      exceeded.push({ kind: 'tokens', used: totalTokens, limit: this.limits.maxTokens });
+    }
+    if (this.limits.maxCostUsd !== undefined && this.costUsd > this.limits.maxCostUsd) {
+      exceeded.push({ kind: 'cost', used: this.costUsd, limit: this.limits.maxCostUsd });
+    }
+
+    if (exceeded.length === 0) return [];
+
     if (!this._onThreshold) {
-      throw new BudgetExceededError(kind, limit, used);
+      // Hard stop — throw on the first exceeded kind.
+      const first = exceeded[0]!;
+      throw new BudgetExceededError(first.kind, first.limit, first.used);
     }
     if (this._mode === 'sync') {
-      throw new BudgetExceededError(kind, limit, used);
+      // Hard stop in sync mode.
+      const first = exceeded[0]!;
+      throw new BudgetExceededError(first.kind, first.limit, first.used);
     }
-    // 'auto' mode: only negotiate when a listener is present for the threshold event.
-    // hasListenerFor (not listenerCount) so a FleetBus `onPattern('*')` forwarder counts.
     const bus = this._events;
     if (!bus || !bus.hasListenerFor('budget.threshold_reached')) {
-      throw new BudgetExceededError(kind, limit, used);
+      const first = exceeded[0]!;
+      throw new BudgetExceededError(first.kind, first.limit, first.used);
     }
-    if (this.pendingExtensions.has(kind)) return;
-    this.pendingExtensions.add(kind);
-    const decision = this.negotiateExtension(kind, used, limit);
-    throw new BudgetThresholdSignal(kind, limit, used, decision);
+
+    // A negotiation is already in flight — don't start another.
+    // The existing conversation with the coordinator will handle ALL exceeded
+    // kinds when it resolves. Subsequent checkLimits() calls are NOOPs.
+    if (this._pendingNegotiation) return [];
+
+    // Start exactly ONE negotiation for all exceeded kinds.
+    const decision = this._negotiateExtension(exceeded);
+    this._pendingNegotiation = decision;
+    const first = exceeded[0]!;
+    throw new BudgetThresholdSignal(first.kind, first.limit, first.used, decision);
   }
+
+  /**
+   * Single in-flight negotiation Promise. Guards against concurrent
+   * negotiations for different budget kinds. Cleared in `_negotiateExtension`'s
+   * `finally` block.
+   */
+  private _pendingNegotiation: Promise<BudgetThresholdDecision> | null = null;
 
   /**
    * Drive the threshold handler to a decision. Resolves with `'stop'`
    * (signal the runner to abort) or `{ extend: ... }` (limits already
-   * patched in-place; the runner should not abort). Always releases the
-   * `pendingExtensions` slot in `finally`.
+   * patched in-place; the runner should not abort). Clears the
+   * `_pendingNegotiation` slot in `finally`.
    *
    * The 'continue' return from a sync handler is treated as
    * `{ extend: {} }` — keep going without patching; next overrun fires
    * a fresh signal.
    */
-  private async negotiateExtension(
-    kind: BudgetKind,
-    used: number,
-    limit: number,
+  private async _negotiateExtension(
+    exceeded: { kind: BudgetKind; used: number; limit: number }[],
   ): Promise<BudgetThresholdDecision> {
     try {
+      // Use the first exceeded kind for the handler call.
+      const first = exceeded[0]!;
       const result = this._onThreshold!({
-        kind,
-        used,
-        limit,
+        kind: first.kind,
+        used: first.used,
+        limit: first.limit,
         requestDecision: (): Promise<BudgetThresholdDecision> => {
-          // No EventBus wired OR no listener registered → nobody to grant
-          // an extension. Fall straight through to 'stop' so the runner
-          // aborts immediately rather than idling for 60s before failing.
           const bus = this._events;
           if (!bus || !bus.hasListenerFor('budget.threshold_reached')) {
             return Promise.resolve('stop');
@@ -271,20 +304,23 @@ export class SubagentBudget {
               () => respond('stop'),
               SubagentBudget.DECISION_TIMEOUT_MS,
             );
-            bus.emit('budget.threshold_reached', {
-              kind: kind as 'iterations' | 'tool_calls' | 'tokens' | 'cost' | 'timeout',
-              used,
-              limit,
-              timeoutMs: SubagentBudget.DECISION_TIMEOUT_MS,
-              extend: (extra: Partial<BudgetLimits>) => {
-                clearTimeout(fallback);
-                respond({ extend: extra });
-              },
-              deny: () => {
-                clearTimeout(fallback);
-                respond('stop');
-              },
-            });
+            // Emit one event per exceeded kind so the FleetBus routes them.
+            for (const { kind, used, limit } of exceeded) {
+              bus.emit('budget.threshold_reached', {
+                kind: kind as 'iterations' | 'tool_calls' | 'tokens' | 'cost' | 'timeout',
+                used,
+                limit,
+                timeoutMs: SubagentBudget.DECISION_TIMEOUT_MS,
+                extend: (extra: Partial<BudgetLimits>) => {
+                  clearTimeout(fallback);
+                  respond({ extend: extra });
+                },
+                deny: () => {
+                  clearTimeout(fallback);
+                  respond('stop');
+                },
+              });
+            }
           });
         },
       });
@@ -315,41 +351,30 @@ export class SubagentBudget {
       }
       return decision;
     } finally {
-      this.pendingExtensions.delete(kind);
+      this._pendingNegotiation = null;
     }
   }
 
   recordIteration(): void {
     this.iterations++;
-    if (this.limits.maxIterations !== undefined && this.iterations > this.limits.maxIterations) {
-      void this.checkLimit('iterations', this.iterations, this.limits.maxIterations);
-    }
+    void this.checkLimits();
   }
 
   recordToolCall(): void {
     this.toolCalls++;
-    if (this.limits.maxToolCalls !== undefined && this.toolCalls > this.limits.maxToolCalls) {
-      void this.checkLimit('tool_calls', this.toolCalls, this.limits.maxToolCalls);
-    }
+    void this.checkLimits();
   }
 
   recordUsage(usage: Usage, costUsd = 0): void {
     this.tokenInput += usage.input;
     this.tokenOutput += usage.output;
     this.costUsd += costUsd;
-
-    const totalTokens = this.tokenInput + this.tokenOutput;
-    if (this.limits.maxTokens !== undefined && totalTokens > this.limits.maxTokens) {
-      void this.checkLimit('tokens', totalTokens, this.limits.maxTokens);
-    }
-    if (this.limits.maxCostUsd !== undefined && this.costUsd > this.limits.maxCostUsd) {
-      void this.checkLimit('cost', this.costUsd, this.limits.maxCostUsd);
-    }
+    void this.checkLimits();
   }
 
   /**
    * Wall-clock budget check. Unlike other limits, timeout check passes through
-   * `checkLimit` and is subject to the same negotiation-mode decision table.
+   * `checkLimits` and is subject to the same negotiation-mode decision table.
    * In practice, `'sync'` mode (the usual test configuration) means a timeout
    * immediately throws `BudgetExceededError`. In production with a coordinator,
    * a timeout emits `budget.threshold_reached` so the Director can decide whether
@@ -359,7 +384,7 @@ export class SubagentBudget {
     if (this.startTime === null || this.limits.timeoutMs === undefined) return;
     const elapsed = Date.now() - this.startTime;
     if (elapsed > this.limits.timeoutMs) {
-      void this.checkLimit('timeout', elapsed, this.limits.timeoutMs);
+      void this.checkLimits();
     }
   }
 

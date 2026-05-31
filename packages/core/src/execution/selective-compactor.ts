@@ -6,6 +6,7 @@ import type { CompactReport, Compactor } from '../types/compactor.js';
 import type { Message } from '../types/messages.js';
 import type { Provider, Request } from '../types/provider.js';
 import type { MessageSelector, SelectorResult } from '../types/selector.js';
+import { estimateRequestTokens } from '../utils/token-estimate.js';
 import { repairToolUseAdjacency } from '../utils/message-invariants.js';
 
 /**
@@ -75,9 +76,11 @@ export class SelectiveCompactor implements Compactor {
 
   async compact(ctx: Context, opts: { aggressive?: boolean } = {}): Promise<CompactReport> {
     const beforeTokens = this.estimateTokens(ctx.messages);
+    const beforeFull = this.estimateFullRequest(ctx);
     const reductions: CompactReport['reductions'] = [];
 
-    const load = beforeTokens / this.maxContext;
+    // Use full request tokens for threshold decisions — messages alone are inaccurate.
+    const load = beforeFull / this.maxContext;
     const shouldCompact = load >= this.warnThreshold || opts.aggressive;
 
     if (!shouldCompact) {
@@ -86,7 +89,15 @@ export class SelectiveCompactor implements Compactor {
       if (saved > 0) reductions.push({ phase: 'elision', saved });
       const repair = this.repairProtocolAdjacency(ctx);
       const afterTokens = this.estimateTokens(ctx.messages);
-      return { before: beforeTokens, after: afterTokens, reductions, repaired: repair };
+      const afterFull = this.estimateFullRequest(ctx);
+      return {
+        before: beforeTokens,
+        after: afterTokens,
+        fullRequestTokensBefore: beforeFull,
+        fullRequestTokensAfter: afterFull,
+        reductions,
+        repaired: repair,
+      };
     }
 
     // Phase 1: elision — always run first to get a baseline reduction
@@ -104,7 +115,24 @@ export class SelectiveCompactor implements Compactor {
 
     const repair = this.repairProtocolAdjacency(ctx);
     const afterTokens = this.estimateTokens(ctx.messages);
-    return { before: beforeTokens, after: afterTokens, reductions, repaired: repair };
+    const afterFull = this.estimateFullRequest(ctx);
+    return {
+      before: beforeTokens,
+      after: afterTokens,
+      fullRequestTokensBefore: beforeFull,
+      fullRequestTokensAfter: afterFull,
+      reductions,
+      repaired: repair,
+    };
+  }
+
+  /**
+   * Estimate the full API request token count: messages + systemPrompt + toolDefs.
+   * This is the accurate figure for context-window pressure monitoring.
+   */
+  private estimateFullRequest(ctx: Context): number {
+    const breakdown = estimateRequestTokens(ctx.messages, ctx.systemPrompt, ctx.tools);
+    return breakdown.total;
   }
 
   private repairProtocolAdjacency(ctx: Context): CompactReport['repaired'] {

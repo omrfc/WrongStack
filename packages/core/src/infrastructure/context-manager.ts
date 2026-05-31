@@ -73,6 +73,28 @@ export interface ContextManagerToolOptions {
    * (signature matches Provider.complete — return the summary text in result.content[0].text)
    */
   summarizer?: (messages: Message[]) => Promise<string>;
+  /**
+   * Minimum full-request token count before the compact action is allowed to run.
+   * Prevents unnecessary compaction calls when context is small.
+   * Default: 0 (always allow). Set to ~5000 for meaningful compaction targets.
+   */
+  minCompactThreshold?: number;
+  /**
+   * Minimum token growth required before retrying after a NOOP compaction.
+   * A NOOP is when compaction saved nothing (preserveK protects everything,
+   * no oversized tool_results). Default: 2000.
+   */
+  noopRetryDeltaTokens?: number;
+  /**
+   * Provider's max context window in tokens. Used to compute a relative
+   * threshold when `minCompactThreshold` is not set. Default: 128_000.
+   */
+  maxContext?: number;
+  /**
+   * Fraction of maxContext that triggers compaction. Only used when
+   * `minCompactThreshold` is not set. Default: 0.5 (50% of maxContext).
+   */
+  compactThresholdFraction?: number;
 }
 
 function roughEstimate(messages: Message[]): number {
@@ -95,6 +117,17 @@ function roughEstimate(messages: Message[]): number {
 export function createContextManagerTool(
   opts: ContextManagerToolOptions = {},
 ): Tool<ContextManagerInput, ContextManagerResult> {
+  const minCompactThreshold = opts.minCompactThreshold ?? 0;
+  const noopRetryDeltaTokens = opts.noopRetryDeltaTokens ?? 2_000;
+  const maxContext = opts.maxContext ?? 128_000;
+  const compactThresholdFraction = opts.compactThresholdFraction ?? 0.5;
+  const effectiveThreshold = minCompactThreshold > 0
+    ? minCompactThreshold
+    : Math.floor(maxContext * compactThresholdFraction);
+
+  // Tracks the most recent NOOP attempt so we can skip retry until context grows.
+  let lastNoopTokens = 0;
+
   return {
     name: CONTEXT_MANAGER_TOOL_NAME,
     description:
@@ -211,11 +244,53 @@ export function createContextManagerTool(
               notes: 'No compactor registered. Use /compact aggressive via slash command instead.',
             };
           }
+          // Compute full request tokens for threshold check.
+          const fullEstimate = (input.systemPrompt != null && Array.isArray(input.tools))
+            ? estimateRequestTokens(messages, input.systemPrompt, input.tools)
+            : { total: beforeTokens, messages: beforeTokens, systemPrompt: 0, tools: 0 };
+          const currentTokens = fullEstimate.total;
+
+          // NOOP retry prevention: skip if the previous compaction saved nothing
+          // and context hasn't grown enough to make another attempt worthwhile.
+          if (lastNoopTokens > 0) {
+            const delta = currentTokens - lastNoopTokens;
+            if (delta < noopRetryDeltaTokens) {
+              return {
+                action: 'compact',
+                beforeTokens,
+                afterTokens: beforeTokens,
+                messageCount: messages.length,
+                notes: `Compact is a NOOP retry: context grew only ${delta} tokens since the last no-op attempt (threshold: ${noopRetryDeltaTokens}). Skip until more content accumulates.`,
+              };
+            }
+          }
+
+          // Minimum threshold check: skip if context is too small to benefit.
+          if (currentTokens < effectiveThreshold) {
+            return {
+              action: 'compact',
+              beforeTokens,
+              afterTokens: beforeTokens,
+              messageCount: messages.length,
+              notes: `Context tokens (${currentTokens}) below compact threshold (${effectiveThreshold}). Skipping.`,
+            };
+          }
+
           const report = await opts.compactor.compact(ctx);
           ctx.clearFileTracking();
           const repair = applyMessages([...ctx.messages]);
           const afterTokens = repair.changed ? roughEstimate(ctx.messages) : report.after;
           const repaired = report.repaired ?? (repair.changed ? repair : undefined);
+
+          // Record NOOP state: did compaction actually reduce tokens?
+          const reduced = report.fullRequestTokensBefore > report.fullRequestTokensAfter;
+          const repairedSomething = !!report.repaired;
+          if (reduced || repairedSomething) {
+            lastNoopTokens = 0;
+          } else {
+            lastNoopTokens = currentTokens;
+          }
+
           return {
             action: 'compact',
             beforeTokens,

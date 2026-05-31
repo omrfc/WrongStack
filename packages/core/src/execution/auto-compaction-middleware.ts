@@ -4,6 +4,7 @@ import type { MiddlewareHandler } from '../kernel/pipeline.js';
 import type { CompactReport, Compactor } from '../types/compactor.js';
 import type { ContextWindowAggressiveOn, ContextWindowPolicy } from '../types/context-window.js';
 import { AgentError, ERROR_CODES } from '../types/errors.js';
+import { estimateRequestTokens } from '../utils/token-estimate.js';
 
 type PressureLevel = 'warn' | 'soft' | 'hard';
 const LEVEL_RANK: Record<PressureLevel, number> = { warn: 0, soft: 1, hard: 2 };
@@ -24,12 +25,15 @@ export interface AutoCompactionOptions {
  * Pipeline middleware that monitors context token load and automatically
  * triggers compaction when the warn/soft/hard thresholds are crossed.
  * Runs before the next agent iteration.
+ *
+ * Uses `estimateRequestTokens` for accurate full-request token counting:
+ * messages + systemPrompt + toolDefs. This replaces the previous pattern
+ * of applying an OVERHEAD_FACTOR to a messages-only estimate.
  */
 export class AutoCompactionMiddleware {
   readonly name = 'AutoCompaction';
 
   private readonly compactor: Compactor;
-  private readonly estimator: (ctx: Context) => number;
   private readonly warnThreshold: number;
   private readonly softThreshold: number;
   private readonly hardThreshold: number;
@@ -39,20 +43,6 @@ export class AutoCompactionMiddleware {
   private readonly events?: EventBus;
   private readonly failureMode: CompactionFailureMode;
   private readonly policyProvider?: AutoCompactionOptions['policyProvider'];
-
-  /**
-   * Calibration factor applied to the estimator output. The estimator is now
-   * expected to already include messages + system prompt + tool definitions
-   * (see `estimateRequestTokens.total`), so no overhead boost is needed. Kept
-   * as a constant so a future calibration against real provider tokenization
-   * (BPE vs the chars/3.5 rough estimator) can dial this without touching the
-   * threshold-check math.
-   *
-   * Historical note: was 1.3 when the estimator only counted messages — that
-   * double-counted system+tools once the estimator was upgraded, firing
-   * compaction ~30% earlier than intended (e.g. real 56% load showed as 73%).
-   */
-  private static readonly OVERHEAD_FACTOR = 1.0;
 
   /**
    * Once a compaction attempt reduces nothing (preserveK protects everything,
@@ -68,8 +58,11 @@ export class AutoCompactionMiddleware {
 
   /**
    * @param compactor        Compactor to use for compaction.
-   * @param maxContext       Provider's max context window in tokens.
-   * @param estimator        Token estimation function.
+   * @param maxContext Provider's max context window in tokens.
+   * @param _estimator       Deprecated parameter kept for backward compatibility.
+   *                         The middleware now uses `estimateRequestTokens` internally
+   *                         for accurate full-request token counting (messages +
+   *                         systemPrompt + toolDefs).
    * @param thresholds       Threshold fractions (0-1) of maxContext.
    * @param opts             Optional behavior. By default, failures at the
    *                         hard threshold throw AGENT_CONTEXT_OVERFLOW so
@@ -80,7 +73,7 @@ export class AutoCompactionMiddleware {
   constructor(
     compactor: Compactor,
     maxContext: number,
-    estimator: (ctx: Context) => number,
+    _estimator: (ctx: Context) => number,
     thresholds: { warn: number; soft: number; hard: number },
     optsOrAggressiveOn: AutoCompactionOptions | ContextWindowAggressiveOn = {},
     events?: EventBus,
@@ -91,7 +84,6 @@ export class AutoCompactionMiddleware {
         : optsOrAggressiveOn;
     this.compactor = compactor;
     this._maxContext = maxContext;
-    this.estimator = estimator;
     this.warnThreshold = thresholds.warn;
     this.softThreshold = thresholds.soft;
     this.hardThreshold = thresholds.hard;
@@ -109,8 +101,10 @@ export class AutoCompactionMiddleware {
 
   handler(): MiddlewareHandler<Context> {
     return async (ctx, next) => {
-      const rawTokens = this.estimator(ctx);
-      const tokens = Math.ceil(rawTokens * AutoCompactionMiddleware.OVERHEAD_FACTOR);
+      // Use estimateRequestTokens for accurate full-request token counting:
+      // messages + systemPrompt + toolDefs. This replaces the previous pattern
+      // of applying an OVERHEAD_FACTOR to a messages-only estimate.
+      const { total: tokens } = estimateRequestTokens(ctx.messages, ctx.systemPrompt, ctx.tools);
       const load = tokens / this._maxContext;
       const policy = this.policyProvider?.(ctx);
       const thresholds = policy?.thresholds ?? {
@@ -168,7 +162,7 @@ export class AutoCompactionMiddleware {
   }
 
   private recordAttempt(level: PressureLevel, tokens: number, report: CompactReport): void {
-    const reduced = report.before > report.after;
+    const reduced = report.fullRequestTokensBefore > report.fullRequestTokensAfter;
     const repaired = !!report.repaired;
     if (reduced || repaired) {
       this.lastNoopAttempt = null;
