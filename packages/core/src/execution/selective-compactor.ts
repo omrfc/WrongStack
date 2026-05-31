@@ -131,7 +131,7 @@ export class SelectiveCompactor implements Compactor {
    * This is the accurate figure for context-window pressure monitoring.
    */
   private estimateFullRequest(ctx: Context): number {
-    const breakdown = estimateRequestTokens(ctx.messages, ctx.systemPrompt, ctx.tools);
+    const breakdown = estimateRequestTokens(ctx.messages, ctx.systemPrompt, ctx.tools ?? []);
     return breakdown.total;
   }
 

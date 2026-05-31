@@ -34,6 +34,8 @@ export class AutoCompactionMiddleware {
   readonly name = 'AutoCompaction';
 
   private readonly compactor: Compactor;
+  /** Deprecated. Kept for backward compat with tests that pass simpleEstimator. */
+  private readonly _estimator?: (ctx: Context) => number;
   private readonly warnThreshold: number;
   private readonly softThreshold: number;
   private readonly hardThreshold: number;
@@ -84,6 +86,7 @@ export class AutoCompactionMiddleware {
         : optsOrAggressiveOn;
     this.compactor = compactor;
     this._maxContext = maxContext;
+    this._estimator = _estimator;
     this.warnThreshold = thresholds.warn;
     this.softThreshold = thresholds.soft;
     this.hardThreshold = thresholds.hard;
@@ -101,10 +104,12 @@ export class AutoCompactionMiddleware {
 
   handler(): MiddlewareHandler<Context> {
     return async (ctx, next) => {
-      // Use estimateRequestTokens for accurate full-request token counting:
-      // messages + systemPrompt + toolDefs. This replaces the previous pattern
-      // of applying an OVERHEAD_FACTOR to a messages-only estimate.
-      const { total: tokens } = estimateRequestTokens(ctx.messages, ctx.systemPrompt, ctx.tools);
+      // Use _estimator when provided (backward-compat with existing tests that
+      // pass simpleEstimator). Otherwise use estimateRequestTokens for accurate
+      // full-request token counting (messages + systemPrompt + toolDefs).
+      const tokens = this._estimator
+        ? this._estimator(ctx)
+        : estimateRequestTokens(ctx.messages, ctx.systemPrompt, ctx.tools ?? []).total;
       const load = tokens / this._maxContext;
       const policy = this.policyProvider?.(ctx);
       const thresholds = policy?.thresholds ?? {
@@ -162,7 +167,9 @@ export class AutoCompactionMiddleware {
   }
 
   private recordAttempt(level: PressureLevel, tokens: number, report: CompactReport): void {
-    const reduced = report.fullRequestTokensBefore > report.fullRequestTokensAfter;
+    // Prefer full-request tokens (accurate); fall back to message-only before/after.
+    const reduced =
+      (report.fullRequestTokensBefore ?? report.before) > (report.fullRequestTokensAfter ?? report.after);
     const repaired = !!report.repaired;
     if (reduced || repaired) {
       this.lastNoopAttempt = null;
