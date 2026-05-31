@@ -1,11 +1,12 @@
 import * as fs from 'node:fs/promises';
 import { decryptConfigSecrets } from '../security/config-secrets.js';
+import { atomicWrite } from '../utils/atomic-write.js';
 import {
   DEFAULT_CONTEXT_WINDOW_MODE_ID,
   isContextWindowModeId,
   listContextWindowModes,
 } from '../types/context-window.js';
-import type { Config, ConfigLoader } from '../types/config.js';
+import type { Config, ConfigLoader, SyncConfig } from '../types/config.js';
 import type { SecretVault } from '../types/secret-vault.js';
 import { safeParse } from '../utils/safe-json.js';
 import type { WstackPaths } from '../utils/wstack-paths.js';
@@ -260,6 +261,46 @@ export class DefaultConfigLoader implements ConfigLoader {
     // caller (e.g. early-boot wizard) accepts a Partial and constructs the
     // provider later, so we deliberately return without the cast.
     return Object.freeze(cfg) as Config;
+  }
+
+  /**
+   * Persist a sync config to ~/.wrongstack/sync.json, with the token encrypted
+   * by the vault (if provided). The file is isolated from the main config
+   * hierarchy to prevent accidental commits.
+   */
+  async persistSyncConfig(cfg: SyncConfig): Promise<void> {
+    let toWrite = { ...cfg };
+    if (this.vault && toWrite.githubToken && !toWrite.githubToken.startsWith('enc:')) {
+      // Re-encrypt if plaintext (e.g. came from in-memory configStore update
+      // rather than direct /sync enable call). Idempotent for already-encrypted.
+      toWrite = { ...toWrite, githubToken: this.vault.encrypt(toWrite.githubToken) };
+    }
+    await atomicWrite(this.paths.syncConfig, JSON.stringify(toWrite, null, 2), { mode: 0o600 });
+  }
+
+  /**
+   * Read ~/.wrongstack/sync.json (encrypted GitHub token storage) and decrypt
+   * the token if a vault is available. Returns null if the file doesn't exist.
+   * This is separate from main config loading because sync.json is intentionally
+   * isolated — it should never be part of project-local or env-driven config.
+   */
+  async loadSyncConfig(): Promise<SyncConfig | null> {
+    try {
+      const raw = await fs.readFile(this.paths.syncConfig, 'utf8');
+      const parsed = safeParse<SyncConfig>(raw);
+      if (!parsed.ok || !parsed.value) return null;
+
+      // Decrypt the token if vault is available (field name matches secret pattern)
+      if (this.vault) {
+        const decrypted = decryptConfigSecrets({ sync: parsed.value } as PartialConfig, this.vault);
+        return (decrypted as { sync: SyncConfig }).sync ?? null;
+      }
+      return parsed.value;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      console.warn('[config] Failed to load sync config:', err);
+      return null;
+    }
   }
 
   private async readJson(file: string): Promise<PartialConfig> {

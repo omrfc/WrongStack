@@ -437,6 +437,7 @@ export async function main(argv: string[]): Promise<number> {
     healthRegistry,
     skillLoader: config.features.skills ? skillLoader : undefined,
     configStore,
+    vault,
     paths: wpaths,
   });
 

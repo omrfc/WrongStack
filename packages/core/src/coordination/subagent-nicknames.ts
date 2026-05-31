@@ -103,7 +103,7 @@ export function assignNickname(role: string, used: ReadonlySet<string>): string 
   // 1. Build preference list: role-specific → default fallback
   const preferences = [
     ...(DOMAIN_PREFERENCES[role] ?? []),
-    ...DOMAIN_PREFERENCES['default'],
+    ...(DOMAIN_PREFERENCES['default'] ?? []),
   ];
 
   // 2. Find the first unassigned nickname from preferences

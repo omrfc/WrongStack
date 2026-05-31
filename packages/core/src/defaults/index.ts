@@ -165,6 +165,20 @@ export {
   FleetSpawnBudgetError,
 } from '../coordination/director.js';
 export {
+  makeSpawnTool,
+  makeAssignTool,
+  makeAwaitTasksTool,
+  makeAskTool,
+  makeRollUpTool,
+  makeTerminateTool,
+  makeFleetStatusTool,
+  makeFleetUsageTool,
+  makeFleetSessionTool,
+  makeFleetHealthTool,
+  makeCollabDebugTool,
+  makeFleetEmitTool,
+} from '../coordination/director-tools.js';
+export {
   createDelegateTool,
   type DelegateHost,
   type CreateDelegateToolOptions,

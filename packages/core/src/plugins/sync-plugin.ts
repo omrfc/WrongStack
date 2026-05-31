@@ -4,10 +4,13 @@ import type { SyncCategory } from '../types/config.js';
 import { CloudSync, ALL_SYNC_CATEGORIES } from '../storage/cloud-sync.js';
 import type { WstackPaths } from '../utils/wstack-paths.js';
 import type { ConfigStore } from '../types/config.js';
+import { atomicWrite } from '../utils/atomic-write.js';
 
 interface SyncPluginOptions {
   paths?: WstackPaths;
   configStore?: ConfigStore;
+  /** Secret vault for encrypting the GitHub token before persisting to disk. */
+  vault?: { encrypt(plaintext: string): string; decrypt?(value: string): string };
 }
 
 /**
@@ -20,6 +23,8 @@ interface SyncPluginOptions {
 export function createSyncPlugin(opts?: SyncPluginOptions): Plugin {
   let cloud: CloudSync | null = null;
   let configStore: ConfigStore | undefined;
+  let vault: { encrypt(plaintext: string): string; decrypt?(value: string): string } | undefined;
+  let syncConfigPath: string | undefined;
 
   return {
     name: 'wstack-sync',
@@ -33,6 +38,8 @@ export function createSyncPlugin(opts?: SyncPluginOptions): Plugin {
       const rawConfig = api.config as unknown as Record<string, unknown>;
       const paths = opts?.paths ?? (rawConfig.paths as WstackPaths | undefined);
       configStore = opts?.configStore ?? (rawConfig.configStore as ConfigStore | undefined);
+      vault = opts?.vault ?? (rawConfig.vault as typeof vault | undefined);
+      syncConfigPath = paths?.syncConfig;
 
       if (!paths || !configStore) {
         api.log.warn('[sync] paths or configStore not available — /sync disabled');
@@ -53,7 +60,7 @@ export function createSyncPlugin(opts?: SyncPluginOptions): Plugin {
       );
 
       void cloud.loadState();
-      api.slashCommands.register(buildSyncCommand(cloud, configStore));
+      api.slashCommands.register(buildSyncCommand(cloud, configStore, vault, syncConfigPath));
       api.log.info('[sync] loaded — /sync available. Run /sync to get started.');
     },
 
@@ -68,7 +75,12 @@ export function createSyncPlugin(opts?: SyncPluginOptions): Plugin {
   };
 }
 
-function buildSyncCommand(cloud: CloudSync, configStore: ConfigStore): SlashCommand {
+function buildSyncCommand(
+  cloud: CloudSync,
+  configStore: ConfigStore,
+  vault: { encrypt(plaintext: string): string; decrypt?(value: string): string } | undefined,
+  syncConfigPath: string | undefined,
+): SlashCommand {
   return {
     name: 'sync',
     description: 'Cloud sync: /sync [status|enable|disable|push|pull|categories]',
@@ -99,14 +111,24 @@ function buildSyncCommand(cloud: CloudSync, configStore: ConfigStore): SlashComm
             return { message: 'Invalid repo format. Expected "owner/repo".' };
           }
 
+          // Encrypt the token before persisting. The field name "githubToken"
+          // matches the secret-vault pattern so auto-decryption works on load.
+          const storedToken = vault ? vault.encrypt(token!) : token!;
           const syncConfig = {
             enabled: true,
             repo,
-            githubToken: token,
+            githubToken: storedToken,
             categories: (cats.length > 0 ? cats : ALL_SYNC_CATEGORIES) as SyncCategory[],
             lastSyncedAt: undefined as string | undefined,
           };
 
+          // Persist to ~/.wrongstack/sync.json (separate from main config.json
+          // to avoid accidental commits). Use atomicWrite so a crash never
+          // produces a half-written token file.
+          if (syncConfigPath) {
+            await atomicWrite(syncConfigPath, JSON.stringify(syncConfig, null, 2), { mode: 0o600 });
+          }
+          // Also update the in-memory store so watchers see the change.
           configStore.update({ sync: syncConfig } as Parameters<ConfigStore['update']>[0]);
           await cloud.loadState();
 

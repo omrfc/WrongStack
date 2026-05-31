@@ -80,7 +80,7 @@ export class FleetManager implements IFleetManager {
   private readonly subagentMeta = new Map<string, { provider?: string; model?: string }>();
   private readonly priceLookups = new Map<string, { input?: number; output?: number; cacheRead?: number; cacheWrite?: number }>();
   /** Tracks which nickname keys are already assigned — prevents collisions. */
-  private readonly usedNicknames = new Set<string>();
+  private readonly _usedNicknames = new Set<string>();
   /** The coordinator (wired via setCoordinator by Director after construction). */
   private coordinator: DefaultMultiAgentCoordinator | null = null;
 
@@ -186,10 +186,10 @@ export class FleetManager implements IFleetManager {
     priceLookup?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number },
   ): string {
     const role = config.role ?? 'subagent';
-    const nickname = assignNickname(role, this.usedNicknames);
+    const nickname = assignNickname(role, this._usedNicknames);
     // Extract the base key (e.g. "einstein") from the pool to mark it used.
     const baseKey = nickname.split(' ')[0]!.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-    this.usedNicknames.add(baseKey);
+    this._usedNicknames.add(baseKey);
     // Write the full nickname back into config so the coordinator
     // and manifest both see the human name.
     config.name = nickname;
@@ -202,7 +202,7 @@ export class FleetManager implements IFleetManager {
    * and testing.
    */
   get usedNicknames(): ReadonlySet<string> {
-    return this.usedNicknames;
+    return this._usedNicknames;
   }
 
   /**

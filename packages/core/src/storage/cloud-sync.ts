@@ -88,7 +88,23 @@ export class CloudSync {
       `Sync ${cfg.categories.join(', ')} — ${new Date().toISOString()}`,
     );
 
-    await this.updateRef(token, owner, repoName, branch, commitSha);
+    try {
+      await this.updateRef(token, owner, repoName, branch, commitSha);
+    } catch (err) {
+      // 422 = not a fast forward — remote branch moved. Fetch latest SHA and retry.
+      if (err instanceof Error && err.message.includes('422')) {
+        const remote = await this.getRef(token, owner, repoName, branch);
+        const currentSha = remote.object.sha;
+        const rebasedCommitSha = await this.createCommit(
+          token, owner, repoName, newTreeSha,
+          currentSha,
+          `Sync ${cfg.categories.join(', ')} — ${new Date().toISOString()}`,
+        );
+        await this.updateRef(token, owner, repoName, branch, rebasedCommitSha);
+      } else {
+        throw err;
+      }
+    }
 
     const syncState: SyncStateFile = {
       version: 1,

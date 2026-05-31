@@ -38,6 +38,8 @@ export interface PluginsWiringDeps {
   /** Skill loader — injected so the skills built-in can list/read skills. */
   skillLoader?: SkillLoader;
   configStore: ConfigStore;
+  /** Secret vault — injected so sync plugin can encrypt the GitHub token. */
+  vault?: { encrypt(plaintext: string): string; decrypt?(value: string): string };
   /** Resolved WstackPaths — injected so built-in plugins can init stores. */
   paths?: {
     globalRoot: string;

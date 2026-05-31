@@ -419,6 +419,11 @@ export class ToolExecutor {
  * shared) uses `__raw`, `contentFromOpenAI` uses `__raw_arguments`, and the
  * streaming response builder's `safeJsonOrRaw` uses `_raw`. Keep this list in
  * sync if a new adapter introduces another marker.
+ *
+ * NOTE: `parseToolInput` and `safeJsonOrRaw` now attempt JSON repair
+ * (auto-closing braces and strings) before wrapping — so a truncated blob
+ * like `{"old_string": "line1\nline2` gets repaired first. The sentinel is
+ * only used when repair also fails.
  */
 const MALFORMED_ARG_MARKERS = ['__raw', '__raw_arguments', '_raw'] as const;
 

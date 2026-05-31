@@ -20,7 +20,7 @@
 import { EventEmitter } from 'node:events';
 import * as fsp from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import type { SubagentConfig } from '../types/multi-agent.js';
+import type { SubagentConfig, TaskResult } from '../types/multi-agent.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -218,6 +218,9 @@ export class CollabSession extends EventEmitter {
     if (this.settled) throw new Error('session already settled');
     this.settled = true;
 
+    // Build the shared file snapshot so all agents see the same baseline
+    await this.buildSnapshot();
+
     // Wire fleet bus listeners BEFORE spawning so we do not miss any events
     this.wireFleetBus();
 
@@ -240,8 +243,9 @@ export class CollabSession extends EventEmitter {
       );
     });
 
+    let results: TaskResult[][];
     try {
-      await Promise.race([
+      results = await Promise.race([
         Promise.all([
           this.director.awaitTasks([bugHunterId]),
           this.director.awaitTasks([refactorPlannerId]),
@@ -256,10 +260,95 @@ export class CollabSession extends EventEmitter {
       throw error;
     }
 
+    // Parse each agent's output and emit FleetBus events
+    for (const result of results.flat()) {
+      await this.parseAndEmit(result);
+    }
+
     const report = this.assembleReport();
     this.cleanup();
     this.emit('session.done', report);
     return report;
+  }
+
+  /**
+   * Parse a completed agent's final text output and route the structured
+   * findings onto the FleetBus. Agents are instructed to emit one JSON object
+   * per finding / plan / evaluation; we scan the output for balanced JSON
+   * objects (tolerating prose, markdown, and ```json fences around them) and
+   * dispatch each by its discriminating key. The wired FleetBus listeners then
+   * collect them into the bugs / plans / evaluations maps.
+   *
+   * Failed or empty results are ignored, and a single malformed object never
+   * aborts the collation pass — see {@link extractJsonObjects}.
+   */
+  private async parseAndEmit(result: TaskResult): Promise<void> {
+    if (result.status !== 'success' || result.result == null) return;
+    const text =
+      typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
+
+    for (const obj of this.extractJsonObjects(text)) {
+      const type =
+        'finding' in obj
+          ? 'bug.found'
+          : 'plan' in obj
+            ? 'refactor.plan'
+            : 'evaluation' in obj
+              ? 'critic.evaluation'
+              : null;
+      if (!type) continue;
+      this.fleetBus.emit({
+        subagentId: result.subagentId,
+        taskId: result.taskId,
+        ts: Date.now(),
+        type,
+        payload: obj,
+      });
+    }
+  }
+
+  /**
+   * Extract every top-level JSON object embedded in free-form agent text.
+   * Scans for balanced braces while respecting string literals and escape
+   * sequences, so prose, markdown headers, and code fences around the JSON
+   * are skipped. Malformed spans are dropped silently rather than thrown.
+   */
+  private extractJsonObjects(text: string): Array<Record<string, unknown>> {
+    const objects: Array<Record<string, unknown>> = [];
+    let depth = 0;
+    let start = -1;
+    let inString = false;
+    let escaped = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === '\\') escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') {
+        inString = true;
+      } else if (ch === '{') {
+        if (depth === 0) start = i;
+        depth++;
+      } else if (ch === '}' && depth > 0) {
+        depth--;
+        if (depth === 0 && start >= 0) {
+          const candidate = text.slice(start, i + 1);
+          try {
+            const parsed = JSON.parse(candidate);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              objects.push(parsed as Record<string, unknown>);
+            }
+          } catch {
+            // Not valid JSON — skip this span and keep scanning.
+          }
+          start = -1;
+        }
+      }
+    }
+    return objects;
   }
 
   private async spawnAgent(role: string, taskBrief: string): Promise<string> {
@@ -267,12 +356,9 @@ export class CollabSession extends EventEmitter {
       id: `${role}-${this.sessionId}`,
       name: role,
       role,
-      // fleet_emit is a built-in coordination tool that lets the subagent
-      // publish structured events (bug.found, refactor.plan, critic.evaluation)
-      // to the fleet bus so the session can route them to other agents.
-      // The tool registry must contain 'fleet_emit' — see index.ts exports
-      // and the cli multi-agent.ts tool registration wiring.
-      tools: ['fleet_emit'],
+      // No fleet_emit tool — agents output structured JSON, the Director parses
+      // results and emits FleetBus events. This keeps the agent simple and the
+      // routing deterministic.
     };
     const subagentId = await this.director.spawn(cfg);
     await this.director.assign({
@@ -286,9 +372,13 @@ export class CollabSession extends EventEmitter {
   private buildBugHunterTask(): string {
     const paths = this.options.targetPaths.join(', ');
     const scratchpad = this.director.sharedScratchpadPath ?? '/tmp';
+    const fileContents = this.snapshot.files
+      .map((f) => `=== ${f.path} ===\n${f.content}`)
+      .join('\n\n');
     return (
-      `Scan the following files for bugs and code smells: ${paths}. ` +
-      `For each bug found, emit a bug.found event on the fleet bus with this structure:\n` +
+      `You are BugHunter. Scan the following files for bugs and code smells.\n\n` +
+      `Target files:\n${fileContents}\n\n` +
+      `For each bug found, write ONE valid JSON line to the scratchpad with this exact structure:\n` +
       `{ "finding": { "id": "<uuid>", "type": "<pattern>", "severity": "<critical|high|medium|low>", ` +
       `"location": { "file": "<path>", "line": <n> }, "description": "<explain>", "suggestedFix": "<optional>" } }.\n` +
       `After scanning all files, write your full markdown bug report to the shared scratchpad at:\n` +
@@ -297,12 +387,15 @@ export class CollabSession extends EventEmitter {
   }
 
   private buildRefactorPlannerTask(): string {
-    const paths = this.options.targetPaths.join(', ');
     const scratchpad = this.director.sharedScratchpadPath ?? '/tmp';
+    const fileContents = this.snapshot.files
+      .map((f) => `=== ${f.path} ===\n${f.content}`)
+      .join('\n\n');
     return (
-      `Plan refactorings for the following files: ${paths}. ` +
-      `Listen for bug.found events on the fleet bus from BugHunter. ` +
-      `For each bug, create a refactor plan and emit refactor.plan events:\n` +
+      `You are RefactorPlanner. Plan refactorings for the following files.\n\n` +
+      `Target files:\n${fileContents}\n\n` +
+      `Listen for bug.found events from BugHunter on the fleet bus. ` +
+      `For each bug, create a refactor plan and write one JSON line per plan:\n` +
       `{ "plan": { "id": "<uuid>", "basedOnBugIds": ["<bug-id>"], "phases": [...], "riskScore": "<low|medium|high>", ` +
       `"estimatedChangeCount": <n>, "rollbackStrategy": "<text>" } }.\n` +
       `After planning, write your full markdown plan to:\n` +
@@ -312,10 +405,14 @@ export class CollabSession extends EventEmitter {
 
   private buildCriticTask(): string {
     const scratchpad = this.director.sharedScratchpadPath ?? '/tmp';
+    const fileContents = this.snapshot.files
+      .map((f) => `=== ${f.path} ===\n${f.content}`)
+      .join('\n\n');
     return (
-      `Evaluate bug findings and refactor plans as they arrive via fleet bus events. ` +
+      `You are Critic. Evaluate bug findings and refactor plans as they arrive via fleet bus events.\n\n` +
+      `Target files:\n${fileContents}\n\n` +
       `Subscribe to bug.found events (from BugHunter) and refactor.plan events (from RefactorPlanner). ` +
-      `For each subject, emit a critic.evaluation event:\n` +
+      `For each subject, write one JSON line per evaluation:\n` +
       `{ "evaluation": { "id": "<uuid>", "subjectType": "<bug_finding|refactor_plan>", ` +
       `"subjectId": "<id>", "score": <0-10>, "verdict": "<approve|needs_revision|reject>", ` +
       `"strengths": [...], "weaknesses": [...], "concerns": [...] } }.\n` +

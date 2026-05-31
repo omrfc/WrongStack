@@ -2,6 +2,7 @@ import type { EventBus } from '../kernel/events.js';
 import type { ContentBlock, ThinkingBlock, ToolUseBlock } from '../types/blocks.js';
 import type { Provider, Request, Response } from '../types/provider.js';
 import type { Context } from './context.js';
+import { completePartialObject } from '../utils/json-repair.js';
 
 interface ThinkingEntry {
   textBuf: string;
@@ -144,7 +145,14 @@ export function safeJsonOrRaw(s: string): unknown {
   try {
     return JSON.parse(s);
   } catch {
-    return { _raw: s };
+    // Attempt to repair a truncated streaming JSON blob by auto-closing
+    // unclosed braces and string values before giving up.
+    const repaired = completePartialObject(s);
+    try {
+      return JSON.parse(repaired);
+    } catch {
+      return { _raw: repaired };
+    }
   }
 }
 

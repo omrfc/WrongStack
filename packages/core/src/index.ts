@@ -167,6 +167,81 @@ export {
   type WorktreeRunResult,
 } from './worktree/index.js';
 
+// ---- Coordination (fleet/multi-agent tools) ----
+// Re-exported from ./coordination/index.js so they are available at the
+// top-level @wrongstack/core import path.  Without this, consumers that
+// `import { makeFleetEmitTool } from '@wrongstack/core'` get a runtime
+// error even though the symbol exists in the ./coordination submodule.
+export {
+  Director,
+  FleetSpawnBudgetError,
+  FleetCostCapError,
+} from './coordination/director.js';
+export {
+  makeSpawnTool,
+  makeAssignTool,
+  makeAwaitTasksTool,
+  makeAskTool,
+  makeRollUpTool,
+  makeTerminateTool,
+  makeFleetStatusTool,
+  makeFleetUsageTool,
+  makeFleetSessionTool,
+  makeFleetHealthTool,
+  makeCollabDebugTool,
+  makeFleetEmitTool,
+} from './coordination/director-tools.js';
+export {
+  makeDirectorSessionFactory,
+  type DirectorSessionFactory,
+  type DirectorSessionFactoryOptions,
+} from './coordination/director-session.js';
+export {
+  FleetBus,
+  FleetUsageAggregator,
+  type FleetEvent,
+  type FleetHandler,
+  type FleetUsage,
+  type SubagentUsageSnapshot,
+} from './coordination/fleet-bus.js';
+export {
+  NULL_FLEET_BUS,
+} from './coordination/null-fleet-bus.js';
+export {
+  FLEET_ROSTER,
+  ALL_FLEET_AGENTS,
+  FLEET_ROSTER_BUDGETS,
+  ACP_AGENTS,
+  FLEET_ROSTER_WITHACP,
+  applyRosterBudget,
+  type FleetRosterBudget,
+} from './coordination/fleet.js';
+export {
+  AGENTS_BY_PHASE,
+  ALL_AGENT_DEFINITIONS,
+  AGENT_CATALOG,
+  getAgentDefinition,
+  type AgentDefinition,
+  type AgentPhase,
+} from './coordination/agents/index.js';
+export {
+  dispatchAgent,
+  scoreAgents,
+  makeLLMClassifier,
+  DEFAULT_DISPATCH_ROLE,
+  type DispatchResult,
+  type DispatchCandidate,
+  type DispatchClassifier,
+  type DispatchOptions,
+  type DispatchMethod,
+} from './coordination/dispatcher.js';
+export {
+  makeAgentSubagentRunner,
+  type AgentFactory,
+  type AgentFactoryResult,
+  type AgentRunnerOptions,
+} from './coordination/agent-subagent-runner.js';
+
 // Built-in plugins
 export { createPromptsPlugin } from './plugins/prompts-plugin.js';
 export { createSyncPlugin } from './plugins/sync-plugin.js';

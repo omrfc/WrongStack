@@ -111,14 +111,18 @@ describe('CloudSync', () => {
   describe('loadState()', () => {
     it('loads and parses a valid state file', async () => {
       await withTempDir(async (dir) => {
+        // Use a date computed relative to now so the day-count assertion does
+        // not drift as wall-clock time advances.
+        const daysAgo = 880;
+        const lastSyncedAt = new Date(Date.now() - daysAgo * 24 * 60 * 60_000).toISOString();
         await fs.writeFile(
           path.join(dir, 'sync-state.json'),
-          JSON.stringify({ version: 1, sha: 'abc', lastSyncedAt: '2024-01-01T00:00:00Z', localRev: 'r1' }),
+          JSON.stringify({ version: 1, sha: 'abc', lastSyncedAt, localRev: 'r1' }),
         );
         const sync = new CloudSync({ ...mockPaths, globalRoot: dir }, () => mockSyncConfig, vi.fn());
         await sync.loadState();
         const result = await sync.status();
-        expect(result).toContain('880d ago');
+        expect(result).toContain(`${daysAgo}d ago`);
       });
     });
 

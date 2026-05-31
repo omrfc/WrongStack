@@ -5,6 +5,20 @@ export {
   FleetCostCapError,
 } from './director.js';
 export {
+  makeSpawnTool,
+  makeAssignTool,
+  makeAwaitTasksTool,
+  makeAskTool,
+  makeRollUpTool,
+  makeTerminateTool,
+  makeFleetStatusTool,
+  makeFleetUsageTool,
+  makeFleetSessionTool,
+  makeFleetHealthTool,
+  makeCollabDebugTool,
+  makeFleetEmitTool,
+} from './director-tools.js';
+export {
   createDelegateTool,
   type DelegateHost,
   type CreateDelegateToolOptions,

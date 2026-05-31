@@ -329,7 +329,7 @@ describe('MultiAgentHost', () => {
       expect(await host.ensureDirector()).toBeNull();
     });
 
-    it('ensureDirector() eagerly builds the Director and exposes 8 tools', async () => {
+    it('ensureDirector() eagerly builds the Director and exposes the orchestration tools', async () => {
       const host = new MultiAgentHost(makeDeps(), { directorMode: true });
       const director = await host.ensureDirector();
       expect(director).not.toBeNull();
@@ -338,6 +338,8 @@ describe('MultiAgentHost', () => {
         'ask_subagent',
         'assign_task',
         'await_tasks',
+        'collab_debug',
+        'fleet_emit',
         'fleet_health',
         'fleet_session',
         'fleet_status',
@@ -416,12 +418,14 @@ describe('MultiAgentHost', () => {
         const director = await host.promoteToDirector();
         expect(director).not.toBeNull();
         expect(host.isDirectorMode()).toBe(true);
-        // After promotion, the director has the 8 orchestration tools.
+        // After promotion, the director has the orchestration tools.
         const tools = director!.tools();
         expect(tools.map((t) => t.name).sort()).toEqual([
           'ask_subagent',
           'assign_task',
           'await_tasks',
+          'collab_debug',
+          'fleet_emit',
           'fleet_health',
           'fleet_session',
           'fleet_status',

@@ -190,6 +190,10 @@ export interface Config {
 
 export interface ConfigLoader {
   load(opts?: { cliFlags?: Partial<Config>; cwd?: string }): Promise<Config>;
+  /** Load and decrypt the sync config from ~/.wrongstack/sync.json. */
+  loadSyncConfig(): Promise<SyncConfig | null>;
+  /** Persist sync config to ~/.wrongstack/sync.json with encrypted token. */
+  persistSyncConfig(cfg: SyncConfig): Promise<void>;
 }
 
 /**
