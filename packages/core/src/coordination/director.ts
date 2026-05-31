@@ -28,7 +28,7 @@ import { FleetManager } from './fleet-manager.js';
 import { assignNickname } from './subagent-nicknames.js';
 import { InMemoryBridgeTransport } from './in-memory-transport.js';
 import { DefaultMultiAgentCoordinator } from './multi-agent-coordinator.js';
-import { makeAskTool, makeAssignTool, makeAwaitTasksTool, makeCollabDebugTool, makeFleetEmitTool, makeFleetHealthTool, makeFleetSessionTool, makeFleetStatusTool, makeFleetUsageTool, makeRollUpTool, makeSpawnTool, makeTerminateTool } from './director-tools.js';
+import { makeAskTool, makeAssignTool, makeAwaitTasksTool, makeCollabDebugTool, makeFleetEmitTool, makeFleetHealthTool, makeFleetSessionTool, makeFleetStatusTool, makeFleetUsageTool, makeRollUpTool, makeSpawnTool, makeTerminateTool, makeWorkCompleteTool } from './director-tools.js';
 import { CollabSession, type CollabSessionOptions, type CollabDebugReport } from './collab-debug.js';
 
 /**
@@ -228,12 +228,12 @@ export class FleetSpawnBudgetError extends Error {
   readonly kind: 'max_spawns' | 'max_spawn_depth';
   readonly limit: number;
   readonly observed: number;
-  constructor(kind: 'max_spawns' | 'max_spawn_depth', limit: number, observed: number) {
-    super(
+  constructor(kind: 'max_spawns' | 'max_spawn_depth', limit: number, observed: number, message?: string) {
+    const defaultMsg =
       kind === 'max_spawns'
         ? `Director spawn budget exceeded: tried to spawn #${observed} but maxSpawns is ${limit}`
-        : `Director spawn depth budget exceeded: this director is at depth ${observed} and maxSpawnDepth is ${limit}`,
-    );
+        : `Director spawn depth budget exceeded: this director is at depth ${observed} and maxSpawnDepth is ${limit}`;
+    super(message ?? defaultMsg);
     this.name = 'FleetSpawnBudgetError';
     this.kind = kind;
     this.limit = limit;
@@ -429,6 +429,13 @@ export class Director implements ICoordinator {
   private readonly maxLeaderContextLoad: number;
   /** Provider's max context window in tokens. */
   private readonly maxContext: number;
+  /**
+   * When set by `workComplete()`, the director stops dispatching new tasks
+   * and terminates all running subagents. Used when the director's LLM decides
+   * the goal is satisfied and no further spawns are needed — prevents the
+   * coordinator from keeping workers alive for tasks that will never arrive.
+   */
+  private workCompleteFlag = false;
 
   constructor(opts: DirectorOptions) {
     this.id = opts.config.coordinatorId || randomUUID();
@@ -701,6 +708,29 @@ export class Director implements ICoordinator {
     return this.extendTotals.get(subagentId) ?? 0;
   }
 
+  /**
+   * Signal that the director's work is done. Once called:
+   * - `spawn()` throws `FleetSpawnBudgetError('max_spawns', …)` — no new
+   *   subagents can be created
+   * - Running subagents are NOT forcibly stopped — they finish naturally,
+   *   but no new tasks are dispatched to them
+   *
+   * This lets the director LLM say "I'm satisfied with the results, stop
+   * spawning and wind down" — without killing in-flight work mid-execution.
+   * Call `terminateAll()` separately if you need immediate teardown.
+   *
+   * Idempotent — calling twice is a no-op.
+   */
+  workComplete(): void {
+    this.workCompleteFlag = true;
+    this.fleet.emit({ subagentId: this.id, ts: Date.now(), type: 'director.work_complete', payload: {} });
+  }
+
+  /** Returns true if `workComplete()` has been called on this director. */
+  isWorkComplete(): boolean {
+    return this.workCompleteFlag;
+  }
+
   /** Best-effort session-writer append. Swallows failures — the director
    *  must not break a fleet run because the session JSONL handle closed. */
   private async appendSessionEvent(event: Parameters<SessionWriter['append']>[0]): Promise<void> {
@@ -746,6 +776,16 @@ export class Director implements ICoordinator {
     config: SubagentConfig,
     priceLookup?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number },
   ): Promise<string> {
+    // workComplete() signal: once the director decides the work is done,
+    // refuse to spawn new subagents so the fleet winds down naturally.
+    if (this.workCompleteFlag) {
+      throw new FleetSpawnBudgetError(
+        'max_spawns',
+        this.maxSpawns,
+        this.spawnCount + 1,
+        'workComplete() has been called — director closed further spawning',
+      );
+    }
     // Enforce safety caps BEFORE touching the coordinator — a refused
     // spawn must not leak partial state into the manifest or fleet bus.
     // Delegate to FleetManager when available; use inline checks otherwise.
@@ -1038,6 +1078,25 @@ export class Director implements ICoordinator {
    */
   async assign(task: TaskSpec): Promise<string> {
     const taskWithId: TaskSpec = task.id ? task : { ...task, id: randomUUID() };
+    // When workComplete() has been called, drain the pending queue as aborted
+    // rather than dispatching new work. The director has decided the goal is
+    // satisfied — queued tasks never get a chance to run, so synthesize their
+    // completion now so any caller awaiting them unblocks immediately.
+    if (this.workCompleteFlag) {
+      const synthetic: TaskResult = {
+        subagentId: taskWithId.subagentId ?? 'unassigned',
+        taskId: taskWithId.id,
+        status: 'stopped',
+        error: { kind: 'aborted_by_parent', message: 'Director called workComplete() — no further tasks will run', retryable: false },
+        iterations: 0,
+        toolCalls: 0,
+        durationMs: 0,
+      };
+      this.completed.set(taskWithId.id, synthetic);
+      const waiter = this.taskWaiters.get(taskWithId.id);
+      if (waiter) { waiter.resolve(synthetic); this.taskWaiters.delete(taskWithId.id); }
+      return taskWithId.id;
+    }
     if (task.subagentId) {
       // Update manifest entry — delegate to FleetManager when available.
       if (this.fleetManager) {
@@ -1300,6 +1359,7 @@ export class Director implements ICoordinator {
       makeFleetHealthTool(this),
       makeCollabDebugTool(this),
       makeFleetEmitTool(this),
+      makeWorkCompleteTool(this),
     ];
     return t;
   }

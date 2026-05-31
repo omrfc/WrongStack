@@ -423,3 +423,35 @@ export function makeFleetEmitTool(director: Director): Tool {
     },
   };
 }
+
+/**
+ * Signal that the director's work is satisfied and the fleet should wind down.
+ *
+ * Once called:
+ * - `spawn_subagent` throws — no new subagents can be created
+ * - `assign_task` synthesizes an immediate `aborted_by_parent` completion
+ *   for any queued task (callers awaiting those tasks unblock immediately)
+ * - Running subagents are NOT killed — they finish naturally; no new
+ *   tasks are dispatched to them
+ *
+ * Use this when you are satisfied with the results and want the fleet to
+ * stop spawning without forcibly stopping in-flight work. Call
+ * `terminate_subagent` separately for any subagent you need to stop immediately.
+ */
+export function makeWorkCompleteTool(director: Director): Tool {
+  return {
+    name: 'work_complete',
+    description:
+      "Signal that the director is satisfied with the results and the fleet should wind down. " +
+      "After calling this, spawn_subagent will refuse with a budget error and assign_task " +
+      "will instantly complete any queued tasks as aborted. Running subagents finish naturally. " +
+      "Call terminate_subagent separately to stop specific subagents immediately.",
+    permission: 'auto',
+    mutating: false,
+    inputSchema: { type: 'object', properties: {}, required: [] },
+    async execute() {
+      director.workComplete();
+      return { ok: true, message: 'Fleet wind-down signaled. No new spawns or task dispatches.' };
+    },
+  };
+}

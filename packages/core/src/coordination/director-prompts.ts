@@ -53,7 +53,11 @@ Working rules:
      thrashing, terminate it rather than letting cost climb silently.
   6. Never claim a subagent's work as your own without verifying it. If a
      result looks wrong, ask_subagent for clarification before passing it
-     to the user.\
+     to the user.
+  7. Wind down when satisfied. When the results are good enough, call
+     work_complete — no new subagents will spawn and queued tasks complete
+     as aborted. Running subagents finish naturally. Call terminate_subagent
+     only for ones you need to stop immediately.\
 `;
 
 /**

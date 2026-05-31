@@ -17,6 +17,7 @@ export {
   makeFleetHealthTool,
   makeCollabDebugTool,
   makeFleetEmitTool,
+  makeWorkCompleteTool,
 } from './director-tools.js';
 export {
   createDelegateTool,
