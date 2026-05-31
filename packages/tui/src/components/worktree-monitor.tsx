@@ -26,7 +26,7 @@ function fmt(s: string) {
 }
 
 /**
- * Full-screen Worktree monitor overlay (Ctrl+T to open, Ctrl+W/Esc to close).
+ * Full-screen Worktree monitor overlay (Ctrl+T to open, Ctrl+T/Esc to close).
  * Shows each AutoPhase worktree: branch, base→branch, owner phase, diff stats,
  * and conflict files for any worktree left in needs-review.
  */
@@ -66,7 +66,7 @@ export function WorktreeMonitor({
             <Text color="red">✗{failed}</Text>
           </>
         ) : null}
-        <Text dimColor>│ Ctrl+W / Esc to close</Text>
+        <Text dimColor>│ Ctrl+T / Esc to close</Text>
       </Box>
 
       {list.length === 0 ? (

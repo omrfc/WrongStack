@@ -2,7 +2,7 @@
 
 > Built on the wrong stack. Shipped anyway.
 
-A CLI AI coding agent that runs in your terminal. It reads your code, edits files, runs commands, and reasons through bugs — while you stay in control of every permission. It drives autonomous goal loops, parallel subagent fan-out, and multi-agent Director orchestration; guides Spec-Driven Development cycles; and ships with 36 built-in tools, 16 bundled skills, 10 official plugins, and ~110 providers from models.dev — all with AES-256-GCM encrypted secrets and per-tool permission policies.
+A CLI AI coding agent that runs in your terminal. It reads your code, edits files, runs commands, and reasons through bugs — while you stay in control of every permission. It drives autonomous goal loops, parallel subagent fan-out, multi-agent Director orchestration, and collaborative debugging; guides Spec-Driven Development cycles; and ships with 36 built-in tools, 16 bundled skills, 7 first-party plugins (prompt library, GitHub cloud sync, git, security, skills, plan, observability), 10 more in the official `@wrongstack/plugins` collection, and ~110 providers from models.dev — all with AES-256-GCM encrypted secrets and per-tool permission policies.
 
 Provider catalog comes from [models.dev](https://models.dev) — no hardcoded provider lists, no hardcoded pricing, no hardcoded model names. API keys are encrypted at rest with a per-machine key. Every developer-level config lives under `~/.wrongstack/`; the only thing you'd ever commit to a repo is `.wrongstack/AGENTS.md`.
 
@@ -149,7 +149,9 @@ BEGIN.]
 
 Architecture: Host EventBus (always-on bridge) → Leader Agent (Director) + FleetBus (director-only fan-in) → `DefaultMultiAgentCoordinator` → `AgentSubagentRunner` per task (fresh Agent + Context + EventBus, full isolation) → per-subagent JSONL transcripts on disk.
 
-**46-agent roster + smart dispatcher.** The Director draws from a 46-role agent catalog; a smart dispatcher routes each task to the best-matching role instead of spawning generic clones. The TUI fleet monitor (**Ctrl+F**) shows per-subagent status and a fleet-wide token gauge, and auto-extended budgets surface as a `⚡ extended ×N` badge across all fleet UIs.
+**46-agent roster + smart dispatcher.** The Director draws from a 46-role agent catalog; a smart dispatcher routes each task to the best-matching role instead of spawning generic clones. The TUI fleet monitor (**Ctrl+F**) shows per-subagent status and a fleet-wide token gauge, and auto-extended budgets surface as a `⚡ extended ×N` badge across all fleet UIs. Spawned subagents take a memorable scientist nickname (Turing, Shannon, Gauss, …) so you can track them across the fleet at a glance.
+
+**Collaborative debugging.** `Director.spawnCollab()` runs **BugHunter, RefactorPlanner, and Critic in parallel on one shared, immutable file snapshot**. Findings flow through the FleetBus as structured events (`bug.found → refactor.plan → critic.evaluation`); the Director routes each output to its dependents through a shared scratchpad — so agents build on each other's conclusions without exchanging full transcripts — and returns a single structured `CollabDebugReport`. Subagents signal upward with the `fleet_emit` tool.
 
 **`--director` flag** launches the full fleet roster from the CLI directly:
 ```bash
@@ -191,6 +193,22 @@ Ten ready-to-use plugins ship in one package, each available via a subpath expor
 | `semver-bump` | `semver_bump`, `changelog_update` | Conventional-commit-driven version bumps |
 
 All plugins type-check under `strict` + `noUncheckedIndexedAccess`, use the real plugin API (`api.onEvent` not pipeline mutation), register `AgentExtension` for iteration hooks, and ship `Record<string, unknown>` typings on every tool `execute`.
+
+#### Built-in (first-party) plugins
+
+Seven plugins ship **enabled by default** and load before any user plugin — they wire core infrastructure and claim bare slash-command names (only `official` first-party plugins may do so; external plugins stay namespaced). Opt a specific one out with `{ "name": "wstack-git", "enabled": false }` in `config.plugins`, or disable all with `features.plugins: false`.
+
+| Built-in plugin | Slash commands | What it adds |
+|-----------------|----------------|--------------|
+| `wstack-prompts` | `/prompts list\|view\|add\|delete\|edit\|extend` | Personal prompt library with LLM-powered enhancement |
+| `wstack-sync` | `/sync status\|enable\|disable\|push\|pull\|categories` | GitHub cloud sync for settings, skills, prompts, memory, and history — token encrypted via the secret vault, no `git` CLI needed |
+| `wstack-git` | `/commit`, `/gitcheck`, `/push` | LLM-written conventional commits, pre-commit sanity check, push |
+| `wstack-security` | `/security scan\|audit\|report` | Security scanning surface |
+| `wstack-skills` | `/skill`, `/skill-gen`, `/skill-install`, `/skill-update`, `/skill-uninstall` | Skill discovery, generation, and lifecycle |
+| `wstack-plan` | `/plan show\|add\|start\|done\|remove\|clear` | Per-session strategic roadmap (chip in the TUI status bar) |
+| `wstack-observability` | `/metrics`, `/health` | Prometheus metrics + health snapshot |
+
+**Cloud sync** (`/sync`) pushes/pulls user-selected `~/.wrongstack` categories — `settings`, `skills`, `prompts`, `memory`, `history` — to a private GitHub repo over the REST API. State lives in `~/.wrongstack/sync.json` (token encrypted) + `sync-state.json`; pick categories with `/sync categories`.
 
 Manage from CLI or REPL:
 ```bash
@@ -264,7 +282,12 @@ Four-layer observability:
 - **Bash tool env allowlist**: `WRONGSTACK_BASH_ENV_PASSTHROUGH=1` disables the allowlist (legacy unsafe mode — see `SECURITY.md`)
 - **`WRONGSTACK_FETCH_ALLOW_PRIVATE=1`**: enables localhost/private IPs in the `fetch` tool
 - **AES-256-GCM** encryption for all secrets at rest
-- Threat model and adversary trust assumptions in [`SECURITY.md`](SECURITY.md)
+- **SSRF guard everywhere**: the `fetch` tool and the builtin `search` tool resolve + re-validate every redirect hop against private/IMDS ranges; MCP transport URL validation blocks IPv4 **and** IPv6 IMDS (`fd00:ec2::254`, link-local `fe80::/10`)
+- **Fail-closed subagent guard**: non-interactive subagents deny `bash`/`write`/`edit`/`replace`/`exec`/`patch`/`install`/`scaffold` and all `mcp__*` tools — prompt-injected delegates can't mutate files the user never confirmed
+- **Session-log scrubbing**: user- and model-turn text is scrubbed before it hits the `0o600` JSONL (and before it rides along in cloud sync), not just tool output
+- **Symlink containment**: `read`/`edit`/`write` resolve symlinks and re-check the target is inside the project root
+- **Plugin trust tiers**: only first-party (`official`) plugins may register bare slash-command names, override builtins, or `wrap`/`unregister` tools they don't own
+- Threat model and adversary trust assumptions in [`SECURITY.md`](SECURITY.md); audit findings and verification in [`security-report/`](security-report/)
 
 ### Bundled skills (16)
 
@@ -275,6 +298,34 @@ Four-layer observability:
 Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. What's left: kernel (`Container` + `Pipeline` + `EventBus` + `RunController`, 505 lines) + agent (525 lines) + 36 tools + permission policy + curated system prompt. The minimal-viable WrongStack runs offline with no network calls at startup. Provider family must be declared explicitly in config when using this mode.
 
 ---
+
+## What's new in 0.9.19
+
+- **Security audit — findings F-01 → F-07 remediated.** A full `security-check`
+  pass closed: an **arbitrary file write** in the `diff` tool (`a`/`b` refs were
+  pushed into `git diff` argv unguarded, so `{ a: "--output=<path>" }` clobbered
+  files with no confirmation — now validated as commit-ish), tool-registry
+  `wrap`/`unregister` now enforce plugin trust tiers (external plugins can't
+  silently downgrade a builtin), the subagent auto-approve guard now **fails
+  closed** (denies `edit`/`replace`/all `mcp__*`, not just `bash`/`write`),
+  symlink-resolving containment checks on `read`/`edit`/`write`, SSRF-guarded
+  redirects in the `search` tool, **session-log scrubbing of user/model turn
+  text**, and IPv6 IMDS parity in MCP transport validation. 26 new regression
+  tests; `pnpm audit` reports 0 advisories across 591 deps. See
+  [`security-report/`](security-report/) and [CHANGELOG.md](CHANGELOG.md).
+
+- **Collaborative debugging — three agents on one problem, in parallel.**
+  `Director.spawnCollab()` runs BugHunter, RefactorPlanner, and Critic
+  simultaneously on a shared immutable file snapshot. Findings flow through the
+  FleetBus (`bug.found → refactor.plan → critic.evaluation`); the Director routes
+  results between agents via a shared scratchpad and returns a structured
+  `CollabDebugReport`. Subagents emit structured signals through the new
+  `fleet_emit` tool, and each spawned worker now gets a memorable scientist
+  nickname (Turing, Shannon, Gauss, …) instead of `AGENT#N`.
+
+- **Tougher streaming.** Truncated tool-call argument streams (JSON that ends
+  mid-object) are now salvaged by `completePartialObject` instead of dropping the
+  call.
 
 ## What's new in 0.9.7
 
@@ -389,7 +440,11 @@ wrongstack --provider openrouter --model anthropic/claude-opus-4-7
 
 ## Slash commands
 
-`/init` `/diag` `/stats` `/help` `/clear` `/context` `/compact` `/usage` `/tools` `/skill` `/use` `/model` `/save` `/resume` `/exit` `/spawn` `/fleet` `/agents` `/steer` `/goal` `/director` `/queue` `/altscreen` `/plan` `/autonomy` `/yolo` `/mode` `/image` `/plugin` `/telegram` `/sdd` `/settings`
+**Core REPL:** `/init` `/diag` `/stats` `/help` `/clear` `/context` `/compact` `/usage` `/tools` `/use` `/model` `/save` `/resume` `/exit` `/queue` `/altscreen` `/autonomy` `/yolo` `/mode` `/image` `/plugin` `/telegram` `/sdd` `/settings` `/btw` `/fix` `/autophase`
+
+**Multi-agent:** `/spawn` `/fleet` `/agents` `/steer` `/goal` `/director`
+
+**Built-in plugins:** `/prompts` `/sync` `/commit` `/gitcheck` `/push` `/security` `/skill` `/skill-gen` `/skill-install` `/skill-update` `/skill-uninstall` `/plan` `/metrics` `/health`
 
 | Command | Effect |
 |---|---|
@@ -429,7 +484,7 @@ wrongstack --provider openrouter --model anthropic/claude-opus-4-7
 | **Ctrl+G** | Toggle the agents monitor — live per-agent context (current tool, streaming tail, sparkline) |
 | **Ctrl+T** | Toggle the worktree monitor — AutoPhase isolation branches |
 | **Ctrl+P** | Toggle the phase monitor — active AutoPhase phases and tasks |
-| **Ctrl+W** | Close worktree monitor (when open); otherwise delete word before cursor |
+| **Ctrl+T** | Close worktree monitor (when open); otherwise delete word before cursor |
 | `/fleet kill <id>` | Stop one specific subagent |
 
 ## Subcommands

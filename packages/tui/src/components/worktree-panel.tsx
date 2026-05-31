@@ -38,7 +38,7 @@ function st(status: string) {
 /**
  * Worktree sidebar panel — shown beside the AutoPhase PhasePanel when git
  * worktree isolation is active. One compact row per worktree (branch, owner
- * phase, diff stats, status). Always visible while live; details on Ctrl+W.
+ * phase, diff stats, status). Always visible while live; details on Ctrl+T.
  */
 export function WorktreePanel({
   worktrees,
@@ -70,7 +70,7 @@ export function WorktreePanel({
         <Text color="yellow">▶{active}</Text>
         <Text color="green">✓{merged}</Text>
         {failed > 0 ? <Text color="red">✗{failed}</Text> : null}
-        <Text dimColor>· {list.length} total · Ctrl+W for details</Text>
+        <Text dimColor>· {list.length} total · Ctrl+T for details</Text>
       </Box>
 
       {list.map((w) => {

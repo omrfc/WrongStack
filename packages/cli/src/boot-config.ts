@@ -61,13 +61,16 @@ export async function bootConfig(
   }
 
   const configLoader = new DefaultConfigLoader({ paths: wpaths, vault });
-  const config = await configLoader.load({ cliFlags: flagsToConfigPatch(flags) });
+  let config = await configLoader.load({ cliFlags: flagsToConfigPatch(flags) });
 
   // Load and decrypt sync config from ~/.wrongstack/sync.json and merge it
   // into the main config so ConfigStore starts with the correct sync state.
+  // `load()` returns a frozen Config, so we rebuild a new frozen object rather
+  // than mutating it in place (a direct assignment throws "Cannot add property
+  // sync, object is not extensible" once sync.json exists).
   const syncConfig = await configLoader.loadSyncConfig();
   if (syncConfig) {
-    (config as unknown as Record<string, unknown>).sync = syncConfig;
+    config = Object.freeze({ ...config, sync: syncConfig }) as Config;
   }
 
   return {

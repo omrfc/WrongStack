@@ -45,7 +45,7 @@ single-tree, one-phase-at-a-time behavior.
 
 - **TUI** — a compact worktree panel sits beside the AutoPhase phase panel
   (branch · owner phase · `+ins/-del` · status). Press **Ctrl+T** for the
-  full-screen worktree monitor (Ctrl+W is taken by delete-word).
+  full-screen worktree monitor (Ctrl+T is taken by delete-word).
 - **WebUI** — the AutoPhase screen shows a live **swim-lane** band (one lane
   per worktree with flowing diff stats) and a **Graph** toggle that renders the
   worktrees as branches forking off — and folding back into — the base trunk.

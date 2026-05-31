@@ -103,4 +103,25 @@ describe('bootConfig', () => {
     const result = await bootConfig({ cwd: projectDir });
     expect(result.paths.cwd).toBe(path.resolve(projectDir));
   });
+
+  it('merges sync.json into config without mutating the frozen Config', async () => {
+    // Regression: load() returns a frozen Config. Merging sync state by
+    // direct assignment threw "Cannot add property sync, object is not
+    // extensible" once ~/.wrongstack/sync.json existed (post `/sync enable`).
+    const projectDir = await mkTempDir('wstack-boot-sync-');
+    const wsDir = path.join(homeDir, '.wrongstack');
+    await fs.mkdir(wsDir, { recursive: true });
+    const syncConfig = {
+      enabled: true,
+      repo: 'owner/repo',
+      githubToken: 'plaintext-token',
+      categories: ['settings', 'memory'],
+    };
+    await fs.writeFile(path.join(wsDir, 'sync.json'), JSON.stringify(syncConfig), 'utf8');
+
+    const result = await bootConfig({ cwd: projectDir });
+    expect(result.config.sync?.enabled).toBe(true);
+    expect(result.config.sync?.repo).toBe('owner/repo');
+    expect(result.config.sync?.categories).toEqual(['settings', 'memory']);
+  });
 });

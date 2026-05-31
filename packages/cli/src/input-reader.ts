@@ -138,7 +138,7 @@ export class ReadlineInputReader implements InputReader {
    * user gets visual confirmation that bytes are arriving (especially on
    * paste, which previously felt like nothing happened). Pasted chunks
    * are echoed as a run of bullets, Backspace/DEL erases one bullet, and
-   * Ctrl+U / Ctrl+W are honored. Non-TTY input is read normally — there's
+   * Ctrl+U / Ctrl+T are honored. Non-TTY input is read normally — there's
    * nothing to hide when piped, and echoing bullets to a file is noise.
    *
    * Returns the raw entered string (no trim — caller decides).
@@ -189,7 +189,7 @@ export class ReadlineInputReader implements InputReader {
             continue;
           }
           if (ch === '') {
-            // Ctrl+W — erase last whitespace-delimited token
+            // Ctrl+T — erase last whitespace-delimited token
             const m = buf.match(/(\S+\s*)$/);
             const drop = m ? m[0].length : buf.length;
             for (let i = 0; i < drop; i++) eraseChar();

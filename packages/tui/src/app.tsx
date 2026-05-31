@@ -3600,7 +3600,7 @@ export function App({
       return;
     }
 
-    // Worktree monitor toggle — Ctrl+T opens, Ctrl+W closes (when open) or deletes word (when closed).
+    // Worktree monitor toggle — Ctrl+T opens, Ctrl+T closes (when open) or deletes word (when closed).
     if (key.ctrl && input === 't') {
       dispatch({ type: 'worktreeMonitorToggle' });
       return;
@@ -3919,7 +3919,7 @@ export function App({
       return;
     }
     if (key.ctrl && input === 'w') {
-      // Ctrl+W → toggle worktree monitor when it's open, otherwise delete word before cursor.
+      // Ctrl+T → toggle worktree monitor when it's open, otherwise delete word before cursor.
       if (state.worktreeMonitorOpen) {
         dispatch({ type: 'worktreeMonitorToggle' });
         return;

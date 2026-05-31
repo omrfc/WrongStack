@@ -5,6 +5,115 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.19] - 2026-05-31
+
+> Consolidates everything since 0.9.7. The intermediate `0.9.8`–`0.9.18` version
+> bumps shipped without their own changelog sections; their substantive changes
+> are folded into this entry. The headline is a full `security-check` audit pass
+> (findings **F-01 → F-07** remediated) plus the collaborative-debugging fleet
+> primitive.
+
+### Security
+
+A full-monorepo `security-check` audit ran across deserialization, path
+traversal, RCE, secrets/crypto, SSRF, and the WebUI control plane. Raw
+per-hunter output and the verified write-ups live under `security-report/`
+(`verified-findings.md` + the `sc-*-results.md` siblings). Seven findings were
+verified and remediated; the rest were ruled out of threat model or
+false-positive (prototype pollution, eval primitives, WebUI CSWSH, secret-vault
+crypto, CI/CD script injection, dependency CVEs — `pnpm audit` returned **0
+advisories** across 591 deps). **26 new regression tests**; core/tools/mcp/
+runtime/cli suites green, workspace typecheck + Biome clean.
+
+- **F-01 (HIGH · CWE-88/22) — `diff` tool argument injection → unconfirmed
+  arbitrary file write.** `gitDiff()` pushed the model-controlled `a`/`b` refs
+  into the `git diff` argv with no leading-dash guard, and the tool is
+  `permission: 'auto'`. A call like `{ a: "--output=../../.bashrc", b: "HEAD" }`
+  became `git diff --output=<path> HEAD`, writing/clobbering an arbitrary file
+  **outside the project root** with no confirmation (and bypassing the subagent
+  guard). `a`/`b` are now validated as commit-ish refs — values beginning with
+  `-` are rejected before `findGitDir`, mirroring `git.ts`'s validator.
+
+- **F-02 (CWE-863) — tool-registry `wrap`/`unregister`/`override` had no
+  trust-tier enforcement.** Unlike the slash-command registry, the plugin tool
+  API let any external plugin `wrap('bash', …)` to silently downgrade a
+  builtin's permission, or `unregister('write')` to disable a safeguard. These
+  paths now route through the same officiality gate as slash commands — only
+  first-party (`official`) plugins may modify tools they don't own.
+
+- **F-03 (CWE-862) — subagent auto-approve guard was an incomplete denylist.**
+  The non-interactive `AutoApprovePermissionPolicy` only blocked
+  `bash/write/scaffold/patch/install/exec`, so a prompt-injection-driven
+  subagent could still mutate files via `edit`/`replace`, write out-of-root via
+  `diff` (F-01), or reach any `mcp__*` tool. The guard now **fails closed** —
+  `edit`, `replace`, and every `mcp__*` tool are denied as well.
+
+- **F-04 (CWE-59) — `safeResolve` did not resolve symlinks.** An existing
+  in-repo symlink pointing outside the root was followed by `read`/`edit`/
+  `write`. The single-file ops now resolve through `safeResolveReal` and
+  re-check containment, matching the `lstat`+`realpath` defense `replace`/`grep`
+  already used.
+
+- **F-05 (CWE-918) — builtin `search` tool followed redirects without per-hop
+  revalidation.** `fetch.ts`'s SSRF-guarded fetch is now exported as
+  `guardedFetch`; the `search` tool routes through it (manual redirects +
+  per-hop private-IP rejection) instead of `redirect: 'follow'`.
+
+- **F-06 (CWE-532) — user/model turn text written to the session JSONL
+  unscrubbed.** Tool output was already scrubbed, but `user_input` /
+  `llm_response` content (and the summary title) was not — a pasted/echoed
+  secret landed in cleartext in the `0o600` session log and would ride along in
+  the `history` cloud-sync category. `DefaultSessionStore` now accepts a
+  `secretScrubber` and scrubs turn text before persistence, wired in the runtime
+  container.
+
+- **F-07 (CWE-918) — MCP transport URL validation lighter than `fetch.ts`.**
+  `validateTransportUrl` gained IPv6 parity — link-local `fe80::/10` and the
+  AWS IPv6 IMDS address (`fd00:ec2::254`) are now blocked alongside the existing
+  IPv4 IMDS guard.
+
+- Also fixed a pre-existing `Config`→`Record` cast in `cli/boot-config.ts` that
+  was masked by a stale `core/dist` and surfaced once core was rebuilt for F-06.
+
+### Added
+
+- **Collaborative debugging — parallel multi-agent debugging on one problem.**
+  New `CollabSession` / `Director.spawnCollab(options)` primitive
+  (`@wrongstack/core/coordination`) runs **BugHunter, RefactorPlanner, and
+  Critic in parallel on a shared, immutable `SharedFileSnapshot`**. Findings flow
+  through the FleetBus as structured events
+  (`bug.found → refactor.plan → critic.evaluation`); the Director acts as a
+  result router, collecting outputs and routing them to dependents via a shared
+  scratchpad so agents read each other's conclusions without needing each
+  other's full transcripts. Returns a structured `CollabDebugReport`.
+
+- **`fleet_emit` tool — structured subagent → FleetBus signalling.** Director-
+  mode subagents can emit typed events onto the fleet bus (consumed by the
+  collab router and the live fleet surfaces). The tool is injected into
+  director-mode subagent registries automatically: a subagent that requests
+  `fleet_emit` in its tool list gets the live, Director-bound instance spliced
+  in at spawn time.
+
+- **Subagent nicknames.** Spawned subagents now draw a memorable nickname from a
+  domain-grouped pool of scientists, mathematicians, and computing pioneers
+  (Einstein, Gauss, Turing, Shannon, …) so the name hints at the agent's role —
+  easier to track than `AGENT#3` across the fleet UIs.
+
+- **`completePartialObject` — streaming tool-input JSON salvage.** New
+  `@wrongstack/core/utils` helper auto-closes braces and completes unclosed
+  string values when a tool-call argument stream truncates mid-object (e.g.
+  `{"old_string": "line1\nline2` with no closing `"}`), recovering the call
+  instead of dropping it.
+
+### Changed
+
+- **All workspace packages bumped 0.9.7 → 0.9.19**: `wrongstack`,
+  `@wrongstack/cli`, `@wrongstack/core`, `@wrongstack/mcp`,
+  `@wrongstack/plug-lsp`, `@wrongstack/plugins`, `@wrongstack/providers`,
+  `@wrongstack/runtime`, `@wrongstack/skills`, `@wrongstack/telegram`,
+  `@wrongstack/tools`, `@wrongstack/tui`, `@wrongstack/webui`.
+  `@wrongstack/acp` tracks the same version.
+
 ## [0.9.7] - 2026-05-31
 
 ### Added
@@ -50,11 +159,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **TUI worktree monitor (`Ctrl+W`).** The worktree monitor overlay now responds to `Ctrl+W` for closing, in addition to `Escape`. When the worktree monitor is open, `Ctrl+W` closes it; when closed, `Ctrl+W` performs the normal "delete word before cursor" behavior.
+- **TUI worktree monitor (`Ctrl+T`).** The worktree monitor overlay now responds to `Ctrl+T` for closing, in addition to `Escape`. When the worktree monitor is open, `Ctrl+T` closes it; when closed, `Ctrl+T` performs the normal "delete word before cursor" behavior.
 
 - **Fleet panel redesigned — max 4 lines, running agents only.** The FleetPanel rendered below the status bar has been simplified to show at most 4 lines: a fleet summary line plus up to 3 running agents with just their name and current tool. Idle and finished agents are no longer listed, reducing visual clutter.
 
-- **TUI keyboard shortcuts documented in README.** The Mid-flight controls table in README now includes all monitor toggle shortcuts: `Ctrl+F` (fleet), `Ctrl+G` (agents), `Ctrl+T` (worktree), `Ctrl+P` (phase), and `Ctrl+W` (close worktree).
+- **TUI keyboard shortcuts documented in README.** The Mid-flight controls table in README now includes all monitor toggle shortcuts: `Ctrl+F` (fleet), `Ctrl+G` (agents), `Ctrl+T` (worktree), `Ctrl+P` (phase), and `Ctrl+T` (close worktree).
 
 ### Changed
 
@@ -62,7 +171,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`worktree-monitor.tsx`: Ctrl+W now actually closes the monitor.** The UI previously showed "Ctrl+W / Esc to close" but only `Escape` was being handled. Now `Ctrl+W` properly closes the worktree monitor when it's open.
+- **`worktree-monitor.tsx`: Ctrl+T now actually closes the monitor.** The UI previously showed "Ctrl+T / Esc to close" but only `Escape` was being handled. Now `Ctrl+T` properly closes the worktree monitor when it's open.
 
 ## [0.8.6] - 2026-05-29
 
