@@ -18,6 +18,7 @@
  */
 
 import { EventEmitter } from 'node:events';
+import * as fsp from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import type { SubagentConfig } from '../types/multi-agent.js';
 
@@ -172,11 +173,41 @@ export class CollabSession extends EventEmitter {
     this.timeoutMs = options.timeoutMs ?? 10 * 60 * 1000;
 
     // Build or use provided snapshot
-    this.snapshot = options.prebuiltSnapshot ?? {
-      id: this.sessionId,
-      createdAt: new Date().toISOString(),
-      files: [],
-    };
+    if (options.prebuiltSnapshot) {
+      this.snapshot = options.prebuiltSnapshot;
+    } else {
+      // Placeholder — call buildSnapshot() before start() to populate from disk,
+      // or pass prebuiltSnapshot to the constructor to avoid async I/O here.
+      this.snapshot = {
+        id: this.sessionId,
+        createdAt: new Date().toISOString(),
+        files: [],
+      };
+    }
+  }
+
+  /**
+   * Read the target files from disk and populate the snapshot.
+   * Call this after construction if you did not provide a prebuiltSnapshot
+   * and want the session to operate on real file contents.
+   */
+  async buildSnapshot(): Promise<SharedFileSnapshot> {
+    if (this.snapshot.files.length > 0) return this.snapshot;
+    for (const filePath of this.options.targetPaths) {
+      try {
+        const content = await fsp.readFile(filePath, 'utf8');
+        const ext = filePath.split('.').pop() ?? '';
+        const language = ext === 'ts' || ext === 'tsx' ? 'typescript'
+          : ext === 'js' || ext === 'jsx' ? 'javascript'
+          : ext === 'md' ? 'markdown'
+          : ext === 'json' ? 'json'
+          : undefined;
+        this.snapshot.files.push({ path: filePath, content, language });
+      } catch {
+        this.snapshot.files.push({ path: filePath, content: '', language: undefined });
+      }
+    }
+    return this.snapshot;
   }
 
   /**
@@ -236,6 +267,12 @@ export class CollabSession extends EventEmitter {
       id: `${role}-${this.sessionId}`,
       name: role,
       role,
+      // fleet_emit is a built-in coordination tool that lets the subagent
+      // publish structured events (bug.found, refactor.plan, critic.evaluation)
+      // to the fleet bus so the session can route them to other agents.
+      // The tool registry must contain 'fleet_emit' — see index.ts exports
+      // and the cli multi-agent.ts tool registration wiring.
+      tools: ['fleet_emit'],
     };
     const subagentId = await this.director.spawn(cfg);
     await this.director.assign({
