@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import type { EventBus } from '../kernel/events.js';
 import type { ContentBlock } from '../types/blocks.js';
 import type { Message } from '../types/messages.js';
+import type { SecretScrubber } from '../types/secret-scrubber.js';
 import type {
   ResumedSession,
   SessionData,
@@ -20,15 +21,26 @@ export interface SessionStoreOptions {
   dir: string;
   /** Optional EventBus for emitting session diagnostics. */
   events?: EventBus;
+  /**
+   * Optional secret scrubber. When set, `user_input` and `llm_response` event
+   * content is scrubbed before being persisted to the JSONL log and the
+   * summary sidecar — so a secret a user pastes or the model echoes does not
+   * sit in cleartext on disk (and does not ride along in history cloud-sync).
+   * Tool output is already scrubbed upstream by the executor; this closes the
+   * conversation-turn gap (finding F-06).
+   */
+  secretScrubber?: SecretScrubber;
 }
 
 export class DefaultSessionStore implements SessionStore {
   private readonly dir: string;
   private readonly events?: EventBus;
+  private readonly secretScrubber?: SecretScrubber;
 
   constructor(opts: SessionStoreOptions) {
     this.dir = opts.dir;
     this.events = opts.events;
+    this.secretScrubber = opts.secretScrubber;
   }
 
   /** Join session ID to its absolute path within the store directory. */
@@ -56,7 +68,11 @@ export class DefaultSessionStore implements SessionStore {
       );
     }
     try {
-      return new FileSessionWriter(id, handle, startedAt, meta, this.events, { dir: shardDir, filePath: file });
+      return new FileSessionWriter(id, handle, startedAt, meta, this.events, {
+        dir: shardDir,
+        filePath: file,
+        secretScrubber: this.secretScrubber,
+      });
     } catch (err) {
       await handle.close().catch(() => {});
       throw err;
@@ -86,7 +102,7 @@ export class DefaultSessionStore implements SessionStore {
           provider: data.metadata.provider,
         },
         this.events,
-        { resumed: true, dir: this.dir, filePath: file },
+        { resumed: true, dir: this.dir, filePath: file, secretScrubber: this.secretScrubber },
       );
       return { writer, data };
     } catch (err) {
@@ -161,13 +177,12 @@ export class DefaultSessionStore implements SessionStore {
       const full = this.sessionPath(id, '.jsonl');
       const stat = await fsp.stat(full);
       const summary = await this.summarize(id, stat.mtime.toISOString());
-      await atomicWrite(manifest, JSON.stringify(summary), { mode: 0o600 })
-        .catch((err) => {
-          console.warn(
-            `[session-store] Failed to write manifest for "${id}":`,
-            err instanceof Error ? err.message : String(err),
-          );
-        });
+      await atomicWrite(manifest, JSON.stringify(summary), { mode: 0o600 }).catch((err) => {
+        console.warn(
+          `[session-store] Failed to write manifest for "${id}":`,
+          err instanceof Error ? err.message : String(err),
+        );
+      });
       return summary;
     }
   }
@@ -321,6 +336,31 @@ class FileSessionWriter implements SessionWriter {
   private readonly resumed: boolean;
   private appendFailCount = 0;
   private lastAppendWarnAt = 0;
+  private readonly secretScrubber?: SecretScrubber;
+
+  /**
+   * Scrub secrets out of conversation-turn events before they are observed
+   * for the summary, written to the JSONL log, or surfaced on resume. Only
+   * `user_input` / `llm_response` carry free-form user/model text; other event
+   * types either have no secret-bearing content or are already scrubbed
+   * upstream (tool results). Returns the event unchanged when no scrubber is
+   * configured.
+   */
+  private scrubEvent(event: SessionEvent): SessionEvent {
+    const s = this.secretScrubber;
+    if (!s) return event;
+    if (event.type === 'user_input') {
+      return {
+        ...event,
+        content:
+          typeof event.content === 'string' ? s.scrub(event.content) : s.scrubObject(event.content),
+      };
+    }
+    if (event.type === 'llm_response') {
+      return { ...event, content: s.scrubObject(event.content) };
+    }
+    return event;
+  }
 
   private promptIndex = 0;
   private pendingFileSnapshots: Array<{
@@ -332,7 +372,12 @@ class FileSessionWriter implements SessionWriter {
   /** Tracks open tool_use IDs during the current run to serialize on close for resume. */
   private openToolUses = new Set<string>();
 
-  recordFileChange(input: { path: string; action: 'created' | 'modified' | 'deleted'; before: string | null; after: string | null }): void {
+  recordFileChange(input: {
+    path: string;
+    action: 'created' | 'modified' | 'deleted';
+    before: string | null;
+    after: string | null;
+  }): void {
     this.pendingFileSnapshots.push(input);
   }
 
@@ -342,11 +387,17 @@ class FileSessionWriter implements SessionWriter {
     private readonly startedAt: string,
     private readonly meta: Omit<SessionMetadata, 'startedAt'>,
     private readonly events?: EventBus,
-    opts: { resumed?: boolean; dir?: string; filePath?: string } = {},
+    opts: {
+      resumed?: boolean;
+      dir?: string;
+      filePath?: string;
+      secretScrubber?: SecretScrubber;
+    } = {},
   ) {
     this.resumed = opts.resumed ?? false;
     this.manifestFile = opts.dir ? path.join(opts.dir, `${id}.summary.json`) : '';
     this.filePath = opts.filePath ?? '';
+    this.secretScrubber = opts.secretScrubber;
     this.summary = {
       id,
       title: '(empty session)',
@@ -384,9 +435,13 @@ class FileSessionWriter implements SessionWriter {
       this.initDone = true;
       await this.writeSessionStartLazy();
     }
-    this.observeForSummary(event);
+    // Scrub before observing (the summary title is derived from user_input
+    // content) and before writing, so neither the JSONL nor the sidecar holds
+    // a cleartext secret.
+    const scrubbed = this.scrubEvent(event);
+    this.observeForSummary(scrubbed);
     try {
-      await this.handle.appendFile(`${JSON.stringify(event)}\n`, 'utf8');
+      await this.handle.appendFile(`${JSON.stringify(scrubbed)}\n`, 'utf8');
     } catch (err) {
       this.appendFailCount++;
       const now = Date.now();
@@ -564,11 +619,12 @@ class FileSessionWriter implements SessionWriter {
 }
 
 function userInputTitle(content: string | ContentBlock[]): string {
-  const text = typeof content === 'string'
-    ? content
-    : content
-        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
-        .map((b) => b.text)
-        .join(' ');
+  const text =
+    typeof content === 'string'
+      ? content
+      : content
+          .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+          .map((b) => b.text)
+          .join(' ');
   return (text || '(non-text input)').slice(0, 60);
 }

@@ -63,6 +63,13 @@ export async function bootConfig(
   const configLoader = new DefaultConfigLoader({ paths: wpaths, vault });
   const config = await configLoader.load({ cliFlags: flagsToConfigPatch(flags) });
 
+  // Load and decrypt sync config from ~/.wrongstack/sync.json and merge it
+  // into the main config so ConfigStore starts with the correct sync state.
+  const syncConfig = await configLoader.loadSyncConfig();
+  if (syncConfig) {
+    (config as unknown as Record<string, unknown>).sync = syncConfig;
+  }
+
   return {
     paths: { cwd, projectRoot, userHome, wpaths, pathResolver },
     config,

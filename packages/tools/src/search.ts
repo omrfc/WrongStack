@@ -1,4 +1,5 @@
 import type { Tool, ToolStreamEvent } from '@wrongstack/core';
+import { guardedFetch } from './fetch.js';
 
 interface SearchInput {
   query: string;
@@ -260,12 +261,13 @@ async function fetchWithTimeout(
 
   const fetchSignal = anySignal(signal, controller.signal);
   try {
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      },
-      signal: fetchSignal,
+    // F-05: route through the SSRF-guarded fetch (private-IP blocking, HTTPS,
+    // DNS-pinned dispatcher, per-hop redirect re-validation) instead of a bare
+    // `fetch` with `redirect: 'follow'`. Search hosts are fixed/trusted, but
+    // this closes the residual "engine 30x → internal address" redirect risk.
+    const res = await guardedFetch(url, 5, fetchSignal, {
+      'user-agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     });
     clearTimeout(timer);
     return res;

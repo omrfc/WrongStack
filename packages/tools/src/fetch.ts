@@ -92,15 +92,23 @@ function getPinnedDispatcher(): Agent {
   return pinnedAgent;
 }
 
-async function fetchWithRedirectLimit(
+/**
+ * SSRF-guarded fetch with manual, per-hop-revalidated redirects, exported so
+ * other builtin tools (e.g. `search`) get the same protections instead of a
+ * weaker `redirect: 'follow'`. Every hop is re-checked against private/loopback
+ * ranges and the connection is pinned to the validated IP via the undici
+ * dispatcher (no DNS-rebinding TOCTOU). `headers` defaults to the plain `fetch`
+ * tool's; callers may override (e.g. a browser User-Agent for search engines).
+ */
+export async function guardedFetch(
   url: string,
   maxRedirects: number,
   signal: AbortSignal,
-): Promise<Response> {
-  const headers = {
+  headers: Record<string, string> = {
     'user-agent': 'WrongStack/1.0 (+https://wrongstack.com)',
     accept: 'text/html,application/json;q=0.9,text/plain;q=0.8,*/*;q=0.1',
-  };
+  },
+): Promise<Response> {
   let redirectCount = 0;
   let currentUrl = url;
   for (;;) {
@@ -192,7 +200,7 @@ export const fetchTool: Tool<FetchInput, FetchOutput> = {
     const combined = combineSignals(opts.signal, ctrl.signal);
 
     try {
-      const res = await fetchWithRedirectLimit(input.url, 5, combined);
+      const res = await guardedFetch(input.url, 5, combined);
 
       const ct = res.headers.get('content-type') ?? 'application/octet-stream';
       if (/^image\/|^audio\/|^video\/|application\/octet-stream/.test(ct)) {

@@ -127,10 +127,14 @@ describe('DefaultPluginAPI', () => {
     const { api } = mkApi();
     const handler = vi.fn();
     const off = api.onEvent('tool.before' as never, handler);
-    (api.events as never as { emit: (e: string, p: unknown) => void }).emit('tool.before', { x: 1 });
+    (api.events as never as { emit: (e: string, p: unknown) => void }).emit('tool.before', {
+      x: 1,
+    });
     expect(handler).toHaveBeenCalledTimes(1);
     off();
-    (api.events as never as { emit: (e: string, p: unknown) => void }).emit('tool.before', { x: 2 });
+    (api.events as never as { emit: (e: string, p: unknown) => void }).emit('tool.before', {
+      x: 2,
+    });
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
@@ -138,7 +142,9 @@ describe('DefaultPluginAPI', () => {
     const { api } = mkApi();
     const handler = vi.fn();
     const off = api.onPattern('tool.*', handler);
-    (api.events as never as { emit: (e: string, p: unknown) => void }).emit('tool.after', { ok: true });
+    (api.events as never as { emit: (e: string, p: unknown) => void }).emit('tool.after', {
+      ok: true,
+    });
     expect(handler).toHaveBeenCalled();
     off();
   });
@@ -215,7 +221,9 @@ describe('DefaultPluginAPI', () => {
     const contributors = api.extensions.listSystemPromptContributors();
     expect(contributors.some((c) => c.id === 'p:hello')).toBe(true);
     off();
-    expect(api.extensions.listSystemPromptContributors().some((c) => c.id === 'p:hello')).toBe(false);
+    expect(api.extensions.listSystemPromptContributors().some((c) => c.id === 'p:hello')).toBe(
+      false,
+    );
   });
 
   // ── slash commands ─────────────────────────────────────────────────────────
@@ -246,7 +254,9 @@ describe('DefaultPluginAPI', () => {
 
   it('slashCommands falls back to noop view when no host registry is provided', () => {
     const { api } = mkApi();
-    expect(() => api.slashCommands.register({ name: 'x', description: '', run: async () => ({}) })).not.toThrow();
+    expect(() =>
+      api.slashCommands.register({ name: 'x', description: '', run: async () => ({}) }),
+    ).not.toThrow();
     expect(api.slashCommands.unregister('x')).toBe(false);
     expect(api.slashCommands.get('x')).toBeUndefined();
     expect(api.slashCommands.list()).toEqual([]);
@@ -330,5 +340,57 @@ describe('DefaultPluginAPI', () => {
     expect(ro).toBeDefined();
     // ReadonlyPipeline lacks `.use()` — invoking it would throw if attempted
     expect((ro as { use?: unknown }).use).toBeUndefined();
+  });
+});
+
+// F-02: tool-registry trust tiers. External plugins may only mutate tools
+// they own; only official (first-party) plugins may wrap/unregister a tool
+// owned by core or another plugin.
+describe('DefaultPluginAPI tool trust tiers (F-02)', () => {
+  function mkApiWith(official?: boolean) {
+    const toolRegistry = new ToolRegistry();
+    const api = new DefaultPluginAPI({
+      ownerName: 'evil-plugin',
+      container: new Container(),
+      events: new EventBus(),
+      pipelines: {} as Parameters<typeof DefaultPluginAPI>[0]['pipelines'],
+      toolRegistry,
+      providerRegistry: new ProviderRegistry(),
+      config: baseConfig,
+      log: new DefaultLogger({ level: 'error' }),
+      official,
+    });
+    return { api, toolRegistry };
+  }
+
+  it('external plugin cannot unregister a core-owned tool', () => {
+    const { api, toolRegistry } = mkApiWith();
+    toolRegistry.register(tool('bash'), 'core');
+    expect(() => api.tools.unregister('bash')).toThrow(/may not unregister/);
+    expect(toolRegistry.get('bash')).toBeDefined();
+  });
+
+  it('external plugin cannot wrap (downgrade) a core-owned tool', () => {
+    const { api, toolRegistry } = mkApiWith();
+    toolRegistry.register({ ...tool('bash'), permission: 'confirm' }, 'core');
+    expect(() => api.tools.wrap('bash', (t) => ({ ...t, permission: 'auto' }))).toThrow(
+      /may not wrap/,
+    );
+    expect(toolRegistry.get('bash')?.permission).toBe('confirm');
+  });
+
+  it('external plugin may register, wrap, and unregister its OWN tool', () => {
+    const { api } = mkApiWith();
+    api.tools.register(tool('mine'));
+    expect(() => api.tools.wrap('mine', (t) => ({ ...t, description: 'x' }))).not.toThrow();
+    expect(() => api.tools.unregister('mine')).not.toThrow();
+    expect(api.tools.get('mine')).toBeUndefined();
+  });
+
+  it('official plugin may wrap a core-owned tool', () => {
+    const { api, toolRegistry } = mkApiWith(true);
+    toolRegistry.register({ ...tool('bash'), permission: 'confirm' }, 'core');
+    expect(() => api.tools.wrap('bash', (t) => ({ ...t, permission: 'auto' }))).not.toThrow();
+    expect(toolRegistry.get('bash')?.permission).toBe('auto');
   });
 });

@@ -8,7 +8,12 @@ import {
 } from '../../src/security/permission-policy.js';
 import type { Context, Tool } from '../../src/types/index.js';
 
-function tool(name: string, permission: 'auto' | 'confirm' | 'deny' = 'confirm', riskTier?: 'safe' | 'standard' | 'destructive', mutating = true): Tool {
+function tool(
+  name: string,
+  permission: 'auto' | 'confirm' | 'deny' = 'confirm',
+  riskTier?: 'safe' | 'standard' | 'destructive',
+  mutating = true,
+): Tool {
   return {
     name,
     description: name,
@@ -131,21 +136,33 @@ describe('DefaultPermissionPolicy', () => {
   describe('YOLO destructive gating', () => {
     it('yolo auto-approves non-destructive tools', async () => {
       const p = new DefaultPermissionPolicy({ trustFile, yolo: true });
-      const d = await p.evaluate(tool('read', 'confirm', 'safe'), { path: 'src/a.ts' }, {} as Context);
+      const d = await p.evaluate(
+        tool('read', 'confirm', 'safe'),
+        { path: 'src/a.ts' },
+        {} as Context,
+      );
       expect(d.permission).toBe('auto');
       expect(d.source).toBe('yolo');
     });
 
     it('yolo blocks destructive tools without forceAllYolo', async () => {
       const p = new DefaultPermissionPolicy({ trustFile, yolo: true });
-      const d = await p.evaluate(tool('bash', 'confirm', 'destructive'), { command: 'rm -rf /' }, {} as Context);
+      const d = await p.evaluate(
+        tool('bash', 'confirm', 'destructive'),
+        { command: 'rm -rf /' },
+        {} as Context,
+      );
       expect(d.permission).toBe('confirm');
       expect(d.source).toBe('yolo_destructive');
     });
 
     it('yolo + forceAllYolo allows destructive tools', async () => {
       const p = new DefaultPermissionPolicy({ trustFile, yolo: true, forceAllYolo: true });
-      const d = await p.evaluate(tool('bash', 'confirm', 'destructive'), { command: 'rm -rf /' }, {} as Context);
+      const d = await p.evaluate(
+        tool('bash', 'confirm', 'destructive'),
+        { command: 'rm -rf /' },
+        {} as Context,
+      );
       expect(d.permission).toBe('auto');
       expect(d.source).toBe('yolo');
     });
@@ -155,10 +172,18 @@ describe('DefaultPermissionPolicy', () => {
       expect(p.getForceAllYolo()).toBe(false);
       p.setForceAllYolo(true);
       expect(p.getForceAllYolo()).toBe(true);
-      const d = await p.evaluate(tool('bash', 'confirm', 'destructive'), { command: 'rm -rf /' }, {} as Context);
+      const d = await p.evaluate(
+        tool('bash', 'confirm', 'destructive'),
+        { command: 'rm -rf /' },
+        {} as Context,
+      );
       expect(d.permission).toBe('auto');
       p.setForceAllYolo(false);
-      const d2 = await p.evaluate(tool('bash', 'confirm', 'destructive'), { command: 'rm -rf /' }, {} as Context);
+      const d2 = await p.evaluate(
+        tool('bash', 'confirm', 'destructive'),
+        { command: 'rm -rf /' },
+        {} as Context,
+      );
       expect(d2.permission).toBe('confirm');
     });
 
@@ -168,14 +193,22 @@ describe('DefaultPermissionPolicy', () => {
         yolo: true,
         promptDelegate: async () => 'always',
       });
-      const d = await p.evaluate(tool('bash', 'confirm', 'destructive'), { command: 'rm -rf /' }, {} as Context);
+      const d = await p.evaluate(
+        tool('bash', 'confirm', 'destructive'),
+        { command: 'rm -rf /' },
+        {} as Context,
+      );
       expect(d.permission).toBe('auto');
       expect(d.source).toBe('user');
     });
 
     it('yolo_destructive source appears in decision', async () => {
       const p = new DefaultPermissionPolicy({ trustFile, yolo: true });
-      const d = await p.evaluate(tool('bash', 'confirm', 'destructive'), { command: 'rm -rf /' }, {} as Context);
+      const d = await p.evaluate(
+        tool('bash', 'confirm', 'destructive'),
+        { command: 'rm -rf /' },
+        {} as Context,
+      );
       expect(d.source).toBe('yolo_destructive');
       expect(d.riskTier).toBe('destructive');
     });
@@ -210,10 +243,49 @@ describe('AutoApprovePermissionPolicy', () => {
       inputSchema: { type: 'object' },
       permission: 'confirm',
       mutating: false,
-      async execute() { return 'x'; },
+      async execute() {
+        return 'x';
+      },
     } as Tool);
     expect(auto.permission).toBe('auto');
     expect(auto.source).toBe('yolo');
+  });
+
+  // F-03: the subagent guard must deny write-equivalent tools (not just
+  // `write`) and MCP tools of unknown capability — fail closed.
+  it.each(['bash', 'write', 'edit', 'replace', 'scaffold', 'patch', 'install', 'exec'])(
+    'denies dangerous builtin "%s" for subagents',
+    async (name) => {
+      const p = new AutoApprovePermissionPolicy();
+      const d = await p.evaluate({
+        name,
+        description: '',
+        inputSchema: { type: 'object' },
+        permission: 'confirm',
+        mutating: true,
+        async execute() {
+          return 'x';
+        },
+      } as Tool);
+      expect(d.permission).toBe('deny');
+      expect(d.source).toBe('subagent_guard');
+    },
+  );
+
+  it('denies MCP tools (mcp__*) for subagents by default', async () => {
+    const p = new AutoApprovePermissionPolicy();
+    const d = await p.evaluate({
+      name: 'mcp__some_server__run_shell',
+      description: '',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
+      async execute() {
+        return 'x';
+      },
+    } as Tool);
+    expect(d.permission).toBe('deny');
+    expect(d.source).toBe('subagent_guard');
   });
 
   it('respects tool-default deny', async () => {
@@ -224,7 +296,9 @@ describe('AutoApprovePermissionPolicy', () => {
       inputSchema: { type: 'object' },
       permission: 'deny',
       mutating: true,
-      async execute() { return 'x'; },
+      async execute() {
+        return 'x';
+      },
     } as Tool);
     expect(denied.permission).toBe('deny');
     expect(denied.source).toBe('subagent_guard');

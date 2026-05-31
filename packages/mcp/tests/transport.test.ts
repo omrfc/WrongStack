@@ -85,9 +85,7 @@ describe('SSEReader', () => {
     // Feed 1024 data lines without a blank-line delimiter — should throw
     // before flushing to prevent memory exhaustion from malicious servers.
     const manyLines = 'data: x\n'.repeat(1024);
-    expect(() => r.feed(manyLines + 'data: overflow\n')).toThrow(
-      /exceeded 1024 data lines/,
-    );
+    expect(() => r.feed(manyLines + 'data: overflow\n')).toThrow(/exceeded 1024 data lines/);
   });
 });
 
@@ -131,6 +129,31 @@ describe('SSETransport — connection failure modes', () => {
     // Generous bound: the timer fires at 150ms, plus fetch + abort
     // bookkeeping. If we ever get above 2000ms the timeout isn't wired.
     expect(elapsed).toBeLessThan(2000);
+  });
+});
+
+describe('validateTransportUrl SSRF guard (via constructor)', () => {
+  it('blocks IPv4 link-local / IMDS (169.254.x.x)', () => {
+    expect(() => new SSETransport({ name: 'x', url: 'https://169.254.169.254/' })).toThrow(
+      /link-local|IMDS/,
+    );
+  });
+
+  // F-07: IPv6 parity for the IPv4 IMDS/link-local block.
+  it('blocks IPv6 link-local (fe80::/10)', () => {
+    expect(() => new StreamableHTTPTransport({ name: 'x', url: 'https://[fe80::1]/' })).toThrow(
+      /link-local|IMDS/,
+    );
+  });
+
+  it('blocks the AWS IPv6 IMDS address (fd00:ec2::254)', () => {
+    expect(() => new SSETransport({ name: 'x', url: 'https://[fd00:ec2::254]/' })).toThrow(
+      /link-local|IMDS/,
+    );
+  });
+
+  it('allows a normal remote https host', () => {
+    expect(() => new SSETransport({ name: 'x', url: 'https://mcp.example.com/' })).not.toThrow();
   });
 });
 
@@ -945,7 +968,8 @@ describe('SSETransport — mocked connect + callTool', () => {
       // notifications/initialized
       () => jsonRes({ jsonrpc: '2.0' }),
       // tools/list
-      (_u, init) => jsonRes({ jsonrpc: '2.0', id: JSON.parse(init.body ?? '{}').id, result: { tools: [] } }),
+      (_u, init) =>
+        jsonRes({ jsonrpc: '2.0', id: JSON.parse(init.body ?? '{}').id, result: { tools: [] } }),
       // tools/call — non-OK status throws from request() method (not postRaw)
       () => new Response('Service Unavailable', { status: 503, statusText: 'Service Unavailable' }),
     ]);
@@ -974,12 +998,14 @@ describe('SSETransport — mocked connect + callTool', () => {
       // notifications/initialized
       () => jsonRes({ jsonrpc: '2.0' }),
       // tools/list
-      (_u, init) => jsonRes({ jsonrpc: '2.0', id: JSON.parse(init.body ?? '{}').id, result: { tools: [] } }),
+      (_u, init) =>
+        jsonRes({ jsonrpc: '2.0', id: JSON.parse(init.body ?? '{}').id, result: { tools: [] } }),
       // tools/call — valid HTTP but not JSON-RPC
-      () => new Response('plain text not JSON-RPC', {
-        status: 200,
-        headers: { 'content-type': 'text/plain' },
-      }),
+      () =>
+        new Response('plain text not JSON-RPC', {
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+        }),
     ]);
     const origFetch = globalThis.fetch;
     (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
@@ -1005,11 +1031,14 @@ describe('SSETransport — mocked connect + callTool', () => {
       // notifications/initialized
       () => jsonRes({ jsonrpc: '2.0' }),
       // tools/list
-      (_u, init) => jsonRes({ jsonrpc: '2.0', id: JSON.parse(init.body ?? '{}').id, result: { tools: [] } }),
+      (_u, init) =>
+        jsonRes({ jsonrpc: '2.0', id: JSON.parse(init.body ?? '{}').id, result: { tools: [] } }),
       // tools/call — NDJSON response (multiple lines)
       () =>
         new Response(
-          'ping event line\n' + JSON.stringify({ jsonrpc: '2.0', id: 4, result: { content: 'ok' } }) + '\n',
+          'ping event line\n' +
+            JSON.stringify({ jsonrpc: '2.0', id: 4, result: { content: 'ok' } }) +
+            '\n',
           { status: 200, headers: { 'content-type': 'text/event-stream' } },
         ),
     ]);
@@ -1018,10 +1047,9 @@ describe('SSETransport — mocked connect + callTool', () => {
     try {
       const t = new StreamableHTTPTransport({ name: 'x', url: 'https://m.test' });
       await t.connect();
-      const res = await (t as unknown as { request: (m: string, p: unknown) => Promise<unknown> }).request(
-        'tools/call',
-        { name: 'x', arguments: {} },
-      );
+      const res = await (
+        t as unknown as { request: (m: string, p: unknown) => Promise<unknown> }
+      ).request('tools/call', { name: 'x', arguments: {} });
       // Should have found the JSON-RPC result in the NDJSON lines
       expect((res as { result?: unknown }).result).toBeDefined();
     } finally {
@@ -1048,7 +1076,9 @@ describe('SSETransport — mocked connect + callTool', () => {
       // Verify that passing an aborted parent signal results in an aborted child
       await expect(
         (
-          t as unknown as { httpPost: (m: string, p: unknown, timeoutMs?: number) => Promise<unknown> }
+          t as unknown as {
+            httpPost: (m: string, p: unknown, timeoutMs?: number) => Promise<unknown>;
+          }
         ).httpPost('tools/list', {}, 5000),
       ).rejects.toThrow();
     } finally {

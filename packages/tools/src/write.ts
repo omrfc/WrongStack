@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import { atomicWrite, unifiedDiff } from '@wrongstack/core';
 import type { Tool } from '@wrongstack/core';
-import { safeResolve } from './_util.js';
+import { safeResolveReal } from './_util.js';
 
 interface WriteInput {
   path: string;
@@ -35,7 +35,7 @@ export const writeTool: Tool<WriteInput, WriteOutput> = {
   async execute(input, ctx) {
     if (!input?.path) throw new Error('write: path is required');
     if (input.content === undefined) throw new Error('write: content is required');
-    const absPath = safeResolve(input.path, ctx);
+    const absPath = await safeResolveReal(input.path, ctx);
 
     let existed = false;
     let prev = '';

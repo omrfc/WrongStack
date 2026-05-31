@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchTool } from '../src/fetch.js';
+import { fetchTool, guardedFetch } from '../src/fetch.js';
 import { mkSandbox, newSignal } from './fixtures.js';
 
 function mkResponse(opts: {
@@ -462,5 +462,22 @@ describe('fetch prettyJson error handling', () => {
     } finally {
       await sb.cleanup();
     }
+  });
+});
+
+// F-05: the exported guardedFetch (now used by the `search` tool) must carry
+// the same SSRF guard as the `fetch` tool — private/loopback targets rejected
+// before any socket is opened.
+describe('guardedFetch (shared SSRF-guarded fetch)', () => {
+  it('rejects a loopback target', async () => {
+    await expect(guardedFetch('https://127.0.0.1/', 5, newSignal())).rejects.toThrow(
+      /private|blocked|loopback/,
+    );
+  });
+
+  it('rejects the cloud metadata (IMDS) address', async () => {
+    await expect(
+      guardedFetch('https://169.254.169.254/latest/meta-data/', 5, newSignal()),
+    ).rejects.toThrow(/private|blocked/);
   });
 });

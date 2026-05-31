@@ -1,3 +1,4 @@
+import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Context } from '@wrongstack/core';
 
@@ -17,6 +18,53 @@ export function ensureInsideRoot(absPath: string, ctx: Context): string {
 
 export function safeResolve(input: string, ctx: Context): string {
   return ensureInsideRoot(resolvePath(input, ctx), ctx);
+}
+
+/**
+ * Defense against in-root→out-of-root symlink escape (CWE-59). `safeResolve`
+ * only does a syntactic `../` check, so a symlink that lives *inside* the
+ * project root but points outside still passes it. This resolves the path
+ * through `fs.realpath` and re-verifies containment against the realpath of
+ * the project root (comparing like-for-like, since the root itself may be a
+ * symlink — macOS `/var`→`/private/var`, Windows 8.3 short names). For a path
+ * that does not exist yet (e.g. a `write` to a new file) the nearest existing
+ * ancestor directory is checked instead. Throws if the real target escapes.
+ *
+ * Mirrors the per-file guard already used in `replace.ts`/`grep.ts`; applied
+ * to single-file `read`/`edit`/`write` it throws (rather than skips) because
+ * the caller named exactly one file.
+ */
+export async function assertRealInsideRoot(absPath: string, ctx: Context): Promise<void> {
+  const realRoot = await fsp.realpath(ctx.projectRoot).catch(() => path.resolve(ctx.projectRoot));
+  let probe = absPath;
+  for (;;) {
+    let real: string;
+    try {
+      real = await fsp.realpath(probe);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        const parent = path.dirname(probe);
+        if (parent === probe) return; // reached fs root without escaping
+        probe = parent;
+        continue;
+      }
+      throw err;
+    }
+    const rel = path.relative(realRoot, real);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      throw new Error(
+        `Path "${absPath}" resolves through a symlink outside project root "${realRoot}"`,
+      );
+    }
+    return;
+  }
+}
+
+/** `safeResolve` + symlink realpath containment check. Async. */
+export async function safeResolveReal(input: string, ctx: Context): Promise<string> {
+  const abs = safeResolve(input, ctx);
+  await assertRealInsideRoot(abs, ctx);
+  return abs;
 }
 
 export function truncateMiddle(s: string, max: number): string {

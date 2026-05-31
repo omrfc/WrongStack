@@ -107,10 +107,42 @@ export class DefaultPluginAPI implements PluginAPI {
     this.pipelines = readonlyPipelines;
 
     const tr = init.toolRegistry;
+    const isOfficial = init.official === true;
+    // Trust tiers for the tool registry, mirroring the slash-command registry:
+    // only first-party ("official") plugins (and core) may mutate a tool they
+    // do not own. An external plugin can register, wrap, and unregister its OWN
+    // tools, but must not silently downgrade a built-in's `permission` via
+    // `wrap`, nor `unregister` another owner's safeguard. Officiality is set by
+    // the host from the load source — never self-declared. (`register` is
+    // already collision-safe: it throws on a duplicate name, so an external
+    // plugin cannot shadow a built-in by re-registering it.)
+    const assertCanMutateTool = (name: string, op: string): void => {
+      if (isOfficial) return;
+      const currentOwner = tr.ownerOf(name);
+      // undefined: tool doesn't exist — let the downstream call no-op/throw.
+      if (currentOwner === undefined) return;
+      // `wrap` records a chain owner like "core+plugin"; a tool this plugin
+      // solely registered and (re)wrapped is "plugin" or "plugin+plugin".
+      // The plugin owns the tool only if EVERY segment is itself — so a core
+      // tool ("core") or one another plugin touched ("core+plugin") is denied.
+      const ownedSolelyByMe = currentOwner.split('+').every((seg) => seg === owner);
+      if (!ownedSolelyByMe) {
+        throw new Error(
+          `Plugin "${owner}" may not ${op} tool "${name}" — it is owned by "${currentOwner}". ` +
+            `Only official (first-party) plugins may modify tools they do not own.`,
+        );
+      }
+    };
     this.tools = {
       register: (t: Tool) => tr.register(t, owner),
-      unregister: (name: string) => tr.unregister(name),
-      wrap: (name: string, wrapper: ToolWrapper) => tr.wrap(name, wrapper, owner),
+      unregister: (name: string) => {
+        assertCanMutateTool(name, 'unregister');
+        return tr.unregister(name);
+      },
+      wrap: (name: string, wrapper: ToolWrapper) => {
+        assertCanMutateTool(name, 'wrap');
+        tr.wrap(name, wrapper, owner);
+      },
       get: (name: string) => tr.get(name),
       list: () => tr.list(),
     };

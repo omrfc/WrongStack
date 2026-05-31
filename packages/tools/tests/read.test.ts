@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readTool } from '../src/read.js';
@@ -73,5 +74,29 @@ describe('read tool', () => {
     // ctx.recordRead should still be called
     const abs = path.normalize(path.resolve(sb.dir, 'd.txt'));
     expect(sb.ctx.hasRead(abs)).toBe(true);
+  });
+
+  // F-04 (CWE-59): a symlink that lives INSIDE the project root but points
+  // outside must not be followed — `safeResolve`'s syntactic check passes it,
+  // the realpath cross-check (safeResolveReal) must reject it.
+  it('refuses to read through an in-root symlink pointing outside the root', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-outside-'));
+    try {
+      const secret = path.join(outside, 'secret.txt');
+      await fs.writeFile(secret, 'TOP SECRET');
+      const link = path.join(sb.dir, 'escape.txt');
+      try {
+        await fs.symlink(secret, link);
+      } catch (err) {
+        // Symlink creation can require privileges (Windows without dev mode).
+        if ((err as NodeJS.ErrnoException).code === 'EPERM') return; // skip
+        throw err;
+      }
+      await expect(
+        readTool.execute({ path: 'escape.txt' }, sb.ctx, { signal: newSignal() }),
+      ).rejects.toThrow(/symlink outside project root/);
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
   });
 });

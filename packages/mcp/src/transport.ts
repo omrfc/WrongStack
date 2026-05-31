@@ -1,7 +1,7 @@
-import type { Dispatcher } from 'undici';
 import { randomBytes } from 'node:crypto';
 import * as https from 'node:https';
 import * as net from 'node:net';
+import type { Dispatcher } from 'undici';
 import type { ConnectionState, JsonRpcResponse, MCPTool, ToolCallResult } from './client.js';
 import { MCP_CONSTANTS } from './constants.js';
 import { normalizeMCPTools } from './tool-schema.js';
@@ -58,13 +58,27 @@ function validateTransportUrl(rawUrl: string): void {
   }
 
   const hostname = url.hostname;
+  // URL.hostname keeps the brackets on IPv6 literals; strip them so net.isIP
+  // and prefix checks see the bare address.
+  const host =
+    hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
 
   // Block cloud metadata endpoints (IMDS) — these are never valid MCP servers
-  const ipVersion = net.isIP(hostname);
+  const ipVersion = net.isIP(host);
   if (ipVersion === 4) {
-    const parts = hostname.split('.').map(Number);
+    const parts = host.split('.').map(Number);
     // 169.254.x.x (link-local / IMDS)
     if (parts[0] === 169 && parts[1] === 254) {
+      throw new Error(
+        `MCP transport: blocked link-local/IMDS address "${hostname}" — likely not a valid MCP server`,
+      );
+    }
+  } else if (ipVersion === 6) {
+    const lower = host.toLowerCase();
+    // fe80::/10 link-local (first hextet fe80–febf) and the AWS IPv6 IMDS
+    // address fd00:ec2::254 — the IPv6 counterparts of the IPv4 block above.
+    const linkLocal = /^fe[89ab]/.test(lower);
+    if (linkLocal || lower === 'fd00:ec2::254') {
       throw new Error(
         `MCP transport: blocked link-local/IMDS address "${hostname}" — likely not a valid MCP server`,
       );
@@ -523,7 +537,10 @@ export class SSETransport {
     const id = this.nextId++;
     const body = JSON.stringify({ jsonrpc: '2.0', id, method, params });
 
-    const timeoutSignal = createTimeoutSignal(this.abortController?.signal, timeoutMs ?? this.requestTimeout);
+    const timeoutSignal = createTimeoutSignal(
+      this.abortController?.signal,
+      timeoutMs ?? this.requestTimeout,
+    );
     const fetchOpts: RequestInit = {
       method: 'POST',
       headers: {
@@ -787,7 +804,10 @@ export class StreamableHTTPTransport {
       ? `${this.url}${this.url.includes('?') ? '&' : '?'}session=${this.sessionId}`
       : this.url;
 
-    const timeoutSignal = createTimeoutSignal(this.abortController?.signal, timeoutMs ?? this.requestTimeout);
+    const timeoutSignal = createTimeoutSignal(
+      this.abortController?.signal,
+      timeoutMs ?? this.requestTimeout,
+    );
     const fetchOpts: RequestInit = {
       method: 'POST',
       headers: {

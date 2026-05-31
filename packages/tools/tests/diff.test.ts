@@ -44,6 +44,32 @@ describe('diffTool', () => {
     expect(result).toHaveProperty('mode');
   });
 
+  // F-01: argument injection via leading-dash git refs (CWE-88/CWE-22).
+  // `a: '--output=<path>'` would make `git diff --output=<path>` write to an
+  // arbitrary path with no confirmation (this tool is permission:'auto').
+  it('rejects a git ref `a` that begins with "-" (flag injection)', async () => {
+    const ctx = makeCtx();
+    await expect(
+      diffTool.execute({ a: '--output=/tmp/pwned', b: 'HEAD' }, ctx, makeOpts()),
+    ).rejects.toThrow(/unsafe ref|flag injection/);
+  });
+
+  it('rejects a git ref `b` that begins with "-" (flag injection)', async () => {
+    const ctx = makeCtx();
+    await expect(
+      diffTool.execute({ a: 'HEAD', b: '--output=/tmp/pwned' }, ctx, makeOpts()),
+    ).rejects.toThrow(/unsafe ref|flag injection/);
+  });
+
+  it('does not write a file when given an --output injection ref', async () => {
+    const ctx = makeCtx();
+    const sentinel = path.join(tmpDir, 'should-not-exist');
+    await diffTool
+      .execute({ a: `--output=${sentinel}`, b: 'HEAD' }, ctx, makeOpts())
+      .catch(() => undefined);
+    await expect(fs.access(sentinel)).rejects.toThrow();
+  });
+
   it('handles context option', async () => {
     const filePath = path.join(tmpDir, 'file.txt');
     await fs.writeFile(filePath, 'hello\nworld', 'utf8');

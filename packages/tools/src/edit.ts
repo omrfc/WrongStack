@@ -7,7 +7,7 @@ import {
   unifiedDiff,
 } from '@wrongstack/core';
 import type { Tool } from '@wrongstack/core';
-import { safeResolve } from './_util.js';
+import { safeResolveReal } from './_util.js';
 
 interface EditInput {
   path: string;
@@ -54,7 +54,7 @@ export const editTool: Tool<EditInput, EditOutput> = {
     if (input.new_string === undefined) throw new Error('edit: new_string is required');
     if (input.old_string === '') throw new Error('edit: old_string cannot be empty');
 
-    const absPath = safeResolve(input.path, ctx);
+    const absPath = await safeResolveReal(input.path, ctx);
     const stat = await fs.stat(absPath).catch((err) => {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         throw new Error(`edit: file "${input.path}" does not exist. Use \`write\` instead.`);

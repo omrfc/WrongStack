@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import type { Tool } from '@wrongstack/core';
-import { isBinaryBuffer, safeResolve } from './_util.js';
+import { isBinaryBuffer, safeResolveReal } from './_util.js';
 
 interface ReadInput {
   path: string;
@@ -38,7 +38,7 @@ export const readTool: Tool<ReadInput, ReadOutput> = {
   },
   async execute(input, ctx) {
     if (!input?.path) throw new Error('read: path is required');
-    const absPath = safeResolve(input.path, ctx);
+    const absPath = await safeResolveReal(input.path, ctx);
 
     let stat: Awaited<ReturnType<typeof fs.stat>>;
     try {
@@ -46,7 +46,9 @@ export const readTool: Tool<ReadInput, ReadOutput> = {
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === 'ENOENT') throw new Error(`read: file not found "${input.path}"`);
-      throw new Error(`read: failed to stat "${input.path}": ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(
+        `read: failed to stat "${input.path}": ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
     if (!stat.isFile()) throw new Error(`read: "${input.path}" is not a regular file`);
     if (stat.size > MAX_BYTES) {

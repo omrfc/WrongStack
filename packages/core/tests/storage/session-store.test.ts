@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DefaultSessionStore } from '../../src/index.js';
+import { DefaultSecretScrubber, DefaultSessionStore } from '../../src/index.js';
 
 // Lift the prototype so we can override appendFile per-test without touching
 // the production code path.
@@ -377,5 +377,76 @@ describe('DefaultSessionStore', () => {
     await w.close();
     // Should not throw — the guard handles the undefined path gracefully
     await expect(w.clearSession()).resolves.not.toThrow();
+  });
+});
+
+// F-06 (CWE-532): secrets in user/model turns must be scrubbed before they are
+// persisted to the JSONL log and the summary sidecar.
+describe('DefaultSessionStore — secret scrubbing (F-06)', () => {
+  let tmp: string;
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-sess-scrub-'));
+  });
+  afterEach(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  // A realistic-looking (fake) Anthropic key the scrubber recognizes.
+  const FAKE_KEY = 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789';
+
+  it('scrubs secrets from user_input content in the JSONL log', async () => {
+    const store = new DefaultSessionStore({
+      dir: tmp,
+      secretScrubber: new DefaultSecretScrubber(),
+    });
+    const w = await store.create({ id: 'sc1', model: 'm', provider: 'p' });
+    await w.append({
+      type: 'user_input',
+      ts: new Date().toISOString(),
+      content: `my key is ${FAKE_KEY} ok`,
+    });
+    await w.close();
+    const raw = await fs.readFile(path.join(tmp, 'sc1.jsonl'), 'utf8');
+    expect(raw).not.toContain(FAKE_KEY);
+    expect(raw).toContain('[REDACTED:anthropic_key]');
+  });
+
+  it('scrubs secrets from llm_response content blocks', async () => {
+    const store = new DefaultSessionStore({
+      dir: tmp,
+      secretScrubber: new DefaultSecretScrubber(),
+    });
+    const w = await store.create({ id: 'sc2', model: 'm', provider: 'p' });
+    await w.append({
+      type: 'llm_response',
+      ts: new Date().toISOString(),
+      content: [{ type: 'text', text: `here you go: ${FAKE_KEY}` }],
+      usage: { input: 1, output: 1 },
+    } as Parameters<typeof w.append>[0]);
+    await w.close();
+    const raw = await fs.readFile(path.join(tmp, 'sc2.jsonl'), 'utf8');
+    expect(raw).not.toContain(FAKE_KEY);
+    expect(raw).toContain('[REDACTED:anthropic_key]');
+  });
+
+  it('keeps the summary sidecar title clean too', async () => {
+    const store = new DefaultSessionStore({
+      dir: tmp,
+      secretScrubber: new DefaultSecretScrubber(),
+    });
+    const w = await store.create({ id: 'sc3', model: 'm', provider: 'p' });
+    await w.append({ type: 'user_input', ts: new Date().toISOString(), content: FAKE_KEY });
+    await w.close();
+    const summary = await fs.readFile(path.join(tmp, 'sc3.summary.json'), 'utf8');
+    expect(summary).not.toContain(FAKE_KEY);
+  });
+
+  it('without a scrubber, content is written verbatim (opt-in)', async () => {
+    const store = new DefaultSessionStore({ dir: tmp });
+    const w = await store.create({ id: 'sc4', model: 'm', provider: 'p' });
+    await w.append({ type: 'user_input', ts: new Date().toISOString(), content: FAKE_KEY });
+    await w.close();
+    const raw = await fs.readFile(path.join(tmp, 'sc4.jsonl'), 'utf8');
+    expect(raw).toContain(FAKE_KEY);
   });
 });

@@ -67,6 +67,19 @@ async function gitDiff(
   ctx: import('@wrongstack/core').Context,
   signal: AbortSignal,
 ): Promise<DiffOutput> {
+  // Flag injection: a/b are passed as positional args BEFORE the `--`
+  // separator, so a leading '-' would be parsed as a git option. The most
+  // dangerous is `--output=<path>`, which makes `git diff` write to an
+  // arbitrary path (outside the project root, with no confirmation since this
+  // tool is permission:'auto'). Reject leading-dash refs unconditionally —
+  // mirrors the guard in git.ts (validateWorktreeInput) and install.ts.
+  if (input.a?.startsWith('-')) {
+    throw new Error(`diff: unsafe ref "${input.a}" — refs may not begin with '-' (flag injection)`);
+  }
+  if (input.b?.startsWith('-')) {
+    throw new Error(`diff: unsafe ref "${input.b}" — refs may not begin with '-' (flag injection)`);
+  }
+
   const gitDir = findGitDir(ctx.cwd);
   if (!gitDir) {
     return { diff: '', files: [], truncated: false, mode: 'unified' };
@@ -115,7 +128,12 @@ function runGit(
     let stdout = '';
     let stderr = '';
 
-    const child = spawn('git', args, { cwd, signal, env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('git', args, {
+      cwd,
+      signal,
+      env: buildChildEnv(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     child.stdout?.on('data', (c) => {
       stdout += c.toString();
     });

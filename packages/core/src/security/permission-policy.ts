@@ -138,7 +138,11 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     // 3b. Session soft allow — 'y' auto-approves this tool+pattern for the
     //     rest of this session without writing to the trust file.
     if (this.sessionAllowed.has(subjectKey)) {
-      return { permission: 'auto', source: 'trust', reason: 'session soft allow (user pressed yes)' };
+      return {
+        permission: 'auto',
+        source: 'trust',
+        reason: 'session soft allow (user pressed yes)',
+      };
     }
 
     // 4. Deny — absolute
@@ -164,7 +168,11 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
           const decision = await this.promptDelegate(tool, input, subject ?? tool.name);
           if (decision === 'always') {
             await this.trust({ tool: tool.name, pattern: subject ?? tool.name });
-            return { permission: 'auto', source: 'user', reason: 'destructive yolo always-allowed' };
+            return {
+              permission: 'auto',
+              source: 'user',
+              reason: 'destructive yolo always-allowed',
+            };
           }
           if (decision === 'deny') {
             await this.deny({ tool: tool.name, pattern: subject ?? tool.name });
@@ -172,7 +180,12 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
           }
           return { permission: decision === 'yes' ? 'auto' : 'deny', source: 'user' };
         }
-        return { permission: 'confirm', source: 'yolo_destructive', riskTier: 'destructive', reason: 'destructive tool needs explicit approval even in yolo mode' };
+        return {
+          permission: 'confirm',
+          source: 'yolo_destructive',
+          riskTier: 'destructive',
+          reason: 'destructive tool needs explicit approval even in yolo mode',
+        };
       }
       return { permission: 'auto', source: 'yolo' };
     }
@@ -181,7 +194,11 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     // session, the user has already seen the content. No confirm needed.
     if (tool.name === 'write' && subject) {
       if (ctx.hasRead(subject)) {
-        return { permission: 'auto', source: 'context', reason: 'file already read in this session' };
+        return {
+          permission: 'auto',
+          source: 'context',
+          reason: 'file already read in this session',
+        };
       }
     }
 
@@ -331,20 +348,35 @@ export class AutoApprovePermissionPolicy implements PermissionPolicy {
    * level so the leader must explicitly allow them per-spawn.
    */
   private static readonly DENY = new Set([
-    'bash',     // arbitrary shell — use exec for constrained shell
-    'write',    // arbitrary file write
+    'bash', // arbitrary shell — use exec for constrained shell
+    'write', // arbitrary file write
+    'edit', // arbitrary in-project file modification (equivalent to write)
+    'replace', // arbitrary multi-file find/replace (equivalent to write)
     'scaffold', // arbitrary file generation outside project root
-    'patch',    // arbitrary diff application
-    'install',  // installs from arbitrary package sources
-    'exec',     // restricted shell but with arbitrary command args
+    'patch', // arbitrary diff application
+    'install', // installs from arbitrary package sources
+    'exec', // restricted shell but with arbitrary command args
   ]);
 
+  /**
+   * Tools from MCP servers (`mcp__<server>__<tool>`) are external code of
+   * unknown capability — they may wrap a shell or filesystem. They are
+   * fail-closed here: not auto-approved for subagents by default, so the
+   * leader must allow them explicitly per-spawn.
+   */
+  private static isMcpTool(name: string): boolean {
+    return name.startsWith('mcp__');
+  }
+
   async evaluate(tool: Tool): Promise<PermissionDecision> {
-    if (tool.permission === 'deny' || AutoApprovePermissionPolicy.DENY.has(tool.name)) {
+    const blocked =
+      AutoApprovePermissionPolicy.DENY.has(tool.name) ||
+      AutoApprovePermissionPolicy.isMcpTool(tool.name);
+    if (tool.permission === 'deny' || blocked) {
       return {
         permission: 'deny',
         source: 'subagent_guard',
-        reason: AutoApprovePermissionPolicy.DENY.has(tool.name)
+        reason: blocked
           ? `tool ${tool.name} is not auto-approved for subagents — ask the leader to allow it explicitly`
           : 'tool default deny',
       };

@@ -1,4 +1,5 @@
 import {
+  type Config,
   Container,
   DefaultConfigStore,
   DefaultErrorHandler,
@@ -12,10 +13,9 @@ import {
   DefaultSystemPromptBuilder,
   DefaultTokenCounter,
   HybridCompactor,
-  TOKENS,
-  type Config,
   type Logger,
   type ModelsRegistry,
+  TOKENS,
   type Tool,
   type WstackPaths,
 } from '@wrongstack/core';
@@ -56,11 +56,23 @@ export function createDefaultContainer(opts: CreateContainerOptions): Container 
   container.bind(TOKENS.RetryPolicy, () => new DefaultRetryPolicy());
   container.bind(TOKENS.ErrorHandler, () => new DefaultErrorHandler());
   container.bind(TOKENS.ModelsRegistry, () => modelsRegistry);
-  container.bind(TOKENS.TokenCounter, () => new DefaultTokenCounter({ registry: modelsRegistry, providerId: config.provider }));
+  container.bind(
+    TOKENS.TokenCounter,
+    () => new DefaultTokenCounter({ registry: modelsRegistry, providerId: config.provider }),
+  );
 
   const modeStore = new DefaultModeStore({ directory: wpaths.configDir });
   container.bind(TOKENS.ModeStore, () => modeStore);
-  container.bind(TOKENS.SessionStore, () => new DefaultSessionStore({ dir: wpaths.projectSessions }));
+  container.bind(
+    TOKENS.SessionStore,
+    () =>
+      new DefaultSessionStore({
+        dir: wpaths.projectSessions,
+        // Scrub secrets out of persisted user/model turns (F-06). Tool output
+        // is already scrubbed by the executor.
+        secretScrubber: container.resolve(TOKENS.SecretScrubber),
+      }),
+  );
 
   const memoryStore = new DefaultMemoryStore({ paths: wpaths });
   container.bind(TOKENS.MemoryStore, () => memoryStore);
@@ -69,23 +81,30 @@ export function createDefaultContainer(opts: CreateContainerOptions): Container 
   container.bind(TOKENS.SkillLoader, () => skillLoader);
 
   if (opts.systemPrompt) {
-    container.bind(TOKENS.SystemPromptBuilder, () => new DefaultSystemPromptBuilder(opts.systemPrompt as DefaultSystemPromptBuilderOptions));
+    container.bind(
+      TOKENS.SystemPromptBuilder,
+      () => new DefaultSystemPromptBuilder(opts.systemPrompt as DefaultSystemPromptBuilderOptions),
+    );
   }
 
-  container.bind(TOKENS.PermissionPolicy, () =>
-    new DefaultPermissionPolicy({
-      trustFile: wpaths.projectTrust,
-      yolo: opts.permission?.yolo ?? false,
-      forceAllYolo: opts.permission?.forceAllYolo ?? false,
-      promptDelegate: opts.permission?.promptDelegate,
-    }),
+  container.bind(
+    TOKENS.PermissionPolicy,
+    () =>
+      new DefaultPermissionPolicy({
+        trustFile: wpaths.projectTrust,
+        yolo: opts.permission?.yolo ?? false,
+        forceAllYolo: opts.permission?.forceAllYolo ?? false,
+        promptDelegate: opts.permission?.promptDelegate,
+      }),
   );
 
-  container.bind(TOKENS.Compactor, () =>
-    new HybridCompactor({
-      preserveK: opts.compactor?.preserveK ?? 20,
-      eliseThreshold: opts.compactor?.eliseThreshold ?? 0.7,
-    }),
+  container.bind(
+    TOKENS.Compactor,
+    () =>
+      new HybridCompactor({
+        preserveK: opts.compactor?.preserveK ?? 20,
+        eliseThreshold: opts.compactor?.eliseThreshold ?? 0.7,
+      }),
   );
 
   return container;
