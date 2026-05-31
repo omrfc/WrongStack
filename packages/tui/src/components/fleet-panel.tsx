@@ -46,12 +46,14 @@ export function FleetPanel({ entries, totalCost, roster }: FleetPanelProps): Rea
 
       {/* Running agents: name + current tool only */}
       {shown.map((entry) => {
-        const name = roster?.[entry.id]?.name ?? entry.name;
+        // entry.name is the subagent's display name (nickname when assigned,
+        // e.g. "Einstein (Bug Hunter)") — prefer it over the raw id.
+        const name = entry.name && entry.name !== entry.id ? entry.name : entry.id.slice(0, 8);
         const tool = entry.currentTool?.name ?? '—';
         return (
           <Box key={entry.id} flexDirection="row" gap={1}>
             <Text color="green">●</Text>
-            <Text>{name.slice(0, 12).padEnd(12)}</Text>
+            <Text>{name.slice(0, 14).padEnd(14)}</Text>
             <Text dimColor>→</Text>
             <Text color="cyan">{tool}</Text>
           </Box>

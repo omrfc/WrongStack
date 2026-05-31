@@ -1880,9 +1880,9 @@ export function App({
     const existing = m.get(id);
     if (existing) return existing;
     const n = m.size + 1;
-    const suffix = name && name !== id ? ` ${name}` : '';
+    // Nickname wins: show "Einstein (Bug Hunter)" rather than "AGENT#1 Einstein (Bug Hunter)".
     const v = {
-      label: `AGENT#${n}${suffix}`,
+      label: name && name !== id ? name : `AGENT#${n}`,
       color: STREAM_COLORS[(n - 1) % STREAM_COLORS.length]!,
     };
     m.set(id, v);
