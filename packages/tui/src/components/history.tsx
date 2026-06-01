@@ -156,7 +156,7 @@ const MAX_STREAM_LINES = 8;
  * tail-N output so the screen doesn't flood, and a "N more lines
  * above" indicator when truncated.
  */
-export function ToolStreamBox({
+export const ToolStreamBox = React.memo(function ToolStreamBox({
   name,
   text,
   startedAt,
@@ -213,7 +213,7 @@ export function ToolStreamBox({
       </Box>
     </Box>
   );
-}
+});
 
 export function tailForDisplay(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;

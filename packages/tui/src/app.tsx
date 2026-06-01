@@ -804,6 +804,13 @@ type Action =
   | { type: 'setMeasuredLines'; totalLines: number }
   /** Report the computed viewport height; re-clamps offset. */
   | { type: 'setViewportRows'; rows: number }
+  /**
+   * Fold a batch of fleet/display actions through the reducer in ONE pass so
+   * a 150ms burst of subagent events produces a single React render instead
+   * of one per event. Order-preserving; only high-frequency display events
+   * are batched (correctness-sensitive events stay immediate).
+   */
+  | { type: 'fleetBatch'; actions: Action[] }
   /** BugHunter emitted a bug.found event on the FleetBus. */
   | {
       type: 'collabBugFound';
@@ -1596,6 +1603,9 @@ export function reducer(state: State, action: Action): State {
         scrollOffset: Math.min(state.scrollOffset, maxOffset),
       };
     }
+    case 'fleetBatch':
+      // Fold each batched action through the reducer; one new state, one render.
+      return action.actions.reduce((s, a) => reducer(s, a), state);
     // --- Collab session ---
     case 'collabSubagentSpawned': {
       // Lazily initialize collab state on the first subagent spawn.
@@ -2060,7 +2070,13 @@ export function App({
   // items begin, so a click can be mapped to a list index.
   const prePickerRef = useRef<DOMElement | null>(null);
   const preRowsRef = useRef(0);
-  useEffect(() => {
+  // useLayoutEffect (not useEffect) so the viewport is sized BEFORE paint — no
+  // one-frame flash. measureElement here only READS the already-computed Yoga
+  // height (cheap), and the dispatch is guarded to fire only when the height
+  // actually changed, so this stays a stable measure-and-set (no churn loop,
+  // and streaming tokens never trigger a setViewportRows because the bottom
+  // region's height doesn't change while the chat viewport streams).
+  React.useLayoutEffect(() => {
     if (!mouseLive) return;
     const node = bottomRef.current;
     if (!node) return;
@@ -3692,6 +3708,29 @@ export function App({
     if (!d) return;
     const FLUSH_MS = 150;
 
+    // Coalesce high-frequency subagent display events. Instead of dispatching
+    // (and re-rendering) once per event, queue them and flush as ONE
+    // `fleetBatch` every ~150ms. During a multi-agent run this turns hundreds
+    // of renders/sec into ~6/sec. Correctness-sensitive events (task.completed
+    // on offDone, and the one-time mount seed) keep the real `dispatch`.
+    const batch: Action[] = [];
+    let batchTimer: ReturnType<typeof setTimeout> | null = null;
+    const flushBatch = () => {
+      batchTimer = null;
+      if (batch.length === 0) return;
+      dispatch({ type: 'fleetBatch', actions: batch.splice(0, batch.length) });
+    };
+    const enq = (a: Action) => {
+      batch.push(a);
+      // Cap so a 20-agent burst can't grow an unbounded array before the timer.
+      if (batch.length >= 256) {
+        if (batchTimer) clearTimeout(batchTimer);
+        flushBatch();
+        return;
+      }
+      if (!batchTimer) batchTimer = setTimeout(flushBatch, FLUSH_MS);
+    };
+
     // Per-agent buffered assistant text. Flushed as one `subagent`
     // history entry when the agent stops emitting deltas for FLUSH_MS,
     // so we don't fire a fresh history entry on every token.
@@ -3702,9 +3741,9 @@ export function App({
         const trimmed = text.trim();
         if (!trimmed) continue;
         const lbl = labelFor(id);
-        dispatch({ type: 'fleetMessage', id, text: trimmed });
+        enq({ type: 'fleetMessage', id, text: trimmed });
         if (streamFleetRef.current) {
-          dispatch({
+          enq({
             type: 'addEntry',
             entry: {
               kind: 'subagent',
@@ -3751,13 +3790,17 @@ export function App({
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
     const doFlush = () => {
       for (const [id, text] of pending) {
-        if (text) dispatch({ type: 'fleetDelta', id, text });
+        if (text) enq({ type: 'fleetDelta', id, text });
       }
       pending.clear();
       flushTimer = null;
     };
 
     const offFleet = d.fleet.onAny((e: FleetEvent) => {
+      // All dispatches in this handler go through the 150ms batch: shadow
+      // `dispatch` with `enq` for the whole callback so every switch case
+      // below queues instead of rendering immediately.
+      const dispatch = enq;
       // Discover new subagents.
       const fresh = !seen.has(e.subagentId);
       if (fresh) {
@@ -4055,20 +4098,26 @@ export function App({
       });
       // Drain any pending streaming text right before the completion
       // entry is committed by the EventBus listener so the order
-      // "chat → done line" stays correct.
+      // "chat → done line" stays correct. flushStreamBufs queues into the
+      // batch, so flush the batch synchronously here to commit those chat
+      // lines before the done entry lands.
       if (streamFlushTimer) {
         clearTimeout(streamFlushTimer);
         flushStreamBufs();
       }
+      if (batchTimer) clearTimeout(batchTimer);
+      flushBatch();
     });
 
     return () => {
       offFleet();
       offDone();
       if (flushTimer) clearTimeout(flushTimer);
-      doFlush(); // commit any pending deltas before cleanup
+      doFlush(); // queues any pending deltas
       if (streamFlushTimer) clearTimeout(streamFlushTimer);
-      flushStreamBufs();
+      flushStreamBufs(); // queues any pending messages
+      if (batchTimer) clearTimeout(batchTimer);
+      flushBatch(); // commit the queued batch before teardown
     };
   }, [director]);
 

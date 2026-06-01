@@ -1,6 +1,7 @@
 import { Box, Text } from 'ink';
-import type React from 'react';
+import React from 'react';
 import type { FleetEntry } from '../app.js';
+import { theme } from '../theme.js';
 
 export interface LiveActivityStripProps {
   /** Per-subagent state from the FleetEntry table. */
@@ -56,7 +57,7 @@ function fmtRecentMessage(message: FleetEntry['recentMessages'][number]): string
  * Renders nothing when no subagents are running, so the input area
  * sits flush against history during idle / solo work.
  */
-export function LiveActivityStrip({
+export const LiveActivityStrip = React.memo(function LiveActivityStrip({
   entries,
   nowTick,
   maxRows = 4,
@@ -87,10 +88,10 @@ export function LiveActivityStrip({
           e.streamingText.trim() || (e.recentMessages ?? []).slice(-1).map(fmtRecentMessage).join('');
         return (
           <Box key={e.id} flexDirection="row" gap={1}>
-            <Text color="cyan">●</Text>
+            <Text color={theme.accent}>●</Text>
             <Text>{e.name.slice(0, 14).padEnd(14)}</Text>
             <Text dimColor>·</Text>
-            <Text color={e.currentTool ? 'green' : 'yellow'}>{toolSeg}</Text>
+            <Text color={e.currentTool ? theme.success : theme.warn}>{toolSeg}</Text>
             <Text dimColor>·</Text>
             <Text dimColor>
               {e.iterations}it {e.toolCalls}tc · {fmtElapsed(taskElapsed)}
@@ -119,4 +120,4 @@ export function LiveActivityStrip({
       ) : null}
     </Box>
   );
-}
+});

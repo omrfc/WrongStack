@@ -37,6 +37,30 @@ function initial() {
 }
 
 describe('TUI reducer', () => {
+  it('fleetBatch folds actions in order into one new state', () => {
+    let s = initial();
+    // A batch of three appends behaves identically to dispatching them one by
+    // one — same ids, same order — but in a single reducer pass (one render).
+    s = reducer(s, {
+      type: 'fleetBatch',
+      actions: [
+        { type: 'addEntry', entry: { kind: 'info', text: 'a' } },
+        { type: 'addEntry', entry: { kind: 'info', text: 'b' } },
+        { type: 'addEntry', entry: { kind: 'info', text: 'c' } },
+      ],
+    });
+    expect(s.entries.map((e) => (e as { text: string }).text)).toEqual(['a', 'b', 'c']);
+    expect(s.entries.map((e) => e.id)).toEqual([1, 2, 3]);
+    expect(s.nextId).toBe(4);
+  });
+
+  it('fleetBatch with no actions returns an equivalent state', () => {
+    const s = initial();
+    const out = reducer(s, { type: 'fleetBatch', actions: [] });
+    expect(out.entries).toEqual(s.entries);
+    expect(out.nextId).toBe(s.nextId);
+  });
+
   it('addEntry assigns sequential ids', () => {
     let s = initial();
     s = reducer(s, { type: 'addEntry', entry: { kind: 'user', text: 'hi' } });

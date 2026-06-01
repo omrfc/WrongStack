@@ -1,6 +1,6 @@
 import { Box, type DOMElement, measureElement, useStdout } from 'ink';
 import type React from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   AssistantTail,
   Entry,
@@ -69,7 +69,7 @@ export function ScrollableHistory({
   // is stable — no measure → dispatch → re-measure feedback loop.
   const contentRef = useRef<DOMElement | null>(null);
   const lastReported = useRef(-1);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const node = contentRef.current;
     if (!node) return;
     const { height } = measureElement(node);
