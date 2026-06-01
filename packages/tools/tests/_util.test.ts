@@ -3,10 +3,15 @@ import * as path from 'node:path';
 import type { Context } from '@wrongstack/core';
 import { describe, expect, it } from 'vitest';
 import {
+  COMMAND_OUTPUT_MAX_BYTES,
+  collapseCarriageReturns,
+  collapseConsecutiveDuplicates,
   ensureInsideRoot,
   isBinaryBuffer,
+  normalizeCommandOutput,
   resolvePath,
   safeResolve,
+  truncateHeadTail,
   truncateMiddle,
 } from '../src/_util.js';
 
@@ -140,5 +145,91 @@ describe('tmpdir round-trip', () => {
     const c = ctx({ cwd: root, projectRoot: root });
     const target = path.join(root, 'demo.txt');
     expect(safeResolve('demo.txt', c)).toBe(target);
+  });
+});
+
+describe('collapseCarriageReturns', () => {
+  it('normalizes CRLF to LF', () => {
+    expect(collapseCarriageReturns('a\r\nb\r\n')).toBe('a\nb\n');
+  });
+
+  it('collapses a progress bar into its final frame, not N lines', () => {
+    const progress = 'Progress: 1%\rProgress: 2%\rProgress: 100%';
+    expect(collapseCarriageReturns(progress)).toBe('Progress: 100%');
+  });
+
+  it('keeps only the text after the last CR per line', () => {
+    expect(collapseCarriageReturns('aaa\rbbb\rccc\nnext')).toBe('ccc\nnext');
+  });
+
+  it('leaves CR-free text untouched', () => {
+    expect(collapseCarriageReturns('clean\noutput')).toBe('clean\noutput');
+  });
+});
+
+describe('collapseConsecutiveDuplicates', () => {
+  it('collapses a run of >=3 identical lines into one + a marker', () => {
+    const out = collapseConsecutiveDuplicates('warn\nwarn\nwarn\nwarn\ndone');
+    expect(out).toBe('warn\n… ⟨repeated 4×⟩\ndone');
+  });
+
+  it('leaves short runs (<3) intact', () => {
+    expect(collapseConsecutiveDuplicates('a\na\nb')).toBe('a\na\nb');
+  });
+
+  it('only collapses CONSECUTIVE duplicates, never reorders', () => {
+    expect(collapseConsecutiveDuplicates('a\nb\na\nb')).toBe('a\nb\na\nb');
+  });
+});
+
+describe('truncateHeadTail', () => {
+  it('returns the input unchanged when within the cap', () => {
+    expect(truncateHeadTail('short', 100)).toBe('short');
+  });
+
+  it('keeps both ends and never exceeds the cap', () => {
+    const s = `${'H'.repeat(500)}${'M'.repeat(500)}${'T'.repeat(500)}`;
+    const out = truncateHeadTail(s, 200);
+    expect(Buffer.byteLength(out, 'utf8')).toBeLessThanOrEqual(200);
+    expect(out.startsWith('H')).toBe(true); // head kept
+    expect(out.endsWith('T')).toBe(true); // tail kept
+    expect(out).toContain('truncated');
+  });
+
+  it('reports the number of dropped bytes', () => {
+    const out = truncateHeadTail('x'.repeat(1000), 200);
+    expect(out).toMatch(/truncated \d+ bytes/);
+  });
+});
+
+describe('normalizeCommandOutput', () => {
+  it('strips ANSI, collapses progress, dedups, and squeezes blanks', () => {
+    const raw =
+      '[32mok[0m\n' +
+      'step 1%\rstep 99%\n' +
+      'warn\nwarn\nwarn\nwarn\n' +
+      '\n\n\n' +
+      'done   ';
+    const out = normalizeCommandOutput(raw);
+    expect(out).not.toContain('['); // no ANSI
+    expect(out).toContain('step 99%');
+    expect(out).not.toContain('step 1%');
+    expect(out).toContain('… ⟨repeated 4×⟩');
+    expect(out).not.toMatch(/\n{3,}/); // no 3+ blank runs
+    expect(out).toContain('done');
+    expect(out.includes('done   ')).toBe(false); // trailing ws trimmed
+  });
+
+  it('caps oversized output at COMMAND_OUTPUT_MAX_BYTES', () => {
+    // Distinct lines so the dedup pass can't shrink it before truncation.
+    let big = '';
+    for (let i = 0; i < 50_000; i++) big += `line ${i}\n`;
+    const out = normalizeCommandOutput(big);
+    expect(Buffer.byteLength(out, 'utf8')).toBeLessThanOrEqual(COMMAND_OUTPUT_MAX_BYTES);
+    expect(out).toContain('truncated');
+  });
+
+  it('passes through empty input', () => {
+    expect(normalizeCommandOutput('')).toBe('');
   });
 });

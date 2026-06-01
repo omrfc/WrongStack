@@ -256,10 +256,13 @@ describe('gitTool truncation', () => {
       ctx,
       makeOpts(),
     );
-    // With enough commits, stdout may exceed 100000
+    // Output is now normalized + head/tail-truncated to the unified command
+    // cap (32 KiB), so when `truncated` is set the returned stdout is capped
+    // there and carries the truncation marker — it is no longer the raw 100K.
     expect(typeof result.truncated).toBe('boolean');
     if (result.truncated) {
-      expect(result.stdout.length).toBeGreaterThanOrEqual(100000);
+      expect(Buffer.byteLength(result.stdout, 'utf8')).toBeLessThanOrEqual(32_768);
+      expect(result.stdout).toContain('truncated');
     }
   });
 

@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import type { Tool, ToolStreamEvent } from '@wrongstack/core';
 import { spawnStream } from './_spawn-stream.js';
-import { safeResolve } from './_util.js';
+import { normalizeCommandOutput, safeResolve } from './_util.js';
 
 interface TypecheckInput {
   project?: string;
@@ -88,7 +88,7 @@ export const typecheckTool: Tool<TypecheckInput, TypecheckOutput> = {
         exit_code: result.exitCode,
         errors,
         warnings,
-        output: result.stdout || result.stderr || result.error || '',
+        output: normalizeCommandOutput(result.stdout || result.stderr || result.error || ''),
         truncated: result.truncated,
       },
     };

@@ -1,6 +1,6 @@
 import type { Tool, ToolStreamEvent } from '@wrongstack/core';
 import { spawnStream } from './_spawn-stream.js';
-import { safeResolve } from './_util.js';
+import { normalizeCommandOutput, safeResolve } from './_util.js';
 
 interface LintInput {
   files?: string | string[];
@@ -101,7 +101,7 @@ export const lintTool: Tool<LintInput, LintOutput> = {
           : 0,
         errors,
         warnings,
-        output: result.stdout,
+        output: normalizeCommandOutput(result.stdout),
         fix_applied: input.fix ?? false,
         truncated: result.truncated,
       },

@@ -1,6 +1,6 @@
 import type { Tool, ToolStreamEvent } from '@wrongstack/core';
 import { spawnStream } from './_spawn-stream.js';
-import { safeResolve } from './_util.js';
+import { normalizeCommandOutput, safeResolve } from './_util.js';
 
 interface InstallInput {
   packages?: string | string[];
@@ -123,7 +123,7 @@ export const installTool: Tool<InstallInput, InstallOutput> = {
       output: {
         packages: pkgList,
         exit_code: result.exitCode,
-        output: result.stdout || result.stderr || result.error || '',
+        output: normalizeCommandOutput(result.stdout || result.stderr || result.error || ''),
         dry_run: args.includes('--dry-run'),
         truncated: result.truncated,
       },

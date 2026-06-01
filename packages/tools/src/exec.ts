@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import * as path from 'node:path';
 import type { Tool } from '@wrongstack/core';
 import { buildChildEnv } from './_env.js';
+import { COMMAND_OUTPUT_MAX_BYTES, normalizeCommandOutput } from './_util.js';
 import { getProcessRegistry, redactCommand } from './process-registry.js';
 
 const ALLOWED_COMMANDS: Record<string, string[]> = {
@@ -277,10 +278,12 @@ function runCommand(
       resolve({
         command: cmd,
         args,
-        stdout: stdout.slice(0, MAX_OUTPUT),
-        stderr: stderr.slice(0, MAX_OUTPUT),
+        stdout: normalizeCommandOutput(stdout),
+        stderr: normalizeCommandOutput(stderr),
         exitCode,
-        truncated: stdout.length >= MAX_OUTPUT || stderr.length >= MAX_OUTPUT,
+        truncated:
+          Buffer.byteLength(stdout, 'utf8') > COMMAND_OUTPUT_MAX_BYTES ||
+          Buffer.byteLength(stderr, 'utf8') > COMMAND_OUTPUT_MAX_BYTES,
         allowed: true,
       });
     });
@@ -292,10 +295,10 @@ function runCommand(
       resolve({
         command: cmd,
         args,
-        stdout: stdout.slice(0, MAX_OUTPUT),
+        stdout: normalizeCommandOutput(stdout),
         stderr: err.message,
         exitCode: 1,
-        truncated: false,
+        truncated: Buffer.byteLength(stdout, 'utf8') > COMMAND_OUTPUT_MAX_BYTES,
         allowed: true,
       });
     });

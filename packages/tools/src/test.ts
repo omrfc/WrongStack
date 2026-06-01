@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import type { Tool, ToolStreamEvent } from '@wrongstack/core';
 import { spawnStream } from './_spawn-stream.js';
-import { safeResolve } from './_util.js';
+import { normalizeCommandOutput, safeResolve } from './_util.js';
 
 interface TestInput {
   files?: string | string[];
@@ -186,7 +186,7 @@ function parseResult(
     passed,
     failed,
     duration_ms: duration,
-    output: result.stdout || result.error || '',
+    output: normalizeCommandOutput(result.stdout || result.error || ''),
     truncated: result.truncated,
   };
 }

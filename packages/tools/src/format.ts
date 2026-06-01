@@ -1,6 +1,6 @@
 import type { Tool, ToolStreamEvent } from '@wrongstack/core';
 import { spawnStream } from './_spawn-stream.js';
-import { safeResolve } from './_util.js';
+import { normalizeCommandOutput, safeResolve } from './_util.js';
 
 interface FormatInput {
   files?: string | string[];
@@ -99,7 +99,7 @@ export const formatTool: Tool<FormatInput, FormatOutput> = {
         fixer: detected,
         files_checked: 0,
         files_changed: changed,
-        output: result.stdout || result.stderr || result.error || '',
+        output: normalizeCommandOutput(result.stdout || result.stderr || result.error || ''),
         truncated: result.truncated,
       },
     };

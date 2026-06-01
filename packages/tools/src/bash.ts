@@ -1,9 +1,8 @@
 import { spawn } from 'node:child_process';
 import * as os from 'node:os';
 import type { Tool, ToolStreamEvent } from '@wrongstack/core';
-import { stripAnsi } from '@wrongstack/core';
 import { buildChildEnv } from './_env.js';
-import { truncateMiddle } from './_util.js';
+import { normalizeCommandOutput } from './_util.js';
 import { redactCommand } from './process-registry.js';
 import { getProcessRegistry } from './process-registry.js';
 
@@ -149,7 +148,7 @@ export const bashTool: Tool<BashInput, BashOutput> = {
       yield {
         type: 'final',
         output: {
-          output: truncated ? buf.slice(0, MAX_OUTPUT) + '…[truncated]' : buf,
+          output: normalizeCommandOutput(buf),
           exit_code: null,
           timed_out: false,
           pid,
@@ -298,11 +297,10 @@ export const bashTool: Tool<BashInput, BashOutput> = {
           if (remainder !== null) {
             yield { type: 'partial_output', text: remainder };
           }
-          const cleaned = stripAnsi(buf).replace(/\r\n?/g, '\n');
           yield {
             type: 'final',
             output: {
-              output: truncateMiddle(cleaned, MAX_OUTPUT),
+              output: normalizeCommandOutput(buf),
               exit_code: c.code,
               timed_out: timedOut,
             },
