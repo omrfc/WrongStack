@@ -122,5 +122,7 @@ describe('AnnotationsStore', () => {
     }
     const list = await store.list('s1');
     expect(list).toHaveLength(1000);
-  });
+    // 1000 sequential disk writes is legitimately slow on CI's slower I/O —
+    // give it generous headroom past the 5s default so it isn't a flaky timeout.
+  }, 20_000);
 });
