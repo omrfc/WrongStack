@@ -31,6 +31,7 @@ import { FleetMonitor } from './components/fleet-monitor.js';
 import { FleetPanel } from './components/fleet-panel.js';
 import { History, type HistoryEntry } from './components/history.js';
 import { EMPTY_KEY, Input, type KeyEvent } from './components/input.js';
+import { KeyHintBar } from './components/key-hint-bar.js';
 import { LiveActivityStrip } from './components/live-activity-strip.js';
 import { ModelPicker, type ProviderOption } from './components/model-picker.js';
 import { PhaseMonitor } from './components/phase-monitor.js';
@@ -5489,6 +5490,24 @@ export function App({
           hiddenItems={hiddenItems}
           eternalStage={state.eternalStage}
           goalSummary={state.goalSummary}
+        />
+        <KeyHintBar
+          context={{
+            confirm: state.confirmQueue.length > 0,
+            picker:
+              state.picker.open ||
+              state.slashPicker.open ||
+              state.modelPicker.open ||
+              state.autonomyPicker.open ||
+              !!state.rewindOverlay,
+            monitor:
+              state.agentsMonitorOpen ||
+              state.monitorOpen ||
+              state.worktreeMonitorOpen ||
+              !!state.autoPhase?.monitorOpen,
+            managed: managedLive,
+            mouse: mouseLive,
+          }}
         />
         {/* Agents monitor overlay (Ctrl+G) and fleet monitor overlay (Ctrl+F)
           take up the lower region — hide FleetPanel while any overlay is open. */}
