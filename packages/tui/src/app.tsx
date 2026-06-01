@@ -2109,6 +2109,9 @@ export function App({
   // normal input pipeline (handleKey is defined far below; the ref is filled
   // after it). handleMouse only ever runs post-mount, so the ref is populated.
   const handleKeyRef = useRef<((input: string, key: KeyEvent) => void) | null>(null);
+  // Set to the row index a mouse click selected; the effect below replays Enter
+  // once that row is the live selection, giving single-click confirm.
+  const pendingClickConfirmRef = useRef<number | null>(null);
 
   // Mouse routing. Wheel scrolls history (or drives an open picker's
   // selection); a left click on a picker item selects + activates it; a click
@@ -2179,14 +2182,16 @@ export function App({
       const firstItemRow = s.viewportRows + affordance + preRowsRef.current + picker.header + 1;
       const index = ev.y - firstItemRow;
       if (index < 0 || index >= picker.count) return;
-      // Two-step to avoid a stale-state race: handleKey's Enter path confirms
-      // whatever was selected at RENDER time, so we can't move + confirm in one
-      // event. Click a new row → highlight it; click the highlighted row →
-      // replay Enter to fire the picker's existing confirm (dispatch / attach /
-      // switch). Wheel-to-highlight then click-to-confirm works the same way.
+      // Single-click select + confirm. handleKey's Enter path confirms whatever
+      // is selected at RENDER time, so we can't move + confirm in one event.
+      // Instead: if the row is already selected, confirm now; otherwise move to
+      // it and arm pendingClickConfirm — an effect replays Enter on the next
+      // render (when handleKey closes over the updated selection). If anything
+      // is off, it degrades gracefully to a second click confirming.
       if (index === picker.selected) {
         handleKeyRef.current?.('', { ...EMPTY_KEY, return: true });
       } else {
+        pendingClickConfirmRef.current = index;
         picker.move(index - picker.selected);
       }
     },
@@ -2197,6 +2202,43 @@ export function App({
     if (!subscribeMouse) return;
     return subscribeMouse(handleMouse);
   }, [subscribeMouse, handleMouse]);
+
+  // Single-click confirm: after a click moved the selection, replay Enter once
+  // the clicked row is the live selection (handleKey then closes over the
+  // updated state, so it confirms the RIGHT item). Cleared if the picker closes.
+  useEffect(() => {
+    const target = pendingClickConfirmRef.current;
+    if (target === null) return;
+    const open =
+      state.slashPicker.open ||
+      state.modelPicker.open ||
+      state.autonomyPicker.open ||
+      state.picker.open;
+    if (!open) {
+      pendingClickConfirmRef.current = null;
+      return;
+    }
+    const sel = state.slashPicker.open
+      ? state.slashPicker.selected
+      : state.modelPicker.open
+        ? state.modelPicker.selected
+        : state.autonomyPicker.open
+          ? state.autonomyPicker.selected
+          : state.picker.selected;
+    if (sel === target) {
+      pendingClickConfirmRef.current = null;
+      handleKeyRef.current?.('', { ...EMPTY_KEY, return: true });
+    }
+  }, [
+    state.slashPicker.open,
+    state.slashPicker.selected,
+    state.modelPicker.open,
+    state.modelPicker.selected,
+    state.autonomyPicker.open,
+    state.autonomyPicker.selected,
+    state.picker.open,
+    state.picker.selected,
+  ]);
 
   // handleRewindTo must be declared before the /rewind useEffect (line 1803)
   // so the closure can capture it. It is intentionally NOT in useCallback
