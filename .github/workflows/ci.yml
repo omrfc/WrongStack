@@ -53,29 +53,5 @@ jobs:
       - name: Typecheck (all packages, parallel)
         run: pnpm typecheck
 
-      # TEMPORARY hang diagnostic. Step-level timeout-minutes does NOT kill a
-      # hung child whose stdout pipe stays open, so we force-kill vitest from
-      # INSIDE the step with coreutils `timeout` (direct node invocation, output
-      # to a file — no pipe to keep alive). The step then exits 0, so the job
-      # completes and its logs are RETAINED (a job-timeout cancel loses them).
-      # A custom reporter logs each module's START/END; the file with a START
-      # and no matching END is the leak. Windows has no `timeout` coreutils and
-      # already passes, so this diagnostic only runs on POSIX.
       - name: Test (vitest)
-        shell: bash
-        run: |
-          set +e
-          if command -v timeout >/dev/null 2>&1; then
-            timeout -s KILL 660 node ./node_modules/vitest/vitest.mjs run \
-              --reporter=default --reporter=./scripts/hang-probe-reporter.mjs > vitest-out.log 2>&1
-            echo "vitest exit code: $?"
-            echo "==== files that STARTed but never ENDed (THE HANG) ===="
-            comm -23 \
-              <(grep '\[probe\] START' vitest-out.log | sed 's#.*START ##' | sort -u) \
-              <(grep '\[probe\] END'   vitest-out.log | sed 's#.*END   ##' | sort -u)
-            echo "==== last 50 lines ===="
-            tail -n 50 vitest-out.log
-            exit 0
-          else
-            pnpm test
-          fi
+        run: pnpm test
