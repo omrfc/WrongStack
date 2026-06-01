@@ -20,7 +20,6 @@ import type {
   BeforeToolExecutionHook,
   OnErrorHook,
   ProviderRunnerFn,
-  ProviderRunnerWrapper,
 } from './extension-points.js';
 
 export class ExtensionRegistry {

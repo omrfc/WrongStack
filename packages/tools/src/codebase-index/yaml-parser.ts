@@ -1,20 +1,4 @@
-/**
- * YAML file symbol extraction.
- *
- * Uses regex-based extraction (no js-yaml dependency).
- * Extracts:
- * - Top-level and nested key-value pairs (up to depth 3)
- * - List items with key: `- key: value`
- * - Block scalars `key: |` and `key: >`
- * - Anchors `&anchor` and aliases `*alias`
- *
- * Kind taxonomy:
- * - `property` for keys
- * - `literal` for scalar values (strings, numbers, booleans)
- * - `const` for anchors
- */
 
-import * as path from 'node:path';
 import type { FileSymbols, Symbol as IndexSymbol, SymbolLang } from './schema.js';
 
 // ─── Public API ─────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import type { TaskGraph, TaskNode, CriticalPathResult } from '../types/task-graph.js';
+import type { TaskGraph } from '../types/task-graph.js';
 import { topologicalSort } from '../types/task-graph.js';
 
 /**
@@ -132,7 +132,7 @@ export function analyzeCriticalPath(graph: TaskGraph): CriticalPathAnalysis {
  * Get all tasks transitively blocked by a given task.
  */
 function getTransitiveBlocked(
-  graph: TaskGraph,
+  _graph: TaskGraph,
   taskId: string,
   blocksMap: Map<string, Set<string>>,
 ): Set<string> {
@@ -159,7 +159,7 @@ function getTransitiveBlocked(
  */
 function computeCriticalPath(
   graph: TaskGraph,
-  topoOrder: string[],
+  _topoOrder: string[],
   blockedByMap: Map<string, Set<string>>,
 ): string[] {
   // Use all nodes in the graph, not just topo-reachable ones

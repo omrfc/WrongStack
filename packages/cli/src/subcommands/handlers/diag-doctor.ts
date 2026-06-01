@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { color } from '@wrongstack/core';
 import { API_VERSION } from '../../version.js';
-import type { SubcommandDeps, SubcommandHandler } from '../index.js';
+import type { SubcommandHandler } from '../index.js';
 
 export const diagCmd: SubcommandHandler = async (_args, deps) => {
   const cfg = deps.config;

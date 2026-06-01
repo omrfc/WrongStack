@@ -22,7 +22,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useTheme } from './ThemeProvider';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -69,8 +69,6 @@ export function SettingsPanel() {
   const { theme, setTheme } = useTheme();
   const ws = useWebSocket();
   const wsClient = ws.client;
-  const listProviders = ws.listProviders;
-  const listSavedProviders = ws.listSavedProviders;
 
   // Catalog data
   const [catalogProviders, setCatalogProviders] = useState<CatalogProvider[]>([]);

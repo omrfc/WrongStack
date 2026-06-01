@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { DefaultSessionReader } from '@wrongstack/core';
-import type { SubcommandDeps, SubcommandHandler } from '../index.js';
+import type { SubcommandHandler } from '../index.js';
 
 export const exportCmd: SubcommandHandler = async (args, deps) => {
   if (!deps.sessionStore) {

@@ -7,7 +7,6 @@ import {
   PhaseStore,
   WorktreeManager,
   type PhaseGraph,
-  type PhaseProgress,
   type PhaseTemplate,
 } from '@wrongstack/core';
 import type { Agent, Context, EventBus, Logger } from '@wrongstack/core';

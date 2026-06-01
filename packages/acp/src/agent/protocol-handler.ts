@@ -32,7 +32,6 @@ const WRONGSTACK_CAPABILITIES = [
 
 export class ACPProtocolHandler {
   private initialized = false;
-  private sessionId: string | undefined;
   private readonly signal = new AbortController();
   private pendingCalls = new Map<string | number, Promise<unknown>>();
 
@@ -102,7 +101,6 @@ export class ACPProtocolHandler {
     req: ACPRequest & {params: ACPInitializeParams},
     id: string | number,
   ): Promise<boolean> {
-    this.sessionId = req.params?.sessionId ?? crypto.randomUUID();
     this.initialized = true;
 
     const result = {
@@ -177,7 +175,7 @@ export class ACPProtocolHandler {
   }
 
   private handleCancelNotification(
-    n: ACPNotification & {params?: {reason?: string}},
+    _n: ACPNotification & {params?: {reason?: string}},
   ): void {
     // Broadcast cancellation to all pending — best-effort
   }

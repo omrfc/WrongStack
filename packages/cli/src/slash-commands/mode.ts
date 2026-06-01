@@ -76,7 +76,7 @@ export function buildModeCommand(
       '  /mode brief    Switch to brief mode',
       '  /mode teach    Switch to teach mode',
     ].join('\n'),
-    async run(args, ctx) {
+    async run(args, _ctx) {
       const modeStore = opts.modeStore;
       if (!modeStore) {
         return { message: 'Mode store not available in this context.' };

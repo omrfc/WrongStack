@@ -189,7 +189,6 @@ export function StatusBar({
   hiddenItems,
   eternalStage,
   goalSummary,
-  autoProceedCountdown,
 }: StatusBarProps): React.ReactElement {
   const hiddenSet = new Set(hiddenItems);
   const usage = tokenCounter?.total();

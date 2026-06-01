@@ -8,7 +8,7 @@
  * - template_list: List all saved templates
  */
 import type { Plugin } from '@wrongstack/core';
-import { isAbsolute, resolve, relative } from 'node:path';
+import { isAbsolute } from 'node:path';
 
 const API_VERSION = '^0.1.10';
 

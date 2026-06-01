@@ -756,10 +756,13 @@ export function reducer(state: State, action: Action): State {
     case 'clearPlaceholdersOnly':
       return { ...state, placeholders: [], placeholderContents: [] };
     case 'clearHistory': {
-      const last = state.entries[state.entries.length - 1];
+      // Keep only the banner entry (always first, id=0). Any other entries
+      // (user messages, assistant responses, slash results) are discarded so
+      // the TUI starts fresh after /clear.
+      const banner = state.entries.find((e) => e.kind === 'banner');
       return {
         ...state,
-        entries: last ? [last] : state.entries,
+        entries: banner ? [banner] : state.entries,
         queue: [],
         nextQueueId: 1,
       };
@@ -1806,11 +1809,6 @@ export function App({
     dispatch({ type: 'clearInput' });
   };
 
-  const clearPlaceholdersOnly = (): void => {
-    draftRef.current = { buffer: '', cursor: 0 };
-    dispatch({ type: 'clearPlaceholdersOnly' });
-  };
-
   // Session-elapsed clock. Mount time is fixed; we re-render once per
   // second to refresh the "⏱ 12:34" chip. The interval is cheap — one
   // dispatch per tick into the same `tick` action — and stops cleanly
@@ -1860,10 +1858,6 @@ export function App({
   // contribute to context-window pressure — cache tokens are still tokens
   // the model must process. (usage.input is disjoint from cacheRead/
   // cacheWrite, so simple sum is correct.)
-  const totalCtxTokens =
-    (tokenCounter?.total().input ?? 0) +
-    (tokenCounter?.total().cacheRead ?? 0) +
-    (tokenCounter?.total().cacheWrite ?? 0);
 
   // Per-model maxContext. CLI passes effectiveMaxContext (resolved via
   // ModelsRegistry — correct for 1M-context variants). Fall back to
@@ -4025,6 +4019,21 @@ export function App({
       }
       return;
     }
+    // Ctrl+T toggles the worktree monitor overlay — a sibling of Ctrl+F/G.
+    // Global so the user can pop it mid-run. Opening it closes any other
+    // overlay first so only one dashboard shows at a time. (Word-delete that
+    // used to live on Ctrl+T is covered by Ctrl+Backspace.)
+    if (key.ctrl && input === 't') {
+      if (state.worktreeMonitorOpen) {
+        dispatch({ type: 'worktreeMonitorToggle' });
+        return;
+      }
+      if (state.agentsMonitorOpen) dispatch({ type: 'toggleAgentsMonitor' });
+      if (state.monitorOpen) dispatch({ type: 'toggleMonitor' });
+      if (state.autoPhase?.monitorOpen) dispatch({ type: 'autoPhaseMonitorToggle' });
+      dispatch({ type: 'worktreeMonitorToggle' });
+      return;
+    }
     // Esc closes whichever monitor is open. When both are closed the busy-state
     // Esc handler above already returned when a run was active.
     if (key.escape) {
@@ -4034,6 +4043,10 @@ export function App({
       }
       if (state.monitorOpen) {
         dispatch({ type: 'toggleMonitor' });
+        return;
+      }
+      if (state.worktreeMonitorOpen) {
+        dispatch({ type: 'worktreeMonitorToggle' });
         return;
       }
     }
@@ -4167,20 +4180,6 @@ export function App({
       setDraft('', 0);
       return;
     }
-    if (key.ctrl && input === 't') {
-      // Ctrl+T: toggle worktree monitor when open; otherwise delete word before cursor.
-      if (state.worktreeMonitorOpen) {
-        dispatch({ type: 'worktreeMonitorToggle' });
-        return;
-      }
-      if (cursor === 0) return;
-      const beforeCursor = buffer.slice(0, cursor);
-      const lastWordStart = beforeCursor.lastIndexOf(' ') + 1;
-      const next = buffer.slice(0, lastWordStart) + buffer.slice(cursor);
-      setDraft(next, lastWordStart);
-      return;
-    }
-
     // Delete key and Ctrl+D → delete character at cursor (forward delete).
     // Ctrl+D also doubles as "EOF" in some shells — here it's just convenient
     // forward-delete when the user isn't at the terminal's physical Delete key.
@@ -4821,7 +4820,7 @@ export function App({
           collabSession={state.collabSession}
         />
       ) : director ? (
-        <FleetPanel entries={state.fleet} totalCost={state.fleetCost} roster={fleetRoster} />
+        <FleetPanel entries={entriesWithLeader} totalCost={state.fleetCost} roster={fleetRoster} collabSession={state.collabSession} />
       ) : null}
       {state.autoPhase && !state.autoPhase.monitorOpen ? (
         <PhasePanel

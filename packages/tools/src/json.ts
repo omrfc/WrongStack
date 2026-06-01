@@ -1,6 +1,5 @@
 import * as fs from 'node:fs/promises';
 import type { Tool } from '@wrongstack/core';
-import { safeResolve } from './_util.js';
 
 interface JsonInput {
   file?: string;

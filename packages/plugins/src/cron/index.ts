@@ -26,21 +26,6 @@ interface CronState {
   createdAt: string;
 }
 
-function parseCronExpression(expr: string): number | null {
-  // Handle */N interval syntax: */5 * * * * → every N minutes
-  // Just return interval in ms (simplified: 1 minute per segment)
-  if (expr.includes('*/')) {
-    const parts = expr.trim().split(/\s+/);
-    if (parts.length === 5) {
-      const minutePart = parts[1];
-      if (minutePart?.startsWith('*/')) {
-        return Number.parseInt(minutePart.slice(2)) * 60_000;
-      }
-    }
-  }
-  return null;
-}
-
 function formatNextRun(intervalMs: number): string {
   const ms = Number.isNaN(intervalMs) || intervalMs <= 0 ? 60_000 : intervalMs;
   return new Date(Date.now() + ms).toISOString();

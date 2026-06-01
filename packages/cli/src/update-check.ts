@@ -139,7 +139,7 @@ export async function checkForUpdate(
       outdated: isNewer(latest, current),
       checkFailed: false,
     };
-  } catch (err) {
+  } catch (_err) {
     // Network hatası — sessiz devam, cache'e yazma
     if (aborted()) {
       return { current, latest: current, outdated: false, checkFailed: true };

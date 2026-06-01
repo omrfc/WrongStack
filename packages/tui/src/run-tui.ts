@@ -3,8 +3,6 @@ import type {
   AttachmentStore,
   Director,
   EventBus,
-  FleetBus,
-  FleetUsageAggregator,
   QueueStore,
   SlashCommandRegistry,
   TokenCounter,

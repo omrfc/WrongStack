@@ -3,7 +3,6 @@ import * as path from 'node:path';
 import { atomicWrite, FsError, ERROR_CODES, type SlashCommand } from '@wrongstack/core';
 
 const CONFIG_ENV = 'WRONGSTACK_STATUSLINE_CONFIG';
-const DEFAULT_PATH = '~/.wrongstack/statusline.json';
 
 export interface StatuslineConfig {
   todos?: boolean;

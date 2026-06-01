@@ -139,7 +139,7 @@ function regexParse(opts: { file: string; content: string; lang: SymbolLang }): 
     return lo + 1; // 1-based
   }
 
-  function extractDeclaration(lineIdx: number, match: RegExpExecArray): string {
+  function extractDeclaration(lineIdx: number, _match: RegExpExecArray): string {
     const line = lines[lineIdx] ?? '';
     return line.trim().slice(0, 500);
   }

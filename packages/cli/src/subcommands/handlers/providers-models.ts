@@ -1,5 +1,5 @@
 import { type WireFamily, color } from '@wrongstack/core';
-import type { SubcommandDeps, SubcommandHandler } from '../index.js';
+import type { SubcommandHandler } from '../index.js';
 
 export const providersCmd: SubcommandHandler = async (args, deps) => {
   const showAll = args.includes('--all');

@@ -139,3 +139,21 @@ export {
   FleetManager,
   type FleetManagerOptions,
 } from './fleet-manager.js';
+export {
+  CollabSession,
+  DirectorAlertLevel,
+  type CollabDebugReport,
+  type CollabSessionOptions,
+  type CollabBudgetConfig,
+  type CollabBudgetOverrides,
+  type DirectorAlert,
+  type DirectorCancelCollabPayload,
+  type CollabBudgetWarningPayload,
+  type SharedFileSnapshot,
+  type SharedFileEntry,
+  type BugFinding,
+  type RefactorPlan,
+  type RefactorPhase,
+  type CriticEvaluation,
+  type CriticConcern,
+} from './collab-debug.js';

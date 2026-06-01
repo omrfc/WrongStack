@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { CheckCircle2, Circle, Clock, Pause, Play, RotateCcw, XCircle } from 'lucide-react';
+import { CheckCircle2, Circle, Clock, Pause, RotateCcw, XCircle } from 'lucide-react';
 import type React from 'react';
 
 export interface TaskItem {

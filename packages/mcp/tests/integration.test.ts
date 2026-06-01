@@ -1,7 +1,7 @@
 import type { MCPServerConfig } from '@wrongstack/core';
 import { EventBus, ToolRegistry } from '@wrongstack/core';
 import type { Logger } from '@wrongstack/core';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MCPClient } from '../src/client.js';
 import type { MCPTool } from '../src/client.js';
 import { MCPRegistry } from '../src/registry.js';
@@ -23,8 +23,6 @@ const silentLog: Logger = {
 class InlineMockMCP {
   private tools: MCPTool[];
   private responses = new Map<string, { content: unknown; isError?: boolean }>();
-  private resolveIO?: (data: string) => void;
-  private lineBuffer = '';
   private scriptPath?: string;
 
   constructor(tools: MCPTool[] = []) {
@@ -43,7 +41,7 @@ class InlineMockMCP {
    */
   async writeScript(): Promise<string> {
     if (this.scriptPath) return this.scriptPath;
-    const { writeFileSync, unlinkSync, existsSync } = await import('node:fs');
+    const { writeFileSync } = await import('node:fs');
     const { join } = await import('node:path');
     const { tmpdir } = await import('node:os');
 

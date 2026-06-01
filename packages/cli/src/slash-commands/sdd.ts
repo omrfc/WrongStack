@@ -9,18 +9,14 @@ import {
   SpecVersioning,
   analyzeCriticalPath,
   renderTaskGraph,
-  renderTaskList,
   renderSpecAnalysis,
   renderProgress,
   listTemplates,
   templateToMarkdown,
   getTemplate,
-  TaskGenerator,
   TaskTracker,
-  TaskFlow,
   DefaultTaskStore,
   type SpecIndexEntry,
-  type TaskGraphIndexEntry,
   type SpecVersion,
   type AISpecPhase,
   type TaskProgress,
@@ -570,13 +566,10 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
     description:
       'AI-driven SDD: /sdd [new|approve|execute|cancel|status|list|show|templates]',
     async run(args) {
-      const ctx = opts.context;
       if (!opts.paths) return { message: 'SDD not available — paths not configured.' };
       const specsDir = opts.paths.projectSpecs;
-      const graphsDir = opts.paths.projectTaskGraphs;
 
       const specStore = new SpecStore({ baseDir: specsDir });
-      const graphStore = new TaskGraphStore({ baseDir: graphsDir });
       const versioning = sddState.getVersioning();
 
       const [verb, ...rest] = args.trim().split(/\s+/);
@@ -1797,25 +1790,6 @@ async function findSpec(store: SpecStore, idOrTitle: string) {
   const all = await store.list();
   const match = all.find(
     (e: SpecIndexEntry) =>
-      e.id.startsWith(idOrTitle) ||
-      e.title.toLowerCase().includes(idOrTitle.toLowerCase()),
-  );
-  if (match) return store.load(match.id);
-  return null;
-}
-
-async function findGraph(store: TaskGraphStore, idOrTitle: string) {
-  if (!idOrTitle) {
-    const all = await store.list();
-    if (all.length === 0) return null;
-    const first = all[0];
-    return first ? store.load(first.id) : null;
-  }
-  const byId = await store.load(idOrTitle);
-  if (byId) return byId;
-  const all = await store.list();
-  const match = all.find(
-    (e: TaskGraphIndexEntry) =>
       e.id.startsWith(idOrTitle) ||
       e.title.toLowerCase().includes(idOrTitle.toLowerCase()),
   );

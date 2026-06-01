@@ -8,11 +8,6 @@ export default defineConfig({
     exclude: [
         '**/node_modules/**',
         '**/dist/**',
-        // parallel-eternal-engine.test.ts hangs in CI/Windows environments due to
-        // fs watchers + AbortController interactions that never resolve. Run
-        // it manually with: node node_modules/vitest/vitest.mjs run --config
-        // vitest.config.ts packages/core/tests/execution/parallel-eternal-engine.test.ts
-        'packages/core/tests/execution/parallel-eternal-engine.test.ts',
       ],
     coverage: {
       provider: 'v8',

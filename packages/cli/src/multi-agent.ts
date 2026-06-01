@@ -20,7 +20,6 @@ import {
   type DirectorSessionFactory,
   EventBus,
   FleetManager,
-  type MultiAgentCoordinator,
   NULL_FLEET_BUS,
   type Provider,
   type ProviderRegistry,
@@ -36,6 +35,7 @@ import {
   makeAgentSubagentRunner,
   makeDirectorSessionFactory,
   makeFleetEmitTool,
+  makeFleetStatusTool,
 } from '@wrongstack/core';
 import type { TextBlock } from '@wrongstack/core';
 import { ToolExecutor } from '@wrongstack/core/execution';
@@ -167,6 +167,10 @@ export class MultiAgentHost {
    *  critic.evaluation) onto the fleet bus without needing the tool registered
    *  in the host's ToolRegistry. */
   private fleetEmitTool?: import('@wrongstack/core').Tool;
+  /** Own FleetStatusTool — created in buildDirector() so subagents in director
+   *  mode can read fleet state (subagent statuses, task progress) without the
+   *  tool being in the host's ToolRegistry. */
+  private fleetStatusTool?: import('@wrongstack/core').Tool;
   /** Lazily built alongside the director — produces per-subagent JSONL
    *  writers under `<sessionsRoot>/<runId>/`. Null without sessionsRoot. */
   private sessionFactory?: DirectorSessionFactory;
@@ -214,7 +218,7 @@ export class MultiAgentHost {
     return this.director;
   }
 
-  private async ensureCoordinator(config: Config): Promise<void> {
+  private async ensureCoordinator(_config: Config): Promise<void> {
     await this.buildDirector();
   }
 
@@ -321,6 +325,7 @@ export class MultiAgentHost {
       },
     );
     this.fleetEmitTool = makeFleetEmitTool(this.director);
+    this.fleetStatusTool = makeFleetStatusTool(this.director);
     const runner = await this.buildSubagentRunner(config);
     this.getCoordinator().setRunner(runner);
   }
@@ -389,19 +394,24 @@ export class MultiAgentHost {
         } as SessionWriter;
       }
 
-      // Expand fleet_emit: when the subagent requests 'fleet_emit' and the
-      // director has been built (director mode), inject the fleet emit tool
-      // directly into the subagent's registry. This is the path that makes
-      // collab session agents (BugHunter, RefactorPlanner, Critic) able to
-      // emit structured fleet bus events without the host registering the
-      // tool in its own ToolRegistry.
+      // Expand fleet_emit and fleet_status: when a subagent requests these tools
+      // and the director has been built (director mode), inject them directly into
+      // the subagent's registry. This is the path that makes collab session agents
+      // (BugHunter, RefactorPlanner, Critic) able to emit and query fleet events
+      // without the host registering these tools in its own ToolRegistry.
       const tools = subCfg.tools ? [...subCfg.tools] : undefined;
       let injectedFleetEmit: Tool | undefined;
-      if (tools?.includes('fleet_emit')) {
-        const fleetTool = this.fleetEmitTool;
-        if (fleetTool) {
-          tools.splice(tools.indexOf('fleet_emit'), 1);
-          injectedFleetEmit = fleetTool;
+      let injectedFleetStatus: Tool | undefined;
+      if (tools) {
+        const emitIdx = tools.indexOf('fleet_emit');
+        if (emitIdx >= 0 && this.fleetEmitTool) {
+          tools.splice(emitIdx, 1);
+          injectedFleetEmit = this.fleetEmitTool;
+        }
+        const statusIdx = tools.indexOf('fleet_status');
+        if (statusIdx >= 0 && this.fleetStatusTool) {
+          tools.splice(statusIdx, 1);
+          injectedFleetStatus = this.fleetStatusTool;
         }
       }
 
@@ -419,6 +429,7 @@ export class MultiAgentHost {
 
       const baseRegistry = this.subagentToolRegistry(tools);
       if (injectedFleetEmit) baseRegistry.register(injectedFleetEmit);
+      if (injectedFleetStatus) baseRegistry.register(injectedFleetStatus);
       const toolExecutor = new ToolExecutor(baseRegistry, {
         permissionPolicy: new AutoApprovePermissionPolicy(),
         secretScrubber: this.deps.secretScrubber,

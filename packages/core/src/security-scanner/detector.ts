@@ -1,7 +1,5 @@
-import { readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readdir } from 'node:fs/promises';
 import type {
-  DetectedDependency,
   DetectionResult,
   PackageManager,
   TechStack,

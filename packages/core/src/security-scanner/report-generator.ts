@@ -1,5 +1,5 @@
-import { readFile, readdir, stat } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
+import { stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import { atomicWrite } from '../utils/atomic-write.js';
 import type { ScanResult, Finding } from './scanner.js';
 

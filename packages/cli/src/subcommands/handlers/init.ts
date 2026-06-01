@@ -6,7 +6,7 @@ import {
   encryptConfigSecrets,
 } from '@wrongstack/core/security';
 import { detectProjectFacts, renderAgentsTemplate } from '../../slash-commands/helpers.js';
-import type { SubcommandDeps, SubcommandHandler } from '../index.js';
+import type { SubcommandHandler } from '../index.js';
 
 export const initCmd: SubcommandHandler = async (_args, deps) => {
   deps.renderer.write(color.bold('WrongStack init\n'));

@@ -173,7 +173,7 @@ export class SddParallelRun {
   }
 
   private defaultFactory(): AgentFactory {
-    return async (config: SubagentConfig) => ({
+    return async (_config: SubagentConfig) => ({
       agent: this.opts.agent,
       events: this.opts.agent.events,
     });

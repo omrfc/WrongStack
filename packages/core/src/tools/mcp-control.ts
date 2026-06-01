@@ -74,7 +74,7 @@ export function createMcpControlTool(opts: CreateMcpControlToolOptions): Tool {
     mutating: true,
     riskTier: 'standard',
     inputSchema,
-    async execute(raw, ctx) {
+    async execute(raw) {
       const input = raw as { action: string; query?: string; server?: string };
       return mcpControlDispatch(input, { getConfig, configPath, registry });
     },

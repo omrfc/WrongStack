@@ -1,5 +1,5 @@
 import { color, dispatchAgent, AGENTS_BY_PHASE } from '@wrongstack/core';
-import type { SlashCommand, CoordinatorStatus, FleetUsage, AgentPhase } from '@wrongstack/core';
+import type { SlashCommand, AgentPhase } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
 
 const PHASE_ORDER: { phase: AgentPhase; label: string }[] = [

@@ -12,7 +12,7 @@
  */
 
 import * as ts from 'typescript';
-import type { CallType, FileSymbols, Ref, Symbol as IndexSymbol, SymbolKind, SymbolLang } from './schema.js';
+import type { FileSymbols, Ref, Symbol as IndexSymbol, SymbolKind, SymbolLang } from './schema.js';
 
 // Map TypeScript SyntaxKind → our SymbolKind taxonomy
 const KIND_MAP: Partial<Record<ts.SyntaxKind, SymbolKind>> = {

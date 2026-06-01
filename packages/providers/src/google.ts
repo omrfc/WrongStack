@@ -67,11 +67,9 @@ export class GoogleProvider extends WireAdapter {
   override readonly id: string;
   override readonly capabilities: Capabilities;
 
-  private readonly opts: GoogleProviderOptions;
 
   constructor(opts: GoogleProviderOptions) {
     super(opts.apiKey, opts.baseUrl ?? DEFAULT_BASE, opts.fetchImpl);
-    this.opts = opts;
     this.id = opts.id ?? 'google';
     this.capabilities = capabilitiesForFamily('google', {
       ...opts.capabilities,

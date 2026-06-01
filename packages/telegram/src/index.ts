@@ -1,5 +1,4 @@
 import type { Plugin } from '@wrongstack/core';
-import type { Logger } from '@wrongstack/core';
 import { TelegramBot } from './bot.js';
 import type { TelegramIncomingMessage } from './bot.js';
 import { truncateForTelegram } from './bot.js';

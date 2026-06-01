@@ -487,17 +487,23 @@ The bearer token regex was lowered from `{20,512}` to `{12,512}`. A 12-char base
 
 ## 8. Unused / Unwired Code
 
-### `@wrongstack/runtime` — Never Wired
+### `@wrongstack/runtime` — ACTUALLY WIRING IN PROGRESS
 
 **Package:** `packages/runtime/`
 
-**Status:** Abstractions (`Container`, `Host`, `Pack`) exist but are not imported anywhere in the codebase.
+**Status:** This note in the previous revision was INCORRECT. The `@wrongstack/runtime` package IS wired:
 
-**Actions (pick one):**
+- `packages/cli/src/boot.ts` — imports from `@wrongstack/runtime`
+- `packages/cli/src/execution.ts` — imports from `@wrongstack/runtime`
+- `packages/cli/src/index.ts` — imports from `@wrongstack/runtime`
+- `packages/cli/src/repl.ts` — imports from `@wrongstack/runtime`
+- `packages/tui/src/app.tsx` — imports from `@wrongstack/runtime`
+- `packages/tui/src/clipboard.ts` — imports from `@wrongstack/runtime`
+- `packages/tui/src/run-tui.ts` — imports from `@wrongstack/runtime`
 
-**If kept:** Wire into `core/src/execution/` for subprocess/clipboard/vision tool execution. The abstractions are clean — just needs integration.
+The package re-exports from `@wrongstack/core` and adds: `pack.js`, `host.js`, `container.js`, `vision.js`, `clipboard.js`. It serves as the host-level composition layer.
 
-**If removed:** Delete the package entirely, including from `pnpm-workspace.yaml` and `packages/skills/package.json` (it references `@wrongstack/runtime`).
+**No action needed.**
 
 ---
 

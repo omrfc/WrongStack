@@ -34,8 +34,8 @@ export const updateCmd: SubcommandHandler = async (args, deps) => {
         cwd,
         stdio: 'pipe',
       });
-      let stderr = '';
-      child.stderr?.on('data', (d) => { stderr += d; });
+      let _stderr = '';
+      child.stderr?.on('data', (d) => { _stderr += d; });
       child.on('error', reject);
       child.on('close', (code) => resolve({ code: code ?? 0 }));
     });

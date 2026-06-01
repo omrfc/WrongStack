@@ -281,12 +281,6 @@ export class SSETransport {
   /** Per-request TLS agent — created once from HttpTransportOptions.tls */
   private tlsAgent?: https.Agent;
   private nextId = 1;
-  // NOTE: id-correlation via this map was scaffolded but never populated by
-  // `httpPost` — JSON-RPC responses come back synchronously over HTTP, not
-  // via the SSE stream. Keep the field reserved for future bidirectional-
-  // streaming support; do not wire callsites to it without first deciding
-  // who is responsible for clearing it on transport teardown.
-  private readonly _reservedPending = new Map<number, (res: JsonRpcResult) => void>();
   private tools: MCPTool[] = [];
   private abortController?: AbortController;
   private reader?: globalThis.ReadableStreamDefaultReader<string>;
@@ -647,24 +641,6 @@ export class StreamableHTTPTransport {
     return () => {
       this.toolsChangedListeners.delete(cb);
     };
-  }
-
-  private async handleToolsListChanged(): Promise<void> {
-    try {
-      const res = await this.postRaw('tools/list', {});
-      if (!res.error) {
-        this.tools = normalizeMCPTools((res.result as { tools?: unknown } | undefined)?.tools);
-        for (const cb of this.toolsChangedListeners) {
-          try {
-            cb([...this.tools]);
-          } catch {
-            /* ignore */
-          }
-        }
-      }
-    } catch {
-      /* ignore transient failures */
-    }
   }
 
   async connect(): Promise<void> {

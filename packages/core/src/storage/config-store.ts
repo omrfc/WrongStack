@@ -1,10 +1,5 @@
 import type { Config, ConfigStore } from '../types/config.js';
 
-/** Fields that must not be persisted because they came from environment variables. */
-const EPHEMERAL_FIELDS = new Set<keyof Config>([
-  'apiKey',
-  'baseUrl',
-] as const);
 
 /**
  * Strip fields that originated from environment variables so they are never

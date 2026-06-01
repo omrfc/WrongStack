@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { SkillLoader } from '../types/skill.js';
-import { type ParsedRef, downloadGitHubTarball, parseSkillRef } from './github-fetcher.js';
+import { downloadGitHubTarball, parseSkillRef } from './github-fetcher.js';
 import { type InstalledSkillEntry, SkillManifestStore } from './manifest-store.js';
 
 export interface SkillInstallerOptions {
@@ -146,7 +146,7 @@ export class SkillInstaller {
    */
   async update(
     nameOrRef?: string,
-    opts?: { global?: boolean },
+    _opts?: { global?: boolean },
   ): Promise<UpdateResult> {
     const result: UpdateResult = { updated: [], unchanged: [], errors: [] };
     const allEntries = await this.manifest.listAll();

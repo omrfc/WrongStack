@@ -2,7 +2,6 @@ import type { TaskGraph, TaskNode } from '../types/task-graph.js';
 import type { Specification } from '../types/spec.js';
 import type { EventBus } from '../kernel/events.js';
 import type { TaskTracker } from './task-tracker.js';
-import { TaskFlow } from './task-flow.js';
 import { analyzeCriticalPath } from './critical-path.js';
 
 export interface AutoExecutorOptions {

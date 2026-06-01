@@ -25,7 +25,7 @@ export function setupPipelines(params: {
   const { events, logger } = params;
   const pipelines = createDefaultPipelines();
 
-  const installBoundary = <T>(p: {
+  const installBoundary = <_T>(p: {
     setErrorHandler: (
       h: (ev: { middleware: string; owner?: string; err: unknown }) => 'rethrow' | 'swallow',
     ) => unknown;
@@ -118,7 +118,6 @@ export function createAgent(params: {
   const renderer = params.container.has(TOKENS.Renderer)
     ? params.container.resolve(TOKENS.Renderer)
     : undefined;
-  const logger = params.container.resolve(TOKENS.Logger);
   const toolExecutor = new ToolExecutor(params.tools, {
     permissionPolicy: params.permissionPolicy ?? params.container.resolve(TOKENS.PermissionPolicy),
     secretScrubber,

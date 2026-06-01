@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import type { Agent } from '../core/agent.js';
-import type { Context } from '../core/context.js';
 import type { AgentFactory } from '../coordination/agent-subagent-runner.js';
 import { makeAgentSubagentRunner } from '../coordination/agent-subagent-runner.js';
 import { dispatchAgent } from '../coordination/dispatcher.js';
@@ -23,6 +22,12 @@ export interface ParallelEternalOptions {
   agent: Agent;
   /** Project root (used for goal.json path). */
   projectRoot: string;
+  /**
+   * Override the resolved goal.json path. Defaults to
+   * `goalFilePath(projectRoot)` (a hashed location under the home dir).
+   * Primarily for tests that want an isolated goal file under a temp dir.
+   */
+  goalPath?: string;
   /**
    * Number of parallel subagent slots per tick.
    * Default: 4. Range 1–16; values >8 are for high-throughput machines.
@@ -93,12 +98,12 @@ export class ParallelEternalEngine {
   private readonly dispatchClassifier?: DispatchClassifier;
 
   constructor(private readonly opts: ParallelEternalOptions) {
-    this.goalPath = goalFilePath(opts.projectRoot);
+    this.goalPath = opts.goalPath ?? goalFilePath(opts.projectRoot);
     this.slots = Math.min(16, Math.max(1, opts.parallelSlots ?? 4));
     this.timeoutMs = opts.iterationTimeoutMs ?? 300_000;
     this.dispatchEnabled = opts.dispatch !== false;
     this.dispatchClassifier = opts.dispatchClassifier;
-    this.agentFactory = opts.subagentFactory ?? (async (config: SubagentConfig) => ({
+    this.agentFactory = opts.subagentFactory ?? (async (_config: SubagentConfig) => ({
       agent: this.opts.agent,
       events: this.opts.agent.events,
     }));
@@ -183,7 +188,8 @@ export class ParallelEternalEngine {
 
     const tasks = await this.decomposeGoal(goal);
     if (!tasks || tasks.length === 0) {
-      await sleep(5000);
+      // Nothing to do this tick. The run() loop paces idle iterations itself
+      // (see its sleep), so a single runOneIteration() must return promptly.
       return false;
     }
 
@@ -215,6 +221,7 @@ export class ParallelEternalEngine {
 
     if (fanOut.goalComplete) {
       this.stopRequested = true;
+      this.state = 'stopped';
       return true;
     }
 
@@ -445,7 +452,14 @@ export class ParallelEternalEngine {
       } finally {
         clearTimeout(timer);
       }
-    } catch {
+    } catch (err) {
+      // The leader agent failed to brainstorm. Surface it to onError so the
+      // failure is visible, but keep the loop alive (return no tasks — the
+      // next tick retries) rather than crashing the autonomous engine.
+      this.opts.onError?.(
+        err instanceof Error ? err : new Error(String(err)),
+        this.consecutiveFailures,
+      );
       return [];
     }
   }

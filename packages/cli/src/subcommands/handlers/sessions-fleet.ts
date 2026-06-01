@@ -1,7 +1,6 @@
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { color } from '@wrongstack/core';
-import { loadDirectorState } from '@wrongstack/core';
 import type { SubcommandDeps, SubcommandHandler } from '../index.js';
 
 /**

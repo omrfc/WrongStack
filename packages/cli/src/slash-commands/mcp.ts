@@ -1,6 +1,5 @@
 import type { SlashCommand } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
-import { runMcpManagementCommand, parseMcpArgs } from './mcp-utils.js';
 
 // Re-export for consumers that import from this barrel
 export { parseMcpArgs, runMcpManagementCommand } from './mcp-utils.js';

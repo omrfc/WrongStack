@@ -12,7 +12,6 @@ import type { SubcommandHandler } from '../index.js';
  */
 export const historyCmd: SubcommandHandler = async (args, deps) => {
   const idFlag = extractArg(args, '--id');
-  const detailedFlag = args.includes('--detail') || args.includes('-d');
 
   if (idFlag) {
     const entry = await getHistoryEntry(idFlag);

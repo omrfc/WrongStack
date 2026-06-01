@@ -12,7 +12,6 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { FileSymbols, Symbol as IndexSymbol, SymbolLang } from './schema.js';
-import { detectLang } from './ts-parser.js';
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 

@@ -8,8 +8,6 @@ import {
   type Config,
   DefaultLogger,
   DefaultModelsRegistry,
-  DefaultSessionStore,
-  DefaultSkillLoader,
   type ModelsRegistry,
   type SecretVault,
   ToolRegistry,

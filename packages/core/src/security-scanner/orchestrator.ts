@@ -1,5 +1,4 @@
 import { defaultTechStackDetector } from './detector.js';
-import { defaultReportGenerator } from './report-generator.js';
 import { defaultGitignoreUpdater } from './gitignore-updater.js';
 import type { TechStackInfo } from './types.js';
 import type { GeneratedSkill } from './skill-generator.js';
@@ -53,7 +52,6 @@ export interface FullScanResult {
  */
 export class SecurityScannerOrchestrator {
   private detector = defaultTechStackDetector;
-  private reportGenerator = defaultReportGenerator;
   private gitignoreUpdater = defaultGitignoreUpdater;
 
   constructor(private readonly retryPolicy?: RetryPolicy, private readonly errorHandler?: ErrorHandler) {}
@@ -307,7 +305,7 @@ Return ONLY the JSON object, no markdown, no explanation.`;
     model: string | undefined,
     files: string[],
     skill: GeneratedSkill,
-    techStack: TechStackInfo
+    _techStack: TechStackInfo
   ): Promise<Finding[]> {
     const fileContents: string[] = [];
     for (const file of files) {
@@ -537,7 +535,7 @@ Be specific about the vulnerabilities found and how to fix them.`;
   /**
    * Gather project info for skill generation.
    */
-  private async gatherProjectInfo(projectRoot: string, techStack: TechStackInfo): Promise<string> {
+  private async gatherProjectInfo(projectRoot: string, _techStack: TechStackInfo): Promise<string> {
     const info: string[] = [];
     
     // Read key project files
@@ -576,7 +574,7 @@ Be specific about the vulnerabilities found and how to fix them.`;
    */
   private async gatherFiles(
     root: string,
-    patterns: string[],
+    _patterns: string[],
     depth: 'quick' | 'standard' | 'deep'
   ): Promise<string[]> {
     const files: string[] = [];

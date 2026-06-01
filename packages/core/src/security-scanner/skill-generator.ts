@@ -345,7 +345,7 @@ export class SkillGenerator {
     return [commonInjection, ...(stackSpecific[stack] ?? [])];
   }
 
-  private getConfigPatterns(stack: TechStack): SecurityPattern[] {
+  private getConfigPatterns(_stack: TechStack): SecurityPattern[] {
     const commonConfig: SecurityPattern[] = [
       {
         id: 'insecure-tls',

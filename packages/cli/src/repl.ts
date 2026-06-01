@@ -7,7 +7,7 @@ import {
 } from '@wrongstack/runtime';
 import type { ReadlineInputReader } from './input-reader.js';
 import type { TerminalRenderer } from './renderer.js';
-import { getActiveSDDContext, trySaveSpecFromAIOutput, trySaveTasksFromAIOutput, getTaskListText, getTaskProgress, autoDetectTaskCompletion, getActiveSDDPhase, trySaveImplementationPlan, renderTaskListWithProgress, getCurrentTask, getCurrentExecutingContext, advanceToNextTask } from './slash-commands/sdd.js';
+import { getActiveSDDContext, trySaveSpecFromAIOutput, trySaveTasksFromAIOutput, getTaskListText, getTaskProgress, autoDetectTaskCompletion, getActiveSDDPhase, trySaveImplementationPlan, renderTaskListWithProgress, getCurrentExecutingContext, advanceToNextTask } from './slash-commands/sdd.js';
 import { theme } from './theme.js';
 import { fmtTok } from './utils.js';
 import { CLI_VERSION } from './version.js';
@@ -176,7 +176,7 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
           );
           interrupts = 0;
           try {
-            const ok = await engine.runOneIteration();
+            await engine.runOneIteration();
             const afterGoal = await loadGoalSafe(opts);
             const last = afterGoal?.journal[afterGoal.journal.length - 1];
 
@@ -292,7 +292,7 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
                   }
                 }
               }
-            } catch (runErr) {
+            } catch (_runErr) {
               // Non-fatal — user can continue manually
               opts.renderer.writeWarning('AI auto-trigger failed. You can continue manually.');
             }

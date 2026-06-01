@@ -380,6 +380,106 @@ describe('DefaultSessionStore', () => {
   });
 });
 
+// ── Idea #1 — in-flight markers (Stateful Session Recovery) ─────────────────
+describe('DefaultSessionStore — in-flight markers', () => {
+  let tmp: string;
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'inflight-'));
+  });
+  afterEach(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  it('writeInFlightMarker appends an in_flight_start event', async () => {
+    const store = new DefaultSessionStore({ dir: tmp });
+    const writer = await store.create({
+      id: 's1',
+      title: '',
+      model: 'm',
+      provider: 'p',
+    });
+    await writer.writeInFlightMarker('iteration 1 / tool: read');
+    const events = await store.load('s1');
+    const last = events.events[events.events.length - 1]!;
+    expect(last.type).toBe('in_flight_start');
+    expect(last.context).toBe('iteration 1 / tool: read');
+  });
+
+  it('clearInFlightMarker appends an in_flight_end with the given reason', async () => {
+    const store = new DefaultSessionStore({ dir: tmp });
+    const writer = await store.create({
+      id: 's1',
+      title: '',
+      model: 'm',
+      provider: 'p',
+    });
+    await writer.writeInFlightMarker('iteration 5');
+    await writer.clearInFlightMarker('clean');
+    const events = await store.load('s1');
+    const last = events.events[events.events.length - 1]!;
+    expect(last.type).toBe('in_flight_end');
+    expect(last.reason).toBe('clean');
+  });
+
+  it('stale marker is detectable via SessionRecovery (round-trip)', async () => {
+    const store = new DefaultSessionStore({ dir: tmp });
+    const writer = await store.create({
+      id: 'crash',
+      title: '',
+      model: 'm',
+      provider: 'p',
+    });
+    await writer.writeInFlightMarker('iteration 7 / tool: bash');
+    // No clearInFlightMarker — simulating a crash.
+    writer.close();
+    const { SessionRecovery } = await import('../../src/storage/session-recovery.js');
+    const recovery = new SessionRecovery(tmp);
+    const stale = await recovery.detectStale('crash');
+    expect(stale).not.toBeNull();
+    expect(stale!.context).toBe('iteration 7 / tool: bash');
+  });
+
+  it('rejects empty or oversized context', async () => {
+    const store = new DefaultSessionStore({ dir: tmp });
+    const writer = await store.create({
+      id: 's1',
+      title: '',
+      model: 'm',
+      provider: 'p',
+    });
+    await expect(writer.writeInFlightMarker('')).rejects.toThrow(/1\.\.500/);
+    await expect(writer.writeInFlightMarker('x'.repeat(501))).rejects.toThrow(/1\.\.500/);
+  });
+
+  it('preserves order: other events between start and end survive intact', async () => {
+    const store = new DefaultSessionStore({ dir: tmp });
+    const writer = await store.create({
+      id: 's1',
+      title: '',
+      model: 'm',
+      provider: 'p',
+    });
+    await writer.writeInFlightMarker('start');
+    await writer.append({
+      type: 'tool_result',
+      ts: new Date().toISOString(),
+      id: 'tu-1',
+      content: 'ok',
+      isError: false,
+    });
+    await writer.clearInFlightMarker('clean');
+    const events = await store.load('s1');
+    const types = events.events.map((e: { type: string }) => e.type);
+    expect(types).toContain('in_flight_start');
+    expect(types).toContain('tool_result');
+    expect(types).toContain('in_flight_end');
+    // The end must follow the tool_result, not the start.
+    const endIdx = types.lastIndexOf('in_flight_end');
+    const toolIdx = types.lastIndexOf('tool_result');
+    expect(endIdx).toBeGreaterThan(toolIdx);
+  });
+});
+
 // F-06 (CWE-532): secrets in user/model turns must be scrubbed before they are
 // persisted to the JSONL log and the summary sidecar.
 describe('DefaultSessionStore — secret scrubbing (F-06)', () => {

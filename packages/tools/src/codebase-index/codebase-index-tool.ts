@@ -1,15 +1,4 @@
-/**
- * `codebase-index` tool — trigger a full or incremental reindex.
- *
- * Usage: codebase-index({ force?: boolean, langs?: string[] })
- *
- * - `force: true`  → clear index and reindex everything from scratch
- * - `langs`         → filter to specific languages (e.g. ['ts', 'tsx'])
- *
- * Returns: { filesIndexed, symbolsIndexed, langStats, durationMs, errors }
- */
 
-import * as path from 'node:path';
 import type { Tool } from '@wrongstack/core';
 import { runIndexer } from './indexer.js';
 

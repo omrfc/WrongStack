@@ -4,10 +4,6 @@ import type { Logger } from '@wrongstack/core';
 // Redaction helpers
 // ---------------------------------------------------------------------------
 
-/** Replace Telegram bot token in a URL string with `[REDACTED:tg_token]`. */
-function redactUrl(url: string): string {
-  return url.replace(/\/bot[^\/]+/, '/bot[REDACTED:tg_token]');
-}
 
 // ---------------------------------------------------------------------------
 // Telegram Bot API types (subset used by this plugin)
@@ -89,7 +85,6 @@ export interface TelegramBotOptions {
 // ---------------------------------------------------------------------------
 
 export class TelegramBot {
-  private readonly token: string;
   private readonly baseUrl: string;
   private readonly pollIntervalMs: number;
   private readonly allowedUsers: Set<string>;
@@ -109,7 +104,6 @@ export class TelegramBot {
   private readonly buffer: TelegramIncomingMessage[] = [];
 
   constructor(opts: TelegramBotOptions) {
-    this.token = opts.token;
     this.baseUrl = `https://api.telegram.org/bot${opts.token}`;
     this.pollIntervalMs = opts.pollIntervalSec * 1000;
     this.allowedUsers = opts.allowedUsers;

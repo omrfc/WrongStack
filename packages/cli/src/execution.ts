@@ -551,7 +551,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     fleetStatusLine?.stop();
     // stats.render is synchronous but can throw — isolate it so cleanup
     // always runs regardless.
-    try { stats.render(renderer); } catch (err) { /* best-effort */ }
+    try { stats.render(renderer); } catch (_err) { /* best-effort */ }
     await Promise.resolve(detachTodosCheckpoint?.()).catch(() => undefined);
     await mcpRegistry.stopAll();
     await session.append({

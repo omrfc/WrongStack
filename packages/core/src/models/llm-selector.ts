@@ -140,7 +140,7 @@ export class LLMSelector implements MessageSelector {
         .map((b) => b.text)
         .join('\n')
         .trim();
-    } catch (err) {
+    } catch (_err) {
       // Fallback: use simple recency-based selection
       return this.fallbackSelect(messages, effectiveBudget);
     }

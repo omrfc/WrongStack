@@ -198,7 +198,6 @@ const plugin: Plugin = {
   setup(api) {
     const tagPrefix = (api.config.extensions?.['semver-bump'] as Record<string, unknown>)?.['tagPrefix'] as string ?? 'v';
     const autoTag = (api.config.extensions?.['semver-bump'] as Record<string, unknown>)?.['autoTag'] as boolean ?? true;
-    const changelogFile = (api.config.extensions?.['semver-bump'] as Record<string, unknown>)?.['changelogFile'] as string ?? 'CHANGELOG.md';
 
     // --- semver_bump ---
     api.tools.register({

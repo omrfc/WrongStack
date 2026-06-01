@@ -27,18 +27,6 @@ interface DocumentOutput {
   style: string;
 }
 
-const JSDOC_TEMPLATE = `/**
- * {description}
- *{params}
- * @returns {returns}
- */`;
-
-const BLOCK_TEMPLATE = `/*
- * {description}
- *{params}
- * @returns {returns}
- */`;
-
 export const documentTool: Tool<DocumentInput, DocumentOutput> = {
   name: 'document',
   category: 'Project',
@@ -144,12 +132,11 @@ async function resolveFiles(filesInput: string, cwd: string): Promise<string[]> 
 function processFile(
   content: string,
   absPath: string,
-  style: string,
-  overwrite: boolean,
+  _style: string,
+  _overwrite: boolean,
   target: string,
 ): DocumentedItem[] {
   const results: DocumentedItem[] = [];
-  const lines = content.split('\n');
   const functionRegex = /(?:async\s+)?function\s+(\w+)\s*\(([^)]*)\)/g;
   const arrowRegex = /(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\(([^)]*)\)\s*=>/g;
   const classRegex = /class\s+(\w+)/g;

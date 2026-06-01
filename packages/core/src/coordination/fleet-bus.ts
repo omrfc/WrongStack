@@ -176,7 +176,7 @@ export class FleetUsageAggregator {
   private readonly total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
 
   constructor(
-    private readonly bus: FleetBus,
+    bus: FleetBus,
     private readonly priceLookup?: (
       subagentId: string,
       provider?: string,

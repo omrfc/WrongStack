@@ -4,7 +4,6 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { buildChildEnv } from '@wrongstack/core';
 import type { Tool } from '@wrongstack/core';
-import { unifiedDiff } from '@wrongstack/core';
 import { safeResolve } from './_util.js';
 
 interface DiffInput {
@@ -148,9 +147,8 @@ function runGit(
 async function fileDiff(
   input: DiffInput,
   ctx: import('@wrongstack/core').Context,
-  signal: AbortSignal,
+  _signal: AbortSignal,
 ): Promise<DiffOutput> {
-  const baseDir = input.path ? safeResolve(input.path, ctx) : ctx.cwd;
   const context = input.context ?? 3;
 
   const files = input.files
@@ -188,6 +186,6 @@ async function fileDiff(
   };
 }
 
-function formatUnified(lines: string[], context: number): string {
-  return lines.map((line, i) => ` ${line}`).join('\n');
+function formatUnified(lines: string[], _context: number): string {
+  return lines.map((line, _i) => ` ${line}`).join('\n');
 }

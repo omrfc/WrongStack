@@ -195,7 +195,7 @@ describe('MCPRegistry', () => {
       let unregisterCall = 0;
       (reg as unknown as { toolRegistry: ToolRegistry }).toolRegistry = {
         ...toolReg,
-        unregister: (name: string) => {
+        unregister: (_name: string) => {
           unregisterCall++;
           if (unregisterCall <= 2) throw new Error('simulated error');
         },

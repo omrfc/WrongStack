@@ -287,7 +287,6 @@ describe('MCPClient', () => {
   describe('onLine() — JSON-RPC parsing edge cases', () => {
     it('onLine ignores malformed JSON', () => {
       const c = new MCPClient({ name: 'malformed-json', transport: 'stdio', command: 'echo' });
-      const handler = vi.fn();
       (c as unknown as { onLine: (line: string) => void }).onLine('not json at all {{{');
       // Should not throw and should not call any handler
     });

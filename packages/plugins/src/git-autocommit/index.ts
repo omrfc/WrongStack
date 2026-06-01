@@ -8,7 +8,7 @@
  */
 import type { Plugin } from '@wrongstack/core';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 
 const API_VERSION = '^0.1.10';
 
@@ -74,25 +74,6 @@ function getCommitHistory(since?: string, cwd?: string): Array<{ hash: string; m
     const type = (typeMatch?.[1] as ConventionalType) ?? 'chore';
     return { hash, message, type };
   });
-}
-
-function detectBumpType(commits: Array<{ type: ConventionalType; message: string }>): 'major' | 'minor' | 'patch' {
-  let hasMajor = false;
-  let hasMinor = false;
-
-  for (const c of commits) {
-    if (c.type === 'feat' && c.message.includes('!')) {
-      hasMajor = true;
-    } else if (c.type === 'fix' && c.message.includes('!')) {
-      hasMajor = true;
-    } else if (c.type === 'feat') {
-      hasMinor = true;
-    }
-  }
-
-  if (hasMajor) return 'major';
-  if (hasMinor) return 'minor';
-  return 'patch';
 }
 
 // ---------------------------------------------------------------------------

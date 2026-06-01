@@ -346,6 +346,7 @@ describe('MultiAgentHost', () => {
         'fleet_usage',
         'roll_up',
         'spawn_subagent',
+        'terminate_all',
         'terminate_subagent',
         'work_complete',
       ]);
@@ -433,6 +434,7 @@ describe('MultiAgentHost', () => {
           'fleet_usage',
           'roll_up',
           'spawn_subagent',
+          'terminate_all',
           'terminate_subagent',
           'work_complete',
         ]);

@@ -15,6 +15,27 @@ const END = '[201~';
 const BEGIN_RE = /\x1b?\[200~/g;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: paste markers carry a literal ESC
 const END_RE = /\x1b?\[201~/g;
+// Partial ANSI CSI without the ESC prefix — Ink strips ESC from sequences
+// like \x1b[0m, leaving [0m which would otherwise appear as literal text.
+const PARTIAL_ANSI_RE = /^\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]/;
+const ANSI_RE = new RegExp(
+  [
+    // CSI: ESC [ params* intermediates* final
+    // params 0x30-0x3f (digits, ; : < = > ?)
+    // intermediates 0x20-0x2f (space … /)
+    // final 0x40-0x7e (@ … ~)
+    '\\x1b\\[[\\x30-\\x3f]*[\\x20-\\x2f]*[\\x40-\\x7e]',
+    // OSC: ESC ] … BEL (\x07) or ST (\x1b\\)
+    '\\x1b\\][^\\x07\\x1b]*(?:\\x07|\\x1b\\\\)',
+    // DCS: ESC P … ST (\x1b\\)
+    '\\x1bP[^\\x1b]*(?:\\x1b\\\\)',
+    // SOS / PM: ESC X / ESC ^
+    '\\x1b[XP][^\\x1b]*(?:\\x1b\\\\)',
+    // Standalone ESC — guard only
+    '\\x1b',
+  ].join('|'),
+  'g',
+);
 
 export interface PasteFeedResult {
   /** New accumulator state: a string while mid-paste, `null` when idle. */
@@ -35,8 +56,24 @@ export interface PasteFeedResult {
  *   handle it as normal input); otherwise the updated accumulation state.
  */
 export function feedPaste(accum: string | null, input: string): PasteFeedResult | null {
-  if (accum === null && !input.includes(BEGIN)) return null;
-  const piece = input.replace(BEGIN_RE, '').replace(END_RE, '');
+  if (accum === null && !input.includes(BEGIN)) {
+    // If input starts with '[' but is not a paste marker, it may be a partial
+    // ANSI CSI sequence whose ESC was stripped by Ink. Guard against it
+    // appearing as literal text in the input buffer.
+    if (input.startsWith('[') && !input.startsWith(BEGIN) && !input.startsWith(END)) {
+      // Treat partial ANSI sequences (ESC stripped) as mid-paste content
+      // so [0m doesn't leak into the buffer as literal text.
+      if (PARTIAL_ANSI_RE.test(input)) {
+        return { accum: '', complete: null };
+      }
+      // Bare '[' is not a paste marker and not a known partial ANSI
+      // sequence — let it through as ordinary input.
+      return null;
+    }
+    return null;
+  }
+  // Strip paste markers AND all ANSI sequences before accumulating.
+  const piece = input.replace(BEGIN_RE, '').replace(END_RE, '').replace(ANSI_RE, '');
   const next = (accum ?? '') + piece;
   if (input.includes(END)) return { accum: null, complete: next };
   return { accum: next, complete: null };

@@ -37,7 +37,7 @@ export function wrapMCPTool(
     permission,
     mutating: isMutatingTool(mcpTool),
     inputSchema: mcpTool.inputSchema ?? { type: 'object', properties: {} },
-    async execute(input, ctx, opts) {
+    async execute(input, _ctx, _opts) {
       const res = await client.callTool(mcpTool.name, input);
       if (res.isError) {
         throw new Error(stringify(res.content));

@@ -217,8 +217,6 @@ async function globFiles(
   base: string,
   extraGlob?: RegExp | null,
 ): Promise<string[]> {
-  const { spawn } = await import('node:child_process');
-  const results: string[] = [];
 
   const rgAvailable = await checkRg();
   if (rgAvailable) {

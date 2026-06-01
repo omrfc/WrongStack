@@ -17,7 +17,6 @@ import {
   internalKindToLspKind,
   lspKindToInternalKind,
 } from '@wrongstack/tools/codebase-index/index';
-import type { SearchResult } from '@wrongstack/tools/codebase-index/index';
 
 import { LSP_CONSTANTS } from '../constants.js';
 import { formatCodebaseLspResults } from '../formatters/symbols.js';

@@ -56,14 +56,6 @@ const PROTECTED_BASENAMES = new Set([
 // Top-level directories that should never be deleted even if a prune
 // pattern accidentally widens. These are absolute directory names
 // relative to the .wrongstack root.
-const PROTECTED_DIRS = new Set([
-  'cache',       // models.dev.json cache
-  'logs',        // runtime logs
-  'history',     // REPL history
-  'memory.md',   // global memory
-  'skills',      // global skills
-  'projects',    // per-project state
-]);
 
 /**
  * Guard: throw if `filename` is a protected file or lives inside a protected

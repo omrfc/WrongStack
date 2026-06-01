@@ -1,6 +1,6 @@
 import { parseAuthFlags } from '../../arg-parser.js';
 import { runAuthDirect, runAuthMenu } from '../../auth-menu.js';
-import type { SubcommandDeps, SubcommandHandler } from '../index.js';
+import type { SubcommandHandler } from '../index.js';
 
 export const authCmd: SubcommandHandler = async (args, deps) => {
   const flags = parseAuthFlags(args);

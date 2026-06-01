@@ -1,7 +1,7 @@
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { atomicWrite, ensureDir } from '../utils/atomic-write.js';
-import type { TaskGraph, TaskNode, TaskEdge } from '../types/task-graph.js';
+import type { TaskGraph, TaskNode } from '../types/task-graph.js';
 
 export interface TaskGraphStoreOptions {
   /** Directory where task graph files are stored. Defaults to `.wrongstack/task-graphs`. */

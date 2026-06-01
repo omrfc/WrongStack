@@ -28,7 +28,7 @@ export function FilePicker({ query, matches, selected }: FilePickerProps): React
   );
 }
 
-function highlight(path: string, query: string): string {
+function highlight(path: string, _query: string): string {
   // Visual highlight is omitted for terseness; ink Text styling at char level
   // requires splitting into segments. Keep the path verbatim for now.
   return path;

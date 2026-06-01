@@ -11,7 +11,7 @@
  */
 
 import type { RunResult, UserInputPayload } from '../core/agent.js';
-import type { Context, RunOptions } from '../core/context.js';
+import type { Context } from '../core/context.js';
 import type { ToolUseBlock } from '../types/blocks.js';
 import type { Request, Response } from '../types/provider.js';
 import type { ToolExecutionOutput } from '../types/tool-executor.js';

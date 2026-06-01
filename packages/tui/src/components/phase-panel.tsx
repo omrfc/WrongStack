@@ -44,7 +44,7 @@ function s(entry: string) {
  * Compact 2-line-per-phase view optimized for the TUI layout.
  * Unlike PhaseMonitor (an overlay), PhasePanel is always visible while active.
  */
-export function PhasePanel({ phases, runningPhaseIds, nowTick }: PhasePanelProps): React.ReactElement | null {
+export function PhasePanel({ phases, nowTick }: PhasePanelProps): React.ReactElement | null {
   const list = Object.values(phases);
   if (list.length === 0) return null;
 

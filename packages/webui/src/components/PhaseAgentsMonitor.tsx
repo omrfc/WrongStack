@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { Activity, Bot, Cpu, Pause, Play, UserCheck, UserX } from 'lucide-react';
+import { Activity, Bot, Cpu, Pause, UserX } from 'lucide-react';
 import type React from 'react';
 
 export interface AgentPhaseAssignment {
@@ -57,7 +57,6 @@ export function PhaseAgentsMonitor({
   totalAgents,
   activeAgents,
   onReleaseAgent,
-  onAssignAgent,
   className,
 }: PhaseAgentsMonitorProps): React.ReactElement {
   return (

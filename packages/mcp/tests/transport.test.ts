@@ -593,7 +593,7 @@ describe('SSETransport — mocked connect + callTool', () => {
     const origFetch = globalThis.fetch;
     (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
     try {
-      const t = new SSETransport({ name: 'x', url: 'https://m.test' });
+      new SSETransport({ name: 'x', url: 'https://m.test' });
       // Can't fully test without mocking SSE stream, but we can test the
       // callTool error path via the already-connected transport state.
     } finally {
@@ -1063,7 +1063,6 @@ describe('SSETransport — mocked connect + callTool', () => {
     // Create an already-aborted parent signal
     const ctrl = new AbortController();
     ctrl.abort(new Error('already aborted'));
-    const abortedSignal = ctrl.signal;
     // Use httpPost with an aborted parent signal — createTimeoutSignal should
     // immediately abort the child signal
     const fetchImpl = mkFetch([

@@ -362,7 +362,6 @@ class FileSessionWriter implements SessionWriter {
     return event;
   }
 
-  private promptIndex = 0;
   private pendingFileSnapshots: Array<{
     path: string;
     action: 'created' | 'modified' | 'deleted';
@@ -502,7 +501,6 @@ class FileSessionWriter implements SessionWriter {
       await this.writeFileSnapshot(promptIndex, [...this.pendingFileSnapshots]);
       this.pendingFileSnapshots = [];
     }
-    this.promptIndex = promptIndex + 1;
     await this.append({
       type: 'checkpoint',
       ts: new Date().toISOString(),
@@ -615,6 +613,40 @@ class FileSessionWriter implements SessionWriter {
       provider: this.meta.provider ?? 'unknown',
     })}\n`;
     await fsp.writeFile(this.filePath, record, 'utf8');
+  }
+
+  /**
+   * Idea #1 — write an in-flight marker. The agent loop should call
+   * this at the start of each long-running operation; a matching
+   * `clearInFlightMarker` follows on clean exit. A stale marker
+   * (no end) is what `SessionRecovery.detectStale` looks for.
+   */
+  async writeInFlightMarker(context: string): Promise<void> {
+    if (!context || context.length > 500) {
+      throw new Error('In-flight context must be 1..500 chars');
+    }
+    await this.append({
+      type: 'in_flight_start',
+      ts: new Date().toISOString(),
+      context,
+    });
+    this.events?.emit('in_flight.started', { context, ts: new Date().toISOString() });
+  }
+
+  /**
+   * Idea #1 — close the in-flight marker. Idempotent in spirit
+   * (you can call it after a successful iteration even if you
+   * didn't open one this round) — but the session log records
+   * every call so postmortem tooling can see "the agent finished
+   * cleanly X times, then died without finishing Y".
+   */
+  async clearInFlightMarker(reason: 'clean' | 'aborted' | 'recovered'): Promise<void> {
+    await this.append({
+      type: 'in_flight_end',
+      ts: new Date().toISOString(),
+      reason,
+    });
+    this.events?.emit('in_flight.ended', { reason, ts: new Date().toISOString() });
   }
 }
 

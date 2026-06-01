@@ -49,7 +49,7 @@ export class SddTaskDecomposer {
 
   constructor(
     private readonly tracker: TaskTracker,
-    private readonly graph: TaskGraph,
+    _graph: TaskGraph,
     opts: SddTaskDecomposerOptions = {},
   ) {
     this.slots = Math.min(16, Math.max(1, opts.parallelSlots ?? 4));

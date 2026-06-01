@@ -34,15 +34,6 @@ export { detectLang } from './ts-parser.js';
 
 // ─── Regex parser ───────────────────────────────────────────────────────────
 
-interface JsonPattern {
-  regex: RegExp;
-  kind: IndexSymbol['kind'];
-}
-
-const JSON_PATTERNS: JsonPattern[] = [
-  // Top-level "key": value (on its own line)
-  { regex: /^\s*"([^"]+)"\s*:/gm, kind: 'property' },
-];
 
 /**
  * Extract key-value pairs from JSON content using regex.

@@ -84,7 +84,7 @@ const DOMAIN_PREFERENCES: Record<string, string[]> = {
   'e2e':         ['hopper', 'bell', 'marconi', 'tesla'],
   'performance': ['knuth', 'gauss', 'planck', 'feynman'],
   'chaos':       ['tesla', 'edison', 'curie', 'fermi'],
-  'cost':        ['oh', 'bell', 'marconi', 'tesla'],
+  'cost':        ['ohm', 'bell', 'marconi', 'tesla'],
   // default fallback
   'default':     ['einstein', 'newton', 'curie', 'tesla', 'edison', 'turing', 'shannon', 'hopper', 'knuth', 'stallman'],
 };
@@ -106,10 +106,13 @@ export function assignNickname(role: string, used: ReadonlySet<string>): string 
     ...(DOMAIN_PREFERENCES['default'] ?? []),
   ];
 
-  // 2. Find the first unassigned nickname from preferences
+  // 2. Find the first unassigned nickname from preferences. Skip keys that are
+  //    not in the pool — preference lists can drift out of sync with the pool
+  //    (typos, removed names), and an unknown key must not crash assignment.
   for (const key of preferences) {
-    if (!used.has(key)) {
-      return `${NICKNAME_POOL[key as NicknameKey].name} (${formatRole(role)})`;
+    const entry = NICKNAME_POOL[key as NicknameKey];
+    if (entry && !used.has(key)) {
+      return `${entry.name} (${formatRole(role)})`;
     }
   }
 

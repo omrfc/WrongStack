@@ -13,13 +13,6 @@ import type {
   ContentBlock,
 } from '../types/acp-messages.js';
 
-const WRONGSTACK_CAPABILITIES = [
-  'code-generation',
-  'async-tools',
-  'streaming',
-  'progress',
-];
-
 export class ACPToolsRegistry {
   private tools = new Map<string, Tool>();
   private readonly owner: string;
@@ -93,7 +86,7 @@ export class ACPToolsRegistry {
 }
 
 /** Convert a WrongStack Tool → ACP ACPToolDefinition */
-function toACPToolDefinition(tool: Tool, owner: string): ACPToolDefinition {
+function toACPToolDefinition(tool: Tool, _owner: string): ACPToolDefinition {
   return {
     name: tool.name,
     description: tool.description,

@@ -68,7 +68,7 @@ export function ConfirmPrompt({
     process.stdout.write('\x07');
   }, []);
 
-  useInput((input, key) => {
+  useInput((input, _key) => {
     // Ignore empty input and CRLF/LF artifacts (Enter produces \r on Windows, \n on Unix)
     if (!input || input === '\r' || input === '\n') return;
     const ch = input.toLowerCase();

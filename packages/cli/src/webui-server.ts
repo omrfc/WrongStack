@@ -424,7 +424,7 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
 
   async function handleUserMessage(
     ws: WebSocket,
-    client: ConnectedClient,
+    _client: ConnectedClient,
     content: string,
   ): Promise<void> {
     // Guard against overlapping runs on the same Agent instance. Two

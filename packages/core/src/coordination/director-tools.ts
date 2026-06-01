@@ -200,7 +200,7 @@ export function makeRollUpTool(director: Director): Tool {
 export function makeTerminateTool(director: Director): Tool {
   return {
     name: 'terminate_subagent',
-    description: 'Forcibly abort a subagent.',
+    description: 'Forcibly abort a subagent. The subagent finishes its current iteration then exits with status "stopped".',
     permission: 'auto',
     mutating: true,
     inputSchema: { type: 'object', properties: { subagentId: { type: 'string', description: 'Subagent to abort.' } }, required: ['subagentId'] },
@@ -208,6 +208,25 @@ export function makeTerminateTool(director: Director): Tool {
       const i = input as { subagentId: string };
       await director.terminate(i.subagentId);
       return { ok: true };
+    },
+  };
+}
+
+export function makeTerminateAllTool(director: Director): Tool {
+  return {
+    name: 'terminate_all',
+    description:
+      'Forcibly stop every subagent in the fleet and drain the pending task queue. ' +
+      'In-flight tasks are terminated mid-execution; pending tasks receive ' +
+      '"aborted_by_parent" completion immediately. ' +
+      'Use this when the fleet is wedged, looping, or you need a clean slate. ' +
+      'Compare: work_complete stops spawning but lets running agents finish naturally.',
+    permission: 'auto',
+    mutating: true,
+    inputSchema: { type: 'object', properties: {}, required: [] },
+    async execute() {
+      await director.terminateAll();
+      return { ok: true, message: `Fleet shutdown complete — all subagents stopped, pending tasks drained.` };
     },
   };
 }

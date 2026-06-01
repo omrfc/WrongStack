@@ -1,6 +1,5 @@
 import type { Specification, SpecRequirement } from '../types/spec.js';
 import type { TaskGraph, TaskNode } from '../types/task-graph.js';
-import { SpecParser } from './spec-parser.js';
 
 export interface SpecVersion {
   version: string;

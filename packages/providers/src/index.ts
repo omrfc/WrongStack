@@ -11,7 +11,6 @@ import { AnthropicProvider } from './anthropic.js';
 import { GoogleProvider } from './google.js';
 import { OpenAICompatibleProvider } from './openai-compatible.js';
 import { OpenAIProvider } from './openai.js';
-import { WireAdapter } from './wire-adapter.js';
 
 export { AnthropicProvider, type AnthropicProviderOptions } from './anthropic.js';
 export { OpenAIProvider, type OpenAIProviderOptions } from './openai.js';

@@ -115,7 +115,7 @@ async function parseFile(
 
 /** Run a full or incremental index and return statistics. */
 export async function runIndexer(
-  ctx: Context,
+  _ctx: Context,
   opts: IndexerOptions,
 ): Promise<IndexResult> {
   const { projectRoot, force = false, langs, ignore = [] } = opts;

@@ -16,8 +16,6 @@ import {
   PanelLeftOpen,
   Settings,
   Sun,
-  Wifi,
-  WifiOff,
   Zap,
 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
@@ -83,7 +81,7 @@ export function ChatView() {
   const compactMode = useUIStore((s) => s.compactMode);
   const setTheme = useConfigStore((s) => s.setTheme);
   const theme = useConfigStore((s) => s.theme);
-  const { totalTokens, cost, startTime, lastInputTokens, maxContext, projectName, iteration } =
+  const { totalTokens, startTime, lastInputTokens, maxContext, projectName, iteration } =
     useSessionStore();
   const { wsConnected, wsStatus, provider, model } = useConfigStore();
   const { setCurrentView } = useUIStore();

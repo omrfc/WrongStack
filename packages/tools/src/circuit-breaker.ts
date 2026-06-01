@@ -92,8 +92,6 @@ export class CircuitBreaker {
   private lastSlowAt: number | null = null;
   /** Timestamp when the breaker was opened (for cooldown calculation). */
   private openedAt: number | null = null;
-  /** Timestamp when the last call ran (for half-open gate). */
-  private lastCallAt: number | null = null;
 
   constructor(config: CircuitBreakerConfig = {}) {
     this.maxConsecutiveFailures = config.maxConsecutiveFailures ?? DEFAULT_MAX_CONSECUTIVE_FAILURES;
@@ -156,7 +154,6 @@ export class CircuitBreaker {
    */
   afterCall(durationMs: number, failed: boolean): void {
     const now = Date.now();
-    this.lastCallAt = now;
 
     if (this.state === 'half-open') {
       // First call through after cooldown — if it failed, go back to open.

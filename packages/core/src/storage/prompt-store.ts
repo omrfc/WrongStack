@@ -35,7 +35,7 @@ export class DefaultPromptStore implements PromptStore {
 
   async list(): Promise<PromptEntry[]> {
     await ensureDir(this.dir);
-    let entries: PromptEntry[] = [];
+    const entries: PromptEntry[] = [];
     try {
       const files = await fs.readdir(this.dir);
       for (const file of files) {

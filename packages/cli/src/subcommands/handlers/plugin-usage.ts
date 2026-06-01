@@ -1,5 +1,5 @@
 import { runPluginManagementCommand } from '../../plugin-management.js';
-import type { SubcommandDeps, SubcommandHandler } from '../index.js';
+import type { SubcommandHandler } from '../index.js';
 
 export const pluginCmd: SubcommandHandler = async (args, deps) => {
   const result = await runPluginManagementCommand(args, {

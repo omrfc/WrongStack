@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { SubagentConfig, TaskResult } from '../types/multi-agent.js';
 import type { JSONSchema, Tool } from '../types/tool.js';
 import type { Director } from './director.js';
-import { applyRosterBudget, FLEET_ROSTER_BUDGETS } from './fleet.js';
+import { applyRosterBudget } from './fleet.js';
 
 /**
  * Opaque host interface so this factory doesn't have to depend on the

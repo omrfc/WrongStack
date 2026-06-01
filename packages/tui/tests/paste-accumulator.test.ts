@@ -48,4 +48,29 @@ describe('feedPaste', () => {
     const r2 = feedPaste(r1?.accum ?? null, `y${END}`);
     expect(r2).toEqual({ accum: null, complete: 'xy' });
   });
+
+  // ── ANSI sequence stripping ─────────────────────────────────────────────
+
+  it('strips ANSI SGR reset (ESC[0m) from pasted content', () => {
+    // \x1b[0m = SGR reset. The escape sequence adds no visible characters.
+    const res = feedPaste(null, `${BEGIN}hello\x1b[0mworld${END}`);
+    expect(res?.complete).toBe('helloworld');
+  });
+
+  it('strips ANSI SGR codes (color) from pasted content', () => {
+    // \x1b[31m = red. \x1b[0m = reset. No visible chars added.
+    const res = feedPaste(null, `${BEGIN}\x1b[31mred\x1b[0mblue${END}`);
+    expect(res?.complete).toBe('redblue');
+  });
+
+  it('strips ANSI cursor-position (H) sequences from pasted content', () => {
+    const res = feedPaste(null, `${BEGIN}\x1b[Htop\x1b[Hbottom${END}`);
+    expect(res?.complete).toBe('topbottom');
+  });
+
+  it('returns null for a bare partial ANSI CSI fragment starting with "["', () => {
+    // A bare "[0m" (ESC was stripped from "\x1b[0m") should be treated as
+    // mid-paste, not passed through as ordinary input.
+    expect(feedPaste(null, '[0m')).toEqual({ accum: '', complete: null });
+  });
 });

@@ -219,7 +219,7 @@ async function handleReport(reportId: string): Promise<{ message?: string }> {
     }
 
     return { message: `❌ Report "${reportId}" not found. Use \`/security report\` to see available reports.` };
-  } catch (error) {
+  } catch (_error) {
     return { message: '📭 No security reports found. Run `/security scan` first.' };
   }
 }

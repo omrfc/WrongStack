@@ -18,6 +18,7 @@ import type {
 import { ProviderError } from '../types/provider.js';
 import { BudgetExceededError, SubagentBudget } from './subagent-budget.js';
 import { applyRosterBudget } from './fleet.js';
+import { assignNickname } from './subagent-nicknames.js';
 
 type SubagentStatus = 'running' | 'idle' | 'stopped' | 'error';
 
@@ -48,6 +49,16 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
   private fleetBus?: import('./fleet-bus.js').FleetBus;
 
   private readonly subagents = new Map<string, SubagentEntry>();
+
+  /**
+   * Base nickname keys already handed out this run (e.g. `einstein`, `tesla`).
+   * Prevents two workers sharing a name. Direct `coordinator.spawn()` callers
+   * (parallel/eternal engine, SDD parallel run) don't go through
+   * `Director.spawn()` where nicknames are normally assigned, so the
+   * coordinator upgrades placeholder names ("Executor", "slot-ab12cd", role
+   * names) to memorable ones here — that's what surfaces in the fleet monitor.
+   */
+  private readonly usedNicknames = new Set<string>();
 
   private pendingTasks: TaskSpec[] = [];
   private completedResults: TaskResult[] = [];
@@ -102,7 +113,33 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
     this.tryDispatchNext();
   }
 
+  /**
+   * Upgrade a placeholder/role-derived name to a memorable scientist nickname
+   * (e.g. "Einstein (Executor)"). A name is treated as a placeholder when it is
+   * empty, equals the role (case-insensitive), is a generic default
+   * ("subagent"/"adhoc"/"generic"), or is an auto-generated `slot-…` id.
+   * Explicit, human-chosen names — including nicknames already assigned by
+   * `Director.spawn()` — are left untouched, so this never double-assigns.
+   */
+  private withNickname(subagent: SubagentConfig): SubagentConfig {
+    const role = subagent.role ?? 'subagent';
+    const name = subagent.name?.trim() ?? '';
+    const isPlaceholder =
+      name === '' ||
+      name.toLowerCase() === role.toLowerCase() ||
+      name === 'subagent' ||
+      name === 'adhoc' ||
+      name === 'generic' ||
+      /^slot-/.test(name);
+    if (!isPlaceholder) return subagent;
+    const nickname = assignNickname(role, this.usedNicknames);
+    const baseKey = nickname.split(' ')[0]!.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    this.usedNicknames.add(baseKey);
+    return { ...subagent, name: nickname };
+  }
+
   async spawn(subagent: SubagentConfig): Promise<SpawnResult> {
+    subagent = this.withNickname(subagent);
     const id = subagent.id || randomUUID();
     // Duplicate-id guard. Previously a second spawn({id}) with the
     // same id silently overwrote the existing entry — orphaning the

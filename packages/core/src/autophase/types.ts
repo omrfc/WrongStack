@@ -6,7 +6,7 @@
  * sonraki faz başlayamaz (opsiyonel olarak parallel fazlar da mümkün).
  */
 
-import type { TaskGraph, TaskNode, TaskStatus } from '../types/task-graph.js';
+import type { TaskGraph, TaskNode } from '../types/task-graph.js';
 
 // ─── Phase Status ───────────────────────────────────────────────────────────
 

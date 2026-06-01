@@ -65,7 +65,6 @@ export class FleetManager implements IFleetManager {
   readonly usage: FleetUsageAggregator;
 
   private readonly manifestPath?: string;
-  private readonly sessionsRoot?: string;
   private readonly directorRunId: string;
   /** Spawn cap (lifetime total). Infinity means unlimited. */
   readonly maxSpawns: number;
@@ -105,7 +104,6 @@ export class FleetManager implements IFleetManager {
 
   constructor(opts: FleetManagerOptions = {}) {
     this.manifestPath = opts.manifestPath;
-    this.sessionsRoot = opts.sessionsRoot;
     this.directorRunId = opts.directorRunId ?? randomUUID();
     this.maxSpawns = opts.maxSpawns ?? Number.POSITIVE_INFINITY;
     this.maxSpawnDepth = opts.maxSpawnDepth ?? 2;
@@ -132,7 +130,7 @@ export class FleetManager implements IFleetManager {
     this.fleet = new FleetBus();
     this.usage = new FleetUsageAggregator(
       this.fleet,
-      (id, provider, model) => {
+      (_id, provider, model) => {
         if (provider && model) return this.priceLookups.get(`${provider}/${model}`);
         return undefined;
       },
@@ -177,7 +175,7 @@ export class FleetManager implements IFleetManager {
    * which cap was exceeded. Does NOT throw — the caller decides
    * how to surface the rejection.
    */
-  canSpawn(config: SubagentConfig): { kind: 'max_spawns' | 'max_spawn_depth' | 'max_cost_usd' | 'max_context_load'; limit: number; observed: number } | null {
+  canSpawn(_config: SubagentConfig): { kind: 'max_spawns' | 'max_spawn_depth' | 'max_cost_usd' | 'max_context_load'; limit: number; observed: number } | null {
     if (this.spawnDepth >= this.maxSpawnDepth) {
       return { kind: 'max_spawn_depth', limit: this.maxSpawnDepth, observed: this.spawnDepth };
     }

@@ -2,11 +2,10 @@ import * as path from 'node:path';
 import {
   DefaultSessionRewinder,
   DefaultSessionStore,
-  type CheckpointInfo,
   color,
   resolveWstackPaths,
 } from '@wrongstack/core';
-import type { SubcommandDeps, SubcommandHandler } from '../index.js';
+import type { SubcommandHandler } from '../index.js';
 
 interface RewindFlags {
   all?: boolean;

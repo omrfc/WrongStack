@@ -4,6 +4,11 @@ const MAX_FILES = parseInt(process.env.GUARD_MAX_FILES ?? '', 10) || 20;
 const FORCE_FLAG = process.argv.includes('--force');
 const VERBOSE = process.argv.includes('--verbose') || process.argv.includes('-v');
 const CORRUPTION_FRAGMENT = "{ type: 'worktreeMonitorToggle' }";
+// `worktreeMonitorToggle` is now a real, fully-wired TUI feature (state +
+// action + reducer + dispatches) and it lives entirely in app.tsx. Treat the
+// pattern as legitimate there; flag it only if it reappears in OTHER files,
+// which is the actual corruption signature this guard was built to catch.
+const CORRUPTION_ALLOWLIST = new Set(['packages/tui/src/app.tsx']);
 const SCAN_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts', '.json', '.jsonc', '.md', '.yml', '.yaml', '.sh', '.ps1']);
 function log(...args) { if (VERBOSE) console.error('[guard]', ...args); }
 function isScannable(filePath) {
@@ -30,6 +35,7 @@ function findCorruptionInStagedFiles(stagedFiles) {
   const findings = [];
   for (const file of stagedFiles) {
     if (!isScannable(file)) continue;
+    if (CORRUPTION_ALLOWLIST.has(file)) continue;
     let diff;
     try {
       diff = execSync(`git diff --cached -- "${file}"`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });

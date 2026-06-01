@@ -13,7 +13,7 @@ import type {
   TaskSpec,
 } from '../types/multi-agent.js';
 import type { SessionWriter } from '../types/session.js';
-import type { JSONSchema, Tool } from '../types/tool.js';
+import type { Tool } from '../types/tool.js';
 import { InMemoryAgentBridge } from './agent-bridge.js';
 import type { ICoordinator } from './icoordinator.js';
 import {
@@ -24,11 +24,11 @@ import {
   rosterSummaryFromConfigs,
 } from './director-prompts.js';
 import { FleetBus, type FleetUsage, FleetUsageAggregator } from './fleet-bus.js';
-import { FleetManager } from './fleet-manager.js';
+import type { FleetManager } from './fleet-manager.js';
 import { assignNickname } from './subagent-nicknames.js';
 import { InMemoryBridgeTransport } from './in-memory-transport.js';
 import { DefaultMultiAgentCoordinator } from './multi-agent-coordinator.js';
-import { makeAskTool, makeAssignTool, makeAwaitTasksTool, makeCollabDebugTool, makeFleetEmitTool, makeFleetHealthTool, makeFleetSessionTool, makeFleetStatusTool, makeFleetUsageTool, makeRollUpTool, makeSpawnTool, makeTerminateTool, makeWorkCompleteTool } from './director-tools.js';
+import { makeAskTool, makeAssignTool, makeAwaitTasksTool, makeCollabDebugTool, makeFleetEmitTool, makeFleetHealthTool, makeFleetSessionTool, makeFleetStatusTool, makeFleetUsageTool, makeRollUpTool, makeSpawnTool, makeTerminateAllTool, makeTerminateTool, makeWorkCompleteTool } from './director-tools.js';
 import { CollabSession, type CollabSessionOptions, type CollabDebugReport } from './collab-debug.js';
 
 /**
@@ -436,6 +436,10 @@ export class Director implements ICoordinator {
    * coordinator from keeping workers alive for tasks that will never arrive.
    */
   private workCompleteFlag = false;
+  /** Pending /btw notes stashed by the leader agent (see setLeaderBtwNote). */
+  private _leaderBtwNotes: string[] = [];
+  /** Active collab sessions tracked by sessionId (see spawnCollab). */
+  private readonly _activeCollabSessions = new Map<string, import('./collab-debug.js').CollabSession>();
 
   constructor(opts: DirectorOptions) {
     this.id = opts.config.coordinatorId || randomUUID();
@@ -491,7 +495,7 @@ export class Director implements ICoordinator {
       this.fleet = new FleetBus();
       this.usage = new FleetUsageAggregator(
         this.fleet,
-        (id, provider, model) => {
+        (_id, provider, model) => {
           if (provider && model) return this.priceLookups.get(`${provider}/${model}`);
           return undefined;
         },
@@ -596,13 +600,30 @@ export class Director implements ICoordinator {
     });
     this.fleet.filter('budget.threshold_reached', (e) => {
       const payload = e.payload as {
-        kind: 'iterations' | 'tool_calls' | 'tokens' | 'cost' | 'timeout';
+        kind: 'timeout' | 'iterations' | 'tool_calls' | 'tokens' | 'cost';
         used: number;
         limit: number;
         timeoutMs: number;
         extend: (extra: Record<string, unknown>) => void;
         deny: () => void;
       };
+      // -----------------------------------------------------------------------
+      // Collab agents are NOT handled here. Their CollabSession owns the
+      // budget.threshold_reached routing — it calls session.cancel() (never
+      // payload.deny()) when the Director decides to stop, so the agent
+      // finishes naturally. The Director's auto-extend/deny logic would
+      // conflict with that decision and must not run for collab subagents.
+      // -----------------------------------------------------------------------
+      if (
+        e.subagentId.startsWith('bug-hunter-') ||
+        e.subagentId.startsWith('refactor-planner-') ||
+        e.subagentId.startsWith('critic-')
+      ) {
+        // Skip — let the CollabSession's fleet handler deal with it.
+        // The session calls session.cancel() on the FleetBus, which causes
+        // the subagent to finish naturally without Director intervention.
+        return;
+      }
       // Timeout is governed by the heartbeat, not the extension cap. While the
       // subagent keeps executing tools it never dies on wall-clock time; once
       // it stops making progress between grants, it's genuinely stuck → deny.
@@ -615,8 +636,6 @@ export class Director implements ICoordinator {
         }
         lastTimeoutProgress.set(e.subagentId, progress);
         setImmediate(() => {
-          // Generous extension with a 24 h hard ceiling so a runaway can't
-          // extend forever even while spuriously emitting tool calls.
           const newLimit = Math.min(Math.ceil(payload.limit * 2), 24 * 60 * 60_000);
           this.recordExtension(e.subagentId, e.taskId, 'timeout', newLimit);
           payload.extend({ timeoutMs: newLimit });
@@ -626,17 +645,10 @@ export class Director implements ICoordinator {
       const guardKey = `${e.subagentId}:${payload.kind}`;
       const prior = extendCounts.get(guardKey) ?? 0;
       if (prior >= this.maxBudgetExtensions) {
-        // Auto-extend cap hit — let the task fail so the host agent
-        // can react rather than spinning forever.
         payload.deny();
         extendCounts.delete(guardKey);
         return;
       }
-      // Fleet-wide cost ceiling also bounds per-subagent cost auto-extensions.
-      // spawn() only checks maxFleetCostUsd when creating a NEW subagent; without
-      // this, already-running subagents could each extend their per-agent cost
-      // budget and collectively blow past a small fleet cap. Re-check here and
-      // deny the extension once the aggregate fleet spend reaches the cap.
       if (payload.kind === 'cost' && this.maxFleetCostUsd < Number.POSITIVE_INFINITY) {
         const totalCost = this.usage.snapshot().total?.cost ?? 0;
         if (totalCost >= this.maxFleetCostUsd) {
@@ -644,16 +656,6 @@ export class Director implements ICoordinator {
           return;
         }
       }
-      // Auto-extend: grant +50% ABOVE the current limit, up to a generous
-      // absolute ceiling. The new limit is computed from `max(limit, used)`
-      // so the patch always lands strictly above where the agent already is
-      // — the old `min(used+100, 800)` / `min(limit*2, 1500)` caps could
-      // resolve BELOW a large roster budget (8000 iters / 20000 tools),
-      // making the "extension" a no-op reduction that just burned a slot
-      // toward the deny cap. With +50% × maxBudgetExtensions the worst-case
-      // growth stays bounded (~7.6× at the default 5), so the loop guard
-      // still holds. Resolved on the next tick so other listeners can
-      // override (e.g. a deny-listener for cost overrun).
       extendCounts.set(guardKey, prior + 1);
       setImmediate(() => {
         const extra: Record<string, unknown> = {};
@@ -677,8 +679,6 @@ export class Director implements ICoordinator {
             newLimit = Math.min(base * 1.5, 100);
             extra.maxCostUsd = newLimit;
             break;
-          // 'timeout' is handled earlier via the heartbeat path and returns
-          // before reaching this switch.
         }
         this.recordExtension(e.subagentId, e.taskId, payload.kind, newLimit);
         payload.extend(extra);
@@ -729,6 +729,103 @@ export class Director implements ICoordinator {
   /** Returns true if `workComplete()` has been called on this director. */
   isWorkComplete(): boolean {
     return this.workCompleteFlag;
+  }
+
+  /**
+   * Stashes a /btw note on the leader agent's context. The leader's agent loop
+   * calls `consumeBtwNotes()` at each iteration boundary and folds pending notes
+   * into the conversation as a visible block — no abort, no restart, just a
+   * "by the way" nudge the model picks up on its next turn.
+   *
+   * This is the entry point for the host (CLI, TUI) to inject /btw notes
+   * programmatically without going through the slash-command path.
+   */
+  setLeaderBtwNote(note: string): number {
+    const trimmed = note.trim();
+    if (!trimmed) return this._leaderBtwNotes.length;
+    this._leaderBtwNotes = [...this._leaderBtwNotes, trimmed].slice(-20);
+    return this._leaderBtwNotes.length;
+  }
+
+  /**
+   * Read and clear all pending /btw notes the leader has stashed.
+   * Returns them in FIFO order (empty array when none).
+   *
+   * Called by CollabSession when a budget threshold event fires so the
+   * Director can inspect accumulated /btw notes before deciding whether
+   * to cancel the collab session or let it continue.
+   */
+  getLeaderBtwNotes(): string[] {
+    const notes = this._leaderBtwNotes;
+    this._leaderBtwNotes = [];
+    return notes;
+  }
+
+  /**
+   * Peek at pending /btw notes without consuming them.
+   * Useful for UI to show "N pending notes" without clearing them.
+   */
+  peekLeaderBtwNotes(): string[] {
+    return [...this._leaderBtwNotes];
+  }
+
+  /**
+   * Drain (read + clear) all /btw notes in one call.
+   * Alias for getLeaderBtwNotes() — kept for symmetry with consumeBtwNotes()
+   * in the agent's btw.ts. The Director calls this at the point where it
+   * makes a cancellation decision, not on every budget event.
+   */
+  drainLeaderBtwNotes(): string[] {
+    return this.getLeaderBtwNotes();
+  }
+
+  /**
+   * Cancel an active collab session by its id.
+   * Emits `director.cancel_collab` on the FleetBus so the session's agents
+   * finish early with a 'cancelled' disposition.
+   *
+   * Returns silently if the session id is not tracked or already settled.
+   * The CollabDebugReport will reflect 'cancelled' disposition when awaited.
+   */
+  cancelCollabSession(sessionId: string, reason = 'Director cancelled'): void {
+    const session = this._activeCollabSessions.get(sessionId);
+    if (!session || session.isCancelled()) return;
+    session.cancel(reason);
+    // Stop each collab agent via the coordinator so their run() aborts.
+    // This is the critical difference from a natural finish: we call
+    // abortController.abort() on each subagent's run signal, which
+    // propagates into agent.run() → tool executor and kills the run
+    // before the budget or natural iteration limit ends it.
+    // The abort is cooperative — the agent finishes its current iteration
+    // then sees the signal and exits with status 'aborted', so no context
+    // is silently lost.
+    for (const [_role, subagentId] of session.getSubagentIds()) {
+      this.coordinator.stop(subagentId).catch(() => {
+        // Subagent may have already completed naturally — that's fine.
+        // The stop() call is best-effort cleanup, not a guarantee.
+      });
+    }
+  }
+
+  /**
+   * Subscribe a callback to be notified whenever a collab session raises
+   * an alert (warning level). The callback receives the full DirectorAlert
+   * payload so the host (CLI, TUI) can display it to the user.
+   * Returns an unsubscribe function.
+   */
+  onCollabAlert(handler: (alert: import('./collab-debug.js').DirectorAlert) => void): () => void {
+    return this.fleet.filter('collab.warning', (e) => {
+      handler(e.payload as import('./collab-debug.js').DirectorAlert);
+    });
+  }
+
+  /**
+   * Returns all active (not yet settled) collab session ids.
+   * Useful for the TUI to render a "N active sessions" badge and for
+   * the host to know what can be cancelled.
+   */
+  activeCollabSessions(): string[] {
+    return Array.from(this._activeCollabSessions.keys());
   }
 
   /** Best-effort session-writer append. Swallows failures — the director
@@ -1358,6 +1455,7 @@ export class Director implements ICoordinator {
       makeAskTool(this),
       makeRollUpTool(this),
       makeTerminateTool(this),
+      makeTerminateAllTool(this),
       makeFleetStatusTool(this),
       makeFleetUsageTool(this),
       makeFleetSessionTool(this),
@@ -1386,7 +1484,21 @@ export class Director implements ICoordinator {
    * three agents complete or the session times out.
    */
   async spawnCollab(options: CollabSessionOptions): Promise<CollabDebugReport> {
-    const session = new CollabSession(this, this.fleet, options);
+    const session = new CollabSession(this, this.fleet, {
+      ...options,
+      onBudgetWarning: (alert) => {
+        // Delegate to the host-provided handler if set; 'ignore' by default.
+        // Collab agents are excluded from the Director's
+        // budget.threshold_reached handler, so the session's own wireFleetBus()
+        // budget handler (progress-based timeout logic, session.cancel()) runs
+        // instead of the Director's auto-extend/deny logic.
+        return options.onBudgetWarning?.(alert) ?? 'ignore';
+      },
+    });
+    // Track so cancelCollabSession(sessionId) works and Director knows what's active
+    this._activeCollabSessions.set(session.sessionId, session);
+    session.on('session.done', () => this._activeCollabSessions.delete(session.sessionId));
+    session.on('session.error', () => this._activeCollabSessions.delete(session.sessionId));
     return session.start();
   }
 
