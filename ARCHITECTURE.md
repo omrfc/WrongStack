@@ -1,6 +1,6 @@
 # WrongStack Architecture
 
-This document is a repository-level architecture map for WrongStack as scanned on 2026-05-22. It is written for maintainers, plugin authors, and contributors who need to understand how the monorepo fits together before changing runtime behavior.
+This document is a repository-level architecture map for WrongStack as scanned on 2026-06-01. It is written for maintainers, plugin authors, and contributors who need to understand how the monorepo fits together before changing runtime behavior.
 
 WrongStack is a TypeScript/Node.js agent platform. The user-facing product is a terminal AI coding agent, but the implementation is deliberately split into reusable packages: a small core runtime, provider adapters, built-in tools, MCP integration, terminal and browser UIs, and an optional multi-agent director layer.
 
@@ -28,6 +28,8 @@ flowchart LR
   CLI --> TUI["@wrongstack/tui"]
   CLI --> WebUI["@wrongstack/webui"]
   CLI --> LSP["@wrongstack/plug-lsp"]
+  CLI --> ACP["@wrongstack/acp"]
+  CLI --> Plugins["@wrongstack/plugins"]
 
   Core --> Agent[Agent loop]
   Agent --> Provider[Provider call]
@@ -37,6 +39,10 @@ flowchart LR
   Events --> CLI
   Events --> TUI
   Events --> WebUI
+  Events --> ACP[FleetBus / ACP subagents]
+  WebUI --> CollaborationWS[collaboration-ws-handler]
+  WebUI --> AutophaseWS[autophase-ws-handler]
+  WebUI --> WorktreeWS[worktree-ws-handler]
 ```
 
 ## Monorepo Map
@@ -55,6 +61,11 @@ packages/
   webui/            Vite/React browser UI plus WebSocket backend.
   plug-lsp/         Language Server Protocol plugin with LSP-backed tools and commands.
   runtime/          Default runtime implementations and host-level composition helpers.
+  acp/              ACP (Agent Communication Protocol) integration: server transport,
+                    protocol handler, client runner for spawning external ACP agents.
+  plugins/          Bundled plugin library: auto-doc, cost-tracker, cron, file-watcher,
+                    git-autocommit, json-path, semver-bump, shell-check, template-engine,
+                    web-search.
   telegram/         Telegram bridge plugin: send messages, receive prompts, get notified.
   skills/           Skill subpackages published as separate npm packages (git-flow, test-runner, etc.).
 
@@ -75,14 +86,16 @@ The scan found the following package sizes:
 
 | Package | Source files | Test files | Primary responsibility |
 |---|---:|---:|---|
-| `@wrongstack/core` | ~155 | ~100 | Agent runtime, DI, storage, security, security-scanner, multi-agent coordination, observability. |
+| `@wrongstack/core` | ~170 | ~100 | Agent runtime, DI, storage, security, security-scanner, multi-agent coordination, observability, autophase, worktree, replay, built-in plugins, skills. |
 | `@wrongstack/cli` | 59 | 15 | CLI boot, runtime assembly, REPL, slash commands, plugin management, WebUI launcher. |
 | `@wrongstack/tools` | 40 | 40 | Built-in tools and meta-tools. |
 | `@wrongstack/webui` | 49 | ~10 | Browser UI and standalone WebSocket backend. |
 | `@wrongstack/plug-lsp` | 41 | 15 | LSP runtime, tools, slash commands, server lifecycle. |
 | `@wrongstack/providers` | 24 | 18 | Provider adapters, streaming parsers, tool wire conversions. |
+| `@wrongstack/plugins` | 10 | 10 | Bundled plugin library: auto-doc, cost-tracker, cron, file-watcher, git-autocommit, json-path, semver-bump, shell-check, template-engine, web-search. |
 | `@wrongstack/tui` | 17 | 17 | Ink terminal UI components and state rendering. |
 | `@wrongstack/mcp` | 7 | 5 | MCP client, registry, transports, wrapping. |
+| `@wrongstack/acp` | 5 | 1 | ACP server transport, protocol handler, ACP subagent runner. |
 | `@wrongstack/runtime` | 6 | 5 | Default runtime implementations, host composition, vision, clipboard. |
 | `@wrongstack/telegram` | 6 | 5 | Telegram bridge plugin with bot, tools, and slash commands. |
 
@@ -99,6 +112,8 @@ flowchart BT
   LSP["@wrongstack/plug-lsp"]
   Runtime["@wrongstack/runtime"]
   Telegram["@wrongstack/telegram"]
+  ACP["@wrongstack/acp"]
+  Plugins["@wrongstack/plugins"]
   CLI["@wrongstack/cli"]
   TUI["@wrongstack/tui"]
   WebUI["@wrongstack/webui"]
@@ -110,6 +125,8 @@ flowchart BT
   LSP -. peer .-> Core
   Runtime --> Core
   Telegram -. peer .-> Core
+  ACP -. peer .-> Core
+  Plugins --> Core
   TUI --> Core
   WebUI --> Core
   WebUI --> Providers
@@ -122,6 +139,8 @@ flowchart BT
   CLI --> Runtime
   CLI --> TUI
   CLI --> WebUI
+  CLI --> ACP
+  CLI --> Plugins
   App --> CLI
 ```
 
@@ -137,6 +156,8 @@ flowchart BT
 | `tui` and `webui` | Agent events, slash command surfaces, session/model state. | Provider wire details, tool implementations. |
 | `runtime` | Core DI container, runtime composition, host-level wiring. | CLI flags, UI rendering, provider HTTP APIs. |
 | `telegram` | Core `Plugin`, `Tool`, `SlashCommandRegistry`, `EventBus`. | CLI boot, provider internals, UI layout. |
+| `acp` | Core `Plugin`, agent factory, subagent runner, `ToolTranslator`. | CLI boot internals, UI. |
+| `plugins` | Core `Plugin` API, `EventBus`, `ToolRegistry`. | CLI boot internals, provider HTTP APIs, UI. |
 
 ## Core Package Anatomy
 
@@ -146,14 +167,14 @@ flowchart BT
 packages/core/src/
   kernel/          Container, tokens, pipeline, event bus, run controller.
   core/            Agent, Context, ConversationState, prompt/request building, streaming response, provider runner, input builder, run env.
-  execution/       ToolExecutor, retry, error recovery, compaction, skills, autonomous runner, auto-compaction middleware, intelligent/selective compaction.
-  storage/         Sessions, config, memory, queue, plans, todos, recovery, attachments, config migration, goals, session rewind.
+  execution/       ToolExecutor, retry, error recovery, compaction, skills, autonomous runner, auto-compaction middleware, intelligent/selective compaction, eternal-autonomy, goal-preamble.
+  storage/         Sessions, config, memory, queue, plans, todos, recovery, attachments, config migration, goals, session rewind, cloud-sync.
   security/        Permission policy, secret vault, secret scrubber, config secrets.
   security-scanner/ Security scanner: orchestrator, detector, scanner, gitignore updater, report generator, skill generator.
   registry/        Tool, provider, and slash command registries.
   plugin/          Plugin API and loader.
   extension/       Agent lifecycle extension registry and extension points (BeforeRun, AfterRun, BeforeIteration, AfterIteration, OnError, wrapProviderRunner, beforeToolExecution, afterToolExecution).
-  coordination/    Multi-agent coordinator, Director, FleetBus, FleetManager, delegate tool, bridge, budgets, transport.
+  coordination/    Multi-agent coordinator, Director, FleetBus, FleetManager, delegate tool, bridge, budgets, transport, collab-debug, collab-bus, dispatcher, auto-extend, parallel-eternal-engine, agents (9-phase system), agent-subagent-runner.
   models/          models.dev registry, model selection, modes.
   observability/   Metrics, traces, health, Prometheus, OTLP, event bridge.
   sdd/             Spec-driven development: parser, task generator, task flow, task tracker, graph store, visualizer, spec store, spec builder, spec versioning, spec templates, auto-executor, critical path.
@@ -161,6 +182,12 @@ packages/core/src/
   types/           Public type contracts.
   defaults/        Backward-compatible re-export barrel for all default implementations.
   utils/           Paths, JSON, glob, diff, color, atomic write, serializers, regex guard, token estimate, json-schema validation, message invariants, newline normalization, todos format.
+  autophase/       Auto-phase system: planner, runner, orchestrator, checkpoint, phase-store, phase-graph-builder.
+  plugins/         Built-in core plugins: git, observability, plan, prompts, security, skills, sync.
+  middleware/      Koa-style middleware: collab-pause.
+  worktree/        Git worktree manager for parallel agent workspaces.
+  replay/          Session replay via replay-provider-runner and hash-based session lookup.
+  tools/           Core-built tools: mcp-control (MCP runtime control via tools).
 ```
 
 ### Core Area Sizes
@@ -168,10 +195,10 @@ packages/core/src/
 | Area | Files | Notes |
 |---|---:|---|
 | `types` | 38 | Public contracts. Keep these stable and additive when possible. |
-| `coordination` | 19 | Multi-agent orchestration, director, bridge, fleet, fleet-manager, budgets, transport, in-memory transport. |
-| `storage` | 16 | JSONL sessions, config, memory, checkpoints, recovery, goal store, queue store, session rewind. |
+| `coordination` | ~29 | Multi-agent orchestration: director, bridge, fleet, fleet-manager, budgets, transport, collab-debug, collab-bus, dispatcher, auto-extend, parallel-eternal-engine, agents (9-phase), agent-subagent-runner. |
+| `storage` | 17 | JSONL sessions, config, memory, checkpoints, recovery, goal store, queue store, session rewind, cloud-sync. |
 | `utils` | 16 | Shared helpers: paths, JSON, glob, diff, color, atomic write, serializers, regex guard, token estimate, json-schema validation, message invariants, newline normalization, todos format. |
-| `execution` | 12 | Tool execution, retry, compaction (intelligent/selective/auto), skill loading, autonomous runner, error handler, auto-compaction middleware. |
+| `execution` | 14 | Tool execution, retry, compaction (intelligent/selective/auto), skill loading, autonomous runner, error handler, auto-compaction middleware, eternal-autonomy, goal-preamble, autonomous-prompt-contributor. |
 | `observability` | 9 | Metrics/traces/health integrations, event bridge. |
 | `core` | 10 | Agent loop, context, conversation state, input builder, run env, streaming response, provider runner, iteration limit, continue-to-next-iteration. |
 | `kernel` | 6 | Low-level primitives: container, pipeline, events, run controller, tokens. |
@@ -179,11 +206,17 @@ packages/core/src/
 | `sdd` | 13 | Parser, generator, flow, tracker, graph store, visualizer, spec store, builder, versioning, templates, auto-executor, critical path. |
 | `security` | 5 | Vault, scrubber, permission policy, config secrets. |
 | `security-scanner` | 8 | Orchestrator, detector, scanner, gitignore updater, report generator, skill generator, types. |
+| `autophase` | 8 | Auto-phase planner, runner, orchestrator, checkpoint, phase-store, phase-graph-builder. |
+| `plugins` | 7 | Built-in core plugins: git, observability, plan, prompts, security, skills, sync. |
 | `models` | 4 | Model registry, selector, modes. |
 | `registry` | 3 | Tool, provider, slash-command registries. |
 | `extension` | 3 | Extension registry, extension points, index. |
 | `plugin` | 2 | Plugin API and loader. |
 | `defaults` | 1 | Backward-compatible re-export barrel. |
+| `worktree` | 2 | Git worktree manager for parallel agent workspaces. |
+| `replay` | 2 | Session replay via replay-provider-runner and hash. |
+| `tools` | 2 | Core-built tools: mcp-control. |
+| `middleware` | 1 | Koa-style middleware: collab-pause. |
 
 ## Kernel Primitives
 
@@ -546,6 +579,9 @@ Project lifecycle:
 Agent control:
   todo, plan, tool-search, tool-use, batch-tool-use, tool-help, memory, mode
 
+Codebase intelligence:
+  codebase-index, codebase-search, codebase-stats
+
 Meta / resilience:
   circuit-breaker, process-registry
 ```
@@ -721,48 +757,56 @@ This prevents collisions with built-in tools and gives the permission policy a n
 |---|---|---|
 | `filesystemServer` | Local filesystem read/write/navigate (read-heavy). | — |
 | `githubServer` | GitHub API — issues, PRs, repos, search, file ops. | `GITHUB_PERSONAL_ACCESS_TOKEN` |
-| `context7Server` | Codebase-aware documentation via context7.ai. | — |
-| `braveSearchServer` | Web search. | `BRAVE_SEARCH_API_KEY` |
-| `blockServer` | Postgres database access via SQL. | — |
-| `everArtServer` | AI image generation. | `EVERART_API_KEY` |
-| `slackServer` | Slack messaging and channels. | `SLACK_BOT_TOKEN` + team/user token |
+| `context7Server` | Codebase-aware documentation and Q&A (context7.ai). | — |
+| `braveSearchServer` | Web search (Brave). Free tier 2k queries/month. | `BRAVE_SEARCH_API_KEY` |
+| `blockServer` | Postgres database access via SQL (Block MCP server). | — |
+| `everArtServer` | AI image generation (EverArt). | `EVERART_API_KEY` |
+| `slackServer` | Slack — messaging, channels, search. | `SLACK_BOT_TOKEN` + team/user token |
 | `awsServer` | AWS — EC2, S3, Lambda, IAM, CloudFormation, costs. | AWS credentials |
-| `googleMapsServer` | Google Maps directions, geocoding, places. | `GOOGLE_MAPS_API_KEY` |
-| `sentinelServer` | Security vulnerability scanning (sentinel-labs). | — |
-| `zaiVisionServer` | Image analysis fallback for text-only models. | `Z_AI_API_KEY` |
-| `miniMaxVisionServer` | MiniMax image understanding via `understand_image`. | `MINIMAX_API_KEY` + `uvx` |
+| `googleMapsServer` | Google Maps — directions, geocoding, places. | `GOOGLE_MAPS_API_KEY` |
+| `sentinelServer` | Security vulnerability scanning (Sentinel). | — |
+| `zaiVisionServer` | Z.AI Vision MCP — image analysis and screenshot understanding. | `Z_AI_API_KEY` |
+| `miniMaxVisionServer` | MiniMax MCP — image understanding via `understand_image`. | `MINIMAX_API_KEY` + `uvx` |
 
 To enable any server, set `mcpServers: { serverName: { enabled: true } }` in config. Use `allServers()` to get the full set for `wstack mcp add --all`.
 
 ## Multi-Agent and Director Architecture
 
-WrongStack has two levels of multi-agent support:
+WrongStack has three levels of multi-agent support:
 
 1. A lazy `MultiAgentHost` in the CLI for `/spawn` and related slash commands.
 2. A richer `Director` layer in `core/coordination` for manifest-backed, tool-driven orchestration.
+3. A `CollabSession` mode for parallel BugHunter + RefactorPlanner + Critic analysis on the same target code.
 
 Important coordination files:
 
 ```text
 packages/core/src/coordination/
-  multi-agent-coordinator.ts
-  agent-subagent-runner.ts
-  subagent-budget.ts
-  agent-bridge.ts
-  agents.ts
-  in-memory-transport.ts
-  transport.ts
-  director.ts
-  director-session.ts
-  director-prompts.ts
-  director-tools.ts
-  fleet-bus.ts
-  fleet.ts
-  fleet-manager.ts
-  ifleet-manager.ts
-  icoordinator.ts
-  null-fleet-bus.ts
-  delegate-tool.ts
+  multi-agent-coordinator.ts     CLI multi-agent host and lazy coordinator.
+  agent-subagent-runner.ts       Agent factory and subagent runner construction.
+  subagent-budget.ts            Budget negotiation and threshold signals.
+  agent-bridge.ts               In-memory bridge transport between leader and subagents.
+  agents.ts                     Fleet roster constants: AUDIT_LOG_AGENT, BUG_HUNTER_AGENT, etc.
+  agents/                       9-phase agent definitions (phase1-discovery through phase9-meta).
+  in-memory-transport.ts        In-process transport for bridged subagents.
+  transport.ts                  Abstract transport interface.
+  director.ts                   Rich director layer for manifest-backed orchestration.
+  director-session.ts           Per-subagent JSONL transcript factory.
+  director-prompts.ts           Director and subagent prompt composition.
+  director-tools.ts             LLM-callable director tools (spawn, assign, await, roll_up, etc.).
+  fleet-bus.ts                  Fan-in event bus aggregating subagent events.
+  fleet.ts                      Fleet roster: FLEET_ROSTER, ACP_AGENTS, budget constants.
+  fleet-manager.ts              Fleet lifecycle and health management.
+  ifleet-manager.ts             Fleet manager interface.
+  icoordinator.ts               Coordinator interface.
+  null-fleet-bus.ts             No-op fleet bus for single-agent sessions.
+  delegate-tool.ts              Delegate tool for cross-agent task handoff.
+  collab-debug.ts               CollabSession for parallel BugHunter + RefactorPlanner + Critic.
+  collab-bus.ts                 In-memory event bus for collab-debug sessions.
+  collab-debug-tool.ts          makeCollabDebugTool for launching collab sessions.
+  dispatcher.ts                 LLM-based agent dispatch: scoreAgents, dispatchAgent.
+  auto-extend.ts                AutoExtendPolicy for automatic session continuation.
+  parallel-eternal-engine.ts   Eternal-engine for autonomous parallel goal pursuit.
 ```
 
 ### Coordinator Flow
@@ -790,8 +834,10 @@ flowchart TD
 
 ```text
 spawn_subagent, assign_task, await_tasks, ask_subagent, roll_up,
-terminate_subagent, fleet_status, fleet_usage
+terminate_subagent, fleet_status, fleet_usage, fleet_health, fleet_emit, work_complete
 ```
+
+There is also a parallel `CollabSession` mode (`makeCollabDebugTool`) that runs BugHunter, RefactorPlanner, and Critic agents in parallel and aggregates their findings.
 
 Director-mode advantages:
 
@@ -825,6 +871,29 @@ flowchart LR
 
 The CLI can promote a session into director mode if a non-director coordinator is not already active. Once plain `/spawn` has created a coordinator, promotion is blocked because live state cannot be safely migrated.
 
+### Auto-Phase System
+
+The `autophase/` area (`packages/core/src/autophase/`) provides an autonomous phase-based workflow system for large projects. It splits work into named phases with dependency awareness, priority, time estimates, and parallelizability.
+
+Key components:
+
+| Component | Responsibility |
+|---|---|
+| `AutoPhasePlanner` | Generates a phased plan from a task description using the LLM. |
+| `AutoPhaseRunner` | Executes phases autonomously, running independent phases in parallel, respecting dependencies. |
+| `PhaseOrchestrator` | Coordinates phase transitions, checkpoints, and event emission. |
+| `PhaseGraphBuilder` | Builds a dependency graph from phase definitions. |
+| `PhaseStore` | Persists phase state for resume after interruption. |
+| `CheckpointManager` | Saves/restores phase progress snapshots. |
+
+Auto-phase runs emit WebSocket events via the `autophase-ws-handler` in WebUI, allowing real-time progress visualization in the browser.
+
+### Git Worktree Manager
+
+The `worktree/` area (`packages/core/src/worktree/`) provides `WorktreeManager` — a Git worktree orchestration layer used by the AutoPhase system to create isolated parallel workspaces for concurrent agent phases.
+
+Each `WorktreeHandle` transitions through states: `allocating → active → committing → merging → merged`, with failure handling at any stage. Worktree lifecycle events are broadcast via `worktree-ws-handler` to WebUI for live status display.
+
 ## UI Architecture
 
 WrongStack has three major user surfaces:
@@ -850,7 +919,15 @@ flowchart TD
 
 ### WebUI Flow
 
-The WebUI package includes both the frontend and a backend service. The CLI also has a `webui-server.ts` launcher path.
+The WebUI package (`packages/webui`) includes both the frontend (React + Vite) and a backend service. The CLI also has a `webui-server.ts` launcher path.
+
+The backend WebSocket server (`packages/webui/src/server/`) handles multiple handler types:
+
+| Handler | Purpose |
+|---|---|
+| `collaboration-ws-handler.ts` | Real-time collaboration events, shared cursors, fleet state. |
+| `autophase-ws-handler.ts` | Auto-phase progress updates and phase transitions. |
+| `worktree-ws-handler.ts` | Git worktree creation, status, and lifecycle events. |
 
 ```mermaid
 sequenceDiagram
@@ -866,8 +943,8 @@ sequenceDiagram
   Server->>Agent: agent.run(content)
   Agent->>Events: provider.text_delta/tool events
   Events->>Server: subscribed event payloads
-  Server->>WS: broadcast provider/tool/session messages
-  WS->>Browser: update chat, tools, todos, stats
+  Server->>WS: broadcast provider/tool/session/collab messages
+  WS->>Browser: update chat, tools, todos, stats, collab state
   Agent->>Session: append JSONL events
 ```
 
@@ -945,6 +1022,43 @@ The plugin declares `@wrongstack/core` as a peer dependency and registers:
 
 Official plugin alias: `wstack plugin install telegram`.
 
+## ACP Package
+
+`@wrongstack/acp` provides WrongStack's ACP (Agent Communication Protocol) integration in two directions:
+
+**DIR-2 — WrongStack as ACP Server:** `WrongStackACPServer` runs inside a host process and exposes WrongStack tools over stdio JSON-RPC to external ACP clients.
+
+**DIR-1 — WrongStack as ACP Client:** `makeACPSubagentRunner` spawns external ACP agent processes and wraps their tools so the WrongStack leader agent can assign tasks to them.
+
+```text
+packages/acp/src/
+  agent/           StdioTransport, WrongStackACPServer, ACPToolsRegistry, ACPProtocolHandler.
+  client/          ToolTranslator for mapping external tool schemas to core tool format.
+  integration/     ACP subagent runner (makeACPSubagentRunner, makeACPSubagentRunnerWithStop).
+  types/           ACP message types (acp-messages).
+```
+
+The package declares `@wrongstack/core` as a peer dependency and is used by the CLI's multi-agent host to support ACP-capable subagents.
+
+## Plugins Package
+
+`@wrongstack/plugins` is a bundled library of 10 installable plugins published as a single package. Each subdirectory is a self-contained plugin:
+
+| Plugin | Capability |
+|---|---|
+| `auto-doc` | Auto-generate JSDoc/TSDoc comments for functions and types. |
+| `cost-tracker` | Track and report per-session and per-file LLM usage costs. |
+| `cron` | Schedule recurring agent tasks via cron expressions. |
+| `file-watcher` | Trigger agent runs when watched files change on disk. |
+| `git-autocommit` | Automatically commit changes when a session ends. |
+| `json-path` | Query and transform JSON with JSONPath expressions via a tool. |
+| `semver-bump` | Detect and propose semantic version bumps based on conventional commits. |
+| `shell-check` | Run shell script analysis via `shellcheck` after `bash`/`exec` tools. |
+| `template-engine` | Render template files with agent-provided variables. |
+| `web-search` | Web search tool backed by a configurable search provider. |
+
+Plugins in this package follow the standard `Plugin.setup(api)` pattern. They can be enabled via config or the `/plugin` slash command.
+
 ## Storage and Persistence
 
 WrongStack uses append-only JSONL for primary session truth and small JSON sidecars for fast lookups or resumable UI state.
@@ -976,6 +1090,8 @@ flowchart TD
 | `QueueStore` | Persists queued tasks. |
 | `AttachmentStore` | Spools file/image attachments under session directories. |
 | `DirectorStateCheckpoint` | Mirrors live multi-agent task graph for crash recovery/retry. |
+| `PhaseStore` | Persists auto-phase state for resume after interruption. |
+| `CheckpointManager` | Saves/restores phase progress snapshots. |
 
 ## Security Architecture
 
@@ -1042,21 +1158,13 @@ The CLI writes a metrics snapshot to the project session directory on shutdown w
 
 ## Built-in Skills and Modes
 
-Bundled skills live in `packages/core/skills`:
+Bundled skills live in `packages/core/skills` (16 total):
 
 ```text
-audit-log
-bug-hunter
-git-flow
-multi-agent
-node-modern
-prompt-engineering
-react-modern
-refactor-planner
-sdd
-security-scanner
-skill-creator
-typescript-strict
+api-design        audit-log         bug-hunter        docker-deploy
+git-flow          multi-agent       node-modern       observability
+prompt-engineering react-modern    refactor-planner  sdd
+security-scanner  skill-creator     testing           typescript-strict
 ```
 
 `DefaultSkillLoader` can load bundled, user-global, and project-local skills. `DefaultSystemPromptBuilder` includes skill entries in the environment block when the skills feature is enabled.
@@ -1112,8 +1220,14 @@ flowchart TD
   Events --> CLI
   Events --> TUI
   Events --> WebUI
+  Events --> CollabWS[collaboration-ws-handler]
+  Events --> AutophaseWS[autophase-ws-handler]
   Events --> Metrics[Metrics/health/traces]
   Session --> Resume[Resume/export/analyze]
+  AutoPhase[AutoPhaseRunner] -.-> Events
+  AutoPhase --> Worktree[WorktreeManager]
+  Worktree --> WorktreeWS[worktree-ws-handler]
+  WorktreeWS -.-> WebUI
 ```
 
 ## Extension Points by Use Case
@@ -1132,6 +1246,8 @@ flowchart TD
 | Replace storage/permissions/logging | DI container token override/decorator. |
 | Add metrics/traces | Bind tracer/sink or subscribe to `EventBus`. |
 | Add multi-agent role | Extend `FLEET_ROSTER` or spawn custom subagent configs. |
+| Spawn external ACP agents | Use `makeACPSubagentRunner` from `@wrongstack/acp` via the multi-agent host. |
+| Use bundled plugins | Enable via config or `/plugin`; use `@wrongstack/plugins` for the full library. |
 
 ## Testing and Verification Structure
 
@@ -1148,6 +1264,8 @@ flowchart LR
   Vitest --> LspTests[plug-lsp tests]
   Vitest --> RuntimeTests[runtime tests]
   Vitest --> TelegramTests[telegram tests]
+  Vitest --> ACPTests[acp tests]
+  Vitest --> PluginsTests[plugins tests]
   Bench[vitest bench] --> Perf[core perf benches]
 ```
 
@@ -1178,6 +1296,8 @@ Risk-oriented testing guidance:
 | LSP plugin | Unit plus integration/e2e tests under `packages/plug-lsp/tests`. |
 | Runtime package | Typecheck plus runtime composition/pack/host tests. |
 | Telegram plugin | Plugin setup/teardown, bot integration, tool and slash command tests. |
+| ACP integration | ACP transport, protocol handler, subagent runner tests. |
+| Bundled plugins | Per-plugin tests for smoke, config schema, and teardown. |
 
 ## Common Change Recipes
 
@@ -1273,5 +1393,7 @@ If you are new to the codebase, read in this order:
 15. `packages/cli/src/multi-agent.ts`
 16. `packages/cli/src/plugin-management.ts`
 17. `packages/core/src/coordination/director.ts`
+18. `packages/core/src/autophase/auto-phase-runner.ts` (autonomous phase workflow)
+19. `packages/core/src/worktree/worktree-manager.ts` (parallel workspace isolation)
 
 That path gives you the runtime loop first, then the extension system, then the boot assembly (including project detection and wiring), then the plugin management and multi-agent layers.
