@@ -1,6 +1,5 @@
-import type React from 'react';
-import { useEffect, useState } from 'react';
 import { Box, Static, Text, useStdout } from 'ink';
+import React, { useEffect, useState } from 'react';
 import { renderMarkdownTables } from '../markdown-table.js';
 
 export type HistoryEntry =
@@ -81,13 +80,18 @@ export function History({ entries, streamingText, toolStream }: HistoryProps): R
   // into committed scrollback entries. This ensures Entry components in
   // both Static (committed) and live-streaming regions use the current
   // width for table wrapping etc.
-  const [termSize, setTermSize] = useState({ columns: stdout?.columns ?? 80, rows: stdout?.rows ?? 24 });
+  const [termSize, setTermSize] = useState({
+    columns: stdout?.columns ?? 80,
+    rows: stdout?.rows ?? 24,
+  });
   useEffect(() => {
     const handleResize = () => {
       setTermSize({ columns: stdout?.columns ?? 80, rows: stdout?.rows ?? 24 });
     };
     process.stdout.on('resize', handleResize);
-    return () => { process.stdout.off('resize', handleResize); };
+    return () => {
+      process.stdout.off('resize', handleResize);
+    };
   }, [stdout]);
   const termWidth = termSize.columns;
   const tail = streamingText ? tailForDisplay(streamingText, MAX_STREAM_DISPLAY_CHARS) : '';
@@ -111,15 +115,7 @@ export function History({ entries, streamingText, toolStream }: HistoryProps): R
           </Box>
         )}
       </Static>
-      {tail ? (
-        <Box flexDirection="column" marginY={1}>
-          <Box flexDirection="row">
-            <Text bold color="cyan">{'ASSISTANT: '}</Text>
-            <Text dimColor>(streaming...)</Text>
-          </Box>
-          <Text color="white">{tail}</Text>
-        </Box>
-      ) : null}
+      {tail ? <AssistantTail text={tail} /> : null}
       {toolTail ? (
         <ToolStreamBox
           name={toolStream!.name}
@@ -132,7 +128,26 @@ export function History({ entries, streamingText, toolStream }: HistoryProps): R
   );
 }
 
-const MAX_STREAM_DISPLAY_CHARS = 480;
+/**
+ * The live "ASSISTANT: (streaming...)" tail shown below committed history
+ * while a response streams in. Extracted so both the legacy `<Static>` History
+ * and the scrollable viewport render an identical tail.
+ */
+export function AssistantTail({ text }: { text: string }): React.ReactElement {
+  return (
+    <Box flexDirection="column" marginY={1}>
+      <Box flexDirection="row">
+        <Text bold color="cyan">
+          {'ASSISTANT: '}
+        </Text>
+        <Text dimColor>(streaming...)</Text>
+      </Box>
+      <Text color="white">{text}</Text>
+    </Box>
+  );
+}
+
+export const MAX_STREAM_DISPLAY_CHARS = 480;
 
 const MAX_STREAM_LINES = 8;
 
@@ -141,7 +156,7 @@ const MAX_STREAM_LINES = 8;
  * tail-N output so the screen doesn't flood, and a "N more lines
  * above" indicator when truncated.
  */
-function ToolStreamBox({
+export function ToolStreamBox({
   name,
   text,
   startedAt,
@@ -275,7 +290,7 @@ function DiffBlock({ rows, hidden }: { rows: DiffLineRow[]; hidden: number }): R
   );
 }
 
-function Entry({
+export const Entry = React.memo(function Entry({
   entry,
   termWidth,
 }: { entry: HistoryEntry; termWidth: number }): React.ReactElement {
@@ -283,7 +298,9 @@ function Entry({
     case 'user':
       return (
         <Text>
-          <Text bold color="yellow">{'USER: '}</Text>
+          <Text bold color="yellow">
+            {'USER: '}
+          </Text>
           <Text color="white">{entry.text}</Text>
           {entry.queued ? <Text dimColor>{' (queued)'}</Text> : null}
           {entry.pasteContent ? (
@@ -301,7 +318,9 @@ function Entry({
       return (
         <Box flexDirection="column" marginY={1}>
           <Box flexDirection="row">
-            <Text bold color="cyan">{'ASSISTANT: '}</Text>
+            <Text bold color="cyan">
+              {'ASSISTANT: '}
+            </Text>
           </Box>
           <Text color="white">{renderMarkdownTables(entry.text, termWidth)}</Text>
         </Box>
@@ -378,8 +397,16 @@ function Entry({
       // Confirmation is handled by ConfirmPrompt component, not here.
       // This placeholder is intentionally minimal to avoid duplicating the UI.
       return (
-        <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginY={1}>
-          <Text bold color="yellow">⚠ Confirm: {entry.toolName}</Text>
+        <Box
+          flexDirection="column"
+          borderStyle="round"
+          borderColor="yellow"
+          paddingX={1}
+          marginY={1}
+        >
+          <Text bold color="yellow">
+            ⚠ Confirm: {entry.toolName}
+          </Text>
           <Text dimColor>Waiting for y / n / a / d...</Text>
         </Box>
       );
@@ -396,9 +423,9 @@ function Entry({
             <Text color={entry.agentColor} bold>
               {`[${entry.agentLabel}]`}
             </Text>
-            <Text>{' '}</Text>
+            <Text> </Text>
             <Text color={entry.agentColor}>{entry.icon}</Text>
-            <Text>{' '}</Text>
+            <Text> </Text>
             <Text>{lines[0] ?? ''}</Text>
             {entry.detail ? (
               <>
@@ -418,7 +445,7 @@ function Entry({
       );
     }
   }
-}
+});
 
 /**
  * Startup splash. Renders into the Static area on mount and never

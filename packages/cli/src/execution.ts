@@ -434,6 +434,10 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           // `--alt-screen` or `/altscreen on`. `--no-alt-screen` still wins
           // when both are passed.
           altScreen: flags['alt-screen'] === true && flags['no-alt-screen'] !== true,
+          // Full mouse mode: clickable pickers + in-app wheel scroll. Opt-in
+          // via --mouse; forces alt-screen (the app must own the screen) and
+          // takes the mouse away from the terminal's native scroll/copy.
+          mouse: flags.mouse === true,
           director,
           fleetRoster,
           onAfterExit: () => {

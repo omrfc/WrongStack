@@ -1,3 +1,4 @@
+import { PassThrough } from 'node:stream';
 import type {
   Agent,
   AttachmentStore,
@@ -11,6 +12,7 @@ import type { VisionAdapters } from '@wrongstack/runtime/vision';
 import { render } from 'ink';
 import React from 'react';
 import { App } from './app.js';
+import { type MouseEvent, parseSgrMouse, stripSgrMouse } from './mouse.js';
 import { startTerminalTitle } from './terminal-title.js';
 
 export interface RunTuiOptions {
@@ -58,29 +60,39 @@ export interface RunTuiOptions {
    * sleep/paused/stopped) in the status bar.
    */
   subscribeEternalStage?: (
-    fn: (stage: {
-      phase: 'idle';
-    } | {
-      phase: 'decide';
-      reason: string;
-    } | {
-      phase: 'execute';
-      task: string;
-    } | {
-      phase: 'reflect';
-      status: 'success' | 'failure' | 'aborted' | 'skipped';
-      note?: string;
-    } | {
-      phase: 'sleep';
-      ms: number;
-    } | {
-      phase: 'paused';
-    } | {
-      phase: 'stopped';
-    } | {
-      phase: 'error';
-      message: string;
-    }) => void,
+    fn: (
+      stage:
+        | {
+            phase: 'idle';
+          }
+        | {
+            phase: 'decide';
+            reason: string;
+          }
+        | {
+            phase: 'execute';
+            task: string;
+          }
+        | {
+            phase: 'reflect';
+            status: 'success' | 'failure' | 'aborted' | 'skipped';
+            note?: string;
+          }
+        | {
+            phase: 'sleep';
+            ms: number;
+          }
+        | {
+            phase: 'paused';
+          }
+        | {
+            phase: 'stopped';
+          }
+        | {
+            phase: 'error';
+            message: string;
+          },
+    ) => void,
   ) => () => void;
   /** Renders in the startup banner. Read from the CLI's package.json. */
   appVersion?: string;
@@ -95,7 +107,9 @@ export interface RunTuiOptions {
   /** Apply a (provider, model) pair after the picker confirms. Returns an error string on failure. */
   switchProviderAndModel?: (providerId: string, modelId: string) => string | null;
   /** Apply an autonomy mode after the picker confirms. Returns an error string on failure. */
-  switchAutonomy?: (mode: 'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-parallel') => string | null;
+  switchAutonomy?: (
+    mode: 'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-parallel',
+  ) => string | null;
   /**
    * Model-specific maxContext (tokens), resolved by the CLI via the
    * ModelsRegistry. When omitted, the TUI falls back to the provider
@@ -116,6 +130,14 @@ export interface RunTuiOptions {
    * while the TUI is up and only what's currently on screen is visible.
    */
   altScreen?: boolean;
+  /**
+   * Enable full mouse support: clickable list items in menus/pickers and
+   * in-app mouse-wheel scrolling of the chat history. Opt-in (default false)
+   * because enabling terminal mouse tracking disables the terminal's own
+   * wheel-scroll and text-selection/copy. When true this FORCES alt-screen
+   * on (the app must own the screen to render its scroll viewport).
+   */
+  mouse?: boolean;
   /**
    * Called right after we exit the alt-screen on a clean shutdown. The
    * CLI uses this to print a one-line "session saved to …" hint into
@@ -165,7 +187,9 @@ export interface RunTuiOptions {
    * the config file before App mounts.
    */
   statuslineHiddenItems: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>;
-  setStatuslineHiddenItems: (items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>) => void;
+  setStatuslineHiddenItems: (
+    items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>,
+  ) => void;
   /**
    * Controller for the agents monitor overlay. App installs a dispatch-backed
    * setter on mount so the `/agents on|off` slash command can toggle the
@@ -213,9 +237,7 @@ export interface RunTuiOptions {
    * Returns an unsubscribe function. The TUI uses this to drive the
    * PhaseMonitor and PhasePanel live views via dispatch actions.
    */
-  subscribeAutoPhase?: (
-    handler: (event: string, payload: unknown) => void,
-  ) => () => void;
+  subscribeAutoPhase?: (handler: (event: string, payload: unknown) => void) => () => void;
   /**
    * Read the persisted autonomy settings (defaultMode, autoProceedDelayMs).
    * Used by the SettingsPicker in the TUI on mount and after Ctrl+S toggle.
@@ -225,7 +247,10 @@ export interface RunTuiOptions {
    * Persist autonomy settings changes. Returns null on success, or an
    * error string on failure (so the TUI can display it as a hint).
    */
-  saveSettings?: (s: { mode: 'off' | 'suggest' | 'auto'; delayMs: number }) => string | null | Promise<string | null>;
+  saveSettings?: (s: { mode: 'off' | 'suggest' | 'auto'; delayMs: number }) =>
+    | string
+    | null
+    | Promise<string | null>;
 }
 
 // Bracketed paste mode wraps any pasted text with these markers, letting us
@@ -243,6 +268,15 @@ const ALT_SCREEN_ON = '\x1b[?1049h';
 const ALT_SCREEN_OFF = '\x1b[?1049l';
 const CURSOR_HOME = '\x1b[H';
 
+// Mouse tracking: DECSET 1000 (button press/release) + 1006 (SGR extended
+// coordinates, so columns/rows beyond 223 are reported as decimal). Enabling
+// these takes the mouse away from the terminal's native wheel-scroll and
+// text-selection — which is why mouse mode is opt-in and forces alt-screen so
+// the app owns the screen and can render its own scroll viewport. We do NOT
+// enable 1002/1003 (drag/any-motion) — clicks + wheel are all we consume.
+const MOUSE_ON = '\x1b[?1000h\x1b[?1006h';
+const MOUSE_OFF = '\x1b[?1006l\x1b[?1000l';
+
 export async function runTui(opts: RunTuiOptions): Promise<number> {
   const stdout = process.stdout;
   const stdin = process.stdin;
@@ -259,12 +293,81 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
     return 2;
   }
 
-  const useAltScreen = opts.altScreen === true;
+  const useMouse = opts.mouse === true;
+  // Mouse mode forces alt-screen: in-app scroll needs the app to own the
+  // whole screen (no native-scrollback leak), which is exactly what
+  // alt-screen guarantees.
+  const useAltScreen = opts.altScreen === true || useMouse;
   if (useAltScreen) {
     stdout.write(ALT_SCREEN_ON);
     stdout.write(CURSOR_HOME);
   }
   stdout.write(BRACKETED_PASTE_ON);
+  if (useMouse) {
+    stdout.write(MOUSE_ON);
+  }
+
+  // When mouse mode is on we intercept stdin: the real TTY is consumed here,
+  // SGR mouse sequences are decoded and fanned out to subscribers, and only
+  // the remaining keyboard bytes are forwarded to a PassThrough that Ink
+  // reads instead of process.stdin. This keeps mouse bytes from ever
+  // polluting Ink's keypress parser (which would otherwise insert `<0;..M`
+  // junk into the input). When mouse mode is off, Ink reads process.stdin
+  // directly and nothing below runs — zero behavior change for the default.
+  const mouseListeners = new Set<(ev: MouseEvent) => void>();
+  let inkStdin: NodeJS.ReadStream = stdin;
+  let detachMouse: (() => void) | null = null;
+  if (useMouse) {
+    const proxy = new PassThrough();
+    const p = proxy as unknown as NodeJS.ReadStream;
+    // Ink probes isTTY and drives raw mode / ref bookkeeping on its stdin;
+    // delegate those to the real terminal so its behavior is unchanged.
+    p.isTTY = true;
+    p.setRawMode = (mode: boolean): NodeJS.ReadStream => {
+      try {
+        stdin.setRawMode?.(mode);
+      } catch {
+        // real stdin may not support raw mode in some shells — ignore.
+      }
+      return p;
+    };
+    const realRef = stdin.ref?.bind(stdin);
+    const realUnref = stdin.unref?.bind(stdin);
+    p.ref = (): NodeJS.ReadStream => {
+      realRef?.();
+      return p;
+    };
+    p.unref = (): NodeJS.ReadStream => {
+      realUnref?.();
+      return p;
+    };
+    stdin.setEncoding('utf8');
+    const onData = (chunk: string) => {
+      const evs = parseSgrMouse(chunk);
+      for (const ev of evs) {
+        for (const fn of mouseListeners) {
+          try {
+            fn(ev);
+          } catch {
+            // a listener throwing must not break input routing — ignore.
+          }
+        }
+      }
+      const rest = stripSgrMouse(chunk);
+      if (rest.length > 0) proxy.write(rest);
+    };
+    stdin.on('data', onData);
+    detachMouse = () => stdin.off('data', onData);
+    inkStdin = p;
+  }
+  const subscribeMouse = useMouse
+    ? (fn: (ev: MouseEvent) => void): (() => void) => {
+        mouseListeners.add(fn);
+        return () => {
+          mouseListeners.delete(fn);
+        };
+      }
+    : undefined;
 
   // Animated window/tab title: a braille spinner + live status (thinking /
   // running a tool) driven by the EventBus, scrolling the app name when idle.
@@ -305,7 +408,17 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
       // title controller already torn down — ignore.
     }
     try {
+      detachMouse?.();
+    } catch {
+      // listener already detached — ignore.
+    }
+    try {
       stdout.write(BRACKETED_PASTE_OFF);
+      // Mouse off before alt-screen off: disable tracking while we still own
+      // the screen, then restore the user's previous terminal contents.
+      if (useMouse) {
+        stdout.write(MOUSE_OFF);
+      }
       if (useAltScreen) {
         stdout.write(ALT_SCREEN_OFF);
       }
@@ -405,8 +518,10 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           projectRoot: opts.projectRoot,
           getSettings: opts.getSettings,
           saveSettings: opts.saveSettings,
+          mouse: useMouse,
+          subscribeMouse,
         }),
-        { exitOnCtrlC: false },
+        { exitOnCtrlC: false, stdin: inkStdin },
       );
     } catch (err) {
       process.stderr.write(

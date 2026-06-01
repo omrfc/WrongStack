@@ -15,39 +15,51 @@ import { DefaultSessionRewinder } from '@wrongstack/core';
 import { InputBuilder, buildGoalPreamble, formatTodosList } from '@wrongstack/core';
 import { type VisionAdapters, routeImagesForModel } from '@wrongstack/runtime/vision';
 import { getProcessRegistry } from '@wrongstack/tools';
-import { Box, useApp } from 'ink';
+import { Box, type DOMElement, Text, measureElement, useApp, useStdout } from 'ink';
 import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { readClipboardImage } from './clipboard.js';
-import { ConfirmPrompt } from './components/confirm-prompt.js';
-import { CheckpointTimeline } from './components/checkpoint-timeline.js';
-import { FilePicker } from './components/file-picker.js';
-import { FleetPanel } from './components/fleet-panel.js';
-import { FleetMonitor } from './components/fleet-monitor.js';
 import { AgentsMonitor } from './components/agents-monitor.js';
+import {
+  AUTONOMY_OPTIONS,
+  type AutonomyOption,
+  AutonomyPicker,
+} from './components/autonomy-picker.js';
+import { CheckpointTimeline } from './components/checkpoint-timeline.js';
+import { ConfirmPrompt } from './components/confirm-prompt.js';
+import { FilePicker } from './components/file-picker.js';
+import { FleetMonitor } from './components/fleet-monitor.js';
+import { FleetPanel } from './components/fleet-panel.js';
+import { History, type HistoryEntry } from './components/history.js';
+import { EMPTY_KEY, Input, type KeyEvent } from './components/input.js';
+import { LiveActivityStrip } from './components/live-activity-strip.js';
+import { ModelPicker, type ProviderOption } from './components/model-picker.js';
 import { PhaseMonitor } from './components/phase-monitor.js';
 import { PhasePanel } from './components/phase-panel.js';
-import { WorktreePanel, type WorktreeRow } from './components/worktree-panel.js';
-import { WorktreeMonitor } from './components/worktree-monitor.js';
-import { History, type HistoryEntry } from './components/history.js';
-import { Input, type KeyEvent } from './components/input.js';
-import { LiveActivityStrip } from './components/live-activity-strip.js';
-import { AutonomyPicker, AUTONOMY_OPTIONS, type AutonomyOption } from './components/autonomy-picker.js';
-import { ModelPicker, type ProviderOption } from './components/model-picker.js';
+import { ScrollableHistory } from './components/scrollable-history.js';
 import { SlashMenu } from './components/slash-menu.js';
 import { StatusBar } from './components/status-bar.js';
+import { WorktreeMonitor } from './components/worktree-monitor.js';
+import { WorktreePanel, type WorktreeRow } from './components/worktree-panel.js';
 import { searchFiles } from './file-search.js';
-import { feedPaste } from './paste-accumulator.js';
-import { INLINE_TOKEN_SRC, deleteTokenBackward, tokenLengthForward } from './input-tokens.js';
 import { type GitInfo, readGitInfo } from './git-info.js';
-import { createQueueSlashCommand } from './queue-slash.js';
+import { INLINE_TOKEN_SRC, deleteTokenBackward, tokenLengthForward } from './input-tokens.js';
 import { createKillSlashCommand } from './kill-slash.js';
+import type { MouseEvent as TuiMouseEvent } from './mouse.js';
+import { feedPaste } from './paste-accumulator.js';
 import { createPsSlashCommand } from './ps-slash.js';
+import { createQueueSlashCommand } from './queue-slash.js';
 
 export interface QueueItem {
   id: number;
   displayText: string;
   blocks: ContentBlock[];
 }
+
+/** Rows the chat-history viewport scrolls per wheel tick (mouse mode). */
+const WHEEL_STEP = 3;
+/** Floor for the scroll viewport so it never collapses to nothing when the
+ *  bottom region (overlays, wrapped input) is tall. */
+const MIN_VIEWPORT = 3;
 
 /** Per-subagent state tracked live from the FleetBus. */
 export interface FleetEntry {
@@ -182,38 +194,46 @@ export interface AppProps {
    * engine's current location (decide → execute → reflect → sleep/paused).
    */
   subscribeEternalStage?: (
-    fn: (stage: {
-      phase: 'idle';
-    } | {
-      phase: 'decide';
-      reason: string;
-    } | {
-      phase: 'execute';
-      task: string;
-    } | {
-      phase: 'reflect';
-      status: 'success' | 'failure' | 'aborted' | 'skipped';
-      note?: string;
-    } | {
-      phase: 'sleep';
-      ms: number;
-    } | {
-      phase: 'paused';
-    } | {
-      phase: 'stopped';
-    } | {
-      phase: 'error';
-      message: string;
-    }) => void,
+    fn: (
+      stage:
+        | {
+            phase: 'idle';
+          }
+        | {
+            phase: 'decide';
+            reason: string;
+          }
+        | {
+            phase: 'execute';
+            task: string;
+          }
+        | {
+            phase: 'reflect';
+            status: 'success' | 'failure' | 'aborted' | 'skipped';
+            note?: string;
+          }
+        | {
+            phase: 'sleep';
+            ms: number;
+          }
+        | {
+            phase: 'paused';
+          }
+        | {
+            phase: 'stopped';
+          }
+        | {
+            phase: 'error';
+            message: string;
+          },
+    ) => void,
   ) => () => void;
   /**
    * Subscribe to AutoPhase phase/task events from the PhaseOrchestrator.
    * Drives `state.autoPhase` used by the PhaseMonitor component.
    * Handlers receive the event name and payload from PhaseEventMap.
    */
-  subscribeAutoPhase?: (
-    handler: (event: string, payload: unknown) => void,
-  ) => () => void;
+  subscribeAutoPhase?: (handler: (event: string, payload: unknown) => void) => () => void;
   /**
    * Read the persisted autonomy settings (defaultMode, autoProceedDelayMs).
    * Used by the SettingsPicker in the TUI on mount and after Ctrl+S toggle.
@@ -223,7 +243,10 @@ export interface AppProps {
    * Persist autonomy settings changes. Returns null on success, or an
    * error string on failure (so the TUI can display it as a hint).
    */
-  saveSettings?: (s: { mode: 'off' | 'suggest' | 'auto'; delayMs: number }) => string | null | Promise<string | null>;
+  saveSettings?: (s: { mode: 'off' | 'suggest' | 'auto'; delayMs: number }) =>
+    | string
+    | null
+    | Promise<string | null>;
   /**
    * SDD session context getter. When an SDD session is active, returns
    * the AI prompt context to inject into user messages so the model
@@ -261,7 +284,9 @@ export interface AppProps {
    * Apply an autonomy mode after the picker confirms. Returns
    * an error string on failure; null on success.
    */
-  switchAutonomy?: (mode: 'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-parallel') => string | null;
+  switchAutonomy?: (
+    mode: 'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-parallel',
+  ) => string | null;
   /**
    * Real max-context token budget for the *active model*, resolved by the
    * CLI via the ModelsRegistry. The provider object only knows its family
@@ -294,6 +319,18 @@ export interface AppProps {
   initialAsk?: string;
   /** Directory for session JSONL files. Passed to App for /rewind. */
   sessionsDir?: string;
+  /**
+   * True when full mouse mode is active (clickable pickers + in-app wheel
+   * scrolling). Implies alt-screen. Switches History to the scrollable
+   * viewport and enables the mouse event handlers.
+   */
+  mouse?: boolean;
+  /**
+   * Subscribe to decoded mouse events (press/release/wheel with 1-based
+   * col/row). Installed by run-tui only when mouse mode is on; the App wires
+   * it on mount and tears it down on unmount. Returns an unsubscribe fn.
+   */
+  subscribeMouse?: (fn: (ev: import('./mouse.js').MouseEvent) => void) => () => void;
 
   // --- Fleet ---
   /** Live director for fleet panel rendering. Null when director mode is off. */
@@ -316,7 +353,9 @@ export interface AppProps {
    * the config file before App mounts.
    */
   statuslineHiddenItems: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>;
-  setStatuslineHiddenItems: (items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>) => void;
+  setStatuslineHiddenItems: (
+    items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>,
+  ) => void;
   /**
    * Controller for the agents monitor overlay. App installs a dispatch-backed
    * setter on mount so the `/agents on|off` slash command can toggle the
@@ -485,36 +524,48 @@ type State = {
     fileCount: number;
   }>;
   /** Checkpoint timeline overlay — null when closed. */
-  rewindOverlay: { checkpoints: Array<{
-    promptIndex: number;
-    promptPreview: string;
-    ts: string;
-    fileCount: number;
-  }>; selected: number } | null;
-  /** Live iteration-stage of the eternal engine (decide/execute/reflect/sleep/paused/stopped). */
-  eternalStage: {
-    phase: 'idle';
-  } | {
-    phase: 'decide';
-    reason: string;
-  } | {
-    phase: 'execute';
-    task: string;
-  } | {
-    phase: 'reflect';
-    status: 'success' | 'failure' | 'aborted' | 'skipped';
-    note?: string;
-  } | {
-    phase: 'sleep';
-    ms: number;
-  } | {
-    phase: 'paused';
-  } | {
-    phase: 'stopped';
-  } | {
-    phase: 'error';
-    message: string;
+  rewindOverlay: {
+    checkpoints: Array<{
+      promptIndex: number;
+      promptPreview: string;
+      ts: string;
+      fileCount: number;
+    }>;
+    selected: number;
   } | null;
+  /** Live iteration-stage of the eternal engine (decide/execute/reflect/sleep/paused/stopped). */
+  eternalStage:
+    | {
+        phase: 'idle';
+      }
+    | {
+        phase: 'decide';
+        reason: string;
+      }
+    | {
+        phase: 'execute';
+        task: string;
+      }
+    | {
+        phase: 'reflect';
+        status: 'success' | 'failure' | 'aborted' | 'skipped';
+        note?: string;
+      }
+    | {
+        phase: 'sleep';
+        ms: number;
+      }
+    | {
+        phase: 'paused';
+      }
+    | {
+        phase: 'stopped';
+      }
+    | {
+        phase: 'error';
+        message: string;
+      }
+    | null;
   /** Loaded from .wrongstack/goal.json on mount for startup banner. */
   goalSummary: GoalSummary;
   /** AutoPhase orchestrator state — rendered by PhaseMonitor. */
@@ -522,13 +573,16 @@ type State = {
     /** AutoPhase graph title. */
     title: string;
     /** Per-phase task summary, keyed by phaseId. */
-    phases: Record<string, {
-      name: string;
-      status: string;
-      completedTasks: number;
-      totalTasks: number;
-      startedAt?: number;
-    }>;
+    phases: Record<
+      string,
+      {
+        name: string;
+        status: string;
+        completedTasks: number;
+        totalTasks: number;
+        startedAt?: number;
+      }
+    >;
     /** Active phase IDs (running phases). */
     runningPhaseIds: string[];
     /** Elapsed ms since graph start — drives the elapsed counter. */
@@ -542,6 +596,18 @@ type State = {
   worktreeBase?: string;
   /** True while the worktree monitor overlay is open (Ctrl+T). */
   worktreeMonitorOpen: boolean;
+  /**
+   * In-app chat scroll state, used only in mouse mode (the scrollable
+   * viewport). In the default `<Static>` path these are inert.
+   *   scrollOffset    — rows scrolled up from the bottom; 0 = pinned to newest.
+   *   totalLines      — last measured content height (rows), from onMeasure.
+   *   viewportRows    — last computed viewport height (rows).
+   *   pendingNewLines — rows added while scrolled up; drives the "↓ N new" hint.
+   */
+  scrollOffset: number;
+  totalLines: number;
+  viewportRows: number;
+  pendingNewLines: number;
 };
 
 type Action =
@@ -668,47 +734,106 @@ type Action =
   | { type: 'rewindOverlayClose' }
   | { type: 'rewindOverlayMove'; delta: number }
   | { type: 'sessionRewound'; toPromptIndex: number }
-  | { type: 'eternalStage'; stage: {
-    phase: 'idle';
-  } | {
-    phase: 'decide';
-    reason: string;
-  } | {
-    phase: 'execute';
-    task: string;
-  } | {
-    phase: 'reflect';
-    status: 'success' | 'failure' | 'aborted' | 'skipped';
-    note?: string;
-  } | {
-    phase: 'sleep';
-    ms: number;
-  } | {
-    phase: 'paused';
-  } | {
-    phase: 'stopped';
-  } | {
-    phase: 'error';
-    message: string;
-  }}
+  | {
+      type: 'eternalStage';
+      stage:
+        | {
+            phase: 'idle';
+          }
+        | {
+            phase: 'decide';
+            reason: string;
+          }
+        | {
+            phase: 'execute';
+            task: string;
+          }
+        | {
+            phase: 'reflect';
+            status: 'success' | 'failure' | 'aborted' | 'skipped';
+            note?: string;
+          }
+        | {
+            phase: 'sleep';
+            ms: number;
+          }
+        | {
+            phase: 'paused';
+          }
+        | {
+            phase: 'stopped';
+          }
+        | {
+            phase: 'error';
+            message: string;
+          };
+    }
   | { type: 'goalSummary'; summary: GoalSummary }
   | { type: 'autoPhaseInit'; title: string }
-  | { type: 'autoPhasePhaseUpdate'; phaseId: string; name: string; status: string; completedTasks: number; totalTasks: number; startedAt?: number }
+  | {
+      type: 'autoPhasePhaseUpdate';
+      phaseId: string;
+      name: string;
+      status: string;
+      completedTasks: number;
+      totalTasks: number;
+      startedAt?: number;
+    }
   | { type: 'autoPhaseRunningPhases'; phaseIds: string[] }
   | { type: 'autoPhaseElapsed'; ms: number }
   | { type: 'autoPhaseMonitorToggle' }
   | { type: 'autoPhaseReset' }
-  | { type: 'worktreeUpsert'; handleId: string; row: Partial<WorktreeRow & { baseBranch?: string }>; baseBranch?: string }
+  | {
+      type: 'worktreeUpsert';
+      handleId: string;
+      row: Partial<WorktreeRow & { baseBranch?: string }>;
+      baseBranch?: string;
+    }
   | { type: 'worktreeRemove'; handleId: string }
   | { type: 'worktreeMonitorToggle' }
+  // --- In-app chat scroll (mouse mode) ---
+  /** Scroll by `delta` rows: +up (older), -down (newer). Clamped. */
+  | { type: 'scrollBy'; delta: number }
+  /** Scroll by a viewport page in `dir`. */
+  | { type: 'scrollPage'; dir: 'up' | 'down' }
+  /** Jump to the newest output (pinned). */
+  | { type: 'scrollToBottom' }
+  /** Jump to the oldest output. */
+  | { type: 'scrollToTop' }
+  /** Report the measured content height; re-clamps offset + tracks new lines. */
+  | { type: 'setMeasuredLines'; totalLines: number }
+  /** Report the computed viewport height; re-clamps offset. */
+  | { type: 'setViewportRows'; rows: number }
   /** BugHunter emitted a bug.found event on the FleetBus. */
-  | { type: 'collabBugFound'; sessionId: string; bugId: string; severity: string; description: string }
+  | {
+      type: 'collabBugFound';
+      sessionId: string;
+      bugId: string;
+      severity: string;
+      description: string;
+    }
   /** RefactorPlanner emitted a refactor.plan event on the FleetBus. */
-  | { type: 'collabPlanEmitted'; sessionId: string; planId: string; riskScore: string; phaseCount: number }
+  | {
+      type: 'collabPlanEmitted';
+      sessionId: string;
+      planId: string;
+      riskScore: string;
+      phaseCount: number;
+    }
   /** Critic emitted a critic.evaluation event on the FleetBus. */
-  | { type: 'collabEvalComplete'; sessionId: string; evalId: string; verdict: string; score: number }
+  | {
+      type: 'collabEvalComplete';
+      sessionId: string;
+      evalId: string;
+      verdict: string;
+      score: number;
+    }
   /** Collab session completed — overall verdict is available. */
-  | { type: 'collabSessionDone'; sessionId: string; verdict: 'approve' | 'needs_revision' | 'reject' }
+  | {
+      type: 'collabSessionDone';
+      sessionId: string;
+      verdict: 'approve' | 'needs_revision' | 'reject';
+    }
   /** A collab subagent (bug-hunter / refactor-planner / critic) was spawned. */
   | { type: 'collabSubagentSpawned'; subagentId: string; role: string };
 
@@ -743,6 +868,8 @@ export function reducer(state: State, action: Action): State {
         entries: banner ? [banner] : state.entries,
         queue: [],
         nextQueueId: 1,
+        scrollOffset: 0,
+        pendingNewLines: 0,
       };
     }
     case 'streamDelta':
@@ -1166,7 +1293,12 @@ export function reducer(state: State, action: Action): State {
           ...state.fleet,
           [action.id]: {
             ...cur,
-            budgetWarning: { kind: action.kind, used: action.used, limit: action.limit, at: Date.now() },
+            budgetWarning: {
+              kind: action.kind,
+              used: action.used,
+              limit: action.limit,
+              at: Date.now(),
+            },
             lastEventAt: Date.now(),
           },
         },
@@ -1212,7 +1344,10 @@ export function reducer(state: State, action: Action): State {
         fleetCost: action.cost,
         fleetTokens:
           action.input !== undefined || action.output !== undefined
-            ? { input: action.input ?? state.fleetTokens.input, output: action.output ?? state.fleetTokens.output }
+            ? {
+                input: action.input ?? state.fleetTokens.input,
+                output: action.output ?? state.fleetTokens.output,
+              }
             : state.fleetTokens,
       };
     }
@@ -1367,7 +1502,10 @@ export function reducer(state: State, action: Action): State {
     }
     case 'autoPhaseMonitorToggle': {
       if (!state.autoPhase) return state;
-      return { ...state, autoPhase: { ...state.autoPhase, monitorOpen: !state.autoPhase.monitorOpen } };
+      return {
+        ...state,
+        autoPhase: { ...state.autoPhase, monitorOpen: !state.autoPhase.monitorOpen },
+      };
     }
     case 'autoPhaseReset': {
       return { ...state, autoPhase: null };
@@ -1400,6 +1538,64 @@ export function reducer(state: State, action: Action): State {
     case 'worktreeMonitorToggle': {
       return { ...state, worktreeMonitorOpen: !state.worktreeMonitorOpen };
     }
+    // --- In-app chat scroll (mouse mode) ---
+    case 'scrollBy': {
+      const maxOffset = Math.max(0, state.totalLines - state.viewportRows);
+      const next = Math.max(0, Math.min(maxOffset, state.scrollOffset + action.delta));
+      return {
+        ...state,
+        scrollOffset: next,
+        pendingNewLines: next === 0 ? 0 : state.pendingNewLines,
+      };
+    }
+    case 'scrollPage': {
+      const page = Math.max(1, state.viewportRows - 1);
+      const delta = action.dir === 'up' ? page : -page;
+      const maxOffset = Math.max(0, state.totalLines - state.viewportRows);
+      const next = Math.max(0, Math.min(maxOffset, state.scrollOffset + delta));
+      return {
+        ...state,
+        scrollOffset: next,
+        pendingNewLines: next === 0 ? 0 : state.pendingNewLines,
+      };
+    }
+    case 'scrollToBottom':
+      return { ...state, scrollOffset: 0, pendingNewLines: 0 };
+    case 'scrollToTop': {
+      const maxOffset = Math.max(0, state.totalLines - state.viewportRows);
+      return { ...state, scrollOffset: maxOffset };
+    }
+    case 'setMeasuredLines': {
+      const newTotal = action.totalLines;
+      const oldTotal = state.totalLines;
+      const maxOffset = Math.max(0, newTotal - state.viewportRows);
+      // Content grew while the user is scrolled up → keep the visible window
+      // anchored on the same older rows by pushing the offset along with the
+      // growth, and surface the new-line count for the "jump to bottom" hint.
+      if (state.scrollOffset > 0 && newTotal > oldTotal) {
+        const grew = newTotal - oldTotal;
+        return {
+          ...state,
+          totalLines: newTotal,
+          scrollOffset: Math.min(maxOffset, state.scrollOffset + grew),
+          pendingNewLines: state.pendingNewLines + grew,
+        };
+      }
+      // Pinned, or content shrank (e.g. /clear): re-clamp and keep following.
+      return {
+        ...state,
+        totalLines: newTotal,
+        scrollOffset: Math.min(state.scrollOffset, maxOffset),
+      };
+    }
+    case 'setViewportRows': {
+      const maxOffset = Math.max(0, state.totalLines - action.rows);
+      return {
+        ...state,
+        viewportRows: action.rows,
+        scrollOffset: Math.min(state.scrollOffset, maxOffset),
+      };
+    }
     // --- Collab session ---
     case 'collabSubagentSpawned': {
       // Lazily initialize collab state on the first subagent spawn.
@@ -1429,31 +1625,90 @@ export function reducer(state: State, action: Action): State {
             planCount: 0,
             evalCount: 0,
             overallVerdict: null,
-            timeline: [{ at: Date.now(), icon: '🐛', color: 'red', text: `bug: ${action.description.slice(0, 60)}…` }],
+            timeline: [
+              {
+                at: Date.now(),
+                icon: '🐛',
+                color: 'red',
+                text: `bug: ${action.description.slice(0, 60)}…`,
+              },
+            ],
             startedAt: Date.now(),
           },
         };
       }
-      const entry = { at: Date.now(), icon: '🐛', color: 'red', text: `bug [${action.severity}]: ${action.description.slice(0, 55)}…` };
-      return { ...state, collabSession: { ...cs, sessionId: action.sessionId, bugCount: cs.bugCount + 1, timeline: [entry, ...cs.timeline].slice(0, 30) } };
+      const entry = {
+        at: Date.now(),
+        icon: '🐛',
+        color: 'red',
+        text: `bug [${action.severity}]: ${action.description.slice(0, 55)}…`,
+      };
+      return {
+        ...state,
+        collabSession: {
+          ...cs,
+          sessionId: action.sessionId,
+          bugCount: cs.bugCount + 1,
+          timeline: [entry, ...cs.timeline].slice(0, 30),
+        },
+      };
     }
     case 'collabPlanEmitted': {
       const cs = state.collabSession;
       if (!cs) return state;
-      const entry = { at: Date.now(), icon: '📐', color: 'yellow', text: `plan [${action.riskScore}]: ${action.phaseCount} phases` };
-      return { ...state, collabSession: { ...cs, sessionId: action.sessionId, planCount: cs.planCount + 1, timeline: [entry, ...cs.timeline].slice(0, 30) } };
+      const entry = {
+        at: Date.now(),
+        icon: '📐',
+        color: 'yellow',
+        text: `plan [${action.riskScore}]: ${action.phaseCount} phases`,
+      };
+      return {
+        ...state,
+        collabSession: {
+          ...cs,
+          sessionId: action.sessionId,
+          planCount: cs.planCount + 1,
+          timeline: [entry, ...cs.timeline].slice(0, 30),
+        },
+      };
     }
     case 'collabEvalComplete': {
       const cs = state.collabSession;
       if (!cs) return state;
-      const entry = { at: Date.now(), icon: '⚖️', color: action.verdict === 'approve' ? 'green' : action.verdict === 'reject' ? 'red' : 'yellow', text: `eval ${action.score}/10 → ${action.verdict}` };
-      return { ...state, collabSession: { ...cs, sessionId: action.sessionId, evalCount: cs.evalCount + 1, timeline: [entry, ...cs.timeline].slice(0, 30) } };
+      const entry = {
+        at: Date.now(),
+        icon: '⚖️',
+        color:
+          action.verdict === 'approve' ? 'green' : action.verdict === 'reject' ? 'red' : 'yellow',
+        text: `eval ${action.score}/10 → ${action.verdict}`,
+      };
+      return {
+        ...state,
+        collabSession: {
+          ...cs,
+          sessionId: action.sessionId,
+          evalCount: cs.evalCount + 1,
+          timeline: [entry, ...cs.timeline].slice(0, 30),
+        },
+      };
     }
     case 'collabSessionDone': {
       const cs = state.collabSession;
       if (!cs) return state;
-      const entry = { at: Date.now(), icon: '🏁', color: 'green', text: `session done — ${action.verdict}` };
-      return { ...state, collabSession: { ...cs, overallVerdict: action.verdict, timeline: [entry, ...cs.timeline].slice(0, 30) } };
+      const entry = {
+        at: Date.now(),
+        icon: '🏁',
+        color: 'green',
+        text: `session done — ${action.verdict}`,
+      };
+      return {
+        ...state,
+        collabSession: {
+          ...cs,
+          overallVerdict: action.verdict,
+          timeline: [entry, ...cs.timeline].slice(0, 30),
+        },
+      };
     }
   }
 }
@@ -1579,6 +1834,8 @@ export function App({
   initialGoal,
   initialAsk,
   sessionsDir,
+  mouse = false,
+  subscribeMouse,
 }: AppProps): React.ReactElement {
   const { exit } = useApp();
   // Reactive mirrors of agent.ctx.{model,provider.id} so the status bar
@@ -1588,8 +1845,30 @@ export function App({
   const [liveModel, setLiveModel] = useState<string>(model);
   const [liveProvider, setLiveProvider] = useState<string>(provider ?? 'agent');
   const [yoloLive, setYoloLive] = useState<boolean>(yolo);
-  const [autonomyLive, setAutonomyLive] = useState<'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-parallel'>(getAutonomy?.() ?? 'off');
+  const [autonomyLive, setAutonomyLive] = useState<
+    'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-parallel'
+  >(getAutonomy?.() ?? 'off');
   const [hiddenItems, setHiddenItems] = useState(statuslineHiddenItems);
+
+  // Terminal row count, tracked reactively so the mouse-mode scroll viewport
+  // can size itself against the live screen height. Only consumed in mouse
+  // mode; harmless to track otherwise.
+  const { stdout } = useStdout();
+  const [termRows, setTermRows] = useState(stdout?.rows ?? 24);
+  useEffect(() => {
+    const onResize = () => setTermRows(process.stdout.rows ?? 24);
+    process.stdout.on('resize', onResize);
+    return () => {
+      process.stdout.off('resize', onResize);
+    };
+  }, []);
+
+  // `mouse` (prop) is the launch-time CAPABILITY: it's only true when run-tui
+  // set up the stdin proxy + mouse-event subscription, which only happens with
+  // --mouse. `mouseLive` is the runtime ON/OFF, toggled by `/mouse`. Tracking
+  // can only be enabled when the capability exists (otherwise mouse bytes would
+  // pollute Ink), so /mouse refuses to turn on without --mouse.
+  const [mouseLive, setMouseLive] = useState(mouse);
 
   // Sync when parent re-loads from config file (e.g., after /statusline reset)
   useEffect(() => {
@@ -1607,24 +1886,26 @@ export function App({
   useEffect(() => {
     if (!projectRoot) return;
     const goalPath = path.join(projectRoot, '.wrongstack', 'goal.json');
-    fs.readFile(goalPath, 'utf8').then((raw) => {
-      const goal = JSON.parse(raw);
-      if (goal?.goal && typeof goal.iterations === 'number') {
-        const lastEntry = goal.journal?.[goal.journal.length - 1];
-        dispatch({
-          type: 'goalSummary',
-          summary: {
-            goal: goal.goal,
-            goalState: goal.goalState ?? 'active',
-            iterations: goal.iterations,
-            lastTask: lastEntry?.task,
-            lastStatus: lastEntry?.status,
-          },
-        });
-      }
-    }).catch(() => {
-      // No goal file yet — that's fine
-    });
+    fs.readFile(goalPath, 'utf8')
+      .then((raw) => {
+        const goal = JSON.parse(raw);
+        if (goal?.goal && typeof goal.iterations === 'number') {
+          const lastEntry = goal.journal?.[goal.journal.length - 1];
+          dispatch({
+            type: 'goalSummary',
+            summary: {
+              goal: goal.goal,
+              goalState: goal.goalState ?? 'active',
+              iterations: goal.iterations,
+              lastTask: lastEntry?.task,
+              lastStatus: lastEntry?.status,
+            },
+          });
+        }
+      })
+      .catch(() => {
+        // No goal file yet — that's fine
+      });
   }, [projectRoot]);
 
   const [state, dispatch] = useReducer(reducer, {
@@ -1692,6 +1973,10 @@ export function App({
     autoPhase: null,
     worktrees: {},
     worktreeMonitorOpen: false,
+    scrollOffset: 0,
+    totalLines: 0,
+    viewportRows: 0,
+    pendingNewLines: 0,
   });
 
   const builderRef = useRef<InputBuilder | null>(null);
@@ -1765,20 +2050,144 @@ export function App({
   const draftRef = useRef({ buffer: state.buffer, cursor: state.cursor });
   draftRef.current = { buffer: state.buffer, cursor: state.cursor };
 
+  // ── Mouse mode: viewport geometry + event routing ─────────────────────
+  // Measures the bottom region (everything below the scroll viewport) so the
+  // viewport height can be derived as termRows − bottomHeight. One ref over the
+  // whole region instead of per-block bookkeeping. Mouse mode only.
+  const bottomRef = useRef<DOMElement | null>(null);
+  // Wraps the rows ABOVE any open picker (live strip + input). Its measured
+  // height tells the click handler the absolute screen row where a picker's
+  // items begin, so a click can be mapped to a list index.
+  const prePickerRef = useRef<DOMElement | null>(null);
+  const preRowsRef = useRef(0);
+  useEffect(() => {
+    if (!mouseLive) return;
+    const node = bottomRef.current;
+    if (!node) return;
+    const { height } = measureElement(node);
+    if (prePickerRef.current) {
+      preRowsRef.current = measureElement(prePickerRef.current).height;
+    }
+    const s = stateRef.current;
+    const affordance = s.scrollOffset > 0 && s.pendingNewLines > 0 ? 1 : 0;
+    // Bias the viewport DOWN by one row: an extra blank chat row is invisible,
+    // but a status bar pushed off-screen is not.
+    const vp = Math.max(MIN_VIEWPORT, termRows - height - affordance - 1);
+    if (vp !== s.viewportRows) {
+      dispatch({ type: 'setViewportRows', rows: vp });
+    }
+  });
+
+  // Latest handleKey, so click-to-activate can replay an Enter through the
+  // normal input pipeline (handleKey is defined far below; the ref is filled
+  // after it). handleMouse only ever runs post-mount, so the ref is populated.
+  const handleKeyRef = useRef<((input: string, key: KeyEvent) => void) | null>(null);
+
+  // Mouse routing. Wheel scrolls history (or drives an open picker's
+  // selection); a left click on a picker item selects + activates it; a click
+  // on the "N new lines" affordance jumps to the bottom. Registered once;
+  // reads live state via stateRef + measured geometry via preRowsRef.
+  const handleMouse = React.useCallback(
+    (ev: TuiMouseEvent) => {
+      const s = stateRef.current;
+      if (ev.type === 'wheel') {
+        const up = ev.button === 'wheelUp';
+        const step = up ? -1 : 1;
+        // An open list overlay claims the wheel for its own selection.
+        if (s.slashPicker.open) return dispatch({ type: 'slashPickerMove', delta: step });
+        if (s.modelPicker.open) return dispatch({ type: 'modelPickerMove', delta: step });
+        if (s.autonomyPicker.open) return dispatch({ type: 'autonomyPickerMove', delta: step });
+        if (s.picker.open) return dispatch({ type: 'pickerMove', delta: step });
+        if (s.rewindOverlay) return dispatch({ type: 'rewindOverlayMove', delta: step });
+        // Otherwise scroll the chat history viewport.
+        return dispatch({ type: 'scrollBy', delta: up ? WHEEL_STEP : -WHEEL_STEP });
+      }
+      if (ev.type !== 'press' || ev.button !== 'left') return;
+
+      const affordance = s.scrollOffset > 0 && s.pendingNewLines > 0 ? 1 : 0;
+      // The affordance occupies the row just below the viewport (1-based).
+      if (affordance && ev.y === s.viewportRows + 1) {
+        return dispatch({ type: 'scrollToBottom' });
+      }
+
+      // Identify the open picker, its header height (rows before the first
+      // item) and how to move/confirm it. Only the bottom-anchored list
+      // pickers participate; the full-screen rewind overlay does not.
+      const picker = s.modelPicker.open
+        ? {
+            header: 2,
+            count:
+              s.modelPicker.step === 'provider'
+                ? s.modelPicker.providerOptions.length
+                : s.modelPicker.modelOptions.length,
+            selected: s.modelPicker.selected,
+            move: (delta: number) => dispatch({ type: 'modelPickerMove', delta }),
+          }
+        : s.autonomyPicker.open
+          ? {
+              header: 2,
+              count: s.autonomyPicker.options.length,
+              selected: s.autonomyPicker.selected,
+              move: (delta: number) => dispatch({ type: 'autonomyPickerMove', delta }),
+            }
+          : s.slashPicker.open
+            ? {
+                header: 1,
+                count: s.slashPicker.matches.length,
+                selected: s.slashPicker.selected,
+                move: (delta: number) => dispatch({ type: 'slashPickerMove', delta }),
+              }
+            : s.picker.open
+              ? {
+                  header: 1,
+                  count: s.picker.matches.length,
+                  selected: s.picker.selected,
+                  move: (delta: number) => dispatch({ type: 'pickerMove', delta }),
+                }
+              : null;
+      if (!picker || picker.count === 0) return;
+
+      // Absolute (1-based) row of the picker's first item:
+      //   viewport rows + affordance + (live strip + input) + header.
+      const firstItemRow = s.viewportRows + affordance + preRowsRef.current + picker.header + 1;
+      const index = ev.y - firstItemRow;
+      if (index < 0 || index >= picker.count) return;
+      // Two-step to avoid a stale-state race: handleKey's Enter path confirms
+      // whatever was selected at RENDER time, so we can't move + confirm in one
+      // event. Click a new row → highlight it; click the highlighted row →
+      // replay Enter to fire the picker's existing confirm (dispatch / attach /
+      // switch). Wheel-to-highlight then click-to-confirm works the same way.
+      if (index === picker.selected) {
+        handleKeyRef.current?.('', { ...EMPTY_KEY, return: true });
+      } else {
+        picker.move(index - picker.selected);
+      }
+    },
+    // dispatch is stable (useReducer); refs are mutable — no reactive deps.
+    [],
+  );
+  useEffect(() => {
+    if (!subscribeMouse) return;
+    return subscribeMouse(handleMouse);
+  }, [subscribeMouse, handleMouse]);
+
   // handleRewindTo must be declared before the /rewind useEffect (line 1803)
   // so the closure can capture it. It is intentionally NOT in useCallback
   // — each call needs a fresh rewinder referencing the current sessionsDir.
-  const handleRewindTo = React.useCallback(async (checkpointIndex: number) => {
-    const sessionId = agent.ctx.session.id;
-    if (!sessionId) return;
-    const rewinder = new DefaultSessionRewinder(sessionsDir ?? '', projectRoot ?? agent.ctx.cwd);
-    // Revert file system changes first (read-only, safe to do eagerly).
-    await rewinder.rewindToCheckpoint(sessionId, checkpointIndex);
-    // Then truncate the conversation history — this fires session.rewound
-    // on the EventBus, which the useEffect at line 2212 listens to and
-    // dispatches sessionRewound + clearHistory.
-    await agent.ctx.session.truncateToCheckpoint(checkpointIndex);
-  }, [agent.ctx.session, sessionsDir, projectRoot, agent.ctx.cwd]);
+  const handleRewindTo = React.useCallback(
+    async (checkpointIndex: number) => {
+      const sessionId = agent.ctx.session.id;
+      if (!sessionId) return;
+      const rewinder = new DefaultSessionRewinder(sessionsDir ?? '', projectRoot ?? agent.ctx.cwd);
+      // Revert file system changes first (read-only, safe to do eagerly).
+      await rewinder.rewindToCheckpoint(sessionId, checkpointIndex);
+      // Then truncate the conversation history — this fires session.rewound
+      // on the EventBus, which the useEffect at line 2212 listens to and
+      // dispatches sessionRewound + clearHistory.
+      await agent.ctx.session.truncateToCheckpoint(checkpointIndex);
+    },
+    [agent.ctx.session, sessionsDir, projectRoot, agent.ctx.cwd],
+  );
 
   const setDraft = (buffer: string, cursor: number): void => {
     draftRef.current = { buffer, cursor };
@@ -1843,8 +2252,7 @@ export function App({
   // Per-model maxContext. CLI passes effectiveMaxContext (resolved via
   // ModelsRegistry — correct for 1M-context variants). Fall back to
   // agent.ctx.provider.capabilities.maxContext when not provided.
-  const maxContext =
-    effectiveMaxContext ?? agent.ctx.provider.capabilities.maxContext;
+  const maxContext = effectiveMaxContext ?? agent.ctx.provider.capabilities.maxContext;
 
   // Per-request context pressure: current prompt tokens (input + cacheRead).
   // Unlike the cumulative tokenCounter.total() which grows across all turns,
@@ -2014,7 +2422,10 @@ export function App({
   const prevEntriesCount = useRef(0);
   useEffect(() => {
     const anyOpenNow =
-      state.picker.open || state.slashPicker.open || state.modelPicker.open || state.confirmQueue.length > 0;
+      state.picker.open ||
+      state.slashPicker.open ||
+      state.modelPicker.open ||
+      state.confirmQueue.length > 0;
     const overlayClosed = prevAnyOverlayOpen.current && !anyOpenNow;
     const newEntryCommitted = state.entries.length > prevEntriesCount.current;
     prevAnyOverlayOpen.current = anyOpenNow;
@@ -2317,6 +2728,72 @@ export function App({
     };
   }, [slashRegistry]);
 
+  // Register `/mouse on|off` — runtime toggle for full mouse mode (clickable
+  // pickers + in-app wheel scroll). Enabling REQUIRES launching with --mouse:
+  // that's when run-tui installs the stdin proxy that keeps mouse bytes out of
+  // Ink's keypress parser. Without it, turning tracking on would spray
+  // `<0;..M` junk into the input — so we refuse and tell the user to relaunch.
+  const mouseLiveRef = useRef(mouseLive);
+  mouseLiveRef.current = mouseLive;
+  useEffect(() => {
+    const MOUSE_ON_SEQ = '\x1b[?1000h\x1b[?1006h';
+    const MOUSE_OFF_SEQ = '\x1b[?1006l\x1b[?1000l';
+    const ALT_ON = '\x1b[?1049h';
+    const ALT_OFF = '\x1b[?1049l';
+    const cmd = {
+      name: 'mouse',
+      description:
+        'Toggle mouse mode (clickable menus + wheel-scroll chat). Needs launch with --mouse to enable.',
+      async run(args: string) {
+        const arg = args.trim().toLowerCase();
+        if (arg !== 'on' && arg !== 'off') {
+          return {
+            message: `Mouse mode is ${mouseLiveRef.current ? 'ON' : 'OFF'}. Usage: /mouse on|off`,
+          };
+        }
+        if (arg === 'on') {
+          if (!mouse) {
+            return {
+              message:
+                'Mouse mode needs the --mouse launch flag (it rewires stdin so mouse ' +
+                'bytes never reach the input). Restart with `wstack --tui --mouse`.',
+            };
+          }
+          try {
+            process.stdout.write(ALT_ON);
+            process.stdout.write('\x1b[H');
+            process.stdout.write(MOUSE_ON_SEQ);
+          } catch {
+            return { message: 'Failed to enable mouse mode.' };
+          }
+          setMouseLive(true);
+          return {
+            message:
+              'Mouse mode ON. Click menu items, wheel-scroll the chat (PgUp/PgDn too). ' +
+              'Native terminal copy/scroll are suspended until `/mouse off`.',
+          };
+        }
+        // off
+        try {
+          process.stdout.write(MOUSE_OFF_SEQ);
+          process.stdout.write(ALT_OFF);
+        } catch {
+          return { message: 'Failed to disable mouse mode.' };
+        }
+        setMouseLive(false);
+        return {
+          message:
+            'Mouse mode OFF. Native terminal scroll/copy restored; chat history flows ' +
+            'into native scrollback again.',
+        };
+      },
+    };
+    slashRegistry.register(cmd);
+    return () => {
+      slashRegistry.unregister('mouse');
+    };
+  }, [slashRegistry, mouse]);
+
   // `/steer <message>` — slash-command equivalent of Esc-to-steer.
   // Useful when Esc is consumed by an outer terminal multiplexer, or
   // when the user wants a single-shot redirect without the typed
@@ -2460,7 +2937,9 @@ export function App({
       },
     };
     slashRegistry.register(cmd);
-    return () => { slashRegistry.unregister('agents'); };
+    return () => {
+      slashRegistry.unregister('agents');
+    };
   }, [slashRegistry]);
 
   // `/goal` is registered as a CLI builtin (packages/cli/src/slash-commands/
@@ -2784,7 +3263,13 @@ export function App({
     // warning — the subagent just keeps running until it finishes.
     const offBudgetWarning = events.on('subagent.budget_warning', (e) => {
       const lbl = labelFor(e.subagentId);
-      dispatch({ type: 'fleetBudgetWarning', id: e.subagentId, kind: e.kind, used: e.used, limit: e.limit });
+      dispatch({
+        type: 'fleetBudgetWarning',
+        id: e.subagentId,
+        kind: e.kind,
+        used: e.used,
+        limit: e.limit,
+      });
       const timeoutSuffix = e.kind === 'timeout' ? ' (subagent continues running)' : ' — extending';
       dispatch({
         type: 'addEntry',
@@ -2801,7 +3286,11 @@ export function App({
     // so the chat history shows the never-die handshake completing.
     const offBudgetExtended = events.on('subagent.budget_extended', (e) => {
       const lbl = labelFor(e.subagentId);
-      dispatch({ type: 'fleetBudgetExtended', id: e.subagentId, totalExtensions: e.totalExtensions });
+      dispatch({
+        type: 'fleetBudgetExtended',
+        id: e.subagentId,
+        totalExtensions: e.totalExtensions,
+      });
       dispatch({
         type: 'addEntry',
         entry: {
@@ -2820,7 +3309,9 @@ export function App({
       const lbl = labelFor(e.subagentId);
       const costStr = e.costUsd > 0 ? ` · ${e.costUsd.toFixed(3)}` : '';
       const toolStr = e.currentTool ? ` · doing ${e.currentTool}` : '';
-      const partial = e.partialText ? ` · "${e.partialText.slice(0, 60)}${e.partialText.length > 60 ? '…' : ''}"` : '';
+      const partial = e.partialText
+        ? ` · "${e.partialText.slice(0, 60)}${e.partialText.length > 60 ? '…' : ''}"`
+        : '';
       dispatch({
         type: 'addEntry',
         entry: {
@@ -2919,23 +3410,52 @@ export function App({
       switch (event) {
         case 'phase.started': {
           const p = payload as { phaseId: string; name: string };
-          dispatch({ type: 'autoPhasePhaseUpdate', phaseId: p.phaseId, name: p.name, status: 'running', completedTasks: 0, totalTasks: 0, startedAt: Date.now() });
+          dispatch({
+            type: 'autoPhasePhaseUpdate',
+            phaseId: p.phaseId,
+            name: p.name,
+            status: 'running',
+            completedTasks: 0,
+            totalTasks: 0,
+            startedAt: Date.now(),
+          });
           break;
         }
         case 'phase.completed': {
           const p = payload as { phaseId: string; name: string; durationMs: number };
-          dispatch({ type: 'autoPhasePhaseUpdate', phaseId: p.phaseId, name: p.name, status: 'completed', completedTasks: 0, totalTasks: 0 });
+          dispatch({
+            type: 'autoPhasePhaseUpdate',
+            phaseId: p.phaseId,
+            name: p.name,
+            status: 'completed',
+            completedTasks: 0,
+            totalTasks: 0,
+          });
           break;
         }
         case 'phase.failed': {
           const p = payload as { phaseId: string; name: string; error?: string };
-          dispatch({ type: 'autoPhasePhaseUpdate', phaseId: p.phaseId, name: p.name, status: 'failed', completedTasks: 0, totalTasks: 0 });
+          dispatch({
+            type: 'autoPhasePhaseUpdate',
+            phaseId: p.phaseId,
+            name: p.name,
+            status: 'failed',
+            completedTasks: 0,
+            totalTasks: 0,
+          });
           break;
         }
         case 'phase.statusChange': {
           const p = payload as { phaseId: string; name: string; from: string; to: string };
           const status = p.to === 'running' ? 'running' : p.to;
-          dispatch({ type: 'autoPhasePhaseUpdate', phaseId: p.phaseId, name: p.name, status, completedTasks: 0, totalTasks: 0 });
+          dispatch({
+            type: 'autoPhasePhaseUpdate',
+            phaseId: p.phaseId,
+            name: p.name,
+            status,
+            completedTasks: 0,
+            totalTasks: 0,
+          });
           break;
         }
         case 'phase.taskCompleted': {
@@ -2954,13 +3474,19 @@ export function App({
           break;
         }
         case 'autonomous.tick': {
-          const p = payload as { activePhases: Array<{ id: string }>; queuedPhases: Array<{ id: string }> };
+          const p = payload as {
+            activePhases: Array<{ id: string }>;
+            queuedPhases: Array<{ id: string }>;
+          };
           dispatch({ type: 'autoPhaseRunningPhases', phaseIds: p.activePhases.map((ph) => ph.id) });
           // Update elapsed time
           const ap = stateRef.current.autoPhase;
           if (ap) {
             const firstPhase = ap.phases[Object.keys(ap.phases)[0] ?? ''];
-            const elapsed = ap.elapsedMs > 0 ? ap.elapsedMs + 1000 : Date.now() - (firstPhase?.startedAt ?? Date.now());
+            const elapsed =
+              ap.elapsedMs > 0
+                ? ap.elapsedMs + 1000
+                : Date.now() - (firstPhase?.startedAt ?? Date.now());
             dispatch({ type: 'autoPhaseElapsed', ms: elapsed });
           }
           break;
@@ -2974,21 +3500,42 @@ export function App({
           break;
         }
         case 'worktree.allocated': {
-          const p = payload as { handleId: string; ownerLabel: string; branch: string; baseBranch: string };
+          const p = payload as {
+            handleId: string;
+            ownerLabel: string;
+            branch: string;
+            baseBranch: string;
+          };
           dispatch({
             type: 'worktreeUpsert',
             handleId: p.handleId,
             baseBranch: p.baseBranch,
-            row: { branch: p.branch, ownerLabel: p.ownerLabel, baseBranch: p.baseBranch, status: 'active', allocatedAt: Date.now() },
+            row: {
+              branch: p.branch,
+              ownerLabel: p.ownerLabel,
+              baseBranch: p.baseBranch,
+              status: 'active',
+              allocatedAt: Date.now(),
+            },
           });
           break;
         }
         case 'worktree.committed': {
-          const p = payload as { handleId: string; insertions: number; deletions: number; files: number };
+          const p = payload as {
+            handleId: string;
+            insertions: number;
+            deletions: number;
+            files: number;
+          };
           dispatch({
             type: 'worktreeUpsert',
             handleId: p.handleId,
-            row: { insertions: p.insertions, deletions: p.deletions, files: p.files, status: 'committing' },
+            row: {
+              insertions: p.insertions,
+              deletions: p.deletions,
+              files: p.files,
+              status: 'committing',
+            },
           });
           break;
         }
@@ -2999,7 +3546,11 @@ export function App({
         }
         case 'worktree.conflict': {
           const p = payload as { handleId: string; conflictFiles: string[] };
-          dispatch({ type: 'worktreeUpsert', handleId: p.handleId, row: { status: 'needs-review', conflictFiles: p.conflictFiles } });
+          dispatch({
+            type: 'worktreeUpsert',
+            handleId: p.handleId,
+            row: { status: 'needs-review', conflictFiles: p.conflictFiles },
+          });
           break;
         }
         case 'worktree.failed': {
@@ -3059,7 +3610,12 @@ export function App({
       }
     });
     const offFailed = events.on('compaction.failed', (e) => {
-      const { level, load, maxContext, fatal } = e as { level: string; load: number; maxContext: number; fatal: boolean };
+      const { level, load, maxContext, fatal } = e as {
+        level: string;
+        load: number;
+        maxContext: number;
+        fatal: boolean;
+      };
       const pct = (load * 100).toFixed(0);
       const text = fatal
         ? `✗ compaction failed at ${level} — load ${pct}% of ${maxContext.toLocaleString()} tok — FATAL`
@@ -3180,7 +3736,12 @@ export function App({
       labelFor(s.id, meta?.name ?? s.name);
     }
     // Also seed cost from the usage aggregator.
-    dispatch({ type: 'fleetCost', cost: d.snapshot().total.cost, input: d.snapshot().total.input, output: d.snapshot().total.output });
+    dispatch({
+      type: 'fleetCost',
+      cost: d.snapshot().total.cost,
+      input: d.snapshot().total.input,
+      output: d.snapshot().total.output,
+    });
 
     // Discover new subagents on first FleetBus event for an unknown id.
     const seen = new Set(Object.keys(status.subagents));
@@ -3329,7 +3890,12 @@ export function App({
         case 'provider.response': {
           // Surface live cost from the aggregator (already computed with
           // per-model pricing).
-          dispatch({ type: 'fleetCost', cost: d.snapshot().total.cost, input: d.snapshot().total.input, output: d.snapshot().total.output });
+          dispatch({
+            type: 'fleetCost',
+            cost: d.snapshot().total.cost,
+            input: d.snapshot().total.input,
+            output: d.snapshot().total.output,
+          });
           break;
         }
         case 'session.ended':
@@ -3392,9 +3958,15 @@ export function App({
           }
           if (!state.collabSession) {
             // First collab event we've seen — bootstrap state lazily.
-            dispatch({ type: 'collabSubagentSpawned', subagentId: e.subagentId, role: role ?? 'unknown' });
+            dispatch({
+              type: 'collabSubagentSpawned',
+              subagentId: e.subagentId,
+              role: role ?? 'unknown',
+            });
           }
-          const bp = e.payload as { finding?: { id?: string; severity?: string; description?: string } };
+          const bp = e.payload as {
+            finding?: { id?: string; severity?: string; description?: string };
+          };
           if (bp?.finding) {
             const sessionId = e.subagentId.split('-').slice(1).join('-') || e.subagentId;
             dispatch({
@@ -3409,7 +3981,9 @@ export function App({
         }
         case 'refactor.plan': {
           if (!state.collabSession) break;
-          const pp = e.payload as { plan?: { id?: string; riskScore?: string; phases?: unknown[] } };
+          const pp = e.payload as {
+            plan?: { id?: string; riskScore?: string; phases?: unknown[] };
+          };
           if (pp?.plan) {
             const sessionId = e.subagentId.split('-').slice(1).join('-') || e.subagentId;
             dispatch({
@@ -3424,7 +3998,9 @@ export function App({
         }
         case 'critic.evaluation': {
           if (!state.collabSession) break;
-          const ep = e.payload as { evaluation?: { id?: string; verdict?: string; score?: number } };
+          const ep = e.payload as {
+            evaluation?: { id?: string; verdict?: string; score?: number };
+          };
           if (ep?.evaluation) {
             const sessionId = e.subagentId.split('-').slice(1).join('-') || e.subagentId;
             dispatch({
@@ -3440,7 +4016,12 @@ export function App({
         case 'collab.session_done': {
           // Emitted by the CollabSession itself (EventEmitter 'session.done').
           if (!state.collabSession) break;
-          const dp = e.payload as { report?: { sessionId?: string; overallVerdict?: 'approve' | 'needs_revision' | 'reject' } };
+          const dp = e.payload as {
+            report?: {
+              sessionId?: string;
+              overallVerdict?: 'approve' | 'needs_revision' | 'reject';
+            };
+          };
           if (dp?.report) {
             dispatch({
               type: 'collabSessionDone',
@@ -3466,7 +4047,12 @@ export function App({
         iterations: payload.result.iterations,
         toolCalls: payload.result.toolCalls,
       });
-      dispatch({ type: 'fleetCost', cost: d.snapshot().total.cost, input: d.snapshot().total.input, output: d.snapshot().total.output });
+      dispatch({
+        type: 'fleetCost',
+        cost: d.snapshot().total.cost,
+        input: d.snapshot().total.input,
+        output: d.snapshot().total.output,
+      });
       // Drain any pending streaming text right before the completion
       // entry is committed by the EventBus listener so the order
       // "chat → done line" stays correct.
@@ -3572,7 +4158,10 @@ export function App({
         // This ensures runaway child processes (including background bashes
         // that outlive the agent iteration) are cleaned up on Ctrl+C.
         const killed = getProcessRegistry().killAll();
-        const procTag = killed.length > 0 ? ` + killed ${killed.length} process${killed.length === 1 ? '' : 'es'}` : '';
+        const procTag =
+          killed.length > 0
+            ? ` + killed ${killed.length} process${killed.length === 1 ? '' : 'es'}`
+            : '';
         const droppedCount = stateRef.current.queue.length;
         if (droppedCount > 0) {
           dispatch({ type: 'queueClear' });
@@ -3641,7 +4230,10 @@ export function App({
         // Truly idle — nothing running. Kill any lingering processes and arm
         // the second-press exit.
         const killed = getProcessRegistry().killAll();
-        const procTag = killed.length > 0 ? ` Killed ${killed.length} process${killed.length === 1 ? '' : 'es'}.` : '';
+        const procTag =
+          killed.length > 0
+            ? ` Killed ${killed.length} process${killed.length === 1 ? '' : 'es'}.`
+            : '';
         dispatch({
           type: 'addEntry',
           entry: { kind: 'warn', text: `Press Ctrl+C again to exit.${procTag}` },
@@ -3706,6 +4298,21 @@ export function App({
 
     // Re-entrancy guard: block stale-second events from \r\n terminals.
     if (inputGateRef.current) return;
+
+    // ── Mouse-mode scroll keys (PageUp/PageDown) ──────────────────────
+    // Keyboard parity with the wheel: page the chat viewport. Only
+    // meaningful in mouse mode (the scrollable viewport); inert otherwise.
+    // Home/End are left to the input editor (line start/end) below.
+    if (mouseLive) {
+      if (key.pageUp) {
+        dispatch({ type: 'scrollPage', dir: 'up' });
+        return;
+      }
+      if (key.pageDown) {
+        dispatch({ type: 'scrollPage', dir: 'down' });
+        return;
+      }
+    }
 
     // ── Double-Esc clears input buffer ────────────────────────────────
     // When the user presses Esc twice within ESC_DOUBLE_PRESS_MS ms while
@@ -4147,7 +4754,8 @@ export function App({
       else {
         // No active AutoPhase — treat as a command alias for /autophase status
         slashRegistry.dispatch('/autophase', agent.ctx).then((res) => {
-          if (res?.message) dispatch({ type: 'addEntry', entry: { kind: 'info', text: res.message } });
+          if (res?.message)
+            dispatch({ type: 'addEntry', entry: { kind: 'info', text: res.message } });
         });
       }
       return;
@@ -4372,7 +4980,10 @@ export function App({
         } catch (err) {
           dispatch({
             type: 'addEntry',
-            entry: { kind: 'error', text: `[eternal] ${err instanceof Error ? err.message : String(err)}` },
+            entry: {
+              kind: 'error',
+              text: `[eternal] ${err instanceof Error ? err.message : String(err)}`,
+            },
           });
         }
         dispatch({ type: 'status', status: 'idle' });
@@ -4414,7 +5025,10 @@ export function App({
         } catch (err) {
           dispatch({
             type: 'addEntry',
-            entry: { kind: 'error', text: `[parallel] ${err instanceof Error ? err.message : String(err)}` },
+            entry: {
+              kind: 'error',
+              text: `[parallel] ${err instanceof Error ? err.message : String(err)}`,
+            },
           });
         }
         dispatch({ type: 'status', status: 'idle' });
@@ -4441,7 +5055,14 @@ export function App({
   useEffect(() => {
     if (!subscribeEternalIteration) return;
     const unsub = subscribeEternalIteration((entry) => {
-      const mark = entry.status === 'success' ? '✓' : entry.status === 'failure' ? '✗' : entry.status === 'aborted' ? '⊘' : '·';
+      const mark =
+        entry.status === 'success'
+          ? '✓'
+          : entry.status === 'failure'
+            ? '✗'
+            : entry.status === 'aborted'
+              ? '⊘'
+              : '·';
       const cost = typeof entry.costUsd === 'number' ? ` ($${entry.costUsd.toFixed(4)})` : '';
       const note = entry.note ? ` — ${entry.note.slice(0, 80)}` : '';
       const text = `#${entry.iteration} ${mark} [${entry.source}] ${entry.task}${cost}${note}`;
@@ -4666,6 +5287,9 @@ export function App({
     })();
   }, [initialAsk, initialGoal]);
 
+  // Expose the latest handleKey to the mouse handler (click-to-confirm).
+  handleKeyRef.current = handleKey;
+
   const inputHint = useMemo(() => {
     if (state.status !== 'idle') return '';
     if (state.buffer.startsWith('/')) return 'slash command — Enter to dispatch';
@@ -4673,152 +5297,184 @@ export function App({
     return '';
   }, [state.buffer, state.status, state.picker.open]);
 
+  const affordanceShown = mouseLive && state.scrollOffset > 0 && state.pendingNewLines > 0;
   return (
-    <Box flexDirection="column">
-      <History
-        entries={state.entries}
-        streamingText={state.streamingText}
-        toolStream={state.toolStream}
-      />
-      {/* Live activity strip — one line per running subagent with
-          current tool + elapsed timer. Sits directly above the input
-          area so it's always visible without scrolling. Renders
-          nothing when no subagents are running. */}
-      <LiveActivityStrip entries={state.fleet} nowTick={nowTick} />
-      <Input
-        value={state.buffer}
-        cursor={state.cursor}
-        disabled={
-          (state.status === 'aborting' && !state.steeringPending) ||
-          state.confirmQueue.length > 0
-        }
-        hint={inputHint}
-        onKey={handleKey}
-      />
-      {state.picker.open ? (
-        <FilePicker
-          query={state.picker.query}
-          matches={state.picker.matches}
-          selected={state.picker.selected}
+    <Box flexDirection="column" height={mouseLive ? termRows : undefined}>
+      {mouseLive ? (
+        <ScrollableHistory
+          entries={state.entries}
+          streamingText={state.streamingText}
+          toolStream={state.toolStream}
+          scrollOffset={state.scrollOffset}
+          viewportRows={state.viewportRows || Math.max(MIN_VIEWPORT, termRows - 8)}
+          onMeasure={(total) => dispatch({ type: 'setMeasuredLines', totalLines: total })}
         />
-      ) : null}
-      {state.slashPicker.open ? (
-        <SlashMenu
-          query={state.slashPicker.query}
-          matches={state.slashPicker.matches}
-          selected={state.slashPicker.selected}
+      ) : (
+        <History
+          entries={state.entries}
+          streamingText={state.streamingText}
+          toolStream={state.toolStream}
         />
+      )}
+      {affordanceShown ? (
+        <Text dimColor>
+          {`  ↓ ${state.pendingNewLines} new line${state.pendingNewLines === 1 ? '' : 's'} — PgDn or click to jump to bottom`}
+        </Text>
       ) : null}
-      {state.modelPicker.open ? (
-        <ModelPicker
-          step={state.modelPicker.step}
-          providerOptions={state.modelPicker.providerOptions}
-          modelOptions={state.modelPicker.modelOptions}
-          selected={state.modelPicker.selected}
-          pickedProviderId={state.modelPicker.pickedProviderId}
-          hint={state.modelPicker.hint}
-        />
-      ) : null}
-      {state.autonomyPicker.open ? (
-        <AutonomyPicker
-          options={state.autonomyPicker.options}
-          selected={state.autonomyPicker.selected}
-          hint={state.autonomyPicker.hint}
-        />
-      ) : null}
-      {state.rewindOverlay ? (
-        <CheckpointTimeline
-          checkpoints={state.rewindOverlay.checkpoints}
-          selected={state.rewindOverlay.selected}
-          onSelect={(i) => dispatch({ type: 'rewindOverlayMove', delta: i - state.rewindOverlay!.selected })}
-          onConfirm={(i) => handleRewindTo(state.rewindOverlay!.checkpoints[i]!.promptIndex)}
-          onClose={() => dispatch({ type: 'rewindOverlayClose' })}
-        />
-      ) : null}
-      {state.confirmQueue.length > 0 && (() => {
-        const head = state.confirmQueue[0]!;
-        let resolved = false;
-        return (
-          <ConfirmPrompt
-            toolName={head.toolName}
-            input={head.input}
-            suggestedPattern={head.suggestedPattern}
-            onDecision={(decision) => {
-              if (resolved) return;
-              resolved = true;
-              head.resolve(decision);
-              dispatch({ type: 'confirmClose' });
-            }}
+      {/* In mouse mode the whole live region below the scroll viewport is
+          wrapped in one measured Box so its height feeds the viewport-size
+          computation. In the default path it's a layout-neutral column. */}
+      <Box ref={mouseLive ? bottomRef : undefined} flexDirection="column" flexShrink={0}>
+        {/* Live activity strip + input. Wrapped so its height locates where an
+          open picker's items start on screen (click-to-select geometry). */}
+        <Box ref={mouseLive ? prePickerRef : undefined} flexDirection="column" flexShrink={0}>
+          <LiveActivityStrip entries={state.fleet} nowTick={nowTick} />
+          <Input
+            value={state.buffer}
+            cursor={state.cursor}
+            disabled={
+              (state.status === 'aborting' && !state.steeringPending) ||
+              state.confirmQueue.length > 0
+            }
+            hint={inputHint}
+            onKey={handleKey}
           />
-        );
-      })()}
-      <StatusBar
-        model={`${liveProvider}/${liveModel}`}
-        version={appVersion}
-        state={state.status}
-        tokenCounter={tokenCounter}
-        hint={renderRunningTools(state.runningTools) || state.hint}
-        queueCount={state.queue.length}
-        yolo={yoloLive}
-        autonomy={autonomyLive}
-        elapsedMs={elapsedMs}
-        todos={todos}
-        plan={planCounts ?? undefined}
-        fleet={fleetCounts}
-        git={gitInfo}
-        context={contextWindow}
-        projectName={projectName}
-        subagentCount={Object.keys(state.fleet).length}
-        processCount={getProcessRegistry().activeCount}
-        hiddenItems={hiddenItems}
-        eternalStage={state.eternalStage}
-        goalSummary={state.goalSummary}
-      />
-      {/* Agents monitor overlay (Ctrl+G) and fleet monitor overlay (Ctrl+F)
+        </Box>
+        {state.picker.open ? (
+          <FilePicker
+            query={state.picker.query}
+            matches={state.picker.matches}
+            selected={state.picker.selected}
+          />
+        ) : null}
+        {state.slashPicker.open ? (
+          <SlashMenu
+            query={state.slashPicker.query}
+            matches={state.slashPicker.matches}
+            selected={state.slashPicker.selected}
+          />
+        ) : null}
+        {state.modelPicker.open ? (
+          <ModelPicker
+            step={state.modelPicker.step}
+            providerOptions={state.modelPicker.providerOptions}
+            modelOptions={state.modelPicker.modelOptions}
+            selected={state.modelPicker.selected}
+            pickedProviderId={state.modelPicker.pickedProviderId}
+            hint={state.modelPicker.hint}
+          />
+        ) : null}
+        {state.autonomyPicker.open ? (
+          <AutonomyPicker
+            options={state.autonomyPicker.options}
+            selected={state.autonomyPicker.selected}
+            hint={state.autonomyPicker.hint}
+          />
+        ) : null}
+        {state.rewindOverlay ? (
+          <CheckpointTimeline
+            checkpoints={state.rewindOverlay.checkpoints}
+            selected={state.rewindOverlay.selected}
+            onSelect={(i) =>
+              dispatch({ type: 'rewindOverlayMove', delta: i - state.rewindOverlay!.selected })
+            }
+            onConfirm={(i) => handleRewindTo(state.rewindOverlay!.checkpoints[i]!.promptIndex)}
+            onClose={() => dispatch({ type: 'rewindOverlayClose' })}
+          />
+        ) : null}
+        {state.confirmQueue.length > 0 &&
+          (() => {
+            const head = state.confirmQueue[0]!;
+            let resolved = false;
+            return (
+              <ConfirmPrompt
+                toolName={head.toolName}
+                input={head.input}
+                suggestedPattern={head.suggestedPattern}
+                onDecision={(decision) => {
+                  if (resolved) return;
+                  resolved = true;
+                  head.resolve(decision);
+                  dispatch({ type: 'confirmClose' });
+                }}
+              />
+            );
+          })()}
+        <StatusBar
+          model={`${liveProvider}/${liveModel}`}
+          version={appVersion}
+          state={state.status}
+          tokenCounter={tokenCounter}
+          hint={renderRunningTools(state.runningTools) || state.hint}
+          queueCount={state.queue.length}
+          yolo={yoloLive}
+          autonomy={autonomyLive}
+          elapsedMs={elapsedMs}
+          todos={todos}
+          plan={planCounts ?? undefined}
+          fleet={fleetCounts}
+          git={gitInfo}
+          context={contextWindow}
+          projectName={projectName}
+          subagentCount={Object.keys(state.fleet).length}
+          processCount={getProcessRegistry().activeCount}
+          hiddenItems={hiddenItems}
+          eternalStage={state.eternalStage}
+          goalSummary={state.goalSummary}
+        />
+        {/* Agents monitor overlay (Ctrl+G) and fleet monitor overlay (Ctrl+F)
           take up the lower region — hide FleetPanel while any overlay is open. */}
-      {state.agentsMonitorOpen ? (
-        <AgentsMonitor
-          entries={entriesWithLeader}
-          totalCost={state.fleetCost}
-          totalTokens={state.fleetTokens}
-          nowTick={nowTick}
-        />
-      ) : state.autoPhase?.monitorOpen ? (
-        <PhaseMonitor
-          phases={state.autoPhase.phases}
-          runningPhaseIds={state.autoPhase.runningPhaseIds}
-          elapsedMs={state.autoPhase.elapsedMs}
-          nowTick={nowTick}
-          onClose={() => dispatch({ type: 'autoPhaseMonitorToggle' })}
-        />
-      ) : state.worktreeMonitorOpen ? (
-        <WorktreeMonitor
-          worktrees={state.worktrees}
-          baseBranch={state.worktreeBase}
-          nowTick={nowTick}
-          onClose={() => dispatch({ type: 'worktreeMonitorToggle' })}
-        />
-      ) : state.monitorOpen ? (
-        <FleetMonitor
-          entries={state.fleet}
-          totalCost={state.fleetCost}
-          totalTokens={state.fleetTokens}
-          nowTick={nowTick}
-          collabSession={state.collabSession}
-        />
-      ) : director ? (
-        <FleetPanel entries={entriesWithLeader} totalCost={state.fleetCost} roster={fleetRoster} collabSession={state.collabSession} />
-      ) : null}
-      {state.autoPhase && !state.autoPhase.monitorOpen ? (
-        <PhasePanel
-          phases={state.autoPhase.phases}
-          runningPhaseIds={state.autoPhase.runningPhaseIds}
-          nowTick={nowTick}
-        />
-      ) : null}
-      {Object.keys(state.worktrees).length > 0 && !state.worktreeMonitorOpen && !state.monitorOpen ? (
-        <WorktreePanel worktrees={state.worktrees} nowTick={nowTick} />
-      ) : null}
+        {state.agentsMonitorOpen ? (
+          <AgentsMonitor
+            entries={entriesWithLeader}
+            totalCost={state.fleetCost}
+            totalTokens={state.fleetTokens}
+            nowTick={nowTick}
+          />
+        ) : state.autoPhase?.monitorOpen ? (
+          <PhaseMonitor
+            phases={state.autoPhase.phases}
+            runningPhaseIds={state.autoPhase.runningPhaseIds}
+            elapsedMs={state.autoPhase.elapsedMs}
+            nowTick={nowTick}
+            onClose={() => dispatch({ type: 'autoPhaseMonitorToggle' })}
+          />
+        ) : state.worktreeMonitorOpen ? (
+          <WorktreeMonitor
+            worktrees={state.worktrees}
+            baseBranch={state.worktreeBase}
+            nowTick={nowTick}
+            onClose={() => dispatch({ type: 'worktreeMonitorToggle' })}
+          />
+        ) : state.monitorOpen ? (
+          <FleetMonitor
+            entries={state.fleet}
+            totalCost={state.fleetCost}
+            totalTokens={state.fleetTokens}
+            nowTick={nowTick}
+            collabSession={state.collabSession}
+          />
+        ) : director ? (
+          <FleetPanel
+            entries={entriesWithLeader}
+            totalCost={state.fleetCost}
+            roster={fleetRoster}
+            collabSession={state.collabSession}
+          />
+        ) : null}
+        {state.autoPhase && !state.autoPhase.monitorOpen ? (
+          <PhasePanel
+            phases={state.autoPhase.phases}
+            runningPhaseIds={state.autoPhase.runningPhaseIds}
+            nowTick={nowTick}
+          />
+        ) : null}
+        {Object.keys(state.worktrees).length > 0 &&
+        !state.worktreeMonitorOpen &&
+        !state.monitorOpen ? (
+          <WorktreePanel worktrees={state.worktrees} nowTick={nowTick} />
+        ) : null}
+      </Box>
     </Box>
   );
 }

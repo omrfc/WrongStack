@@ -25,8 +25,18 @@ function renderRow(cells: InputCell[], rowKey: string, promptColor: string): Rea
   const flush = (end: number) => {
     if (run === '' || runStyle === null) return;
     const key = `${rowKey}-${runStart}`;
-    if (runStyle === 'prompt') out.push(<Text key={key} color={promptColor}>{run}</Text>);
-    else if (runStyle === 'chip') out.push(<Text key={key} color="cyan" dimColor>{run}</Text>);
+    if (runStyle === 'prompt')
+      out.push(
+        <Text key={key} color={promptColor}>
+          {run}
+        </Text>,
+      );
+    else if (runStyle === 'chip')
+      out.push(
+        <Text key={key} color="cyan" dimColor>
+          {run}
+        </Text>,
+      );
     else out.push(<Text key={key}>{run}</Text>);
     run = '';
     runStart = end;
@@ -79,24 +89,14 @@ export interface KeyEvent {
 function isHomeEnd(data: string): 'home' | 'end' | null {
   // Common terminal sequences for Home/End.
   // CSI H / CSI F are the most universal; the longer variants are fallbacks.
-  if (
-    data === '\x1b[H' ||
-    data === '\x1b[1~' ||
-    data === '\x1bOH' ||
-    data === '\x1b[7~'
-  )
+  if (data === '\x1b[H' || data === '\x1b[1~' || data === '\x1bOH' || data === '\x1b[7~')
     return 'home';
-  if (
-    data === '\x1b[F' ||
-    data === '\x1b[4~' ||
-    data === '\x1bOF' ||
-    data === '\x1b[8~'
-  )
+  if (data === '\x1b[F' || data === '\x1b[4~' || data === '\x1bOF' || data === '\x1b[8~')
     return 'end';
   return null;
 }
 
-const EMPTY_KEY: KeyEvent = {
+export const EMPTY_KEY: KeyEvent = {
   upArrow: false,
   downArrow: false,
   leftArrow: false,
