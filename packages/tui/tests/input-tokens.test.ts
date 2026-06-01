@@ -21,6 +21,18 @@ describe('deleteTokenBackward', () => {
     expect(res).toEqual({ buffer: 'see ', cursor: 4 });
   });
 
+  it('deletes a file chip with an absolute / nested / spaced path', () => {
+    for (const tok of [
+      '[file:d:/Codebox/PROJECTS/WrongStack/packages/tui/src/app.tsx]',
+      '[file:packages/core/src/agent.ts]',
+      '[file:my folder/a.ts]',
+    ]) {
+      const buffer = `hi ${tok}`;
+      const res = deleteTokenBackward(buffer, buffer.length);
+      expect(res).toEqual({ buffer: 'hi ', cursor: 3 });
+    }
+  });
+
   it('returns null when no chip ends at the cursor (plain char delete)', () => {
     expect(deleteTokenBackward('hello', 5)).toBeNull();
     // Cursor inside a chip — not a clean end boundary.
