@@ -35,6 +35,8 @@ export interface WstackPaths {
   cacheDir: string;
   /** ~/.wrongstack/cache/models.dev.json */
   modelsCache: string;
+  /** ~/.wrongstack/cache/models-overlay.json — cached curated overlay. */
+  modelsOverlayCache: string;
   /** ~/.wrongstack/history — REPL line history. */
   historyFile: string;
   /** ~/.wrongstack/logs/wrongstack.log */
@@ -101,6 +103,7 @@ export function resolveWstackPaths(opts: WstackPathOptions): WstackPaths {
     globalPrompts: path.join(globalRoot, 'prompts'),
     cacheDir: path.join(globalRoot, 'cache'),
     modelsCache: path.join(globalRoot, 'cache', 'models.dev.json'),
+    modelsOverlayCache: path.join(globalRoot, 'cache', 'models-overlay.json'),
     historyFile: path.join(globalRoot, 'history'),
     logFile: path.join(globalRoot, 'logs', 'wrongstack.log'),
     projectDir,

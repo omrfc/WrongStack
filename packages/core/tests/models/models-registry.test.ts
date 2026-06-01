@@ -160,4 +160,109 @@ describe('DefaultModelsRegistry', () => {
     const age = await reg.ageSeconds();
     expect(age).toBeLessThan(60);
   });
+
+  describe('overlay merge', () => {
+    const okFetch = (payload: ModelsDevPayload) =>
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => payload,
+      } as unknown as Response) as unknown as typeof fetch;
+
+    it('in-memory overlay overrides a base model field', async () => {
+      const fetchImpl = okFetch(SAMPLE);
+      const overlay: ModelsDevPayload = {
+        anthropic: {
+          id: 'anthropic',
+          name: 'Anthropic',
+          models: {
+            'claude-sonnet-4-6': {
+              id: 'claude-sonnet-4-6',
+              name: 'Claude Sonnet 4.6',
+              limit: { context: 1_000_000 },
+            },
+          },
+        },
+      };
+      const reg = new DefaultModelsRegistry({ cacheFile, fetchImpl, overlay });
+      const m = await reg.getModel('anthropic', 'claude-sonnet-4-6');
+      expect(m?.capabilities.maxContext).toBe(1_000_000); // overridden
+    });
+
+    it('overlay adds a provider absent from the base', async () => {
+      const fetchImpl = okFetch(SAMPLE);
+      const overlay: ModelsDevPayload = {
+        myco: {
+          id: 'myco',
+          name: 'My Co',
+          npm: '@ai-sdk/openai-compatible',
+          api: 'https://api.myco.example',
+          env: ['MYCO_API_KEY'],
+          models: { 'myco-1': { id: 'myco-1', name: 'MyCo One', limit: { context: 64_000 } } },
+        },
+      };
+      const reg = new DefaultModelsRegistry({ cacheFile, fetchImpl, overlay });
+      const ids = (await reg.listProviders()).map((p) => p.id);
+      expect(ids).toContain('myco');
+      const m = await reg.getModel('myco', 'myco-1');
+      expect(m?.capabilities.maxContext).toBe(64_000);
+    });
+
+    it('reads the overlay from overlayFile when overlayUrl fetch fails', async () => {
+      const overlayFile = path.join(cacheDir, 'providers.json');
+      await fs.writeFile(
+        overlayFile,
+        JSON.stringify({
+          anthropic: {
+            id: 'anthropic',
+            name: 'Anthropic',
+            models: {
+              'claude-sonnet-4-6': {
+                id: 'claude-sonnet-4-6',
+                name: 'Claude Sonnet 4.6',
+                limit: { context: 500_000 },
+              },
+            },
+          },
+        }),
+      );
+      // base fetch ok, overlay URL fetch fails → falls back to the file.
+      const fetchImpl = vi.fn(async (url: string) => {
+        if (String(url).includes('providers.json')) throw new Error('overlay offline');
+        return { ok: true, status: 200, json: async () => SAMPLE } as unknown as Response;
+      }) as unknown as typeof fetch;
+      const reg = new DefaultModelsRegistry({
+        cacheFile,
+        fetchImpl,
+        overlayUrl: 'https://example.test/providers.json',
+        overlayFile,
+        overlayCacheFile: path.join(cacheDir, 'overlay-cache.json'),
+      });
+      const m = await reg.getModel('anthropic', 'claude-sonnet-4-6');
+      expect(m?.capabilities.maxContext).toBe(500_000);
+    });
+
+    it('degrades to overlay-only when models.dev fails and no cache exists', async () => {
+      const fetchImpl = vi.fn().mockRejectedValue(new Error('offline')) as unknown as typeof fetch;
+      const overlay: ModelsDevPayload = {
+        myco: {
+          id: 'myco',
+          name: 'My Co',
+          npm: '@ai-sdk/openai-compatible',
+          models: { 'myco-1': { id: 'myco-1', name: 'MyCo One' } },
+        },
+      };
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const reg = new DefaultModelsRegistry({ cacheFile, fetchImpl, overlay });
+      const providers = await reg.listProviders();
+      expect(providers.map((p) => p.id)).toEqual(['myco']); // base empty, overlay served
+      warn.mockRestore();
+    });
+
+    it('still throws offline when there is no overlay source and no cache', async () => {
+      const fetchImpl = vi.fn().mockRejectedValue(new Error('offline')) as unknown as typeof fetch;
+      const reg = new DefaultModelsRegistry({ cacheFile, fetchImpl });
+      await expect(reg.load()).rejects.toThrow(/offline/);
+    });
+  });
 });

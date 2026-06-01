@@ -1,9 +1,32 @@
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 /**
  * Boot phase — everything before the DI container wiring.
  * Extracted from index.ts so main() focuses on wire → execute.
  */
+
+/**
+ * Curated model-catalog overlay served from our GitHub repo. Deep-merged on
+ * top of models.dev so we can add/fix providers/models without an upstream
+ * fix or a release. See `packages/cli/data/README.md`.
+ */
+const GITHUB_PROVIDERS_OVERLAY_URL =
+  'https://raw.githubusercontent.com/WrongStack/WrongStack/main/packages/cli/data/providers.json';
+
+/**
+ * Resolve the bundled overlay `providers.json`. It ships at `<pkg>/data/` —
+ * a sibling of both `src/` (dev) and `dist/` (published) — so `../data/…`
+ * relative to this module resolves in both. Returns undefined if anything
+ * about the resolution looks off (the overlay is optional).
+ */
+function resolveBundledOverlayFile(): string | undefined {
+  try {
+    return fileURLToPath(new URL('../data/providers.json', import.meta.url));
+  } catch {
+    return undefined;
+  }
+}
 import {
   type Config,
   DefaultLogger,
@@ -88,6 +111,11 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
   const modelsRegistry = new DefaultModelsRegistry({
     cacheFile: wpaths.modelsCache,
     ttlSeconds: 24 * 3600,
+    // Curated overlay merged on top of models.dev: fetched from GitHub raw for
+    // freshness, with the bundled file as the offline floor.
+    overlayUrl: GITHUB_PROVIDERS_OVERLAY_URL,
+    overlayFile: resolveBundledOverlayFile(),
+    overlayCacheFile: wpaths.modelsOverlayCache,
   });
 
   // Background update check — fires async, non-blocking.

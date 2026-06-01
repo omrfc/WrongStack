@@ -33,3 +33,4 @@ export { compileUserRegex, type CompileResult, type CompileFail } from './regex-
 export {
   completePartialObject,
 } from './json-repair.js';
+export { mergeModelsPayload } from './merge-models-payload.js';
