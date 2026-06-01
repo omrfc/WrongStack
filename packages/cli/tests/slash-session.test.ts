@@ -73,6 +73,128 @@ describe('buildLoadCommand', () => {
   });
 });
 
+// ── /resume --incomplete (recovery) ──────────────────────────────────────────
+
+describe('buildLoadCommand --incomplete', () => {
+  // Minimal fake — we need `paths` to construct a SessionRecovery,
+  // and SessionRecovery.listResumable scans the dir. We point the
+  // dir at a real tempdir; the helper below creates a stale log
+  // and asserts the command surfaces it.
+  it('lists incomplete sessions with their crash context', async () => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = await mkdtemp(join(tmpdir(), 'resume-incomplete-'));
+    try {
+      // Stale session — last event is in_flight_start with no end.
+      const log = [
+        JSON.stringify({ type: 'session_start', ts: '2026-01-01T00:00:00Z', id: 's-crash', model: 'm', provider: 'p' }),
+        JSON.stringify({ type: 'in_flight_start', ts: '2026-01-01T00:00:01Z', context: 'iteration 7 / tool: read' }),
+        '',
+      ].join('\n');
+      await writeFile(join(dir, 's-crash.jsonl'), log, 'utf8');
+
+      const cmd = buildLoadCommand({ paths: { projectSessions: dir } } as never);
+      const res = await cmd.run('--incomplete', fakeCtx());
+      expect(res?.message).toContain('1 incomplete session');
+      expect(res?.message).toContain('s-crash');
+      expect(res?.message).toContain('iteration 7 / tool: read');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns a "no incomplete sessions" message when the dir has no stale logs', async () => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = await mkdtemp(join(tmpdir(), 'resume-clean-'));
+    try {
+      // Clean shutdown.
+      const log = [
+        JSON.stringify({ type: 'in_flight_start', ts: '2026-01-01T00:00:00Z', context: 'x' }),
+        JSON.stringify({ type: 'in_flight_end', ts: '2026-01-01T00:00:01Z', reason: 'clean' }),
+        '',
+      ].join('\n');
+      await writeFile(join(dir, 's-clean.jsonl'), log, 'utf8');
+      const cmd = buildLoadCommand({ paths: { projectSessions: dir } } as never);
+      const res = await cmd.run('--incomplete', fakeCtx());
+      expect(res?.message).toMatch(/no incomplete/i);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('warns when no paths are configured', async () => {
+    const cmd = buildLoadCommand({} as never);
+    const res = await cmd.run('--incomplete', fakeCtx());
+    expect(res?.message).toMatch(/no paths configured/i);
+  });
+});
+
+// ── /resume --recover <sessionId> ───────────────────────────────────────────
+
+describe('buildLoadCommand --recover <sessionId>', () => {
+  it('returns a recovery plan for a stale session', async () => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = await mkdtemp(join(tmpdir(), 'resume-recover-'));
+    try {
+      const log = [
+        JSON.stringify({ type: 'session_start', ts: '2026-01-01T00:00:00Z', id: 's-recover', model: 'm', provider: 'p' }),
+        JSON.stringify({ type: 'checkpoint', ts: '2026-01-01T00:00:01Z', promptIndex: 0, promptPreview: 'before the crash' }),
+        JSON.stringify({ type: 'in_flight_start', ts: '2026-01-01T00:00:02Z', context: 'iteration 7 / tool: bash' }),
+        '',
+      ].join('\n');
+      await writeFile(join(dir, 's-recover.jsonl'), log, 'utf8');
+      const cmd = buildLoadCommand({ paths: { projectSessions: dir } } as never);
+      const res = await cmd.run('--recover s-recover', fakeCtx());
+      expect(res?.message).toContain('Recovery plan for s-recover');
+      expect(res?.message).toContain('Stale: yes');
+      expect(res?.message).toContain('iteration 7 / tool: bash');
+      expect(res?.message).toContain('before the crash');
+      expect(res?.message).toContain('Pending events: 1');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns a "not found" message for a missing session', async () => {
+    const { mkdtemp, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = await mkdtemp(join(tmpdir(), 'resume-recover-empty-'));
+    try {
+      const cmd = buildLoadCommand({ paths: { projectSessions: dir } } as never);
+      const res = await cmd.run('--recover no-such', fakeCtx());
+      expect(res?.message).toMatch(/no session log found/i);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('marks plan as not-stale for a clean session', async () => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = await mkdtemp(join(tmpdir(), 'resume-recover-clean-'));
+    try {
+      const log = [
+        JSON.stringify({ type: 'session_start', ts: '2026-01-01T00:00:00Z', id: 's-clean', model: 'm', provider: 'p' }),
+        JSON.stringify({ type: 'in_flight_end', ts: '2026-01-01T00:00:01Z', reason: 'clean' }),
+        '',
+      ].join('\n');
+      await writeFile(join(dir, 's-clean.jsonl'), log, 'utf8');
+      const cmd = buildLoadCommand({ paths: { projectSessions: dir } } as never);
+      const res = await cmd.run('--recover s-clean', fakeCtx());
+      expect(res?.message).toContain('Stale: no');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ── /exit ────────────────────────────────────────────────────────────────────
 
 describe('buildExitCommand', () => {

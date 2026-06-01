@@ -345,6 +345,15 @@ export interface EventMap {
   /** Fired by SessionWriter.writeCheckpoint() after the checkpoint event is appended to JSONL. */
   'checkpoint.written': { promptIndex: number; promptPreview: string; ts: string; fileCount: number };
   /**
+   * Fired by SessionWriter.writeInFlightMarker() — the agent loop has
+   * started a long-running operation. Pairs with `in_flight.ended`
+   * on clean shutdown. A marker with no end indicates a crash.
+   * (Idea #1 from IDEAS.md — Stateful Session Recovery.)
+   */
+  'in_flight.started': { context: string; ts: string };
+  /** Fired by SessionWriter.clearInFlightMarker() — operation completed cleanly. */
+  'in_flight.ended': { reason: 'clean' | 'aborted' | 'recovered'; ts: string };
+  /**
    * Fired after a session rewind completes: files are reverted and the session
    * history is truncated. The TUI listens to this to update its checkpoint
    * list and clear history entries that are now invalid.

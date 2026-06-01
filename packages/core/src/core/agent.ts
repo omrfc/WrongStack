@@ -18,7 +18,6 @@ import type { Plugin, PluginAPI } from '../types/plugin.js';
 import type { Request, Response } from '../types/provider.js';
 import type { Renderer } from '../types/renderer.js';
 import type { RetryPolicy } from '../types/retry-policy.js';
-import type { SecretScrubber } from '../types/secret-scrubber.js';
 import type { Tool } from '../types/tool.js';
 import type { ToolExecutorLike } from '../types/tool-executor.js';
 import { repairToolUseAdjacency } from '../utils/message-invariants.js';
@@ -174,7 +173,6 @@ export class Agent {
   readonly pipelines: AgentPipelines;
   readonly ctx: Context;
   private readonly maxIterations: number;
-  private readonly iterationTimeoutMs: number;
   private readonly executionStrategy: 'parallel' | 'sequential' | 'smart';
   private readonly perIterationOutputCapBytes: number;
   private readonly plugins: { plugin: Plugin; api: PluginAPI }[] = [];
@@ -193,7 +191,6 @@ export class Agent {
     this.pipelines = init.pipelines;
     this.ctx = init.context;
     this.maxIterations = init.maxIterations ?? DEFAULT_MAX_ITERATIONS;
-    this.iterationTimeoutMs = init.iterationTimeoutMs ?? 300_000;
     this.executionStrategy = init.executionStrategy ?? 'smart';
     this.perIterationOutputCapBytes = init.perIterationOutputCapBytes ?? 100_000;
     this.autoExtendLimit = init.autoExtendLimit ?? true;
@@ -215,9 +212,6 @@ export class Agent {
   }
   private get permission(): PermissionPolicy {
     return this.container.resolve(TOKENS.PermissionPolicy);
-  }
-  private get scrubber(): SecretScrubber {
-    return this.container.resolve(TOKENS.SecretScrubber);
   }
   private get renderer(): Renderer | undefined {
     return this.container.has(TOKENS.Renderer)
@@ -404,6 +398,24 @@ export class Agent {
           return { status: 'aborted', iterations };
         }
 
+        // Idea #1 — Stateful Session Recovery. Mark the start of
+        // each iteration so a crashed process leaves a visible
+        // "iteration N was in flight when the process died" record.
+        // The matching `clearInFlightMarker` runs after the iteration
+        // completes (success or thrown). Pairs with SessionRecovery
+        // and `/resume --incomplete`.
+        await this.ctx.session
+          .writeInFlightMarker(`iteration ${i} / max ${this.maxIterations}`)
+          .catch((err) => {
+            // Marker writes are best-effort — never let a logging
+            // failure abort the agent loop.
+            this.logger.debug?.(
+              `in-flight marker write failed: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          });
+
         // Clear any stale autonomous continue flag from a prior iteration.
         // This prevents a stale flag (e.g. from a tool call that set it but
         // then the run crashed before the flag was consumed) from causing
@@ -556,6 +568,22 @@ export class Agent {
       }
     } finally {
       offSubagentDone();
+      // Idea #1 — close the in-flight marker on every exit path. The
+      // controller.signal check at the loop top will have set
+      // `aborted` first, so this distinguishes "user asked to stop"
+      // from "ran to completion". The `clean` / `aborted` split is
+      // what `SessionRecovery.detectStale` and postmortem tooling
+      // look at to decide whether a session is resumable.
+      const reason: 'clean' | 'aborted' = controller.signal.aborted ? 'aborted' : 'clean';
+      await this.ctx.session
+        .clearInFlightMarker(reason)
+        .catch((err) => {
+          this.logger.debug?.(
+            `in-flight marker clear failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        });
     }
   }
 

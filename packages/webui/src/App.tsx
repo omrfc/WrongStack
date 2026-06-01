@@ -4,6 +4,7 @@ import { getWSClient } from '@/lib/ws-client';
 import { useChatStore, useConfigStore, useSessionStore, useUIStore } from '@/stores';
 import { useEffect } from 'react';
 import { ChatView } from './components/ChatView';
+import { CollabPanel } from './components/CollabPanel';
 import { CommandPalette, downloadChatAsMarkdown } from './components/CommandPalette';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { ConnectionBanner } from './components/ConnectionBanner';
@@ -201,7 +202,16 @@ function AppInner() {
       {sidebarOpen && <Sidebar />}
       <main className="flex-1 flex flex-col overflow-hidden">
         <ConnectionBanner />
-        {currentView === 'chat' && <ChatView />}
+        {currentView === 'chat' && (
+          <>
+            {sessionId && (
+              <div className="px-4 pt-2">
+                <CollabPanel sessionId={sessionId} />
+              </div>
+            )}
+            <ChatView />
+          </>
+        )}
         {currentView === 'settings' && <SettingsPanel />}
       </main>
 

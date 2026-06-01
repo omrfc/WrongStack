@@ -1,58 +1,31 @@
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
-import { spawn } from 'node:child_process';
 import type { CommitLLMProvider } from './slash-commands/commit-llm.js';
 import { generateCommitMessageWithLLM } from './slash-commands/commit-llm.js';
 import { makeProviderClassifier } from './slash-commands/dispatch-llm.js';
 import {
-  Agent,
-  AutoCompactionMiddleware,
   type Config,
-  Container,
-  Context,
-  DefaultAttachmentStore,
-  DefaultConfigStore,
-  DefaultErrorHandler,
-  DefaultHealthRegistry,
-  DefaultLogger,
-  DefaultMemoryStore,
-  DefaultModeStore,
-  DefaultModelsRegistry,
   DefaultPathResolver,
   type DefaultPermissionPolicy,
-  DefaultRetryPolicy,
-  DefaultSecretScrubber,
-  DefaultSessionStore,
-  DefaultSkillLoader,
   DefaultSystemPromptBuilder,
   makeAutonomyPromptContributor,
-  DefaultTokenCounter,
   type Director,
   EventBus,
   FLEET_ROSTER,
-  HybridCompactor,
-  type MetricsSink,
   type ProviderRegistry,
-  QueueStore,
-  RecoveryLock,
   SlashCommandRegistry,
   type SystemPromptBuilder,
   TOKENS,
   ToolRegistry,
   allServers,
-  attachTodosCheckpoint,
   color,
   createContextManagerTool,
   EternalAutonomyEngine,
   ParallelEternalEngine,
-  createDefaultPipelines,
   createDelegateTool,
   createMcpControlTool,
   loadDirectorState,
-  loadPlan,
-  loadPlugins,
-  loadTodosCheckpoint,
 } from '@wrongstack/core';
 import { MCPRegistry } from '@wrongstack/mcp';
 import { capabilitiesFor, makeProviderFromConfig } from '@wrongstack/providers';
@@ -67,12 +40,13 @@ import { runPluginManagementCommand } from './plugin-management.js';
 import { runMcpManagementCommand, parseMcpArgs } from './slash-commands/mcp-utils.js';
 import { buildPickableProviders } from './provider-helpers.js';
 import type { TerminalRenderer } from './renderer.js';
+import { bindReplayToContainer } from './wiring/replay.js';
 import { SessionStats } from './session-stats.js';
 import { buildBuiltinSlashCommands } from './slash-commands/index.js';
 import { createAutoPhaseHost } from './autophase-host.js';
-import { buildStatuslineCommand, loadStatuslineConfig, saveStatuslineConfig } from './slash-commands/statusline.js';
+import { loadStatuslineConfig, saveStatuslineConfig } from './slash-commands/statusline.js';
 import { Spinner } from './spinner.js';
-import { fmtTaskResultLine, fmtTok, patchConfig } from './utils.js';
+import { fmtTaskResultLine, patchConfig } from './utils.js';
 import { createAgent, setupCompaction, setupPipelines } from './wiring/pipeline.js';
 import { setupMetrics } from './wiring/metrics.js';
 import { setupPlugins } from './wiring/plugins.js';
@@ -99,7 +73,6 @@ type ContainerPromptDelegate = (
 ) => Promise<'yes' | 'no' | 'always' | 'deny'>;
 
 /** Set of listeners for journal-entry events from the eternal engine. */
-const eternalListeners = new Set<(entry: import('@wrongstack/core').JournalEntry) => void>();
 /** Set of listeners for stage-transition events from the eternal engine. */
 const stageListeners = new Set<(stage: {
   phase: 'idle';
@@ -138,7 +111,6 @@ export async function main(argv: string[]): Promise<number> {
     wpaths,
     cwd,
     projectRoot,
-    userHome,
     flags,
     positional,
     modelsRegistry,
@@ -182,6 +154,30 @@ export async function main(argv: string[]): Promise<number> {
     compactor: { preserveK: config.context.preserveK, eliseThreshold: config.context.eliseThreshold },
     bundledSkillsDir: config.features.skills ? resolveBundledSkillsDir() : undefined,
   });
+
+  // Replay wiring (idea #2). When `--replay <sessionId>` is set, every
+  // provider call is served from the recorded log; `--record` writes
+  // a fresh log; `--replay=auto <sessionId>` does both. The
+  // ReplayProviderRunner is bound under TOKENS.ProviderRunner so the
+  // agent picks it up transparently.
+  const replayFlag = flags['replay'];
+  const recordFlag = flags['record'];
+  if (typeof replayFlag === 'string' || recordFlag === true) {
+    const sessionId =
+      typeof replayFlag === 'string' ? replayFlag : `record-${Date.now()}`;
+    const mode = recordFlag === true ? 'record' : 'replay';
+    bindReplayToContainer({
+      container,
+      wpaths,
+      sessionId,
+      mode,
+      logger,
+    });
+    logger.info(
+      `replay: ProviderRunner bound in '${mode}' mode for session ${sessionId}`,
+    );
+  }
+
   const configStore = container.resolve(TOKENS.ConfigStore);
   container.bind(TOKENS.PathResolver, () => pathResolver);
   container.bind(TOKENS.Renderer, () => renderer);
@@ -267,7 +263,7 @@ export async function main(argv: string[]): Promise<number> {
   events.setLogger(logger);
 
   // Metrics wiring — extracted to wiring/metrics.ts
-  const { metricsSink, healthRegistry, metricsServerHandle } = (() => {
+  const { metricsSink, healthRegistry } = (() => {
     const ms = setupMetrics({ flags, wpaths, events, logger, config: { provider: config.provider, model: config.model } });
     return ms;
   })();
@@ -360,7 +356,6 @@ export async function main(argv: string[]): Promise<number> {
   });
   const session = sessResult.session;
   sessionRef.current = session;
-  const restoredMessages = sessResult.restoredMessages;
   const context = sessResult.context;
   const attachments = sessResult.attachments;
   const recoveryLock = sessResult.recoveryLock;

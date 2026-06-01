@@ -253,6 +253,7 @@ import { buildSddCommand } from './sdd.js';
 import { buildStatuslineCommand } from './statusline.js';
 import { buildFixCommand } from './fix.js';
 import { buildAutoPhaseCommand } from './autophase.js';
+import { buildCollabCommand } from './collab.js';
 import { buildWorktreeCommand } from './worktree.js';
 import { buildSettingsCommand } from './settings.js';
 
@@ -287,6 +288,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildAutoPhaseCommand(opts),
     buildWorktreeCommand(opts),
     buildSettingsCommand(opts),
+    buildCollabCommand(opts),
     buildStatuslineCommand({
       cwd: opts.cwd,
       hiddenItems: opts.statuslineHiddenItems ?? [],

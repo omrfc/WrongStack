@@ -1,0 +1,221 @@
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import { atomicWrite } from '../utils/atomic-write.js';
+import { hashRequest } from '../replay/hash.js';
+import type { Request, Response } from '../types/provider.js';
+
+/**
+ * ReplayLogStore — sidecar store for deterministic-replay support
+ * (idea #2 from IDEAS.md). One JSONL file per session, recording
+ * every provider request/response pair so the same agent loop can
+ * be re-run later with frozen API responses.
+ *
+ * Why a sidecar (not the session JSONL)?
+ *
+ *   Same reason as `AnnotationsStore` — the session log is
+ *   event-sourced and append-only; a provider request payload can be
+ *   tens of kilobytes (especially with long conversation history),
+ *   and we want replay to be opt-in (recorded only when the user
+ *   runs with `--replay` or a future equivalent). Mixing it into
+ *   the event log would inflate every read for replay-irrelevant
+ *   paths.
+ *
+ * File layout: `<dir>/<sessionId>.replay.jsonl`, one entry per line.
+ * Each entry: `{ hash, ts, request, response }`. The `hash` is
+ * computed via `hashRequest` so lookups are O(1) by hash.
+ *
+ * Concurrency: per-session write queue (same pattern as
+ * `AnnotationsStore`). Reads are lock-free; the write chain makes
+ * the append + rehash sequence atomic.
+ */
+export interface ReplayEntry {
+  hash: string;
+  ts: string;
+  request: Request;
+  response: Response;
+}
+
+const FILE_VERSION = 1;
+
+/** Default cap on the number of entries per session. */
+const DEFAULT_MAX_ENTRIES = 1000;
+
+export interface ReplayLogStoreOptions {
+  /** Directory where `<sessionId>.replay.jsonl` files live. */
+  dir: string;
+  /**
+   * Cap on the number of entries per session. When a `record` would
+   * push the file beyond this, the oldest entries are evicted (LRU
+   * by insertion order). Set to `Infinity` to disable rotation.
+   * Defaults to 1000 — a single LLM call averages ~5KB serialized
+   * (messages + tools + response), so 1000 entries is ~5MB per
+   * session which is a reasonable upper bound.
+   */
+  maxEntries?: number;
+}
+
+export class ReplayLogStore {
+  private readonly dir: string;
+  private readonly writeChains = new Map<string, Promise<void>>();
+  /** Per-session hash → entry index, kept in memory after the first load. */
+  private readonly cache = new Map<string, Map<string, ReplayEntry>>();
+  private readonly maxEntries: number;
+
+  constructor(opts: ReplayLogStoreOptions) {
+    this.dir = opts.dir;
+    this.maxEntries = opts.maxEntries ?? DEFAULT_MAX_ENTRIES;
+  }
+
+  // ── Writes ──────────────────────────────────────────────────────────────
+
+  /**
+   * Record a request/response pair. Idempotent on hash: a second
+   * `record` for the same hash is a no-op (the existing entry wins).
+   * Returns the hash.
+   */
+  async record(input: {
+    sessionId: string;
+    request: Request;
+    response: Response;
+  }): Promise<string> {
+    const hash = hashRequest(input.request);
+    await this.enqueue(input.sessionId, async () => {
+      const cache = await this.ensureCache(input.sessionId);
+      if (cache.has(hash)) return; // already recorded
+      const entry: ReplayEntry = {
+        hash,
+        ts: new Date().toISOString(),
+        request: input.request,
+        response: input.response,
+      };
+      // Append the new entry, then enforce the rotation cap. The
+      // `Map.values()` order is insertion order, so evicting the
+      // first N entries preserves the most recent N — exactly the
+      // LRU-by-insertion semantics we want for a replay log.
+      let all = [...cache.values(), entry];
+      if (all.length > this.maxEntries) {
+        const evictCount = all.length - this.maxEntries;
+        all = all.slice(evictCount);
+      }
+      await this.writeAll(input.sessionId, all);
+      // Reset the cache to match the rotated file.
+      cache.clear();
+      for (const e of all) cache.set(e.hash, e);
+    });
+    return hash;
+  }
+
+  // ── Reads ───────────────────────────────────────────────────────────────
+
+  /**
+   * Look up an entry by hash. Returns `null` when the request has
+   * not been recorded for this session. O(1) after the first call
+   * per session (in-memory cache).
+   */
+  async lookup(sessionId: string, hash: string): Promise<ReplayEntry | null> {
+    const cache = await this.ensureCache(sessionId);
+    return cache.get(hash) ?? null;
+  }
+
+  /** All recorded entries for a session, in insertion order. */
+  async load(sessionId: string): Promise<ReplayEntry[]> {
+    const cache = await this.ensureCache(sessionId);
+    return [...cache.values()];
+  }
+
+  /**
+   * List every session id that has a replay log in the store dir.
+   * Returns an array of `{ sessionId, entryCount, path }` sorted
+   * by sessionId for stable output. Used by `wstack replay --list`.
+   */
+  async list(): Promise<Array<{ sessionId: string; entryCount: number; path: string }>> {
+    let entries: string[];
+    try {
+      entries = await fs.readdir(this.dir);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      return [];
+    }
+    const out: Array<{ sessionId: string; entryCount: number; path: string }> = [];
+    for (const name of entries) {
+      if (!name.endsWith('.replay.jsonl')) continue;
+      const sessionId = name.slice(0, -'.replay.jsonl'.length);
+      const all = await this.load(sessionId);
+      out.push({
+        sessionId,
+        entryCount: all.length,
+        path: path.join(this.dir, name),
+      });
+    }
+    return out.sort((a, b) => a.sessionId.localeCompare(b.sessionId));
+  }
+
+  // ── Internals ───────────────────────────────────────────────────────────
+
+  private filePath(sessionId: string): string {
+    if (!sessionId || sessionId.includes('/') || sessionId.includes('\\') || sessionId.includes('..')) {
+      throw new Error(`Invalid sessionId: ${sessionId}`);
+    }
+    return path.join(this.dir, `${sessionId}.replay.jsonl`);
+  }
+
+  private async readAll(sessionId: string): Promise<ReplayEntry[]> {
+    const fp = this.filePath(sessionId);
+    try {
+      const raw = await fs.readFile(fp, 'utf8');
+      const out: ReplayEntry[] = [];
+      for (const line of raw.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          const parsed = JSON.parse(line) as { version?: number; entry?: ReplayEntry } & ReplayEntry;
+          // Forward-compat: v1 stores entries one per line, no envelope.
+          // A future "v2" could wrap with `{version, entries:[...]}`;
+          // the loader would then branch on `parsed.version`.
+          if ('entry' in parsed && parsed.entry) {
+            out.push(parsed.entry);
+          } else {
+            out.push(parsed);
+          }
+        } catch {
+          // Skip a corrupt line — annotations-store and other sidecar
+          // stores take the same approach (meta-data, not fatal).
+        }
+      }
+      return out;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      // Corrupt or unreadable: treat as empty.
+      return [];
+    }
+  }
+
+  private async writeAll(sessionId: string, entries: ReplayEntry[]): Promise<void> {
+    const fp = this.filePath(sessionId);
+    const body = entries.map((e) => JSON.stringify(e)).join('\n') + (entries.length ? '\n' : '');
+    await atomicWrite(fp, body);
+    // Drop the version-stamp comment at the top — v1 has no envelope,
+    // but we keep a one-line marker for human readers / future tooling.
+    // (The atomicWrite just wrote pure JSONL; that's correct for v1.)
+    void FILE_VERSION;
+  }
+
+  private async ensureCache(sessionId: string): Promise<Map<string, ReplayEntry>> {
+    let cache = this.cache.get(sessionId);
+    if (cache) return cache;
+    const all = await this.readAll(sessionId);
+    cache = new Map();
+    for (const e of all) cache.set(e.hash, e);
+    this.cache.set(sessionId, cache);
+    return cache;
+  }
+
+  private enqueue(sessionId: string, fn: () => Promise<void>): Promise<void> {
+    const prev = this.writeChains.get(sessionId) ?? Promise.resolve();
+    const next = prev.then(fn, fn);
+    this.writeChains.set(
+      sessionId,
+      next.catch(() => undefined),
+    );
+    return next;
+  }
+}

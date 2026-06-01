@@ -1,29 +1,22 @@
 import * as fs from 'node:fs/promises';
 import * as http from 'node:http';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   Agent,
   AutoCompactionMiddleware,
-  type Config,
-  Container,
   Context,
-  DefaultConfigLoader,
-  DefaultConfigStore,
-  DefaultErrorHandler,
-  DefaultLogger,
   DefaultMemoryStore,
   DefaultModeStore,
   DefaultModelsRegistry,
-  DefaultPathResolver,
-  DefaultPermissionPolicy,
-  DefaultRetryPolicy,
-  DefaultSecretScrubber,
-  DefaultSecretVault,
+  DefaultSessionReader,
   DefaultSessionStore,
   DefaultSkillLoader,
   DefaultSystemPromptBuilder,
   DefaultTokenCounter,
+  AnnotationsStore,
+  CollaborationBus,
+  collabPauseMiddleware,
+  collabInjectMiddleware,
   estimateRequestTokens,
   EventBus,
   HybridCompactor,
@@ -33,13 +26,10 @@ import {
   ProviderRegistry,
   TOKENS,
   ToolRegistry,
-  type WstackPaths,
   atomicWrite,
   createDefaultPipelines,
   DEFAULT_CONTEXT_WINDOW_MODE_ID,
   DEFAULT_TOOLS_CONFIG,
-  migratePlaintextSecrets,
-  resolveWstackPaths,
   listContextWindowModes,
   repairToolUseAdjacency,
   resolveContextWindowPolicy,
@@ -51,8 +41,9 @@ import { builtinToolsPack, forgetTool, rememberTool } from '@wrongstack/tools';
 import { WebSocket, WebSocketServer } from 'ws';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createDefaultContainer } from '../../../runtime/src/container.js';
-import { bootConfig, patchConfig, type BootResult } from './boot.js';
+import { bootConfig, patchConfig, } from './boot.js';
 import { AutoPhaseWebSocketHandler } from './autophase-ws-handler.js';
+import { CollaborationWebSocketHandler } from './collaboration-ws-handler.js';
 import { WorktreeWebSocketHandler } from './worktree-ws-handler.js';
 
 // Re-export types
@@ -157,6 +148,14 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
 
   // Session store
   const sessionStore = new DefaultSessionStore({ dir: wpaths.projectSessions });
+  // Session reader — same on-disk store, read-only access. Used by the
+  // collaboration handler to replay the last N events to late-joining
+  // observers (Phase 1.5 of idea #13).
+  const sessionReader = new DefaultSessionReader({ store: sessionStore });
+  // Annotations store — sidecar files for collaboration notes (Phase 2
+  // of idea #13). Living under `projectSessions` so all per-session
+  // data is colocated and travels with the project.
+  const annotationsStore = new AnnotationsStore({ dir: wpaths.projectSessions });
   let session = await sessionStore.create({
     id: '',
     title: '',
@@ -275,7 +274,26 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
 
   // Pipelines
   const pipelines = createDefaultPipelines();
-
+  // Collaboration bus — process-singleton pause/resume signal. The
+  // middleware below hooks it into the toolCall pipeline so a
+  // `controller` participant can halt the agent before the next tool
+  // call (Phase 3 of idea #13). The same bus instance is shared with
+  // the CollaborationWebSocketHandler so client pause/resume requests
+  // are routed to the kernel.
+  const collabBus = new CollaborationBus();
+  // prepend (not use) — the pause check must run first, before any
+  // permission/retry middleware that would otherwise proceed.
+  const collabPause = collabPauseMiddleware(collabBus, { logger });
+  Object.defineProperty(collabPause, 'name', { value: 'collab-pause' });
+  pipelines.toolCall.prepend(collabPause as never);
+  // Phase 4 — collab-inject. Installed AFTER collab-pause so the
+  // controller can pause + inject before the next tool runs. The
+  // middleware checks the bus's injection queue and splices a
+  // synthetic tool_result when a controller has queued one for
+  // the current toolUse.id.
+  const collabInject = collabInjectMiddleware(collabBus, { logger });
+  Object.defineProperty(collabInject, 'name', { value: 'collab-inject' });
+  pipelines.toolCall.prepend(collabInject as never);
   // Compactor
   const compactor = new HybridCompactor({
     preserveK: config.context?.preserveK ?? 20,
@@ -368,6 +386,19 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   // Worktree handler — subscribes to the shared EventBus `worktree.*` events
   // and streams live swim-lane / DAG state to connected clients.
   const worktreeHandler = new WorktreeWebSocketHandler(events, logger);
+
+  // Collaboration handler — Phase 1 of idea #13. Lets a second client
+  // (e.g. a senior dev) join an active agent run as a read-only
+  // observer and watch a live mirror of kernel events. Annotated and
+  // controller roles land in Phase 2/3. The session reader enables
+  // replay-on-join for late observers.
+  const collabHandler = new CollaborationWebSocketHandler(
+    events,
+    logger,
+    sessionReader,
+    annotationsStore,
+    collabBus,
+  );
 
   // Helper: build the rich session.start payload from current runtime state.
   // Centralised so initial connect, post-/new, and post-model.switch all
@@ -726,6 +757,8 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     autoPhaseHandler.addClient(ws);
     // …and the worktree handler for live isolation lanes.
     worktreeHandler.addClient(ws);
+    // …and the collaboration handler for read-only session observation.
+    collabHandler.addClient(ws);
 
     ws.on('message', async (data) => {
       if (!checkRateLimit(ws, client)) {
@@ -813,10 +846,20 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
 
   async function handleMessage(
     ws: WebSocket,
-    client: ConnectedClient,
+    _client: ConnectedClient,
     msg: WSClientMessage,
   ): Promise<void> {
     switch (msg.type) {
+      // Collaboration messages short-circuit the user/agent flow.
+      // They don't touch runLock, the agent loop, or the message queue —
+      // they're pure transport for the live observer mirror.
+      case 'collab.join':
+      case 'collab.leave':
+      case 'collab.annotate':
+      case 'collab.resolve': {
+        collabHandler.handleMessage(ws, msg as { type: string; payload?: unknown });
+        return;
+      }
       case 'user_message': {
         const content = (msg as { payload: { content: string } }).payload.content;
 
@@ -1566,7 +1609,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
           break;
         }
         try {
-          const { getPlanTemplate, loadPlan, savePlan, emptyPlan, addPlanItem, formatPlan } = await import('@wrongstack/core');
+          const { getPlanTemplate, loadPlan, savePlan, emptyPlan, addPlanItem } = await import('@wrongstack/core');
           const tpl = getPlanTemplate(template);
           if (!tpl) {
             sendResult(ws, false, `Unknown template "${template}".`);

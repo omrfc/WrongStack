@@ -35,6 +35,28 @@ export {
   type AbandonedSession,
 } from './recovery-lock.js';
 export { DefaultSessionReader } from './session-reader.js';
+export type { SessionReader, DefaultSessionReaderOptions } from '../types/session-reader.js';
+export {
+  AnnotationsStore,
+  type Annotation,
+  type AnnotationsStoreOptions,
+} from './annotations-store.js';
+export {
+  ReplayLogStore,
+  type ReplayEntry,
+  type ReplayLogStoreOptions,
+} from './replay-log-store.js';
+export {
+  SessionRecovery,
+  type StaleSession,
+  type RecoveryPlan,
+} from './session-recovery.js';
+export {
+  ToolAuditLog,
+  type AuditEntry,
+  type ToolAuditLogOptions,
+  type VerifyResult,
+} from './tool-audit-log.js';
 export { SessionAnalyzer } from './session-analyzer.js';
 export {
   DefaultSessionRewinder,
@@ -95,4 +117,4 @@ export {
   type SyncResult,
   ALL_SYNC_CATEGORIES,
 } from './cloud-sync.js';
-export { type SyncConfig, type SyncCategory } from '../types/config.js';
+export type { SyncConfig, SyncCategory } from '../types/config.js';

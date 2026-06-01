@@ -54,7 +54,28 @@ export type SessionEvent =
   | { type: 'message_truncated'; ts: string; before: number; after: number }
   | { type: 'checkpoint'; ts: string; promptIndex: number; promptPreview: string }
   | { type: 'file_snapshot'; ts: string; promptIndex: number; files: FileSnapshot[] }
-  | { type: 'rewound'; ts: string; toPromptIndex: number; revertedFiles: string[] };
+  | { type: 'rewound'; ts: string; toPromptIndex: number; revertedFiles: string[] }
+  | {
+      /**
+       * Idea #1 from IDEAS.md — Stateful Session Recovery.
+       *
+       * Marks the start of "the process is currently working on this
+       * point in the log". If the process exits cleanly, a matching
+       * `in_flight_end` follows. If the process dies (crash, OOM,
+       * machine sleep, SIGKILL) the marker is the last event in the
+       * file — and `SessionRecovery.detectStale` flags the session
+       * as resumable.
+       *
+       * `context` is a free-form description of the current
+       * operation (e.g. "iteration 14 / tool: read / id: tu-7") so
+       * the recovery UI can show "what was the agent doing when it
+       * died?".
+       */
+      type: 'in_flight_start';
+      ts: string;
+      context: string;
+    }
+  | { type: 'in_flight_end'; ts: string; reason: 'clean' | 'aborted' | 'recovered' };
 
 export type FileSnapshot = {
   path: string;
@@ -146,4 +167,27 @@ export interface SessionWriter {
    * Called by /clear to wipe chat history from persistent storage.
    */
   clearSession(): Promise<void>;
+  /**
+   * Idea #1 from IDEAS.md — Stateful Session Recovery.
+   *
+   * Writes an `in_flight_start` event at the current point in the
+   * log. The agent loop should call this at the start of every
+   * long-running operation (an iteration, a tool execution, a
+   * streaming LLM call) so that a crashed process leaves a
+   * visible "what was I doing?" marker. Pair with
+   * `clearInFlightMarker` on clean shutdown.
+   *
+   * The `context` string is surfaced verbatim by
+   * `SessionRecovery.detectStale` and the `/resume --incomplete`
+   * CLI command, so prefer something a human can read at a glance:
+   *   "iteration 14 / tool: read / id: tu-7"
+   */
+  writeInFlightMarker(context: string): Promise<void>;
+  /**
+   * Writes an `in_flight_end` event. Call on every clean exit
+   * point (after a successful iteration, after the user issues
+   * /exit, after a graceful SIGINT, etc.). The `reason` is
+   * surfaced in the session log for postmortem review.
+   */
+  clearInFlightMarker(reason: 'clean' | 'aborted' | 'recovered'): Promise<void>;
 }

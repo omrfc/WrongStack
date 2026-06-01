@@ -23,6 +23,7 @@ export {
   createDefaultPipelines,
   DEFAULT_MAX_ITERATIONS,
 } from './core/agent.js';
+export { runProviderWithRetry } from './core/provider-runner.js';
 export {
   parseContinueDirective,
   type ContinueDirective,
@@ -241,6 +242,27 @@ export {
   type AgentFactoryResult,
   type AgentRunnerOptions,
 } from './coordination/agent-subagent-runner.js';
+export {
+  CollaborationBus,
+  type CollabBusState,
+} from './coordination/collab-bus.js';
+export {
+  collabPauseMiddleware,
+  type CollabPauseMiddlewareOptions,
+} from './middleware/collab-pause.js';
+export {
+  collabInjectMiddleware,
+  type InjectedToolResult as CollabInjectedToolResult,
+} from './middleware/collab-pause.js';
+export {
+  hashRequest,
+  stableStringify,
+} from './replay/hash.js';
+export {
+  ReplayProviderRunner,
+  type ReplayMode,
+  type ReplayProviderRunnerOptions,
+} from './replay/replay-provider-runner.js';
 
 // Built-in plugins
 export { createPromptsPlugin } from './plugins/prompts-plugin.js';
