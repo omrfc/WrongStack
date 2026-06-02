@@ -462,8 +462,11 @@ function htmlToMarkdown(html: string): string {
   s = s.replace(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/gi, '**$2**');
   s = s.replace(/<(em|i)[^>]*>([\s\S]*?)<\/\1>/gi, '*$2*');
   // Links — only emit markdown links for safe protocols
+  // Explicitly reject dangerous schemes (javascript:, data:, vbscript:) to prevent XSS
   s = s.replace(/<a [^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, (_m, href, text) => {
-    const safe = /^(https?|ftps?):\/\//i.test(href);
+    const safe =
+      /^(https?|ftps?):\/\//i.test(href) &&
+      !/^(javascript|data|vbscript):/i.test(href);
     return safe ? `[${text}](${href})` : text;
   });
   // Code

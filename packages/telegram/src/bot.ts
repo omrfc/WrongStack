@@ -1,9 +1,12 @@
 import type { Logger } from '@wrongstack/core';
 
 // ---------------------------------------------------------------------------
-// Redaction helpers
+// Redaction helpers (for future use)
 // ---------------------------------------------------------------------------
-
+// If logging URLs that contain the bot token in the future, use:
+// function redactToken(url: string, token: string): string {
+//   return url.replace(token, '[REDACTED]');
+// }
 
 // ---------------------------------------------------------------------------
 // Telegram Bot API types (subset used by this plugin)
