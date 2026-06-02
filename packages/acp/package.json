@@ -1,6 +1,6 @@
 {
   "name": "@wrongstack/acp",
-  "version": "0.10.3",
+  "version": "0.23.1",
   "description": "ACP (Agent Client Protocol) integration for WrongStack — client + agent support",
   "type": "module",
   "exports": {

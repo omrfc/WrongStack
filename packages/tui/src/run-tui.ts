@@ -1,4 +1,4 @@
-import { PassThrough } from 'node:stream';
+import { Readable } from 'node:stream';
 import type {
   Agent,
   AttachmentStore,
@@ -320,20 +320,53 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
   let inkStdin: NodeJS.ReadStream = stdin;
   let detachMouse: (() => void) | null = null;
   if (useMouse) {
-    // Use a PassThrough whose _read() actually pulls buffered data to the
-    // readable side.  The base PassThrough._read is a no-op, so when Ink adds
-    // a 'readable' listener and calls stdin.read() the buffered data is never
-    // surfaced — the entire input pipeline deadlocks (mouse AND keyboard).
-    const proxy = new PassThrough();
-    // _read override: the base implementation is a no-op, so we call read(0)
-    // on the readable side so that buffered data emits 'readable' and Ink's
-    // handleReadable fires (fixes the mouse-mode deadlock).
-    proxy._read = function (this: PassThrough, _size: number) {
-      // Trigger a read(0) call on the readable side so that any buffered data
-      // emits a 'readable' event and Ink's handleReadable fires.
-      this.read(0);
-    };
-    const p = proxy as unknown as NodeJS.ReadStream;
+    /**
+     * Keyboard-only readable stream that fans out SGR mouse bytes to subscribers
+     * and forwards the remaining keyboard bytes to Ink's stdin.
+     *
+     * PassThrough was tried first but its _read(0) override destabilises the
+     * internal `needReadable` state machine: _read(0) calls this.read(0) which
+     * returns null when the buffer is empty, preventing PassThrough from ever
+     * emitting the 'readable' event that Ink's handleReadable waits on — classic
+     * deadlock (mouse AND keyboard freeze).  A minimal custom Readable avoids
+     * this because _read(size) is only called when downstream demands data,
+     * and we explicitly push() to signal availability.
+     */
+    class KeyboardReadable extends Readable {
+      // eslint-disable-next-line no-useless-constructor
+      constructor() {
+        super({ encoding: 'utf8' });
+      }
+      override _read(_size: number): void {
+        // No-op: data arrives via push() from the stdin data handler below.
+        // Keeping _read present satisfies the Readable contract without
+        // interfering with the push() signalling that Ink's 'readable' listener
+        // depends on.
+        void _size;
+      }
+      /** Called by the stdin data handler when keyboard bytes are available. */
+      doPush(chunk: string): void {
+        if (chunk.length === 0) return;
+        // push() returns false when the internal buffer exceeds its high-water
+        // mark.  Readable then suppresses further _read() calls until it drains.
+        // That back-pressure signal propagates: the readable side stops calling
+        // _read(), stdin naturally stops emitting data events (the event loop is
+        // busy with Ink rendering), and everything resumes once Ink has consumed
+        // enough bytes and the HWM drops.
+        const ok = this.push(chunk);
+        if (!ok) {
+          // Buffer is full — stdin will naturally stop emitting data events
+          // because the event loop isn't cycling while Ink is rendering.
+          // Once Ink reads from us and the HWM drops, readable fires again.
+        }
+      }
+      /** Called on shutdown so the stream closes cleanly. */
+      doEnd(): void {
+        this.push(null); // null = EOF
+      }
+    }
+    const keyboardStream = new KeyboardReadable();
+    const p = keyboardStream as unknown as NodeJS.ReadStream;
     // Ink probes isTTY and drives raw mode / ref bookkeeping on its stdin;
     // delegate those to the real terminal so its behavior is unchanged.
     p.isTTY = true;
@@ -368,10 +401,13 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
         }
       }
       const rest = stripSgrMouse(chunk);
-      if (rest.length > 0) proxy.write(rest);
+      keyboardStream.doPush(rest);
     };
     stdin.on('data', onData);
-    detachMouse = () => stdin.off('data', onData);
+    detachMouse = () => {
+      stdin.off('data', onData);
+      keyboardStream.doEnd();
+    };
     inkStdin = p;
   }
   const subscribeMouse = useMouse

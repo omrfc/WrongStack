@@ -16,7 +16,7 @@ import { InputBuilder, buildGoalPreamble, formatTodosList } from '@wrongstack/co
 import { type VisionAdapters, routeImagesForModel } from '@wrongstack/runtime/vision';
 import { getProcessRegistry } from '@wrongstack/tools';
 import { Box, type DOMElement, Text, measureElement, useApp, useStdout } from 'ink';
-import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { readClipboardImage } from './clipboard.js';
 import { AgentsMonitor } from './components/agents-monitor.js';
 import {
@@ -1979,8 +1979,12 @@ export function App({
   // mode; harmless to track otherwise.
   const { stdout } = useStdout();
   const [termRows, setTermRows] = useState(stdout?.rows ?? 24);
+  const [termCols, setTermCols] = useState(stdout?.columns ?? 80);
   useEffect(() => {
-    const onResize = () => setTermRows(process.stdout.rows ?? 24);
+    const onResize = () => {
+      setTermRows(process.stdout.rows ?? 24);
+      setTermCols(process.stdout.columns ?? 80);
+    };
     process.stdout.on('resize', onResize);
     return () => {
       process.stdout.off('resize', onResize);
@@ -2218,7 +2222,9 @@ export function App({
     if (vp !== s.viewportRows) {
       dispatch({ type: 'setViewportRows', rows: vp });
     }
-  });
+    // stable deps: stateRef (ref), dispatch (stable from useReducer),
+    // termRows is a prop of the effect scope.
+  }, [managedLive, termRows]);
 
   // Latest handleKey, so click-to-activate can replay an Enter through the
   // normal input pipeline (handleKey is defined far below; the ref is filled
@@ -2314,7 +2320,7 @@ export function App({
           }
           return;
         }
-        const cols = process.stdout.columns ?? 0;
+        const cols = termCols || 80;
         // Accept the scrollbar column plus 1-col left margin so near-misses still grab.
         const onScrollbar = cols > 0 && ev.x >= cols - 2 && ev.y >= 1 && ev.y <= rows;
         if (onScrollbar && s.totalLines > rows) {
@@ -2443,7 +2449,7 @@ export function App({
         // layout the component renders. Skipped while the input is disabled.
         const inputDisabled = s.status === 'aborting' && !s.steeringPending;
         if (!inputDisabled) {
-          const cols = process.stdout.columns ?? 80;
+          const cols = termCols || 80;
           const inputTop = s.viewportRows + affordance + liveStripRowsRef.current + 1;
           const inputRows = layoutInputRows(INPUT_PROMPT, s.buffer, s.cursor, cols).length;
           const rowIdx = ev.y - inputTop;
@@ -2504,7 +2510,8 @@ export function App({
       }
     },
     // dispatch is stable (useReducer); refs are mutable — no reactive deps.
-    [],
+    // termCols is stable (useState + resize effect).
+    [termCols],
   );
   useEffect(() => {
     if (!subscribeMouse) return;
@@ -2799,7 +2806,8 @@ export function App({
   // workflows the bullet-proof alternative is still `--alt-screen`.
   const prevAnyOverlayOpen = useRef(false);
   const prevEntriesCount = useRef(0);
-  const eraseLiveRegion = () => {
+  // Stable erase function — only calls process.stdout.write which is a stable global.
+  const eraseLiveRegion = useCallback(() => {
     try {
       // \x1b[J = erase from cursor to end of screen. The cursor sits at the
       // top of log-update's live region, so this clears the stale live
@@ -2811,7 +2819,7 @@ export function App({
     } catch {
       // stdout might be detached during shutdown — ignore.
     }
-  };
+  }, []);
   useEffect(() => {
     const anyOpenNow =
       state.picker.open ||
@@ -2835,6 +2843,7 @@ export function App({
     state.settingsPicker.open,
     state.confirmQueue.length,
     state.entries.length,
+    eraseLiveRegion,
   ]);
 
   // Erase stale live-region content on terminal resize. Without this, Ink
@@ -2846,7 +2855,7 @@ export function App({
     return () => {
       process.stdout.off('resize', handleResize);
     };
-  }, []);
+  }, [eraseLiveRegion]);
 
   // Detect an active `@<query>` token at the cursor and drive the picker.
   // Reruns whenever buffer/cursor changes — guards against stale results.
