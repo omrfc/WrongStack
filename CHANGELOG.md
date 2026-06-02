@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2026-06-03
+
+> Version-line realignment. No source/behaviour changes — this entry exists
+> solely to reconcile the package versions and the tag history with reality.
+
+### Changed — versions
+
+- **All 15 workspace manifests consolidated to a single `0.24.0`**:
+  root `package.json` plus `wrongstack`, `@wrongstack/acp`, `@wrongstack/cli`,
+  `@wrongstack/core`, `@wrongstack/mcp`, `@wrongstack/plug-lsp`,
+  `@wrongstack/plugins`, `@wrongstack/providers`, `@wrongstack/runtime`,
+  `@wrongstack/skills`, `@wrongstack/telegram`, `@wrongstack/tools`,
+  `@wrongstack/tui`, `@wrongstack/webui`. The tree had drifted out of lockstep —
+  the root manifest had run ahead to `0.28.0` via bump-only commits while the
+  actual packages were still at `0.23.1`. `scripts/bump-version.mjs set 0.24.0`
+  rewrote every manifest to the one shared value.
+
+- **Intermediate `0.11.0`–`0.28.0` bumps collapsed into this entry.** The
+  versions between `0.10.3` and here were mechanical `bump version` commits that
+  shipped no changelog sections of their own and no substantive package changes
+  (they paired with placeholder `feat: update code` commits). They are folded
+  here rather than back-documented.
+
+- **Tag history reset to a single `v0.24.0`.** Every prior tag (`v0.10.2`
+  through `v0.28.0`, local and remote) was deleted; the only tag now is
+  `v0.24.0`, pointing at the realignment commit.
+
 ## [0.10.3] - 2026-06-02
 
 ### Changed
