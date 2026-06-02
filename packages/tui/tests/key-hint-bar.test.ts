@@ -18,8 +18,8 @@ describe('KeyHintBar context priority', () => {
     expect(keys({ monitor: true })).toContain('^F');
   });
 
-  it('idle shows /help and stop; adds scroll hints by capability', () => {
-    expect(keys({})).toEqual(['/help', '^G', '^C']);
+  it('idle shows help and stop; adds scroll hints by capability', () => {
+    expect(keys({})).toEqual(['?', '^G', '^C']);
     expect(keys({ managed: true })).toContain('PgUp/PgDn');
     expect(keys({ mouse: true })).toContain('wheel');
   });

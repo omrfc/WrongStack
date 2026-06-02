@@ -31,6 +31,7 @@ import { FleetMonitor } from './components/fleet-monitor.js';
 import { FleetPanel } from './components/fleet-panel.js';
 import { History, type HistoryEntry } from './components/history.js';
 import { EMPTY_KEY, Input, type KeyEvent } from './components/input.js';
+import { HelpOverlay } from './components/help-overlay.js';
 import { KeyHintBar } from './components/key-hint-bar.js';
 import { LiveActivityStrip } from './components/live-activity-strip.js';
 import { ModelPicker, type ProviderOption } from './components/model-picker.js';
@@ -505,6 +506,8 @@ type State = {
   monitorOpen: boolean;
   /** When true, the agents monitor overlay is shown (Ctrl+G). */
   agentsMonitorOpen: boolean;
+  /** When true, the keys-&-commands help overlay is shown (`?` on an empty prompt). */
+  helpOpen: boolean;
   /**
    * Active or completed collaborative debugging session state.
    * Null when no collab session has run. Tracks counts + the event timeline
@@ -736,6 +739,7 @@ type Action =
   | { type: 'setStreamFleet'; enabled: boolean }
   | { type: 'toggleMonitor' }
   | { type: 'toggleAgentsMonitor' }
+  | { type: 'toggleHelp' }
   | { type: 'checkpointReceived'; cp: State['checkpoints'][0] }
   | { type: 'rewindOverlayOpen' }
   | { type: 'rewindOverlayClose' }
@@ -1430,6 +1434,9 @@ export function reducer(state: State, action: Action): State {
     case 'toggleAgentsMonitor': {
       return { ...state, agentsMonitorOpen: !state.agentsMonitorOpen };
     }
+    case 'toggleHelp': {
+      return { ...state, helpOpen: !state.helpOpen };
+    }
     case 'checkpointReceived': {
       const existing = state.checkpoints.find((c) => c.promptIndex === action.cp.promptIndex);
       if (existing) return state;
@@ -1986,6 +1993,7 @@ export function App({
     streamFleet: true,
     monitorOpen: false,
     agentsMonitorOpen: false,
+    helpOpen: false,
     collabSession: null,
     checkpoints: [],
     rewindOverlay: null,
@@ -4407,6 +4415,13 @@ export function App({
     // is not reliable when multiple useInput hooks are active.
     if (state.confirmQueue.length > 0) return;
 
+    // The help overlay is modal: Esc / `?` / `q` dismiss it; every other key is
+    // swallowed so nothing leaks into the editor or chat behind it.
+    if (state.helpOpen) {
+      if (key.escape || input === '?' || input === 'q') dispatch({ type: 'toggleHelp' });
+      return;
+    }
+
     // Re-entrancy guard: block stale-second events from \r\n terminals.
     if (inputGateRef.current) return;
 
@@ -4752,6 +4767,29 @@ export function App({
         dispatch({ type: 'worktreeMonitorToggle' });
         return;
       }
+    }
+
+    // `?` on an empty prompt opens the keys-&-commands help overlay (lazygit
+    // style). With any draft text it types normally, so a literal `?` mid-
+    // message is never swallowed. Guarded against every other overlay/picker so
+    // it never steals their `?`.
+    if (
+      input === '?' &&
+      !key.ctrl &&
+      !key.meta &&
+      draftRef.current.buffer === '' &&
+      !state.slashPicker.open &&
+      !state.picker.open &&
+      !state.modelPicker.open &&
+      !state.autonomyPicker.open &&
+      !state.rewindOverlay &&
+      !state.monitorOpen &&
+      !state.agentsMonitorOpen &&
+      !state.worktreeMonitorOpen &&
+      !state.autoPhase?.monitorOpen
+    ) {
+      dispatch({ type: 'toggleHelp' });
+      return;
     }
 
     if (isEnter) {
@@ -5558,6 +5596,10 @@ export function App({
             }}
           />
         ) : null}
+        {/* Keys-&-commands help overlay (`?` on an empty prompt). Modal: while
+          open, handleKey swallows everything but Esc/?/q, so it never coexists
+          with a monitor. */}
+        {state.helpOpen ? <HelpOverlay managed={managedLive} mouse={mouseLive} /> : null}
         {/* Agents monitor overlay (Ctrl+G) and fleet monitor overlay (Ctrl+F)
           take up the lower region — hide FleetPanel while any overlay is open. */}
         {state.agentsMonitorOpen ? (

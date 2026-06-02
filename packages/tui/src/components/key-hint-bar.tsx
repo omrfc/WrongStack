@@ -43,7 +43,7 @@ export function hintsFor(ctx: KeyHintContext): Hint[] {
     ];
   }
   // Idle / chat.
-  const base: Hint[] = [{ key: '/help', label: 'cmds' }];
+  const base: Hint[] = [{ key: '?', label: 'help' }];
   if (ctx.managed) base.push({ key: 'PgUp/PgDn', label: 'scroll' });
   if (ctx.mouse) base.push({ key: 'wheel', label: 'scroll' }, { key: 'click', label: 'select' });
   base.push({ key: '^G', label: 'agents' }, { key: '^C', label: 'stop' });
