@@ -21,7 +21,7 @@ export interface FleetPanelProps {
 
 /**
  * Compact fleet summary rendered below the status bar when director mode is
- * active. Max 4 lines: fleet summary + up to 3 running agents with only
+ * active. Max 6 lines: fleet summary + up to 5 running agents with only
  * name and current tool. Idle/finished agents are excluded unless a collab
  * session is active (LEADER always shows as "waiting" in that case).
  */
@@ -70,9 +70,9 @@ export function FleetPanel({
       ? `${runningCount} running${costLabel}${collabLabel}`
       : `idle${costLabel}${collabLabel}`;
 
-  // Show up to 3 running agents (collab agents or regular subagents).
-  const shown = running.slice(0, 3);
-  const overflow = running.length > 3 ? running.length - 3 : 0;
+  // Show up to 5 running agents (collab agents or regular subagents).
+  const shown = running.slice(0, 5);
+  const overflow = running.length > 5 ? running.length - 5 : 0;
 
   // Leader status label: when collab is active show "waiting for agents",
   // otherwise show its current tool or a dash.
@@ -116,12 +116,17 @@ export function FleetPanel({
         );
       })}
 
-      {/* Overflow indicator — show count and the first overflowed agent name */}
+      {/* Overflow indicator — show count and first 2 overflowed agent names */}
       {overflow > 0 ? (
-        <Text dimColor>
-          {' '}
-          +{overflow}: {running[3]?.name?.slice(0, nameMaxLen - 2) ?? 'agent'}…
-        </Text>
+        <Box flexDirection="row" gap={1}>
+          <Text dimColor>+{overflow}:</Text>
+          {running.slice(5, 7).map((e) => (
+            <Text key={e.id} dimColor>
+              {e.name?.split(' ')[0]?.slice(0, nameMaxLen - 2) ?? 'agent'},
+            </Text>
+          ))}
+          <Text dimColor>…</Text>
+        </Box>
       ) : null}
     </Box>
   );

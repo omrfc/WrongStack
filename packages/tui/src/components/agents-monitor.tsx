@@ -243,6 +243,13 @@ export function AgentsMonitor({
               </Box>
             ) : null}
 
+            {/* Failure reason (shown for failed/timeout/stopped agents) */}
+            {e.failureReason && e.status !== 'success' ? (
+              <Box paddingLeft={2}>
+                <Text color="red">✗ {e.failureReason}</Text>
+              </Box>
+            ) : null}
+
             {/* Context window fill bar */}
             {e.ctxPct !== undefined ? (
               <Box paddingLeft={2}>

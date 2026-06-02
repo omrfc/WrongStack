@@ -143,6 +143,12 @@ export interface FleetEntry {
   ctxTokens?: number;
   /** Provider's max context window in tokens (from ctx.pct event). */
   ctxMaxTokens?: number;
+  /**
+   * Human-readable reason for terminal failure, when known.
+   * E.g. "provider_auth", "rate_limit", "timeout", "budget_iterations".
+   * Shown in the Fleet timeline and the per-agent card in the agents monitor.
+   */
+  failureReason?: string;
 }
 
 /** A registered slash command matched against the user's current / query. */
@@ -753,6 +759,8 @@ type Action =
       status: FleetEntry['status'];
       iterations: number;
       toolCalls: number;
+      /** Human-readable failure reason, e.g. "provider_auth", "rate_limit", "timeout". */
+      failureReason?: string;
     }
   | {
       type: 'fleetBudgetWarning';
@@ -1251,10 +1259,38 @@ export function reducer(state: State, action: Action): State {
       return { ...state, fleet: seeded, fleetCost: action.cost };
     }
     case 'fleetSpawn': {
-      if (state.fleet[action.id]) return state;
+      const existing = state.fleet[action.id];
+      const incomingName = action.name ?? action.id.slice(0, 8);
+      // Placeholder names that should be overwritten when a better name arrives.
+      // "adhoc" is what MultiAgentHost.spawn() seeds before Director.spawn()
+      // assigns the real nickname. id-prefix fallbacks also count as placeholders.
+      const isPlaceholderName = (name: string) =>
+        name === 'adhoc' ||
+        name === 'subagent' ||
+        name === 'generic' ||
+        name.startsWith('slot-') ||
+        name === action.id.slice(0, 8);
+
+      if (existing) {
+        // If we already have an entry but it has a placeholder name and the
+        // incoming name is a real improvement, update the name. This handles
+        // the race between EventBus's "subagent.spawned" (which fires before
+        // Director.spawn() assigns the nickname) and FleetBus's
+        // "subagent.assigned" (which fires after the manifest is updated).
+        if (isPlaceholderName(existing.name) && !isPlaceholderName(incomingName) && incomingName !== existing.name) {
+          return {
+            ...state,
+            fleet: {
+              ...state.fleet,
+              [action.id]: { ...existing, name: incomingName },
+            },
+          };
+        }
+        return state;
+      }
       const entry: FleetEntry = {
         id: action.id,
-        name: action.name ?? action.id.slice(0, 8),
+        name: incomingName,
         provider: action.provider,
         model: action.model,
         status: 'idle',
@@ -1395,6 +1431,7 @@ export function reducer(state: State, action: Action): State {
             currentTool: undefined,
             budgetWarning: undefined, // clear on done/restart
             lastEventAt: Date.now(),
+            failureReason: action.failureReason,
           },
         },
       };
@@ -3682,12 +3719,14 @@ export function App({
     });
     const offCompleted = events.on('subagent.task_completed', (e) => {
       const lbl = labelFor(e.subagentId);
+      const errKind = e.error?.kind;
       dispatch({
         type: 'fleetDone',
         id: e.subagentId,
         status: e.status,
         iterations: e.iterations,
         toolCalls: e.toolCalls,
+        failureReason: errKind,
       });
       // Status-specific icon so timeout/stopped/failed are visually
       // distinct from a plain success. We now have a structured error

@@ -55,6 +55,11 @@ const NICKNAME_POOL = {
   'hawking':      { name: 'Hawking',      domain: 'cosmology' },
   'sagan':        { name: 'Sagan',        domain: 'cosmology' },
 
+  // Exploration & navigation
+  'columbus':     { name: 'Columbus',     domain: 'exploration' },
+  'polo':         { name: 'Polo',         domain: 'exploration' },
+  'magellan':     { name: 'Magellan',     domain: 'exploration' },
+
   // Chemistry / materials
   'lavoisier':    { name: 'Lavoisier',    domain: 'chemistry' },
   'mendeleev':    { name: 'Mendeleev',    domain: 'chemistry' },

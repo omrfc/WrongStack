@@ -381,7 +381,8 @@ export class CollabSession extends EventEmitter {
       }, this.timeoutMs);
     });
 
-    let results: TaskResult[][];
+    let results: TaskResult[][] | null = null;
+    let timedOut = false;
     try {
       results = await Promise.race([
         Promise.all([
@@ -392,9 +393,15 @@ export class CollabSession extends EventEmitter {
         timeout,
       ]);
     } catch (err) {
+      // Promise.race rejected — either the timeout fired or one of the
+      // awaitTasks failed. In both cases `results` is unassigned. Clear the
+      // timer if the timeout won the race, always clean up, then re-throw.
+      // NOTE: we cannot distinguish timeout from awaitTasks failure here
+      // without additional state. Both are treated as session failure.
       if (this._timeoutTimer) {
         clearTimeout(this._timeoutTimer);
         this._timeoutTimer = undefined;
+        timedOut = true;
       }
       this.cleanup();
       const error = err instanceof Error ? err : new Error(String(err));
@@ -402,7 +409,10 @@ export class CollabSession extends EventEmitter {
       throw error;
     }
 
-    for (const result of results.flat()) {
+    // If we are here, Promise.race resolved (not rejected) — results were assigned.
+    // Guard with non-null assertion since TypeScript doesn't know the try/catch
+    // guarantees this when we reach this line.
+    for (const result of results!.flat()) {
       await this.parseAndEmit(result);
     }
 

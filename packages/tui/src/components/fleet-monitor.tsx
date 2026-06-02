@@ -123,11 +123,12 @@ export function FleetMonitor({
     events.push({ at: e.startedAt, icon: '●', color: 'cyan', text: `${e.name} spawned` });
     if (e.status !== 'running' && e.status !== 'idle') {
       const s = STATUS[e.status];
+      const reason = e.failureReason ? ` [${e.failureReason}]` : '';
       events.push({
         at: e.lastEventAt,
         icon: s.icon,
         color: s.color,
-        text: `${e.name} ${e.status} (${e.toolCalls}t)`,
+        text: `${e.name} ${e.status} (${e.toolCalls}t)${reason}`,
       });
     }
     if (e.budgetWarning) {
