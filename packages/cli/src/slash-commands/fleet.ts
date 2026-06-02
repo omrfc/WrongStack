@@ -185,12 +185,6 @@ export function buildFleetCommand(opts: SlashCommandContext): SlashCommand {
 
       // ── /fleet kill ──────────────────────────────────────────────────────
       if (cmd === 'kill' || cmd === 'stop-all') {
-        const targetId = subargs[0];
-        if (!targetId) {
-          const msg = `Usage: /fleet kill <subagent-id>`;
-          opts.renderer.writeWarning(msg);
-          return { message: msg };
-        }
         if (opts.onFleetKill) {
           const killed = opts.onFleetKill();
           const msg = `${color.red('✗ Killed')} ${killed} subagent(s).`;
@@ -198,7 +192,7 @@ export function buildFleetCommand(opts: SlashCommandContext): SlashCommand {
           return { message: msg };
         }
         if (opts.onFleet) {
-          const msg = await opts.onFleet('kill', targetId);
+          const msg = await opts.onFleet('kill', undefined);
           return { message: msg };
         }
         const msg = `${color.amber('⚠ /fleet kill is not wired in this session.')}`;

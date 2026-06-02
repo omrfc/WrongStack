@@ -1035,11 +1035,13 @@ export async function main(argv: string[]): Promise<number> {
     onFleetKill: () => {
       if (!director) return 0;
       const s = director.status();
-      // Kill all running subagents
+      // Kill and remove all subagents so their ids can be reused in future spawns.
+      // Uses remove() rather than terminate() to also clean up the coordinator
+      // entry and the usage aggregator, preventing resource accumulation.
       let killed = 0;
       for (const sa of s.subagents) {
         if (sa.status === 'running' || sa.status === 'idle') {
-          try { director.terminate(sa.id); killed++; } catch { /* best-effort */ }
+          try { director.remove(sa.id); killed++; } catch { /* best-effort */ }
         }
       }
       return killed;
