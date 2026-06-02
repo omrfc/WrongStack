@@ -101,8 +101,9 @@ describe('renderMarkdownTables', () => {
     ].join('\n');
     const out = renderMarkdownTables(input, 60);
     const lines = out.split('\n');
-    // All lines must have the same character width.
-    const widths = new Set(lines.map((l) => l.length));
+    // All lines must have the same visual width (not string length, which
+    // undercounts emoji/CJK since they occupy 2 terminal columns per code point).
+    const widths = new Set(lines.map((l) => strWidth(l)));
     expect(widths.size).toBe(1);
     // Borders must use proper box-drawing characters.
     expect(lines[0]).toMatch(/^┌─+┬─+┐$/); // top border
@@ -122,9 +123,9 @@ describe('renderMarkdownTables', () => {
     const lines = out.split('\n');
     // Debug: print lines and widths
     console.log('CJK test output:');
-    lines.forEach((l, i) => console.log(`  [${i}] "${l}" len=${l.length}`));
-    // All lines must have the same character width.
-    const widths = new Set(lines.map((l) => l.length));
+    lines.forEach((l, i) => console.log(`  [${i}] "${l}" visual=${strWidth(l)}`));
+    // All lines must have the same visual width.
+    const widths = new Set(lines.map((l) => strWidth(l)));
     expect(widths.size).toBe(1);
   });
 
@@ -138,9 +139,9 @@ describe('renderMarkdownTables', () => {
     const out = renderMarkdownTables(input, 60);
     const lines = out.split('\n');
     console.log('Emoji single column:');
-    lines.forEach((l, i) => console.log(`  [${i}] "${l}" len=${l.length}`));
-    // All lines must have the same character width.
-    const widths = new Set(lines.map((l) => l.length));
+    lines.forEach((l, i) => console.log(`  [${i}] "${l}" visual=${strWidth(l)}`));
+    // All lines must have the same visual width.
+    const widths = new Set(lines.map((l) => strWidth(l)));
     expect(widths.size).toBe(1);
   });
 
