@@ -1,4 +1,3 @@
-import { Readable } from 'node:stream';
 import type {
   Agent,
   AttachmentStore,
@@ -12,8 +11,10 @@ import type { VisionAdapters } from '@wrongstack/runtime/vision';
 import { render } from 'ink';
 import React from 'react';
 import { App } from './app.js';
-import { type MouseEvent, parseSgrMouse, stripSgrMouse } from './mouse.js';
+import { createMouseStdinProxy } from './mouse-stdin.js';
+import type { MouseEvent } from './mouse.js';
 import { startTerminalTitle } from './terminal-title.js';
+import { enableWindowsMouseInput } from './win-console.js';
 
 export interface RunTuiOptions {
   agent: Agent;
@@ -318,141 +319,35 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
     stdout.write(MOUSE_ON);
   }
 
-  // When mouse mode is on we intercept stdin: the real TTY is consumed here,
-  // SGR mouse sequences are decoded and fanned out to subscribers, and only
-  // the remaining keyboard bytes are forwarded to a PassThrough that Ink
-  // reads instead of process.stdin. This keeps mouse bytes from ever
-  // polluting Ink's keypress parser (which would otherwise insert `<0;..M`
-  // junk into the input). When mouse mode is off, Ink reads process.stdin
-  // directly and nothing below runs — zero behavior change for the default.
-  const mouseListeners = new Set<(ev: MouseEvent) => void>();
+  // When mouse mode is on we intercept stdin: the real TTY is consumed by the
+  // proxy, SGR mouse sequences are decoded and fanned out to subscribers, and
+  // only the remaining keyboard bytes are forwarded to a stream Ink reads
+  // instead of process.stdin. This keeps mouse bytes from ever polluting Ink's
+  // keypress parser (which would otherwise insert `<0;..M` junk into the
+  // input). When mouse mode is off, Ink reads process.stdin directly and the
+  // proxy is never created — zero behavior change for the default.
   let inkStdin: NodeJS.ReadStream = stdin;
   let detachMouse: (() => void) | null = null;
+  let subscribeMouse: ((fn: (ev: MouseEvent) => void) => () => void) | undefined;
   if (useMouse) {
-    /**
-     * Keyboard-only readable stream that fans out SGR mouse bytes to subscribers
-     * and forwards the remaining keyboard bytes to Ink's stdin.
-     *
-     * PassThrough was tried first but its _read(0) override destabilises the
-     * internal `needReadable` state machine: _read(0) calls this.read(0) which
-     * returns null when the buffer is empty, preventing PassThrough from ever
-     * emitting the 'readable' event that Ink's handleReadable waits on — classic
-     * deadlock (mouse AND keyboard freeze). A minimal custom Readable avoids
-     * this by properly implementing _read() to NEVER block — it just returns
-     * and lets push() from the stdin data handler signal availability.
-     */
-    class KeyboardReadable extends Readable {
-      private pendingChunks: string[] = [];
-
-      // eslint-disable-next-line no-useless-constructor
-      constructor() {
-        super({ encoding: 'utf8', highWaterMark: 64 * 1024 }); // 64KB buffer
-      }
-
-      override _read(_size: number): void {
-        // Pull any pending chunks through. This is called when the buffer is
-        // drained enough to drop below the high-water mark. We don't block —
-        // we push whatever we have (which may be nothing if stdin hasn't
-        // delivered yet). The 'readable' event will fire when push() adds
-        // data to an empty buffer.
-        void _size;
-        this.flushPending();
-      }
-
-      private flushPending(): void {
-        while (this.pendingChunks.length > 0) {
-          const chunk = this.pendingChunks[0]!;
-          const ok = this.push(chunk);
-          this.pendingChunks.shift();
-          if (!ok) {
-            // Buffer is full again — stop flushing, wait for _read to be
-            // called when the buffer drains. Store remaining chunks.
-            break;
-          }
+    // On Windows, libuv's raw mode delivers mouse as MOUSE_EVENT records that it
+    // then discards, so SGR mouse bytes never reach stdin and the TUI sees
+    // nothing. Re-enable VT console input AFTER Ink flips raw mode (it clears
+    // VT input), once, so mouse sequences are actually delivered. No-op on other
+    // platforms. See win-console.ts.
+    let vtInputEnabled = false;
+    const proxy = createMouseStdinProxy(stdin, {
+      onRawMode: (enabled) => {
+        if (enabled && !vtInputEnabled) {
+          vtInputEnabled = true;
+          enableWindowsMouseInput();
         }
-      }
-
-      /** Called by the stdin data handler when keyboard bytes are available. */
-      doPush(chunk: string): void {
-        if (chunk.length === 0) return;
-        // push() returns false when the internal buffer exceeds high-water mark.
-        // When that happens, queue the chunk so it's not lost. The _read()
-        // method will drain the queue when the buffer drains.
-        const ok = this.push(chunk);
-        if (ok) {
-          // Successfully buffered — if we had pending chunks, try to flush more.
-          if (this.pendingChunks.length > 0) {
-            this.flushPending();
-          }
-        } else {
-          // Buffer full — queue for when _read is called after buffer drains.
-          // Cap the queue to prevent unbounded memory growth (drop oldest if needed).
-          if (this.pendingChunks.length >= 100) {
-            this.pendingChunks.shift(); // drop oldest
-          }
-          this.pendingChunks.push(chunk);
-        }
-      }
-
-      /** Called on shutdown so the stream closes cleanly. */
-      doEnd(): void {
-        this.pendingChunks = [];
-        this.push(null); // null = EOF
-      }
-    }
-    const keyboardStream = new KeyboardReadable();
-    const p = keyboardStream as unknown as NodeJS.ReadStream;
-    // Ink probes isTTY and drives raw mode / ref bookkeeping on its stdin;
-    // delegate those to the real terminal so its behavior is unchanged.
-    p.isTTY = true;
-    p.setRawMode = (mode: boolean): NodeJS.ReadStream => {
-      try {
-        stdin.setRawMode?.(mode);
-      } catch {
-        // real stdin may not support raw mode in some shells — ignore.
-      }
-      return p;
-    };
-    const realRef = stdin.ref?.bind(stdin);
-    const realUnref = stdin.unref?.bind(stdin);
-    p.ref = (): NodeJS.ReadStream => {
-      realRef?.();
-      return p;
-    };
-    p.unref = (): NodeJS.ReadStream => {
-      realUnref?.();
-      return p;
-    };
-    stdin.setEncoding('utf8');
-    const onData = (chunk: string) => {
-      const evs = parseSgrMouse(chunk);
-      for (const ev of evs) {
-        for (const fn of mouseListeners) {
-          try {
-            fn(ev);
-          } catch {
-            // a listener throwing must not break input routing — ignore.
-          }
-        }
-      }
-      const rest = stripSgrMouse(chunk);
-      keyboardStream.doPush(rest);
-    };
-    stdin.on('data', onData);
-    detachMouse = () => {
-      stdin.off('data', onData);
-      keyboardStream.doEnd();
-    };
-    inkStdin = p;
+      },
+    });
+    inkStdin = proxy.inkStdin;
+    subscribeMouse = proxy.subscribeMouse;
+    detachMouse = proxy.detach;
   }
-  const subscribeMouse = useMouse
-    ? (fn: (ev: MouseEvent) => void): (() => void) => {
-        mouseListeners.add(fn);
-        return () => {
-          mouseListeners.delete(fn);
-        };
-      }
-    : undefined;
 
   // Animated window/tab title: a braille spinner + live status (thinking /
   // running a tool) driven by the EventBus, scrolling the app name when idle.

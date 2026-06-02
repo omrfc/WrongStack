@@ -54,6 +54,7 @@ import { WorktreeMonitor } from './components/worktree-monitor.js';
 import { WorktreePanel, type WorktreeRow } from './components/worktree-panel.js';
 import { searchFiles } from './file-search.js';
 import { type GitInfo, readGitInfo } from './git-info.js';
+import { confirmButtonsRow, pickerFirstItemRow } from './hit-test.js';
 import {
   INLINE_TOKEN_SRC,
   deleteTokenBackward,
@@ -2213,6 +2214,17 @@ export function App({
   // actually changed, so this stays a stable measure-and-set (no churn loop,
   // and streaming tokens never trigger a setViewportRows because the bottom
   // region's height doesn't change while the chat viewport streams).
+  //
+  // NO dep array: this MUST run after every commit so preRowsRef /
+  // liveStripRowsRef track the live bottom-region height. They feed the mouse
+  // hit-test, and the pre-picker height changes whenever the input wraps to
+  // more rows or the live-activity strip grows/shrinks (a running fleet) —
+  // neither of which moves `termRows`. With the old `[managedLive, termRows]`
+  // deps those refs went stale and every click landed N rows off once the input
+  // wrapped. Running every render is safe: bottomRef's measured height does not
+  // depend on viewportRows (it's laid out outside the chat viewport), so there
+  // is no measure → setViewportRows → re-measure feedback loop, and the guard
+  // below keeps streaming/typing renders from dispatching at all.
   React.useLayoutEffect(() => {
     if (!managedLive) return;
     const node = bottomRef.current;
@@ -2232,9 +2244,7 @@ export function App({
     if (vp !== s.viewportRows) {
       dispatch({ type: 'setViewportRows', rows: vp });
     }
-    // stable deps: stateRef (ref), dispatch (stable from useReducer),
-    // termRows is a prop of the effect scope.
-  }, [managedLive, termRows]);
+  });
 
   // Latest handleKey, so click-to-activate can replay an Enter through the
   // normal input pipeline (handleKey is defined far below; the ref is filled
@@ -2371,8 +2381,11 @@ export function App({
         const head = s.confirmQueue[0];
         if (node && head) {
           const { height } = measureElement(node);
-          const top = s.viewportRows + affordance + preRowsRef.current + 1;
-          const buttonsRow = top + height - 2; // -1 bottom border, -1 to land on buttons
+          // The dialog is wrapped in a Box with marginY={1}; measureElement
+          // excludes that margin, so the button row math must add it back.
+          // confirmButtonsRow encapsulates the layout contract (see hit-test.ts).
+          const rowsAbove = s.viewportRows + affordance + preRowsRef.current;
+          const buttonsRow = confirmButtonsRow(rowsAbove, height);
           if (ev.y === buttonsRow) {
             // round border (1) + paddingX (1) before the first content column.
             const contentX = ev.x - 1 - 2;
@@ -2503,7 +2516,10 @@ export function App({
 
       // Absolute (1-based) row of the picker's first item:
       //   viewport rows + affordance + (live strip + input) + header.
-      const firstItemRow = s.viewportRows + affordance + preRowsRef.current + picker.header + 1;
+      const firstItemRow = pickerFirstItemRow(
+        s.viewportRows + affordance + preRowsRef.current,
+        picker.header,
+      );
       const index = ev.y - firstItemRow;
       if (index < 0 || index >= picker.count) return;
       // Single-click select + confirm. handleKey's Enter path confirms whatever
