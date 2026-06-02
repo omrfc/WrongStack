@@ -343,23 +343,23 @@ function padVisual(text: string, targetWidth: number): string {
 
 function padCell(text: string, width: number, align: Align): string {
   const visualLen = strWidth(text);
-  // Border creates visual width of (width + 2), so content must also be (width + 2)
-  // to match. This is critical for emoji/CJK where text.length != visual width.
-  const targetWidth = width + 2;
+  // Pad (or truncate) text so its visual width equals `width`.
+  // This matches how `border` creates `─`.repeat(width + 2) dashes,
+  // which gives a visual content width of `width` columns.
   let displayText = text;
-  if (visualLen > targetWidth) {
+  if (visualLen > width) {
     // Truncate to visual width — iterate code points, stop when we'd exceed target.
     let takenWidth = 0;
     let endIdx = 0;
     for (const cp of text) {
       const cpWidth = strWidth(cp);
-      if (takenWidth + cpWidth > targetWidth) break;
+      if (takenWidth + cpWidth > width) break;
       takenWidth += cpWidth;
       endIdx += [...cp].join('').length;
     }
     displayText = text.slice(0, endIdx);
   }
-  const pad = targetWidth - strWidth(displayText);
+  const pad = width - strWidth(displayText);
   if (align === 'right') return ' '.repeat(pad) + displayText;
   if (align === 'center') {
     const l = Math.floor(pad / 2);
