@@ -332,13 +332,18 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
   if (useMouse) {
     // On Windows, libuv's raw mode delivers mouse as MOUSE_EVENT records that it
     // then discards, so SGR mouse bytes never reach stdin and the TUI sees
-    // nothing. Re-enable VT console input AFTER Ink flips raw mode (it clears
-    // VT input), once, so mouse sequences are actually delivered. No-op on other
-    // platforms. See win-console.ts.
+    // nothing. Flipping the console to VT input (after Ink enables raw mode,
+    // which clears it) can make mouse sequences flow — but it shells out to
+    // PowerShell and changes the shared console mode, which is unconfirmed on
+    // ConPTY and could perturb a fragile terminal. So it's OPT-IN via
+    // WRONGSTACK_WIN_MOUSE_VT=1 rather than default-on: the default --mouse
+    // experience stays stable, and the VT path can be tried explicitly. No-op
+    // off win32. See win-console.ts.
+    const tryWinVtInput = process.env.WRONGSTACK_WIN_MOUSE_VT === '1';
     let vtInputEnabled = false;
     const proxy = createMouseStdinProxy(stdin, {
       onRawMode: (enabled) => {
-        if (enabled && !vtInputEnabled) {
+        if (enabled && tryWinVtInput && !vtInputEnabled) {
           vtInputEnabled = true;
           enableWindowsMouseInput();
         }

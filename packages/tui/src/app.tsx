@@ -2208,34 +2208,24 @@ export function App({
   // height locates the input's first screen row for click-to-position-cursor.
   const liveStripRef = useRef<DOMElement | null>(null);
   const liveStripRowsRef = useRef(0);
-  // useLayoutEffect (not useEffect) so the viewport is sized BEFORE paint — no
-  // one-frame flash. measureElement here only READS the already-computed Yoga
-  // height (cheap), and the dispatch is guarded to fire only when the height
-  // actually changed, so this stays a stable measure-and-set (no churn loop,
-  // and streaming tokens never trigger a setViewportRows because the bottom
-  // region's height doesn't change while the chat viewport streams).
+  // Viewport sizing. useLayoutEffect (not useEffect) so the viewport is sized
+  // BEFORE paint — no one-frame flash. The dispatch is guarded to fire only when
+  // the height actually changed.
   //
-  // NO dep array: this MUST run after every commit so preRowsRef /
-  // liveStripRowsRef track the live bottom-region height. They feed the mouse
-  // hit-test, and the pre-picker height changes whenever the input wraps to
-  // more rows or the live-activity strip grows/shrinks (a running fleet) —
-  // neither of which moves `termRows`. With the old `[managedLive, termRows]`
-  // deps those refs went stale and every click landed N rows off once the input
-  // wrapped. Running every render is safe: bottomRef's measured height does not
-  // depend on viewportRows (it's laid out outside the chat viewport), so there
-  // is no measure → setViewportRows → re-measure feedback loop, and the guard
-  // below keeps streaming/typing renders from dispatching at all.
+  // Deps are INTENTIONALLY [managedLive, termRows] only — this effect MUST NOT
+  // run on every commit. The "↓ N new lines" affordance is a 1-row element whose
+  // presence depends on scroll state; recomputing `vp` every render lets the
+  // affordance toggle feed back through setViewportRows → ScrollableHistory
+  // re-measure → setMeasuredLines → scroll-state change → affordance toggle …,
+  // an infinite render loop that pins the event loop (screen flickers, keyboard
+  // AND mouse freeze). Keeping the narrow deps is what makes it a stable
+  // measure-and-set. preRows/liveStrip measurement lives in its OWN effect below
+  // (refs only, no dispatch) so it can stay fresh without risking that loop.
   React.useLayoutEffect(() => {
     if (!managedLive) return;
     const node = bottomRef.current;
     if (!node) return;
     const { height } = measureElement(node);
-    if (prePickerRef.current) {
-      preRowsRef.current = measureElement(prePickerRef.current).height;
-    }
-    if (liveStripRef.current) {
-      liveStripRowsRef.current = measureElement(liveStripRef.current).height;
-    }
     const s = stateRef.current;
     const affordance = s.scrollOffset > 0 && s.pendingNewLines > 0 ? 1 : 0;
     // Bias the viewport DOWN by one row: an extra blank chat row is invisible,
@@ -2243,6 +2233,22 @@ export function App({
     const vp = Math.max(MIN_VIEWPORT, termRows - height - affordance - 1);
     if (vp !== s.viewportRows) {
       dispatch({ type: 'setViewportRows', rows: vp });
+    }
+    // stable deps — see the loop warning above.
+  }, [managedLive, termRows]);
+
+  // Keep the mouse hit-test geometry refs fresh on EVERY commit. This is safe to
+  // run unconditionally because it only WRITES refs (never dispatches), so it
+  // cannot trigger a re-render or the feedback loop the sizing effect above
+  // guards against. It fixes click mapping going stale when the input wraps to
+  // more rows or the live-activity strip grows/shrinks without termRows moving.
+  React.useLayoutEffect(() => {
+    if (!managedLive) return;
+    if (prePickerRef.current) {
+      preRowsRef.current = measureElement(prePickerRef.current).height;
+    }
+    if (liveStripRef.current) {
+      liveStripRowsRef.current = measureElement(liveStripRef.current).height;
     }
   });
 
