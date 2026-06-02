@@ -185,14 +185,22 @@ export function buildFleetCommand(opts: SlashCommandContext): SlashCommand {
 
       // ── /fleet kill ──────────────────────────────────────────────────────
       if (cmd === 'kill' || cmd === 'stop-all') {
+        const targetId = subargs[0];
+        if (targetId) {
+          // /fleet kill <id> — delegate to onFleet with the target
+          if (opts.onFleet) {
+            const msg = await opts.onFleet('kill', targetId);
+            return { message: msg };
+          }
+          const msg = `${color.amber('⚠ /fleet kill is not wired in this session.')}`;
+          opts.renderer.writeWarning(msg);
+          return { message: msg };
+        }
+        // /fleet kill (no id) — kill all
         if (opts.onFleetKill) {
           const killed = opts.onFleetKill();
           const msg = `${color.red('✗ Killed')} ${killed} subagent(s).`;
           opts.renderer.write(msg);
-          return { message: msg };
-        }
-        if (opts.onFleet) {
-          const msg = await opts.onFleet('kill', undefined);
           return { message: msg };
         }
         const msg = `${color.amber('⚠ /fleet kill is not wired in this session.')}`;
@@ -219,9 +227,9 @@ export function buildFleetCommand(opts: SlashCommandContext): SlashCommand {
           opts.renderer.write(msg);
           return { message: msg };
         }
-          const msg = `${color.red('✗ Failed')} to terminate ${color.bold(targetId)}. Subagent may already be stopped.`;
-          opts.renderer.writeWarning(msg);
-          return { message: msg };
+        const msg = `${color.red('✗ Failed')} to terminate ${color.bold(targetId)}. Subagent may already be stopped.`;
+        opts.renderer.writeWarning(msg);
+        return { message: msg };
       }
 
       // ── /fleet spawn <role> [count] ──────────────────────────────────────
