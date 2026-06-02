@@ -117,21 +117,37 @@ const QUOTE_RE = /^>\s?(.*)$/;
  * Render assistant prose with markdown emphasis + block formatting. Tables are
  * routed through the existing box-drawing renderer; everything else is parsed
  * line-by-line.
+ *
+ * `contentWidth` is the real inner width of the panel that wraps this view
+ * (the assistant entry's left-border + paddingLeft). When provided, tables
+ * are sized against it so they don't overflow the panel; otherwise we fall
+ * back to `termWidth`, which is correct for callers without a bordered
+ * container. Non-table prose is unaffected — Ink handles its soft wrap.
  */
 export function MarkdownView({
   text,
   termWidth,
-}: { text: string; termWidth: number }): React.ReactElement {
+  contentWidth,
+}: {
+  text: string;
+  termWidth: number;
+  /** Real inner width of the surrounding panel. Defaults to `termWidth`. */
+  contentWidth?: number;
+}): React.ReactElement {
   const lines = text.split('\n');
   const rows: React.ReactNode[] = [];
   let i = 0;
   let key = 0;
+  // Tables are the only width-sensitive path here; size them to the real
+  // content area so a 2-col-chrome border (assistant panel) doesn't push
+  // the last cell off the right edge and force an Ink wrap.
+  const tableBudget = Math.max(20, contentWidth ?? termWidth);
   while (i < lines.length) {
     // GitHub table block → existing renderer.
     const tableEnd = detectTable(lines, i);
     if (tableEnd > i) {
       rows.push(
-        <Text key={`t${key++}`}>{renderTable(lines.slice(i, tableEnd), Math.max(20, termWidth))}</Text>,
+        <Text key={`t${key++}`}>{renderTable(lines.slice(i, tableEnd), tableBudget)}</Text>,
       );
       i = tableEnd;
       continue;

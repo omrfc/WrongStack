@@ -28,6 +28,16 @@ export interface BindOptions {
 
 export class Container {
   private readonly entries = new Map<symbol, Entry>();
+  /**
+   * Tokens currently mid-resolve. Tracked so we can detect circular
+   * dependencies (A → B → A) and throw a structured error instead of
+   * overflowing the call stack with "Maximum call stack size exceeded".
+   *
+   * Not a memoization cache — the per-entry `cache` field is the source
+   * of truth for "have I built this before?". This set only lives for
+   * the duration of a single resolve call.
+   */
+  private readonly resolving = new Set<symbol>();
 
   bind<T>(token: Token<T>, factory: Factory<T>, opts: BindOptions = {}): void {
     if (this.entries.has(token)) {
@@ -92,14 +102,44 @@ export class Container {
     if (entry.singleton && entry.cache !== undefined) {
       return entry.cache as T;
     }
-    let value: unknown = entry.factory(this);
-    for (const d of entry.decorators) {
-      value = d(value, this);
+    if (this.resolving.has(token)) {
+      const cycle = this.describeCycle(token);
+      throw new WrongStackError({
+        message: `Container: circular dependency detected — ${cycle}`,
+        code: ERROR_CODES.CONTAINER_CIRCULAR_DEPENDENCY,
+        subsystem: 'container',
+        context: { token: token.description, cycle },
+      });
     }
-    if (entry.singleton) {
-      entry.cache = value;
+    this.resolving.add(token);
+    try {
+      let value: unknown = entry.factory(this);
+      for (const d of entry.decorators) {
+        value = d(value, this);
+      }
+      if (entry.singleton) {
+        entry.cache = value;
+      }
+      return value as T;
+    } finally {
+      this.resolving.delete(token);
     }
-    return value as T;
+  }
+
+  /**
+   * Build a human-readable description of the dependency cycle that
+   * caused the resolution to re-enter. Lists the tokens in the order
+   * they were entered, then appends the re-entered token to close the
+   * loop. Falls back to a generic message if the resolving set is
+   * somehow empty (shouldn't happen, but defensive).
+   */
+  private describeCycle(reentry: symbol): string {
+    const descs: string[] = [];
+    for (const t of this.resolving) {
+      descs.push(t.description ?? 'unknown');
+    }
+    descs.push(reentry.description ?? 'unknown');
+    return descs.join(' → ');
   }
 
   has<T>(token: Token<T>): boolean {

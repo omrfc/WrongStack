@@ -20,7 +20,7 @@ Requires **Node.js ≥ 22.0.0**.
 src/
   core/         — Agent, Context, ConversationState, ProviderRunner, InputBuilder
   defaults/     — Production-ready implementations (session store, secret vault, …)
-  kernel/       — Container, TOKENS, EventBus, ToolRegistry, ProviderRegistry
+  kernel/       — Container, TOKENS, EventBus, ScopedEventBus, Pipeline, RunController
   plugin/       — Plugin loader, PluginAPI, manifest validation
   registry/     — SlashCommandRegistry, ToolRegistry, ProviderRegistry
   types/        — Public type surface (Tool, Provider, SessionStore, …)
@@ -29,54 +29,58 @@ src/
 
 ## Quick example
 
-Run an agent loop with the Anthropic provider and a single tool:
+The kernel is the small set of primitives the agent is built on. You can use them
+standalone — for instance, to wire a small observability pipeline around a tool call:
 
 ```ts
 import {
-  Agent,
   Container,
-  Context,
-  DefaultEventBus,
+  EventBus,
+  Pipeline,
+  RunController,
+  TOKENS,
   DefaultLogger,
   DefaultPermissionPolicy,
-  DefaultSessionStore,
-  DefaultSystemPromptBuilder,
-  DefaultTokenCounter,
-  ToolRegistry,
-  TOKENS,
 } from '@wrongstack/core';
-import { AnthropicProvider } from '@wrongstack/providers';
-import { readTool, writeTool, bashTool } from '@wrongstack/tools';
 
+// 1. DI container — bind defaults to TOKENS, override per token.
 const container = new Container();
-container.bind(TOKENS.EventBus, () => new DefaultEventBus());
 container.bind(TOKENS.Logger, () => new DefaultLogger());
 container.bind(TOKENS.PermissionPolicy, () => new DefaultPermissionPolicy());
 
-const provider = new AnthropicProvider({ apiKey: process.env.ANTHROPIC_API_KEY! });
-const tools = new ToolRegistry([readTool, writeTool, bashTool]);
-
-const ctx = new Context({
-  cwd: process.cwd(),
-  projectRoot: process.cwd(),
-  provider,
-  model: 'claude-sonnet-4-6',
-  tokenCounter: new DefaultTokenCounter({ providerId: 'anthropic' }),
+// 2. Typed event bus — observe, don't mutate. Listener errors are isolated
+//    and routed to the optional logger; one bad subscriber can't kill emit().
+const events = new EventBus();
+events.on('tool.executed', ({ name, durationMs }) => {
+  console.log(`tool ${name} ran in ${durationMs}ms`);
 });
 
-const agent = new Agent({
-  container,
-  ctx,
-  tools,
-  systemPromptBuilder: new DefaultSystemPromptBuilder(),
+// 3. Koa-style pipeline — chain middleware around a value. The error
+//    boundary decides per-middleware whether to rethrow or swallow, so
+//    one bad plugin can't take down the agent loop.
+type Req = { url: string };
+const requestLog = new Pipeline<Req>();
+requestLog.use({
+  name: 'timing',
+  handler: async (req, next) => {
+    const start = Date.now();
+    const res = await next(req);
+    console.log(`${req.url} took ${Date.now() - start}ms`);
+    return res;
+  },
 });
+requestLog.setErrorHandler(() => 'swallow');
 
-const result = await agent.run({
-  input: { text: 'list the files in src/' },
-});
-
-console.log(result.assistantText);
+// 4. Abort + cleanup — hooks fire in LIFO order on abort OR dispose().
+const run = new RunController();
+const off = run.onAbort(() => console.log('cleaning up'));
+// later, when the run ends:  await run.dispose();
 ```
+
+For a full agent loop with a real LLM provider and tools, see
+[`packages/cli/src/wiring/pipeline.ts`](../cli/src/wiring/pipeline.ts) — the
+`Agent` constructor needs a `ToolExecutor`, `ProviderRegistry`, and several
+container-resolved policies, which the CLI assembles from the user's config.
 
 ## Replacing a default
 
@@ -95,7 +99,7 @@ class StrictPolicy implements PermissionPolicy {
 container.bind(TOKENS.PermissionPolicy, () => new StrictPolicy());
 ```
 
-The same pattern works for `SessionStore`, `MemoryStore`, `SystemPromptBuilder`, `RetryPolicy`, `ErrorHandler`, `TokenCounter`, `SecretVault`, `SecretScrubber`, `Compactor`, `ConfigStore`, `ModelsRegistry`, `ModeStore`.
+The same pattern works for `SessionStore`, `MemoryStore`, `SystemPromptBuilder`, `RetryPolicy`, `ErrorHandler`, `TokenCounter`, `SecretScrubber`, `Compactor`, `ConfigStore`, `ModelsRegistry`, `ModeStore`. (`SecretVault` isn't container-resolved — pass it to `ConfigLoader` instead.)
 
 ## Building a tool
 

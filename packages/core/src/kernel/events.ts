@@ -519,10 +519,14 @@ export class EventBus {
         }
       }
     }
-    // Wildcard listeners
+    // Wildcard listeners — snapshot the array first so a listener that
+    // subscribes another pattern (via onPattern/onRegex) doesn't see
+    // inconsistent behavior across JS engines. ECMA leaves mid-iteration
+    // array mutation under-specified; this keeps us engine-portable.
     if (this.wildcards.length > 0) {
       const name = event as string;
-      for (const { match, fn } of this.wildcards) {
+      const snapshot = this.wildcards.slice();
+      for (const { match, fn } of snapshot) {
         if (!match(name)) continue;
         try {
           fn(name, payload);
@@ -623,6 +627,13 @@ export class ScopedEventBus extends EventBus {
    * Uses EventBus's public API directly to avoid triggering our own `on()`
    * override (which would consume a key slot for the wrapper, then orphan
    * our registration entry under a different key).
+   *
+   * When the wrapper fires, it cleans up BOTH the underlying EventBus
+   * listener AND the tracking entry — so `scopedListenerCount` returns to
+   * its pre-`once()` value without requiring the caller to invoke the
+   * returned unsubscribe. The returned `unsub` is still safe to call
+   * after auto-removal (its delete is a no-op and its off() finds
+   * nothing to remove).
    */
   override once<E extends EventName>(event: E, fn: Listener<E>): () => void {
     const key = this.nextKey++;
@@ -630,6 +641,10 @@ export class ScopedEventBus extends EventBus {
       // Bypass ScopedEventBus.on() — go straight to EventBus.off() so we
       // don't recurse and don't consume another key.
       EventBus.prototype.off.call(this, event, wrapper as Listener<EventName>);
+      // Drop the tracking entry so scopedListenerCount is honest. Done
+      // before calling `fn` so a handler that calls scopedListenerCount
+      // mid-fire sees the post-removal state.
+      this.registrations.delete(key);
       (fn as Listener<E>)(payload);
     };
     // Use the EventBus prototype directly to register without triggering

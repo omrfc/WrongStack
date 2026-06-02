@@ -73,6 +73,31 @@ export interface HistoryProps {
   toolStream?: { toolUseId: string; name: string; text: string; startedAt: number } | null;
 }
 
+/**
+ * Horizontal columns consumed by every bordered message panel in this
+ * file (the user / assistant / warn / error cases below). 1 column for
+ * the left-border glyph + 1 column for `paddingLeft={1}`. Width-sensitive
+ * renderers in the panel body (notably the markdown table renderer) must
+ * budget against `termWidth - MESSAGE_PANEL_CHROME_WIDTH`, otherwise they
+ * lay out for the full terminal width and Ink wraps the last cell at the
+ * right edge, producing a 2-column shift / extra row.
+ *
+ * Exported so the regression test can assert against the same number the
+ * Entry uses — drift between the two would silently re-introduce the bug.
+ */
+export const MESSAGE_PANEL_CHROME_WIDTH = 2;
+
+/**
+ * Compute the real inner content width of an assistant panel. Pulled out
+ * as a named helper so the formula lives in exactly one place: both the
+ * Entry render and the regression test import this, so a future change
+ * to the chrome model (e.g. adding paddingRight) only has to be made
+ * here and both sides stay in lockstep.
+ */
+export function assistantContentWidth(termWidth: number): number {
+  return Math.max(20, termWidth - MESSAGE_PANEL_CHROME_WIDTH);
+}
+
 export function History({ entries, streamingText, toolStream }: HistoryProps): React.ReactElement {
   const { stdout } = useStdout();
   // Track terminal dimensions imperatively so that every resize triggers a
@@ -249,12 +274,30 @@ function CodeBlock({
 }
 
 /** Assistant message body: prose (with markdown tables) interleaved with
- *  highlighted code blocks. */
+ *  highlighted code blocks.
+ *
+ *  - `termWidth` is the full terminal width and is forwarded to `CodeBlock`,
+ *    which already accounts for its own border + paddingX + marginLeft chrome
+ *    via the `termWidth - 8 - gutterW - 1` formula.
+ *  - `contentWidth` is the real inner width of the surrounding panel. It is
+ *    forwarded to `MarkdownView` for the *table* path so tables don't lay out
+ *    for the full terminal width and overflow the panel (which would make Ink
+ *    wrap the last cell at the right edge — a 2-column shift / extra row).
+ *    Optional, defaults to `termWidth`, so `AssistantBody` is still safe to
+ *    call from contexts without a bordered panel.
+ */
 export function AssistantBody({
   text,
   termWidth,
-}: { text: string; termWidth: number }): React.ReactElement {
+  contentWidth,
+}: {
+  text: string;
+  termWidth: number;
+  /** Real inner width of the surrounding panel. Defaults to `termWidth`. */
+  contentWidth?: number;
+}): React.ReactElement {
   const segments = splitFencedBlocks(text);
+  const inner = contentWidth ?? termWidth;
   return (
     <Box flexDirection="column">
       {segments.map((seg, i) =>
@@ -263,7 +306,7 @@ export function AssistantBody({
           <CodeBlock key={i} code={seg.text} lang={seg.lang ?? 'plain'} termWidth={termWidth} />
         ) : (
           // biome-ignore lint/suspicious/noArrayIndexKey: segment order is stable
-          <MarkdownView key={i} text={seg.text} termWidth={termWidth} />
+          <MarkdownView key={i} text={seg.text} termWidth={inner} />
         ),
       )}
     </Box>
@@ -446,7 +489,12 @@ export const Entry = React.memo(function Entry({
           </Text>
         </Box>
       );
-    case 'assistant':
+    case 'assistant': {
+      // Subtract the panel's left-border + paddingLeft chrome from the
+      // terminal width so the body lays out inside the box, not against
+      // the full terminal. Tables in particular will overflow otherwise
+      // (see assistantContentWidth).
+      const contentWidth = assistantContentWidth(termWidth);
       return (
         <Box
           flexDirection="column"
@@ -463,9 +511,14 @@ export const Entry = React.memo(function Entry({
               {'ASSISTANT'}
             </Text>
           </Box>
-          <AssistantBody text={entry.text} termWidth={termWidth} />
+          <AssistantBody
+            text={entry.text}
+            termWidth={termWidth}
+            contentWidth={contentWidth}
+          />
         </Box>
       );
+    }
     case 'tool': {
       const argSummary = formatToolArgs(entry.name, entry.input);
       const outLines = formatToolOutput(

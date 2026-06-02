@@ -22,19 +22,42 @@ describe('ScopedEventBus', () => {
     expect(fn).toHaveBeenCalled();
   });
 
-  it('once() returns tracked unsubscribe', () => {
+  it('once() returns tracked unsubscribe and fully cleans up on fire', () => {
     const bus = new ScopedEventBus();
     const fn = vi.fn();
     const off = bus.once('session.started', fn);
     expect(bus.scopedListenerCount).toBe(1);
     bus.emit('session.started', { id: '1' });
     expect(fn).toHaveBeenCalledTimes(1);
-    // once() auto-removes after first emit, so listener count should reflect
-    // only the tracking entry (not the underlying EventBus listener which was auto-removed)
+    // After the once-listener fires, BOTH the underlying EventBus listener
+    // and the ScopedEventBus tracking entry are removed. scopedListenerCount
+    // returns to its pre-call value so the public metric is honest.
+    expect(bus.scopedListenerCount).toBe(0);
+    // The returned off is now a no-op: the underlying listener is already
+    // gone, and the tracking entry was deleted in the wrapper.
+    expect(() => off()).not.toThrow();
+    expect(bus.scopedListenerCount).toBe(0);
+  });
+
+  it('once() tracking entry is removed BEFORE the user fn runs (mid-fire introspection sees the post-state)', () => {
+    const bus = new ScopedEventBus();
+    let countInsideHandler = -1;
+    bus.once('session.started', () => {
+      countInsideHandler = bus.scopedListenerCount;
+    });
+    bus.emit('session.started', { id: '1' });
+    expect(countInsideHandler).toBe(0);
+  });
+
+  it('once() with explicit off before emit also cleans up the tracking entry', () => {
+    const bus = new ScopedEventBus();
+    const fn = vi.fn();
+    const off = bus.once('session.started', fn);
     expect(bus.scopedListenerCount).toBe(1);
-    // Manual off should also reduce count
     off();
     expect(bus.scopedListenerCount).toBe(0);
+    bus.emit('session.started', { id: '1' });
+    expect(fn).not.toHaveBeenCalled();
   });
 
   it('teardown() removes all tracked listeners', () => {
@@ -285,5 +308,37 @@ describe('EventBus', () => {
     const err = new Error('boom');
     bus.emit('error', { err, phase: 'execution' });
     expect(fn).toHaveBeenCalledWith({ err, phase: 'execution' });
+  });
+
+  it('emit() snapshots wildcards so a pattern added mid-emit does not fire on the same emit', () => {
+    // Regression guard: ECMA leaves mid-iteration array mutation
+    // under-specified, so emit() takes a snapshot to make the behavior
+    // engine-portable. The new pattern still fires on the NEXT emit.
+    const bus = new EventBus();
+    const late = vi.fn();
+    bus.onPattern('*', () => {
+      bus.onPattern('*', late);
+    });
+    bus.emit('session.started', { id: '1' });
+    expect(late).not.toHaveBeenCalled();
+    // The pattern IS now registered — the next emit should fire it.
+    bus.emit('session.started', { id: '2' });
+    expect(late).toHaveBeenCalledTimes(1);
+  });
+
+  it('emit() removes a wildcard mid-iteration without skipping the unvisited wildcards', () => {
+    // Regression guard: if emit() didn't snapshot, removing an entry
+    // mid-iteration could change which subsequent entries get visited.
+    // The snapshot guarantees that every wildcard that was registered
+    // BEFORE emit() runs gets a chance to fire exactly once.
+    const bus = new EventBus();
+    const order: string[] = [];
+    const offB = bus.onPattern('*', () => {
+      order.push('b');
+      offB();
+    });
+    bus.onPattern('*', () => order.push('c'));
+    bus.emit('session.started', { id: '1' });
+    expect(order).toEqual(['b', 'c']);
   });
 });

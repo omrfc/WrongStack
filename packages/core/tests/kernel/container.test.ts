@@ -129,4 +129,73 @@ describe('Container', () => {
     expect(after.cached).toBe(true);
     expect(c.inspect(COUNTER)).toBeNull();
   });
+
+  it('throws a structured error on a 2-cycle (A → B → A), not a stack overflow', () => {
+    const A: Token<number> = Symbol('A') as Token<number>;
+    const B: Token<number> = Symbol('B') as Token<number>;
+    const c = new Container();
+    c.bind(A, (cc) => cc.resolve(B) + 1);
+    c.bind(B, (cc) => cc.resolve(A) + 1);
+    let err: unknown;
+    try {
+      c.resolve(A);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(Error);
+    const msg = (err as Error).message;
+    expect(msg).toMatch(/circular dependency/);
+    expect(msg).toContain('A');
+    expect(msg).toContain('B');
+  });
+
+  it('throws on a self-cycle (A → A)', () => {
+    const A: Token<number> = Symbol('A') as Token<number>;
+    const c = new Container();
+    c.bind(A, (cc) => cc.resolve(A) + 1);
+    expect(() => c.resolve(A)).toThrow(/circular dependency/);
+  });
+
+  it('throws on a 3-cycle and lists every token in the path', () => {
+    const A: Token<number> = Symbol('A') as Token<number>;
+    const B: Token<number> = Symbol('B') as Token<number>;
+    const C: Token<number> = Symbol('C') as Token<number>;
+    const c = new Container();
+    c.bind(A, (cc) => cc.resolve(B) + 1);
+    c.bind(B, (cc) => cc.resolve(C) + 1);
+    c.bind(C, (cc) => cc.resolve(A) + 1);
+    let err: unknown;
+    try {
+      c.resolve(A);
+    } catch (e) {
+      err = e;
+    }
+    expect((err as Error).message).toMatch(/A.*B.*C.*A/s);
+  });
+
+  it('clears the resolving set after a successful resolve, so the same token can be re-resolved', () => {
+    // Regression guard: if the finally-block didn't fire, the second
+    // resolve would see the token still in `resolving` and throw
+    // CIRCULAR_DEPENDENCY. We use singleton:false so the factory
+    // actually runs twice — otherwise the singleton cache would mask
+    // the bug.
+    const A: Token<number> = Symbol('A') as Token<number>;
+    const c = new Container();
+    let n = 0;
+    c.bind(A, () => ++n, { singleton: false });
+    expect(c.resolve(A)).toBe(1);
+    expect(c.resolve(A)).toBe(2);
+  });
+
+  it('clears the resolving set after a throwing factory, so the token can be rebound and retried', () => {
+    const A: Token<number> = Symbol('A') as Token<number>;
+    const c = new Container();
+    c.bind(A, () => {
+      throw new Error('factory failed');
+    });
+    expect(() => c.resolve(A)).toThrow('factory failed');
+    // If the resolving set leaked, this would throw CIRCULAR_DEPENDENCY
+    // instead of "factory failed" again.
+    expect(() => c.resolve(A)).toThrow('factory failed');
+  });
 });
