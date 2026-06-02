@@ -320,7 +320,19 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
   let inkStdin: NodeJS.ReadStream = stdin;
   let detachMouse: (() => void) | null = null;
   if (useMouse) {
+    // Use a PassThrough whose _read() actually pulls buffered data to the
+    // readable side.  The base PassThrough._read is a no-op, so when Ink adds
+    // a 'readable' listener and calls stdin.read() the buffered data is never
+    // surfaced — the entire input pipeline deadlocks (mouse AND keyboard).
     const proxy = new PassThrough();
+    // _read override: the base implementation is a no-op, so we call read(0)
+    // on the readable side so that buffered data emits 'readable' and Ink's
+    // handleReadable fires (fixes the mouse-mode deadlock).
+    proxy._read = function (this: PassThrough, _size: number) {
+      // Trigger a read(0) call on the readable side so that any buffered data
+      // emits a 'readable' event and Ink's handleReadable fires.
+      this.read(0);
+    };
     const p = proxy as unknown as NodeJS.ReadStream;
     // Ink probes isTTY and drives raw mode / ref bookkeeping on its stdin;
     // delegate those to the real terminal so its behavior is unchanged.
