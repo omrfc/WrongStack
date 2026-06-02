@@ -409,10 +409,10 @@ function expandIPv6(addr: string): number[] | null {
 
 function combineSignals(...sigs: AbortSignal[]): AbortSignal {
   // Check for AbortSignal.any() static method (may not exist in older runtimes)
-  // AbortSignal.any() takes rest parameters: (...sigs: AbortSignal[]) => AbortSignal
-  const anyFn = (AbortSignal as unknown as { any?: (...sigs: AbortSignal[]) => AbortSignal }).any;
+  // AbortSignal.any() takes an iterable (array), not rest parameters
+  const anyFn = (AbortSignal as unknown as { any?: (signals: Iterable<AbortSignal>) => AbortSignal }).any;
   if (typeof anyFn === 'function') {
-    return anyFn(...sigs);
+    return anyFn(sigs);
   }
   // Fallback for older runtimes. We register listeners on the parent signals
   // and clean them up once any of them fires (or once ctrl itself aborts) to
