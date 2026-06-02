@@ -90,6 +90,12 @@ With `--mouse` the TUI takes over terminal mouse tracking (forces alt-screen; na
 - **Click** a `/settings` row to focus it; click again to cycle its value.
 - **Click** the lower region to dismiss an open monitor (`Ctrl+F/G/T/P`) or the `?` help overlay (parity with `Esc`).
 
+Keyboard shortcuts (always available in managed/alt-screen mode, not just `--mouse`):
+- **PgUp/PgDn** — page scroll through chat history.
+- **Home/End** — jump to top/bottom of chat history (when input is empty); move cursor to start/end of line (when typing).
+- **Ctrl+Home/End** — jump to top/bottom of chat history (always, even when typing).
+- **↑/↓** — navigate input history when buffer is empty.
+
 ## Options worth knowing
 
 - **`altScreen: true`** (default) — render into the terminal's alternate screen buffer (vim/less/htop style). The TUI owns the whole viewport, native scrollback is untouched, and the live region cannot leak into terminal history. Raw mode plus alt-screen also means every keystroke — including Ctrl+S, Ctrl+Q, Ctrl+Z, Ctrl+\\ — reaches Ink instead of being consumed by the terminal driver (`runTui` additionally registers no-op handlers for `SIGTSTP`/`SIGQUIT`/`SIGTTIN`/`SIGTTOU` as belt-and-suspenders). Set `false` (or pass `--no-alt-screen`) to render into normal scrollback if you specifically want completed chat to survive after exit; the trade-off is the documented live-region leak on resize / overlay-close / picker-submit, and that some shortcuts may fall through to the terminal.

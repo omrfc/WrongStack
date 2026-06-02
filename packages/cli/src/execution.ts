@@ -431,12 +431,14 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           // Default OFF so the terminal's native scrollback works for chat
           // history out of the box (mouse wheel / Shift+PgUp). Users who hit
           // resize/overlay-leak artifacts can opt back into alt-screen with
-          // `--alt-screen` or `/altscreen on`. `--no-alt-screen` still wins
-          // when both are passed.
+          // `--alt-screen`. `--no-alt-screen` still wins when both are passed.
           altScreen: flags['alt-screen'] === true && flags['no-alt-screen'] !== true,
           // Full mouse mode: clickable pickers + in-app wheel scroll. Opt-in
-          // via --mouse; forces alt-screen (the app must own the screen) and
-          // takes the mouse away from the terminal's native scroll/copy.
+          // via --mouse. The TUI combines altScreen || mouse to determine
+          // whether to use the managed viewport (ScrollableHistory + in-app
+          // scroll); --mouse alone enables that without requiring --alt-screen.
+          // Mouse mode takes ownership of the terminal's mouse, suspending
+          // native scroll/copy until `/mouse off`.
           mouse: flags.mouse === true,
           director,
           fleetRoster,

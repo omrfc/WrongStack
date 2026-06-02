@@ -2240,6 +2240,12 @@ export function App({
   // True while the left button is held after pressing on the scrollbar, so
   // subsequent motion events scrub the chat viewport (thumb drag).
   const scrollbarDragRef = useRef(false);
+  // Multi-click detection: tracks the timestamp and position of the last left
+  // click to identify double/triple clicks. SGR 1006 doesn't emit native
+  // multi-click events, so we track them ourselves.
+  const lastLeftClickRef = useRef<{ x: number; y: number; ts: number; count: number } | null>(null);
+  const DOUBLE_CLICK_MS = 500;
+  const DOUBLE_CLICK_DIST = 5; // max pixels between clicks to count as multi-click
   // Live status-bar chip inputs, so the empty-dep mouse handler can hit-test
   // the model / autonomy chips against their current values (not stale ones).
   const statusChipRef = useRef<{
@@ -2277,6 +2283,21 @@ export function App({
       }
       if (ev.button !== 'left') return;
 
+      // Multi-click detection: tracks consecutive clicks within DOUBLE_CLICK_MS
+      // and DOUBLE_CLICK_DIST to identify double/triple clicks. Note: terminal
+      // text selection is managed by the terminal emulator, not the app, so
+      // clickCount is tracked here for future use (e.g., terminal selection API).
+      const now = Date.now();
+      const lastClick = lastLeftClickRef.current;
+      const isMultiClick =
+        lastClick !== null &&
+        now - lastClick.ts < DOUBLE_CLICK_MS &&
+        Math.abs(ev.x - lastClick.x) <= DOUBLE_CLICK_DIST &&
+        Math.abs(ev.y - lastClick.y) <= DOUBLE_CLICK_DIST;
+      const clickCount = isMultiClick ? lastClick.count + 1 : 1;
+      lastLeftClickRef.current = { x: ev.x, y: ev.y, ts: now, count: clickCount };
+      void clickCount; // tracked for future terminal selection API use
+
       // Scrollbar (right edge, rows 1..viewportRows): a press on it jumps the
       // viewport to that position and arms a drag; subsequent held-motion
       // events scrub. The bar is the terminal's last column — accept it plus
@@ -2294,7 +2315,8 @@ export function App({
           return;
         }
         const cols = process.stdout.columns ?? 0;
-        const onScrollbar = cols > 0 && ev.x >= cols - 1 && ev.y >= 1 && ev.y <= rows;
+        // Accept the scrollbar column plus 1-col left margin so near-misses still grab.
+        const onScrollbar = cols > 0 && ev.x >= cols - 2 && ev.y >= 1 && ev.y <= rows;
         if (onScrollbar && s.totalLines > rows) {
           scrollbarDragRef.current = true;
           dispatch({
@@ -4755,10 +4777,10 @@ export function App({
     // Re-entrancy guard: block stale-second events from \r\n terminals.
     if (inputGateRef.current) return;
 
-    // ── Managed-viewport scroll keys (PageUp/PageDown) ────────────────
+    // ── Managed-viewport scroll keys (PageUp/PageDown + Ctrl+Home/End) ─
     // Keyboard parity with the wheel: page the chat viewport. Active whenever
-    // the managed viewport is the surface (alt-screen), mouse or not. Home/End
-    // are left to the input editor (line start/end) below.
+    // the managed viewport is the surface (alt-screen), mouse or not.
+    // Home/End (when buffer empty) are handled separately below.
     if (managedLive) {
       if (key.pageUp) {
         dispatch({ type: 'scrollPage', dir: 'up' });
@@ -4766,6 +4788,15 @@ export function App({
       }
       if (key.pageDown) {
         dispatch({ type: 'scrollPage', dir: 'down' });
+        return;
+      }
+      // Ctrl+Home/End: jump to top/bottom of chat history.
+      if (key.ctrl && key.home) {
+        dispatch({ type: 'scrollToTop' });
+        return;
+      }
+      if (key.ctrl && key.end) {
+        dispatch({ type: 'scrollToBottom' });
         return;
       }
     }
@@ -5253,12 +5284,23 @@ export function App({
       if (cursor < buffer.length) setDraft(buffer, cursor + 1);
       return;
     }
+    // In managed (scroll) mode: Home/End scroll the chat viewport to top/bottom
+    // when the input buffer is empty, mirroring the wheel and PgUp/PgDn.
+    // When there is text in the buffer, Home/End position the cursor.
     if (key.home) {
-      setDraft(buffer, 0);
+      if (managedLive && buffer.length === 0) {
+        dispatch({ type: 'scrollToTop' });
+      } else {
+        setDraft(buffer, 0);
+      }
       return;
     }
     if (key.end) {
-      setDraft(buffer, buffer.length);
+      if (managedLive && buffer.length === 0) {
+        dispatch({ type: 'scrollToBottom' });
+      } else {
+        setDraft(buffer, buffer.length);
+      }
       return;
     }
 
