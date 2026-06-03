@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.0] - 2026-06-03
+
+> Version bump to 0.32.0.
+
+### Changed
+
+- **All workspace packages bumped to 0.32.0**: `wrongstack`, `@wrongstack/cli`, `@wrongstack/core`, `@wrongstack/mcp`, `@wrongstack/plug-lsp`, `@wrongstack/plugins`, `@wrongstack/providers`, `@wrongstack/runtime`, `@wrongstack/skills`, `@wrongstack/telegram`, `@wrongstack/tools`, `@wrongstack/tui`, `@wrongstack/webui`. `@wrongstack/acp` tracks the same version.
+
 ## [0.31.1] - 2026-06-03
 
 > The Director-resilience release. Consolidates everything since the `0.24.0`

@@ -684,15 +684,6 @@ export class MultiAgentHost {
       model: opts?.model,
       tools: opts?.tools,
     };
-    // Pre-compute the transcript path before any spawn so the very first
-    // `subagent.spawned` event the TUI / observability layer sees already
-    // carries it. The factory uses the same naming rule
-    // (`name ?? id ?? sub_<random>`); for the legacy `/spawn` path the
-    // name is always set, so the path is deterministic.
-    const transcriptPath = this.sessionFactory
-      ? path.join(this.sessionFactory.dir, `${subagentConfig.name}.jsonl`)
-      : undefined;
-
     // In director mode we route through `Director.spawn` / `Director.assign`
     // so the director's manifest entries get populated. Calling the
     // underlying coordinator directly would still execute the task, but

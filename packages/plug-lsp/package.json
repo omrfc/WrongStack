@@ -1,6 +1,6 @@
 {
   "name": "@wrongstack/plug-lsp",
-  "version": "0.31.1",
+  "version": "0.32.0",
   "license": "MIT",
   "description": "WrongStack plugin that exposes Language Server Protocol tools.",
   "repository": {
