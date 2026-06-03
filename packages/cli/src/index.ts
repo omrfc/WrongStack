@@ -1,4 +1,3 @@
-import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import type { CommitLLMProvider } from './slash-commands/commit-llm.js';
@@ -56,13 +55,11 @@ import { createDefaultContainer } from '@wrongstack/runtime';
 import { builtinToolsPack, forgetTool, rememberTool } from '@wrongstack/tools';
 import { boot } from './boot.js';
 import { type ExecutionDeps, execute } from './execution.js';
-import type { ReadlineInputReader } from './input-reader.js';
 import { MultiAgentHost } from './multi-agent.js';
 import { makeConfirmAwaiter, makePromptDelegate } from './permission-prompt.js';
 import { runPluginManagementCommand } from './plugin-management.js';
 import { runMcpManagementCommand, parseMcpArgs } from './slash-commands/mcp-utils.js';
 import { buildPickableProviders } from './provider-helpers.js';
-import type { TerminalRenderer } from './renderer.js';
 import { bindReplayToContainer } from './wiring/replay.js';
 import { SessionStats } from './session-stats.js';
 import { buildBuiltinSlashCommands } from './slash-commands/index.js';
@@ -76,17 +73,12 @@ import { setupPlugins } from './wiring/plugins.js';
 import { setupProvider } from './wiring/provider.js';
 import { setupSession } from './wiring/session.js';
 
-function resolveBundledSkillsDir(): string | undefined {
-  try {
-    const req = createRequire(import.meta.url);
-    const corePkg = req.resolve('@wrongstack/core/package.json');
-    return path.join(path.dirname(corePkg), 'skills');
-  } catch {
-    return undefined;
-  }
-}
-
 import { CLI_VERSION } from './version.js';
+import { resolveBundledSkillsDir } from './cli-bundled-skills.js';
+import { printUpdateNotice } from './cli-update-notice.js';
+import { promptRecovery } from './cli-recovery-prompt.js';
+import { runAsMain } from './cli-entry-point.js';
+import { launchEternalFromFlag } from './cli-eternal-flag.js';
 export { CLI_VERSION };
 
 type ContainerPromptDelegate = (
@@ -143,26 +135,8 @@ export async function main(argv: string[]): Promise<number> {
     updateInfo,
   } = ctx;
 
-  // Show update notification if outdated.
-  // If boot's background check is still running (cache miss), fire a new
-  // quick check and wait up to 2s — notification is non-critical.
-  if (!updateInfo?.outdated) {
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 2000);
-    try {
-      const { checkForUpdate } = await import('./update-check.js');
-      updateInfo = await checkForUpdate(ac.signal);
-    } catch {
-      // best-effort
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  if (updateInfo?.outdated) {
-    writeErr(
-      `\n  \x1b[33m↑ Update available: v${updateInfo.current} → v${updateInfo.latest}\x1b[0m  Run \`wrongstack update\` to upgrade.\n\n`,
-    );
-  }
+  // Show update notification (best-effort, never blocks boot).
+  updateInfo = await printUpdateNotice(updateInfo);
   // PathResolver is created from the resolved projectRoot
   const pathResolver = new DefaultPathResolver(cwd);
 
@@ -1542,42 +1516,28 @@ export async function main(argv: string[]): Promise<number> {
   for (const cmd of slashCmds) slashRegistry.register(cmd);
 
   // ── --eternal "<mission>" flag: one-shot launch into eternal autonomy. ──
-  // Writes the mission as the goal (overwriting any prior goal), forces
-  // YOLO on (consistent with /autonomy eternal), instantiates + primes the
-  // engine, and flips autonomyMode='eternal' so the REPL's main loop drives
-  // the engine instead of reading user input. The user can still /autonomy
-  // stop or Ctrl+C to exit the loop normally.
+  // See `cli-eternal-flag.ts` for the full contract. The flag is parsed
+  // here so we can early-return without it; the side effects (YOLO on,
+  // engine prime, autonomyMode flip) all live in the helper.
   const eternalFlag = typeof flags['eternal'] === 'string' ? (flags['eternal'] as string).trim() : '';
+  const configRef = { current: config };
+  await launchEternalFromFlag({
+    eternalFlag,
+    projectRoot,
+    agent,
+    container,
+    renderer,
+    broadcastEternalIteration,
+    effectiveMaxContext,
+    configRef,
+    autonomyModeRef,
+  });
+  // Sync local `config` with any mutation the helper applied (e.g. yolo
+  // flag flip). Using a ref keeps the helper's call site clean — no return
+  // value juggling for callers that don't care about the update.
+  config = configRef.current;
   if (eternalFlag.length > 0) {
-    const { saveGoal, emptyGoal, goalFilePath, loadGoal } = await import('@wrongstack/core');
-    const goalPath = goalFilePath(projectRoot);
-    const prior = await loadGoal(goalPath);
-    // Preserve journal across flag-driven re-launches so the user can run
-    // `wstack --eternal "<x>"`, ctrl-c, then `wstack --eternal "<y>"` and
-    // still see the prior iteration history under /goal journal.
-    const next = prior
-      ? { ...prior, goal: eternalFlag, setAt: new Date().toISOString(), lastActivityAt: new Date().toISOString() }
-      : emptyGoal(eternalFlag);
-    await saveGoal(goalPath, next);
-    // Force YOLO on for destructive ops, matching the /autonomy eternal path.
-    const policy = container.resolve(TOKENS.PermissionPolicy) as DefaultPermissionPolicy;
-    policy.setYolo(true);
-    config = patchConfig(config, { yolo: true });
-    eternalEngine = new EternalAutonomyEngine({
-      agent,
-      projectRoot,
-      compactor: container.resolve(TOKENS.Compactor) as import('@wrongstack/core').Compactor,
-      maxContextTokens: effectiveMaxContext > 0 ? effectiveMaxContext : undefined,
-      onIteration: broadcastEternalIteration,
-    });
-    await eternalEngine.prime();
     autonomyMode = 'eternal';
-    autonomyModeRef.current = 'eternal';
-    renderer.write(
-      color.red('Eternal mode launching from --eternal flag.') +
-        color.dim(` Goal: ${eternalFlag.slice(0, 80)}${eternalFlag.length > 80 ? '…' : ''}`) +
-        '\n',
-    );
   }
 
   // Dispatch to execution phase — single-shot, TUI, REPL, or WebUI.
@@ -1650,68 +1610,11 @@ export async function main(argv: string[]): Promise<number> {
  * input degrades to the same — the alternative is hanging on stdin or
  * forcing the user to remember a flag they never typed.
  */
-async function promptRecovery(
-  reader: ReadlineInputReader,
-  renderer: TerminalRenderer,
-  abandoned: import('@wrongstack/core').AbandonedSession,
-  autoRecover: boolean,
-): Promise<'resume' | 'delete' | 'skip'> {
-  const minutes = Math.round(abandoned.ageMs / 60_000);
-  const ageLabel =
-    minutes < 1
-      ? `${Math.round(abandoned.ageMs / 1000)}s ago`
-      : minutes < 60
-        ? `${minutes} min ago`
-        : `${Math.round(minutes / 60)}h ago`;
-  const summary = `Previous session was killed mid-run: ${abandoned.sessionId} (${abandoned.messageCount} messages, ${ageLabel}).`;
-  if (autoRecover) {
-    renderer.writeInfo(`${summary} Auto-resuming (--recover).`);
-    return 'resume';
-  }
-  if (!isStdinTTY()) {
-    renderer.writeInfo(
-      `${summary} Non-interactive — leaving as-is. Use \`wstack resume ${abandoned.sessionId}\` or pass \`--recover\` to auto-resume.`,
-    );
-    return 'skip';
-  }
-  renderer.writeInfo(summary);
-  const answer = await reader.readKey(
-    `${color.amber('?')} Recover it? ${color.dim('[')}${color.bold('Y')}es / ${color.bold('n')}o / ${color.bold('d')}elete${color.dim(']')} `,
-    [
-      { key: 'y', label: 'yes', value: 'resume' },
-      { key: 'Y', label: 'yes', value: 'resume' },
-      { key: '\r', label: 'yes', value: 'resume' },
-      { key: '\n', label: 'yes', value: 'resume' },
-      { key: 'n', label: 'no', value: 'skip' },
-      { key: 'N', label: 'no', value: 'skip' },
-      { key: 'd', label: 'delete', value: 'delete' },
-      { key: 'D', label: 'delete', value: 'delete' },
-    ],
-  );
-  return answer as 'resume' | 'delete' | 'skip';
-}
+// promptRecovery lives in `cli-recovery-prompt.ts` (extracted so it can be
+// unit-tested with a fake ReadlineInputReader + TerminalRenderer stub
+// without spinning up the whole CLI). Imported at the top of this file.
 
-const isMain =
-  import.meta.url === `file://${process.argv[1]?.replace(/\\/g, '/')}` ||
-  process.argv[1]?.endsWith('/cli/dist/index.js') ||
-  process.argv[1]?.endsWith('\\cli\\dist\\index.js');
-if (isMain) {
-  main(process.argv.slice(2)).then(
-    (c) => {
-      // Set exitCode and let Node drain async handles (undici TLS, log file
-      // flushes) naturally. Force-exit after a brief grace period so we don't
-      // hang if a plugin or MCP server leaks. Avoids libuv UV_HANDLE_CLOSING
-      // assertions seen on Windows when process.exit() races with handle teardown.
-      process.exitCode = c;
-      // 500ms grace: let undici TLS, log flushes, and plugin teardown complete.
-      // The unref() prevents this timer from keeping the event loop alive
-      // if everything else finishes first.
-      setTimeout(() => process.exit(c), 500).unref();
-    },
-    (err) => {
-      writeErr((err instanceof Error ? err.stack : String(err)) + '\n');
-      process.exitCode = 1;
-      setTimeout(() => process.exit(1), 500).unref();
-    },
-  );
-}
+// isMain detection + bounded exit-on-both-success-and-failure live in
+// `cli-entry-point.ts` (extracted to centralise the URL/path matching and
+// the 500ms unref-grace-period setTimeout dance).
+runAsMain(main);
