@@ -23,9 +23,12 @@ export function makeSpawnTool(director: Director, roster?: Record<string, Subage
       provider: { type: 'string', description: 'Provider id (e.g. "anthropic", "openai"). Defaults to the leader provider when omitted.' },
       model: { type: 'string', description: 'Model id within the provider. Defaults to the leader model when omitted.' },
       systemPromptOverride: { type: 'string', description: 'Extra prompt text appended after the role-base prompt.' },
-      maxIterations: { type: 'number' },
-      maxToolCalls: { type: 'number' },
-      maxCostUsd: { type: 'number' },
+      maxIterations: { type: 'number', minimum: 1 },
+      maxToolCalls: { type: 'number', minimum: 1 },
+      maxCostUsd: { type: 'number', minimum: 0 },
+      timeoutMs: { type: 'number', minimum: 1, description: 'Hard wall-clock cap in milliseconds. Defaults to none (idle timeout is the default reaper).' },
+      idleTimeoutMs: { type: 'number', minimum: 1, description: 'Idle timeout in ms: reap the subagent after this long with no activity. Resets on every iteration/tool call. Default is role/coordinator-specific.' },
+      maxTokens: { type: 'number', minimum: 1, description: 'Maximum total tokens (input + output) the subagent may use.' },
     },
     required: [],
   };
@@ -82,6 +85,9 @@ export function makeSpawnTool(director: Director, roster?: Record<string, Subage
       if (typeof i.maxIterations === 'number') cfg.maxIterations = i.maxIterations;
       if (typeof i.maxToolCalls === 'number') cfg.maxToolCalls = i.maxToolCalls;
       if (typeof i.maxCostUsd === 'number') cfg.maxCostUsd = i.maxCostUsd;
+      if (typeof i.timeoutMs === 'number') cfg.timeoutMs = i.timeoutMs;
+      if (typeof i.idleTimeoutMs === 'number') cfg.idleTimeoutMs = i.idleTimeoutMs;
+      if (typeof i.maxTokens === 'number') cfg.maxTokens = i.maxTokens;
       try {
         const subagentId = await director.spawn(cfg);
         return { subagentId, provider: cfg.provider, model: cfg.model, name: cfg.name, role: cfg.role };
@@ -111,10 +117,10 @@ export function makeAssignTool(director: Director): Tool {
   const inputSchema: JSONSchema = {
     type: 'object',
     properties: {
-      subagentId: { type: 'string', description: 'Target subagent id. Required.' },
-      description: { type: 'string', description: 'The task in natural language — what you want this subagent to do.' },
-      maxToolCalls: { type: 'number', description: 'Optional per-task tool-call budget override.' },
-      timeoutMs: { type: 'number', description: 'Optional per-task timeout in ms.' },
+      subagentId: { type: 'string', minLength: 1, description: 'Target subagent id. Required.' },
+      description: { type: 'string', minLength: 1, description: 'The task in natural language — what you want this subagent to do.' },
+      maxToolCalls: { type: 'number', minimum: 1, description: 'Optional per-task tool-call budget override.' },
+      timeoutMs: { type: 'number', minimum: 1, description: 'Optional per-task timeout in ms.' },
     },
     required: ['subagentId', 'description'],
   };
@@ -157,9 +163,9 @@ export function makeAskTool(director: Director): Tool {
     inputSchema: {
       type: 'object',
       properties: {
-        subagentId: { type: 'string', description: 'Subagent to ask. Must be a previously spawned id.' },
-        question: { type: 'string', description: 'The question or instruction.' },
-        timeoutMs: { type: 'number', description: 'Optional timeout in ms (default 30s).' },
+        subagentId: { type: 'string', minLength: 1, description: 'Subagent to ask. Must be a previously spawned id.' },
+        question: { type: 'string', minLength: 1, description: 'The question or instruction.' },
+        timeoutMs: { type: 'number', minimum: 1, description: 'Optional timeout in ms (default 30s).' },
       },
       required: ['subagentId', 'question'],
     },
@@ -366,6 +372,7 @@ export function makeCollabDebugTool(director: Director): Tool {
         },
         timeoutMs: {
           type: 'number',
+          minimum: 1,
           description: 'Timeout in ms. Default: 600000 (10 minutes).',
         },
       },

@@ -30,6 +30,7 @@ import { EventEmitter } from 'node:events';
 import * as fsp from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import type { SubagentConfig, TaskResult } from '../types/multi-agent.js';
+import { expandGlob } from '../utils/glob-expand.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -314,7 +315,7 @@ export class CollabSession extends EventEmitter {
 
   async buildSnapshot(): Promise<SharedFileSnapshot> {
     if (this.snapshot.files.length > 0) return this.snapshot;
-    for (const filePath of this.options.targetPaths) {
+    for (const filePath of (await Promise.all(this.options.targetPaths.map(p => expandGlob(p)))).flat()) {
       try {
         const content = await fsp.readFile(filePath, 'utf8');
         const ext = filePath.split('.').pop() ?? '';

@@ -59,9 +59,13 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
    * names) to memorable ones here — that's what surfaces in the fleet monitor.
    */
   private readonly usedNicknames = new Set<string>();
+  /** Maps subagentId → nickname key (e.g. 'einstein'). Used to free the slot on remove(). */
+  private readonly subagentNicknames = new Map<string, string>();
 
   private pendingTasks: TaskSpec[] = [];
   private completedResults: TaskResult[] = [];
+  /** Prevents completedResults from growing unbounded in long-running coordinators. */
+  private static readonly MAX_COMPLETED_RESULTS = 10_000;
   private totalIterations = 0;
   private inFlight = 0;
   /**
@@ -121,7 +125,7 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
    * Explicit, human-chosen names — including nicknames already assigned by
    * `Director.spawn()` — are left untouched, so this never double-assigns.
    */
-  private withNickname(subagent: SubagentConfig): SubagentConfig {
+  private withNickname(subagent: SubagentConfig, subagentId: string): SubagentConfig {
     const role = subagent.role ?? 'subagent';
     const name = subagent.name?.trim() ?? '';
     const isPlaceholder =
@@ -135,12 +139,13 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
     const nickname = assignNickname(role, this.usedNicknames);
     const baseKey = nickname.split(' ')[0]!.toLowerCase().replace(/[^a-z0-9-]/g, '-');
     this.usedNicknames.add(baseKey);
+    this.subagentNicknames.set(subagentId, baseKey);
     return { ...subagent, name: nickname };
   }
 
   async spawn(subagent: SubagentConfig): Promise<SpawnResult> {
-    subagent = this.withNickname(subagent);
     const id = subagent.id || randomUUID();
+    subagent = this.withNickname(subagent, id);
     // Duplicate-id guard. Previously a second spawn({id}) with the
     // same id silently overwrote the existing entry — orphaning the
     // first subagent's AbortController, Context, and any in-flight
@@ -768,6 +773,14 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
 
   private recordCompletion(result: TaskResult): void {
     this.completedResults.push(result);
+    // Trim oldest entries when the cap is exceeded — keep the most recent
+    // results so /fleet and roll_up still have data to work with.
+    if (this.completedResults.length > DefaultMultiAgentCoordinator.MAX_COMPLETED_RESULTS) {
+      this.completedResults.splice(
+        0,
+        this.completedResults.length - DefaultMultiAgentCoordinator.MAX_COMPLETED_RESULTS,
+      );
+    }
     this.totalIterations += result.iterations;
     if (this.inFlight > 0) {
       this.inFlight--;
@@ -867,9 +880,35 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
     // Release all resources associated with this subagent.
     this.subagents.delete(subagentId);
     this.terminating.delete(subagentId);
+    // Free the nickname slot so the same name can be reused by a future spawn.
+    const nicknameKey = this.subagentNicknames.get(subagentId);
+    if (nicknameKey) {
+      this.usedNicknames.delete(nicknameKey);
+      this.subagentNicknames.delete(subagentId);
+    }
 
-    // Clean up any pending tasks assigned to this subagent.
+    // Clean up any pending tasks assigned to this subagent — emit synthetic
+    // 'stopped' completions so callers awaiting them via awaitTasks() unblock
+    // instead of hanging forever. Without this, a task queued for a removed
+    // subagent would leave its waiter permanently unresolved.
+    const orphaned = this.pendingTasks.filter((t) => t.subagentId === subagentId);
     this.pendingTasks = this.pendingTasks.filter((t) => t.subagentId !== subagentId);
+    for (const t of orphaned) {
+      const synthetic: TaskResult = {
+        subagentId,
+        taskId: t.id,
+        status: 'stopped',
+        error: {
+          kind: 'aborted_by_parent',
+          message: `Subagent "${subagentId}" was removed while task "${t.id}" was pending`,
+          retryable: false,
+        },
+        iterations: 0,
+        toolCalls: 0,
+        durationMs: 0,
+      };
+      this.recordCompletion(synthetic);
+    }
 
     this.fleetBus?.emit({
       subagentId,

@@ -441,6 +441,26 @@ export class FleetManager implements IFleetManager {
     return { pending, live: [] };
   }
 
+  /**
+   * Clean up all fleet-manager state associated with a removed subagent:
+   * - Frees the nickname slot so the same name can be reused
+   * - Removes any pending tasks for this subagent
+   */
+  removeSubagent(subagentId: string): void {
+    // Free the nickname slot so the same name can be reused.
+    const entry = this.manifestEntries.get(subagentId);
+    if (entry?.name) {
+      const nicknameKey = entry.name.split(' ')[0]!.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+      this._usedNicknames.delete(nicknameKey);
+    }
+    // Remove any pending tasks assigned to this subagent.
+    for (const [taskId, task] of this.pendingTasks) {
+      if (task.subagentId === subagentId) {
+        this.pendingTasks.delete(taskId);
+      }
+    }
+  }
+
   /** Release all resources: clear the manifest debounce timer and dispose the usage aggregator. */
   dispose(): void {
     if (this.manifestTimer) {

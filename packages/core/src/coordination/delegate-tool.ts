@@ -131,17 +131,38 @@ export function createDelegateTool(opts: CreateDelegateToolOptions): Tool {
       },
       timeoutMs: {
         type: 'number',
+        minimum: 1,
         description: `Wall-clock budget for this delegate in milliseconds. No hard cap — set as high as the task realistically needs (a monorepo audit can take hours, a single-file lint takes seconds). Default ${Math.round(defaultTimeoutMs / 1000 / 60)} minutes.`,
       },
       maxIterations: {
         type: 'number',
+        minimum: 1,
         description:
           'Maximum LLM iterations the subagent may take. Unset = use the role/coordinator default. Raise this for tasks with many tool-think-tool cycles (deep code analysis, multi-file refactors).',
       },
       maxToolCalls: {
         type: 'number',
+        minimum: 1,
         description:
           'Maximum number of tool invocations the subagent may make. Unset = use the role/coordinator default. Raise this for tasks that touch many files (large grep + read + report).',
+      },
+      idleTimeoutMs: {
+        type: 'number',
+        minimum: 1,
+        description:
+          'Idle timeout in ms: reap the subagent after this long with no activity. Resets on every iteration/tool call. Unset = use the role/coordinator default.',
+      },
+      maxTokens: {
+        type: 'number',
+        minimum: 1,
+        description:
+          'Maximum total tokens (input + output) the subagent may use. Unset = use the role/coordinator default.',
+      },
+      maxCostUsd: {
+        type: 'number',
+        minimum: 0,
+        description:
+          'Maximum estimated USD cost the subagent may incur. Unset = use the role/coordinator default.',
       },
     },
     required: ['task'],
@@ -221,11 +242,20 @@ export function createDelegateTool(opts: CreateDelegateToolOptions): Tool {
             cfg = applyRosterBudget({ ...cfg, name: i.name });
           }
 
-          if (typeof i.maxIterations === 'number' && i.maxIterations > 0) {
+          if (typeof i.maxIterations === 'number') {
             cfg.maxIterations = i.maxIterations;
           }
-          if (typeof i.maxToolCalls === 'number' && i.maxToolCalls > 0) {
+          if (typeof i.maxToolCalls === 'number') {
             cfg.maxToolCalls = i.maxToolCalls;
+          }
+          if (typeof i.idleTimeoutMs === 'number') {
+            cfg.idleTimeoutMs = i.idleTimeoutMs;
+          }
+          if (typeof i.maxTokens === 'number') {
+            cfg.maxTokens = i.maxTokens;
+          }
+          if (typeof i.maxCostUsd === 'number') {
+            cfg.maxCostUsd = i.maxCostUsd;
           }
 
           const SUBAGENT_TIMEOUT_BUFFER_MS = opts.subagentTimeoutBufferMs ?? 60_000;

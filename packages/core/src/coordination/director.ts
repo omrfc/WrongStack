@@ -348,6 +348,8 @@ export class Director implements ICoordinator {
    *  coordinator already fired the event — `awaitTasks(['t-1'])` after
    *  t-1 finished should resolve immediately, not hang. */
   private readonly completed = new Map<string, TaskResult>();
+  /** Prevents the completed Map from growing unbounded in long-running directors. */
+  private static readonly MAX_COMPLETED = 10_000;
   /** Per-subagent provider/model metadata, captured at spawn time so the
    *  FleetUsageAggregator's metaLookup can surface readable rows. */
   private readonly subagentMeta = new Map<string, { provider?: string; model?: string }>();
@@ -521,6 +523,13 @@ export class Director implements ICoordinator {
     this.taskCompletedListener = (payload: { task: TaskSpec; result: TaskResult }) => {
       const r = payload.result;
       this.completed.set(r.taskId, r);
+      // Trim oldest entries when the cap is exceeded — keep most recent results
+      // so rollUp() and completedResults() still have data to return.
+      if (this.completed.size > Director.MAX_COMPLETED) {
+        const toDelete = this.completed.size - Director.MAX_COMPLETED;
+        const keys = [...this.completed.keys()].slice(0, toDelete);
+        for (const k of keys) this.completed.delete(k);
+      }
       const waiter = this.taskWaiters.get(r.taskId);
       if (waiter) {
         waiter.resolve(r);
@@ -1264,8 +1273,33 @@ export class Director implements ICoordinator {
 
   async remove(subagentId: string): Promise<void> {
     await this.coordinator.remove(subagentId);
+
+    // Clean up the bridge so it stops consuming resources.
+    const bridge = this.subagentBridges.get(subagentId);
+    if (bridge) {
+      await bridge.stop();
+      this.subagentBridges.delete(subagentId);
+    }
+
     // Clean up the aggregator so terminated subagent data doesn't accumulate.
     this.usage.removeSubagent(subagentId);
+
+    // Delegate nickname cleanup to FleetManager when available; otherwise handle
+    // it directly here. This frees the slot so the same name can be reused.
+    if (this.fleetManager) {
+      this.fleetManager.removeSubagent(subagentId);
+    } else {
+      const entry = this.manifestEntries.get(subagentId);
+      if (entry?.name) {
+        const nicknameKey = entry.name.split(' ')[0]!.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+        this._usedNicknames.delete(nicknameKey);
+      }
+    }
+
+    // Remove all local state entries for this subagent.
+    this.manifestEntries.delete(subagentId);
+    this.taskOwners.delete(subagentId);
+    this.taskDescriptions.delete(subagentId);
   }
 
   status(): CoordinatorStatus {

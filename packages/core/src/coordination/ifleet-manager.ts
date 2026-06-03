@@ -133,6 +133,12 @@ export interface IFleetManager {
   };
 
   /**
+   * Called when a subagent is removed so the fleet manager can clean up
+   * associated state (nickname slots, pending tasks, etc.).
+   */
+  removeSubagent(subagentId: string): void;
+
+  /**
    * Release all resources held by the fleet manager.
    * Clears any pending manifest debounce timer and disposes the usage aggregator.
    * Call this when the fleet manager is no longer needed (e.g. process shutdown).
