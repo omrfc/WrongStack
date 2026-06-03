@@ -27,6 +27,7 @@ import {
   createMcpControlTool,
   isStdinTTY,
   loadDirectorState,
+  writeOut,
   // createSessionEventBridge, // real import after core declarations are rebuilt
   // resolveAuditLevel,
   // type SessionEventBridge,
@@ -1441,7 +1442,7 @@ export async function main(argv: string[]): Promise<number> {
       // starts on a fresh terminal.
       if (flags.tui && !flags['no-tui']) return;
       try {
-        process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
+        writeOut('\x1b[2J\x1b[3J\x1b[H');
       } catch {
         // stdout may be closed during shutdown — ignore.
       }

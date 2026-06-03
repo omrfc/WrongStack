@@ -1,5 +1,5 @@
 import type { InputReader, Tool } from '@wrongstack/core';
-import { color } from '@wrongstack/core';
+import { color, writeOut } from '@wrongstack/core';
 import { renderDiff } from './diff-renderer.js';
 import { theme } from './theme.js';
 
@@ -18,17 +18,17 @@ export function makePromptDelegate(reader: InputReader) {
     // Terminal bell (\x07) to alert the user that action is required.
     // Without this, the prompt can be easily missed when output is
     // scrolling or the user has switched to another window.
-    process.stdout.write('\x07');
-    process.stdout.write(`\n${theme.warn('⚠ APPROVAL REQUIRED')} ${theme.primary('│')} ${theme.bold(tool.name)}\n`);
-    process.stdout.write(`${color.dim(stringifyInput(input))}\n`);
+    writeOut('\x07');
+    writeOut(`\n${theme.warn('⚠ APPROVAL REQUIRED')} ${theme.primary('│')} ${theme.bold(tool.name)}\n`);
+    writeOut(`${color.dim(stringifyInput(input))}\n`);
 
     if (tool.name === 'edit' && hasDiff(input)) {
       const inp = input as { diff?: unknown };
       const diff = typeof inp.diff === 'string' ? inp.diff : '';
-      if (diff) process.stdout.write(`${renderDiff(diff)}\n`);
+      if (diff) writeOut(`${renderDiff(diff)}\n`);
     }
 
-    process.stdout.write(color.dim('─────────────────\n'));
+    writeOut(color.dim('─────────────────\n'));
     const answer = await reader.readKey(
       `${theme.bold('[y]')}es  ${theme.bold('[n]')}o  ${theme.bold('[a]')}lways allow (${suggestedPattern})  ${theme.bold('[d]')}eny: `,
       [

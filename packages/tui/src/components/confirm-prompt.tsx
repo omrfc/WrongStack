@@ -1,4 +1,5 @@
 import { Box, Text, useInput } from 'ink';
+import { writeOut } from '@wrongstack/core';
 import React from 'react';
 
 export type ConfirmDecision = 'yes' | 'no' | 'always' | 'deny';
@@ -114,7 +115,7 @@ export function ConfirmPrompt({
   // especially important when the agent has been running autonomously
   // and the user may not be staring at the terminal.
   React.useEffect(() => {
-    process.stdout.write('\x07');
+    writeOut('\x07');
   }, []);
 
   useInput((input, _key) => {

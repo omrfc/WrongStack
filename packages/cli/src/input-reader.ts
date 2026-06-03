@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
-import { type InputReader, type PromptOption, setRawMode } from '@wrongstack/core';
+import { type InputReader, type PromptOption, setRawMode, writeOut } from '@wrongstack/core';
 
 export interface ReadlineInputReaderOptions {
   historyFile?: string;
@@ -93,7 +93,7 @@ export class ReadlineInputReader implements InputReader {
   }
 
   async readKey(prompt: string, options: PromptOption[]): Promise<string> {
-    process.stdout.write(prompt);
+    writeOut(prompt);
     return new Promise<string>((resolve) => {
       const stdin = process.stdin;
       const wasRaw = stdin.isRaw;
@@ -105,7 +105,7 @@ export class ReadlineInputReader implements InputReader {
         // Ctrl+C — treat as cancel (resolve with empty string).
         if (key === '\x03') {
           cleanup();
-          process.stdout.write('\n');
+          writeOut('\n');
           resolve('');
           return;
         }
@@ -114,7 +114,7 @@ export class ReadlineInputReader implements InputReader {
         );
         if (opt) {
           cleanup();
-          process.stdout.write(`${opt.key}\n`);
+          writeOut(`${opt.key}\n`);
           resolve(opt.value);
         }
       };
@@ -149,7 +149,7 @@ export class ReadlineInputReader implements InputReader {
     // Tear down the active readline so we can take over stdin.
     this.rl?.close();
     this.rl = undefined;
-    process.stdout.write(prompt);
+    writeOut(prompt);
     return new Promise<string>((resolve) => {
       let buf = '';
       const wasRaw = stdin.isRaw;
@@ -159,7 +159,7 @@ export class ReadlineInputReader implements InputReader {
 
       const eraseChar = () => {
         // Move cursor back, overwrite with space, move back again.
-        process.stdout.write('\b \b');
+        writeOut('\b \b');
       };
       const eraseAll = () => {
         for (let i = 0; i < buf.length; i++) eraseChar();
@@ -172,14 +172,14 @@ export class ReadlineInputReader implements InputReader {
         for (const ch of chunk) {
           if (ch === '\r' || ch === '\n') {
             cleanup();
-            process.stdout.write(`  ${dim(`[${buf.length} chars]`)}\n`);
+            writeOut(`  ${dim(`[${buf.length} chars]`)}\n`);
             resolve(buf);
             return;
           }
           if (ch === '') {
             // Ctrl+C
             cleanup();
-            process.stdout.write('\n');
+            writeOut('\n');
             process.exit(130);
           }
           if (ch === '') {
@@ -206,7 +206,7 @@ export class ReadlineInputReader implements InputReader {
           // Skip other control bytes silently (escape sequences, etc.).
           if (ch < ' ') continue;
           buf += ch;
-          process.stdout.write('•');
+          writeOut('•');
         }
       };
       const cleanup = () => {

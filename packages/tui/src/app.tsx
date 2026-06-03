@@ -12,7 +12,7 @@ import type {
   TokenCounter,
 } from '@wrongstack/core';
 import { DefaultSessionRewinder } from '@wrongstack/core';
-import { InputBuilder, buildGoalPreamble, formatTodosList } from '@wrongstack/core';
+import { InputBuilder, buildGoalPreamble, formatTodosList, writeOut } from '@wrongstack/core';
 import { type VisionAdapters, routeImagesForModel } from '@wrongstack/runtime/vision';
 import { getProcessRegistry } from '@wrongstack/tools';
 import { Box, type DOMElement, Text, measureElement, useApp, useStdout } from 'ink';
@@ -2866,7 +2866,7 @@ export function App({
       // untouched. Do NOT prefix with \x1b[H: homing to (0,0) wipes the
       // visible committed output and forces the input/status bar to redraw
       // at the top of the viewport instead of staying pinned to the bottom.
-      process.stdout.write('\x1b[J');
+      writeOut('\x1b[J');
     } catch {
       // stdout might be detached during shutdown — ignore.
     }
@@ -3157,7 +3157,7 @@ export function App({
         const arg = args.trim().toLowerCase();
         if (arg === 'off') {
           try {
-            process.stdout.write(ALT_OFF);
+            writeOut(ALT_OFF);
           } catch {
             return { message: 'Failed to exit alt-screen.' };
           }
@@ -3172,7 +3172,7 @@ export function App({
         }
         if (arg === 'on') {
           try {
-            process.stdout.write(ALT_ON);
+            writeOut(ALT_ON);
           } catch {
             return { message: 'Failed to re-enter alt-screen.' };
           }
@@ -3225,9 +3225,9 @@ export function App({
             };
           }
           try {
-            process.stdout.write(ALT_ON);
-            process.stdout.write('\x1b[H');
-            process.stdout.write(MOUSE_ON_SEQ);
+            writeOut(ALT_ON);
+            writeOut('\x1b[H');
+            writeOut(MOUSE_ON_SEQ);
           } catch {
             return { message: 'Failed to enable mouse mode.' };
           }
@@ -3241,8 +3241,8 @@ export function App({
         }
         // off
         try {
-          process.stdout.write(MOUSE_OFF_SEQ);
-          process.stdout.write(ALT_OFF);
+          writeOut(MOUSE_OFF_SEQ);
+          writeOut(ALT_OFF);
         } catch {
           return { message: 'Failed to disable mouse mode.' };
         }

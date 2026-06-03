@@ -1,7 +1,7 @@
 import type { Mode, ModeStore, InputReader } from '@wrongstack/core';
 import type { SlashCommand } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
-import { color } from '@wrongstack/core';
+import { color, writeOut } from '@wrongstack/core';
 
 /**
  * Interactive mode picker — arrow-key navigation, Enter to select, q to quit.
@@ -30,7 +30,7 @@ async function runModePicker(modeStore: ModeStore, reader: InputReader): Promise
     return lines.join('\n');
   };
 
-  process.stdout.write(render(cursor));
+  writeOut(render(cursor));
 
   // Arrow keys and Enter for selection; q to quit
   const options = [
@@ -50,8 +50,8 @@ async function runModePicker(modeStore: ModeStore, reader: InputReader): Promise
       cursor = cursor < modes.length - 1 ? cursor + 1 : 0;
     }
     // Re-render at current cursor position
-    process.stdout.write('\x1b[J'); // Clear from cursor to end of screen
-    process.stdout.write(render(cursor));
+    writeOut('\x1b[J'); // Clear from cursor to end of screen
+    writeOut(render(cursor));
   }
 }
 

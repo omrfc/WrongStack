@@ -36,6 +36,8 @@ export {
   isInteractive,
   getTermSize,
   onResize,
+  setRawMode,
+  writeOut,
 } from './utils/term.js';
 export {
   Agent,
