@@ -5,6 +5,104 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.1] - 2026-06-03
+
+> The Director-resilience release. Consolidates everything since the `0.24.0`
+> realignment. The headline is a hardening pass over the multi-agent
+> coordination layer — bounded context for the Director, classified fleet
+> failures surfaced live, and a sweep of resource leaks / unbounded-growth
+> bugs closed — plus calibrated token estimation that self-corrects against
+> real provider usage. Additive only; no breaking changes.
+>
+> **Version consolidation.** The intermediate `0.25.0`–`0.31.0` bumps shipped
+> as mechanical `chore: bump version` / `feat: update code` commits without
+> their own changelog sections; their substantive changes are folded into this
+> entry. All 15 workspace manifests are realigned from `0.24.0` to `0.31.1` in
+> lockstep (the root manifest had again run ahead via bump-only commits).
+
+### Added
+
+- **`LargeAnswerStore` + `ask_result` tool — bounded Director context.** Large
+  `ask_subagent` responses (10–50K+ tokens each) used to accumulate in
+  `ctx.messages` as `tool_result` content; because the compactor preserves the
+  last few conversation pairs (`preserveK`), several big asks in that window
+  could push the Director past 100% context pressure into provider overflow or
+  silent quality loss. `ask_subagent` now stores any response over 2K chars in
+  a per-Director out-of-band `LargeAnswerStore`, returning only a 300-char
+  summary plus an `_answerKey`; small responses are returned inline unchanged.
+  The new `ask_result` tool retrieves the full content by key on demand, so the
+  Director's context stays bounded regardless of how many large asks happen.
+  `Director` exposes `readonly largeAnswerStore: LargeAnswerStore` (2K
+  threshold). The Director tool surface grows from 13 to **14** tools.
+
+- **Calibrated request-token estimation (`estimateRequestTokensCalibrated`).**
+  A new estimator in `@wrongstack/core/utils` records actual provider usage
+  (`recordActualUsage`) and applies the observed estimate-vs-actual ratio to
+  subsequent calls, self-correcting the per-iteration token projection instead
+  of relying on a fixed chars/token heuristic. Wired through the agent loop,
+  the auto-compaction middleware, the CLI request pipeline, and the WebUI
+  server so the context-pressure figure the Director and UIs read tracks
+  reality.
+
+- **Live context-pressure reporting to the Director.** After each agent
+  iteration the CLI reports the calibrated context-pressure estimate to the
+  Director, so fleet-level decisions (compaction, delegation, roll-up) react to
+  actual load rather than a stale snapshot.
+
+- **Fleet failure taxonomy surfaced in the TUI.** `FleetEntry` gains a
+  `failureReason` field tracking the terminal cause (`provider_auth`,
+  `provider_rate_limit`, `budget_timeout`, `budget_iterations`, …); the agents
+  monitor and fleet timeline now render the reason for failed / timed-out /
+  stopped agents instead of an opaque ✗.
+
+- **`expandGlob` utility + glob-aware collab snapshots.** `Director.spawnCollab`
+  / `buildSnapshot()` previously tried to read glob strings (`src/**/*.ts`) as
+  literal paths, silently producing empty snapshots. A new `expandGlob()`
+  helper (`@wrongstack/core/utils`) expands `*`, `**`, `?`, and `[...]` across
+  both `/` and `\` separators, so collab sessions read the files the pattern
+  actually matches.
+
+### Changed
+
+- **Fleet panel / monitor density.** The fleet panel now shows up to 5 running
+  agents (was 3) and names the first 2 overflowed agents; nickname assignment
+  no longer races — placeholder names (`adhoc`, `subagent`, `slot-*`) are
+  rewritten in place when the real scientist nickname arrives.
+
+- **Tighter orchestration-tool schemas.** The `delegate` tool schema gained the
+  previously-undocumented `idleTimeoutMs`, `maxTokens`, and `maxCostUsd`
+  parameters plus `minimum` constraints on every numeric field; `director-tools`
+  added `minLength: 1` to id/description/question string fields and `minimum: 1`
+  to all numeric budget fields, so malformed orchestration calls are rejected at
+  the schema boundary.
+
+### Fixed
+
+- **Director / Fleet resource leaks and unbounded growth.** `Director.remove()`
+  now stops the subagent bridge and deletes its `manifestEntries`,
+  `taskOwners`, and `taskDescriptions` (all leaked before). The `completed` map
+  and `completedResults` array are capped at 10K entries to bound memory in
+  long-running directors. `FleetManager.removeSubagent()` (new `IFleetManager`
+  method) frees the nickname slot and drops the subagent's pending tasks, and
+  the coordinator tracks nicknames so slots are actually reclaimed on remove
+  instead of leaking forever.
+
+- **Orphaned pending tasks no longer hang `awaitTasks()`.** Removing a subagent
+  with tasks still pending now emits synthetic `stopped` completions, so
+  `awaitTasks()` waiters unblock immediately instead of parking indefinitely.
+
+- **TUI mouse mode disabled on Windows.** Mouse reporting caused console
+  corruption under the Windows terminal, so it is now disabled there.
+
+- **Build / typecheck / test gate restored to green.** Removed dead locals that
+  tripped `tsup`'s DTS unused-symbol check (`large-answer-store.ts`,
+  `collab-debug.ts`), added the missing `estimateRequestTokensCalibrated` import
+  in the CLI REPL and the missing `idleTimeoutMs`/`maxTokens`/`maxCostUsd`
+  fields on the delegate-tool input type, and refreshed the Director tool-list
+  assertions (`director.test.ts`, `multi-agent.test.ts`) for the new
+  `ask_result` tool. `pnpm release:check` (audit + typecheck + test + build)
+  passes.
+
 ## [0.24.0] - 2026-06-03
 
 > Version-line realignment. No source/behaviour changes — this entry exists

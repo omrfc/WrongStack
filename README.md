@@ -161,7 +161,7 @@ BEGIN.]
 
 ### Multi-agent fleet + Director
 
-**Fleet tools** (8 on the Director's belt from first message): `spawn_subagent`, `assign_task`, `await_tasks`, `ask_subagent`, `roll_up`, `terminate_subagent`, `fleet_status`, `fleet_usage`.
+**Fleet tools** (14 on the Director's belt from first message): `spawn_subagent`, `assign_task`, `await_tasks`, `ask_subagent`, `ask_result`, `roll_up`, `terminate_subagent`, `terminate_all`, `fleet_status`, `fleet_usage`, `fleet_health`, `fleet_session`, `fleet_emit`, `collab_debug`. Large `ask_subagent` responses (>2K chars) are stashed in a per-Director `LargeAnswerStore` and returned as a summary + key — the Director pulls the full text back with `ask_result` only when it needs it, so its context stays bounded no matter how many big asks happen.
 
 **`/fleet`** command: `status` — task progress per subagent · `usage` — token + cost breakdown · `kill <id>` — stop one subagent · `kill` — stop all · `manifest` — full fleet snapshot · `log <id>` — transcript summary · `log <id> raw` — full JSONL dump · `journal` — recent parallel engine entries · `spawn <role> [count]` — spawn N subagents of a role · `terminate <subagentId>` — stop one · `retry <id>` — re-spawn a failed subagent · `stream on|off` — toggle live output streaming.
 
@@ -566,7 +566,7 @@ For the full walk-through — including the L1-A reactive `ConversationState`, h
 
 ## Status
 
-- **5010 tests passing** across 357 test files (13 skipped)
+- **5297 tests passing** across 372 test files (13 skipped)
 - Coverage thresholds: ≥85 % lines / ≥85 % functions / ≥70 % branches / ≥82 % statements
 - All workspace packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles
