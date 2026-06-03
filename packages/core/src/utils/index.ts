@@ -17,6 +17,10 @@ export {
   estimateTextTokens,
   estimateToolDefTokens,
   estimateRequestTokens,
+  estimateRequestTokensCalibrated,
+  recordActualUsage,
+  getCalibrationState,
+  resetCalibration,
   type RequestTokenBreakdown,
 } from './token-estimate.js';
 export {

@@ -1,11 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   estimateRequestTokens,
+  estimateRequestTokensCalibrated,
   estimateTextTokens,
   estimateToolDefTokens,
   estimateToolInputTokens,
   estimateToolResultTokens,
+  getCalibrationState,
+  recordActualUsage,
+  resetCalibration,
 } from '../../src/utils/token-estimate.js';
+
+afterEach(() => {
+  resetCalibration();
+});
 
 describe('estimateToolInputTokens', () => {
   it('returns a positive integer for string input', () => {
@@ -188,5 +196,122 @@ describe('estimateRequestTokens', () => {
   it('ignores system prompt arrays whose entries are not text blocks', () => {
     const r = estimateRequestTokens([], [{ type: 'tool_use', id: 'x' }], []);
     expect(r.systemPrompt).toBe(0);
+  });
+});
+
+describe('recordActualUsage + estimateRequestTokensCalibrated', () => {
+  const messages = [{ role: 'user', content: 'hello world' }];
+  const system = 'You are a helpful assistant.';
+  const tools: { name: string; inputSchema: unknown }[] = [];
+
+  it('before any recordActualUsage, calibrated returns the same as uncalibrated', () => {
+    resetCalibration();
+    const uncal = estimateRequestTokens(messages, system, tools);
+    const cal = estimateRequestTokensCalibrated(messages, system, tools);
+    expect(cal.total).toBe(uncal.total);
+    expect(getCalibrationState().calibrated).toBe(false);
+  });
+
+  it('calibrated returns uncalibrated until MIN_SAMPLES_FOR_CALIBRATION (3) samples', () => {
+    for (let i = 1; i <= 2; i++) {
+      const est = estimateRequestTokensCalibrated(messages, system, tools);
+      recordActualUsage(Math.floor(est.total * 0.75));
+      expect(getCalibrationState().count).toBe(i);
+      expect(getCalibrationState().calibrated).toBe(false);
+    }
+    // After 2 samples, still not calibrated
+    const stillUncal = estimateRequestTokensCalibrated(messages, system, tools);
+    expect(stillUncal.total).toBe(estimateRequestTokens(messages, system, tools).total);
+  });
+
+  it('after 3 samples, calibrated applies the rolling ratio', () => {
+    // Each iteration: actual = 75% of estimated → ratio should converge near 0.75
+    for (let i = 0; i < 3; i++) {
+      const est = estimateRequestTokensCalibrated(messages, system, tools);
+      recordActualUsage(Math.floor(est.total * 0.75));
+    }
+
+    expect(getCalibrationState().calibrated).toBe(true);
+    const cal = estimateRequestTokensCalibrated(messages, system, tools);
+    const uncal = estimateRequestTokens(messages, system, tools);
+
+    // Calibrated should be roughly 75% of uncalibrated (within rounding tolerance)
+    expect(cal.total).toBeLessThan(uncal.total);
+    expect(cal.total).toBeGreaterThan(Math.floor(uncal.total * 0.70));
+  });
+
+  it('ratio is capped to [0.5, 1.5] as sanity bound', () => {
+    resetCalibration();
+    // Record wildly off estimates (200% ratio)
+    for (let i = 0; i < 3; i++) {
+      const est = estimateRequestTokensCalibrated(messages, system, tools);
+      recordActualUsage(est.total * 2.0);
+    }
+    const state = getCalibrationState();
+    expect(state.ratio).toBeLessThanOrEqual(1.5);
+    expect(state.ratio).toBeGreaterThanOrEqual(0.5);
+  });
+
+  it('recordActualUsage ignores non-positive input', () => {
+    resetCalibration();
+    estimateRequestTokensCalibrated(messages, system, tools);
+    expect(() => recordActualUsage(0)).not.toThrow();
+    expect(() => recordActualUsage(-100)).not.toThrow();
+    expect(getCalibrationState().count).toBe(0);
+  });
+
+  it('resetCalibration clears all state', () => {
+    for (let i = 0; i < 5; i++) {
+      const est = estimateRequestTokensCalibrated(messages, system, tools);
+      recordActualUsage(Math.floor(est.total * 0.8));
+    }
+    expect(getCalibrationState().count).toBe(5);
+    resetCalibration();
+    expect(getCalibrationState().count).toBe(0);
+    expect(getCalibrationState().ratio).toBe(1.0);
+    expect(getCalibrationState().calibrated).toBe(false);
+  });
+
+  it('rolling ratio converges toward actual after many samples', () => {
+    resetCalibration();
+    const actualRatio = 0.72;
+    for (let i = 0; i < 10; i++) {
+      const est = estimateRequestTokensCalibrated(messages, system, tools);
+      recordActualUsage(Math.floor(est.total * actualRatio));
+    }
+    const state = getCalibrationState();
+    // After 10 samples with α=0.3, should be close to 0.72
+    expect(state.ratio).toBeCloseTo(actualRatio, 1);
+  });
+
+  it('recordActualUsage with explicit estimatedInputTokens uses that value, not _cal.prevEst', () => {
+    resetCalibration();
+    // Simulate the audit log interference: estimateRequestTokens sets _cal.prevEst
+    // to one value, but we want recordActualUsage to use the calibrated estimate.
+    const auditLogEst = estimateRequestTokens(messages, system, tools); // _cal.prevEst = auditLogEst.total
+    const calibratedEst = estimateRequestTokensCalibrated(messages, system, tools); // ratio=1.0 before 3 samples, so same
+
+    // If we call recordActualUsage without explicit estimate, it uses _cal.prevEst (= auditLogEst)
+    // With explicit estimate, it uses the calibrated value
+    recordActualUsage(80, calibratedEst.total);
+
+    // The ratio should be 80 / calibratedEst.total (not 80 / auditLogEst.total)
+    // Since calibration is not yet active, both would be the same, but after 3 samples:
+    resetCalibration();
+    // Seed with 2 samples
+    for (let i = 0; i < 2; i++) {
+      const e = estimateRequestTokensCalibrated(messages, system, tools);
+      recordActualUsage(Math.floor(e.total * 0.75));
+    }
+    // Now calibrated returns adjusted value
+    const cal3 = estimateRequestTokensCalibrated(messages, system, tools);
+    // audit log overwrites _cal.prevEst to uncalibrated
+    const uncal = estimateRequestTokens(messages, system, tools);
+    // recordActualUsage with explicit est uses cal3, not uncal
+    recordActualUsage(60, cal3.total);
+
+    const state = getCalibrationState();
+    // Ratio should be 60 / cal3.total, not 60 / uncal.total
+    expect(state.ratio).toBeCloseTo(60 / cal3.total, 5);
   });
 });

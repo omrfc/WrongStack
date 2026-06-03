@@ -1,10 +1,36 @@
 /**
  * Shared token estimation with JSON.stringify caching.
  * Avoids repeated stringification of tool input objects.
+ *
+ * ## Calibration
+ *
+ * `estimateRequestTokens` uses a fixed 3.5 chars/token heuristic — a
+ * conservative overestimate that prevents underestimation but reduces
+ * accuracy. After each API call, call `recordActualUsage()` with the
+ * real `usage.input` from the provider response. The module maintains a
+ * rolling average of `actual / estimated` ratio (EWM, α=0.3) and
+ * applies it to subsequent calls via `estimateRequestTokensCalibrated`.
+ *
+ * Calibration is per-module (shared across all callers), which is
+ * sufficient: the chars/token ratio is a property of the tokenizer,
+ * not the model. Uncalibrated calls (before any samples, or when
+ * `recordActualUsage` is not called) fall back to the uncalibrated
+ * estimate so nothing breaks.
  */
 
 const RoughTokenEstimate = (text: string, charsPerToken = 3.5): number =>
   Math.max(1, Math.ceil(text.length / charsPerToken));
+
+/** Calibration state: actual/estimated ratio via exponential weighted moving average. */
+const _cal = {
+  ratio: 1.0,     // current calibration multiplier (actual / estimated)
+  count: 0,        // number of samples recorded
+  prevEst: 0,     // estimated tokens from the most recent estimateRequestTokens call
+  /** EWM α — higher = faster adaptation, more volatile */
+  alpha: 0.3,
+};
+
+const MIN_SAMPLES_FOR_CALIBRATION = 3;
 
 /**
  * Cache of computed estimates keyed by the stringified input — not the
@@ -140,10 +166,95 @@ export function estimateRequestTokens(
     toolsTokens += estimateToolDefTokens(t);
   }
 
+  const total = messagesTokens + systemTokens + toolsTokens;
+
+  // Record the raw estimate for calibration: the next recordActualUsage()
+  // call will pair this against the actual API usage so the rolling ratio
+  // stays in sync with the real chars/token ratio of the content.
+  _cal.prevEst = total;
+
   return {
     messages: messagesTokens,
     systemPrompt: systemTokens,
     tools: toolsTokens,
-    total: messagesTokens + systemTokens + toolsTokens,
+    total,
   };
+}
+
+/**
+ * Record the actual API input token count after a provider call so
+ * `estimateRequestTokensCalibrated` can self-correct on subsequent calls.
+ *
+ * Prefer passing `estimatedInputTokens` explicitly (the calibrated pre-flight
+ * estimate from the middleware) — this avoids race conditions when other code
+ * also calls `estimateRequestTokens` between the pre-flight and this call
+ * (e.g. audit logging in agent.ts).
+ *
+ * When `estimatedInputTokens` is omitted, falls back to `_cal.prevEst`
+ * for backward compatibility with callers that don't have the pre-flight value.
+ */
+export function recordActualUsage(actualInputTokens: number, estimatedInputTokens?: number): void {
+  if (actualInputTokens <= 0) return;
+  const est = estimatedInputTokens ?? _cal.prevEst;
+  if (est <= 0) return;
+
+  const sampleRatio = actualInputTokens / est;
+  if (_cal.count === 0) {
+    _cal.ratio = sampleRatio;
+  } else {
+    // EWM: new = α * sample + (1-α) * old  →  α=0.3 = fast initial converge
+    _cal.ratio = _cal.alpha * sampleRatio + (1 - _cal.alpha) * _cal.ratio;
+  }
+  _cal.count++;
+}
+
+/**
+ * Returns the current calibration state. Exposed for debugging and
+ * tests — not needed by normal callers.
+ */
+export function getCalibrationState(): { ratio: number; count: number; calibrated: boolean } {
+  return {
+    ratio: _cal.ratio,
+    count: _cal.count,
+    calibrated: _cal.count >= MIN_SAMPLES_FOR_CALIBRATION,
+  };
+}
+
+/**
+ * Like `estimateRequestTokens` but applies the rolling calibration factor
+ * so context pressure readings converge on reality within a few iterations.
+ *
+ * Before any `recordActualUsage` samples are collected, returns the same
+ * result as `estimateRequestTokens` (ratio = 1.0, no distortion).
+ * After `MIN_SAMPLES_FOR_CALIBRATION` samples, applies the calibrated
+ * multiplier capped to the range [0.5, 1.5] as a sanity bound.
+ */
+export function estimateRequestTokensCalibrated(
+  messages: unknown,
+  systemPrompt: unknown,
+  tools: { name: string; description?: string; inputSchema: unknown }[],
+): RequestTokenBreakdown {
+  const result = estimateRequestTokens(messages, systemPrompt, tools);
+
+  if (_cal.count >= MIN_SAMPLES_FOR_CALIBRATION) {
+    const safeRatio = Math.min(1.5, Math.max(0.5, _cal.ratio));
+    return {
+      messages: Math.round(result.messages * safeRatio),
+      systemPrompt: Math.round(result.systemPrompt * safeRatio),
+      tools: Math.round(result.tools * safeRatio),
+      total: Math.round(result.total * safeRatio),
+    };
+  }
+
+  return result;
+}
+
+/**
+ * Resets calibration state. Primarily for tests that run in the same
+ * process and need a clean slate between suites.
+ */
+export function resetCalibration(): void {
+  _cal.ratio = 1.0;
+  _cal.count = 0;
+  _cal.prevEst = 0;
 }

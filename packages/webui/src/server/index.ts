@@ -17,7 +17,7 @@ import {
   CollaborationBus,
   collabPauseMiddleware,
   collabInjectMiddleware,
-  estimateRequestTokens,
+  estimateRequestTokensCalibrated,
   EventBus,
   HybridCompactor,
   type ProviderApiKey,
@@ -307,7 +307,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     autoCompactor = new AutoCompactionMiddleware(
       compactor,
       effectiveMaxContext,
-      (ctx) => estimateRequestTokens(ctx.messages, ctx.systemPrompt, ctx.tools ?? []).total,
+      (ctx) => estimateRequestTokensCalibrated(ctx.messages, ctx.systemPrompt, ctx.tools ?? []).total,
       {
         warn: initialContextPolicy.thresholds.warn,
         soft: initialContextPolicy.thresholds.soft,

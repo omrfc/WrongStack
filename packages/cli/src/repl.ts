@@ -65,6 +65,12 @@ export interface ReplOptions {
     enabled: boolean;
     setEnabled: (enabled: boolean) => void;
   };
+  /**
+   * Called after each agent.run() iteration completes so the host can
+   * report context pressure to the Director (for spawn pre-checks) or
+   * other systems that track token usage across the session.
+   */
+  onAgentIterationComplete?: (estimatedTokens: number) => void;
 }
 
 export async function runRepl(opts: ReplOptions): Promise<number> {
@@ -252,6 +258,13 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
             activeCtrl = runCtrl;
             try {
               const runResult = await opts.agent.run(runBlocks, { signal: runCtrl.signal });
+              opts.onAgentIterationComplete?.(
+                estimateRequestTokensCalibrated(
+                  opts.agent.ctx.messages,
+                  opts.agent.ctx.systemPrompt,
+                  opts.agent.ctx.tools ?? [],
+                ).total,
+              );
               if (runResult.status === 'done' && runResult.finalText) {
                 // SDD auto-detection: spec, implementation plan, tasks
                 const specSaved = await trySaveSpecFromAIOutput(runResult.finalText);
@@ -381,6 +394,15 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
           );
         }
         const result = await opts.agent.run(routed.blocks, { signal: runCtrl.signal });
+        // Report context pressure to the Director (for spawn pre-checks) and
+        // update the calibration state so the next estimate is more accurate.
+        opts.onAgentIterationComplete?.(
+          estimateRequestTokensCalibrated(
+            opts.agent.ctx.messages,
+            opts.agent.ctx.systemPrompt,
+            opts.agent.ctx.tools ?? [],
+          ).total,
+        );
         if (result.status === 'aborted') {
           opts.renderer.writeWarning('Aborted.');
         } else if (result.status === 'failed') {
@@ -487,6 +509,13 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
             activeCtrl = nextCtrl;
             try {
               const nextResult = await opts.agent.run(nextBlocks, { signal: nextCtrl.signal });
+              opts.onAgentIterationComplete?.(
+                estimateRequestTokensCalibrated(
+                  opts.agent.ctx.messages,
+                  opts.agent.ctx.systemPrompt,
+                  opts.agent.ctx.tools ?? [],
+                ).total,
+              );
               if (nextResult.status === 'done' && nextResult.finalText?.trim() === 'DONE') {
                 opts.renderer.write(color.dim('\n  ↳ [autonomy] agent reports task complete.\n'));
               }
@@ -515,6 +544,13 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
             activeCtrl = suggestCtrl;
             try {
               const suggestResult = await opts.agent.run(suggestBlocks, { signal: suggestCtrl.signal });
+              opts.onAgentIterationComplete?.(
+                estimateRequestTokensCalibrated(
+                  opts.agent.ctx.messages,
+                  opts.agent.ctx.systemPrompt,
+                  opts.agent.ctx.tools ?? [],
+                ).total,
+              );
               if (suggestResult.status === 'done' && suggestResult.finalText) {
                 opts.renderer.write(
                   `\n${color.cyan('  Suggested next steps:')}\n${suggestResult.finalText}\n`,

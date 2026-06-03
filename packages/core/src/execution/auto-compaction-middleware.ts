@@ -5,7 +5,7 @@ import type { SessionEventBridge } from '../storage/session-event-bridge.js';
 import type { CompactReport, Compactor } from '../types/compactor.js';
 import type { ContextWindowAggressiveOn, ContextWindowPolicy } from '../types/context-window.js';
 import { AgentError, ERROR_CODES } from '../types/errors.js';
-import { estimateRequestTokens } from '../utils/token-estimate.js';
+import { estimateRequestTokensCalibrated } from '../utils/token-estimate.js';
 
 type PressureLevel = 'warn' | 'soft' | 'hard';
 const LEVEL_RANK: Record<PressureLevel, number> = { warn: 0, soft: 1, hard: 2 };
@@ -110,11 +110,13 @@ export class AutoCompactionMiddleware {
   handler(): MiddlewareHandler<Context> {
     return async (ctx, next) => {
       // Use _estimator when provided (backward-compat with existing tests that
-      // pass simpleEstimator). Otherwise use estimateRequestTokens for accurate
-      // full-request token counting (messages + systemPrompt + toolDefs).
+      // pass simpleEstimator). Otherwise use estimateRequestTokensCalibrated:
+      // before any API calls it returns the same as estimateRequestTokens, but
+      // after recordActualUsage() is called each iteration it self-corrects so
+      // context pressure readings converge on the real token count.
       const tokens = this._estimator
         ? this._estimator(ctx)
-        : estimateRequestTokens(ctx.messages, ctx.systemPrompt, ctx.tools ?? []).total;
+        : estimateRequestTokensCalibrated(ctx.messages, ctx.systemPrompt, ctx.tools ?? []).total;
       const load = tokens / this._maxContext;
       const policy = this.policyProvider?.(ctx);
       const thresholds = policy?.thresholds ?? {

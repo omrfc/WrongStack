@@ -4,7 +4,7 @@ import type { EventBus } from '../kernel/events.js';
 import { Pipeline } from '../kernel/pipeline.js';
 import { RunController } from '../kernel/run-controller.js';
 import { TOKENS } from '../kernel/tokens.js';
-import { estimateRequestTokens } from '../utils/token-estimate.js';
+import { estimateRequestTokens, estimateRequestTokensCalibrated, recordActualUsage } from '../utils/token-estimate.js';
 import type { ProviderRegistry } from '../registry/provider-registry.js';
 import type { ToolRegistry } from '../registry/tool-registry.js';
 import type { ContentBlock, TextBlock, ToolResultBlock, ToolUseBlock } from '../types/blocks.js';
@@ -462,6 +462,13 @@ export class Agent {
         let res: Response;
         try {
           res = await customRunner(this.ctx, req);
+          // Feed real API usage back to the token estimator so the calibration
+          // factor converges on reality within a few iterations. This makes
+          // the auto-compaction middleware's context pressure readings accurate.
+          // Pass the calibrated estimate explicitly — the audit log's estimateRequestTokens
+          // call (line ~456) would otherwise overwrite _cal.prevEst before we read it.
+          const calibratedEstimate = estimateRequestTokensCalibrated(req.messages, req.system, req.tools ?? []).total;
+          recordActualUsage(res.usage.input, calibratedEstimate);
           recoveryRetries = 0;
         } catch (err) {
           if (controller.signal.aborted) {

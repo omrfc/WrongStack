@@ -13,7 +13,7 @@ import {
   createDefaultPipelines,
   // createSessionEventBridge,  // enabled after core declarations are rebuilt
   // resolveAuditLevel,
-  estimateRequestTokens,
+  estimateRequestTokensCalibrated,
 } from '@wrongstack/core';
 
 // Temporary workaround until the core package declarations are rebuilt in node_modules.
@@ -106,9 +106,9 @@ export async function setupCompaction(params: {
     autoCompactor = new AutoCompactionMiddleware(
       compactor,
       effectiveMaxContext,
-      // Use the full API request estimator: messages + system prompt + tool definitions.
-      // This matches what the provider actually counts as input tokens.
-      (ctx) => estimateRequestTokens(ctx.messages, ctx.systemPrompt, ctx.tools ?? []).total,
+      // Calibrated estimator: recordActualUsage() is called after each API
+      // response so this converges on real token counts for compaction decisions.
+      (ctx) => estimateRequestTokensCalibrated(ctx.messages, ctx.systemPrompt, ctx.tools ?? []).total,
       {
         warn: config.context.warnThreshold,
         soft: config.context.softThreshold,
