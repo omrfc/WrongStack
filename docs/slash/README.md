@@ -17,6 +17,7 @@ WrongStack's REPL supports ~30 built-in slash commands. Each is a first-class ci
 | `/todos` | `todos.ts` | Session todo list: show, add, done (by id/index/fuzzy match), clear |
 | `/plan` | `plan.ts` | Strategic plan board (session-persistent `.plan.json`): show, add, start, done, remove, promote, derive, template, clear |
 | `/mode` | `mode.ts` | Switch or view session mode (default, brief, teach, refactorer, …) |
+| `/setmodel` | `setmodel.ts` | View/set the leader model and the per-task model matrix (role/phase/* → provider/model) |
 | `/yolo` | `yolo.ts` | Toggle or query YOLO (auto-approve all tool calls) |
 | `/autonomy` | `autonomy.ts` | Set autonomy level: off, suggest, auto, eternal |
 | `/goal` | `goal.ts` | Set/show/clear persistent autonomous mission (`.wrongstack/goal.json`) |

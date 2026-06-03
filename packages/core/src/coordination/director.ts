@@ -1,10 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
-import { atomicWrite } from '../utils/atomic-write.js';
-import { LargeAnswerStore } from './large-answer-store.js';
 import { DirectorStateCheckpoint, type DirectorStateSnapshot } from '../storage/director-state.js';
 import type { BridgeMessage } from '../types/agent-bridge.js';
+import type { ModelMatrixEntry } from '../types/config.js';
 import type {
   CoordinatorStatus,
   MultiAgentConfig,
@@ -15,8 +14,13 @@ import type {
 } from '../types/multi-agent.js';
 import type { SessionWriter } from '../types/session.js';
 import type { Tool } from '../types/tool.js';
+import { atomicWrite } from '../utils/atomic-write.js';
 import { InMemoryAgentBridge } from './agent-bridge.js';
-import type { ICoordinator } from './icoordinator.js';
+import {
+  type CollabDebugReport,
+  CollabSession,
+  type CollabSessionOptions,
+} from './collab-debug.js';
 import {
   DEFAULT_DIRECTOR_PREAMBLE,
   DEFAULT_SUBAGENT_BASELINE,
@@ -24,13 +28,31 @@ import {
   composeSubagentPrompt,
   rosterSummaryFromConfigs,
 } from './director-prompts.js';
+import {
+  makeAskResultTool,
+  makeAskTool,
+  makeAssignTool,
+  makeAwaitTasksTool,
+  makeCollabDebugTool,
+  makeFleetEmitTool,
+  makeFleetHealthTool,
+  makeFleetSessionTool,
+  makeFleetStatusTool,
+  makeFleetUsageTool,
+  makeRollUpTool,
+  makeSpawnTool,
+  makeTerminateAllTool,
+  makeTerminateTool,
+  makeWorkCompleteTool,
+} from './director-tools.js';
 import { FleetBus, type FleetUsage, FleetUsageAggregator } from './fleet-bus.js';
 import type { FleetManager } from './fleet-manager.js';
-import { assignNickname } from './subagent-nicknames.js';
+import type { ICoordinator } from './icoordinator.js';
 import { InMemoryBridgeTransport } from './in-memory-transport.js';
+import { LargeAnswerStore } from './large-answer-store.js';
+import { resolveModelMatrix } from './model-matrix.js';
 import { DefaultMultiAgentCoordinator } from './multi-agent-coordinator.js';
-import { makeAskTool, makeAskResultTool, makeAssignTool, makeAwaitTasksTool, makeCollabDebugTool, makeFleetEmitTool, makeFleetHealthTool, makeFleetSessionTool, makeFleetStatusTool, makeFleetUsageTool, makeRollUpTool, makeSpawnTool, makeTerminateAllTool, makeTerminateTool, makeWorkCompleteTool } from './director-tools.js';
-import { CollabSession, type CollabSessionOptions, type CollabDebugReport } from './collab-debug.js';
+import { assignNickname } from './subagent-nicknames.js';
 
 /**
  * Director — high-level orchestrator that owns a `MultiAgentCoordinator`,
@@ -217,7 +239,25 @@ export interface DirectorOptions {
    * Only used when no `fleetManager` is provided (inline mode).
    */
   maxContext?: number;
+  /**
+   * Per-task model matrix (Config.modelMatrix). When set, a spawn whose
+   * config has no explicit `model` is resolved against this matrix by role
+   * (→ phase → `*`) before the subagent is built — so the spawned event,
+   * manifest, and the agent itself all run the matched model. Explicit
+   * per-spawn `model` overrides always win.
+   *
+   * Pass a **function** (not a snapshot) when the matrix can change at
+   * runtime (the CLI passes `() => configStore.get().modelMatrix`) so a
+   * mid-session `/setmodel` takes effect on the next spawn. A static record
+   * is also accepted for tests and one-shot runs.
+   */
+  modelMatrix?: ModelMatrixSource;
 }
+
+/** Either a static matrix or a live getter (re-read on every spawn). */
+export type ModelMatrixSource =
+  | Record<string, ModelMatrixEntry>
+  | (() => Record<string, ModelMatrixEntry> | undefined);
 
 /**
  * Thrown by `Director.spawn()` when a configured spawn cap (`maxSpawns`,
@@ -229,7 +269,12 @@ export class FleetSpawnBudgetError extends Error {
   readonly kind: 'max_spawns' | 'max_spawn_depth';
   readonly limit: number;
   readonly observed: number;
-  constructor(kind: 'max_spawns' | 'max_spawn_depth', limit: number, observed: number, message?: string) {
+  constructor(
+    kind: 'max_spawns' | 'max_spawn_depth',
+    limit: number,
+    observed: number,
+    message?: string,
+  ) {
     const defaultMsg =
       kind === 'max_spawns'
         ? `Director spawn budget exceeded: tried to spawn #${observed} but maxSpawns is ${limit}`
@@ -286,7 +331,9 @@ export class FleetContextOverflowError extends Error {
 
 export class Director implements ICoordinator {
   /** Alias for the ICoordinator contract. `id` is retained for backward compatibility. */
-  get coordinatorId(): string { return this.id; }
+  get coordinatorId(): string {
+    return this.id;
+  }
   readonly id: string;
   /**
    * The fleet event bus. Backed by `fleetManager?.fleet` when a FleetManager
@@ -423,7 +470,9 @@ export class Director implements ICoordinator {
    * cached coordinator and slowly drifts the EventEmitter past its
    * default cap.
    */
-  private taskCompletedListener: ((payload: { task: TaskSpec; result: TaskResult }) => void) | null = null;
+  private taskCompletedListener:
+    | ((payload: { task: TaskSpec; result: TaskResult }) => void)
+    | null = null;
   /** Optional LLM classifier for smart dispatch. Passed from options. */
   readonly dispatchClassifier?: import('../coordination/dispatcher.js').DispatchClassifier;
   /** Leader agent's current context pressure (full request tokens). */
@@ -432,6 +481,9 @@ export class Director implements ICoordinator {
   private readonly maxLeaderContextLoad: number;
   /** Provider's max context window in tokens. */
   private readonly maxContext: number;
+  /** Per-task model matrix (static record or live getter); resolved
+   *  per-spawn when no explicit model is set. */
+  private readonly modelMatrix?: ModelMatrixSource;
   /**
    * When set by `workComplete()`, the director stops dispatching new tasks
    * and terminates all running subagents. Used when the director's LLM decides
@@ -442,7 +494,10 @@ export class Director implements ICoordinator {
   /** Pending /btw notes stashed by the leader agent (see setLeaderBtwNote). */
   private _leaderBtwNotes: string[] = [];
   /** Active collab sessions tracked by sessionId (see spawnCollab). */
-  private readonly _activeCollabSessions = new Map<string, import('./collab-debug.js').CollabSession>();
+  private readonly _activeCollabSessions = new Map<
+    string,
+    import('./collab-debug.js').CollabSession
+  >();
   /** Prevents large `ask_subagent` answers from bloating the leader's context window. */
   readonly largeAnswerStore: LargeAnswerStore;
 
@@ -463,16 +518,21 @@ export class Director implements ICoordinator {
     this.maxBudgetExtensions = opts.maxBudgetExtensions ?? 5;
     this.maxLeaderContextLoad = opts.maxLeaderContextLoad ?? 0.85;
     this.maxContext = opts.maxContext ?? 128_000;
+    this.modelMatrix = opts.modelMatrix;
     this.sessionsRoot = opts.sessionsRoot;
     this.directorRunId = opts.directorRunId ?? this.id;
     this.stateCheckpoint = opts.stateCheckpointPath
-      ? new DirectorStateCheckpoint(opts.stateCheckpointPath, {
-          directorRunId: this.id,
-          maxSpawns: opts.maxSpawns,
-          spawnDepth: this.spawnDepth,
-          maxSpawnDepth: this.maxSpawnDepth,
-          directorBudget: opts.directorBudget,
-        }, opts.checkpointDebounceMs ?? 250)
+      ? new DirectorStateCheckpoint(
+          opts.stateCheckpointPath,
+          {
+            directorRunId: this.id,
+            maxSpawns: opts.maxSpawns,
+            spawnDepth: this.spawnDepth,
+            maxSpawnDepth: this.maxSpawnDepth,
+            directorBudget: opts.directorBudget,
+          },
+          opts.checkpointDebounceMs ?? 250,
+        )
       : null;
     this.fleetManager = opts.fleetManager;
     if (this.sharedScratchpadPath) {
@@ -482,9 +542,7 @@ export class Director implements ICoordinator {
       // ENOENT a subagent hits is opaque without this signal.
       void fsp
         .mkdir(this.sharedScratchpadPath, { recursive: true })
-        .catch((err) =>
-          this.logShutdownError('shared_scratchpad_mkdir', err),
-        );
+        .catch((err) => this.logShutdownError('shared_scratchpad_mkdir', err));
     }
     this.transport = new InMemoryBridgeTransport();
     this.bridge = new InMemoryAgentBridge(
@@ -548,9 +606,7 @@ export class Director implements ICoordinator {
       // to a `kind: message` string here so old readers stay valid and
       // grep-friendly. The full envelope is still available live via
       // the EventBus / TaskResult to in-process consumers.
-      const errorString = r.error
-        ? `${r.error.kind}: ${r.error.message}`
-        : undefined;
+      const errorString = r.error ? `${r.error.kind}: ${r.error.message}` : undefined;
       this.stateCheckpoint?.recordTaskStatus(r.taskId, {
         status: failed ? (r.status as 'failed' | 'timeout' | 'stopped') : 'completed',
         completedAt: new Date().toISOString(),
@@ -707,7 +763,12 @@ export class Director implements ICoordinator {
    * the host can re-emit `subagent.budget_extended` for live UI badges.
    * Called from both the timeout heartbeat path and the per-kind grant path.
    */
-  private recordExtension(subagentId: string, taskId: string | undefined, kind: string, newLimit: number): void {
+  private recordExtension(
+    subagentId: string,
+    taskId: string | undefined,
+    kind: string,
+    newLimit: number,
+  ): void {
     const total = (this.extendTotals.get(subagentId) ?? 0) + 1;
     this.extendTotals.set(subagentId, total);
     this.fleet.emit({
@@ -739,7 +800,12 @@ export class Director implements ICoordinator {
    */
   workComplete(): void {
     this.workCompleteFlag = true;
-    this.fleet.emit({ subagentId: this.id, ts: Date.now(), type: 'director.work_complete', payload: {} });
+    this.fleet.emit({
+      subagentId: this.id,
+      ts: Date.now(),
+      type: 'director.work_complete',
+      payload: {},
+    });
   }
 
   /** Returns true if `workComplete()` has been called on this director. */
@@ -899,16 +965,32 @@ export class Director implements ICoordinator {
         'workComplete() has been called — director closed further spawning',
       );
     }
+    // Per-task model matrix: when the caller didn't pin a model, resolve one
+    // from the matrix by role (→ phase → `*`). Done here, before the spawned
+    // event + manifest + coordinator handoff, so the fleet UI and the agent
+    // itself all reflect the matched model. Explicit per-spawn models win.
+    if (!config.model && this.modelMatrix) {
+      const matrix = typeof this.modelMatrix === 'function' ? this.modelMatrix() : this.modelMatrix;
+      const entry = resolveModelMatrix(matrix, config.role);
+      if (entry) {
+        config.model = entry.model;
+        if (entry.provider) config.provider = entry.provider;
+      }
+    }
     // Enforce safety caps BEFORE touching the coordinator — a refused
     // spawn must not leak partial state into the manifest or fleet bus.
     // Delegate to FleetManager when available; use inline checks otherwise.
     if (this.fleetManager) {
       const rejection = this.fleetManager.canSpawn(config);
       if (rejection) {
-        if (rejection.kind === 'max_spawn_depth') throw new FleetSpawnBudgetError('max_spawn_depth', rejection.limit, rejection.observed);
-        if (rejection.kind === 'max_spawns') throw new FleetSpawnBudgetError('max_spawns', rejection.limit, rejection.observed);
-        if (rejection.kind === 'max_cost_usd') throw new FleetCostCapError(rejection.limit, rejection.observed);
-        if (rejection.kind === 'max_context_load') throw new FleetContextOverflowError(rejection.limit, rejection.observed);
+        if (rejection.kind === 'max_spawn_depth')
+          throw new FleetSpawnBudgetError('max_spawn_depth', rejection.limit, rejection.observed);
+        if (rejection.kind === 'max_spawns')
+          throw new FleetSpawnBudgetError('max_spawns', rejection.limit, rejection.observed);
+        if (rejection.kind === 'max_cost_usd')
+          throw new FleetCostCapError(rejection.limit, rejection.observed);
+        if (rejection.kind === 'max_context_load')
+          throw new FleetContextOverflowError(rejection.limit, rejection.observed);
       }
     } else {
       if (this.spawnDepth >= this.maxSpawnDepth) {
@@ -952,7 +1034,12 @@ export class Director implements ICoordinator {
         this.fleetManager.assignNicknameAndRecord(config);
       } else {
         config.name = assignNickname(role, this._usedNicknames);
-        this._usedNicknames.add(config.name.split(' ')[0]!.toLowerCase().replace(/[^a-z0-9-]/g, '-'));
+        this._usedNicknames.add(
+          config.name
+            .split(' ')[0]!
+            .toLowerCase()
+            .replace(/[^a-z0-9-]/g, '-'),
+        );
       }
     }
     result = await this.coordinator.spawn(config);
@@ -1218,14 +1305,21 @@ export class Director implements ICoordinator {
         subagentId: taskWithId.subagentId ?? 'unassigned',
         taskId: taskWithId.id,
         status: 'stopped',
-        error: { kind: 'aborted_by_parent', message: 'Director called workComplete() — no further tasks will run', retryable: false },
+        error: {
+          kind: 'aborted_by_parent',
+          message: 'Director called workComplete() — no further tasks will run',
+          retryable: false,
+        },
         iterations: 0,
         toolCalls: 0,
         durationMs: 0,
       };
       this.completed.set(taskWithId.id, synthetic);
       const waiter = this.taskWaiters.get(taskWithId.id);
-      if (waiter) { waiter.resolve(synthetic); this.taskWaiters.delete(taskWithId.id); }
+      if (waiter) {
+        waiter.resolve(synthetic);
+        this.taskWaiters.delete(taskWithId.id);
+      }
       return taskWithId.id;
     }
     if (task.subagentId) {
@@ -1313,7 +1407,10 @@ export class Director implements ICoordinator {
     } else {
       const entry = this.manifestEntries.get(subagentId);
       if (entry?.name) {
-        const nicknameKey = entry.name.split(' ')[0]!.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+        const nicknameKey = entry.name
+          .split(' ')[0]!
+          .toLowerCase()
+          .replace(/[^a-z0-9-]/g, '-');
         this._usedNicknames.delete(nicknameKey);
       }
     }
@@ -1384,7 +1481,10 @@ export class Director implements ICoordinator {
    * tool-use count, and line count — or null if the file is unavailable.
    * Requires `sessionsRoot` to be set on construction.
    */
-  async readSession(subagentId: string, tail?: number): Promise<{
+  async readSession(
+    subagentId: string,
+    tail?: number,
+  ): Promise<{
     lastAssistantText?: string;
     lastStopReason?: string;
     toolUsesObserved: number;
@@ -1568,4 +1668,3 @@ export class Director implements ICoordinator {
     this.stateCheckpoint?.resume(snapshot);
   }
 }
-

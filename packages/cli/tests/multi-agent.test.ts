@@ -149,8 +149,11 @@ describe('MultiAgentHost', () => {
     const a = await host.spawn('task one');
     const b = await host.spawn('task two');
     expect(a.taskId).not.toBe(b.taskId);
-    // configStore.get should be called only once — for the lazy build.
-    expect((deps.configStore.get as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+    // The coordinator/director is built lazily once and reused (proven by both
+    // spawns succeeding on the same host with distinct task ids). configStore is
+    // additionally read live per spawn so a mid-session /setmodel model-matrix
+    // change applies on the next spawn — so get() is called more than once now.
+    expect((deps.configStore.get as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(1);
     await host.stopAll();
   });
 

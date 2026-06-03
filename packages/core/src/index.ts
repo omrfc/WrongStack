@@ -26,6 +26,17 @@ export { createMcpControlTool, type MCPRegistryHandle } from './tools/mcp-contro
 // Re-export safeParse explicitly at the top-level export for consumers
 // who import from '@wrongstack/core' directly (e.g. providers package).
 export { safeParse, safeStringify, sanitizeJsonString } from './utils/safe-json.js';
+// Likewise pin the terminal helpers: tsup's DTS deduplication can drop the
+// whole term.js module from the bundled declarations (it's only reachable via
+// the `export *` util chain), which breaks `import { onResize } from
+// '@wrongstack/core'` in the CLI. An explicit re-export forces them in.
+export {
+  isStdoutTTY,
+  isStdinTTY,
+  isInteractive,
+  getTermSize,
+  onResize,
+} from './utils/term.js';
 export {
   Agent,
   type RunResult,
@@ -218,9 +229,7 @@ export {
   type FleetUsage,
   type SubagentUsageSnapshot,
 } from './coordination/fleet-bus.js';
-export {
-  NULL_FLEET_BUS,
-} from './coordination/null-fleet-bus.js';
+export { NULL_FLEET_BUS } from './coordination/null-fleet-bus.js';
 export {
   FLEET_ROSTER,
   ALL_FLEET_AGENTS,
@@ -238,6 +247,14 @@ export {
   type AgentDefinition,
   type AgentPhase,
 } from './coordination/agents/index.js';
+export {
+  resolveModelMatrix,
+  phaseForRole,
+  matrixKeyKind,
+  isValidMatrixKey,
+  MATRIX_PHASE_KEYS,
+  type MatrixKeyKind,
+} from './coordination/model-matrix.js';
 export {
   dispatchAgent,
   scoreAgents,

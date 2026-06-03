@@ -1,12 +1,12 @@
+import { randomUUID } from 'node:crypto';
+import * as path from 'node:path';
 /**
  * L1-E: Multi-agent CLI integration. The coordinator + per-task agent
  * factory is created lazily on the first `/spawn` so users who never use
  * subagents don't pay the construction cost.
  */
-import {makeACPSubagentRunner, ACP_AGENT_COMMANDS} from '@wrongstack/acp';
-import type {SubagentRunner, SubagentRunContext, TaskSpec} from '@wrongstack/core';
-import {randomUUID} from 'node:crypto';
-import * as path from 'node:path';
+import { ACP_AGENT_COMMANDS, makeACPSubagentRunner } from '@wrongstack/acp';
+import type { SubagentRunContext, SubagentRunner, TaskSpec } from '@wrongstack/core';
 import {
   Agent,
   type AgentFactory,
@@ -37,6 +37,7 @@ import {
   makeDirectorSessionFactory,
   makeFleetEmitTool,
   makeFleetStatusTool,
+  resolveModelMatrix,
 } from '@wrongstack/core';
 import type { TextBlock } from '@wrongstack/core';
 import { ToolExecutor } from '@wrongstack/core/execution';
@@ -281,6 +282,9 @@ export class MultiAgentHost {
       sessionsRoot: this.opts.sessionsRoot,
       directorRunId: this.opts.directorRunId,
       maxSpawnDepth: 5,
+      // Live getter (not a snapshot) so a mid-session `/setmodel` takes
+      // effect on the next spawn — the director is built lazily + once.
+      modelMatrix: () => this.deps.configStore.get().modelMatrix,
       fleetManager, // pass so director.fleetManager is never undefined
     });
     this.director.on('task.completed', ({ task, result }) => {
@@ -324,7 +328,14 @@ export class MultiAgentHost {
     // track collab agents (bug-hunter, refactor-planner, critic) that bypass
     // MultiAgentHost.spawn and go through director.spawn directly.
     this.director.fleet.filter('subagent.spawned', (e) => {
-      const payload = e.payload as { subagentId: string; taskId: string; name?: string; role?: string; provider?: string; model?: string };
+      const payload = e.payload as {
+        subagentId: string;
+        taskId: string;
+        name?: string;
+        role?: string;
+        provider?: string;
+        model?: string;
+      };
       this.deps.events.emit('subagent.spawned', {
         subagentId: payload.subagentId,
         taskId: payload.taskId,
@@ -372,11 +383,17 @@ export class MultiAgentHost {
   makeSubagentFactory(config: Config): AgentFactory {
     return async (subCfg: SubagentConfig) => {
       const events = new EventBus();
-      const provider = await this.buildSubagentProvider(
-        config,
-        subCfg.provider,
-        subCfg.model ?? config.model,
-      );
+      // Per-task model matrix safety net. Director.spawn already fills these in
+      // for director-routed spawns, but direct-factory paths (e.g. the
+      // autonomy-parallel engine) call the factory without going through the
+      // director — resolve here too so they honor the matrix. Explicit
+      // per-subagent model/provider always win.
+      const matrixEntry = subCfg.model
+        ? undefined
+        : resolveModelMatrix(this.deps.configStore.get().modelMatrix, subCfg.role);
+      const effProvider = subCfg.provider ?? matrixEntry?.provider ?? config.provider;
+      const effModel = subCfg.model ?? matrixEntry?.model ?? config.model;
+      const provider = await this.buildSubagentProvider(config, effProvider, effModel);
 
       // Per-subagent cwd (defaults to the factory cwd). AutoPhase points this
       // at a phase's git worktree so isolated checkouts don't collide.
@@ -386,8 +403,8 @@ export class MultiAgentHost {
         cwd: subCwd,
         projectRoot: this.deps.projectRoot,
         tools: this.filterTools(subCfg.tools),
-        model: subCfg.model ?? config.model,
-        provider: subCfg.provider ?? config.provider,
+        model: effModel,
+        provider: effProvider,
         // Tell the builder this is a subagent build — skips the host's
         // plan injection so each subagent gets a clean, task-scoped
         // prompt instead of inheriting strategic context that's
@@ -408,8 +425,8 @@ export class MultiAgentHost {
         const subagentName = subCfg.id ?? subCfg.name ?? `sub_${randomUUID().slice(0, 8)}`;
         subSession = await this.sessionFactory.createSubagentSession({
           subagentId: subagentName,
-          provider: subCfg.provider ?? config.provider,
-          model: subCfg.model ?? config.model,
+          provider: effProvider,
+          model: effModel,
           title: `subagent: ${subagentName}`,
         });
       } else {
@@ -449,7 +466,7 @@ export class MultiAgentHost {
         tokenCounter: this.deps.tokenCounter,
         cwd: subCwd,
         projectRoot: this.deps.projectRoot,
-        model: subCfg.model ?? config.model,
+        model: effModel,
         tools: this.filterTools(tools),
       });
 
@@ -592,25 +609,17 @@ export class MultiAgentHost {
     // provider owns its own capabilities object, so mutating in place is safe.
     if (this.deps.modelsRegistry) {
       const resolvedModel = model ?? config.model;
-      const caps = await capabilitiesFor(
-        this.deps.modelsRegistry,
-        providerId,
-        resolvedModel,
-      ).catch(() => undefined);
+      const caps = await capabilitiesFor(this.deps.modelsRegistry, providerId, resolvedModel).catch(
+        () => undefined,
+      );
       const mc =
-        caps?.maxContext ??
-        config.context?.effectiveMaxContext ??
-        provider.capabilities.maxContext;
+        caps?.maxContext ?? config.context?.effectiveMaxContext ?? provider.capabilities.maxContext;
       if (mc && mc > 0) provider.capabilities.maxContext = mc;
     }
     return provider;
   }
 
-  async spawnACP(
-    subagentId: string,
-    task: string,
-    config: Config,
-  ): Promise<string> {
+  async spawnACP(subagentId: string, task: string, config: Config): Promise<string> {
     const taskId = randomUUID();
     await this.ensureCoordinator(config);
     const coordinator = this.getCoordinator();

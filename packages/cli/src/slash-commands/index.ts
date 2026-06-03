@@ -123,7 +123,9 @@ export interface SlashCommandContext {
   /** Toggle or query next-task prediction. Pass undefined to query, boolean to set. */
   onNextPredict?: (setTo?: boolean) => boolean;
   /** Toggle or query autonomy mode. Pass undefined to query, AutonomyMode to set. */
-  onAutonomy?: (setTo?: import('./autonomy.js').AutonomyMode) => import('./autonomy.js').AutonomyMode;
+  onAutonomy?: (
+    setTo?: import('./autonomy.js').AutonomyMode,
+  ) => import('./autonomy.js').AutonomyMode;
   /**
    * Access the (possibly null) eternal-autonomy engine. The REPL drives
    * `runOneIteration()` from its main loop when autonomy is 'eternal'.
@@ -168,8 +170,12 @@ export interface SlashCommandContext {
    * Current list of hidden status bar items. Written by the /statusline command
    * so the TUI can update without a restart.
    */
-  statuslineHiddenItems?: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>;
-  setStatuslineHiddenItems?: (items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>) => void;
+  statuslineHiddenItems?: Array<
+    'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'
+  >;
+  setStatuslineHiddenItems?: (
+    items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>,
+  ) => void;
   /**
    * Controller for the agents monitor overlay. The TUI installs the actual
    * setter on mount via a shared controller; before that, calls are buffered
@@ -203,8 +209,7 @@ export interface SlashCommandContext {
    * in the background. Returns the built graph or an error.
    */
   onAutoPhaseStart?: (opts: { goal: string; projectContext?: string }) => Promise<
-    | { ok: true; graph: import('@wrongstack/core').PhaseGraph }
-    | { ok: false; error: string }
+    { ok: true; graph: import('@wrongstack/core').PhaseGraph } | { ok: false; error: string }
   >;
   onAutoPhasePause?: () => void;
   onAutoPhaseResume?: () => void;
@@ -232,33 +237,34 @@ export interface SlashCommandContext {
 export type { ProjectFacts } from './helpers.js';
 export { detectProjectFacts, renderAgentsTemplate } from './helpers.js';
 
+import { buildAutonomyCommand } from './autonomy.js';
+import { buildAutoPhaseCommand } from './autophase.js';
+import { buildBtwCommand } from './btw.js';
 import { buildClearCommand } from './clear.js';
+import { buildCollabCommand } from './collab.js';
 import { buildCompactCommand } from './compact.js';
 import { buildContextCommand } from './context.js';
 import { buildDiagCommand, buildStatsCommand } from './diag-stats.js';
+import { buildFixCommand } from './fix.js';
 import { buildFleetCommand } from './fleet.js';
+import { buildGoalCommand } from './goal.js';
 import { buildHelpCommand } from './help.js';
 import { buildInitCommand } from './init.js';
 import { buildMcpSlashCommand } from './mcp.js';
 import { buildMemoryCommand } from './memory.js';
+import { buildModeCommand } from './mode.js';
+import { buildNextCommand } from './next.js';
 import { buildPluginCommand } from './plugin.js';
+import { buildSddCommand } from './sdd.js';
 import { buildExitCommand, buildLoadCommand, buildSaveCommand } from './session.js';
+import { buildSetModelCommand } from './setmodel.js';
+import { buildSettingsCommand } from './settings.js';
 import { buildAgentsCommand, buildDirectorCommand, buildSpawnCommand } from './spawn-agents.js';
+import { buildStatuslineCommand } from './statusline.js';
 import { buildTodosCommand } from './todos.js';
 import { buildToolsCommand } from './tools.js';
-import { buildYoloCommand } from './yolo.js';
-import { buildAutonomyCommand } from './autonomy.js';
-import { buildBtwCommand } from './btw.js';
-import { buildNextCommand } from './next.js';
-import { buildGoalCommand } from './goal.js';
-import { buildModeCommand } from './mode.js';
-import { buildSddCommand } from './sdd.js';
-import { buildStatuslineCommand } from './statusline.js';
-import { buildFixCommand } from './fix.js';
-import { buildAutoPhaseCommand } from './autophase.js';
-import { buildCollabCommand } from './collab.js';
 import { buildWorktreeCommand } from './worktree.js';
-import { buildSettingsCommand } from './settings.js';
+import { buildYoloCommand } from './yolo.js';
 
 export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashCommand[] {
   return [
@@ -292,6 +298,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildAutoPhaseCommand(opts),
     buildWorktreeCommand(opts),
     buildSettingsCommand(opts),
+    buildSetModelCommand(opts),
     buildCollabCommand(opts),
     buildStatuslineCommand({
       cwd: opts.cwd,

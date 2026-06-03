@@ -86,6 +86,20 @@ export interface ProviderConfig {
   models?: string[];
 }
 
+/**
+ * One entry in the per-task model matrix. Pins a catalog role, a phase, or
+ * the `*` default to a specific model (and, optionally, a specific provider).
+ * Resolved at subagent-spawn time so e.g. `security-scanner` can run a
+ * different model than `documentation` while the leader stays on its own.
+ */
+export interface ModelMatrixEntry {
+  /** Provider registry id (e.g. "anthropic", "minimax", "zai"). When omitted,
+   *  the leader's provider is used with this entry's model. */
+  provider?: string;
+  /** Model id to run for the matched role/phase/default. */
+  model: string;
+}
+
 export interface MCPServerConfig {
   /** Human-readable description shown in `wstack mcp list`. */
   description?: string;
@@ -191,6 +205,13 @@ export interface Config {
   apiKey?: string;
   baseUrl?: string;
   providers?: Record<string, ProviderConfig>;
+  /**
+   * Per-task model matrix. Keys are catalog roles (e.g. "security-scanner"),
+   * phase names (e.g. "review"), or the `*` default. Resolution precedence at
+   * subagent spawn: exact role → the role's phase → `*` → leader model. Set via
+   * the `/setmodel` slash command; persisted to ~/.wrongstack/config.json.
+   */
+  modelMatrix?: Record<string, ModelMatrixEntry>;
   context: ContextConfig;
   tools: ToolsConfig;
   mcpServers?: Record<string, MCPServerConfig>;

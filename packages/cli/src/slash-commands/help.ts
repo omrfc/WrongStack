@@ -13,7 +13,7 @@ export function buildHelpCommand(opts: SlashCommandContext): SlashCommand {
       'Examples:',
       '  /help',
       '  /help context',
-      '  /help model',
+      '  /help setmodel',
     ].join('\n'),
     async run(args) {
       const query = args.trim();
