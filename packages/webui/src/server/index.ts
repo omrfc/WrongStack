@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as http from 'node:http';
 import * as path from 'node:path';
+import { createHttpServer } from './http-server.js';
 import {
   Agent,
   AutoCompactionMiddleware,
@@ -2007,93 +2008,15 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     }
   }
 
-  // HTTP server for the React frontend (port 3456)
-  const httpPort = Number.parseInt(process.env['PORT'] ?? '3456', 10);
-  const DIST_DIR = path.resolve(import.meta.dirname, '../../dist');
-
-  const mimeTypes: Record<string, string> = {
-    '.html': 'text/html',
-    '.js': 'application/javascript',
-    '.css': 'text/css',
-    '.json': 'application/json',
-    '.svg': 'image/svg+xml',
-    '.png': 'image/png',
-    '.ico': 'image/x-icon',
-  };
-
-  const httpServer = http.createServer(async (req, res) => {
-    try {
-      const url = new URL(req.url ?? '/', `http://127.0.0.1:${httpPort}`);
-      let filePath: string;
-
-      if (url.pathname === '/' || url.pathname === '') {
-        filePath = path.join(DIST_DIR, 'index.html');
-      } else if (url.pathname.startsWith('/assets/')) {
-        filePath = path.join(DIST_DIR, url.pathname);
-      } else if (url.pathname.startsWith('/')) {
-        filePath = path.join(DIST_DIR, url.pathname);
-      } else {
-        filePath = path.join(DIST_DIR, 'index.html');
-      }
-
-      // Path traversal guard: the resolved path must stay inside DIST_DIR.
-      // new URL() decodes percent-encoding (%2e%2e → ..), so path.join alone
-      // does not prevent ../../../etc/passwd escapes.
-      const resolvedPath = path.resolve(filePath);
-      const resolvedRoot = path.resolve(DIST_DIR);
-      if (!resolvedPath.startsWith(resolvedRoot + path.sep) && resolvedPath !== resolvedRoot) {
-        res.writeHead(403, { 'Content-Type': 'text/plain' });
-        res.end('Forbidden');
-        return;
-      }
-
-      const ext = path.extname(resolvedPath);
-      const contentType = mimeTypes[ext] ?? 'application/octet-stream';
-      res.setHeader('Content-Type', contentType);
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-      res.setHeader('X-Frame-Options', 'DENY');
-      res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-
-      if (ext === '.html') {
-        res.setHeader('Cache-Control', 'no-cache');
-        // connect-src uses explicit loopback addresses rather than bare
-        // ws:/wss: schemes so a malicious page script can't connect to any
-        // WebSocket server. Combined with token-in-URL (C-2), explicit loopback
-        // prevents cross-origin abuse.
-        res.setHeader('Content-Security-Policy',
-          `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://127.0.0.1:${wsPort} wss://127.0.0.1:${wsPort} ws://[::1]:${wsPort} wss://[::1]:${wsPort}; img-src 'self' data:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`
-        );
-      }
-
-      const fileContent = await fs.readFile(resolvedPath);
-      res.writeHead(200);
-      res.end(fileContent);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        // Try index.html for SPA routing
-        try {
-          const fileContent = await fs.readFile(path.join(DIST_DIR, 'index.html'));
-          res.writeHead(200, {
-            'Content-Type': 'text/html',
-            'X-Content-Type-Options': 'nosniff',
-            'X-Frame-Options': 'DENY',
-            'Referrer-Policy': 'strict-origin-when-cross-origin',
-            // SPA fallback previously shipped no CSP — apply the same policy as
-            // the direct .html branch so deep-linked routes aren't unprotected.
-            'Content-Security-Policy': `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://127.0.0.1:${wsPort} wss://127.0.0.1:${wsPort} ws://[::1]:${wsPort} wss://[::1]:${wsPort}; img-src 'self' data:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`,
-          });
-          res.end(fileContent);
-        } catch {
-          res.writeHead(404);
-          res.end('Not found');
-        }
-      } else {
-        res.writeHead(500);
-        res.end('Server error');
-      }
-    }
+  // HTTP server for the React frontend (port 3456) — see `http-server.ts`
+  // for the static-serve, MIME matching, path-traversal guard, and CSP
+  // header logic. Constructed here, listen()d below alongside the WS server.
+  const httpServer = createHttpServer({
+    host: wsHost,
+    distDir: path.resolve(import.meta.dirname, '../../dist'),
+    wsPort,
   });
-
+  const httpPort = Number.parseInt(process.env['PORT'] ?? '3456', 10);
   httpServer.listen(httpPort, wsHost, () => {
     console.log(`[WebUI] HTTP server running on http://${wsHost}:${httpPort}`);
   });
