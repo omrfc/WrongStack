@@ -541,6 +541,11 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           skillLoader,
           agentsMonitorController,
           fleetStreamController,
+          // Report context pressure to the Director after each iteration so
+          // the spawn pre-check (maxLeaderContextLoad) stays accurate.
+          onAgentIterationComplete: director
+            ? (tokens) => director.setLeaderContextPressure(tokens)
+            : undefined,
         });
       } finally {
         // webuiPromise must be awaited regardless of whether runRepl threw,
@@ -567,6 +572,9 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         skillLoader,
         agentsMonitorController,
         fleetStreamController,
+        onAgentIterationComplete: director
+          ? (tokens) => director.setLeaderContextPressure(tokens)
+          : undefined,
       });
     }
   } finally {
