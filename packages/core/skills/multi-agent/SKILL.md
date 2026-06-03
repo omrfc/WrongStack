@@ -131,3 +131,59 @@ Subagents share **nothing** — no memory, no session state, no variable scope. 
 - `security-scanner` — parallel security scans
 - `refactor-planner` — parallel module analysis
 - `audit-log` — aggregating multiple session analyses
+
+---
+
+## collab_debug — Three-Agent Parallel Code Review
+
+`collab_debug` runs **BugHunter + RefactorPlanner + Critic** simultaneously on the same file snapshot. All three agents receive the full target context, so the number of files must be kept small.
+
+### Target size limit: dynamic, defaults to 30
+
+The file limit is computed in this priority order:
+
+1. **`maxTargetFiles`** — explicit override if provided
+2. **`contextWindow`** — dynamic calculation: `floor((contextWindow × 0.4) / 2000)`
+3. **`DEFAULT_MAX_TARGET_FILES = 30`** — fallback when neither is set
+
+Each of the three agents gets the entire file snapshot as context. With 3 agents × N files, large targets cause:
+- **Token overflow** — context window exhausted
+- **Timeout failures** — session times out before agents finish
+- **Budget exhaustion** — each agent burns through iterations with no progress
+
+| contextWindow (tokens) | Calculated limit | Interpretation |
+|---|---|---|
+| 200_000 (large model) | 40 files | ~20-30 recommended |
+| 100_000 (typical) | 20 files | ✅ Comfortable |
+| 32_768 (small) | 6 files | ⚠️ Very limited |
+| not provided | 30 files (default) | Safe baseline |
+
+The session throws a clear error if the resolved file count exceeds the effective limit.
+
+### Correct usage
+
+```js
+// ✅ Good — single package, limited files
+collab_debug(["packages/core/src/agents/**/*.ts"])
+
+// ✅ Dynamic — limit computed from contextWindow
+collab_debug({
+// ✅ Explicit — override limit directly
+collab_debug({
+  targetPaths: ["packages/core/src/**/*.ts"],
+  maxTargetFiles: 15,
+})
+
+// ✅ Dynamic — limit computed from contextWindow
+collab_debug({
+  targetPaths: ["packages/core/src/**/*.ts"],
+  contextWindow: 100_000,  // → limit = floor(100000 * 0.4 / 2000) = 20
+})
+
+// ❌ Bad — entire monorepo
+collab_debug(["packages/**/src/**/*.ts"])
+```
+
+### For large codebases
+
+Run **package-by-package** or **module-by-module** sessions. Target only the area under review, not the whole repo.
