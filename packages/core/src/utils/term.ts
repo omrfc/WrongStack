@@ -95,3 +95,35 @@ export function setRawMode(input: NodeJS.ReadStream, mode: boolean): boolean {
   input.setRawMode(mode);
   return true;
 }
+
+/**
+ * Write `s` to `stream` (defaults to `process.stdout`). Returns `false`
+ * when the stream is missing or doesn't expose `write` so callers can
+ * degrade silently under hostile host environments (closed pipe, mock
+ * injects `null`, test replaces the stream with a stub).
+ *
+ * Why a helper:
+ *   1. **Single seam for output capture in tests** — stub `writeOut` once
+ *      and assert on what the rest of the codebase intended to print,
+ *      without spying on `process.stdout.write` (which is brittle and
+ *      leaks across parallel test files).
+ *   2. **Stream swap without grep** — routing the CLI's output to a
+ *      logger or `out.log` becomes a one-line change at process boot.
+ *   3. **Defensive default** — closes the "what if `process.stdout` is
+ *      `null`" gap that currently exists at ~50 call sites that just
+ *      call `process.stdout.write(s)` and crash on certain Windows
+ *      redirect invocations.
+ *
+ * Call-site migration is staged: this commit introduces the helper, a
+ * follow-up commit replaces the 50+ `process.stdout.write(...)` sites
+ * with `writeOut(...)`. Until that migration lands, both forms coexist
+ * and `writeOut` is the preferred form for new code.
+ */
+export function writeOut(
+  s: string,
+  stream: NodeJS.WriteStream = process.stdout,
+): boolean {
+  if (!stream || typeof stream.write !== 'function') return false;
+  stream.write(s);
+  return true;
+}
