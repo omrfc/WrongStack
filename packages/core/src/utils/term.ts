@@ -97,6 +97,28 @@ export function setRawMode(input: NodeJS.ReadStream, mode: boolean): boolean {
 }
 
 /**
+ * Stream-agnostic write primitive. Returns `false` when the stream is
+ * missing or doesn't expose `write` so callers can degrade silently under
+ * hostile host environments (closed pipe, mock injects `null`, test
+ * replaces the stream with a stub).
+ *
+ * **Not exported in the public API.** Exposed only inside `term.ts` for
+ * `writeOut` / `writeErr` to share a single implementation. If a caller
+ * needs to write to an arbitrary stream, they should call `writeOut` (or
+ * `writeErr`) with an explicit `stream` argument — the named functions
+ * are the public surface so the "this is the standard error stream"
+ * intent stays visible at every call site.
+ */
+function writeTo(
+  s: string,
+  stream: NodeJS.WriteStream | undefined,
+): boolean {
+  if (!stream || typeof stream.write !== 'function') return false;
+  stream.write(s);
+  return true;
+}
+
+/**
  * Write `s` to `stream` (defaults to `process.stdout`). Returns `false`
  * when the stream is missing or doesn't expose `write` so callers can
  * degrade silently under hostile host environments (closed pipe, mock
@@ -123,9 +145,7 @@ export function writeOut(
   s: string,
   stream: NodeJS.WriteStream = process.stdout,
 ): boolean {
-  if (!stream || typeof stream.write !== 'function') return false;
-  stream.write(s);
-  return true;
+  return writeTo(s, stream);
 }
 
 /**
@@ -150,7 +170,5 @@ export function writeErr(
   s: string,
   stream: NodeJS.WriteStream = process.stderr,
 ): boolean {
-  if (!stream || typeof stream.write !== 'function') return false;
-  stream.write(s);
-  return true;
+  return writeTo(s, stream);
 }
