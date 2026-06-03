@@ -173,10 +173,53 @@ export function makeAskTool(director: Director): Tool {
       const i = input as { subagentId: string; question: string; timeoutMs?: number };
       try {
         const answer = await director.ask(i.subagentId, { question: i.question }, i.timeoutMs);
-        return { ok: true, answer };
+        // Store large answers out-of-band; return only a summary string in ctx.
+        const stored = director.largeAnswerStore.storeAnswer(answer);
+        if (stored.inline) {
+          return { ok: true, answer: stored.summary };
+        }
+        return {
+          ok: true,
+          answer: stored.summary,
+          _answerKey: stored.key,
+          _hint: 'Response was large and stored. Use ask_result with the key to retrieve it.',
+        };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
       }
+    },
+  };
+}
+
+/**
+ * Retrieve a previously stored `ask_subagent` answer by its store key.
+ * The key was returned as `_answerKey` in the ask_subagent response.
+ * Use this only for large responses that were stored out-of-context.
+ */
+export function makeAskResultTool(director: Director): Tool {
+  return {
+    name: 'ask_result',
+    description: 'Retrieve a large `ask_subagent` response that was stored out-of-context (>2K chars). Returns the full stored value.',
+    permission: 'auto',
+    mutating: false,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        key: {
+          type: 'string',
+          minLength: 1,
+          description: 'The `_answerKey` returned by `ask_subagent` for a large response.',
+        },
+      },
+      required: ['key'],
+    },
+    async execute(input: unknown) {
+      const i = input as { key: string };
+      const value = director.largeAnswerStore.retrieveAnswer(i.key);
+      if (value === undefined) {
+        return { ok: false, error: `No stored answer found for key "${i.key}" — it may have been cleared or the key is invalid.` };
+      }
+      return { ok: true, value };
     },
   };
 }

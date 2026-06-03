@@ -9,6 +9,7 @@ export {
   makeAssignTool,
   makeAwaitTasksTool,
   makeAskTool,
+  makeAskResultTool,
   makeRollUpTool,
   makeTerminateTool,
   makeFleetStatusTool,
@@ -19,6 +20,7 @@ export {
   makeFleetEmitTool,
   makeWorkCompleteTool,
 } from './director-tools.js';
+export { LargeAnswerStore } from './large-answer-store.js';
 export {
   createDelegateTool,
   type DelegateHost,

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { atomicWrite } from '../utils/atomic-write.js';
+import { LargeAnswerStore } from './large-answer-store.js';
 import { DirectorStateCheckpoint, type DirectorStateSnapshot } from '../storage/director-state.js';
 import type { BridgeMessage } from '../types/agent-bridge.js';
 import type {
@@ -28,7 +29,7 @@ import type { FleetManager } from './fleet-manager.js';
 import { assignNickname } from './subagent-nicknames.js';
 import { InMemoryBridgeTransport } from './in-memory-transport.js';
 import { DefaultMultiAgentCoordinator } from './multi-agent-coordinator.js';
-import { makeAskTool, makeAssignTool, makeAwaitTasksTool, makeCollabDebugTool, makeFleetEmitTool, makeFleetHealthTool, makeFleetSessionTool, makeFleetStatusTool, makeFleetUsageTool, makeRollUpTool, makeSpawnTool, makeTerminateAllTool, makeTerminateTool, makeWorkCompleteTool } from './director-tools.js';
+import { makeAskTool, makeAskResultTool, makeAssignTool, makeAwaitTasksTool, makeCollabDebugTool, makeFleetEmitTool, makeFleetHealthTool, makeFleetSessionTool, makeFleetStatusTool, makeFleetUsageTool, makeRollUpTool, makeSpawnTool, makeTerminateAllTool, makeTerminateTool, makeWorkCompleteTool } from './director-tools.js';
 import { CollabSession, type CollabSessionOptions, type CollabDebugReport } from './collab-debug.js';
 
 /**
@@ -442,6 +443,8 @@ export class Director implements ICoordinator {
   private _leaderBtwNotes: string[] = [];
   /** Active collab sessions tracked by sessionId (see spawnCollab). */
   private readonly _activeCollabSessions = new Map<string, import('./collab-debug.js').CollabSession>();
+  /** Prevents large `ask_subagent` answers from bloating the leader's context window. */
+  readonly largeAnswerStore: LargeAnswerStore;
 
   constructor(opts: DirectorOptions) {
     this.id = opts.config.coordinatorId || randomUUID();
@@ -693,6 +696,10 @@ export class Director implements ICoordinator {
         payload.extend(extra);
       });
     });
+    // Large-answer store: prevents big `ask_subagent` responses from
+    // bloating the leader's context window. Responses above 2K chars
+    // are stored out-of-band; only a summary goes into ctx.messages.
+    this.largeAnswerStore = new LargeAnswerStore(2000);
   }
 
   /**
@@ -1487,6 +1494,7 @@ export class Director implements ICoordinator {
       makeAssignTool(this),
       makeAwaitTasksTool(this),
       makeAskTool(this),
+      makeAskResultTool(this),
       makeRollUpTool(this),
       makeTerminateTool(this),
       makeTerminateAllTool(this),
