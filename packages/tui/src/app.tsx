@@ -2769,10 +2769,10 @@ export function App({
       currentTool: state.leader.currentTool,
       ctxPct: state.leader.ctxPct,
       ctxTokens: state.leader.ctxTokens,
-      ctxMaxTokens: state.leader.ctxMaxTokens,
+      ctxMaxTokens: state.leader.ctxMaxTokens ?? effectiveMaxContext,
     };
     return { leader: leaderEntry, ...state.fleet };
-  }, [state.fleet, state.leader, state.status, provider, model]);
+  }, [state.fleet, state.leader, state.status, provider, model, effectiveMaxContext]);
 
   // Stable per-subagent label + color assigned on first sighting.
   const STREAM_COLORS = ['cyan', 'magenta', 'yellow', 'green', 'blue'];

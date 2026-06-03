@@ -67,6 +67,10 @@ function fmtTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
+export function fmtExactTokens(n: number): string {
+  return `${Math.round(n).toLocaleString('en-US')} tok`;
+}
+
 function snippet(s: string, max = 72): string {
   const oneLine = s.replace(/\s+/g, ' ').trim();
   if (oneLine.length <= max) return oneLine;
@@ -187,6 +191,9 @@ export function AgentsMonitor({
               <Text bold>{e.name}</Text>
               {fmtModelLabel(e.provider, e.model) ? (
                 <Text dimColor>{fmtModelLabel(e.provider, e.model)}</Text>
+              ) : null}
+              {e.ctxMaxTokens && e.ctxMaxTokens > 0 ? (
+                <Text color="blue">ctx max {fmtExactTokens(e.ctxMaxTokens)}</Text>
               ) : null}
               <Text dimColor>·</Text>
               <Text dimColor>{elapsed}</Text>

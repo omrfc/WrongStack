@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FleetEntry } from '../src/app.js';
-import { IDLE_HIDE_MS, selectLiveAgents } from '../src/components/agents-monitor.js';
+import { IDLE_HIDE_MS, fmtExactTokens, selectLiveAgents } from '../src/components/agents-monitor.js';
 import { bucketActivity, sparkline } from '../src/components/fleet-monitor.js';
 
 function entry(over: Partial<FleetEntry> & Pick<FleetEntry, 'id' | 'status'>): FleetEntry {
@@ -68,6 +68,13 @@ describe('selectLiveAgents', () => {
     const agents = [entry({ id: 'i', status: 'idle', lastEventAt: now - 5_000 })];
     expect(selectLiveAgents(agents, now, 4_000).map((e) => e.id)).toEqual([]);
     expect(selectLiveAgents(agents, now, 6_000).map((e) => e.id)).toEqual(['i']);
+  });
+});
+
+describe('agents-monitor formatting', () => {
+  it('renders exact model context windows instead of compact abbreviations', () => {
+    expect(fmtExactTokens(1_050_000)).toBe('1,050,000 tok');
+    expect(fmtExactTokens(128_000)).toBe('128,000 tok');
   });
 });
 
