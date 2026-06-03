@@ -1,13 +1,13 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { DefaultSecretVault, migratePlaintextSecrets } from '../security/secret-vault.js';
-import { DefaultConfigLoader } from '../storage/config-loader.js';
-import type { Config } from '../types/config.js';
-import { writeErr } from '../utils/term.js';
-import { type WstackPaths, resolveWstackPaths } from '../utils/wstack-paths.js';
-import { DefaultLogger } from './logger.js';
-import { DefaultPathResolver } from './path-resolver.js';
+import { DefaultLogger } from './infrastructure/logger.js';
+import { DefaultPathResolver } from './infrastructure/path-resolver.js';
+import { DefaultSecretVault, migratePlaintextSecrets } from './security/secret-vault.js';
+import { DefaultConfigLoader } from './storage/config-loader.js';
+import type { Config } from './types/config.js';
+import { writeErr } from './utils/term.js';
+import { type WstackPaths, resolveWstackPaths } from './utils/wstack-paths.js';
 
 /**
  * Options for {@link bootConfig}. Both the CLI and the WebUI server boot the

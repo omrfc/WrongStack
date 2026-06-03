@@ -56,7 +56,7 @@ export {
   flagsToConfigPatch,
   type BootConfigOptions,
   type BootConfigResult,
-} from './infrastructure/boot.js';
+} from './boot.js';
 export {
   parseContinueDirective,
   type ContinueDirective,

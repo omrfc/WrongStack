@@ -1,10 +1,4 @@
 // Infrastructure domain: logging, paths, tokens, MCP servers, context manager
-export {
-  bootConfig,
-  flagsToConfigPatch,
-  type BootConfigOptions,
-  type BootConfigResult,
-} from './boot.js';
 export { DefaultLogger, type DefaultLoggerOptions } from './logger.js';
 export { DefaultPathResolver } from './path-resolver.js';
 export { DefaultTokenCounter } from './token-counter.js';

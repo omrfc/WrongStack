@@ -30,7 +30,7 @@ const { mkdirMock, writeFileMock, mockWpaths } = vi.hoisted(() => ({
 vi.mock('node:os', () => ({ homedir: () => '/home/testuser' }));
 vi.mock('node:fs/promises', () => ({ mkdir: mkdirMock, writeFile: writeFileMock }));
 
-vi.mock('../../src/storage/config-loader.js', () => ({
+vi.mock('../src/storage/config-loader.js', () => ({
   DefaultConfigLoader: vi.fn().mockImplementation(function (this: any) {
     this.load = vi
       .fn()
@@ -43,27 +43,27 @@ vi.mock('../../src/storage/config-loader.js', () => ({
     this.loadSyncConfig = vi.fn().mockResolvedValue(null);
   }),
 }));
-vi.mock('../../src/infrastructure/logger.js', () => ({
+vi.mock('../src/infrastructure/logger.js', () => ({
   DefaultLogger: vi.fn().mockImplementation(function (this: any, opts: { level: string }) {
     this.level = opts?.level;
   }),
 }));
-vi.mock('../../src/infrastructure/path-resolver.js', () => ({
+vi.mock('../src/infrastructure/path-resolver.js', () => ({
   DefaultPathResolver: vi.fn().mockImplementation(function (this: any) {
     this.projectRoot = '/tmp/test';
   }),
 }));
-vi.mock('../../src/security/secret-vault.js', () => ({
+vi.mock('../src/security/secret-vault.js', () => ({
   DefaultSecretVault: vi.fn().mockImplementation(function (this: any) {}),
   migratePlaintextSecrets: vi.fn().mockResolvedValue({ migrated: 0, file: '' }),
 }));
-vi.mock('../../src/utils/wstack-paths.js', () => ({
+vi.mock('../src/utils/wstack-paths.js', () => ({
   resolveWstackPaths: vi.fn().mockReturnValue(mockWpaths),
 }));
-vi.mock('../../src/utils/term.js', () => ({ writeErr: (s: string) => process.stderr.write(s) }));
+vi.mock('../src/utils/term.js', () => ({ writeErr: (s: string) => process.stderr.write(s) }));
 
-import { bootConfig } from '../../src/infrastructure/boot.js';
-import { migratePlaintextSecrets } from '../../src/security/secret-vault.js';
+import { bootConfig } from '../src/boot.js';
+import { migratePlaintextSecrets } from '../src/security/secret-vault.js';
 
 const migrateMock = migratePlaintextSecrets as unknown as ReturnType<typeof vi.fn>;
 
