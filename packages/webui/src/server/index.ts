@@ -61,6 +61,11 @@ import { estimateContextBreakdown } from './token-estimator.js';
 // Re-export types
 export type { WebUIOptions, BackendServices } from './types.js';
 
+/** Extract a human-readable message from an unknown thrown value. */
+function errMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 // Internal message types
 interface WSServerMessage {
   type: string;
@@ -861,7 +866,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
             type: 'error',
             payload: {
               phase: 'agent.run',
-              message: err instanceof Error ? err.message : String(err),
+              message: errMessage(err),
             },
           });
         } finally {
@@ -974,7 +979,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
             `Compacted: ${report.before} → ${report.after} tokens (saved ~${Math.max(0, report.before - report.after)})`,
           );
         } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
+          sendResult(ws, false, errMessage(err));
         }
         break;
       }
@@ -1165,7 +1170,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
             type: 'key.operation_result',
             payload: {
               success: false,
-              message: `Switch failed: ${err instanceof Error ? err.message : String(err)}`,
+              message: `Switch failed: ${errMessage(err)}`,
             },
           });
           break;
@@ -1235,7 +1240,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
         } catch (err) {
           send(ws, {
             type: 'sessions.list',
-            payload: { sessions: [], error: err instanceof Error ? err.message : String(err) },
+            payload: { sessions: [], error: errMessage(err) },
           });
         }
         break;
@@ -1251,7 +1256,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
           await sessionStore.delete(id);
           sendResult(ws, true, `Session ${id} deleted`);
         } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
+          sendResult(ws, false, errMessage(err));
         }
         break;
       }
@@ -1295,7 +1300,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
           });
           sendResult(ws, true, `Resumed session ${id}`);
         } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
+          sendResult(ws, false, errMessage(err));
         }
         break;
       }
@@ -1336,7 +1341,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
         } catch (err) {
           send(ws, {
             type: 'memory.list',
-            payload: { text: '', error: err instanceof Error ? err.message : String(err) },
+            payload: { text: '', error: errMessage(err) },
           });
         }
         break;
@@ -1352,7 +1357,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
           await memoryStore.remember(text, scope ?? 'project-memory');
           sendResult(ws, true, 'Saved to memory');
         } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
+          sendResult(ws, false, errMessage(err));
         }
         break;
       }
@@ -1373,7 +1378,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
               : 'No matching entries',
           );
         } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
+          sendResult(ws, false, errMessage(err));
         }
         break;
       }
@@ -1408,7 +1413,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
             payload: {
               skills: [],
               enabled: true,
-              error: err instanceof Error ? err.message : String(err),
+              error: errMessage(err),
             },
           });
         }
@@ -1519,7 +1524,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
             payload: { plan },
           });
         } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
+          sendResult(ws, false, errMessage(err));
         }
         break;
       }
@@ -1624,7 +1629,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
             payload: {
               modes: [],
               activeId: 'default',
-              error: err instanceof Error ? err.message : String(err),
+              error: errMessage(err),
             },
           });
         }
@@ -1673,7 +1678,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
             payload: { ...(await sessionStartPayload()) },
           });
         } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
+          sendResult(ws, false, errMessage(err));
         }
         break;
       }
@@ -1771,7 +1776,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
       if (result.ok) await saveProviders(providers);
       sendResult(ws, result.ok, result.message);
     } catch (err) {
-      sendResult(ws, false, err instanceof Error ? err.message : String(err));
+      sendResult(ws, false, errMessage(err));
     }
   }
 
@@ -1782,7 +1787,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
       if (result.ok) await saveProviders(providers);
       sendResult(ws, result.ok, result.message);
     } catch (err) {
-      sendResult(ws, false, err instanceof Error ? err.message : String(err));
+      sendResult(ws, false, errMessage(err));
     }
   }
 
@@ -1797,7 +1802,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
       if (result.ok) await saveProviders(providers);
       sendResult(ws, result.ok, result.message);
     } catch (err) {
-      sendResult(ws, false, err instanceof Error ? err.message : String(err));
+      sendResult(ws, false, errMessage(err));
     }
   }
 
@@ -1811,7 +1816,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
       if (result.ok) await saveProviders(providers);
       sendResult(ws, result.ok, result.message);
     } catch (err) {
-      sendResult(ws, false, err instanceof Error ? err.message : String(err));
+      sendResult(ws, false, errMessage(err));
     }
   }
 
@@ -1822,7 +1827,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
       if (result.ok) await saveProviders(providers);
       sendResult(ws, result.ok, result.message);
     } catch (err) {
-      sendResult(ws, false, err instanceof Error ? err.message : String(err));
+      sendResult(ws, false, errMessage(err));
     }
   }
 
