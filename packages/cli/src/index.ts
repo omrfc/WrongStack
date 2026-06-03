@@ -25,6 +25,7 @@ import {
   ParallelEternalEngine,
   createDelegateTool,
   createMcpControlTool,
+  isStdinTTY,
   loadDirectorState,
   // createSessionEventBridge, // real import after core declarations are rebuilt
   // resolveAuditLevel,
@@ -856,7 +857,7 @@ export async function main(argv: string[]): Promise<number> {
       // operations in scripts is dangerous. `null` signals "no user to ask"
       // only when the caller explicitly needs to distinguish cancel from
       // deny (which /autonomy eternal doesn't).
-      if (!process.stdin.isTTY) return false;
+      if (!isStdinTTY()) return false;
       const hint = defaultYes ? '[Y/n/q]' : '[y/N/q]';
       try {
         const raw = await reader.readLine(`  ${color.amber('?')} ${question} ${color.dim(hint)} `);
@@ -1665,7 +1666,7 @@ async function promptRecovery(
     renderer.writeInfo(`${summary} Auto-resuming (--recover).`);
     return 'resume';
   }
-  if (!process.stdin.isTTY) {
+  if (!isStdinTTY()) {
     renderer.writeInfo(
       `${summary} Non-interactive — leaving as-is. Use \`wstack resume ${abandoned.sessionId}\` or pass \`--recover\` to auto-resume.`,
     );

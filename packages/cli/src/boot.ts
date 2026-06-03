@@ -36,6 +36,7 @@ import {
   ToolRegistry,
   type WstackPaths,
   TOKENS,
+  isStdinTTY,
 } from '@wrongstack/core';
 import { builtinToolsPack } from '@wrongstack/tools';
 import { parseArgs } from './arg-parser.js';
@@ -180,7 +181,7 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
   }
 
   const isSingleShot = positional.length > 0 || typeof flags['prompt'] === 'string';
-  const isInteractiveTTY = !!process.stdin.isTTY && !isSingleShot;
+  const isInteractiveTTY = isStdinTTY() && !isSingleShot;
 
   if (isInteractiveTTY) {
     const cont = await runProjectCheck({ projectRoot, renderer, reader });
@@ -194,7 +195,7 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
   const providerFlag = typeof flags['provider'] === 'string' ? flags['provider'] : undefined;
   const modelFlag = typeof flags['model'] === 'string' ? flags['model'] : undefined;
   if (!(!!providerFlag && !!modelFlag)) {
-    if (process.stdin.isTTY) {
+    if (isStdinTTY()) {
       const picked = await runPicker({
         modelsRegistry,
         renderer,
