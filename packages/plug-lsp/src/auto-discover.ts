@@ -7,9 +7,11 @@ export async function autoDiscoverServers(
   cwd = process.cwd(),
 ): Promise<Record<string, ServerConfig>> {
   const out = { ...userServers };
-  for (const [name, cfg] of Object.entries(PRESETS)) {
-    if (out[name]) continue;
-    const command = await resolveServerCommand(cfg.command, cwd);
+  const pending = Object.entries(PRESETS).filter(([name]) => !out[name]);
+  const resolved = await Promise.all(
+    pending.map(async ([name, cfg]) => [name, cfg, await resolveServerCommand(cfg.command, cwd)] as const),
+  );
+  for (const [name, cfg, command] of resolved) {
     if (command) out[name] = { ...cfg, command };
   }
   return out;
