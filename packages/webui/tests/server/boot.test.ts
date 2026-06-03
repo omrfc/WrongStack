@@ -26,6 +26,11 @@ vi.mock('@wrongstack/core', () => ({
   DefaultSecretVault: vi.fn().mockImplementation(function(this: any, opts: any) { this.encrypt = vi.fn(); this.decrypt = vi.fn(); this.isEncrypted = vi.fn(); }),
   migratePlaintextSecrets: vi.fn().mockResolvedValue({ migrated: 0, file: '' }),
   resolveWstackPaths: vi.fn().mockReturnValue(mockWpaths),
+  // The `Encrypted N plaintext secret(s) in FILE` notice in boot.ts
+  // routes through `writeErr` after the Phase-5 refactor. The test
+  // asserts on process.stderr.write directly, so we forward through
+  // to that.
+  writeErr: (s: string) => process.stderr.write(s),
 }));
 
 import { bootConfig, patchConfig } from '../../src/server/boot.js';
