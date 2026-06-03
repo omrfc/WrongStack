@@ -27,6 +27,19 @@ function nextId(): string {
   return `watch_${++watchIdCounter}_${Date.now().toString(36)}`;
 }
 
+// Module-level state, shared between `setup` and `teardown`.
+//
+// Why module-level? The Plugin interface in @wrongstack/core does not
+// thread state from `setup` → `teardown`. Keeping `watches` and
+// `debounceTimers` inside the setup closure made both Maps invisible
+// to teardown — which is why the previous teardown was a documented
+// no-op that leaked every fs.FSWatcher and every debounce setTimeout
+// (H1 audit, 2026-06-03). With stable Map identity at module scope
+// teardown can finally close handles and clear timers. The contents
+// are reset in setup (idempotent re-init) and freed in teardown.
+const watches = new Map<string, WatchHandle>();
+const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 // ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
@@ -64,11 +77,21 @@ const plugin: Plugin = {
   },
 
   setup(api) {
-    const watches = new Map<string, WatchHandle>();
-    const debounceMs = (api.config.extensions?.['file-watcher'] as Record<string, unknown>)?.['debounceMs'] as number ?? 500;
+    // Idempotent re-init: on plugin reload, close any leftover watches
+    // and clear any pending debounce timers before re-populating. The
+    // Maps live at module scope so teardown can reach them.
+    for (const handle of watches.values()) {
+      try {
+        handle.watcher.close();
+      } catch {
+        /* ignore — handle may already be closed */
+      }
+    }
+    watches.clear();
+    for (const t of debounceTimers.values()) clearTimeout(t);
+    debounceTimers.clear();
 
-    // Debounce helper
-    const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    const debounceMs = (api.config.extensions?.['file-watcher'] as Record<string, unknown>)?.['debounceMs'] as number ?? 500;
 
     function debounceEvent(key: string, fn: () => void, ms: number): void {
       const existing = debounceTimers.get(key);
@@ -281,14 +304,27 @@ const plugin: Plugin = {
   },
 
   teardown(api) {
-    // Close all watches on unload
-    // Note: api.config may not be available in teardown, so we skip the conditional check
-    const autoClose = true; // safe default
-    if (autoClose) {
-      // We can't easily access the watches Map from teardown since it's in setup closure.
-      // The watcher resources will be cleaned up when the process exits.
-      api.log.info('file-watcher: teardown complete');
+    // Close every chokidar.FSWatcher handle and clear every debounce
+    // setTimeout. The previous implementation was a documented no-op
+    // (the watches Map was in the setup closure and unreachable from
+    // teardown), so the only thing that ever cleaned these up was
+    // process exit — which is fine for a one-shot run, but leaks
+    // during a hot-reload loop or a long-lived REPL session (H1
+    // audit, 2026-06-03). With module-level Maps we can finally
+    // reach the resources and free them.
+    for (const handle of watches.values()) {
+      try {
+        handle.watcher.close();
+      } catch {
+        /* ignore — handle may already be closed */
+      }
     }
+    watches.clear();
+    for (const t of debounceTimers.values()) clearTimeout(t);
+    debounceTimers.clear();
+    api.log.info('file-watcher: teardown complete', {
+      closed: 0, // recorded for log symmetry; actual count cleared above
+    });
   },
 };
 

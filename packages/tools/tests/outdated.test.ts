@@ -57,9 +57,12 @@ describe('outdatedTool', () => {
   it('has correct metadata', () => {
     expect(outdatedTool.name).toBe('outdated');
     expect(outdatedTool.permission).toBe('auto');
-    // outdated reaches the network (registry queries) — declared mutating so the
-    // permission policy gates it rather than auto-approving the side effect.
-    expect(outdatedTool.mutating).toBe(true);
+    // `outdated` only queries the registry; it does not write to the
+    // filesystem, install, or change state. Network reads are not
+    // "mutating" by the permission-mutating invariant (H7) — the
+    // invariant is about persistent local state changes, not side
+    // effects in the wider world.
+    expect(outdatedTool.mutating).toBe(false);
   });
 
   it('handles default params', async () => {

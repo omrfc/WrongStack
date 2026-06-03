@@ -10,5 +10,11 @@ export default defineConfig({
   treeshake: true,
   target: 'es2023',
   banner: { js: '#!/usr/bin/env node' },
-  external: ['@wrongstack/core', '@wrongstack/providers', '@wrongstack/tools', '@wrongstack/mcp'],
+  // Externalize every @wrongstack/* workspace package so a single shared
+  // copy of each is loaded at runtime. The previous explicit list missed
+  // acp, plug-lsp, runtime, telegram, tui, and webui — bundling them
+  // inline duplicated @wrongstack/core in the dist, breaking the
+  // singleton contract that the cross-package event bus and config
+  // paths depend on. The regex picks up new workspace deps automatically.
+  external: [/^@wrongstack\//, 'ws'],
 });

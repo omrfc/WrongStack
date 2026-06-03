@@ -9,5 +9,8 @@ export default defineConfig({
   splitting: false,
   treeshake: true,
   target: 'es2023',
-  external: ['@wrongstack/core', 'ink', 'react'],
+  // Externalize every @wrongstack/* workspace package (single shared
+  // copy of core/runtime/tools at runtime) plus ink + react which
+  // tsup cannot bundle because they have native/JSX runtime concerns.
+  external: [/^@wrongstack\//, 'ink', 'react'],
 });

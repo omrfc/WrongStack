@@ -1,6 +1,6 @@
 # WrongStack Architecture
 
-This document is a repository-level architecture map for WrongStack as scanned on 2026-06-01. It is written for maintainers, plugin authors, and contributors who need to understand how the monorepo fits together before changing runtime behavior.
+This document is a repository-level architecture map for WrongStack as scanned on 2026-06-03 (version 0.34.0). It is written for maintainers, plugin authors, and contributors who need to understand how the monorepo fits together before changing runtime behavior.
 
 WrongStack is a TypeScript/Node.js agent platform. The user-facing product is a terminal AI coding agent, but the implementation is deliberately split into reusable packages: a small core runtime, provider adapters, built-in tools, MCP integration, terminal and browser UIs, and an optional multi-agent director layer.
 
@@ -86,18 +86,19 @@ The scan found the following package sizes:
 
 | Package | Source files | Test files | Primary responsibility |
 |---|---:|---:|---|
-| `@wrongstack/core` | ~170 | ~100 | Agent runtime, DI, storage, security, security-scanner, multi-agent coordination, observability, autophase, worktree, replay, built-in plugins, skills. |
-| `@wrongstack/cli` | 59 | 15 | CLI boot, runtime assembly, REPL, slash commands, plugin management, WebUI launcher. |
-| `@wrongstack/tools` | 40 | 40 | Built-in tools and meta-tools. |
-| `@wrongstack/webui` | 49 | ~10 | Browser UI and standalone WebSocket backend. |
-| `@wrongstack/plug-lsp` | 41 | 15 | LSP runtime, tools, slash commands, server lifecycle. |
-| `@wrongstack/providers` | 24 | 18 | Provider adapters, streaming parsers, tool wire conversions. |
-| `@wrongstack/plugins` | 10 | 10 | Bundled plugin library: auto-doc, cost-tracker, cron, file-watcher, git-autocommit, json-path, semver-bump, shell-check, template-engine, web-search. |
-| `@wrongstack/tui` | 17 | 17 | Ink terminal UI components and state rendering. |
-| `@wrongstack/mcp` | 7 | 5 | MCP client, registry, transports, wrapping. |
-| `@wrongstack/acp` | 5 | 1 | ACP server transport, protocol handler, ACP subagent runner. |
-| `@wrongstack/runtime` | 6 | 5 | Default runtime implementations, host composition, vision, clipboard. |
+| `@wrongstack/core` | ~241 | ~157 | Agent runtime, DI, storage, security, security-scanner, multi-agent coordination, observability, autophase, worktree, replay, built-in plugins, skills. |
+| `@wrongstack/cli` | 92 | 66 | CLI boot, runtime assembly, REPL, slash commands, plugin management, WebUI launcher. |
+| `@wrongstack/tools` | 58 | 43 | Built-in tools and meta-tools. |
+| `@wrongstack/webui` | 21 | 11 | Browser UI and standalone WebSocket backend. |
+| `@wrongstack/plug-lsp` | 43 | 15 | LSP runtime, tools, slash commands, server lifecycle. |
+| `@wrongstack/providers` | 22 | 18 | Provider adapters, streaming parsers, tool wire conversions. |
+| `@wrongstack/plugins` | 11 | 12 | Bundled plugin library: auto-doc, cost-tracker, cron, file-watcher, git-autocommit, json-path, semver-bump, shell-check, template-engine, web-search. |
+| `@wrongstack/tui` | 15 | 33 | Ink terminal UI components and state rendering. |
+| `@wrongstack/mcp` | 8 | 5 | MCP client, registry, transports, wrapping. |
+| `@wrongstack/acp` | 10 | 1 | ACP server transport, protocol handler, ACP subagent runner. |
+| `@wrongstack/runtime` | 6 | 6 | Default runtime implementations, host composition, vision, clipboard. |
 | `@wrongstack/telegram` | 6 | 5 | Telegram bridge plugin with bot, tools, and slash commands. |
+| `@wrongstack/skills` | 0 | 0 | Umbrella for skill subpackages published as separate npm packages (git-flow, test-runner, etc.). |
 
 ## Dependency Topology
 
@@ -166,18 +167,18 @@ flowchart BT
 ```text
 packages/core/src/
   kernel/          Container, tokens, pipeline, event bus, run controller.
-  core/            Agent, Context, ConversationState, prompt/request building, streaming response, provider runner, input builder, run env.
-  execution/       ToolExecutor, retry, error recovery, compaction, skills, autonomous runner, auto-compaction middleware, intelligent/selective compaction, eternal-autonomy, goal-preamble.
-  storage/         Sessions, config, memory, queue, plans, todos, recovery, attachments, config migration, goals, session rewind, cloud-sync.
+  core/            Agent, Context, ConversationState, prompt/request building, streaming response, provider runner, input builder, run env, modes, /btw mid-run steering.
+  execution/       ToolExecutor, retry, error recovery, compaction, skills, autonomous runner, auto-compaction middleware, intelligent/selective compaction, eternal-autonomy, goal-preamble, parallel-eternal-engine.
+  storage/         Sessions, config, memory, queue, plans + plan-templates, todos, recovery, attachments, config migration, goals, session rewind, cloud-sync, annotations, prompt-store, replay-log, session-analyzer, session-recovery, session-event-bridge, tool-audit-log.
   security/        Permission policy, secret vault, secret scrubber, config secrets.
   security-scanner/ Security scanner: orchestrator, detector, scanner, gitignore updater, report generator, skill generator.
   registry/        Tool, provider, and slash command registries.
   plugin/          Plugin API and loader.
   extension/       Agent lifecycle extension registry and extension points (BeforeRun, AfterRun, BeforeIteration, AfterIteration, OnError, wrapProviderRunner, beforeToolExecution, afterToolExecution).
-  coordination/    Multi-agent coordinator, Director, FleetBus, FleetManager, delegate tool, bridge, budgets, transport, collab-debug, collab-bus, dispatcher, auto-extend, parallel-eternal-engine, agents (9-phase system), agent-subagent-runner.
-  models/          models.dev registry, model selection, modes.
+  coordination/    Multi-agent coordinator, Director, FleetBus, FleetManager, delegate tool, bridge, budgets, transport, collab-debug, collab-bus, dispatcher, auto-extend, parallel-eternal-engine, agents (9-phase system), agent-subagent-runner, large-answer-store, subagent-nicknames.
+  models/          models.dev registry, model selection (llm-selector), mode-store.
   observability/   Metrics, traces, health, Prometheus, OTLP, event bridge.
-  sdd/             Spec-driven development: parser, task generator, task flow, task tracker, graph store, visualizer, spec store, spec builder, spec versioning, spec templates, auto-executor, critical path.
+  sdd/             Spec-driven development: parser, task generator, task flow, task tracker, graph store, visualizer, spec store, spec builder, spec versioning, spec templates, auto-executor, critical path, task decomposer, parallel run.
   infrastructure/  Logger, token counter, path resolver, context manager, MCP presets.
   types/           Public type contracts.
   defaults/        Backward-compatible re-export barrel for all default implementations.
@@ -194,29 +195,30 @@ packages/core/src/
 
 | Area | Files | Notes |
 |---|---:|---|
-| `types` | 38 | Public contracts. Keep these stable and additive when possible. |
-| `coordination` | ~29 | Multi-agent orchestration: director, bridge, fleet, fleet-manager, budgets, transport, collab-debug, collab-bus, dispatcher, auto-extend, parallel-eternal-engine, agents (9-phase), agent-subagent-runner. |
-| `storage` | 17 | JSONL sessions, config, memory, checkpoints, recovery, goal store, queue store, session rewind, cloud-sync. |
-| `utils` | 16 | Shared helpers: paths, JSON, glob, diff, color, atomic write, serializers, regex guard, token estimate, json-schema validation, message invariants, newline normalization, todos format. |
-| `execution` | 14 | Tool execution, retry, compaction (intelligent/selective/auto), skill loading, autonomous runner, error handler, auto-compaction middleware, eternal-autonomy, goal-preamble, autonomous-prompt-contributor. |
-| `observability` | 9 | Metrics/traces/health integrations, event bridge. |
-| `core` | 10 | Agent loop, context, conversation state, input builder, run env, streaming response, provider runner, iteration limit, continue-to-next-iteration. |
-| `kernel` | 6 | Low-level primitives: container, pipeline, events, run controller, tokens. |
-| `infrastructure` | 6 | Logger, token counter, path resolver, context manager, MCP presets. |
-| `sdd` | 13 | Parser, generator, flow, tracker, graph store, visualizer, spec store, builder, versioning, templates, auto-executor, critical path. |
-| `security` | 5 | Vault, scrubber, permission policy, config secrets. |
-| `security-scanner` | 8 | Orchestrator, detector, scanner, gitignore updater, report generator, skill generator, types. |
-| `autophase` | 8 | Auto-phase planner, runner, orchestrator, checkpoint, phase-store, phase-graph-builder. |
+| `types` | 40 | Public contracts. Keep these stable and additive when possible. |
+| `coordination` | 38 | Multi-agent orchestration: director, bridge, fleet, fleet-manager, budgets, transport, collab-debug, collab-bus, dispatcher, auto-extend, parallel-eternal-engine, agents (9-phase), agent-subagent-runner, large-answer-store, subagent-nicknames. |
+| `storage` | 24 | JSONL sessions, config, memory, checkpoints, recovery, goal store, queue store, session rewind, cloud-sync, annotations, prompt-store, replay-log, session-analyzer, session-event-bridge, tool-audit-log, plan-templates. |
+| `utils` | 18 | Shared helpers: paths, JSON, glob, diff, color, atomic write, serializers, regex guard, token estimate, json-schema validation, message invariants, newline normalization, todos format, child-env, merge-models-payload. |
+| `execution` | 16 | Tool execution, retry, compaction (intelligent/selective/auto), skill loading, autonomous runner, error handler, auto-compaction middleware, eternal-autonomy, goal-preamble, autonomy-prompt-contributor, parallel-eternal-engine. |
+| `sdd` | 15 | Parser, generator, flow, tracker, graph store, visualizer, spec store, builder, versioning, templates, auto-executor, critical path, task decomposer, parallel run. |
+| `core` | 14 | Agent loop, context, conversation state, input builder, run env, streaming response, provider runner, iteration limit, continue-to-next-iteration, system prompt builder, /btw steering, modes. |
+| `observability` | 9 | Metrics/traces/health integrations, event bridge, OTLP traces/metrics, Prometheus. |
+| `security-scanner` | 9 | Orchestrator, detector, scanner, gitignore updater, report generator, skill generator, slash-command, types. |
+| `autophase` | 8 | Auto-phase planner, runner, orchestrator, checkpoint, phase-store, phase-graph-builder, types. |
 | `plugins` | 7 | Built-in core plugins: git, observability, plan, prompts, security, skills, sync. |
-| `models` | 4 | Model registry, selector, modes. |
+| `kernel` | 6 | Low-level primitives: container, pipeline, events, run controller, tokens, index. |
+| `infrastructure` | 6 | Logger, token counter, path resolver, context manager, MCP presets. |
+| `security` | 6 | Vault, scrubber, permission policy, config secrets, tool capabilities. |
+| `models` | 4 | Model registry, LLM selector, mode store. |
+| `skills` | 4 | Skill loading helpers and built-in skill plumbing. |
 | `registry` | 3 | Tool, provider, slash-command registries. |
 | `extension` | 3 | Extension registry, extension points, index. |
-| `plugin` | 2 | Plugin API and loader. |
-| `defaults` | 1 | Backward-compatible re-export barrel. |
-| `worktree` | 2 | Git worktree manager for parallel agent workspaces. |
 | `replay` | 2 | Session replay via replay-provider-runner and hash. |
+| `worktree` | 2 | Git worktree manager for parallel agent workspaces. |
 | `tools` | 2 | Core-built tools: mcp-control. |
+| `plugin` | 2 | Plugin API and loader. |
 | `middleware` | 1 | Koa-style middleware: collab-pause. |
+| `defaults` | 1 | Backward-compatible re-export barrel. |
 
 ## Kernel Primitives
 
@@ -243,7 +245,7 @@ The standard tokens are:
 Logger, TokenCounter, SessionStore, MemoryStore, PermissionPolicy, Compactor,
 PathResolver, ConfigLoader, ConfigStore, Renderer, InputReader, ErrorHandler,
 RetryPolicy, SkillLoader, SystemPromptBuilder, SecretScrubber, ModelsRegistry,
-ModeStore, ProviderRunner
+ModeStore, ProviderRunner, WorktreeManager
 ```
 
 ### Pipeline
@@ -391,7 +393,7 @@ Key behaviors:
 The CLI boot path is split into two phases:
 
 1. `packages/cli/src/boot.ts` parses arguments, loads config, handles early subcommands, provider/model picking, and launch prompts. `pre-launch.ts` handles project-kind detection and AGENTS.md initialization prompts.
-2. `packages/cli/src/index.ts` wires the runtime: container, providers, tools, events, sessions, prompt builder, MCP, plugins, multi-agent host, slash commands, and agent. Session, provider, and pipeline wiring are factored into `wiring/session.ts`, `wiring/provider.ts`, and `wiring/pipeline.ts`.
+2. `packages/cli/src/index.ts` wires the runtime: container, providers, tools, events, sessions, prompt builder, MCP, plugins, multi-agent host, slash commands, and agent. Wiring is factored into focused modules under `wiring/`: `session.ts`, `provider.ts`, `pipeline.ts`, `tools.ts`, `plugins.ts`, `slash-commands.ts`, `metrics.ts`, and `replay.ts`.
 
 ```mermaid
 flowchart TD
@@ -550,12 +552,15 @@ Important provider internals:
 | `anthropic.ts`, `openai.ts`, `google.ts` | Native provider classes. |
 | `openai-compatible.ts` | Drop-in adapter for `/v1/chat/completions` services. |
 | `wire-adapter.ts` | Shared HTTP mechanics: request, SSE parsing, abort, error translation. |
-| `wire-format.ts` and `presets/` | Declarative provider definition path. |
-| `tool-format/` | Conversion between core tools/content blocks and provider-specific wire formats. |
+| `wire-format.ts` and `presets/` | Declarative provider definition path. Presets ship for `anthropic`, `google`, `mistral`, and `openai`. |
+| `tool-format/` | Conversion between core tools/content blocks and provider-specific wire formats (`to-`/`from-` anthropic and openai). |
 | `sse.ts` | SSE parsing with buffer limits. |
 | `aggregate.ts` | Stream-event aggregation into a final response. |
 | `error-parse.ts` | Provider-specific HTTP error normalization. |
 | `capabilities.ts` | Maps catalog capability data into runtime flags. |
+| `family-capabilities.ts` | Per-wire-family capability defaults (tools, streaming, vision, reasoning). |
+| `stop-reason.ts` | Normalizes provider stop reasons into canonical values. |
+| `_tool-input.ts` | Repairs incomplete/streamed tool-input JSON by auto-closing braces and strings. |
 
 ## Tool System
 
@@ -586,7 +591,7 @@ Meta / resilience:
   circuit-breaker, process-registry
 ```
 
-The default exported `builtinTools` intentionally lives in `packages/tools/src/builtin.ts` so consumers that only need a subset can import individual tools without pulling in the whole catalog.
+The default exported `builtinTools` intentionally lives in `packages/tools/src/builtin.ts` so consumers that only need a subset can import individual tools without pulling in the whole catalog. The codebase-intelligence tools (`codebase-index`, `codebase-search`, `codebase-stats`) live in their own `packages/tools/src/codebase-index/` subdirectory alongside the index writer. `packages/tools/src/pack.ts` exports `builtinToolsPack`, a named bundle of the full default tool set. Files prefixed with `_` (`_env`, `_regex`, `_spawn-stream`, `_util`) are shared internal helpers, not standalone tools.
 
 ### Tool Call Data Flow
 
@@ -807,6 +812,8 @@ packages/core/src/coordination/
   dispatcher.ts                 LLM-based agent dispatch: scoreAgents, dispatchAgent.
   auto-extend.ts                AutoExtendPolicy for automatic session continuation.
   parallel-eternal-engine.ts   Eternal-engine for autonomous parallel goal pursuit.
+  large-answer-store.ts         Sidecar store keeping large ask_subagent results out of the director's context window.
+  subagent-nicknames.ts         Domain-affinity nickname pool (scientists/mathematicians) for spawned subagents.
 ```
 
 ### Coordinator Flow
@@ -890,7 +897,7 @@ Auto-phase runs emit WebSocket events via the `autophase-ws-handler` in WebUI, a
 
 ### Git Worktree Manager
 
-The `worktree/` area (`packages/core/src/worktree/`) provides `WorktreeManager` — a Git worktree orchestration layer used by the AutoPhase system to create isolated parallel workspaces for concurrent agent phases.
+The `worktree/` area (`packages/core/src/worktree/`) provides `WorktreeManager` — a Git worktree orchestration layer used by the AutoPhase system to create isolated parallel workspaces for concurrent agent phases. It is now a first-class kernel DI token (`TOKENS.WorktreeManager`), so hosts can resolve, decorate, or override the manager through the container like any other core service.
 
 Each `WorktreeHandle` transitions through states: `allocating → active → committing → merging → merged`, with failure handling at any stage. Worktree lifecycle events are broadcast via `worktree-ws-handler` to WebUI for live status display.
 
@@ -966,7 +973,7 @@ WebUI backend notes:
 ```text
 packages/plug-lsp/src/
   server/          LSP connection, initialization, lifecycle, capabilities.
-  tools/           definition, references, rename, hover, diagnostics, symbols, code actions.
+  tools/           definition, references, rename, hover, diagnostics, symbols, code actions, workspace-edit, codebase-lsp-search.
   slash-commands/  start, stop, restart, diagnostics, list.
   formatters/      Human-readable formatting for diagnostics, hover, symbols, locations.
   utils/           URI, timeout, safe spawn, command resolver.
@@ -1092,6 +1099,13 @@ flowchart TD
 | `DirectorStateCheckpoint` | Mirrors live multi-agent task graph for crash recovery/retry. |
 | `PhaseStore` | Persists auto-phase state for resume after interruption. |
 | `CheckpointManager` | Saves/restores phase progress snapshots. |
+| `SessionRecovery` | Read-side companion to in-flight recovery state; reconstructs interrupted sessions. |
+| `ToolAuditLog` | Tamper-evident audit trail recording every `tool_use`/`tool_result` pair. |
+| `AnnotationsStore` | Sidecar storage for collaboration annotations. |
+| `PromptStore` | Persists reusable prompt entries. |
+| `ReplayLogStore` | Sidecar store backing deterministic session replay. |
+| `SessionAnalyzer` | Computes derived analytics/summaries over stored sessions. |
+| `PlanTemplates` | In-memory pre-defined plan skeletons for common workflows. |
 
 ## Security Architecture
 
@@ -1188,6 +1202,8 @@ The `sdd` area provides:
 | `TaskVisualizer` | Render task graphs visually. |
 | `AutoExecutor` | Auto-execute spec-driven task flows. |
 | `CriticalPath` | Compute and track critical path through tasks. |
+| `SddTaskDecomposer` | Convert a `TaskGraph` into a dependency-aware decomposition for parallel execution. |
+| `SddParallelRun` | Drive a `TaskGraph` through `ParallelEternalEngine` infrastructure for concurrent task execution. |
 
 This area is independent of the normal agent loop but can be surfaced through tools, slash commands, or specialized modes/skills.
 

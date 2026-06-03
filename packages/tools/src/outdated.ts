@@ -40,7 +40,7 @@ export const outdatedTool: Tool<OutdatedInput, OutdatedOutput> = {
     '- Safe, read-only operation.\n' +
     'Use the output to decide on upgrades. Prefer this over manual shell commands for dependency hygiene.',
   permission: 'auto',
-  mutating: true,
+  mutating: false,
   timeoutMs: 60_000,
   inputSchema: {
     type: 'object',

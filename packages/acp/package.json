@@ -1,8 +1,25 @@
 {
   "name": "@wrongstack/acp",
   "version": "0.32.0",
+  "license": "MIT",
   "description": "ACP (Agent Client Protocol) integration for WrongStack — client + agent support",
+  "keywords": [
+    "ai",
+    "agent",
+    "acp",
+    "agent-client-protocol",
+    "coding-agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WrongStack/WrongStack.git",
+    "directory": "packages/acp"
+  },
+  "homepage": "https://github.com/WrongStack/WrongStack#readme",
+  "bugs": "https://github.com/WrongStack/WrongStack/issues",
+  "author": "ECOSTACK TECHNOLOGY OÜ",
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": {
       "import": "./dist/index.js",
@@ -33,5 +50,8 @@
     "@types/node": "^22",
     "typescript": "^5",
     "vitest": "^4.1.6"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

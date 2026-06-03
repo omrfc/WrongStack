@@ -1,7 +1,7 @@
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { atomicWrite } from '../utils/atomic-write.js';
-import type { ScanResult, Finding } from './scanner.js';
+import type { Finding, ScanResult } from './scanner.js';
 
 export interface ReportOptions {
   outputDir: string;
@@ -92,7 +92,14 @@ export class ReportGenerator {
         const findings = severityGroups[severity] ?? [];
         if (findings.length === 0) continue;
 
-        const emoji = severity === 'critical' ? '🔴' : severity === 'high' ? '🟠' : severity === 'medium' ? '🟡' : '🟢';
+        const emoji =
+          severity === 'critical'
+            ? '🔴'
+            : severity === 'high'
+              ? '🟠'
+              : severity === 'medium'
+                ? '🟡'
+                : '🟢';
         lines.push(`## ${emoji} ${severity.toUpperCase()} (${findings.length})`);
         lines.push('');
 
@@ -209,7 +216,7 @@ export class ReportGenerator {
         errors: result.errors,
       },
       null,
-      2
+      2,
     );
   }
 
@@ -221,25 +228,34 @@ export class ReportGenerator {
       low: '#16a34a',
     };
 
+    // SECURITY: Every finding field below is treated as untrusted text. The
+    // security scanner (and its LLM-assisted analysis) is allowed to emit
+    // arbitrary strings — including titles, file paths, and remediation
+    // text that may contain `<script>`, quotes, or HTML entities. Embedding
+    // them directly into the template would create a stored XSS vector
+    // when the report is opened in a browser or served by the WebUI.
+    // All dynamic content passes through escapeHtml() before interpolation.
     const rows = result.findings
-      .map(
-        (f) => `
+      .map((f) => {
+        const sevColor = severityColors[f.severity] ?? '#000000';
+        const loc = `${escapeHtml(f.file)}${f.line ? `:${escapeHtml(String(f.line))}` : ''}`;
+        return `
       <tr>
-        <td style="color: ${severityColors[f.severity]}; font-weight: bold;">${f.severity.toUpperCase()}</td>
-        <td>${f.category}</td>
-        <td>${f.title}</td>
-        <td><code>${f.file}${f.line ? `:${f.line}` : ''}</code></td>
-        <td>${f.remediation}</td>
+        <td style="color: ${escapeHtml(sevColor)}; font-weight: bold;">${escapeHtml(f.severity.toUpperCase())}</td>
+        <td>${escapeHtml(f.category)}</td>
+        <td>${escapeHtml(f.title)}</td>
+        <td><code>${loc}</code></td>
+        <td>${escapeHtml(f.remediation)}</td>
       </tr>
-    `
-      )
+    `;
+      })
       .join('');
 
     return `
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Security Scan Report - ${new Date(result.timestamp).toLocaleDateString()}</title>
+  <title>Security Scan Report - ${escapeHtml(new Date(result.timestamp).toLocaleDateString())}</title>
   <style>
     body { font-family: system-ui, sans-serif; margin: 2rem; }
     table { border-collapse: collapse; width: 100%; }
@@ -250,9 +266,9 @@ export class ReportGenerator {
 </head>
 <body>
   <h1>Security Scan Report</h1>
-  <p><strong>Generated:</strong> ${new Date(result.timestamp).toLocaleString()}</p>
-  <p><strong>Project:</strong> ${result.projectRoot}</p>
-  <p><strong>Tech Stack:</strong> ${result.techStack.stack} (${result.techStack.packageManager})</p>
+  <p><strong>Generated:</strong> ${escapeHtml(new Date(result.timestamp).toLocaleString())}</p>
+  <p><strong>Project:</strong> ${escapeHtml(result.projectRoot)}</p>
+  <p><strong>Tech Stack:</strong> ${escapeHtml(result.techStack.stack)} (${escapeHtml(result.techStack.packageManager)})</p>
 
   <h2>Summary</h2>
   <ul>
@@ -277,6 +293,23 @@ export class ReportGenerator {
 </html>
     `.trim();
   }
+}
+
+/**
+ * Minimal HTML entity escaper. Sufficient for the report's interpolation
+ * needs (text content, attribute values via double quotes). Intentionally
+ * NOT a full sanitizer — output is well-formed HTML, but dangerous
+ * patterns like `javascript:` URLs are still rejected upstream by the
+ * scanner's input validation. If richer content (Markdown, links) is
+ * ever embedded, swap this for a vetted sanitizer like DOMPurify.
+ */
+function escapeHtml(value: unknown): string {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 export const defaultReportGenerator = new ReportGenerator();

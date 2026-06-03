@@ -31,15 +31,17 @@ export const documentTool: Tool<DocumentInput, DocumentOutput> = {
   name: 'document',
   category: 'Project',
   description:
-    'Automatically generate or update documentation comments (JSDoc/TSDoc style) for code. Can target specific symbols or entire files/directories.',
+    'Preview documentation comments (JSDoc/TSDoc style) that would be generated for code symbols. ' +
+    'Returns a list of candidates with status `skipped` — the tool is currently a read-only preview and does NOT write to files.',
   usageHint:
     'USE FOR IMPROVING CODE DOCUMENTATION:\n\n' +
     '- Good for adding missing docs to public APIs or complex functions.\n' +
-    '- `overwrite: true` will replace existing documentation (use carefully).\n' +
-    '- You can target specific symbols via `target` or whole files/directories via `files`.\n' +
-    'Always review the generated documentation before committing — the model can hallucinate details.',
-  permission: 'confirm',
-  mutating: true,
+    '- Currently this is a PREVIEW-ONLY tool: it does not modify files.\n' +
+    '- Use the output to decide which symbols to document manually, or pass the candidates to `edit` / `patch`.\n' +
+    '- `overwrite`, `style`, and `target` parameters are accepted for future expansion but are ignored today.\n' +
+    'Always review the proposed documentation before applying it — the model can hallucinate details.',
+  permission: 'auto',
+  mutating: false,
   timeoutMs: 30_000,
   inputSchema: {
     type: 'object',

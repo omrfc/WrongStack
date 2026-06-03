@@ -27,13 +27,17 @@ export const diffTool: Tool<DiffInput, DiffOutput> = {
   name: 'diff',
   category: 'Filesystem',
   description:
-    'Show code differences between files, commits, branches, or staged changes. A safer and more structured alternative to raw `git diff` via shell.',
+    'Show file content with line numbers, staged/working-tree diffs via git, or commit/branch diffs. A safer and more structured alternative to raw `git diff` via shell.',
   usageHint:
     'USE FOR CODE REVIEW AND CHANGE INSPECTION:\n\n' +
-    '- `files` + no `a`/`b` → diff working tree vs HEAD for those files.\n' +
-    '- `a` and/or `b` → git-style commit/branch diff.\n' +
+    '- `files` + no `a`/`b` → show file content with line numbers (NOT a unified diff; no +/- prefixes).\n' +
+    '- `a` and/or `b` → git-style commit/branch diff (unified format, real +/- prefixes).\n' +
     '- `staged: true` → only show staged changes.\n' +
-    '- `mode` can be "unified", "stat", or "side-by-side".\n' +
+    '- `mode` can be "unified", "stat", or "side-by-side" (only affects the git-diff path).\n' +
+    '\n' +
+    'NOTE: For a true file-vs-file unified diff, supply `a` and `b` so the tool ' +
+    'delegates to `git diff`. The `files`-only path is a line-numbered dump, not a diff.\n' +
+    '\n' +
     'This tool has important safety guards against flag injection (see previous security findings).',
   permission: 'auto',
   mutating: false,
@@ -170,7 +174,10 @@ async function fileDiff(
   ctx: import('@wrongstack/core').Context,
   _signal: AbortSignal,
 ): Promise<DiffOutput> {
-  const context = input.context ?? 3;
+  // `context` is accepted on the input schema for API stability but is
+  // unused in the line-dump path — there is no notion of "context lines"
+  // when there is no real diff. The git-diff path (`a`/`b`) ignores it too.
+  void input.context;
 
   const files = input.files
     ? (Array.isArray(input.files) ? input.files : input.files.split(','))
@@ -196,17 +203,28 @@ async function fileDiff(
 
     const content = await fs.readFile(absPath, 'utf8');
     const lines = content.split(/\r?\n/);
-    results.push(`--- ${file}\n+++ ${file}\n${formatUnified(lines, context)}`);
+    results.push(formatWithLineNumbers(file, lines));
   }
 
   return {
-    diff: results.join('\n'),
+    diff: results.join('\n\n'),
     files,
     truncated: false,
     mode: input.mode ?? 'unified',
   };
 }
 
-function formatUnified(lines: string[], _context: number): string {
-  return lines.map((line, _i) => ` ${line}`).join('\n');
+/**
+ * Render a file's content as a line-numbered dump. This is intentionally
+ * NOT a unified diff — it has no `-`/`+` prefixes. For a real diff
+ * between two revisions, use the `a`/`b` params (delegates to `git diff`).
+ *
+ * Format: `   N | content` with the line number right-aligned. The
+ * `context` parameter is accepted for API compatibility but unused —
+ * a line dump has no notion of "context lines".
+ */
+function formatWithLineNumbers(file: string, lines: string[]): string {
+  const width = String(lines.length).length;
+  const numbered = lines.map((line, i) => `${String(i + 1).padStart(width)} | ${line}`).join('\n');
+  return `--- ${file} (line-numbered dump, not a unified diff) ---\n${numbered}`;
 }

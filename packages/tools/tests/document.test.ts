@@ -19,8 +19,13 @@ const makeCtx = () => ({ cwd: tmpDir, tools: [], projectRoot: tmpDir }) as any;
 describe('documentTool', () => {
   it('has correct metadata', () => {
     expect(documentTool.name).toBe('document');
-    expect(documentTool.permission).toBe('confirm');
-    expect(documentTool.mutating).toBe(true);
+    // `document` is currently a PREVIEW-ONLY tool: it scans files and
+    // returns candidate docstrings with `status: 'skipped'`, but does
+    // NOT call fs.writeFile/atomicWrite anywhere. As such it must be
+    // `mutating: false` and `permission: 'auto'`. The H7 invariant
+    // test (`permission-mutating-invariant.test.ts`) enforces this.
+    expect(documentTool.permission).toBe('auto');
+    expect(documentTool.mutating).toBe(false);
   });
 
   it('returns empty results when no files specified', async () => {

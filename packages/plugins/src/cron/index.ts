@@ -26,6 +26,24 @@ interface CronState {
   createdAt: string;
 }
 
+// Module-level state, shared between `setup` and `teardown`.
+//
+// Why module-level? The Plugin interface in @wrongstack/core does not
+// currently thread state from `setup` → `teardown`. The previous
+// implementation kept `state` as a `const` inside the setup closure,
+// which made it inaccessible from teardown — so the teardown function
+// fell through to a `?? { jobs: new Map(), timers: new Map() }` default
+// and silently leaked every setTimeout timer it had registered (H1
+// audit, 2026-06-03). Keeping a single shared object with stable Map
+// identity lets teardown actually clear resources. The contents are
+// reset in setup (idempotent re-init on plugin reload) and cleared in
+// teardown (resource release).
+const state: CronState = {
+  jobs: new Map(),
+  timers: new Map(),
+  createdAt: new Date().toISOString(),
+};
+
 function formatNextRun(intervalMs: number): string {
   const ms = Number.isNaN(intervalMs) || intervalMs <= 0 ? 60_000 : intervalMs;
   return new Date(Date.now() + ms).toISOString();
@@ -56,11 +74,12 @@ const plugin: Plugin = {
   },
 
   setup(api) {
-    const state: CronState = {
-      jobs: new Map(),
-      timers: new Map(),
-      createdAt: new Date().toISOString(),
-    };
+    // Idempotent re-init: if the plugin is reloaded (e.g. via /plugin
+    // reload), clear any previous timers/jobs first. The shared
+    // `state` object lives at module scope so teardown can reach it.
+    state.jobs.clear();
+    state.timers.clear();
+    state.createdAt = new Date().toISOString();
 
     const maxConcurrent = (api.config.extensions?.['cron'] as Record<string, unknown>)?.['maxConcurrentJobs'] as number ?? 5;
 
@@ -275,13 +294,16 @@ const plugin: Plugin = {
   },
 
   teardown(api) {
-    const { jobs, timers } = (api as unknown as { _state?: CronState })._state ?? { jobs: new Map(), timers: new Map() };
-    for (const name of jobs.keys()) {
-      const timer = timers.get(name);
-      if (timer) clearTimeout(timer);
+    // Clear every pending timer so the agent loop never invokes a
+    // callback against a torn-down plugin (H1 fix). The previous
+    // implementation tried to read state from `api._state` (which is
+    // never set) and fell through to an empty Map default — leaking
+    // all timers. The module-level `state` is the source of truth.
+    for (const timer of state.timers.values()) {
+      clearTimeout(timer);
     }
-    jobs.clear();
-    timers.clear();
+    state.timers.clear();
+    state.jobs.clear();
     api.log.info('cron plugin unloaded');
   },
 };

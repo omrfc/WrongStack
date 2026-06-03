@@ -15,8 +15,9 @@ export const codebaseIndexTool: Tool<CodebaseIndexInput, CodebaseIndexOutput> = 
     '- Normal usage: call without arguments for fast incremental updates.\n' +
     '- Use `langs` to restrict to specific languages if you only care about certain parts of the project.\n' +
     'This tool is relatively expensive — do not call it on every turn. Use it when the index is stale or before heavy codebase-search sessions.',
-  permission: 'auto',
+  permission: 'confirm',
   mutating: true,
+  capabilities: ['fs.write.outside-project'],
   timeoutMs: 120_000,
   inputSchema: {
     type: 'object',

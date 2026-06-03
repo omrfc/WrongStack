@@ -1,9 +1,12 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
-import { ReportGenerator, defaultReportGenerator } from '../../src/security-scanner/report-generator.js';
-import type { ScanResult, Finding } from '../../src/security-scanner/scanner.js';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  ReportGenerator,
+  defaultReportGenerator,
+} from '../../src/security-scanner/report-generator.js';
+import type { Finding, ScanResult } from '../../src/security-scanner/scanner.js';
 
 let tmp: string;
 
@@ -125,9 +128,7 @@ describe('ReportGenerator', () => {
     const gen = new ReportGenerator({ outputDir: path.join(tmp, 'reports') });
     const file = await gen.generate(
       mkScanResult({
-        findings: [
-          mkFinding({ snippet: undefined, line: undefined, title: 'No snippet' }),
-        ],
+        findings: [mkFinding({ snippet: undefined, line: undefined, title: 'No snippet' })],
         summary: { critical: 1, high: 0, medium: 0, low: 0, total: 1 } as never,
       }),
     );
@@ -162,6 +163,74 @@ describe('ReportGenerator', () => {
     expect(html).toContain('color: #ea580c'); // high color
   });
 
+  // CRIT-002 (bug-hunter) / XSS guard: every finding field flows from
+  // untrusted sources (LLM output, file paths, remediation text). Without
+  // escaping, an LLM that returns `<script>alert(1)</script>` in `title`
+  // would inject executable HTML when the report is served by the WebUI.
+  describe('HTML XSS escaping (CRIT-002 fix)', () => {
+    it('escapes <, >, &, ", and \' in finding fields', async () => {
+      const gen = new ReportGenerator({ outputDir: path.join(tmp, 'reports'), format: 'html' });
+      const file = await gen.generate(
+        mkScanResult({
+          findings: [
+            mkFinding({
+              title: '"><script>alert(1)</script>',
+              category: 'injection"onload="x',
+              file: "src/<bad>&'.ts",
+              line: 1,
+              remediation: 'Use <safe> & "quoted" text',
+            }),
+          ],
+          summary: { critical: 1, high: 0, medium: 0, low: 0, total: 1 } as never,
+        }),
+      );
+      const html = await fs.readFile(file, 'utf8');
+
+      // The raw payload must NOT appear unescaped anywhere in the HTML body
+      expect(html).not.toContain('<script>alert(1)</script>');
+      expect(html).not.toContain('"onload="x');
+      expect(html).not.toContain("src/<bad>&'.ts");
+
+      // It must appear in escaped form
+      expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+      expect(html).toContain('&quot;&gt;'); // ">  → &quot;&gt;
+      expect(html).toContain('&amp;');
+      expect(html).toContain('&#39;');
+    });
+
+    it('escapes projectRoot, techStack, and timestamp in header', async () => {
+      const gen = new ReportGenerator({ outputDir: path.join(tmp, 'reports'), format: 'html' });
+      const file = await gen.generate(
+        mkScanResult({
+          projectRoot: '/proj/<x>',
+          techStack: { stack: 'type<script>', packageManager: 'pn&pm' } as never,
+        }),
+      );
+      const html = await fs.readFile(file, 'utf8');
+      expect(html).not.toContain('/proj/<x>');
+      expect(html).not.toContain('type<script>');
+      expect(html).not.toContain('pn&pm');
+      expect(html).toContain('&lt;x&gt;');
+      expect(html).toContain('pn&amp;pm');
+    });
+
+    it('falls back to black when severity is unknown (no undefined CSS)', async () => {
+      // The map lookup `severityColors[f.severity]` previously produced
+      // `undefined` for unknown severities, which would emit `color: undefined;`
+      // into the style attribute. Now it falls back to #000000.
+      const gen = new ReportGenerator({ outputDir: path.join(tmp, 'reports'), format: 'html' });
+      const file = await gen.generate(
+        mkScanResult({
+          findings: [mkFinding({ severity: 'gibberish' as never })],
+          summary: { critical: 0, high: 0, medium: 0, low: 0, total: 1 } as never,
+        }),
+      );
+      const html = await fs.readFile(file, 'utf8');
+      expect(html).not.toMatch(/color:\s*undefined/i);
+      expect(html).toContain('color: #000000');
+    });
+  });
+
   // ── output directory creation ────────────────────────────────────────────
 
   it('creates the output directory when it does not exist', async () => {
@@ -169,7 +238,10 @@ describe('ReportGenerator', () => {
     const gen = new ReportGenerator({ outputDir: outDir });
     const file = await gen.generate(mkScanResult());
     expect(file.startsWith(outDir)).toBe(true);
-    const exists = await fs.stat(outDir).then(() => true).catch(() => false);
+    const exists = await fs
+      .stat(outDir)
+      .then(() => true)
+      .catch(() => false);
     expect(exists).toBe(true);
   });
 
@@ -185,6 +257,8 @@ describe('ReportGenerator', () => {
     const gen = new ReportGenerator({ outputDir: path.join(tmp, 'reports') });
     const file = await gen.generate(mkScanResult());
     // Replace : and . with - → 2026-05-22T10-00-00 style
-    expect(path.basename(file)).toMatch(/^security-report-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.markdown$/);
+    expect(path.basename(file)).toMatch(
+      /^security-report-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.markdown$/,
+    );
   });
 });

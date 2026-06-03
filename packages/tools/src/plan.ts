@@ -1,4 +1,5 @@
 import {
+  type PlanFile,
   addPlanItem,
   clearPlan,
   deriveTodosFromPlanItem,
@@ -6,7 +7,6 @@ import {
   formatPlan,
   getPlanTemplate,
   loadPlan,
-  type PlanFile,
   removePlanItem,
   savePlan,
   setPlanItemStatus,
@@ -27,7 +27,16 @@ import type { Tool } from '@wrongstack/core';
  * bloating the surface with nine near-identical tools.
  */
 interface PlanInput {
-  action: 'show' | 'add' | 'start' | 'done' | 'remove' | 'promote' | 'derive' | 'template_use' | 'clear';
+  action:
+    | 'show'
+    | 'add'
+    | 'start'
+    | 'done'
+    | 'remove'
+    | 'promote'
+    | 'derive'
+    | 'template_use'
+    | 'clear';
   /** Required for add. */
   title?: string;
   /** Optional detail line for add. */
@@ -66,15 +75,26 @@ export const planTool: Tool<PlanInput, PlanOutput> = {
     '- Keep plans at the "why and what" level, and todos at the "how and next step" level.\n' +
     '- Common templates: "new-feature", "bug-fix", "refactor", "release", "security-audit".\n\n' +
     'This tool is excellent for maintaining long-term direction across many turns or even multiple sessions.',
-  permission: 'auto',
-  mutating: false,
+  permission: 'confirm',
+  mutating: true,
+  capabilities: ['fs.write'],
   timeoutMs: 2_000,
   inputSchema: {
     type: 'object',
     properties: {
       action: {
         type: 'string',
-        enum: ['show', 'add', 'start', 'done', 'remove', 'promote', 'derive', 'template_use', 'clear'],
+        enum: [
+          'show',
+          'add',
+          'start',
+          'done',
+          'remove',
+          'promote',
+          'derive',
+          'template_use',
+          'clear',
+        ],
         description: 'The operation to perform on the plan board.',
       },
       title: {
@@ -87,16 +107,19 @@ export const planTool: Tool<PlanInput, PlanOutput> = {
       },
       target: {
         type: 'string',
-        description: 'Identifier for the target plan item (id, 1-based index, or partial title). Required for most actions except add/show/clear.',
+        description:
+          'Identifier for the target plan item (id, 1-based index, or partial title). Required for most actions except add/show/clear.',
       },
       subtasks: {
         type: 'array',
         items: { type: 'string' },
-        description: 'List of subtask titles. Used with promote or derive to break a plan item into multiple todos.',
+        description:
+          'List of subtask titles. Used with promote or derive to break a plan item into multiple todos.',
       },
       template: {
         type: 'string',
-        description: 'Template identifier when using action=template_use. Common values: new-feature, bug-fix, refactor, release, security-audit.',
+        description:
+          'Template identifier when using action=template_use. Common values: new-feature, bug-fix, refactor, release, security-audit.',
       },
     },
     required: ['action'],
@@ -169,7 +192,12 @@ export const planTool: Tool<PlanInput, PlanOutput> = {
         await savePlan(planPath, plan);
         // Replace todos with the derived list
         ctx.state.replaceTodos(derived.todos);
-        return mkResult(plan, true, `${input.action} ok — ${derived.todos.length} todo(s) created.`, derived.todos);
+        return mkResult(
+          plan,
+          true,
+          `${input.action} ok — ${derived.todos.length} todo(s) created.`,
+          derived.todos,
+        );
       }
       case 'template_use': {
         const templateName = input.template?.trim();
@@ -184,7 +212,11 @@ export const planTool: Tool<PlanInput, PlanOutput> = {
           ({ plan } = addPlanItem(plan, item.title, item.details));
         }
         await savePlan(planPath, plan);
-        return mkResult(plan, true, `Applied template "${template.name}" — ${template.items.length} items added.`);
+        return mkResult(
+          plan,
+          true,
+          `Applied template "${template.name}" — ${template.items.length} items added.`,
+        );
       }
       case 'clear':
         plan = clearPlan(plan);

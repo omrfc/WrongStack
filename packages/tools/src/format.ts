@@ -28,6 +28,7 @@ export const formatTool: Tool<FormatInput, FormatOutput> = {
     'This project has very consistent formatting expectations. Always ensure your changes are formatted.',
   permission: 'confirm',
   mutating: true,
+  capabilities: ['fs.write', 'shell.exec'],
   timeoutMs: 60_000,
   inputSchema: {
     type: 'object',

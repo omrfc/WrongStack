@@ -14,11 +14,11 @@
  * Startup: sends `[wstack-acp]\n` to stdout so the client knows which process
  * is the ACP server before protocol messages begin.
  */
-import {fileURLToPath} from 'node:url';
-import {StdioTransport} from './stdio-transport.js';
-import {ACPToolsRegistry} from './tools-registry.js';
-import {ACPProtocolHandler} from './protocol-handler.js';
-import type {Tool} from '@wrongstack/core';
+import { fileURLToPath } from 'node:url';
+import type { Tool } from '@wrongstack/core';
+import { ACPProtocolHandler } from './protocol-handler.js';
+import { StdioTransport } from './stdio-transport.js';
+import { ACPToolsRegistry } from './tools-registry.js';
 
 export interface WrongStackACPServerOptions {
   /**
@@ -57,15 +57,18 @@ export class WrongStackACPServer {
    * 1. Send the startup marker `[wstack-acp]` so the client
    *    knows which stdout line is the protocol boundary.
    * 2. Loop: read messages, dispatch to handler, until EOF or error.
+   *
+   * Single dispatch path: every inbound message is read exactly once
+   * from the transport and passed to the protocol handler exactly once.
+   * An earlier version combined a `transport.onMessage` callback with
+   * this read loop, which caused every message to be processed twice
+   * (once by the callback, once by the loop) — duplicate tool calls
+   * and duplicate responses to the client. See the ACP double-dispatch
+   * fix in the security audit (P1-001).
    */
   async start(): Promise<void> {
     this.transport.sendStartupMarker();
     this.running = true;
-
-    // Handle messages via callback + read loop hybrid
-    this.transport.onMessage((msg) => {
-      void this.handler.handleMessage(msg); // fire-and-forget; ordering is per-message
-    });
 
     while (this.running) {
       const msg = await this.transport.read();
@@ -97,7 +100,7 @@ export class WrongStackACPServer {
  * passing `api.tools.list()` as the tool set.
  */
 async function main(): Promise<void> {
-  const server = new WrongStackACPServer({tools: []});
+  const server = new WrongStackACPServer({ tools: [] });
   await server.start();
 }
 
@@ -105,7 +108,8 @@ async function main(): Promise<void> {
 // `node dist/agent/wrongstack-acp-agent.js`). Importing the module — which the
 // CLI does to reuse `WrongStackACPServer` — must stay side-effect-free, or
 // every launch would start an ACP server and hijack stdin.
-const isEntrypoint = process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1];
+const isEntrypoint =
+  process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1];
 if (isEntrypoint) {
   main().catch((err) => {
     process.stderr.write(`[wstack-acp fatal] ${err}\n`);

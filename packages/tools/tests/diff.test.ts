@@ -185,15 +185,30 @@ describe('diffTool', () => {
     }
   });
 
-  it('fileDiff produces unified diff format with context', async () => {
+  it('fileDiff produces a line-numbered dump (NOT a unified diff)', async () => {
+    // After CRIT-002 (code-review) fix: the `files`-only path is a line-numbered
+    // dump, not a unified diff. There must be no `+`/`-` prefixes and no
+    // `+++ <file>` header — the previous implementation produced a misleading
+    // fake-diff that marked every line as a context line.
+    //
+    // 12 lines → `width = 2` so padding is observable (lines 1-9 are right-
+    // aligned with a leading space; line 12 fills the full width).
     const filePath = path.join(tmpDir, 'context.txt');
-    const content = ['line0', 'line1', 'line2', 'line3', 'line4'].join('\n');
+    const content = Array.from({ length: 12 }, (_, i) => `line${i}`).join('\n');
     await fs.writeFile(filePath, content);
     const ctx = makeCtx();
     const result = await diffTool.execute({ files: 'context.txt', context: 2 }, ctx, makeOpts());
-    expect(result.diff).toContain('--- context.txt');
-    expect(result.diff).toContain('+++ context.txt');
-    expect(result.diff).toContain(' line0');
+
+    // Header explicitly says it is NOT a unified diff
+    expect(result.diff).toContain('--- context.txt (line-numbered dump, not a unified diff) ---');
+    // Each original line is rendered with its 1-based index, right-aligned
+    // to the digit-count of the line count (width = 2 here).
+    expect(result.diff).toContain(' 1 | line0');
+    expect(result.diff).toContain(' 9 | line8');
+    expect(result.diff).toContain('12 | line11');
+    // Negative invariants — must not look like a unified diff
+    expect(result.diff).not.toContain('+++ context.txt');
+    expect(result.diff).not.toMatch(/^ [^\d|]/m); // no space-prefixed bare context lines
   });
 
   it('fileDiff uses mode from input', async () => {

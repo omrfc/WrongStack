@@ -17,19 +17,22 @@ WrongStack is a terminal AI coding agent built in TypeScript. It runs an LLM tha
 
 ```
 packages/core/        — Kernel: Container, Pipeline, EventBus, RunController, Context
-packages/providers/  — Anthropic, OpenAI, Google, OpenAI-compatible adapters
-packages/tools/      — Builtin tools: read, write, bash, exec, git, grep, glob, ...
+packages/providers/   — Anthropic, OpenAI, Google, OpenAI-compatible adapters
+packages/tools/       — Builtin tools: read, write, bash, exec, git, grep, glob, ...
 packages/mcp/         — MCP client + registry + stdio/SSE/streamable-http transports
-packages/plug-lsp/   — LSP bridge (slash commands: /lsp:start, /lsp:diag, /lsp:goto)
-packages/cli/        — REPL, subcommands, slash commands, plugin management
-packages/tui/        — React/Ink terminal UI (lazy-loaded behind --tui)
-packages/runtime/    — Default runtime wiring: makeDefaultRuntime()
-packages/telegram/   — Telegram bridge plugin
-packages/webui/      — Vite+React web UI served by the CLI
-apps/wrongstack/     — bin entry (wrongstack / wstack)
+packages/plug-lsp/    — LSP bridge (slash commands: /lsp:start, /lsp:diag, /lsp:goto)
+packages/acp/         — Agent Client Protocol: client + agent (Zed, JetBrains, VSCode ACP)
+packages/cli/         — REPL, subcommands, slash commands, plugin management
+packages/tui/         — React/Ink terminal UI (lazy-loaded behind --tui)
+packages/runtime/     — Default runtime wiring: makeDefaultRuntime()
+packages/telegram/    — Telegram bridge plugin
+packages/webui/       — Vite+React web UI served by the CLI
+packages/plugins/     — Built-in plugin host: cron, file-watcher, session-tracker, subagent
+packages/skills/      — Bundled skill registry (16 SKILL.md files shipped in core/skills/)
+apps/wrongstack/      — bin entry (wrongstack / wstack)
 ```
 
-**Dependency direction:** `core` → nothing WrongStack-internal. `providers/tools/mcp/plug-lsp/runtime/telegram` → `core`. `cli/tui` → everything beneath. Never reverse these layers.
+**Dependency direction:** `core` → nothing WrongStack-internal. `providers/tools/mcp/plug-lsp/acp/runtime/telegram/plugins/skills` → `core`. `cli/tui` → everything beneath. Never reverse these layers.
 
 ## Key architectural concepts
 
@@ -42,9 +45,9 @@ apps/wrongstack/     — bin entry (wrongstack / wstack)
 ```
 TOKENS.Logger · TOKENS.TokenCounter · TOKENS.SessionStore · TOKENS.MemoryStore
 TOKENS.PermissionPolicy · TOKENS.Compactor · TOKENS.PathResolver · TOKENS.ConfigLoader
-TOKENS.Renderer · TOKENS.InputReader · TOKENS.ErrorHandler · TOKENS.RetryPolicy
-TOKENS.SkillLoader · TOKENS.SystemPromptBuilder · TOKENS.SecretScrubber
-TOKENS.ModelsRegistry · TOKENS.ModeStore
+TOKENS.ConfigStore · TOKENS.Renderer · TOKENS.InputReader · TOKENS.ErrorHandler
+TOKENS.RetryPolicy · TOKENS.SkillLoader · TOKENS.SystemPromptBuilder · TOKENS.SecretScrubber
+TOKENS.ModelsRegistry · TOKENS.ModeStore · TOKENS.ProviderRunner · TOKENS.WorktreeManager
 ```
 
 Plugins rebind any token before `Agent.run`. No service-locator pattern — every dependency is explicit.
@@ -69,7 +72,24 @@ const mw: Middleware<Request> = {
 };
 ```
 
-**EventBus** — Typed pub/sub. Key events: `iteration.started/completed`, `provider.text_delta/response/retry/error`, `tool.started/progress/executed/confirm_needed`, `compaction.fired/failed`, `mcp.server.connected/reconnected/disconnected`, `subagent.started/stopped`, `task.assigned/completed/done`. Full list in `packages/core/src/kernel/events.ts`.
+**EventBus** — Typed pub/sub. All events defined in `packages/core/src/kernel/events.ts` (typed `EventMap`):
+
+| Category | Events |
+|---|---|
+| **Session** | `session.started`, `session.ended`, `session.damaged`, `session.rewound` |
+| **Iteration** | `iteration.started`, `iteration.completed`, `iteration.limit_reached` |
+| **Provider** | `provider.response`, `provider.text_delta`, `provider.thinking_delta`, `provider.tool_use_start`, `provider.tool_use_stop`, `provider.retry`, `provider.error`, `provider.trust.persisted` |
+| **Tool** | `tool.started`, `tool.progress`, `tool.confirm_needed`, `tool.executed` |
+| **Context** | `ctx.pct`, `token.threshold`, `budget.threshold_reached`, `context.repaired` |
+| **Compaction** | `compaction.fired`, `compaction.failed` |
+| **MCP** | `mcp.server.connected`, `mcp.server.reconnected`, `mcp.server.disconnected` |
+| **Subagent** | `subagent.spawned`, `subagent.task_started`, `subagent.task_completed`, `subagent.budget_warning`, `subagent.budget_extended`, `subagent.tool_executed`, `subagent.iteration_summary`, `subagent.done`, `subagent.ctx_pct` |
+| **Worktree** | `worktree.allocated`, `worktree.committed`, `worktree.merged`, `worktree.conflict`, `worktree.released`, `worktree.failed` |
+| **Session (audit)** | `checkpoint.written`, `in_flight.started`, `in_flight.ended`, `token.cost_estimate_unavailable` |
+| **Fleet** | `coordinator.stats` |
+| **Errors** | `error` |
+
+Total: **~50 events** across 12 categories. Source of truth is the `EventMap` type in `events.ts` — any new event must be added there AND to this table.
 
 **RunController** — One per `Agent.run`. Owns `AbortController`, chains parent signal, drains abort hooks LIFO on dispose.
 
@@ -289,6 +309,10 @@ Slash commands are documented in `docs/slash/`. When adding a new one:
 3. Import and add to `buildBuiltinSlashCommands()` in `index.ts`
 4. Add tests: `packages/cli/tests/slash-<name>.test.ts`
 5. Add docs: `docs/slash/<name>.md`
+
+**Currently registered (32):** `help`, `init`, `clear`, `compact`, `context`, `tools`, `plugin`, `mcp`, `diag`, `stats`, `spawn`, `agents`, `director`, `fleet`, `memory`, `todos`, `sdd`, `save`, `load`, `yolo`, `autonomy`, `goal`, `btw`, `next`, `mode`, `exit`, `fix`, `autophase`, `worktree`, `settings`, `collab`, `statusline`.
+
+**Planned but not yet implemented (7):** `git`, `health`, `metrics`, `plan`, `security`, `skill-gen`, `skills`. Their `docs/slash/*.md` files exist but no buildXxxCommand has been registered yet. Either implement them or remove the orphan docs in a follow-up commit. See H13 in the 2026-06-03 audit.
 
 ## Skill system
 
