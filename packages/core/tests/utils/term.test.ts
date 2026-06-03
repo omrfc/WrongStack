@@ -6,6 +6,7 @@ import {
   isStdoutTTY,
   onResize,
   setRawMode,
+  writeErr,
   writeOut,
 } from '../../src/utils/term.js';
 
@@ -246,6 +247,31 @@ describe('term helpers', () => {
     it('returns false when stream lacks a callable write method', () => {
       const stream = { write: 'not-a-fn' } as unknown as NodeJS.WriteStream;
       expect(writeOut('x', stream)).toBe(false);
+    });
+  });
+
+  describe('writeErr', () => {
+    it('writes to the given stream and returns true', () => {
+      const write = vi.fn();
+      const stream = { write } as unknown as NodeJS.WriteStream;
+      expect(writeErr('oops', stream)).toBe(true);
+      expect(write).toHaveBeenCalledWith('oops');
+    });
+
+    it('defaults to process.stderr when no stream is supplied', () => {
+      const write = vi
+        .spyOn(process.stderr, 'write')
+        .mockImplementation(() => true);
+      try {
+        expect(writeErr('boom')).toBe(true);
+        expect(write).toHaveBeenCalledWith('boom');
+      } finally {
+        write.mockRestore();
+      }
+    });
+
+    it('returns false (no throw) when stream is null', () => {
+      expect(writeErr('x', null as unknown as NodeJS.WriteStream)).toBe(false);
     });
   });
 });

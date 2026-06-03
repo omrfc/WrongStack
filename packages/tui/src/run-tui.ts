@@ -8,6 +8,7 @@ import type {
   SlashCommandRegistry,
   TokenCounter,
 } from '@wrongstack/core';
+import { writeErr } from '@wrongstack/core';
 import type { VisionAdapters } from '@wrongstack/runtime/vision';
 import { render } from 'ink';
 import React from 'react';
@@ -297,7 +298,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
   // clear message so a piped invocation (`echo hi | wstack --tui`) tells
   // the user what to do instead.
   if (!stdout.isTTY || !stdin.isTTY) {
-    process.stderr.write(
+    writeErr(
       'wstack: --tui requires an interactive terminal on both stdin and stdout.\n' +
         '       Drop the flag (use the plain REPL) or run wstack directly without piping.\n',
     );
@@ -614,7 +615,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
         { exitOnCtrlC: false, stdin: inkStdin },
       );
     } catch (err) {
-      process.stderr.write(
+      writeErr(
         `wstack: TUI failed to start: ${err instanceof Error ? err.message : String(err)}\n`,
       );
       settle(1);

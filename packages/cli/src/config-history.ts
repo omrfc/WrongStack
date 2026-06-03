@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import os from 'node:os';
-import { atomicWrite, FsError, ERROR_CODES } from '@wrongstack/core';
+import { atomicWrite, FsError, ERROR_CODES, writeErr } from '@wrongstack/core';
 import { isSecretField } from '@wrongstack/core/security';
 
 // ── UID ownership ──────────────────────────────────────────────────────────
@@ -97,7 +97,7 @@ async function safeDelete(filePath: string): Promise<void> {
   } catch (err) {
     // Log but don't crash — safety check violations are logged for debugging
     if (err instanceof Error && err.message.startsWith('Refusing')) {
-      process.stderr.write(`[config-history] SAFETY: ${err.message}\n`);
+      writeErr(`[config-history] SAFETY: ${err.message}\n`);
     }
     // Best-effort — ignore other errors (file doesn't exist, etc.)
   }

@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { LogLevel, Logger } from '../types/logger.js';
 import { color } from '../utils/color.js';
+import { writeErr } from '../utils/term.js';
 
 const LEVEL_RANK: Record<LogLevel, number> = {
   error: 0,
@@ -92,9 +93,9 @@ export class DefaultLogger implements Logger {
     if (r <= LEVEL_RANK.warn || this.level === 'debug' || this.level === 'trace') {
       const head = `${color.dim(ts)} ${COLORS[level](level.toUpperCase().padEnd(5))} ${msg}`;
       if (ctx !== undefined) {
-        process.stderr.write(`${head} ${formatCtx(ctx)}\n`);
+        writeErr(`${head} ${formatCtx(ctx)}\n`);
       } else {
-        process.stderr.write(`${head}\n`);
+        writeErr(`${head}\n`);
       }
     }
   }

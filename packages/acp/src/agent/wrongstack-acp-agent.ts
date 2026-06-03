@@ -15,6 +15,7 @@
  * is the ACP server before protocol messages begin.
  */
 import { fileURLToPath } from 'node:url';
+import { writeErr } from '@wrongstack/core';
 import type { Tool } from '@wrongstack/core';
 import { ACPProtocolHandler } from './protocol-handler.js';
 import { StdioTransport } from './stdio-transport.js';
@@ -112,7 +113,7 @@ const isEntrypoint =
   process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1];
 if (isEntrypoint) {
   main().catch((err) => {
-    process.stderr.write(`[wstack-acp fatal] ${err}\n`);
+    writeErr(`[wstack-acp fatal] ${err}\n`);
     process.exit(1);
   });
 }

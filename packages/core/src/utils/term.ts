@@ -127,3 +127,30 @@ export function writeOut(
   stream.write(s);
   return true;
 }
+
+/**
+ * Symmetric partner of `writeOut` for the standard error stream. Same shape,
+ * same defensive contract, same single-seam-for-tests story — just defaults to
+ * `process.stderr` instead of `process.stdout`.
+ *
+ * Use this in code paths that emit error/diagnostic/warning text. Keeping
+ * these two helpers split (rather than a single `writeTo(s, stream)`) means
+ * the call site reads as a clear intent signal: "I am writing an error" vs.
+ * "I am writing a result" — which matters for callers that decide between
+ * stdout/stderr routing (e.g. `--quiet` flags, log-level filtering,
+ * structured-log rewriters that fork on stream).
+ *
+ * Stderr writes from the core logger (see `infrastructure/logger.ts`) and from
+ * the TUI guard (see `tui/run-tui.ts`) used to call `process.stderr.write`
+ * directly. Routing them through this helper lets tests stub the stream at
+ * one boundary and lets future logging middleware (e.g. a JSON-line rewriter)
+ * swap the destination for the entire process in one place.
+ */
+export function writeErr(
+  s: string,
+  stream: NodeJS.WriteStream = process.stderr,
+): boolean {
+  if (!stream || typeof stream.write !== 'function') return false;
+  stream.write(s);
+  return true;
+}

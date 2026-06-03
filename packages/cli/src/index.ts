@@ -27,6 +27,7 @@ import {
   createMcpControlTool,
   isStdinTTY,
   loadDirectorState,
+  writeErr,
   writeOut,
   // createSessionEventBridge, // real import after core declarations are rebuilt
   // resolveAuditLevel,
@@ -158,7 +159,7 @@ export async function main(argv: string[]): Promise<number> {
     }
   }
   if (updateInfo?.outdated) {
-    process.stderr.write(
+    writeErr(
       `\n  \x1b[33m↑ Update available: v${updateInfo.current} → v${updateInfo.latest}\x1b[0m  Run \`wrongstack update\` to upgrade.\n\n`,
     );
   }
@@ -217,7 +218,7 @@ export async function main(argv: string[]): Promise<number> {
     providerRegistry = result.providerRegistry;
     provider = result.provider;
   } catch (err) {
-    process.stderr.write(`${err instanceof Error ? err.message : err}\n`);
+    writeErr(`${err instanceof Error ? err.message : err}\n`);
     await reader.close();
     return 2;
   }
@@ -337,7 +338,7 @@ export async function main(argv: string[]): Promise<number> {
       streamingActive = false;
     }
     const secs = (p.delayMs / 1000).toFixed(p.delayMs >= 1000 ? 1 : 2);
-    process.stderr.write(color.yellow(`  ⟳ retry ${p.attempt} in ${secs}s — ${p.description}\n`));
+    writeErr(color.yellow(`  ⟳ retry ${p.attempt} in ${secs}s — ${p.description}\n`));
     spinner.start(color.dim(`${config.provider}/${config.model} thinking…`));
   });
   events.on('provider.error', (p) => {
@@ -346,7 +347,7 @@ export async function main(argv: string[]): Promise<number> {
       renderer.write('\n');
       streamingActive = false;
     }
-    process.stderr.write(color.red(`  ✗ ${p.description}\n`));
+    writeErr(color.red(`  ✗ ${p.description}\n`));
   });
 
   // Provider instance — registry-driven by default, but falls through to
@@ -1708,7 +1709,7 @@ if (isMain) {
       setTimeout(() => process.exit(c), 500).unref();
     },
     (err) => {
-      process.stderr.write((err instanceof Error ? err.stack : String(err)) + '\n');
+      writeErr((err instanceof Error ? err.stack : String(err)) + '\n');
       process.exitCode = 1;
       setTimeout(() => process.exit(1), 500).unref();
     },

@@ -37,6 +37,7 @@ import {
   type WstackPaths,
   TOKENS,
   isStdinTTY,
+  writeErr,
 } from '@wrongstack/core';
 import { builtinToolsPack } from '@wrongstack/tools';
 import { parseArgs } from './arg-parser.js';
@@ -107,7 +108,7 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
   try {
     bootResult = await bootConfig(flags);
   } catch (err) {
-    process.stderr.write(`Config error: ${err instanceof Error ? err.message : String(err)}\n`);
+    writeErr(`Config error: ${err instanceof Error ? err.message : String(err)}\n`);
     return 2;
   }
   const { paths, config: _config, vault } = bootResult;
@@ -223,7 +224,7 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
         }
       }
     } else if (!config.provider || !config.model) {
-      process.stderr.write(
+      writeErr(
         'No provider or model configured. Run `wrongstack init` first, or pass --provider <id> --model <id>.\n',
       );
       await reader.close();

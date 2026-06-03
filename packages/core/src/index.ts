@@ -38,6 +38,7 @@ export {
   onResize,
   setRawMode,
   writeOut,
+  writeErr,
 } from './utils/term.js';
 export {
   Agent,

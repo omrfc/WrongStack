@@ -9,6 +9,7 @@ import {
   type WstackPaths,
   migratePlaintextSecrets,
   resolveWstackPaths,
+  writeErr,
 } from '@wrongstack/core';
 
 export interface BootPaths {
@@ -53,7 +54,7 @@ export async function bootConfig(
     try {
       const { migrated } = await migratePlaintextSecrets(file, vault);
       if (migrated > 0) {
-        process.stderr.write(`[wstack] Encrypted ${migrated} plaintext secret(s) in ${file}\n`);
+        writeErr(`[wstack] Encrypted ${migrated} plaintext secret(s) in ${file}\n`);
       }
     } catch {
       // best-effort — never block boot on migration issues
