@@ -338,6 +338,7 @@ describe('MultiAgentHost', () => {
       expect(director).not.toBeNull();
       const tools = director!.tools();
       expect(tools.map((t) => t.name).sort()).toEqual([
+        'ask_result',
         'ask_subagent',
         'assign_task',
         'await_tasks',
@@ -426,6 +427,7 @@ describe('MultiAgentHost', () => {
         // After promotion, the director has the orchestration tools.
         const tools = director!.tools();
         expect(tools.map((t) => t.name).sort()).toEqual([
+          'ask_result',
           'ask_subagent',
           'assign_task',
           'await_tasks',

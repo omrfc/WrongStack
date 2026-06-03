@@ -1,5 +1,11 @@
 import type { Agent, AttachmentStore, GoalFile, SlashCommandRegistry, TokenCounter } from '@wrongstack/core';
-import { InputBuilder, color, goalFilePath, loadGoal } from '@wrongstack/core';
+import {
+  InputBuilder,
+  color,
+  estimateRequestTokensCalibrated,
+  goalFilePath,
+  loadGoal,
+} from '@wrongstack/core';
 import {
   readClipboardImage,
   routeImagesForModel,

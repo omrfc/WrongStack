@@ -257,6 +257,7 @@ describe('Director orchestration', () => {
     });
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      'ask_result',
       'ask_subagent',
       'assign_task',
       'await_tasks',
@@ -554,12 +555,13 @@ describe('Director orchestration', () => {
     return { director: d, runner };
   }
 
-  it('director.tools() exposes all 12 tools including collab_debug and fleet_emit', async () => {
+  it('director.tools() exposes all 14 tools including collab_debug and fleet_emit', async () => {
     const { director: d } = buildDirector();
     director = d;
     const tools = d.tools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      'ask_result',
       'ask_subagent',
       'assign_task',
       'await_tasks',
