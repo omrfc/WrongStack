@@ -8,7 +8,7 @@
  * Start message: clients look for the `[wstack-acp]` marker on stdout before
  * treating subsequent lines as protocol messages.
  */
-import { buildChildEnv } from '@wrongstack/core';
+import { buildChildEnv, writeErr } from '@wrongstack/core';
 import type { ACPMessage } from '../types/acp-messages.js';
 
 export interface AgentServerTransport {
@@ -260,7 +260,7 @@ export class ClientTransport {
   }
 
   private onChildError(chunk: string): void {
-    process.stderr.write(`[acp-child stderr] ${chunk}`, 'utf8');
+    writeErr(`[acp-child stderr] ${chunk}`);
   }
 
   private onChildClose(code: number | null): void {
@@ -268,7 +268,7 @@ export class ClientTransport {
     this.resolveRead?.(null);
     this.resolveRead = null;
     if (code !== 0 && code !== null) {
-      process.stderr.write(`[acp-child exited with code ${code}]\n`, 'utf8');
+      writeErr(`[acp-child exited with code ${code}]\n`);
     }
   }
 
