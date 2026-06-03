@@ -6,6 +6,7 @@ import {
   isStdoutTTY,
   onResize,
   setRawMode,
+  writeOut,
 } from '../../src/utils/term.js';
 
 describe('term helpers', () => {
@@ -212,6 +213,39 @@ describe('term helpers', () => {
     it('returns false when stream is a TTY but lacks setRawMode (Windows ConPTY edge case)', () => {
       const input = makeInput(true, false);
       expect(setRawMode(input, true)).toBe(false);
+    });
+  });
+
+  describe('writeOut', () => {
+    it('writes the string to the given stream and returns true', () => {
+      const write = vi.fn();
+      const stream = { write } as unknown as NodeJS.WriteStream;
+      expect(writeOut('hello', stream)).toBe(true);
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(write).toHaveBeenCalledWith('hello');
+    });
+
+    it('defaults to process.stdout when no stream is supplied', () => {
+      const write = vi
+        .spyOn(process.stdout, 'write')
+        .mockImplementation(() => true);
+      try {
+        expect(writeOut('hi')).toBe(true);
+        expect(write).toHaveBeenCalledWith('hi');
+      } finally {
+        write.mockRestore();
+      }
+    });
+
+    it('returns false (no throw) when stream is null', () => {
+      // (passing `undefined` triggers the default parameter and routes to
+      // process.stdout — that is the documented behaviour, not a guard)
+      expect(writeOut('x', null as unknown as NodeJS.WriteStream)).toBe(false);
+    });
+
+    it('returns false when stream lacks a callable write method', () => {
+      const stream = { write: 'not-a-fn' } as unknown as NodeJS.WriteStream;
+      expect(writeOut('x', stream)).toBe(false);
     });
   });
 });
