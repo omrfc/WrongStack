@@ -17,7 +17,7 @@ import type {
   SlashCommandRegistry,
   TokenCounter,
 } from '@wrongstack/core';
-import { color } from '@wrongstack/core';
+import { color, writeOut } from '@wrongstack/core';
 import { persistAutonomySetting } from './settings-menu.js';
 import type { ProviderConfig, ResolvedProvider, WstackPaths } from '@wrongstack/core';
 import type { MCPRegistry } from '@wrongstack/mcp';
@@ -267,7 +267,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             : null,
           usage,
         });
-        process.stdout.write(json + '\n');
+        writeOut(json + '\n');
       } else {
         if (result.status === 'failed') {
           code = 1;
@@ -459,7 +459,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           director,
           fleetRoster,
           onAfterExit: () => {
-            process.stdout.write(
+            writeOut(
               color.dim(`Session saved: ${session.id} — resume with `) +
                 color.cyan(`wstack resume ${session.id}`) +
                 '\n',
