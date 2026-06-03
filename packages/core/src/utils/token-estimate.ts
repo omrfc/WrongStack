@@ -205,6 +205,9 @@ export function recordActualUsage(actualInputTokens: number, estimatedInputToken
     // EWM: new = α * sample + (1-α) * old  →  α=0.3 = fast initial converge
     _cal.ratio = _cal.alpha * sampleRatio + (1 - _cal.alpha) * _cal.ratio;
   }
+  // Sanity bound: keep the rolling ratio within [0.5, 1.5] so a sequence
+  // of bad samples can't blow up the calibration for everyone.
+  _cal.ratio = Math.min(1.5, Math.max(0.5, _cal.ratio));
   _cal.count++;
 }
 
