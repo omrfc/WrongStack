@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import { createHttpServer } from './http-server.js';
+import { SKIP_DIRS, isHiddenEntry, rankFiles } from './file-picker.js';
 import {
   Agent,
   AutoCompactionMiddleware,
@@ -1535,23 +1536,9 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
         // a fuzzy substring match against the (lowercased) query and caps
         // the result so the popup never has to paginate.
         const payload = (msg as { payload?: { query?: string; limit?: number } }).payload ?? {};
-        const query = (payload.query ?? '').toLowerCase();
         const limit = payload.limit ?? 50;
-        const SKIP_DIRS = new Set([
-          '.git',
-          'node_modules',
-          'dist',
-          'build',
-          '.next',
-          '.turbo',
-          '.cache',
-          'target',
-          'coverage',
-          '.nyc_output',
-          'out',
-          '.pnpm-store',
-          '.parcel-cache',
-        ]);
+        // Filtering (isHiddenEntry/SKIP_DIRS) and ranking (rankFiles) live in
+        // ./file-picker.ts; the walk itself stays here since it's disk I/O.
         const results: string[] = [];
         async function walk(dir: string, rel: string, depth: number): Promise<void> {
           if (depth > 8 || results.length >= 600) return;
@@ -1563,12 +1550,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
           }
           for (const e of entries) {
             if (results.length >= 600) return;
-            if (e.name.startsWith('.') && e.name !== '.wrongstack' && e.name !== '.env.example') {
-              // hide dotfiles by default; pick a couple common ones the user
-              // might want anyway
-              if (e.name !== '.gitignore' && e.name !== '.eslintrc' && e.name !== '.prettierrc')
-                continue;
-            }
+            if (isHiddenEntry(e.name)) continue;
             const childRel = rel ? `${rel}/${e.name}` : e.name;
             if (e.isDirectory()) {
               if (SKIP_DIRS.has(e.name)) continue;
@@ -1579,29 +1561,9 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
           }
         }
         await walk(projectRoot, '', 0);
-        // Score: exact basename match > prefix > substring. Cheap heuristic
-        // that's good enough for a picker.
-        const scored: Array<{ path: string; score: number }> = [];
-        for (const p of results) {
-          if (!query) {
-            scored.push({ path: p, score: 0 });
-            continue;
-          }
-          const lower = p.toLowerCase();
-          const base = lower.split('/').pop() ?? lower;
-          let score = 0;
-          if (base === query) score = 100;
-          else if (base.startsWith(query)) score = 60;
-          else if (lower.includes(query)) score = 20;
-          else continue;
-          // Penalise depth so root files come first.
-          score -= p.split('/').length;
-          scored.push({ path: p, score });
-        }
-        scored.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
         send(ws, {
           type: 'files.list',
-          payload: { files: scored.slice(0, limit).map((s) => s.path) },
+          payload: { files: rankFiles(results, payload.query ?? '', limit) },
         });
         break;
       }
