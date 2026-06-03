@@ -9,7 +9,21 @@ Last updated: 2026-06-03 (end of a 22-commit day, ~18h).
 
 ---
 
-## 1. CLI / WebUI boot path unification — HIGH
+## 1. CLI / WebUI boot path unification — HIGH ✅ DONE (2026-06-03)
+
+**Done.** Canonical `bootConfig(opts?: BootConfigOptions)` now lives in
+`packages/core/src/infrastructure/boot.ts` (exported from the core barrel).
+It does path resolution, the AES-GCM `DefaultSecretVault`, plaintext-secret
+migration (label via `appLabel`: `wstack` vs `WebUI`), config + sync load,
+project-meta write, and logger creation — the union of what cli/webui each
+did. `packages/cli/src/boot-config.ts` and `packages/webui/src/server/boot.ts`
+are now thin wrappers that re-shape the result into their legacy return types.
+Behavior coverage moved to `packages/core/tests/infrastructure/boot.test.ts`;
+the cli `boot-config.test.ts` (real core, temp HOME) and a slimmed webui
+`boot.test.ts` (wrapper contract) round it out. 17 tests green; core/cli/webui
+typecheck + build clean.
+
+<details><summary>Original note</summary>
 
 **Why.** `packages/cli/src/boot-config.ts` and
 `packages/webui/src/server/boot.ts` are near-duplicates. Both:
@@ -41,44 +55,97 @@ priority there, but the duplicated surface is the actual issue);
 `packages/webui/src/server/boot.ts:30-63` are the two near-duplicate
 implementations.
 
----
-
-## 2. webui/src/server/index.ts — remaining 7 concerns
-
-**Why.** This file is 1,622 lines. Phase-4 PR (`5200966`) extracted
-the static-file HTTP server into `http-server.ts` (-75 lines), but
-the refactor-planner sub-agent (read-only plan, 3m, 2k tokens) flagged
-**18 distinct concerns** remaining. The cheapest three after
-`http-server` are:
-
-| # | Concern | Approx lines | Migration cost |
-|---|---------|-------------:|---------------:|
-| 17 (done) | `http-server.ts` — static serve, MIME, CSP, SPA fallback | -75 | LOW |
-| 6  | `ws-auth.ts` — token check, time-constant compare | ~90 | LOW |
-| 18 | `lifecycle.ts` — start/stop, signal handlers, graceful shutdown | ~60 | LOW |
-| 11 | `error-formatter.ts` — JSON-RPC error shape, human-readable fallback | ~40 | LOW |
-| 7  | `token-estimator.ts` — request body size estimate, calibrated for context | ~30 | LOW |
-| 9  | `rest-routes.ts` — `/api/...` registration | ~150 | MEDIUM |
-| 8  | `ws-handlers.ts` — `handleMessage` switch on `type` | ~400 | HIGH (touches shared state) |
-
-**Effort.** 1.5–2h for the four LOW entries (6, 18, 11, 7). The
-MEDIUM/HIGH ones (9, 8) are 4–6h and can wait a day.
-
-**Next step.** Read `packages/webui/src/server/index.ts` end-to-end,
-then extract `ws-auth.ts` first (pure functions, no shared state,
-already has `ws-auth.test.ts` covering 15 cases — refactor will
-strengthen, not weaken, the test surface). Repeat the
-`http-server.ts` pattern: write the new file, update the import
-in `index.ts`, run `tsc --noEmit -p packages/webui/tsconfig.json`
-plus the targeted vitest file.
-
-**Refs.** Commit `5200966` shows the exact pattern. Sub-agent plan
-saved during the read-only triage pass (look for the
-`webui/server/index.ts plan` invocation in the day-2 transcript).
+</details>
 
 ---
 
-## 3. Phase 6: input-reader readLine + readSecret tests
+## 2. webui/src/server/index.ts — remaining concerns
+
+**Progress.** `index.ts` is now **1923 lines** (it had grown to 2046).
+`http-server.ts` (#17), **`ws-auth.ts` (#6), `lifecycle.ts` (#18), and
+`token-estimator.ts` (#7) are extracted**.
+
+| # | Concern | Status | Migration cost |
+|---|---------|--------|---------------:|
+| 17 | `http-server.ts` — static serve, MIME, CSP, SPA fallback | ✅ done (`5200966`) | LOW |
+| 6  | `ws-auth.ts` — token check, time-constant compare, DNS-rebinding | ✅ done (2026-06-03) | LOW |
+| 18 | `lifecycle.ts` — graceful shutdown + SIGINT/SIGTERM | ✅ done (2026-06-03) | LOW |
+| 7  | `token-estimator.ts` — per-section context.debug token breakdown | ✅ done (2026-06-03) | LOW |
+| 11 | `error-formatter.ts` — ⚠️ plan mismatch (see below) | re-scope | LOW |
+| 9  | `rest-routes.ts` — `/api/...` registration | open | MEDIUM |
+| 8  | `ws-handlers.ts` — `handleMessage` switch on `type` | open | HIGH (shared state) |
+
+**token-estimator.ts done (2026-06-03).** Extracted the `context.debug`
+per-section token breakdown (~78 lines) into pure `estimateTokens` /
+`stringifyContent` / `estimateContextBreakdown` in
+`packages/webui/src/server/token-estimator.ts`; the WS handler now calls it and
+layers `mode`/`policy` on top. New `token-estimator.test.ts` (7 tests, incl. the
+per-block-type accounting + preview truncation). Note: faithful extraction —
+the original (and the extract) assume `tool_use` blocks always carry an `input`
+(`JSON.stringify(undefined)` would throw); real blocks always do. Full webui
+suite 144 green; index.ts diff verified content-only (no biome reformat).
+
+**#11 error-formatter — plan mismatch.** The sub-agent plan called this
+"JSON-RPC error shape", but the webui server speaks a WebSocket broadcast
+protocol (`{ type: 'error', payload }`), not JSON-RPC. The only real
+duplication is `err instanceof Error ? err.message : String(err)` repeated
+~10×. If actioned, it's a one-line `errMessage(err)` helper (+ maybe a
+`sendError(ws, phase, err)` wrapper), NOT a ~40-line module. Re-scope or drop.
+
+**lifecycle.ts done (2026-06-03).** Extracted the inline `shutdown` closure +
+`process.on('SIGINT'/'SIGTERM')` into `packages/webui/src/server/lifecycle.ts`
+(`createShutdown` + `registerShutdownHandlers`) with injectable `log`/`exit`
+seams, so the teardown order, error-swallow, and idempotency are unit-testable
+without killing the runner. `index.ts` passes a `flushSession` thunk + a
+`clients()` getter (closes whoever is connected *at signal time*) + the server
+list. Added a re-entrancy guard (rapid double Ctrl+C no longer runs teardown
+twice) — minor behavior improvement. New `lifecycle.test.ts` (6 tests); full
+webui suite 137 green; typecheck + build clean.
+
+**ws-auth.ts done (2026-06-03).** Extracted the inline `verifyClient`/
+`isLoopback`/`tokenMatches`/`hostHeaderOk` closures (~73 lines) into pure,
+documented functions in `packages/webui/src/server/ws-auth.ts`; `index.ts`
+keeps a thin adapter that pulls fields off the request and delegates (dropped
+the now-unused `timingSafeEqual` import). Crucially, `ws-auth.test.ts` no longer
+re-implements a simplified copy — it imports the **real** functions, and the
+DNS-rebinding guard (`hostHeaderOk`) + constant-time `tokenMatches`, which had
+**zero** real-code coverage, are now tested. 15 → **24 ws-auth tests**; full
+webui suite 131 green; typecheck + build clean.
+
+> Note: `ws-auth.test.ts` still carries local copies of `isPathSafe` and the
+> rate limiter (separate concerns). `isPathSafe` is now redundant with
+> `http-server.ts`'s exported `isInsideDist` — repoint it when #8's rate-limiter
+> lands, or as a tiny standalone cleanup.
+
+**Next step.** All four LOW entries are done. What remains is MEDIUM/HIGH:
+`rest-routes.ts` (#9, ~150 lines) then `ws-handlers.ts` (#8, ~400 lines, touches
+shared `clients`/`session`/`context` state — the hard one). Both are 4–6h and
+warrant their own session. The #11 "error-formatter" is a tiny `errMessage()`
+helper, not a module — do it opportunistically or drop.
+
+**IMPORTANT (process).** Do NOT `biome --write` `index.ts` (or other
+pre-existing committed files) — they aren't biome-clean at HEAD and `--write`
+reformats the whole file into a multi-thousand-line noise diff. Use targeted
+edits; `--write` only files you create whole. Verify with
+`git diff --shortstat` vs `--ignore-all-space` (should match).
+
+**Refs.** Commits `5200966` (http-server) and the ws-auth / lifecycle /
+token-estimator extractions above show the exact pattern.
+
+---
+
+## 3. Phase 6: input-reader readLine + readSecret tests — ✅ DONE (2026-06-03)
+
+**Done.** Added `packages/cli/tests/input-reader-line-secret.test.ts` (9
+tests): `readLine` via a `node:readline` mock (entered line, default `> `
+prompt, Ctrl+C/EOF close → empty, history persistence) and `readSecret` via a
+fake TTY stdin + `process.stdout.write` spy (bullet masking, DEL backspace,
+Ctrl+U clear-line, raw-mode restore + stdin pause, non-TTY → readLine
+fallback). Every reader uses a throwaway temp `historyFile` so tests never
+touch the real `~/.wrongstack/history`. Original readKey test header updated to
+point at the new file. 13 input-reader tests green; cli typecheck clean.
+
+<details><summary>Original note</summary>
 
 **Why.** `packages/cli/tests/input-reader.test.ts` (commit `3fe3bc8`)
 covers `readKey` (4 tests). The other two methods on the same
@@ -102,37 +169,35 @@ can supply its own readline). For `readSecret`: assert on
 **Refs.** `packages/cli/src/input-reader.ts:140-180` (readSecret
 implementation), the existing readKey test for the fake-stdin pattern.
 
+</details>
+
 ---
 
-## 4. `process.stdout.write(` in docs — replace with `writeOut`
+## 4. `process.stdout.write(` in docs — ⚠️ PREMISE INVALID, recommend close
 
-**Why.** The codebase itself is now clean (Phase 5), but three
-documentation files still show the old `process.stdout.write(s)`
-form in their code examples, which trains contributors to copy the
-old pattern.
+**Reassessed 2026-06-03.** Inspected all three sites; none is a
+WrongStack output site that should adopt `writeOut`, so the original
+"trains contributors to copy the old pattern" rationale doesn't hold:
 
-```
-packages/core/skills/node-modern/SKILL.md:144
-packages/mcp/README.md:178, 184
-packages/providers/README.md:52
-```
+- `packages/mcp/README.md:178,184` — inside a **"Writing Your Own MCP
+  Server"** standalone stdio example. Those writes ARE the JSON-RPC
+  protocol channel; they must stay `process.stdout.write` (+`flush`).
+  The example server doesn't import `@wrongstack/core` and shouldn't.
+  Changing these would be actively wrong.
+- `packages/core/skills/node-modern/SKILL.md:144` — a generic
+  **"Web Streams"** teaching snippet (read a `fetch` body, print the
+  decoded chunk). It teaches Node stream mechanics, not WrongStack
+  output conventions; a `writeOut` import would muddy a generic lesson.
+- `packages/providers/README.md:52` — a `provider.stream()` usage
+  example printing text deltas. Borderline, but it documents using
+  `@wrongstack/providers` standalone; `writeOut` (a core export) isn't
+  necessarily in scope for a providers consumer, and `process.stdout.write`
+  is the idiomatic "print streamed tokens" form.
 
-These are *intentionally* simple examples, so the call-site
-replacement is one word. The bigger win is the
-"`writeOut` is the seam for output capture / future middleware"
-comment in each, so the next contributor who reads the doc learns
-the new pattern instead of re-spreading the old one.
-
-**Effort.** 15 minutes.
-
-**Next step.** For each of the 4 lines above, swap
-`process.stdout.write(X)` for `writeOut(X)` and add the import from
-`@wrongstack/core`. Re-render the markdown locally to make sure the
-diffed code blocks still compile (they're illustrative, but a
-broken import line would undercut the lesson).
-
-**Refs.** Commit `90f0c80` (the writeTo primitive + the JSDoc that
-explains why writeOut exists).
+**Recommendation.** Close this item. If we still want the teaching
+win, the right move is a one-line note in the *contributing* docs that
+`writeOut` is the seam for first-party CLI output — not edits to these
+three third-party/standalone examples.
 
 ---
 

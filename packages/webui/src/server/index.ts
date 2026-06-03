@@ -40,12 +40,15 @@ import { decryptConfigSecrets, encryptConfigSecrets } from '@wrongstack/core/sec
 import { buildProviderFactoriesFromRegistry, makeProviderFromConfig } from '@wrongstack/providers';
 import { builtinToolsPack, forgetTool, rememberTool } from '@wrongstack/tools';
 import { WebSocket, WebSocketServer } from 'ws';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { createDefaultContainer } from '../../../runtime/src/container.js';
 import { bootConfig, patchConfig, } from './boot.js';
 import { AutoPhaseWebSocketHandler } from './autophase-ws-handler.js';
 import { CollaborationWebSocketHandler } from './collaboration-ws-handler.js';
 import { WorktreeWebSocketHandler } from './worktree-ws-handler.js';
+import { verifyClient as verifyWsClient } from './ws-auth.js';
+import { registerShutdownHandlers } from './lifecycle.js';
+import { estimateContextBreakdown } from './token-estimator.js';
 
 // Re-export types
 export type { WebUIOptions, BackendServices } from './types.js';
@@ -478,82 +481,24 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   // prefix so operators can correlate without leaking the full secret.
   console.log(`[WebUI] WS auth token: ${wsToken.slice(0, 4)}…${wsToken.slice(-4)} (masked)`);
 
-  // CSWSH guard + token auth: when the user exposes the socket beyond
-  // loopback, require the shared token. Local loopback connections
-  // without a token are still allowed for convenience.
-  const isLoopback = (hostname: string) =>
-    hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
-
-  // Constant-time token comparison: avoids leaking the token byte-by-byte via
-  // response timing. Length mismatch short-circuits (lengths aren't secret).
-  const tokenMatches = (provided: string | undefined): boolean => {
-    if (!provided) return false;
-    const a = Buffer.from(provided);
-    const b = Buffer.from(wsToken);
-    if (a.length !== b.length) return false;
-    return timingSafeEqual(a, b);
-  };
-
-  // DNS-rebinding defense: the browser puts the *name it dialed* in the Host
-  // header. A page on evil.com that rebinds DNS to 127.0.0.1 still sends
-  // `Host: evil.com:<port>`, so requiring a loopback Host rejects rebinding
-  // regardless of the bind address. The legitimate same-machine client dials
-  // 127.0.0.1/localhost/[::1], so this never blocks real usage on a loopback
-  // bind. When the operator deliberately exposes the socket (wsHost set to a
-  // LAN/0.0.0.0 address) the Host will legitimately be non-loopback, so we
-  // only enforce the loopback-Host requirement on a loopback bind.
-  const hostHeaderOk = (req: import('node:http').IncomingMessage): boolean => {
-    const boundToLoopback = wsHost === '127.0.0.1' || wsHost === '::1' || wsHost === 'localhost';
-    if (!boundToLoopback) return true; // operator opted into wider exposure
-    const hostHeader = (req.headers.host ?? '').trim();
-    if (!hostHeader) return false;
-    // Strip the port (handle bare host, host:port, and [::1]:port).
-    let hostname: string;
-    try {
-      hostname = new URL(`http://${hostHeader}`).hostname;
-    } catch {
-      return false;
-    }
-    return isLoopback(hostname);
-  };
-
+  // CSWSH guard + token auth: when the user exposes the socket beyond loopback,
+  // require the shared token; loopback connections bootstrap without one. The
+  // policy (DNS-rebinding Host guard, constant-time token compare, loopback
+  // bootstrap) lives in ./ws-auth.ts as pure functions — this closure just
+  // pulls the relevant fields off the incoming request and delegates.
   const verifyClient = (info: {
     origin: string;
     secure: boolean;
     req: import('node:http').IncomingMessage;
-  }) => {
-    const origin = info.origin;
-    const url = info.req.url ?? '';
-    const tokenMatch = url.match(/[?&]token=([^&]+)/);
-    const providedToken = tokenMatch ? tokenMatch[1] : undefined;
-    const tokenOk = tokenMatches(providedToken);
-
-    // DNS-rebinding guard runs first on a loopback bind — independent of token
-    // and Origin. Blocks a rebound attacker page (Host = attacker domain) even
-    // though the TCP peer is 127.0.0.1.
-    if (!hostHeaderOk(info.req)) return false;
-
-    if (!origin) {
-      // Non-browser clients (curl, scripts): require token unless on loopback.
-      // When wsHost=0.0.0.0 the server accepts connections from any network
-      // interface — token is mandatory in that case.
-      const remoteIp = info.req.socket.remoteAddress ?? '';
-      const isRemoteLoopback = remoteIp === '127.0.0.1' || remoteIp === '::1';
-      if (!isRemoteLoopback && wsHost === '0.0.0.0') return false; // LAN exposure without token = deny
-      return tokenOk || wsHost === '127.0.0.1' || wsHost === '::1' || wsHost === 'localhost';
-    }
-    try {
-      const { hostname } = new URL(origin);
-      // Loopback browser origins: allow without token (bootstrap — the token is
-      // delivered in session.start and replayed on reconnect). The Host-header
-      // guard above already rejects cross-site/rebinding pages here.
-      if (isLoopback(hostname)) return true;
-      // Non-loopback origins: token is mandatory.
-      return tokenOk;
-    } catch {
-      return false;
-    }
-  };
+  }) =>
+    verifyWsClient({
+      origin: info.origin,
+      url: info.req.url ?? '',
+      hostHeader: info.req.headers.host,
+      remoteAddress: info.req.socket.remoteAddress,
+      wsHost,
+      expectedToken: wsToken,
+    });
   // Cap inbound frame size (8 MiB) so a single oversized message can't exhaust
   // memory. Agent messages are small; large pastes/attachments stay well under.
   const WS_MAX_PAYLOAD = 8 * 1024 * 1024;
@@ -983,80 +928,19 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
 
       case 'context.debug': {
         // Per-section token estimate so users can see what's actually eating
-        // the context window. Uses the simple 4-chars-per-token heuristic —
-        // not exact, but close enough to spot which section is bloated.
-        const estimate = (s: string): number => Math.ceil(s.length / 4);
-        const stringifyContent = (c: unknown): string => {
-          if (typeof c === 'string') return c;
-          try {
-            return JSON.stringify(c);
-          } catch {
-            return String(c);
-          }
-        };
-        const sysTokens = context.systemPrompt.reduce((acc, b) => acc + estimate(b.text ?? ''), 0);
-        // Tool schemas: each tool sends a JSON schema to the model on every
-        // turn. With 20+ builtins these can be 10-20k by themselves.
-        const tools = toolRegistry.list();
-        const toolBreakdown = tools.map((t) => {
-          const schema = (t as { inputSchema?: unknown }).inputSchema ?? {};
-          const desc = (t as { description?: string }).description ?? '';
-          return {
-            name: t.name,
-            tokens: estimate(t.name) + estimate(desc) + estimate(stringifyContent(schema)),
-          };
+        // the context window. The breakdown maths lives in ./token-estimator.ts
+        // (4-chars-per-token heuristic); we layer the active mode/policy on top.
+        const breakdown = estimateContextBreakdown({
+          systemPrompt: context.systemPrompt,
+          tools: toolRegistry.list(),
+          messages: context.messages,
         });
-        const toolTokens = toolBreakdown.reduce((a, b) => a + b.tokens, 0);
-        const messageBreakdown = context.messages.map((m, i) => {
-          let tk = 0;
-          if (typeof m.content === 'string') {
-            tk = estimate(m.content);
-          } else if (Array.isArray(m.content)) {
-            for (const b of m.content) {
-              if (b.type === 'text') tk += estimate(b.text ?? '');
-              else if (b.type === 'tool_use') tk += estimate(stringifyContent(b.input));
-              else if (b.type === 'tool_result') tk += estimate(stringifyContent(b.content));
-              else tk += estimate(stringifyContent(b));
-            }
-          }
-          return {
-            index: i,
-            role: m.role,
-            tokens: tk,
-            preview:
-              typeof m.content === 'string'
-                ? m.content.slice(0, 60)
-                : Array.isArray(m.content)
-                  ? m.content
-                      .map((b) =>
-                        b.type === 'text'
-                          ? (b.text ?? '').slice(0, 40)
-                          : b.type === 'tool_use'
-                            ? `[tool_use: ${b.name}]`
-                            : b.type === 'tool_result'
-                              ? `[tool_result]`
-                              : `[${b.type}]`,
-                      )
-                      .join(' ')
-                      .slice(0, 60)
-                  : '',
-          };
-        });
-        const msgTokens = messageBreakdown.reduce((a, b) => a + b.tokens, 0);
-        const total = sysTokens + toolTokens + msgTokens;
         send(ws, {
           type: 'context.debug',
           payload: {
-            total,
+            ...breakdown,
             mode: context.meta['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID,
             policy: context.meta['contextWindowPolicy'],
-            systemPrompt: sysTokens,
-            tools: { total: toolTokens, count: tools.length, breakdown: toolBreakdown },
-            messages: {
-              total: msgTokens,
-              count: context.messages.length,
-              breakdown: messageBreakdown,
-            },
           },
         });
         break;
@@ -2021,26 +1905,19 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     console.log(`[WebUI] HTTP server running on http://${wsHost}:${httpPort}`);
   });
 
-  // Graceful shutdown
-  const shutdown = async () => {
-    console.log('[WebUI] Shutting down...');
-    try {
+  // Graceful shutdown on SIGINT/SIGTERM — see `lifecycle.ts`. The session
+  // flush (session_end + close) is passed as a thunk so lifecycle stays
+  // decoupled from the session/tokenCounter types.
+  registerShutdownHandlers({
+    flushSession: async () => {
       await session.append({
         type: 'session_end',
         ts: new Date().toISOString(),
         usage: tokenCounter.total(),
       });
       await session.close();
-    } catch (e) {
-      console.warn('[WebUI] Error closing session:', e);
-    }
-    for (const [ws] of clients) ws.close();
-    httpServer.close();
-    wssPrimary.close();
-    wssSecondary?.close();
-    process.exit(0);
-  };
-
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+    },
+    clients: () => clients.keys(),
+    servers: [httpServer, wssPrimary, wssSecondary],
+  });
 }
