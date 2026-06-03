@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
-import type { InputReader, PromptOption } from '@wrongstack/core';
+import { type InputReader, type PromptOption, setRawMode } from '@wrongstack/core';
 
 export interface ReadlineInputReaderOptions {
   historyFile?: string;
@@ -98,7 +98,7 @@ export class ReadlineInputReader implements InputReader {
       const stdin = process.stdin;
       const wasRaw = stdin.isRaw;
       const wasPaused = stdin.isPaused();
-      if (stdin.isTTY) stdin.setRawMode(true);
+      setRawMode(stdin, true);
       stdin.resume();
       const onData = (buf: Buffer) => {
         const key = buf.toString();
@@ -125,7 +125,7 @@ export class ReadlineInputReader implements InputReader {
       const cleanup = () => {
         stdin.off('data', onData);
         stdin.off('close', onClose);
-        if (stdin.isTTY) stdin.setRawMode(wasRaw);
+        setRawMode(stdin, wasRaw);
         if (wasPaused) stdin.pause();
       };
       stdin.on('data', onData);
@@ -153,7 +153,7 @@ export class ReadlineInputReader implements InputReader {
     return new Promise<string>((resolve) => {
       let buf = '';
       const wasRaw = stdin.isRaw;
-      stdin.setRawMode(true);
+      setRawMode(stdin, true);
       stdin.resume();
       stdin.setEncoding('utf8');
 
@@ -211,7 +211,7 @@ export class ReadlineInputReader implements InputReader {
       };
       const cleanup = () => {
         stdin.off('data', onData);
-        stdin.setRawMode(wasRaw);
+        setRawMode(stdin, wasRaw);
         stdin.pause();
       };
       stdin.on('data', onData);

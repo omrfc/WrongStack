@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getTermSize, isInteractive, isStdinTTY, isStdoutTTY, onResize } from '../../src/utils/term.js';
+import {
+  getTermSize,
+  isInteractive,
+  isStdinTTY,
+  isStdoutTTY,
+  onResize,
+  setRawMode,
+} from '../../src/utils/term.js';
 
 describe('term helpers', () => {
   // Snapshot the original stream props so afterEach can restore them, even
@@ -170,6 +177,41 @@ describe('term helpers', () => {
       expect(typeof off).toBe('function');
       expect(() => off()).not.toThrow();
       expect(cb).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('setRawMode', () => {
+    function makeInput(
+      isTTY: boolean | undefined = true,
+      hasSetRawMode = true,
+    ): NodeJS.ReadStream {
+      return {
+        isTTY,
+        setRawMode: hasSetRawMode ? vi.fn() : undefined,
+      } as unknown as NodeJS.ReadStream;
+    }
+
+    it('toggles raw mode on a TTY stream and returns true', () => {
+      const input = makeInput(true);
+      expect(setRawMode(input, true)).toBe(true);
+      expect((input.setRawMode as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(true);
+    });
+
+    it('returns false (no throw) when stream is null/undefined', () => {
+      expect(setRawMode(null as unknown as NodeJS.ReadStream, true)).toBe(false);
+      expect(setRawMode(undefined as unknown as NodeJS.ReadStream, true)).toBe(false);
+    });
+
+    it('returns false (no throw) when stream is not a TTY (piped/redirected)', () => {
+      const input = makeInput(false);
+      expect(setRawMode(input, true)).toBe(false);
+      // setRawMode must NOT have been called on a non-TTY stream
+      expect(input.setRawMode as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+    });
+
+    it('returns false when stream is a TTY but lacks setRawMode (Windows ConPTY edge case)', () => {
+      const input = makeInput(true, false);
+      expect(setRawMode(input, true)).toBe(false);
     });
   });
 });

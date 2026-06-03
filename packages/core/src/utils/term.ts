@@ -78,3 +78,20 @@ export function onResize(
     stream.off('resize', handler);
   };
 }
+
+/**
+ * Toggle raw mode on a TTY stdin stream. Returns `true` when the toggle was
+ * applied, `false` when the stream is null, not a TTY, or doesn't expose
+ * `setRawMode` (pipes, file descriptors, Windows ConPTY edge cases). Callers
+ * that need to restore the previous mode should snapshot `input.isRaw`
+ * BEFORE the call and pass the value to a second call to flip back.
+ *
+ * Use this helper to drop the now-redundant
+ * `if (input.isTTY) input.setRawMode(...)` ceremony at every call site.
+ */
+export function setRawMode(input: NodeJS.ReadStream, mode: boolean): boolean {
+  if (!input || input.isTTY !== true) return false;
+  if (typeof input.setRawMode !== 'function') return false;
+  input.setRawMode(mode);
+  return true;
+}
