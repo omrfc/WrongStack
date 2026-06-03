@@ -1,6 +1,6 @@
 import type { Tool, ToolStreamEvent } from '@wrongstack/core';
 import { spawnStream } from './_spawn-stream.js';
-import { safeResolve } from './_util.js';
+import { detectPackageManager, safeResolve } from './_util.js';
 
 interface AuditInput {
   cwd?: string;
@@ -62,7 +62,7 @@ export const auditTool: Tool<AuditInput, AuditOutput> = {
   },
   async *executeStream(input, ctx, opts): AsyncGenerator<ToolStreamEvent<AuditOutput>> {
     const cwd = input.cwd ? safeResolve(input.cwd, ctx) : ctx.cwd;
-    const manager = await detectManager(cwd);
+    const manager = await detectPackageManager(cwd);
     yield { type: 'log', text: `Auditing with ${manager}…`, data: { manager } };
 
     const args = ['audit', '--json'];
@@ -83,23 +83,6 @@ export const auditTool: Tool<AuditInput, AuditOutput> = {
     yield { type: 'final', output: parseAuditOutput(result.stdout, result.exitCode) };
   },
 };
-
-async function detectManager(cwd: string): Promise<string> {
-  const { stat } = await import('node:fs/promises');
-  try {
-    await stat(`${cwd}/pnpm-lock.yaml`);
-    return 'pnpm';
-  } catch {
-    /* */
-  }
-  try {
-    await stat(`${cwd}/yarn.lock`);
-    return 'yarn';
-  } catch {
-    /* */
-  }
-  return 'npm';
-}
 
 function parseAuditOutput(json: string, exitCode: number): AuditOutput {
   if (!json) {

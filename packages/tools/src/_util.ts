@@ -2,6 +2,32 @@ import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { type Context, stripAnsi } from '@wrongstack/core';
 
+/** Detected package manager for a project directory. */
+export type PackageManager = 'pnpm' | 'yarn' | 'npm';
+
+/**
+ * Detect the project's package manager by inspecting lockfiles in `cwd`.
+ * Order: pnpm → yarn → npm (default). Missing or unreadable directories fall
+ * back to `npm` rather than throwing, so a `safeResolve`-checked cwd that
+ * happens to be empty never aborts the tool.
+ */
+export async function detectPackageManager(cwd: string): Promise<PackageManager> {
+  const { stat } = await import('node:fs/promises');
+  try {
+    await stat(`${cwd}/pnpm-lock.yaml`);
+    return 'pnpm';
+  } catch {
+    /* not pnpm */
+  }
+  try {
+    await stat(`${cwd}/yarn.lock`);
+    return 'yarn';
+  } catch {
+    /* not yarn */
+  }
+  return 'npm';
+}
+
 export function resolvePath(input: string, ctx: Context): string {
   return path.isAbsolute(input) ? path.normalize(input) : path.resolve(ctx.cwd, input);
 }

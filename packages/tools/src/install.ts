@@ -1,6 +1,6 @@
 import type { Tool, ToolStreamEvent } from '@wrongstack/core';
 import { spawnStream } from './_spawn-stream.js';
-import { normalizeCommandOutput, safeResolve } from './_util.js';
+import { detectPackageManager, normalizeCommandOutput, safeResolve } from './_util.js';
 
 interface InstallInput {
   packages?: string | string[];
@@ -145,17 +145,3 @@ export const installTool: Tool<InstallInput, InstallOutput> = {
   },
 };
 
-async function detectPackageManager(cwd: string): Promise<string> {
-  const { stat } = await import('node:fs/promises');
-  try {
-    await stat(`${cwd}/pnpm-lock.yaml`);
-    return 'pnpm';
-  } catch {
-    try {
-      await stat(`${cwd}/yarn.lock`);
-      return 'yarn';
-    } catch {
-      return 'npm';
-    }
-  }
-}

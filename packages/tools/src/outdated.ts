@@ -1,8 +1,7 @@
 import { spawn } from 'node:child_process';
-import { stat } from 'node:fs/promises';
 import { buildChildEnv } from '@wrongstack/core';
 import type { Tool } from '@wrongstack/core';
-import { safeResolve } from './_util.js';
+import { detectPackageManager, safeResolve } from './_util.js';
 
 interface OutdatedInput {
   cwd?: string;
@@ -63,7 +62,7 @@ export const outdatedTool: Tool<OutdatedInput, OutdatedOutput> = {
   },
   async execute(input, ctx, opts) {
     const cwd = input.cwd ? safeResolve(input.cwd, ctx) : ctx.cwd;
-    const manager = await detectManager(cwd);
+    const manager = await detectPackageManager(cwd);
 
     const args: string[] = ['outdated', '--json'];
     if (input.format === 'table') args.push('--table');
@@ -72,22 +71,6 @@ export const outdatedTool: Tool<OutdatedInput, OutdatedOutput> = {
     return runOutdated(manager, args, cwd, opts.signal);
   },
 };
-
-async function detectManager(cwd: string): Promise<string> {
-  try {
-    await stat(`${cwd}/pnpm-lock.yaml`);
-    return 'pnpm';
-  } catch {
-    /* */
-  }
-  try {
-    await stat(`${cwd}/yarn.lock`);
-    return 'yarn';
-  } catch {
-    /* */
-  }
-  return 'npm';
-}
 
 function runOutdated(
   manager: string,

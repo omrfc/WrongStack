@@ -1,3 +1,4 @@
+import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Context } from '@wrongstack/core';
@@ -6,6 +7,7 @@ import {
   COMMAND_OUTPUT_MAX_BYTES,
   collapseCarriageReturns,
   collapseConsecutiveDuplicates,
+  detectPackageManager,
   ensureInsideRoot,
   isBinaryBuffer,
   normalizeCommandOutput,
@@ -231,5 +233,56 @@ describe('normalizeCommandOutput', () => {
 
   it('passes through empty input', () => {
     expect(normalizeCommandOutput('')).toBe('');
+  });
+});
+
+describe('detectPackageManager', () => {
+  // Spin up an isolated temp dir, optionally pre-seeded with lockfiles, and
+  // clean it up afterwards. The detection is cwd-local so each test must own
+  // its own directory to avoid flake from leftover state.
+  async function withDir(
+    files: string[],
+    fn: (dir: string) => Promise<void>,
+  ): Promise<void> {
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'wrongstack-detect-pm-'));
+    try {
+      for (const f of files) {
+        await fsp.writeFile(path.join(dir, f), '');
+      }
+      await fn(dir);
+    } finally {
+      await fsp.rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('detects pnpm when pnpm-lock.yaml is present', async () => {
+    await withDir(['pnpm-lock.yaml'], async (dir) => {
+      expect(await detectPackageManager(dir)).toBe('pnpm');
+    });
+  });
+
+  it('detects yarn when only yarn.lock is present', async () => {
+    await withDir(['yarn.lock'], async (dir) => {
+      expect(await detectPackageManager(dir)).toBe('yarn');
+    });
+  });
+
+  it('falls back to npm when no lockfile is present', async () => {
+    await withDir([], async (dir) => {
+      expect(await detectPackageManager(dir)).toBe('npm');
+    });
+  });
+
+  it('prefers pnpm when both pnpm and yarn lockfiles coexist', async () => {
+    await withDir(['pnpm-lock.yaml', 'yarn.lock'], async (dir) => {
+      expect(await detectPackageManager(dir)).toBe('pnpm');
+    });
+  });
+
+  it('returns npm for a non-existent directory (does not throw)', async () => {
+    // Stat on a missing path throws ENOENT; the helper must catch and fall
+    // back to npm rather than aborting the tool.
+    const ghost = path.join(os.tmpdir(), `definitely-missing-${Date.now()}`);
+    expect(await detectPackageManager(ghost)).toBe('npm');
   });
 });
