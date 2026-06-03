@@ -72,8 +72,9 @@ implementations.
 | 18 | `lifecycle.ts` — graceful shutdown + SIGINT/SIGTERM | ✅ done (2026-06-03) | LOW |
 | 7  | `token-estimator.ts` — per-section context.debug token breakdown | ✅ done (2026-06-03) | LOW |
 | 11 | `error-formatter.ts` — ⚠️ plan mismatch (see below) | re-scope | LOW |
-| 9  | `rest-routes.ts` — `/api/...` registration | open | MEDIUM |
-| 8  | `ws-handlers.ts` — `handleMessage` switch on `type` | open | HIGH (shared state) |
+| 9  | `rest-routes.ts` — `/api/...` registration | ⚠️ does not exist | n/a |
+| 8a | `provider-keys.ts` — `key.*`/`provider.*` record transforms | ✅ done (2026-06-03) | LOW |
+| 8  | `ws-handlers.ts` — rest of the `handleMessage` switch | open | HIGH (shared state) |
 
 **token-estimator.ts done (2026-06-03).** Extracted the `context.debug`
 per-section token breakdown (~78 lines) into pure `estimateTokens` /
@@ -117,10 +118,31 @@ webui suite 131 green; typecheck + build clean.
 > `http-server.ts`'s exported `isInsideDist` — repoint it when #8's rate-limiter
 > lands, or as a tiny standalone cleanup.
 
-**Next step.** All four LOW entries are done. What remains is MEDIUM/HIGH:
-`rest-routes.ts` (#9, ~150 lines) then `ws-handlers.ts` (#8, ~400 lines, touches
-shared `clients`/`session`/`context` state — the hard one). Both are 4–6h and
-warrant their own session. The #11 "error-formatter" is a tiny `errMessage()`
+**provider-keys.ts done (2026-06-03).** Extracted the security-sensitive
+provider/API-key record transforms (`normalizeKeys`, `writeKeysBack`,
+`maskedKey`, and pure `upsertKey`/`deleteKey`/`setActiveKey`/`addProvider`/
+`removeProvider`) out of the `key.*`/`provider.*` handlers into
+`packages/webui/src/server/provider-keys.ts`. The handlers keep their
+load/decrypt → transform → encrypt/save → WS-reply flow; only the in-memory
+record mutation moved. This is the cleanly-separable, *pure* slice of #8 — the
+rest of `handleMessage` mutates live `session`/`context`/`clients` and can't be
+made pure this easily. New `provider-keys.test.ts` (19 tests) covers active-key
+re-pointing, last-key-drops-provider, legacy single-key upgrade, masking. Full
+webui suite 163 green; index.ts diff verified content-only. index.ts: 1923 →
+1857.
+
+**#9 rest-routes — does not exist.** The webui server has NO `/api/...` REST
+routes; the HTTP server is static-file-only (`http-server.ts`) and all app
+logic is WebSocket. Third sub-agent-plan item that didn't survive contact with
+the code (after item 4 docs and #11 error-formatter). Dropped from the table.
+
+**Next step.** The remaining #8 is the genuinely hard core: the ~35 stateful
+`handleMessage` cases that mutate live `session`/`context`/`clients`/`config`
+and broadcast. There's no integration test harness for the running server (all
+webui tests are unit tests of extracted pure fns), so further extraction here
+risks behavior changes that nothing would catch. Recommend pausing #8 until
+either (a) a WS integration test harness exists, or (b) it's done with a
+human-in-the-loop review. The #11 "error-formatter" is a tiny `errMessage()`
 helper, not a module — do it opportunistically or drop.
 
 **IMPORTANT (process).** Do NOT `biome --write` `index.ts` (or other

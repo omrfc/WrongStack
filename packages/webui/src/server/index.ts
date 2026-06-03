@@ -21,7 +21,6 @@ import {
   estimateRequestTokensCalibrated,
   EventBus,
   HybridCompactor,
-  type ProviderApiKey,
   type ProviderConfig,
   type Provider,
   ProviderRegistry,
@@ -48,6 +47,15 @@ import { CollaborationWebSocketHandler } from './collaboration-ws-handler.js';
 import { WorktreeWebSocketHandler } from './worktree-ws-handler.js';
 import { verifyClient as verifyWsClient } from './ws-auth.js';
 import { registerShutdownHandlers } from './lifecycle.js';
+import {
+  addProvider as addProviderRecord,
+  deleteKey as deleteKeyRecord,
+  maskedKey,
+  normalizeKeys,
+  removeProvider as removeProviderRecord,
+  setActiveKey as setActiveKeyRecord,
+  upsertKey as upsertKeyRecord,
+} from './provider-keys.js';
 import { estimateContextBreakdown } from './token-estimator.js';
 
 // Re-export types
@@ -1741,41 +1749,16 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     await configWriteLock;
   }
 
-  function normalizeKeys(cfg: ProviderConfig): ProviderApiKey[] {
-    if (Array.isArray(cfg.apiKeys) && cfg.apiKeys.length > 0) {
-      return cfg.apiKeys.map((k) => ({ ...k }));
-    }
-    if (typeof cfg.apiKey === 'string' && cfg.apiKey.length > 0) {
-      return [{ label: 'default', apiKey: cfg.apiKey, createdAt: '' }];
-    }
-    return [];
-  }
-
-  function writeKeysBack(cfg: ProviderConfig, keys: ProviderApiKey[]): void {
-    if (keys.length === 0) {
-      delete cfg.apiKeys;
-      delete cfg.apiKey;
-      delete cfg.activeKey;
-      return;
-    }
-    cfg.apiKeys = keys;
-    const active = keys.find((k) => k.label === cfg.activeKey) ?? keys[0]!;
-    cfg.apiKey = active.apiKey;
-    if (!cfg.activeKey || !keys.some((k) => k.label === cfg.activeKey)) {
-      cfg.activeKey = active.label;
-    }
-  }
-
-  function maskedKey(key: string | undefined): string {
-    if (!key) return '—';
-    if (key.length <= 8) return '•'.repeat(key.length);
-    return `${key.slice(0, 4)}…${key.slice(-4)}`;
-  }
+  // Provider/API-key record transforms (normalizeKeys, writeKeysBack,
+  // maskedKey, upsert/delete/setActive/add/remove) live in ./provider-keys.ts
+  // as pure functions; the handlers below own the load/save I/O + WS reply.
 
   function sendResult(ws: WebSocket, success: boolean, message: string): void {
     send(ws, { type: 'key.operation_result', payload: { success, message } });
   }
 
+  // Each handler loads the decrypted providers record, applies a pure transform
+  // from ./provider-keys.ts, persists only on success, and reports the result.
   async function handleKeyUpsert(
     ws: WebSocket,
     providerId: string,
@@ -1784,20 +1767,9 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   ): Promise<void> {
     try {
       const providers = await loadSavedProviders();
-      const existing: ProviderConfig = providers[providerId] ?? { type: providerId };
-      const keys = normalizeKeys(existing);
-      const idx = keys.findIndex((k) => k.label === label);
-      const nowIso = new Date().toISOString();
-      if (idx >= 0) {
-        keys[idx] = { ...keys[idx]!, apiKey, createdAt: nowIso };
-      } else {
-        keys.push({ label, apiKey, createdAt: nowIso });
-      }
-      writeKeysBack(existing, keys);
-      if (!existing.activeKey) existing.activeKey = label;
-      providers[providerId] = existing;
-      await saveProviders(providers);
-      sendResult(ws, true, `Key "${label}" saved for ${providerId}`);
+      const result = upsertKeyRecord(providers, providerId, label, apiKey, new Date().toISOString());
+      if (result.ok) await saveProviders(providers);
+      sendResult(ws, result.ok, result.message);
     } catch (err) {
       sendResult(ws, false, err instanceof Error ? err.message : String(err));
     }
@@ -1806,21 +1778,9 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   async function handleKeyDelete(ws: WebSocket, providerId: string, label: string): Promise<void> {
     try {
       const providers = await loadSavedProviders();
-      const existing = providers[providerId];
-      if (!existing) {
-        sendResult(ws, false, `Provider "${providerId}" not found`);
-        return;
-      }
-      const keys = normalizeKeys(existing).filter((k) => k.label !== label);
-      if (keys.length === 0) {
-        delete providers[providerId];
-      } else {
-        writeKeysBack(existing, keys);
-        if (existing.activeKey === label) existing.activeKey = keys[0]!.label;
-        providers[providerId] = existing;
-      }
-      await saveProviders(providers);
-      sendResult(ws, true, `Key "${label}" deleted from ${providerId}`);
+      const result = deleteKeyRecord(providers, providerId, label);
+      if (result.ok) await saveProviders(providers);
+      sendResult(ws, result.ok, result.message);
     } catch (err) {
       sendResult(ws, false, err instanceof Error ? err.message : String(err));
     }
@@ -1833,16 +1793,9 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   ): Promise<void> {
     try {
       const providers = await loadSavedProviders();
-      const existing = providers[providerId];
-      if (!existing) {
-        sendResult(ws, false, `Provider "${providerId}" not found`);
-        return;
-      }
-      existing.activeKey = label;
-      writeKeysBack(existing, normalizeKeys(existing));
-      providers[providerId] = existing;
-      await saveProviders(providers);
-      sendResult(ws, true, `Active key for ${providerId} set to "${label}"`);
+      const result = setActiveKeyRecord(providers, providerId, label);
+      if (result.ok) await saveProviders(providers);
+      sendResult(ws, result.ok, result.message);
     } catch (err) {
       sendResult(ws, false, err instanceof Error ? err.message : String(err));
     }
@@ -1854,24 +1807,9 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   ): Promise<void> {
     try {
       const providers = await loadSavedProviders();
-      if (providers[payload.id]) {
-        sendResult(ws, false, `Provider "${payload.id}" already exists. Use key.add to add a key.`);
-        return;
-      }
-      const newProv: ProviderConfig = {
-        type: payload.id,
-        family: payload.family as ProviderConfig['family'],
-        baseUrl: payload.baseUrl,
-      };
-      if (payload.apiKey) {
-        newProv.apiKeys = [
-          { label: 'default', apiKey: payload.apiKey, createdAt: new Date().toISOString() },
-        ];
-        newProv.activeKey = 'default';
-      }
-      providers[payload.id] = newProv;
-      await saveProviders(providers);
-      sendResult(ws, true, `Provider "${payload.id}" added`);
+      const result = addProviderRecord(providers, payload, new Date().toISOString());
+      if (result.ok) await saveProviders(providers);
+      sendResult(ws, result.ok, result.message);
     } catch (err) {
       sendResult(ws, false, err instanceof Error ? err.message : String(err));
     }
@@ -1880,13 +1818,9 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   async function handleProviderRemove(ws: WebSocket, providerId: string): Promise<void> {
     try {
       const providers = await loadSavedProviders();
-      if (!providers[providerId]) {
-        sendResult(ws, false, `Provider "${providerId}" not found`);
-        return;
-      }
-      delete providers[providerId];
-      await saveProviders(providers);
-      sendResult(ws, true, `Provider "${providerId}" removed`);
+      const result = removeProviderRecord(providers, providerId);
+      if (result.ok) await saveProviders(providers);
+      sendResult(ws, result.ok, result.message);
     } catch (err) {
       sendResult(ws, false, err instanceof Error ? err.message : String(err));
     }
