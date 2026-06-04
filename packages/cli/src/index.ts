@@ -51,6 +51,7 @@ const resolveSessionLoggingConfig: any = (cfg?: any) => ({
 type SessionEventBridge = any;
 import { MCPRegistry } from '@wrongstack/mcp';
 import { capabilitiesFor, makeProviderFromConfig } from '@wrongstack/providers';
+import { resolveRuntimeMaxContext } from './context-limit.js';
 import { createDefaultContainer } from '@wrongstack/runtime';
 import { builtinToolsPack, forgetTool, rememberTool } from '@wrongstack/tools';
 import { boot } from './boot.js';
@@ -522,15 +523,22 @@ export async function main(argv: string[]): Promise<number> {
 
   // Refresh the active model's context denominator when provider/model changes.
   // This feeds auto-compaction, the leader context chip, and Director spawn guards.
-  const refreshMaxContext = async (providerId: string, modelId: string) => {
-    const cap = await capabilitiesFor(modelsRegistry, providerId, modelId).catch(() => undefined);
-    const mc =
-      (cap as { maxContext?: number } | undefined)?.maxContext ??
-      config.context.effectiveMaxContext ??
-      200_000;
-    effectiveMaxContext = mc;
-    context.provider.capabilities.maxContext = mc;
-    autoCompactor?.setMaxContext(mc);
+  const refreshMaxContext = async (
+    providerId: string,
+    modelId: string,
+    runtimeProviderConfig?: import('@wrongstack/core').ProviderConfig,
+  ) => {
+    const mc = await resolveRuntimeMaxContext({
+      modelsRegistry,
+      config,
+      provider: context.provider,
+      runtimeProviderConfig,
+      providerId,
+      modelId,
+    });
+    effectiveMaxContext = mc > 0 ? mc : 200_000;
+    context.provider.capabilities.maxContext = effectiveMaxContext;
+    autoCompactor?.setMaxContext(effectiveMaxContext);
     updateSpinnerContext();
   };
 
@@ -615,7 +623,7 @@ export async function main(argv: string[]): Promise<number> {
       configStore.update({ provider: providerId, model: modelId });
       // Refresh AutoCompactionMiddleware denominator for the new model's
       // maxContext so threshold triggers (warn/soft/hard) use the correct denominator.
-      void refreshMaxContext(resolvedProviderId, modelId);
+      void refreshMaxContext(resolvedProviderId, modelId, cfgWithType);
       return null;
     } catch (err) {
       return err instanceof Error ? err.message : String(err);

@@ -41,7 +41,8 @@ import {
 } from '@wrongstack/core';
 import type { TextBlock } from '@wrongstack/core';
 import { ToolExecutor } from '@wrongstack/core/execution';
-import { capabilitiesFor, makeProviderFromConfig } from '@wrongstack/providers';
+import { makeProviderFromConfig } from '@wrongstack/providers';
+import { resolveRuntimeMaxContext } from './context-limit.js';
 
 export interface MultiAgentDeps {
   container: Container;
@@ -628,21 +629,20 @@ export class MultiAgentHost {
     const provider = this.deps.providerRegistry.has(providerId)
       ? this.deps.providerRegistry.create(cfgWithType)
       : makeProviderFromConfig(providerId, cfgWithType);
-    // Overlay the real context window. Provider constructors stamp family
-    // defaults (128k for OpenAI, 32k for openai-compatible), but the monitor
-    // must show the concrete model window (e.g. 1,050,000 for long-context
-    // GPT variants). Match the leader's resolution order for the active model:
-    // explicit config override first, then model catalog, then family default.
+    // Overlay the runtime context window. Catalog model limits are accurate
+    // for normal hosted providers, but custom baseUrl/proxy configs may route
+    // the same model id to a smaller backend. Keep this aligned with the
+    // leader's compaction denominator.
     if (this.deps.modelsRegistry) {
       const resolvedModel = model ?? config.model;
-      const caps = await capabilitiesFor(this.deps.modelsRegistry, providerId, resolvedModel).catch(
-        () => undefined,
-      );
-      const configMaxContext =
-        providerId === config.provider && resolvedModel === config.model
-          ? config.context?.effectiveMaxContext
-          : undefined;
-      const mc = configMaxContext ?? caps?.maxContext ?? provider.capabilities.maxContext;
+      const mc = await resolveRuntimeMaxContext({
+        modelsRegistry: this.deps.modelsRegistry,
+        config,
+        provider,
+        runtimeProviderConfig: cfgWithType,
+        providerId,
+        modelId: resolvedModel,
+      });
       if (mc && mc > 0) provider.capabilities.maxContext = mc;
     }
     return provider;

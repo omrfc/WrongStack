@@ -127,7 +127,12 @@ describe('setupCompaction', () => {
       modelsRegistry: {} as never,
       context: fakeContext(),
       config: {
-        context: { warnThreshold: 70, softThreshold: 85, hardThreshold: 95, effectiveMaxContext: 8_000 },
+        context: {
+          warnThreshold: 70,
+          softThreshold: 85,
+          hardThreshold: 95,
+          effectiveMaxContext: 8_000,
+        },
       },
       provider: fakeProvider(),
       pipelines,
@@ -149,6 +154,56 @@ describe('setupCompaction', () => {
       pipelines,
     });
     expect(result.effectiveMaxContext).toBe(150_000);
+  });
+
+  it('does not trust catalog maxContext for custom baseUrl providers', async () => {
+    capabilitiesFor.mockResolvedValue({ maxContext: 1_050_000 });
+    const events = new EventBus();
+    const pipelines = setupPipelines({ events, logger: new DefaultLogger({ level: 'error' }) });
+    const result = await setupCompaction({
+      compactor: { compact: vi.fn() } as never,
+      events,
+      modelsRegistry: {} as never,
+      context: fakeContext({ model: 'gpt-5.5' }),
+      config: {
+        provider: 'openai',
+        model: 'gpt-5.5',
+        providers: { openai: { type: 'openai', baseUrl: 'http://127.0.0.1:8317/v1' } },
+        context: { warnThreshold: 70, softThreshold: 85, hardThreshold: 95 },
+      },
+      provider: fakeProvider(128_000),
+      pipelines,
+    });
+    expect(result.effectiveMaxContext).toBe(128_000);
+    expect(capabilitiesFor).not.toHaveBeenCalled();
+  });
+
+  it('allows provider capabilities.maxContext to override custom baseUrl fallback', async () => {
+    capabilitiesFor.mockResolvedValue({ maxContext: 1_050_000 });
+    const events = new EventBus();
+    const pipelines = setupPipelines({ events, logger: new DefaultLogger({ level: 'error' }) });
+    const result = await setupCompaction({
+      compactor: { compact: vi.fn() } as never,
+      events,
+      modelsRegistry: {} as never,
+      context: fakeContext({ model: 'gpt-5.5' }),
+      config: {
+        provider: 'openai',
+        model: 'gpt-5.5',
+        providers: {
+          openai: {
+            type: 'openai',
+            baseUrl: 'http://127.0.0.1:8317/v1',
+            capabilities: { maxContext: 96_000 },
+          } as never,
+        },
+        context: { warnThreshold: 70, softThreshold: 85, hardThreshold: 95 },
+      },
+      provider: fakeProvider(128_000),
+      pipelines,
+    });
+    expect(result.effectiveMaxContext).toBe(96_000);
+    expect(capabilitiesFor).not.toHaveBeenCalled();
   });
 
   it('skips auto-compaction when config.context.autoCompact is false', async () => {

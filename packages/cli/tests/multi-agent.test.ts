@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@wrongstack/providers', () => ({
   // Fresh capabilities object per call (each provider owns its own), with the
@@ -31,6 +31,10 @@ import {
 } from '@wrongstack/core';
 import { capabilitiesFor } from '@wrongstack/providers';
 import { type MultiAgentDeps, MultiAgentHost } from '../src/multi-agent.js';
+
+beforeEach(() => {
+  vi.mocked(capabilitiesFor).mockClear();
+});
 
 /**
  * V0-C: `MultiAgentHost` is lazy by design — until /spawn fires, no
@@ -684,6 +688,31 @@ describe('MultiAgentHost.makeSubagentFactory', () => {
       model: 'gpt-5.5',
     });
     expect(agent.ctx.provider.capabilities.maxContext).toBe(1_050_000);
+    await dispose?.();
+  });
+
+  it('does not apply catalog maxContext to custom baseUrl subagents', async () => {
+    const deps = depsWithTools();
+    deps.modelsRegistry = {} as unknown as MultiAgentDeps['modelsRegistry'];
+    const gptProxyConfig = {
+      provider: 'openai',
+      model: 'gpt-5.5',
+      providers: {
+        openai: {
+          type: 'openai',
+          apiKey: 'fake',
+          baseUrl: 'http://127.0.0.1:8317/v1',
+        },
+      },
+    } as unknown as Config;
+    const host = new MultiAgentHost(deps);
+    const { agent, dispose } = await host.makeSubagentFactory(gptProxyConfig)({
+      ...slotCfg,
+      provider: 'openai',
+      model: 'gpt-5.5',
+    });
+    expect(agent.ctx.provider.capabilities.maxContext).toBe(32_000);
+    expect(capabilitiesFor).not.toHaveBeenCalled();
     await dispose?.();
   });
 

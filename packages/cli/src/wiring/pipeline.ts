@@ -25,7 +25,7 @@ const createSessionEventBridge: any = (_writer: any, level?: any) => ({
 });
 const resolveAuditLevel: any = (cfg?: any) => cfg?.session?.auditLevel ?? 'standard';
 import { ToolExecutor } from '@wrongstack/core/execution';
-import { capabilitiesFor } from '@wrongstack/providers';
+import { resolveRuntimeMaxContext } from '../context-limit.js';
 
 type CompactionDriver = ConstructorParameters<typeof AutoCompactionMiddleware>[0];
 
@@ -69,6 +69,9 @@ export async function setupCompaction(params: {
   modelsRegistry: ModelsRegistry;
   context: Context;
   config: {
+    provider?: string;
+    model?: string;
+    providers?: import('@wrongstack/core').Config['providers'];
     context: {
       autoCompact?: boolean;
       warnThreshold: number;
@@ -88,12 +91,25 @@ export async function setupCompaction(params: {
   /** Pre-created SessionEventBridge (preferred for sharing across error + compaction + future events). */
   sessionBridge?: any;
 }): Promise<{ effectiveMaxContext: number; autoCompactor: AutoCompactionMiddleware | undefined }> {
-  const { compactor, events, modelsRegistry, context, config, provider, pipelines, fullConfig, sessionWriter, sessionBridge: providedBridge } = params;
-  const resolvedCaps = await capabilitiesFor(modelsRegistry, provider.id, context.model).catch(() => undefined);
-  const effectiveMaxContext =
-    config.context.effectiveMaxContext ??
-    (resolvedCaps as { maxContext?: number } | undefined)?.maxContext ??
-    provider.capabilities.maxContext;
+  const {
+    compactor,
+    events,
+    modelsRegistry,
+    context,
+    config,
+    provider,
+    pipelines,
+    fullConfig,
+    sessionWriter,
+    sessionBridge: providedBridge,
+  } = params;
+  const effectiveMaxContext = await resolveRuntimeMaxContext({
+    modelsRegistry,
+    config,
+    provider,
+    providerId: config.provider ?? provider.id,
+    modelId: config.model ?? context.model,
+  });
   let autoCompactor: AutoCompactionMiddleware | undefined;
   if (config.context.autoCompact !== false) {
     // Resolve audit level from fullConfig (preferred) or the config slice.
@@ -108,7 +124,8 @@ export async function setupCompaction(params: {
       effectiveMaxContext,
       // Calibrated estimator: recordActualUsage() is called after each API
       // response so this converges on real token counts for compaction decisions.
-      (ctx) => estimateRequestTokensCalibrated(ctx.messages, ctx.systemPrompt, ctx.tools ?? []).total,
+      (ctx) =>
+        estimateRequestTokensCalibrated(ctx.messages, ctx.systemPrompt, ctx.tools ?? []).total,
       {
         warn: config.context.warnThreshold,
         soft: config.context.softThreshold,
