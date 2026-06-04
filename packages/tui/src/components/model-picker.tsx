@@ -47,7 +47,6 @@ function getVisibleWindow(selected: number, total: number): { start: number; end
 export function ModelPicker({
   step,
   providerOptions,
-  modelOptions,
   filteredOptions,
   selected,
   pickedProviderId,
