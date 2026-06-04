@@ -242,6 +242,86 @@ describe('DefaultModelsRegistry', () => {
       expect(m?.capabilities.maxContext).toBe(500_000);
     });
 
+    it('uses bundled overlay-only model limits when the base catalog lacks a model', async () => {
+      const overlayFile = path.join(cacheDir, 'providers.json');
+      await fs.writeFile(
+        overlayFile,
+        JSON.stringify({
+          openai: {
+            id: 'openai',
+            name: 'OpenAI',
+            npm: '@ai-sdk/openai',
+            models: {
+              'gpt-5.5': {
+                id: 'gpt-5.5',
+                name: 'GPT-5.5',
+                tool_call: true,
+                limit: { context: 1_050_000 },
+              },
+            },
+          },
+        }),
+      );
+      const fetchImpl = vi.fn(
+        async () =>
+          ({
+            ok: true,
+            status: 200,
+            json: async () => SAMPLE,
+          }) as unknown as Response,
+      ) as unknown as typeof fetch;
+      const reg = new DefaultModelsRegistry({ cacheFile, fetchImpl, overlayFile });
+      const model = await reg.getModel('openai', 'gpt-5.5');
+      expect(model?.capabilities.maxContext).toBe(1_050_000);
+    });
+
+    it('falls back to bundled overlay when the fetched overlay cache is empty', async () => {
+      const overlayFile = path.join(cacheDir, 'providers.json');
+      const overlayCacheFile = path.join(cacheDir, 'overlay-cache.json');
+      await fs.writeFile(
+        overlayFile,
+        JSON.stringify({
+          openai: {
+            id: 'openai',
+            name: 'OpenAI',
+            npm: '@ai-sdk/openai',
+            models: {
+              'gpt-5.5': {
+                id: 'gpt-5.5',
+                name: 'GPT-5.5',
+                limit: { context: 1_050_000 },
+              },
+            },
+          },
+        }),
+      );
+      await fs.writeFile(
+        overlayCacheFile,
+        JSON.stringify({
+          fetchedAt: new Date().toISOString(),
+          url: 'https://example.test/providers.json',
+          payload: {},
+        }),
+      );
+      const fetchImpl = vi.fn(
+        async () =>
+          ({
+            ok: true,
+            status: 200,
+            json: async () => SAMPLE,
+          }) as unknown as Response,
+      ) as unknown as typeof fetch;
+      const reg = new DefaultModelsRegistry({
+        cacheFile,
+        fetchImpl,
+        overlayUrl: 'https://example.test/providers.json',
+        overlayFile,
+        overlayCacheFile,
+      });
+      const model = await reg.getModel('openai', 'gpt-5.5');
+      expect(model?.capabilities.maxContext).toBe(1_050_000);
+    });
+
     it('degrades to overlay-only when models.dev fails and no cache exists', async () => {
       const fetchImpl = vi.fn().mockRejectedValue(new Error('offline')) as unknown as typeof fetch;
       const overlay: ModelsDevPayload = {

@@ -121,7 +121,12 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
   const reader = new ReadlineInputReader({ historyFile: wpaths.historyFile });
   const modelsRegistry = new DefaultModelsRegistry({
     cacheFile: wpaths.modelsCache,
-    ttlSeconds: 24 * 3600,
+    // Force a refresh attempt once per CLI process. Model metadata changes faster
+    // than releases (new model ids, corrected context windows), and stale cache
+    // here directly affects runtime behavior like context bars and compaction.
+    // If the network is unavailable, DefaultModelsRegistry still falls back to
+    // stale cache or the bundled overlay instead of failing startup.
+    ttlSeconds: 0,
     // Curated overlay merged on top of models.dev: fetched from GitHub raw for
     // freshness, with the bundled file as the offline floor.
     overlayUrl: GITHUB_PROVIDERS_OVERLAY_URL,
@@ -243,7 +248,8 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
     else if (flags['no-director'] === true) directorPinned = false;
     let autonomyPinned: 'off' | 'auto' | undefined;
     if (flags['no-autonomy'] === true) autonomyPinned = 'off';
-    else if (flags['eternal'] === true) autonomyPinned = 'off'; // --eternal starts engine directly, skips launch-prompt autonomy
+    else if (flags['eternal'] === true)
+      autonomyPinned = 'off'; // --eternal starts engine directly, skips launch-prompt autonomy
     else if (typeof flags['autonomy'] === 'string') {
       const v = (flags['autonomy'] as string).toLowerCase();
       autonomyPinned = v === 'off' || v === 'no' || v === 'false' ? 'off' : 'auto';

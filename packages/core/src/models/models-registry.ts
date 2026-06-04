@@ -202,12 +202,12 @@ export class DefaultModelsRegistry implements ModelsRegistry {
    */
   private async loadOverlay(opts: { force?: boolean } = {}): Promise<ModelsDevPayload> {
     if (this.overlayPayload && !opts.force) return this.overlayPayload;
-    if (this.overlay) {
+    if (hasEntries(this.overlay)) {
       this.overlayPayload = this.overlay;
       return this.overlayPayload;
     }
     const fetched = await this.loadOverlayFromUrl(opts);
-    if (fetched) {
+    if (hasEntries(fetched)) {
       this.overlayPayload = fetched;
       return fetched;
     }
@@ -216,7 +216,9 @@ export class DefaultModelsRegistry implements ModelsRegistry {
     return this.overlayPayload;
   }
 
-  private async loadOverlayFromUrl(opts: { force?: boolean }): Promise<ModelsDevPayload | undefined> {
+  private async loadOverlayFromUrl(opts: { force?: boolean }): Promise<
+    ModelsDevPayload | undefined
+  > {
     if (!this.overlayUrl || !this.overlayCacheFile) return undefined;
     if (!opts.force) {
       const cached = await this.readCacheAt(this.overlayCacheFile);
@@ -349,4 +351,8 @@ export class DefaultModelsRegistry implements ModelsRegistry {
   cacheLocation(): string {
     return path.resolve(this.cacheFile);
   }
+}
+
+function hasEntries(payload: ModelsDevPayload | undefined): payload is ModelsDevPayload {
+  return payload !== undefined && Object.keys(payload).length > 0;
 }

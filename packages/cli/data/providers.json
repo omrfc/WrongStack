@@ -1,1 +1,22 @@
-{}
+{
+  "openai": {
+    "id": "openai",
+    "name": "OpenAI",
+    "npm": "@ai-sdk/openai",
+    "env": ["OPENAI_API_KEY"],
+    "models": {
+      "gpt-5.5": {
+        "id": "gpt-5.5",
+        "name": "GPT-5.5",
+        "tool_call": true,
+        "modalities": {
+          "input": ["text", "image"],
+          "output": ["text"]
+        },
+        "limit": {
+          "context": 1050000
+        }
+      }
+    }
+  }
+}
