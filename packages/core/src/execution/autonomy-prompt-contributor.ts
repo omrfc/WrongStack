@@ -28,7 +28,7 @@ export interface AutonomyPromptContributorOptions {
    * leak into interactive runs that happen to have a goal on disk and
    * teach the model loop-control markers it shouldn't emit.
    *
-   * Typical wiring: `() => autonomyMode === 'eternal'`.
+   * Typical wiring: enable while `eternal` or `eternal-parallel` autonomy is active.
    */
   enabled: () => boolean;
   /** Number of journal entries to include in the recent-tail block. Default 5. */
@@ -64,18 +64,16 @@ export function makeAutonomyPromptContributor(
     if (missionState !== 'active') return [];
 
     const tailSize = opts.journalTailSize ?? 5;
-    const journalTail = goal.journal
-      .slice(-tailSize)
-      .map((e) => {
-        const note = e.note ? ` — ${e.note.slice(0, 80)}` : '';
-        return `  #${e.iteration} [${e.status}] ${e.task}${note}`;
-      });
+    const journalTail = goal.journal.slice(-tailSize).map((e) => {
+      const note = e.note ? ` — ${e.note.slice(0, 80)}` : '';
+      return `  #${e.iteration} [${e.status}] ${e.task}${note}`;
+    });
 
     const text = [
       '## ETERNAL AUTONOMY — active mission',
       '',
       'You are inside a long-running autonomous loop. The user is asleep',
-      "and is not available to confirm decisions. Each turn you receive a",
+      'and is not available to confirm decisions. Each turn you receive a',
       'directive describing one concrete sub-task that advances the mission.',
       '',
       `Mission: ${goal.goal}`,

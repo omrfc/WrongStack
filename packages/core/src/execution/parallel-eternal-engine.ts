@@ -17,6 +17,21 @@ import type { MultiAgentConfig } from '../types/multi-agent.js';
 
 export type ParallelEngineState = 'idle' | 'running' | 'stopped';
 
+export type ParallelIterationStage =
+  | { phase: 'idle' }
+  | { phase: 'decompose' }
+  | { phase: 'fanout'; slots: number }
+  | { phase: 'await'; taskIds: string[] }
+  | {
+      phase: 'aggregate';
+      successCount: number;
+      total: number;
+      goalComplete: boolean;
+    }
+  | { phase: 'sleep'; ms: number }
+  | { phase: 'stopped' }
+  | { phase: 'error'; message: string };
+
 export interface ParallelEternalOptions {
   /** The coordinating agent — NOT a subagent. Owns container/tools/providers. */
   agent: Agent;
@@ -37,6 +52,8 @@ export interface ParallelEternalOptions {
   iterationTimeoutMs?: number;
   onIteration?: (entry: JournalEntry) => void;
   onError?: (err: Error, iteration: number) => void;
+  /** Per-tick phase notifications for live UI/status updates. */
+  onStage?: (stage: ParallelIterationStage) => void;
   gitStatusReader?: () => Promise<string>;
   now?: () => Date;
   compactor?: Compactor;
@@ -103,10 +120,12 @@ export class ParallelEternalEngine {
     this.timeoutMs = opts.iterationTimeoutMs ?? 300_000;
     this.dispatchEnabled = opts.dispatch !== false;
     this.dispatchClassifier = opts.dispatchClassifier;
-    this.agentFactory = opts.subagentFactory ?? (async (_config: SubagentConfig) => ({
-      agent: this.opts.agent,
-      events: this.opts.agent.events,
-    }));
+    this.agentFactory =
+      opts.subagentFactory ??
+      (async (_config: SubagentConfig) => ({
+        agent: this.opts.agent,
+        events: this.opts.agent.events,
+      }));
   }
 
   get currentState(): ParallelEngineState {
@@ -151,8 +170,14 @@ export class ParallelEternalEngine {
           await this.runOneIteration();
         } catch (err) {
           this.consecutiveFailures++;
-          this.opts.onError?.(err instanceof Error ? err : new Error(String(err)), this.consecutiveFailures);
-          await this.appendFailure('engine error', err instanceof Error ? err.message : String(err));
+          this.opts.onError?.(
+            err instanceof Error ? err : new Error(String(err)),
+            this.consecutiveFailures,
+          );
+          await this.appendFailure(
+            'engine error',
+            err instanceof Error ? err.message : String(err),
+          );
         }
         if (this.stopRequested) break;
         await sleep(2000);
@@ -168,11 +193,23 @@ export class ParallelEternalEngine {
    * Called by the REPL in its main loop (REPL drives, engine is stateless per tick).
    */
   async runOneIteration(): Promise<boolean> {
+    const emit = (stage: ParallelIterationStage) => {
+      this.opts.onStage?.(stage);
+    };
+
     this.iterations++;
 
     const goal = await loadGoal(this.goalPath);
-    if (!goal) { this.stopRequested = true; return false; }
-    if (goal.goalState !== 'active') { this.stopRequested = true; return false; }
+    if (!goal) {
+      this.stopRequested = true;
+      emit({ phase: 'stopped' });
+      return false;
+    }
+    if (goal.goalState !== 'active') {
+      this.stopRequested = true;
+      emit({ phase: 'stopped' });
+      return false;
+    }
 
     // Build coordinator on first tick.
     if (!this.coordinator) {
@@ -186,46 +223,64 @@ export class ParallelEternalEngine {
       this.coordinator.setRunner?.(runner);
     }
 
+    emit({ phase: 'decompose' });
     const tasks = await this.decomposeGoal(goal);
     if (!tasks || tasks.length === 0) {
       // Nothing to do this tick. The run() loop paces idle iterations itself
       // (see its sleep), so a single runOneIteration() must return promptly.
+      emit({ phase: 'sleep', ms: 2000 });
       return false;
     }
 
+    emit({ phase: 'fanout', slots: Math.min(this.slots, tasks.length) });
     const fanOut = await this.fanOut(goal, tasks);
     this.iterationsSinceCompact++;
 
-    const successCount = fanOut.results.filter(r => r.status === 'success').length;
-    const status: JournalEntry['status'] = fanOut.goalComplete ? 'success' : fanOut.allSuccessful ? 'success' : 'failure';
+    const successCount = fanOut.results.filter((r) => r.status === 'success').length;
+    const status: JournalEntry['status'] = fanOut.goalComplete
+      ? 'success'
+      : fanOut.allSuccessful
+        ? 'success'
+        : 'failure';
     const note = [
       `${successCount}/${fanOut.results.length} subagents succeeded`,
       fanOut.goalComplete ? '[GOAL_COMPLETE]' : '',
       fanOut.partialOutput ? `Output: ${fanOut.partialOutput.slice(0, 120)}` : '',
-    ].filter(Boolean).join(' | ');
+    ]
+      .filter(Boolean)
+      .join(' | ');
 
     // Surface routing in the journal: "role→task-snippet" per slot so /goal
     // journal shows which agent handled what.
-    const routeSummary = fanOut.routes.length > 0
-      ? fanOut.routes
-          .slice(0, 3)
-          .map((r) => `${r.role}→${r.task.slice(0, 28)}`)
-          .join(', ')
-      : tasks.slice(0, 3).join(', ');
+    const routeSummary =
+      fanOut.routes.length > 0
+        ? fanOut.routes
+            .slice(0, 3)
+            .map((r) => `${r.role}→${r.task.slice(0, 28)}`)
+            .join(', ')
+        : tasks.slice(0, 3).join(', ');
     await this.appendIterationEntry({
       source: 'parallel',
       task: `parallel:${tasks.length} slots — ${routeSummary}${tasks.length > 3 ? '...' : ''}`,
       status,
       note,
     });
+    emit({
+      phase: 'aggregate',
+      successCount,
+      total: fanOut.results.length,
+      goalComplete: fanOut.goalComplete,
+    });
 
     if (fanOut.goalComplete) {
       this.stopRequested = true;
       this.state = 'stopped';
+      emit({ phase: 'stopped' });
       return true;
     }
 
     await this.maybeCompact();
+    emit({ phase: 'sleep', ms: 2000 });
     return fanOut.allSuccessful;
   }
 
@@ -233,7 +288,10 @@ export class ParallelEternalEngine {
   // Fan-out
   // -------------------------------------------------------------------------
 
-  private async fanOut(goal: GoalFile, tasks: string[]): Promise<{
+  private async fanOut(
+    goal: GoalFile,
+    tasks: string[],
+  ): Promise<{
     results: TaskResult[];
     allSuccessful: boolean;
     goalComplete: boolean;
@@ -248,14 +306,20 @@ export class ParallelEternalEngine {
     // A dispatch failure for one slot is non-fatal — that slot stays generic.
     const routes: (DispatchResult | null)[] = this.dispatchEnabled
       ? await Promise.all(
-          tasks.slice(0, slotCount).map((t) =>
-            dispatchAgent(t, { classifier: this.dispatchClassifier }).catch(() => null),
-          ),
+          tasks
+            .slice(0, slotCount)
+            .map((t) =>
+              dispatchAgent(t, { classifier: this.dispatchClassifier }).catch(() => null),
+            ),
         )
       : [];
 
-    const recentJournal = goal.journal.slice(-5)
-      .map(e => `  #${e.iteration} [${e.status}] ${e.task}${e.note ? ` — ${e.note.slice(0, 80)}` : ''}`)
+    const recentJournal = goal.journal
+      .slice(-5)
+      .map(
+        (e) =>
+          `  #${e.iteration} [${e.status}] ${e.task}${e.note ? ` — ${e.note.slice(0, 80)}` : ''}`,
+      )
       .join('\n');
 
     const directivePreamble = [
@@ -304,42 +368,52 @@ export class ParallelEternalEngine {
         method: route?.method ?? 'none',
       });
 
-      spawnPromises.push((async () => {
-        try {
-          // Spawn in-role when routed: `role` lets applyRosterBudget resolve the
-          // role's budget tier; name/tools/systemPromptOverride specialize the
-          // worker if a real per-role factory is wired (forward-compatible).
-          await coordinator.spawn(
-            route
-              ? {
-                  id: subagentId,
-                  name: route.definition.config.name,
-                  role: route.role,
-                  tools: route.definition.config.tools,
-                  systemPromptOverride: route.definition.config.prompt,
-                  timeoutMs: this.timeoutMs,
-                }
-              : {
-                  id: subagentId,
-                  name: `slot-${subagentId.slice(-6)}`,
-                  // Let the coordinator apply its default budget (roster or generic).
-                  // Hardcoding low limits here defeats the x10 budget improvement.
-                  timeoutMs: this.timeoutMs,
-                },
-          );
-          subagentIds.push(subagentId);
-          taskIds.push(taskId);
-          await coordinator.assign(spec);
-        } catch {
-          // non-fatal: individual spawn failure doesn't block other slots
-        }
-      })());
+      spawnPromises.push(
+        (async () => {
+          try {
+            // Spawn in-role when routed: `role` lets applyRosterBudget resolve the
+            // role's budget tier; name/tools/systemPromptOverride specialize the
+            // worker if a real per-role factory is wired (forward-compatible).
+            await coordinator.spawn(
+              route
+                ? {
+                    id: subagentId,
+                    name: route.definition.config.name,
+                    role: route.role,
+                    tools: route.definition.config.tools,
+                    systemPromptOverride: route.definition.config.prompt,
+                    timeoutMs: this.timeoutMs,
+                  }
+                : {
+                    id: subagentId,
+                    name: `slot-${subagentId.slice(-6)}`,
+                    // Let the coordinator apply its default budget (roster or generic).
+                    // Hardcoding low limits here defeats the x10 budget improvement.
+                    timeoutMs: this.timeoutMs,
+                  },
+            );
+            subagentIds.push(subagentId);
+            taskIds.push(taskId);
+            await coordinator.assign(spec);
+          } catch {
+            // non-fatal: individual spawn failure doesn't block other slots
+          }
+        })(),
+      );
     }
     await Promise.all(spawnPromises);
 
     if (taskIds.length === 0) {
-      return { results: [], allSuccessful: false, goalComplete: false, partialOutput: '', routes: routeInfo };
+      return {
+        results: [],
+        allSuccessful: false,
+        goalComplete: false,
+        partialOutput: '',
+        routes: routeInfo,
+      };
     }
+
+    this.opts.onStage?.({ phase: 'await', taskIds: [...taskIds] });
 
     let results: TaskResult[] = [];
     try {
@@ -357,12 +431,15 @@ export class ParallelEternalEngine {
       results = coordinator.results().slice(-taskIds.length);
     }
 
-    const allSuccessful = results.length > 0 && results.every(r => r.status === 'success');
-    const goalComplete = results.some(r =>
-      r.status === 'success' && typeof r.result === 'string' && GOAL_COMPLETE_MARKER.test(r.result)
+    const allSuccessful = results.length > 0 && results.every((r) => r.status === 'success');
+    const goalComplete = results.some(
+      (r) =>
+        r.status === 'success' &&
+        typeof r.result === 'string' &&
+        GOAL_COMPLETE_MARKER.test(r.result),
     );
     const partialOutput = results
-      .map(r => (typeof r.result === 'string' ? r.result : ''))
+      .map((r) => (typeof r.result === 'string' ? r.result : ''))
       .filter(Boolean)
       .join('\n\n');
 
@@ -423,7 +500,10 @@ export class ParallelEternalEngine {
   }
 
   private async brainstormSubtasks(goal: GoalFile, count: number): Promise<string[]> {
-    const lastFew = goal.journal.slice(-5).map((e) => `  - [${e.status}] ${e.task}`).join('\n');
+    const lastFew = goal.journal
+      .slice(-5)
+      .map((e) => `  - [${e.status}] ${e.task}`)
+      .join('\n');
     const directive = [
       `Decompose this goal into exactly ${count} independent sub-tasks for parallel execution.`,
       '',
@@ -447,7 +527,10 @@ export class ParallelEternalEngine {
         if (result.status !== 'done') return [];
         const text = (result.finalText ?? '').trim();
         if (!text) return [];
-        const tasks = text.split('|').map(t => t.trim()).filter(t => t.length > 10 && t.length < 240);
+        const tasks = text
+          .split('|')
+          .map((t) => t.trim())
+          .filter((t) => t.length > 10 && t.length < 240);
         return tasks.slice(0, count);
       } finally {
         clearTimeout(timer);

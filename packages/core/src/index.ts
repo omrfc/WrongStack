@@ -143,6 +143,10 @@ export {
   type IntelligentCompactorOptions,
   type SelectiveCompactorOptions,
 } from './defaults/index.js';
+export type {
+  IterationStage,
+  ParallelIterationStage,
+} from './execution/index.js';
 export {
   CONTEXT_WINDOW_MODES,
   DEFAULT_CONTEXT_WINDOW_MODE_ID,

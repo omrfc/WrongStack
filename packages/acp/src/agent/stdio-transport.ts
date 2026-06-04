@@ -8,7 +8,7 @@
  * Start message: clients look for the `[wstack-acp]` marker on stdout before
  * treating subsequent lines as protocol messages.
  */
-import { buildChildEnv, writeErr } from '@wrongstack/core';
+import { writeErr } from '@wrongstack/core';
 import type { ACPMessage } from '../types/acp-messages.js';
 
 export interface AgentServerTransport {
@@ -122,7 +122,6 @@ export class StdioTransport implements AgentServerTransport {
 // ClientTransport — spawns a child ACP agent process (DIR-1)
 // ---------------------------------------------------------------------------
 
-import { spawn } from 'node:child_process';
 import type { EventEmitter } from 'node:events';
 
 export interface ClientTransportOptions {
@@ -160,6 +159,10 @@ export class ClientTransport {
 
   async start(): Promise<void> {
     if (this.child) return;
+    const [{ spawn }, { buildChildEnv }] = await Promise.all([
+      import('node:child_process'),
+      import('@wrongstack/core'),
+    ]);
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(

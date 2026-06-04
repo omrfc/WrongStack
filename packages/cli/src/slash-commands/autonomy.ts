@@ -68,8 +68,16 @@ export function buildAutonomyCommand(opts: SlashCommandContext): SlashCommand {
           const goal = await loadGoal(goalFilePath(opts.projectRoot));
           if (goal) {
             const u = summarizeUsage(goal);
-            lines.push(color.dim(`  Goal: ${goal.goal.length > 80 ? `${goal.goal.slice(0, 77)}…` : goal.goal}`));
-            lines.push(color.dim(`  Engine state: ${goal.engineState}  ·  iterations: ${goal.iterations}  ·  journal: ${goal.journal.length}`));
+            lines.push(
+              color.dim(
+                `  Goal: ${goal.goal.length > 80 ? `${goal.goal.slice(0, 77)}…` : goal.goal}`,
+              ),
+            );
+            lines.push(
+              color.dim(
+                `  Engine state: ${goal.engineState}  ·  iterations: ${goal.iterations}  ·  journal: ${goal.journal.length}`,
+              ),
+            );
             if (u.iterationsWithUsage > 0) {
               lines.push(
                 color.dim(
@@ -80,7 +88,9 @@ export function buildAutonomyCommand(opts: SlashCommandContext): SlashCommand {
             const recent = goal.journal.slice(-10);
             const failed = recent.filter((e) => e.status === 'failure').length;
             if (failed > 0) {
-              lines.push(color.amber(`  Recent failures: ${failed} of last ${recent.length} iterations`));
+              lines.push(
+                color.amber(`  Recent failures: ${failed} of last ${recent.length} iterations`),
+              );
             }
           }
         } catch {
@@ -121,7 +131,7 @@ export function buildAutonomyCommand(opts: SlashCommandContext): SlashCommand {
         } catch {
           // best-effort
         }
-        const msg = `${color.amber('Eternal/parallel mode stop requested.')} The current iteration will finish, then the loop exits.${summaryLine}`;
+        const msg = `${color.amber('Eternal/parallel mode stop requested.')} In-flight eternal work is cancelled; parallel fan-out stops after the current tick cleans up.${summaryLine}`;
         opts.renderer.write(msg);
         return { message: msg };
       }
@@ -134,13 +144,18 @@ export function buildAutonomyCommand(opts: SlashCommandContext): SlashCommand {
         newMode = 'off';
       } else if (arg === 'suggest' || arg === 'suggestions') {
         newMode = 'suggest';
-      } else if (arg === 'eternal' || arg === 'forever' || arg === 'infinite' || arg === 'sittinsene') {
+      } else if (
+        arg === 'eternal' ||
+        arg === 'forever' ||
+        arg === 'infinite' ||
+        arg === 'sittinsene'
+      ) {
         newMode = 'eternal';
       } else if (arg === 'parallel' || arg === 'eternal-parallel' || arg === 'fanout') {
         newMode = 'eternal-parallel';
       } else if (arg === 'toggle' || arg === 'cycle') {
         const current = opts.onAutonomy() ?? 'off';
-        const cycle: AutonomyMode[] = ['off', 'suggest', 'auto', 'eternal'];
+        const cycle: AutonomyMode[] = ['off', 'suggest', 'auto', 'eternal', 'eternal-parallel'];
         newMode = cycle[(cycle.indexOf(current) + 1) % cycle.length] ?? 'off';
       } else {
         const msg = `Unknown argument: ${arg}. Use /autonomy on, off, suggest, eternal, parallel, stop, or toggle.`;
@@ -179,9 +194,7 @@ export function buildAutonomyCommand(opts: SlashCommandContext): SlashCommand {
         // hard-error if stale.
         if (!wantKeep) {
           if (opts.confirm) {
-            const goalPreview = goal.goal.length > 80
-              ? `${goal.goal.slice(0, 77)}…`
-              : goal.goal;
+            const goalPreview = goal.goal.length > 80 ? `${goal.goal.slice(0, 77)}…` : goal.goal;
             const detail = isStale
               ? `${color.amber('Stale goal')} (${goal.iterations} iterations, engineState: ${goal.engineState}): "${goalPreview}". Continue with this mission?`
               : `Existing goal: "${goalPreview}". Use this mission?`;
@@ -221,9 +234,10 @@ export function buildAutonomyCommand(opts: SlashCommandContext): SlashCommand {
         if (opts.onYolo) opts.onYolo(true);
         opts.onAutonomy(newMode);
         opts.onEternalStart(newMode);
-        const modeLabel = newMode === 'eternal-parallel'
-          ? `${color.magenta('PARALLEL')} mode`
-          : `${color.red('ETERNAL')} mode`;
+        const modeLabel =
+          newMode === 'eternal-parallel'
+            ? `${color.magenta('PARALLEL')} mode`
+            : `${color.red('ETERNAL')} mode`;
         const msg =
           `Autonomy mode: ${modeLabel} — engine launching against goal: ${color.bold(goal.goal)}\n` +
           `${color.dim('YOLO forced ON. Use /autonomy stop to end. Journal at /goal journal.')}`;

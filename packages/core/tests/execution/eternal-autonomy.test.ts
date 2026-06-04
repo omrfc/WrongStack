@@ -40,7 +40,9 @@ function makeMockAgent(setup: MockAgentSetup = {}): Agent {
   } as unknown as Agent;
 }
 
-function makeMockTokenCounter(seq: Array<{ input: number; output: number; cost: number; requestInput?: number }>): MockAgentSetup['tokenCounter'] {
+function makeMockTokenCounter(
+  seq: Array<{ input: number; output: number; cost: number; requestInput?: number }>,
+): MockAgentSetup['tokenCounter'] {
   let i = 0;
   return {
     total: () => {
@@ -158,14 +160,32 @@ describe('EternalAutonomyEngine', () => {
     expect(after?.journal[0]?.source).toBe('brainstorm');
   });
 
+  it('emits live stage callbacks for a serial iteration', async () => {
+    const phases: string[] = [];
+    const agent = makeMockAgent({
+      todos: [{ id: 't1', content: 'do thing', status: 'pending' }],
+    });
+    const engine = new EternalAutonomyEngine({
+      agent,
+      projectRoot,
+      gitStatusReader: async () => '',
+      onStage: (stage) => phases.push(stage.phase),
+    });
+
+    await engine.runOneIteration();
+
+    expect(phases).toEqual(['decide', 'execute', 'reflect', 'sleep']);
+  });
+
   it('records failures in the journal but keeps the engine alive', async () => {
     const agent = makeMockAgent({
       todos: [{ id: 't1', content: 'do thing', status: 'pending' }],
-      runImpl: async () => ({
-        status: 'failed',
-        iterations: 1,
-        error: { describe: () => 'provider unreachable' } as any,
-      } as any),
+      runImpl: async () =>
+        ({
+          status: 'failed',
+          iterations: 1,
+          error: { describe: () => 'provider unreachable' } as any,
+        }) as any,
     });
     const engine = new EternalAutonomyEngine({
       agent,
@@ -349,7 +369,8 @@ describe('EternalAutonomyEngine', () => {
     const agent = makeMockAgent({
       todos,
       runImpl: async (input: unknown) => {
-        const text = Array.isArray(input) && input[0] && 'text' in input[0] ? (input[0] as any).text : '';
+        const text =
+          Array.isArray(input) && input[0] && 'text' in input[0] ? (input[0] as any).text : '';
         if (text.includes('You are deciding the next action')) {
           brainstormHit = true;
           return { status: 'done', iterations: 1, finalText: 'try a totally different path' };
@@ -393,7 +414,9 @@ describe('EternalAutonomyEngine', () => {
       agent,
       projectRoot,
       gitStatusReader: async () => '',
-      onEternalStop: () => { onEternalStopCalled = true; },
+      onEternalStop: () => {
+        onEternalStopCalled = true;
+      },
     });
 
     const ok = await engine.runOneIteration();
@@ -461,7 +484,8 @@ describe('EternalAutonomyEngine', () => {
     const agent = makeMockAgent({
       todos,
       runImpl: async (input: unknown) => {
-        const text = Array.isArray(input) && input[0] && 'text' in input[0] ? (input[0] as any).text : '';
+        const text =
+          Array.isArray(input) && input[0] && 'text' in input[0] ? (input[0] as any).text : '';
         if (text.includes('cannot do')) {
           return {
             status: 'failed',
@@ -542,14 +566,15 @@ describe('EternalAutonomyEngine', () => {
   it('does NOT back off on permanent (non-recoverable) failures', async () => {
     const agent = makeMockAgent({
       todos: [{ id: 't1', content: 'work', status: 'pending' }],
-      runImpl: async () => ({
-        status: 'failed',
-        iterations: 1,
-        error: {
-          recoverable: false,
-          describe: () => 'auth error (401)',
-        } as any,
-      } as any),
+      runImpl: async () =>
+        ({
+          status: 'failed',
+          iterations: 1,
+          error: {
+            recoverable: false,
+            describe: () => 'auth error (401)',
+          } as any,
+        }) as any,
     });
     const engine = new EternalAutonomyEngine({
       agent,
@@ -600,11 +625,12 @@ describe('EternalAutonomyEngine', () => {
     // Swap in an always-failing agent without rebuilding the engine.
     (engine as any).opts.agent = makeMockAgent({
       todos: [{ id: 't2', content: 'work', status: 'pending' }],
-      runImpl: async () => ({
-        status: 'failed',
-        iterations: 1,
-        error: { recoverable: true, describe: () => 'transient again' } as any,
-      } as any),
+      runImpl: async () =>
+        ({
+          status: 'failed',
+          iterations: 1,
+          error: { recoverable: true, describe: () => 'transient again' } as any,
+        }) as any,
     });
     const t0 = Date.now();
     await engine.runOneIteration();

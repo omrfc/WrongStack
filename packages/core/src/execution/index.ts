@@ -20,6 +20,7 @@ export {
   ParallelEternalEngine,
   type ParallelEternalOptions,
   type ParallelEngineState,
+  type ParallelIterationStage,
 } from './parallel-eternal-engine.js';
 export {
   makeAutonomyPromptContributor,

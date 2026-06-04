@@ -158,11 +158,13 @@ export {
   EternalAutonomyEngine,
   type EternalAutonomyOptions,
   type EternalEngineState,
+  type IterationStage,
 } from '../execution/eternal-autonomy.js';
 export {
   ParallelEternalEngine,
   type ParallelEternalOptions,
   type ParallelEngineState,
+  type ParallelIterationStage,
 } from '../execution/parallel-eternal-engine.js';
 export {
   makeAutonomyPromptContributor,
@@ -275,12 +277,8 @@ export {
   type AutoExtendPolicy,
   type AutoExtendCeiling,
 } from '../coordination/auto-extend.js';
-export type {
-  ICoordinator,
-} from '../coordination/icoordinator.js';
-export type {
-  IFleetManager,
-} from '../coordination/ifleet-manager.js';
+export type { ICoordinator } from '../coordination/icoordinator.js';
+export type { IFleetManager } from '../coordination/ifleet-manager.js';
 export { NULL_FLEET_BUS } from '../coordination/null-fleet-bus.js';
 
 // ---- Models ----
@@ -322,7 +320,11 @@ export {
   type SpecDrivenDevOptions,
 } from '../sdd/task-flow.js';
 export { SpecStore, type SpecStoreOptions, type SpecIndexEntry } from '../sdd/spec-store.js';
-export { TaskGraphStore, type TaskGraphStoreOptions, type TaskGraphIndexEntry } from '../sdd/task-graph-store.js';
+export {
+  TaskGraphStore,
+  type TaskGraphStoreOptions,
+  type TaskGraphIndexEntry,
+} from '../sdd/task-graph-store.js';
 export {
   AISpecBuilder,
   type AISpecBuilderOptions,
@@ -330,9 +332,23 @@ export {
   type AISpecSession,
   type CollectedAnswer,
 } from '../sdd/spec-builder.js';
-export { SPEC_TEMPLATES, getTemplate, listTemplates, templateToMarkdown } from '../sdd/spec-templates.js';
-export { renderTaskGraph, renderProgress, renderTaskList, renderSpecAnalysis } from '../sdd/task-visualizer.js';
-export { analyzeCriticalPath, type CriticalPathAnalysis, type BottleneckTask } from '../sdd/critical-path.js';
+export {
+  SPEC_TEMPLATES,
+  getTemplate,
+  listTemplates,
+  templateToMarkdown,
+} from '../sdd/spec-templates.js';
+export {
+  renderTaskGraph,
+  renderProgress,
+  renderTaskList,
+  renderSpecAnalysis,
+} from '../sdd/task-visualizer.js';
+export {
+  analyzeCriticalPath,
+  type CriticalPathAnalysis,
+  type BottleneckTask,
+} from '../sdd/critical-path.js';
 export { SpecVersioning, type SpecVersion, type SpecDiff } from '../sdd/spec-versioning.js';
 export {
   AutoExecutor,

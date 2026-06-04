@@ -75,7 +75,9 @@ export interface ExecutionDeps {
   };
   /** Status bar hidden items controller (passed to TUI). */
   statuslineHiddenItems: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>;
-  setStatuslineHiddenItems: (items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>) => void;
+  setStatuslineHiddenItems: (
+    items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>,
+  ) => void;
   /** Agents monitor overlay controller (passed to TUI). */
   agentsMonitorController?: {
     visible: boolean;
@@ -109,34 +111,16 @@ export interface ExecutionDeps {
     fn: (entry: import('@wrongstack/core').JournalEntry) => void,
   ) => () => void;
   /**
-   * Subscribe to per-iteration stage transitions from the eternal engine.
+   * Subscribe to per-iteration stage transitions from the autonomy engines.
    * Returns an unsubscribe function. TUI uses this to render live status
-   * (decide → execute → reflect → sleep/paused/stopped) in the status bar.
+   * (decide/execute/reflect or decompose/fanout/aggregate) in the status bar.
    */
   subscribeEternalStage?: (
-    fn: (stage: {
-      phase: 'idle';
-    } | {
-      phase: 'decide';
-      reason: string;
-    } | {
-      phase: 'execute';
-      task: string;
-    } | {
-      phase: 'reflect';
-      status: 'success' | 'failure' | 'aborted' | 'skipped';
-      note?: string;
-    } | {
-      phase: 'sleep';
-      ms: number;
-    } | {
-      phase: 'paused';
-    } | {
-      phase: 'stopped';
-    } | {
-      phase: 'error';
-      message: string;
-    }) => void,
+    fn: (
+      stage:
+        | import('@wrongstack/core').IterationStage
+        | import('@wrongstack/core').ParallelIterationStage,
+    ) => void,
   ) => () => void;
   /** Skill loader for the skill generator wizard. */
   skillLoader?: import('@wrongstack/core').SkillLoader;
@@ -287,7 +271,10 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         }
         if (result.finalText) renderer.write('\n' + result.finalText + '\n');
         // Surface any delegate subagent completion banners.
-        const r = result as { delegateSummaries?: Array<{ summary: string; ok: boolean }>; messages?: Array<unknown> };
+        const r = result as {
+          delegateSummaries?: Array<{ summary: string; ok: boolean }>;
+          messages?: Array<unknown>;
+        };
         renderer.writeDelegateSummaries(r);
         renderer.write(
           '\n' +
@@ -304,7 +291,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
       // the input deadlocked. After this call, tool.confirm_needed events
       // fire instead, which the TUI's ConfirmPrompt component handles.
       agent.disableInteractiveConfirmation();
-      const { runTui } = await import('@wrongstack/tui') as {
+      const { runTui } = (await import('@wrongstack/tui')) as {
         runTui: (opts: import('@wrongstack/tui').RunTuiOptions) => Promise<number>;
       };
       renderer.setSilent(true);
@@ -465,7 +452,9 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                 '\n',
             );
           },
-          onClearHistory: (dispatch: (action: { type: 'clearHistory' } | { type: 'resetContextChip' }) => void) => {
+          onClearHistory: (
+            dispatch: (action: { type: 'clearHistory' } | { type: 'resetContextChip' }) => void,
+          ) => {
             dispatch({ type: 'clearHistory' });
             dispatch({ type: 'resetContextChip' });
           },
@@ -481,10 +470,18 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             return getActiveSDDContext();
           },
           onSDDOutput: async (output: string) => {
-            const { trySaveSpecFromAIOutput, trySaveImplementationPlan, trySaveTasksFromAIOutput, autoDetectTaskCompletion, getTaskProgress, getActiveSDDPhase } = require('./slash-commands/sdd.js');
+            const {
+              trySaveSpecFromAIOutput,
+              trySaveImplementationPlan,
+              trySaveTasksFromAIOutput,
+              autoDetectTaskCompletion,
+              getTaskProgress,
+              getActiveSDDPhase,
+            } = require('./slash-commands/sdd.js');
             const messages: string[] = [];
             const specSaved = await trySaveSpecFromAIOutput(output);
-            if (specSaved) messages.push('✓ Spec detected and saved! Use /sdd approve to continue.');
+            if (specSaved)
+              messages.push('✓ Spec detected and saved! Use /sdd approve to continue.');
             const planSaved = trySaveImplementationPlan(output);
             if (planSaved) messages.push('✓ Implementation plan saved!');
             const tasksSaved = await trySaveTasksFromAIOutput(output);
@@ -499,7 +496,9 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
               if (autoCompleted > 0) {
                 const progress = getTaskProgress();
                 if (progress) {
-                  messages.push(`✓ ${autoCompleted} task(s) auto-completed! Progress: ${progress.completed}/${progress.total} (${progress.percentComplete}%)`);
+                  messages.push(
+                    `✓ ${autoCompleted} task(s) auto-completed! Progress: ${progress.completed}/${progress.total} (${progress.percentComplete}%)`,
+                  );
                 }
               }
             }
@@ -583,7 +582,11 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     fleetStatusLine?.stop();
     // stats.render is synchronous but can throw — isolate it so cleanup
     // always runs regardless.
-    try { stats.render(renderer); } catch (_err) { /* best-effort */ }
+    try {
+      stats.render(renderer);
+    } catch (_err) {
+      /* best-effort */
+    }
     await Promise.resolve(detachTodosCheckpoint?.()).catch(() => undefined);
     await mcpRegistry.stopAll();
     await session.append({

@@ -22,15 +22,21 @@ class FakeRenderer {
   write(s: unknown): void {
     this.output += typeof s === 'string' ? s : '';
   }
-  writeLine(s = ''): void { this.output += `${s}\n`; }
+  writeLine(s = ''): void {
+    this.output += `${s}\n`;
+  }
   writeBlock(): void {}
   writeToolCall(): void {}
   writeToolResult(): void {}
   writeDiff(): void {}
-  writeWarning(s: string): void { this.warnings.push(s); }
+  writeWarning(s: string): void {
+    this.warnings.push(s);
+  }
   writeError(): void {}
   writeInfo(): void {}
-  clear(): void { this.output = ''; }
+  clear(): void {
+    this.output = '';
+  }
 }
 
 function rig(projectRoot: string) {
@@ -70,8 +76,14 @@ function rig(projectRoot: string) {
 }
 
 const fakeCtx = {
-  messages: [], todos: [], systemPrompt: [], readFiles: new Set(), fileMtimes: new Map(),
-  model: 'test-model', cwd: '/tmp', projectRoot: '/proj',
+  messages: [],
+  todos: [],
+  systemPrompt: [],
+  readFiles: new Set(),
+  fileMtimes: new Map(),
+  model: 'test-model',
+  cwd: '/tmp',
+  projectRoot: '/proj',
 } as unknown as Context;
 
 describe('/autonomy slash command', () => {
@@ -92,8 +104,8 @@ describe('/autonomy slash command', () => {
     expect(result?.message).toContain('OFF');
   });
 
-  it('toggles through off → suggest → auto → eternal cycle', async () => {
-    await saveGoal(goalFilePath(tmp), emptyGoal('mission')); // eternal needs a goal
+  it('toggles through off → suggest → auto → eternal → parallel cycle', async () => {
+    await saveGoal(goalFilePath(tmp), emptyGoal('mission')); // eternal/parallel need a goal
     const { registry, getMode } = rig(tmp);
     await registry.dispatch('/autonomy toggle', fakeCtx);
     expect(getMode()).toBe('suggest');
@@ -101,6 +113,8 @@ describe('/autonomy slash command', () => {
     expect(getMode()).toBe('auto');
     await registry.dispatch('/autonomy toggle', fakeCtx);
     expect(getMode()).toBe('eternal');
+    await registry.dispatch('/autonomy toggle', fakeCtx);
+    expect(getMode()).toBe('eternal-parallel');
     await registry.dispatch('/autonomy toggle', fakeCtx);
     expect(getMode()).toBe('off');
   });

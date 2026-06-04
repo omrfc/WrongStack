@@ -23,13 +23,20 @@ function makeMockAgent(overrides: Partial<Agent> = {}): Agent {
       signal: new AbortController().signal,
       session: { append: vi.fn(), close: vi.fn() } as never,
       state: {} as never,
-      tokenCounter: { currentRequestTokens: () => ({ input: 100, output: 50, cacheRead: 0 }) } as never,
+      tokenCounter: {
+        currentRequestTokens: () => ({ input: 100, output: 50, cacheRead: 0 }),
+      } as never,
       modeStore: { get: vi.fn(), set: vi.fn() } as never,
       registerAbortHook: vi.fn(),
       drainAbortHooks: vi.fn(),
       isDisposed: false,
     },
-    run: vi.fn(async () => ({ status: 'done' as const, finalText: 'DONE', iterations: 1, toolCalls: 0 })),
+    run: vi.fn(async () => ({
+      status: 'done' as const,
+      finalText: 'DONE',
+      iterations: 1,
+      toolCalls: 0,
+    })),
     events: { emit: vi.fn(), on: vi.fn(() => () => {}), off: vi.fn() } as never,
     container: { resolve: vi.fn() } as never,
     tools: { register: vi.fn(), all: () => [] } as never,
@@ -76,7 +83,11 @@ describe('ParallelEternalEngine', () => {
   afterEach(async () => {
     // Stop all tracked engines first — aborts in-flight async operations.
     for (const eng of engines) {
-      try { eng.stop(); } catch { /* ignore — may already be stopped */ }
+      try {
+        eng.stop();
+      } catch {
+        /* ignore — may already be stopped */
+      }
     }
     engines.length = 0;
 
@@ -101,7 +112,12 @@ describe('ParallelEternalEngine', () => {
 
     it('respects parallelSlots option', () => {
       const agent = makeMockAgent();
-      const engine = new ParallelEternalEngine({ agent, projectRoot: tmpDir, goalPath, parallelSlots: 8 });
+      const engine = new ParallelEternalEngine({
+        agent,
+        projectRoot: tmpDir,
+        goalPath,
+        parallelSlots: 8,
+      });
       // Slots are capped at 16, so 8 is accepted
       // The only way to verify is through behavior — we check the slot count indirectly
       expect(engine.currentState).toBe('idle');
@@ -109,13 +125,23 @@ describe('ParallelEternalEngine', () => {
 
     it('caps parallelSlots at 16', () => {
       const agent = makeMockAgent();
-      const engine = new ParallelEternalEngine({ agent, projectRoot: tmpDir, goalPath, parallelSlots: 99 });
+      const engine = new ParallelEternalEngine({
+        agent,
+        projectRoot: tmpDir,
+        goalPath,
+        parallelSlots: 99,
+      });
       expect(engine.currentState).toBe('idle');
     });
 
     it('floors parallelSlots at 1', () => {
       const agent = makeMockAgent();
-      const engine = new ParallelEternalEngine({ agent, projectRoot: tmpDir, goalPath, parallelSlots: 0 });
+      const engine = new ParallelEternalEngine({
+        agent,
+        projectRoot: tmpDir,
+        goalPath,
+        parallelSlots: 0,
+      });
       expect(engine.currentState).toBe('idle');
     });
   });
@@ -164,7 +190,12 @@ describe('ParallelEternalEngine', () => {
     it('writes a journal entry after a tick', async () => {
       const { writeFile, readFile, rm } = await import('node:fs/promises');
       const agent = makeMockAgent({
-        run: vi.fn(async () => ({ status: 'done' as const, finalText: 'Inspect the codebase', iterations: 1, toolCalls: 0 })),
+        run: vi.fn(async () => ({
+          status: 'done' as const,
+          finalText: 'Inspect the codebase',
+          iterations: 1,
+          toolCalls: 0,
+        })),
       });
       await writeFile(goalPath, JSON.stringify(makeGoal()), 'utf-8');
       const engine = new ParallelEternalEngine({ agent, projectRoot: tmpDir, goalPath });
@@ -180,18 +211,49 @@ describe('ParallelEternalEngine', () => {
       const { writeFile, rm } = await import('node:fs/promises');
       const entries: JournalEntry[] = [];
       const agent = makeMockAgent({
-        run: vi.fn(async () => ({ status: 'done' as const, finalText: 'Write tests', iterations: 1, toolCalls: 0 })),
+        run: vi.fn(async () => ({
+          status: 'done' as const,
+          finalText: 'Write tests',
+          iterations: 1,
+          toolCalls: 0,
+        })),
       });
       await writeFile(goalPath, JSON.stringify(makeGoal()), 'utf-8');
       const engine = new ParallelEternalEngine({
         agent,
         projectRoot: tmpDir,
-      goalPath,
+        goalPath,
         onIteration: (e) => entries.push(e),
       });
       await engine.runOneIteration();
       expect(entries.length).toBe(1);
       expect(entries[0]!.source).toBe('parallel');
+      await rm(tmpDir, { recursive: true });
+    });
+
+    it('emits live stage callbacks for a parallel tick', async () => {
+      const { writeFile, rm } = await import('node:fs/promises');
+      const phases: string[] = [];
+      const agent = makeMockAgent({
+        run: vi.fn(async () => ({
+          status: 'done' as const,
+          finalText: 'Write tests',
+          iterations: 1,
+          toolCalls: 0,
+        })),
+      });
+      await writeFile(goalPath, JSON.stringify(makeGoal()), 'utf-8');
+      const engine = new ParallelEternalEngine({
+        agent,
+        projectRoot: tmpDir,
+        goalPath,
+        onStage: (stage) => phases.push(stage.phase),
+      });
+      await engine.runOneIteration();
+      expect(phases).toContain('decompose');
+      expect(phases).toContain('fanout');
+      expect(phases).toContain('await');
+      expect(phases).toContain('aggregate');
       await rm(tmpDir, { recursive: true });
     });
 
@@ -201,11 +263,21 @@ describe('ParallelEternalEngine', () => {
       const agent = makeMockAgent({
         run: vi.fn(async (messages) => {
           runCalls.push(messages[messages.length - 1]!.text);
-          return { status: 'done' as const, finalText: 'task-1 | task-2 | task-3 | task-4', iterations: 1, toolCalls: 0 };
+          return {
+            status: 'done' as const,
+            finalText: 'task-1 | task-2 | task-3 | task-4',
+            iterations: 1,
+            toolCalls: 0,
+          };
         }),
       });
       await writeFile(goalPath, JSON.stringify(makeGoal()), 'utf-8');
-      const engine = new ParallelEternalEngine({ agent, projectRoot: tmpDir, goalPath, parallelSlots: 4 });
+      const engine = new ParallelEternalEngine({
+        agent,
+        projectRoot: tmpDir,
+        goalPath,
+        parallelSlots: 4,
+      });
       await engine.runOneIteration();
       // Leader agent should have been called to decompose
       expect(runCalls.length).toBeGreaterThanOrEqual(1);
@@ -219,15 +291,27 @@ describe('ParallelEternalEngine', () => {
       // Leader must brainstorm at least one task (>10 chars) so fan-out runs
       // and the subagent's [GOAL_COMPLETE] is observed.
       const agent = makeMockAgent({
-        run: vi.fn(async () => ({ status: 'done' as const, finalText: 'inspect the whole codebase', iterations: 1, toolCalls: 0 })),
+        run: vi.fn(async () => ({
+          status: 'done' as const,
+          finalText: 'inspect the whole codebase',
+          iterations: 1,
+          toolCalls: 0,
+        })),
       });
       await writeFile(goalPath, JSON.stringify(makeGoal()), 'utf-8');
       const engine = new ParallelEternalEngine({
         agent,
         projectRoot: tmpDir,
-      goalPath,
+        goalPath,
         subagentFactory: async () => ({
-          agent: makeMockAgent({ run: vi.fn(async () => ({ status: 'done' as const, finalText: '[GOAL_COMPLETE]', iterations: 1, toolCalls: 0 })) }),
+          agent: makeMockAgent({
+            run: vi.fn(async () => ({
+              status: 'done' as const,
+              finalText: '[GOAL_COMPLETE]',
+              iterations: 1,
+              toolCalls: 0,
+            })),
+          }),
           events: agent.events,
         }),
       });
@@ -241,13 +325,15 @@ describe('ParallelEternalEngine', () => {
       const { writeFile, rm } = await import('node:fs/promises');
       const errors: Error[] = [];
       const badAgent = makeMockAgent({
-        run: vi.fn(async () => { throw new Error('simulated failure'); }),
+        run: vi.fn(async () => {
+          throw new Error('simulated failure');
+        }),
       });
       await writeFile(goalPath, JSON.stringify(makeGoal()), 'utf-8');
       const engine = new ParallelEternalEngine({
         agent: badAgent,
         projectRoot: tmpDir,
-      goalPath,
+        goalPath,
         onError: (err) => errors.push(err),
       });
       await engine.runOneIteration();
@@ -262,13 +348,18 @@ describe('ParallelEternalEngine', () => {
       const { writeFile, readFile, rm } = await import('node:fs/promises');
       const compactCall = vi.fn();
       const agent = makeMockAgent({
-        run: vi.fn(async () => ({ status: 'done' as const, finalText: 'step 1', iterations: 1, toolCalls: 0 })),
+        run: vi.fn(async () => ({
+          status: 'done' as const,
+          finalText: 'step 1',
+          iterations: 1,
+          toolCalls: 0,
+        })),
       });
       await writeFile(goalPath, JSON.stringify(makeGoal()), 'utf-8');
       const engine = new ParallelEternalEngine({
         agent,
         projectRoot: tmpDir,
-      goalPath,
+        goalPath,
         compactEveryNIterations: 3,
         compactor: { compact: compactCall } as never,
       });
@@ -281,13 +372,18 @@ describe('ParallelEternalEngine', () => {
       const { writeFile, rm } = await import('node:fs/promises');
       const compactCall = vi.fn(async () => ({ before: 1000, after: 500 }));
       const agent = makeMockAgent({
-        run: vi.fn(async () => ({ status: 'done' as const, finalText: 'run the full audit pass', iterations: 1, toolCalls: 0 })),
+        run: vi.fn(async () => ({
+          status: 'done' as const,
+          finalText: 'run the full audit pass',
+          iterations: 1,
+          toolCalls: 0,
+        })),
       });
       await writeFile(goalPath, JSON.stringify(makeGoal()), 'utf-8');
       const engine = new ParallelEternalEngine({
         agent,
         projectRoot: tmpDir,
-      goalPath,
+        goalPath,
         compactEveryNIterations: 2,
         compactor: { compact: compactCall } as never,
       });
@@ -333,7 +429,7 @@ describe('ParallelEternalEngine', () => {
       const engine = new ParallelEternalEngine({
         agent,
         projectRoot: tmpDir,
-      goalPath,
+        goalPath,
         parallelSlots: 1,
         dispatchClassifier: classifier,
       });
@@ -361,7 +457,12 @@ describe('ParallelEternalEngine', () => {
       await writeFile(goalPath, JSON.stringify(makeGoal()), 'utf-8');
 
       const spawnSpy = vi.spyOn(DefaultMultiAgentCoordinator.prototype, 'spawn');
-      const engine = new ParallelEternalEngine({ agent, projectRoot: tmpDir, goalPath, parallelSlots: 1 });
+      const engine = new ParallelEternalEngine({
+        agent,
+        projectRoot: tmpDir,
+        goalPath,
+        parallelSlots: 1,
+      });
       await engine.runOneIteration();
 
       const cfg = spawnSpy.mock.calls[0]![0] as SubagentConfig;
@@ -382,7 +483,7 @@ describe('ParallelEternalEngine', () => {
       const engine = new ParallelEternalEngine({
         agent,
         projectRoot: tmpDir,
-      goalPath,
+        goalPath,
         parallelSlots: 1,
         dispatch: false,
       });

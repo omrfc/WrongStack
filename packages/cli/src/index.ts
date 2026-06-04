@@ -87,31 +87,9 @@ type ContainerPromptDelegate = (
   suggestedPattern: string,
 ) => Promise<'yes' | 'no' | 'always' | 'deny'>;
 
-/** Set of listeners for journal-entry events from the eternal engine. */
-/** Set of listeners for stage-transition events from the eternal engine. */
-const stageListeners = new Set<(stage: {
-  phase: 'idle';
-} | {
-  phase: 'decide';
-  reason: string;
-} | {
-  phase: 'execute';
-  task: string;
-} | {
-  phase: 'reflect';
-  status: 'success' | 'failure' | 'aborted' | 'skipped';
-  note?: string;
-} | {
-  phase: 'sleep';
-  ms: number;
-} | {
-  phase: 'paused';
-} | {
-  phase: 'stopped';
-} | {
-  phase: 'error';
-  message: string;
-}) => void>();
+type AutonomyStage =
+  | import('@wrongstack/core').IterationStage
+  | import('@wrongstack/core').ParallelIterationStage;
 
 type SddParallelRunGlobal = typeof globalThis & {
   __sddParallelRun?: import('@wrongstack/core').SddParallelRun;
@@ -142,13 +120,19 @@ export async function main(argv: string[]): Promise<number> {
 
   // Build container via shared factory
   const container = createDefaultContainer({
-    config, wpaths, logger, modelsRegistry,
+    config,
+    wpaths,
+    logger,
+    modelsRegistry,
     permission: {
       yolo: config.yolo,
       forceAllYolo: flags['force-all-yolo'] === true,
       promptDelegate: makePromptDelegate(reader) as unknown as ContainerPromptDelegate,
     },
-    compactor: { preserveK: config.context.preserveK, eliseThreshold: config.context.eliseThreshold },
+    compactor: {
+      preserveK: config.context.preserveK,
+      eliseThreshold: config.context.eliseThreshold,
+    },
     bundledSkillsDir: config.features.skills ? resolveBundledSkillsDir() : undefined,
   });
 
@@ -160,8 +144,7 @@ export async function main(argv: string[]): Promise<number> {
   const replayFlag = flags['replay'];
   const recordFlag = flags['record'];
   if (typeof replayFlag === 'string' || recordFlag === true) {
-    const sessionId =
-      typeof replayFlag === 'string' ? replayFlag : `record-${Date.now()}`;
+    const sessionId = typeof replayFlag === 'string' ? replayFlag : `record-${Date.now()}`;
     const mode = recordFlag === true ? 'record' : 'replay';
     bindReplayToContainer({
       container,
@@ -170,9 +153,7 @@ export async function main(argv: string[]): Promise<number> {
       mode,
       logger,
     });
-    logger.info(
-      `replay: ProviderRunner bound in '${mode}' mode for session ${sessionId}`,
-    );
+    logger.info(`replay: ProviderRunner bound in '${mode}' mode for session ${sessionId}`);
   }
 
   const configStore = container.resolve(TOKENS.ConfigStore);
@@ -198,13 +179,16 @@ export async function main(argv: string[]): Promise<number> {
   }
   const modeId = activeMode?.id ?? 'default';
   const modePrompt = activeMode?.prompt ?? '';
-  const resolvedCaps = await capabilitiesFor(modelsRegistry, provider.id, config.model).catch(() => undefined);
+  const [resolvedCaps, resolvedModel] = await Promise.all([
+    capabilitiesFor(modelsRegistry, provider.id, config.model).catch(() => undefined),
+    modelsRegistry.getModel(config.provider, config.model).catch(() => undefined),
+  ]);
   const modelCapabilities = resolvedCaps
     ? {
         maxContextTokens: resolvedCaps.maxContext,
         supportsTools: resolvedCaps.tools,
         supportsVision: resolvedCaps.vision,
-        supportsReasoning: resolvedCaps.reasoning,
+        supportsReasoning: resolvedModel?.capabilities.reasoning ?? false,
       }
     : undefined;
 
@@ -220,29 +204,33 @@ export async function main(argv: string[]): Promise<number> {
     current: import('./slash-commands/autonomy.js').AutonomyMode;
   } = { current: 'off' };
   const goalPathForPrompt = wpaths.projectGoal;
-  container.bind(TOKENS.SystemPromptBuilder, () =>
-    new DefaultSystemPromptBuilder({
-      memoryStore,
-      skillLoader: config.features.skills ? skillLoader : undefined,
-      modeStore,
-      modeId,
-      modePrompt,
-      modelCapabilities,
-      planPath: () =>
-        sessionRef.current
-          ? path.join(wpaths.projectSessions, `${sessionRef.current.id}.plan.json`)
-          : undefined,
-      contributors: [
-        // Injects the ETERNAL AUTONOMY block when the user has activated
-        // `/autonomy eternal`. Without this, the per-iteration directive
-        // is the only place the model sees the rules — compaction can
-        // drop it and the model forgets it's in autonomy mode.
-        makeAutonomyPromptContributor({
-          goalPath: goalPathForPrompt,
-          enabled: () => autonomyModeRef.current === 'eternal',
-        }),
-      ],
-    }),
+  container.bind(
+    TOKENS.SystemPromptBuilder,
+    () =>
+      new DefaultSystemPromptBuilder({
+        memoryStore,
+        skillLoader: config.features.skills ? skillLoader : undefined,
+        modeStore,
+        modeId,
+        modePrompt,
+        modelCapabilities,
+        planPath: () =>
+          sessionRef.current
+            ? path.join(wpaths.projectSessions, `${sessionRef.current.id}.plan.json`)
+            : undefined,
+        contributors: [
+          // Injects the ETERNAL AUTONOMY block when the user has activated
+          // a long-running autonomy engine. Without this, the per-iteration
+          // directive is the only place the model sees the rules — compaction
+          // can drop it and the model forgets it's in autonomy mode.
+          makeAutonomyPromptContributor({
+            goalPath: goalPathForPrompt,
+            enabled: () =>
+              autonomyModeRef.current === 'eternal' ||
+              autonomyModeRef.current === 'eternal-parallel',
+          }),
+        ],
+      }),
   );
 
   // Tool registry
@@ -261,7 +249,13 @@ export async function main(argv: string[]): Promise<number> {
 
   // Metrics wiring — extracted to wiring/metrics.ts
   const { metricsSink, healthRegistry } = (() => {
-    const ms = setupMetrics({ flags, wpaths, events, logger, config: { provider: config.provider, model: config.model } });
+    const ms = setupMetrics({
+      flags,
+      wpaths,
+      events,
+      logger,
+      config: { provider: config.provider, model: config.model },
+    });
     return ms;
   })();
 
@@ -349,7 +343,8 @@ export async function main(argv: string[]): Promise<number> {
     tokenCounter,
     renderer,
     flags,
-    onRecovery: (abandoned, autoRecover) => promptRecovery(reader, renderer, abandoned, autoRecover),
+    onRecovery: (abandoned, autoRecover) =>
+      promptRecovery(reader, renderer, abandoned, autoRecover),
   });
   const session = sessResult.session;
   sessionRef.current = session;
@@ -380,7 +375,10 @@ export async function main(argv: string[]): Promise<number> {
   events.on('error', (e) => {
     const err = e.err as unknown;
     const code =
-      err && typeof err === 'object' && 'code' in err && typeof (err as { code: unknown }).code === 'string'
+      err &&
+      typeof err === 'object' &&
+      'code' in err &&
+      typeof (err as { code: unknown }).code === 'string'
         ? (err as { code: string }).code
         : 'UNKNOWN';
     const message = e.err instanceof Error ? e.err.message : String(e.err);
@@ -391,88 +389,100 @@ export async function main(argv: string[]): Promise<number> {
 
     // Also persist to the session log via the central bridge (respects auditLevel).
     // This gives us error history in the JSONL for forensics / post-mortems.
-    sessionBridge.append({
-      type: 'error',
-      ts,
-      message,
-      phase: e.phase,
-    }).catch(() => {
-      // best-effort, never block on session logging
-    });
+    sessionBridge
+      .append({
+        type: 'error',
+        ts,
+        message,
+        phase: e.phase,
+      })
+      .catch(() => {
+        // best-effort, never block on session logging
+      });
   });
 
   // Persist tool execution start/end to the session log for audit + timing forensics.
   // Uses the same central bridge (respects auditLevel).
   events.on('tool.started', (e) => {
-    sessionBridge.append({
-      type: 'tool_call_start',
-      ts: new Date().toISOString(),
-      name: e.name,
-      id: e.id,
-      input: e.input,
-    }).catch(() => {
-      // best-effort
-    });
+    sessionBridge
+      .append({
+        type: 'tool_call_start',
+        ts: new Date().toISOString(),
+        name: e.name,
+        id: e.id,
+        input: e.input,
+      })
+      .catch(() => {
+        // best-effort
+      });
   });
 
   events.on('tool.executed', (e) => {
-    sessionBridge.append({
-      type: 'tool_call_end',
-      ts: new Date().toISOString(),
-      name: e.name,
-      id: e.id ?? '',
-      durationMs: e.durationMs,
-      outputSize: e.outputBytes ?? 0,
-      ok: e.ok,
-      outputBytes: e.outputBytes,
-      outputTokens: e.outputTokens,
-      outputLines: e.outputLines,
-    }).catch(() => {
-      // best-effort
-    });
+    sessionBridge
+      .append({
+        type: 'tool_call_end',
+        ts: new Date().toISOString(),
+        name: e.name,
+        id: e.id ?? '',
+        durationMs: e.durationMs,
+        outputSize: e.outputBytes ?? 0,
+        ok: e.ok,
+        outputBytes: e.outputBytes,
+        outputTokens: e.outputTokens,
+        outputLines: e.outputLines,
+      })
+      .catch(() => {
+        // best-effort
+      });
   });
 
   // Forward tool progress events.
   // Sampling + "full" level filtering is now handled inside the SessionEventBridge
   // for consistency and reusability across CLI / TUI / WebUI etc.
   events.on('tool.progress', (e) => {
-    sessionBridge.append({
-      type: 'tool_progress',
-      ts: new Date().toISOString(),
-      name: e.name,
-      id: e.id,
-      event: { type: e.event.type, text: e.event.text, data: e.event.data },
-    }).catch(() => {
-      // best-effort
-    });
+    sessionBridge
+      .append({
+        type: 'tool_progress',
+        ts: new Date().toISOString(),
+        name: e.name,
+        id: e.id,
+        event: { type: e.event.type, text: e.event.text, data: e.event.data },
+      })
+      .catch(() => {
+        // best-effort
+      });
   });
 
   // Provider visibility — very valuable for debugging retry storms and provider failures.
   events.on('provider.retry', (e) => {
-    sessionBridge.append({
-      type: 'provider_retry',
-      ts: new Date().toISOString(),
-      providerId: e.providerId,
-      attempt: e.attempt,
-      delayMs: e.delayMs,
-      status: e.status,
-      description: e.description,
-    }).catch(() => {
-      // best-effort
-    });
+    sessionBridge
+      .append({
+        type: 'provider_retry',
+        ts: new Date().toISOString(),
+        providerId: e.providerId,
+        attempt: e.attempt,
+        delayMs: e.delayMs,
+        status: e.status,
+        description: e.description,
+      })
+      .catch(() => {
+        // best-effort
+      });
   });
 
   events.on('provider.error', (e) => {
-    sessionBridge.append({
-      type: 'provider_error',
-      ts: new Date().toISOString(),
-      providerId: e.providerId,
-      status: e.status,
-      description: e.description,
-      retryable: e.retryable,
-    }).catch(() => {
-      // best-effort
-    });
+    sessionBridge
+      .append({
+        type: 'provider_error',
+        ts: new Date().toISOString(),
+        providerId: e.providerId,
+        status: e.status,
+        description: e.description,
+        retryable: e.retryable,
+      })
+      .catch(() => {
+        // best-effort
+      });
   });
 
   const pipelines = setupPipelines({ events, logger });
@@ -496,7 +506,10 @@ export async function main(argv: string[]): Promise<number> {
   // This feeds auto-compaction, the leader context chip, and Director spawn guards.
   const refreshMaxContext = async (providerId: string, modelId: string) => {
     const cap = await capabilitiesFor(modelsRegistry, providerId, modelId).catch(() => undefined);
-    const mc = (cap as { maxContext?: number } | undefined)?.maxContext ?? config.context.effectiveMaxContext ?? 200_000;
+    const mc =
+      (cap as { maxContext?: number } | undefined)?.maxContext ??
+      config.context.effectiveMaxContext ??
+      200_000;
     effectiveMaxContext = mc;
     context.provider.capabilities.maxContext = mc;
     autoCompactor?.setMaxContext(mc);
@@ -510,7 +523,16 @@ export async function main(argv: string[]): Promise<number> {
     } else spinner.setContext(undefined);
   };
 
-  const agent = createAgent({ container, tools: toolRegistry, providers: providerRegistry, events, pipelines, context, config, confirmAwaiter: makeConfirmAwaiter(reader) });
+  const agent = createAgent({
+    container,
+    tools: toolRegistry,
+    providers: providerRegistry,
+    events,
+    pipelines,
+    context,
+    config,
+    confirmAwaiter: makeConfirmAwaiter(reader),
+  });
 
   // MCP servers
   const mcpRegistry = new MCPRegistry({ toolRegistry, events, log: logger });
@@ -643,6 +665,16 @@ export async function main(argv: string[]): Promise<number> {
       }
     }
   };
+  const stageListeners = new Set<(stage: AutonomyStage) => void>();
+  const broadcastAutonomyStage = (stage: AutonomyStage): void => {
+    for (const fn of stageListeners) {
+      try {
+        fn(stage);
+      } catch {
+        // listener failures must never break the engine — swallow
+      }
+    }
+  };
   // Convention: director artifacts all live under the same fleet root —
   //   <projectSessions>/<sessionId>/
   //     ├─ fleet.json              (manifest)
@@ -767,12 +799,15 @@ export async function main(argv: string[]): Promise<number> {
   // Statusline config — loaded once and shared with /statusline slash command
   const statuslineConfigDeps = {
     get: () => loadStatuslineConfig(),
-    set: (cfg: import('./slash-commands/statusline.js').StatuslineConfig) => saveStatuslineConfig(cfg),
+    set: (cfg: import('./slash-commands/statusline.js').StatuslineConfig) =>
+      saveStatuslineConfig(cfg),
   };
 
   // Statusline hidden items — derived from the config file, kept in sync with the TUI
   const hiddenItemsFromConfig = await loadStatuslineConfig();
-  const hiddenItemsList: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'> = [];
+  const hiddenItemsList: Array<
+    'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'
+  > = [];
   const ALL_ITEMS = ['todos', 'plan', 'fleet', 'git', 'elapsed', 'context', 'cost'] as const;
   for (const k of ALL_ITEMS) {
     if (!hiddenItemsFromConfig[k]) hiddenItemsList.push(k);
@@ -908,7 +943,9 @@ export async function main(argv: string[]): Promise<number> {
       for (const a of s.live) {
         if (a.status === 'running' || a.status === 'idle') {
           const task = a.task ? ` — ${a.task.slice(0, 60)}` : '';
-          lines.push(`  ${STATUS_ICON[a.status] ?? '?'}  ${a.subagentId.slice(0, 8)} ${a.status}${task}`);
+          lines.push(
+            `  ${STATUS_ICON[a.status] ?? '?'}  ${a.subagentId.slice(0, 8)} ${a.status}${task}`,
+          );
         }
       }
       for (const p of s.pending) {
@@ -1028,17 +1065,28 @@ export async function main(argv: string[]): Promise<number> {
       let killed = 0;
       for (const sa of s.subagents) {
         if (sa.status === 'running' || sa.status === 'idle') {
-          try { director.remove(sa.id); killed++; } catch { /* best-effort */ }
+          try {
+            director.remove(sa.id);
+            killed++;
+          } catch {
+            /* best-effort */
+          }
         }
       }
       return killed;
     },
     onFleetTerminate: (subagentId) => {
       if (!director) return false;
-      try { director.terminate(subagentId); return true; } catch { return false; }
+      try {
+        director.terminate(subagentId);
+        return true;
+      } catch {
+        return false;
+      }
     },
     onFleetSpawn: async (role) => {
-      if (!director) throw new Error('No director active — start with --director or use /autonomy parallel.');
+      if (!director)
+        throw new Error('No director active — start with --director or use /autonomy parallel.');
       const cfg = FLEET_ROSTER[role] ?? {
         id: `manual-${Date.now()}`,
         name: role,
@@ -1097,7 +1145,9 @@ export async function main(argv: string[]): Promise<number> {
             `  ${color.cyan(t.subagentId.padEnd(18))}  ${color.dim(t.runId.slice(0, 18))}  ${color.dim(`${(t.size / 1024).toFixed(1)} KB`)}`,
           );
         }
-        lines.push('Use `/fleet log <subagentId>` for a summary, or append `raw` for the full JSONL.');
+        lines.push(
+          'Use `/fleet log <subagentId>` for a summary, or append `raw` for the full JSONL.',
+        );
         return lines.join('\n');
       }
       // Match by exact id or prefix; ambiguous matches return the list.
@@ -1136,7 +1186,10 @@ export async function main(argv: string[]): Promise<number> {
                 ? ev.content
                 : Array.isArray(ev.content)
                   ? ev.content
-                      .filter((b): b is { type: 'text'; text: string } => (b as { type?: string }).type === 'text')
+                      .filter(
+                        (b): b is { type: 'text'; text: string } =>
+                          (b as { type?: string }).type === 'text',
+                      )
                       .map((b) => b.text)
                       .join(' ')
                   : '';
@@ -1227,18 +1280,14 @@ export async function main(argv: string[]): Promise<number> {
       const targets =
         taskId === 'all'
           ? interrupted
-          : interrupted.filter(
-              (t) => t.taskId === taskId || t.taskId.startsWith(taskId),
-            );
+          : interrupted.filter((t) => t.taskId === taskId || t.taskId.startsWith(taskId));
       if (targets.length === 0) {
         return `No interrupted task matched "${taskId}".`;
       }
 
       const results: string[] = [];
       for (const t of targets) {
-        const owner = t.subagentId
-          ? prior.subagents.find((s) => s.id === t.subagentId)
-          : undefined;
+        const owner = t.subagentId ? prior.subagents.find((s) => s.id === t.subagentId) : undefined;
         if (!owner) {
           results.push(`  - ${t.taskId.slice(0, 12)}: no owner record, skipped.`);
           continue;
@@ -1367,6 +1416,7 @@ export async function main(argv: string[]): Promise<number> {
             compactor: container.resolve(TOKENS.Compactor) as import('@wrongstack/core').Compactor,
             maxContextTokens: effectiveMaxContext > 0 ? effectiveMaxContext : undefined,
             onIteration: broadcastEternalIteration,
+            onStage: broadcastAutonomyStage,
             // Real per-role factory: each dispatched slot runs as a fresh,
             // isolated agent with the role's filtered tools + persona prompt
             // (instead of sharing the leader agent's Context).
@@ -1382,6 +1432,7 @@ export async function main(argv: string[]): Promise<number> {
             compactor: container.resolve(TOKENS.Compactor) as import('@wrongstack/core').Compactor,
             maxContextTokens: effectiveMaxContext > 0 ? effectiveMaxContext : undefined,
             onIteration: broadcastEternalIteration,
+            onStage: broadcastAutonomyStage,
           });
         }
         void eternalEngine.prime();
@@ -1399,13 +1450,20 @@ export async function main(argv: string[]): Promise<number> {
       const { spawn } = await import('node:child_process');
       const cwd = projectRoot;
 
-      const statusResult = await new Promise<{ stdout: string; code: number }>((resolve, reject) => {
-        const child = spawn('git', ['status', '--porcelain'], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
-        let stdout = '';
-        child.stdout?.on('data', (d) => { stdout += d; });
-        child.on('error', reject);
-        child.on('close', (code) => resolve({ stdout, code: code ?? 0 }));
-      });
+      const statusResult = await new Promise<{ stdout: string; code: number }>(
+        (resolve, reject) => {
+          const child = spawn('git', ['status', '--porcelain'], {
+            cwd,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+          let stdout = '';
+          child.stdout?.on('data', (d) => {
+            stdout += d;
+          });
+          child.on('error', reject);
+          child.on('close', (code) => resolve({ stdout, code: code ?? 0 }));
+        },
+      );
 
       if (statusResult.stdout.trim().length > 0) {
         const lines = statusResult.stdout.split('\n').filter(Boolean);
@@ -1494,7 +1552,9 @@ export async function main(argv: string[]): Promise<number> {
         parallelSlots: opts?.parallelSlots,
         subagentFactory,
         onProgress: (p: import('@wrongstack/core').SddProgress) => {
-          renderer.write(`  ░ wave ${p.wave + 1} · ${p.completed}/${p.total} tasks · ${p.percent}% done\n`);
+          renderer.write(
+            `  ░ wave ${p.wave + 1} · ${p.completed}/${p.total} tasks · ${p.percent}% done\n`,
+          );
         },
       });
       (globalThis as SddParallelRunGlobal).__sddParallelRun = run;
@@ -1526,7 +1586,8 @@ export async function main(argv: string[]): Promise<number> {
   // See `cli-eternal-flag.ts` for the full contract. The flag is parsed
   // here so we can early-return without it; the side effects (YOLO on,
   // engine prime, autonomyMode flip) all live in the helper.
-  const eternalFlag = typeof flags['eternal'] === 'string' ? (flags['eternal'] as string).trim() : '';
+  const eternalFlag =
+    typeof flags['eternal'] === 'string' ? (flags['eternal'] as string).trim() : '';
   const configRef = { current: config };
   await launchEternalFromFlag({
     eternalFlag,
