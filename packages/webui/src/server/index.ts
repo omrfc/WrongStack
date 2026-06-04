@@ -322,7 +322,21 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   // Auto-compaction
   let autoCompactor: AutoCompactionMiddleware | undefined;
   if (config.context?.autoCompact !== false) {
-    const effectiveMaxContext = config.context?.effectiveMaxContext ?? provider.capabilities.maxContext;
+    // Priority: explicit override → models.dev per-model window → family default.
+    // The catalog lookup matters for openai-compatible providers (OpenRouter,
+    // Groq, …) whose family default is 0; without it auto-compaction would be
+    // disabled even though the model has a real published window. Mirrors
+    // updateAutoCompactionMaxContext below.
+    let effectiveMaxContext = config.context?.effectiveMaxContext ?? 0;
+    if (!effectiveMaxContext) {
+      try {
+        const m = await modelsRegistry.getModel(provider.id, context.model);
+        effectiveMaxContext = m?.capabilities?.maxContext ?? 0;
+      } catch {
+        // best-effort: fall through to provider capability
+      }
+    }
+    if (!effectiveMaxContext) effectiveMaxContext = provider.capabilities.maxContext;
     autoCompactor = new AutoCompactionMiddleware(
       compactor,
       effectiveMaxContext,
