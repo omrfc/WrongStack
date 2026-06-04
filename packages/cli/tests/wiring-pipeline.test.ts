@@ -184,6 +184,37 @@ describe('setupCompaction', () => {
     expect(capabilitiesFor).not.toHaveBeenCalled();
   });
 
+  it('trusts catalog maxContext when baseUrl equals the catalog apiBase', async () => {
+    // OpenRouter added from the catalog persists its own apiBase as baseUrl —
+    // that is NOT a custom proxy, so the published 1M window must still apply.
+    capabilitiesFor.mockResolvedValue({ maxContext: 1_000_000 });
+    const events = new EventBus();
+    const pipelines = setupPipelines({ events, logger: new DefaultLogger({ level: 'error' }) });
+    const registry = {
+      getModel: vi.fn().mockRejectedValue(new Error('unused')),
+      getProvider: vi.fn().mockResolvedValue({ apiBase: 'https://openrouter.ai/api/v1' }),
+    } as never;
+    const result = await setupCompaction({
+      compactor: { compact: vi.fn() } as never,
+      events,
+      modelsRegistry: registry,
+      context: fakeContext({ model: 'nvidia/nemotron-3-ultra-550b-a55b:free' }),
+      config: {
+        provider: 'openrouter',
+        model: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+        // baseUrl differs only by a trailing slash — normalization must match.
+        providers: {
+          openrouter: { type: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1/' },
+        },
+        context: { warnThreshold: 70, softThreshold: 85, hardThreshold: 95 },
+      },
+      provider: fakeProvider(0),
+      pipelines,
+    });
+    expect(result.effectiveMaxContext).toBe(1_000_000);
+    expect(capabilitiesFor).toHaveBeenCalled();
+  });
+
   it('allows provider capabilities.maxContext to override custom baseUrl fallback', async () => {
     capabilitiesFor.mockResolvedValue({ maxContext: 1_050_000 });
     const events = new EventBus();
