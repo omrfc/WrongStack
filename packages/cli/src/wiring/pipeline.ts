@@ -111,7 +111,9 @@ export async function setupCompaction(params: {
     modelId: config.model ?? context.model,
   });
   let autoCompactor: AutoCompactionMiddleware | undefined;
-  if (config.context.autoCompact !== false) {
+  // Skip auto-compaction when the context window is unknown (0).
+  // Guessing would trigger premature compaction and degrade the session.
+  if (config.context.autoCompact !== false && effectiveMaxContext > 0) {
     // Resolve audit level from fullConfig (preferred) or the config slice.
     const auditLevel = resolveAuditLevel(fullConfig ?? config);
 

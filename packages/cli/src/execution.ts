@@ -193,7 +193,12 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     const visionAdapters = () => createToolVisionAdapters(agent.tools);
     const supportsVision = async (): Promise<boolean> => {
       try {
-        const caps = await capabilitiesFor(modelsRegistry, context.provider.id, context.model);
+        const caps = await capabilitiesFor(
+          modelsRegistry,
+          context.provider.id,
+          context.model,
+          config.models,
+        );
         return caps.vision;
       } catch {
         return context.provider.capabilities.vision;

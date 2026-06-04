@@ -1,5 +1,6 @@
 import type { ContextWindowModeId } from './context-window.js';
 import type { WireFamily } from './models-registry.js';
+import type { Capabilities } from './provider.js';
 import type { Permission } from './tool.js';
 
 export interface ContextConfig {
@@ -84,6 +85,12 @@ export interface ProviderConfig {
   envVars?: string[];
   /** Optional list of models the user wants visible for this provider. */
   models?: string[];
+  /**
+   * Provider-relative custom model definitions (maps modelId → definition).
+   * Each entry adds/overrides a model for this provider with optional
+   * capability overrides. The model id is the key, not a fully qualified id.
+   */
+  customModels?: Record<string, CustomModelDefinition>;
 }
 
 /**
@@ -198,6 +205,25 @@ export interface SyncConfig {
   lastSyncedAt?: string;
 }
 
+/**
+ * Per-model capability overrides the user can define in their config.
+ * Used to add models not in the models.dev catalog, or override catalog
+ * facts when the real backend differs (e.g. local Ollama models, proxies).
+ */
+export interface CustomModelDefinition {
+  /** Provider this model belongs to. Defaults to the owning ProviderConfig. */
+  provider?: string;
+  /** Optional display name. */
+  name?: string;
+  /** Capability overrides — only specified fields are overlaid. */
+  capabilities?: Partial<Capabilities>;
+  /**
+   * Max output tokens. If not specified, the provider family default
+   * or catalog entry is used.
+   */
+  maxOutput?: number;
+}
+
 export interface Config {
   version: 1;
   provider: string;
@@ -205,6 +231,13 @@ export interface Config {
   apiKey?: string;
   baseUrl?: string;
   providers?: Record<string, ProviderConfig>;
+  /**
+   * Top-level custom models (maps modelId → definition). Merged with
+   * per-provider `customModels` at resolution time. The key is the
+   * model id — not a fully qualified name. When the same model id
+   * appears in both places, the top-level one wins.
+   */
+  models?: Record<string, CustomModelDefinition>;
   /**
    * Per-task model matrix. Keys are catalog roles (e.g. "security-scanner"),
    * phase names (e.g. "review"), or the `*` default. Resolution precedence at

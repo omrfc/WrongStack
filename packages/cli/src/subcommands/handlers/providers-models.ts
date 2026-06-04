@@ -1,4 +1,13 @@
-import { type WireFamily, color } from '@wrongstack/core';
+import * as fs from 'node:fs/promises';
+import {
+  type Capabilities,
+  type CustomModelDefinition,
+  type WireFamily,
+  atomicWrite,
+  color,
+  decryptConfigSecrets,
+  encryptConfigSecrets,
+} from '@wrongstack/core';
 import type { SubcommandHandler } from '../index.js';
 
 export const providersCmd: SubcommandHandler = async (args, deps) => {
@@ -67,10 +76,36 @@ function parseFlags(args: string[]): Record<string, string | boolean> {
   return flags;
 }
 
+/** Filter out flag args and return only positional (non-flag) args. */
+function positionals(args: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    if (a.startsWith('--')) {
+      const eq = a.indexOf('=');
+      if (eq === -1) {
+        // If the next arg is a value (not a flag), skip it
+        if (i + 1 < args.length && !args[i + 1]!.startsWith('--')) {
+          i++;
+        }
+      }
+      continue;
+    }
+    out.push(a);
+  }
+  return out;
+}
+
 const DEFAULT_PER_PAGE = 15;
 
 export const modelsCmd: SubcommandHandler = async (args, deps) => {
   const sub = args[0];
+
+  // ---- custom model commands ----
+  if (sub === 'add') return modelsAdd(args.slice(1), deps);
+  if (sub === 'remove') return modelsRemove(args.slice(1), deps);
+  if (sub === 'list') return modelsList(args.slice(1), deps);
+
   if (sub === 'refresh') {
     deps.renderer.writeInfo('Refreshing models.dev cache…');
     try {
@@ -189,3 +224,191 @@ export const modelsCmd: SubcommandHandler = async (args, deps) => {
   );
   return 0;
 };
+
+/* ------------------------------------------------------------------ */
+/*  Custom model management (top-level Config.models)                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Load → mutate → encrypt → atomic-write for the `models` section.
+ */
+async function mutateModelsConfig(
+  deps: Parameters<SubcommandHandler>[1],
+  mutator: (models: Record<string, CustomModelDefinition>) => void,
+): Promise<void> {
+  const vault = deps.vault;
+  const configPath = deps.paths.globalConfig;
+  let fileExists = true;
+  let raw: string;
+  try {
+    raw = await fs.readFile(configPath, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    fileExists = false;
+    raw = '{}';
+  }
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>;
+  } catch (err) {
+    if (fileExists) {
+      throw new Error(
+        `Refusing to overwrite corrupt config at ${configPath} (${(err as Error).message}).`,
+      );
+    }
+    parsed = {};
+  }
+  const decrypted = decryptConfigSecrets(parsed, vault) as Record<string, unknown>;
+  const models = (decrypted.models as Record<string, CustomModelDefinition>) ?? {};
+  mutator(models);
+  decrypted.models = models;
+  const encrypted = encryptConfigSecrets(decrypted, vault);
+  await atomicWrite(configPath, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
+}
+
+/** Parse a human-readable size like "128k", "1M", "200000" into a number. */
+function parseSizeFlag(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  const s = raw.trim().toLowerCase();
+  const match = /^(\d+(?:\.\d+)?)\s*(k|m|b)?$/.exec(s);
+  if (!match) return undefined;
+  const num = Number.parseFloat(match[1]!);
+  const unit = match[2];
+  if (unit === 'b') return Math.round(num * 1_000_000_000);
+  if (unit === 'm') return Math.round(num * 1_000_000);
+  if (unit === 'k') return Math.round(num * 1000);
+  return Math.round(num);
+}
+
+/** Parse a boolean flag like "--tools" / "--no-tools". */
+function parseBoolFlag(
+  flags: Record<string, string | boolean>,
+  key: string,
+): boolean | undefined {
+  if (flags[key] === true || flags[key] === 'true') return true;
+  if (flags[`no-${key}`] !== undefined) return false;
+  return undefined;
+}
+
+async function modelsAdd(
+  args: string[],
+  deps: Parameters<SubcommandHandler>[1],
+): Promise<number> {
+  const flags = parseFlags(args);
+  const pos = positionals(args);
+  const modelId = pos[0];
+
+  if (!modelId) {
+    deps.renderer.writeError(
+      'Usage: wstack models add <modelId> [--provider <id>] [--name <name>] ' +
+        '[--max-context <N>] [--max-output <N>] [--tools] [--no-tools] ' +
+        '[--vision] [--no-vision] [--reasoning] [--streaming] [--no-streaming] [--json-mode]',
+    );
+    return 1;
+  }
+
+  const existing = deps.config.models?.[modelId];
+  if (existing) {
+    deps.renderer.writeWarning(
+      `Model "${modelId}" already defined. Overwriting.`,
+    );
+  }
+
+  const capabilities: Partial<Capabilities> = {};
+  const toolsVal = parseBoolFlag(flags, 'tools');
+  if (toolsVal !== undefined) capabilities.tools = toolsVal;
+  const visionVal = parseBoolFlag(flags, 'vision');
+  if (visionVal !== undefined) capabilities.vision = visionVal;
+  const streamingVal = parseBoolFlag(flags, 'streaming');
+  if (streamingVal !== undefined) capabilities.streaming = streamingVal;
+  const reasoningVal = parseBoolFlag(flags, 'reasoning');
+  if (reasoningVal !== undefined) capabilities.reasoning = reasoningVal;
+  const jsonModeVal = parseBoolFlag(flags, 'json-mode');
+  if (jsonModeVal !== undefined) capabilities.jsonMode = jsonModeVal;
+
+  const maxContextRaw = typeof flags['max-context'] === 'string' ? flags['max-context'] : undefined;
+  const maxContext = parseSizeFlag(maxContextRaw);
+  if (maxContext !== undefined) capabilities.maxContext = maxContext;
+
+  const def: CustomModelDefinition = {};
+  const nameFlag = typeof flags['name'] === 'string' ? flags['name'] : undefined;
+  const providerFlag = typeof flags['provider'] === 'string' ? flags['provider'] : undefined;
+  if (nameFlag) def.name = nameFlag;
+  if (providerFlag) def.provider = providerFlag;
+  if (Object.keys(capabilities).length > 0) def.capabilities = capabilities;
+
+  const maxOutputRaw = typeof flags['max-output'] === 'string' ? flags['max-output'] : undefined;
+  const maxOutput = parseSizeFlag(maxOutputRaw);
+  if (maxOutput !== undefined) def.maxOutput = maxOutput;
+
+  await mutateModelsConfig(deps, (models) => {
+    models[modelId] = def;
+  });
+
+  deps.renderer.writeInfo(`Custom model "${modelId}" ${existing ? 'updated' : 'added'}.`);
+  const capLines: string[] = [];
+  if (def.capabilities) {
+    for (const [k, v] of Object.entries(def.capabilities)) {
+      capLines.push(`  ${k}: ${v}`);
+    }
+  }
+  if (def.maxOutput !== undefined) capLines.push(`  maxOutput: ${def.maxOutput}`);
+  if (capLines.length > 0) {
+    deps.renderer.write(color.dim(capLines.join('\n') + '\n'));
+  }
+  return 0;
+}
+
+async function modelsRemove(
+  args: string[],
+  deps: Parameters<SubcommandHandler>[1],
+): Promise<number> {
+  const modelId = args[0];
+  if (!modelId) {
+    deps.renderer.writeError('Usage: wstack models remove <modelId>');
+    return 1;
+  }
+
+  const existing = deps.config.models?.[modelId];
+  if (!existing) {
+    deps.renderer.writeError(`No custom model "${modelId}" found.`);
+    return 1;
+  }
+
+  await mutateModelsConfig(deps, (models) => {
+    delete models[modelId];
+  });
+
+  deps.renderer.writeInfo(`Removed custom model "${modelId}".`);
+  return 0;
+}
+
+async function modelsList(
+  _args: string[],
+  deps: Parameters<SubcommandHandler>[1],
+): Promise<number> {
+  const models = deps.config.models ?? {};
+  const entries = Object.entries(models);
+
+  if (entries.length === 0) {
+    deps.renderer.write(color.dim('No custom models defined.\n'));
+    deps.renderer.write(color.dim('Use `wstack models add <modelId> --max-context 128k --tools`\n'));
+    return 0;
+  }
+
+  deps.renderer.write(color.bold('Custom models\n'));
+  for (const [id, def] of entries.sort(([a], [b]) => a.localeCompare(b))) {
+    const label = def.name ?? id;
+    const provider = def.provider ? ` ${color.dim(`(${def.provider})`)}` : '';
+    deps.renderer.write(`  ${color.bold(label)}${provider}\n`);
+    if (def.capabilities) {
+      for (const [k, v] of Object.entries(def.capabilities)) {
+        deps.renderer.write(`    ${color.dim(`${k}:`)} ${v}\n`);
+      }
+    }
+    if (def.maxOutput !== undefined) {
+      deps.renderer.write(`    ${color.dim('maxOutput:')} ${def.maxOutput}\n`);
+    }
+  }
+  return 0;
+}

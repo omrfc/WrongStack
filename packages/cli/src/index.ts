@@ -203,7 +203,9 @@ export async function main(argv: string[]): Promise<number> {
   const modeId = activeMode?.id ?? 'default';
   const modePrompt = activeMode?.prompt ?? '';
   const [resolvedCaps, resolvedModel] = await Promise.all([
-    capabilitiesFor(modelsRegistry, provider.id, config.model).catch(() => undefined),
+    capabilitiesFor(modelsRegistry, provider.id, config.model, config.models).catch(
+      () => undefined,
+    ),
     modelsRegistry.getModel(config.provider, config.model).catch(() => undefined),
   ]);
   const modelCapabilities = resolvedCaps
@@ -540,9 +542,11 @@ export async function main(argv: string[]): Promise<number> {
       providerId,
       modelId,
     });
-    effectiveMaxContext = mc > 0 ? mc : 200_000;
-    context.provider.capabilities.maxContext = effectiveMaxContext;
-    autoCompactor?.setMaxContext(effectiveMaxContext);
+    effectiveMaxContext = mc;
+    context.provider.capabilities.maxContext = effectiveMaxContext; // may be 0 (unknown)
+    if (effectiveMaxContext > 0) {
+      autoCompactor?.setMaxContext(effectiveMaxContext);
+    }
     events.emit('ctx.max_context', { providerId, modelId, maxContext: effectiveMaxContext });
     updateSpinnerContext();
   };
