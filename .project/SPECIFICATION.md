@@ -395,6 +395,7 @@ interface Capabilities {
   promptCache: boolean;
   systemPrompt: boolean;
   jsonMode: boolean;
+  reasoning: boolean;
   maxContext: number;
   cacheControl: 'native' | 'auto' | 'none';
 }
