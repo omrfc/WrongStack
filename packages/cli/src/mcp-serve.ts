@@ -43,7 +43,7 @@ function parseToolsFlag(flags: Record<string, string | boolean>): Set<string> | 
 }
 
 /** Minimal run context — tools read cwd/projectRoot/signal; provider/session are stubs. */
-function makeServeContext(cwd: string, projectRoot: string, signal: AbortSignal): Context {
+export function makeServeContext(cwd: string, projectRoot: string, signal: AbortSignal): Context {
   const provider = {
     id: 'mcp-serve',
     capabilities: { maxContext: 0 },
@@ -73,6 +73,28 @@ function makeServeContext(cwd: string, projectRoot: string, signal: AbortSignal)
   });
 }
 
+/**
+ * Compute the set of tools an MCP-serve session exposes: a tool is included
+ * only if it passes the whitelist (when set) AND the permission policy returns
+ * `auto`. With `AutoApprovePermissionPolicy` this withholds shell/write/edit and
+ * dangerous-capability tools; with the `--yolo` policy everything passes.
+ * Exported for testing — the live path calls it inside `serveMcpStdio`.
+ */
+export async function selectExposedTools(
+  registry: ToolRegistry,
+  ctx: Context,
+  policy: PermissionPolicy,
+  whitelist: Set<string> | null,
+): Promise<Tool[]> {
+  const allowed: Tool[] = [];
+  for (const tool of registry.list()) {
+    if (whitelist && !whitelist.has(tool.name)) continue;
+    const decision = await policy.evaluate(tool, {}, ctx);
+    if (decision.permission === 'auto') allowed.push(tool);
+  }
+  return allowed;
+}
+
 export async function serveMcpStdio(deps: SubcommandDeps): Promise<number> {
   const flags = deps.flags ?? {};
   const yolo = flags['yolo'] === true || flags['allow-all'] === true;
@@ -99,12 +121,7 @@ export async function serveMcpStdio(deps: SubcommandDeps): Promise<number> {
 
   // Pre-compute the exposed set so tools/list and tools/call agree, and so a
   // withheld tool can never be invoked even if a client guesses its name.
-  const allowed: Tool[] = [];
-  for (const tool of registry.list()) {
-    if (whitelist && !whitelist.has(tool.name)) continue;
-    const decision = await permissionPolicy.evaluate(tool, {}, ctx);
-    if (decision.permission === 'auto') allowed.push(tool);
-  }
+  const allowed = await selectExposedTools(registry, ctx, permissionPolicy, whitelist);
   const allowedNames = new Set(allowed.map((t) => t.name));
 
   if (allowed.length === 0) {
