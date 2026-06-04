@@ -26,6 +26,10 @@ describe('parseModelRef', () => {
     expect(parseModelRef('openai/gpt-x')).toEqual({ provider: 'openai', model: 'gpt-x' });
     expect(parseModelRef('openai gpt-x')).toEqual({ provider: 'openai', model: 'gpt-x' });
   });
+
+  it('treats a leading-slash entry as "use the primary provider"', () => {
+    expect(parseModelRef('/gpt-x')).toEqual({ provider: undefined, model: 'gpt-x' });
+  });
 });
 
 describe('createFallbackModelExtension', () => {
@@ -128,6 +132,31 @@ describe('createFallbackModelExtension', () => {
     });
     await ext.wrapProviderRunner!(ctx, { model: 'opus' } as never, inner as never);
     expect(ctx.model).toBe('haiku');
+  });
+
+  it('notifies onModelSwitch on fallback hop and on primary restore', async () => {
+    const switches: Array<[string, string]> = [];
+    const ext = createFallbackModelExtension({
+      getConfig: () => cfg({ fallbackModels: ['openai/gpt-x'] }),
+      buildProvider: fakeProvider,
+      onModelSwitch: (p, m) => switches.push([p, m]),
+      events: new EventBus(),
+      logger,
+    })!;
+    const ctx = makeCtx('anthropic', 'opus');
+    let call = 0;
+    await ext.wrapProviderRunner!(
+      ctx,
+      { model: 'opus' } as never,
+      (async () => {
+        call++;
+        if (call === 1) throw overload('anthropic');
+        return { stopReason: 'end_turn', usage: { input: 0, output: 0 } } as never;
+      }) as never,
+    );
+    expect(switches).toContainEqual(['openai', 'gpt-x']); // fallback hop
+    await ext.beforeRun!(ctx, {} as never);
+    expect(switches).toContainEqual(['anthropic', 'opus']); // primary restore
   });
 
   it('restores the primary at the start of the next turn (beforeRun)', async () => {

@@ -44,9 +44,9 @@ export function createUserPromptSubmitMiddleware(hookRunner: HookRunner): UserIn
 
 /**
  * Agent extension for the `SessionStart` and `Stop` lifecycle hooks.
- * `SessionStart` fires once on the first run of the session (its
- * `additionalContext` is appended to the system prompt as an ephemeral block);
- * `Stop` fires at the end of every turn.
+ * `SessionStart` fires once on the first run of the session; its
+ * `additionalContext` is appended to `ctx.systemPrompt` as a one-time text
+ * block (persists for the session). `Stop` fires at the end of every turn.
  */
 export function createLifecycleHooksExtension(hookRunner: HookRunner): AgentExtension {
   let started = false;

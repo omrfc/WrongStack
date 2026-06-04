@@ -645,21 +645,35 @@ export async function main(argv: string[]): Promise<number> {
     hookRegistry,
   });
 
-  // Construct a credential-resolved Provider for a provider id (alias-resolved
-  // via `providers[id].type`), WITHOUT persisting anything. Shared by the
-  // `/model` switch below and the fallback-model extension.
-  const buildProviderForId = (providerId: string): import('@wrongstack/core').Provider => {
+  // Resolve a provider id (alias-resolved via `providers[id].type`) to the
+  // concrete provider id + the runtime ProviderConfig used to build it and to
+  // refresh the context-window denominator. Single source of truth so the
+  // `/model` switch and the fallback extension can't drift apart.
+  const resolveProviderCfg = (providerId: string) => {
     const savedCfg = config.providers?.[providerId];
     const resolvedProviderId = savedCfg?.type ?? providerId;
-    const newCfg = savedCfg ?? {
-      type: providerId,
-      apiKey: config.apiKey,
-      baseUrl: config.baseUrl,
+    const cfgWithType = {
+      ...(savedCfg ?? { type: providerId, apiKey: config.apiKey, baseUrl: config.baseUrl }),
+      type: resolvedProviderId,
     };
-    const cfgWithType = { ...newCfg, type: resolvedProviderId };
+    return { resolvedProviderId, cfgWithType };
+  };
+
+  // Construct a credential-resolved Provider for a provider id, WITHOUT
+  // persisting anything. Shared by the `/model` switch and the fallback extension.
+  const buildProviderForId = (providerId: string): import('@wrongstack/core').Provider => {
+    const { resolvedProviderId, cfgWithType } = resolveProviderCfg(providerId);
     return config.features.modelsRegistry && providerRegistry.has(resolvedProviderId)
       ? providerRegistry.create(cfgWithType)
       : makeProviderFromConfig(resolvedProviderId, cfgWithType);
+  };
+
+  // Refresh the auto-compaction / context-chip denominator for a (provider,
+  // model) pair. Used by both the `/model` switch and the fallback extension so
+  // a switch to a smaller-window model recomputes thresholds.
+  const refreshMaxContextFor = (providerId: string, modelId: string): void => {
+    const { resolvedProviderId, cfgWithType } = resolveProviderCfg(providerId);
+    void refreshMaxContext(resolvedProviderId, modelId, cfgWithType);
   };
 
   // Cross-provider fallback: switch to the next configured model when the
@@ -667,6 +681,7 @@ export async function main(argv: string[]): Promise<number> {
   const fallbackExtension = createFallbackModelExtension({
     getConfig: () => config,
     buildProvider: buildProviderForId,
+    onModelSwitch: refreshMaxContextFor,
     events,
     logger,
   });
@@ -678,14 +693,7 @@ export async function main(argv: string[]): Promise<number> {
   // and rebuild the frozen config so other consumers see the new ids.
   const switchProviderAndModel = (providerId: string, modelId: string): string | null => {
     try {
-      const savedCfg = config.providers?.[providerId];
-      const resolvedProviderId = savedCfg?.type ?? providerId;
-      const cfgWithType = {
-        ...(savedCfg ?? { type: providerId, apiKey: config.apiKey, baseUrl: config.baseUrl }),
-        type: resolvedProviderId,
-      };
-      const newProvider = buildProviderForId(providerId);
-      context.provider = newProvider;
+      context.provider = buildProviderForId(providerId);
       context.model = modelId;
       config = patchConfig(config, { provider: providerId, model: modelId });
       // L1-B: propagate the change to the ConfigStore so any subsystem
@@ -694,7 +702,7 @@ export async function main(argv: string[]): Promise<number> {
       configStore.update({ provider: providerId, model: modelId });
       // Refresh AutoCompactionMiddleware denominator for the new model's
       // maxContext so threshold triggers (warn/soft/hard) use the correct denominator.
-      void refreshMaxContext(resolvedProviderId, modelId, cfgWithType);
+      refreshMaxContextFor(providerId, modelId);
       return null;
     } catch (err) {
       return err instanceof Error ? err.message : String(err);

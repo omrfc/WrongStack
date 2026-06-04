@@ -16,6 +16,12 @@ export interface FallbackModelDeps {
    * path, which shares this with the `/model` switch logic.
    */
   buildProvider: (providerId: string) => Provider;
+  /**
+   * Called after the active model changes (a fallback hop or the primary
+   * restore) so the host can refresh the auto-compaction / context-window
+   * denominator — important when a fallback crosses to a smaller-window model.
+   */
+  onModelSwitch?: (providerId: string, modelId: string) => void;
   events: EventBus;
   logger: Logger;
 }
@@ -30,7 +36,12 @@ export function parseModelRef(ref: string): ModelRef {
   const trimmed = ref.trim();
   const slash = trimmed.indexOf('/');
   if (slash !== -1) {
-    return { provider: trimmed.slice(0, slash), model: trimmed.slice(slash + 1).trim() };
+    // An empty provider (leading slash, e.g. "/gpt") means "use the primary
+    // provider" — collapse to undefined so the `?? cfg.provider` fallback fires.
+    return {
+      provider: trimmed.slice(0, slash) || undefined,
+      model: trimmed.slice(slash + 1).trim(),
+    };
   }
   const parts = trimmed.split(/\s+/);
   if (parts.length >= 2) {
@@ -74,6 +85,7 @@ export function createFallbackModelExtension(deps: FallbackModelDeps): AgentExte
       try {
         ctx.provider = deps.buildProvider(cfg.provider);
         ctx.model = cfg.model;
+        deps.onModelSwitch?.(cfg.provider, cfg.model);
       } catch (err) {
         deps.logger.warn(
           `fallback-model: could not restore primary "${cfg.provider}/${cfg.model}": ${
@@ -119,6 +131,7 @@ export function createFallbackModelExtension(deps: FallbackModelDeps): AgentExte
           ctx.model = parsed.model;
           request.model = parsed.model;
           dirty = true;
+          deps.onModelSwitch?.(targetProviderId, parsed.model);
 
           deps.events.emit('provider.fallback', {
             from,
