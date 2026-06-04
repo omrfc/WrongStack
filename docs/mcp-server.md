@@ -6,12 +6,30 @@ it can expose its own built-in tools to any MCP client — Claude Desktop, an ID
 or another agent — over the standard stdio JSON-RPC transport.
 
 ```bash
-wstack mcp serve            # safe: exposes read-only tools only
+wstack mcp serve            # stdio, safe: read-only tools only
 wstack mcp serve --yolo     # exposes every tool, including bash/write/edit
 wstack mcp serve --tools read,grep,glob   # expose only a whitelist
+
+# network-reachable (HTTP/JSON-RPC):
+wstack mcp serve --http --port 7777                 # loopback only (127.0.0.1)
+wstack mcp serve --http --host 0.0.0.0 --token SECRET  # LAN, token required
 ```
 
-stdout is the JSON-RPC channel; all status/log output goes to stderr.
+Over stdio, stdout is the JSON-RPC channel; all status/log output goes to stderr.
+
+## Transports
+
+| Transport | Flag | Reachability |
+|---|---|---|
+| **stdio** (default) | _(none)_ | A client spawns `wstack mcp serve` as a child process and talks over its stdio. |
+| **HTTP** | `--http [--port N] [--host H] [--token T]` | Network-reachable. POST a JSON-RPC request, get the JSON response; `GET /` is a health probe. |
+
+### HTTP security
+
+- Binds to **`127.0.0.1` (loopback) by default** — only processes on the same machine can reach it.
+- Binding to any non-loopback host (e.g. `--host 0.0.0.0`) **requires `--token`**; the server refuses to start otherwise, so tools are never exposed to the network unauthenticated.
+- When a token is set, every request must send `Authorization: Bearer <token>` (401 otherwise).
+- Request bodies are capped at 4 MiB.
 
 ## What gets exposed
 

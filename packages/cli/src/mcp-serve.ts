@@ -19,7 +19,7 @@ import {
   ToolRegistry,
 } from '@wrongstack/core';
 import { ToolExecutor } from '@wrongstack/core/execution';
-import { MCPServer, type MCPServerToolHost, serveStdio } from '@wrongstack/mcp';
+import { MCPServer, type MCPServerToolHost, serveHttp, serveStdio } from '@wrongstack/mcp';
 import { builtinToolsPack } from '@wrongstack/tools';
 import type { SubcommandDeps } from './subcommands/index.js';
 
@@ -166,10 +166,46 @@ export async function serveMcpStdio(deps: SubcommandDeps): Promise<number> {
     logger: { warn: (m) => log(`[mcp-serve] ${m}`) },
   });
 
-  log(
-    `wrongstack MCP server ready on stdio — exposing ${allowed.length} tool(s)` +
-      `${yolo ? ' (yolo: all tools)' : ' (safe: read-only tools)'}.`,
-  );
+  const mode = yolo ? 'yolo: all tools' : 'safe: read-only tools';
+
+  // HTTP transport — network-reachable. Loopback by default; non-loopback
+  // requires a token (enforced in serveHttp).
+  if (
+    flags['http'] === true ||
+    typeof flags['http'] === 'string' ||
+    flags['port'] ||
+    flags['host']
+  ) {
+    const port = Number(flags['port'] ?? flags['http'] ?? 0) || 0;
+    const httpHost = typeof flags['host'] === 'string' ? flags['host'] : '127.0.0.1';
+    const token = typeof flags['token'] === 'string' ? flags['token'] : undefined;
+    let handle: Awaited<ReturnType<typeof serveHttp>>;
+    try {
+      handle = await serveHttp(server, {
+        port,
+        host: httpHost,
+        token,
+        logger: { warn: (m) => log(`[mcp-serve] ${m}`) },
+      });
+    } catch (err) {
+      log(`wrongstack MCP server: ${err instanceof Error ? err.message : String(err)}`);
+      return 1;
+    }
+    log(
+      `wrongstack MCP server ready at ${handle.url} — exposing ${allowed.length} tool(s) (${mode})` +
+        `${token ? ' [token auth]' : ''}.`,
+    );
+    await new Promise<void>((resolve) => {
+      const stop = () => resolve();
+      process.once('SIGINT', stop);
+      process.once('SIGTERM', stop);
+    });
+    await handle.close();
+    controller.abort();
+    return 0;
+  }
+
+  log(`wrongstack MCP server ready on stdio — exposing ${allowed.length} tool(s) (${mode}).`);
 
   const handle = serveStdio(server);
   await handle.done;

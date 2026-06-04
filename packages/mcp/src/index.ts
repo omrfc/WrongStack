@@ -11,6 +11,7 @@ export { MCPRegistry, type MCPRegistryOptions } from './registry.js';
 export {
   MCPServer,
   serveStdio,
+  serveHttp,
   toContentBlocks,
   type MCPServerTool,
   type MCPServerToolHost,
@@ -19,6 +20,8 @@ export {
   type MCPServerLogger,
   type ServeStdioHandle,
   type ServeStdioOptions,
+  type ServeHttpOptions,
+  type ServeHttpHandle,
 } from './server.js';
 export { MCP_CONSTANTS } from './constants.js';
 export {

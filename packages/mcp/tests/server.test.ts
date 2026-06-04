@@ -1,6 +1,12 @@
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
-import { MCPServer, type MCPServerToolHost, serveStdio, toContentBlocks } from '../src/server.js';
+import {
+  MCPServer,
+  type MCPServerToolHost,
+  serveHttp,
+  serveStdio,
+  toContentBlocks,
+} from '../src/server.js';
 
 function makeHost(overrides: Partial<MCPServerToolHost> = {}): MCPServerToolHost {
   return {
@@ -158,5 +164,77 @@ describe('serveStdio', () => {
     const handle = serveStdio(new MCPServer({ host: makeHost() }), { stdin, stdout });
     stdin.end();
     await expect(handle.done).resolves.toBeUndefined();
+  });
+});
+
+describe('serveHttp', () => {
+  it('serves JSON-RPC over POST on an ephemeral loopback port', async () => {
+    const handle = await serveHttp(new MCPServer({ host: makeHost() }), { port: 0 });
+    try {
+      const r = await fetch(handle.url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+      });
+      expect(r.status).toBe(200);
+      const body = (await r.json()) as { result: { tools: unknown[] } };
+      expect(body.result.tools).toHaveLength(1);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('answers a GET health probe', async () => {
+    const handle = await serveHttp(new MCPServer({ host: makeHost() }), { port: 0 });
+    try {
+      const r = await fetch(handle.url);
+      expect(r.status).toBe(200);
+      expect(((await r.json()) as { status: string }).status).toBe('ok');
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('returns 202 (no body) for notifications', async () => {
+    const handle = await serveHttp(new MCPServer({ host: makeHost() }), { port: 0 });
+    try {
+      const r = await fetch(handle.url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+      });
+      expect(r.status).toBe(202);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('enforces bearer token when configured', async () => {
+    const handle = await serveHttp(new MCPServer({ host: makeHost() }), {
+      port: 0,
+      token: 'secret',
+    });
+    try {
+      const unauth = await fetch(handle.url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }),
+      });
+      expect(unauth.status).toBe(401);
+      const ok = await fetch(handle.url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: 'Bearer secret' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }),
+      });
+      expect(ok.status).toBe(200);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('refuses to bind a non-loopback host without a token', async () => {
+    await expect(
+      serveHttp(new MCPServer({ host: makeHost() }), { host: '0.0.0.0' }),
+    ).rejects.toThrow(/non-loopback/);
   });
 });

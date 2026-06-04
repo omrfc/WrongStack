@@ -1,3 +1,4 @@
+import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import { MCP_CONSTANTS } from './constants.js';
 
 /**
@@ -251,4 +252,138 @@ export function serveStdio(server: MCPServer, opts: ServeStdioOptions = {}): Ser
     },
     done,
   };
+}
+
+// ── HTTP transport ──────────────────────────────────────────────────────────
+
+const HTTP_BODY_CAP = 4 * 1024 * 1024; // 4 MiB
+
+export interface ServeHttpOptions {
+  /** TCP port. 0 picks an ephemeral port (resolved in the handle). Default 0. */
+  port?: number;
+  /** Bind address. Default '127.0.0.1' (loopback only). */
+  host?: string;
+  /**
+   * Bearer token required on every request (`Authorization: Bearer <token>`).
+   * REQUIRED when binding to a non-loopback host — `serveHttp` refuses to
+   * expose tools to the network without one.
+   */
+  token?: string;
+  logger?: MCPServerLogger;
+}
+
+export interface ServeHttpHandle {
+  port: number;
+  host: string;
+  url: string;
+  close(): Promise<void>;
+}
+
+function isLoopbackHost(host: string): boolean {
+  return host === '127.0.0.1' || host === '::1' || host === 'localhost';
+}
+
+/**
+ * Run an `MCPServer` over HTTP: POST a single JSON-RPC request, get the JSON
+ * response (notifications → 202 with no body). Reuses `handleMessage`, so the
+ * protocol is identical to the stdio transport.
+ *
+ * Security: binds to loopback by default. Binding to any other host (e.g.
+ * `0.0.0.0`) REQUIRES a `token` — otherwise this rejects, because it would
+ * otherwise expose tool execution to the whole network unauthenticated.
+ */
+export function serveHttp(
+  server: MCPServer,
+  opts: ServeHttpOptions = {},
+): Promise<ServeHttpHandle> {
+  const host = opts.host ?? '127.0.0.1';
+  const port = opts.port ?? 0;
+  const token = opts.token;
+  const log = opts.logger;
+
+  if (!isLoopbackHost(host) && !token) {
+    return Promise.reject(
+      new Error(
+        `serveHttp: refusing to bind to non-loopback host "${host}" without a token — ` +
+          'pass a token to expose tools to the network, or bind to 127.0.0.1.',
+      ),
+    );
+  }
+
+  const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+    void handleHttpRequest(server, req, res, token, log);
+  });
+
+  return new Promise<ServeHttpHandle>((resolve, reject) => {
+    httpServer.once('error', reject);
+    httpServer.listen(port, host, () => {
+      httpServer.removeListener('error', reject);
+      const addr = httpServer.address();
+      const boundPort = typeof addr === 'object' && addr ? addr.port : port;
+      const displayHost = host === '::1' ? '[::1]' : host;
+      resolve({
+        port: boundPort,
+        host,
+        url: `http://${displayHost}:${boundPort}/`,
+        close: () =>
+          new Promise<void>((res2) => {
+            httpServer.close(() => res2());
+          }),
+      });
+    });
+  });
+}
+
+async function handleHttpRequest(
+  server: MCPServer,
+  req: IncomingMessage,
+  res: ServerResponse,
+  token: string | undefined,
+  log: MCPServerLogger | undefined,
+): Promise<void> {
+  const send = (status: number, body: string, type = 'application/json') => {
+    res.writeHead(status, { 'content-type': type });
+    res.end(body);
+  };
+
+  // Health probe.
+  if (req.method === 'GET') {
+    return send(200, JSON.stringify({ status: 'ok', server: 'wrongstack-mcp' }));
+  }
+  if (req.method !== 'POST') {
+    return send(405, JSON.stringify({ error: 'method not allowed' }));
+  }
+  if (token) {
+    const auth = req.headers.authorization ?? '';
+    const expected = `Bearer ${token}`;
+    if (auth !== expected) {
+      return send(401, JSON.stringify({ error: 'unauthorized' }));
+    }
+  }
+
+  let body = '';
+  let tooLarge = false;
+  req.on('data', (chunk: Buffer) => {
+    if (tooLarge) return;
+    body += chunk.toString('utf8');
+    if (body.length > HTTP_BODY_CAP) {
+      tooLarge = true;
+      send(413, JSON.stringify({ error: 'payload too large' }));
+      req.destroy();
+    }
+  });
+  req.on('end', () => {
+    if (tooLarge) return;
+    void server
+      .handleMessage(body)
+      .then((out) => {
+        // Notifications produce no response body.
+        if (out === null) return send(202, '');
+        return send(200, out);
+      })
+      .catch((err) => {
+        log?.warn?.(`MCP http handler error: ${err instanceof Error ? err.message : String(err)}`);
+        send(500, JSON.stringify({ error: 'internal error' }));
+      });
+  });
 }
