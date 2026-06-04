@@ -41,17 +41,21 @@ const lines = [
   { cmd: 'npm i -g wrongstack', out: <Out tone="green">✓ wrongstack@{META.version}</Out> },
   {
     cmd: 'wrongstack --tui --yolo',
-    out: <Out tone="blue">▸ TUI ready — readline + Ink, lazy-loaded</Out>,
+    out: <Out tone="blue">▸ models.dev refreshed · TUI ready</Out>,
+  },
+  {
+    cmd: '/model',
+    out: <Out tone="purple">provider → type-to-search models · ▲ 12 above · ▼ 28 below</Out>,
+  },
+  {
+    cmd: 'wstack models openrouter --search claude --page 2',
+    out: <Out tone="blue">18 matches · page 2/3 · fresh catalog</Out>,
   },
   {
     cmd: '/goal "ship the REST API"',
     out: <Out tone="purple">⟳ DECIDE · ⚡ EXECUTE · ◎ REFLECT — locked in</Out>,
   },
   { cmd: '/fleet status', out: <Out tone="yellow">3 subagents · 2 running · 1 done</Out> },
-  {
-    cmd: '/autophase start',
-    out: <Out>Discovery → Design → Implementation → Testing → Deploy</Out>,
-  },
 ];
 
 function useTypewriter() {

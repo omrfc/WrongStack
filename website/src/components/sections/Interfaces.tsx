@@ -59,9 +59,10 @@ const surfaces: Surface[] = [
     label: 'TUI',
     badge: '--tui · Ink + React',
     blurb:
-      'A rich terminal UI, lazy-loaded behind --tui. Live status, per-subagent timers, and Esc-to-steer mid-run.',
+      'A rich terminal UI, lazy-loaded behind --tui. Live status, per-subagent timers, type-to-search model picking, and Esc-to-steer mid-run.',
     features: [
       'Status bar: model · tokens · cache hit · cost',
+      '/model picker: provider → searchable model list with scroll window',
       'LiveActivityStrip: tool in flight + elapsed timer',
       'Esc-to-steer: abort and prepend a STEERING preamble',
       '@query fuzzy file picker · clipboard image paste',

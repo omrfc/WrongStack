@@ -26,7 +26,7 @@ export function ProviderStrip() {
     <section aria-label="Supported providers" className="border-y border-line bg-surface/40 py-8">
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         <p className="text-center font-mono text-xs uppercase tracking-widest text-faint">
-          Talks to ~110 providers — straight from the models.dev catalog
+          Talks to ~110 providers — refreshed from models.dev before boot completes
         </p>
         <div className="edge-fade mt-5 overflow-hidden">
           <div className="marquee flex w-max items-center gap-10">

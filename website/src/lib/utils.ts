@@ -11,7 +11,7 @@ export function cn(...inputs: ClassValue[]) {
    ========================================================================= */
 
 export const META = {
-  version: '0.10.2',
+  version: '0.54.1',
   repo: 'https://github.com/WrongStack/WrongStack',
   npm: 'wrongstack',
   node: '22',
@@ -21,24 +21,28 @@ export const META = {
 
 export const heroStats = [
   { value: '36', label: 'built-in tools' },
-  { value: '12', label: 'bundled skills' },
+  { value: '16', label: 'bundled skills' },
   { value: '~110', label: 'model providers' },
   { value: '10', label: 'official plugins' },
 ] as const;
 
-/** 12 bundled skills — AGENTS.md canonical list. */
+/** 16 bundled skills — README / bundled catalog canonical list. */
 export const skills = [
+  { name: 'api-design', description: 'REST conventions, pagination, auth, and error taxonomy' },
   { name: 'audit-log', description: 'Analyze session logs and event streams' },
   { name: 'bug-hunter', description: 'Systematic debugging and anti-pattern detection' },
+  { name: 'docker-deploy', description: 'Container builds, non-root images, and deployment checks' },
   { name: 'git-flow', description: 'Branching strategy and commit conventions' },
   { name: 'multi-agent', description: 'Coordinate parallel agent workflows' },
   { name: 'node-modern', description: 'Node.js 22+ patterns and best practices' },
+  { name: 'observability', description: 'Structured logs, traces, metrics, and redaction' },
   { name: 'prompt-engineering', description: 'Craft effective prompts for better results' },
   { name: 'react-modern', description: 'React 19+ patterns and hooks' },
   { name: 'refactor-planner', description: 'Plan and execute safe refactors' },
   { name: 'sdd', description: 'Spec-Driven Development workflow' },
   { name: 'security-scanner', description: 'Find vulnerabilities before they ship' },
   { name: 'skill-creator', description: 'Build custom skills for specialized tasks' },
+  { name: 'testing', description: 'Vitest patterns, mocks, coverage, and test strategy' },
   { name: 'typescript-strict', description: 'Strict TypeScript for bulletproof code' },
 ] as const;
 

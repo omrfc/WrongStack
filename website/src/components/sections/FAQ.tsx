@@ -15,7 +15,7 @@ const faqs = [
   },
   {
     q: 'Which models and providers can it use?',
-    a: 'Around 110 providers across four wire families (anthropic, openai, openai-compatible, google). The catalog comes live from models.dev — there are no hardcoded model names and no hardcoded pricing. Switch provider or model at runtime with /model or /use.',
+    a: 'Around 110 providers across four wire families (anthropic, openai, openai-compatible, google). The catalog refreshes from models.dev before boot completes — there are no hardcoded model names and no hardcoded pricing. Switch provider or model at runtime with the TUI /model picker, type to search after selecting a provider, or inspect models with wstack models --search --page --per-page.',
   },
   {
     q: 'Are my API keys safe?',
@@ -27,7 +27,7 @@ const faqs = [
   },
   {
     q: 'Can it run offline?',
-    a: 'Yes. --no-features boots a minimal kernel with no MCP, plugins, memory tools, models.dev fetch, or skill discovery — and makes no network calls at startup. You just declare the provider family in config.',
+    a: 'Yes. Use --no-models-refresh to skip only the boot-time models.dev refresh, or --no-features to boot a minimal kernel with no MCP, plugins, memory tools, models.dev fetch, or skill discovery. In full offline mode, declare the provider family in config.',
   },
   {
     q: 'How does it stay safe while editing my code?',

@@ -25,7 +25,7 @@ const features = [
     icon: Users,
     title: 'Multi-agent fleet',
     tag: 'Director + 46 roles',
-    body: 'A Director promotes the session and drives a fleet through 8 belt tools — spawn, assign, await, ask, roll_up, terminate. A smart dispatcher routes each task to the best-matching role.',
+    body: 'A Director promotes the session and drives a fleet through 14 orchestration tools — spawn, assign, await, ask, roll_up, health, transcripts, and collab debug. A smart dispatcher routes each task to the best-matching role.',
   },
   {
     icon: Target,
@@ -48,8 +48,8 @@ const features = [
   {
     icon: Boxes,
     title: '~110 providers',
-    tag: 'models.dev catalog',
-    body: 'Four wire families with real end-to-end streaming. The catalog comes from models.dev — no hardcoded model names, no hardcoded pricing, no hardcoded provider lists.',
+    tag: 'boot-refreshed catalog',
+    body: 'Four wire families with real end-to-end streaming. The models.dev catalog refreshes before boot completes, then the TUI model picker and capability resolver use the fresh provider data.',
   },
   {
     icon: ListChecks,

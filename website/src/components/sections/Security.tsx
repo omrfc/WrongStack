@@ -3,7 +3,7 @@
 import { Reveal, SectionHeading } from '@/components/ui/reveal';
 import { SpotlightCard } from '@/components/ui/spotlight-card';
 import { META } from '@/lib/utils';
-import { KeyRound, Lock, Network, ShieldCheck, Zap } from 'lucide-react';
+import { Cloud, EyeOff, KeyRound, Lock, Network, ShieldCheck, Zap } from 'lucide-react';
 
 const items = [
   {
@@ -25,6 +25,16 @@ const items = [
     icon: Network,
     title: 'Network is locked down',
     body: 'The fetch tool blocks localhost and private IPs by default; opt in with WRONGSTACK_FETCH_ALLOW_PRIVATE=1. The bash tool runs behind an env allowlist.',
+  },
+  {
+    icon: EyeOff,
+    title: 'WebUI broadcasts are scrubbed',
+    body: 'tool.started and tool.executed payloads are redacted before WebSocket broadcast, so API keys and bearer tokens do not leak to connected browser tabs.',
+  },
+  {
+    icon: Cloud,
+    title: 'Cloud sync stays in-bounds',
+    body: 'Pulled sync entries reject .. traversal, absolute paths, and anything resolving outside the category root. File-backed categories also reject nested paths.',
   },
   {
     icon: Zap,
@@ -60,7 +70,7 @@ export function Security() {
             </Reveal>
           ))}
 
-          {/* Threat model callout fills the 6th cell */}
+          {/* Threat model callout */}
           <Reveal delay={0.12}>
             <a
               href={`${META.repo}/blob/main/SECURITY.md`}

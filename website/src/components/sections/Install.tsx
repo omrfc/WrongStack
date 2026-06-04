@@ -46,7 +46,9 @@ const recipes = [
   { label: 'Director fleet', cmd: 'wrongstack --director "audit src/ for security issues"' },
   { label: 'Goal mode', cmd: 'wrongstack --goal "ship the REST API"' },
   { label: 'Pick a provider', cmd: 'wrongstack --provider groq --model llama-3.3-70b-versatile' },
+  { label: 'Search models', cmd: 'wstack models openrouter --search claude --page 2' },
   { label: 'Resume a session', cmd: 'wrongstack --resume <session-id>' },
+  { label: 'Skip catalog refresh', cmd: 'wrongstack --no-models-refresh' },
   { label: 'Minimal kernel (offline)', cmd: 'wrongstack --no-features' },
   { label: 'Add a key', cmd: 'wrongstack auth groq' },
 ];
