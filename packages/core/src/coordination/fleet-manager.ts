@@ -35,8 +35,11 @@ export interface FleetManagerOptions {
   /**
    * Provider's max context window in tokens. Used with `maxLeaderContextLoad`
    * to compute the absolute token threshold. Default: 128_000.
+   *
+   * A function may be supplied when the leader can switch models at runtime;
+   * canSpawn() reads it lazily so the spawn threshold follows the active model.
    */
-  maxContext?: number;
+  maxContext?: number | (() => number | undefined);
 }
 
 /**
@@ -99,8 +102,8 @@ export class FleetManager implements IFleetManager {
   private leaderContextPressure = 0;
   /** Maximum context load fraction before spawn is refused. */
   private readonly maxLeaderContextLoad: number;
-  /** Provider's max context window in tokens. */
-  private readonly maxContext: number;
+  /** Provider's max context window in tokens, or a live resolver for runtime model switches. */
+  private readonly maxContext: number | (() => number | undefined);
 
   constructor(opts: FleetManagerOptions = {}) {
     this.manifestPath = opts.manifestPath;
@@ -191,7 +194,8 @@ export class FleetManager implements IFleetManager {
     // Context pressure check: reject spawn if leader context is too full.
     // maxLeaderContextLoad === 1.0 disables this check.
     if (this.maxLeaderContextLoad < 1.0) {
-      const threshold = this.maxContext * this.maxLeaderContextLoad;
+      const maxContext = this.resolveMaxContext();
+      const threshold = maxContext * this.maxLeaderContextLoad;
       if (this.leaderContextPressure >= threshold) {
         return {
           kind: 'max_context_load',
@@ -205,6 +209,12 @@ export class FleetManager implements IFleetManager {
 
   setLeaderContextPressure(tokens: number): void {
     this.leaderContextPressure = tokens;
+  }
+
+  private resolveMaxContext(): number {
+    const resolved =
+      typeof this.maxContext === 'function' ? this.maxContext() : this.maxContext;
+    return resolved && resolved > 0 ? resolved : 128_000;
   }
 
   /**

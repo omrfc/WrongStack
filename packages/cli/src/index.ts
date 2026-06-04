@@ -198,13 +198,13 @@ export async function main(argv: string[]): Promise<number> {
   }
   const modeId = activeMode?.id ?? 'default';
   const modePrompt = activeMode?.prompt ?? '';
-  const resolvedModel = await modelsRegistry.getModel(config.provider, config.model);
-  const modelCapabilities = resolvedModel?.capabilities
+  const resolvedCaps = await capabilitiesFor(modelsRegistry, provider.id, config.model).catch(() => undefined);
+  const modelCapabilities = resolvedCaps
     ? {
-        maxContextTokens: resolvedModel.capabilities.maxContext,
-        supportsTools: resolvedModel.capabilities.tools,
-        supportsVision: resolvedModel.capabilities.vision,
-        supportsReasoning: resolvedModel.capabilities.reasoning,
+        maxContextTokens: resolvedCaps.maxContext,
+        supportsTools: resolvedCaps.tools,
+        supportsVision: resolvedCaps.vision,
+        supportsReasoning: resolvedCaps.reasoning,
       }
     : undefined;
 
@@ -477,7 +477,7 @@ export async function main(argv: string[]): Promise<number> {
 
   const pipelines = setupPipelines({ events, logger });
   const compactor = container.resolve(TOKENS.Compactor);
-  const { effectiveMaxContext, autoCompactor } = await setupCompaction({
+  const compactionSetup = await setupCompaction({
     compactor,
     events,
     modelsRegistry,
@@ -488,13 +488,19 @@ export async function main(argv: string[]): Promise<number> {
     fullConfig: config as any,
     sessionBridge, // share the same bridge for consistent audit logging (compaction + errors + future)
   });
+  let effectiveMaxContext = compactionSetup.effectiveMaxContext;
+  context.provider.capabilities.maxContext = effectiveMaxContext;
+  const { autoCompactor } = compactionSetup;
 
-  // Refresh AutoCompactionMiddleware denominator when the active model changes.
+  // Refresh the active model's context denominator when provider/model changes.
+  // This feeds auto-compaction, the leader context chip, and Director spawn guards.
   const refreshMaxContext = async (providerId: string, modelId: string) => {
-    if (!autoCompactor) return;
     const cap = await capabilitiesFor(modelsRegistry, providerId, modelId).catch(() => undefined);
     const mc = (cap as { maxContext?: number } | undefined)?.maxContext ?? config.context.effectiveMaxContext ?? 200_000;
-    autoCompactor.setMaxContext(mc);
+    effectiveMaxContext = mc;
+    context.provider.capabilities.maxContext = mc;
+    autoCompactor?.setMaxContext(mc);
+    updateSpinnerContext();
   };
 
   // Helper: keep the spinner's context chip in sync
@@ -686,6 +692,7 @@ export async function main(argv: string[]): Promise<number> {
       stateCheckpointPath,
       sessionWriter: session,
       maxConcurrent,
+      getLeaderMaxContext: () => effectiveMaxContext,
     },
   );
   // ALWAYS register the `delegate` tool, even in non-director mode. It

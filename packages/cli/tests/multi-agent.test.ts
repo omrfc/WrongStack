@@ -29,6 +29,7 @@ import {
   type Tool,
   ToolRegistry,
 } from '@wrongstack/core';
+import { capabilitiesFor } from '@wrongstack/providers';
 import { type MultiAgentDeps, MultiAgentHost } from '../src/multi-agent.js';
 
 /**
@@ -658,11 +659,31 @@ describe('MultiAgentHost.makeSubagentFactory', () => {
     // Without the overlay an openai-compatible subagent (DeepSeek/Groq)
     // reports the 32k family default in the fleet panel. With a registry
     // wired, the factory resolves the real window (here mocked to 128k).
+    vi.mocked(capabilitiesFor).mockResolvedValueOnce({ maxContext: 128_000 } as never);
     const deps = depsWithTools();
     deps.modelsRegistry = {} as unknown as MultiAgentDeps['modelsRegistry'];
     const host = new MultiAgentHost(deps);
     const { agent, dispose } = await host.makeSubagentFactory(config)(slotCfg);
     expect(agent.ctx.provider.capabilities.maxContext).toBe(128_000);
+    await dispose?.();
+  });
+
+  it('uses the model-specific maxContext for subagents instead of the provider family default', async () => {
+    vi.mocked(capabilitiesFor).mockResolvedValueOnce({ maxContext: 1_050_000 } as never);
+    const deps = depsWithTools();
+    deps.modelsRegistry = {} as unknown as MultiAgentDeps['modelsRegistry'];
+    const gptConfig = {
+      provider: 'openai',
+      model: 'gpt-5.5',
+      apiKey: 'fake',
+    } as unknown as Config;
+    const host = new MultiAgentHost(deps);
+    const { agent, dispose } = await host.makeSubagentFactory(gptConfig)({
+      ...slotCfg,
+      provider: 'openai',
+      model: 'gpt-5.5',
+    });
+    expect(agent.ctx.provider.capabilities.maxContext).toBe(1_050_000);
     await dispose?.();
   });
 

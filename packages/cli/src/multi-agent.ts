@@ -150,6 +150,12 @@ export interface MultiAgentHostOptions {
    */
   maxConcurrent?: number;
   /**
+   * Live max context window for the leader model. Director spawn guards read
+   * this lazily so runtime provider/model switches do not leave the fleet
+   * using the launch-time family default.
+   */
+  getLeaderMaxContext?: () => number | undefined;
+  /**
    * Debounce window for state-checkpoint writes in milliseconds.
    * Default: 250. Only meaningful in director mode.
    */
@@ -249,6 +255,7 @@ export class MultiAgentHost {
       manifestDebounceMs: 2000,
       checkpointDebounceMs: this.opts.checkpointDebounceMs ?? 250,
       maxSpawnDepth: 5,
+      maxContext: this.opts.getLeaderMaxContext,
     });
     this.fleetManager = fleetManager;
 
@@ -282,6 +289,7 @@ export class MultiAgentHost {
       sessionsRoot: this.opts.sessionsRoot,
       directorRunId: this.opts.directorRunId,
       maxSpawnDepth: 5,
+      maxContext: this.opts.getLeaderMaxContext,
       // Live getter (not a snapshot) so a mid-session `/setmodel` takes
       // effect on the next spawn — the director is built lazily + once.
       modelMatrix: () => this.deps.configStore.get().modelMatrix,
@@ -543,9 +551,19 @@ export class MultiAgentHost {
         });
       });
 
+      const offCtxBridge = events.on('ctx.pct', (e) => {
+        hostEvents.emit('subagent.ctx_pct', {
+          subagentId: subCfg.id ?? subCfg.name ?? 'subagent',
+          load: e.load,
+          tokens: e.tokens,
+          maxContext: e.maxContext,
+        });
+      });
+
       const dispose = async () => {
         offToolBridge();
         offSummaryBridge();
+        offCtxBridge();
         try {
           await subSession.close?.();
         } catch {
@@ -591,29 +609,40 @@ export class MultiAgentHost {
     overrideId?: string,
     model?: string,
   ): Promise<Provider> {
-    const providerId = overrideId && config.providers?.[overrideId] ? overrideId : config.provider;
+    const requestedProviderId = overrideId ?? config.provider;
+    const providerId =
+      requestedProviderId === config.provider ||
+      config.providers?.[requestedProviderId] !== undefined ||
+      this.deps.providerRegistry.has(requestedProviderId)
+        ? requestedProviderId
+        : config.provider;
     const newCfg = config.providers?.[providerId] ?? {
       type: providerId,
       apiKey: config.apiKey,
       baseUrl: config.baseUrl,
     };
-    const provider = makeProviderFromConfig(providerId, {
+    const cfgWithType = {
       ...newCfg,
       type: providerId,
-    });
-    // Overlay the real context window. `makeProviderFromConfig` stamps the
-    // family default (32k for openai-compatible), which makes every DeepSeek/
-    // Groq subagent report a 32k window in the fleet panel. Resolve it the
-    // same way the leader does — models catalog first, then the leader's
-    // effective override, then the family default as a last resort. Each
-    // provider owns its own capabilities object, so mutating in place is safe.
+    };
+    const provider = this.deps.providerRegistry.has(providerId)
+      ? this.deps.providerRegistry.create(cfgWithType)
+      : makeProviderFromConfig(providerId, cfgWithType);
+    // Overlay the real context window. Provider constructors stamp family
+    // defaults (128k for OpenAI, 32k for openai-compatible), but the monitor
+    // must show the concrete model window (e.g. 1,050,000 for long-context
+    // GPT variants). Match the leader's resolution order for the active model:
+    // explicit config override first, then model catalog, then family default.
     if (this.deps.modelsRegistry) {
       const resolvedModel = model ?? config.model;
       const caps = await capabilitiesFor(this.deps.modelsRegistry, providerId, resolvedModel).catch(
         () => undefined,
       );
-      const mc =
-        caps?.maxContext ?? config.context?.effectiveMaxContext ?? provider.capabilities.maxContext;
+      const configMaxContext =
+        providerId === config.provider && resolvedModel === config.model
+          ? config.context?.effectiveMaxContext
+          : undefined;
+      const mc = configMaxContext ?? caps?.maxContext ?? provider.capabilities.maxContext;
       if (mc && mc > 0) provider.capabilities.maxContext = mc;
     }
     return provider;

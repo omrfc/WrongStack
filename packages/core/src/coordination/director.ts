@@ -237,8 +237,11 @@ export interface DirectorOptions {
    * Provider's max context window in tokens. Used with `maxLeaderContextLoad`
    * to compute the absolute token threshold. Default: 128_000.
    * Only used when no `fleetManager` is provided (inline mode).
+   *
+   * A function may be supplied when the leader can switch models at runtime;
+   * spawn() reads it lazily so the threshold follows the active model.
    */
-  maxContext?: number;
+  maxContext?: number | (() => number | undefined);
   /**
    * Per-task model matrix (Config.modelMatrix). When set, a spawn whose
    * config has no explicit `model` is resolved against this matrix by role
@@ -367,6 +370,12 @@ export class Director implements ICoordinator {
   getLeaderContextPressure(): number {
     return this.leaderContextPressure;
   }
+
+  private resolveMaxContext(): number {
+    const resolved =
+      typeof this.maxContext === 'function' ? this.maxContext() : this.maxContext;
+    return resolved && resolved > 0 ? resolved : 128_000;
+  }
   /**
    * Optional fleet-level policy container. When provided the Director
    * delegates spawn budgeting, manifest entries, and checkpointing to it
@@ -479,8 +488,8 @@ export class Director implements ICoordinator {
   private leaderContextPressure = 0;
   /** Maximum context load fraction before spawn is refused. */
   private readonly maxLeaderContextLoad: number;
-  /** Provider's max context window in tokens. */
-  private readonly maxContext: number;
+  /** Provider's max context window in tokens, or a live resolver for runtime model switches. */
+  private readonly maxContext: number | (() => number | undefined);
   /** Per-task model matrix (static record or live getter); resolved
    *  per-spawn when no explicit model is set. */
   private readonly modelMatrix?: ModelMatrixSource;
@@ -1008,7 +1017,8 @@ export class Director implements ICoordinator {
       // Context pressure check: reject spawn if leader context is too full.
       // maxLeaderContextLoad === 1.0 disables this check.
       if (this.maxLeaderContextLoad < 1.0) {
-        const threshold = this.maxContext * this.maxLeaderContextLoad;
+        const maxContext = this.resolveMaxContext();
+        const threshold = maxContext * this.maxLeaderContextLoad;
         if (this.leaderContextPressure >= threshold) {
           throw new FleetContextOverflowError(threshold, this.leaderContextPressure);
         }

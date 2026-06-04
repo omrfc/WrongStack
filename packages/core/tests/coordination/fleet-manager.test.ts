@@ -159,6 +159,17 @@ describe('FleetManager', () => {
       });
       expect(fm.canSpawn(makeConfig())).toBeNull();
     });
+
+    it('reads maxContext lazily so leader model switches update spawn pressure checks', () => {
+      let maxContext = 128_000;
+      const fm = new FleetManager({ maxContext: () => maxContext, maxLeaderContextLoad: 0.85 });
+      fm.setLeaderContextPressure(120_000);
+
+      expect(fm.canSpawn(makeConfig())?.kind).toBe('max_context_load');
+
+      maxContext = 1_050_000;
+      expect(fm.canSpawn(makeConfig())).toBeNull();
+    });
   });
 
   // -------------------------------------------------------------------------
