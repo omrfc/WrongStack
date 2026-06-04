@@ -43,7 +43,7 @@ export const context7Server = (): MCPServerConfig => ({
   name: 'context7',
   description: 'Codebase-aware documentation and Q&A (context7.ai)',
   transport: 'streamable-http',
-  url: 'https://server.context7.ai/mcp',
+  url: 'https://mcp.context7.com/mcp',
   permission: 'confirm',
 });
 

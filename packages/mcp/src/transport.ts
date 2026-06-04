@@ -247,6 +247,66 @@ function isJsonRpcResult(v: unknown): v is JsonRpcResult {
   return 'result' in r || r.id === undefined;
 }
 
+/**
+ * Extract JSON-RPC envelopes from a streamable-http response body. Handles BOTH
+ * plain NDJSON (one JSON object per line) AND SSE framing
+ * (`event: message\ndata: {...}` blocks) — modern MCP servers (e.g. Context7)
+ * reply with `text/event-stream` even on a single POST, so the data must be
+ * un-prefixed before parsing. Multi-line `data:` values within one event are
+ * joined per the SSE spec.
+ */
+export function extractJsonRpcResults(text: string): JsonRpcResult[] {
+  const out: JsonRpcResult[] = [];
+  let dataBuf: string[] = [];
+  const flush = () => {
+    if (dataBuf.length === 0) return;
+    const joined = dataBuf.join('\n').trim();
+    dataBuf = [];
+    if (!joined) return;
+    try {
+      const parsed = JSON.parse(joined);
+      if (isJsonRpcResult(parsed)) out.push(parsed);
+    } catch {
+      /* ignore non-JSON event data */
+    }
+  };
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    if (line === '') {
+      flush(); // blank line ends an SSE event
+      continue;
+    }
+    if (line.startsWith(':')) continue; // SSE comment
+    if (line.startsWith('data:')) {
+      let v = line.slice(5);
+      if (v.startsWith(' ')) v = v.slice(1);
+      dataBuf.push(v);
+      continue;
+    }
+    if (line.startsWith('event:') || line.startsWith('id:') || line.startsWith('retry:')) {
+      continue; // other SSE fields
+    }
+    // Plain NDJSON line (no SSE framing).
+    const trimmed = line.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (isJsonRpcResult(parsed)) out.push(parsed);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  flush();
+  return out;
+}
+
+/** Pick the JSON-RPC envelope matching `id`, or the first one if none matches. */
+function pickJsonRpcResult(text: string, id: number): JsonRpcResult | undefined {
+  const results = extractJsonRpcResults(text);
+  return results.find((r) => r.id === id) ?? results[0];
+}
+
 function assertMatchingJsonRpcResult(
   data: unknown,
   expectedId: number,
@@ -683,17 +743,8 @@ export class StreamableHTTPTransport {
         const parsed = await initRes.json();
         if (isJsonRpcResult(parsed)) data = parsed;
       } else {
-        const text = await initRes.text();
-        const lines = text.split('\n').filter((l) => l.trim());
-        for (const line of lines) {
-          try {
-            const parsed = JSON.parse(line);
-            if (isJsonRpcResult(parsed)) {
-              data = parsed;
-              break;
-            }
-          } catch {}
-        }
+        // text/event-stream or NDJSON — handle SSE `data:` framing.
+        data = extractJsonRpcResults(await initRes.text())[0];
       }
 
       if (!data) {
@@ -705,7 +756,10 @@ export class StreamableHTTPTransport {
         throw new Error(`initialize failed: ${data.error.message}`);
       }
 
-      this.sessionId = (initRes.headers.get('x-mcp-session') ?? undefined) as string | undefined;
+      // MCP Streamable HTTP spec: the server assigns a session via the
+      // `Mcp-Session-Id` response header, which the client must echo on every
+      // subsequent request. (Header lookups are case-insensitive.)
+      this.sessionId = initRes.headers.get('mcp-session-id') ?? undefined;
       await this.postRaw('notifications/initialized', {});
 
       const toolsRes = await this.postRaw('tools/list', {});
@@ -730,40 +784,35 @@ export class StreamableHTTPTransport {
     const id = this.nextId++;
     const body = JSON.stringify({ jsonrpc: '2.0', id, method, params });
 
-    const url = this.sessionId
-      ? `${this.url}${this.url.includes('?') ? '&' : '?'}session=${this.sessionId}`
-      : this.url;
-
     const timeoutSignal = createTimeoutSignal(this.abortController?.signal, this.requestTimeout);
     const fetchOpts: RequestInit = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json, text/event-stream',
-        ...(this.sessionId ? { 'x-mcp-session': this.sessionId } : {}),
+        ...(this.sessionId ? { 'Mcp-Session-Id': this.sessionId } : {}),
         ...this.headers,
       },
       body,
       signal: timeoutSignal.signal,
     };
     if (this.tlsAgent) fetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
-    const res = await fetch(url, fetchOpts);
+    const res = await fetch(this.url, fetchOpts);
 
     try {
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }
 
-      const text = await res.text();
-      const lines = text.split('\n').filter((l) => l.trim());
-      for (const line of lines) {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(line);
-        } catch {}
-        if (isJsonRpcResult(parsed)) {
-          return assertMatchingJsonRpcResult(parsed, id, method);
-        }
+      // Notifications get no JSON-RPC reply (the server returns 202 / empty body).
+      if (method.startsWith('notifications/')) {
+        await res.text().catch(() => undefined);
+        return { jsonrpc: '2.0' };
+      }
+
+      const match = pickJsonRpcResult(await res.text(), id);
+      if (match) {
+        return assertMatchingJsonRpcResult(match, id, method);
       }
       throw new Error('Could not parse response as JSON-RPC');
     } finally {
@@ -776,10 +825,6 @@ export class StreamableHTTPTransport {
     const id = this.nextId++;
     const body = JSON.stringify({ jsonrpc: '2.0', id, method, params });
 
-    const url = this.sessionId
-      ? `${this.url}${this.url.includes('?') ? '&' : '?'}session=${this.sessionId}`
-      : this.url;
-
     const timeoutSignal = createTimeoutSignal(
       this.abortController?.signal,
       timeoutMs ?? this.requestTimeout,
@@ -789,36 +834,34 @@ export class StreamableHTTPTransport {
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json, text/event-stream',
-        ...(this.sessionId ? { 'x-mcp-session': this.sessionId } : {}),
+        ...(this.sessionId ? { 'Mcp-Session-Id': this.sessionId } : {}),
         ...this.headers,
       },
       body,
       signal: timeoutSignal.signal,
     };
     if (this.tlsAgent) fetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
-    const res = await fetch(url, fetchOpts);
+    const res = await fetch(this.url, fetchOpts);
 
     try {
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }
 
-      const text = await res.text();
-      const lines = text.split('\n').filter((l) => l.trim());
-      for (const line of lines) {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(line);
-        } catch {}
-        if (isJsonRpcResult(parsed)) {
-          // Convert JsonRpcResult to JsonRpcResponse
-          return {
-            jsonrpc: '2.0',
-            id,
-            result: parsed.result,
-            error: parsed.error,
-          };
-        }
+      if (method.startsWith('notifications/')) {
+        await res.text().catch(() => undefined);
+        return { jsonrpc: '2.0', id };
+      }
+
+      const parsed = pickJsonRpcResult(await res.text(), id);
+      if (parsed) {
+        // Convert JsonRpcResult to JsonRpcResponse
+        return {
+          jsonrpc: '2.0',
+          id,
+          result: parsed.result,
+          error: parsed.error,
+        };
       }
       throw new Error('Could not parse response as JSON-RPC');
     } finally {

@@ -1,5 +1,42 @@
 import { describe, expect, it, vi } from 'vitest';
-import { SSEReader, SSETransport, StreamableHTTPTransport } from '../src/transport.js';
+import {
+  SSEReader,
+  SSETransport,
+  StreamableHTTPTransport,
+  extractJsonRpcResults,
+} from '../src/transport.js';
+
+describe('extractJsonRpcResults', () => {
+  it('parses plain NDJSON', () => {
+    const r = extractJsonRpcResults('{"jsonrpc":"2.0","id":1,"result":{"ok":true}}');
+    expect(r).toHaveLength(1);
+    expect(r[0]?.id).toBe(1);
+  });
+
+  it('parses SSE-framed responses (strips the data: prefix)', () => {
+    // The exact shape modern MCP servers (e.g. Context7) return.
+    const sse = 'event: message\ndata: {"jsonrpc":"2.0","id":2,"result":{"tools":[]}}\n\n';
+    const r = extractJsonRpcResults(sse);
+    expect(r).toHaveLength(1);
+    expect(r[0]?.id).toBe(2);
+    expect((r[0]?.result as { tools: unknown[] }).tools).toEqual([]);
+  });
+
+  it('joins multi-line SSE data within one event', () => {
+    const sse = 'data: {"jsonrpc":"2.0",\ndata: "id":3,"result":1}\n\n';
+    const r = extractJsonRpcResults(sse);
+    expect(r).toHaveLength(1);
+    expect(r[0]?.id).toBe(3);
+  });
+
+  it('ignores SSE comments and non-JSON noise', () => {
+    const sse =
+      ': keep-alive\nevent: ping\ndata: not-json\n\ndata: {"jsonrpc":"2.0","id":4,"result":{}}\n\n';
+    const r = extractJsonRpcResults(sse);
+    expect(r).toHaveLength(1);
+    expect(r[0]?.id).toBe(4);
+  });
+});
 
 describe('SSEReader', () => {
   it('dispatches a single complete event', () => {
