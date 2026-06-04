@@ -539,6 +539,7 @@ export async function main(argv: string[]): Promise<number> {
     effectiveMaxContext = mc > 0 ? mc : 200_000;
     context.provider.capabilities.maxContext = effectiveMaxContext;
     autoCompactor?.setMaxContext(effectiveMaxContext);
+    events.emit('ctx.max_context', { providerId, modelId, maxContext: effectiveMaxContext });
     updateSpinnerContext();
   };
 

@@ -136,6 +136,8 @@ export interface EventMap {
     /** Provider's max context window. */
     maxContext: number;
   };
+  /** Fired when the active model's resolved context window changes. */
+  'ctx.max_context': { providerId: string; modelId: string; maxContext: number };
   'token.threshold': { used: number; limit: number };
   /**
    * Fired when the subagent budget hits a soft limit and the coordinator

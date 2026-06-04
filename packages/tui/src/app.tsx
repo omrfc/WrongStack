@@ -1946,6 +1946,10 @@ export function App({
   // the slash command's message in history instead.
   const [liveModel, setLiveModel] = useState<string>(model);
   const [liveProvider, setLiveProvider] = useState<string>(provider ?? 'agent');
+  // CLI resolves the startup model's catalog limit, but /model can switch to a
+  // different model without remounting App. Keep the denominator mutable so the
+  // status bar follows the active model instead of a stale launch-time prop.
+  const [activeMaxContext, setActiveMaxContext] = useState<number | undefined>(effectiveMaxContext);
   const [yoloLive, setYoloLive] = useState<boolean>(yolo);
   const [autonomyLive, setAutonomyLive] = useState<
     'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-parallel'
@@ -2611,10 +2615,9 @@ export function App({
   // the model must process. (usage.input is disjoint from cacheRead/
   // cacheWrite, so simple sum is correct.)
 
-  // Per-model maxContext. CLI passes effectiveMaxContext (resolved via
-  // ModelsRegistry — correct for 1M-context variants). Fall back to
-  // agent.ctx.provider.capabilities.maxContext when not provided.
-  const maxContext = effectiveMaxContext ?? agent.ctx.provider.capabilities.maxContext;
+  // Per-model maxContext. CLI passes the startup value, then model-switch and
+  // ctx.pct events keep activeMaxContext in sync with the live agent context.
+  const maxContext = activeMaxContext ?? agent.ctx.provider.capabilities.maxContext;
 
   // Per-request context pressure: current prompt tokens (input + cacheRead).
   // Unlike the cumulative tokenCounter.total() which grows across all turns,
@@ -3774,12 +3777,16 @@ export function App({
     // Leader agent ctx.pct: emitted directly on the host EventBus (not forwarded
     // by MultiAgentHost). Updates the dedicated leader state for the monitor.
     const offLeaderCtxPct = events.on('ctx.pct', (e) => {
+      setActiveMaxContext(e.maxContext);
       dispatch({
         type: 'leaderCtxPct',
         load: e.load,
         tokens: e.tokens,
         maxContext: e.maxContext,
       });
+    });
+    const offLeaderMaxContext = events.on('ctx.max_context', (e) => {
+      if (e.maxContext > 0) setActiveMaxContext(e.maxContext);
     });
     // Always-on per-tool state surface. Now fires in both director and
     // non-director modes, so the leader's chat history shows subagent
@@ -3805,6 +3812,7 @@ export function App({
       offIterationSummary();
       offCtxPct();
       offLeaderCtxPct();
+      offLeaderMaxContext();
       offTool();
     };
   }, [events, director]);
@@ -4902,6 +4910,7 @@ export function App({
           }
           setLiveProvider(providerId);
           setLiveModel(modelId);
+          setActiveMaxContext(agent.ctx.provider.capabilities.maxContext);
           dispatch({
             type: 'addEntry',
             entry: { kind: 'info', text: `Switched to ${providerId} / ${modelId}.` },
@@ -5739,6 +5748,10 @@ export function App({
         if (ctxModel && ctxModel !== liveModel) setLiveModel(ctxModel);
         const ctxProviderId = (agent.ctx.provider as { id?: string } | undefined)?.id;
         if (ctxProviderId && ctxProviderId !== liveProvider) setLiveProvider(ctxProviderId);
+        const ctxMaxContext = agent.ctx.provider.capabilities.maxContext;
+        if (ctxMaxContext > 0 && ctxMaxContext !== activeMaxContext) {
+          setActiveMaxContext(ctxMaxContext);
+        }
         if (getYolo) {
           const currentYolo = getYolo();
           if (currentYolo !== yoloLive) setYoloLive(currentYolo);
