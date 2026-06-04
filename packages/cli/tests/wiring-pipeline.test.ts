@@ -47,6 +47,12 @@ function fakeProvider(maxContext = 100_000) {
   } as never;
 }
 
+function fakeModelsRegistry() {
+  return {
+    getModel: vi.fn().mockRejectedValue(new Error('model not found in registry')),
+  } as never;
+}
+
 beforeEach(() => {
   capabilitiesFor.mockReset();
 });
@@ -105,7 +111,7 @@ describe('setupCompaction', () => {
     const result = await setupCompaction({
       compactor: { compact: vi.fn() } as never,
       events,
-      modelsRegistry: {} as never,
+      modelsRegistry: fakeModelsRegistry(),
       context: fakeContext(),
       config: {
         context: { warnThreshold: 70, softThreshold: 85, hardThreshold: 95 },
@@ -124,7 +130,7 @@ describe('setupCompaction', () => {
     const result = await setupCompaction({
       compactor: { compact: vi.fn() } as never,
       events,
-      modelsRegistry: {} as never,
+      modelsRegistry: fakeModelsRegistry(),
       context: fakeContext(),
       config: {
         context: {
@@ -147,7 +153,7 @@ describe('setupCompaction', () => {
     const result = await setupCompaction({
       compactor: { compact: vi.fn() } as never,
       events,
-      modelsRegistry: {} as never,
+      modelsRegistry: fakeModelsRegistry(),
       context: fakeContext(),
       config: { context: { warnThreshold: 70, softThreshold: 85, hardThreshold: 95 } },
       provider: fakeProvider(99_000),
@@ -163,7 +169,7 @@ describe('setupCompaction', () => {
     const result = await setupCompaction({
       compactor: { compact: vi.fn() } as never,
       events,
-      modelsRegistry: {} as never,
+      modelsRegistry: fakeModelsRegistry(),
       context: fakeContext({ model: 'gpt-5.5' }),
       config: {
         provider: 'openai',
@@ -185,7 +191,7 @@ describe('setupCompaction', () => {
     const result = await setupCompaction({
       compactor: { compact: vi.fn() } as never,
       events,
-      modelsRegistry: {} as never,
+      modelsRegistry: fakeModelsRegistry(),
       context: fakeContext({ model: 'gpt-5.5' }),
       config: {
         provider: 'openai',
@@ -213,7 +219,7 @@ describe('setupCompaction', () => {
     const result = await setupCompaction({
       compactor: { compact: vi.fn() } as never,
       events,
-      modelsRegistry: {} as never,
+      modelsRegistry: fakeModelsRegistry(),
       context: fakeContext(),
       config: {
         context: { autoCompact: false, warnThreshold: 70, softThreshold: 85, hardThreshold: 95 },
@@ -231,7 +237,7 @@ describe('setupCompaction', () => {
     const result = await setupCompaction({
       compactor: { compact: vi.fn() } as never,
       events,
-      modelsRegistry: {} as never,
+      modelsRegistry: fakeModelsRegistry(),
       context: fakeContext(),
       config: { context: { warnThreshold: 70, softThreshold: 85, hardThreshold: 95 } },
       provider: fakeProvider(60_000),
