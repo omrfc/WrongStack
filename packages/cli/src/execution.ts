@@ -32,6 +32,28 @@ import type { SessionStats } from './session-stats.js';
 import { fmtTok } from './utils.js';
 import { CLI_VERSION } from './version.js';
 
+type SerialAutonomyStage =
+  | { phase: 'idle' }
+  | { phase: 'decide'; reason: string }
+  | { phase: 'execute'; task: string }
+  | { phase: 'reflect'; status: 'success' | 'failure' | 'aborted' | 'skipped'; note?: string }
+  | { phase: 'sleep'; ms: number }
+  | { phase: 'paused' }
+  | { phase: 'stopped' }
+  | { phase: 'error'; message: string };
+
+type ParallelAutonomyStage =
+  | { phase: 'idle' }
+  | { phase: 'decompose' }
+  | { phase: 'fanout'; slots: number }
+  | { phase: 'await'; taskIds: string[] }
+  | { phase: 'aggregate'; successCount: number; total: number; goalComplete: boolean }
+  | { phase: 'sleep'; ms: number }
+  | { phase: 'stopped' }
+  | { phase: 'error'; message: string };
+
+type AutonomyStage = SerialAutonomyStage | ParallelAutonomyStage;
+
 export interface ExecutionDeps {
   agent: Agent;
   events: EventBus;
@@ -115,13 +137,7 @@ export interface ExecutionDeps {
    * Returns an unsubscribe function. TUI uses this to render live status
    * (decide/execute/reflect or decompose/fanout/aggregate) in the status bar.
    */
-  subscribeEternalStage?: (
-    fn: (
-      stage:
-        | import('@wrongstack/core').IterationStage
-        | import('@wrongstack/core').ParallelIterationStage,
-    ) => void,
-  ) => () => void;
+  subscribeEternalStage?: (fn: (stage: AutonomyStage) => void) => () => void;
   /** Skill loader for the skill generator wizard. */
   skillLoader?: import('@wrongstack/core').SkillLoader;
 }
@@ -393,7 +409,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           },
           getEternalEngine,
           subscribeEternalIteration,
-          subscribeEternalStage,
+          subscribeEternalStage: subscribeEternalStage as never,
           subscribeAutoPhase,
           appVersion: CLI_VERSION,
           provider: config.provider,

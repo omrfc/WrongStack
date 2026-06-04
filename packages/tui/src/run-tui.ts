@@ -16,6 +16,28 @@ import { App } from './app.js';
 import { type MouseEvent, parseSgrMouse, stripSgrMouse } from './mouse.js';
 import { startTerminalTitle } from './terminal-title.js';
 
+export type SerialAutonomyStage =
+  | { phase: 'idle' }
+  | { phase: 'decide'; reason: string }
+  | { phase: 'execute'; task: string }
+  | { phase: 'reflect'; status: 'success' | 'failure' | 'aborted' | 'skipped'; note?: string }
+  | { phase: 'sleep'; ms: number }
+  | { phase: 'paused' }
+  | { phase: 'stopped' }
+  | { phase: 'error'; message: string };
+
+export type ParallelAutonomyStage =
+  | { phase: 'idle' }
+  | { phase: 'decompose' }
+  | { phase: 'fanout'; slots: number }
+  | { phase: 'await'; taskIds: string[] }
+  | { phase: 'aggregate'; successCount: number; total: number; goalComplete: boolean }
+  | { phase: 'sleep'; ms: number }
+  | { phase: 'stopped' }
+  | { phase: 'error'; message: string };
+
+export type AutonomyStage = SerialAutonomyStage | ParallelAutonomyStage;
+
 export interface RunTuiOptions {
   agent: Agent;
   slashRegistry: SlashCommandRegistry;
@@ -56,45 +78,10 @@ export interface RunTuiOptions {
     fn: (entry: import('@wrongstack/core').JournalEntry) => void,
   ) => () => void;
   /**
-   * Subscribe to per-iteration stage transitions from the eternal engine.
-   * TUI uses this to render live status (decide → execute → reflect →
-   * sleep/paused/stopped) in the status bar.
+   * Subscribe to per-iteration stage transitions from the autonomy engines.
+   * TUI uses this to render live status in the status bar.
    */
-  subscribeEternalStage?: (
-    fn: (
-      stage:
-        | {
-            phase: 'idle';
-          }
-        | {
-            phase: 'decide';
-            reason: string;
-          }
-        | {
-            phase: 'execute';
-            task: string;
-          }
-        | {
-            phase: 'reflect';
-            status: 'success' | 'failure' | 'aborted' | 'skipped';
-            note?: string;
-          }
-        | {
-            phase: 'sleep';
-            ms: number;
-          }
-        | {
-            phase: 'paused';
-          }
-        | {
-            phase: 'stopped';
-          }
-        | {
-            phase: 'error';
-            message: string;
-          },
-    ) => void,
-  ) => () => void;
+  subscribeEternalStage?: (fn: (stage: AutonomyStage) => void) => () => void;
   /** Renders in the startup banner. Read from the CLI's package.json. */
   appVersion?: string;
   /** Provider id for the startup banner ("openai", "anthropic", ...). */

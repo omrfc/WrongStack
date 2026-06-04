@@ -70,6 +70,28 @@ export interface ContextWindow {
   max: number;
 }
 
+type SerialAutonomyStage =
+  | { phase: 'idle' }
+  | { phase: 'decide'; reason: string }
+  | { phase: 'execute'; task: string }
+  | { phase: 'reflect'; status: 'success' | 'failure' | 'aborted' | 'skipped'; note?: string }
+  | { phase: 'sleep'; ms: number }
+  | { phase: 'paused' }
+  | { phase: 'stopped' }
+  | { phase: 'error'; message: string };
+
+type ParallelAutonomyStage =
+  | { phase: 'idle' }
+  | { phase: 'decompose' }
+  | { phase: 'fanout'; slots: number }
+  | { phase: 'await'; taskIds: string[] }
+  | { phase: 'aggregate'; successCount: number; total: number; goalComplete: boolean }
+  | { phase: 'sleep'; ms: number }
+  | { phase: 'stopped' }
+  | { phase: 'error'; message: string };
+
+type AutonomyStage = SerialAutonomyStage | ParallelAutonomyStage;
+
 export interface StatusBarProps {
   model: string;
   /**
@@ -125,42 +147,11 @@ export interface StatusBarProps {
   /** Items to hide from the status bar. */
   hiddenItems?: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>;
   /**
-   * Live iteration stage from the eternal engine. When set, renders a
-   * chip like `⏸ decide` or `▶ execute(todo:fix-auth)` next to the
+   * Live iteration stage from the active autonomy engine. When set, renders
+   * a chip like `⏸ decide` or `▶ execute(todo:fix-auth)` next to the
    * autonomy chip on line 2.
    */
-  eternalStage?:
-    | {
-        phase: 'idle';
-      }
-    | {
-        phase: 'decide';
-        reason: string;
-      }
-    | {
-        phase: 'execute';
-        task: string;
-      }
-    | {
-        phase: 'reflect';
-        status: 'success' | 'failure' | 'aborted' | 'skipped';
-        note?: string;
-      }
-    | {
-        phase: 'sleep';
-        ms: number;
-      }
-    | {
-        phase: 'paused';
-      }
-    | {
-        phase: 'stopped';
-      }
-    | {
-        phase: 'error';
-        message: string;
-      }
-    | null;
+  eternalStage?: AutonomyStage | null;
   /** Active goal summary for startup banner display. */
   goalSummary?: {
     goal: string;
@@ -531,6 +522,18 @@ function EternalStageChip({
           }
         >
           ↩ reflect: {stage.status}
+        </Text>
+      );
+    case 'decompose':
+      return <Text color="cyan">⬇ decompose</Text>;
+    case 'fanout':
+      return <Text color="magenta">⇄ fanout: {stage.slots}</Text>;
+    case 'await':
+      return <Text color="magenta">⏳ await: {stage.taskIds.length}</Text>;
+    case 'aggregate':
+      return (
+        <Text color={stage.goalComplete ? 'green' : 'magenta'}>
+          ↩ aggregate: {stage.successCount}/{stage.total}
         </Text>
       );
     case 'sleep':

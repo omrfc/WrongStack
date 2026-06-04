@@ -82,6 +82,28 @@ const MIN_VIEWPORT = 3;
  *  columns the same way the input renders them. */
 const INPUT_PROMPT = '› ';
 
+type SerialAutonomyStage =
+  | { phase: 'idle' }
+  | { phase: 'decide'; reason: string }
+  | { phase: 'execute'; task: string }
+  | { phase: 'reflect'; status: 'success' | 'failure' | 'aborted' | 'skipped'; note?: string }
+  | { phase: 'sleep'; ms: number }
+  | { phase: 'paused' }
+  | { phase: 'stopped' }
+  | { phase: 'error'; message: string };
+
+type ParallelAutonomyStage =
+  | { phase: 'idle' }
+  | { phase: 'decompose' }
+  | { phase: 'fanout'; slots: number }
+  | { phase: 'await'; taskIds: string[] }
+  | { phase: 'aggregate'; successCount: number; total: number; goalComplete: boolean }
+  | { phase: 'sleep'; ms: number }
+  | { phase: 'stopped' }
+  | { phase: 'error'; message: string };
+
+type AutonomyStage = SerialAutonomyStage | ParallelAutonomyStage;
+
 /** Per-subagent state tracked live from the FleetBus. */
 export interface FleetEntry {
   id: string;
@@ -216,45 +238,11 @@ export interface AppProps {
     fn: (entry: import('@wrongstack/core').JournalEntry) => void,
   ) => () => void;
   /**
-   * Subscribe to per-iteration stage transitions from the eternal engine.
+   * Subscribe to per-iteration stage transitions from the autonomy engines.
    * Drives `state.eternalStage` used by the status bar to show the
-   * engine's current location (decide → execute → reflect → sleep/paused).
+   * engine's current location.
    */
-  subscribeEternalStage?: (
-    fn: (
-      stage:
-        | {
-            phase: 'idle';
-          }
-        | {
-            phase: 'decide';
-            reason: string;
-          }
-        | {
-            phase: 'execute';
-            task: string;
-          }
-        | {
-            phase: 'reflect';
-            status: 'success' | 'failure' | 'aborted' | 'skipped';
-            note?: string;
-          }
-        | {
-            phase: 'sleep';
-            ms: number;
-          }
-        | {
-            phase: 'paused';
-          }
-        | {
-            phase: 'stopped';
-          }
-        | {
-            phase: 'error';
-            message: string;
-          },
-    ) => void,
-  ) => () => void;
+  subscribeEternalStage?: (fn: (stage: AutonomyStage) => void) => () => void;
   /**
    * Subscribe to AutoPhase phase/task events from the PhaseOrchestrator.
    * Drives `state.autoPhase` used by the PhaseMonitor component.
@@ -586,39 +574,8 @@ type State = {
     }>;
     selected: number;
   } | null;
-  /** Live iteration-stage of the eternal engine (decide/execute/reflect/sleep/paused/stopped). */
-  eternalStage:
-    | {
-        phase: 'idle';
-      }
-    | {
-        phase: 'decide';
-        reason: string;
-      }
-    | {
-        phase: 'execute';
-        task: string;
-      }
-    | {
-        phase: 'reflect';
-        status: 'success' | 'failure' | 'aborted' | 'skipped';
-        note?: string;
-      }
-    | {
-        phase: 'sleep';
-        ms: number;
-      }
-    | {
-        phase: 'paused';
-      }
-    | {
-        phase: 'stopped';
-      }
-    | {
-        phase: 'error';
-        message: string;
-      }
-    | null;
+  /** Live iteration-stage of the active autonomy engine. */
+  eternalStage: AutonomyStage | null;
   /** Loaded from .wrongstack/goal.json on mount for startup banner. */
   goalSummary: GoalSummary;
   /** AutoPhase orchestrator state — rendered by PhaseMonitor. */
@@ -798,37 +755,7 @@ type Action =
   | { type: 'sessionRewound'; toPromptIndex: number }
   | {
       type: 'eternalStage';
-      stage:
-        | {
-            phase: 'idle';
-          }
-        | {
-            phase: 'decide';
-            reason: string;
-          }
-        | {
-            phase: 'execute';
-            task: string;
-          }
-        | {
-            phase: 'reflect';
-            status: 'success' | 'failure' | 'aborted' | 'skipped';
-            note?: string;
-          }
-        | {
-            phase: 'sleep';
-            ms: number;
-          }
-        | {
-            phase: 'paused';
-          }
-        | {
-            phase: 'stopped';
-          }
-        | {
-            phase: 'error';
-            message: string;
-          };
+      stage: AutonomyStage;
     }
   | { type: 'goalSummary'; summary: GoalSummary }
   | { type: 'autoPhaseInit'; title: string }

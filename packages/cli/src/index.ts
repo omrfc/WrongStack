@@ -87,9 +87,27 @@ type ContainerPromptDelegate = (
   suggestedPattern: string,
 ) => Promise<'yes' | 'no' | 'always' | 'deny'>;
 
-type AutonomyStage =
-  | import('@wrongstack/core').IterationStage
-  | import('@wrongstack/core').ParallelIterationStage;
+type SerialAutonomyStage =
+  | { phase: 'idle' }
+  | { phase: 'decide'; reason: string }
+  | { phase: 'execute'; task: string }
+  | { phase: 'reflect'; status: 'success' | 'failure' | 'aborted' | 'skipped'; note?: string }
+  | { phase: 'sleep'; ms: number }
+  | { phase: 'paused' }
+  | { phase: 'stopped' }
+  | { phase: 'error'; message: string };
+
+type ParallelAutonomyStage =
+  | { phase: 'idle' }
+  | { phase: 'decompose' }
+  | { phase: 'fanout'; slots: number }
+  | { phase: 'await'; taskIds: string[] }
+  | { phase: 'aggregate'; successCount: number; total: number; goalComplete: boolean }
+  | { phase: 'sleep'; ms: number }
+  | { phase: 'stopped' }
+  | { phase: 'error'; message: string };
+
+type AutonomyStage = SerialAutonomyStage | ParallelAutonomyStage;
 
 type SddParallelRunGlobal = typeof globalThis & {
   __sddParallelRun?: import('@wrongstack/core').SddParallelRun;
@@ -1410,7 +1428,9 @@ export async function main(argv: string[]): Promise<number> {
       const effectiveMode = mode ?? 'eternal';
       if (effectiveMode === 'eternal-parallel') {
         if (!parallelEngine) {
-          parallelEngine = new ParallelEternalEngine({
+          const parallelOptions: ConstructorParameters<typeof ParallelEternalEngine>[0] & {
+            onStage?: (stage: AutonomyStage) => void;
+          } = {
             agent,
             projectRoot,
             compactor: container.resolve(TOKENS.Compactor) as import('@wrongstack/core').Compactor,
@@ -1421,7 +1441,8 @@ export async function main(argv: string[]): Promise<number> {
             // isolated agent with the role's filtered tools + persona prompt
             // (instead of sharing the leader agent's Context).
             subagentFactory: multiAgentHost.makeSubagentFactory(config),
-          });
+          };
+          parallelEngine = new ParallelEternalEngine(parallelOptions);
         }
         void parallelEngine.prime?.();
       } else {
