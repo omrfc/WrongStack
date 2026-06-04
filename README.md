@@ -21,12 +21,13 @@ npm i -g wrongstack && wrongstack
 
 ---
 
-WrongStack drives **autonomous goal loops**, **parallel subagent fan-out**, **multi-agent Director orchestration**, and **collaborative debugging** — and walks you through full **Spec-Driven Development** cycles. It ships with **36 built-in tools**, **16 skills**, **7 first-party plugins**, **10 more** in `@wrongstack/plugins`, and **~110 providers** pulled live from [models.dev](https://models.dev) — no hardcoded model names, no hardcoded pricing, no hardcoded lists. Secrets are **AES-256-GCM** encrypted at rest with a per-machine key; every tool call clears a **per-tool permission policy**. Everything lives under `~/.wrongstack/` — the only thing you'd ever commit is `.wrongstack/AGENTS.md`.
+WrongStack drives **autonomous goal loops**, **parallel subagent fan-out**, **multi-agent Director orchestration**, **Brain-governed policy decisions**, and **collaborative debugging** — and walks you through full **Spec-Driven Development** cycles. It ships with **36 built-in tools**, **16 skills**, **7 first-party plugins**, **10 more** in `@wrongstack/plugins`, and **~110 providers** pulled live from [models.dev](https://models.dev) — no hardcoded model names, no hardcoded pricing, no hardcoded lists. Secrets are **AES-256-GCM** encrypted at rest with a per-machine key; every tool call clears a **per-tool permission policy**. Everything lives under `~/.wrongstack/` — the only thing you'd ever commit is `.wrongstack/AGENTS.md`.
 
 ### ✨ Why it slaps
 
 - 🧠 **Three surfaces, one brain** — a plain readline REPL, an Ink/React **TUI** (`--tui`), and a standalone **web UI**.
 - 🤖 **A fleet, not a lone agent** — a 46-role roster + smart dispatcher fan out under a Director, each subagent fully isolated with its own budget and JSONL transcript.
+- 🧠 **Brain as an authority seam** — risky AutoPhase and Director choices can be auto-decided by policy, denied, or escalated to the human through the TUI.
 - ♾️ **Set a goal, walk away** — `/goal` locks in a contract and the eternal / parallel engines grind until it's _verifiably_ done.
 - 🔌 **~110 providers, zero lock-in** — Anthropic, OpenAI, Google, and ~100 OpenAI-compatible endpoints, catalog straight from models.dev.
 - 🔐 **Locked down by default** — encrypted secrets, SSRF guards on every redirect hop, fail-closed subagents, symlink containment, plugin trust tiers.
@@ -183,6 +184,19 @@ Architecture: Host EventBus (always-on bridge) → Leader Agent (Director) + Fle
 ```bash
 wrongstack --director "audit src/ for security issues"
 ```
+
+### Brain-governed decisions
+
+Brain is a small authority layer for decisions that are bigger than one tool
+permission prompt. Director and AutoPhase can ask a `BrainArbiter` whether to
+continue, deny, or escalate a risky choice — for example extending a subagent's
+budget or attempting an automatic worktree merge-conflict resolution.
+
+The default Brain is conservative: low-risk requests with an explicit
+recommended option can be answered automatically; higher-risk choices route to a
+human decision prompt in the TUI. The prompt appears in chat history, the status
+bar shows a compact `🧠` chip, and the answer flows back through typed
+`brain.*` EventBus events.
 
 ### Spec-Driven Development (`/sdd`)
 
@@ -567,11 +581,11 @@ For the full walk-through — including the L1-A reactive `ConversationState`, h
 
 ## Status
 
-- **5400+ tests passing** across 382 test files (13 skipped)
+- **5491 tests passing** across 389 test files (13 skipped) in the 0.51.3 release gate
 - Coverage thresholds: ≥85 % lines / ≥85 % functions / ≥70 % branches / ≥82 % statements
 - All workspace packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles
-- CI gate: `pnpm typecheck && pnpm build && pnpm test` all required
+- Release gate verified locally: `pnpm audit --audit-level=moderate` + `pnpm typecheck` + `pnpm test` + `pnpm build`
 - Threat model: [`SECURITY.md`](SECURITY.md)
 
 ## Contributor docs

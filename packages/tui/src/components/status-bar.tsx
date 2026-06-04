@@ -63,6 +63,13 @@ export interface FleetAgentDetail {
   extensions?: number;
 }
 
+export interface BrainStatusChip {
+  state: 'idle' | 'deciding' | 'answered' | 'ask_human' | 'denied';
+  source?: string;
+  risk?: 'low' | 'medium' | 'high' | 'critical';
+  summary?: string;
+}
+
 export interface ContextWindow {
   /** Input tokens of the most recent provider request — the de-facto live context size. */
   used: number;
@@ -133,6 +140,8 @@ export interface StatusBarProps {
   subagentCount?: number;
   /** Renders the "ctx ████░░ 42%" chip on line 1 when present. */
   context?: ContextWindow;
+  /** Live Brain arbiter state, shown as a compact work chip when active/recent. */
+  brain?: BrainStatusChip;
   /**
    * Project / working-folder name. Rendered on line 2 just before the git
    * branch so users running multiple WrongStack windows can tell at a
@@ -191,6 +200,7 @@ export function StatusBar({
   git,
   subagentCount = 0,
   context,
+  brain,
   projectName,
   processCount,
   hiddenItems,
@@ -236,10 +246,12 @@ export function StatusBar({
   const fleetHasActivity =
     (fleet && (fleet.running > 0 || fleet.idle > 0 || fleet.pending > 0 || fleet.completed > 0)) ||
     subagentCount > 0;
+  const hasBrainActivity = !!brain && brain.state !== 'idle';
   const hasThirdLine =
     (todos && (todos.pending > 0 || todos.inProgress > 0 || todos.completed > 0)) ||
     (plan && (plan.open > 0 || plan.inProgress > 0 || plan.done > 0)) ||
-    fleetHasActivity;
+    fleetHasActivity ||
+    hasBrainActivity;
 
   return (
     <Box
@@ -458,6 +470,16 @@ export function StatusBar({
               )}
             </>
           ) : null}
+          {hasBrainActivity && brain ? (
+            <>
+              {(todos && (todos.pending > 0 || todos.inProgress > 0 || todos.completed > 0)) ||
+              (plan && (plan.open > 0 || plan.inProgress > 0 || plan.done > 0)) ||
+              fleetHasActivity ? (
+                <Text dimColor>│</Text>
+              ) : null}
+              <BrainChip brain={brain} />
+            </>
+          ) : null}
         </Box>
       ) : null}
 
@@ -494,6 +516,28 @@ export function StatusBar({
         </Box>
       ) : null}
     </Box>
+  );
+}
+
+function BrainChip({ brain }: { brain: BrainStatusChip }): React.ReactElement {
+  const color =
+    brain.state === 'denied'
+      ? 'red'
+      : brain.state === 'ask_human'
+        ? 'yellow'
+        : brain.state === 'deciding'
+          ? 'magenta'
+          : 'cyan';
+  const label =
+    brain.state === 'deciding' ? 'deciding' : brain.state === 'ask_human' ? 'human' : brain.state;
+  const scope = brain.source ? ` ${brain.source}` : '';
+  const summary = brain.summary ? ` · ${brain.summary.slice(0, 40)}` : '';
+  return (
+    <Text color={color}>
+      🧠 {label}
+      <Text dimColor>{scope}</Text>
+      <Text dimColor>{summary}</Text>
+    </Text>
   );
 }
 

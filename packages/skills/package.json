@@ -1,6 +1,6 @@
 {
   "name": "@wrongstack/skills",
-  "version": "0.41.0",
+  "version": "0.51.3",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",

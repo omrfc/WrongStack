@@ -6,7 +6,7 @@ import * as path from 'node:path';
  * subagents don't pay the construction cost.
  */
 import { ACP_AGENT_COMMANDS, makeACPSubagentRunner } from '@wrongstack/acp';
-import type { SubagentRunContext, SubagentRunner, TaskSpec } from '@wrongstack/core';
+import type { BrainArbiter, SubagentRunContext, SubagentRunner, TaskSpec } from '@wrongstack/core';
 import {
   Agent,
   type AgentFactory,
@@ -142,6 +142,8 @@ export interface MultiAgentHostOptions {
    * director mode.
    */
   maxBudgetExtensions?: number;
+  /** Optional global Brain arbiter for director-level policy decisions. */
+  brain?: BrainArbiter;
   /**
    * Maximum number of subagent tasks that may run concurrently. Extra
    * tasks queue in the coordinator's pending list and dispatch as slots
@@ -295,6 +297,7 @@ export class MultiAgentHost {
       // effect on the next spawn — the director is built lazily + once.
       modelMatrix: () => this.deps.configStore.get().modelMatrix,
       fleetManager, // pass so director.fleetManager is never undefined
+      brain: this.opts.brain,
     });
     this.director.on('task.completed', ({ task, result }) => {
       this.fleetManager?.removePendingTask(task.id);

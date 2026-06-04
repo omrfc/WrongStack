@@ -21,6 +21,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   AutoPhasePlanner,
+  type BrainArbiter,
   type Config,
   type EventBus,
   type PhaseGraph,
@@ -126,6 +127,8 @@ export interface AutoPhaseHostDeps {
   worktrees?: boolean;
   /** Max parallel phases when worktrees are active (default 4). */
   maxConcurrentPhases?: number;
+  /** Optional global Brain arbiter for AutoPhase policy decisions. */
+  brain?: BrainArbiter;
   /** Optional progress logger (rendered to the user during start). */
   log?: (line: string) => void;
 }
@@ -414,6 +417,7 @@ export function createAutoPhaseHost(deps: AutoPhaseHostDeps): AutoPhaseHostHooks
                 }
               }
             : undefined,
+          brain: deps.brain,
           onPhaseComplete: (phase) => {
             log(`✅ Phase completed: ${phase.name}`);
             void persist(graph);
@@ -445,11 +449,20 @@ export function createAutoPhaseHost(deps: AutoPhaseHostDeps): AutoPhaseHostHooks
         event: string,
         handler: (payload: unknown) => void,
       ) => void;
+      const finalizeActiveRun = () => {
+        if (active?.graph.id !== graph.id) return;
+        active.unsubscribe();
+        active = null;
+      };
       const onDone = () => {
         log(`🎉 AutoPhase complete: ${graph.title}`);
         void persist(graph);
+        finalizeActiveRun();
       };
-      const onFailed = () => void persist(graph);
+      const onFailed = () => {
+        void persist(graph);
+        finalizeActiveRun();
+      };
       onUntyped('graph.completed', onDone);
       onUntyped('graph.failed', onFailed);
       const unsubscribe = () => {
@@ -464,6 +477,8 @@ export function createAutoPhaseHost(deps: AutoPhaseHostDeps): AutoPhaseHostHooks
       // would block until the entire project is built.
       void orchestrator.start().catch((err) => {
         log(`💥 AutoPhase aborted: ${err instanceof Error ? err.message : String(err)}`);
+        void persist(graph);
+        finalizeActiveRun();
       });
 
       return { ok: true, graph };

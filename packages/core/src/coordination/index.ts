@@ -1,5 +1,20 @@
 // Coordination domain: multi-agent orchestration, director, fleet bus, agents
 export {
+  BrainDecisionQueue,
+  DefaultBrainArbiter,
+  HumanEscalatingBrainArbiter,
+  ObservableBrainArbiter,
+  formatHumanPrompt,
+  type BrainArbiter,
+  type BrainDecision,
+  type BrainDecisionOption,
+  type BrainDecisionRequest,
+  type BrainDecisionSource,
+  type BrainFallback,
+  type BrainRisk,
+  type DefaultBrainArbiterOptions,
+} from './brain.js';
+export {
   Director,
   FleetSpawnBudgetError,
   FleetCostCapError,
@@ -128,15 +143,9 @@ export {
   type AutoExtendPolicy,
   type AutoExtendCeiling,
 } from './auto-extend.js';
-export type {
-  ICoordinator,
-} from './icoordinator.js';
-export type {
-  IFleetManager,
-} from './ifleet-manager.js';
-export {
-  NULL_FLEET_BUS,
-} from './null-fleet-bus.js';
+export type { ICoordinator } from './icoordinator.js';
+export type { IFleetManager } from './ifleet-manager.js';
+export { NULL_FLEET_BUS } from './null-fleet-bus.js';
 export {
   FleetManager,
   type FleetManagerOptions,

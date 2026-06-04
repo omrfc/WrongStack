@@ -13,6 +13,8 @@ function initial() {
     steeringPending: false,
     steerSnapshot: null,
     hint: '',
+    brain: { state: 'idle' as const },
+    brainPrompt: null,
     nextId: 1,
     picker: { open: false, query: '', matches: [], selected: 0 },
     slashPicker: { open: false, query: '', matches: [], selected: 0 },
@@ -67,6 +69,63 @@ describe('TUI reducer', () => {
     s = reducer(s, { type: 'addEntry', entry: { kind: 'assistant', text: 'hello' } });
     expect(s.entries.map((e) => e.id)).toEqual([1, 2]);
     expect(s.nextId).toBe(3);
+  });
+
+  it('addEntry supports Brain decision entries as first-class history items', () => {
+    const s = reducer(initial(), {
+      type: 'addEntry',
+      entry: {
+        kind: 'brain',
+        status: 'answered',
+        source: 'director',
+        risk: 'medium',
+        question: 'Extend budget?',
+        decision: 'extend',
+        rationale: 'Still making progress.',
+      },
+    });
+
+    expect(s.entries[0]).toMatchObject({
+      id: 1,
+      kind: 'brain',
+      source: 'director',
+      decision: 'extend',
+    });
+  });
+
+  it('brainStatus updates the live Brain status chip state', () => {
+    const s = reducer(initial(), {
+      type: 'brainStatus',
+      state: 'deciding',
+      source: 'autophase',
+      risk: 'high',
+      summary: 'autophase: conflict',
+    });
+
+    expect(s.brain).toMatchObject({
+      state: 'deciding',
+      source: 'autophase',
+      risk: 'high',
+      summary: 'autophase: conflict',
+    });
+    expect(typeof s.brain.updatedAt).toBe('number');
+  });
+
+  it('brainPromptSet and brainPromptClear manage the visible Brain prompt', () => {
+    const withPrompt = reducer(initial(), {
+      type: 'brainPromptSet',
+      prompt: {
+        requestId: 'decision-1',
+        source: 'autophase',
+        risk: 'high',
+        question: 'Resolve conflict?',
+        options: [{ id: 'review', label: 'Keep for review', recommended: true }],
+      },
+    });
+    expect(withPrompt.brainPrompt?.question).toBe('Resolve conflict?');
+
+    const cleared = reducer(withPrompt, { type: 'brainPromptClear' });
+    expect(cleared.brainPrompt).toBeNull();
   });
 
   it('addEntry is append-only and never drops oldest entries', () => {

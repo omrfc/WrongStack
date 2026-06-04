@@ -82,6 +82,9 @@ export class PhaseOrchestrator {
     // Tüm fazları sırayla çalıştır (autonomous=false'da da sonraki fazlar başlar)
     let readyPhases = this.getReadyPhases();
     while (readyPhases.length > 0 && !this.stopped) {
+      await this.waitWhilePaused();
+      if (this.stopped) break;
+
       const batch = readyPhases.slice(0, this.opts.maxConcurrentPhases);
       await Promise.all(batch.map((p) => this.startPhase(p)));
 
@@ -89,6 +92,9 @@ export class PhaseOrchestrator {
       if (this.opts.phaseDelayMs > 0) {
         await this.delay(this.opts.phaseDelayMs);
       }
+
+      await this.waitWhilePaused();
+      if (this.stopped) break;
 
       // Yeni ready fazları kontrol et (bir faz tamamlanınca sonrakiler ready olur)
       readyPhases = this.getReadyPhases().filter(
@@ -394,6 +400,8 @@ export class PhaseOrchestrator {
     try {
       const resolve = this.ctx.resolveConflict
         ? async (info: { conflictFiles: string[]; cwd: string }) => {
+            const shouldResolve = await this.shouldAttemptConflictResolution(phase, info);
+            if (!shouldResolve) return false;
             this.emit('phase.conflictResolving', {
               phaseId: phase.id,
               name: phase.name,
@@ -406,16 +414,93 @@ export class PhaseOrchestrator {
       if (result.resolved) {
         this.emit('phase.conflictResolved', { phaseId: phase.id, name: phase.name });
       }
+      this.setIntegrationMetadata(phase, result.ok ? 'merged' : 'needs_review', {
+        branch: handle.branch,
+        worktreeDir: handle.dir,
+        conflictFiles: result.conflictFiles,
+      });
       // merge() already emitted worktree.merged / worktree.conflict and set status.
       // Clean (or resolved) merge → remove the worktree; conflict → release(keep).
       await this.worktrees.release(handle, { keep: !result.ok });
     } catch (err) {
+      this.setIntegrationMetadata(phase, 'merge_failed', {
+        branch: handle.branch,
+        worktreeDir: handle.dir,
+        error: err instanceof Error ? err.message : String(err),
+      });
       this.emit('phase.failed', {
         phaseId: phase.id,
         name: phase.name,
         error: `worktree merge failed: ${err instanceof Error ? err.message : String(err)}`,
       });
     }
+  }
+
+  private async shouldAttemptConflictResolution(
+    phase: PhaseNode,
+    info: { conflictFiles: string[]; cwd: string },
+  ): Promise<boolean> {
+    if (!this.ctx.brain) return true;
+
+    const decision = await this.ctx.brain.decide({
+      id: `autophase-conflict-${phase.id}`,
+      source: 'autophase',
+      question: `Should AutoPhase try to resolve merge conflicts for phase "${phase.name}" automatically?`,
+      context: [
+        `Phase id: ${phase.id}`,
+        `Conflicted files: ${info.conflictFiles.join(', ') || '(unknown)'}`,
+        `Base working tree: ${info.cwd}`,
+      ].join('\n'),
+      risk: 'high',
+      fallback: 'ask_human',
+      options: [
+        {
+          id: 'resolve',
+          label: 'Try the configured conflict resolver',
+          consequence: 'A resolver agent may edit conflicted files in the base working tree.',
+          risk: 'medium',
+        },
+        {
+          id: 'review',
+          label: 'Keep the worktree for human review',
+          consequence: 'No automatic conflict resolution is attempted.',
+          risk: 'low',
+          recommended: true,
+        },
+      ],
+    });
+
+    phase.metadata = {
+      ...phase.metadata,
+      brainConflictDecision: decision.type,
+      brainConflictDecisionAt: Date.now(),
+    };
+
+    if (decision.type !== 'answer') return false;
+    return decision.optionId === 'resolve' || /\bresolve\b/i.test(decision.text);
+  }
+
+  private setIntegrationMetadata(
+    phase: PhaseNode,
+    status: 'merged' | 'needs_review' | 'merge_failed' | 'not_merged_failed_phase',
+    details: {
+      branch?: string;
+      worktreeDir?: string;
+      conflictFiles?: string[];
+      error?: string;
+    } = {},
+  ): void {
+    phase.metadata = {
+      ...phase.metadata,
+      integrationStatus: status,
+      integrationBranch: details.branch,
+      integrationWorktreeDir: details.worktreeDir,
+      integrationConflictFiles: details.conflictFiles,
+      integrationError: details.error,
+      integrationUpdatedAt: Date.now(),
+    };
+    phase.updatedAt = Date.now();
+    this.graph.updatedAt = Date.now();
   }
 
   /** A failed phase keeps its worktree on disk for inspection (no merge). */
@@ -427,6 +512,10 @@ export class PhaseOrchestrator {
     } catch {
       // best effort
     }
+    this.setIntegrationMetadata(phase, 'not_merged_failed_phase', {
+      branch: handle.branch,
+      worktreeDir: handle.dir,
+    });
     await this.worktrees.release(handle, { keep: true }).catch(() => {});
   }
 
@@ -721,6 +810,12 @@ export class PhaseOrchestrator {
       emitAsync: async () => [],
       waitFor: async () => {},
     } as unknown as EventBus;
+  }
+
+  private async waitWhilePaused(): Promise<void> {
+    while (this.paused && !this.stopped) {
+      await this.delay(100);
+    }
   }
 
   private delay(ms: number): Promise<void> {

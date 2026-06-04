@@ -31,9 +31,9 @@ In the TUI, `/autonomy` (no args) opens an interactive picker. In the CLI REPL, 
 
 ### Stopping eternal/parallel mode
 
-`/autonomy stop` sends `stopRequested = true` to the engine and calls `onEternalStop`, which sets autonomy back to `off`. The in-flight `agent.run()` receives an AbortSignal and is terminated — the current iteration's work is lost.
+`/autonomy stop` sends `stopRequested = true` to the active engine and calls `onEternalStop`, which sets autonomy back to `off`. In serial eternal mode, the in-flight `agent.run()` receives an AbortSignal and is terminated — the current iteration's work is lost. In parallel mode, no new ticks start; already-dispatched fan-out work is allowed to clean up through the current coordinator await.
 
-To stop **without** cancelling the in-flight iteration, use `/goal pause` instead. The loop exits after the current iteration completes cleanly.
+To stop serial eternal mode **without** cancelling the in-flight iteration, use `/goal pause` instead. The loop exits after the current iteration completes cleanly.
 
 ## Eternal mode — loop internals
 
@@ -85,6 +85,10 @@ capability metadata, instant and with no extra provider call per tick. A task
 with no signal falls back to the `executor` generalist. The engine accepts an
 optional `dispatchClassifier` for LLM fallback, and `dispatch: false` restores
 the legacy generic (`slot-xxxxxx`) fan-out.
+
+Parallel mode also emits live stage updates: `decompose` → `fanout` → `await` →
+`aggregate` → `sleep`/`stopped`, so UI subscribers can show where the current
+fan-out tick is instead of only seeing the final journal entry.
 
 ## Status output
 

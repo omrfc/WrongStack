@@ -202,6 +202,39 @@ describe('PhaseOrchestrator', () => {
     expect(orchestrator.isPaused()).toBe(false);
   });
 
+  it('does not start the next phase while paused', async () => {
+    const graph = await buildGraph();
+    const phases = Array.from(graph.phases.values());
+    const first = phases[0]!;
+    const second = phases[1]!;
+    const started: string[] = [];
+
+    const orchestrator = new PhaseOrchestrator({
+      graph,
+      ctx: {
+        executeTask: async (_task, phaseId) => {
+          started.push(phaseId);
+        },
+        onPhaseComplete: (phase) => {
+          if (phase.id === first.id) orchestrator.pause();
+        },
+      },
+      autonomous: false,
+    });
+
+    const run = orchestrator.start();
+    await new Promise((r) => setTimeout(r, 150));
+
+    expect(first.status).toBe('completed');
+    expect(second.status).toBe('pending');
+    expect(started).not.toContain(second.id);
+
+    orchestrator.resume();
+    await run;
+
+    expect(second.status).toBe('completed');
+  });
+
   it('should assign and release agents', async () => {
     const graph = await buildGraph();
     const phase = Array.from(graph.phases.values())[0]!;
@@ -289,7 +322,8 @@ describe('PhaseOrchestrator + worktrees', () => {
     });
     await orchestrator.start();
 
-    const first = Array.from(graph.phases.values())[0]!.id;
+    const firstPhase = Array.from(graph.phases.values())[0]!;
+    const first = firstPhase.id;
     const order = wt.calls.filter((c) => c.includes(first));
     expect(order).toEqual([
       `allocate:${first}`,
@@ -297,6 +331,8 @@ describe('PhaseOrchestrator + worktrees', () => {
       `merge:${first}:ok`,
       `release:${first}:remove`,
     ]);
+    expect(firstPhase.metadata?.integrationStatus).toBe('merged');
+    expect(firstPhase.metadata?.integrationBranch).toBe(`wstack/ap/${first}`);
   });
 
   it('a merge conflict keeps the worktree and does NOT fail the run', async () => {
@@ -314,9 +350,12 @@ describe('PhaseOrchestrator + worktrees', () => {
     const phases = Array.from(graph.phases.values());
     // run completes; phases are not marked failed by a worktree conflict
     expect(phases.every((p) => p.status === 'completed')).toBe(true);
-    const first = phases[0]!.id;
+    const firstPhase = phases[0]!;
+    const first = firstPhase.id;
     expect(wt.calls).toContain(`merge:${first}:conflict`);
     expect(wt.calls).toContain(`release:${first}:keep`);
+    expect(firstPhase.metadata?.integrationStatus).toBe('needs_review');
+    expect(firstPhase.metadata?.integrationConflictFiles).toEqual(['x.ts']);
   });
 
   it('serializes merges even when phases run in parallel', async () => {
@@ -475,6 +514,7 @@ describe('PhaseOrchestrator + verify gate', () => {
     // broken code is never merged; the worktree is kept for review
     expect(wt.calls.some((c) => c.startsWith(`merge:${phase.id}`))).toBe(false);
     expect(wt.calls).toContain(`release:${phase.id}:keep`);
+    expect(phase.metadata?.integrationStatus).toBe('not_merged_failed_phase');
   });
 
   it('skips the gate entirely when no verifyPhase is wired (back-compat)', async () => {
@@ -537,6 +577,7 @@ describe('PhaseOrchestrator + conflict resolution', () => {
     expect(phase.status).toBe('completed');
     expect(wt.calls).toContain(`merge:${phase.id}:resolved`);
     expect(wt.calls).toContain(`release:${phase.id}:remove`);
+    expect(phase.metadata?.integrationStatus).toBe('merged');
   });
 
   it('parks the worktree for review when conflict resolution fails (run still completes)', async () => {
@@ -559,5 +600,70 @@ describe('PhaseOrchestrator + conflict resolution', () => {
     expect(phase.status).toBe('completed');
     expect(wt.calls).toContain(`merge:${phase.id}:conflict`);
     expect(wt.calls).toContain(`release:${phase.id}:keep`);
+    expect(phase.metadata?.integrationStatus).toBe('needs_review');
+    expect(phase.metadata?.integrationConflictFiles).toEqual(['x.ts']);
+  });
+
+  it('asks Brain before attempting conflict resolution and parks when Brain does not answer resolve', async () => {
+    const graph = await singlePhaseGraph();
+    const name = Array.from(graph.phases.values())[0]!.name;
+    const wt = fakeWorktrees({ conflictOn: (slug) => slug === name });
+    let brainCalls = 0;
+    let resolves = 0;
+    const orchestrator = new PhaseOrchestrator({
+      graph,
+      ctx: {
+        executeTask: async () => {},
+        brain: {
+          decide: async () => {
+            brainCalls++;
+            return { type: 'ask_human', prompt: 'Need human decision' };
+          },
+        },
+        resolveConflict: async () => {
+          resolves++;
+          return true;
+        },
+      },
+      worktrees: wt.wm,
+      autonomous: false,
+    });
+    await orchestrator.start();
+
+    const phase = Array.from(graph.phases.values())[0]!;
+    expect(brainCalls).toBe(1);
+    expect(resolves).toBe(0);
+    expect(phase.metadata?.brainConflictDecision).toBe('ask_human');
+    expect(phase.metadata?.integrationStatus).toBe('needs_review');
+    expect(wt.calls).toContain(`release:${phase.id}:keep`);
+  });
+
+  it('attempts conflict resolution when Brain answers with the resolve option', async () => {
+    const graph = await singlePhaseGraph();
+    const name = Array.from(graph.phases.values())[0]!.name;
+    const wt = fakeWorktrees({ conflictOn: (slug) => slug === name });
+    let resolves = 0;
+    const orchestrator = new PhaseOrchestrator({
+      graph,
+      ctx: {
+        executeTask: async () => {},
+        brain: {
+          decide: async () => ({ type: 'answer', optionId: 'resolve', text: 'Try resolver' }),
+        },
+        resolveConflict: async () => {
+          resolves++;
+          return true;
+        },
+      },
+      worktrees: wt.wm,
+      autonomous: false,
+    });
+    await orchestrator.start();
+
+    const phase = Array.from(graph.phases.values())[0]!;
+    expect(resolves).toBe(1);
+    expect(phase.metadata?.brainConflictDecision).toBe('answer');
+    expect(phase.metadata?.integrationStatus).toBe('merged');
+    expect(wt.calls).toContain(`merge:${phase.id}:resolved`);
   });
 });

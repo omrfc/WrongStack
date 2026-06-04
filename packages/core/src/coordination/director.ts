@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
+import type { BrainArbiter } from './brain.js';
 import { DirectorStateCheckpoint, type DirectorStateSnapshot } from '../storage/director-state.js';
 import type { BridgeMessage } from '../types/agent-bridge.js';
 import type { ModelMatrixEntry } from '../types/config.js';
@@ -70,6 +71,8 @@ import { assignNickname } from './subagent-nicknames.js';
 export interface DirectorOptions {
   config: MultiAgentConfig;
   runner?: SubagentRunner;
+  /** Optional Brain arbiter above the director for policy/decision escalation. */
+  brain?: BrainArbiter;
   /**
    * When set, the director writes a `fleet.json` manifest to this path
    * recording every spawned subagent (id, provider, model, role, task
@@ -372,10 +375,11 @@ export class Director implements ICoordinator {
   }
 
   private resolveMaxContext(): number {
-    const resolved =
-      typeof this.maxContext === 'function' ? this.maxContext() : this.maxContext;
+    const resolved = typeof this.maxContext === 'function' ? this.maxContext() : this.maxContext;
     return resolved && resolved > 0 ? resolved : 128_000;
   }
+  /** Optional Brain arbiter for director-level policy decisions. */
+  private readonly brain?: BrainArbiter;
   /**
    * Optional fleet-level policy container. When provided the Director
    * delegates spawn budgeting, manifest entries, and checkpointing to it
@@ -512,6 +516,7 @@ export class Director implements ICoordinator {
 
   constructor(opts: DirectorOptions) {
     this.id = opts.config.coordinatorId || randomUUID();
+    this.brain = opts.brain;
     this.manifestPath = opts.manifestPath;
     this.roster = opts.roster;
     this.directorPreamble = opts.directorPreamble ?? DEFAULT_DIRECTOR_PREAMBLE;
@@ -733,33 +738,86 @@ export class Director implements ICoordinator {
           return;
         }
       }
-      extendCounts.set(guardKey, prior + 1);
-      setImmediate(() => {
-        const extra: Record<string, unknown> = {};
-        const base = Math.max(payload.limit, payload.used);
-        const grow = (ceiling: number) => Math.min(Math.ceil(base * 1.5), ceiling);
-        let newLimit = base;
-        switch (payload.kind) {
-          case 'iterations':
-            newLimit = grow(50_000);
-            extra.maxIterations = newLimit;
-            break;
-          case 'tool_calls':
-            newLimit = grow(100_000);
-            extra.maxToolCalls = newLimit;
-            break;
-          case 'tokens':
-            newLimit = grow(5_000_000);
-            extra.maxTokens = newLimit;
-            break;
-          case 'cost':
-            newLimit = Math.min(base * 1.5, 100);
-            extra.maxCostUsd = newLimit;
-            break;
-        }
-        this.recordExtension(e.subagentId, e.taskId, payload.kind, newLimit);
-        payload.extend(extra);
-      });
+      const grantExtension = () => {
+        setImmediate(() => {
+          const extra: Record<string, unknown> = {};
+          const base = Math.max(payload.limit, payload.used);
+          const grow = (ceiling: number) => Math.min(Math.ceil(base * 1.5), ceiling);
+          let newLimit = base;
+          switch (payload.kind) {
+            case 'iterations':
+              newLimit = grow(50_000);
+              extra.maxIterations = newLimit;
+              break;
+            case 'tool_calls':
+              newLimit = grow(100_000);
+              extra.maxToolCalls = newLimit;
+              break;
+            case 'tokens':
+              newLimit = grow(5_000_000);
+              extra.maxTokens = newLimit;
+              break;
+            case 'cost':
+              newLimit = Math.min(base * 1.5, 100);
+              extra.maxCostUsd = newLimit;
+              break;
+          }
+          extendCounts.set(guardKey, prior + 1);
+          this.recordExtension(e.subagentId, e.taskId, payload.kind, newLimit);
+          payload.extend(extra);
+        });
+      };
+      if (this.brain) {
+        void this.brain
+          .decide({
+            id: `director-budget-${e.subagentId}-${payload.kind}`,
+            source: 'director',
+            question: `Should the director extend the ${payload.kind} budget for subagent ${e.subagentId}?`,
+            context: [
+              e.taskId ? `Task id: ${e.taskId}` : undefined,
+              `Used: ${payload.used}`,
+              `Limit: ${payload.limit}`,
+              `Prior extensions for this kind: ${prior}`,
+            ]
+              .filter(Boolean)
+              .join('\n'),
+            risk: payload.kind === 'cost' ? 'high' : 'medium',
+            fallback: 'continue',
+            options: [
+              {
+                id: 'extend',
+                label: 'Grant the director default budget extension',
+                consequence: 'The subagent continues with a larger per-kind budget.',
+                risk: payload.kind === 'cost' ? 'high' : 'medium',
+                recommended: true,
+              },
+              {
+                id: 'stop',
+                label: 'Stop this subagent at the current budget limit',
+                consequence: 'The current task will fail or stop due to budget pressure.',
+                risk: 'low',
+              },
+            ],
+          })
+          .then((decision) => {
+            if (decision.type === 'deny') {
+              payload.deny();
+              return;
+            }
+            if (decision.type === 'ask_human') {
+              payload.deny();
+              return;
+            }
+            if (decision.optionId === 'stop' || /\bstop\b/i.test(decision.text)) {
+              payload.deny();
+              return;
+            }
+            grantExtension();
+          })
+          .catch(() => payload.deny());
+        return;
+      }
+      grantExtension();
     });
     // Large-answer store: prevents big `ask_subagent` responses from
     // bloating the leader's context window. Responses above 2K chars

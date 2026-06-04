@@ -3,11 +3,27 @@
  * Subscribers cannot modify or cancel. Subscriber exceptions are caught.
  */
 
+import type { BrainDecision, BrainDecisionRequest } from '../coordination/brain.js';
 import type { Context } from '../core/context.js';
 import type { Usage } from '../types/provider.js';
 import type { Tool, ToolProgressEvent } from '../types/tool.js';
 
 export interface EventMap {
+  'brain.decision_requested': { request: BrainDecisionRequest; at: number };
+  'brain.decision_answered': { request: BrainDecisionRequest; decision: BrainDecision; at: number };
+  'brain.decision_ask_human': {
+    request: BrainDecisionRequest;
+    decision: BrainDecision;
+    at: number;
+  };
+  'brain.human_answered': {
+    id: string;
+    optionId?: string;
+    deny?: boolean;
+    text?: string;
+    at: number;
+  };
+  'brain.decision_denied': { request: BrainDecisionRequest; decision: BrainDecision; at: number };
   'session.started': { id: string };
   'session.ended': { id: string; usage: Usage };
   'session.damaged': { sessionId: string; detail: string };
@@ -345,7 +361,12 @@ export interface EventMap {
   'mcp.server.disconnected': { name: string; reason: string };
   'token.cost_estimate_unavailable': { model: string };
   /** Fired by SessionWriter.writeCheckpoint() after the checkpoint event is appended to JSONL. */
-  'checkpoint.written': { promptIndex: number; promptPreview: string; ts: string; fileCount: number };
+  'checkpoint.written': {
+    promptIndex: number;
+    promptPreview: string;
+    ts: string;
+    fileCount: number;
+  };
   /**
    * Fired by SessionWriter.writeInFlightMarker() — the agent loop has
    * started a long-running operation. Pairs with `in_flight.ended`
@@ -717,7 +738,11 @@ export class ScopedEventBus extends EventBus {
    */
   teardown(): void {
     for (const unsub of this.registrations.values()) {
-      try { unsub(); } catch { /* ignore — best effort */ }
+      try {
+        unsub();
+      } catch {
+        /* ignore — best effort */
+      }
     }
     this.registrations.clear();
     this.clear();

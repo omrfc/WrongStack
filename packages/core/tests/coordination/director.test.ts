@@ -51,7 +51,7 @@ describe('Director orchestration', () => {
    * bus is attached to the Director's FleetBus inside this helper so
    * the test doesn't have to remember the wiring step.
    */
-  function buildDirector(): {
+  function buildDirector(brain?: ConstructorParameters<typeof Director>[0]['brain']): {
     director: Director;
     runner: ReturnType<typeof vi.fn>;
   } {
@@ -83,6 +83,7 @@ describe('Director orchestration', () => {
         maxConcurrent: 4,
       },
       runner,
+      brain,
     });
     return { director: d, runner };
   }
@@ -100,6 +101,82 @@ describe('Director orchestration', () => {
     attachDisposers.push(d.fleet.attach(id, bus));
     return id;
   }
+
+  const waitImmediate = () => new Promise((resolve) => setImmediate(resolve));
+
+  it('asks Brain before granting a non-timeout budget extension and extends on answer', async () => {
+    let brainCalls = 0;
+    const { director: d } = buildDirector({
+      decide: async (req) => {
+        brainCalls++;
+        expect(req.source).toBe('director');
+        expect(req.question).toContain('iterations');
+        return { type: 'answer', optionId: 'extend', text: 'extend' };
+      },
+    });
+    director = d;
+    let extended: Record<string, unknown> | null = null;
+    let denied = false;
+
+    d.fleet.emit({
+      subagentId: 'agent-1',
+      taskId: 'task-1',
+      ts: Date.now(),
+      type: 'budget.threshold_reached',
+      payload: {
+        kind: 'iterations',
+        used: 11,
+        limit: 10,
+        timeoutMs: 60_000,
+        extend: (extra: Record<string, unknown>) => {
+          extended = extra;
+        },
+        deny: () => {
+          denied = true;
+        },
+      },
+    });
+
+    await waitImmediate();
+    await waitImmediate();
+
+    expect(brainCalls).toBe(1);
+    expect(denied).toBe(false);
+    expect(extended?.maxIterations).toBeGreaterThan(11);
+  });
+
+  it('asks Brain before granting a non-timeout budget extension and denies on stop', async () => {
+    const { director: d } = buildDirector({
+      decide: async () => ({ type: 'answer', optionId: 'stop', text: 'stop' }),
+    });
+    director = d;
+    let extended = false;
+    let denied = false;
+
+    d.fleet.emit({
+      subagentId: 'agent-1',
+      taskId: 'task-1',
+      ts: Date.now(),
+      type: 'budget.threshold_reached',
+      payload: {
+        kind: 'tool_calls',
+        used: 11,
+        limit: 10,
+        timeoutMs: 60_000,
+        extend: () => {
+          extended = true;
+        },
+        deny: () => {
+          denied = true;
+        },
+      },
+    });
+
+    await waitImmediate();
+
+    expect(denied).toBe(true);
+    expect(extended).toBe(false);
+  });
 
   it('isolates subagents: per-id provider + model attribution', async () => {
     const { director: d } = buildDirector();
@@ -815,12 +892,14 @@ describe('Director orchestration', () => {
       });
 
       // If there's no actual checkpoint store, the call is a no-op but the code path runs
-      expect(() => dir.setCheckpointState({
-        subagents: [],
-        tasks: [],
-        completedTaskIds: [],
-        manifest: new Map(),
-      })).not.toThrow();
+      expect(() =>
+        dir.setCheckpointState({
+          subagents: [],
+          tasks: [],
+          completedTaskIds: [],
+          manifest: new Map(),
+        }),
+      ).not.toThrow();
       await dir.shutdown();
     });
 
@@ -840,12 +919,14 @@ describe('Director orchestration', () => {
       const dir = new Dir({
         config: { coordinatorId: 'no-resume', doneCondition: { type: 'all_tasks_done' } },
       });
-      expect(() => dir.resumeFromCheckpoint({
-        subagents: [],
-        tasks: [],
-        completedTaskIds: [],
-        manifest: new Map(),
-      })).not.toThrow();
+      expect(() =>
+        dir.resumeFromCheckpoint({
+          subagents: [],
+          tasks: [],
+          completedTaskIds: [],
+          manifest: new Map(),
+        }),
+      ).not.toThrow();
       await dir.shutdown();
     });
   });
@@ -892,7 +973,11 @@ describe('Director orchestration', () => {
       const dir = new Director({
         config: { coordinatorId: 'task-brief', doneCondition: { type: 'all_tasks_done' } },
       });
-      const config: SubagentConfig = { name: 'W', prompt: 'Do work', systemPromptOverride: 'OVERRIDE' };
+      const config: SubagentConfig = {
+        name: 'W',
+        prompt: 'Do work',
+        systemPromptOverride: 'OVERRIDE',
+      };
       const prompt = dir.subagentSystemPrompt(config, 'specific task description');
       expect(prompt).toContain('Do work');
       expect(prompt).toContain('OVERRIDE');
@@ -928,7 +1013,9 @@ describe('Director orchestration', () => {
   // ── spawn with maxSpawnDepth at limit ─────────────────────────────────────
 
   it('maxSpawnDepth=0 director cannot spawn any subagents', async () => {
-    const { FleetSpawnBudgetError, Director: Dir } = await import('../../src/coordination/director.js');
+    const { FleetSpawnBudgetError, Director: Dir } = await import(
+      '../../src/coordination/director.js'
+    );
     const dir = new Dir({
       config: { coordinatorId: 'zero-depth', doneCondition: { type: 'all_tasks_done' } },
       maxSpawnDepth: 0,
@@ -956,8 +1043,16 @@ describe('Director orchestration', () => {
       const runner = vi.fn(async (task, ctx) => {
         const bus = buses.get(ctx.subagentId);
         bus.emit('iteration.started', { ctx: null, index: 1 });
-        bus.emit('provider.response', { ctx: null, usage: { input: 100, output: 50 }, stopReason: 'end_turn' });
-        return { result: ctx.config.name + ':' + task.description, iterations: 1, toolCalls: 0 } as SubagentRunOutcome;
+        bus.emit('provider.response', {
+          ctx: null,
+          usage: { input: 100, output: 50 },
+          stopReason: 'end_turn',
+        });
+        return {
+          result: ctx.config.name + ':' + task.description,
+          iterations: 1,
+          toolCalls: 0,
+        } as SubagentRunOutcome;
       });
       const d = new Director({
         config: { coordinatorId: 'dispatch-test', doneCondition: { type: 'all_tasks_done' } },

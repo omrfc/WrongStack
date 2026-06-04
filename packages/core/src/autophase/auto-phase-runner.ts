@@ -1,5 +1,4 @@
 import type { EventBus } from '../kernel/events.js';
-import type { TaskNode } from '../types/task-graph.js';
 import { PhaseGraphBuilder } from './phase-graph-builder.js';
 import { PhaseOrchestrator } from './phase-orchestrator.js';
 import type {
@@ -18,7 +17,15 @@ export interface AutoPhaseRunnerOptions extends AutoPhaseOptions {
   /** Faz şablonları */
   phases: PhaseTemplate[];
   /** Task çalıştırma fonksiyonu */
-  executeTask: (task: TaskNode, phaseId: string) => Promise<unknown>;
+  executeTask: PhaseExecutionContext['executeTask'];
+  /** Opsiyonel doğrulama kapısı */
+  verifyPhase?: PhaseExecutionContext['verifyPhase'];
+  /** Doğrulama başarısız olduğunda opsiyonel onarım geçişi */
+  repairPhase?: PhaseExecutionContext['repairPhase'];
+  /** Worktree merge çakışmaları için opsiyonel çözücü */
+  resolveConflict?: PhaseExecutionContext['resolveConflict'];
+  /** Opsiyonel Brain arbiter */
+  brain?: PhaseExecutionContext['brain'];
   /** Faz tamamlandığında */
   onPhaseComplete?: (phase: PhaseNode) => void;
   /** Faz başarısız olduğunda */
@@ -93,6 +100,10 @@ export class AutoPhaseRunner {
     // Execution context
     const ctx: PhaseExecutionContext = {
       executeTask: this.opts.executeTask,
+      verifyPhase: this.opts.verifyPhase,
+      repairPhase: this.opts.repairPhase,
+      resolveConflict: this.opts.resolveConflict,
+      brain: this.opts.brain,
       onPhaseComplete: (phase) => {
         this.opts.onPhaseComplete?.(phase);
       },
@@ -111,10 +122,12 @@ export class AutoPhaseRunner {
       maxConcurrentPhases: this.opts.maxConcurrentPhases,
       maxConcurrentTasks: this.opts.maxConcurrentTasks,
       maxRetries: this.opts.maxRetries,
+      maxVerifyAttempts: this.opts.maxVerifyAttempts,
       autonomous: this.opts.autonomous,
       phaseDelayMs: this.opts.phaseDelayMs,
       stopOnFailure: this.opts.stopOnFailure,
       events: this.opts.events,
+      worktrees: this.opts.worktrees,
     });
 
     // Progress reporting

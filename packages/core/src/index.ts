@@ -206,6 +206,21 @@ export {
 } from './worktree/index.js';
 
 // ---- Coordination (fleet/multi-agent tools) ----
+export {
+  BrainDecisionQueue,
+  DefaultBrainArbiter,
+  HumanEscalatingBrainArbiter,
+  ObservableBrainArbiter,
+  formatHumanPrompt,
+  type BrainArbiter,
+  type BrainDecision,
+  type BrainDecisionOption,
+  type BrainDecisionRequest,
+  type BrainDecisionSource,
+  type BrainFallback,
+  type BrainRisk,
+  type DefaultBrainArbiterOptions,
+} from './coordination/brain.js';
 // Re-exported from ./coordination/index.js so they are available at the
 // top-level @wrongstack/core import path.  Without this, consumers that
 // `import { makeFleetEmitTool } from '@wrongstack/core'` get a runtime

@@ -5,6 +5,83 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.51.3] - 2026-06-04
+
+> The Brain-governed AutoPhase release. The main thread since `0.41.0` is a new
+> **Brain arbiter** layer that sits above Director and AutoPhase policy
+> decisions, escalates unsafe choices to the human through the TUI, and records
+> the decision flow on the shared EventBus. AutoPhase now keeps phase execution
+> state separate from worktree integration state, and parallel autonomy exposes
+> finer-grained stage progress.
+>
+> **Release status.** Ready after local verification: all 15 lockstep workspace
+> manifests are aligned to `0.51.3`; `pnpm audit --audit-level=moderate`, `pnpm
+> typecheck`, `pnpm test`, and `pnpm build` pass in this working tree.
+
+### Added
+
+- **Brain arbiter coordination layer.** New `@wrongstack/core/coordination`
+  exports define `BrainArbiter`, `BrainDecisionRequest`, `BrainDecision`,
+  `DefaultBrainArbiter`, `HumanEscalatingBrainArbiter`,
+  `ObservableBrainArbiter`, `BrainDecisionQueue`, and `formatHumanPrompt()`.
+  Brain is intentionally an authority/decision seam, not an autonomous bypass:
+  callers ask for a policy decision; low-risk recommended choices can be
+  answered deterministically, while higher-risk decisions escalate to the human
+  or fall back according to the request policy.
+
+- **TUI Brain decision prompt.** The TUI now listens for `brain.*` EventBus
+  events, renders Brain decisions in chat history, shows a compact `🧠` status
+  chip, and displays an interactive human-decision panel for escalations.
+  Users can answer with `A`/`B`/`C` or `1`/`2`/`3`; `Esc`/`D` denies with the
+  safe default.
+
+- **Director budget-extension policy hooks.** `DirectorOptions` accepts an
+  optional `brain` arbiter. When subagents hit soft limits, the Director can now
+  ask Brain whether to grant the default budget extension or stop the task,
+  with cost extensions marked higher risk.
+
+### Changed
+
+- **AutoPhase conflict resolution is Brain-governed.** Worktree merge conflict
+  resolution can now be routed through Brain before the configured resolver is
+  allowed to edit conflicted files. The conservative default keeps conflicted
+  worktrees for human review unless the decision explicitly chooses resolution.
+
+- **AutoPhase phase completion and worktree integration are tracked
+  separately.** Phase metadata now records `integrationStatus` values such as
+  `merged`, `needs_review`, `merge_failed`, and `not_merged_failed_phase`, plus
+  branch/worktree/conflict details. This separates “phase work completed” from
+  “changes safely landed on the base branch,” which is the right mental model
+  for worktree-based automation.
+
+- **AutoPhase pause handling tightened.** `PhaseOrchestrator` now waits while
+  paused before dispatching the next ready-phase batch and again between phase
+  batches, so pause/resume behaves predictably across autonomous graph runs.
+
+- **Parallel autonomy docs clarified.** `/autonomy stop` documentation now
+  distinguishes serial eternal cancellation from parallel-mode shutdown, and
+  parallel mode documents live stage updates (`decompose` → `fanout` → `await`
+  → `aggregate` → `sleep`/`stopped`).
+
+### Fixed
+
+- **AutoPhase active-run cleanup.** CLI AutoPhase host cleanup now finalizes the
+  active run on graph completion, graph failure, or orchestrator abort, avoiding
+  stale subscriptions / active-run state after a background run exits.
+
+### Tests
+
+- **Brain and TUI regression coverage.** Added tests for the Brain coordination
+  primitives, Director Brain integration, AutoPhase runner/orchestrator Brain
+  plumbing, and TUI reducer state for Brain history/status/prompt handling.
+
+### Docs
+
+- **`docs/slash/autophase.md`** now documents sequential todo execution in CLI
+  phases, verification/repair behavior, and worktree integration metadata.
+- **`docs/slash/autonomy.md`** now documents parallel-mode stop semantics and
+  live stage progression.
+
 ## [0.41.0] - 2026-06-03
 
 > The code-quality & model-routing release. Consolidates everything since the

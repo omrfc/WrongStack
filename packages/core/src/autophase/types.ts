@@ -6,6 +6,7 @@
  * sonraki faz başlayamaz (opsiyonel olarak parallel fazlar da mümkün).
  */
 
+import type { BrainArbiter } from '../coordination/brain.js';
 import type { TaskGraph, TaskNode } from '../types/task-graph.js';
 
 // ─── Phase Status ───────────────────────────────────────────────────────────
@@ -178,6 +179,8 @@ export interface PhaseExecutionContext {
     phase: PhaseNode,
     info: { conflictFiles: string[]; cwd: string },
   ) => Promise<boolean>;
+  /** Opsiyonel global Brain arbiter: policy/karar/escalation katmanı. */
+  brain?: BrainArbiter;
   /** Bir faz tamamlandığında çağrılır */
   onPhaseComplete?: (phase: PhaseNode) => void;
   /** Bir faz başarısız olduğunda çağrılır */

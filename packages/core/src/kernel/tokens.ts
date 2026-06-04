@@ -1,3 +1,4 @@
+import type { BrainArbiter } from '../coordination/brain.js';
 import type { Compactor } from '../types/compactor.js';
 import type { ConfigLoader, ConfigStore } from '../types/config.js';
 import type { ErrorHandler } from '../types/error-handler.js';
@@ -44,4 +45,6 @@ export const TOKENS = {
   ProviderRunner: t<ProviderRunner>('ProviderRunner'),
   /** Optional git-worktree lifecycle manager (per-phase isolation in AutoPhase). */
   WorktreeManager: t<WorktreeManager>('WorktreeManager'),
+  /** Optional global Brain arbiter for policy/decision escalation. */
+  BrainArbiter: t<BrainArbiter>('BrainArbiter'),
 } as const;

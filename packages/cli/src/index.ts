@@ -4,11 +4,15 @@ import type { CommitLLMProvider } from './slash-commands/commit-llm.js';
 import { generateCommitMessageWithLLM } from './slash-commands/commit-llm.js';
 import { makeProviderClassifier } from './slash-commands/dispatch-llm.js';
 import {
+  BrainDecisionQueue,
   type Config,
+  DefaultBrainArbiter,
   DefaultPathResolver,
+  HumanEscalatingBrainArbiter,
   type DefaultPermissionPolicy,
   DefaultSystemPromptBuilder,
   makeAutonomyPromptContributor,
+  ObservableBrainArbiter,
   type Director,
   EventBus,
   FLEET_ROSTER,
@@ -726,6 +730,15 @@ export async function main(argv: string[]): Promise<number> {
   // Always derive a fleetRoot for runtime promotion — /director needs
   // a base dir to write manifest + scratchpad + per-subagent JSONLs into.
   const fleetRootForPromotion = path.join(wpaths.projectSessions, session.id);
+
+  // Global Brain chain: policy arbiter → human escalation queue → observable events.
+  // Everything talks to the same EventBus, so TUI can render and answer escalations.
+  const brainQueue = new BrainDecisionQueue(events);
+  const brain = new ObservableBrainArbiter(
+    new HumanEscalatingBrainArbiter(new DefaultBrainArbiter(), brainQueue),
+    events,
+  );
+
   const multiAgentHost = new MultiAgentHost(
     {
       container,
@@ -752,6 +765,7 @@ export async function main(argv: string[]): Promise<number> {
       sessionWriter: session,
       maxConcurrent,
       getLeaderMaxContext: () => effectiveMaxContext,
+      brain,
     },
   );
   // ALWAYS register the `delegate` tool, even in non-director mode. It
@@ -865,6 +879,7 @@ export async function main(argv: string[]): Promise<number> {
     events,
     storeDir: wpaths.projectAutophase,
     projectRoot,
+    brain,
     log: (line) => renderer.write(`${line}\n`),
   });
 
@@ -1473,6 +1488,7 @@ export async function main(argv: string[]): Promise<number> {
       parallelEngine?.stop();
     },
     onExit: () => {
+      brainQueue.dispose();
       void mcpRegistry.stopAll();
     },
     onBeforeExit: async () => {

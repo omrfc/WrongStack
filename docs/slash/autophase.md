@@ -11,8 +11,10 @@ Turns a free-text **goal** into a real, LLM-driven build. AutoPhase:
    populated `TaskGraph` per phase, persisted as per-project JSON.
 3. **Runs autonomously** — the `PhaseOrchestrator` drives the graph in the
    background. Each todo is executed by a **fresh subagent with full tool
-   access** (read/edit/write/bash/…). Up to 2 todos run concurrently within a
-   phase; phases run in dependency order.
+   access** (read/edit/write/bash/…). In the CLI, todos run sequentially within
+   a phase to avoid concurrent writes to the same worktree. When git-worktree
+   isolation is enabled, independent/parallelizable phases can run concurrently
+   and are merged back sequentially.
 
 This is "SDD logic but different": phased, persisted task-lists like SDD, but
 driven by the autonomous orchestrator + concurrent subagents rather than
@@ -79,5 +81,17 @@ reducer actions:
 Each todo is run by a subagent with a task-scoped prompt that includes the
 overall goal, the current phase, and the todo's title/description/type/priority,
 instructing it to make the change real (not just describe it) using its tools.
-A todo that ends with a non-`done` status is retried up to `maxRetries` (2)
-before the phase is marked failed.
+The CLI runs one todo at a time within a phase; a todo that ends with a non-`done`
+status is retried up to `maxRetries` (2) before the phase is marked failed.
+
+After all todos in a phase succeed, AutoPhase runs a verification gate before
+marking the phase completed and merging its worktree. By default this runs the
+project's `typecheck` and `lint` scripts when available. Override with
+`WRONGSTACK_AUTOPHASE_VERIFY_CMD`, or disable with `WRONGSTACK_AUTOPHASE_VERIFY=0`.
+If verification fails, a repair subagent gets the verifier output and AutoPhase
+re-verifies up to the configured attempt limit.
+
+Worktree integration is tracked separately from phase completion in phase
+metadata: `integrationStatus` is set to `merged`, `needs_review`, `merge_failed`,
+or `not_merged_failed_phase`. This keeps "the phase work finished" distinct from
+"the phase changes safely landed on the base branch".

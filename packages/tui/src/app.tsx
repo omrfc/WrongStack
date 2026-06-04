@@ -24,6 +24,7 @@ import {
   type AutonomyOption,
   AutonomyPicker,
 } from './components/autonomy-picker.js';
+import { BrainDecisionPrompt } from './components/brain-decision-prompt.js';
 import { CheckpointTimeline } from './components/checkpoint-timeline.js';
 import {
   type ConfirmDecision,
@@ -448,6 +449,27 @@ type State = {
     partialAssistantText: string;
   } | null;
   hint: string;
+  brain: {
+    state: 'idle' | 'deciding' | 'answered' | 'ask_human' | 'denied';
+    source?: string;
+    risk?: 'low' | 'medium' | 'high' | 'critical';
+    summary?: string;
+    updatedAt?: number;
+  };
+  brainPrompt: {
+    requestId: string;
+    source: string;
+    risk: 'low' | 'medium' | 'high' | 'critical';
+    question: string;
+    context?: string;
+    options?: Array<{
+      id: string;
+      label: string;
+      risk?: string;
+      consequence?: string;
+      recommended?: boolean;
+    }>;
+  } | null;
   nextId: number;
   picker: { open: boolean; query: string; matches: string[]; selected: number };
   /** Slash command picker — open while typing a / command. */
@@ -639,6 +661,15 @@ type Action =
   /** Submit handler consumed the steering flag; reset. */
   | { type: 'steerConsume' }
   | { type: 'hint'; text: string }
+  | {
+      type: 'brainStatus';
+      state: State['brain']['state'];
+      source?: string;
+      risk?: State['brain']['risk'];
+      summary?: string;
+    }
+  | { type: 'brainPromptSet'; prompt: NonNullable<State['brainPrompt']> }
+  | { type: 'brainPromptClear' }
   | { type: 'pickerOpen'; query: string }
   | { type: 'pickerClose' }
   | { type: 'pickerSetMatches'; query: string; matches: string[] }
@@ -885,6 +916,21 @@ export function reducer(state: State, action: Action): State {
       return { ...state, interrupts: 0 };
     case 'hint':
       return { ...state, hint: action.text };
+    case 'brainStatus':
+      return {
+        ...state,
+        brain: {
+          state: action.state,
+          source: action.source,
+          risk: action.risk,
+          summary: action.summary,
+          updatedAt: Date.now(),
+        },
+      };
+    case 'brainPromptSet':
+      return { ...state, brainPrompt: action.prompt };
+    case 'brainPromptClear':
+      return { ...state, brainPrompt: null };
     case 'pickerOpen':
       return {
         ...state,
@@ -2045,6 +2091,8 @@ export function App({
     steeringPending: false,
     steerSnapshot: null,
     hint: '',
+    brain: { state: 'idle' as const },
+    brainPrompt: null,
     nextId: 1,
     picker: { open: false, query: '', matches: [], selected: 0 },
     slashPicker: { open: false, query: '', matches: [], selected: 0 },
@@ -3843,6 +3891,101 @@ export function App({
       offRewound();
     };
   }, [events, onClearHistory]);
+
+  // --- Brain decision events → chat history/status bar ---
+  useEffect(() => {
+    const requestSummary = (request: { source: string; question: string }) =>
+      `${request.source}: ${request.question}`.slice(0, 80);
+
+    const addBrainEntry = (
+      status: Exclude<Extract<HistoryEntry, { kind: 'brain' }>['status'], 'thinking'>,
+      payload: unknown,
+    ) => {
+      const p = payload as {
+        request: {
+          id: string;
+          source: string;
+          risk: Extract<HistoryEntry, { kind: 'brain' }>['risk'];
+          question: string;
+          context?: string;
+          options?: NonNullable<State['brainPrompt']>['options'];
+        };
+        decision: {
+          type: string;
+          optionId?: string;
+          text?: string;
+          prompt?: string;
+          reason?: string;
+          rationale?: string;
+        };
+      };
+      const decision =
+        p.decision.optionId ??
+        p.decision.text ??
+        p.decision.reason ??
+        p.decision.prompt ??
+        p.decision.type;
+      dispatch({
+        type: 'brainStatus',
+        state: status,
+        source: p.request.source,
+        risk: p.request.risk,
+        summary: decision,
+      });
+      if (status === 'ask_human') {
+        dispatch({
+          type: 'brainPromptSet',
+          prompt: {
+            requestId: p.request.id,
+            source: p.request.source,
+            risk: p.request.risk,
+            question: p.request.question,
+            context: p.request.context,
+            options: p.request.options,
+          },
+        });
+      } else {
+        dispatch({ type: 'brainPromptClear' });
+      }
+      dispatch({
+        type: 'addEntry',
+        entry: {
+          kind: 'brain',
+          status,
+          source: p.request.source,
+          risk: p.request.risk,
+          question: p.request.question,
+          decision,
+          rationale: p.decision.rationale,
+        },
+      });
+    };
+
+    const offRequested = events.on('brain.decision_requested', ({ request }) => {
+      dispatch({
+        type: 'brainStatus',
+        state: 'deciding',
+        source: request.source,
+        risk: request.risk,
+        summary: requestSummary(request),
+      });
+    });
+    const offAnswered = events.on('brain.decision_answered', (payload) => {
+      addBrainEntry('answered', payload);
+    });
+    const offAskHuman = events.on('brain.decision_ask_human', (payload) => {
+      addBrainEntry('ask_human', payload);
+    });
+    const offDenied = events.on('brain.decision_denied', (payload) => {
+      addBrainEntry('denied', payload);
+    });
+    return () => {
+      offRequested();
+      offAnswered();
+      offAskHuman();
+      offDenied();
+    };
+  }, [events]);
 
   // --- AutoPhase phase/task events → PhaseMonitor ---
   useEffect(() => {
@@ -6035,6 +6178,17 @@ export function App({
             onClose={() => dispatch({ type: 'rewindOverlayClose' })}
           />
         ) : null}
+        {state.brainPrompt ? (
+          <Box flexDirection="column" marginY={1} flexShrink={0}>
+            <BrainDecisionPrompt
+              {...state.brainPrompt}
+              onAnswer={(answer) => {
+                events.emit('brain.human_answered', { ...answer, at: Date.now() });
+                dispatch({ type: 'brainPromptClear' });
+              }}
+            />
+          </Box>
+        ) : null}
         {state.confirmQueue.length > 0 &&
           (() => {
             const head = state.confirmQueue[0]!;
@@ -6076,6 +6230,7 @@ export function App({
           fleet={fleetCounts}
           git={gitInfo}
           context={contextWindow}
+          brain={state.brain}
           projectName={projectName}
           subagentCount={Object.keys(state.fleet).length}
           processCount={getProcessRegistry().activeCount}

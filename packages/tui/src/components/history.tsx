@@ -33,6 +33,16 @@ export type HistoryEntry =
   | { id: number; kind: 'turn-summary'; text: string }
   | {
       id: number;
+      kind: 'brain';
+      status: 'thinking' | 'answered' | 'ask_human' | 'denied';
+      source: string;
+      risk: 'low' | 'medium' | 'high' | 'critical';
+      question: string;
+      decision?: string;
+      rationale?: string;
+    }
+  | {
+      id: number;
       kind: 'banner';
       version: string;
       provider: string;
@@ -464,6 +474,35 @@ function DiffBlock({ rows, hidden }: { rows: DiffLineRow[]; hidden: number }): R
   );
 }
 
+function brainStatusStyle(status: Extract<HistoryEntry, { kind: 'brain' }>['status']): {
+  icon: string;
+  color: string;
+} {
+  switch (status) {
+    case 'thinking':
+      return { icon: '…', color: 'magenta' };
+    case 'answered':
+      return { icon: '⚖', color: 'cyan' };
+    case 'ask_human':
+      return { icon: '?', color: 'yellow' };
+    case 'denied':
+      return { icon: '×', color: 'red' };
+  }
+}
+
+function brainRiskColor(risk: Extract<HistoryEntry, { kind: 'brain' }>['risk']): string {
+  switch (risk) {
+    case 'low':
+      return 'green';
+    case 'medium':
+      return 'cyan';
+    case 'high':
+      return 'yellow';
+    case 'critical':
+      return 'red';
+  }
+}
+
 export const Entry = React.memo(function Entry({
   entry,
   termWidth,
@@ -613,6 +652,40 @@ export const Entry = React.memo(function Entry({
       );
     case 'turn-summary':
       return <Text dimColor>{entry.text}</Text>;
+    case 'brain': {
+      const statusStyle = brainStatusStyle(entry.status);
+      const riskColor = brainRiskColor(entry.risk);
+      return (
+        <Box
+          flexDirection="column"
+          marginY={1}
+          borderStyle="single"
+          borderTop={false}
+          borderRight={false}
+          borderBottom={false}
+          borderColor="magenta"
+          paddingLeft={1}
+        >
+          <Box flexDirection="row" gap={1}>
+            <Text bold color="magenta">
+              BRAIN
+            </Text>
+            <Text color={statusStyle.color}>{statusStyle.icon}</Text>
+            <Text dimColor>{entry.source}</Text>
+            <Text dimColor>·</Text>
+            <Text color={riskColor}>{entry.risk}</Text>
+          </Box>
+          <Text color="white">{entry.question}</Text>
+          {entry.decision ? (
+            <Text>
+              <Text dimColor>Decision: </Text>
+              <Text color={statusStyle.color}>{entry.decision}</Text>
+            </Text>
+          ) : null}
+          {entry.rationale ? <Text dimColor>{entry.rationale}</Text> : null}
+        </Box>
+      );
+    }
     case 'confirm':
       // Confirmation is handled by ConfirmPrompt component, not here.
       // This placeholder is intentionally minimal to avoid duplicating the UI.
