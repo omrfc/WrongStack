@@ -57,13 +57,25 @@ export class ReadlineInputReader implements InputReader {
     }
     this.pending = true;
     try {
-      const rl = this.ensure();
-      if (
-        (rl as unknown as { closed?: boolean }).closed ||
-        (rl as unknown as { _flushed?: boolean })._flushed
-      ) {
-        rl.close();
+      // Tear down any stale interface *and await its full close event*
+      // before creating a replacement.  On Windows, readline listeners
+      // linger past .close() — if the new interface attaches while the
+      // old one is still draining, both fire for every keystroke and the
+      // user sees every typed character doubled (5→55, 2→22).
+      if (this.rl) {
+        const old = this.rl;
         this.rl = undefined;
+        await new Promise<void>((resolve) => {
+          // If the interface is already closed/closing the 'close' event
+          // may fire synchronously or on the next tick — the promise
+          // handles both.
+          if ((old as unknown as { closed?: boolean }).closed) {
+            resolve();
+          } else {
+            old.once('close', resolve);
+            old.close();
+          }
+        });
       }
       const fresh = this.ensure();
       return new Promise<string>((resolve) => {
@@ -79,12 +91,11 @@ export class ReadlineInputReader implements InputReader {
         // an unhandled EOF error.
         fresh.once('close', () => resolve(''));
       }).then((result) => {
-        // Tear down after each prompt so the next call always starts
-        // fresh.  On Windows / Node ≥ 24 the interface can enter an
-        // internally-closed state after question() resolves; reusing it
-        // throws ERR_USE_AFTER_CLOSE.
+        // Close the interface so the next readLine call tears it down
+        // first (see the guard above).  On Windows / Node ≥ 24 the
+        // interface can enter an internally-closed state after
+        // question() resolves; reusing it throws ERR_USE_AFTER_CLOSE.
         this.rl?.close();
-        this.rl = undefined;
         return result;
       });
     } finally {

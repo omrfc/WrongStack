@@ -73,7 +73,7 @@ import { CLI_VERSION } from './version.js';
 import { resolveBundledSkillsDir } from './cli-bundled-skills.js';
 import { printUpdateNotice } from './cli-update-notice.js';
 import { promptRecovery } from './cli-recovery-prompt.js';
-import { runAsMain } from './cli-entry-point.js';
+
 import { launchEternalFromFlag } from './cli-eternal-flag.js';
 export { CLI_VERSION };
 
@@ -1780,6 +1780,5 @@ export async function main(argv: string[]): Promise<number> {
 // without spinning up the whole CLI). Imported at the top of this file.
 
 // isMain detection + bounded exit-on-both-success-and-failure live in
-// `cli-entry-point.ts` (extracted to centralise the URL/path matching and
-// the 500ms unref-grace-period setTimeout dance).
-runAsMain(main);
+// `index.ts` (the real entry point). This module exports `main` for
+// library consumers; `index.ts` calls `runAsMain(main)` once.
