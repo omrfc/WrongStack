@@ -8,13 +8,13 @@ export function buildYoloCommand(opts: SlashCommandContext): SlashCommand {
     description: 'Toggle or query YOLO (auto-approve) mode.',
     help: [
       'Usage:',
-      '  /yolo          Show current YOLO status',
-      '  /yolo on       Enable YOLO mode (auto-approve normal project work)',
-      '  /yolo off      Disable YOLO mode (restore permission prompts)',
-      '  /yolo toggle   Toggle YOLO mode',
+      '  /yolo              Show current YOLO status',
+      '  /yolo on           Enable YOLO mode (auto-approve all tool calls)',
+      '  /yolo off          Disable YOLO mode (restore permission prompts)',
+      '  /yolo destructive  Toggle destructive confirmation gate (YOLO mode only)',
       '',
-      'YOLO mode auto-approves normal in-project tool calls, including simple shell commands.',
-      'Clearly destructive calls may still ask unless --yolo-destructive is enabled.',
+      'YOLO mode auto-approves everything, including destructive calls.',
+      'Use /yolo destructive to re-enable confirmation for risky operations.',
     ].join('\n'),
     async run(args) {
       const arg = args.trim().toLowerCase();

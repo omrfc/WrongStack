@@ -585,7 +585,7 @@ For the full walk-through — including the L1-A reactive `ConversationState`, h
 
 ## Status
 
-- **5494 tests passing** across 390 test files (13 skipped) in the 0.54.1 release gate
+- **5494+ tests passing** across 390+ test files in the 0.66.13 release gate
 - Coverage thresholds: ≥85 % lines / ≥85 % functions / ≥70 % branches / ≥82 % statements
 - All workspace packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles

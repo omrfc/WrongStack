@@ -251,6 +251,15 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
     }
   }
 
+  // --webui serves the browser UI alongside the terminal REPL and is mutually
+  // exclusive with the Ink TUI (both own stdout). Pin the surface to REPL so the
+  // launch picker below doesn't ask TUI/REPL and let a TUI choice shadow the
+  // --webui branch in execution.ts (which is checked AFTER the TUI branch).
+  if (flags['webui']) {
+    flags['tui'] = false;
+    flags['no-tui'] = true;
+  }
+
   // Mode + YOLO + Director + Autonomy prompts
   if (isInteractiveTTY) {
     let modePinned: 'tui' | 'repl' | undefined;

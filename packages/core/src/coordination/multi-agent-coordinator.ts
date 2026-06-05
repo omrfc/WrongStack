@@ -473,23 +473,33 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
    */
   private drainPendingAsAborted(message: string): void {
     const dropped = this.pendingTasks.splice(0, this.pendingTasks.length);
-    for (const t of dropped) {
-      const synthetic: TaskResult = {
-        subagentId: t.subagentId ?? 'unassigned',
-        taskId: t.id,
-        status: 'stopped',
-        error: {
-          kind: 'aborted_by_parent',
-          message,
-          retryable: false,
-        },
-        iterations: 0,
-        toolCalls: 0,
-        durationMs: 0,
-      };
-      this.completedResults.push(synthetic);
-      this.emit('task.completed', { task: t, result: synthetic });
-    }
+    for (const t of dropped) this.emitPendingAborted(t, message);
+  }
+
+  /**
+   * Emit a synthetic `stopped`/`aborted_by_parent` completion for a single
+   * PENDING task — one that was never counted in `inFlight`. This MUST bypass
+   * `recordCompletion`: that path does `inFlight--`, which for a pending task
+   * steals a decrement from a genuinely in-flight task and trips the underflow
+   * guard — suppressing that real task's `task.completed` and hanging its
+   * `awaitTasks()` caller. Pushes the result and fires the event directly.
+   */
+  private emitPendingAborted(task: TaskSpec, message: string): void {
+    const synthetic: TaskResult = {
+      subagentId: task.subagentId ?? 'unassigned',
+      taskId: task.id,
+      status: 'stopped',
+      error: {
+        kind: 'aborted_by_parent',
+        message,
+        retryable: false,
+      },
+      iterations: 0,
+      toolCalls: 0,
+      durationMs: 0,
+    };
+    this.completedResults.push(synthetic);
+    this.emit('task.completed', { task, result: synthetic });
   }
 
   private async runDispatched(subagentId: string, task: TaskSpec): Promise<void> {
@@ -893,20 +903,14 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
     const orphaned = this.pendingTasks.filter((t) => t.subagentId === subagentId);
     this.pendingTasks = this.pendingTasks.filter((t) => t.subagentId !== subagentId);
     for (const t of orphaned) {
-      const synthetic: TaskResult = {
-        subagentId,
-        taskId: t.id,
-        status: 'stopped',
-        error: {
-          kind: 'aborted_by_parent',
-          message: `Subagent "${subagentId}" was removed while task "${t.id}" was pending`,
-          retryable: false,
-        },
-        iterations: 0,
-        toolCalls: 0,
-        durationMs: 0,
-      };
-      this.recordCompletion(synthetic);
+      // Inline-emit, NOT recordCompletion: these are PENDING tasks that were
+      // never counted in inFlight. Routing them through recordCompletion would
+      // decrement inFlight on behalf of a still-running task and suppress that
+      // task's own completion via the underflow guard, hanging its awaiter.
+      this.emitPendingAborted(
+        t,
+        `Subagent "${subagentId}" was removed while task "${t.id}" was pending`,
+      );
     }
 
     this.fleetBus?.emit({

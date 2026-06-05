@@ -17,12 +17,20 @@ export interface PermissionPolicyOptions {
   trustFile: string;
   yolo?: boolean;
   /**
-   * When true, YOLO mode allows even calls classified as truly destructive
-   * without confirm. Corresponds to the `--yolo-destructive` CLI flag.
+   * When true, YOLO mode auto-approves even destructive calls without confirm.
+   * @deprecated YOLO now auto-approves everything by default. Use `confirmDestructive`
+   *   to opt back into destructive-operation confirmation prompts.
    */
   yoloDestructive?: boolean;
-  /** @deprecated Use `yoloDestructive`. Kept for `--force-all-yolo` compatibility. */
+  /** @deprecated Use `yoloDestructive`. */
   forceAllYolo?: boolean;
+  /**
+   * When true AND yolo is true, destructive operations still require confirmation.
+   * This is the opt-in safety net: set this if you want YOLO for normal work but
+   * explicit approval for `rm -rf`, project-escaping writes, etc.
+   * Has no effect when yolo is false (normal permission flow applies).
+   */
+  confirmDestructive?: boolean;
   promptDelegate?: (
     tool: Tool,
     input: unknown,
@@ -37,6 +45,8 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
   private readonly trustFile: string;
   private yolo: boolean;
   private yoloDestructive: boolean;
+  /** When true, destructive ops still require confirmation even in YOLO mode. */
+  private confirmDestructive: boolean;
   /**
    * Session-scoped "soft deny" map. When the user presses 'n' (block once),
    * the tool+pattern is added here. If the LLM retries in the same session,
@@ -71,6 +81,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     this.trustFile = opts.trustFile;
     this.yolo = opts.yolo ?? false;
     this.yoloDestructive = opts.yoloDestructive ?? opts.forceAllYolo ?? false;
+    this.confirmDestructive = opts.confirmDestructive ?? false;
     this.promptDelegate = opts.promptDelegate;
   }
 
@@ -102,6 +113,16 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
   /** Check whether the destructive YOLO override is active. */
   getYoloDestructive(): boolean {
     return this.yoloDestructive;
+  }
+
+  /** Toggle destructive confirmation gate (only meaningful when yolo is active). */
+  setConfirmDestructive(enabled: boolean): void {
+    this.confirmDestructive = enabled;
+  }
+
+  /** Check whether destructive confirmation gate is active. */
+  getConfirmDestructive(): boolean {
+    return this.confirmDestructive;
   }
 
   /** @deprecated Use `setYoloDestructive`. */
@@ -179,33 +200,31 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
       return { permission: 'auto', source: 'trust' };
     }
 
-    // 6. YOLO — auto-approve normal in-project work, but keep truly
-    // destructive operations gated unless the destructive override is enabled.
+    // 6. YOLO — auto-approve everything. Destructive operations are
+    // included unless the user explicitly opted into `confirmDestructive`.
     if (this.yolo) {
-      const destructive = this.isDestructiveYoloCall(tool, input, ctx);
-      if (destructive && !this.yoloDestructive) {
-        if (this.promptDelegate) {
-          const decision = await this.promptDelegate(tool, input, subject ?? tool.name);
-          if (decision === 'always') {
-            await this.trust({ tool: tool.name, pattern: subject ?? tool.name });
-            return {
-              permission: 'auto',
-              source: 'user',
-              reason: 'destructive yolo always-allowed',
-            };
+      if (this.confirmDestructive) {
+        const destructive = this.isDestructiveYoloCall(tool, input, ctx);
+        if (destructive) {
+          if (this.promptDelegate) {
+            const decision = await this.promptDelegate(tool, input, subject ?? tool.name);
+            if (decision === 'always') {
+              await this.trust({ tool: tool.name, pattern: subject ?? tool.name });
+              return { permission: 'auto', source: 'user', reason: 'destructive yolo always-allowed' };
+            }
+            if (decision === 'deny') {
+              await this.deny({ tool: tool.name, pattern: subject ?? tool.name });
+              return { permission: 'deny', source: 'user', reason: 'user denied destructive yolo' };
+            }
+            return { permission: decision === 'yes' ? 'auto' : 'deny', source: 'user' };
           }
-          if (decision === 'deny') {
-            await this.deny({ tool: tool.name, pattern: subject ?? tool.name });
-            return { permission: 'deny', source: 'user', reason: 'user denied destructive yolo' };
-          }
-          return { permission: decision === 'yes' ? 'auto' : 'deny', source: 'user' };
+          return {
+            permission: 'confirm',
+            source: 'yolo_destructive',
+            riskTier: 'destructive',
+            reason: 'destructive tool needs explicit approval (confirmDestructive is on)',
+          };
         }
-        return {
-          permission: 'confirm',
-          source: 'yolo_destructive',
-          riskTier: 'destructive',
-          reason: 'destructive tool needs explicit approval even in yolo mode',
-        };
       }
       return { permission: 'auto', source: 'yolo' };
     }

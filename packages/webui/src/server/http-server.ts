@@ -47,6 +47,29 @@ const MIME_TYPES: Record<string, string> = {
   '.ico': 'image/x-icon',
 };
 
+/**
+ * Inject the live WS port into the served HTML so the frontend connects to
+ * THIS instance's backend instead of a hardcoded default. Enables running
+ * several WebUI instances simultaneously on different PORT/WS_PORT pairs
+ * (e.g. one per project) — each instance serves HTML stamped with its own
+ * WS port.
+ *
+ * A `<meta>` tag is used deliberately rather than an inline `<script>`: the
+ * CSP sets `script-src 'self'`, which would block an inline script, but meta
+ * tags are not subject to script-src. The frontend reads
+ * `meta[name="wrongstack-ws-port"]` (see ws-client.ts `defaultWsUrl`).
+ */
+export function injectWsPort(html: string, wsPort: number): string {
+  const tag = `<meta name="wrongstack-ws-port" content="${wsPort}" />`;
+  // Idempotent: never inject twice if the source HTML already carries one.
+  if (html.includes('name="wrongstack-ws-port"')) return html;
+  if (html.includes('</head>')) {
+    return html.replace('</head>', `  ${tag}\n  </head>`);
+  }
+  // No <head> (unexpected) — prepend so the tag is still in the document.
+  return `${tag}\n${html}`;
+}
+
 /** Build the Content-Security-Policy value for the given WS port. */
 export function buildCspHeader(wsPort: number): string {
   return (
@@ -122,6 +145,13 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
       if (ext === '.html') {
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Content-Security-Policy', buildCspHeader(wsPort));
+        // Stamp the live WS port into the HTML so the frontend dials this
+        // instance's backend (not the hardcoded default) — required for
+        // running multiple WebUI instances on different ports.
+        const html = await fs.readFile(resolvedPath, 'utf8');
+        res.writeHead(200);
+        res.end(injectWsPort(html, wsPort));
+        return;
       }
 
       const fileContent = await fs.readFile(resolvedPath);
@@ -131,7 +161,7 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         // SPA fallback: serve index.html so client-side routing still works.
         try {
-          const fileContent = await fs.readFile(path.join(distDir, 'index.html'));
+          const html = await fs.readFile(path.join(distDir, 'index.html'), 'utf8');
           res.writeHead(200, {
             'Content-Type': 'text/html',
             'X-Content-Type-Options': 'nosniff',
@@ -139,7 +169,7 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
             'Referrer-Policy': 'strict-origin-when-cross-origin',
             'Content-Security-Policy': buildCspHeader(wsPort),
           });
-          res.end(fileContent);
+          res.end(injectWsPort(html, wsPort));
         } catch {
           res.writeHead(404);
           res.end('Not found');

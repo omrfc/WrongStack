@@ -30,7 +30,8 @@ export const updateCmd: SubcommandHandler = async (args, deps) => {
   // npm install -g wrongstack@latest
   try {
     const result = await new Promise<{ code: number }>((resolve, reject) => {
-      const child = spawn('npm', ['install', '-g', 'wrongstack@latest'], {
+      const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+      const child = spawn(npmCommand, ['install', '-g', 'wrongstack@latest'], {
         cwd,
         stdio: 'pipe',
       });

@@ -5,8 +5,10 @@ import { ensureNotificationPermission, notifyIfHidden } from '@/lib/notify';
 import { type WrongStackWebSocketClient, getWSClient } from '@/lib/ws-client';
 import {
   type SessionHistoryEntry,
+  type SubagentEvent,
   useChatStore,
   useConfigStore,
+  useFleetStore,
   useHistoryStore,
   useSessionStore,
   useUIStore,
@@ -77,7 +79,12 @@ function installHandlers(ws: WrongStackWebSocketClient): () => void {
       provider: payload.provider,
       model: payload.model,
     });
-    if (isNew || payload.reset) useChatStore.getState().clearMessages();
+    if (isNew || payload.reset) {
+      useChatStore.getState().clearMessages();
+      // A fresh session has no fleet yet — drop any roster carried over from
+      // the previous run so completed agents don't linger into the new one.
+      useFleetStore.getState().clear();
+    }
 
     // Resume hydration: rebuild the chat from the on-disk transcript so the
     // user can pick up exactly where they left off. We translate each
@@ -792,6 +799,14 @@ function installHandlers(ws: WrongStackWebSocketClient): () => void {
   on('worktree.event', (msg) => {
     const p = msg.payload as { kind: string; handleId: string; text: string; at: number };
     useWorktreeStore.getState().pushEvent(p);
+  });
+
+  // ── Live subagent fleet ───────────────────────────────────────────────────
+  // A flattened mirror of the kernel's subagent.* catalog. Each event carries
+  // a `kind` discriminator + the subagentId; the fleet store reduces them into
+  // a per-agent live view (status, model, iteration/tool/cost, ctx fill).
+  on('subagent.event', (msg) => {
+    useFleetStore.getState().applyEvent(msg.payload as SubagentEvent);
   });
 
   return () => {

@@ -776,3 +776,152 @@ export const useWorktreeStore = create<WorktreeState>()((set) => ({
   setSnapshot: (worktrees, baseBranch) => set({ worktrees, baseBranch }),
   pushEvent: (e) => set((s) => ({ activity: [...s.activity, e].slice(-40) })),
 }));
+
+// ── Fleet store (live subagent roster; not persisted) ───────────────────────
+//
+// Reduces the backend's `subagent.event` stream (a flattened mirror of the
+// kernel's subagent.* catalog) into a per-agent live view. The leader spawns
+// nickname'd subagents during multi-agent runs; this gives the WebUI the same
+// at-a-glance fleet visibility the TUI's FleetPanel has — status, model, live
+// iteration/tool/cost counters, current tool, and a context-fill bar.
+
+/** One live (or just-finished) subagent in the fleet roster. */
+export interface SubagentView {
+  id: string;
+  /** Display name — the leader-assigned nickname (may be multi-word, e.g.
+   *  "Von Neumann"). Falls back to the raw id until `spawned` names it. */
+  name: string;
+  status: 'running' | 'completed' | 'failed' | 'timeout' | 'stopped';
+  provider?: string;
+  model?: string;
+  description?: string;
+  taskId?: string;
+  /** Latest iteration index from iteration_summary. */
+  iteration: number;
+  /** Cumulative tool calls (authoritative from iteration_summary, live-bumped
+   *  by tool_executed between summaries). */
+  toolCalls: number;
+  costUsd: number;
+  /** Tool the agent says it's running right now (iteration_summary). */
+  currentTool?: string;
+  /** Most-recent completed tool name (tool_executed). */
+  lastTool?: string;
+  /** Context-window load 0–100. */
+  ctxPct: number;
+  ctxTokens: number;
+  maxContext: number;
+  /** How many times this agent self-extended its budget. */
+  extensions: number;
+  error?: { kind: string; message: string };
+  startedAt: number;
+  completedAt?: number;
+}
+
+/** Discriminated payload mirroring the subagent.* events the backend forwards.
+ *  `kind` selects the reducer branch; the rest is a loose bag of fields. */
+export interface SubagentEvent {
+  kind:
+    | 'spawned'
+    | 'task_started'
+    | 'tool_executed'
+    | 'iteration_summary'
+    | 'budget_extended'
+    | 'ctx_pct'
+    | 'task_completed';
+  subagentId: string;
+  name?: string;
+  provider?: string;
+  model?: string;
+  description?: string;
+  taskId?: string;
+  toolName?: string;
+  iteration?: number;
+  toolCalls?: number;
+  costUsd?: number;
+  currentTool?: string;
+  load?: number;
+  tokens?: number;
+  maxContext?: number;
+  totalExtensions?: number;
+  status?: 'success' | 'failed' | 'timeout' | 'stopped';
+  iterations?: number;
+  error?: { kind: string; message: string };
+}
+
+interface FleetState {
+  /** Insertion-ordered map keyed by subagentId. */
+  agents: Map<string, SubagentView>;
+  applyEvent: (e: SubagentEvent) => void;
+  clear: () => void;
+}
+
+function blankAgent(id: string, name?: string): SubagentView {
+  return {
+    id,
+    name: name?.trim() || id,
+    status: 'running',
+    iteration: 0,
+    toolCalls: 0,
+    costUsd: 0,
+    ctxPct: 0,
+    ctxTokens: 0,
+    maxContext: 0,
+    extensions: 0,
+    startedAt: Date.now(),
+  };
+}
+
+export const useFleetStore = create<FleetState>()((set) => ({
+  agents: new Map(),
+  clear: () => set({ agents: new Map() }),
+  applyEvent: (e) =>
+    set((state) => {
+      const agents = new Map(state.agents);
+      const prev = agents.get(e.subagentId) ?? blankAgent(e.subagentId, e.name);
+      const next: SubagentView = { ...prev };
+      switch (e.kind) {
+        case 'spawned':
+          next.name = e.name?.trim() || next.name;
+          next.provider = e.provider ?? next.provider;
+          next.model = e.model ?? next.model;
+          next.description = e.description ?? next.description;
+          next.taskId = e.taskId ?? next.taskId;
+          next.status = 'running';
+          break;
+        case 'task_started':
+          next.description = e.description ?? next.description;
+          next.taskId = e.taskId ?? next.taskId;
+          next.status = 'running';
+          break;
+        case 'tool_executed':
+          next.lastTool = e.toolName ?? next.lastTool;
+          next.toolCalls = next.toolCalls + 1;
+          break;
+        case 'iteration_summary':
+          next.iteration = e.iteration ?? next.iteration;
+          // Authoritative cumulative count — corrects live increments.
+          if (typeof e.toolCalls === 'number') next.toolCalls = e.toolCalls;
+          if (typeof e.costUsd === 'number') next.costUsd = e.costUsd;
+          next.currentTool = e.currentTool ?? next.currentTool;
+          break;
+        case 'budget_extended':
+          next.extensions = e.totalExtensions ?? next.extensions + 1;
+          break;
+        case 'ctx_pct':
+          next.ctxPct = Math.round(Math.min(1, Math.max(0, e.load ?? 0)) * 100);
+          next.ctxTokens = e.tokens ?? next.ctxTokens;
+          next.maxContext = e.maxContext ?? next.maxContext;
+          break;
+        case 'task_completed':
+          next.status = e.status === 'success' ? 'completed' : (e.status ?? 'completed');
+          if (typeof e.iterations === 'number') next.iteration = e.iterations;
+          if (typeof e.toolCalls === 'number') next.toolCalls = e.toolCalls;
+          next.error = e.error;
+          next.currentTool = undefined;
+          next.completedAt = Date.now();
+          break;
+      }
+      agents.set(e.subagentId, next);
+      return { agents };
+    }),
+}));

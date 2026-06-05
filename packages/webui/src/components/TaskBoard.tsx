@@ -28,32 +28,35 @@ export interface TaskBoardProps {
   className?: string;
 }
 
+// Token-driven so every state reads correctly in both light and dark. Status
+// colors lean on the shared semantic vars (--success / --warning / --info /
+// primary); badges use translucent tints that sit on either background.
 const TASK_STATUS_CONFIG: Record<
   TaskItem['status'],
   { icon: React.ReactNode; color: string; label: string }
 > = {
-  pending: { icon: <Circle className="w-4 h-4" />, color: 'text-slate-400', label: 'Bekliyor' },
-  in_progress: { icon: <Clock className="w-4 h-4 animate-spin" />, color: 'text-amber-500', label: 'Çalışıyor' },
-  blocked: { icon: <Pause className="w-4 h-4" />, color: 'text-orange-500', label: 'Bloklu' },
-  failed: { icon: <XCircle className="w-4 h-4" />, color: 'text-red-500', label: 'Başarısız' },
-  review: { icon: <RotateCcw className="w-4 h-4" />, color: 'text-blue-500', label: 'İncelemede' },
-  completed: { icon: <CheckCircle2 className="w-4 h-4" />, color: 'text-emerald-500', label: 'Tamamlandı' },
+  pending: { icon: <Circle className="w-4 h-4" />, color: 'text-muted-foreground', label: 'Bekliyor' },
+  in_progress: { icon: <Clock className="w-4 h-4 animate-spin" />, color: 'text-primary', label: 'Çalışıyor' },
+  blocked: { icon: <Pause className="w-4 h-4" />, color: 'text-[hsl(var(--warning))]', label: 'Bloklu' },
+  failed: { icon: <XCircle className="w-4 h-4" />, color: 'text-destructive', label: 'Başarısız' },
+  review: { icon: <RotateCcw className="w-4 h-4" />, color: 'text-[hsl(var(--info))]', label: 'İncelemede' },
+  completed: { icon: <CheckCircle2 className="w-4 h-4" />, color: 'text-[hsl(var(--success))]', label: 'Tamamlandı' },
 };
 
 const PRIORITY_BADGE: Record<TaskItem['priority'], string> = {
-  critical: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
-  high: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300',
-  medium: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
-  low: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
+  critical: 'bg-destructive/15 text-destructive',
+  high: 'bg-orange-500/15 text-orange-600 dark:text-orange-400',
+  medium: 'bg-[hsl(var(--info)/0.15)] text-[hsl(var(--info))]',
+  low: 'bg-muted text-muted-foreground',
 };
 
 const TYPE_BADGE: Record<TaskItem['type'], string> = {
-  feature: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300',
-  bugfix: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
-  refactor: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
-  docs: 'bg-sky-100 text-sky-700 dark:bg-sky-900 dark:text-sky-300',
-  test: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300',
-  chore: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
+  feature: 'bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]',
+  bugfix: 'bg-destructive/15 text-destructive',
+  refactor: 'bg-violet-500/15 text-violet-600 dark:text-violet-400',
+  docs: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
+  test: 'bg-primary/15 text-primary',
+  chore: 'bg-muted text-muted-foreground',
 };
 
 function formatTime(ms?: number): string {
@@ -103,10 +106,10 @@ export function TaskBoard({
           </div>
           <div className={cn(
             'px-3 py-1 rounded-full text-xs font-medium',
-            phaseStatus === 'running' ? 'bg-amber-100 text-amber-700' :
-            phaseStatus === 'completed' ? 'bg-emerald-100 text-emerald-700' :
-            phaseStatus === 'failed' ? 'bg-red-100 text-red-700' :
-            'bg-slate-100 text-slate-600',
+            phaseStatus === 'running' ? 'bg-primary/15 text-primary' :
+            phaseStatus === 'completed' ? 'bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]' :
+            phaseStatus === 'failed' ? 'bg-destructive/15 text-destructive' :
+            'bg-muted text-muted-foreground',
           )}>
             {phaseStatus === 'running' ? 'Çalışıyor' :
              phaseStatus === 'completed' ? 'Tamamlandı' :
@@ -146,13 +149,13 @@ export function TaskBoard({
                       key={task.id}
                       onClick={() => onTaskClick?.(task.id)}
                       className={cn(
-                        'w-full text-left rounded-lg border p-3 transition-all hover:shadow-sm cursor-pointer',
+                        'w-full text-left rounded-lg border p-3 transition-all hover:shadow-sm hover:border-primary/40 cursor-pointer',
                         task.status === 'in_progress'
-                          ? 'border-amber-200 bg-amber-50/30 dark:bg-amber-950/20'
+                          ? 'border-primary/40 bg-primary/5'
                           : task.status === 'completed'
-                            ? 'border-emerald-200 bg-emerald-50/30 dark:bg-emerald-950/20'
+                            ? 'border-[hsl(var(--success)/0.35)] bg-[hsl(var(--success)/0.06)]'
                             : task.status === 'failed'
-                              ? 'border-red-200 bg-red-50/30 dark:bg-red-950/20'
+                              ? 'border-destructive/40 bg-destructive/5'
                               : 'border-border bg-card',
                       )}
                     >
@@ -215,7 +218,7 @@ export function TaskBoard({
                                 e.stopPropagation();
                                 onTaskStatusChange(task.id, 'in_progress');
                               }}
-                              className="px-2 py-0.5 text-[10px] rounded bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors"
+                              className="px-2 py-0.5 text-[10px] rounded bg-primary/15 text-primary hover:bg-primary/25 transition-colors"
                             >
                               Başlat
                             </button>
@@ -227,7 +230,7 @@ export function TaskBoard({
                                 e.stopPropagation();
                                 onTaskStatusChange(task.id, 'completed');
                               }}
-                              className="px-2 py-0.5 text-[10px] rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors"
+                              className="px-2 py-0.5 text-[10px] rounded bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))] hover:bg-[hsl(var(--success)/0.25)] transition-colors"
                             >
                               Tamamla
                             </button>
@@ -239,7 +242,7 @@ export function TaskBoard({
                                 e.stopPropagation();
                                 onTaskStatusChange(task.id, 'failed');
                               }}
-                              className="px-2 py-0.5 text-[10px] rounded bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
+                              className="px-2 py-0.5 text-[10px] rounded bg-destructive/15 text-destructive hover:bg-destructive/25 transition-colors"
                             >
                               Başarısız
                             </button>

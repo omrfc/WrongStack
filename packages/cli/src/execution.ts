@@ -17,7 +17,7 @@ import type {
   SlashCommandRegistry,
   TokenCounter,
 } from '@wrongstack/core';
-import { color, mergeCustomModelDefs, writeOut } from '@wrongstack/core';
+import { color, mergeCustomModelDefs, writeOut, type AutonomyStage } from '@wrongstack/core';
 import { persistAutonomySetting } from './settings-menu.js';
 import type { ProviderConfig, ResolvedProvider, WstackPaths } from '@wrongstack/core';
 import type { MCPRegistry } from '@wrongstack/mcp';
@@ -32,28 +32,6 @@ import { runRepl } from './repl.js';
 import type { SessionStats } from './session-stats.js';
 import { fmtTok } from './utils.js';
 import { CLI_VERSION } from './version.js';
-
-type SerialAutonomyStage =
-  | { phase: 'idle' }
-  | { phase: 'decide'; reason: string }
-  | { phase: 'execute'; task: string }
-  | { phase: 'reflect'; status: 'success' | 'failure' | 'aborted' | 'skipped'; note?: string }
-  | { phase: 'sleep'; ms: number }
-  | { phase: 'paused' }
-  | { phase: 'stopped' }
-  | { phase: 'error'; message: string };
-
-type ParallelAutonomyStage =
-  | { phase: 'idle' }
-  | { phase: 'decompose' }
-  | { phase: 'fanout'; slots: number }
-  | { phase: 'await'; taskIds: string[] }
-  | { phase: 'aggregate'; successCount: number; total: number; goalComplete: boolean }
-  | { phase: 'sleep'; ms: number }
-  | { phase: 'stopped' }
-  | { phase: 'error'; message: string };
-
-type AutonomyStage = SerialAutonomyStage | ParallelAutonomyStage;
 
 export interface ExecutionDeps {
   agent: Agent;
@@ -313,7 +291,10 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             '\n',
         );
       }
-    } else if (flags.tui && !flags['no-tui']) {
+    } else if (flags.tui && !flags['no-tui'] && !flags.webui) {
+      // --webui takes precedence over the TUI: both want exclusive ownership of
+      // stdout, and the webui branch (below) runs the REPL + browser server. The
+      // `!flags.webui` guard ensures a stray --tui (or a default) can't shadow it.
       // Switch from inline CLI prompts to event-driven confirmation.
       // Without this, the permission prompt writes to stdout and blocks
       // on stdin — both owned by Ink — making the prompt invisible and
@@ -543,12 +524,20 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         renderer.setSilent(false);
       }
     } else if (flags.webui) {
+      // Route permission confirmations to the browser (tool.confirm_needed
+      // events) instead of inline terminal prompts — runWebUI forwards them to
+      // the WebUI and resolves on the client's tool.confirm_result. Without
+      // this, approvals appear in the terminal even when you're driving the
+      // agent from the browser.
+      agent.disableInteractiveConfirmation();
       const { runWebUI } = await import('./webui-server.js');
       const webuiPromise = runWebUI({
         agent,
         events,
         session,
         port: Number.parseInt(String(flags.port ?? '3457'), 10),
+        projectRoot,
+        open: !!flags.open,
         modelsRegistry,
         globalConfigPath: wpaths.globalConfig,
         subscribeEternalIteration,

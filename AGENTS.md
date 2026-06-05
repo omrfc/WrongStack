@@ -26,7 +26,7 @@ packages/cli/         — REPL, subcommands, slash commands, plugin management
 packages/tui/         — React/Ink terminal UI (lazy-loaded behind --tui)
 packages/runtime/     — Default runtime wiring: makeDefaultRuntime()
 packages/telegram/    — Telegram bridge plugin
-packages/webui/       — Vite+React web UI served by the CLI
+packages/webui/       — Vite+React web UI: standalone `webui` binary + CLI `--webui` (see docs/webui.md)
 packages/plugins/     — Built-in plugin host: cron, file-watcher, session-tracker, subagent
 packages/skills/      — Bundled skill registry (16 SKILL.md files shipped in core/skills/)
 apps/wrongstack/      — bin entry (wrongstack / wstack)

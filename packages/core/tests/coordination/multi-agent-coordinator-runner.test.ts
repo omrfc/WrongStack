@@ -372,4 +372,52 @@ describe('DefaultMultiAgentCoordinator with runner', () => {
     expect(err.observed).toBe(150);
     expect(err.message).toMatch(/Budget exceeded/);
   });
+
+  it('remove() with a running task + queued pending task completes both without inFlight underflow', async () => {
+    // Regression: remove() used to route orphaned PENDING tasks through
+    // recordCompletion, whose inFlight-- stole a decrement from the still-
+    // running task — tripping the underflow guard, suppressing the running
+    // task's task.completed, and hanging its awaiter. Both tasks must complete
+    // and no inFlight_underflow warning may fire.
+    let abortRunner: (() => void) | undefined;
+    const runner: SubagentRunner = (_task, ctx) =>
+      new Promise((_resolve, reject) => {
+        // Cooperative runner: reject when the coordinator aborts our signal.
+        const onAbort = () => reject(new Error('agent aborted'));
+        if (ctx.signal.aborted) onAbort();
+        else ctx.signal.addEventListener('abort', onAbort, { once: true });
+        abortRunner = onAbort;
+      });
+
+    const coord = new DefaultMultiAgentCoordinator(makeConfig(), { runner });
+    const warnings: Array<{ type: string }> = [];
+    coord.on('warning', (w: { type: string }) => warnings.push(w));
+    const completed = new Set<string>();
+    coord.on('task.completed', (e: { result: TaskResult }) =>
+      completed.add(e.result.taskId),
+    );
+
+    await coord.spawn({ id: 'a1', name: 'A1' });
+    // taskA dispatches and blocks the single worker (inFlight=1).
+    await coord.assign({ id: 'taskA', subagentId: 'a1', description: 'long task' });
+    // taskB targets the now-busy worker, so it stays pending.
+    await coord.assign({ id: 'taskB', subagentId: 'a1', description: 'queued task' });
+
+    expect(coord.getStats().inFlight).toBe(1);
+    expect(coord.getStats().pending).toBe(1);
+
+    // Remove the worker while taskA runs and taskB is queued.
+    await coord.remove('a1');
+    // Let the cooperative runner observe the abort and reject taskA.
+    abortRunner?.();
+    // Flush microtasks so taskA's rejection → recordCompletion settles.
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Both tasks must have produced a terminal completion event.
+    expect(completed.has('taskA')).toBe(true);
+    expect(completed.has('taskB')).toBe(true);
+    // The decrement accounting must be clean — no underflow warning.
+    expect(warnings.find((w) => w.type === 'inFlight_underflow')).toBeUndefined();
+    expect(coord.getStats().inFlight).toBe(0);
+  });
 });

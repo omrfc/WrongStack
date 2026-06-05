@@ -32,10 +32,10 @@ const AGENT_STATUS_CONFIG: Record<
   AgentPhaseAssignment['agentStatus'],
   { icon: React.ReactNode; color: string; label: string }
 > = {
-  idle: { icon: <Pause className="w-3 h-3" />, color: 'text-slate-400', label: 'Bekliyor' },
-  running: { icon: <Activity className="w-3 h-3" />, color: 'text-emerald-500', label: 'Çalışıyor' },
-  paused: { icon: <Pause className="w-3 h-3" />, color: 'text-amber-500', label: 'Duraklatıldı' },
-  error: { icon: <Cpu className="w-3 h-3" />, color: 'text-red-500', label: 'Hata' },
+  idle: { icon: <Pause className="w-3 h-3" />, color: 'text-muted-foreground', label: 'Bekliyor' },
+  running: { icon: <Activity className="w-3 h-3" />, color: 'text-[hsl(var(--success))]', label: 'Çalışıyor' },
+  paused: { icon: <Pause className="w-3 h-3" />, color: 'text-[hsl(var(--warning))]', label: 'Duraklatıldı' },
+  error: { icon: <Cpu className="w-3 h-3" />, color: 'text-destructive', label: 'Hata' },
 };
 
 function formatDuration(ms: number): string {
@@ -76,7 +76,7 @@ export function PhaseAgentsMonitor({
           </div>
           <div>
             <span className="text-muted-foreground">Aktif:</span>{' '}
-            <span className="font-medium text-emerald-600">{activeAgents}</span>
+            <span className="font-medium text-[hsl(var(--success))]">{activeAgents}</span>
           </div>
         </div>
       </div>
@@ -95,12 +95,12 @@ export function PhaseAgentsMonitor({
               <span className="truncate max-w-[120px]">{pac.phaseName}</span>
               <div className="flex items-center gap-1.5">
                 <span className="font-medium">{pac.count}</span>
-                <div
+                <span
                   className={cn(
-                    'w-1.5 h-1.5 rounded-full',
-                    pac.status === 'running' ? 'bg-emerald-500' :
-                    pac.status === 'completed' ? 'bg-slate-400' :
-                    'bg-amber-500',
+                    'led',
+                    pac.status === 'running' ? 'text-[hsl(var(--success))] led-pulse' :
+                    pac.status === 'completed' ? 'text-muted-foreground' :
+                    'text-[hsl(var(--warning))]',
                   )}
                 />
               </div>
@@ -136,7 +136,7 @@ export function PhaseAgentsMonitor({
                 <div className="mt-1.5 text-[11px] text-muted-foreground">
                   <div className="truncate">{a.phaseName}</div>
                   {a.taskTitle && (
-                    <div className="truncate mt-0.5 text-amber-600">→ {a.taskTitle}</div>
+                    <div className="truncate mt-0.5 text-primary">→ {a.taskTitle}</div>
                   )}
                   <div className="mt-1">
                     {formatDuration(Date.now() - a.startedAt)}
@@ -149,7 +149,7 @@ export function PhaseAgentsMonitor({
                     <button
                       type="button"
                       onClick={() => onReleaseAgent(a.agentId, a.phaseId)}
-                      className="flex items-center gap-1 px-2 py-0.5 text-[10px] rounded bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
+                      className="flex items-center gap-1 px-2 py-0.5 text-[10px] rounded bg-destructive/15 text-destructive hover:bg-destructive/25 transition-colors"
                     >
                       <UserX className="w-3 h-3" />
                       Çıkar

@@ -3,9 +3,9 @@ import type { Context } from '../core/context.js';
 export type Permission = 'auto' | 'confirm' | 'deny';
 
 /**
- * Risk tier for tools in YOLO mode. YOLO auto-approves normal project work,
- * but calls classified as clearly destructive still prompt unless
- * `--yolo-destructive` is set (`--force-all-yolo` is a deprecated alias).
+ * Risk tier for tools in YOLO mode. YOLO auto-approves everything by default,
+ * including destructive calls. Use `--confirm-destructive` to re-enable
+ * confirmation prompts for destructive operations.
  *
  * - `safe`       — read-only, no side effects (read, glob, grep, etc.)
  * - `standard`   — non-destructive writes and mutations (write, edit, safe shell commands)

@@ -31,6 +31,8 @@ export interface CreateContainerOptions {
     yoloDestructive?: boolean;
     /** @deprecated Use `yoloDestructive`. */
     forceAllYolo?: boolean;
+    /** When true, destructive ops prompt even in YOLO mode. */
+    confirmDestructive?: boolean;
     promptDelegate?: (
       tool: Tool,
       input: unknown,
@@ -96,6 +98,7 @@ export function createDefaultContainer(opts: CreateContainerOptions): Container 
         trustFile: wpaths.projectTrust,
         yolo: opts.permission?.yolo ?? false,
         yoloDestructive: opts.permission?.yoloDestructive ?? opts.permission?.forceAllYolo ?? false,
+        confirmDestructive: opts.permission?.confirmDestructive ?? false,
         promptDelegate: opts.permission?.promptDelegate,
       }),
   );

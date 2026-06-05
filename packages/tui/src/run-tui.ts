@@ -8,7 +8,7 @@ import type {
   SlashCommandRegistry,
   TokenCounter,
 } from '@wrongstack/core';
-import { writeErr } from '@wrongstack/core';
+import { writeErr, type AutonomyStage } from '@wrongstack/core';
 import type { VisionAdapters } from '@wrongstack/runtime/vision';
 import { render } from 'ink';
 import React from 'react';
@@ -16,27 +16,8 @@ import { App } from './app.js';
 import { type MouseEvent, parseSgrMouse, stripSgrMouse } from './mouse.js';
 import { startTerminalTitle } from './terminal-title.js';
 
-export type SerialAutonomyStage =
-  | { phase: 'idle' }
-  | { phase: 'decide'; reason: string }
-  | { phase: 'execute'; task: string }
-  | { phase: 'reflect'; status: 'success' | 'failure' | 'aborted' | 'skipped'; note?: string }
-  | { phase: 'sleep'; ms: number }
-  | { phase: 'paused' }
-  | { phase: 'stopped' }
-  | { phase: 'error'; message: string };
-
-export type ParallelAutonomyStage =
-  | { phase: 'idle' }
-  | { phase: 'decompose' }
-  | { phase: 'fanout'; slots: number }
-  | { phase: 'await'; taskIds: string[] }
-  | { phase: 'aggregate'; successCount: number; total: number; goalComplete: boolean }
-  | { phase: 'sleep'; ms: number }
-  | { phase: 'stopped' }
-  | { phase: 'error'; message: string };
-
-export type AutonomyStage = SerialAutonomyStage | ParallelAutonomyStage;
+// Re-export autonomy stage types from core for backward compatibility
+export type { AutonomyStage };
 
 export interface RunTuiOptions {
   agent: Agent;

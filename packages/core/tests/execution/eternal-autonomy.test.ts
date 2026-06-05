@@ -607,6 +607,13 @@ describe('EternalAutonomyEngine', () => {
         return { status: 'done', iterations: 1, finalText: 'ok' };
       },
     });
+    // Capture the engine's COMPUTED backoff via onStage('sleep') rather than
+    // measuring wall-clock. Wall-clock around an iteration that performs real
+    // fs I/O + a real backoff sleep is flaky under the full parallel suite
+    // (event-loop congestion can push a 50ms backoff past a 400ms wall budget);
+    // the emitted `ms` is the exact value the backoff logic chose, so asserting
+    // on it is deterministic. cycleGapMs:1 keeps the success-path sleep tiny.
+    const sleeps: number[] = [];
     const engine = new EternalAutonomyEngine({
       agent,
       projectRoot,
@@ -614,6 +621,10 @@ describe('EternalAutonomyEngine', () => {
       transientBackoffBaseMs: 50,
       transientBackoffMaxMs: 1000,
       failureBudget: 99,
+      cycleGapMs: 1,
+      onStage: (s) => {
+        if (s.phase === 'sleep') sleeps.push(s.ms);
+      },
     });
 
     // Two transients (50ms, 100ms) then a success → resets streak.
@@ -621,7 +632,8 @@ describe('EternalAutonomyEngine', () => {
     await engine.runOneIteration();
     await engine.runOneIteration(); // success, streak resets
 
-    // Now another transient: should take ~50ms (base), NOT ~200ms.
+    // Now another transient: the backoff must restart at the base (50ms), NOT
+    // the escalated 200ms it would be if the success hadn't reset the streak.
     // Swap in an always-failing agent without rebuilding the engine.
     (engine as any).opts.agent = makeMockAgent({
       todos: [{ id: 't2', content: 'work', status: 'pending' }],
@@ -632,10 +644,12 @@ describe('EternalAutonomyEngine', () => {
           error: { recoverable: true, describe: () => 'transient again' } as any,
         }) as any,
     });
-    const t0 = Date.now();
     await engine.runOneIteration();
-    const elapsed = Date.now() - t0;
-    expect(elapsed).toBeLessThan(400);
+
+    // sleeps = [50 (transient #1), 100 (transient #2), 1 (success gap), 50 (reset backoff)]
+    expect(sleeps[0]).toBe(50);
+    expect(sleeps[1]).toBe(100);
+    expect(sleeps.at(-1)).toBe(50);
   });
 
   it('passes autonomousContinue:true and a maxIterations cap to agent.run', async () => {

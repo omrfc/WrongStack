@@ -173,6 +173,27 @@ describe('runLaunchPrompts', () => {
     expect(reader.readLine).not.toHaveBeenCalled();
   });
 
+  it("modePinned: 'repl' skips the mode question (the path --webui pins)", async () => {
+    // boot.ts pins the surface to REPL when --webui is passed (webui runs the
+    // browser server alongside the REPL, mutually exclusive with the Ink TUI),
+    // so the TUI/REPL picker must not prompt — otherwise a TUI choice would
+    // shadow the --webui branch in execution.ts.
+    const renderer = makeRenderer();
+    const reader = makeReader([]);
+
+    const result = await runLaunchPrompts({
+      renderer,
+      reader,
+      modePinned: 'repl',
+      yoloPinned: false,
+      directorPinned: false,
+      autonomyPinned: 'off',
+    });
+
+    expect(result.mode).toBe('repl');
+    expect(reader.readLine).not.toHaveBeenCalled();
+  });
+
   it("'r' answer picks REPL mode", async () => {
     const renderer = makeRenderer();
     // 4 prompts: mode, yolo, director, autonomy — all defaults except mode

@@ -52,8 +52,8 @@ describe('helpCmd', () => {
       .map((call) => call[0])
       .join('');
     expect(output).toContain('--yolo');
-    expect(output).toContain('--yolo-destructive');
-    expect(output).toContain('Deprecated alias for --yolo-destructive');
+    expect(output).toContain('--confirm-destructive');
+    expect(output).toContain('Deprecated — YOLO now auto-approves everything');
   });
 });
 

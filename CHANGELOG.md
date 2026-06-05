@@ -5,6 +5,109 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.66.13] - 2026-06-05
+
+> The WebUI-fleet & agent-decomposition release. Consolidates everything since
+> the `0.54.1` lockstep realignment. The headlines are a **multi-instance WebUI**
+> with auto-advancing ports and a self-healing instance registry, a full WebUI
+> visual overhaul ("Engineering Instrument Deck") with a **live fleet roster**,
+> the decomposition of the 1,000-line agent monolith into focused modules, and a
+> reworked **YOLO destructive-confirmation gate**. Additive only; no breaking
+> changes.
+>
+> **Version consolidation.** The intermediate `0.55.0`–`0.66.12` bumps shipped as
+> mechanical `chore: bump version` / `feat: update code` commits without their own
+> changelog sections; their substantive changes are folded into this entry. All 15
+> workspace manifests are aligned to `0.66.13` in lockstep.
+
+### Added
+
+- **Agent loop decomposition.** The 1,064-line `core/agent.ts` monolith was split
+  into focused modules — `agent-loop.ts` (iteration driver), `agent-response.ts`
+  (response/tool-use handling), `agent-tools.ts` (tool batch execution),
+  `agent-internals.ts` (shared helpers), `agent-types.ts`, and a new
+  `types/autonomy.ts`. `agent.ts` is now a 181-line composition root. Pure
+  refactor — no behaviour change; each extracted unit is independently testable.
+- **`/yolo destructive` gate + `confirmDestructive` safety net.** YOLO now
+  auto-approves everything by default (including destructive calls); the new
+  `/yolo destructive` toggle and `PermissionPolicy.setConfirmDestructive()` let
+  you keep YOLO for routine work while still requiring confirmation for risky
+  operations. Has no effect when YOLO is off (normal permission flow applies).
+- **`createToolOutputSerializer` — budget-capped tool-output serialization.** A
+  new `@wrongstack/core/utils` helper serializes tool output against a token
+  budget, enforcing per-value caps and emitting `sizeSignals`, so oversized tool
+  results are truncated deterministically before they reach the context window or
+  the session log.
+- **`bump-version.mjs` website lockstep.** The release script now also rewrites
+  the marketing site (`website/`, outside the pnpm workspace) — its
+  `package.json`/`package-lock.json` and `src/lib/utils.ts` version string — so a
+  single `bump-version` run keeps the site in sync with the workspace.
+- **WebUI multiple instances.** Run any number of WebUI servers at once (one per
+  project, or several per project). The HTTP (`PORT`, 3456) and WebSocket
+  (`WS_PORT`, 3457) ports now **auto-advance** past anything already bound, so
+  successive `webui` launches land on tidy adjacent pairs (3456/3457, 3458/3459,
+  …) with no manual port juggling. `WEBUI_STRICT_PORT=1` disables auto-advance.
+- **WebUI instance registry.** Every running instance records itself in
+  `~/.wrongstack/webui-instances.json` (port ↔ project path ↔ pid, self-healing on
+  crash via PID liveness pruning, atomic writes). `webui --list` (alias `ls` / `-l`)
+  prints them without starting a server. CLI-embedded (`--webui`) instances share
+  the same registry.
+- **`wrongstack --webui` now serves the browser UI.** Previously it only opened a
+  WebSocket bridge next to the REPL; it now also serves the React frontend over
+  HTTP and prints the URL, so it's a true one-command launch (terminal REPL and
+  browser share the same live agent/session). Reuses the webui package's
+  static-serve / port / registry building blocks via a new `@wrongstack/webui/server`
+  export surface.
+- **`--open` flag** (CLI `--webui --open`, standalone `webui --open` / `WEBUI_OPEN=1`)
+  pops the default browser to the served URL once the server is ready.
+- **`docs/webui.md`** — full Web UI reference (launch modes, ports, registry,
+  flags/env, security, internals). README / ARCHITECTURE / AGENTS updated to match,
+  and `--webui` is now listed in `--help`.
+- **WebUI visual overhaul** — a cohesive "Engineering Instrument Deck" design
+  system (IBM Plex type, warm-graphite/​warm-paper surfaces, signal-amber accent,
+  blueprint grid, status LEDs) with refined dark **and** light modes behind a
+  visible segmented Light/Dark/System toggle in the header. The sidebar todos
+  panel became a progress-railed "Plan" instrument, and the multi-agent panels
+  (`TaskBoard`, `PhaseAgentsMonitor`) were re-themed off hardcoded colors onto
+  shared semantic tokens so they read correctly in both modes.
+- **WebUI live fleet roster** (`FleetPanel`) — during a multi-agent run the
+  leader's spawned (nickname'd) subagents render as a collapsible card strip
+  above the chat: live iteration/tool/cost counters, current tool, context-fill
+  bar, self-extension count, and terminal status/error. Driven by a new
+  `subagent.event` WS stream that **both** the standalone and CLI-embedded
+  servers flatten from the kernel's `subagent.*` catalog, reduced in
+  `useFleetStore`. Self-hides for solo sessions.
+
+### Fixed
+
+- **Coordinator `remove()` could hang a running task's awaiter.** When a subagent
+  was removed while it had an in-flight task **and** a queued (pending) task,
+  `remove()` routed the orphaned pending task through `recordCompletion`, whose
+  `inFlight--` stole a decrement from the still-running task. That tripped the
+  underflow guard when the running task later completed, suppressing its
+  `task.completed` event and leaving any `awaitTasks()` caller to hang until the
+  300 s timeout. Pending tasks now inline-emit their synthetic `aborted_by_parent`
+  completion (via a shared `emitPendingAborted` helper, matching `stopAll` /
+  dead-queue drains) and never touch `inFlight`. Regression test added.
+- **WebUI multi-instance was broken** because the frontend hardcoded the WS port
+  (3457); it now reads the live port from a `<meta name="wrongstack-ws-port">` tag
+  the HTTP server injects into the served HTML.
+- **`@wrongstack/webui/server` export** lacked a `default`/`require` condition, so
+  runtime `require.resolve` of the dist path failed and the frontend was silently
+  not served from the CLI path.
+- **Subagent nickname duplication.** Multi-word names (e.g. *Von Neumann*) could be
+  assigned to two workers because the dedup key was derived by truncating the
+  display string; `assignNickname` now returns the canonical key directly and a
+  `nicknameKeyFromDisplay` helper backs the release paths.
+- **`eternal-parallel` subagent leak** — per-tick subagents are now removed from the
+  coordinator, freeing their entries and nickname slots over long runs.
+- **`CollabSession` timer leak** — the session-level timeout is now cleared on the
+  success path too (it previously leaked, later firing a spurious cancel + unhandled
+  rejection).
+- **Director `idle_timeout` budget extension** was a silent no-op (`extend({})`); it
+  now flows through the heartbeat path and extends `idleTimeoutMs`, consistent with
+  the collab and auto-extend handlers.
+
 ## [0.54.1] - 2026-06-04
 
 > The boot-refresh & model-picker release. Consolidates everything since the

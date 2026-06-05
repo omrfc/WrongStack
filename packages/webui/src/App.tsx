@@ -9,6 +9,7 @@ import { CommandPalette, downloadChatAsMarkdown } from './components/CommandPale
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { ConnectionBanner } from './components/ConnectionBanner';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { FleetPanel } from './components/FleetPanel';
 import { QuickModelSwitcher } from './components/QuickModelSwitcher';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ShortcutsOverlay } from './components/ShortcutsOverlay';
@@ -205,8 +206,10 @@ function AppInner() {
         {currentView === 'chat' && (
           <>
             {sessionId && (
-              <div className="px-4 pt-2">
+              <div className="px-4 pt-2 space-y-2">
                 <CollabPanel sessionId={sessionId} />
+                {/* Live subagent roster — self-hides when no fleet is running. */}
+                <FleetPanel />
               </div>
             )}
             <ChatView />

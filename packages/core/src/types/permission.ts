@@ -49,4 +49,8 @@ export interface PermissionPolicy {
   getForceAllYolo?(): boolean;
   /** @deprecated Use `setYoloDestructive`. */
   setForceAllYolo?(enabled: boolean): void;
+  /** Query whether destructive-operation confirmation gate is active. */
+  getConfirmDestructive?(): boolean;
+  /** Enable/disable destructive-operation confirmation (only meaningful in yolo mode). */
+  setConfirmDestructive?(enabled: boolean): void;
 }

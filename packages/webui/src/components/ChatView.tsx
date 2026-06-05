@@ -11,11 +11,8 @@ import {
   Command,
   Cpu,
   FolderOpen,
-  Monitor,
-  Moon,
   PanelLeftOpen,
   Settings,
-  Sun,
   Zap,
 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
@@ -26,6 +23,7 @@ import { CostChip } from './CostChip';
 import { MessageBubble } from './MessageBubble';
 import { ModePicker } from './ModePicker';
 import { SearchOverlay } from './SearchOverlay';
+import { ThemeToggle } from './ThemeToggle';
 import { ToolGroup } from './ToolGroup';
 import { WelcomeScreen } from './WelcomeScreen';
 import { Button } from './ui/button';
@@ -79,8 +77,6 @@ export function ChatView() {
   const sidebarOpen = useUIStore((s) => s.sidebarOpen);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const compactMode = useUIStore((s) => s.compactMode);
-  const setTheme = useConfigStore((s) => s.setTheme);
-  const theme = useConfigStore((s) => s.theme);
   const { totalTokens, startTime, lastInputTokens, maxContext, projectName, iteration } =
     useSessionStore();
   const { wsConnected, wsStatus, provider, model } = useConfigStore();
@@ -320,24 +316,7 @@ export function ChatView() {
             >
               <Command className="h-4 w-4" />
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={() => {
-                const next = theme === 'light' ? 'dark' : theme === 'dark' ? 'system' : 'light';
-                setTheme(next);
-              }}
-              title={`Theme: ${theme} (click to cycle)`}
-            >
-              {theme === 'light' ? (
-                <Sun className="h-4 w-4" />
-              ) : theme === 'dark' ? (
-                <Moon className="h-4 w-4" />
-              ) : (
-                <Monitor className="h-4 w-4" />
-              )}
-            </Button>
+            <ThemeToggle className="mx-0.5" />
             <Button
               variant="ghost"
               size="icon"

@@ -1,6 +1,7 @@
 // Backend types for WebUI server
 // These are the internal types used by the server-side code
 
+import type { WebSocket } from 'ws';
 import type {
   Agent,
   ConfigStore,

@@ -38,3 +38,4 @@ export * from './slash-command.js';
 export * from './observability.js';
 export * from './system-prompt-contributor.js';
 export * from '../storage/session-reader.js';
+export * from './autonomy.js';

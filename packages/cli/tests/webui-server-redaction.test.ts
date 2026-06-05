@@ -64,9 +64,18 @@ describe('runWebUI redaction', () => {
 
   it('redacts secrets from tool event input/output before broadcasting to WebSocket clients', async () => {
     const port = nextPort();
+    const httpPort = nextPort();
     const events = new EventBus();
+    // Port resolution made startup async, so wait for the server to report
+    // it's listening before connecting (the old immediate-connect was racy).
+    let signalReady: (() => void) | undefined;
+    const listening = new Promise<void>((r) => {
+      signalReady = r;
+    });
     const serverDone = runWebUI({
       port,
+      httpPort,
+      onListening: () => signalReady?.(),
       events,
       session: { id: 'test-session' } as any,
       agent: {
@@ -78,6 +87,7 @@ describe('runWebUI redaction', () => {
       } as any,
     });
 
+    await listening;
     const { ws, waitForMessage } = await openWs(`ws://127.0.0.1:${port}`);
     await waitForMessage('session.start');
 

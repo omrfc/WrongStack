@@ -186,29 +186,29 @@ describe('DefaultPermissionPolicy', () => {
       expect(d.source).toBe('yolo');
     });
 
-    it('yolo blocks clearly destructive bash commands without yoloDestructive', async () => {
+    it('yolo auto-approves clearly destructive bash commands (no longer gated)', async () => {
       const p = new DefaultPermissionPolicy({ trustFile, yolo: true });
       const d = await p.evaluate(
         tool('bash', 'confirm', 'destructive'),
         { command: 'rm -rf /' },
         { projectRoot: process.cwd() } as Context,
       );
-      expect(d.permission).toBe('confirm');
-      expect(d.source).toBe('yolo_destructive');
+      expect(d.permission).toBe('auto');
+      expect(d.source).toBe('yolo');
     });
 
-    it('yolo blocks bash cleanup commands that escape the project', async () => {
+    it('yolo auto-approves bash commands that escape the project', async () => {
       const p = new DefaultPermissionPolicy({ trustFile, yolo: true });
       const d = await p.evaluate(
         tool('bash', 'confirm', 'destructive'),
         { command: 'rm -rf ../other-project' },
         { projectRoot: process.cwd() } as Context,
       );
-      expect(d.permission).toBe('confirm');
-      expect(d.source).toBe('yolo_destructive');
+      expect(d.permission).toBe('auto');
+      expect(d.source).toBe('yolo');
     });
 
-    it('yolo + yoloDestructive allows destructive tools', async () => {
+    it('yolo + yoloDestructive is a no-op (YOLO already auto-approves everything)', async () => {
       const p = new DefaultPermissionPolicy({ trustFile, yolo: true, yoloDestructive: true });
       const d = await p.evaluate(
         tool('bash', 'confirm', 'destructive'),
@@ -219,35 +219,42 @@ describe('DefaultPermissionPolicy', () => {
       expect(d.source).toBe('yolo');
     });
 
-    it('forceAllYolo constructor option remains a deprecated alias', async () => {
-      const p = new DefaultPermissionPolicy({ trustFile, yolo: true, forceAllYolo: true });
-      expect(p.getYoloDestructive()).toBe(true);
-    });
-
-    it('setYoloDestructive / getYoloDestructive toggle at runtime', async () => {
-      const p = new DefaultPermissionPolicy({ trustFile, yolo: true });
-      expect(p.getYoloDestructive()).toBe(false);
-      p.setYoloDestructive(true);
-      expect(p.getYoloDestructive()).toBe(true);
+    it('yolo + confirmDestructive gates destructive operations', async () => {
+      const p = new DefaultPermissionPolicy({ trustFile, yolo: true, confirmDestructive: true });
       const d = await p.evaluate(
         tool('bash', 'confirm', 'destructive'),
         { command: 'rm -rf /' },
         { projectRoot: process.cwd() } as Context,
       );
-      expect(d.permission).toBe('auto');
-      p.setYoloDestructive(false);
+      expect(d.permission).toBe('confirm');
+      expect(d.source).toBe('yolo_destructive');
+    });
+
+    it('setConfirmDestructive / getConfirmDestructive toggle at runtime', async () => {
+      const p = new DefaultPermissionPolicy({ trustFile, yolo: true });
+      expect(p.getConfirmDestructive()).toBe(false);
+      p.setConfirmDestructive(true);
+      expect(p.getConfirmDestructive()).toBe(true);
+      const d = await p.evaluate(
+        tool('bash', 'confirm', 'destructive'),
+        { command: 'rm -rf /' },
+        { projectRoot: process.cwd() } as Context,
+      );
+      expect(d.permission).toBe('confirm');
+      p.setConfirmDestructive(false);
       const d2 = await p.evaluate(
         tool('bash', 'confirm', 'destructive'),
         { command: 'rm -rf /' },
         {} as Context,
       );
-      expect(d2.permission).toBe('confirm');
+      expect(d2.permission).toBe('auto');
     });
 
-    it('promptDelegate intercepts destructive yolo with always/deny/yes/no', async () => {
+    it('confirmDestructive + promptDelegate intercepts with always/deny/yes/no', async () => {
       const p = new DefaultPermissionPolicy({
         trustFile,
         yolo: true,
+        confirmDestructive: true,
         promptDelegate: async () => 'always',
       });
       const d = await p.evaluate(
@@ -259,8 +266,8 @@ describe('DefaultPermissionPolicy', () => {
       expect(d.source).toBe('user');
     });
 
-    it('yolo_destructive source appears in decision', async () => {
-      const p = new DefaultPermissionPolicy({ trustFile, yolo: true });
+    it('yolo_destructive source appears when confirmDestructive is active', async () => {
+      const p = new DefaultPermissionPolicy({ trustFile, yolo: true, confirmDestructive: true });
       const d = await p.evaluate(
         tool('bash', 'confirm', 'destructive'),
         { command: 'rm -rf /' },

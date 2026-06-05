@@ -34,27 +34,11 @@ import {
   mergeCustomModelDefs,
   writeErr,
   writeOut,
-  // createSessionEventBridge, // real import after core declarations are rebuilt
-  // resolveAuditLevel,
-  // type SessionEventBridge,
+  createSessionEventBridge,
+  resolveSessionLoggingConfig,
+  type SessionEventBridge,
+  type AutonomyStage,
 } from '@wrongstack/core';
-
-// Transitional shims (until core package is rebuilt and declarations are refreshed in node_modules)
-const createSessionEventBridge: any = (_writer: any, level?: any, _opts?: any) => ({
-  append: async (_e: any) => {},
-  level: level ?? 'standard',
-  allows: () => true,
-});
-const resolveAuditLevel: any = (cfg?: any) => cfg?.session?.auditLevel ?? 'standard';
-const resolveSessionLoggingConfig: any = (cfg?: any) => ({
-  auditLevel: resolveAuditLevel(cfg),
-  sampling: {
-    toolProgress: {
-      sampleRate: cfg?.session?.sampling?.toolProgress?.sampleRate ?? 8,
-    },
-  },
-});
-type SessionEventBridge = any;
 import { MCPRegistry } from '@wrongstack/mcp';
 import { capabilitiesFor, makeProviderFromConfig } from '@wrongstack/providers';
 import { resolveRuntimeMaxContext } from './context-limit.js';
@@ -99,28 +83,6 @@ type ContainerPromptDelegate = (
   suggestedPattern: string,
 ) => Promise<'yes' | 'no' | 'always' | 'deny'>;
 
-type SerialAutonomyStage =
-  | { phase: 'idle' }
-  | { phase: 'decide'; reason: string }
-  | { phase: 'execute'; task: string }
-  | { phase: 'reflect'; status: 'success' | 'failure' | 'aborted' | 'skipped'; note?: string }
-  | { phase: 'sleep'; ms: number }
-  | { phase: 'paused' }
-  | { phase: 'stopped' }
-  | { phase: 'error'; message: string };
-
-type ParallelAutonomyStage =
-  | { phase: 'idle' }
-  | { phase: 'decompose' }
-  | { phase: 'fanout'; slots: number }
-  | { phase: 'await'; taskIds: string[] }
-  | { phase: 'aggregate'; successCount: number; total: number; goalComplete: boolean }
-  | { phase: 'sleep'; ms: number }
-  | { phase: 'stopped' }
-  | { phase: 'error'; message: string };
-
-type AutonomyStage = SerialAutonomyStage | ParallelAutonomyStage;
-
 type SddParallelRunGlobal = typeof globalThis & {
   __sddParallelRun?: import('@wrongstack/core').SddParallelRun;
 };
@@ -157,6 +119,7 @@ export async function main(argv: string[]): Promise<number> {
     permission: {
       yolo: config.yolo,
       yoloDestructive: flags['yolo-destructive'] === true || flags['force-all-yolo'] === true,
+      confirmDestructive: flags['confirm-destructive'] === true,
       promptDelegate: makePromptDelegate(reader) as unknown as ContainerPromptDelegate,
     },
     compactor: {

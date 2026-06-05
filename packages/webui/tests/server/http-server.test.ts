@@ -16,6 +16,7 @@ import * as path from 'node:path';
 import {
   buildCspHeader,
   createHttpServer,
+  injectWsPort,
   isInsideDist,
 } from '../../src/server/http-server.js';
 
@@ -59,13 +60,38 @@ describe('buildCspHeader', () => {
   });
 });
 
+describe('injectWsPort', () => {
+  it('injects a meta tag before </head> when present', () => {
+    const out = injectWsPort('<html><head><title>x</title></head><body></body></html>', 3557);
+    expect(out).toContain('<meta name="wrongstack-ws-port" content="3557" />');
+    // Must land inside the head, before the closing tag.
+    expect(out.indexOf('wrongstack-ws-port')).toBeLessThan(out.indexOf('</head>'));
+  });
+
+  it('prepends the meta tag when there is no </head>', () => {
+    const out = injectWsPort('<!doctype html><title>x</title>', 3557);
+    expect(out).toContain('<meta name="wrongstack-ws-port" content="3557" />');
+    expect(out).toContain('<title>x</title>');
+  });
+
+  it('is idempotent — never injects twice', () => {
+    const once = injectWsPort('<head></head>', 3557);
+    const twice = injectWsPort(once, 9999);
+    expect(twice).toBe(once);
+    expect(twice.match(/wrongstack-ws-port/g)).toHaveLength(1);
+  });
+});
+
 describe('createHttpServer', () => {
-  it('serves index.html for /', async () => {
+  it('serves index.html for / with the live WS port stamped in', async () => {
     const res = await fetch(`${baseUrl}/`);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('text/html');
     expect(res.headers.get('content-security-policy')).toContain('ws://127.0.0.1:9999');
-    expect(await res.text()).toContain('<title>root</title>');
+    const html = await res.text();
+    expect(html).toContain('<title>root</title>');
+    // The frontend reads this to dial THIS instance's backend (multi-instance).
+    expect(html).toContain('<meta name="wrongstack-ws-port" content="9999" />');
   });
 
   it('serves .js with the right MIME type', async () => {

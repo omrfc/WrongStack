@@ -1,4 +1,4 @@
-import type { TokenCounter } from '@wrongstack/core';
+import type { TokenCounter, AutonomyStage } from '@wrongstack/core';
 import { Box, Text, useStdout } from 'ink';
 import type React from 'react';
 import { useEffect, useState } from 'react';
@@ -76,28 +76,6 @@ export interface ContextWindow {
   /** Provider's declared maxContext capability. */
   max: number;
 }
-
-type SerialAutonomyStage =
-  | { phase: 'idle' }
-  | { phase: 'decide'; reason: string }
-  | { phase: 'execute'; task: string }
-  | { phase: 'reflect'; status: 'success' | 'failure' | 'aborted' | 'skipped'; note?: string }
-  | { phase: 'sleep'; ms: number }
-  | { phase: 'paused' }
-  | { phase: 'stopped' }
-  | { phase: 'error'; message: string };
-
-type ParallelAutonomyStage =
-  | { phase: 'idle' }
-  | { phase: 'decompose' }
-  | { phase: 'fanout'; slots: number }
-  | { phase: 'await'; taskIds: string[] }
-  | { phase: 'aggregate'; successCount: number; total: number; goalComplete: boolean }
-  | { phase: 'sleep'; ms: number }
-  | { phase: 'stopped' }
-  | { phase: 'error'; message: string };
-
-type AutonomyStage = SerialAutonomyStage | ParallelAutonomyStage;
 
 export interface StatusBarProps {
   model: string;

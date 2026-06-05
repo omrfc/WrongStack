@@ -508,9 +508,25 @@ let client: WrongStackWebSocketClient | null = null;
  * force the WS URL to use the literal IPv4 loopback address. That bypasses the
  * DNS dance entirely. For any other hostname (LAN IP, custom WS_HOST override)
  * we keep the page's hostname so things still "just work".
+ *
+ * The WS port is NOT hardcoded: the HTTP server stamps the live port into the
+ * served HTML as `<meta name="wrongstack-ws-port">` (see http-server.ts), so
+ * several WebUI instances can run on different PORT/WS_PORT pairs at once. We
+ * fall back to 3457 only when the tag is absent (e.g. the vite dev server).
  */
+const DEFAULT_WS_PORT = 3457;
+
+function resolveWsPort(): number {
+  if (typeof document === 'undefined') return DEFAULT_WS_PORT;
+  const raw = document
+    .querySelector('meta[name="wrongstack-ws-port"]')
+    ?.getAttribute('content');
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 && parsed < 65536 ? parsed : DEFAULT_WS_PORT;
+}
+
 function defaultWsUrl(): string {
-  const port = 3457;
+  const port = resolveWsPort();
   if (typeof window === 'undefined' || !window.location?.hostname) {
     return `ws://127.0.0.1:${port}`;
   }

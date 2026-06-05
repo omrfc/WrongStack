@@ -40,7 +40,6 @@ import { decryptConfigSecrets, encryptConfigSecrets } from '@wrongstack/core/sec
 import { buildProviderFactoriesFromRegistry, makeProviderFromConfig } from '@wrongstack/providers';
 import { builtinToolsPack, forgetTool, rememberTool } from '@wrongstack/tools';
 import { WebSocket, WebSocketServer } from 'ws';
-import { randomBytes } from 'node:crypto';
 import { createDefaultContainer } from '../../../runtime/src/container.js';
 import { bootConfig, patchConfig, } from './boot.js';
 import { AutoPhaseWebSocketHandler } from './autophase-ws-handler.js';
@@ -48,6 +47,9 @@ import { CollaborationWebSocketHandler } from './collaboration-ws-handler.js';
 import { WorktreeWebSocketHandler } from './worktree-ws-handler.js';
 import { verifyClient as verifyWsClient } from './ws-auth.js';
 import { registerShutdownHandlers } from './lifecycle.js';
+import { registerInstance, unregisterInstance } from './instance-registry.js';
+import { findFreePort } from './port-utils.js';
+import { openBrowser } from './open-browser.js';
 import { computeUsageCost, getCostRates } from './usage-cost.js';
 import {
   addProvider as addProviderRecord,
@@ -58,39 +60,111 @@ import {
   setActiveKey as setActiveKeyRecord,
   upsertKey as upsertKeyRecord,
 } from './provider-keys.js';
+import { loadSavedProviders, saveProviders } from './provider-config-io.js';
+import { send, broadcast, sendResult, errMessage, generateAuthToken } from './ws-utils.js';
 import { estimateContextBreakdown } from './token-estimator.js';
 
-// Re-export types
+// Re-export types — shared message shapes and options used by both the
+// standalone server and the CLI's `--webui` embedded mode.
 export type { WebUIOptions, BackendServices } from './types.js';
+export type { WSServerMessage, WSClientMessage, ConnectedClient } from './types.js';
 
-/** Extract a human-readable message from an unknown thrown value. */
-function errMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
+// Re-export the static-serve + multi-instance building blocks so other packages
+// (the CLI's `--webui` mode) can serve the same React frontend, inject the live
+// WS port, pick free ports, and register in the shared instance registry —
+// without duplicating any of that logic.
+export { createHttpServer, buildCspHeader, injectWsPort } from './http-server.js';
+export { findFreePort, isPortFree } from './port-utils.js';
+export { openBrowser, browserOpenCommand } from './open-browser.js';
+export {
+  registerInstance,
+  unregisterInstance,
+  listInstances,
+  formatInstances,
+  registryPath,
+  defaultBaseDir,
+  type WebUIInstanceRecord,
+} from './instance-registry.js';
 
-// Internal message types
-interface WSServerMessage {
-  type: string;
-  payload: unknown;
-}
+// WebSocket utilities shared with CLI
+export {
+  send,
+  broadcast,
+  sendResult,
+  errMessage,
+  generateAuthToken,
+} from './ws-utils.js';
 
-interface WSClientMessage {
-  type: string;
-  payload?: unknown;
-}
+// WS auth — pure functions for verifying WebSocket connections
+export {
+  verifyClient,
+  isLoopbackHostname,
+  isLoopbackBind,
+  tokenMatches,
+  extractToken,
+  hostHeaderOk,
+  type VerifyClientInput,
+} from './ws-auth.js';
 
-interface ConnectedClient {
-  ws: WebSocket;
-  sessionId: string | null;
-  connectedAt: number;
-}
+// Provider/API-key record transforms (pure functions, testable without I/O)
+export {
+  normalizeKeys,
+  writeKeysBack,
+  maskedKey,
+  upsertKey,
+  deleteKey,
+  setActiveKey,
+  addProvider,
+  removeProvider,
+  type KeyOpResult,
+  type ProvidersRecord,
+} from './provider-keys.js';
 
-export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}): Promise<void> {
-  const wsPort = opts.wsPort ?? 3457;
+// Provider config load/save (decrypt from / encrypt to global config)
+export {
+  loadSavedProviders,
+  saveProviders,
+  createProviderConfigIO,
+} from './provider-config-io.js';
+
+// Message + client shapes now live in ./types.ts (shared with the CLI's
+// embedded server). Imported here for internal use; re-exported above for
+// external consumers. The previous local copies shadowed these and made the
+// `Map<WebSocket, ConnectedClient>` passed to the extracted ws-utils helpers
+// nominally distinct, which TS rejected.
+import type { ConnectedClient, WSClientMessage, WSServerMessage } from './types.js';
+
+export async function startWebUI(
+  opts: { wsPort?: number; wsHost?: string; open?: boolean } = {},
+): Promise<void> {
+  const requestedWsPort = opts.wsPort ?? 3457;
   // Bind to loopback IP by default (not the string "localhost", which on some
   // hosts resolves to IPv6 ::1 and surprises older WS clients). Set WS_HOST or
   // pass opts.wsHost to override (e.g. "0.0.0.0" for LAN access).
   const wsHost = opts.wsHost ?? '127.0.0.1';
+  const requestedHttpPort = Number.parseInt(process.env['PORT'] ?? '3456', 10);
+
+  // Port resolution. Unless WEBUI_STRICT_PORT is set, auto-advance past any port
+  // already taken by another instance so running `webui` several times "just
+  // works" — the real ports are then stamped into the served HTML and the
+  // instance registry. Strict mode keeps the requested ports and lets bind fail
+  // loudly (useful behind a reverse proxy that expects fixed ports).
+  const strictPort =
+    process.env['WEBUI_STRICT_PORT'] === '1' || process.env['WEBUI_STRICT_PORT'] === 'true';
+  let wsPort = requestedWsPort;
+  let httpPort = requestedHttpPort;
+  if (!strictPort) {
+    // Resolve HTTP first, then WS excluding it, so successive instances land on
+    // tidy adjacent pairs (3456/3457, 3458/3459, …) instead of interleaving.
+    httpPort = await findFreePort(wsHost, requestedHttpPort);
+    wsPort = await findFreePort(wsHost, requestedWsPort, { exclude: new Set([httpPort]) });
+    if (httpPort !== requestedHttpPort) {
+      console.warn(`[WebUI] HTTP port ${requestedHttpPort} in use → using ${httpPort}`);
+    }
+    if (wsPort !== requestedWsPort) {
+      console.warn(`[WebUI] WS port ${requestedWsPort} in use → using ${wsPort}`);
+    }
+  }
 
   console.log('[WebUI] Starting backend services...');
 
@@ -503,7 +577,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   // can connect. Printed to console on startup; the frontend reads it from
   // the URL query param `?token=...`. Without a token, any client on the
   // network can connect and send `user_message`/`key.add`/`model.switch`.
-  const wsToken = randomBytes(16).toString('hex');
+  const wsToken = generateAuthToken();
   // Token is sent to clients via session.start payload — log only a masked
   // prefix so operators can correlate without leaking the full secret.
   console.log(`[WebUI] WS auth token: ${wsToken.slice(0, 4)}…${wsToken.slice(-4)} (masked)`);
@@ -550,11 +624,14 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   // Exceeding clients are temporarily blocked to prevent flooding.
   // Uses sessionId as the key once connected, falling back to ws for
   // pre-auth messages — prevents connection-reuse bypass.
-  const RATE_LIMIT_MESSAGES = 60;
+  // Rate limit OFF by default (counted pings/list calls too and tripped during
+  // normal use). Opt in via WEBUI_RATE_LIMIT=<messages-per-60s> for LAN exposure.
+  const RATE_LIMIT_MESSAGES = Number.parseInt(process.env['WEBUI_RATE_LIMIT'] ?? '0', 10);
   const RATE_LIMIT_WINDOW_MS = 60_000;
   const rateLimits = new Map<string, { count: number; resetAt: number }>();
 
   function checkRateLimit(ws: WebSocket, client: ConnectedClient): boolean {
+    if (RATE_LIMIT_MESSAGES <= 0) return true; // disabled
     const now = Date.now();
     // Prefer the per-client authenticated sessionId; fall back to the
     // WebSocket identity for pre-auth messages before session.start.
@@ -591,22 +668,22 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
   // Event subscriptions
   function setupEvents() {
     events.on('iteration.started', (e) => {
-      broadcast({
+      broadcast(clients, {
         type: 'iteration.started',
         payload: { index: e.index, maxIterations: config.tools?.maxIterations ?? 100 },
       });
     });
 
     events.on('provider.text_delta', (e) => {
-      broadcast({ type: 'provider.text_delta', payload: { text: e.text, messageId: 'current' } });
+      broadcast(clients, { type: 'provider.text_delta', payload: { text: e.text, messageId: 'current' } });
     });
 
     events.on('provider.thinking_delta', (e) => {
-      broadcast({ type: 'provider.thinking_delta', payload: { text: e.text } });
+      broadcast(clients, { type: 'provider.thinking_delta', payload: { text: e.text } });
     });
 
     events.on('tool.started', (e) => {
-      broadcast({
+      broadcast(clients, {
         type: 'tool.started',
         payload: { id: e.id, name: e.name, input: e.input, messageId: `tool_${e.id}` },
       });
@@ -619,7 +696,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
       // running. Heavy `data` blob is intentionally dropped here — the
       // frontend doesn't need it and broadcasting it would balloon the WS
       // traffic for tools that emit progress every few ms.
-      broadcast({
+      broadcast(clients, {
         type: 'tool.progress',
         payload: {
           id: e.id,
@@ -631,7 +708,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     });
 
     events.on('tool.executed', (e) => {
-      broadcast({
+      broadcast(clients, {
         type: 'tool.executed',
         payload: {
           // Forward the tool_use id so frontend can correlate with the
@@ -649,14 +726,14 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
       // Push the current todo snapshot too — the TodoWrite tool mutates
       // context.todos in place, and a side-panel that needs to react to
       // that change shouldn't have to poll. Cheap (todos are tiny).
-      broadcast({
+      broadcast(clients, {
         type: 'todos.updated',
         payload: { todos: [...context.todos] },
       });
     });
 
     events.on('provider.response', (e) => {
-      broadcast({
+      broadcast(clients, {
         type: 'provider.response',
         payload: {
           usage: e.usage,
@@ -667,7 +744,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     });
 
     events.on('context.repaired', (e) => {
-      broadcast({
+      broadcast(clients, {
         type: 'context.repaired',
         payload: {
           removedToolUses: e.removedToolUses,
@@ -680,7 +757,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     events.on('tool.confirm_needed', (e) => {
       const id = e.toolUseId ?? `confirm_${Date.now()}`;
       pendingConfirms.set(id, e.resolve);
-      broadcast({
+      broadcast(clients, {
         type: 'tool.confirm_needed',
         payload: {
           id,
@@ -692,7 +769,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     });
 
     events.on('error', (e) => {
-      broadcast({
+      broadcast(clients, {
         type: 'error',
         payload: {
           phase: e.phase,
@@ -700,21 +777,71 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
         },
       });
     });
-  }
 
-  function send(ws: WebSocket, msg: WSServerMessage): void {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(msg));
-    }
-  }
-
-  function broadcast(msg: WSServerMessage): void {
-    const data = JSON.stringify(msg);
-    for (const [ws] of clients) {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
-      }
-    }
+    // Subagent fleet lifecycle — flatten the kernel's subagent.* catalog into a
+    // single kind-tagged `subagent.event` stream so the WebUI's FleetPanel
+    // (useFleetStore) can render a live roster of the leader's nickname'd
+    // workers. Mirrors the CLI-embedded server (packages/cli/src/webui-server.ts);
+    // only names + counters are forwarded, so there's nothing to scrub.
+    const forwardSubagent = (kind: string, payload: Record<string, unknown>) =>
+      broadcast(clients, { type: 'subagent.event', payload: { kind, ...payload } });
+    events.on('subagent.spawned', (e) =>
+      forwardSubagent('spawned', {
+        subagentId: e.subagentId,
+        taskId: e.taskId,
+        name: e.name,
+        provider: e.provider,
+        model: e.model,
+        description: e.description,
+      }),
+    );
+    events.on('subagent.task_started', (e) =>
+      forwardSubagent('task_started', {
+        subagentId: e.subagentId,
+        taskId: e.taskId,
+        description: e.description,
+      }),
+    );
+    events.on('subagent.tool_executed', (e) =>
+      forwardSubagent('tool_executed', {
+        subagentId: e.subagentId,
+        toolName: e.name,
+        durationMs: e.durationMs,
+        ok: e.ok,
+      }),
+    );
+    events.on('subagent.iteration_summary', (e) =>
+      forwardSubagent('iteration_summary', {
+        subagentId: e.subagentId,
+        iteration: e.iteration,
+        toolCalls: e.toolCalls,
+        costUsd: e.costUsd,
+        currentTool: e.currentTool,
+      }),
+    );
+    events.on('subagent.budget_extended', (e) =>
+      forwardSubagent('budget_extended', {
+        subagentId: e.subagentId,
+        totalExtensions: e.totalExtensions,
+      }),
+    );
+    events.on('subagent.ctx_pct', (e) =>
+      forwardSubagent('ctx_pct', {
+        subagentId: e.subagentId,
+        load: e.load,
+        tokens: e.tokens,
+        maxContext: e.maxContext,
+      }),
+    );
+    events.on('subagent.task_completed', (e) =>
+      forwardSubagent('task_completed', {
+        subagentId: e.subagentId,
+        status: e.status,
+        iterations: e.iterations,
+        toolCalls: e.toolCalls,
+        error: e.error ? { kind: e.error.kind, message: e.error.message } : undefined,
+      }),
+    );
   }
 
   const handleConnection = (ws: WebSocket): void => {
@@ -905,7 +1032,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
 
       case 'abort':
         runLock?.abort();
-        broadcast({ type: 'error', payload: { phase: 'abort', message: 'User aborted' } });
+        broadcast(clients, { type: 'error', payload: { phase: 'abort', message: 'User aborted' } });
         break;
 
       case 'ping':
@@ -932,7 +1059,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
         context.fileMtimes.clear();
         tokenCounter.reset();
         sessionStartedAt = Date.now();
-        broadcast({ type: 'session.start', payload: await sessionStartPayload() });
+        broadcast(clients, { type: 'session.start', payload: await sessionStartPayload() });
         break;
       }
 
@@ -946,7 +1073,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
         context.fileMtimes.clear();
         tokenCounter.reset();
         sendResult(ws, true, 'Context cleared');
-        broadcast({
+        broadcast(clients, {
           type: 'session.start',
           payload: { ...(await sessionStartPayload()), reset: true },
         });
@@ -1011,7 +1138,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
           beforeMessages,
           afterMessages: context.messages.length,
         };
-        broadcast({ type: 'context.repaired', payload });
+        broadcast(clients, { type: 'context.repaired', payload });
         const removed =
           payload.removedToolUses.length +
           payload.removedToolResults.length +
@@ -1056,7 +1183,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
         context.meta['contextWindowMode'] = policy.id;
         context.meta['contextWindowPolicy'] = policy;
         sendResult(ws, true, `Context mode switched to ${policy.id}`);
-        broadcast({
+        broadcast(clients, {
           type: 'context.mode.changed',
           payload: { id: policy.id, name: policy.name, policy },
         });
@@ -1087,7 +1214,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
       }
 
     case 'providers.saved': {
-      const saved = await loadSavedProviders();
+      const saved = await loadConfigProviders();
       send(ws, {
         type: 'providers.saved',
         payload: {
@@ -1190,7 +1317,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
           break;
         }
 
-        broadcast({ type: 'session.start', payload: await sessionStartPayload() });
+        broadcast(clients, { type: 'session.start', payload: await sessionStartPayload() });
         break;
       }
 
@@ -1303,7 +1430,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
           // Replay usage so the topbar shows accurate totals after resume.
           tokenCounter.account(resumed.data.usage, config.model);
           sessionStartedAt = Date.now();
-          broadcast({
+          broadcast(clients, {
             type: 'session.start',
             payload: {
               ...(await sessionStartPayload()),
@@ -1481,7 +1608,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
         // (checkpoint writer) stay in sync.
         context.state.replaceTodos([]);
         sendResult(ws, true, 'Todos cleared');
-        broadcast({ type: 'todos.updated', payload: { todos: [] } });
+        broadcast(clients, { type: 'todos.updated', payload: { todos: [] } });
         break;
       }
 
@@ -1533,7 +1660,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
           }
           await savePlan(planPath, plan);
           sendResult(ws, true, `Applied template "${tpl.name}" — ${tpl.items.length} items added.`);
-          broadcast({
+          broadcast(clients, {
             type: 'plan.updated',
             payload: { plan },
           });
@@ -1648,7 +1775,7 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
             model: config.model,
           });
           sendResult(ws, true, `Switched to mode "${id}"`);
-          broadcast({
+          broadcast(clients, {
             type: 'session.start',
             payload: { ...(await sessionStartPayload()) },
           });
@@ -1692,41 +1819,20 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     }
   }
 
-  // ---- Provider/Key management helpers (mirror packages/cli/src/webui-server.ts) ----
+  // ---- Provider/Key management helpers ----
+  // loadSavedProviders / saveProviders from provider-config-io.ts do the
+  // heavy lifting (read, decrypt, encrypt, write). We wrap saveProviders
+  // with the configWriteLock so concurrent handler calls serialize correctly.
 
-  async function loadSavedProviders(): Promise<Record<string, ProviderConfig>> {
-    try {
-      const raw = await fs.readFile(globalConfigPath, 'utf8');
-      const parsed = JSON.parse(raw) as { providers?: Record<string, ProviderConfig> };
-      if (!parsed.providers) return {};
-      return decryptConfigSecrets(parsed.providers, vault);
-    } catch {
-      return {};
-    }
+  async function loadConfigProviders(): Promise<Record<string, ProviderConfig>> {
+    return loadSavedProviders(globalConfigPath, vault);
   }
 
-  async function saveProviders(providers: Record<string, ProviderConfig>): Promise<void> {
-    configWriteLock = configWriteLock.then(async () => {
-      let parsed: Record<string, unknown>;
-      try {
-        const raw = await fs.readFile(globalConfigPath, 'utf8');
-        parsed = JSON.parse(raw) as Record<string, unknown>;
-      } catch {
-        parsed = {};
-      }
-      parsed['providers'] = providers;
-      const encrypted = encryptConfigSecrets(parsed, vault);
-      await atomicWrite(globalConfigPath, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
-    });
+  async function saveConfigProviders(providers: Record<string, ProviderConfig>): Promise<void> {
+    configWriteLock = configWriteLock.then(() =>
+      saveProviders(globalConfigPath, vault, providers),
+    );
     await configWriteLock;
-  }
-
-  // Provider/API-key record transforms (normalizeKeys, writeKeysBack,
-  // maskedKey, upsert/delete/setActive/add/remove) live in ./provider-keys.ts
-  // as pure functions; the handlers below own the load/save I/O + WS reply.
-
-  function sendResult(ws: WebSocket, success: boolean, message: string): void {
-    send(ws, { type: 'key.operation_result', payload: { success, message } });
   }
 
   // Each handler loads the decrypted providers record, applies a pure transform
@@ -1738,9 +1844,9 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     apiKey: string,
   ): Promise<void> {
     try {
-      const providers = await loadSavedProviders();
+      const providers = await loadConfigProviders();
       const result = upsertKeyRecord(providers, providerId, label, apiKey, new Date().toISOString());
-      if (result.ok) await saveProviders(providers);
+      if (result.ok) await saveConfigProviders(providers);
       sendResult(ws, result.ok, result.message);
     } catch (err) {
       sendResult(ws, false, errMessage(err));
@@ -1749,9 +1855,9 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
 
   async function handleKeyDelete(ws: WebSocket, providerId: string, label: string): Promise<void> {
     try {
-      const providers = await loadSavedProviders();
+      const providers = await loadConfigProviders();
       const result = deleteKeyRecord(providers, providerId, label);
-      if (result.ok) await saveProviders(providers);
+      if (result.ok) await saveConfigProviders(providers);
       sendResult(ws, result.ok, result.message);
     } catch (err) {
       sendResult(ws, false, errMessage(err));
@@ -1764,9 +1870,9 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     label: string,
   ): Promise<void> {
     try {
-      const providers = await loadSavedProviders();
+      const providers = await loadConfigProviders();
       const result = setActiveKeyRecord(providers, providerId, label);
-      if (result.ok) await saveProviders(providers);
+      if (result.ok) await saveConfigProviders(providers);
       sendResult(ws, result.ok, result.message);
     } catch (err) {
       sendResult(ws, false, errMessage(err));
@@ -1778,9 +1884,9 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     payload: { id: string; family: string; baseUrl?: string; apiKey?: string },
   ): Promise<void> {
     try {
-      const providers = await loadSavedProviders();
+      const providers = await loadConfigProviders();
       const result = addProviderRecord(providers, payload, new Date().toISOString());
-      if (result.ok) await saveProviders(providers);
+      if (result.ok) await saveConfigProviders(providers);
       sendResult(ws, result.ok, result.message);
     } catch (err) {
       sendResult(ws, false, errMessage(err));
@@ -1789,9 +1895,9 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
 
   async function handleProviderRemove(ws: WebSocket, providerId: string): Promise<void> {
     try {
-      const providers = await loadSavedProviders();
+      const providers = await loadConfigProviders();
       const result = removeProviderRecord(providers, providerId);
-      if (result.ok) await saveProviders(providers);
+      if (result.ok) await saveConfigProviders(providers);
       sendResult(ws, result.ok, result.message);
     } catch (err) {
       sendResult(ws, false, errMessage(err));
@@ -1806,9 +1912,31 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     distDir: path.resolve(import.meta.dirname, '../../dist'),
     wsPort,
   });
-  const httpPort = Number.parseInt(process.env['PORT'] ?? '3456', 10);
+  // httpPort/wsPort were resolved (and possibly auto-advanced) at the top.
+  // Base dir for the running-instance registry — keep it next to the rest of
+  // the wstack home state (config.json lives here too).
+  const registryBaseDir = path.dirname(globalConfigPath);
   httpServer.listen(httpPort, wsHost, () => {
-    console.log(`[WebUI] HTTP server running on http://${wsHost}:${httpPort}`);
+    const openUrl = `http://${wsHost}:${httpPort}`;
+    console.log(`[WebUI] HTTP server running on ${openUrl}`);
+    // Optionally pop the browser open (best-effort; the URL is always printed).
+    if (opts.open) openBrowser(openUrl);
+    // Record this instance so `webui --list` (and `~/.wrongstack/
+    // webui-instances.json`) show which ports are open for which project.
+    // Best-effort: a registry write failure must not affect serving.
+    void registerInstance(
+      {
+        pid: process.pid,
+        httpPort,
+        wsPort,
+        host: wsHost,
+        projectRoot,
+        projectName: path.basename(projectRoot) || projectRoot,
+        startedAt: new Date().toISOString(),
+        url: `http://${wsHost}:${httpPort}`,
+      },
+      registryBaseDir,
+    ).catch((err) => console.warn('[WebUI] Could not record instance:', errMessage(err)));
   });
 
   // Graceful shutdown on SIGINT/SIGTERM — see `lifecycle.ts`. The session
@@ -1825,5 +1953,8 @@ export async function startWebUI(opts: { wsPort?: number; wsHost?: string } = {}
     },
     clients: () => clients.keys(),
     servers: [httpServer, wssPrimary, wssSecondary],
+    // Drop this instance from the registry on a clean exit so the file reflects
+    // reality. Crash exits are healed by the next register()/list() prune pass.
+    onShutdown: () => unregisterInstance(process.pid, registryBaseDir),
   });
 }

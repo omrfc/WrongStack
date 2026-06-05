@@ -1,6 +1,14 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { createRequire } from 'node:module';
+import {
+  createHttpServer,
+  findFreePort,
+  openBrowser,
+  registerInstance,
+  unregisterInstance,
+} from '@wrongstack/webui/server';
 import type { Agent, EventBus, ModelsRegistry, SessionWriter } from '@wrongstack/core';
 import { DefaultSecretScrubber, type ProviderConfig, atomicWrite } from '@wrongstack/core';
 import {
@@ -29,7 +37,21 @@ interface WebUIOptions {
   agent: Agent;
   events: EventBus;
   session: SessionWriter;
+  /** WebSocket backend port. Defaults to 3457 (auto-advances if taken). */
   port?: number;
+  /** HTTP port serving the React frontend. Defaults to 3456 (auto-advances). */
+  httpPort?: number;
+  /** Project root — recorded in the running-instance registry. */
+  projectRoot?: string;
+  /** Pop the browser open to the served URL once the frontend is ready. */
+  open?: boolean;
+  /**
+   * Fired once the WebSocket server is accepting connections. Useful for
+   * callers (and tests) that must not connect before the server is ready —
+   * port resolution now makes startup asynchronous, so a synchronous bind can
+   * no longer be assumed.
+   */
+  onListening?: (info: { httpPort: number; wsPort: number; host: string }) => void;
   modelsRegistry?: ModelsRegistry;
   globalConfigPath?: string;
   /**
@@ -50,8 +72,31 @@ interface ConnectedClient {
 }
 
 export async function runWebUI(opts: WebUIOptions): Promise<void> {
-  const port = opts.port ?? 3457;
+  const host = '127.0.0.1';
+  const requestedWsPort = opts.port ?? 3457;
+  const requestedHttpPort = opts.httpPort ?? 3456;
+  // Auto-advance past busy ports (unless WEBUI_STRICT_PORT) so this works
+  // alongside other WebUI instances. HTTP resolved first → tidy adjacent pairs.
+  const strictPort =
+    process.env['WEBUI_STRICT_PORT'] === '1' || process.env['WEBUI_STRICT_PORT'] === 'true';
+  let httpPort = requestedHttpPort;
+  let wsPort = requestedWsPort;
+  if (!strictPort) {
+    httpPort = await findFreePort(host, requestedHttpPort);
+    wsPort = await findFreePort(host, requestedWsPort, { exclude: new Set([httpPort]) });
+  }
+  const port = wsPort; // existing WS code below refers to `port`
+  // Per-connection message rate limit. OFF by default — this is a local,
+  // single-user tool and the limit (which counted pings/list calls too) was
+  // tripping during normal use. Opt back in by setting WEBUI_RATE_LIMIT to a
+  // positive messages-per-60s number (useful only when exposing on a LAN).
+  const rateLimitMax = Number.parseInt(process.env['WEBUI_RATE_LIMIT'] ?? '0', 10);
   const clients = new Map<WebSocket, ConnectedClient>();
+  // Pending permission confirmations keyed by toolUseId. When the agent emits
+  // tool.confirm_needed, we stash its resolver here and forward the prompt to
+  // the browser; the client's tool.confirm_result resolves it. This is what
+  // makes approvals appear in the WebUI instead of the terminal.
+  const pendingConfirms = new Map<string, (d: 'yes' | 'no' | 'always' | 'deny') => void>();
   const secretScrubber = new DefaultSecretScrubber();
   let abortController: AbortController | null = null;
 
@@ -61,9 +106,54 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
   // convenience (matches standalone WebUI server behavior).
   const authToken = crypto.randomBytes(16).toString('hex');
 
-  const wss = new WebSocketServer({ port, host: '127.0.0.1', maxPayload: 1 * 1024 * 1024 });
+  const wss = new WebSocketServer({ port, host, maxPayload: 1 * 1024 * 1024 });
 
-  console.log(`[WebUI] WebSocket server starting on ws://127.0.0.1:${port}`);
+  console.log(`[WebUI] WebSocket server starting on ws://${host}:${port}`);
+
+  // Serve the React frontend over HTTP so `wrongstack --webui` is a one-command
+  // launch (open the printed URL) instead of only a WS bridge. The static
+  // serve + WS-port injection live in @wrongstack/webui; we resolve its built
+  // dist via the package entry. If the webui package isn't built, we degrade
+  // gracefully to WS-only (the original behavior).
+  let httpServer: import('node:http').Server | null = null;
+  try {
+    const requireFromHere = createRequire(import.meta.url);
+    const serverEntry = requireFromHere.resolve('@wrongstack/webui/server');
+    const distDir = path.resolve(path.dirname(serverEntry), '..'); // .../dist
+    httpServer = createHttpServer({ host, distDir, wsPort });
+    const openUrl = `http://${host}:${httpPort}`;
+    httpServer.listen(httpPort, host, () => {
+      console.log(
+        `\n  ▸ WebUI ready — open \x1b[1m${openUrl}\x1b[0m in your browser` +
+          `\n    (same agent as this terminal · ws:${wsPort})\n`,
+      );
+      if (opts.open) openBrowser(openUrl);
+    });
+  } catch (err) {
+    console.warn(
+      `[WebUI] Frontend not served (run \`pnpm --filter @wrongstack/webui build\`): ` +
+        `${err instanceof Error ? err.message : String(err)}. WS bridge still active on ws://${host}:${wsPort}.`,
+    );
+  }
+
+  // Record this instance so it shows up in `webui --list` /
+  // ~/.wrongstack/webui-instances.json alongside standalone instances.
+  const registryBaseDir = opts.globalConfigPath ? path.dirname(opts.globalConfigPath) : undefined;
+  if (opts.projectRoot) {
+    void registerInstance(
+      {
+        pid: process.pid,
+        httpPort,
+        wsPort,
+        host,
+        projectRoot: opts.projectRoot,
+        projectName: path.basename(opts.projectRoot) || opts.projectRoot,
+        startedAt: new Date().toISOString(),
+        url: `http://${host}:${httpPort}`,
+      },
+      registryBaseDir,
+    ).catch(() => {});
+  }
   // Auth token is sent to clients via the session.start payload — do NOT log it.
 
   // Subscribe to events once
@@ -182,6 +272,95 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
       }),
     );
 
+    // tool.confirm_needed — forward permission prompts to the browser so the
+    // user approves/denies in the WebUI rather than the terminal. Requires the
+    // agent to be in event-driven confirmation mode (the --webui launch path
+    // calls disableInteractiveConfirmation()).
+    eventUnsubscribers.push(
+      opts.events.on('tool.confirm_needed', (e) => {
+        const id = e.toolUseId ?? `confirm_${Date.now()}`;
+        pendingConfirms.set(id, e.resolve);
+        broadcast({
+          type: 'tool.confirm_needed',
+          payload: {
+            id,
+            toolName: e.tool?.name ?? 'unknown',
+            input: secretScrubber.scrubObject(e.input),
+            suggestedPattern: e.suggestedPattern,
+          },
+        });
+      }),
+    );
+
+    // Subagent fleet lifecycle. The kernel emits a rich subagent.* catalog on
+    // the host bus (spawn → task → per-tool → periodic summary → completion).
+    // We flatten the relevant ones into a single `subagent.event` stream with a
+    // `kind` discriminator so the WebUI can render a live fleet roster (the
+    // nickname'd leader/worker agents) without subscribing to the director-only
+    // FleetBus. No tool inputs/outputs are forwarded here — only names + counts
+    // — so there's nothing to scrub.
+    const forwardSubagent = (kind: string, payload: Record<string, unknown>) =>
+      broadcast({ type: 'subagent.event', payload: { kind, ...payload } });
+    eventUnsubscribers.push(
+      opts.events.on('subagent.spawned', (e) =>
+        forwardSubagent('spawned', {
+          subagentId: e.subagentId,
+          taskId: e.taskId,
+          name: e.name,
+          provider: e.provider,
+          model: e.model,
+          description: e.description,
+        }),
+      ),
+      opts.events.on('subagent.task_started', (e) =>
+        forwardSubagent('task_started', {
+          subagentId: e.subagentId,
+          taskId: e.taskId,
+          description: e.description,
+        }),
+      ),
+      opts.events.on('subagent.tool_executed', (e) =>
+        forwardSubagent('tool_executed', {
+          subagentId: e.subagentId,
+          toolName: e.name,
+          durationMs: e.durationMs,
+          ok: e.ok,
+        }),
+      ),
+      opts.events.on('subagent.iteration_summary', (e) =>
+        forwardSubagent('iteration_summary', {
+          subagentId: e.subagentId,
+          iteration: e.iteration,
+          toolCalls: e.toolCalls,
+          costUsd: e.costUsd,
+          currentTool: e.currentTool,
+        }),
+      ),
+      opts.events.on('subagent.budget_extended', (e) =>
+        forwardSubagent('budget_extended', {
+          subagentId: e.subagentId,
+          totalExtensions: e.totalExtensions,
+        }),
+      ),
+      opts.events.on('subagent.ctx_pct', (e) =>
+        forwardSubagent('ctx_pct', {
+          subagentId: e.subagentId,
+          load: e.load,
+          tokens: e.tokens,
+          maxContext: e.maxContext,
+        }),
+      ),
+      opts.events.on('subagent.task_completed', (e) =>
+        forwardSubagent('task_completed', {
+          subagentId: e.subagentId,
+          status: e.status,
+          iterations: e.iterations,
+          toolCalls: e.toolCalls,
+          error: e.error ? { kind: e.error.kind, message: e.error.message } : undefined,
+        }),
+      ),
+    );
+
     // eternal-autonomy iteration events. Each iteration the engine
     // completes lands here and is fanned out to every connected client
     // so the frontend can render a live timeline of the autonomous loop.
@@ -210,8 +389,9 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
 
   return new Promise<void>((resolve) => {
     wss.on('listening', () => {
-      console.log(`[WebUI] WebSocket server running on ws://127.0.0.1:${port}`);
+      console.log(`[WebUI] WebSocket server running on ws://${host}:${port}`);
       setupEvents();
+      opts.onListening?.({ httpPort, wsPort, host });
     });
 
     wss.on('connection', (ws, req) => {
@@ -283,22 +463,24 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
       clients.set(ws, client);
       console.log('[WebUI] Client connected');
 
-      // Per-connection rate limiting: 60 messages per 60-second window.
+      // Per-connection rate limiting — disabled unless WEBUI_RATE_LIMIT > 0.
       let msgCount = 0;
       let windowResetAt = Date.now() + 60_000;
 
       ws.on('message', async (data) => {
-        const now = Date.now();
-        if (now > windowResetAt) {
-          msgCount = 0;
-          windowResetAt = now + 60_000;
-        }
-        if (++msgCount > 60) {
-          send(ws, {
-            type: 'error',
-            payload: { phase: 'rate_limit', message: 'Too many messages. Please wait.' },
-          });
-          return;
+        if (rateLimitMax > 0) {
+          const now = Date.now();
+          if (now > windowResetAt) {
+            msgCount = 0;
+            windowResetAt = now + 60_000;
+          }
+          if (++msgCount > rateLimitMax) {
+            send(ws, {
+              type: 'error',
+              payload: { phase: 'rate_limit', message: 'Too many messages. Please wait.' },
+            });
+            return;
+          }
         }
         try {
           const msg = JSON.parse(data.toString()) as WSClientMessage;
@@ -311,6 +493,15 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
       ws.on('close', () => {
         console.log('[WebUI] Client disconnected');
         clients.delete(ws);
+        // If the last client leaves while a permission prompt is pending, deny
+        // it so the agent loop doesn't hang waiting for an answer that will
+        // never arrive (the terminal no longer prompts in --webui mode).
+        if (clients.size === 0 && pendingConfirms.size > 0) {
+          for (const [id, resolve] of pendingConfirms) {
+            resolve('no');
+            pendingConfirms.delete(id);
+          }
+        }
       });
 
       // Send session.start to the new client (includes wsToken for reconnection)
@@ -337,6 +528,10 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
         ws.close();
       }
       clients.clear();
+      // Best-effort: drop ourselves from the running-instance registry and
+      // stop the frontend HTTP server before the WS server resolves the run.
+      void unregisterInstance(process.pid, registryBaseDir).catch(() => {});
+      httpServer?.close();
       wss.close(() => {
         console.log('[WebUI] Server stopped');
         resolve();
@@ -372,6 +567,18 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
       case 'ping':
         send(ws, { type: 'pong', payload: {} });
         break;
+
+      case 'tool.confirm_result': {
+        const { id, decision } = (
+          msg as { payload: { id: string; decision: 'yes' | 'no' | 'always' | 'deny' } }
+        ).payload;
+        const resolve = pendingConfirms.get(id);
+        if (resolve) {
+          pendingConfirms.delete(id);
+          resolve(decision);
+        }
+        break;
+      }
 
       case 'providers.list':
         await handleProvidersList(ws);

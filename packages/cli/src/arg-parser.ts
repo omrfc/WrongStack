@@ -7,6 +7,7 @@
 export const BOOLEAN_FLAGS = new Set([
   'yolo',
   'yolo-destructive',
+  'confirm-destructive',
   'force-all-yolo',
   'verbose',
   'trace',
@@ -25,6 +26,7 @@ export const BOOLEAN_FLAGS = new Set([
   'prompt',
   'metrics',
   'webui',
+  'open',
   'no-check',
   'no-models-refresh',
   'director',

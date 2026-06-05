@@ -22,9 +22,8 @@ describe('/yolo slash command', () => {
       expect(cmd.description).toMatch(/YOLO/);
       expect(cmd.help).toContain('/yolo on');
       expect(cmd.help).toContain('/yolo off');
-      expect(cmd.help).toContain('/yolo toggle');
-      expect(cmd.help).toContain('normal in-project tool calls');
-      expect(cmd.help).toContain('--yolo-destructive');
+      expect(cmd.help).toContain('/yolo destructive');
+      expect(cmd.help).toContain('auto-approves everything');
     });
   });
 

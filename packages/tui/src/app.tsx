@@ -11,7 +11,7 @@ import type {
   SlashCommandRegistry,
   TokenCounter,
 } from '@wrongstack/core';
-import { DefaultSessionRewinder } from '@wrongstack/core';
+import { DefaultSessionRewinder, type AutonomyStage } from '@wrongstack/core';
 import { InputBuilder, buildGoalPreamble, formatTodosList, writeOut } from '@wrongstack/core';
 import { type VisionAdapters, routeImagesForModel } from '@wrongstack/runtime/vision';
 import { getProcessRegistry } from '@wrongstack/tools';
@@ -82,28 +82,6 @@ const MIN_VIEWPORT = 3;
 /** Input prompt — mirrors the <Input> default so click-to-position-cursor maps
  *  columns the same way the input renders them. */
 const INPUT_PROMPT = '› ';
-
-type SerialAutonomyStage =
-  | { phase: 'idle' }
-  | { phase: 'decide'; reason: string }
-  | { phase: 'execute'; task: string }
-  | { phase: 'reflect'; status: 'success' | 'failure' | 'aborted' | 'skipped'; note?: string }
-  | { phase: 'sleep'; ms: number }
-  | { phase: 'paused' }
-  | { phase: 'stopped' }
-  | { phase: 'error'; message: string };
-
-type ParallelAutonomyStage =
-  | { phase: 'idle' }
-  | { phase: 'decompose' }
-  | { phase: 'fanout'; slots: number }
-  | { phase: 'await'; taskIds: string[] }
-  | { phase: 'aggregate'; successCount: number; total: number; goalComplete: boolean }
-  | { phase: 'sleep'; ms: number }
-  | { phase: 'stopped' }
-  | { phase: 'error'; message: string };
-
-type AutonomyStage = SerialAutonomyStage | ParallelAutonomyStage;
 
 /** Per-subagent state tracked live from the FleetBus. */
 export interface FleetEntry {

@@ -40,6 +40,68 @@ function writeVersion(path, version) {
   writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
 }
 
+/**
+ * Keep the marketing site (`website/`, outside the pnpm workspace) in lockstep
+ * too. It carries its own `package.json`/`package-lock.json` version plus a
+ * `META.version` constant rendered on the page. These are NOT covered by the
+ * workspace scan above, which is exactly how they drifted in the past — so the
+ * single bump entry point owns them. Each step is guarded: if the site isn't
+ * present (or its shape changed), we skip silently rather than fail the bump.
+ * Returns the number of website files updated.
+ */
+function updateWebsite(version) {
+  const websiteDir = resolve(repoRoot, 'website');
+  let updated = 0;
+
+  // package.json (+ package-lock.json self-version) — JSON, safe to rewrite.
+  for (const rel of ['package.json', 'package-lock.json']) {
+    const p = resolve(websiteDir, rel);
+    try {
+      const json = JSON.parse(readFileSync(p, 'utf8'));
+      json.version = version;
+      // package-lock.json mirrors the version under packages[""].
+      if (json.packages && json.packages['']) json.packages[''].version = version;
+      writeFileSync(p, `${JSON.stringify(json, null, 2)}\n`);
+      updated++;
+    } catch {
+      // file absent or unparseable — skip
+    }
+  }
+
+  // src/lib/utils.ts — the `META.version` string shown in the UI. Replace only
+  // the first `version: '…'` after `META = {` so unrelated values are untouched.
+  const utilsPath = resolve(websiteDir, 'src', 'lib', 'utils.ts');
+  try {
+    const src = readFileSync(utilsPath, 'utf8');
+    const next = src.replace(
+      /(META\s*=\s*\{[\s\S]*?version:\s*)'[^']*'/,
+      `$1'${version}'`,
+    );
+    if (next !== src) {
+      writeFileSync(utilsPath, next);
+      updated++;
+    }
+  } catch {
+    // file absent — skip
+  }
+
+  // index.html — the JSON-LD `"softwareVersion"` in the SoftwareApplication
+  // structured-data block (drives the version shown to search engines).
+  const indexPath = resolve(websiteDir, 'index.html');
+  try {
+    const html = readFileSync(indexPath, 'utf8');
+    const next = html.replace(/("softwareVersion":\s*)"[^"]*"/, `$1"${version}"`);
+    if (next !== html) {
+      writeFileSync(indexPath, next);
+      updated++;
+    }
+  } catch {
+    // file absent — skip
+  }
+
+  return updated;
+}
+
 const [, , type, arg] = process.argv;
 
 const rootPath = resolve(repoRoot, 'package.json');
@@ -75,6 +137,9 @@ for (const path of manifests) {
   writeVersion(path, newVersion);
 }
 
+const websiteUpdated = updateWebsite(newVersion);
+
 console.log(
-  `Version ${type === 'set' ? 'set' : 'bumped'} to ${newVersion} across ${manifests.length} package(s).`,
+  `Version ${type === 'set' ? 'set' : 'bumped'} to ${newVersion} across ${manifests.length} package(s)` +
+    (websiteUpdated > 0 ? ` + ${websiteUpdated} website file(s).` : '.'),
 );

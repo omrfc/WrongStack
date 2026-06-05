@@ -2,50 +2,85 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ===========================================================================
+   WrongStack WebUI — "Engineering Instrument Deck"
+   IBM Plex typography · warm graphite (dark) / warm paper (light) ·
+   signal-amber accent · blueprint grid atmosphere · status LEDs.
+   The data layer is unchanged; this is the visual system everything inherits.
+   =========================================================================== */
+
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 92.2% 55.4%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 92.2% 55.4%;
-    --radius: 0.5rem;
+    /* — Light: warm paper — */
+    --background: 40 33% 97%;
+    --foreground: 222 24% 13%;
+    --card: 40 33% 99%;
+    --card-foreground: 222 24% 13%;
+    --popover: 40 33% 99%;
+    --popover-foreground: 222 24% 13%;
+
+    --primary: 28 92% 46%;            /* deep signal amber for paper contrast */
+    --primary-foreground: 40 40% 99%;
+    --secondary: 40 22% 92%;
+    --secondary-foreground: 222 24% 16%;
+    --muted: 40 20% 92%;
+    --muted-foreground: 222 10% 42%;
+    --accent: 40 24% 90%;
+    --accent-foreground: 28 92% 38%;
+    --destructive: 0 72% 48%;
+    --destructive-foreground: 40 40% 99%;
+
+    --border: 40 16% 85%;
+    --input: 40 16% 87%;
+    --ring: 28 92% 46%;
+
+    /* Semantic signals (shared names, theme-tuned) */
+    --success: 150 58% 36%;
+    --warning: 32 92% 44%;
+    --info: 200 80% 40%;
+    --running: 28 92% 46%;
+
+    --radius: 0.625rem;
+    --font-sans: 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+    --grid-line: 222 24% 13%;
+    --grid-opacity: 0.05;
+    --shadow-color: 222 30% 30%;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 60%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 50.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 25%;
-    --input: 217.2 32.6% 25%;
-    --ring: 224.3 76.3% 48%;
+    /* — Dark (hero): warm graphite — */
+    --background: 225 17% 8%;
+    --foreground: 40 22% 92%;
+    --card: 225 15% 11%;
+    --card-foreground: 40 22% 92%;
+    --popover: 225 16% 10%;
+    --popover-foreground: 40 22% 92%;
+
+    --primary: 36 96% 56%;            /* CRT signal amber */
+    --primary-foreground: 28 60% 8%;
+    --secondary: 225 12% 16%;
+    --secondary-foreground: 40 22% 92%;
+    --muted: 225 12% 15%;
+    --muted-foreground: 225 9% 60%;
+    --accent: 225 13% 17%;
+    --accent-foreground: 36 96% 62%;
+    --destructive: 0 70% 55%;
+    --destructive-foreground: 40 40% 96%;
+
+    --border: 225 12% 18%;
+    --input: 225 12% 17%;
+    --ring: 36 96% 56%;
+
+    --success: 150 64% 46%;
+    --warning: 36 96% 56%;
+    --info: 198 82% 56%;
+    --running: 36 96% 56%;
+
+    --grid-line: 40 22% 92%;
+    --grid-opacity: 0.045;
+    --shadow-color: 225 60% 2%;
   }
 }
 
@@ -53,144 +88,161 @@
   * {
     @apply border-border;
   }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    font-feature-settings: 'liga' 1, 'calt' 1, 'ss03' 1;
+  }
+
+  /* Content sits above the blueprint atmosphere. */
+  #root {
+    position: relative;
+    z-index: 1;
+    isolation: isolate;
+    height: 100%;
+  }
+
+  /* Blueprint grid — a faint engineering substrate that fades from the top.
+     Theme-aware via --grid-line; fixed so it reads as the deck surface. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(hsl(var(--grid-line) / var(--grid-opacity)) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--grid-line) / var(--grid-opacity)) 1px, transparent 1px);
+    background-size: 34px 34px;
+    mask-image: radial-gradient(140% 90% at 50% -10%, #000 30%, transparent 82%);
+    -webkit-mask-image: radial-gradient(140% 90% at 50% -10%, #000 30%, transparent 82%);
+  }
+
+  ::selection {
+    background-color: hsl(var(--primary) / 0.28);
+    color: hsl(var(--foreground));
+  }
+
+  /* Monospace numerics line up in data readouts. */
+  .tabular {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
   }
 }
 
-/* Scrollbar styling */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+/* — Status LED: a glowing instrument dot. Color via `color:` (currentColor). — */
+@layer components {
+  .led {
+    @apply inline-block rounded-full;
+    width: 0.5rem;
+    height: 0.5rem;
+    background: currentColor;
+    box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 8px 0 currentColor;
+  }
+  .led-pulse {
+    animation: ledPulse 1.4s ease-in-out infinite;
+  }
 }
 
+@keyframes ledPulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 7px 0 currentColor; }
+  50% { opacity: 0.55; box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 13px 1px currentColor; }
+}
+
+/* — Scrollbars — */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
 ::-webkit-scrollbar-track {
   @apply bg-transparent;
 }
-
 ::-webkit-scrollbar-thumb {
-  @apply bg-border rounded-full;
+  background-color: hsl(var(--muted-foreground) / 0.28);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
-
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-muted-foreground/50;
+  background-color: hsl(var(--primary) / 0.6);
 }
 
-/* Message animations */
+/* — Motion — */
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
-
 @keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateX(-12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
+}
+.animate-message { animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+.animate-tool { animation: slideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
+
+/* Indeterminate progress sweep for "working" bars. */
+.bar-sweep { position: relative; overflow: hidden; }
+.bar-sweep::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.7), transparent);
+  animation: shimmer 1.5s infinite;
 }
 
-.animate-message {
-  animation: fadeIn 0.3s ease-out;
-}
-
-.animate-tool {
-  animation: slideIn 0.25s ease-out;
-}
-
-/* Markdown content styling */
-.markdown-content {
-  @apply leading-relaxed;
-}
-
-.markdown-content p {
-  @apply mb-3;
-}
-
+/* — Markdown content — */
+.markdown-content { @apply leading-relaxed; }
+.markdown-content p { @apply mb-3; }
 .markdown-content code {
-  @apply bg-muted px-1.5 py-0.5 rounded text-sm font-mono;
+  font-family: var(--font-mono);
+  @apply bg-muted px-1.5 py-0.5 rounded text-[0.85em];
+  border: 1px solid hsl(var(--border));
 }
-
 .markdown-content pre {
+  font-family: var(--font-mono);
   @apply bg-muted p-4 rounded-lg overflow-x-auto mb-3;
+  border: 1px solid hsl(var(--border));
 }
-
-.markdown-content pre code {
-  @apply bg-transparent p-0;
+.markdown-content pre code { @apply bg-transparent p-0; border: 0; }
+.markdown-content ul, .markdown-content ol { @apply mb-3 pl-6; }
+.markdown-content ul { list-style: disc; }
+.markdown-content ol { list-style: decimal; }
+.markdown-content li { @apply mb-1; }
+.markdown-content a { @apply text-primary underline underline-offset-2; }
+.markdown-content h1, .markdown-content h2, .markdown-content h3 {
+  @apply font-semibold mt-4 mb-2; letter-spacing: -0.01em;
 }
-
-.markdown-content ul,
-.markdown-content ol {
-  @apply mb-3 pl-6;
-}
-
-.markdown-content li {
-  @apply mb-1;
-}
-
 .markdown-content blockquote {
-  @apply border-l-4 border-primary pl-4 italic text-muted-foreground;
+  @apply border-l-2 border-primary pl-4 italic text-muted-foreground;
 }
 
-/* CSS Custom Highlights API — used by SearchOverlay to mark all matches
-   of the current query inside chat bubbles without mutating the DOM. The
-   `chat-search` highlight covers every hit; `chat-search-active` is only
-   applied to the message the user is currently navigated to. Browser
-   support: Chrome 105+ / Firefox 140+ / Safari 17.2+ — older browsers
-   silently skip rendering, the ring-flash navigation fallback still
-   works. */
-::highlight(chat-search) {
-  background-color: rgb(250 204 21 / 0.35);
-  color: inherit;
-}
+/* — Search highlight (CSS Custom Highlights API) — */
+::highlight(chat-search) { background-color: hsl(var(--primary) / 0.3); color: inherit; }
+::highlight(chat-search-active) { background-color: hsl(var(--primary) / 0.85); color: hsl(var(--primary-foreground)); }
 
-::highlight(chat-search-active) {
-  background-color: rgb(250 204 21 / 0.85);
-  color: rgb(24 24 27);
-}
-
-.dark ::highlight(chat-search) {
-  background-color: rgb(234 179 8 / 0.4);
-}
-
-.dark ::highlight(chat-search-active) {
-  background-color: rgb(250 204 21 / 0.95);
-  color: rgb(24 24 27);
-}
-
-/* Vim-style chat navigation focus marker. Bubbles get this when stepped
-   to with j/k/g/G — a left-side accent bar + soft background tint so the
-   active row is obvious without competing with the chat-search highlight
-   layer. Cleared on Esc or by clicking elsewhere. */
+/* — Vim-style chat focus marker — */
 [data-message-id][data-focused="true"] {
   position: relative;
-  background-color: rgb(59 130 246 / 0.04);
+  background-color: hsl(var(--primary) / 0.05);
   border-radius: 0.5rem;
   transition: background-color 0.15s ease-out;
 }
-
 [data-message-id][data-focused="true"]::before {
   content: "";
   position: absolute;
-  left: -8px;
-  top: 4px;
-  bottom: 4px;
-  width: 3px;
-  border-radius: 2px;
+  left: -8px; top: 4px; bottom: 4px;
+  width: 3px; border-radius: 2px;
   background-color: hsl(var(--primary));
+  box-shadow: 0 0 10px 0 hsl(var(--primary) / 0.6);
   pointer-events: none;
-  user-select: none;
-}
-
-.dark [data-message-id][data-focused="true"] {
-  background-color: rgb(96 165 250 / 0.06);
 }

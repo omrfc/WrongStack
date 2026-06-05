@@ -11,20 +11,12 @@ import {
   TOKENS,
   type ToolRegistry,
   createDefaultPipelines,
-  // createSessionEventBridge,  // enabled after core declarations are rebuilt
-  // resolveAuditLevel,
   estimateRequestTokensCalibrated,
   resolveContextWindowPolicy,
+  createSessionEventBridge,
+  resolveAuditLevel,
+  type SessionEventBridge,
 } from '@wrongstack/core';
-
-// Temporary workaround until the core package declarations are rebuilt in node_modules.
-// In a real run these will be properly imported from '@wrongstack/core'.
-const createSessionEventBridge: any = (_writer: any, level?: any) => ({
-  append: async (_e: any) => {},
-  level: level ?? 'standard',
-  allows: () => true,
-});
-const resolveAuditLevel: any = (cfg?: any) => cfg?.session?.auditLevel ?? 'standard';
 import { ToolExecutor } from '@wrongstack/core/execution';
 import { resolveRuntimeMaxContext } from '../context-limit.js';
 
@@ -93,7 +85,7 @@ export async function setupCompaction(params: {
   /** Real SessionWriter (used if no pre-created bridge is passed). */
   sessionWriter?: import('@wrongstack/core').SessionWriter;
   /** Pre-created SessionEventBridge (preferred for sharing across error + compaction + future events). */
-  sessionBridge?: any;
+  sessionBridge?: SessionEventBridge;
 }): Promise<{ effectiveMaxContext: number; autoCompactor: AutoCompactionMiddleware | undefined }> {
   const {
     compactor,

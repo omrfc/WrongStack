@@ -222,15 +222,31 @@ export function Sidebar() {
           <span className="h-1 w-1 rounded-full bg-primary/70" />
         </div>
       </div>
-      {/* Header */}
+      {/* Header — brand plate with a live status LED. The LED reflects the
+          backend link so the user has an always-on heartbeat in the corner. */}
       <div className="flex items-center justify-between px-4 py-3 border-b">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded bg-primary flex items-center justify-center">
-            <Zap className="h-4 w-4 text-primary-foreground" />
+        <div className="flex items-center gap-2.5">
+          <div className="relative w-7 h-7 rounded-md bg-primary flex items-center justify-center shadow-[0_0_0_1px_hsl(var(--primary)/0.4),0_2px_8px_-2px_hsl(var(--primary)/0.5)]">
+            <Zap className="h-4 w-4 text-primary-foreground" strokeWidth={2.4} />
           </div>
-          <span className="text-sm font-semibold tracking-tight">WrongStack</span>
+          <div className="flex flex-col leading-none">
+            <span className="text-sm font-semibold tracking-tight">WrongStack</span>
+            <span className="flex items-center gap-1 text-[10px] text-muted-foreground mt-0.5">
+              <span
+                className={cn(
+                  'led',
+                  wsConnected
+                    ? 'text-[hsl(var(--success))] led-pulse'
+                    : 'text-[hsl(var(--warning))]',
+                )}
+              />
+              <span className="tabular font-medium uppercase tracking-wider">
+                {wsConnected ? 'online' : 'offline'}
+              </span>
+            </span>
+          </div>
         </div>
-        <Button variant="ghost" size="icon" onClick={toggleSidebar}>
+        <Button variant="ghost" size="icon" onClick={toggleSidebar} title="Collapse sidebar (Ctrl+\\)">
           <PanelLeftClose className="h-4 w-4" />
         </Button>
       </div>
@@ -331,46 +347,80 @@ export function Sidebar() {
               broadcast after every tool.executed. Empty array → hide the
               section entirely so a vanilla session keeps its existing
               vertical rhythm. */}
-          {todos.length > 0 && (
-            <div className="px-4 py-3 border-b space-y-2">
-              <h3 className="text-sm font-medium flex items-center justify-between">
-                <span className="flex items-center gap-2">
-                  <ListTodo className="h-4 w-4 text-muted-foreground" />
-                  Todos
-                </span>
-                <span className="text-[10px] text-muted-foreground tabular-nums">
-                  {todos.filter((t) => t.status === 'completed').length}/{todos.length}
-                </span>
-              </h3>
-              <ul className="space-y-1 max-h-48 overflow-y-auto pr-1">
-                {todos.map((t) => {
-                  const Icon =
-                    t.status === 'completed'
-                      ? CheckCircle2
-                      : t.status === 'in_progress'
-                        ? CircleDot
-                        : Circle;
-                  const tone =
-                    t.status === 'completed'
-                      ? 'text-green-600 dark:text-green-400 line-through opacity-70'
-                      : t.status === 'in_progress'
-                        ? 'text-amber-600 dark:text-amber-400'
-                        : 'text-muted-foreground';
-                  return (
-                    <li
-                      key={t.id}
-                      className={cn('flex items-start gap-2 text-xs leading-snug', tone)}
-                    >
-                      <Icon className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                      <span className="break-words">
-                        {t.status === 'in_progress' && t.activeForm ? t.activeForm : t.content}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          )}
+          {todos.length > 0 &&
+            (() => {
+              const done = todos.filter((t) => t.status === 'completed').length;
+              const running = todos.filter((t) => t.status === 'in_progress').length;
+              const pct = todos.length > 0 ? Math.round((done / todos.length) * 100) : 0;
+              const allDone = done === todos.length;
+              return (
+                <div className="px-4 py-3 border-b space-y-2.5">
+                  <h3 className="text-sm font-medium flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      <ListTodo className="h-4 w-4 text-muted-foreground" />
+                      Plan
+                    </span>
+                    <span className="tabular text-[10px] text-muted-foreground">
+                      {done}/{todos.length}
+                    </span>
+                  </h3>
+                  {/* Progress rail — fills with signal-amber, shimmers while a
+                      task is in flight, flips to success-green on completion. */}
+                  <div
+                    className={cn(
+                      'relative h-1.5 w-full overflow-hidden rounded-full bg-muted',
+                      running > 0 && 'bar-sweep',
+                    )}
+                    title={`${pct}% complete`}
+                  >
+                    <div
+                      className={cn(
+                        'h-full rounded-full transition-all duration-500',
+                        allDone ? 'bg-[hsl(var(--success))]' : 'bg-primary',
+                      )}
+                      style={{ width: `${Math.max(pct, running > 0 ? 4 : 0)}%` }}
+                    />
+                  </div>
+                  <ul className="space-y-0.5 max-h-56 overflow-y-auto pr-1 -mx-1">
+                    {todos.map((t) => {
+                      const Icon =
+                        t.status === 'completed'
+                          ? CheckCircle2
+                          : t.status === 'in_progress'
+                            ? CircleDot
+                            : Circle;
+                      const active = t.status === 'in_progress';
+                      const tone =
+                        t.status === 'completed'
+                          ? 'text-[hsl(var(--success))] line-through opacity-60'
+                          : active
+                            ? 'text-foreground'
+                            : 'text-muted-foreground';
+                      return (
+                        <li
+                          key={t.id}
+                          className={cn(
+                            'flex items-start gap-2 text-xs leading-snug rounded-md px-1.5 py-1 transition-colors',
+                            active && 'bg-primary/10 ring-1 ring-inset ring-primary/20',
+                            tone,
+                          )}
+                        >
+                          <Icon
+                            className={cn(
+                              'h-3.5 w-3.5 mt-0.5 shrink-0',
+                              active && 'text-primary animate-pulse',
+                            )}
+                          />
+                          <span className="break-words">
+                            {active && t.activeForm ? t.activeForm : t.content}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              );
+            })()}
 
           {/* Pinned answers — click to scroll the chat to the bubble. We
               briefly highlight the target via a CSS class on data-message-id

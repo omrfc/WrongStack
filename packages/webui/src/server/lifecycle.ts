@@ -23,6 +23,12 @@ export interface LifecycleResources {
   clients: () => Iterable<{ close: () => void }>;
   /** Servers to stop (HTTP + WS). `null`/`undefined` entries are skipped. */
   servers: Array<{ close: () => void } | null | undefined>;
+  /**
+   * Optional best-effort cleanup run after the session flush and before exit
+   * (e.g. removing this process from the running-instance registry). Errors are
+   * logged, never thrown — cleanup must not block a clean shutdown.
+   */
+  onShutdown?: () => Promise<void> | void;
   /** Output sink. Defaults to `console.log`. */
   log?: (msg: string) => void;
   /** Process exit. Defaults to `process.exit`. Injectable for tests. */
@@ -51,6 +57,13 @@ export function createShutdown(res: LifecycleResources): () => Promise<void> {
     }
     for (const ws of res.clients()) ws.close();
     for (const server of res.servers) server?.close();
+    if (res.onShutdown) {
+      try {
+        await res.onShutdown();
+      } catch (e) {
+        log(`[WebUI] Error during shutdown cleanup: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     exit(0);
   };
 }
