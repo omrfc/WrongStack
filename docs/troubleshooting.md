@@ -170,11 +170,11 @@ wrongstack diag                   # full diagnostic
 
 **Symptom**: Garbled output, resize artifacts, or missing content.
 
+The TUI renders inline with the terminal's native scrollback. Chat history uses
+Ink's `<Static>` component — completed entries sit in native scrollback and can
+be reviewed with the terminal's scroll (mouse wheel, Shift+PgUp).
+
 **Fix**:
-```bash
-wrongstack --alt-screen           # use alternate screen buffer
-/altscreen on                     # toggle at runtime
-```
 
 For tmux/screen users: ensure `$TERM` is set correctly.
 

@@ -19,8 +19,6 @@ export const BOOLEAN_FLAGS = new Set([
   'no-tui',
   'no-recovery',
   'recover',
-  'no-alt-screen',
-  'alt-screen',
   'output-json',
   'prompt',
   'metrics',

@@ -219,7 +219,7 @@ Todos (1/3 done):
 
 **Status bar** (line 3): shows live counts as `todos ⌛N ☐M ✓K`.
 
-**F5 — Right-side compact panel** (`CompactTodosPanel`): managed (alt-screen) mode only. ~30% terminal width, sorted by status (in_progress first), auto-truncated labels, "+N more" overflow indicator.
+**F5 — Autonomy settings editor**: settings for autonomy mode, delay, YOLO, chime, and other preferences.
 
 **F6 — Full-screen overlay** (`TodosMonitor`): bordered panel with two-column layout on wide terminals. F6 or Esc to close.
 

@@ -83,6 +83,8 @@ export interface KeyEvent {
   pageDown: boolean;
   home: boolean;
   end: boolean;
+  /** Mouse wheel scroll: positive = up (away from user), negative = down. */
+  wheelDeltaY?: number;
   /** Function-key number 1–12 when a plain F-key was pressed, else undefined.
    *  Ink's useInput does not decode F-keys, so these are caught from raw stdin
    *  (same mechanism as Home/End) and surfaced here. F-keys are terminal-safe
@@ -114,6 +116,22 @@ function isHomeEnd(data: string): 'home' | 'end' | null {
 function isBackspaceOrDelete(data: string): 'backspace' | 'delete' | null {
   if (data === '\x7f' || data === '\x08') return 'backspace';
   if (data === '\x1b[3~') return 'delete';
+  return null;
+}
+
+/**
+ * Parse SGR mouse protocol (\x1b[?1006h) wheel events from raw stdin.
+ * Format: \x1b[<Cb;Cx;CyM (press) or \x1b[<Cb;Cx;Cym (release, ignored).
+ * Cb=64 → wheel up (positive delta), Cb=65 → wheel down (negative delta).
+ * Returns null when the data is not a mouse event or not a wheel event.
+ */
+function parseMouseWheel(data: string): number | null {
+  // SGR mouse: ESC [ < Cb ; Cx ; Cy (M|m)
+  const m = data.match(/^\x1b\[<(\d+);(\d+);(\d+)([Mm])$/);
+  if (!m) return null;
+  const cb = parseInt(m[1]!, 10);
+  if (cb === 64) return 1;  // wheel up
+  if (cb === 65) return -1; // wheel down
   return null;
 }
 
@@ -180,6 +198,14 @@ export function Input({
         return;
       }
 
+      // Mouse wheel (SGR protocol — terminal must have \x1b[?1000h + \x1b[?1006h set).
+      // Wheel events scroll the chat viewport; button events are ignored here.
+      const wheelDelta = parseMouseWheel(s);
+      if (wheelDelta !== null) {
+        onKey('', { ...EMPTY_KEY, wheelDeltaY: wheelDelta });
+        return;
+      }
+
       // Function keys (F1–F12)
       const fn = fnKey(s);
       if (fn !== null) onKey('', { ...EMPTY_KEY, fn });
@@ -205,11 +231,7 @@ export function Input({
   }, [stdout]);
 
   // Disabled (aborting an iteration) is the only signal that needs a
-  // hard visual cue — paint the prompt red. We avoid wrapping the input
-  // in a border Box: Ink redraws the live area on every state change,
-  // and in non-altScreen mode the previous frame's border is left in
-  // the terminal's scrollback. A `> ` prompt + inverse cursor is enough
-  // to indicate the input row.
+  // hard visual cue — paint the prompt red.
   const promptColor = disabled ? 'red' : 'cyan';
 
   // One <Text> per wrapped row: the column box's height becomes the row count,

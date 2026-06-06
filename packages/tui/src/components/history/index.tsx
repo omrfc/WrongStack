@@ -3,7 +3,7 @@ import type React from 'react';
 import { useEffect, useState } from 'react';
 import { AssistantTail } from './assistant.js';
 import { Entry } from './entry.js';
-import { ToolStreamBox, MAX_STREAM_DISPLAY_CHARS, tailForDisplay } from './utils.js';
+import { MAX_STREAM_DISPLAY_CHARS, tailForDisplay } from './utils.js';
 import type { HistoryProps } from './types.js';
 
 // ── Re-exports ──
@@ -61,9 +61,18 @@ export function History({ entries, streamingText, toolStream }: HistoryProps): R
   }, [stdout]);
   const termWidth = termSize.columns;
   const tail = streamingText ? tailForDisplay(streamingText, MAX_STREAM_DISPLAY_CHARS) : '';
-  const toolTail = toolStream?.text
-    ? tailForDisplay(toolStream.text, MAX_STREAM_DISPLAY_CHARS)
-    : '';
+
+  // NOTE: the live tool-stream box (◆ <tool> ⏱ … + last N output lines) is
+  // deliberately NOT rendered in inline mode. In a full terminal the live
+  // region sits at the bottom edge, so every tool.progress re-render scrolls
+  // the screen by a line and strands the box's top row (the "◆ bash ⏱ Xs"
+  // header) permanently in native scrollback — the user sees the header
+  // stacked dozens of times. Ink can't avoid this without owning the screen,
+  // so the live tail belongs to the managed (alt-screen) ScrollableHistory
+  // path only. Inline users still get a live "running: <tool> Xs" chip in the
+  // status bar while it runs, and the full output as a committed entry when it
+  // finishes — `toolStream` is intentionally unused here.
+  void toolStream;
 
   return (
     <>
@@ -75,14 +84,6 @@ export function History({ entries, streamingText, toolStream }: HistoryProps): R
         )}
       </Static>
       {tail ? <AssistantTail text={tail} termWidth={termWidth} /> : null}
-      {toolTail ? (
-        <ToolStreamBox
-          name={toolStream!.name}
-          text={toolTail}
-          startedAt={toolStream!.startedAt}
-          termWidth={termWidth}
-        />
-      ) : null}
     </>
   );
 }

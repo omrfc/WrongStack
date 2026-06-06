@@ -17,7 +17,7 @@ import { InputBuilder, buildGoalPreamble, formatTodosList, writeOut } from '@wro
 import { enhanceUserPrompt, normalizedEqual, recentTextTurns, shouldEnhance } from '@wrongstack/core';
 import { type VisionAdapters, routeImagesForModel } from '@wrongstack/runtime/vision';
 import { getProcessRegistry, getIndexState, onIndexStateChange } from '@wrongstack/tools';
-import { Box, type DOMElement, Text, measureElement, useApp, useStdout } from 'ink';
+import { Box, Text, useApp } from 'ink';
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { readClipboardImage } from './clipboard.js';
 import { AgentsMonitor } from './components/agents-monitor.js';
@@ -32,13 +32,11 @@ import { FleetPanel } from './components/fleet-panel.js';
 import { HelpOverlay } from './components/help-overlay.js';
 import { History } from './components/history.js';
 import { Input, type KeyEvent } from './components/input.js';
-import { KeyHintBar } from './components/key-hint-bar.js';
 import { LiveActivityStrip } from './components/live-activity-strip.js';
 import { ModelPicker, type ProviderOption } from './components/model-picker.js';
 import { PhaseMonitor } from './components/phase-monitor.js';
 import { PhasePanel } from './components/phase-panel.js';
 import { QueuePanel } from './components/queue-panel.js';
-import { ScrollableHistory } from './components/scrollable-history.js';
 import { SettingsPicker } from './components/settings-picker.js';
 import { SlashMenu } from './components/slash-menu.js';
 import { StatusBar } from './components/status-bar.js';
@@ -73,9 +71,6 @@ export {
   type State,
 } from './app-reducer.js';
 
-/** Floor for the scroll viewport so it never collapses to nothing when the
- *  bottom region (overlays, wrapped input) is tall. */
-const MIN_VIEWPORT = 3;
 /** Input prompt — mirrors the <Input> default so click-to-position-cursor maps
  *  columns the same way the input renders them. */
 const INPUT_PROMPT = '› ';
@@ -321,12 +316,6 @@ export interface AppProps {
   initialAsk?: string;
   /** Directory for session JSONL files. Passed to App for /rewind. */
   sessionsDir?: string;
-  /**
-   * True when the managed full-screen viewport is the surface (alt-screen on).
-   * Drives ScrollableHistory + in-app scroll + collapsibility, independent of
-   * mouse. When false the app uses History + Ink <Static> (native scrollback).
-   */
-  managed?: boolean;
 
   // --- Fleet ---
   /** Live director for fleet panel rendering. Null when director mode is off. */
@@ -427,7 +416,6 @@ export function App({
   initialGoal,
   initialAsk,
   sessionsDir,
-  managed = false,
   modeLabel,
   getModeLabel,
 }: AppProps): React.ReactElement {
@@ -458,24 +446,6 @@ export function App({
     setIndexState(getIndexState());
     return onIndexStateChange((next) => setIndexState(next));
   }, []);
-
-  // Terminal row count, tracked reactively so the managed scroll viewport
-  // can size itself against the live screen height.
-  const { stdout } = useStdout();
-  const [termRows, setTermRows] = useState(stdout?.rows ?? 24);
-  useEffect(() => {
-    const onResize = () => {
-      setTermRows(process.stdout.rows ?? 24);
-    };
-    process.stdout.on('resize', onResize);
-    return () => {
-      process.stdout.off('resize', onResize);
-    };
-  }, []);
-
-  // Whether the managed viewport (ScrollableHistory + in-app scroll) is the
-  // active surface. Mirrors alt-screen; toggled by /altscreen.
-  const [managedLive, setManagedLive] = useState(managed);
 
   // Sync when parent re-loads from config file (e.g., after /statusline reset)
   useEffect(() => {
@@ -692,29 +662,6 @@ export function App({
   const draftRef = useRef({ buffer: state.buffer, cursor: state.cursor });
   draftRef.current = { buffer: state.buffer, cursor: state.cursor };
 
-  // ── Managed viewport: geometry measurement ────────────────────────────
-  // Measures the bottom region (everything below the scroll viewport) so the
-  // viewport height can be derived as termRows − bottomHeight. One ref over the
-  // whole region instead of per-block bookkeeping.
-  const bottomRef = useRef<DOMElement | null>(null);
-  // viewport height.
-  React.useLayoutEffect(() => {
-    if (!managedLive) return;
-    const node = bottomRef.current;
-    if (!node) return;
-    const { height } = measureElement(node);
-    const s = stateRef.current;
-    const affordance = s.scrollOffset > 0 && s.pendingNewLines > 0 ? 1 : 0;
-    // Bias the viewport DOWN by one row: an extra blank chat row is invisible,
-    // but a status bar pushed off-screen is not.
-    const vp = Math.max(MIN_VIEWPORT, termRows - height - affordance - 1);
-    if (vp !== s.viewportRows) {
-      dispatch({ type: 'setViewportRows', rows: vp });
-    }
-    // stable deps: stateRef (ref), dispatch (stable from useReducer),
-    // termRows is a prop of the effect scope.
-  }, [managedLive, termRows]);
-
   // Latest handleKey, so the keyboard event pipeline can be accessed from
   // effects and callbacks defined above handleKey in the component body.
   const handleKeyRef = useRef<((input: string, key: KeyEvent) => void) | null>(null);
@@ -747,17 +694,31 @@ export function App({
     dispatch({ type: 'clearInput' });
   };
 
-  // Session-elapsed clock. Mount time is fixed; we re-render once per
-  // second to refresh the "⏱ 12:34" chip. The interval is cheap — one
-  // dispatch per tick into the same `tick` action — and stops cleanly
-  // on unmount.
+  // Global clock tick. Deliberately slow (10s). The StatusBar tracks its own 1s
+  // elapsed-time display internally; this tick only feeds monitor overlays and
+  // the todos poll (which have their own faster intervals when open).
   const startedAtRef = useRef<number>(Date.now());
   const [nowTick, setNowTick] = React.useState<number>(Date.now());
   useEffect(() => {
-    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    const t = setInterval(() => setNowTick(Date.now()), 10000);
     return () => clearInterval(t);
   }, []);
-  const elapsedMs = nowTick - startedAtRef.current;
+
+  // Todos polling — separate 2s interval so the status-bar chip stays fresh
+  // without relying on the 10s global tick. Compares with a ref to skip
+  // dispatching when nothing changed.
+  const todosRef = useRef(JSON.stringify([]));
+  useEffect(() => {
+    const poll = () => {
+      const snap = JSON.stringify(agent.ctx.todos.map((t) => ({ s: t.status })));
+      if (snap !== todosRef.current) {
+        todosRef.current = snap;
+        setNowTick(Date.now()); // trigger a re-render so useMemo re-evaluates
+      }
+    };
+    const t = setInterval(poll, 2000);
+    return () => clearInterval(t);
+  }, []);
 
   // Git branch + change counts. Polled every 5s (cheap, two short-lived
   // `git` subprocesses). Skipped silently when the cwd isn't a repo or
@@ -967,8 +928,7 @@ export function App({
   // when the terminal resizes (Ink re-renders the live region but the
   // cleanup logic above doesn't fire since none of its deps changed).
   // \x1b[J only touches what's below the cursor, so committed Static
-  // history above is preserved. For users in heavy resize / picker
-  // workflows the bullet-proof alternative is still `--alt-screen`.
+  // history above is preserved.
   const prevAnyOverlayOpen = useRef(false);
   const prevEntriesCount = useRef(0);
   // Track tool-stream text length so we can fire eraseLiveRegion when the
@@ -1040,15 +1000,14 @@ export function App({
     };
   }, [eraseLiveRegion]);
 
-  // While the prompt-refinement flow is active, the 1s `nowTick` and the
-  // EnhancePanel's own countdown both re-render the live region. In inline
-  // mode each redraw can bleed the region's top rows into native scrollback,
-  // so the preview "clones" itself once per second. Erase the stale region
-  // before each tick's paint (layout effect runs pre-flush) so nothing
-  // accumulates. Gated on the flow being active so idle redraws are untouched.
+  // While the prompt-refinement flow is active, the EnhancePanel's countdown
+  // re-renders the live region. In inline mode each redraw can bleed the
+  // region's top rows into native scrollback, so the preview "clones" itself.
+  // Erase the stale region before each paint (layout effect runs pre-flush)
+  // so nothing accumulates. Gated on the flow being active.
   React.useLayoutEffect(() => {
     if (state.enhanceBusy || state.enhance != null) eraseLiveRegion();
-  }, [nowTick, state.enhanceBusy, state.enhance, eraseLiveRegion]);
+  }, [state.enhanceBusy, state.enhance, eraseLiveRegion]);
 
   // Detect an active `@<query>` token at the cursor and drive the picker.
   // Reruns whenever buffer/cursor changes — guards against stale results.
@@ -1279,61 +1238,6 @@ export function App({
       getProcessRegistry().killAll();
     };
   }, []);
-
-  // Register `/altscreen on|off` — runtime escape valve for the
-  // alt-screen scrollback limitation. In alt-screen mode the terminal's
-  // native scrollback is disabled, so users can't review old chat
-  // entries. `off` writes the alt-screen-exit escape so subsequent
-  // entries land in the normal scroll region and the mouse wheel /
-  // shift+pgup work again. The trade-off (lost on-screen history,
-  // resize artifacts) is spelled out in the response message so the
-  // user can decide whether to keep it.
-  useEffect(() => {
-    const ALT_OFF = '\x1b[?1049l';
-    const ALT_ON = '\x1b[?1049h';
-    const cmd = {
-      name: 'altscreen',
-      description:
-        'Toggle the alt-screen buffer. Default is OFF (native scroll); /altscreen on for full-screen mode.',
-      async run(args: string) {
-        const arg = args.trim().toLowerCase();
-        if (arg === 'off') {
-          try {
-            writeOut(ALT_OFF);
-          } catch {
-            return { message: 'Failed to exit alt-screen.' };
-          }
-          // Leaving alt-screen drops the managed viewport back to <Static>.
-          setManagedLive(false);
-          return {
-            message:
-              'Alt-screen disabled. New entries will land in normal scrollback (mouse wheel / Shift+PgUp work). ' +
-              'On-screen history rendered before this command is no longer reachable via terminal scroll. ' +
-              'Resize may now leak the live region — `/altscreen on` to re-enable.',
-          };
-        }
-        if (arg === 'on') {
-          try {
-            writeOut(ALT_ON);
-          } catch {
-            return { message: 'Failed to re-enter alt-screen.' };
-          }
-          // Entering alt-screen turns on the managed viewport (in-app scroll +
-          // PgUp/PgDn + collapsibility), no mouse required.
-          setManagedLive(true);
-          return {
-            message:
-              'Alt-screen re-enabled. Managed scroll (PgUp/PgDn) is now active; native scroll is off.',
-          };
-        }
-        return { message: 'Usage: /altscreen on|off' };
-      },
-    };
-    slashRegistry.register(cmd);
-    return () => {
-      slashRegistry.unregister('altscreen');
-    };
-  }, [slashRegistry]);
 
   // `/steer <message>` — slash-command equivalent of Esc-to-steer.
   // Useful when Esc is consumed by an outer terminal multiplexer, or
@@ -2602,7 +2506,7 @@ export function App({
         // Terminate any lingering fleet so subagents don't outlive the TUI.
         if (director) void director.terminateAll().catch(() => undefined);
         // Graceful Ink unmount first: it restores the terminal (raw mode off,
-        // cursor shown, alt-screen dismantled) and routes the 130 exit code
+        // cursor shown) and routes the 130 exit code
         // through run-tui's settle(). A bare process.exit() here would skip
         // that and can leave the terminal in raw mode — the "exit feels
         // broken" symptom. Fall back to a hard exit if Ink never unmounts.
@@ -2835,30 +2739,6 @@ export function App({
 
     // Re-entrancy guard: block stale-second events from \r\n terminals.
     if (inputGateRef.current) return;
-
-    // ── Managed-viewport scroll keys (PageUp/PageDown + Ctrl+Home/End) ─
-    // Keyboard parity with the wheel: page the chat viewport. Active whenever
-    // the managed viewport is the surface (alt-screen), mouse or not.
-    // Home/End (when buffer empty) are handled separately below.
-    if (managedLive) {
-      if (key.pageUp) {
-        dispatch({ type: 'scrollPage', dir: 'up' });
-        return;
-      }
-      if (key.pageDown) {
-        dispatch({ type: 'scrollPage', dir: 'down' });
-        return;
-      }
-      // Ctrl+Home/End: jump to top/bottom of chat history.
-      if (key.ctrl && key.home) {
-        dispatch({ type: 'scrollToTop' });
-        return;
-      }
-      if (key.ctrl && key.end) {
-        dispatch({ type: 'scrollToBottom' });
-        return;
-      }
-    }
 
     // ── Double-Esc clears input buffer ────────────────────────────────
     // When the user presses Esc twice within ESC_DOUBLE_PRESS_MS ms while
@@ -3538,23 +3418,12 @@ export function App({
       if (cursor < buffer.length) setDraft(buffer, cursor + 1);
       return;
     }
-    // In managed (scroll) mode: Home/End scroll the chat viewport to top/bottom
-    // when the input buffer is empty, mirroring the wheel and PgUp/PgDn.
-    // When there is text in the buffer, Home/End position the cursor.
     if (key.home) {
-      if (managedLive && buffer.length === 0) {
-        dispatch({ type: 'scrollToTop' });
-      } else {
-        setDraft(buffer, 0);
-      }
+      setDraft(buffer, 0);
       return;
     }
     if (key.end) {
-      if (managedLive && buffer.length === 0) {
-        dispatch({ type: 'scrollToBottom' });
-      } else {
-        setDraft(buffer, buffer.length);
-      }
+      setDraft(buffer, buffer.length);
       return;
     }
 
@@ -4251,42 +4120,20 @@ export function App({
     return '';
   }, [state.buffer, state.status, state.picker.open]);
 
-  const affordanceShown = managedLive && state.scrollOffset > 0 && state.pendingNewLines > 0;
-
   // True while a prompt-refinement call is in flight or its preview panel is
   // open. Used to blank the live input row (so the un-cleared draft can't bleed
   // into scrollback) and to drive the per-tick live-region erase below.
   const enhanceActive = state.enhanceBusy || state.enhance != null;
 
   return (
-    <Box flexDirection="column" height={managedLive ? termRows : undefined}>
+    <Box flexDirection="column">
       <Box flexDirection="column" flexGrow={1} flexShrink={0}>
-        {managedLive ? (
-          <ScrollableHistory
-            entries={state.entries}
-            streamingText={state.streamingText}
-            toolStream={state.toolStream}
-            scrollOffset={state.scrollOffset}
-            viewportRows={state.viewportRows || Math.max(MIN_VIEWPORT, termRows - 8)}
-            totalLines={state.totalLines}
-            onMeasure={(total) => dispatch({ type: 'setMeasuredLines', totalLines: total })}
-          />
-        ) : (
-          <History
-            entries={state.entries}
-            streamingText={state.streamingText}
-            toolStream={state.toolStream}
-          />
-        )}
-        {affordanceShown ? (
-          <Text dimColor>
-            {`  ↓ ${state.pendingNewLines} new line${state.pendingNewLines === 1 ? '' : 's'} — PgDn or click to jump to bottom`}
-          </Text>
-        ) : null}
-        {/* In mouse mode the whole live region below the scroll viewport is
-            wrapped in one measured Box so its height feeds the viewport-size
-            computation. In the default path it's a layout-neutral column. */}
-        <Box ref={managedLive ? bottomRef : undefined} flexDirection="column" flexShrink={0}>
+        <History
+          entries={state.entries}
+          streamingText={state.streamingText}
+          toolStream={state.toolStream}
+        />
+        <Box flexDirection="column" flexShrink={0}>
           <LiveActivityStrip entries={state.fleet} nowTick={nowTick} />
           <Input
             prompt={INPUT_PROMPT}
@@ -4439,7 +4286,7 @@ export function App({
             queueCount={state.queue.length}
             yolo={yoloLive}
             autonomy={autonomyLive}
-            elapsedMs={elapsedMs}
+            startedAt={startedAtRef.current}
             todos={todos}
             plan={planCounts ?? undefined}
             fleet={fleetCounts}
@@ -4455,35 +4302,10 @@ export function App({
             indexState={indexState}
             modeLabel={liveModeLabel || undefined}
           />
-          {/* Only render the persistent hint bar in the managed (alt-screen)
-          viewport. In the default inline-redraw mode it would add a row to the
-          fragile live region and collide with monitor panels rendered below it
-          (interleaving their counts into the hints). */}
-          {managedLive ? (
-            <KeyHintBar
-              context={{
-                confirm: state.confirmQueue.length > 0,
-                picker:
-                  state.picker.open ||
-                  state.slashPicker.open ||
-                  state.modelPicker.open ||
-                  state.autonomyPicker.open ||
-                  state.settingsPicker.open ||
-                  !!state.rewindOverlay,
-                monitor:
-                  state.agentsMonitorOpen ||
-                  state.monitorOpen ||
-                  state.worktreeMonitorOpen ||
-                  state.todosMonitorOpen ||
-                  !!state.autoPhase?.monitorOpen,
-                managed: managedLive,
-              }}
-            />
-          ) : null}
           {/* Keys-&-commands help overlay (`?` on an empty prompt). Modal: while
           open, handleKey swallows everything but Esc/?/q, so it never coexists
           with a monitor. */}
-          {state.helpOpen ? <HelpOverlay managed={managedLive} /> : null}
+          {state.helpOpen ? <HelpOverlay /> : null}
           {/* Agents monitor overlay (Ctrl+G) and fleet monitor overlay (Ctrl+F)
           take up the lower region — hide FleetPanel while any overlay is open. */}
           {state.agentsMonitorOpen ? (

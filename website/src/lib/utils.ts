@@ -147,7 +147,6 @@ export const slashCommands = [
   '/settings',
   '/fix',
   '/image',
-  '/altscreen',
   '/statusline',
 ] as const;
 

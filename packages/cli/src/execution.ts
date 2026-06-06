@@ -598,25 +598,10 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           titleAnimation: ((config.autonomy as Record<string, unknown> | undefined)?.['terminalTitleAnimation'] as boolean) ?? true,
           // Completion chime: terminal bell when agent finishes.
           chime: ((config.autonomy as Record<string, unknown> | undefined)?.['chime'] as boolean) ?? false,
-          // Confirm before exit: show "confirm exit" prompt on Ctrl+C.
+          // Normal exit.
           confirmExit: ((config.autonomy as Record<string, unknown> | undefined)?.['confirmExit'] as boolean) ?? true,
-          // Default ON: the managed full-screen viewport pins the status bar +
-          // panels and renders chat into an in-app scroll region (mouse wheel /
-          // PgUp-PgDn / Ctrl+Home-End), so the live region can never "jump" or
-          // leak into native scrollback — the inline-mode artifact where the
-          // streaming tool box and input prompt get re-stamped into history.
-          // Opt out with `--no-alt-screen` for raw native scrollback (at the
-          // cost of those artifacts). `--alt-screen` is the explicit opt-in.
-          altScreen: flags['no-alt-screen'] !== true,
           director,
           fleetRoster,
-          onAfterExit: () => {
-            writeOut(
-              color.dim(`Session saved: ${session.id} — resume with `) +
-                color.cyan(`wstack resume ${session.id}`) +
-                '\n',
-            );
-          },
           onClearHistory: (
             dispatch: (action: { type: 'clearHistory' } | { type: 'resetContextChip' }) => void,
           ) => {

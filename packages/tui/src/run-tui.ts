@@ -87,16 +87,7 @@ export interface RunTuiOptions {
   effectiveMaxContext?: number;
   /** Absolute project root for goal.json loading. */
   projectRoot?: string;
-  /** Render into the terminal's alternate screen buffer (like vim/less/htop).
-   * Default: false — native scrollback stays live so chat history is
-   * scrollable (wheel / Shift+PgUp), which matches the user's
-   * "this is a chat app, let me scroll the chat" intuition. Pass true
-   * (or run with `--alt-screen`) for the full-screen mode that owns the
-   * terminal and prevents resize/overlay leaks of the live region —
-   * trade-off is that the terminal's native scrollback is suspended
-   * while the TUI is up and only what's currently on screen is visible.
-   */
-  altScreen?: boolean;
+
   /**
    * Terminal title animation on/off. Defaults to true. When false, the
    * OSC-0 window/tab title stays static (the app name only, no spinner).
@@ -111,13 +102,6 @@ export interface RunTuiOptions {
   modeLabel?: string;
   /** Live getter for the agent mode label so the status bar updates after /mode. */
   getModeLabel?: () => string;
-  /**
-   * Called right after we exit the alt-screen on a clean shutdown. The
-   * CLI uses this to print a one-line "session saved to …" hint into
-   * the user's normal terminal, since alt-screen exit erases the whole
-   * TUI view.
-   */
-  onAfterExit?: () => void;
   /** Called from /clear so the TUI can wipe its history entries while agent.ctx + memory are cleared separately. */
   onClearHistory?: (
     dispatch: React.Dispatch<{ type: 'clearHistory' } | { type: 'resetContextChip' }>,
@@ -250,16 +234,6 @@ export interface RunTuiOptions {
 const BRACKETED_PASTE_ON = '\x1b[?2004h';
 const BRACKETED_PASTE_OFF = '\x1b[?2004l';
 
-// Alternate-screen buffer (DECSET 1049). Switches the terminal to a
-// dedicated virtual screen; on exit, the previous scrollback is restored
-// untouched. This is what every "full-screen TUI" uses (vim, less, htop).
-// Without it, Ink writes its dynamic area in line with scrollback and
-// each redraw can leak the previous frame's input/status into the
-// permanent terminal history — the exact bug we hit before this change.
-const ALT_SCREEN_ON = '\x1b[?1049h';
-const ALT_SCREEN_OFF = '\x1b[?1049l';
-const CURSOR_HOME = '\x1b[H';
-
 export async function runTui(opts: RunTuiOptions): Promise<number> {
   const stdout = process.stdout;
   const stdin = process.stdin;
@@ -276,11 +250,6 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
     return 2;
   }
 
-  const useAltScreen = opts.altScreen === true;
-  if (useAltScreen) {
-    stdout.write(ALT_SCREEN_ON);
-    stdout.write(CURSOR_HOME);
-  }
   stdout.write(BRACKETED_PASTE_ON);
 
   const inkStdin: NodeJS.ReadStream = stdin;
@@ -313,10 +282,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
     }
   }
 
-  // Track cleanup state so signal handlers don't double-disable. Order
-  // matters on exit: paste mode off first (it's a screen-independent
-  // setting), then alt-screen off (which restores the user's previous
-  // terminal contents).
+  // Track cleanup state so signal handlers don't double-disable.
   let cleaned = false;
   const cleanup = () => {
     if (cleaned) return;
@@ -328,9 +294,6 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
     }
     try {
       stdout.write(BRACKETED_PASTE_OFF);
-      if (useAltScreen) {
-        stdout.write(ALT_SCREEN_OFF);
-      }
     } catch {
       // stdout may already be closed during shutdown — ignore.
     }
@@ -365,17 +328,6 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
     const settle = (code: number) => {
       cleanup();
       detachListeners();
-      // Once the alt-screen is dismantled the user is staring at their
-      // pre-TUI terminal again — print a quick line so they can see
-      // where the session is preserved, instead of wondering "where did
-      // my chat go?". Best-effort: callback failures don't change exit.
-      if (useAltScreen && opts.onAfterExit) {
-        try {
-          opts.onAfterExit();
-        } catch {
-          // ignore — UX helper, not load-bearing
-        }
-      }
       resolve(code);
     };
 
@@ -430,9 +382,6 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           getSettings: opts.getSettings,
           saveSettings: opts.saveSettings,
           predictNext: opts.predictNext,
-          // Managed viewport (in-app scroll + collapsibility) follows
-          // alt-screen: it owns the screen, so there's no native-scrollback leak.
-          managed: useAltScreen,
           chime: opts.chime,
           confirmExit: opts.confirmExit,
           modeLabel: opts.modeLabel,
@@ -447,38 +396,26 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
       settle(1);
       return;
     }
-    // Non-altScreen mode: terminal reflows visible text on resize BEFORE
-    // Ink can react, which leaks one or more lines of the live region
-    // (input prompt, status bar) into native scrollback. We can't recover
-    // what the terminal already pushed up, but we CAN ensure no leftover
-    // ghosts persist below the cursor by erasing from-cursor-to-end on
-    // every resize. Combined with Ink's automatic re-render on resize,
-    // this minimizes the artifact to (at most) the lines the terminal
-    // itself pushed up at the moment of the resize event.
-    //
-    // For users doing heavy resize / split-pane workflows, --alt-screen
-    // is the bullet-proof fix: Ink renders into a separate screen buffer
-    // that has no native scrollback, so terminal-side reflow can't push
-    // anything anywhere. Trade-off documented in tui/README.md.
+    // Terminal reflows visible text on resize BEFORE Ink can react, which can
+    // leave ghosts below the cursor. Erase from-cursor-to-end on every resize
+    // to minimize artifacts. Ink immediately re-renders at the new width.
     let detachResize: (() => void) | null = null;
-    if (!useAltScreen) {
-      const onResize = () => {
-        try {
-          // \x1b[J = erase from cursor to end of screen. Does NOT touch
-          // anything above the cursor, so committed Static history in
-          // scrollback is preserved. Ink's useStdout subscriber will
-          // immediately re-render the live region at the new width.
-          // Do NOT prefix with \x1b[H: homing to (0,0) erases the visible
-          // committed output and repositions the live region (input + status
-          // bar) at the top of the viewport instead of the bottom.
-          stdout.write('\x1b[J');
-        } catch {
-          // stdout might be detached mid-shutdown — ignore.
-        }
-      };
-      stdout.on('resize', onResize);
-      detachResize = () => stdout.off('resize', onResize);
-    }
+    const onResize = () => {
+      try {
+        // \x1b[J = erase from cursor to end of screen. Does NOT touch
+        // anything above the cursor, so committed Static history in
+        // scrollback is preserved. Ink's useStdout subscriber will
+        // immediately re-render the live region at the new width.
+        // Do NOT prefix with \x1b[H: homing to (0,0) erases the visible
+        // committed output and repositions the live region (input + status
+        // bar) at the top of the viewport instead of the bottom.
+        stdout.write('\x1b[J');
+      } catch {
+        // stdout might be detached mid-shutdown — ignore.
+      }
+    };
+    stdout.on('resize', onResize);
+    detachResize = () => stdout.off('resize', onResize);
 
     instance
       .waitUntilExit()

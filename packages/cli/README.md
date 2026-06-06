@@ -38,7 +38,7 @@ wstack plugin disable @wrongstack/telegram  # keep config but skip loading
 wstack plugin remove @wrongstack/telegram   # remove from config.plugins
 ```
 
-`--no-tui` forces REPL mode even when `--tui` is configured globally. The TUI uses Ink's alt-screen buffer by default so it can capture every keystroke (Ctrl+S/Q/Z/\\ included) and avoid live-region leaks into scrollback; pass `--no-alt-screen` if you specifically want completed chat to survive after exit.
+`--no-tui` forces REPL mode even when `--tui` is configured globally.
 
 ## Slash commands inside the REPL/TUI
 
@@ -101,7 +101,6 @@ API keys are encrypted at rest with AES-256-GCM and the key file at `~/.wrongsta
 | `--provider <id>` | Override the configured provider |
 | `--model <id>` | Override the configured model |
 | `--resume <id>` | Resume a saved session by id |
-| `--no-alt-screen` | Render TUI inline in scrollback (default is alt-screen so all shortcuts are captured). |
 | `--config <path>` | Use a non-default config file |
 | `--debug` | Verbose logging to `~/.wrongstack/logs/wrongstack.log` |
 | `--version` | Print version |

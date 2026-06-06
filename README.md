@@ -412,7 +412,6 @@ wrongstack --provider openrouter --model anthropic/claude-opus-4-7
 --director           Enable Director-based fleet orchestration (LLM-driven subagent planning)
 --goal "<task>"      Boot directly into goal mode — GOAL preamble injected, TUI auto-enabled
 --ask "<text>"       Submit one turn verbatim on TUI boot (no preamble)
---alt-screen         TUI only: render into a separate screen buffer (no native scrollback)
 --verbose / -v       Log level → debug
 --trace              Log level → trace
 --log-level <lvl>    Explicit log level
@@ -425,7 +424,7 @@ wrongstack --provider openrouter --model anthropic/claude-opus-4-7
 
 **Multi-agent:** `/spawn` `/fleet` `/agents` `/goal` `/director` `/collab` `/setmodel`
 
-**TUI-only** (need `--tui`): `/model` (provider → model picker) · `/steer` (mid-flight redirect — the plain REPL uses **Esc** instead) · `/altscreen` · `/queue`
+**TUI-only** (need `--tui`): `/model` (provider → model picker) · `/steer` (mid-flight redirect — the plain REPL uses **Esc** instead) · `/queue`
 
 **Built-in plugins** (enabled by default): `/prompts` `/sync` `/commit` `/gitcheck` `/push` `/security` `/skill` `/skill-gen` `/skill-install` `/skill-update` `/skill-uninstall` `/plan` `/metrics` `/health`
 
@@ -441,7 +440,6 @@ wrongstack --provider openrouter --model anthropic/claude-opus-4-7
 | `/steer <text>` | _(TUI; in the plain REPL use **Esc**)_ Mid-flight redirect — aborts iteration, terminates fleet, drops queue, prepends STEERING preamble |
 | `/goal <text>` | Lock in a goal — persists to `~/.wrongstack/projects/<hash>/goal.json` and injects full-autonomy preamble. Subcommands: `/goal` (status + journal), `/goal clear` (stop engine), `/goal pause` (pause at end of iteration), `/goal resume` (resume), `/goal journal [N]` |
 | `/queue` | _(TUI)_ Show, clear, or delete entries from the in-flight message queue |
-| `/altscreen on\|off` | _(TUI)_ Toggle terminal alt-screen buffer. Default OFF (native scroll); `on` for full-screen mode |
 | `/plan show\|add\|start\|done\|remove\|clear` | Per-session plan JSON. Mirrored to disk; surfaces `📋 ⌛N ☐N ✓N` chip in TUI status bar |
 | `/autonomy off\|suggest\|on\|eternal\|parallel\|stop\|toggle` | Self-driving mode. `suggest` shows next steps without executing; `on` auto-continues; `eternal` runs goal-driven loop; `parallel` fans out 4-8 subagents per tick. TUI shows `∞ AUTO` / `∞ SUGGEST` / `ETERNAL` / `⟳ PARALLEL` chip |
 | `/yolo on\|off\|toggle` | Flip YOLO mode (auto-approve all tool calls). `/yolo` alone shows status. TUI shows `⚠ YOLO` chip |

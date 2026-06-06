@@ -41,7 +41,7 @@ Commands that accept `<id|index>` (`done`, `remove`, `rm`, `delete`) match in th
 
 | Key | Panel | Mode |
 |-----|-------|------|
-| **F5** | Right-side compact panel | Managed (alt-screen) only |
+| **F5** | Autonomy settings editor | Both modes, Esc to close |
 | **F6** | Full-screen monitor overlay | Both modes, Esc to close |
 
 ## WebUI

@@ -23,8 +23,8 @@ describe('helpSections', () => {
   });
 
   it('adds PgUp/PgDn only in the managed viewport', () => {
-    expect(flat({ managed: false })).not.toContain('PgUp/PgDn');
-    expect(flat({ managed: true })).toContain('PgUp/PgDn');
+    expect(flat({ managed: false })).not.toContain('PgUp/PgDn   ↕ wheel');
+    expect(flat({ managed: true })).toContain('PgUp/PgDn   ↕ wheel');
   });
 
   it('never produces an empty section', () => {

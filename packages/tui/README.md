@@ -31,7 +31,6 @@ const exitCode = await runTui({
   family: 'anthropic',
   keyTail: '…ABC',
   effectiveMaxContext: 200_000,
-  altScreen: true,
 });
 
 process.exit(exitCode);
@@ -76,24 +75,16 @@ process.exit(exitCode);
 | `Esc` | Close any picker / dialog / agents monitor |
 | `Ctrl+L` | Clear screen (TUI keeps state — equivalent to scrolling) |
 
-Keyboard shortcuts (always available in managed/alt-screen mode):
-- **PgUp/PgDn** — page scroll through chat history.
-- **Home/End** — jump to top/bottom of chat history (when input is empty); move cursor to start/end of line (when typing).
-- **Ctrl+Home/End** — jump to top/bottom of chat history (always, even when typing).
-- **↑/↓** — navigate input history when buffer is empty.
-
 ## Options worth knowing
 
-- **`altScreen: true`** (default) — render into the terminal's alternate screen buffer (vim/less/htop style). The TUI owns the whole viewport, native scrollback is untouched, and the live region cannot leak into terminal history. Raw mode plus alt-screen also means every keystroke — including Ctrl+S, Ctrl+Q, Ctrl+Z, Ctrl+\\ — reaches Ink instead of being consumed by the terminal driver (`runTui` additionally registers no-op handlers for `SIGTSTP`/`SIGQUIT`/`SIGTTIN`/`SIGTTOU` as belt-and-suspenders). Set `false` (or pass `--no-alt-screen`) to render into normal scrollback if you specifically want completed chat to survive after exit; the trade-off is the documented live-region leak on resize / overlay-close / picker-submit, and that some shortcuts may fall through to the terminal.
 - **`effectiveMaxContext`** — the context-bar denominator. Pass the model-specific value resolved via `ModelsRegistry`, not the family baseline; the 1M Opus variant has a much larger window than the 200k default.
 - **`queueStore`** — if set, queued input survives a crash. Without it, queued lines are in-memory only.
 - **`onClearHistory`** — invoked from the `/clear` slash command so the TUI can wipe its rendered history entries (keeping just the banner) while `Agent`/memory reset happens elsewhere.
-- **`onAfterExit`** — called once the alt-screen has been restored on clean shutdown. Use it to print "session saved" hints into the user's normal terminal (alt-screen exit erases the TUI view).
 
 ## Architecture
 
 ```
-runTui                — entry; sets up bracketed paste, alt-screen, signal handlers
+runTui                — entry; sets up bracketed paste, signal handlers
   ↓
 App (React component) — useReducer-driven state machine
   ↓ dispatches events to ↓

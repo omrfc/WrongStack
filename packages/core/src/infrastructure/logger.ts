@@ -28,8 +28,7 @@ export interface DefaultLoggerOptions {
   /**
    * When false, suppress stderr output entirely — only write to the log
    * file (if configured). Use this in TUI mode so plugin/library log
-   * messages don't interleave with Ink's terminal rendering and break
-   * the Static/live boundary in non-altScreen mode.
+   * messages don't interleave with Ink's terminal rendering.
    * Default: true (stderr output is enabled).
    */
   stderr?: boolean;

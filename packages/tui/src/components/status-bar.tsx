@@ -34,9 +34,8 @@ const COMPACT_THRESHOLD = 50;
 const COMFORTABLE_THRESHOLD = 90;
 
 // Animated braille spinner shown when the agent is thinking/streaming.
-// Cycles at ~8fps, same as the terminal title animation.
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-const SPINNER_INTERVAL_MS = 130;
+const SPINNER_INTERVAL_MS = 250;
 
 export interface TodoCounts {
   pending: number;
@@ -118,8 +117,10 @@ export interface StatusBarProps {
   hint?: string;
   queueCount?: number;
   yolo?: boolean;
-  /** Session elapsed in milliseconds. Renders as `mm:ss` (< 1h) or `h:mm:ss`. */
-  elapsedMs?: number;
+  /** Session start timestamp (ms). Elapsed time is computed internally on
+   *  the same interval as the spinner so the display stays live without
+   *  forcing a full App tree re-render every second. */
+  startedAt?: number;
   todos?: TodoCounts;
   /**
    * Plan board counts surfaced as a chip on line 2. Distinct from
@@ -202,7 +203,7 @@ export function StatusBar({
   queueCount = 0,
   yolo = false,
   autonomy,
-  elapsedMs,
+  startedAt,
   todos,
   plan,
   fleet,
@@ -240,6 +241,15 @@ export function StatusBar({
   const cost = tokenCounter?.estimateCost();
   const cache = tokenCounter?.cacheStats();
 
+  // Elapsed time display — updated locally on a 1s interval so the "⏱ 12:34"
+  // chip stays live without forcing a full App tree re-render.
+  const [elapsedMs, setElapsedMs] = useState(startedAt ? Date.now() - startedAt : 0);
+  useEffect(() => {
+    if (startedAt == null) return;
+    const t = setInterval(() => setElapsedMs(Date.now() - startedAt), 1000);
+    return () => clearInterval(t);
+  }, [startedAt]);
+
   // Animated braille spinner — cycles while the agent is thinking/streaming.
   // Stops when idle so the interval doesn't drive unnecessary re-renders.
   const [spinnerIdx, setSpinnerIdx] = useState(0);
@@ -256,6 +266,10 @@ export function StatusBar({
   const { label: stateLabel, color: stateColor } = stateChip(state, fleet?.running ?? 0);
   // Animated spinner for thinking/streaming; static ● for idle/aborting.
   const statePrefix = state === 'idle' || state === 'aborting' ? '●' : spinner;
+  // When the agent is actively working, paint the state chip as a moving
+  // rainbow wave (each glyph cycles through the hue wheel, offset per char and
+  // shifted by the spinner tick). Idle/aborting stay flat-colored.
+  const thinking = state === 'running' || state === 'streaming';
 
   // Line 2 is *session context* — slow-moving facts about where you
   // are: the project, the branch, the elapsed clock, YOLO chip. These
@@ -263,7 +277,7 @@ export function StatusBar({
   const hasSecondLine =
     yolo ||
     (autonomy && autonomy !== 'off') ||
-    elapsedMs !== undefined ||
+    startedAt != null ||
     (git !== null && git !== undefined) ||
     (projectName !== undefined && projectName.length > 0) ||
     (goalSummary !== null && goalSummary !== undefined) ||
@@ -297,7 +311,14 @@ export function StatusBar({
         {isCompact ? (
           // Ultra-compact: state · model
           <>
-            <Text color={stateColor}>{statePrefix}{stateLabel}</Text>
+            {thinking ? (
+              <WaveText text={`${statePrefix}${stateLabel}`} phase={spinnerIdx} />
+            ) : (
+              <Text color={stateColor}>
+                {statePrefix}
+                {stateLabel}
+              </Text>
+            )}
             <Text dimColor>·</Text>
             <Text color="magenta">{model}</Text>
           </>
@@ -315,7 +336,13 @@ export function StatusBar({
                 <Text dimColor>│</Text>
               </>
             ) : null}
-            <Text color={stateColor}>{statePrefix} {stateLabel}</Text>
+            {thinking ? (
+              <WaveText text={`${statePrefix} ${stateLabel}`} phase={spinnerIdx} />
+            ) : (
+              <Text color={stateColor}>
+                {statePrefix} {stateLabel}
+              </Text>
+            )}
             <Text dimColor>│</Text>
             <Text color="magenta">{model}</Text>
             {context && context.max > 0 ? (
@@ -381,7 +408,7 @@ export function StatusBar({
       </Box>
 
       {/* Line 2 always rendered — empty spacer when no content, to keep the
-          live-region height stable in non-altScreen mode. Without this, the
+          live-region height stable. Without this, the
           StatusBar jumping from 1→2 or 2→1 lines shifts the Ink layout and
           pushes the input area into the static history scrollback. */}
       {hasSecondLine ? (
@@ -418,13 +445,13 @@ export function StatusBar({
           ) : null}
           {projectName ? (
             <>
-              {yolo || elapsedMs !== undefined ? <Text dimColor>│</Text> : null}
+              {yolo || startedAt != null ? <Text dimColor>│</Text> : null}
               <Text color="blue">📁 {projectName}</Text>
             </>
           ) : null}
           {goalSummary ? (
             <>
-              {yolo || elapsedMs !== undefined || projectName ? <Text dimColor>│</Text> : null}
+              {yolo || startedAt != null || projectName ? <Text dimColor>│</Text> : null}
               <Text
                 color={
                   goalSummary.goalState === 'active'
@@ -449,7 +476,7 @@ export function StatusBar({
               {yolo ||
               (autonomy && autonomy !== 'off') ||
               eternalStage ||
-              elapsedMs !== undefined ||
+              startedAt != null ||
               projectName ||
               goalSummary ? (
                 <Text dimColor>│</Text>
@@ -459,7 +486,7 @@ export function StatusBar({
           ) : null}
           {git ? (
             <>
-              {yolo || elapsedMs !== undefined || projectName ? <Text dimColor>│</Text> : null}
+              {yolo || startedAt != null || projectName ? <Text dimColor>│</Text> : null}
               <Text>
                 <Text color="magenta">⎇ {git.branch}</Text>
                 {git.added > 0 ? <Text color="green"> +{git.added}</Text> : null}
@@ -763,6 +790,42 @@ export function stateChip(
   if (state === 'idle') return { label: 'idle', color: 'cyan' };
   if (state === 'aborting') return { label: 'aborting…', color: 'yellow' };
   return { label: 'thinking…', color: 'green' };
+}
+
+// Hue-wheel palette for the animated "thinking…" wave. 12 stops give a smooth
+// gradient as the per-character offset shifts each spinner tick.
+const WAVE_COLORS = [
+  '#ff5f5f',
+  '#ff8f3f',
+  '#ffd23f',
+  '#bce84a',
+  '#6bcb77',
+  '#3dd9c0',
+  '#3fb6ff',
+  '#5f8bff',
+  '#845ef7',
+  '#b15bff',
+  '#f06595',
+  '#ff5fa2',
+];
+
+/**
+ * Render `text` as a moving rainbow: each glyph gets a color from {@link
+ * WAVE_COLORS} indexed by (charIndex + phase), so advancing `phase` slides the
+ * gradient sideways like a wave. Whitespace is emitted plain (color is a no-op
+ * on it) to keep word spacing intact.
+ */
+function WaveText({ text, phase }: { text: string; phase: number }): React.ReactElement {
+  return (
+    <Text bold>
+      {Array.from(text).map((ch, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: glyph order is positional and re-rendered each tick
+        <Text key={i} color={WAVE_COLORS[(i + phase) % WAVE_COLORS.length]}>
+          {ch}
+        </Text>
+      ))}
+    </Text>
+  );
 }
 
 const FILLED = '█';

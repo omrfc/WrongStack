@@ -29,9 +29,18 @@ export class Spinner {
   private readonly out: NodeJS.WriteStream;
   private readonly enabled: boolean;
 
-  constructor(out: NodeJS.WriteStream = process.stderr) {
+  /**
+   * @param out    Stream the spinner writes to (default stderr).
+   * @param opts.enabled  Hard override. When `false`, every method becomes a
+   *   no-op regardless of TTY state — used to silence the spinner when the Ink
+   *   TUI owns the screen (the spinner writes to stderr on an 80ms timer, which
+   *   interleaves with Ink's stdout cursor math and corrupts the live region:
+   *   it leaks the input row into scrollback and paints a stray
+   *   "thinking… ctx" tracker at the very bottom). Defaults to TTY detection.
+   */
+  constructor(out: NodeJS.WriteStream = process.stderr, opts?: { enabled?: boolean }) {
     this.out = out;
-    this.enabled = Boolean(out.isTTY) && !process.env.NO_COLOR;
+    this.enabled = (opts?.enabled ?? Boolean(out.isTTY)) && !process.env.NO_COLOR;
   }
 
   start(label: string): void {

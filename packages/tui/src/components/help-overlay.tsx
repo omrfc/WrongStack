@@ -17,12 +17,10 @@ export interface HelpSection {
 /**
  * Static cheat-sheet content: keybindings + common slash commands, grouped by
  * area. Pure data (no JSX) so the exact set of entries is unit-testable and the
- * overlay renders identically everywhere. The Navigation section adapts to the
- * active surface — scroll keys only make sense in the managed viewport.
+ * overlay renders identically everywhere.
  */
-export function helpSections(opts: { managed: boolean }): HelpSection[] {
+export function helpSections(): HelpSection[] {
   const nav: HelpEntry[] = [];
-  if (opts.managed) nav.push({ keys: 'PgUp/PgDn', desc: 'scroll chat history' });
   nav.push(
     { keys: '↑/↓', desc: 'previous / next input (empty prompt)' },
     { keys: '?', desc: 'open this help (empty prompt)' },
@@ -74,12 +72,8 @@ export function helpSections(opts: { managed: boolean }): HelpSection[] {
  * chord (accent) and its description (dim), with the key column padded to a
  * shared width so descriptions align.
  */
-export function HelpOverlay({
-  managed,
-}: {
-  managed: boolean;
-}): React.ReactElement {
-  const sections = helpSections({ managed });
+export function HelpOverlay(): React.ReactElement {
+  const sections = helpSections();
   const keyWidth = Math.max(...sections.flatMap((s) => s.entries.map((e) => e.keys.length)), 0);
 
   return (

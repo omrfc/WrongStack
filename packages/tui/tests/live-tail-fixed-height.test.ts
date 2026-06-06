@@ -4,7 +4,7 @@ import { assistantTailRows, streamBoxRows } from '../src/components/history.js';
 // Regression: the live tool-stream box and assistant tail must render at a
 // CONSTANT height regardless of how much text is streaming. A region that grows
 // row-by-row at the bottom of the terminal scrolls the screen on every update,
-// and in inline (non-alt-screen) mode each scroll leaks the top row into
+// and in inline mode each scroll leaks the top row into
 // permanent scrollback — the bug where "◆ bash ⏱ …" and the input prompt get
 // re-stamped into history dozens of times per turn.
 

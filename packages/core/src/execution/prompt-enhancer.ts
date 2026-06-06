@@ -84,7 +84,7 @@ export interface EnhanceUserPromptOptions {
   history?: ConversationTurn[];
   /** Parent abort signal (e.g. the run controller / Esc). */
   signal?: AbortSignal;
-  /** Hard cap on how long to wait for the refiner before giving up. Default 25s. */
+  /** Hard cap on how long to wait for the refiner before giving up. Default 90s. */
   timeoutMs?: number;
   /** Max tokens for the refined output. Default 2048. */
   maxTokens?: number;
@@ -125,7 +125,7 @@ export async function enhanceUserPrompt(
   const { provider, model, text } = opts;
   // Reasoning models ("thinking" models like DeepSeek reasoner / o1) take
   // longer to first token, so give a generous default window.
-  const timeoutMs = opts.timeoutMs ?? 25000;
+  const timeoutMs = opts.timeoutMs ?? 90000;
   // Generous default: on some endpoints the model's hidden "thinking" tokens
   // count against this budget, so a small cap can leave NO room for the actual
   // refined text (→ empty completion → null). 2048 keeps the output room ample.

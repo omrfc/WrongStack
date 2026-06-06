@@ -113,7 +113,7 @@ export function assistantTailRows(
  * Renders at a CONSTANT height (header + ASSISTANT_TAIL_LINES rows) with every
  * line truncated to the terminal width so nothing wraps. A wrapping/growing
  * tail pinned to the bottom of the screen forces the terminal to scroll on each
- * delta, and in inline (non-alt-screen) mode each scroll leaks the input prompt
+ * delta, and in inline mode each scroll leaks the input prompt
  * row into permanent scrollback. Holding the height fixed limits that to one
  * scroll when streaming starts. Rows are bottom-aligned (blank padding on top)
  * so the newest line stays pinned to the bottom.

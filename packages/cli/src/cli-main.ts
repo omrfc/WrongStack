@@ -258,8 +258,17 @@ export async function main(argv: string[]): Promise<number> {
     return ms;
   })();
 
-  // Spinner: visible "thinking…" line during each model request.
-  const spinner = new Spinner();
+  // True when the Ink TUI owns the screen. The TUI renders its own status,
+  // streaming, and delegate lines, so the REPL-presentation handlers below
+  // (spinner + inline streaming + retry/error lines) must stand down to avoid
+  // fighting Ink's cursor math.
+  const tuiOwnsScreen = flags.tui === true && flags['no-tui'] !== true;
+
+  // Spinner: visible "thinking…" line during each model request. Disabled
+  // under the TUI — it writes to stderr on an 80ms timer, which the Ink
+  // renderer can't account for, leaking the input row into scrollback and
+  // painting a stray bottom-of-screen tracker.
+  const spinner = new Spinner(process.stderr, { enabled: !tuiOwnsScreen });
   // Track the latest provider request's input-token count so the spinner
   // can render a live context-window fullness bar (TUI parity).
   let lastInputTokens = 0;
@@ -438,7 +447,6 @@ export async function main(argv: string[]): Promise<number> {
   // Humanized `delegate` lifecycle lines for the plain (non-TUI) CLI. The
   // Ink TUI renders its own delegate history entries, so skip these when it
   // owns the screen to avoid double-printing.
-  const tuiOwnsScreen = flags.tui === true && flags['no-tui'] !== true;
   if (!tuiOwnsScreen) {
     events.on('delegate.started', (e) => {
       const task = e.task.length > 100 ? `${e.task.slice(0, 99)}…` : e.task;
