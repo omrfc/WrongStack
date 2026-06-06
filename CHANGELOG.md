@@ -5,6 +5,114 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.77.0] - 2026-06-06
+
+> The prompt-refinement & hardening release. Consolidates everything since the
+> `0.73.1` lockstep realignment. The headlines are an **LLM-driven `/enhance`
+> prompt refinement** flow with a countdown auto-send preview, a
+> **`/telegram-setup` one-command bot configuration**, a **live concurrency
+> ceiling** in the TUI fleet monitor, and a **project-root detection hardening**
+> pass that stops walk-up at the user's home directory and prunes stale project
+> dirs on boot. Additive only; no breaking changes.
+>
+> **Version consolidation.** The intermediate `0.74.0`–`0.76.0` bumps shipped as
+> mechanical `chore: bump version` / `feat: update code` commits without their own
+> changelog sections; their substantive changes are folded into this entry. All 15
+> workspace manifests — and the marketing site (`website/`) — are aligned to
+> `0.77.0` in lockstep.
+
+### Added
+
+- **`/enhance` prompt refinement.** A new LLM-driven refinement flow across
+  core, CLI, and TUI: `prompt-enhancer.ts` calls the active model to refine a
+  typed draft into a clearer prompt, the CLI slash command toggles the feature
+  on/off, and the TUI `EnhancePanel` shows a "did you mean this?" preview with a
+  live countdown before auto-sending. Refined prompts can be accepted, re-rolled,
+  or cancelled. Covered by `prompt-enhancer.test.ts` and
+  `slash-enhance.test.ts`.
+- **`/telegram-setup` slash command.** Replaces manual `config.json` editing
+  with a single ` /telegram-setup <botToken> [chatId]` command (alias `/tg-setup`).
+  Validates the bot token against the Telegram `getMe` API, persists to
+  `extensions.telegram`, and maps `chatId` if provided. Built on a shared
+  `persistTelegramConfig()` helper in `settings-menu.ts`.
+- **Live concurrency ceiling in the TUI fleet monitor.** The TUI now tracks
+  `fleetConcurrency` in its reducer, subscribes to the new `concurrency.changed`
+  kernel event, and surfaces the live ceiling in the fleet monitor. The
+  `/fleet concurrency <n>` slash command emits the event after the host ceiling
+  is updated, so the TUI reflects runtime changes without polling.
+- **Telegram message formatting utility.** New `format.ts` in
+  `@wrongstack/telegram` provides shared message formatting helpers for the
+  Telegram plugin, replacing ad-hoc formatting scattered across handlers.
+- **TUI compact todos panel, queue panel, and todos monitor.** Three new
+  surfaces: `CompactTodosPanel` renders a minimised todo list above the input,
+  `QueuePanel` shows and manages the in-flight message queue, and
+  `TodosMonitor` provides a dedicated todo overlay. The settings picker was
+  also expanded with additional controls.
+- **Expanded slash command docs.** New reference pages for `/enhance`,
+  `/telegram-setup`, `/collab`, `/mcp`, `/models`, `/settings`, `/sync`, and the
+  subcommand family (`/acp`, `/audit`, `/replay`, `/version-help`). Existing
+  pages for `/yolo`, `/sdd`, `/skills`, `/skill-gen`, `/plan`, `/security`,
+  `/todos`, `/goal`, and `/compact` updated with current behaviour.
+
+### Changed
+
+- **pnpm upgraded from 11.3.0 to 11.5.2.** Workspace `packageManager` field and
+  `pnpm-lock.yaml` updated.
+- **Project directory naming improved.** `WstackPaths` now derives the
+  per-project folder from a slugified base name + short hash (e.g.
+  `wrongstack-a1b2c3`) instead of a bare 12-char SHA-256 hex string, making
+  `~/.wrongstack/projects/` human-readable.
+- **Delegator tool expanded.** `delegate-tool.test.ts` grew 110 new test cases
+  covering edge cases in the delegation pipeline.
+- **Background indexer and codebase-index tools refined.** The background
+  indexer, codebase-search, and codebase-stats tools received internal
+  improvements from the 0.73.1 codebase-index pass.
+- **WebUI todos panel and WS client expanded.** `TodosPanel` gained a dedicated
+  React component (146 lines); `ws-client.ts` added new message types for the
+  live todos surface.
+
+### Fixed
+
+- **TUI refine-panel scrollback cloning.** During the refine countdown, the
+  typed draft was repeatedly cloned into native scrollback. The live input is
+  now blanked while the enhance flow is in flight, the flow folds into the
+  existing `eraseLiveRegion` overlay mitigation, and the live region is erased
+  on each tick — so `log-update` can't accumulate leaked rows.
+- **Codebase-index ready flag.** The indexer's readiness signal was incorrectly
+  gated, causing tools to query the index before the background build completed.
+- **Project root detection hardened.** Three fixes in `path-resolver.ts`:
+  (1) the walk-up now stops at `os.homedir()` so stray user-home markers
+  (`.git`, `package.json`) aren't mistaken for the project root; (2) the marker
+  file is `.wrongstack/AGENTS.md` (not the bare `.wrongstack/` directory) so
+  the detector doesn't match an empty or leftover directory; (3) `boot.ts`
+  gained `cleanupStaleProjects()` which removes project dirs whose original
+  root no longer exists (deleted repos, test artifacts).
+- **pre-launch git init location.** `runProjectCheck` now receives the actual
+  `cwd` so `git init` always runs in the working directory, never a parent
+  detected by walk-up.
+- **TUI input key handling.** Two fixes: `Delete` was being caught by the
+  `Backspace` handler instead of its own; `Shift+Enter` now inserts a literal
+  newline into multi-line input instead of submitting.
+
+### Tests
+
+- New suites for prompt enhancer (`prompt-enhancer.test.ts`, 182 cases),
+  `/enhance` slash command (`slash-enhance.test.ts`, 93 cases), path resolver
+  hardening (`path-resolver.test.ts`, 99 cases), delegate tool expansion
+  (`delegate-tool.test.ts`, +110 cases), and Telegram formatting
+  (`format.test.ts`, 62 cases). Existing suites for `wstack-paths`,
+  `todos-checkpoint`, `pre-launch`, `markdown-table`, `reducer`, and
+  `slash-goal` updated to reflect the new behaviour.
+
+### Changed — versions
+
+- **All workspace packages bumped to 0.77.0**: `wrongstack`, `@wrongstack/cli`,
+  `@wrongstack/core`, `@wrongstack/mcp`, `@wrongstack/plug-lsp`, `@wrongstack/plugins`,
+  `@wrongstack/providers`, `@wrongstack/runtime`, `@wrongstack/skills`,
+  `@wrongstack/telegram`, `@wrongstack/tools`, `@wrongstack/tui`, `@wrongstack/webui`.
+  `@wrongstack/acp` tracks the same version, and the marketing site (`website/`) is
+  bumped in lockstep.
+
 ## [0.73.1] - 2026-06-06
 
 > The background-index & decomposition release. Consolidates everything since
