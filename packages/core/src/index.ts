@@ -39,6 +39,8 @@ export {
   setRawMode,
   writeOut,
   writeErr,
+  setOutputLineGuard,
+  type OutputLineGuard,
 } from './utils/term.js';
 export {
   Agent,

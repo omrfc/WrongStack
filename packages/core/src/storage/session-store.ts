@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import type { Dirent } from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import type { EventBus } from '../kernel/events.js';
@@ -75,6 +76,11 @@ export class DefaultSessionStore implements SessionStore {
     this.secretScrubber = opts.secretScrubber;
   }
 
+  /** Absolute path to the session index file. */
+  private get indexFile(): string {
+    return path.join(this.dir, '_index.jsonl');
+  }
+
   /** Join session ID to its absolute path within the store directory. */
   private sessionPath(id: string, ext: '.jsonl' | '.summary.json'): string {
     return path.join(this.dir, `${id}${ext}`);
@@ -113,6 +119,7 @@ export class DefaultSessionStore implements SessionStore {
         dir: shardDir,
         filePath: file,
         secretScrubber: this.secretScrubber,
+        onClose: (s) => this.appendToIndex(s),
       });
     } catch (err) {
       await handle.close().catch(() => {});
@@ -143,7 +150,7 @@ export class DefaultSessionStore implements SessionStore {
           provider: data.metadata.provider,
         },
         this.events,
-        { resumed: true, dir: this.dir, filePath: file, secretScrubber: this.secretScrubber },
+        { resumed: true, dir: this.dir, filePath: file, secretScrubber: this.secretScrubber, onClose: (s) => this.appendToIndex(s) },
       );
       return { writer, data };
     } catch (err) {
@@ -180,6 +187,18 @@ export class DefaultSessionStore implements SessionStore {
   async list(limit = 20): Promise<SessionSummary[]> {
     try {
       await ensureDir(this.dir);
+      // Try the index first; fall back to directory scan if the index is
+      // missing, empty, or unreadable.
+      const indexed = await this.readIndex();
+      if (indexed.length > 0) {
+        indexed.sort((a, b) => {
+          if (a.startedAt < b.startedAt) return 1;
+          if (a.startedAt > b.startedAt) return -1;
+          return a.id.localeCompare(b.id);
+        });
+        return indexed.slice(0, limit);
+      }
+      // Index unavailable — fall back to full directory scan + summary parse.
       const ids = await this.collectSessionIds(this.dir);
       const sessions = await Promise.all(ids.map((id) => this.summaryFor(id).catch(() => null)));
       const out = sessions.filter((s): s is SessionSummary => s !== null);
@@ -194,16 +213,143 @@ export class DefaultSessionStore implements SessionStore {
     }
   }
 
-  /** Recursively collect all session IDs from shard subdirectories. */
-  private async collectSessionIds(dir: string): Promise<string[]> {
+  // ── Session index (_index.jsonl) ─────────────────────────────────────────
+  //
+  // One JSON line per closed session, appended atomically on close().
+  // When a session is deleted, a tombstone {action:"delete",id:"..."} is
+  // appended. On read, tombstones filter out matching session entries.
+  // This keeps listing O(lines-in-index) instead of O(files-on-disk).
+  //
+  // The index auto-compacts every N appends to prevent unbounded growth
+  // from tombstones and duplicate entries (resume cycles).
+
+  private indexAppendCount = 0;
+  private static readonly COMPACT_EVERY = 30;
+
+  /** Append a session summary to the index. */
+  private async appendToIndex(summary: SessionSummary): Promise<void> {
+    try {
+      await ensureDir(this.dir);
+      const line = JSON.stringify(summary) + '\n';
+      await fsp.appendFile(this.indexFile, line, 'utf8');
+      this.indexAppendCount++;
+      // Auto-compact the index periodically to remove tombstones and duplicates.
+      if (this.indexAppendCount >= DefaultSessionStore.COMPACT_EVERY) {
+        await this.compactIndex();
+        this.indexAppendCount = 0;
+      }
+    } catch {
+      // best-effort
+    }
+  }
+
+  /** Append a tombstone entry for a deleted session. */
+  private async writeTombstone(id: string): Promise<void> {
+    try {
+      await ensureDir(this.dir);
+      const line = JSON.stringify({ action: 'delete', id }) + '\n';
+      await fsp.appendFile(this.indexFile, line, 'utf8');
+      this.indexAppendCount++;
+    } catch {
+      // best-effort
+    }
+  }
+
+  /**
+   * Compact the index: read all entries, drop tombstones, deduplicate
+   * (keep latest per session), and rewrite. Atomic via temp+rename.
+   */
+  private async compactIndex(): Promise<void> {
+    const entries = await this.readIndex();
+    if (entries.length === 0) return;
+    const tmp = `${this.indexFile}.compact.tmp`;
+    const lines = entries.map((s) => JSON.stringify(s)).join('\n') + '\n';
+    await fsp.writeFile(tmp, lines, 'utf8');
+    await fsp.rename(tmp, this.indexFile);
+  }
+
+  /**
+   * Read the index file and return deduplicated session summaries.
+   * Entries with a matching tombstone are filtered out.
+   * Returns empty array when the index doesn't exist or is corrupt.
+   */
+  private async readIndex(): Promise<SessionSummary[]> {
+    let raw: string;
+    try {
+      raw = await fsp.readFile(this.indexFile, 'utf8');
+    } catch {
+      return [];
+    }
+    const deleted = new Set<string>();
+    const seen = new Map<string, SessionSummary>();
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const entry = JSON.parse(line) as { action?: string; id?: string } & SessionSummary;
+        if (entry.action === 'delete' && entry.id) {
+          deleted.add(entry.id);
+          seen.delete(entry.id);
+          continue;
+        }
+        if (entry.id && !deleted.has(entry.id)) {
+          // Keep the latest entry for each session (multiple appends on resume).
+          seen.set(entry.id, entry as SessionSummary);
+        }
+      } catch {
+        // skip corrupt lines
+      }
+    }
+    return Array.from(seen.values());
+  }
+
+  /**
+   * Rebuild the index from disk by scanning all sessions and writing a
+   * fresh _index.jsonl. Useful after manual cleanup or index corruption.
+   */
+  async rebuildIndex(): Promise<number> {
+    const ids = await this.collectSessionIds(this.dir);
+    const summaries = await Promise.all(ids.map((id) => this.summaryFor(id).catch(() => null)));
+    const valid = summaries.filter((s): s is SessionSummary => s !== null);
+    // Atomic rewrite: write to temp, then rename.
+    const tmp = `${this.indexFile}.tmp`;
+    const lines = valid.map((s) => JSON.stringify(s)).join('\n') + '\n';
+    await fsp.writeFile(tmp, lines, 'utf8');
+    await fsp.rename(tmp, this.indexFile);
+    return valid.length;
+  }
+
+  /** Recursively collect session IDs from date-shard subdirectories.
+   *  IDs include the date-prefix path (e.g. "2026-06-06/17-46-57Z_…").
+   *  Skips `.jsonl`/`.summary.json` root files, dot-files, and
+   *  sub-directories that belong to fleet/subagent sessions. */
+  private async collectSessionIds(
+    dir: string,
+    prefix = '',
+    depth = 0,
+  ): Promise<string[]> {
     const ids: string[] = [];
-    const entries = await fsp.readdir(dir, { withFileTypes: true });
+    let entries: Dirent[];
+    try {
+      entries = await fsp.readdir(dir, { withFileTypes: true });
+    } catch {
+      return ids;
+    }
     for (const entry of entries) {
-      const full = path.join(dir, entry.name);
+      // Skip dot-files and known non-session directories
+      if (entry.name.startsWith('.') && entry.name !== '.wrongstack') continue;
+      if (entry.name === 'shared' || entry.name === 'subagents' || entry.name === 'attachments')
+        continue;
       if (entry.isDirectory()) {
-        ids.push(...(await this.collectSessionIds(full)));
+        // Date-shard directories become the prefix for their contents
+        const childPrefix = depth === 0 ? entry.name : `${prefix}/${entry.name}`;
+        ids.push(...(await this.collectSessionIds(path.join(dir, entry.name), childPrefix, depth + 1)));
       } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
-        ids.push(entry.name.replace(/\.jsonl$/, ''));
+        const base = entry.name.replace(/\.jsonl$/, '');
+        // Skip files at root level (like .jsonl that might be the index itself)
+        if (depth === 0) continue;
+        // Skip subagent session logs (they live under subagents/ which we skip above;
+        // but if somehow found, skip by heuristic: base starts with a known role name)
+        ids.push(prefix ? `${prefix}/${base}` : base);
       }
     }
     return ids;
@@ -228,9 +374,85 @@ export class DefaultSessionStore implements SessionStore {
     }
   }
 
-  async delete(id: string): Promise<void> {
-    await fsp.unlink(this.sessionPath(id, '.jsonl'));
+  /**
+   * Delete a session and all associated files: JSONL, summary, plan/todos
+   * sidecars, and the session directory (fleet.json, shared/, subagents/).
+   */
+  private async deleteSession(id: string): Promise<void> {
+    // Remove the JSONL and summary.
+    await fsp.unlink(this.sessionPath(id, '.jsonl')).catch(() => undefined);
     await fsp.unlink(this.sessionPath(id, '.summary.json')).catch(() => undefined);
+    // Remove sidecar files that live next to the JSONL.
+    const shardDir = path.dirname(path.join(this.dir, id));
+    const base = path.basename(id);
+    for (const ext of ['.plan.json', '.todos.json']) {
+      await fsp.unlink(path.join(shardDir, `${base}${ext}`)).catch(() => undefined);
+    }
+    // Remove the session directory (may contain fleet.json, shared/, subagents/).
+    const sessDir = path.join(shardDir, base);
+    await fsp.rm(sessDir, { recursive: true, force: true }).catch(() => undefined);
+    // Write an index tombstone so readIndex() filters this session out.
+    await this.writeTombstone(id);
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.deleteSession(id);
+  }
+
+  async prune(maxAgeDays = 30): Promise<number> {
+    const cutoff = Date.now() - maxAgeDays * 86_400_000;
+    let deleted = 0;
+
+    // Read the active session lock to avoid pruning the current session.
+    let activeSessionId: string | null = null;
+    try {
+      const raw = await fsp.readFile(path.join(this.dir, 'active.json'), 'utf8');
+      const active = JSON.parse(raw) as { sessionId?: string };
+      activeSessionId = active.sessionId ?? null;
+    } catch {
+      // no active.json — nothing to protect
+    }
+
+    const entries = await fsp.readdir(this.dir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      // entry.name is a date-shard like "2026-06-06"
+      const dateDir = path.join(this.dir, entry.name);
+      const files = await fsp.readdir(dateDir, { withFileTypes: true }).catch(() => []);
+      for (const file of files) {
+        if (!file.isFile() || !file.name.endsWith('.jsonl')) continue;
+        const jsonlPath = path.join(dateDir, file.name);
+        try {
+          const stat = await fsp.stat(jsonlPath);
+          if (stat.mtimeMs >= cutoff) continue;
+        } catch {
+          continue;
+        }
+        const id = `${entry.name}/${file.name.replace(/\.jsonl$/, '')}`;
+        // Never prune the currently active session.
+        if (activeSessionId && id === activeSessionId) continue;
+        await this.deleteSession(id);
+        deleted++;
+      }
+    }
+    if (deleted > 0) {
+      // Compact the index to remove tombstones for deleted sessions.
+      await this.compactIndex().catch(() => undefined);
+    }
+    // Clean up empty date-shard directories left behind after pruning.
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const dateDir = path.join(this.dir, entry.name);
+      try {
+        const remaining = await fsp.readdir(dateDir);
+        if (remaining.length === 0) {
+          await fsp.rmdir(dateDir).catch(() => undefined);
+        }
+      } catch {
+        // best-effort
+      }
+    }
+    return deleted;
   }
 
   async clearHistory(id: string): Promise<void> {
@@ -256,13 +478,48 @@ export class DefaultSessionStore implements SessionStore {
         firstUser && firstUser.type === 'user_input'
           ? userInputTitle(firstUser.content)
           : '(empty session)';
+
+      // Compute enriched stats from events.
+      let iterationCount = 0;
+      let toolCallCount = 0;
+      let toolErrorCount = 0;
+      let fileChangeCount = 0;
+      const toolBreakdown: Record<string, number> = {};
+      let outcome: SessionSummary['outcome'] = undefined;
+      const lastEvent = data.events[data.events.length - 1];
+
+      for (const e of data.events) {
+        if (e.type === 'in_flight_start') iterationCount++;
+        else if (e.type === 'tool_call_start') {
+          toolCallCount++;
+          toolBreakdown[e.name] = (toolBreakdown[e.name] ?? 0) + 1;
+        } else if (e.type === 'tool_result' && e.isError) toolErrorCount++;
+        else if (e.type === 'file_snapshot') fileChangeCount += e.files.length;
+      }
+
+      // Determine outcome from the last event.
+      if (lastEvent?.type === 'session_end') {
+        outcome = 'completed';
+      } else if (lastEvent?.type === 'in_flight_start') {
+        outcome = 'aborted';
+      } else if (data.events.some((e) => e.type === 'error')) {
+        outcome = 'error';
+      }
+
       return {
         id,
         title,
         startedAt: data.metadata.startedAt,
+        endedAt: data.metadata.endedAt,
         model: data.metadata.model ?? 'unknown',
         provider: data.metadata.provider ?? 'unknown',
         tokenTotal: data.usage.input + data.usage.output,
+        iterationCount: iterationCount > 0 ? iterationCount : undefined,
+        toolCallCount: toolCallCount > 0 ? toolCallCount : undefined,
+        toolErrorCount: toolErrorCount > 0 ? toolErrorCount : undefined,
+        fileChangeCount: fileChangeCount > 0 ? fileChangeCount : undefined,
+        toolBreakdown: Object.keys(toolBreakdown).length > 0 ? toolBreakdown : {},
+        outcome,
       };
     } catch {
       return {
@@ -378,6 +635,16 @@ class FileSessionWriter implements SessionWriter {
   private appendFailCount = 0;
   private lastAppendWarnAt = 0;
   private readonly secretScrubber?: SecretScrubber;
+  private readonly onCloseCb?: (summary: SessionSummary) => void;
+
+  // ── Enriched summary tracking ──────────────────────────────────────────
+  private iterationCount = 0;
+  private toolCallCount = 0;
+  private toolErrorCount = 0;
+  private toolBreakdown: Record<string, number> = {};
+  private fileChangeCount = 0;
+  private compactionCount = 0;
+  private outcome: SessionSummary['outcome'] = undefined;
 
   /**
    * Scrub secrets out of conversation-turn events before they are observed
@@ -432,12 +699,18 @@ class FileSessionWriter implements SessionWriter {
       dir?: string;
       filePath?: string;
       secretScrubber?: SecretScrubber;
+      /** Called on close() with the finalized summary for index/sidecar writes. */
+      onClose?: (summary: SessionSummary) => void;
     } = {},
   ) {
     this.resumed = opts.resumed ?? false;
-    this.manifestFile = opts.dir ? path.join(opts.dir, `${id}.summary.json`) : '';
+    // id already contains a date-prefix shard (e.g. "2026-06-06/17-46-57Z_…").
+    // opts.dir is the shard directory — join with basename so the manifest
+    // lives next to the JSONL file instead of creating a double-nested path.
+    this.manifestFile = opts.dir ? path.join(opts.dir, `${path.basename(id)}.summary.json`) : '';
     this.filePath = opts.filePath ?? '';
     this.secretScrubber = opts.secretScrubber;
+    this.onCloseCb = opts.onClose;
     this.summary = {
       id,
       title: '(empty session)',
@@ -503,8 +776,23 @@ class FileSessionWriter implements SessionWriter {
     // Track open tool uses so we can serialize them on close for resume.
     if (event.type === 'tool_use') {
       this.openToolUses.add(event.id);
+    } else if (event.type === 'tool_call_start') {
+      this.toolCallCount++;
+      this.toolBreakdown[event.name] = (this.toolBreakdown[event.name] ?? 0) + 1;
     } else if (event.type === 'tool_result') {
       this.openToolUses.delete(event.id);
+      if (event.isError) {
+        this.toolErrorCount++;
+        this.outcome = 'error';
+      }
+    } else if (event.type === 'file_snapshot') {
+      this.fileChangeCount += event.files.length;
+    } else if (event.type === 'compaction') {
+      this.compactionCount++;
+    }
+    // Error events (provider errors, execution errors) mark the session as failed.
+    if (event.type === 'error' || event.type === 'provider_error') {
+      this.outcome = 'error';
     }
     if (event.type === 'user_input' && this.summary.title === '(empty session)') {
       this.summary = { ...this.summary, title: userInputTitle(event.content) };
@@ -515,6 +803,8 @@ class FileSessionWriter implements SessionWriter {
     } else if (event.type === 'session_end') {
       const total = event.usage.input + event.usage.output;
       if (total > 0) this.summary = { ...this.summary, tokenTotal: total };
+    } else if (event.type === 'in_flight_start') {
+      this.iterationCount++;
     }
   }
 
@@ -522,12 +812,31 @@ class FileSessionWriter implements SessionWriter {
     if (this.closing) return;
     this.closing = true;
     this.closed = true;
+    // Finalize the summary before writing.
+    this.summary = {
+      ...this.summary,
+      endedAt: new Date().toISOString(),
+      iterationCount: this.iterationCount,
+      toolCallCount: this.toolCallCount,
+      toolErrorCount: this.toolErrorCount,
+      fileChangeCount: this.fileChangeCount,
+      compactionCount: this.compactionCount > 0 ? this.compactionCount : undefined,
+      toolBreakdown:
+        { ...this.toolBreakdown },
+      outcome: this.outcome ?? 'completed',
+    };
     if (this.manifestFile) {
       try {
         await atomicWrite(this.manifestFile, JSON.stringify(this.summary), { mode: 0o600 });
       } catch {
         // manifest write is best-effort
       }
+    }
+    // Notify the store so it can update the session index.
+    try {
+      this.onCloseCb?.(this.summary);
+    } catch {
+      // best-effort
     }
     try {
       await this.handle.close();

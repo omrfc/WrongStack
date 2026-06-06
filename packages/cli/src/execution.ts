@@ -600,11 +600,14 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           chime: ((config.autonomy as Record<string, unknown> | undefined)?.['chime'] as boolean) ?? false,
           // Confirm before exit: show "confirm exit" prompt on Ctrl+C.
           confirmExit: ((config.autonomy as Record<string, unknown> | undefined)?.['confirmExit'] as boolean) ?? true,
-          // Default OFF so the terminal's native scrollback works for chat
-          // history out of the box. Users who hit resize/overlay-leak
-          // artifacts can opt back into alt-screen with `--alt-screen`.
-          // `--no-alt-screen` still wins when both are passed.
-          altScreen: flags['alt-screen'] === true && flags['no-alt-screen'] !== true,
+          // Default ON: the managed full-screen viewport pins the status bar +
+          // panels and renders chat into an in-app scroll region (mouse wheel /
+          // PgUp-PgDn / Ctrl+Home-End), so the live region can never "jump" or
+          // leak into native scrollback — the inline-mode artifact where the
+          // streaming tool box and input prompt get re-stamped into history.
+          // Opt out with `--no-alt-screen` for raw native scrollback (at the
+          // cost of those artifacts). `--alt-screen` is the explicit opt-in.
+          altScreen: flags['no-alt-screen'] !== true,
           director,
           fleetRoster,
           onAfterExit: () => {

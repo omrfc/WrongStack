@@ -111,11 +111,34 @@ export function buildLoadCommand(opts: SlashCommandContext): SlashCommand {
       if (!opts.sessionStore) return { message: 'No session store configured.' };
       const list = await opts.sessionStore.list(10);
       if (list.length === 0) return { message: 'No saved sessions.' };
-      const lines = list.map(
-        (s) =>
-          `  ${s.id}  ${color.dim(s.startedAt)}  ${color.dim(`${s.tokenTotal} tok`)}  ${s.title}`,
-      );
-      const msg = `Recent sessions:\n${lines.join('\n')}\n\n${color.dim(`Resume one with: wstack resume ${list[0]?.id ?? '<id>'}\n`)}\n${color.dim('Tip: /resume --incomplete — list sessions that crashed mid-iteration')}`;
+      const lines = list.map((s) => {
+        // Build a compact stats column: tools, errors, outcome badge.
+        const parts: string[] = [];
+        parts.push(color.dim(`${s.tokenTotal.toLocaleString()} tok`));
+        if (s.toolCallCount) {
+          const toolStr = `${s.toolCallCount} call${s.toolCallCount === 1 ? '' : 's'}`;
+          parts.push(s.toolErrorCount ? color.yellow(toolStr) : color.cyan(toolStr));
+        }
+        if (s.iterationCount) parts.push(color.dim(`${s.iterationCount} iter`));
+        if (s.outcome) {
+          const badge =
+            s.outcome === 'completed' ? color.green('✓') :
+            s.outcome === 'aborted' ? color.yellow('⚠') :
+            s.outcome === 'error' ? color.red('✗') :
+            color.dim('?');
+          parts.push(badge);
+        }
+        const stat = parts.join(' ');
+        const date = color.dim(s.startedAt.slice(0, 16).replace('T', ' '));
+        return `  ${s.id.padEnd(42)} ${date}  ${stat}\n    ${color.dim(s.title)}`;
+      });
+      const msg = [
+        color.bold(`Recent sessions (${list.length}):`),
+        ...lines,
+        '',
+        color.dim(`Resume: wstack resume ${list[0]?.id ?? '<id>'}`),
+        color.dim('Tip: /resume --incomplete — list crashed sessions'),
+      ].join('\n');
       opts.renderer.write(msg);
       return { message: msg };
     },

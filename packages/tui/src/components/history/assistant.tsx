@@ -84,10 +84,47 @@ export function AssistantBody({
   );
 }
 
+/** Rows reserved by the live assistant tail. Held constant so the streaming
+ *  region never grows row-by-row (see ToolStreamBox for the why). */
+const ASSISTANT_TAIL_LINES = 8;
+
+/**
+ * Build the CONSTANT-height row set for the live assistant tail: always exactly
+ * `tailLines` rows (newest pinned to the bottom, blank padding on top), each
+ * truncated to `contentWidth` so nothing wraps. Pure + exported for testing.
+ */
+export function assistantTailRows(
+  text: string,
+  tailLines: number,
+  contentWidth: number,
+): string[] {
+  const tail = text.split('\n').slice(-tailLines);
+  const rows: string[] = [];
+  for (let i = 0; i < tailLines - tail.length; i++) rows.push('');
+  for (const line of tail) {
+    rows.push(line.length > contentWidth ? `${line.slice(0, contentWidth - 1)}…` : line);
+  }
+  return rows;
+}
+
 /**
  * The live "ASSISTANT: (streaming...)" tail shown below committed history.
+ *
+ * Renders at a CONSTANT height (header + ASSISTANT_TAIL_LINES rows) with every
+ * line truncated to the terminal width so nothing wraps. A wrapping/growing
+ * tail pinned to the bottom of the screen forces the terminal to scroll on each
+ * delta, and in inline (non-alt-screen) mode each scroll leaks the input prompt
+ * row into permanent scrollback. Holding the height fixed limits that to one
+ * scroll when streaming starts. Rows are bottom-aligned (blank padding on top)
+ * so the newest line stays pinned to the bottom.
  */
-export function AssistantTail({ text }: { text: string }): React.ReactElement {
+export function AssistantTail({
+  text,
+  termWidth,
+}: { text: string; termWidth: number }): React.ReactElement {
+  // border (1) + paddingLeft (1) + 1 safety column against last-column autowrap.
+  const contentWidth = Math.max(20, termWidth - 3);
+  const rows = assistantTailRows(text, ASSISTANT_TAIL_LINES, contentWidth);
   return (
     <Box
       flexDirection="column"
@@ -105,7 +142,12 @@ export function AssistantTail({ text }: { text: string }): React.ReactElement {
         </Text>
         <Text dimColor>{'  (streaming…)'}</Text>
       </Box>
-      <Text color="white">{text}</Text>
+      <Box flexDirection="column">
+        {rows.map((r, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: fixed-height block, index is the row
+          <Text key={i} color="white">{r || ' '}</Text>
+        ))}
+      </Box>
     </Box>
   );
 }

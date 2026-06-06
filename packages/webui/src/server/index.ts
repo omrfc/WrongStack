@@ -234,6 +234,10 @@ export async function startWebUI(
 
   // Session store
   const sessionStore = new DefaultSessionStore({ dir: wpaths.projectSessions });
+  // Prune old sessions on server start (non-blocking).
+  sessionStore.prune(30).then((count) => {
+    if (count > 0) logger.info(`Pruned ${count} old session${count === 1 ? '' : 's'}.`);
+  }).catch(() => undefined);
   // Session reader — same on-disk store, read-only access. Used by the
   // collaboration handler to replay the last N events to late-joining
   // observers (Phase 1.5 of idea #13).

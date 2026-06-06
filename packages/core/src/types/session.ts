@@ -177,9 +177,25 @@ export interface SessionSummary {
   id: string;
   title: string;
   startedAt: string;
+  /** When the session finished (null if still running / crashed). */
+  endedAt?: string;
   model: string;
   provider: string;
   tokenTotal: number;
+  /** Number of LLM iterations (turn cycles). */
+  iterationCount?: number;
+  /** Number of tool calls executed. */
+  toolCallCount?: number;
+  /** Number of tool calls that returned an error. */
+  toolErrorCount?: number;
+  /** Number of files changed (created + modified + deleted). */
+  fileChangeCount?: number;
+  /** Per-tool breakdown: tool name → call count. */
+  toolBreakdown?: Record<string, number>;
+  /** Number of compaction events. */
+  compactionCount?: number;
+  /** Session outcome: 'completed', 'error', 'timeout', 'aborted', or undefined. */
+  outcome?: 'completed' | 'error' | 'timeout' | 'aborted';
 }
 
 export interface SessionData {
@@ -212,6 +228,19 @@ export interface SessionStore {
    * Called by /clear to wipe persistent chat history.
    */
   clearHistory(id: string): Promise<void>;
+  /**
+   * Delete sessions whose JSONL file mtime is older than maxAgeDays.
+   * Also removes associated summary files, plan/todos sidecars, and
+   * session directories. Returns the count of deleted sessions.
+   * Sessions referenced by active.json are never pruned.
+   */
+  prune(maxAgeDays?: number): Promise<number>;
+  /**
+   * Rebuild the session index from disk. Scans all session directories,
+   * computes summaries, and writes a fresh _index.jsonl. Returns the
+   * number of sessions indexed.
+   */
+  rebuildIndex?(): Promise<number>;
 }
 
 export interface SessionWriter {

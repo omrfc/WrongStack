@@ -13,7 +13,7 @@ export type { BodySegment } from './types.js';
 export { Banner } from './banner.js';
 export { CodeBlock, DiffBlock, type DiffLineKind, type DiffLineRow, extractDiffPreview, parseUnifiedDiff } from './code-block.js';
 export { Entry } from './entry.js';
-export { MESSAGE_PANEL_CHROME_WIDTH, AssistantBody, AssistantTail, splitFencedBlocks } from './assistant.js';
+export { MESSAGE_PANEL_CHROME_WIDTH, AssistantBody, AssistantTail, assistantTailRows, splitFencedBlocks } from './assistant.js';
 export {
   shortenPath,
   previewArgs,
@@ -32,6 +32,7 @@ export {
   formatToolArgs,
   formatToolOutput,
   ToolStreamBox,
+  streamBoxRows,
   MAX_STREAM_DISPLAY_CHARS,
   tailForDisplay,
 } from './utils.js';
@@ -73,7 +74,7 @@ export function History({ entries, streamingText, toolStream }: HistoryProps): R
           </Box>
         )}
       </Static>
-      {tail ? <AssistantTail text={tail} /> : null}
+      {tail ? <AssistantTail text={tail} termWidth={termWidth} /> : null}
       {toolTail ? (
         <ToolStreamBox
           name={toolStream!.name}

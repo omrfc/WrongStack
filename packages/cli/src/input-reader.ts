@@ -2,7 +2,13 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
-import { type InputReader, type PromptOption, setRawMode, writeOut } from '@wrongstack/core';
+import {
+  type InputReader,
+  type PromptOption,
+  setOutputLineGuard,
+  setRawMode,
+  writeOut,
+} from '@wrongstack/core';
 
 export interface ReadlineInputReaderOptions {
   historyFile?: string;
@@ -78,18 +84,26 @@ export class ReadlineInputReader implements InputReader {
         });
       }
       const fresh = this.ensure();
+      // While this prompt is on screen, bracket every out-of-band write
+      // (logger WARN/INFO, async Telegram activity) so it can't strand the
+      // half-typed draft in scrollback. Cleared the moment the read settles.
+      this.installPromptGuard(fresh);
       return new Promise<string>((resolve) => {
+        const settle = (line: string): void => {
+          setOutputLineGuard(null);
+          resolve(line);
+        };
         fresh.question(prompt ?? '> ', (line) => {
           if (line.trim()) {
             this.history.push(line);
             void this.saveHistory();
           }
-          resolve(line);
+          settle(line);
         });
         // Ctrl+C closes the readline interface — resolve with empty
         // string so callers treat it as cancel instead of crashing with
         // an unhandled EOF error.
-        fresh.once('close', () => resolve(''));
+        fresh.once('close', () => settle(''));
       }).then((result) => {
         // Close the interface so the next readLine call tears it down
         // first (see the guard above).  On Windows / Node ≥ 24 the
@@ -103,7 +117,47 @@ export class ReadlineInputReader implements InputReader {
     }
   }
 
+  /**
+   * Install the out-of-band write guard for the active prompt. When a log
+   * line or other async output lands while the user is mid-type, the guard
+   * clears the draft row, lets the message print, then repaints the prompt
+   * and the in-progress draft (cursor preserved) via readline's own
+   * refresh. Without it, each async write leaves the half-typed line
+   * stranded as a fresh scrollback row.
+   *
+   * No-op on non-TTY output (piped/redirected) — there's no draft to
+   * protect and the ANSI clear/repaint would be noise in a file.
+   */
+  private installPromptGuard(rl: readline.Interface): void {
+    const out = process.stdout;
+    if (!out.isTTY) {
+      setOutputLineGuard(null);
+      return;
+    }
+    setOutputLineGuard({
+      suspend(): void {
+        // Carriage-return to column 0 and erase the whole row so the
+        // out-of-band line prints onto clean terminal space.
+        readline.cursorTo(out, 0);
+        readline.clearLine(out, 0);
+      },
+      resume(): void {
+        // `prompt(true)` re-emits the prompt + current line buffer and
+        // restores the cursor column, so editing-in-place survives the
+        // interruption. Guarded: the interface may have closed between the
+        // write being issued and this callback firing.
+        try {
+          rl.prompt(true);
+        } catch {
+          // readline closed mid-write — nothing left to repaint.
+        }
+      },
+    });
+  }
+
   async readKey(prompt: string, options: PromptOption[]): Promise<string> {
+    // This flow drives stdin directly; no readline prompt to protect.
+    setOutputLineGuard(null);
     writeOut(prompt);
     return new Promise<string>((resolve) => {
       const stdin = process.stdin;
@@ -158,6 +212,7 @@ export class ReadlineInputReader implements InputReader {
     const stdin = process.stdin;
     if (!stdin.isTTY) return this.readLine(prompt);
     // Tear down the active readline so we can take over stdin.
+    setOutputLineGuard(null);
     this.rl?.close();
     this.rl = undefined;
     writeOut(prompt);
@@ -230,6 +285,7 @@ export class ReadlineInputReader implements InputReader {
   }
 
   async close(): Promise<void> {
+    setOutputLineGuard(null);
     await this.saveHistory();
     this.rl?.close();
     this.rl = undefined;

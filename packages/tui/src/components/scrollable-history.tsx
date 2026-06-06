@@ -185,7 +185,7 @@ export function ScrollableHistory({
               <Entry entry={entry} termWidth={termWidth} />
             </Box>
           ))}
-          {tail ? <AssistantTail text={tail} /> : null}
+          {tail ? <AssistantTail text={tail} termWidth={termWidth} /> : null}
           {toolTail ? (
             <ToolStreamBox
               name={toolStream!.name}

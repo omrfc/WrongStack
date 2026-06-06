@@ -5,6 +5,7 @@ import {
   isStdinTTY,
   isStdoutTTY,
   onResize,
+  setOutputLineGuard,
   setRawMode,
   writeErr,
   writeOut,
@@ -272,6 +273,71 @@ describe('term helpers', () => {
 
     it('returns false (no throw) when stream is null', () => {
       expect(writeErr('x', null as unknown as NodeJS.WriteStream)).toBe(false);
+    });
+  });
+
+  describe('output line guard', () => {
+    afterEach(() => setOutputLineGuard(null));
+
+    it('passes writes straight through when no guard is installed', () => {
+      const order: string[] = [];
+      const stream = {
+        write: (s: string) => {
+          order.push(`write:${s}`);
+          return true;
+        },
+      } as unknown as NodeJS.WriteStream;
+      expect(writeErr('WARN telegram\n', stream)).toBe(true);
+      expect(order).toEqual(['write:WARN telegram\n']);
+    });
+
+    it('brackets an out-of-band write with suspend()/resume() in order', () => {
+      const order: string[] = [];
+      setOutputLineGuard({
+        suspend: () => order.push('suspend'),
+        resume: () => order.push('resume'),
+      });
+      const stream = {
+        write: (s: string) => {
+          order.push(`write:${s}`);
+          return true;
+        },
+      } as unknown as NodeJS.WriteStream;
+
+      // Simulates a logger WARN landing while a readline prompt is live:
+      // the draft row is cleared, the message prints, the prompt repaints.
+      expect(writeErr('WARN telegram poll failed\n', stream)).toBe(true);
+      expect(order).toEqual([
+        'suspend',
+        'write:WARN telegram poll failed\n',
+        'resume',
+      ]);
+    });
+
+    it('stops bracketing once the guard is cleared', () => {
+      const order: string[] = [];
+      setOutputLineGuard({
+        suspend: () => order.push('suspend'),
+        resume: () => order.push('resume'),
+      });
+      setOutputLineGuard(null);
+      const stream = {
+        write: (s: string) => {
+          order.push(`write:${s}`);
+          return true;
+        },
+      } as unknown as NodeJS.WriteStream;
+      writeOut('plain\n', stream);
+      expect(order).toEqual(['write:plain\n']);
+    });
+
+    it('does not invoke the guard when the stream is unwritable', () => {
+      const suspend = vi.fn();
+      const resume = vi.fn();
+      setOutputLineGuard({ suspend, resume });
+      expect(writeOut('x', null as unknown as NodeJS.WriteStream)).toBe(false);
+      expect(suspend).not.toHaveBeenCalled();
+      expect(resume).not.toHaveBeenCalled();
     });
   });
 });

@@ -676,6 +676,34 @@ export function formatToolOutput(
 export const MAX_STREAM_DISPLAY_CHARS = 480;
 const MAX_STREAM_LINES = 8;
 
+/**
+ * Build the CONSTANT-height content block for the live tool-stream box: always
+ * exactly `maxLines` rows, newest-pinned-to-bottom, every line truncated to
+ * `contentWidth` so nothing wraps. Holding the row count fixed is what stops the
+ * live region from growing (and thus scrolling the terminal + leaking the header
+ * into scrollback) as output streams in. Pure + exported for testing.
+ */
+export function streamBoxRows(
+  text: string,
+  maxLines: number,
+  contentWidth: number,
+): Array<{ text: string; italic?: boolean }> {
+  const trunc = (line: string) =>
+    line.length > contentWidth ? `${line.slice(0, contentWidth - 1)}…` : line;
+  const lines = text.split('\n');
+  const totalLines = lines.length;
+  const hidden = Math.max(0, totalLines - maxLines);
+  const rows: Array<{ text: string; italic?: boolean }> = [];
+  if (hidden > 0) {
+    rows.push({ text: `  … ${hidden} more line${hidden === 1 ? '' : 's'} above`, italic: true });
+    for (const line of lines.slice(totalLines - (maxLines - 1))) rows.push({ text: trunc(line) });
+  } else {
+    for (let i = 0; i < maxLines - totalLines; i++) rows.push({ text: '' });
+    for (const line of lines) rows.push({ text: trunc(line) });
+  }
+  return rows;
+}
+
 export const ToolStreamBox = React.memo(function ToolStreamBox({
   name,
   text,
@@ -695,11 +723,13 @@ export const ToolStreamBox = React.memo(function ToolStreamBox({
   void tick;
 
   const elapsedMs = Date.now() - startedAt;
-  const lines = text.split('\n');
-  const totalLines = lines.length;
+  const totalLines = text.split('\n').length;
   const hidden = Math.max(0, totalLines - MAX_STREAM_LINES);
-  const visible = hidden > 0 ? lines.slice(hidden) : lines;
   const contentWidth = Math.max(20, Math.min(termWidth - 4, 100));
+  // Constant-height content block (see streamBoxRows): the live region must not
+  // grow row-by-row as output streams, or it scrolls the terminal and leaks the
+  // "◆ <tool> ⏱ …" header into scrollback on every update in inline mode.
+  const rows = streamBoxRows(text, MAX_STREAM_LINES, contentWidth);
 
   return (
     <Box flexDirection="column" marginTop={0}>
@@ -712,13 +742,10 @@ export const ToolStreamBox = React.memo(function ToolStreamBox({
         ) : null}
       </Box>
       <Box flexDirection="column" marginLeft={2}>
-        {hidden > 0 ? (
-          <Text dimColor italic>{`  … ${hidden} more line${hidden === 1 ? '' : 's'} above`}</Text>
-        ) : null}
-        {visible.map((line, i) => {
-          const trimmed = line.length > contentWidth ? `${line.slice(0, contentWidth - 1)}…` : line;
-          return <Text key={i} dimColor>{trimmed || ' '}</Text>;
-        })}
+        {rows.map((r, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: fixed-height block, index is the row
+          <Text key={i} dimColor italic={r.italic}>{r.text || ' '}</Text>
+        ))}
       </Box>
     </Box>
   );

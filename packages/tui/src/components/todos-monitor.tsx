@@ -1,5 +1,5 @@
 import type { TodoItem } from '@wrongstack/core';
-import { Box, Text, useInput, useStdout } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import type React from 'react';
 
 /**
@@ -11,13 +11,6 @@ import type React from 'react';
  */
 export function TodosMonitor({ todos }: { todos: TodoItem[] }): React.ReactElement {
   const { stdout } = useStdout();
-
-  useInput((_input, key) => {
-    if (key.escape) {
-      // Parent App.handleKey closes on Esc — this just consumes the event
-      // so Ink doesn't bubble it further.
-    }
-  });
 
   const done = todos.filter((t) => t.status === 'completed').length;
   const inProgress = todos.filter((t) => t.status === 'in_progress').length;

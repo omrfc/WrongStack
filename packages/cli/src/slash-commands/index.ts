@@ -270,6 +270,7 @@ import { buildModeCommand } from './mode.js';
 import { buildModelsCommand } from './models.js';
 import { buildNextCommand } from './next.js';
 import { buildPluginCommand } from './plugin.js';
+import { buildPruneCommand } from './prune.js';
 import { buildSddCommand } from './sdd.js';
 import { buildExitCommand, buildLoadCommand, buildSaveCommand } from './session.js';
 import { buildSetModelCommand } from './setmodel.js';
@@ -292,6 +293,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildCodebaseReindexCommand(opts),
     buildToolsCommand(opts),
     buildPluginCommand(opts),
+    buildPruneCommand(opts),
     buildMcpSlashCommand(opts),
     buildDiagCommand(opts),
     buildStatsCommand(opts),

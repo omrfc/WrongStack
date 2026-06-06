@@ -97,10 +97,49 @@ export function setRawMode(input: NodeJS.ReadStream, mode: boolean): boolean {
 }
 
 /**
+ * Bracket installed by the interactive input reader while a `readline`
+ * prompt is on screen. Out-of-band terminal writes — logger WARN/INFO
+ * lines, async activity from the Telegram bridge, etc. — go to the same
+ * physical terminal as the half-typed prompt but readline has no idea they
+ * happened, so it never repaints. The result is the classic corruption the
+ * user sees: every async line strands the in-progress draft as a fresh
+ * scrollback row (sometimes with its cursor underline).
+ *
+ * The guard closes that gap. `suspend()` wipes the draft row so the message
+ * prints clean; `resume()` repaints the prompt + draft (cursor preserved).
+ * When no prompt is active the guard is `null` and writes pass straight
+ * through — so agent-turn output (spinner, renderer) is untouched.
+ */
+export interface OutputLineGuard {
+  /** Clear the current input row right before an out-of-band write. */
+  suspend(): void;
+  /** Repaint the prompt + in-progress draft right after the write. */
+  resume(): void;
+}
+
+let activeOutputGuard: OutputLineGuard | null = null;
+
+/**
+ * Register (or clear, with `null`) the guard that brackets out-of-band
+ * writes. Installed by {@link writeOut}/{@link writeErr} consumers — in
+ * practice the CLI's readline input reader — only while a prompt is live.
+ * Idempotent; the most recent caller wins.
+ */
+export function setOutputLineGuard(guard: OutputLineGuard | null): void {
+  activeOutputGuard = guard;
+}
+
+/**
  * Stream-agnostic write primitive. Returns `false` when the stream is
  * missing or doesn't expose `write` so callers can degrade silently under
  * hostile host environments (closed pipe, mock injects `null`, test
  * replaces the stream with a stub).
+ *
+ * When an {@link OutputLineGuard} is installed (a readline prompt is on
+ * screen) the write is bracketed by `suspend()`/`resume()` so the user's
+ * half-typed input survives the interruption instead of being stranded in
+ * scrollback. The guard's own redraw uses raw stream writes — never
+ * `writeOut`/`writeErr` — so there is no re-entrancy here.
  *
  * **Not exported in the public API.** Exposed only inside `term.ts` for
  * `writeOut` / `writeErr` to share a single implementation. If a caller
@@ -114,7 +153,15 @@ function writeTo(
   stream: NodeJS.WriteStream | undefined,
 ): boolean {
   if (!stream || typeof stream.write !== 'function') return false;
+  const guard = activeOutputGuard;
+  if (!guard) {
+    stream.write(s);
+    return true;
+  }
+  // A prompt is live — wipe the draft row, emit the message, repaint.
+  guard.suspend();
   stream.write(s);
+  guard.resume();
   return true;
 }
 

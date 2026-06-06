@@ -4509,7 +4509,7 @@ export function App({
               nowTick={nowTick}
               onClose={() => dispatch({ type: 'worktreeMonitorToggle' })}
             />
-          ) : state.todosMonitorOpen && !managedLive ? (
+          ) : state.todosMonitorOpen ? (
             <TodosMonitor todos={agent.ctx.todos} />
           ) : state.monitorOpen ? (
             <FleetMonitor

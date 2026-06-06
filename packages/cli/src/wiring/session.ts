@@ -48,6 +48,12 @@ export async function setupSession(params: {
 }): Promise<SessionResult> {
   const { config, wpaths, projectRoot, cwd, sessionStore, systemPrompt, provider, tokenCounter, renderer, flags, onRecovery } = params;
 
+  // Prune sessions older than 30 days on every interactive start.
+  // Best-effort: failures here should not block the user.
+  sessionStore.prune(30).then((count) => {
+    if (count > 0) renderer.writeInfo(`Pruned ${count} old session${count === 1 ? '' : 's'}.`);
+  }).catch(() => undefined);
+
   let resumeId = typeof flags['resume'] === 'string' ? (flags['resume'] as string) : undefined;
 
   const recoveryLock = new RecoveryLock({ dir: wpaths.projectSessions, sessionStore });
