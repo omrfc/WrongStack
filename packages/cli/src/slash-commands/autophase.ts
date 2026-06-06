@@ -72,6 +72,7 @@ async function gatherProjectContext(projectRoot: string): Promise<string | undef
 export function buildAutoPhaseCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'autophase',
+    category: 'Agent',
     description: 'Autonomous phase-based workflow — plans a project into phases of todos and builds it with the LLM.',
     help: [
       'Usage:',

@@ -1,6 +1,6 @@
 import { type SecretVault, color } from '@wrongstack/core';
 import type { SlashCommand } from '@wrongstack/core';
-import { persistAutonomySetting } from '../settings-menu.js';
+import { persistAutonomySetting, persistConfigSetting } from '../settings-menu.js';
 import type { SlashCommandContext } from './index.js';
 
 /** No-op vault that passes values through unchanged.
@@ -31,6 +31,7 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
     '  /settings                     Show current settings',
     '  /settings delay <seconds>     Auto-proceed delay in auto mode (0 disables)',
     '  /settings mode <off|suggest|auto>   Default autonomy mode at startup',
+    '  /settings hints on|off        Show or suppress rotating launch hints',
     '  /settings defaults            Show built-in default values',
     '',
     'Settings are persisted to ~/.wrongstack/config.json.',
@@ -42,11 +43,13 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
       | undefined;
     const delay = autonomy?.autoProceedDelayMs ?? 45_000;
     const mode = autonomy?.defaultMode ?? 'off';
+    const hints = opts.configStore.get().hints !== false; // default true
     return [
       `${color.bold('WrongStack')} ${color.dim('— Settings')}`,
       '',
       `  auto-proceed delay:    ${color.cyan(formatDelay(delay))}   ${color.dim('change: /settings delay <seconds>')}`,
       `  default autonomy mode: ${color.cyan(mode)}   ${color.dim('change: /settings mode off|suggest|auto')}`,
+      `  launch hints:          ${hints ? color.cyan('on') : color.dim('off')}   ${color.dim('change: /settings hints on|off')}`,
       '',
       color.dim('  Persisted to ~/.wrongstack/config.json · /settings help for more'),
     ].join('\n');
@@ -54,7 +57,8 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
 
   return {
     name: 'settings',
-    description: 'View or change settings (auto-proceed delay, default autonomy mode).',
+    category: 'Config',
+    description: 'View or change settings (auto-proceed delay, default autonomy mode, launch hints).',
     help,
     async run(args) {
       const parts = args.trim().split(/\s+/).filter(Boolean);
@@ -80,6 +84,7 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
             '',
             `  auto-proceed delay:    ${color.cyan('45s')} ${color.dim('(WRONGSTACK_AUTO_PROCEED_DELAY_MS env)')}`,
             `  default autonomy mode: ${color.cyan('off')}`,
+            `  launch hints:          ${color.cyan('on')}`,
             `  iteration timeout:     ${color.cyan('5 min')}`,
             `  session timeout:       ${color.cyan('30 min')}`,
             `  max iterations:        ${color.cyan('100')}`,
@@ -126,8 +131,20 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
           return { message: `${color.green('✓')} default autonomy → ${color.bold(raw)}` };
         }
 
+        if (sub === 'hints') {
+          const raw = (parts[1] ?? '').toLowerCase();
+          if (!['on', 'off'].includes(raw)) {
+            return { message: `${color.amber('Usage:')} /settings hints on|off` };
+          }
+          const on = raw === 'on';
+          await persistConfigSetting(persistDeps, (cfg) => {
+            cfg.hints = on;
+          });
+          return { message: `${color.green('✓')} launch hints → ${on ? color.cyan('on') : color.dim('off')}` };
+        }
+
         return {
-          message: `${color.red('Unknown setting')} "${sub}". Try ${color.dim('/settings')}, ${color.dim('/settings delay <s>')}, or ${color.dim('/settings mode <m>')}.`,
+          message: `${color.red('Unknown setting')} "${sub}". Try ${color.dim('/settings')}, ${color.dim('/settings delay <s>')}, ${color.dim('/settings mode <m>')}, or ${color.dim('/settings hints on|off')}.`,
         };
       } catch (err) {
         return {

@@ -45,6 +45,7 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
 
   return {
     name: 'sdd',
+    category: 'Agent',
     description:
       'AI-driven SDD: /sdd [new|approve|execute|cancel|status|list|show|templates]',
     async run(args) {

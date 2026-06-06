@@ -27,6 +27,7 @@ const KNOWN_VERBS = new Set([
 export function buildGoalCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'goal',
+    category: 'Agent',
     description:
       'Set, inspect, or clear the long-running autonomous mission used by /autonomy eternal.',
     help: [

@@ -21,6 +21,7 @@ export type { McpParsedArgs } from './mcp-utils.js';
 export function buildMcpSlashCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'mcp',
+    category: 'Config',
     description:
       'Manage MCP servers: /mcp [list|add <name>|remove <name>|enable <name>|disable <name>|restart <name>]',
     aliases: ['mcp-servers'],

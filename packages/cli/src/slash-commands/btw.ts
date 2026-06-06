@@ -13,6 +13,7 @@ import type { SlashCommandContext } from './index.js';
 export function buildBtwCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'btw',
+    category: 'Agent',
     description:
       'Drop a "by the way" note for the running agent without interrupting it — delivered at the next step',
     argsHint: '<note>',

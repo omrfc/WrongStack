@@ -5,6 +5,7 @@ import type { SlashCommandContext } from './index.js';
 export function buildToolsCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'tools',
+    category: 'Inspect',
     description: 'List registered tools.',
     async run() {
       const all = opts.toolRegistry.listWithOwner();

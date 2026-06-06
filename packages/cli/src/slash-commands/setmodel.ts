@@ -148,6 +148,7 @@ export function buildSetModelCommand(opts: SlashCommandContext): SlashCommand {
 
   return {
     name: 'setmodel',
+    category: 'Config',
     description: 'View or change the leader model and the per-task model matrix.',
     help,
     async run(args) {

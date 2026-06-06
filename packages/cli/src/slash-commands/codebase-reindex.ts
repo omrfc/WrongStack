@@ -13,6 +13,7 @@ import type { SlashCommandContext } from './index.js';
 export function buildCodebaseReindexCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'codebase-reindex',
+    category: 'Inspect',
     aliases: ['reindex'],
     description: 'Rebuild the codebase symbol index used by codebase-search.',
     argsHint: '[force]',

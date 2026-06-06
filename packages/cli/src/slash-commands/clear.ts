@@ -4,6 +4,7 @@ import type { SlashCommandContext } from './index.js';
 export function buildClearCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'clear',
+    category: 'Session',
     description: 'Reset the session and start a new one.',
     help: [
       'Usage:',

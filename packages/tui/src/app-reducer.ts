@@ -102,6 +102,7 @@ export interface SlashCommandMatch {
   description: string;
   argsHint?: string;
   isBuiltin: boolean;
+  category: 'Run' | 'Session' | 'Inspect' | 'Agent' | 'Config' | 'App';
 }
 
 type DraftEntry = HistoryEntry extends infer T

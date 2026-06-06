@@ -15,6 +15,7 @@ import type { SlashCommandContext } from './index.js';
 export function buildContextCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'context',
+    category: 'Inspect',
     aliases: ['ctx'],
     description: 'Show context window summary.',
     help: [

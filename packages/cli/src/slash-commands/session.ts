@@ -8,6 +8,7 @@ import type { SlashCommandContext } from './index.js';
 export function buildSaveCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'save',
+    category: 'Session',
     description: 'Save current session (auto by default; this forces flush).',
     async run(_args, ctx) {
       await ctx.session.append({
@@ -23,6 +24,7 @@ export function buildSaveCommand(opts: SlashCommandContext): SlashCommand {
 export function buildLoadCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'resume',
+    category: 'Session',
     aliases: ['load', 'sessions'],
     description: 'List recent sessions, show incomplete ones (--incomplete), or plan a recovery (--recover <id>).',
     async run(args) {
@@ -148,6 +150,7 @@ export function buildLoadCommand(opts: SlashCommandContext): SlashCommand {
 export function buildExitCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'exit',
+    category: 'App',
     aliases: ['quit', 'q'],
     description: 'Exit the REPL.',
     async run() {

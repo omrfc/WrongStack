@@ -48,6 +48,7 @@ const HELP = [
 export function buildTelegramSetupCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'telegram-setup',
+    category: 'Config',
     aliases: ['tg-setup'],
     description: 'Configure Telegram bot token and default chat. /telegram-setup <token> [chatId]',
     argsHint: '[botToken] [chatId]',
@@ -97,7 +98,7 @@ export function buildTelegramSetupCommand(opts: SlashCommandContext): SlashComma
       }
 
       // ---- Validate args: first arg is botToken ----
-      const botToken = parts[0]!;
+      const botToken = parts[0] ?? '';
       const chatId = parts[1];
 
       // Basic token format check: numbers:alphanumeric
@@ -142,7 +143,7 @@ export function buildTelegramSetupCommand(opts: SlashCommandContext): SlashComma
         };
       }
 
-      const bot = botInfo.result!;
+      const bot = botInfo.result;
 
       // ---- Persist to config ----
       const persistDeps = {

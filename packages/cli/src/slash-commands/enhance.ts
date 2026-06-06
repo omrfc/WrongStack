@@ -23,6 +23,7 @@ export function buildEnhanceCommand(opts: SlashCommandContext): SlashCommand {
 
   return {
     name: 'enhance',
+    category: 'Config',
     description: 'Toggle prompt refinement ("did you mean this?") before sending.',
     help: [
       'Usage:',

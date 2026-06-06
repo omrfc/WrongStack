@@ -4,6 +4,7 @@ import type { SlashCommandContext } from './index.js';
 export function buildPluginCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'plugin',
+    category: 'Config',
     aliases: ['plugins'],
     description:
       'Manage plugins: /plugin [list|status|official|install <alias>|enable <name>|disable <name>|remove <name>]',

@@ -83,7 +83,7 @@ function parseFlags(tokens: string[]): {
 
   let i = 0;
   while (i < tokens.length) {
-    const t = tokens[i]!;
+    const t = tokens[i] ?? '';
     if (t.startsWith('--')) {
       const key = t.slice(2);
       switch (key) {
@@ -177,6 +177,7 @@ export function buildModelsCommand(opts: SlashCommandContext): SlashCommand {
 
   return {
     name: 'models',
+    category: 'Config',
     description: 'Manage custom model definitions.',
     help,
     async run(args) {
@@ -207,7 +208,7 @@ export function buildModelsCommand(opts: SlashCommandContext): SlashCommand {
         return {
           message: [
             `${color.bold('Custom Models')} ${color.dim(`(${ids.length})`)}`,
-            ...ids.sort().map((id) => fmtModel(id, models[id]!)),
+            ...ids.sort().map((id) => fmtModel(id, models[id])),
           ].join('\n'),
         };
       }

@@ -27,6 +27,7 @@ import type { SlashCommandContext } from './index.js';
 export function buildCollabCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'collab',
+    category: 'Agent',
     description: 'Live collaboration helpers (status / invite / history).',
     async run(args, ctx) {
       // SlashCommand.run receives `args` as a single string — split it

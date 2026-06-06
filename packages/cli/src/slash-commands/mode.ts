@@ -20,7 +20,7 @@ async function runModePicker(modeStore: ModeStore, reader: InputReader): Promise
     lines.push(color.dim('  ↑↓ navigate   Enter select   q quit\n'));
     lines.push('');
     for (let i = 0; i < modes.length; i++) {
-      const m = modes[i]!;
+      const m = modes[i];
       const mark = m.id === active?.id ? color.green(' [active]') : '';
       const prefix = i === currentCursor ? color.bold('❯ ') : '  ';
       const name = i === currentCursor ? color.bold(m.name) : m.name;
@@ -60,6 +60,7 @@ export function buildModeCommand(
 ): SlashCommand {
   return {
     name: 'mode',
+    category: 'Config',
     description: 'Switch or view the current mode',
     help: [
       'Usage:',

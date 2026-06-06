@@ -7,6 +7,7 @@ import type { SlashCommandContext } from './index.js';
 export function buildInitCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'init',
+    category: 'Config',
     description: 'Create or update .wrongstack/AGENTS.md project context for the system prompt.',
     async run(_args, ctx) {
       const dir = path.join(ctx.projectRoot, '.wrongstack');

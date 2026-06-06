@@ -8,6 +8,7 @@ export type AutonomyMode = 'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-par
 export function buildAutonomyCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'autonomy',
+    category: 'Agent',
     description: 'Toggle or query autonomy mode (self-driving agent).',
     help: [
       'Usage:',

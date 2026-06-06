@@ -5,6 +5,7 @@ import type { SlashCommandContext } from './index.js';
 export function buildYoloCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'yolo',
+    category: 'Config',
     description: 'Toggle or query YOLO (auto-approve) mode.',
     help: [
       'Usage:',

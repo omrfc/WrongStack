@@ -1,6 +1,6 @@
 // Slash command registry and matching utilities for ChatInput
 
-export type SlashCategory = 'Session' | 'Inspect' | 'Run' | 'App';
+export type SlashCategory = 'Run' | 'Session' | 'Inspect' | 'Agent' | 'Config' | 'App';
 
 export interface SlashCommandDef {
   name: string;
@@ -10,25 +10,63 @@ export interface SlashCommandDef {
 }
 
 export const SLASH_COMMANDS: SlashCommandDef[] = [
-  { name: '/help', category: 'App', description: 'Show every slash command and what it does' },
-  { name: '/export', category: 'Session', description: 'Download the current chat as markdown' },
-  { name: '/todos', category: 'Inspect', description: 'List current todos (try `/todos clear` to reset)' },
-  { name: '/clear', category: 'Session', description: 'Wipe current context (keeps session id, disk record stays)' },
+  // Run
+  { name: '/abort', category: 'Run', aliases: ['/stop'], description: 'Abort the current run' },
+
+  // Session
   { name: '/new', category: 'Session', description: 'Start a brand-new session (fresh on disk and in memory)' },
+  { name: '/clear', category: 'Session', description: 'Wipe current context (keeps session id, disk record stays)' },
   { name: '/compact', category: 'Session', description: 'Shrink context — elide ancient tool output' },
   { name: '/repair', category: 'Session', description: 'Repair orphan tool_use/tool_result blocks in context' },
+  { name: '/save', category: 'Session', description: 'Force-flush the session (auto-saved already)' },
+  { name: '/load', category: 'Session', aliases: ['/resume'], description: 'Resume a previous session from disk' },
+  { name: '/prune', category: 'Session', description: 'Delete old sessions (default older than 30 days)' },
+  { name: '/export', category: 'Session', description: 'Download the current chat as markdown' },
+
+  // Inspect
   { name: '/debug', category: 'Inspect', aliases: ['/context'], description: 'Per-section context size breakdown' },
   { name: '/tools', category: 'Inspect', description: 'List every registered tool the model can call' },
   { name: '/memory', category: 'Inspect', description: 'Show all remembered notes (project + user scope)' },
   { name: '/skill', category: 'Inspect', aliases: ['/skills'], description: 'List active skills' },
   { name: '/diag', category: 'Inspect', description: 'Runtime diagnostics (provider, tools, features, mode, usage)' },
   { name: '/stats', category: 'Inspect', description: 'Session stats: tokens, cache hit ratio, cost, elapsed' },
-  { name: '/save', category: 'Session', description: 'Force-flush the session (auto-saved already)' },
-  { name: '/abort', category: 'Run', aliases: ['/stop'], description: 'Abort the current run' },
-  { name: '/settings', category: 'App', aliases: ['/model'], description: 'Open settings (provider/model/keys)' },
+  { name: '/todos', category: 'Inspect', description: 'List current todos (try `/todos clear` to reset)' },
+  { name: '/codebase-reindex', category: 'Inspect', aliases: ['/reindex'], description: 'Rebuild the codebase symbol index' },
+
+  // Agent
+  { name: '/spawn', category: 'Agent', description: 'Spawn an isolated subagent to handle a task' },
+  { name: '/agents', category: 'Agent', description: 'Show status of spawned subagents' },
+  { name: '/fleet', category: 'Agent', description: 'Inspect and control the agent fleet' },
+  { name: '/director', category: 'Agent', description: 'Promote to director mode at runtime' },
+  { name: '/autonomy', category: 'Agent', description: 'Toggle or query autonomy mode (self-driving agent)' },
+  { name: '/goal', category: 'Agent', description: 'Set, inspect, or clear the autonomous mission' },
+  { name: '/autophase', category: 'Agent', description: 'Autonomous phase-based workflow with subagents' },
+  { name: '/fix', category: 'Agent', description: 'Diagnose and fix a reported error or bug' },
+  { name: '/sdd', category: 'Agent', description: 'AI-driven Specification-Driven Development workflow' },
+  { name: '/btw', category: 'Agent', description: 'Drop a mid-run note without interrupting the agent' },
+  { name: '/collab', category: 'Agent', description: 'Live collaboration helpers (status / invite / history)' },
+
+  // Config
+  { name: '/settings', category: 'Config', aliases: ['/model'], description: 'Open settings (provider/model/keys)' },
+  { name: '/setmodel', category: 'Config', description: 'Quick-switch the active provider/model' },
+  { name: '/models', category: 'Config', description: 'List available providers and models' },
+  { name: '/mode', category: 'Config', description: 'Switch the active mode (persona/skill set)' },
+  { name: '/yolo', category: 'Config', description: 'Toggle or query YOLO (auto-approve) mode' },
+  { name: '/next', category: 'Config', description: 'Toggle next-task prediction after each turn' },
+  { name: '/enhance', category: 'Config', description: 'Toggle prompt refinement before sending' },
+  { name: '/mcp', category: 'Config', aliases: ['/mcp-servers'], description: 'Manage MCP servers' },
+  { name: '/plugin', category: 'Config', aliases: ['/plugins'], description: 'Manage plugins' },
+  { name: '/statusline', category: 'Config', aliases: ['/sl'], description: 'Customize status bar chips' },
+  { name: '/telegram-setup', category: 'Config', aliases: ['/tg-setup'], description: 'Configure Telegram bot token and chat' },
+  { name: '/init', category: 'Config', description: 'Create or update .wrongstack/AGENTS.md project context' },
+  { name: '/worktree', category: 'Config', aliases: ['/wt'], description: 'Inspect/manage git worktrees for AutoPhase' },
+
+  // App
+  { name: '/help', category: 'App', description: 'Show every slash command and what it does' },
+  { name: '/exit', category: 'App', description: 'Exit the current session' },
 ];
 
-export const SLASH_CATEGORY_ORDER: SlashCategory[] = ['Run', 'Session', 'Inspect', 'App'];
+export const SLASH_CATEGORY_ORDER: SlashCategory[] = ['Run', 'Session', 'Inspect', 'Agent', 'Config', 'App'];
 
 export function matchSlash(query: string): SlashCommandDef[] {
   const q = query.toLowerCase();

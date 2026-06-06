@@ -67,6 +67,7 @@ export interface StatuslineCommandDeps {
 export function buildStatuslineCommand(deps: StatuslineCommandDeps): SlashCommand {
   return {
     name: 'statusline',
+    category: 'Config',
     aliases: ['sl'],
     description: 'Customize status bar chips: /statusline [item] [on|off] or /statusline reset',
     help: [

@@ -8,6 +8,7 @@ import type { SlashCommandContext } from './index.js';
 export function buildWorktreeCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'worktree',
+    category: 'Config',
     aliases: ['wt'],
     description: 'Inspect/manage git worktrees used for AutoPhase per-phase isolation.',
     argsHint: '[list | merge <branch> | prune | clean]',

@@ -4,6 +4,7 @@ import type { SlashCommandContext } from './index.js';
 export function buildHelpCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'help',
+    category: 'App',
     description: 'Show available slash commands. Pass a name for detailed help.',
     help: [
       'Usage:',

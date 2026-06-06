@@ -14,6 +14,11 @@ export interface SlashCommand {
   aliases?: string[];
   description: string;
   /**
+   * Category used to group commands in the slash picker. Defaults to 'App'
+   * when omitted.
+   */
+  category?: 'Run' | 'Session' | 'Inspect' | 'Agent' | 'Config' | 'App';
+  /**
    * Optional compact argument hint for interactive menus. This is not parsed
    * by the registry; it only helps TUI/REPL surfaces show the expected shape,
    * for example `[list|install <alias>|disable <name>]`.

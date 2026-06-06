@@ -13,6 +13,7 @@ import type { SlashCommandContext } from './index.js';
 export function buildNextCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'next',
+    category: 'Config',
     description: 'Toggle next-task prediction — show likely next steps after each turn.',
     argsHint: '[on|off|toggle]',
     help: [

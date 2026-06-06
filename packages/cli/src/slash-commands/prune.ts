@@ -5,6 +5,7 @@ import type { SlashCommandContext } from './index.js';
 export function buildPruneCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'prune',
+    category: 'Session',
     description:
       'Delete old sessions. /prune (default 30d), /prune 7, /prune --rebuild-index.',
     help:

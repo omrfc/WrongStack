@@ -4,6 +4,7 @@ import type { SlashCommandContext } from './index.js';
 export function buildCompactCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'compact',
+    category: 'Session',
     description: 'Compact the context window.',
     help: [
       'Usage:',

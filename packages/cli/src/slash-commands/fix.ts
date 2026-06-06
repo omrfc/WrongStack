@@ -176,6 +176,7 @@ function categoryLabel(cli: Classification): string {
 export function buildFixCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'fix',
+    category: 'Agent',
     description: 'Classify a bug/error (any language), activate the right skill, and fix it — inline or via subagent.',
     argsHint: '<error message or problem description>',
     help: `

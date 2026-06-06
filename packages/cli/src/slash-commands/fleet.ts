@@ -33,6 +33,7 @@ const PHASE_ORDER: { phase: AgentPhase; label: string }[] = [
 export function buildFleetCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'fleet',
+    category: 'Agent',
     description: 'Inspect and control the agent fleet (subagents, parallel slots).',
     help: [
       'Usage:',

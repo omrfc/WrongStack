@@ -16,17 +16,18 @@ function findTodo(
   }
   // Try exact id match
   const byId = todos.findIndex((t) => t.id === query);
-  if (byId >= 0) return { idx: byId, item: todos[byId]! };
+  if (byId >= 0) return { idx: byId, item: todos[byId] };
   // Fall through to case-insensitive substring
   const q = query.toLowerCase();
   const byContent = todos.findIndex((t) => t.content.toLowerCase().includes(q));
-  if (byContent >= 0) return { idx: byContent, item: todos[byContent]! };
+  if (byContent >= 0) return { idx: byContent, item: todos[byContent] };
   return null;
 }
 
 export function buildTodosCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'todos',
+    category: 'Inspect',
     description:
       'Inspect or edit the live todo list: /todos [show|clear|add|done|remove|rm <id|index>]',
     async run(args) {

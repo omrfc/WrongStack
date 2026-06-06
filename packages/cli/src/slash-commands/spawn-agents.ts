@@ -5,6 +5,7 @@ import type { SlashCommandContext } from './index.js';
 export function buildSpawnCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'spawn',
+    category: 'Agent',
     description: 'Spawn an isolated subagent to handle a task.',
     async run(args) {
       const { description, opts: parsed } = parseSpawnFlags(args.trim());
@@ -30,6 +31,7 @@ export function buildSpawnCommand(opts: SlashCommandContext): SlashCommand {
 export function buildAgentsCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'agents',
+    category: 'Agent',
     description:
       'Show status of spawned subagents. /agents monitor opens the agents monitor overlay. /agents on|off toggles the overlay.',
     help: [
@@ -71,6 +73,7 @@ export function buildAgentsCommand(opts: SlashCommandContext): SlashCommand {
 export function buildDirectorCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'director',
+    category: 'Agent',
     description:
       'Promote this session to director mode, enabling fleet orchestration tools. Only works before any subagents are spawned.',
     async run() {

@@ -4,6 +4,7 @@ import type { SlashCommandContext } from './index.js';
 export function buildMemoryCommand(opts: SlashCommandContext): SlashCommand {
   return {
     name: 'memory',
+    category: 'Inspect',
     description:
       'Inspect or edit persistent memory: /memory [show|remember <text>|forget <query>|clear]',
     async run(args) {

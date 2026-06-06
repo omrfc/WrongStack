@@ -1054,19 +1054,25 @@ export function App({
     }
     const query = trimmed.slice(1).toLowerCase();
     const allCommands = slashRegistry.listWithOwner();
+    const CATEGORY_ORDER = ['Run', 'Session', 'Inspect', 'Agent', 'Config', 'App'] as const;
     const matches: SlashCommandMatch[] = allCommands
       .filter(({ cmd }) => {
         const name = cmd.name.toLowerCase();
         const aliases = cmd.aliases ?? [];
         return name.includes(query) || aliases.some((a) => a.toLowerCase().includes(query));
       })
-      .slice(0, 12)
       .map(({ cmd, owner }) => ({
         name: cmd.name,
         description: cmd.description,
         argsHint: cmd.argsHint,
         isBuiltin: owner === 'core',
-      }));
+        category: cmd.category ?? 'App',
+      }))
+      .sort((a, b) => {
+        const catDiff = CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category);
+        if (catDiff !== 0) return catDiff;
+        return a.name.localeCompare(b.name);
+      });
 
     if (!state.slashPicker.open) {
       dispatch({ type: 'slashPickerOpen', query, matches });
@@ -2724,18 +2730,22 @@ export function App({
       return;
     }
 
-    // ── Non-modal panel state: allow typing while panels are visible.
-    // Monitor overlays and side panels are informational views — the user
-    // can keep typing in the chat input while referencing them. Toggle
-    // keys (F2–F7) and Escape still work; all other keystrokes reach
-    // the input buffer normally.
-    const anyMonitorOpen =
+    // ── Fullscreen monitor overlays are modal ─────────────────────────
+    // F6 todos, F2 fleet, F3 agents, F4 worktree, F7 queue, and the phase
+    // monitor take over the lower region while the chat input stays mounted
+    // underneath. Without this guard a leftover draft would submit to chat
+    // the moment the user pressed Enter to dismiss the panel. While one is
+    // open, swallow every keystroke except the F-key toggles and Esc (both
+    // handled below — they close the panel and leave the draft untouched).
+    // Ctrl+C still aborts: it bypasses handleKey via the SIGINT handler.
+    const monitorOverlayOpen =
       state.todosMonitorOpen ||
       state.monitorOpen ||
       state.agentsMonitorOpen ||
       state.worktreeMonitorOpen ||
-      !!state.autoPhase?.monitorOpen;
-    void anyMonitorOpen; // unused now — kept for clarity in the Escape handler below
+      !!state.autoPhase?.monitorOpen ||
+      state.queuePanelOpen;
+    if (monitorOverlayOpen && !key.fn && !key.escape) return;
 
     // Re-entrancy guard: block stale-second events from \r\n terminals.
     if (inputGateRef.current) return;
