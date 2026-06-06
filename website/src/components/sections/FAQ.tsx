@@ -31,7 +31,7 @@ const faqs = [
   },
   {
     q: 'How does it stay safe while editing my code?',
-    a: 'Every mutating or destructive tool is mediated by the permission policy. Decisions persist to trust.json and are inherited by subagents. For trusted workflows, --yolo (or /yolo) auto-approves normal project work while clearly destructive calls remain gated unless --yolo-destructive is active.',
+    a: 'Every mutating or destructive tool is mediated by the permission policy. Decisions persist to trust.json and are inherited by subagents. For trusted workflows, --yolo (or /yolo) auto-approves every tool call, including destructive ones; toggle /yolo destructive to put a confirmation gate back in front of risky operations.',
   },
   {
     q: 'What does it cost?',

@@ -334,7 +334,7 @@ Four-layer observability:
 
 ### Bundled skills (16)
 
-`api-design`, `audit-log`, `bug-hunter`, `docker-deploy`, `git-flow`, `multi-agent`, `node-modern`, `observability`, `prompt-engineering`, `react-modern`, `refactor-planner`, `security-scanner`, `skill-creator`, `testing`, `typescript-strict` — all following one structure (Overview → Rules → Patterns → Skills in scope). Discovered in order: project → user → bundled, with first-seen winning on name collisions.
+`api-design`, `audit-log`, `bug-hunter`, `docker-deploy`, `git-flow`, `multi-agent`, `node-modern`, `observability`, `prompt-engineering`, `react-modern`, `refactor-planner`, `sdd`, `security-scanner`, `skill-creator`, `testing`, `typescript-strict` — all following one structure (Overview → Rules → Patterns → Skills in scope). Discovered in order: project → user → bundled, with first-seen winning on name collisions.
 
 ### `--no-features` minimal kernel
 
@@ -585,7 +585,7 @@ For the full walk-through — including the L1-A reactive `ConversationState`, h
 
 ## Status
 
-- **5494+ tests passing** across 390+ test files in the 0.66.13 release gate
+- **5494+ tests passing** across 408+ test files in the 0.73.1 release gate
 - Coverage thresholds: ≥85 % lines / ≥85 % functions / ≥70 % branches / ≥82 % statements
 - All workspace packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles

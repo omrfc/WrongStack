@@ -5,6 +5,90 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.73.1] - 2026-06-06
+
+> The background-index & decomposition release. Consolidates everything since
+> the `0.66.13` lockstep realignment. The headlines are a **background,
+> gitignore-aware codebase indexer** with a `/codebase-reindex` command, a
+> large-file **decomposition pass** that split the WebUI store/socket/sidebar
+> monoliths and the TUI `app.tsx` into focused submodules, and the **removal of
+> the TUI mouse mode** (unreliable on Windows consoles). Additive except for the
+> mouse-mode removal; no other breaking changes.
+>
+> **Version consolidation.** The intermediate `0.66.14`–`0.73.0` bumps shipped as
+> mechanical `chore: bump version` / `feat: update code` commits without their own
+> changelog sections; their substantive changes are folded into this entry. All 15
+> workspace manifests — and the marketing site (`website/`) — are aligned to
+> `0.73.1` in lockstep.
+
+### Added
+
+- **Background, gitignore-aware codebase indexer.** The SQLite symbol index now
+  builds and refreshes in the background instead of blocking the first search.
+  A new `background-indexer.ts` drives the pass, a new `gitignore.ts` walks
+  `.gitignore` rules so ignored files are skipped, and `cli/src/wiring/codebase-index.ts`
+  wires the indexer into boot. Config gained options to tune/disable the
+  background pass (`types/config.ts` + `config-loader.ts`). Covered by new
+  `background-indexer`, `gitignore`, and `wiring-codebase-index` test suites.
+- **`/codebase-reindex` slash command.** Force a full rebuild or an incremental
+  refresh of the symbol index on demand, with docs (`docs/slash/codebase-reindex.md`)
+  and tests (`slash-codebase-reindex.test.ts`).
+- **Pre-launch checks expanded.** `pre-launch.ts` grew additional boot-time
+  readiness checks (with matching `pre-launch.test.ts` coverage) so a misconfigured
+  environment surfaces a clear message before the agent starts.
+
+### Changed
+
+- **Large-file decomposition pass (16 files → 55 submodules).** A 70-file refactor
+  split the biggest monoliths into focused, independently-testable units — no
+  behaviour change:
+  - **WebUI store** — the 947-line `stores/index.ts` became `chat-store`,
+    `config-store`, `fleet-store`, `history-store`, `session-store`, `ui-store`,
+    `worktree-store`, and a shared `types.ts`.
+  - **WebUI WebSocket hook** — the 1,222-line `useWebSocket.ts` was reduced to a
+    thin shell over an extracted `ws-handlers.ts`.
+  - **WebUI sidebar** — the 744-line `Sidebar.tsx` split into `Sidebar/ConfigSection`,
+    `SessionActions`, `SessionList`, and an `index.tsx` composition root.
+  - **WebUI server** — `server/index.ts` shed its provider-message handling
+    (`provider-handlers.ts`) and event wiring (`setup-events.ts`).
+  - **TUI** — `app.tsx` reducer logic was extracted to `app-reducer.ts`, the
+    steering-preamble builder to its own module (`buildSteeringPreamble`), and the
+    history renderer split into per-entry-kind components.
+- **WebUI Collab panel refinements.** `CollabPanel` was retuned against the
+  decomposed store/socket layer so collab-session events render off the new typed
+  WS handlers.
+
+### Removed
+
+- **TUI mouse mode removed entirely.** Mouse reporting (`mouse.ts`, its tests, and
+  the `mouse` `RunTuiOptions` prop) was unreliable on Windows consoles and is gone;
+  the TUI relies on keyboard navigation and the terminal's native scrollback. The
+  CLI no longer passes a `mouse` option through to `runTui`.
+
+### Fixed
+
+- **`release:check` build break from the mouse removal.** `cli/src/execution.ts`
+  still passed `mouse: false` to `runTui` after the prop was deleted, failing
+  `tsc --noEmit` (`TS2353`). The dangling prop was removed so typecheck, test, and
+  build pass again.
+- **TUI build errors from the `app-reducer` extraction** were resolved, and a
+  duplicate `sddHelp` import was de-duplicated / hoisted in the SDD slash command.
+
+### Tests
+
+- New suites for the background indexer, gitignore walker, codebase-index wiring,
+  `/codebase-reindex`, expanded pre-launch checks, and WebUI `ws-utils`. The repo
+  now carries **408+ test files**.
+
+### Changed — versions
+
+- **All workspace packages bumped to 0.73.1**: `wrongstack`, `@wrongstack/cli`,
+  `@wrongstack/core`, `@wrongstack/mcp`, `@wrongstack/plug-lsp`, `@wrongstack/plugins`,
+  `@wrongstack/providers`, `@wrongstack/runtime`, `@wrongstack/skills`,
+  `@wrongstack/telegram`, `@wrongstack/tools`, `@wrongstack/tui`, `@wrongstack/webui`.
+  `@wrongstack/acp` tracks the same version, and the marketing site (`website/`) is
+  bumped in lockstep.
+
 ## [0.66.13] - 2026-06-05
 
 > The WebUI-fleet & agent-decomposition release. Consolidates everything since

@@ -39,7 +39,7 @@ const items = [
   {
     icon: Zap,
     title: 'YOLO when you mean it',
-    body: '--yolo (or /yolo) auto-approves normal project work for trusted workflows. Clearly destructive calls still require the --yolo-destructive override.',
+    body: '--yolo (or /yolo) auto-approves every tool call, including destructive ones, for trusted workflows. Toggle /yolo destructive to re-enable confirmation for risky operations.',
   },
 ];
 

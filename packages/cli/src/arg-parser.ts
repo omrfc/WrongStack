@@ -21,7 +21,6 @@ export const BOOLEAN_FLAGS = new Set([
   'recover',
   'no-alt-screen',
   'alt-screen',
-  'mouse',
   'output-json',
   'prompt',
   'metrics',

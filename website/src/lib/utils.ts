@@ -11,7 +11,7 @@ export function cn(...inputs: ClassValue[]) {
    ========================================================================= */
 
 export const META = {
-  version: '0.68.0',
+  version: '0.73.1',
   repo: 'https://github.com/WrongStack/WrongStack',
   npm: 'wrongstack',
   node: '22',
@@ -116,8 +116,8 @@ export const slashCommands = [
   '/usage',
   '/tools',
   '/skill',
-  '/use',
   '/model',
+  '/setmodel',
   '/save',
   '/resume',
   '/plan',
@@ -142,6 +142,9 @@ export const slashCommands = [
   '/health',
   '/commit',
   '/security',
+  '/collab',
+  '/btw',
+  '/settings',
   '/fix',
   '/image',
   '/altscreen',
