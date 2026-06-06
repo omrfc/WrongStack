@@ -1,6 +1,6 @@
 {
   "name": "@wrongstack/plugins",
-  "version": "0.73.1",
+  "version": "0.74.0",
   "description": "Official WrongStack plugin collection — auto-doc, git-autocommit, shell-check, cost-tracker, file-watcher, web-search, json-path, cron, template-engine, semver-bump",
   "license": "MIT",
   "author": "ECOSTACK TECHNOLOGY OÜ",
@@ -13,44 +13,44 @@
       "import": "./dist/index.js"
     },
     "./auto-doc": {
-      "types": "./dist/auto-doc/index.d.ts",
-      "import": "./dist/auto-doc/index.js"
+      "types": "./dist/auto-doc.d.ts",
+      "import": "./dist/auto-doc.js"
     },
     "./git-autocommit": {
-      "types": "./dist/git-autocommit/index.d.ts",
-      "import": "./dist/git-autocommit/index.js"
+      "types": "./dist/git-autocommit.d.ts",
+      "import": "./dist/git-autocommit.js"
     },
     "./shell-check": {
-      "types": "./dist/shell-check/index.d.ts",
-      "import": "./dist/shell-check/index.js"
+      "types": "./dist/shell-check.d.ts",
+      "import": "./dist/shell-check.js"
     },
     "./cost-tracker": {
-      "types": "./dist/cost-tracker/index.d.ts",
-      "import": "./dist/cost-tracker/index.js"
+      "types": "./dist/cost-tracker.d.ts",
+      "import": "./dist/cost-tracker.js"
     },
     "./file-watcher": {
-      "types": "./dist/file-watcher/index.d.ts",
-      "import": "./dist/file-watcher/index.js"
+      "types": "./dist/file-watcher.d.ts",
+      "import": "./dist/file-watcher.js"
     },
     "./web-search": {
-      "types": "./dist/web-search/index.d.ts",
-      "import": "./dist/web-search/index.js"
+      "types": "./dist/web-search.d.ts",
+      "import": "./dist/web-search.js"
     },
     "./json-path": {
-      "types": "./dist/json-path/index.d.ts",
-      "import": "./dist/json-path/index.js"
+      "types": "./dist/json-path.d.ts",
+      "import": "./dist/json-path.js"
     },
     "./cron": {
-      "types": "./dist/cron/index.d.ts",
-      "import": "./dist/cron/index.js"
+      "types": "./dist/cron.d.ts",
+      "import": "./dist/cron.js"
     },
     "./template-engine": {
-      "types": "./dist/template-engine/index.d.ts",
-      "import": "./dist/template-engine/index.js"
+      "types": "./dist/template-engine.d.ts",
+      "import": "./dist/template-engine.js"
     },
     "./semver-bump": {
-      "types": "./dist/semver-bump/index.d.ts",
-      "import": "./dist/semver-bump/index.js"
+      "types": "./dist/semver-bump.d.ts",
+      "import": "./dist/semver-bump.js"
     }
   },
   "files": [
