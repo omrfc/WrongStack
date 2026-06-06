@@ -1,4 +1,4 @@
-import type { State } from '../app-reducer.js';
+import type { State } from './app-reducer.js';
 
 /**
  * Build the steering preamble that gets prepended to a user's message
@@ -36,7 +36,7 @@ export function buildSteeringPreamble(
   }
   if (snapshot?.subagentsTerminated && snapshot.subagentsTerminated > 0) {
     const subDetails = snapshot.subagents
-      .map((s) => `${s.label}${s.tool ? ` (was running: ${s.tool})` : ''}`)
+      .map((s: { label: string; tool?: string }) => `${s.label}${s.tool ? ` (was running: ${s.tool})` : ''}`)
       .join(', ');
     ctx.push(
       `- subagents (${snapshot.subagentsTerminated} terminated by me, do NOT await them): ${subDetails}`,

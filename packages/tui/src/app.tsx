@@ -68,14 +68,7 @@ import { createQueueSlashCommand } from './queue-slash.js';
 import { buildSteeringPreamble } from './steering-preamble.js';
 
 // Types imported from app-reducer.ts (single source of truth for reducer + State types)
-import {
-  reducer,
-  type Action,
-  type FleetEntry,
-  type QueueItem,
-  type SlashCommandMatch,
-  type State,
-} from './app-reducer.js';
+import { reducer, type Action, type FleetEntry, type SlashCommandMatch, type State } from './app-reducer.js';
 export {
   reducer,
   type Action,
