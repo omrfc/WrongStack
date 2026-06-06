@@ -645,7 +645,7 @@ class FileSessionWriter implements SessionWriter {
   private appendFailCount = 0;
   private lastAppendWarnAt = 0;
   private readonly secretScrubber?: SecretScrubber | undefined;
-  private readonly onCloseCb?: (((summary: SessionSummary) => void)) | undefined;
+  private readonly onCloseCb?: (((summary: SessionSummary) => void | Promise<void>)) | undefined;
 
   // ── Enriched summary tracking ──────────────────────────────────────────
   private iterationCount = 0;
@@ -710,7 +710,7 @@ class FileSessionWriter implements SessionWriter {
       filePath?: string | undefined;
       secretScrubber?: SecretScrubber | undefined;
       /** Called on close() with the finalized summary for index/sidecar writes. */
-      onClose?: (((summary: SessionSummary) => void)) | undefined;
+      onClose?: (((summary: SessionSummary) => void | Promise<void>)) | undefined;
     } = {},
   ) {
     this.resumed = opts.resumed ?? false;
@@ -842,9 +842,12 @@ class FileSessionWriter implements SessionWriter {
         // manifest write is best-effort
       }
     }
-    // Notify the store so it can update the session index.
+    // Notify the store so it can update the session index. Await so the
+    // index write completes before close() resolves — otherwise the
+    // fire-and-forget _index.jsonl append races callers that tear down the
+    // session directory right after close() (e.g. ENOTEMPTY on Windows).
     try {
-      this.onCloseCb?.(this.summary);
+      await this.onCloseCb?.(this.summary);
     } catch {
       // best-effort
     }
