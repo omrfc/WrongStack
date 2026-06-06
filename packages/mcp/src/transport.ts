@@ -417,6 +417,7 @@ export class SSETransport {
         headers: this.headers,
         signal,
       };
+      // @ts-expect-error — https.Agent is compatible at runtime; type mismatch is from undici@7 bundling types vs @types/node transitively pulling undici-types@6
       if (this.tlsAgent) fetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
       const response = await fetch(sseUrl, fetchOpts);
 
@@ -542,6 +543,7 @@ export class SSETransport {
       body,
       signal: timeoutSignal.signal,
     };
+    // @ts-expect-error — https.Agent is compatible at runtime; type mismatch is from undici@7 bundling types vs @types/node transitively pulling undici-types@6
     if (this.tlsAgent) fetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
     const res = await fetch(this.url, fetchOpts);
 
@@ -604,6 +606,7 @@ export class SSETransport {
       body,
       signal: timeoutSignal.signal,
     };
+    // @ts-expect-error — https.Agent is compatible at runtime; type mismatch is from undici@7 bundling types vs @types/node transitively pulling undici-types@6
     if (this.tlsAgent) fetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
     const res = await fetch(this.url, fetchOpts);
 
@@ -729,6 +732,7 @@ export class StreamableHTTPTransport {
         }),
         signal,
       };
+      // @ts-expect-error — https.Agent is compatible at runtime; type mismatch is from undici@7 bundling types vs @types/node transitively pulling undici-types@6
       if (this.tlsAgent) initFetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
       const initRes = await fetch(this.url, initFetchOpts);
 
@@ -796,6 +800,7 @@ export class StreamableHTTPTransport {
       body,
       signal: timeoutSignal.signal,
     };
+    // @ts-expect-error — https.Agent is compatible at runtime; type mismatch is from undici@7 bundling types vs @types/node transitively pulling undici-types@6
     if (this.tlsAgent) fetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
     const res = await fetch(this.url, fetchOpts);
 
@@ -840,6 +845,7 @@ export class StreamableHTTPTransport {
       body,
       signal: timeoutSignal.signal,
     };
+    // @ts-expect-error — https.Agent is compatible at runtime; type mismatch is from undici@7 bundling types vs @types/node transitively pulling undici-types@6
     if (this.tlsAgent) fetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
     const res = await fetch(this.url, fetchOpts);
 
