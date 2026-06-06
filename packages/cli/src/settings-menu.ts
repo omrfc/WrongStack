@@ -179,6 +179,51 @@ export async function persistAutonomySetting(
   deps.configStore.update({ autonomy: decrypted.autonomy as Parameters<typeof deps.configStore.update>[0]['autonomy'] });
 }
 
+/**
+ * Persist Telegram plugin config to `extensions.telegram` in the global config
+ * file. Mirrors `persistAutonomySetting` — reads the config, applies the
+ * mutator, encrypts secrets, writes atomically, then updates ConfigStore.
+ */
+export async function persistTelegramConfig(
+  deps: PersistSettingDeps,
+  mutator: (telegram: Record<string, unknown>) => void,
+): Promise<void> {
+  let raw: string;
+  let fileExists = true;
+  try {
+    raw = await fs.readFile(deps.globalConfigPath, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw new Error(`Could not read ${deps.globalConfigPath}: ${(err as Error).message}`);
+    }
+    fileExists = false;
+    raw = '{}';
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>;
+  } catch (err) {
+    if (fileExists) {
+      throw new Error(`Config at ${deps.globalConfigPath} is not valid JSON: ${(err as Error).message}`);
+    }
+    parsed = {};
+  }
+
+  const decrypted = decryptConfigSecrets(parsed, deps.vault) as Record<string, unknown>;
+  const extensions = (decrypted.extensions as Record<string, Record<string, unknown>>) ?? {};
+  const telegram = extensions.telegram ?? {};
+  mutator(telegram);
+  extensions.telegram = telegram;
+  decrypted.extensions = extensions;
+
+  const encrypted = encryptConfigSecrets(decrypted, deps.vault);
+  await atomicWrite(deps.globalConfigPath, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
+
+  // Also update the in-memory config store so changes are immediately visible
+  deps.configStore.update({ extensions: decrypted.extensions as Parameters<typeof deps.configStore.update>[0]['extensions'] });
+}
+
 /** Interactive-menu adapter over {@link persistAutonomySetting}. */
 function mutateAutonomyConfig(
   deps: SettingsMenuDeps,

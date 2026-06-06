@@ -263,6 +263,7 @@ import { buildSddCommand } from './sdd.js';
 import { buildExitCommand, buildLoadCommand, buildSaveCommand } from './session.js';
 import { buildSetModelCommand } from './setmodel.js';
 import { buildSettingsCommand } from './settings.js';
+import { buildTelegramSetupCommand } from './telegram-setup.js';
 import { buildAgentsCommand, buildDirectorCommand, buildSpawnCommand } from './spawn-agents.js';
 import { buildStatuslineCommand } from './statusline.js';
 import { buildTodosCommand } from './todos.js';
@@ -303,6 +304,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildAutoPhaseCommand(opts),
     buildWorktreeCommand(opts),
     buildSettingsCommand(opts),
+    buildTelegramSetupCommand(opts),
     buildSetModelCommand(opts),
     buildModelsCommand(opts),
     buildCollabCommand(opts),
