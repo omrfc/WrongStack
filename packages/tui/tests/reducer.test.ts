@@ -527,3 +527,78 @@ describe('settings picker reducer', () => {
     expect(down.settingsPicker.delayMs).toBe(120_000);
   });
 });
+
+describe('Monitor overlays do not block input buffer mutations', () => {
+  // Regression: F2 (fleet), F3 (agents), F4 (worktree), F6 (todos), F7 (queue)
+  // and the autoPhase monitor used to make handleKey swallow every keystroke
+  // except F-keys and Esc, so typing into the chat input behind the panel
+  // silently failed. The guard was removed; the reducer is now the only
+  // place that decides whether a `setBuffer` action takes effect, and it
+  // must accept the action regardless of overlay state.
+  it('setBuffer still mutates the buffer when every monitor overlay is open', () => {
+    const overlayKeys = [
+      'monitorOpen',
+      'agentsMonitorOpen',
+      'worktreeMonitorOpen',
+      'todosMonitorOpen',
+      'queuePanelOpen',
+    ] as const;
+
+    for (const key of overlayKeys) {
+      const closed: Record<string, unknown> = { monitorOpen: false };
+      // Build a baseline state that mirrors what App.tsx feeds to handleKey:
+      // the overlay under test is open, every other overlay is closed.
+      for (const k of overlayKeys) closed[k] = false;
+      closed[key] = true;
+
+      const typed = reducer(
+        { ...initial(), ...closed } as Parameters<typeof reducer>[0],
+        { type: 'setBuffer', buffer: 'hello world', cursor: 11 },
+      );
+      expect(typed.buffer, `setBuffer should work while ${key} is true`).toBe('hello world');
+      expect(typed.cursor).toBe(11);
+    }
+  });
+
+  it('setBuffer still mutates the buffer when autoPhase monitor is open', () => {
+    const s = reducer(
+      {
+        ...initial(),
+        autoPhase: {
+          title: 't',
+          phases: {},
+          runningPhaseIds: [],
+          elapsedMs: 0,
+          monitorOpen: true,
+        },
+      } as Parameters<typeof reducer>[0],
+      { type: 'setBuffer', buffer: 'draft text', cursor: 10 },
+    );
+    expect(s.buffer).toBe('draft text');
+    expect(s.cursor).toBe(10);
+  });
+
+  it('clearInput resets the buffer even when a monitor overlay is open', () => {
+    const dirty: Record<string, unknown> = {
+      monitorOpen: false,
+      agentsMonitorOpen: false,
+      worktreeMonitorOpen: false,
+      todosMonitorOpen: false,
+      queuePanelOpen: false,
+    };
+    dirty.monitorOpen = true;
+    const s = reducer(
+      {
+        ...initial(),
+        ...dirty,
+        buffer: 'leftover draft',
+        cursor: 14,
+        historyIndex: 1,
+      } as Parameters<typeof reducer>[0],
+      { type: 'clearInput' },
+    );
+    expect(s.buffer).toBe('');
+    expect(s.cursor).toBe(0);
+    expect(s.historyIndex).toBe(0);
+  });
+});

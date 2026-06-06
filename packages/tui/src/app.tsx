@@ -2730,22 +2730,18 @@ export function App({
       return;
     }
 
-    // ── Fullscreen monitor overlays are modal ─────────────────────────
-    // F6 todos, F2 fleet, F3 agents, F4 worktree, F7 queue, and the phase
-    // monitor take over the lower region while the chat input stays mounted
-    // underneath. Without this guard a leftover draft would submit to chat
-    // the moment the user pressed Enter to dismiss the panel. While one is
-    // open, swallow every keystroke except the F-key toggles and Esc (both
-    // handled below — they close the panel and leave the draft untouched).
-    // Ctrl+C still aborts: it bypasses handleKey via the SIGINT handler.
-    const monitorOverlayOpen =
-      state.todosMonitorOpen ||
-      state.monitorOpen ||
-      state.agentsMonitorOpen ||
-      state.worktreeMonitorOpen ||
-      !!state.autoPhase?.monitorOpen ||
-      state.queuePanelOpen;
-    if (monitorOverlayOpen && !key.fn && !key.escape) return;
+    // ── Monitor overlays are NON-modal ───────────────────────────────
+    // F2 fleet, F3 agents, F4 worktree, F6 todos, F7 queue, and the
+    // autoPhase monitor render in the lower region of the layout, but the
+    // chat input above them stays LIVE — typing, backspace, paste, cursor
+    // movement, and Enter (submit) all flow through to the input buffer.
+    // Only the F-key toggles below and Esc are reserved for the panel:
+    //   • F2/F3/F4/F6/F7 toggle their respective overlay
+    //   • Esc closes whichever overlay is open
+    // (Overlays with their own dedicated UI — `confirmQueue`, `enhance`,
+    // `modelPicker`, `autonomyPicker`, `settingsPicker`, `rewindOverlay`,
+    // `helpOpen` — are still modal and keep their own guards above.)
+    // Ctrl+C still aborts via the SIGINT handler, which bypasses handleKey.
 
     // Re-entrancy guard: block stale-second events from \r\n terminals.
     if (inputGateRef.current) return;
