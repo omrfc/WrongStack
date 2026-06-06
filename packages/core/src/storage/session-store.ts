@@ -17,6 +17,38 @@ import type {
 import { atomicWrite, ensureDir } from '../utils/atomic-write.js';
 import { repairToolUseAdjacency } from '../utils/message-invariants.js';
 
+// ─── Session ID naming ───────────────────────────────────────────────────────
+
+/** Sanitize a model name for use in filenames: alphanumeric + dash + underscore. */
+function sanitizeModel(model: string): string {
+  return model
+    .replace(/[^a-zA-Z0-9_-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 40);
+}
+
+/**
+ * Generate a session ID in the format:
+ *   `YYYY-MM-DD/HH-MM-SSZ[_model]_xxxx.jsonl`
+ *
+ * Examples:
+ *   `2026-06-06/12-30-45Z_claude-sonnet_a1b2.jsonl`
+ *   `2026-06-06/14-22-10Z_a1b2.jsonl`          (no model)
+ *
+ * The date prefix becomes a subdirectory so sessions group naturally by day.
+ * The model name (when available) lets you see at a glance which provider was
+ * used, without opening the file. The 4-byte random suffix prevents collisions
+ * within the same second.
+ */
+function generateSessionId(startedAt: string, model?: string): string {
+  const date = startedAt.slice(0, 10);                       // "2026-06-06"
+  const time = startedAt.slice(11, 19).replace(/:/g, '-');   // "12-30-45"
+  const suffix = randomBytes(2).toString('hex');              // "a1b2"
+  const modelPart = model ? `_${sanitizeModel(model)}` : '';
+  return `${date}/${time}Z${modelPart}_${suffix}`;
+}
+
 export interface SessionStoreOptions {
   dir: string;
   /** Optional EventBus for emitting session diagnostics. */
@@ -48,16 +80,25 @@ export class DefaultSessionStore implements SessionStore {
     return path.join(this.dir, `${id}${ext}`);
   }
 
-  private async ensureShardDir(_id: string): Promise<string> {
-    await ensureDir(this.dir);
-    return this.dir;
+  /**
+   * Ensure the directory implied by the session ID exists. When the ID
+   * contains a date prefix like `2026-06-06/...`, this creates the date
+   * subdirectory so sessions group naturally by day.
+   */
+  private async ensureShardDir(id: string): Promise<string> {
+    const dirPath = path.dirname(path.join(this.dir, id));
+    await ensureDir(dirPath);
+    return dirPath;
   }
 
   async create(meta: Omit<SessionMetadata, 'startedAt'>): Promise<SessionWriter> {
     const startedAt = new Date().toISOString();
-    const id = meta.id ?? `${startedAt.replace(/[:.]/g, '-')}-${randomBytes(2).toString('hex')}`;
+    const id =
+      meta.id && meta.id.length > 0
+        ? meta.id
+        : generateSessionId(startedAt, meta.model ?? meta.provider);
     const shardDir = await this.ensureShardDir(id);
-    const file = path.join(shardDir, `${id}.jsonl`);
+    const file = path.join(shardDir, `${path.basename(id)}.jsonl`);
     let handle: fsp.FileHandle;
     try {
       handle = await fsp.open(file, 'a', 0o600);

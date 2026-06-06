@@ -1,7 +1,7 @@
 {
   "name": "wrongstack-monorepo",
   "private": true,
-  "version": "0.75.4",
+  "version": "0.75.13",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.5.2+sha512.71c631e382066efc25625d5cf029075de07b61b37f6e27350fbd84b1bda5864c8c1967adc280776b45c30a715c0359a3be08fef42d5bb09e2b99029979692916",
@@ -23,7 +23,7 @@
     "version:major": "node scripts/bump-version.mjs major",
     "version:set": "node scripts/bump-version.mjs set",
     "sync:models": "node scripts/sync-models.mjs",
-    "release:check": "pnpm audit --audit-level=moderate && pnpm typecheck && pnpm test && pnpm build",
+    "release:check": "pnpm audit --audit-level=moderate && pnpm typecheck && pnpm build && pnpm test",
     "release:dry": "pnpm publish -r --dry-run --no-git-checks --force",
     "release": "pnpm release:check && pnpm publish -r --access public --no-git-checks",
     "setup:hooks": "git config core.hooksPath .githooks",

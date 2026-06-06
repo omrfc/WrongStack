@@ -3,6 +3,7 @@
  * Extracted from index.ts so the main() function focuses on
  * boot + wiring; this file owns the three run modes and cleanup.
  */
+import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type {
   Agent,
@@ -17,7 +18,7 @@ import type {
   SlashCommandRegistry,
   TokenCounter,
 } from '@wrongstack/core';
-import { color, mergeCustomModelDefs, writeOut, type AutonomyStage } from '@wrongstack/core';
+import { color, mergeCustomModelDefs, writeOut, type AutonomyStage, decryptConfigSecrets, encryptConfigSecrets, atomicWrite } from '@wrongstack/core';
 import { persistAutonomySetting } from './settings-menu.js';
 import type { ProviderConfig, ResolvedProvider, WstackPaths } from '@wrongstack/core';
 import type { MCPRegistry } from '@wrongstack/mcp';
@@ -119,6 +120,8 @@ export interface ExecutionDeps {
   subscribeEternalStage?: (fn: (stage: AutonomyStage) => void) => () => void;
   /** Skill loader for the skill generator wizard. */
   skillLoader?: import('@wrongstack/core').SkillLoader;
+  /** Active agent mode id shown in the status bar (e.g. "teach", "brief"). */
+  modeId?: string;
 }
 
 export async function execute(deps: ExecutionDeps): Promise<number> {
@@ -164,6 +167,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     subscribeEternalIteration,
     subscribeEternalStage,
     skillLoader,
+    modeId,
   } = deps;
 
   let code = 0;
@@ -421,16 +425,56 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             return null;
           },
           getSettings: () => {
-            const autonomy = configStore.get().autonomy as
-              | { autoProceedDelayMs?: number; defaultMode?: string }
-              | undefined;
-            const rawMode = autonomy?.defaultMode;
+            const cfg = configStore.get();
+            const autonomy = cfg.autonomy as Record<string, unknown> | undefined;
+            const rawMode = autonomy?.defaultMode as string | undefined;
             const mode: 'off' | 'suggest' | 'auto' =
               rawMode === 'suggest' || rawMode === 'auto' ? rawMode : 'off';
-            return { mode, delayMs: autonomy?.autoProceedDelayMs ?? 45_000 };
+            return {
+              mode,
+              delayMs: (autonomy?.autoProceedDelayMs as number) ?? 45_000,
+              titleAnimation: autonomy?.terminalTitleAnimation !== false,
+              yolo: (autonomy?.yolo as boolean) ?? false,
+              streamFleet: autonomy?.streamFleet !== false,
+              chime: (autonomy?.chime as boolean) ?? false,
+              confirmExit: autonomy?.confirmExit !== false,
+              nextPrediction: cfg.nextPrediction ?? false,
+              featureMcp: cfg.features?.mcp !== false,
+              featurePlugins: cfg.features?.plugins !== false,
+              featureMemory: cfg.features?.memory !== false,
+              featureSkills: cfg.features?.skills !== false,
+              featureModelsRegistry: cfg.features?.modelsRegistry !== false,
+              contextAutoCompact: cfg.context?.autoCompact !== false,
+              contextStrategy: cfg.context?.strategy ?? 'hybrid',
+              logLevel: cfg.log?.level ?? 'info',
+              auditLevel: cfg.session?.auditLevel ?? 'standard',
+              indexOnStart: cfg.indexing?.onSessionStart !== false,
+              maxIterations: cfg.tools?.maxIterations ?? 500,
+            };
           },
-          async saveSettings(s: { mode: 'off' | 'suggest' | 'auto'; delayMs: number }) {
+          async saveSettings(s: {
+            mode: 'off' | 'suggest' | 'auto';
+            delayMs: number;
+            titleAnimation?: boolean;
+            yolo?: boolean;
+            streamFleet?: boolean;
+            chime?: boolean;
+            confirmExit?: boolean;
+            nextPrediction?: boolean;
+            featureMcp?: boolean;
+            featurePlugins?: boolean;
+            featureMemory?: boolean;
+            featureSkills?: boolean;
+            featureModelsRegistry?: boolean;
+            contextAutoCompact?: boolean;
+            contextStrategy?: string;
+            logLevel?: string;
+            auditLevel?: string;
+            indexOnStart?: boolean;
+            maxIterations?: number;
+          }) {
             try {
+              // Persist autonomy section (existing behaviour).
               await persistAutonomySetting(
                 {
                   configStore,
@@ -440,14 +484,116 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                 (autonomy) => {
                   autonomy.defaultMode = s.mode;
                   autonomy.autoProceedDelayMs = s.delayMs;
+                  const a = autonomy as Record<string, unknown>;
+                  a['terminalTitleAnimation'] = s.titleAnimation ?? true;
+                  a['yolo'] = s.yolo ?? false;
+                  a['streamFleet'] = s.streamFleet ?? true;
+                  a['chime'] = s.chime ?? false;
+                  a['confirmExit'] = s.confirmExit ?? true;
                 },
               );
+
+              // Persist other config sections that the SettingsPicker now exposes.
+              // Use the same read → modify → encrypt → atomic-write pattern as
+              // persistAutonomySetting, but applied to the full config.
+              if (
+                s.featureMcp !== undefined ||
+                s.featurePlugins !== undefined ||
+                s.featureMemory !== undefined ||
+                s.featureSkills !== undefined ||
+                s.featureModelsRegistry !== undefined ||
+                s.contextAutoCompact !== undefined ||
+                s.contextStrategy !== undefined ||
+                s.logLevel !== undefined ||
+                s.auditLevel !== undefined ||
+                s.indexOnStart !== undefined ||
+                s.maxIterations !== undefined ||
+                s.nextPrediction !== undefined
+              ) {
+                const raw = await fs.readFile(wpaths.globalConfig, 'utf8').catch(() => '{}');
+                const parsed = JSON.parse(raw) as Record<string, unknown>;
+                const vault = { encrypt: (v: string) => v, decrypt: (v: string) => v, isEncrypted: () => false };
+                const decrypted = decryptConfigSecrets(parsed, vault) as Record<string, unknown>;
+
+                if (s.nextPrediction !== undefined) {
+                  decrypted.nextPrediction = s.nextPrediction;
+                }
+                if (
+                  s.featureMcp !== undefined ||
+                  s.featurePlugins !== undefined ||
+                  s.featureMemory !== undefined ||
+                  s.featureSkills !== undefined ||
+                  s.featureModelsRegistry !== undefined
+                ) {
+                  const feats = (decrypted.features as Record<string, unknown>) ?? {};
+                  if (s.featureMcp !== undefined) feats.mcp = s.featureMcp;
+                  if (s.featurePlugins !== undefined) feats.plugins = s.featurePlugins;
+                  if (s.featureMemory !== undefined) feats.memory = s.featureMemory;
+                  if (s.featureSkills !== undefined) feats.skills = s.featureSkills;
+                  if (s.featureModelsRegistry !== undefined) feats.modelsRegistry = s.featureModelsRegistry;
+                  decrypted.features = feats;
+                }
+                if (s.contextAutoCompact !== undefined || s.contextStrategy !== undefined) {
+                  const ctx = (decrypted.context as Record<string, unknown>) ?? {};
+                  if (s.contextAutoCompact !== undefined) ctx.autoCompact = s.contextAutoCompact;
+                  if (s.contextStrategy !== undefined) ctx.strategy = s.contextStrategy;
+                  decrypted.context = ctx;
+                }
+                if (s.logLevel !== undefined) {
+                  const log = (decrypted.log as Record<string, unknown>) ?? {};
+                  log.level = s.logLevel;
+                  decrypted.log = log;
+                }
+                if (s.auditLevel !== undefined) {
+                  const sess = (decrypted.session as Record<string, unknown>) ?? {};
+                  sess.auditLevel = s.auditLevel;
+                  decrypted.session = sess;
+                }
+                if (s.indexOnStart !== undefined) {
+                  const idx = (decrypted.indexing as Record<string, unknown>) ?? {};
+                  idx.onSessionStart = s.indexOnStart;
+                  decrypted.indexing = idx;
+                }
+                if (s.maxIterations !== undefined) {
+                  const tools = (decrypted.tools as Record<string, unknown>) ?? {};
+                  tools.maxIterations = s.maxIterations;
+                  decrypted.tools = tools;
+                }
+                const encrypted = encryptConfigSecrets(decrypted, vault);
+                await atomicWrite(wpaths.globalConfig, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
+
+                // Sync in-memory config store.
+                configStore.update({
+                  ...(s.nextPrediction !== undefined ? { nextPrediction: s.nextPrediction } : {}),
+                  ...(s.featureMcp !== undefined || s.featurePlugins !== undefined || s.featureMemory !== undefined || s.featureSkills !== undefined || s.featureModelsRegistry !== undefined
+                    ? { features: decrypted.features as Config['features'] }
+                    : {}),
+                  ...(s.contextAutoCompact !== undefined || s.contextStrategy !== undefined
+                    ? { context: decrypted.context as Config['context'] }
+                    : {}),
+                  ...(s.logLevel !== undefined ? { log: decrypted.log as Config['log'] } : {}),
+                  ...(s.auditLevel !== undefined ? { session: decrypted.session as Config['session'] } : {}),
+                  ...(s.indexOnStart !== undefined ? { indexing: decrypted.indexing as Config['indexing'] } : {}),
+                  ...(s.maxIterations !== undefined ? { tools: decrypted.tools as Config['tools'] } : {}),
+                });
+              }
+
+              // Apply runtime effects immediately.
+              if (s.streamFleet !== undefined) {
+                fleetStreamController?.setEnabled(s.streamFleet);
+              }
               return null;
             } catch (err) {
               return err instanceof Error ? err.message : String(err);
             }
           },
           effectiveMaxContext,
+          // Terminal title animation: read from config (default on).
+          titleAnimation: ((config.autonomy as Record<string, unknown> | undefined)?.['terminalTitleAnimation'] as boolean) ?? true,
+          // Completion chime: terminal bell when agent finishes.
+          chime: ((config.autonomy as Record<string, unknown> | undefined)?.['chime'] as boolean) ?? false,
+          // Confirm before exit: show "confirm exit" prompt on Ctrl+C.
+          confirmExit: ((config.autonomy as Record<string, unknown> | undefined)?.['confirmExit'] as boolean) ?? true,
           // Default OFF so the terminal's native scrollback works for chat
           // history out of the box. Users who hit resize/overlay-leak
           // artifacts can opt back into alt-screen with `--alt-screen`.
@@ -514,6 +660,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             }
             return messages;
           },
+          modeLabel: modeId,
         });
       } finally {
         renderer.setSilent(false);

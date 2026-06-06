@@ -124,7 +124,7 @@ User Input
 | 1 | Provider plumbing (`provider?: string` on SubagentConfig) | ✅ Shipped |
 | 2 | Per-subagent sessions (`makeDirectorSessionFactory`) | ✅ Shipped |
 | 3 | FleetBus + FleetUsageAggregator | ✅ Shipped |
-| 4 | 8 Director tools | ✅ Shipped |
+| 4 | Director tool surface | ✅ Shipped |
 | 5 | Director class + shutdown + manifest writing | ✅ Shipped |
 
 ### ✅ Phase 6: Partially Shipped (0.1.8)
@@ -140,10 +140,10 @@ User Input
 | `FleetSpawnBudgetError` surfaced in `spawn_subagent` tool | LLM sees structured `{ error, kind, limit, observed }` | ✅ Shipped |
 | `--resume <runId>` | Crash recovery: re-attach to live subagents via lock files | 🔲 Pending |
 | Hostile-prompt test pack | Verify bridge contract prevents parent-context exfiltration | 🔲 Pending |
-| `wstack sessions ls <runId>` | CLI command to list session artifacts | 🔲 Pending |
-| TUI fleet panel | Real-time subagent status dashboard in TUI | 🔲 Pending |
+| `wstack sessions ls <runId>` | CLI command to list fleet/session artifacts | 🔲 Pending |
+| TUI fleet panel | Real-time subagent status dashboard in TUI | ✅ Shipped |
 | WebUI fleet tab | Fleet observability in web UI | 🔲 Pending |
-| `wstack replay <runId>` | Replay an entire director run from manifest + JSONLs | 🔲 Pending |
+| `wstack replay <runId>` | Replay session events from JSONL | ✅ Shipped |
 | `fleet_session` subagent-side bridge handler | Subagent responds to `session_read` bridge messages | 🔲 Pending |
 | `redirect` tool | Mid-flight task reassignment | 🔲 Pending |
 | `classifySubagentError` case normalization | Use `lower` for empty_response / tool_failed regexes | 🔲 Pending |
@@ -200,13 +200,13 @@ Director now accepts `sessionsRoot` and `directorRunId` in its options, enabling
 
 Added `director` to `BOOLEAN_FLAGS` in `arg-parser.ts`. Running `wrongstack --director` starts a session in director mode from the outset — no need for `/director` slash command or delegate tool promotion.
 
-#### No `wstack sessions ls` or `wstack replay` 🔲 Pending
+#### Partial session artifact CLI support
 
-Fleet artifacts are written but no CLI commands exist to inspect them.
+Fleet artifacts are written. `wstack replay` exists for session-event replay, but there is still no first-class `wstack sessions ls <runId>` command dedicated to listing fleet artifacts for a run.
 
-#### No fleet observability in TUI or WebUI 🔲 Pending
+#### Fleet observability surface
 
-`FleetBus` events are emitted but the TUI and WebUI fleet panels are not yet implemented.
+`FleetBus` events are emitted and consumed by the TUI. `FleetMonitor` (`Ctrl+F` / `F2`) shows the orchestration dashboard, `AgentsMonitor` (`Ctrl+G` / `F3`) shows per-agent live context, and `FleetPanel` renders the compact status-bar summary. WebUI has collaboration/worktree streaming handlers but does not yet have an equivalent dedicated fleet dashboard.
 
 ### 4.5 Error Handling
 
@@ -236,7 +236,7 @@ The director test suite covers:
 - Usage roll-up with pricing
 - Late-await resolution (completed cache)
 - Terminate/abort
-- All 8 tool shapes + roster lookup
+- Director tool shapes + roster lookup
 - FleetBus subscribe/filter/onAny
 - Bridge ask round-trip
 - rollUp markdown + JSON
@@ -261,7 +261,7 @@ The director test suite covers:
 
 The `Director` uses `opts.config.coordinatorId || randomUUID()` as its id. The `DirectorStateCheckpoint` stores this as `directorRunId`. The `makeDirectorSessionFactory` generates its own `directorRunId` (timestamped, e.g. `20260515-abcd1234`). In `MultiAgentHost.promoteToDirector`, when `fleetRoot` is set, `directorRunId` is derived differently. These three id spaces are not synchronized.
 
-**Impact:** The same fleet run has 2-3 different identifiers depending on which component writes it. `wstack replay <runId>` must know which id space to look in.
+**Impact:** The same fleet run has 2-3 different identifiers depending on which component writes it. Fleet-specific replay or artifact browsing must know which id space to look in.
 
 ### 5.2 `delegate` timeout buffer is arbitrary
 
@@ -309,9 +309,9 @@ In `fleet-bus.ts` line 50-73, `FORWARDED_TYPES` is a const array listing every e
 | R1 | `--resume <runId>` crash recovery | `director-state.ts`, CLI | Checkpoint survives crashes; resume banner needs lock-file re-attach |
 | R2 | Hostile-prompt test pack | `director.test.ts` | Verify bridge contract prevents parent-context exfiltration |
 | R3 | `wstack sessions ls <runId>` | CLI subcommands | Inspect fleet artifacts |
-| R4 | TUI fleet panel | `packages/tui/src/components/fleet-panel.tsx` | Real-time multi-agent dashboard |
+| R4 | TUI fleet panel | `packages/tui/src/components/fleet-panel.tsx` | Shipped compact status summary; full monitor also lives in `packages/tui/src/components/fleet-monitor.tsx` |
 | R5 | WebUI fleet tab | `packages/webui/` | Fleet observability in web UI |
-| R6 | `wstack replay <runId>` | CLI, core | Replay any fleet run from JSONLs |
+| R6 | Fleet-aware replay | CLI, core | Extend existing `wstack replay` support to understand director/fleet run ids |
 | R7 | `fleet_session` subagent-side bridge handler | `agent-subagent-runner.ts` | Subagent responds to `session_read` bridge messages |
 | R8 | `redirect` tool | `director-tools.ts` | Mid-flight task reassignment |
 | R9 | `classifySubagentError` case normalization | `multi-agent-coordinator.ts:626` | Use `lower` for `empty_response` / `tool_failed` regexes |
@@ -340,7 +340,7 @@ In `fleet-bus.ts` line 50-73, `FORWARDED_TYPES` is a const array listing every e
 The Director orchestration system is architecturally sound — isolation invariants are correct, the tool set is well-designed, and the state checkpoint mechanism provides a foundation for crash recovery. The primary gaps are:
 
 1. **Phase 6 items** (safety caps at tool layer, quota guard, crash recovery tests) — these are prerequisite for production reliability
-2. **Missing tools** (`fleet_session`, `fleet_health`) — these unlock director introspection that the current 8-tool set doesn't support
-3. **UX gaps** (`--director` flag, TUI panel, `wstack sessions ls`) — without CLI/UI support, users can't easily observe their fleets
+2. **Remaining bridge gaps** (`fleet_session` subagent-side bridge handler) — the Director can read JSONL directly today, but subagent-side session-read handling is still listed as future work
+3. **UX gaps** (`wstack sessions ls`, dedicated WebUI fleet dashboard) — the TUI has fleet/agents monitors, but CLI artifact browsing and WebUI fleet observability are still thinner than the runtime capabilities
 
 The most impactful single improvement is **F4: crash recovery test + `--resume` implementation**, because without it, any director process crash loses all in-flight task state regardless of how well the checkpoint mechanism works.

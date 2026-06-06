@@ -34,7 +34,6 @@ export function CompactTodosPanel({ todos }: { todos: TodoItem[] }): React.React
   // ── Vertical space budget ──────────────────────────────────────
   // Panel typically spans full terminal height in managed mode.
   // Deduct: header (~3 rows) + border (~2) + padding (~2) = 7 overhead.
-  const HEADER_ROWS = 3;
   const OVERHEAD = 7;
   const maxVisible = Math.max(4, h - OVERHEAD);
 
@@ -92,7 +91,7 @@ export function CompactTodosPanel({ todos }: { todos: TodoItem[] }): React.React
           <Text dimColor>
             {done}/{todos.length}
           </Text>
-          {overflow > 0 && HEADER_ROWS < 3 ? (
+          {overflow > 0 ? (
             <Text color="yellow">+{overflow}</Text>
           ) : null}
         </Box>

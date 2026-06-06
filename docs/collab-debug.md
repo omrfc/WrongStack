@@ -1,62 +1,62 @@
-# Collab Debug — Çoklu Agent Kod İncelemesi
+# Collab Debug - Multi-Agent Code Review
 
-`collab_debug`, **BugHunter + RefactorPlanner + Critic** olmak üzere üç agent'ı paralel olarak aynı kod tabanında çalıştırır. Her agent bağımsız tarama yapar, bulgularını FleetBus üzerinden paylaşır ve Critic sonunda bütünleşik bir karar raporu üretir.
-
----
-
-## Nasıl Çalışır
-
-```
-BugHunter ──┐
-            ├──► FleetBus ──► Critic ──► final report
-Refactor ───┘   (events)     (listens + judges)
-```
-
-- **BugHunter** — Bug, anti-pattern, code smell tespiti yapar → `bug.found` eventleri yayar
-- **RefactorPlanner** — BugHunter eventlerini dinler → refactor planları üretir → `refactor.plan` eventleri yayar
-- **Critic** — Hem BugHunter hem RefactorPlanner çıktılarını dinler → `critic.evaluation` eventleri yayar → final verdict üretir
+`collab_debug` runs **BugHunter + RefactorPlanner + Critic** in parallel against the same codebase. Each agent scans independently, shares findings through FleetBus, and Critic produces an integrated final verdict.
 
 ---
 
-## Kullanım Sınırları
+## How It Works
 
-> **Kural:** `targetPaths` ile seçilen dosya sayısı **maksimum 20-30** olmalıdır.
+```
+BugHunter ----.
+              +--> FleetBus --> Critic --> final report
+Refactor -----'   (events)     (listens + judges)
+```
 
-**Neden?** Her agent tüm hedef dosyaları tarar. 3 agent × N dosya = çoklu iterasyon maliyeti. Büyük hedefler zaman aşımına (timeout) ve aşırı token tüketimine neden olur.
+- **BugHunter** - Detects bugs, anti-patterns, and code smells -> emits `bug.found` events
+- **RefactorPlanner** - Listens to BugHunter events -> creates refactor plans -> emits `refactor.plan` events
+- **Critic** - Listens to both BugHunter and RefactorPlanner outputs -> emits `critic.evaluation` events -> produces the final verdict
 
-| Hedef | Dosya Sayısı | Örnek |
+---
+
+## Usage Limits
+
+> **Rule:** the number of files selected by `targetPaths` should be **20-30 at most**.
+
+**Why?** Each agent scans all target files. 3 agents x N files means multiple-iteration cost. Large targets cause timeouts and excessive token usage.
+
+| Target | File Count | Example |
 |---|---|---|
-| ✅ İdeal | 10-20 | `packages/core/src/agents/**/*.ts` |
-| ⚠️ Sınır | 20-30 | `packages/core/src/director/**/*.ts` |
-| ❌ Kaçın | 50+ | `packages/**/src/**/*.ts` (monorepo geneli) |
+| Good | 10-20 | `packages/core/src/agents/**/*.ts` |
+| Limit | 20-30 | `packages/core/src/director/**/*.ts` |
+| Avoid | 50+ | `packages/**/src/**/*.ts` (entire monorepo) |
 
 ---
 
-## Doğru Kullanım Pattern'i
+## Recommended Usage Pattern
 
-### Package-by-package yaklaşımı
+### Package-by-package approach
 
-Monorepo için tüm paketi değil, **tek bir modül/package'ı** hedefle:
+For a monorepo, target **one module/package** instead of the whole package set:
 
 ```js
-// ✅ İyi — tek package, sınırlı dosya
+// Good - single package, limited files
 collab_debug(["packages/core/src/agents/**/*.ts"])
 
-// ✅ İyi — alt dizin bile olabilir
+// Good - a subdirectory is even better
 collab_debug(["packages/runtime/src/sessions/**/*.ts"])
 
-// ❌ Kötü — tüm monorepo
+// Bad - entire monorepo
 collab_debug(["packages/**/src/**/*.ts"])
 ```
 
-### Glob Pattern'ler
+### Glob Patterns
 
 ```js
-// Tek package içinde glob ile hedefle
-collab_debug(["packages/core/src/**/*.ts"])           // core/src altı (çok geniş ⚠️)
-collab_debug(["packages/core/src/agents/**/*.ts"])   // sadece agents altı ✅
+// Target with a glob inside one package
+collab_debug(["packages/core/src/**/*.ts"])           // under core/src (too broad)
+collab_debug(["packages/core/src/agents/**/*.ts"])   // only under agents
 
-// Birden fazla ama küçük hedef
+// Multiple small targets are okay
 collab_debug([
   "packages/core/src/agents/**/*.ts",
   "packages/core/src/director/**/*.ts"
@@ -65,37 +65,37 @@ collab_debug([
 
 ---
 
-## Ne Zaman Kullanılır
+## When To Use It
 
-| Senaryo | collab_debug Uygun mu? |
+| Scenario | Is `collab_debug` appropriate? |
 |---|---|
-| Yeni bir özellik için kod yazıldı, son kontrole girmek istiyor | ✅ Evet |
-| Mevcut bir modülde refactor planlanıyor | ✅ Evet |
-| Güvenlik açığı şüphesi olan bir dosya | ✅ Evet |
-| Tüm repo genelinde tarama | ❌ Hayır — package-by-package yap |
-| Sürekli CI/CD entegrasyonu | ❌ Hayır — tek agent scan yeterli |
-| Çok büyük dosya (1000+ satır) | ⚠️ Dikkat — tek başına incele |
+| Code was written for a new feature and needs a final review | Yes |
+| A refactor is planned in an existing module | Yes |
+| A file may contain a security vulnerability | Yes |
+| Scanning the entire repository | No - do it package by package |
+| Continuous CI/CD integration | No - a single-agent scan is enough |
+| Very large file (1000+ lines) | Caution - review it on its own |
 
 ---
 
-## Alternatifler
+## Alternatives
 
-- **Geniş tarama ihtiyacı** → `bug-hunter` tek başına subagent (parallel yok, daha hızlı)
-- **Sadece type check** → `typecheck` aracı
-- **Sadece lint** → `lint` aracı
-- **Manuel inceleme** → Ben (director) üzerinden grep/read ile Targeted tarama
-
----
-
-## Timeout ve Budget
-
-Varsayılan timeout **10 dakika (600000ms)**. Büyük hedeflerde artırılabilir ama bu kaçınılması gereken bir durumdur — hedef küçültmek her zaman tercih edilir.
+- **Need a broad scan** -> run a standalone `bug-hunter` subagent (no parallel pipeline, faster)
+- **Only need type checking** -> use the `typecheck` tool
+- **Only need linting** -> use the `lint` tool
+- **Manual review** -> use targeted grep/read from the director
 
 ---
 
-## Çıktı Raporu Yapısı
+## Timeout and Budget
 
-Critic'in ürettiği final rapor şunu içerir:
+The default timeout is **10 minutes (600000 ms)**. It can be increased for large targets, but that should be avoided; shrinking the target is almost always preferable.
+
+---
+
+## Output Report Structure
+
+The final report produced by Critic contains:
 
 ```
 overall_verdict: "approve" | "needs_revision" | "reject"

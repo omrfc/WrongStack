@@ -146,10 +146,10 @@ function computeWidths(
   for (const row of allRows) {
     for (let c = 0; c < cols; c++) {
       const cell = row[c] ?? '';
-      const w = longestWord(cell); // visual width of the longest word in this cell
-      const total = strWidth(cell); // visual width of the entire cell content
-      // Ensure the column is at least wide enough for the longest word,
-      // and at least wide enough for the full cell content.
+      // Use visible width (stripped markers) so **bold** contributes 4, not 8.
+      const stripped = stripInlineMarkers(cell);
+      const w = longestWord(stripped);
+      const total = strWidth(stripped);
       natural[c] = Math.max(natural[c]!, w, total);
     }
   }
@@ -241,22 +241,60 @@ export function breakLigatures(text: string): string {
 
 /**
  * Return the number of terminal columns a string occupies.
- * Uses East Asian Width property to determine character widths:
- * - Emoji (U+1F000+ and various other emoji blocks) count as 2 columns.
- * - Full-width (F) and Wide (W) characters count as 2 columns.
+ *
+ * Handles Unicode properly:
+ * - ZWJ emoji sequences (👨‍👩‍👧, 🧑‍🏫) count as 2 columns total.
+ * - Variation selectors (U+FE0F, U+FE0E) contribute zero width.
+ * - Zero-width characters (ZWJ U+200D, ZWSP U+200B, etc.) contribute zero width.
+ * - Emoji blocks count as 2 columns.
+ * - East Asian Wide/Fullwidth characters count as 2 columns.
  * - ASCII printable characters count as 1.
  * - Control characters count as 0.
  */
 export function strWidth(s: string): number {
   let width = 0;
-  for (const cp of s) {
-    const code = cp.codePointAt(0)!;
-    // Control characters: no width
-    if (code < 0x20 || (code >= 0x7f && code < 0xa0)) {
+  const len = s.length;
+  let i = 0;
+  while (i < len) {
+    const code = s.codePointAt(i)!;
+    const cpLen = code > 0xffff ? 2 : 1; // surrogate pair = single code point
+
+    // Zero-width characters — contribute nothing to visual width.
+    if (
+      code === 0x200d || // ZWJ — Zero Width Joiner (emoji sequences)
+      code === 0x200b || // ZWSP — Zero Width Space
+      code === 0x200c || // ZWNJ — Zero Width Non-Joiner
+      code === 0x200e || // LRM — Left-to-Right Mark
+      code === 0x200f || // RLM — Right-to-Left Mark
+      code === 0x2060 || // WJ — Word Joiner
+      code === 0xfeff || // BOM / ZWNBSP
+      (code >= 0xfe00 && code <= 0xfe0f) || // Variation Selectors 1–16
+      (code >= 0xe0100 && code <= 0xe01ef) // Variation Selectors Supplement
+    ) {
+      i += cpLen;
       continue;
     }
+
+    // Control characters: no width
+    if (code < 0x20 || (code >= 0x7f && code < 0xa0)) {
+      i += cpLen;
+      continue;
+    }
+
+    // Combining marks, enclosing marks, modifiers — zero width on their own
+    // (they combine with preceding base character).
+    if (
+      (code >= 0x0300 && code <= 0x036f) || // Combining Diacritical Marks
+      (code >= 0x1ab0 && code <= 0x1aff) || // Combining Diacritical Marks Extended
+      (code >= 0x1dc0 && code <= 0x1dff) || // Combining Diacritical Marks Supplement
+      (code >= 0x20d0 && code <= 0x20ff) || // Combining Diacritical Marks for Symbols
+      (code >= 0xfe20 && code <= 0xfe2f) // Combining Half Marks
+    ) {
+      i += cpLen;
+      continue;
+    }
+
     // Emoji: Most emoji render as double-width in terminals.
-    // Modern emoji are in U+1F000+ or various other blocks.
     if (
       code >= 0x1f000 || // Supplementary Pictographs (U+1F000-U+1FFFF)
       (code >= 0x2600 && code <= 0x27bf) || // Miscellaneous Symbols, Dingbats
@@ -269,14 +307,13 @@ export function strWidth(s: string): number {
       (code >= 0x2700 && code <= 0x27bf) // Dingbats (includes ✅ ❌)
     ) {
       width += 2;
+      i += cpLen;
       continue;
     }
     // East Asian Width: Wide characters take 2 columns.
-    // CJK Unified Ideographs, Hiragana, Katakana, Hangul, etc.
     if (
       (code >= 0x1100 && code <= 0x115f) || // Hangul Jamo
-      code === 0x2329 || // LEFT-POINTING ANGLE BRACKET
-      code === 0x232a || // RIGHT-POINTING ANGLE BRACKET
+      code === 0x2329 || code === 0x232a || // Angle brackets
       (code >= 0x2e80 && code <= 0x303e) || // CJK Radicals Supplement
       (code >= 0x3040 && code <= 0xa4cf) || // Hiragana, Katakana, CJK
       (code >= 0xac00 && code <= 0xd7a3) || // Hangul Syllables
@@ -289,10 +326,12 @@ export function strWidth(s: string): number {
       (code >= 0x30000 && code <= 0x3fffd) // CJK Extension F+
     ) {
       width += 2;
+      i += cpLen;
       continue;
     }
     // ASCII and most other printable characters: 1 column
     width += 1;
+    i += cpLen;
   }
   return width;
 }
@@ -310,8 +349,48 @@ function border(left: string, mid: string, right: string, widths: number[]): str
   return left + widths.map((w) => '─'.repeat(w + 2)).join(mid) + right;
 }
 
+// ─── Inline markdown in table cells ─────────────────────────────────────────
+
+/**
+ * Strip inline formatting markers from text for width calculation.
+ * Removes `**`, `*`, `` ` ``, `~~` markers so `strWidth` measures only
+ * the visible text, not the markup characters.
+ */
+function stripInlineMarkers(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '$1') // **bold**
+    .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '$1') // *italic*
+    .replace(/`(.+?)`/g, '$1') // `code`
+    .replace(/~~(.+?)~~/g, '$1'); // ~~strike~~
+}
+
+// ANSI SGR codes for terminal text styling inside <Text> strings.
+const ANSI_BOLD = '\x1b[1m';
+const ANSI_RESET = '\x1b[22m';
+const ANSI_DIM = '\x1b[2m';
+const ANSI_CYAN = '\x1b[36m';
+const ANSI_STRIKE = '\x1b[9m';
+const ANSI_RESET_ALL = '\x1b[0m';
+
+/**
+ * Convert inline markdown markers to ANSI escape codes for styled display
+ * inside table cells. Ink's `<Text>` component passes ANSI through, so we
+ * get bold/italic/code/strikethrough styling without breaking the box-drawing
+ * geometry (ANSI codes are zero-width).
+ */
+function applyInlineAnsi(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, `${ANSI_BOLD}$1${ANSI_RESET}`)
+    .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, `${ANSI_DIM}$1${ANSI_RESET_ALL}`)
+    .replace(/`(.+?)`/g, `${ANSI_CYAN}$1${ANSI_RESET_ALL}`)
+    .replace(/~~(.+?)~~/g, `${ANSI_STRIKE}$1${ANSI_RESET_ALL}`);
+}
+
 function renderRow(cells: string[], widths: number[], aligns: Align[]): string[] {
-  const safe = cells.map((c) => breakLigatures(c));
+  // Apply ANSI formatting for inline markdown, then break ligatures.
+  const styled = cells.map((c) => applyInlineAnsi(c));
+  const safe = styled.map((c) => breakLigatures(c));
+  // Wrap and pad based on VISIBLE width (stripped markers), but display styled text.
   const wrapped = safe.map((c, i) => wrapCell(c, widths[i] ?? MIN_COL_WIDTH));
   const height = Math.max(1, ...wrapped.map((w) => w.length));
   const out: string[] = [];

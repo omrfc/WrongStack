@@ -1,92 +1,62 @@
-# /skill · /skill-gen · /skill-install · /skill-update · /skill-uninstall
+# /skill /skill-gen /skill-install /skill-update /skill-uninstall
 
-## /skill — Skill Browser
+These commands are registered by the built-in `wstack-skills` plugin.
+
+## /skill - Skill Browser
 
 Lists all available skills or shows the full body of a named skill.
 
-```bash
-/skill              → list all skills with trigger hints
-/skill <name>       → show full skill body
+```text
+/skill              -> list all skills with trigger hints
+/skill <name>       -> show full skill body
 ```
 
 Skills are loaded by `DefaultSkillLoader` from three scopes:
-- Bundled: `packages/core/skills/<name>/SKILL.md`
-- User-global: `~/.wrongstack/skills/<name>/SKILL.md`
+
 - Project-local: `<projectRoot>/.wrongstack/skills/<name>/SKILL.md`
+- User-global: `~/.wrongstack/skills/<name>/SKILL.md`
+- Bundled: `packages/core/skills/<name>/SKILL.md`
 
-Output for each skill shows its scope tags and the trigger condition text.
+## /skill-gen - LLM-Assisted Skill Creator
 
-## /skill-gen — LLM-Assisted Skill Creator
+Launches an LLM-driven skill creation session. The LLM reads `packages/core/skills/skill-creator/SKILL.md` and guides the user through defining the name, trigger conditions, and instructions.
 
-Launches an interactive LLM-driven skill creation session. The LLM reads `packages/core/skills/skill-creator/SKILL.md` and guides you through defining:
-- Skill name and scope
-- Trigger conditions (when to activate)
-- Instructor text (what the agent should do)
+## /skill-install - Install a Skill
 
-The LLM validates the format, writes the file, and confirms location. No separate wizard needed — it's conversational.
-
-## /skill-install — Install a Skill
-
-```
-/skill-install <url-or-name>
+```text
+/skill-install <user/repo[@ref]> [--global]
 ```
 
-Downloads and installs a skill from a URL or the skill registry. Installs to user-global scope (`~/.wrongstack/skills/`).
+Installs skills from a GitHub repository. Repositories may contain a single `SKILL.md` at the root or multiple skills under a `skills/` directory. Without `--global`, installs into the project skill directory.
 
-## /skill-update — Update Installed Skills
+## /skill-update - Update Installed Skills
 
-```
-/skill-update            → update all user-global skills
-/skill-update <name>     → update a specific skill
-```
-
-Checks the installed skill's source for a newer version and updates in place.
-
-## /skill-uninstall — Remove a Skill
-
-```
-/skill-uninstall <name>
+```text
+/skill-update
+/skill-update <name>
+/skill-update <user/repo@ref>
+/skill-update <name> --global
 ```
 
-Removes the skill from user-global scope. Bundled skills cannot be uninstalled.
+Updates installed skills from their recorded GitHub source.
 
-## Skill format (SKILL.md)
+## /skill-uninstall - Remove a Skill
 
-```markdown
-# <skill name>
-
-## When to use
-_Trigger condition text — the agent reads this to know when to activate the skill._
-
-## What to do
-_Instructor text — what the agent should do when the skill is active._
+```text
+/skill-uninstall <name> [--global]
 ```
 
-See `packages/core/skills/skill-creator/SKILL.md` for the canonical skill format reference.
+Removes an installed project or user-global skill. When called without a name, it lists installed skills for the selected scope.
 
-## Bundled skills
+## Skill format
 
-| Skill | Purpose |
-|---|---|
-| `audit-log` | Log parsing, anomaly detection, pattern recognition |
-| `bug-hunter` | Static bug and code smell detection |
-| `git-flow` | Commit message style, branch hygiene |
-| `multi-agent` | Leader/worker roles, task delegation |
-| `node-modern` | Node.js >= 22 idioms (ESM, native fetch, AbortSignal) |
-| `prompt-engineering` | LLM agent system prompt design |
-| `react-modern` | React 19+ patterns (Server Components, useTransition, Suspense, `use` hook) |
-| `refactor-planner` | Dependency mapping, risk assessment, phased planning |
-| `sdd` | Spec-driven development workflow |
-| `security-scanner` | Security vulnerability scanning |
-| `skill-creator` | Skill authoring guide and validation |
-| `typescript-strict` | TypeScript strict mode patterns |
+See `packages/core/skills/skill-creator/SKILL.md` and `docs/skills.md` for the canonical skill format.
 
 ## Code reference
 
-- `packages/cli/src/slash-commands/skill.ts`
-- `packages/cli/src/slash-commands/skill-generator.ts`
-- `packages/cli/src/slash-commands/skill-install.ts`
-- `packages/core/src/skills/skill-loader.ts`
+- `packages/core/src/plugins/skills-plugin.ts`
 - `packages/core/src/skills/skill-installer.ts`
+- `packages/core/src/execution/skill-loader.ts`
 - `packages/core/skills/skill-creator/SKILL.md`
+- `packages/core/tests/plugins/skills-plugin.test.ts`
 - `docs/skills.md`

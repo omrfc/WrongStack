@@ -98,6 +98,18 @@ export interface RunTuiOptions {
    */
   altScreen?: boolean;
   /**
+   * Terminal title animation on/off. Defaults to true. When false, the
+   * OSC-0 window/tab title stays static (the app name only, no spinner).
+   * Controlled via /settings → Terminal title animation.
+   */
+  titleAnimation?: boolean;
+  /** Play terminal bell (\\x07) when agent run completes. */
+  chime?: boolean;
+  /** Show "confirm exit" message on first Ctrl+C instead of "exit". */
+  confirmExit?: boolean;
+  /** Active agent mode label shown in the status bar (e.g. "teach", "brief"). */
+  modeLabel?: string;
+  /**
    * Called right after we exit the alt-screen on a clean shutdown. The
    * CLI uses this to print a one-line "session saved to …" hint into
    * the user's normal terminal, since alt-screen exit erases the whole
@@ -201,12 +213,12 @@ export interface RunTuiOptions {
    * Read the persisted autonomy settings (defaultMode, autoProceedDelayMs).
    * Used by the SettingsPicker in the TUI on mount and after Ctrl+S toggle.
    */
-  getSettings?: () => { mode: 'off' | 'suggest' | 'auto'; delayMs: number };
+  getSettings?: () => import('./app.js').Settings;
   /**
-   * Persist autonomy settings changes. Returns null on success, or an
+   * Persist settings changes. Returns null on success, or an
    * error string on failure (so the TUI can display it as a hint).
    */
-  saveSettings?: (s: { mode: 'off' | 'suggest' | 'auto'; delayMs: number }) =>
+  saveSettings?: (s: import('./app.js').Settings) =>
     | string
     | null
     | Promise<string | null>;
@@ -264,8 +276,11 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
   // Animated window/tab title: a braille spinner + live status (thinking /
   // running a tool) driven by the EventBus, scrolling the app name when idle.
   // Out-of-band OSC sequence, so it never touches Ink's render. Reset on
-  // cleanup(). Self-disables on a non-TTY or WRONGSTACK_NO_TITLE=1.
-  const stopTitle = startTerminalTitle({ stdout, events: opts.events, model: opts.model });
+  // cleanup(). Disabled when WRONGSTACK_NO_TITLE=1 or titleAnimation is false.
+  const stopTitle =
+    opts.titleAnimation !== false
+      ? startTerminalTitle({ stdout, events: opts.events, model: opts.model })
+      : (() => {});
 
   // Take over EVERY keystroke. Raw mode (Ink turns this on when render
   // mounts) already disables ICANON/ECHO/ISIG/IXON on Linux+macOS, so
@@ -404,6 +419,9 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           // Managed viewport (in-app scroll + collapsibility) follows
           // alt-screen: it owns the screen, so there's no native-scrollback leak.
           managed: useAltScreen,
+          chime: opts.chime,
+          confirmExit: opts.confirmExit,
+          modeLabel: opts.modeLabel,
         }),
         { exitOnCtrlC: false, stdin: inkStdin },
       );

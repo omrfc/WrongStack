@@ -156,7 +156,7 @@ export const todoTool: Tool<TodoInput, TodoOutput> = {
     '- **Re-order items** to reflect current priorities.\n' +
     'This tool is extremely valuable for maintaining focus.',
   permission: 'auto',
-  mutating: true,          // mutates conversation state via state.replaceTodos
+  mutating: false,          // mutates only conversation state, not external state
   timeoutMs: 1_000,
   inputSchema: { /* array of TodoItem objects */ },
 };
@@ -267,7 +267,7 @@ Both systems can coexist: a user might set up a high-level plan with `/plan`, th
 
 | # | Feature | Motivation | Files touched |
 |---|---------|------------|---------------|
-| 5 | **Todo → Plan bridge** | Allow promoting a todo item into a plan item (and vice versa). | `packages/cli/src/slash-commands/todos.ts`, `packages/cli/src/slash-commands/plan.ts` |
+| 5 | **Todo -> Plan bridge** | Allow promoting a todo item into a plan item (and vice versa). | `packages/cli/src/slash-commands/todos.ts`, `packages/core/src/plugins/plan-plugin.ts` |
 | 6 | **Todo history / undo** | Keep a rolling log of todo mutations (last N states) so the user can undo an accidental `clear`. | `packages/core/src/storage/todos-checkpoint.ts`, `packages/core/src/core/conversation-state.ts` |
 | 7 | **Per-todo notes / subtasks** | Optional `notes?: string` and `subtasks?: TodoItem[]` fields. | `packages/core/src/core/context.ts`, `packages/core/src/utils/todos-format.ts` |
 | 8 | **Todo deadlines / reminders** | Optional `dueAt?: string` with reminder hook. | `packages/core/src/core/context.ts`, `packages/core/src/kernel/events.ts` |
@@ -289,7 +289,7 @@ Both systems can coexist: a user might set up a high-level plan with `/plan`, th
 | ID | Issue | Severity | Status |
 |----|-------|----------|--------|
 | F-1 | `/todos add/done` mutated `ctx.todos` directly, skipping observers. | **Medium** | ✅ Fixed — all mutations via `state.replaceTodos()` |
-| F-2 | `todoTool` declared `mutating: false` but mutates state. | **Low** | ✅ Fixed — changed to `mutating: true` |
+| F-2 | `todoTool` declared `mutating: false` but mutates conversation state. | **Low** | ✅ Documented — `mutating` means *external* side effects; conversation state mutation is internal and needs no confirmation. |
 | F-3 | `todos-checkpoint.ts` didn't validate `activeForm` on load. | **Low** | ✅ Fixed — validates `typeof t.activeForm === 'string'` |
 | F-4 | No test covered the `/todos` slash command. | **Low** | ✅ Fixed — 16 test cases including `remove` path |
 | F-5 | WebUI `todos.clear` used direct mutation. | **Medium** | ✅ Fixed — uses `state.replaceTodos([])` |

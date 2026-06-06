@@ -103,6 +103,20 @@ function isHomeEnd(data: string): 'home' | 'end' | null {
   return null;
 }
 
+/**
+ * Detect Backspace / Delete from raw stdin bytes. Ink 5.x `useInput` may
+ * miss these on Windows Terminal — Backspace often sends `\x08` (BS / Ctrl+H)
+ * while most Unix terminals send `\x7f` (DEL). We catch both so the key works
+ * regardless of terminal configuration. Delete sends the escape sequence
+ * `\x1b[3~` which Ink usually handles, but we include it here for completeness
+ * and to avoid relying on Ink internals.
+ */
+function isBackspaceOrDelete(data: string): 'backspace' | 'delete' | null {
+  if (data === '\x7f' || data === '\x08') return 'backspace';
+  if (data === '\x1b[3~') return 'delete';
+  return null;
+}
+
 export const EMPTY_KEY: KeyEvent = {
   upArrow: false,
   downArrow: false,
@@ -135,21 +149,38 @@ export function Input({
     onKey(input, key as KeyEvent);
   });
 
-  // Catch Home/End that Ink's useInput doesn't surface.
+  // Catch Home/End/Backspace/Delete that Ink's useInput may not surface
+  // (especially on Windows Terminal where Backspace sends \x08 not \x7f).
   const { stdin } = useStdin();
   useEffect(() => {
     if (!stdin || disabled) return;
     const handleData = (data: Buffer) => {
       const s = data.toString();
-      const kind = isHomeEnd(s);
-      if (kind === 'home') {
+
+      // Home / End
+      const homeEnd = isHomeEnd(s);
+      if (homeEnd === 'home') {
         onKey('', { ...EMPTY_KEY, home: true });
         return;
       }
-      if (kind === 'end') {
+      if (homeEnd === 'end') {
         onKey('', { ...EMPTY_KEY, end: true });
         return;
       }
+
+      // Backspace / Delete — caught here because Ink's useInput may miss
+      // \x08 (BS) on Windows Terminal. We fire before Ink so the key is never lost.
+      const bsdel = isBackspaceOrDelete(s);
+      if (bsdel === 'backspace') {
+        onKey('', { ...EMPTY_KEY, backspace: true });
+        return;
+      }
+      if (bsdel === 'delete') {
+        onKey('', { ...EMPTY_KEY, delete: true });
+        return;
+      }
+
+      // Function keys (F1–F12)
       const fn = fnKey(s);
       if (fn !== null) onKey('', { ...EMPTY_KEY, fn });
     };

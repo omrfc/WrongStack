@@ -1784,6 +1784,7 @@ export async function main(argv: string[]): Promise<number> {
       return () => stageListeners.delete(fn);
     },
     skillLoader: config.features.skills ? skillLoader : undefined,
+    modeId,
   });
 }
 

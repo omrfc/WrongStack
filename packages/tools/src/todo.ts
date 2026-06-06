@@ -21,10 +21,11 @@ export const todoTool: Tool<TodoInput, TodoOutput> = {
     '- Only **one** item should be `in_progress` at any time.\n' +
     '- Update the list frequently as work progresses (mark items done, add new ones, change status).\n' +
     '- **Re-order items** to reflect current priorities — the full list is replaced each call, so item order is entirely under your control.\n' +
+    '- When all items are completed the board auto-clears — you do NOT need to send an empty list.\n' +
     '- The system and user can see this list, so keep it honest and up-to-date.\n' +
     'This tool is extremely valuable for maintaining focus and giving the user visibility into your plan.',
   permission: 'auto',
-  mutating: true, // mutates conversation state (ctx.todos) via state.replaceTodos
+  mutating: false, // mutates only conversation state (ctx.todos), not external state — no confirmation needed
   timeoutMs: 1_000,
   inputSchema: {
     type: 'object',

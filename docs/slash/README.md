@@ -1,143 +1,90 @@
-# Slash Commands — Overview
+# Slash Commands - Overview
 
-WrongStack's REPL supports ~30 built-in slash commands. Each is a first-class citizen: registered into `SlashCommandRegistry`, dispatched by name, and wired with a shared `SlashCommandContext` that provides access to the runtime container, renderer, event bus, and agent state.
+WrongStack's REPL supports core slash commands plus commands registered by built-in plugins. Commands are registered into `SlashCommandRegistry`, dispatched by name, and wired with a shared `SlashCommandContext`.
 
-## Command map
+## Core command map
 
-| Command | File | What it does |
+| Command | Source | What it does |
 |---|---|---|
-| `/help` | `help.ts` | List all commands; show detailed help for a named command |
-| `/init` | `init.ts` | Create or update `.wrongstack/AGENTS.md` with auto-detected project facts |
-| `/clear` | `clear.ts` | Wipe session state: messages, todos, read-files, file-mtimes, meta, memory, terminal |
-| `/compact` | `compact.ts` | Run the context-window compactor (normal or aggressive) |
-| `/context` | `context.ts` | Context window summary; repair orphan blocks; switch context mode; `/ctx` alias |
-| `/diag` | `diag-stats.ts` | Runtime diagnostics: provider, tokens, tools, MCP server state |
-| `/stats` | `diag-stats.ts` | Session report: tokens, requests, tool calls, files read, estimated cost |
-| `/memory` | `memory.ts` | Persistent memory: show, remember, forget, clear |
-| `/todos` | `todos.ts` | Session todo list: show, add, done (by id/index/fuzzy match), clear |
-| `/plan` | `plan.ts` | Strategic plan board (session-persistent `.plan.json`): show, add, start, done, remove, promote, derive, template, clear |
-| `/mode` | `mode.ts` | Switch or view session mode (default, brief, teach, refactorer, …) |
-| `/setmodel` | `setmodel.ts` | View/set the leader model and the per-task model matrix (role/phase/* → provider/model) |
-| `/yolo` | `yolo.ts` | Toggle or query YOLO (auto-approve normal project work) |
-| `/autonomy` | `autonomy.ts` | Set autonomy level: off, suggest, auto, eternal |
-| `/goal` | `goal.ts` | Set/show/clear persistent autonomous mission (`.wrongstack/goal.json`) |
-| `/save` | `session.ts` | Force-flush session to disk (append `session_end` event) |
-| `/resume` | `session.ts` | List recent sessions; `/load`, `/sessions` aliases |
-| `/exit` | `session.ts` | Exit REPL; `/quit`, `/q` aliases |
-| `/tools` | `tools.ts` | List all registered tools: name, owner package, mut/ro, permission |
-| `/skill` | `skill.ts` | List all skills or show a skill's full body |
-| `/skill-gen` | `skill-generator.ts` | LLM-guided skill authoring wizard |
-| `/skill-install` | `skill-install.ts` | Install a skill from URL or registry |
-| `/skill-update` | `skill-update.ts` | Update installed skills |
-| `/skill-uninstall` | `skill-uninstall.ts` | Remove a user-global skill |
-| `/plugin` | `plugin.ts` | Manage plugins: list, official, install, enable, disable, remove |
-| `/mcp` | `mcp.ts` | MCP servers: list, add, remove, enable, disable, restart (REPL only) |
-| `/spawn` | `spawn-agents.ts` | Spawn an isolated subagent for a task |
-| `/agents` | `spawn-agents.ts` | Show all spawned subagents; `/agents monitor|on|off` toggles the overlay; with an id, show detailed live monitor view |
-| `/director` | `spawn-agents.ts` | Promote to director mode (fleet orchestration) |
-| `/fleet` | `fleet.ts` | Fleet control: status, usage, kill, manifest, retry, log, stream |
-| `/sdd` | `sdd.ts` | AI-driven spec-driven development workflow |
-| `/commit` | `commit.ts` | Stage all + generate LLM commit message + commit; `--dry-run` / `--no-llm` flags |
-| `/gitcheck` | `commit.ts` | Silent change check for system-prompt injection |
-| `/push` | `commit.ts` | Git push to all remotes; `--force` / `--dry-run` flags |
-| `/security` | `security.ts` | Security scan/audit/report; `--depth`, `--format` flags |
-| `/metrics` | `metrics.ts` | Prometheus metrics snapshot (requires `--metrics` flag at startup) |
-| `/health` | `health.ts` | Run health checks (requires `--metrics` flag at startup) |
-| `/statusline` | `statusline.ts` | Toggle TUI status bar items at runtime |
+| `/help` | `packages/cli/src/slash-commands/help.ts` | List all commands; show detailed help for a named command |
+| `/init` | `packages/cli/src/slash-commands/init.ts` | Create or update `.wrongstack/AGENTS.md` |
+| `/clear` | `packages/cli/src/slash-commands/clear.ts` | Wipe session state and terminal view |
+| `/compact` | `packages/cli/src/slash-commands/compact.ts` | Run the context-window compactor |
+| `/context` | `packages/cli/src/slash-commands/context.ts` | Context summary, repair, mode, and limit controls; `/ctx` alias |
+| `/codebase-reindex` | `packages/cli/src/slash-commands/codebase-reindex.ts` | Rebuild the codebase symbol index; `/reindex` alias |
+| `/diag` | `packages/cli/src/slash-commands/diag-stats.ts` | Runtime diagnostics |
+| `/stats` | `packages/cli/src/slash-commands/diag-stats.ts` | Session report |
+| `/memory` | `packages/cli/src/slash-commands/memory.ts` | Persistent memory: show, remember, forget, clear |
+| `/todos` | `packages/cli/src/slash-commands/todos.ts` | Session todo list |
+| `/mode` | `packages/cli/src/slash-commands/mode.ts` | Switch or view session mode |
+| `/setmodel` | `packages/cli/src/slash-commands/setmodel.ts` | View or set leader model and per-task model matrix |
+| `/models` | `packages/cli/src/slash-commands/models.ts` | Manage custom model definitions |
+| `/yolo` | `packages/cli/src/slash-commands/yolo.ts` | Toggle or query YOLO mode |
+| `/autonomy` | `packages/cli/src/slash-commands/autonomy.ts` | Set autonomy level |
+| `/goal` | `packages/cli/src/slash-commands/goal.ts` | Set, show, pause, resume, journal, or clear an autonomous mission |
+| `/save` | `packages/cli/src/slash-commands/session.ts` | Force-flush session to disk |
+| `/resume` | `packages/cli/src/slash-commands/session.ts` | List recent sessions; `/load`, `/sessions` aliases |
+| `/exit` | `packages/cli/src/slash-commands/session.ts` | Exit REPL; `/quit`, `/q` aliases |
+| `/tools` | `packages/cli/src/slash-commands/tools.ts` | List registered tools |
+| `/plugin` | `packages/cli/src/slash-commands/plugin.ts` | Manage plugins |
+| `/mcp` | `packages/cli/src/slash-commands/mcp.ts` | Manage MCP servers |
+| `/spawn` | `packages/cli/src/slash-commands/spawn-agents.ts` | Spawn an isolated subagent |
+| `/agents` | `packages/cli/src/slash-commands/spawn-agents.ts` | Show subagents or toggle the agents monitor |
+| `/director` | `packages/cli/src/slash-commands/spawn-agents.ts` | Promote to director mode |
+| `/fleet` | `packages/cli/src/slash-commands/fleet.ts` | Fleet status, usage, kill, manifest, retry, log, stream |
+| `/sdd` | `packages/cli/src/slash-commands/sdd.ts` | Spec-driven development workflow |
+| `/btw` | `packages/cli/src/slash-commands/btw.ts` | Quick side-note workflow |
+| `/next` | `packages/cli/src/slash-commands/next.ts` | Toggle next-task prediction |
+| `/fix` | `packages/cli/src/slash-commands/fix.ts` | Classify and route a bug/error fix |
+| `/autophase` | `packages/cli/src/slash-commands/autophase.ts` | Autonomous phase-based workflow |
+| `/worktree` | `packages/cli/src/slash-commands/worktree.ts` | Inspect and manage worktrees used by AutoPhase |
+| `/settings` | `packages/cli/src/slash-commands/settings.ts` | View or change runtime settings |
+| `/telegram-setup` | `packages/cli/src/slash-commands/telegram-setup.ts` | Configure Telegram bot token and default chat; `/tg-setup` alias |
+| `/collab` | `packages/cli/src/slash-commands/collab.ts` | Live collaboration helpers |
+| `/statusline` | `packages/cli/src/slash-commands/statusline.ts` | Toggle TUI status bar items; `/sl` alias |
+
+## Built-in plugin commands
+
+These commands are enabled by default when plugins are enabled and their host dependencies are available.
+
+| Command | Source | What it does |
+|---|---|---|
+| `/prompts` | `packages/core/src/plugins/prompts-plugin.ts` | Manage the personal prompt library |
+| `/sync` | `packages/core/src/plugins/sync-plugin.ts` | GitHub-backed sync for prompts, skills, settings, memory, and history |
+| `/commit` | `packages/core/src/plugins/git-plugin.ts` | Stage all changes and commit with an auto-generated message; `/gc` alias |
+| `/gitcheck` | `packages/core/src/plugins/git-plugin.ts` | Silent uncommitted-change check; `/gcstatus` alias |
+| `/push` | `packages/core/src/plugins/git-plugin.ts` | Push current branch to configured remotes |
+| `/metrics` | `packages/core/src/plugins/observability-plugin.ts` | Metrics snapshot; requires `--metrics` |
+| `/health` | `packages/core/src/plugins/observability-plugin.ts` | Run health checks; requires `--metrics` |
+| `/security` | `packages/core/src/plugins/security-plugin.ts` | Security scan, audit, and report commands |
+| `/skill` | `packages/core/src/plugins/skills-plugin.ts` | List skills or show a skill body |
+| `/skill-gen` | `packages/core/src/plugins/skills-plugin.ts` | LLM-guided skill authoring |
+| `/skill-install` | `packages/core/src/plugins/skills-plugin.ts` | Install skills from GitHub |
+| `/skill-update` | `packages/core/src/plugins/skills-plugin.ts` | Update installed skills |
+| `/skill-uninstall` | `packages/core/src/plugins/skills-plugin.ts` | Remove installed skills |
+| `/plan` | `packages/core/src/plugins/plan-plugin.ts` | Strategic plan board |
+
+Optional built-in plugins, such as the LSP and Telegram plugins, can also register slash commands when enabled.
 
 ## Dispatch flow
 
-```
-REPL input "/<command> <args>" 
-  → SlashCommandRegistry.dispatch(name, args, ctx)
-  → matching SlashCommand.run(args, ctx)
-  → returns { message: string, runText?: string, exit?: boolean }
-```
-
-`runText` is a special field: when a slash command returns it, the REPL injects that text into the next agent turn — used by `/goal`, `/sdd`, `/autonomy` to steer the AI conversation without the user typing.
-
-## SlashCommandContext wiring
-
-`SlashCommandContext` is assembled in `packages/cli/src/index.ts` and passed to every `buildXxxCommand(opts)`. All fields are optional unless noted.
-
-```typescript
-interface SlashCommandContext {
-  // Core registries
-  registry: SlashCommandRegistry;       // ✅ required — list/dispatch commands
-  toolRegistry: ToolRegistry;           // ✅ required — list tools
-
-  // Agent state
-  context?: Context;                    // Live agent state (messages, todos, meta)
-  cwd: string;                          // ✅ required — working directory
-  projectRoot: string;                  // ✅ required — resolved project root
-
-  // Infrastructure
-  renderer: Renderer;                    // ✅ required — terminal output
-  tokenCounter: TokenCounter;           // ✅ required — usage accounting
-
-  // Storage
-  memoryStore?: MemoryStore;             // show/remember/forget/clear
-  sessionStore?: SessionStore;           // session listing and resume
-  skillLoader?: SkillLoader;             // skill listing and reading
-
-  // Compaction
-  compactor?: { compact(ctx: Context, opts?: { aggressive?: boolean }): Promise<CompactReport> };
-
-  // Observability
-  metricsSink?: MetricsSink;             // behind --metrics flag
-  healthRegistry?: HealthRegistry;       // behind --metrics flag
-
-  // Mode store
-  modeStore?: ModeStore;                // session mode switching
-
-  // REPL lifecycle
-  onExit?: () => void;
-  onBeforeExit?: () => Promise<{ abort?: boolean; message?: string } | void>;
-  onClear?: () => void;
-
-  // Diagnostics
-  onDiag?: () => string;                 // runtime diagnostic snapshot
-  onStats?: () => string | null;         // session summary
-
-  // Git / commit
-  generateCommitMessage?: (diff: string) => Promise<string>;
-
-  // Multi-agent
-  onSpawn?: (task: string, opts?: { provider?, model?, tools?: string[], name?: string }) => Promise<string>;
-  onAgents?: (subagentId?: string) => string;  // no id = summary table; with id = detailed monitor view
-  onFleet?: (action: 'status'|'usage'|'kill'|'manifest', target?: string) => Promise<string>;
-  onFleetRetry?: (taskId?: string) => Promise<string>;
-  onFleetLog?: (id: string | undefined, mode: 'summary'|'raw') => Promise<string>;
-  onDirector?: () => Promise<string | null>;
-  fleetStreamController?: { enabled: boolean; setEnabled: (v: boolean) => void };
-
-  // Plugin management
-  onPlugin?: (args: string) => Promise<string>;
-
-  // YOLO + autonomy
-  onYolo?: (setTo?: boolean) => boolean;
-  onAutonomy?: (setTo?: AutonomyMode) => AutonomyMode;
-  onEternalStart?: () => void;
-  onEternalStop?: () => void;
-
-  // Persistent session plan
-  planPath?: string;                     // path to <session-id>.plan.json
-
-  // Pre-agent LLM access
-  llmProvider?: Provider;                // active before first run
-  llmModel?: string;
-
-  // Status bar (TUI)
-  statuslineConfig?: { get: () => Promise<StatuslineConfig>; set: (cfg: StatuslineConfig) => Promise<void> };
-  statuslineHiddenItems?: StatuslineItem[];
-  setStatuslineHiddenItems?: (items: StatuslineItem[]) => void;
-}
+```text
+REPL input "/<command> <args>"
+  -> SlashCommandRegistry.dispatch(name, args, ctx)
+  -> matching SlashCommand.run(args, ctx)
+  -> returns { message?: string, runText?: string, exit?: boolean }
 ```
 
-## Adding a new slash command
+`runText` is a special field: when a slash command returns it, the REPL injects that text into the next agent turn. `/goal`, `/sdd`, `/autonomy`, `/fix`, and `/skill-gen` use this to steer the AI conversation without the user typing the full prompt.
 
-1. Create `packages/cli/src/slash-commands/<name>.ts`
-2. Export `buildXxxCommand(opts: SlashCommandContext): SlashCommand`
-3. Import and add to `buildBuiltinSlashCommands()` in `index.ts`
-4. Add tests: `packages/cli/tests/slash-<name>.test.ts`
-5. Add docs: `docs/slash/<name>.md`
+## Adding a core slash command
+
+1. Create `packages/cli/src/slash-commands/<name>.ts`.
+2. Export `buildXxxCommand(opts: SlashCommandContext): SlashCommand`.
+3. Import and add it to `buildBuiltinSlashCommands()` in `packages/cli/src/slash-commands/index.ts`.
+4. Add tests under `packages/cli/tests/`.
+5. Add or update docs under `docs/slash/`.
+
+## Adding a plugin slash command
+
+Register it from a plugin with `api.slashCommands.register(command)` and declare `capabilities: { slashCommands: true }`. First-party built-in plugins can claim bare command names; user plugins are namespaced by owner unless the host marks them official.

@@ -1,8 +1,8 @@
 # Security Hardening Plan — 2026-06
 
-**Based on:** Full `security-check` rescan (June 2026)  
-**Source Report:** `security-report/SECURITY-REPORT.md` + `verified-findings.md`  
-**Current Posture:** Strong — 0 Critical/High/Medium findings. All prior issues (F-01, F-02, F-03) verified fixed. Overall risk **LOW**.  
+**Based on:** Full `security-check` rescan (June 2026)
+**Source Report:** historical security-report scan artifacts (not committed); current source of truth is `SECURITY.md`.
+**Current Posture:** Strong — 0 Critical/High/Medium findings. All prior issues (F-01, F-02, F-03) verified fixed. Overall risk **LOW**.
 **Owner:** Maintainers + security-conscious contributors
 
 ---
@@ -13,7 +13,7 @@ The June 2026 full security rescan (using the external `security-check` 4-phase 
 
 The only remaining items are **informational hardening opportunities** (no blocking vulnerabilities):
 
-1. **Short-term (Recommended):** Add `pnpm audit` as an explicit gate.
+1. **Short-term (Implemented):** Keep `pnpm audit` as an explicit gate.
 2. **Medium-term (Architectural):** Evolve authorization decisions from name-string + denylists toward explicit capability allowlists.
 3. **Ongoing (Process):** Institutionalize the excellent `onlyBuiltDependencies` + secret-scrubbing + guarded-egress discipline for future MCP/plugin/tool additions.
 
@@ -23,29 +23,29 @@ This plan turns those recommendations into concrete, prioritized, trackable work
 
 ## Prioritized Initiatives
 
-### P0 — Quick Win: Explicit Dependency Audit Gate (High Value / Low Effort)
+### P0 — Quick Win: Explicit Dependency Audit Gate (Implemented)
 
-**Objective**  
-Make supply-chain hygiene a first-class, enforced gate rather than something that is only run manually.
+**Objective**
+Keep supply-chain hygiene as a first-class, enforced gate rather than something that is only run manually.
 
 **Rationale (from report)**
 > "Short-term (Recommended) — Add explicit `pnpm audit --audit-level=moderate` step to release gates if not already present."
 
-Currently:
-- `package.json` → `"release:check": "pnpm typecheck && pnpm test && pnpm build"`
-- `.github/workflows/ci.yml` and `release.yml` have no audit step at all.
+Current implementation:
+- `package.json` → `"release:check": "pnpm audit --audit-level=moderate && pnpm typecheck && pnpm test && pnpm build"`
+- CI/release workflow audit gates are tracked as implemented in the progress section below.
 - `pnpm-workspace.yaml` already has a good `onlyBuiltDependencies` allowlist.
 
 **Concrete Steps**
 
-1. Update root `package.json`:
+1. Keep root `package.json` gated:
    ```json
    "release:check": "pnpm audit --audit-level=moderate && pnpm typecheck && pnpm test && pnpm build"
    ```
 
-2. Add a dedicated audit job (or step) in `.github/workflows/ci.yml` (non-blocking on PRs at first, blocking on main?).
+2. Keep the dedicated audit step in `.github/workflows/ci.yml`.
 
-3. Add the same check in `.github/workflows/release.yml` **before** the publish step (blocking).
+3. Keep the same check in `.github/workflows/release.yml` **before** the publish step (blocking).
 
 4. (Optional but nice) Add a weekly scheduled audit workflow that fails + notifies on new advisories.
 
@@ -60,7 +60,7 @@ Currently:
 
 ### P1 — Architectural: Capability-Based Authorization Model (Defense-in-Depth)
 
-**Objective**  
+**Objective**
 Reduce reliance on fragile name strings and hardcoded denylists. Move toward explicit, declarative capabilities/permissions that are easier to audit and reason about.
 
 **Rationale (from report + verified-findings.md)**
@@ -99,7 +99,7 @@ Current implementation examples:
 
 ### P2 — Process & Discipline: Future-Proofing New Integrations (Ongoing)
 
-**Objective**  
+**Objective**
 Ensure that the current excellent hygiene (`onlyBuiltDependencies`, secret scrubbing, guarded egress, permission model) does not degrade as the project adds new MCP servers, plugins, or powerful tools.
 
 **Rationale (from report)**
@@ -135,7 +135,7 @@ Ensure that the current excellent hygiene (`onlyBuiltDependencies`, secret scrub
 
 From the report and previous scan:
 
-- **Dev-only `postinstall` git-hooks setup** (`F-09` in prior scan): Maintainer decision. Not a security boundary. Document this explicitly as "accepted" in `SECURITY.md` or `docs/notes/SECURITY_AUDIT.md` so future scans don't keep surfacing it.
+- **Dev-only `postinstall` git-hooks setup** (`F-09` in prior scan): Maintainer decision. Not a security boundary. Document this explicitly as "accepted" in `SECURITY.md` so future scans don't keep surfacing it.
 - Some owner-string based checks that remain for backward compatibility / pragmatism.
 
 **Action:** Add a short "Accepted Risks & Trade-offs" section to `SECURITY.md` referencing the 2026-05 and 2026-06 scans. This prevents alert fatigue on future audits.
@@ -146,16 +146,16 @@ From the report and previous scan:
 
 - This plan is tracked via the project's internal todo system (see agent todos for `sec-plan-*` items).
 - Major items should be broken into GitHub issues or PRs with the label `security` or `hardening`.
-- After each significant change, re-run `/security-check` (or at minimum the relevant focused hunters) and update `security-report/` + `docs/notes/SECURITY_AUDIT.md`.
+- After each significant change, re-run `/security-check` (or at minimum the relevant focused hunters) and update `SECURITY.md` plus any generated scan artifacts.
 
 ---
 
 ## Current Implementation Status (June 2026 — Full Pass)
 
-**A — Tool Content Quality**  
+**A — Tool Content Quality**
 Largely complete. The vast majority of user-facing tools now have high-quality, security-aware, usage-guidance-rich documentation (description + usageHint + detailed schema properties). This directly improves the quality and safety of LLM-driven tool calls.
 
-**B — Invocation Guarantees**  
+**B — Invocation Guarantees**
 Significant concrete progress:
 - Registration-time schema validation (ToolRegistry rejects tools without valid inputSchema at load time).
 - Runtime JSON Schema validation on *every* tool call inside ToolExecutor — before permission policy or execution. Invalid calls are rejected with rich, model-actionable errors that include guidance on how to fix the call (e.g. use tool-help).
@@ -164,7 +164,7 @@ Significant concrete progress:
 
 These form real, enforceable gates that make incorrect or overly powerful tool calls much harder to succeed accidentally or maliciously.
 
-**Overall**  
+**Overall**
 The combination of dramatically better tool self-documentation + hard runtime gates around schema validity and capability visibility represents a major step forward in the project's security posture for agentic tool use.
 
 **Recommended follow-ups**
@@ -175,9 +175,9 @@ The combination of dramatically better tool self-documentation + hard runtime ga
 
 ## References
 
-- `security-report/SECURITY-REPORT.md` (this scan)
-- `security-report/verified-findings.md`
-- `security-report/architecture.md`
+- Historical security-report scan artifact (not committed)
+- Historical verified-findings scan artifact (not committed)
+- Historical security architecture scan artifact (not committed)
 - `SECURITY.md` (threat model — source of truth)
 - `packages/core/src/security/permission-policy.ts`
 - `packages/core/src/plugin/api.ts`
@@ -200,7 +200,7 @@ The combination of dramatically better tool self-documentation + hard runtime ga
 
 ### B — Invocation Guarantees (strong progress)
 - **Registration time**: Tools without valid `inputSchema` are rejected at load time.
-- **Runtime time**: 
+- **Runtime time**:
   - Full JSON Schema validation on *every* tool call before permission or execution.
   - "Effective permission" calculation that forces `confirm` for tools with dangerous capabilities in normal (non-full-yolo) operation.
   - Rich, model-actionable rejection messages when validation or safety checks fail.
@@ -261,5 +261,5 @@ The following items from this plan have been implemented in detail:
 
 Next review recommended after the next batch of capability migrations or any new high-privilege MCP/tool addition.
 
-**Last updated:** 2026-06 (full implementation pass after security-check rescan)  
+**Last updated:** 2026-06 (full implementation pass after security-check rescan)
 **Next review:** After additional capability migration or new high-privilege surface addition.

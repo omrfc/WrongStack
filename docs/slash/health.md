@@ -1,29 +1,20 @@
-# /health — Health Check Runner
+# /health - Health Check Runner
 
 ## What it does
 
-Runs all registered health checks from `DefaultHealthRegistry` and reports their status. Requires `--metrics` flag at startup.
+Runs registered health checks from the injected `HealthRegistry` and reports their status. The command is registered by the built-in `wstack-observability` plugin and requires startup with `--metrics`; otherwise it reports that health checks are not enabled.
 
 ## Output format
 
+```text
+overall: healthy
+  provider: healthy
+  storage: healthy - /home/user/.wrongstack is writable
+  session: degraded - 2 sessions open > 1h
 ```
-● overall: healthy
-  ● provider: healthy
-  ● storage: healthy — /home/user/.wrongstack is writable
-  ● session: degraded — 2 sessions open > 1h
-```
-
-Status icons: ● (green=healthy) ● (yellow=degraded) ● (red=unhealthy)
-
-## Health checks registered by default
-
-Checks are registered during boot. Typical checks include:
-- Provider connectivity
-- Storage writability
-- Session count and age
-- MCP server connectivity
 
 ## Code reference
 
-- `packages/cli/src/slash-commands/health.ts`
-- `packages/core/src/observability/health.ts` — `HealthRegistry`
+- `packages/core/src/plugins/observability-plugin.ts`
+- `packages/core/src/observability/health.ts`
+- `packages/core/tests/plugins/observability-plugin.test.ts`

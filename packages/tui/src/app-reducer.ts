@@ -4,8 +4,21 @@ import type { AutonomyStage, ContentBlock } from '@wrongstack/core';
 import type { AutonomyOption } from './components/autonomy-picker.js';
 import type { HistoryEntry } from './components/history.js';
 import type { ProviderOption } from './components/model-picker.js';
-import type { SettingsMode } from './components/settings-picker.js';
-import { DELAY_PRESETS_MS, SETTINGS_MODES } from './components/settings-picker.js';
+import type {
+  AuditLevel,
+  CompactorStrategy,
+  LogLevel,
+  SettingsMode,
+} from './components/settings-picker.js';
+import {
+  AUDIT_LEVELS,
+  COMPACTOR_STRATEGIES,
+  DELAY_PRESETS_MS,
+  LOG_LEVELS,
+  MAX_ITERATIONS_PRESETS,
+  SETTINGS_FIELD_COUNT,
+  SETTINGS_MODES,
+} from './components/settings-picker.js';
 import type { WorktreeRow } from './components/worktree-panel.js';
 
 export interface QueueItem {
@@ -197,13 +210,38 @@ export type State = {
     selected: number;
     hint?: string;
   };
-  /** Autonomy settings editor — opened by `/settings` or Ctrl+S. */
+  /** Settings editor — opened by `/settings` or Ctrl+S. */
   settingsPicker: {
     open: boolean;
-    /** Focused row: 0 = mode, 1 = delay. */
+    /** Focused row index. */
     field: number;
+    // Autonomy
     mode: SettingsMode;
     delayMs: number;
+    // UX
+    titleAnimation: boolean;
+    yolo: boolean;
+    streamFleet: boolean;
+    chime: boolean;
+    confirmExit: boolean;
+    nextPrediction: boolean;
+    // Features
+    featureMcp: boolean;
+    featurePlugins: boolean;
+    featureMemory: boolean;
+    featureSkills: boolean;
+    featureModelsRegistry: boolean;
+    // Context
+    contextAutoCompact: boolean;
+    contextStrategy: CompactorStrategy;
+    // Logging
+    logLevel: LogLevel;
+    // Session
+    auditLevel: AuditLevel;
+    // Indexing
+    indexOnStart: boolean;
+    // Tools
+    maxIterations: number;
     hint?: string;
   };
   /** Pending tool confirmations — queue to handle multiple tools requesting confirmation. */
@@ -264,6 +302,8 @@ export type State = {
   todosMonitorOpen: boolean;
   /** When true, the right-side compact todos panel is shown in managed mode (F5). */
   rightTodosPanelOpen: boolean;
+  /** When true, the right-side queue panel is shown (F7). */
+  queuePanelOpen: boolean;
   /**
    * Active or completed collaborative debugging session state.
    * Null when no collab session has run. Tracks counts + the event timeline
@@ -400,7 +440,28 @@ export type Action =
   | { type: 'autonomyPickerClose' }
   | { type: 'autonomyPickerMove'; delta: number }
   | { type: 'autonomyPickerHint'; text?: string }
-  | { type: 'settingsOpen'; mode: SettingsMode; delayMs: number }
+  | {
+      type: 'settingsOpen';
+      mode: SettingsMode;
+      delayMs: number;
+      titleAnimation: boolean;
+      yolo: boolean;
+      streamFleet: boolean;
+      chime: boolean;
+      confirmExit: boolean;
+      nextPrediction: boolean;
+      featureMcp: boolean;
+      featurePlugins: boolean;
+      featureMemory: boolean;
+      featureSkills: boolean;
+      featureModelsRegistry: boolean;
+      contextAutoCompact: boolean;
+      contextStrategy: CompactorStrategy;
+      logLevel: LogLevel;
+      auditLevel: AuditLevel;
+      indexOnStart: boolean;
+      maxIterations: number;
+    }
   | { type: 'settingsClose' }
   | { type: 'settingsFieldMove'; delta: number }
   | { type: 'settingsFieldSet'; field: number }
@@ -488,6 +549,7 @@ export type Action =
   | { type: 'toggleHelp' }
   | { type: 'toggleTodosMonitor' }
   | { type: 'toggleRightTodosPanel' }
+  | { type: 'toggleQueuePanel' }
   | { type: 'checkpointReceived'; cp: State['checkpoints'][0] }
   | { type: 'rewindOverlayOpen' }
   | { type: 'rewindOverlayClose' }
@@ -905,6 +967,23 @@ export function reducer(state: State, action: Action): State {
           field: 0,
           mode: action.mode,
           delayMs: action.delayMs,
+          titleAnimation: action.titleAnimation,
+          yolo: action.yolo,
+          streamFleet: action.streamFleet,
+          chime: action.chime,
+          confirmExit: action.confirmExit,
+          nextPrediction: action.nextPrediction,
+          featureMcp: action.featureMcp,
+          featurePlugins: action.featurePlugins,
+          featureMemory: action.featureMemory,
+          featureSkills: action.featureSkills,
+          featureModelsRegistry: action.featureModelsRegistry,
+          contextAutoCompact: action.contextAutoCompact,
+          contextStrategy: action.contextStrategy,
+          logLevel: action.logLevel,
+          auditLevel: action.auditLevel,
+          indexOnStart: action.indexOnStart,
+          maxIterations: action.maxIterations,
           hint: undefined,
         },
       };
@@ -914,39 +993,79 @@ export function reducer(state: State, action: Action): State {
         settingsPicker: { ...state.settingsPicker, open: false, hint: undefined },
       };
     case 'settingsFieldMove': {
-      // Two fields (mode / delay); wrap around.
-      const next = (state.settingsPicker.field + action.delta + 2) % 2;
+      const next = (state.settingsPicker.field + action.delta + SETTINGS_FIELD_COUNT) % SETTINGS_FIELD_COUNT;
       return {
         ...state,
         settingsPicker: { ...state.settingsPicker, field: next, hint: undefined },
       };
     }
     case 'settingsFieldSet': {
-      const field = action.field === 1 ? 1 : 0;
+      const field =
+        action.field >= 0 && action.field < SETTINGS_FIELD_COUNT ? action.field : 0;
       return { ...state, settingsPicker: { ...state.settingsPicker, field, hint: undefined } };
     }
     case 'settingsValueChange': {
-      if (state.settingsPicker.field === 0) {
-        const i = SETTINGS_MODES.indexOf(state.settingsPicker.mode);
+      const sp = state.settingsPicker;
+      const f = sp.field;
+      // Field 0: autonomy mode (cycle SETTINGS_MODES)
+      if (f === 0) {
+        const i = SETTINGS_MODES.indexOf(sp.mode);
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + SETTINGS_MODES.length) % SETTINGS_MODES.length;
-        return {
-          ...state,
-          settingsPicker: { ...state.settingsPicker, mode: SETTINGS_MODES[next]!, hint: undefined },
-        };
+        return { ...state, settingsPicker: { ...sp, mode: SETTINGS_MODES[next]!, hint: undefined } };
       }
-      const j = DELAY_PRESETS_MS.indexOf(state.settingsPicker.delayMs);
-      // Snap an off-preset value onto the nearest step before moving.
-      const base = j < 0 ? 0 : j;
-      const next = (base + action.delta + DELAY_PRESETS_MS.length) % DELAY_PRESETS_MS.length;
-      return {
-        ...state,
-        settingsPicker: {
-          ...state.settingsPicker,
-          delayMs: DELAY_PRESETS_MS[next]!,
-          hint: undefined,
-        },
-      };
+      // Field 1: delay presets
+      if (f === 1) {
+        const j = DELAY_PRESETS_MS.indexOf(sp.delayMs);
+        const base = j < 0 ? 0 : j;
+        const next = (base + action.delta + DELAY_PRESETS_MS.length) % DELAY_PRESETS_MS.length;
+        return { ...state, settingsPicker: { ...sp, delayMs: DELAY_PRESETS_MS[next]!, hint: undefined } };
+      }
+      // Field 2–7: UX boolean toggles
+      if (f === 2) return { ...state, settingsPicker: { ...sp, titleAnimation: !sp.titleAnimation, hint: undefined } };
+      if (f === 3) return { ...state, settingsPicker: { ...sp, yolo: !sp.yolo, hint: undefined } };
+      if (f === 4) return { ...state, settingsPicker: { ...sp, streamFleet: !sp.streamFleet, hint: undefined } };
+      if (f === 5) return { ...state, settingsPicker: { ...sp, chime: !sp.chime, hint: undefined } };
+      if (f === 6) return { ...state, settingsPicker: { ...sp, confirmExit: !sp.confirmExit, hint: undefined } };
+      if (f === 7) return { ...state, settingsPicker: { ...sp, nextPrediction: !sp.nextPrediction, hint: undefined } };
+      // Field 8–12: Features boolean toggles
+      if (f === 8) return { ...state, settingsPicker: { ...sp, featureMcp: !sp.featureMcp, hint: undefined } };
+      if (f === 9) return { ...state, settingsPicker: { ...sp, featurePlugins: !sp.featurePlugins, hint: undefined } };
+      if (f === 10) return { ...state, settingsPicker: { ...sp, featureMemory: !sp.featureMemory, hint: undefined } };
+      if (f === 11) return { ...state, settingsPicker: { ...sp, featureSkills: !sp.featureSkills, hint: undefined } };
+      if (f === 12) return { ...state, settingsPicker: { ...sp, featureModelsRegistry: !sp.featureModelsRegistry, hint: undefined } };
+      // Field 13: context auto-compact (boolean)
+      if (f === 13) return { ...state, settingsPicker: { ...sp, contextAutoCompact: !sp.contextAutoCompact, hint: undefined } };
+      // Field 14: compactor strategy (cycle)
+      if (f === 14) {
+        const i = COMPACTOR_STRATEGIES.indexOf(sp.contextStrategy);
+        const base = i < 0 ? 0 : i;
+        const next = (base + action.delta + COMPACTOR_STRATEGIES.length) % COMPACTOR_STRATEGIES.length;
+        return { ...state, settingsPicker: { ...sp, contextStrategy: COMPACTOR_STRATEGIES[next]!, hint: undefined } };
+      }
+      // Field 15: log level (cycle)
+      if (f === 15) {
+        const i = LOG_LEVELS.indexOf(sp.logLevel);
+        const base = i < 0 ? 0 : i;
+        const next = (base + action.delta + LOG_LEVELS.length) % LOG_LEVELS.length;
+        return { ...state, settingsPicker: { ...sp, logLevel: LOG_LEVELS[next]!, hint: undefined } };
+      }
+      // Field 16: audit level (cycle)
+      if (f === 16) {
+        const i = AUDIT_LEVELS.indexOf(sp.auditLevel);
+        const base = i < 0 ? 0 : i;
+        const next = (base + action.delta + AUDIT_LEVELS.length) % AUDIT_LEVELS.length;
+        return { ...state, settingsPicker: { ...sp, auditLevel: AUDIT_LEVELS[next]!, hint: undefined } };
+      }
+      // Field 17: index on start (boolean)
+      if (f === 17) return { ...state, settingsPicker: { ...sp, indexOnStart: !sp.indexOnStart, hint: undefined } };
+      // Field 18: max iterations (cycle presets)
+      {
+        const j = MAX_ITERATIONS_PRESETS.indexOf(sp.maxIterations);
+        const base = j < 0 ? 0 : j;
+        const next = (base + action.delta + MAX_ITERATIONS_PRESETS.length) % MAX_ITERATIONS_PRESETS.length;
+        return { ...state, settingsPicker: { ...sp, maxIterations: MAX_ITERATIONS_PRESETS[next]!, hint: undefined } };
+      }
     }
     case 'settingsHint':
       return { ...state, settingsPicker: { ...state.settingsPicker, hint: action.text } };
@@ -1293,6 +1412,9 @@ export function reducer(state: State, action: Action): State {
     }
     case 'toggleRightTodosPanel': {
       return { ...state, rightTodosPanelOpen: !state.rightTodosPanelOpen };
+    }
+    case 'toggleQueuePanel': {
+      return { ...state, queuePanelOpen: !state.queuePanelOpen };
     }
     case 'checkpointReceived': {
       const existing = state.checkpoints.find((c) => c.promptIndex === action.cp.promptIndex);

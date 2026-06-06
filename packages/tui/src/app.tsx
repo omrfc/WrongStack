@@ -14,7 +14,7 @@ import type {
 import { type AutonomyStage, DefaultSessionRewinder } from '@wrongstack/core';
 import { InputBuilder, buildGoalPreamble, formatTodosList, writeOut } from '@wrongstack/core';
 import { type VisionAdapters, routeImagesForModel } from '@wrongstack/runtime/vision';
-import { getProcessRegistry } from '@wrongstack/tools';
+import { getProcessRegistry, getIndexState, onIndexStateChange } from '@wrongstack/tools';
 import { Box, type DOMElement, Text, measureElement, useApp, useStdout } from 'ink';
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { readClipboardImage } from './clipboard.js';
@@ -35,6 +35,7 @@ import { LiveActivityStrip } from './components/live-activity-strip.js';
 import { ModelPicker, type ProviderOption } from './components/model-picker.js';
 import { PhaseMonitor } from './components/phase-monitor.js';
 import { PhasePanel } from './components/phase-panel.js';
+import { QueuePanel } from './components/queue-panel.js';
 import { ScrollableHistory } from './components/scrollable-history.js';
 import { SettingsPicker } from './components/settings-picker.js';
 import { SlashMenu } from './components/slash-menu.js';
@@ -85,6 +86,18 @@ export interface Settings {
   streamFleet: boolean;
   chime: boolean;
   confirmExit: boolean;
+  nextPrediction: boolean;
+  featureMcp: boolean;
+  featurePlugins: boolean;
+  featureMemory: boolean;
+  featureSkills: boolean;
+  featureModelsRegistry: boolean;
+  contextAutoCompact: boolean;
+  contextStrategy: 'hybrid' | 'intelligent' | 'selective';
+  logLevel: 'error' | 'warn' | 'info' | 'debug' | 'trace';
+  auditLevel: 'minimal' | 'standard' | 'full';
+  indexOnStart: boolean;
+  maxIterations: number;
 }
 
 export function selectedSlashCommandLine(picker: {
@@ -291,6 +304,8 @@ export interface AppProps {
     visible: boolean;
     setVisible: (visible: boolean) => void;
   };
+  /** Active agent mode label shown in the status bar (e.g. "teach", "brief"). */
+  modeLabel?: string;
 }
 
 const PASTE_THRESHOLD_CHARS = 200;
@@ -353,6 +368,7 @@ export function App({
   initialAsk,
   sessionsDir,
   managed = false,
+  modeLabel,
 }: AppProps): React.ReactElement {
   const { exit } = useApp();
   // Reactive mirrors of agent.ctx.{model,provider.id} so the status bar
@@ -370,6 +386,14 @@ export function App({
     'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-parallel'
   >(getAutonomy?.() ?? 'off');
   const [hiddenItems, setHiddenItems] = useState(statuslineHiddenItems);
+
+  // Codebase indexing state — synced from the process-wide indexer
+  // so the status bar shows "⚙ indexing 42/500" while the index builds.
+  const [indexState, setIndexState] = useState(() => getIndexState());
+  useEffect(() => {
+    setIndexState(getIndexState());
+    return onIndexStateChange((next) => setIndexState(next));
+  }, []);
 
   // Terminal row count, tracked reactively so the managed scroll viewport
   // can size itself against the live screen height.
@@ -471,7 +495,7 @@ export function App({
       searchQuery: '',
     },
     autonomyPicker: { open: false, options: [], selected: 0 },
-    settingsPicker: { open: false, field: 0, mode: 'off', delayMs: 0, titleAnimation: true, yolo: false, streamFleet: true, chime: false, confirmExit: true },
+    settingsPicker: { open: false, field: 0, mode: 'off', delayMs: 0, titleAnimation: true, yolo: false, streamFleet: true, chime: false, confirmExit: true, nextPrediction: false, featureMcp: true, featurePlugins: true, featureMemory: true, featureSkills: true, featureModelsRegistry: true, contextAutoCompact: true, contextStrategy: 'hybrid', logLevel: 'info', auditLevel: 'standard', indexOnStart: true, maxIterations: 500 },
     confirmQueue: [],
     contextChipVersion: 0,
     fleet: {},
@@ -493,6 +517,7 @@ export function App({
     helpOpen: false,
     todosMonitorOpen: false,
     rightTodosPanelOpen: false,
+    queuePanelOpen: false,
     collabSession: null,
     checkpoints: [],
     rewindOverlay: null,
@@ -1369,6 +1394,18 @@ export function App({
       streamFleet: s.streamFleet ?? true,
       chime: s.chime ?? false,
       confirmExit: s.confirmExit ?? true,
+      nextPrediction: s.nextPrediction ?? false,
+      featureMcp: s.featureMcp ?? true,
+      featurePlugins: s.featurePlugins ?? true,
+      featureMemory: s.featureMemory ?? true,
+      featureSkills: s.featureSkills ?? true,
+      featureModelsRegistry: s.featureModelsRegistry ?? true,
+      contextAutoCompact: s.contextAutoCompact ?? true,
+      contextStrategy: s.contextStrategy ?? 'hybrid',
+      logLevel: s.logLevel ?? 'info',
+      auditLevel: s.auditLevel ?? 'standard',
+      indexOnStart: s.indexOnStart ?? true,
+      maxIterations: s.maxIterations ?? 500,
     });
   }, [getSettings]);
 
@@ -1386,27 +1423,31 @@ export function App({
         return { message: undefined };
       },
     };
-    slashRegistry.register(cmd);
+    // Register as an official TUI plugin so it can override a CLI built-in
+    // of the same name (owner='tui' + official=true → claims the bare name).
+    slashRegistry.register(cmd, 'tui', { official: true });
     return () => {
       slashRegistry.unregister('model');
     };
   }, [slashRegistry, getPickableProviders, switchProviderAndModel, openModelPicker]);
 
-  // Register the TUI-only `/settings` command — opens the autonomy settings
-  // editor (default mode + auto-proceed delay). Gated on the settings
+  // Register the TUI-only `/settings` command — opens the interactive
+  // SettingsPicker immediately, same as Ctrl+S. Gated on the settings
   // accessors being wired by the host (CLI passes them in).
   useEffect(() => {
     if (!getSettings || !saveSettings) return;
     const cmd = {
       name: 'settings',
       aliases: ['config', 'prefs'],
-      description: 'Edit autonomy defaults (mode + auto-proceed delay).',
+      description: 'Open the interactive settings editor (19 config fields across 8 sections).',
       async run() {
         openSettings();
         return { message: undefined };
       },
     };
-    slashRegistry.register(cmd);
+    // Register as an official TUI plugin so it overrides the CLI's text-based
+    // /settings command. Without this, only Ctrl+S could open the picker.
+    slashRegistry.register(cmd, 'tui', { official: true });
     return () => {
       slashRegistry.unregister('settings');
     };
@@ -1426,7 +1467,9 @@ export function App({
         return { message: undefined };
       },
     };
-    slashRegistry.register(cmd);
+    // Register as an official TUI plugin so it overrides the CLI's text-based
+    // /autonomy command. Opens the interactive picker instead.
+    slashRegistry.register(cmd, 'tui', { official: true });
     return () => {
       slashRegistry.unregister('autonomy');
     };
@@ -2587,6 +2630,35 @@ export function App({
       return;
     }
 
+    // Monitor overlays are modal — block all keys except Escape and the overlay's
+    // own toggle key so nothing leaks into the chat input behind them.
+    const anyMonitorOpen =
+      state.todosMonitorOpen ||
+      state.monitorOpen ||
+      state.agentsMonitorOpen ||
+      state.worktreeMonitorOpen ||
+      !!state.autoPhase?.monitorOpen;
+    if (anyMonitorOpen) {
+      // Escape closes whichever overlay is open (handled in the Escape block below).
+      // The overlay's own toggle key also toggles it closed.
+      // We allow those through; swallow everything else.
+      if (key.escape) {
+        // Fall through to the Escape handler below — it knows which overlay to close.
+      } else if (
+        (key.fn === 2 || (key.ctrl && input === 'f')) ||
+        (key.fn === 3 || (key.ctrl && input === 'g')) ||
+        (key.fn === 4 || (key.ctrl && input === 't')) ||
+        key.fn === 5 ||
+        key.fn === 6 ||
+        key.fn === 7 ||
+        (key.ctrl && input === 'p')
+      ) {
+        // Fall through to the F-key / Ctrl+P handlers below — they toggle overlays.
+      } else {
+        return;
+      }
+    }
+
     // Re-entrancy guard: block stale-second events from \r\n terminals.
     if (inputGateRef.current) return;
 
@@ -2804,8 +2876,8 @@ export function App({
         const now = Date.now();
         if (now - lastEnterAtRef.current < 50) return;
         lastEnterAtRef.current = now;
-        const { mode, delayMs, titleAnimation, yolo, streamFleet, chime, confirmExit } = state.settingsPicker;
-        const err = await saveSettings?.({ mode, delayMs, titleAnimation, yolo, streamFleet, chime, confirmExit });
+        const { mode, delayMs, titleAnimation, yolo, streamFleet, chime, confirmExit, nextPrediction, featureMcp, featurePlugins, featureMemory, featureSkills, featureModelsRegistry, contextAutoCompact, contextStrategy, logLevel, auditLevel, indexOnStart, maxIterations } = state.settingsPicker;
+        const err = await saveSettings?.({ mode, delayMs, titleAnimation, yolo, streamFleet, chime, confirmExit, nextPrediction, featureMcp, featurePlugins, featureMemory, featureSkills, featureModelsRegistry, contextAutoCompact, contextStrategy, logLevel, auditLevel, indexOnStart, maxIterations });
         if (err) {
           dispatch({ type: 'settingsHint', text: err });
           return;
@@ -3026,6 +3098,11 @@ export function App({
       toggleTodosOverlay();
       return;
     }
+    // F7 → right-side queue panel (managed mode only).
+    if (key.fn === 7) {
+      dispatch({ type: 'toggleQueuePanel' });
+      return;
+    }
     // Ctrl+S toggles the autonomy settings editor (also openable via
     // `/settings`). Only when the host wired the settings accessors.
     if (key.ctrl && input === 's') {
@@ -3042,6 +3119,18 @@ export function App({
           streamFleet: cfg.streamFleet ?? true,
           chime: cfg.chime ?? false,
           confirmExit: cfg.confirmExit ?? true,
+          nextPrediction: cfg.nextPrediction ?? false,
+          featureMcp: cfg.featureMcp ?? true,
+          featurePlugins: cfg.featurePlugins ?? true,
+          featureMemory: cfg.featureMemory ?? true,
+          featureSkills: cfg.featureSkills ?? true,
+          featureModelsRegistry: cfg.featureModelsRegistry ?? true,
+          contextAutoCompact: cfg.contextAutoCompact ?? true,
+          contextStrategy: cfg.contextStrategy ?? 'hybrid',
+          logLevel: cfg.logLevel ?? 'info',
+          auditLevel: cfg.auditLevel ?? 'standard',
+          indexOnStart: cfg.indexOnStart ?? true,
+          maxIterations: cfg.maxIterations ?? 500,
         });
       }
       return;
@@ -3452,6 +3541,13 @@ export function App({
     const head = stateRef.current.queue[0];
     if (head) {
       dispatch({ type: 'dequeueFirst' });
+      // Echo the dequeued message as a USER entry so the user can see
+      // which queued message is now being processed — the original
+      // queued entry may have scrolled off screen.
+      dispatch({
+        type: 'addEntry',
+        entry: { kind: 'user', text: head.displayText },
+      });
       await runBlocks(head.blocks);
     }
   };
@@ -3814,10 +3910,10 @@ export function App({
 
   const affordanceShown = managedLive && state.scrollOffset > 0 && state.pendingNewLines > 0;
 
-  // When the right todos panel is open in managed mode, the chat area gets
-  // ~70% of the terminal width. Give ScrollableHistory a maxWidth so code
-  // blocks, tables, and prose don't overflow into the right panel.
-  const rightPanelOpen = managedLive && state.rightTodosPanelOpen;
+  // When a right panel is open in managed mode, the chat area gets ~70% of
+  // the terminal width. Give ScrollableHistory a maxWidth so code blocks,
+  // tables, and prose don't overflow into the right panel.
+  const rightPanelOpen = managedLive && (state.rightTodosPanelOpen || state.queuePanelOpen);
   const chatMaxWidth = rightPanelOpen ? Math.floor((stdout?.columns ?? 80) * 0.7) - 2 : undefined;
 
   return (
@@ -3912,6 +4008,18 @@ export function App({
               streamFleet={state.settingsPicker.streamFleet}
               chime={state.settingsPicker.chime}
               confirmExit={state.settingsPicker.confirmExit}
+              nextPrediction={state.settingsPicker.nextPrediction}
+              featureMcp={state.settingsPicker.featureMcp}
+              featurePlugins={state.settingsPicker.featurePlugins}
+              featureMemory={state.settingsPicker.featureMemory}
+              featureSkills={state.settingsPicker.featureSkills}
+              featureModelsRegistry={state.settingsPicker.featureModelsRegistry}
+              contextAutoCompact={state.settingsPicker.contextAutoCompact}
+              contextStrategy={state.settingsPicker.contextStrategy}
+              logLevel={state.settingsPicker.logLevel}
+              auditLevel={state.settingsPicker.auditLevel}
+              indexOnStart={state.settingsPicker.indexOnStart}
+              maxIterations={state.settingsPicker.maxIterations}
               hint={state.settingsPicker.hint}
             />
           ) : null}
@@ -3978,6 +4086,8 @@ export function App({
             hiddenItems={hiddenItems}
             eternalStage={state.eternalStage}
             goalSummary={state.goalSummary}
+            indexState={indexState}
+            modeLabel={modeLabel}
           />
           {/* Only render the persistent hint bar in the managed (alt-screen)
           viewport. In the default inline-redraw mode it would add a row to the
@@ -4071,9 +4181,13 @@ export function App({
           flexGrow={3}
           flexShrink={0}
           borderStyle="round"
-          borderColor="yellow"
+          borderColor={state.queuePanelOpen ? 'cyan' : 'yellow'}
         >
-          <CompactTodosPanel todos={agent.ctx.todos} />
+          {state.queuePanelOpen ? (
+            <QueuePanel items={state.queue} />
+          ) : (
+            <CompactTodosPanel todos={agent.ctx.todos} />
+          )}
         </Box>
       ) : null}
     </Box>

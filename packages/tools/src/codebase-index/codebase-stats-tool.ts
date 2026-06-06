@@ -8,6 +8,8 @@
 
 import type { Tool } from '@wrongstack/core';
 import { IndexStore, codebaseIndexDirOverride } from './writer.js';
+import { getIndexState } from './background-indexer.js';
+import { SCHEMA_VERSION } from './schema.js';
 
 export const codebaseStatsTool: Tool<Record<string, never>, CodebaseStatsOutput> = {
   name: 'codebase-stats',
@@ -29,6 +31,36 @@ export const codebaseStatsTool: Tool<Record<string, never>, CodebaseStatsOutput>
     additionalProperties: false,
   },
   async execute(_input, ctx) {
+    const idxState = getIndexState();
+    if (!idxState.ready) {
+      return {
+        totalSymbols: 0,
+        totalFiles: 0,
+        byLang: {},
+        byKind: {},
+        lastIndexed: null,
+        sizeBytes: 0,
+        indexPath: '',
+        version: SCHEMA_VERSION,
+        indexStatus: idxState.indexing
+          ? `Indexing in progress (${idxState.currentFile}/${idxState.totalFiles} files).`
+          : 'Index not yet built.',
+      };
+    }
+    if (idxState.indexing) {
+      // Still serve real stats but note they may be incomplete.
+      const store = new IndexStore(ctx.projectRoot, { indexDir: codebaseIndexDirOverride(ctx) });
+      try {
+        const stats = store.getStats();
+        return {
+          ...stats,
+          indexStatus: `Index refresh in progress (${idxState.currentFile}/${idxState.totalFiles} files). Stats may be incomplete.`,
+        };
+      } finally {
+        store.close();
+      }
+    }
+
     const store = new IndexStore(ctx.projectRoot, { indexDir: codebaseIndexDirOverride(ctx) });
     try {
       const stats = store.getStats();
@@ -57,4 +89,6 @@ interface CodebaseStatsOutput {
   sizeBytes: number;
   indexPath: string;
   version: number;
+  /** Non-empty when the index is not ready or is still building. */
+  indexStatus?: string;
 }

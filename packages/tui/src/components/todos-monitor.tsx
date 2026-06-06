@@ -27,6 +27,7 @@ export function TodosMonitor({ todos }: { todos: TodoItem[] }): React.ReactEleme
   // Below 100 cols: single column; 100+ cols: two-column.
   const w = stdout?.columns ?? 80;
   const twoCols = w >= 100;
+  const mid = Math.ceil(todos.length / 2);
 
   // Width for each column in two-column mode (account for gap + border padding).
   const colWidth = twoCols ? Math.floor((w - 8) / 2) : w - 6;
@@ -109,13 +110,14 @@ export function TodosMonitor({ todos }: { todos: TodoItem[] }): React.ReactEleme
           <Text dimColor>No todos. The agent will create them as it plans work.</Text>
         </Box>
       ) : twoCols ? (
-        /* Two-column layout: split the list in half, render side-by-side. */
+        /* Two-column layout: split the list in half, render side-by-side.
+           Pass the absolute position so numbering is continuous across columns. */
         <Box flexDirection="row" gap={2}>
           <Box flexDirection="column" width={colWidth}>
-            {todos.slice(0, Math.ceil(todos.length / 2)).map(renderRow)}
+            {todos.slice(0, mid).map((t, i) => renderRow(t, i))}
           </Box>
           <Box flexDirection="column" width={colWidth}>
-            {todos.slice(Math.ceil(todos.length / 2)).map(renderRow)}
+            {todos.slice(mid).map((t, i) => renderRow(t, mid + i))}
           </Box>
         </Box>
       ) : (

@@ -5,6 +5,29 @@ import { useEffect, useState } from 'react';
 import type { GitInfo } from '../git-info.js';
 import { theme } from '../theme.js';
 
+// ─── Mode icon map ───────────────────────────────────────────────────────────
+
+/** Map mode ids to compact icons for the status bar chip. */
+const MODE_ICONS: Record<string, string> = {
+  teach: '🧑‍🏫',
+  brief: '⚡',
+  'code-reviewer': '🔍',
+  'bug-hunter': '🐛',
+  'security-scanner': '🛡️',
+  'refactor-planner': '🔧',
+  architect: '🏗️',
+  debugger: '🪲',
+  test: '🧪',
+  document: '📝',
+  'skill-creator': '🛠️',
+};
+
+function modeIcon(label?: string): string {
+  if (!label) return '';
+  const icon = MODE_ICONS[label] ?? '▪';
+  return `${icon} ${label}`;
+}
+
 /** Minimum terminal width before we switch to ultra-compact mode. */
 const COMPACT_THRESHOLD = 50;
 /** Above this width, show most available information. */
@@ -152,6 +175,10 @@ export interface StatusBarProps {
    * Rendered as a chip on line 2 when non-null.
    */
   autoProceedCountdown?: number | null;
+  /** Codebase indexing state — rendered as a chip on line 1 when indexing. */
+  indexState?: { ready: boolean; indexing: boolean; currentFile: number; totalFiles: number };
+  /** Active agent mode label with icon (e.g. "🧑‍🏫 teach", "⚡ brief"). Rendered on line 2. */
+  modeLabel?: string;
 }
 
 /**
@@ -184,6 +211,8 @@ export function StatusBar({
   hiddenItems,
   eternalStage,
   goalSummary,
+  indexState,
+  modeLabel,
 }: StatusBarProps): React.ReactElement {
   // Track terminal width so we can adapt layout on narrow terminals.
   // We snapshot into state so that renders are stable — we don't want
@@ -216,7 +245,8 @@ export function StatusBar({
     elapsedMs !== undefined ||
     (git !== null && git !== undefined) ||
     (projectName !== undefined && projectName.length > 0) ||
-    (goalSummary !== null && goalSummary !== undefined);
+    (goalSummary !== null && goalSummary !== undefined) ||
+    !!modeLabel;
 
   // Line 3 is *active work* — the dynamic chips that mutate as the
   // agent / subagents make progress. Hidden when nothing is in flight
@@ -317,6 +347,14 @@ export function StatusBar({
                 <Text dimColor>{hint}</Text>
               </>
             ) : null}
+            {indexState && indexState.indexing ? (
+              <>
+                <Text dimColor>│</Text>
+                <Text color="yellow">
+                  ⚙ indexing {indexState.currentFile}/{indexState.totalFiles}
+                </Text>
+              </>
+            ) : null}
           </>
         )}
       </Box>
@@ -379,6 +417,19 @@ export function StatusBar({
                   : goalSummary.goal}{' '}
                 [{goalSummary.goalState}] (iter {goalSummary.iterations})
               </Text>
+            </>
+          ) : null}
+          {modeLabel ? (
+            <>
+              {yolo ||
+              (autonomy && autonomy !== 'off') ||
+              eternalStage ||
+              elapsedMs !== undefined ||
+              projectName ||
+              goalSummary ? (
+                <Text dimColor>│</Text>
+              ) : null}
+              <Text color="cyan">{modeIcon(modeLabel)}</Text>
             </>
           ) : null}
           {git ? (

@@ -1,7 +1,7 @@
 # Security Findings — WrongStack
 
-Generated: 2026-05-29  
-Auditor: WrongStack Security Scanner  
+Generated: 2026-05-29
+Auditor: WrongStack Security Scanner
 Scope: All packages, tools, plugins, webui, core
 
 ---
@@ -9,8 +9,8 @@ Scope: All packages, tools, plugins, webui, core
 ## Critical
 
 ### C-1: Shell Injection in git-autocommit and semver-bump Plugins
-**File:** `packages/plugins/src/git-autocommit/index.ts:23`, `packages/plugins/src/semver-bump/index.ts:27`  
-**CWE:** [CWE-78](https://cwe.mitre.org/data/definitions/78.html) — OS Command Injection  
+**File:** `packages/plugins/src/git-autocommit/index.ts`, `packages/plugins/src/semver-bump/index.ts`
+**CWE:** [CWE-78](https://cwe.mitre.org/data/definitions/78.html) — OS Command Injection
 **Severity:** Critical
 **Status:** ✅ ALREADY FIXED
 
@@ -19,8 +19,8 @@ Both plugins already use `execFileSync('git', args, ...)` with an array of indiv
 ---
 
 ### C-2: WebSocket Auth Token Exposed in URL Query String
-**File:** `packages/webui/src/server/index.ts:2084-2144`, `packages/webui/src/lib/ws-client.ts:102-105`  
-**CWE:** [CWE-598](https://cwe.mitre.org/data/definitions/598.html) — Information Exposure Through Query String  
+**File:** `packages/webui/src/server/index.ts`, `packages/webui/src/lib/ws-client.ts`
+**CWE:** [CWE-598](https://cwe.mitre.org/data/definitions/598.html) — Information Exposure Through Query String
 **Severity:** Critical
 **Status:** ✅ FIXED
 
@@ -33,8 +33,8 @@ Both plugins already use `execFileSync('git', args, ...)` with an array of indiv
 ## High
 
 ### H-1: CSP Allows WebSocket Connections to Any Origin
-**File:** `packages/webui/src/server/index.ts:2004`, `packages/webui/vite.config.ts:30`  
-**CWE:** [CWE-1021](https://cwe.mitre.org/data/definitions/1021.html) — Improper Restriction of Rendered Frame Pages  
+**File:** `packages/webui/src/server/index.ts`, `packages/webui/vite.config.ts`
+**CWE:** [CWE-1021](https://cwe.mitre.org/data/definitions/1021.html) — Improper Restriction of Rendered Frame Pages
 **Severity:** High
 **Status:** ✅ ALREADY FIXED
 
@@ -47,8 +47,8 @@ Bare `ws: wss:` schemes are not present in either CSP configuration.
 ---
 
 ### H-2: Env Var Passthrough Can Exfiltrate API Keys
-**File:** `packages/core/src/utils/child-env.ts:104-121`  
-**CWE:** [CWE-78](https://cwe.mitre.org/data/definitions/78.html) — OS Command Injection  
+**File:** `packages/core/src/utils/child-env.ts`
+**CWE:** [CWE-78](https://cwe.mitre.org/data/definitions/78.html) — OS Command Injection
 **Severity:** High
 **Status:** ℹ️ By design — correctly implemented
 
@@ -57,8 +57,8 @@ The `WRONGSTACK_CHILD_ENV_PASSTHROUGH` mechanism is an **explicit operator opt-i
 ---
 
 ### H-3: HTTP Server Path Traversal (Old — Believed Fixed, Verify)
-**File:** `packages/webui/src/server/index.ts:1979-1988`  
-**CWE:** [CWE-22](https://cwe.mitre.org/data/definitions/22.html) — Path Traversal  
+**File:** `packages/webui/src/server/index.ts`
+**CWE:** [CWE-22](https://cwe.mitre.org/data/definitions/22.html) — Path Traversal
 **Severity:** High
 **Status:** ✅ ALREADY FIXED — Verified
 
@@ -72,8 +72,8 @@ Double-encoding (`%252e%252e`) is decoded once by `new URL()` to `%2e%2e`, which
 ---
 
 ### H-4: Rate Limit Uses sessionId When Available
-**File:** `packages/webui/src/server/index.ts:545-566`, `sessionStore.create` at line 160  
-**CWE:** [CWE-770](https://cwe.mitre.org/data/definitions/770.html) — Allocation of Resources Without Limits  
+**File:** `packages/webui/src/server/index.ts`, `sessionStore.create` at line 160
+**CWE:** [CWE-770](https://cwe.mitre.org/data/definitions/770.html) — Allocation of Resources Without Limits
 **Severity:** High
 
 **Status:** ✅ FIXED — `id: ''` removed from `sessionStore.create()` call (line 160). The store now auto-generates a real session ID (`"2026-05-30T...-<randomhex>"`) at startup, so every WS connection gets a stable session-based rate limit key from the first message. The `?? String(ws)` fallback no longer triggers.
@@ -83,8 +83,8 @@ Double-encoding (`%252e%252e`) is decoded once by `new URL()` to `%2e%2e`, which
 ## Medium
 
 ### M-1: `permission: 'auto'` Tools with Side Effects Bypass Confirmation Gate
-**File:** `packages/core/src/security/permission-policy.ts`, `packages/webui/src/server/index.ts`  
-**CWE:** [CWE-862](https://cwe.mitre.org/data/definitions/862.html) — Unintended Unauthorized Action  
+**File:** `packages/core/src/security/permission-policy.ts`, `packages/webui/src/server/index.ts`
+**CWE:** [CWE-862](https://cwe.mitre.org/data/definitions/862.html) — Unintended Unauthorized Action
 **Severity:** Medium-High
 
 **Status:** ✅ FIXED — `mutating: true` added to `mcp_control`, `shellcheck`, `shellcheck_scan`, `web_search`, and `outdated`. These tools now trigger the confirmation gate in the permission policy at `permission-policy.ts:188-195`.
@@ -116,8 +116,8 @@ The gate correctly requires `mutating: true` for confirmation. **However, tools 
 ---
 
 ### M-2: Type Coercion in Provider Config Fallback Logic
-**File:** `packages/webui/src/server/index.ts:105-111`  
-**CWE:** [CWE-20](https://cwe.mitre.org/data/definitions/20.html) — Improper Input Validation  
+**File:** `packages/webui/src/server/index.ts`
+**CWE:** [CWE-20](https://cwe.mitre.org/data/definitions/20.html) — Improper Input Validation
 **Severity:** Medium
 **Status:** ✅ ALREADY FIXED — Verified
 
@@ -133,8 +133,8 @@ A string value for `config.providers` is rejected before `Object.keys()` is call
 ---
 
 ### M-3: Recovery Lock Could Be Stolen by Another Process
-**File:** `packages/core/src/storage/recovery-lock.ts`  
-**CWE:** [CWE-410](https://cwe.mitre.org/data/definitions/410.html) — Insufficient Resource Locking  
+**File:** `packages/core/src/storage/recovery-lock.ts`
+**CWE:** [CWE-410](https://cwe.mitre.org/data/definitions/410.html) — Insufficient Resource Locking
 **Severity:** Medium
 **Status:** ✅ ALREADY FIXED — Verified
 
@@ -143,8 +143,8 @@ The `write()` method (lines 140-163) now uses `O_EXCL` flag (`flag: 'wx'`) for e
 ---
 
 ### M-4: Config History Operations Lack Authentication / Ownership Check
-**File:** `packages/cli/src/config-history.ts`  
-**CWE:** [CWE-284](https://cwe.mitre.org/data/definitions/284.html) — Improper Access Control  
+**File:** `packages/cli/src/config-history.ts`
+**CWE:** [CWE-284](https://cwe.mitre.org/data/definitions/284.html) — Improper Access Control
 **Severity:** Medium
 **Status:** ✅ FIXED — UID ownership check added to write operations.
 
@@ -176,8 +176,8 @@ The `write()` method (lines 140-163) now uses `O_EXCL` flag (`flag: 'wx'`) for e
 ## Low
 
 ### L-1: Session Rewind Does Not Validate Paths Are Inside Project Root
-**File:** `packages/core/src/storage/session-rewinder.ts`  
-**CWE:** [CWE-20](https://cwe.mitre.org/data/definitions/20.html) — Improper Input Validation  
+**File:** `packages/core/src/storage/session-rewinder.ts`
+**CWE:** [CWE-20](https://cwe.mitre.org/data/definitions/20.html) — Improper Input Validation
 **Severity:** Low
 **Status:** ✅ ALREADY FIXED
 
@@ -196,8 +196,8 @@ No action needed.
 ---
 
 ### L-2: Bearer Token Regex Could Miss Short-Lived Tokens
-**File:** `packages/core/src/security/secret-scrubber.ts:53`  
-**CWE:** [CWE-200](https://cwe.mitre.org/data/definitions/200.html) — Exposure of Sensitive Information  
+**File:** `packages/core/src/security/secret-scrubber.ts`
+**CWE:** [CWE-200](https://cwe.mitre.org/data/definitions/200.html) — Exposure of Sensitive Information
 **Severity:** Low
 **Status:** ✅ FIXED
 
@@ -208,8 +208,8 @@ The bearer token regex previously required a minimum of 20 characters. Very shor
 ---
 
 ### L-3: Python Parser Uses `execFileSync` with Inline Script — Version-Dependent
-**File:** `packages/tools/src/codebase-index/py-parser.ts`  
-**CWE:** [CWE-78](https://cwe.mitre.org/data/definitions/78.html) — OS Command Injection (indirect)  
+**File:** `packages/tools/src/codebase-index/py-parser.ts`
+**CWE:** [CWE-78](https://cwe.mitre.org/data/definitions/78.html) — OS Command Injection (indirect)
 **Severity:** Low
 **Status:** Acknowledged — by design
 
@@ -218,8 +218,8 @@ The bearer token regex previously required a minimum of 20 characters. Very shor
 ---
 
 ### L-4: No `Origin` Header Validation in Non-Browser WS Client Path
-**File:** `packages/webui/src/server/index.ts:503-510`  
-**CWE:** [CWE-346](https://cwe.mitre.org/data/definitions/346.html) — Origin Validation Error  
+**File:** `packages/webui/src/server/index.ts`
+**CWE:** [CWE-346](https://cwe.mitre.org/data/definitions/346.html) — Origin Validation Error
 **Severity:** Low
 **Status:** Acknowledged — by design
 
@@ -228,8 +228,8 @@ A curl command from the same machine bypassing token and Origin checks on loopba
 ---
 
 ### L-5: Encrypted Config Has No MAC — Malformed ciphertext could corrupt state
-**File:** `packages/core/src/security/secret-vault.ts`, `packages/core/src/security/encrypt-config.ts`  
-**CWE:** [CWE-310](https://cwe.mitre.org/data/definitions/310.html) — Cryptographic Failure  
+**File:** `packages/core/src/security/secret-vault.ts`, `packages/core/src/security/config-secrets.ts`
+**CWE:** [CWE-310](https://cwe.mitre.org/data/definitions/310.html) — Cryptographic Failure
 **Severity:** Low
 **Status:** Acknowledged — AES-GCM provides authentication
 
@@ -238,8 +238,8 @@ AES-GCM throws on decryption failure when the authentication tag is wrong — th
 ---
 
 ### L-6: No TLS Certificate Validation for MCP HTTP Transports
-**File:** `packages/mcp/src/transport.ts:16–29`, `packages/mcp/src/client.ts`  
-**CWE:** [CWE-295](https://cwe.mitre.org/data/definitions/295.html) — Improper Certificate Validation  
+**File:** `packages/mcp/src/transport.ts:16–29`, `packages/mcp/src/client.ts`
+**CWE:** [CWE-295](https://cwe.mitre.org/data/definitions/295.html) — Improper Certificate Validation
 **Severity:** Low
 **Status:** ⚠️ Partially addressed
 
@@ -248,8 +248,8 @@ AES-GCM throws on decryption failure when the authentication tag is wrong — th
 ---
 
 ### L-7: MCP SSE Transport Lacks Response Size Limit
-**File:** `packages/mcp/src/transport.ts`  
-**CWE:** [CWE-400](https://cwe.mitre.org/data/definitions/400.html) — Uncontrolled Resource Consumption  
+**File:** `packages/mcp/src/transport.ts`
+**CWE:** [CWE-400](https://cwe.mitre.org/data/definitions/400.html) — Uncontrolled Resource Consumption
 **Severity:** Low
 **Status:** Acknowledged — edge case
 
@@ -258,8 +258,8 @@ The SSE reader already has `SSE_READER_MAX_BUFFER` (256 KB) and `SSE_READER_MAX_
 ---
 
 ### L-8: MCP Tool Schema `properties` Can Be `undefined` — No Type Validation
-**File:** `packages/mcp/src/tool-schema.ts`  
-**CWE:** [CWE-20](https://cwe.mitre.org/data/definitions/20.html) — Improper Input Validation  
+**File:** `packages/mcp/src/tool-schema.ts`
+**CWE:** [CWE-20](https://cwe.mitre.org/data/definitions/20.html) — Improper Input Validation
 **Severity:** Low
 **Status:** ✅ FIXED
 
@@ -268,8 +268,8 @@ The SSE reader already has `SSE_READER_MAX_BUFFER` (256 KB) and `SSE_READER_MAX_
 ---
 
 ### L-9: WorktreeManager Has No Isolation Between Concurrent Worktrees
-**File:** `packages/core/src/worktree/manager.ts` or equivalent  
-**CWE:** [CWE-362](https://cwe.mitre.org/data/definitions/362.html) — Improper Synchronization  
+**File:** `packages/core/src/worktree/worktree-manager.ts` or equivalent
+**CWE:** [CWE-362](https://cwe.mitre.org/data/definitions/362.html) — Improper Synchronization
 **Severity:** Low
 **Status:** Acknowledged — edge case
 
@@ -278,8 +278,8 @@ The `patch` tool has path traversal guards. Git branch names containing `../` wo
 ---
 
 ### L-10: Process Registry Is In-Memory — Information Disclosure
-**File:** `packages/tools/src/process-registry.ts`  
-**CWE:** [CWE-200](https://cwe.mitre.org/data/definitions/200.html) — Exposure of Sensitive Information  
+**File:** `packages/tools/src/process-registry.ts`
+**CWE:** [CWE-200](https://cwe.mitre.org/data/definitions/200.html) — Exposure of Sensitive Information
 **Severity:** Low
 **Status:** ✅ FIXED — `redactCommand()` implemented and applied at all registry.register() call sites in `bash.ts` and `exec.ts`.
 
@@ -288,8 +288,8 @@ The `patch` tool has path traversal guards. Git branch names containing `../` wo
 ---
 
 ### L-11: WebSocket JSON-RPC Message Type Confusion / Prototype Pollution
-**File:** `packages/webui/src/server/index.ts` (WS message handling)  
-**CWE:** [CWE-1321](https://cwe.mitre.org/data/definitions/1321.html) — Improperly Controlled Modification of Object Prototype Properties ('Prototype Pollution')  
+**File:** `packages/webui/src/server/index.ts` (WS message handling)
+**CWE:** [CWE-1321](https://cwe.mitre.org/data/definitions/1321.html) — Improperly Controlled Modification of Object Prototype Properties ('Prototype Pollution')
 **Severity:** Low
 **Status:** ✅ ALREADY FIXED — Verified
 
@@ -309,8 +309,8 @@ if (
 ---
 
 ### L-12: Telegram Bot Polling Offset Not Persisted — Replay Risk
-**File:** `packages/telegram/src/bot.ts`  
-**CWE:** [CWE-662](https://cwe.mitre.org/data/definitions/662.html) — Improper Synchronization  
+**File:** `packages/telegram/src/bot.ts`
+**CWE:** [CWE-662](https://cwe.mitre.org/data/definitions/662.html) — Improper Synchronization
 **Severity:** Low
 **Status:** ✅ ALREADY FIXED — Verified
 
@@ -319,8 +319,8 @@ if (
 ---
 
 ### L-13: WebUI File Download Lacks Range Header Validation
-**File:** `packages/webui/src/server/index.ts:1964-2010`  
-**CWE:** [CWE-778](https://cwe.mitre.org/data/definitions/778.html) — Insufficient Output Control  
+**File:** `packages/webui/src/server/index.ts`
+**CWE:** [CWE-778](https://cwe.mitre.org/data/definitions/778.html) — Insufficient Output Control
 **Severity:** Low
 **Status:** ✅ FIXED — RFC 7233 Range header support added.
 
@@ -329,8 +329,8 @@ Lines 2007-2051 now: parse `Range: bytes=start-end`, support all three forms (`b
 ---
 
 ### L-14: No Shutdown Guard on In-Flight MCP Requests
-**File:** `packages/mcp/src/client.ts:353-403` (close method)  
-**CWE:** [CWE-403](https://cwe.mitre.org/data/definitions/403.html) — Exposure of File Descriptor  
+**File:** `packages/mcp/src/client.ts` (close method)
+**CWE:** [CWE-403](https://cwe.mitre.org/data/definitions/403.html) — Exposure of File Descriptor
 **Severity:** Low
 **Status:** ✅ ALREADY FIXED — Verified
 
@@ -339,8 +339,8 @@ Lines 2007-2051 now: parse `Range: bytes=start-end`, support all three forms (`b
 ---
 
 ### L-15: MCP SSE Stream URL Uses Timestamp Instead of Random Token
-**File:** `packages/mcp/src/transport.ts:450-461`  
-**CWE:** [CWE-287](https://cwe.mitre.org/data/definitions/287.html) — Improper Authentication  
+**File:** `packages/mcp/src/transport.ts`
+**CWE:** [CWE-287](https://cwe.mitre.org/data/definitions/287.html) — Improper Authentication
 **Severity:** Low
 **Status:** ✅ ALREADY FIXED — Verified
 

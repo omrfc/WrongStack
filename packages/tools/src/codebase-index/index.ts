@@ -25,6 +25,10 @@ export {
   enqueueReindex,
   isIndexableFile,
   cancelPendingReindexes,
+  isIndexReady,
+  isIndexing,
+  getIndexState,
+  onIndexStateChange,
 } from './background-indexer.js';
 
 // Re-export shared internal helpers so external consumers (e.g. plug-lsp)

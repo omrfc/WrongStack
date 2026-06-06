@@ -22,7 +22,7 @@
 | Scope | File | Shared across |
 |---|---|---|
 | User | `~/.wrongstack/memory.md` | All projects for this user |
-| Project | `<projectRoot>/.wrongstack/memory.md` | Only this project |
+| Project | `~/.wrongstack/projects/<hash>/memory.md` | Only this project |
 
 `remember` writes to both scopes; `forget` and `clear` operate on whichever scope matches.
 
@@ -39,4 +39,4 @@
 
 - `packages/cli/src/slash-commands/memory.ts`
 - `packages/core/src/storage/memory-store.ts`
-- `packages/core/src/storage/memory-store.test.ts`
+- `packages/core/tests/storage/memory-store.test.ts`

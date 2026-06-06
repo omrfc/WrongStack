@@ -105,6 +105,8 @@ export const BUILTIN_PLUGIN_FACTORIES: (() => Promise<Plugin>)[] = [
   async () => (await import('@wrongstack/plugins/semver-bump')).default,
   // ── LSP plugin ──────────────────────────────────────────────────────
   async () => (await import('@wrongstack/plug-lsp')).default,
+  // ── Telegram plugin ─────────────────────────────────────────────────
+  async () => (await import('@wrongstack/telegram')).default,
 ];
 
 export async function setupPlugins(params: PluginsWiringDeps): Promise<void> {

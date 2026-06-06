@@ -25,7 +25,7 @@
 
 ### C1. `plugin/api.ts`: `onEvent` calls `once` instead of `on`
 **Status: ✅ ALREADY FIXED**
-**File:** `packages/core/src/plugin/api.ts:130–134`
+**File:** `packages/core/src/plugin/api.ts` (around lines 130-134)
 
 **Bug (historical):** `onEvent` was calling `events.once` — a one-shot listener that auto-unsubscribes after the first emission. Current code already uses `.on`.
 
@@ -182,7 +182,7 @@ No action needed.
 
 ### S4. CSP Allows WebSocket Connections to Any Origin
 **Status: ✅ FIXED**
-**File:** `packages/webui/vite.config.ts:30`
+**File:** `packages/webui/vite.config.ts`
 **CWE:** CWE-1021
 
 **Fix applied:** Updated CSP in vite.config.ts (dev server) to use explicit loopback addresses for all three WS endpoints (v4 and v6 loopback), and added `object-src 'none'` to prevent plugin-based attacks:
@@ -274,9 +274,9 @@ No further action needed.
 
 **Problem:** Both the CLI REPL and WebUI server run the same boot sequence with significant duplication (~500 lines).
 
-**Fix:** Extract shared boot logic into `packages/core/src/boot/`:
+**Fix:** Extract shared boot logic into `packages/core/src/boot.ts and packages/cli/src/wiring/`:
 ```
-packages/core/src/boot/
+packages/core/src/boot.ts and packages/cli/src/wiring/
     config-loader.ts   ← loads and validates config
     container.ts       ← creates DI container with defaults
     registries.ts      ← registers providers, tools, MCP, plugins
@@ -414,7 +414,7 @@ No action needed.
 
 ### L3. Secret scrubber minimum token length (20 chars)
 
-**File:** `packages/core/src/security/secret-scrubber.ts:53`
+**File:** `packages/core/src/security/secret-scrubber.ts`
 **Status:** ✅ FIXED
 
 The bearer token regex was lowered from `{20,512}` to `{12,512}`. A 12-char base64 string has ~71 bits of entropy — above the random-string false-match threshold. The `high_entropy_env` regex (20-char minimum) remains unchanged since short random strings are more likely to appear in code.

@@ -3,8 +3,9 @@
 ## What it does
 
 Sets, inspects, pauses, resumes, or clears the long-running mission used by
-`/autonomy eternal`. Goals persist at `<projectRoot>/.wrongstack/goal.json`
-across sessions, surviving process restarts.
+`/autonomy eternal`. Goals persist at
+`~/.wrongstack/projects/<hash>/goal.json` across sessions, surviving process
+restarts.
 
 ## Storage format
 

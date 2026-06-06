@@ -7,7 +7,7 @@ agent's **next iteration** — between tool batches — without interrupting the
 work in flight. Use it to nudge the agent ("by the way, prefer pnpm", "also
 check the error path") while it keeps going.
 
-This is the lightweight counterpart to [`/steer`](./steer.md):
+This is the lightweight counterpart to a full steering turn:
 
 | | `/steer` | `/btw` |
 |---|---|---|

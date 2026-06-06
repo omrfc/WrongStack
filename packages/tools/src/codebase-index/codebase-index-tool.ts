@@ -2,6 +2,7 @@
 import type { Tool } from '@wrongstack/core';
 import { runIndexer } from './indexer.js';
 import { codebaseIndexDirOverride } from './writer.js';
+import { isIndexing, setIndexReady } from './background-indexer.js';
 
 export const codebaseIndexTool: Tool<CodebaseIndexInput, CodebaseIndexOutput> = {
   name: 'codebase-index',
@@ -34,12 +35,28 @@ export const codebaseIndexTool: Tool<CodebaseIndexInput, CodebaseIndexOutput> = 
     },
   },
   async execute(input, ctx) {
+    // If the startup index is still running, tell the agent to wait instead of
+    // firing a second reindex that would just queue behind the mutex.
+    if (isIndexing()) {
+      return {
+        filesIndexed: 0,
+        symbolsIndexed: 0,
+        langStats: {},
+        durationMs: 0,
+        errors: [],
+        note: 'A full index is already in progress. Retry codebase-index after it completes (check codebase-stats).',
+      };
+    }
+
     const result = await runIndexer(ctx, {
       projectRoot: ctx.projectRoot,
       force: input.force ?? false,
       langs: input.langs,
       indexDir: codebaseIndexDirOverride(ctx),
     });
+    // Mark ready so downstream tools (search, stats) don't gate on a
+    // missing startup index when runIndexer was called directly.
+    setIndexReady();
     return result;
   },
 };
@@ -57,4 +74,6 @@ interface CodebaseIndexOutput {
   langStats: Record<string, number>;
   durationMs: number;
   errors: string[];
+  /** Advisory note when the indexer was skipped (e.g. another index in progress). */
+  note?: string;
 }

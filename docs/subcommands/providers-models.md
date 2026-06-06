@@ -1,13 +1,13 @@
-# `wstack providers` · `wstack models`
+# `wstack providers` / `wstack models`
 
 ## `wstack providers`
 
-Lists all configured providers from `config.json`:
+Lists all configured providers from `config.json`.
 
-```
-anthropic     ✅ configured  env: ANTHROPIC_API_KEY
-openai        ❌ not configured
-google       ❌ not configured
+```text
+anthropic     configured  env: ANTHROPIC_API_KEY
+openai        not configured
+google        not configured
 ```
 
 ## `wstack models`
@@ -16,8 +16,8 @@ Lists available models for a provider:
 
 ```bash
 wstack models                  # list for configured provider
-wstack models anthropic       # list for specific provider
-wstack models refresh         # force-refresh the models.dev cache
+wstack models anthropic        # list for specific provider
+wstack models refresh          # force-refresh the models.dev cache
 ```
 
 Refresh fetches fresh model data from models.dev and updates `~/.wrongstack/cache/models.dev.json`.
@@ -25,5 +25,5 @@ Refresh fetches fresh model data from models.dev and updates `~/.wrongstack/cach
 ## Code reference
 
 - `packages/cli/src/subcommands/handlers/providers-models.ts`
-- `packages/core/src/models/models-registry.ts` — `ModelsRegistry`
-- `packages/core/src/models/model-selector.ts` — `ModelSelector`
+- `packages/core/src/models/models-registry.ts`
+- `packages/core/src/models/llm-selector.ts`

@@ -50,6 +50,7 @@ TOKENS.Renderer        TOKENS.InputReader       TOKENS.ErrorHandler
 TOKENS.RetryPolicy     TOKENS.SkillLoader       TOKENS.SystemPromptBuilder
 TOKENS.SecretScrubber  TOKENS.ModelsRegistry    TOKENS.ModeStore
 TOKENS.ProviderRunner  TOKENS.WorktreeManager   TOKENS.BrainArbiter
+TOKENS.HookRegistry
 ```
 
 The CLI binds defaults at boot; plugins can rebind any token before
@@ -311,8 +312,9 @@ provider request as the final safety net. CLI users can force it with
   aborted subagents can take new work)
 
 `makeAgentSubagentRunner()` wraps a regular `Agent` instance as a
-`SubagentRunner`. The coordinator emits `subagent.started`,
-`subagent.stopped`, `task.assigned`, `task.completed`, and `done` events.
+`SubagentRunner`. The coordinator emits events such as `subagent.spawned`,
+`subagent.task_started`, `subagent.task_completed`, `subagent.done`,
+`subagent.budget_warning`, and `subagent.ctx_pct`.
 
 For the **director-driven** evolution of this — where every subagent
 runs with its own provider, model, context, session, and budget under

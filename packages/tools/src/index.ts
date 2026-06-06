@@ -41,6 +41,10 @@ export {
   enqueueReindex,
   isIndexableFile,
   cancelPendingReindexes,
+  isIndexReady,
+  isIndexing,
+  getIndexState,
+  onIndexStateChange,
 } from './codebase-index/index.js';
 
 // builtinTools moved to './builtin.ts' so consumers that only need a subset of

@@ -16,6 +16,7 @@ import type { Tool } from '@wrongstack/core';
 import { IndexStore, codebaseIndexDirOverride } from './writer.js';
 import { buildBm25Index, buildIndexableText, tokenise } from './bm25.js';
 import type { SearchResult, SymbolKind, SymbolLang } from './schema.js';
+import { getIndexState } from './background-indexer.js';
 
 export const codebaseSearchTool: Tool<CodebaseSearchInput, CodebaseSearchOutput> = {
   name: 'codebase-search',
@@ -66,6 +67,36 @@ export const codebaseSearchTool: Tool<CodebaseSearchInput, CodebaseSearchOutput>
     required: ['query'],
   },
   async execute(input, ctx) {
+    // Gate: if the index is still building or hasn't been built yet, return a
+    // clear status instead of querying partial/inconsistent data.
+    const state = getIndexState();
+    if (!state.ready) {
+      return {
+        results: [],
+        total: 0,
+        query: input.query,
+        indexStatus: state.indexing
+          ? `Indexing in progress (${state.currentFile}/${state.totalFiles} files) — retry in a moment.`
+          : 'Index not yet built. The codebase is being indexed at startup — search will be available shortly.',
+      };
+    }
+    if (state.indexing) {
+      return {
+        results: [],
+        total: 0,
+        query: input.query,
+        indexStatus: `Index refresh in progress (${state.currentFile}/${state.totalFiles} files). Results may be incomplete.`,
+      };
+    }
+    if (state.lastError) {
+      return {
+        results: [],
+        total: 0,
+        query: input.query,
+        indexStatus: `Index build failed: ${state.lastError}. Try /codebase-reindex.`,
+      };
+    }
+
     const store = new IndexStore(ctx.projectRoot, { indexDir: codebaseIndexDirOverride(ctx) });
     try {
       const limit = Math.min(input.limit ?? 20, 100);
@@ -136,4 +167,6 @@ interface CodebaseSearchOutput {
   results: SearchResult[];
   total: number;  // total candidates before limit
   query: string;
+  /** Non-empty when the index blocked the search (not ready, indexing, failed). */
+  indexStatus?: string;
 }

@@ -76,9 +76,15 @@ export class ConversationState {
   }
 
   replaceTodos(todos: TodoItem[]): void {
+    // Auto-clear: when every item is completed and the list is non-empty,
+    // the board has served its purpose. Treat it as a clear signal so the
+    // user doesn't have to manually `/todos clear` after each task.
+    const allDone = todos.length > 0 && todos.every((t) => t.status === 'completed');
+    const effective = allDone ? [] : todos;
+
     this.ctx.todos.length = 0;
-    this.ctx.todos.splice(0, 0, ...todos);
-    this.emit({ kind: 'todos_replaced', todos: [...todos] });
+    this.ctx.todos.splice(0, 0, ...effective);
+    this.emit({ kind: 'todos_replaced', todos: [...effective] });
   }
 
   setMeta(key: string, value: unknown): void {

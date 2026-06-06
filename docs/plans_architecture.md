@@ -61,24 +61,32 @@ export interface PlanFile {
 
 ### 3.1 File format
 
-- Stored at `<session-dir>/<session-id>.plan.json`
+- The `/plan` slash command is registered by `wstack-plan` and stores the
+  project-level plan at `~/.wrongstack/projects/<hash>/plan.json`
+  (`WstackPaths.projectPlan`).
+- The LLM-callable `plan` tool uses `ctx.meta['plan.path']`, which CLI session
+  setup seeds as `~/.wrongstack/projects/<hash>/sessions/<session-id>.plan.json`.
+  This keeps tool-driven planning scoped to the active session while the slash
+  command remains a project-level board.
 - Atomic write via `atomicWrite` with `0o600` permissions
 - JSON, human-readable, versioned
 
 ### 3.2 Lifecycle
 
 ```
-Session start
+Project start
 |
-+-- CLI wiring creates planPath
-|   `-- `context.state.setMeta('plan.path', planPath)`
++-- path wiring creates `paths.projectPlan`
 |
-+-- resume path ----> loadPlan(planPath)
-|                    `--> if found, banner shows "Plan: N items (O open, D done)"
++-- built-in `wstack-plan` plugin registers `/plan`
+|   `-- command loads the project plan on demand
+|
++-- CLI session setup seeds `ctx.meta['plan.path']`
+|   `-- the `plan` tool loads the session plan on demand
 |
 +-- new path -------> no file yet, empty plan on first access
 |
-`--> Every mutation (add/start/done/remove/clear) -> atomic save
+`--> Every mutation (add/start/done/remove/promote/derive/template/clear) -> atomic save
 ```
 
 ### 3.3 Error posture
@@ -141,12 +149,16 @@ Matching priority: index -> exact ID -> substring.
 /plan start <id|#>       -> mark item in_progress
 /plan done <id|#>        -> mark item done
 /plan remove <id|#>      -> delete item
+/plan promote <id|#>     -> convert a plan item into todos
+/plan derive <id|#>      -> derive todos from a plan item
+/plan template list      -> list built-in plan templates
+/plan template use <name> -> append a template's items
 /plan clear              -> wipe all items
 ```
 
-- Implemented in `packages/cli/src/slash-commands/plan.ts`
-- Reads/writes the same `PlanFile` as `planTool`
-- `planPath` comes from `opts.planPath` (seeded by session wiring)
+- Implemented by the built-in `wstack-plan` plugin in `packages/core/src/plugins/plan-plugin.ts`
+- Reads/writes the same `PlanFile` shape as `planTool`
+- `planPath` comes from `WstackPaths.projectPlan`
 
 ---
 
@@ -205,19 +217,19 @@ LLM: planTool(action: 'start', target: '2')  -> step 2 active
 
 | # | Feature | Motivation | Files touched |
 |---|---------|------------|---------------|
-| 1 | **Plan <-> Todo bridge** | Allow promoting a plan item into todo items (`/plan promote <id>`) and deriving todos from an active plan step (`/plan derive`). Closes the gap between strategic and tactical layers. | `packages/cli/src/slash-commands/plan.ts`, `packages/tools/src/plan.ts`, `packages/core/src/storage/plan-store.ts` |
-| 2 | **Plan templates** | Pre-defined plan skeletons for common workflows (feature, bugfix, release, refactor). Users instantiate with one command instead of manual `/plan add` for each step. | `packages/core/src/storage/plan-templates.ts` (new), `packages/cli/src/slash-commands/plan.ts` |
-| 3 | **Plan title editing** | `/plan title <text>` to set the plan title. Currently `PlanFile.title` exists in schema but has no CLI surface. | `packages/cli/src/slash-commands/plan.ts` |
-| 4 | **Plan item reordering** | `/plan move <from> <to>` to reorder items. Currently items are append-only. | `packages/core/src/storage/plan-store.ts`, `packages/cli/src/slash-commands/plan.ts` |
+| 1 | **Plan title editing** | `/plan title <text>` to set the plan title. Currently `PlanFile.title` exists in schema but has no CLI surface. | `packages/core/src/plugins/plan-plugin.ts` |
+| 2 | **Plan item reordering** | `/plan move <from> <to>` to reorder items. Currently items are append-only. | `packages/core/src/storage/plan-store.ts`, `packages/core/src/plugins/plan-plugin.ts` |
+| 3 | **Tool support for templates and derivation** | The slash command supports `promote`, `derive`, and `template`; the `planTool` action schema is still limited to show/add/start/done/remove/clear. | `packages/tools/src/plan.ts`, `packages/core/src/storage/plan-store.ts` |
+| 4 | **Best-match fuzzy targeting** | Improve substring matching so `"auth"` prefers exact or prefix matches over the first arbitrary substring. | `packages/core/src/storage/plan-store.ts` |
 
 ### 8.2 Medium-term (next 3-6 releases)
 
 | # | Feature | Motivation | Files touched |
 |---|---------|------------|---------------|
-| 5 | **Hierarchical plans (sub-items)** | Plan items with nested children. Enables complex roadmaps without flattening. | `packages/core/src/storage/plan-store.ts`, `packages/core/src/utils/plan-format.ts` (new) |
-| 6 | **Priority and tags** | `priority: 'low'|'medium'|'high'|'critical'` and `tags: string[]` on `PlanItem`. Enables filtering and sorting. | `packages/core/src/storage/plan-store.ts`, `packages/cli/src/slash-commands/plan.ts` |
+| 5 | **Hierarchical plans (sub-items)** | Plan items with nested children. Enables complex roadmaps without flattening. | `packages/core/src/storage/plan-store.ts`, future plan formatting helper |
+| 6 | **Priority and tags** | `priority: 'low'|'medium'|'high'|'critical'` and `tags: string[]` on `PlanItem`. Enables filtering and sorting. | `packages/core/src/storage/plan-store.ts`, `packages/core/src/plugins/plan-plugin.ts` |
 | 7 | **Plan history / undo** | Rolling log of plan mutations. `/plan undo` reverts last change. | `packages/core/src/storage/plan-store.ts` |
-| 8 | **Cross-session named plans** | `/plan save <name>` and `/plan load <name>` to persist plans beyond a single session. Storage: `.wrongstack/plans/<name>.json`. | `packages/core/src/storage/plan-store.ts`, `packages/cli/src/slash-commands/plan.ts` |
+| 8 | **Cross-session named plans** | `/plan save <name>` and `/plan load <name>` to persist plans beyond a single session. Storage: `.wrongstack/plans/<name>.json`. | `packages/core/src/storage/plan-store.ts`, `packages/core/src/plugins/plan-plugin.ts` |
 | 9 | **WebUI plan panel** | Sidebar panel showing live plan, editable via drag-drop, with progress bar. | `packages/webui/src/components/` |
 
 ### 8.3 Long-term / exploratory
@@ -259,10 +271,12 @@ LLM: planTool(action: 'start', target: '2')  -> step 2 active
 |------|------|
 | `packages/core/src/storage/plan-store.ts` | Core data model, CRUD operations, save/load, formatting |
 | `packages/tools/src/plan.ts` | `planTool` - LLM-callable plan management |
-| `packages/cli/src/slash-commands/plan.ts` | `/plan` slash command implementation |
-| `packages/cli/src/wiring/session.ts` | Session setup: creates `planPath`, seeds `ctx.meta['plan.path']`, resume banner |
+| `packages/core/src/plugins/plan-plugin.ts` | Built-in `/plan` slash command implementation |
+| `packages/core/src/storage/plan-templates.ts` | Built-in template catalog for `/plan template` |
+| `packages/core/src/utils/wstack-paths.ts` | Path setup: provides `projectPlan` |
 | `packages/core/tests/storage/plan-store.test.ts` | Plan store round-trip, CRUD, formatting tests |
 | `packages/tools/tests/plan.test.ts` | Plan tool execution, persistence, error paths |
+| `packages/core/tests/plugins/plan-plugin.test.ts` | `/plan` plugin command behavior |
 | `packages/core/src/defaults/index.ts` | Re-exports plan-store API for consumers |
 | `packages/core/src/storage/index.ts` | Barrel export for plan-store |
 

@@ -23,6 +23,14 @@ import { parseSymbols as parseRs } from './rs-parser.js';
 import { parseSymbols as parseJson } from './json-parser.js';
 import { parseSymbols as parseYaml } from './yaml-parser.js';
 import { loadGitignoreMatcher, type IgnoreMatcher } from './gitignore.js';
+import { _setIndexProgress } from './background-indexer.js';
+
+/** Yield the event loop every N files so the main thread stays responsive. */
+const YIELD_EVERY_N = 50;
+
+function yieldEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
 
 const DEFAULT_IGNORE = [
   'node_modules', '.git', 'dist', 'build', '.next', 'coverage',
@@ -166,7 +174,18 @@ export async function runIndexer(
     for (const meta of store.getAllFileMetas()) existingMeta.set(meta.file, meta);
   }
 
-  for (const file of files) {
+  for (let fi = 0; fi < files.length; fi++) {
+    const file = files[fi]!;
+
+    // Report progress to the state tracker so UIs can show indexing status.
+    _setIndexProgress(fi + 1, files.length);
+
+    // Yield the event loop periodically so the main thread stays responsive
+    // (TUI rendering, input handling, etc.) during large index builds.
+    if (fi > 0 && fi % YIELD_EVERY_N === 0) {
+      await yieldEventLoop();
+    }
+
     let stat: Stats;
     try {
       stat = await fs.stat(file);
