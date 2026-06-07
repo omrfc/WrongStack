@@ -308,7 +308,7 @@ describe('TelegramBot sendMessage', () => {
 // ---------------------------------------------------------------------------
 
 describe('TelegramBot poll errors', () => {
-  it('logs warning on getUpdates API failure', async () => {
+  it('logs getUpdates API failure at debug level', async () => {
     const onMessage = vi.fn();
     // Use very short poll interval so we catch the first poll quickly
     const bot = new TelegramBot({
@@ -331,7 +331,7 @@ describe('TelegramBot poll errors', () => {
     // Wait for the poll cycle (0ms interval, fires immediately)
     await new Promise((r) => setTimeout(r, 50));
 
-    expect(log.warn).toHaveBeenCalledWith(
+    expect(log.debug).toHaveBeenCalledWith(
       expect.stringContaining('Service unavailable'),
     );
 
@@ -355,7 +355,7 @@ describe('TelegramBot poll errors', () => {
     bot.start();
     await new Promise((r) => setTimeout(r, 50));
 
-    expect(log.warn).toHaveBeenCalledWith(
+    expect(log.debug).toHaveBeenCalledWith(
       expect.stringContaining('ETIMEDOUT'),
     );
 
