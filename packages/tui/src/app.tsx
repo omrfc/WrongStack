@@ -26,6 +26,7 @@ import { BrainDecisionPrompt } from './components/brain-decision-prompt.js';
 import { CheckpointTimeline } from './components/checkpoint-timeline.js';
 import { type ConfirmDecision, ConfirmPrompt } from './components/confirm-prompt.js';
 import { EnhancePanel } from './components/enhance-panel.js';
+import { EscConfirmPrompt } from './components/esc-confirm-prompt.js';
 import { FilePicker } from './components/file-picker.js';
 import { FleetMonitor } from './components/fleet-monitor.js';
 import { FleetPanel } from './components/fleet-panel.js';
@@ -562,6 +563,7 @@ export function App({
     enhance: null,
     enhanceEnabled,
     enhanceBusy: false,
+    escConfirm: null,
     contextChipVersion: 0,
     fleet: {},
     leader: {
@@ -974,6 +976,7 @@ export function App({
       state.settingsPicker.open ||
       state.enhanceBusy ||
       state.enhance != null ||
+      state.escConfirm != null ||
       state.confirmQueue.length > 0;
     const overlayClosed = prevAnyOverlayOpen.current && !anyOpenNow;
     const newEntryCommitted = state.entries.length > prevEntriesCount.current;
@@ -993,6 +996,7 @@ export function App({
     state.settingsPicker.open,
     state.enhanceBusy,
     state.enhance,
+    state.escConfirm,
     state.confirmQueue.length,
     state.entries.length,
     state.toolStream?.text,
@@ -2733,6 +2737,10 @@ export function App({
     // The EnhancePanel owns Enter/Esc/e, so the main input stays out of the way.
     if (state.enhance) return;
 
+    // The ESC-interrupt confirmation dialog is modal — EscConfirmPrompt owns
+    // y/n/Esc/Enter; all other keys are swallowed.
+    if (state.escConfirm) return;
+
     // The help overlay is modal: Esc / `?` / `q` dismiss it; every other key is
     // swallowed so nothing leaks into the editor or chat behind it.
     if (state.helpOpen) {
@@ -3036,6 +3044,11 @@ export function App({
     // the model exactly what it was mid-doing. Does NOT consume the
     // Ctrl+C exit ladder (interrupts counter untouched). When no run
     // is active, Esc falls through to normal text handling.
+    //
+    // When `confirmExit` is enabled, Esc first shows a confirmation
+    // dialog ("Are you sure?") so the user doesn't accidentally
+    // interrupt a long-running task. The dialog is dismissed with
+    // y/Enter to confirm or n/Esc to cancel.
     if (key.escape && state.status !== 'idle' && state.confirmQueue.length === 0) {
       // Snapshot context BEFORE we mutate anything. The submit handler
       // replays this into the model prompt so the model isn't guessing.
@@ -3049,18 +3062,34 @@ export function App({
         }));
       const subagentsTerminated = subagents.length;
       const partialAssistantText = streamingTextRef.current.slice(-1500);
+      const snapshot = {
+        runningTools,
+        subagents,
+        subagentsTerminated,
+        partialAssistantText,
+      };
 
+      // ── confirmExit gate: show confirmation dialog ──────────────────
+      if (confirmExitRef.current) {
+        dispatch({ type: 'escConfirmOpen', snapshot });
+        dispatch({
+          type: 'addEntry',
+          entry: {
+            kind: 'warn',
+            text:
+              `⏸ Interrupt? [y]es — stop and steer  ·  [n]o / Esc — keep running` +
+              (subagentsTerminated > 0
+                ? `  (${subagentsTerminated} subagent${subagentsTerminated === 1 ? '' : 's'})`
+                : ''),
+          },
+        });
+        return;
+      }
+
+      // ── Immediate interrupt (confirmExit is off) ────────────────────
       activeCtrlRef.current?.abort();
       dispatch({ type: 'status', status: 'aborting' });
-      dispatch({
-        type: 'steerStart',
-        snapshot: {
-          runningTools,
-          subagents,
-          subagentsTerminated,
-          partialAssistantText,
-        },
-      });
+      dispatch({ type: 'steerStart', snapshot });
 
       // Kill the fleet too. Without this the subagents keep running
       // on the old direction, finish minutes later, and pollute the
@@ -4277,6 +4306,45 @@ export function App({
                 />
               );
             })()}
+          {state.escConfirm ? (
+            <Box flexDirection="column" marginY={1} flexShrink={0}>
+              <EscConfirmPrompt
+                runningTools={state.escConfirm.snapshot.runningTools}
+                subagentCount={state.escConfirm.snapshot.subagentsTerminated}
+                onConfirm={() => {
+                  const { snapshot } = state.escConfirm!;
+                  activeCtrlRef.current?.abort();
+                  dispatch({ type: 'status', status: 'aborting' });
+                  dispatch({ type: 'steerStart', snapshot });
+                  if (director && snapshot.subagentsTerminated > 0) {
+                    const cap = new Promise<void>((resolve) => {
+                      const t = setTimeout(resolve, 1500);
+                      t.unref?.();
+                    });
+                    void Promise.race([director.terminateAll().catch(() => undefined), cap]);
+                  }
+                  const droppedCount = state.queue.length;
+                  if (droppedCount > 0) dispatch({ type: 'queueClear' });
+                  const droppedTag = droppedCount > 0 ? ` · dropped ${droppedCount} queued` : '';
+                  const fleetTag =
+                    snapshot.subagentsTerminated > 0
+                      ? ` · stopped ${snapshot.subagentsTerminated} subagent${snapshot.subagentsTerminated === 1 ? '' : 's'}`
+                      : '';
+                  dispatch({
+                    type: 'addEntry',
+                    entry: {
+                      kind: 'warn',
+                      text: `↯ Interrupted${droppedTag}${fleetTag}. Type your new direction.`,
+                    },
+                  });
+                  dispatch({ type: 'escConfirmClose' });
+                }}
+                onCancel={() => {
+                  dispatch({ type: 'escConfirmClose' });
+                }}
+              />
+            </Box>
+          ) : null}
           {state.enhanceBusy && !state.enhance ? (
             <Box paddingX={1}>
               <Text color="cyan">✨ refining your request…</Text>
