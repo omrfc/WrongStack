@@ -7,6 +7,7 @@ export default defineConfig({
     'src/types/index.ts',
     'src/defaults/index.ts',
     'src/utils/index.ts',
+    'src/utils/expect-defined.ts',
     // Domain entry points (new as of 0.2.0)
     'src/execution/index.ts',
     'src/coordination/index.ts',

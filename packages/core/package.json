@@ -36,6 +36,10 @@
       "types": "./dist/utils/index.d.ts",
       "import": "./dist/utils/index.js"
     },
+    "./utils/expect-defined": {
+      "types": "./dist/utils/expect-defined.d.ts",
+      "import": "./dist/utils/expect-defined.js"
+    },
     "./execution": {
       "types": "./dist/execution/index.d.ts",
       "import": "./dist/execution/index.js"

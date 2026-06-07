@@ -14,6 +14,7 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
+      "@wrongstack/core/utils/expect-defined": ["../core/src/utils/expect-defined.ts"],
       "@/*": ["./src/*"]
     }
   },

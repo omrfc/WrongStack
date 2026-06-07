@@ -8,9 +8,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-    },
+    alias: [
+      {
+        find: /^@wrongstack\/core\/utils\/expect-defined$/,
+        replacement: path.resolve(__dirname, '../core/src/utils/expect-defined.ts'),
+      },
+      // Browser-only: redirect the bare `@wrongstack/core` barrel (which drags
+      // in Node built-ins) to a tiny browser-safe shim. Exact match only, so
+      // subpath imports like `@wrongstack/core/storage` are left untouched.
+      {
+        find: /^@wrongstack\/core$/,
+        replacement: path.resolve(__dirname, './src/lib/core-browser-shim.ts'),
+      },
+      { find: '@', replacement: path.resolve(__dirname, './src') },
+    ],
   },
   css: {
     postcss: './postcss.config.cjs',
