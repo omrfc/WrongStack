@@ -39,9 +39,48 @@ function discoverPackages() {
   return found;
 }
 
-function readBuildScript(pkgDir) {
+function readPkgMeta(pkgDir) {
   const pkg = JSON.parse(readFileSync(join(root, pkgDir, 'package.json'), 'utf8'));
-  return pkg.scripts?.build ?? null;
+  const deps = Object.keys({
+    ...pkg.dependencies,
+    ...pkg.devDependencies,
+    ...pkg.peerDependencies,
+  }).filter((d) => d.startsWith('@wrongstack/'));
+  return { dir: pkgDir, name: pkg.name, build: pkg.scripts?.build ?? null, deps };
+}
+
+// Build packages in dependency (topological) order, not the alphabetical
+// order readdirSync yields. tsup's DTS step resolves a package's
+// `@wrongstack/*` imports from each dependency's *emitted* dist/*.d.ts, so
+// every dependency must be fully built first. Alphabetical order is unsafe:
+// `cli` depends on `tools` but sorts before it, `acp` before `core`, etc. On
+// a clean dist that fails outright; with a half-populated dist (stale .d.ts,
+// missing .js) the build silently "succeeds" but ships an unloadable runtime
+// (ERR_MODULE_NOT_FOUND). Ties are broken alphabetically for determinism.
+function topoSort(metas) {
+  const byName = new Map(metas.map((m) => [m.name, m]));
+  const visited = new Set();
+  const onStack = new Set();
+  const ordered = [];
+  const visit = (m) => {
+    if (visited.has(m.name)) return;
+    if (onStack.has(m.name)) {
+      throw new Error(`Dependency cycle detected involving ${m.name}`);
+    }
+    onStack.add(m.name);
+    const deps = m.deps
+      .map((d) => byName.get(d))
+      .filter(Boolean)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    for (const dep of deps) visit(dep);
+    onStack.delete(m.name);
+    visited.add(m.name);
+    ordered.push(m);
+  };
+  for (const m of [...metas].sort((a, b) => a.name.localeCompare(b.name))) {
+    visit(m);
+  }
+  return ordered;
 }
 
 function runBuild(pkgDir, script) {
@@ -64,13 +103,14 @@ if (pkgs.length === 0) {
   process.exit(1);
 }
 
-for (const pkg of pkgs) {
-  const script = readBuildScript(pkg);
-  if (!script) {
-    console.log(`> ${pkg} — no build script, skipping`);
+const ordered = topoSort(pkgs.map(readPkgMeta));
+
+for (const { dir, build } of ordered) {
+  if (!build) {
+    console.log(`> ${dir} — no build script, skipping`);
     continue;
   }
-  runBuild(pkg, script);
+  runBuild(dir, build);
 }
 
 console.log('\nBuild complete.');

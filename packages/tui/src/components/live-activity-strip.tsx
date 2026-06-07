@@ -40,11 +40,6 @@ function fmtRecentTool(tool: FleetEntry['recentTools'][number]): string {
   return parts.join(' ');
 }
 
-function fmtRecentMessage(message: FleetEntry['recentMessages'][number]): string {
-  const text = message.text.replace(/\s+/g, ' ');
-  return text.length > 48 ? `${text.slice(0, 47)}...` : text;
-}
-
 /**
  * Compact one-line-per-subagent strip that sits directly above the
  * input area. Shows only RUNNING subagents — completed/failed entries
@@ -100,11 +95,8 @@ export const LiveActivityStrip = React.memo(function LiveActivityStrip({
         const taskElapsed = now - e.startedAt;
         const toolSeg = e.currentTool
           ? `→ ${e.currentTool.name} (${fmtElapsed(toolElapsed)})`
-          : 'idle between tools';
+          : '';
         const recentTools = (e.recentTools ?? []).slice(-2).map(fmtRecentTool).join(' | ');
-        const messageText =
-          e.streamingText.trim() ||
-          (e.recentMessages ?? []).slice(-1).map(fmtRecentMessage).join('');
         return (
           <Box key={e.id} flexDirection="row" gap={1}>
             <Text color={theme.accent}>●</Text>
@@ -119,12 +111,6 @@ export const LiveActivityStrip = React.memo(function LiveActivityStrip({
               <>
                 <Text dimColor>|</Text>
                 <Text dimColor>last: {recentTools}</Text>
-              </>
-            ) : null}
-            {messageText ? (
-              <>
-                <Text dimColor>|</Text>
-                <Text dimColor>msg: {fmtRecentMessage({ text: messageText, at: Date.now() })}</Text>
               </>
             ) : null}
           </Box>

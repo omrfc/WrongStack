@@ -3,7 +3,6 @@ import { Box, Text, useStdout } from 'ink';
 import type React from 'react';
 import { useEffect, useState } from 'react';
 import type { GitInfo } from '../git-info.js';
-import { theme } from '../theme.js';
 
 
 
@@ -219,7 +218,6 @@ export function StatusBar({
   fleetAgents,
   git,
   subagentCount = 0,
-  context,
   brain,
   projectName,
   processCount,
@@ -354,12 +352,6 @@ export function StatusBar({
             )}
             <Text dimColor>│</Text>
             <Text color="magenta">{model}</Text>
-            {context && context.max > 0 ? (
-              <>
-                <Text dimColor>│</Text>
-                <ContextChip ctx={context} />
-              </>
-            ) : null}
             {usage && isComfortable ? (
               <>
                 <Text dimColor>│</Text>
@@ -696,26 +688,6 @@ function EternalStageChip({
     case 'error':
       return <Text color="red">⚠ error: {stage.message}</Text>;
   }
-}
-
-function ContextChip({ ctx }: { ctx: ContextWindow }): React.ReactElement {
-  const ratio = Math.max(0, Math.min(1, ctx.used / ctx.max));
-  const pct = Math.round(ratio * 100);
-  const color = ratio >= 0.85 ? theme.error : ratio >= 0.65 ? theme.warn : theme.accent;
-  return (
-    <Text>
-      <Text dimColor>ctx </Text>
-      <Text color={color}>{renderMeter(ratio, 12)}</Text>
-      <Text color={color} bold>
-        {' '}
-        {pct}%
-      </Text>
-      <Text dimColor>
-        {' '}
-        {fmtTok(ctx.used)}/{fmtTok(ctx.max)}
-      </Text>
-    </Text>
-  );
 }
 
 /**

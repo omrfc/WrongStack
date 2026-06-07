@@ -137,7 +137,7 @@ const plugin: Plugin = {
           ].join('\n');
 
           void bot.sendMessage(expectDefined(cfg.notifyChatId), msg).catch((err) => {
-            log.warn(`Failed to send session end notification: ${(err as Error).message}`);
+            log.debug(`Failed to send session end notification: ${(err as Error).message}`);
           });
         }),
       );
@@ -161,7 +161,7 @@ const plugin: Plugin = {
           ].join('\n');
 
           void bot.sendMessage(expectDefined(cfg.notifyChatId), msg).catch((err) => {
-            log.warn(`Failed to send tool notification: ${(err as Error).message}`);
+            log.debug(`Failed to send tool notification: ${(err as Error).message}`);
           });
         }),
       );
@@ -178,7 +178,7 @@ const plugin: Plugin = {
             cfg.maxMessageLength,
           );
           void bot.sendMessage(expectDefined(cfg.notifyChatId), msg).catch((err) => {
-            log.warn(`Failed to send delegate notification: ${(err as Error).message}`);
+            log.debug(`Failed to send delegate notification: ${(err as Error).message}`);
           });
         }),
       );

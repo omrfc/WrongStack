@@ -1,6 +1,6 @@
 import { Box, Text, useInput, useStdin, useStdout } from 'ink';
 import type React from 'react';
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { fnKey } from '../fn-keys.js';
 import { type InputCell, layoutInputRows } from '../input-tokens.js';
 
@@ -163,7 +163,7 @@ export const EMPTY_KEY: KeyEvent = {
   end: false,
 };
 
-export function Input({
+export const Input = memo(function Input({
   prompt = '› ',
   value,
   cursor,
@@ -263,4 +263,4 @@ export function Input({
       {hint ? <Text dimColor>{hint}</Text> : null}
     </Box>
   );
-}
+});

@@ -717,6 +717,15 @@ export function App({
     return () => clearInterval(t);
   }, []);
 
+  // Animated dot indicator for the refine-in-progress bar. Cycles 0..3
+  // while `enhanceBusy` is true so the user sees a live "still working" cue.
+  const [enhanceDots, setEnhanceDots] = useState(0);
+  useEffect(() => {
+    if (!state.enhanceBusy) return;
+    const t = setInterval(() => setEnhanceDots((n) => (n + 1) % 4), 400);
+    return () => clearInterval(t);
+  }, [state.enhanceBusy]);
+
   // Todos polling — separate 2s interval so the status-bar chip stays fresh
   // without relying on the 10s global tick. Compares with a ref to skip
   // dispatching when nothing changed.
@@ -3449,6 +3458,16 @@ export function App({
   // Expose the latest handleKey for the keyboard event pipeline.
   handleKeyRef.current = handleKey;
 
+  // Stable callback wrapping handleKey via ref — prevents Input from
+  // re-rendering on every nowTick tick (which bleeds the prompt line into
+  // native scrollback in inline mode). handleKey itself captures many
+  // mutable state values in its closure and must be recreated each render,
+  // but the Input only needs a stable function reference that delegates
+  // to the latest closure via the ref.
+  const stableOnKey = useCallback((input: string, key: KeyEvent) => {
+    handleKeyRef.current?.(input, key);
+  }, []);
+
   const inputHint = useMemo(() => {
     if (state.status !== 'idle') return '';
     if (state.buffer.startsWith('/')) return 'slash command — Enter to dispatch';
@@ -3487,7 +3506,7 @@ export function App({
                 state.confirmQueue.length > 0
               }
               hint={inputHint}
-              onKey={handleKey}
+              onKey={stableOnKey}
             />
           )}
           {state.picker.open ? (
@@ -3639,8 +3658,16 @@ export function App({
             </Box>
           ) : null}
           {state.enhanceBusy && !state.enhance ? (
-            <Box paddingX={1}>
-              <Text color="cyan">✨ refining your request…</Text>
+            <Box paddingX={1} flexDirection="column">
+              <Text dimColor>
+                ✨ refining:{' '}
+                <Text color="cyan">
+                  {state.buffer.length > 100
+                    ? `${state.buffer.slice(0, 97)}…`
+                    : state.buffer}
+                </Text>
+              </Text>
+              <Text color="cyan">{'.'.repeat(enhanceDots)}</Text>
             </Box>
           ) : null}
           {state.enhance
