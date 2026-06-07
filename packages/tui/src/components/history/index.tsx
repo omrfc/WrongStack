@@ -1,4 +1,4 @@
-import { Box, Static, useStdout } from 'ink';
+import { Box, Static, Text, useStdout } from 'ink';
 import type React from 'react';
 import { useEffect, useState } from 'react';
 import { AssistantTail } from './assistant.js';
@@ -83,7 +83,15 @@ export function History({ entries, streamingText, toolStream }: HistoryProps): R
           </Box>
         )}
       </Static>
-      {tail ? <AssistantTail text={tail} termWidth={termWidth} /> : null}
+      {/*
+        flexGrow anchor — always present so Ink's layout engine has a live
+        node at the history / bottom-area boundary. Without this, <Static>
+        bypasses the virtual screen and when a tall overlay (SettingsPicker)
+        unmounts the reclaimed space is not cleared, leaving ghost text.
+      */}
+      <Box flexGrow={1}>
+        {tail ? <AssistantTail text={tail} termWidth={termWidth} /> : <Text> </Text>}
+      </Box>
     </>
   );
 }
