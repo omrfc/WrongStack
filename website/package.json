@@ -1,7 +1,7 @@
 {
   "name": "wrongstack-website",
   "private": true,
-  "version": "0.82.6",
+  "version": "0.84.1",
   "type": "module",
   "scripts": {
     "dev": "vite",

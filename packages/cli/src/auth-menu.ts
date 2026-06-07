@@ -1,19 +1,18 @@
-import * as fs from 'node:fs/promises';
 import {
   type ModelsRegistry,
   type ProviderConfig,
   type ResolvedProvider,
   type SecretVault,
   type WireFamily,
-  atomicWrite,
   color,
-  decryptConfigSecrets,
-  encryptConfigSecrets,
 } from '@wrongstack/core';
 import type { ReadlineInputReader } from './input-reader.js';
 import {
   activeLabel,
+  expectDefined,
+  loadConfigProviders,
   maskedKey,
+  mutateConfigProviders,
   normalizeKeys,
   nowIso,
   writeKeysBack,
@@ -21,13 +20,6 @@ import {
 import type { TerminalRenderer } from './renderer.js';
 
 
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
 
 export interface AuthMenuDeps {
   renderer: TerminalRenderer;
@@ -768,84 +760,17 @@ async function readKeyInput(deps: AuthMenuDeps, intent: string): Promise<string 
 
 /* ----------------------------- I/O helpers ----------------------------- */
 
-/**
- * Read the on-disk config file and return its `providers` map, fully
- * decrypted. We don't use `deps.config` here because it's a frozen
- * snapshot taken at startup — and once we start mutating keys we want to
- * see our own writes on the next iteration.
- */
-async function loadProviders(deps: AuthMenuDeps): Promise<Record<string, ProviderConfig>> {
-  let raw: string;
-  try {
-    raw = await fs.readFile(deps.globalConfigPath, 'utf8');
-  } catch (err) {
-    // ENOENT is normal on first run; anything else (EACCES, EIO) is worth surfacing.
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      deps.renderer.writeWarning(
-        `Could not read ${deps.globalConfigPath}: ${(err as Error).message}. Treating as empty.`,
-      );
-    }
-    return {};
-  }
-  let parsed: { providers?: Record<string, ProviderConfig> } = {};
-  try {
-    parsed = JSON.parse(raw) as { providers?: Record<string, ProviderConfig> };
-  } catch (err) {
-    // Corrupt config: surface loudly. We still return {} so the menu remains
-    // usable, but mutateProviders() will refuse to overwrite (see below).
-    deps.renderer.writeWarning(
-      `Config at ${deps.globalConfigPath} is not valid JSON: ${(err as Error).message}`,
-    );
-    return {};
-  }
-  const decrypted = decryptConfigSecrets(parsed, deps.vault);
-  return decrypted.providers ?? {};
+/** Thin wrapper — delegates to the shared config provider loader. */
+function loadProviders(deps: AuthMenuDeps): Promise<Record<string, ProviderConfig>> {
+  return loadConfigProviders(deps.globalConfigPath, deps.vault, {
+    warn: (msg) => deps.renderer.writeWarning(msg),
+  });
 }
 
-/**
- * Load → mutate → encrypt → atomic-write. Operates on the FULL config
- * file so we don't truncate anything the user has set up elsewhere; only
- * the `providers` key gets replaced wholesale with the post-mutation
- * value (so deletions actually take effect).
- */
-async function mutateProviders(
+/** Thin wrapper — delegates to the shared atomic config mutator. */
+function mutateProviders(
   deps: AuthMenuDeps,
   mutator: (providers: Record<string, ProviderConfig>) => void,
 ): Promise<void> {
-  let raw: string;
-  let fileExists = true;
-  try {
-    raw = await fs.readFile(deps.globalConfigPath, 'utf8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      // Something other than missing file — refuse to overwrite blindly.
-      throw new Error(
-        `Refusing to mutate ${deps.globalConfigPath}: ${(err as Error).message}`,
-        { cause: err },
-      );
-    }
-    fileExists = false;
-    raw = '{}';
-  }
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(raw) as Record<string, unknown>;
-  } catch (err) {
-    // Refuse to clobber a corrupt-but-existing config — the user may still
-    // have salvageable keys in it. Bail with a clear error.
-    if (fileExists) {
-      throw new Error(
-        `Refusing to overwrite corrupt config at ${deps.globalConfigPath} ` +
-          `(${(err as Error).message}). Fix or move the file aside before retrying.`,
-        { cause: err },
-      );
-    }
-    parsed = {};
-  }
-  const decrypted = decryptConfigSecrets(parsed, deps.vault) as Record<string, unknown>;
-  const providers = (decrypted.providers as Record<string, ProviderConfig>) ?? {};
-  mutator(providers);
-  decrypted.providers = providers;
-  const encrypted = encryptConfigSecrets(decrypted, deps.vault);
-  await atomicWrite(deps.globalConfigPath, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
+  return mutateConfigProviders(deps.globalConfigPath, deps.vault, mutator);
 }
