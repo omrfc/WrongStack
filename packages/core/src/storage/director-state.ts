@@ -1,4 +1,5 @@
 import * as fsp from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { atomicWrite } from '../utils/atomic-write.js';
 
 /**
@@ -111,7 +112,7 @@ export async function acquireDirectorStateLock(
 
   const lock: DirectorStateLock = {
     pid: processId,
-    hostname: require('node:os').hostname(),
+    hostname: hostname(),
     startedAt: new Date().toISOString(),
   };
   await atomicWrite(lockPath, JSON.stringify(lock), { mode: 0o600 });

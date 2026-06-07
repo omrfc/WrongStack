@@ -8,6 +8,7 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import type { FileSymbols, Symbol as IndexSymbol, SymbolLang } from './schema.js';
 
@@ -78,7 +79,6 @@ function tryNativeParse(file: string, content: string): FileSymbols | null {
 
     // Write source to temp file for cargo to read
     const tmpFile = path.join(crateDir, 'src', 'input.rs');
-    const { writeFileSync } = require('node:fs');
     writeFileSync(tmpFile, content, 'utf8');
 
     const result = spawnSync(

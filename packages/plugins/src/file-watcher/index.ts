@@ -131,8 +131,8 @@ const plugin: Plugin = {
             if (autoIndex && isIndexableFile(fullPath)) {
               debounceEvent(`index:${fullPath}`, async () => {
                 try {
-                  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-                  // @ts-ignore — runtime resolution; type-only import not visible to DTS worker
+                  // @ts-expect-error — @wrongstack/tools/codebase-index is not an exported subpath;
+                  // the dynamic import resolves at runtime but has no type declaration visible here.
                   const { runIndexer } = await import('@wrongstack/tools/codebase-index/index.js');
                   const root = indexProjectRoot || dirPath;
                   const fakeAppend = async () => { /* noop */ };

@@ -3,6 +3,7 @@
  * Extracted from index.ts so the main() function focuses on
  * boot + wiring; this file owns the three run modes and cleanup.
  */
+import { createRequire } from 'node:module';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type {
@@ -33,6 +34,9 @@ import { runRepl } from './repl.js';
 import type { SessionStats } from './session-stats.js';
 import { fmtTok } from './utils.js';
 import { CLI_VERSION } from './version.js';
+
+// Lazy-load CJS-compatible modules via createRequire for circular-dep avoidance.
+const require = createRequire(import.meta.url);
 
 export interface ExecutionDeps {
   agent: Agent;
