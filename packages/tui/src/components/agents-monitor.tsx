@@ -172,10 +172,10 @@ export function AgentsMonitor({
         ) : null}
         <Text dimColor>total</Text>
         <Text color="green" bold>
-          ${grandCost.toFixed(3)}
+          ${grandCost.toFixed(4)}
         </Text>
         <Text dimColor>
-          (leader ${leaderCost.toFixed(3)} · fleet ${totalCost.toFixed(3)})
+          (leader ${leaderCost.toFixed(4)} · fleet ${totalCost.toFixed(4)})
         </Text>
         {hiddenIdle > 0 ? <Text dimColor>· {hiddenIdle} idle hidden</Text> : null}
       </Box>
@@ -225,7 +225,7 @@ export function AgentsMonitor({
               {e.extensions && e.extensions > 0 ? (
                 <Text color="yellow">⚡×{e.extensions}</Text>
               ) : null}
-              {e.cost > 0 ? <Text color="green">${e.cost.toFixed(3)}</Text> : null}
+              {e.cost > 0 ? <Text color="green">${e.cost.toFixed(4)}</Text> : null}
             </Box>
 
             {/* Current tool (live, ms-precision) — only while inside a tool */}

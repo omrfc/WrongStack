@@ -48,7 +48,7 @@ export function Release() {
             {/* Automation steps */}
             <div className="mt-6 grid gap-3 sm:grid-cols-4">
               {releaseWorkflow.automation.map((step, i) => (
-                <div key={i} className="flex items-start gap-2.5 rounded-xl border border-line bg-surface p-3.5">
+                <div key={step} className="flex items-start gap-2.5 rounded-xl border border-line bg-surface p-3.5">
                   <span className="grid size-6 shrink-0 place-items-center rounded-md bg-brand/10 font-mono text-xs font-bold text-brand">
                     {i + 1}
                   </span>
@@ -88,8 +88,8 @@ export function Release() {
                   <h4 className="text-base font-bold tracking-tight">{phase.phase}</h4>
                 </div>
                 <ul className="mt-4 space-y-2.5">
-                  {phase.steps.map((step, si) => (
-                    <li key={si} className="flex items-start gap-2 text-[13px]">
+                  {phase.steps.map((step) => (
+                    <li key={`${phase.phase}-${step}`} className="flex items-start gap-2 text-[13px]">
                       <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-term-green" />
                       <span className="text-muted">{step}</span>
                     </li>
@@ -111,8 +111,8 @@ export function Release() {
               If a critical bug is found after release, branch from the tag and bump the patch version:
             </p>
             <div className="mt-4 space-y-2">
-              {releaseWorkflow.hotfix.map((cmd, i) => (
-                <div key={i} className="flex items-center justify-between gap-2 rounded-lg border border-line bg-surface px-3.5 py-2.5 font-mono text-sm">
+              {releaseWorkflow.hotfix.map((cmd) => (
+                <div key={cmd} className="flex items-center justify-between gap-2 rounded-lg border border-line bg-surface px-3.5 py-2.5 font-mono text-sm">
                   <code className="text-fg">
                     <span className="text-faint">$ </span>
                     {cmd}

@@ -1,5 +1,5 @@
 import { Box, Text, useInput } from 'ink';
-import React from 'react';
+import type React from 'react';
 
 export interface EscConfirmPromptProps {
   runningTools: string[];

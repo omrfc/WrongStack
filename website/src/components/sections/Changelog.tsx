@@ -68,8 +68,8 @@ export function Changelog() {
 
                 {/* Highlights */}
                 <ul className="mt-5 space-y-2">
-                  {entry.highlights.map((h, hi) => (
-                    <li key={hi} className="flex items-start gap-2.5 text-sm">
+                  {entry.highlights.map((h) => (
+                    <li key={`${entry.version}-${h}`} className="flex items-start gap-2.5 text-sm">
                       <span className="mt-1.5 block size-1.5 shrink-0 rounded-full bg-brand/60" />
                       <span className="text-muted">{h}</span>
                     </li>

@@ -4312,7 +4312,9 @@ export function App({
                 runningTools={state.escConfirm.snapshot.runningTools}
                 subagentCount={state.escConfirm.snapshot.subagentsTerminated}
                 onConfirm={() => {
-                  const { snapshot } = state.escConfirm!;
+                  const escConfirm = state.escConfirm;
+                  if (!escConfirm) return;
+                  const { snapshot } = escConfirm;
                   activeCtrlRef.current?.abort();
                   dispatch({ type: 'status', status: 'aborting' });
                   dispatch({ type: 'steerStart', snapshot });

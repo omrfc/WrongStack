@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import type { CommitLLMProvider } from './slash-commands/commit-llm.js';
 import { generateCommitMessageWithLLM } from './slash-commands/commit-llm.js';
 import { makeProviderClassifier } from './slash-commands/dispatch-llm.js';
@@ -60,10 +61,7 @@ import { Spinner } from './spinner.js';
 import { fmtTaskResultLine, patchConfig } from './utils.js';
 import { createAgent, setupCompaction, setupPipelines } from './wiring/pipeline.js';
 import { createFallbackModelExtension } from './fallback-model.js';
-import {
-  createLifecycleHooksExtension,
-  createUserPromptSubmitMiddleware,
-} from './hooks-wiring.js';
+import { createLifecycleHooksExtension, createUserPromptSubmitMiddleware } from './hooks-wiring.js';
 import { setupMetrics } from './wiring/metrics.js';
 import { setupCodebaseIndexing } from './wiring/codebase-index.js';
 import { setupPlugins } from './wiring/plugins.js';
@@ -76,7 +74,6 @@ import { printUpdateNotice } from './cli-update-notice.js';
 import { promptRecovery } from './cli-recovery-prompt.js';
 
 import { launchEternalFromFlag } from './cli-eternal-flag.js';
-
 
 function expectDefined<T>(value: T | null | undefined): T {
   if (value === null || value === undefined) {
@@ -797,8 +794,12 @@ export async function main(argv: string[]): Promise<number> {
       ? process.env['WRONGSTACK_FLEET_MANIFEST']
       : path.join(expectDefined(fleetRoot), 'fleet.json')
     : undefined;
-  const sharedScratchpadPath = directorMode ? path.join(expectDefined(fleetRoot), 'shared') : undefined;
-  const subagentSessionsRoot = directorMode ? path.join(expectDefined(fleetRoot), 'subagents') : undefined;
+  const sharedScratchpadPath = directorMode
+    ? path.join(expectDefined(fleetRoot), 'shared')
+    : undefined;
+  const subagentSessionsRoot = directorMode
+    ? path.join(expectDefined(fleetRoot), 'subagents')
+    : undefined;
   // Live director state checkpoint — written incrementally to disk on
   // every spawn/assign/complete event so a crashed director leaves a
   // recoverable snapshot. Distinct from manifestPath (final record).
@@ -1314,7 +1315,11 @@ export async function main(argv: string[]): Promise<number> {
       const toolNames = new Map<string, number>();
       for (const line of lines) {
         try {
-          const ev = JSON.parse(line) as { type: string; content?: unknown | undefined; name?: string | undefined };
+          const ev = JSON.parse(line) as {
+            type: string;
+            content?: unknown | undefined;
+            name?: string | undefined;
+          };
           counts[ev.type] = (counts[ev.type] ?? 0) + 1;
           if (ev.type === 'user_input' && !firstUser) {
             const txt =
@@ -1333,7 +1338,9 @@ export async function main(argv: string[]): Promise<number> {
           }
           if (ev.type === 'llm_response') {
             if (Array.isArray(ev.content)) {
-              const txt = (ev.content as Array<{ type?: string | undefined; text?: string | undefined }>)
+              const txt = (
+                ev.content as Array<{ type?: string | undefined; text?: string | undefined }>
+              )
                 .filter((b) => b.type === 'text')
                 .map((b) => b.text ?? '')
                 .join(' ');
@@ -1602,7 +1609,6 @@ export async function main(argv: string[]): Promise<number> {
     },
     onBeforeExit: async () => {
       // Check for uncommitted changes directly
-      const { spawn } = await import('node:child_process');
       const cwd = projectRoot;
 
       const statusResult = await new Promise<{ stdout: string; code: number }>(
