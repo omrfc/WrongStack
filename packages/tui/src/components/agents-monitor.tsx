@@ -1,4 +1,5 @@
-import { Box, Text } from 'ink';
+import { Box, Text, useInput } from 'ink';
+import { useMemo, useState } from 'react';
 import type React from 'react';
 import type { FleetEntry } from '../app.js';
 import { bucketActivity, fmtModelLabel, sparkline } from './fleet-monitor.js';
@@ -110,10 +111,138 @@ function ContextBar({
 }
 
 /**
- * Live per-agent context view (Ctrl+G). Each active agent gets a card with
- * its current tool, the last tool result, the most recent streaming /
- * message text, an activity sparkline, and budget pressure. Terminal
- * agents are excluded so the monitor reflects only what's actually live.
+ * Compact single-line agent row. All the essential info in one line:
+ * status icon, name, model, iterations/tools, context bar, cost.
+ */
+function AgentRow({
+  entry,
+  now,
+  selected,
+}: {
+  entry: FleetEntry;
+  now: number;
+  selected: boolean;
+}): React.ReactElement {
+  const s = STATUS[entry.status];
+  const elapsed =
+    entry.status === 'running' ? fmtElapsed(Math.max(0, now - entry.startedAt)) : entry.status;
+  const modelLabel = fmtModelLabel(entry.provider, entry.model);
+
+  return (
+    <Box flexDirection="row" gap={1}>
+      {/* Selection indicator */}
+      <Text color={selected ? 'magenta' : 'gray'}>{selected ? '▶' : ' '}</Text>
+      {/* Status icon */}
+      <Text color={s.color} bold>
+        {s.icon}
+      </Text>
+      {/* Name */}
+      <Text bold={selected} color={selected ? 'magenta' : undefined}>
+        {entry.name}
+      </Text>
+      {/* Model */}
+      {modelLabel ? <Text dimColor>{modelLabel}</Text> : null}
+      {/* Iterations / tool calls */}
+      <Text dimColor>
+        L{entry.iterations} {entry.toolCalls}t
+      </Text>
+      {/* Context bar */}
+      {entry.ctxPct !== undefined ? (
+        <ContextBar pct={entry.ctxPct} tokens={entry.ctxTokens} maxTokens={entry.ctxMaxTokens} />
+      ) : null}
+      {/* Current tool (inline) */}
+      {entry.status === 'running' && entry.currentTool ? (
+        <Text color="cyan">
+          → {entry.currentTool.name}
+          <Text dimColor> ({Math.max(0, now - entry.currentTool.startedAt)}ms)</Text>
+        </Text>
+      ) : null}
+      {/* Elapsed */}
+      <Text dimColor>{elapsed}</Text>
+      {/* Extensions badge */}
+      {entry.extensions && entry.extensions > 0 ? (
+        <Text color="yellow">⚡×{entry.extensions}</Text>
+      ) : null}
+      {/* Cost */}
+      {entry.cost > 0 ? <Text color="green">${entry.cost.toFixed(4)}</Text> : null}
+    </Box>
+  );
+}
+
+/**
+ * Expanded detail card for the selected agent — shows sparkline, last tool,
+ * streaming text, budget warnings, and failure reason.
+ */
+function AgentDetail({
+  entry,
+  now,
+}: {
+  entry: FleetEntry;
+  now: number;
+}): React.ReactElement {
+  const spark = sparkline(bucketActivity(entry.recentTools, now));
+  const lastTool = entry.recentTools[entry.recentTools.length - 1];
+  const lastMessage = entry.recentMessages[entry.recentMessages.length - 1];
+  const streamTail = entry.streamingText ? snippet(entry.streamingText.slice(-160)) : '';
+
+  return (
+    <Box flexDirection="column" paddingLeft={4} borderStyle="single" borderColor="magenta" borderLeft>
+      {/* Activity sparkline + last completed tool */}
+      {spark || lastTool ? (
+        <Box flexDirection="row" gap={1}>
+          <Text color="green">{spark || ''}</Text>
+          {lastTool ? (
+            <Text dimColor>
+              last: {lastTool.name}
+              {typeof lastTool.durationMs === 'number' ? ` ${lastTool.durationMs}ms` : ''}
+              {lastTool.ok === false ? ' ✗' : ''}
+            </Text>
+          ) : null}
+        </Box>
+      ) : null}
+
+      {/* Live streaming tail */}
+      {entry.status === 'running' && streamTail ? (
+        <Box>
+          <Text dimColor>
+            {'>'} {streamTail}
+          </Text>
+        </Box>
+      ) : null}
+
+      {/* Latest finished-message snippet */}
+      {(entry.status !== 'running' || !streamTail) && lastMessage ? (
+        <Box>
+          <Text dimColor>msg: {snippet(lastMessage.text)}</Text>
+        </Box>
+      ) : null}
+
+      {/* Budget pressure */}
+      {entry.budgetWarning ? (
+        <Box>
+          <Text color="yellow">
+            ⚡ {entry.budgetWarning.kind} {entry.budgetWarning.used}/{entry.budgetWarning.limit} —
+            extending
+          </Text>
+        </Box>
+      ) : null}
+
+      {/* Failure reason */}
+      {entry.failureReason && entry.status !== 'success' ? (
+        <Box>
+          <Text color="red">✗ {entry.failureReason}</Text>
+        </Box>
+      ) : null}
+    </Box>
+  );
+}
+
+/**
+ * Live per-agent monitor (Ctrl+G / F3). Hybrid compact view:
+ * - All agents rendered in single-line rows with ↑↓/jk navigation.
+ * - Selected agent expands an inline detail card showing sparkline,
+ *   last tool, streaming text, budget warnings, and failure reason.
+ * - Terminal agents are excluded; stale idle agents pruned after 60s.
  */
 export function AgentsMonitor({
   entries,
@@ -123,28 +252,35 @@ export function AgentsMonitor({
   nowTick,
 }: AgentsMonitorProps): React.ReactElement {
   const all = Object.values(entries);
-  // Grand total the user can trust = leader (main session) + fleet (subagents).
   const grandCost = leaderCost + totalCost;
 
-  // Terminal agents are excluded, and idle agents that have been silent for
-  // longer than IDLE_HIDE_MS are pruned — the FleetPanel + history still hold
-  // the full record; this view shows only what's actually live right now.
-  const live = selectLiveAgents(all, nowTick);
+  const live = useMemo(() => selectLiveAgents(all, nowTick), [all, nowTick]);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  // Clamp selection when the list shrinks
+  const safeIndex = Math.min(selectedIndex, Math.max(0, live.length - 1));
+
+  // Keyboard navigation
+  useInput((input, key) => {
+    if (key.upArrow || input === 'k') {
+      setSelectedIndex((prev) => Math.max(0, prev - 1));
+    } else if (key.downArrow || input === 'j') {
+      setSelectedIndex((prev) => Math.min(live.length - 1, prev + 1));
+    }
+  });
 
   const running = live.filter((e) => e.status === 'running').length;
   const totalDone = all.filter((e) => e.status === 'success').length;
   const totalFailed = all.filter((e) => e.status === 'failed' || e.status === 'timeout').length;
-  // Idle agents pruned for being stale (live but not in the visible set).
   const hiddenIdle = all.filter(
     (e) => e.status === 'idle' && nowTick - e.lastEventAt >= IDLE_HIDE_MS,
   ).length;
 
-  const ordered = live;
-  const shown = ordered.slice(0, 8);
+  const selected = live[safeIndex];
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1}>
-      {/* Header — live identity, distinct from FLEET MONITOR */}
+      {/* Header */}
       <Box flexDirection="row" gap={1}>
         <Text bold color="magenta">
           AGENTS · LIVE
@@ -157,7 +293,7 @@ export function AgentsMonitor({
         <Text dimColor>·</Text>
         <Text dimColor>failed</Text>
         {totalFailed > 0 ? <Text color="red">✗{totalFailed}</Text> : null}
-        <Text dimColor>· Ctrl+G / F3 to close</Text>
+        <Text dimColor>· ↑↓ nav · Ctrl+G / F3 close</Text>
       </Box>
 
       {/* Token + cost row */}
@@ -180,111 +316,26 @@ export function AgentsMonitor({
         {hiddenIdle > 0 ? <Text dimColor>· {hiddenIdle} idle hidden</Text> : null}
       </Box>
 
-      {shown.length === 0 ? (
+      {live.length === 0 ? (
         <Text dimColor>No live agents — spawn with /spawn or /fleet dispatch.</Text>
       ) : null}
 
-      {/* Per-agent live cards */}
-      {shown.map((e) => {
-        const s = STATUS[e.status];
-        const elapsed =
-          e.status === 'running' ? fmtElapsed(Math.max(0, nowTick - e.startedAt)) : e.status;
-        const spark = sparkline(bucketActivity(e.recentTools, nowTick));
-        const lastTool = e.recentTools[e.recentTools.length - 1];
-        const lastMessage = e.recentMessages[e.recentMessages.length - 1];
-        const streamTail = e.streamingText ? snippet(e.streamingText.slice(-160)) : '';
-        const toolElapsed = e.currentTool ? Math.max(0, nowTick - e.currentTool.startedAt) : 0;
+      {/* Compact agent rows */}
+      {live.map((e) => (
+        <AgentRow key={e.id} entry={e} now={nowTick} selected={e.id === selected?.id} />
+      ))}
 
-        return (
-          <Box key={e.id} flexDirection="column" marginTop={1}>
-            {/* Identity line: icon · name · model · elapsed · iter/tools · ctx · extensions
-                — ctx bar lives here (not its own line) to save vertical space. */}
-            <Box flexDirection="row" gap={1}>
-              <Text color={s.color} bold>
-                {s.icon}
-              </Text>
-              <Text bold>{e.name}</Text>
-              {fmtModelLabel(e.provider, e.model) ? (
-                <Text dimColor>{fmtModelLabel(e.provider, e.model)}</Text>
-              ) : null}
-              {e.ctxMaxTokens && e.ctxMaxTokens > 0 ? (
-                <Text color="blue">ctx max {fmtExactTokens(e.ctxMaxTokens)}</Text>
-              ) : null}
-              <Text dimColor>·</Text>
-              <Text dimColor>{elapsed}</Text>
-              <Text dimColor>·</Text>
-              <Text dimColor>
-                L{e.iterations} {e.toolCalls}t
-              </Text>
-              {e.ctxPct !== undefined ? (
-                <>
-                  <Text dimColor>·</Text>
-                  <ContextBar pct={e.ctxPct} tokens={e.ctxTokens} maxTokens={e.ctxMaxTokens} />
-                </>
-              ) : null}
-              {e.extensions && e.extensions > 0 ? (
-                <Text color="yellow">⚡×{e.extensions}</Text>
-              ) : null}
-              {e.cost > 0 ? <Text color="green">${e.cost.toFixed(4)}</Text> : null}
-            </Box>
-
-            {/* Current tool (live, ms-precision) — only while inside a tool */}
-            {e.status === 'running' && e.currentTool ? (
-              <Box flexDirection="row" gap={1} paddingLeft={2}>
-                <Text color="cyan">→ {e.currentTool.name}</Text>
-                <Text dimColor>({toolElapsed}ms)</Text>
-              </Box>
-            ) : null}
-
-            {/* Activity sparkline + last completed tool summary */}
-            {spark || lastTool ? (
-              <Box flexDirection="row" gap={1} paddingLeft={2}>
-                <Text color="green">{spark || ''}</Text>
-                {lastTool ? (
-                  <Text dimColor>
-                    last: {lastTool.name}
-                    {typeof lastTool.durationMs === 'number' ? ` ${lastTool.durationMs}ms` : ''}
-                    {lastTool.ok === false ? ' ✗' : ''}
-                  </Text>
-                ) : null}
-              </Box>
-            ) : null}
-
-            {/* Live streaming tail (for running agents) */}
-            {e.status === 'running' && streamTail ? (
-              <Box paddingLeft={2}>
-                <Text dimColor>
-                  {'>'} {streamTail}
-                </Text>
-              </Box>
-            ) : null}
-
-            {/* Latest finished-message snippet (when nothing streaming) */}
-            {(e.status !== 'running' || !streamTail) && lastMessage ? (
-              <Box paddingLeft={2}>
-                <Text dimColor>msg: {snippet(lastMessage.text)}</Text>
-              </Box>
-            ) : null}
-
-            {/* Budget pressure */}
-            {e.budgetWarning ? (
-              <Box paddingLeft={2}>
-                <Text color="yellow">
-                  ⚡ {e.budgetWarning.kind} {e.budgetWarning.used}/{e.budgetWarning.limit} —
-                  extending
-                </Text>
-              </Box>
-            ) : null}
-
-            {/* Failure reason (shown for failed/timeout/stopped agents) */}
-            {e.failureReason && e.status !== 'success' ? (
-              <Box paddingLeft={2}>
-                <Text color="red">✗ {e.failureReason}</Text>
-              </Box>
-            ) : null}
+      {/* Expanded detail for selected agent */}
+      {selected ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Box flexDirection="row" gap={1} paddingLeft={2}>
+            <Text dimColor>───</Text>
+            <Text color="magenta">{selected.name}</Text>
+            <Text dimColor>details ───</Text>
           </Box>
-        );
-      })}
+          <AgentDetail entry={selected} now={nowTick} />
+        </Box>
+      ) : null}
     </Box>
   );
 }

@@ -461,7 +461,7 @@ export async function main(argv: string[]): Promise<number> {
       renderer.writeInfo(`🤝 Delegating → ${e.target}: ${task}`);
     });
     events.on('delegate.completed', (e) => {
-      const cost = e.costUsd && e.costUsd > 0 ? ` · $${e.costUsd.toFixed(3)}` : '';
+      const cost = e.costUsd && e.costUsd > 0 ? ` · $${e.costUsd.toFixed(4)}` : '';
       renderer.writeInfo(`${e.ok ? '✅' : '❌'} ${e.summary}${cost}`);
     });
   }

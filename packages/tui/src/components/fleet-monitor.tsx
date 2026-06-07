@@ -81,7 +81,7 @@ function fmtTokens(n: number): string {
 
 function fmtCost(n: number): string {
   if (n === 0) return '—';
-  return `$${n.toFixed(3)}`;
+  return `$${n.toFixed(4)}`;
 }
 
 /**
@@ -105,6 +105,9 @@ export function fmtModelLabel(provider?: string, model?: string): string {
  * a compact one-line-per-agent table, and a recent-events timeline. Live
  * per-agent context (current tool / streaming tail) lives in the Agents
  * monitor (Ctrl+G) — this view is for "how the fleet is doing overall".
+ *
+ * Prunes terminal agents older than TERMINAL_TTL_MS from the table and
+ * timeline to prevent unbounded growth in long-running sessions.
  */
 export function FleetMonitor({
   entries,
@@ -114,16 +117,28 @@ export function FleetMonitor({
   nowTick,
   collabSession,
 }: FleetMonitorProps): React.ReactElement {
+  /** Terminal agents older than this are excluded from table + timeline. */
+  const TERMINAL_TTL_MS = 5 * 60_000; // 5 minutes
+
   const all = Object.values(entries);
+
+  // Counts from ALL entries (accurate totals).
   const running = all.filter((e) => e.status === 'running');
   const idle = all.filter((e) => e.status === 'idle').length;
   const done = all.filter((e) => e.status === 'success').length;
   const failed = all.filter((e) => e.status === 'failed' || e.status === 'timeout').length;
 
+  // Table: live agents + recently-finished terminal agents only. This
+  // prevents old terminal entries from bloating the render loop.
+  const recent = all.filter((e) => {
+    if (e.status === 'running' || e.status === 'idle') return true;
+    return nowTick - e.lastEventAt < TERMINAL_TTL_MS;
+  });
+
   const concurrencyRatio = maxConcurrent > 0 ? running.length / maxConcurrent : 0;
 
   // Sort: running → idle → recently-finished (newest first).
-  const ordered = [...all].sort((a, b) => {
+  const ordered = [...recent].sort((a, b) => {
     const ra = a.status === 'running' ? 0 : a.status === 'idle' ? 1 : 2;
     const rb = b.status === 'running' ? 0 : b.status === 'idle' ? 1 : 2;
     if (ra !== rb) return ra - rb;
@@ -131,11 +146,14 @@ export function FleetMonitor({
     return a.startedAt - b.startedAt;
   });
   const shown = ordered.slice(0, 12);
-  const overflow = all.length - shown.length;
+  const overflow = ordered.length - shown.length;
 
-  // Timeline: spawn + terminal-status events across all agents + collab session events, newest first.
+  // Stale terminal count for the user so they know we pruned.
+  const staleTerminal = all.length - recent.length;
+
+  // Timeline: only from recent agents, newest first.
   const events: Array<{ at: number; icon: string; color: string; text: string }> = [];
-  for (const e of all) {
+  for (const e of recent) {
     events.push({ at: e.startedAt, icon: '●', color: 'cyan', text: `${e.name} spawned` });
     if (e.status !== 'running' && e.status !== 'idle') {
       const s = STATUS[e.status];
@@ -237,7 +255,7 @@ export function FleetMonitor({
             {fmtTokens(totalTokens.input)}↑ {fmtTokens(totalTokens.output)}↓
           </Text>
         ) : null}
-        <Text color="green">{`  $${totalCost.toFixed(3)}`}</Text>
+        <Text color="green">{`  $${totalCost.toFixed(4)}`}</Text>
       </Box>
 
       {shown.length === 0 ? (
@@ -283,6 +301,7 @@ export function FleetMonitor({
             );
           })}
           {overflow > 0 ? <Text dimColor>{`  … +${overflow} more`}</Text> : null}
+          {staleTerminal > 0 ? <Text dimColor>{`  · ${staleTerminal} terminal pruned`}</Text> : null}
         </Box>
       ) : null}
 

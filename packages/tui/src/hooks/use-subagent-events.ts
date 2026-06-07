@@ -88,7 +88,7 @@ export function useSubagentEvents(
 
     const offIterationSummary = events.on('subagent.iteration_summary', (e) => {
       const l = lbl(e.subagentId);
-      const costStr = e.costUsd > 0 ? ` · ${e.costUsd.toFixed(3)}` : '';
+      const costStr = e.costUsd > 0 ? ` · ${e.costUsd.toFixed(4)}` : '';
       const toolStr = e.currentTool ? ` · doing ${e.currentTool}` : '';
       const partial = e.partialText ? ` · "${e.partialText.slice(0, 60)}${e.partialText.length > 60 ? '…' : ''}"` : '';
       dispatch({ type: 'addEntry', entry: { kind: 'subagent', agentLabel: l.label, agentColor: l.color, icon: '💬', text: `L${e.iteration} · ${e.toolCalls} tools${costStr}${toolStr}${partial}` } });

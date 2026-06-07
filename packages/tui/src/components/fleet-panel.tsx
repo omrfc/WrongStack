@@ -60,7 +60,7 @@ export function FleetPanel({
   const hasCollab = !!collabSession;
 
   // Fleet summary line
-  const costLabel = totalCost > 0 ? ` · ${totalCost.toFixed(3)}` : '';
+  const costLabel = totalCost > 0 ? ` · ${totalCost.toFixed(4)}` : '';
   const collabLabel =
     hasCollab && collabSession.sessionId
       ? ` · collab(${collabSession.bugCount}b/${collabSession.planCount}p/${collabSession.evalCount}e)`

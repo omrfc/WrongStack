@@ -1692,7 +1692,7 @@ export function App({
       });
     });
     const offDelegateDone = events.on('delegate.completed', (e) => {
-      const cost = e.costUsd && e.costUsd > 0 ? `$${e.costUsd.toFixed(3)}` : undefined;
+      const cost = e.costUsd && e.costUsd > 0 ? `$${e.costUsd.toFixed(4)}` : undefined;
       dispatch({
         type: 'addEntry',
         entry: {
