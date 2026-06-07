@@ -16,6 +16,10 @@ const mockWpaths = {
   projectSessions: '/tmp/sessions',
   configDir: '/tmp/config',
   projectTrust: '/tmp/trust.json',
+  globalRoot: '/home/user/.wrongstack',
+  inProjectAgentsFile: '/repo/.wrongstack/AGENTS.md',
+  projectMemory: '/repo/.wrongstack/memory.md',
+  globalMemory: '/home/user/.wrongstack/memory.md',
 } as any;
 
 const mockLogger = { info: () => {}, warn: () => {}, error: () => {}, child: () => mockLogger } as any;
