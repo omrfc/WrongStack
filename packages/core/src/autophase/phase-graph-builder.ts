@@ -6,20 +6,20 @@ import { DefaultTaskStore, TaskTracker } from '../sdd/index.js';
 export interface PhaseGraphBuilderOptions {
   title: string;
   description?: string | undefined;
-  /** Faz şablonları (sıralı) */
+  /** Ordered phase templates. */
   phases: PhaseTemplate[];
-  /** Otonom mod */
+  /** Autonomous mode. */
   autonomous?: boolean | undefined;
-  /** Başarısızlıkta dur */
+  /** Stop on failure. */
   stopOnFailure?: boolean | undefined;
-  /** Harici TaskStore (opsiyonel) */
+  /** Optional external TaskStore. */
   externalTaskStore?: TaskStore | undefined;
 }
 
 /**
- * PhaseGraphBuilder — Projeyi fazlara bölen ve her faz için task graph oluşturan builder.
+ * PhaseGraphBuilder - builds project phases and a task graph for each phase.
  *
- * Kullanım:
+ * Usage:
  *   const builder = new PhaseGraphBuilder({
  *     title: 'Auth System Refactor',
  *     phases: [
@@ -40,18 +40,18 @@ export class PhaseGraphBuilder {
     const phases = new Map<string, PhaseNode>();
     const phaseIds: string[] = [];
 
-    // Her faz şablonundan PhaseNode oluştur
+    // Create a PhaseNode from each phase template.
     for (let i = 0; i < this.opts.phases.length; i++) {
       const tmpl = this.opts.phases[i] ?? { name: '', description: '', tasks: [], taskTemplates: [], parallelizable: false, priority: 'medium' as const, estimateHours: 0 };
       const phaseId = crypto.randomUUID();
       phaseIds.push(phaseId);
 
-      // Harici store veya yeni DefaultTaskStore kullan
+      // Use the external store or create a new DefaultTaskStore.
       const store = this.opts.externalTaskStore ?? new DefaultTaskStore();
       const tracker = new TaskTracker({ store });
       const taskGraph = await tracker.createGraph(phaseId, `${tmpl.name} Tasks`);
 
-      // Task şablonları varsa ekle
+      // Add task templates when present.
       if (tmpl.taskTemplates && tmpl.taskTemplates.length > 0) {
         for (const tt of tmpl.taskTemplates) {
           tracker.addNode({
@@ -85,8 +85,8 @@ export class PhaseGraphBuilder {
       phases.set(phaseId, phase);
     }
 
-    // İkinci geçiş: nextPhases bağlantılarını düzelt
-    // (phase oluşturulurken sonraki fazın ID'si henüz bilinmiyordu)
+    // Second pass: fix nextPhases links.
+    // The next phase ID was not known while the phase was being created.
     const phaseArray = Array.from(phases.values());
     for (let i = 0; i < phaseArray.length; i++) {
       const phase = phaseArray[i];
@@ -114,26 +114,26 @@ export class PhaseGraphBuilder {
   }
 
   /**
-   * Var olan bir TaskGraph'tan fazlar oluştur.
-   * Task'ları priority/type göre gruplayarak fazlara ayırır.
+   * Create phases from an existing TaskGraph.
+   * Groups tasks into phases by priority and type.
    */
   static fromTaskGraph(
     taskGraph: TaskGraph,
     options: Omit<PhaseGraphBuilderOptions, 'phases'> & {
-      /** Faz başına düşen task sayısı (default: 5) */
+      /** Number of tasks per phase. Defaults to 5. */
       tasksPerPhase?: number | undefined;
     },
   ): Promise<PhaseGraph> {
     const tasksPerPhase = options.tasksPerPhase ?? 5;
     const nodes = Array.from(taskGraph.nodes.values());
 
-    // Task'ları sırala: önce critical, sonra dependency order
+    // Sort tasks: critical first, then dependency order.
     const sorted = [...nodes].sort((a, b) => {
       const prioOrder = { critical: 0, high: 1, medium: 2, low: 3 };
       return (prioOrder[a.priority] ?? 4) - (prioOrder[b.priority] ?? 4);
     });
 
-    // Task'ları grupla
+    // Group tasks.
     const groups: typeof sorted[] = [];
     for (let i = 0; i < sorted.length; i += tasksPerPhase) {
       groups.push(sorted.slice(i, i + tasksPerPhase));

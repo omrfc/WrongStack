@@ -30,12 +30,12 @@ interface SerializedCheckpoint {
 }
 
 /**
- * CheckpointManager — Phase graph'ın anlık görüntülerini alır ve geri yükler.
+ * CheckpointManager - saves and restores snapshots of the phase graph.
  *
- * Kullanım:
+ * Usage:
  *   const cm = new CheckpointManager({ store });
  *   await cm.saveCheckpoint(graph, 'Before risky refactor');
- *   // ... işler ters giderse ...
+ *   // ... if something goes wrong ...
  *   const restored = await cm.restoreCheckpoint(checkpointId);
  */
 export class CheckpointManager {
@@ -57,10 +57,10 @@ export class CheckpointManager {
   }
 
   async saveCheckpoint(graph: PhaseGraph, label?: string): Promise<Checkpoint> {
-    // Önce graph'ı kaydet
+    // Save the graph first.
     await this.store.save(graph);
 
-    // Aktif fazdan checkpoint bilgisi çıkar
+    // Extract checkpoint information from the active phase.
     const activePhase = Array.from(graph.phases.values()).find(
       (p) => p.status === 'running' || p.status === 'paused',
     );
@@ -83,7 +83,7 @@ export class CheckpointManager {
 
     this.checkpoints.set(checkpoint.id, checkpoint);
 
-    // Diske kaydet
+    // Save to disk.
     await this.saveToDisk(checkpoint);
 
     // Eski checkpoint'leri temizle
@@ -95,7 +95,7 @@ export class CheckpointManager {
   async restoreCheckpoint(checkpointId: string): Promise<PhaseGraph | null> {
     let checkpoint = this.checkpoints.get(checkpointId);
 
-    // Diskten yükle (checkpoint bellekte değilse)
+    // Load from disk if the checkpoint is not in memory.
     if (!checkpoint) {
       await this.loadFromDisk();
       checkpoint = this.checkpoints.get(checkpointId);
@@ -106,13 +106,13 @@ export class CheckpointManager {
     const graph = await this.store.load(checkpoint.graphId);
     if (!graph) return null;
 
-    // Checkpoint'teki faz status'unu geri yükle
+    // Restore the phase status from the checkpoint.
     const phase = graph.phases.get(checkpoint.phaseId);
     if (phase) {
       phase.status = checkpoint.phaseStatus;
       phase.updatedAt = Date.now();
 
-      // Task status'larını geri yükle
+      // Restore task statuses.
       for (const ts of checkpoint.taskStatuses) {
         const task = phase.taskGraph.nodes.get(ts.taskId);
         if (task) {

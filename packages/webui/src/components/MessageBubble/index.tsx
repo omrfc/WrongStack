@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import { summarizeToolInput } from '@/lib/tool-summary';
 import { cn } from '@/lib/utils';
 import { getWSClient } from '@/lib/ws-client';
@@ -29,16 +30,6 @@ import { CopyButton } from './CopyButton.js';
 import { ErrorBodyWithStack } from './ErrorBody.js';
 import { ToolInputView } from './ToolInputView.js';
 import { downloadTextFile, fileExtensionFor, formatToolDuration, markdownComponents } from './utils.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 interface MessageBubbleProps {
   message: ChatMessage;
   isFirst?: boolean | undefined;

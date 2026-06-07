@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import { toast } from '@/components/Toaster';
 import { playCompletionChime, playPermissionChime } from '@/lib/chime';
 import { setFaviconStatus } from '@/lib/favicon';
@@ -16,16 +17,6 @@ import {
   useWorktreeStore,
 } from '@/stores';
 import type { WorktreeHandleView, WSServerMessage } from '@/types';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 // ── Session handlers ──
 
 export function handleSessionStart(msg: WSServerMessage) {

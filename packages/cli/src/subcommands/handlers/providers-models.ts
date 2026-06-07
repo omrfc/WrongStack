@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import * as fs from 'node:fs/promises';
 import {
   type Capabilities,
@@ -9,16 +10,6 @@ import {
   encryptConfigSecrets,
 } from '@wrongstack/core';
 import type { SubcommandHandler } from '../index.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export const providersCmd: SubcommandHandler = async (args, deps) => {
   const showAll = args.includes('--all');
   const showUnsupported = args.includes('--unsupported');

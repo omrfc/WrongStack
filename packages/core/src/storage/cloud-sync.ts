@@ -1,18 +1,9 @@
+import { expectDefined } from '../utils/expect-defined.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import type { WstackPaths } from '../utils/wstack-paths.js';
 import type { SyncCategory, SyncConfig } from '../types/config.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export const ALL_SYNC_CATEGORIES: SyncCategory[] = ['settings', 'skills', 'prompts', 'memory', 'history'];
 
 export interface SyncResult {

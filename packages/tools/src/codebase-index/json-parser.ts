@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 /**
  * JSON file symbol extraction.
  *
@@ -13,16 +14,6 @@
 
 import * as path from 'node:path';
 import type { FileSymbols, Symbol as IndexSymbol, SymbolLang } from './schema.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 // ─── Public API ─────────────────────────────────────────────────────────────
 
 export function parseSymbols(opts: {

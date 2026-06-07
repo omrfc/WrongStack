@@ -1,17 +1,9 @@
+import { expectDefined } from '../utils/expect-defined.js';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import type { CheckpointInfo, RewindResult, RewindResultExtended, SessionRewinder } from '../types/session-rewinder.js';
 import type { SessionEvent, FileSnapshot } from '../types/session.js';
 import { atomicWrite } from '../utils/atomic-write.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
 
 export interface SessionRewinderOptions {
   sessionsDir: string;

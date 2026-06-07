@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 // Self-hosted fonts (CSP-clean: served from 'self'). IBM Plex gives the UI an
@@ -9,16 +10,6 @@ import '@fontsource/ibm-plex-mono/500.css';
 import '@fontsource/ibm-plex-mono/600.css';
 import { App } from './App';
 import './index.css';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 ReactDOM.createRoot(expectDefined(document.getElementById('root'))).render(
   <React.StrictMode>
     <App />

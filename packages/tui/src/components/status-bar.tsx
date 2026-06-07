@@ -1,18 +1,9 @@
+import { expectDefined } from '@wrongstack/core';
 import type { TokenCounter, AutonomyStage } from '@wrongstack/core';
 import { Box, Text, useStdout } from 'ink';
 import type React from 'react';
 import { useEffect, useState } from 'react';
 import type { GitInfo } from '../git-info.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 // ─── Mode icon map ───────────────────────────────────────────────────────────
 
 /** Map mode ids to compact icons for the status bar chip. */
@@ -221,6 +212,7 @@ export function StatusBar({
   brain,
   projectName,
   processCount,
+  context,
   hiddenItems,
   eternalStage,
   goalSummary,
@@ -352,6 +344,14 @@ export function StatusBar({
             )}
             <Text dimColor>│</Text>
             <Text color="magenta">{model}</Text>
+            {context && !hiddenSet.has('context') ? (
+              <>
+                <Text dimColor>│</Text>
+                <Text color={context.used / context.max < 0.6 ? 'green' : context.used / context.max < 0.75 ? 'yellow' : 'red'}>
+                  ctx {renderMeter(context.used / context.max, 8)} {Math.round((context.used / context.max) * 100)}%
+                </Text>
+              </>
+            ) : null}
             {usage && isComfortable ? (
               <>
                 <Text dimColor>│</Text>

@@ -1,3 +1,4 @@
+import { expectDefined } from './expect-defined.js';
 /**
  * Glob pattern → concrete file path expansion.
  *
@@ -10,16 +11,6 @@
 
 import * as fsp from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 const GLOB_CHARS = new Set(['*', '?', '[']);
 const IS_WINDOWS = process.platform === 'win32';
 const SEP = IS_WINDOWS ? '\\' : '/';

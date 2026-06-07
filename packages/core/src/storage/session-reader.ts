@@ -1,3 +1,4 @@
+import { expectDefined } from '../utils/expect-defined.js';
 import type { ContentBlock } from '../types/blocks.js';
 import type {
   DefaultSessionReaderOptions,
@@ -10,15 +11,6 @@ import type {
 } from '../types/session-reader.js';
 import { compileUserRegex } from '../utils/regex-guard.js';
 import type { SessionEvent, SessionMetadata, SessionStore } from '../types/session.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
 
 /**
  * L2-A: read-only view over a `SessionStore` with query, replay, search,

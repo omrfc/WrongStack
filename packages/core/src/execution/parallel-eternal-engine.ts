@@ -1,3 +1,4 @@
+import { expectDefined } from '../utils/expect-defined.js';
 import { randomUUID } from 'node:crypto';
 import type { Agent } from '../core/agent.js';
 import type { AgentFactory } from '../coordination/agent-subagent-runner.js';
@@ -11,16 +12,6 @@ import type { Compactor } from '../types/compactor.js';
 import { DefaultMultiAgentCoordinator } from '../coordination/multi-agent-coordinator.js';
 import type { MultiAgentConfig } from '../types/multi-agent.js';
 import { sleep } from '../utils/sleep.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------

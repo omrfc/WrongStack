@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import * as path from 'node:path';
 import {
   DefaultSessionRewinder,
@@ -6,16 +7,6 @@ import {
   resolveWstackPaths,
 } from '@wrongstack/core';
 import type { SubcommandHandler } from '../index.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 interface RewindFlags {
   all?: boolean | undefined;
   last?: string | undefined;

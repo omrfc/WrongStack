@@ -1,18 +1,9 @@
+import { expectDefined } from '@wrongstack/core';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
 import { useSessionStore } from '@/stores';
 import { Check, ChevronDown, Gauge } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 const FALLBACK_MODES = [
   {
     id: 'balanced',

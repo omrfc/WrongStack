@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 /**
  * ToolTranslator — bidirectional translation between WrongStack tools and
  * ACP tool representations.
@@ -16,16 +17,6 @@
  */
 import type {ACPMessage, ACPToolDefinition, ACPToolCallResponse, ContentBlock} from '../types/acp-messages.js';
 import type {TaskSpec, TaskResult} from '@wrongstack/core';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export interface ToolTranslatorOptions {
   /**
    * If true (default), wrap tool calls in an async poll loop that waits

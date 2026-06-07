@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import type { SubagentRunContext, SubagentRunner, TaskSpec } from '@wrongstack/core';
 import {
   type Config,
@@ -6,16 +7,6 @@ import {
   makeAgentSubagentRunner,
 } from '@wrongstack/core';
 import type { MultiAgentHost } from './host.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 /**
  * Routing runner — dispatches tasks to standard or ACP runner based on provider.
  */

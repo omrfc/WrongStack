@@ -1,18 +1,9 @@
+import { expectDefined } from '@wrongstack/core';
 import * as fs from 'node:fs/promises';
 import { decryptConfigSecrets, encryptConfigSecrets } from '@wrongstack/core/security';
 import { atomicWrite } from '@wrongstack/core';
 import type { DefaultSecretVault } from '@wrongstack/core';
 import type { ProviderApiKey, ProviderConfig } from '@wrongstack/core';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export interface ProviderStoreDeps {
   globalConfigPath: string;
   vault: DefaultSecretVault;

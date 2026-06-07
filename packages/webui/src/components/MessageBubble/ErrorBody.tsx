@@ -1,16 +1,7 @@
+import { expectDefined } from '@wrongstack/core';
 import { cn } from '@/lib/utils';
 import type React from 'react';
 import { useState } from 'react';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 function detectStackBoundary(text: string): number {
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {

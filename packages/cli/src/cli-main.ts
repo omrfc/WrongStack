@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
@@ -75,14 +76,6 @@ import { printUpdateNotice } from './cli-update-notice.js';
 import { promptRecovery } from './cli-recovery-prompt.js';
 
 import { launchEternalFromFlag } from './cli-eternal-flag.js';
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export { CLI_VERSION };
 
 type ContainerPromptDelegate = (

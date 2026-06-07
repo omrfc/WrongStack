@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 /**
  * SQLite storage layer for the codebase index.
  *
@@ -14,16 +15,6 @@ import { resolveWstackPaths } from '@wrongstack/core';
 import type { FileMeta, IndexStats, Ref, SearchResult, Symbol as IndexSymbol, SymbolKind, SymbolLang } from './schema.js';
 import { SCHEMA_VERSION } from './schema.js';
 import { lspKindToInternalKind } from './lsp-kind.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 const DB_FILE = 'index.db';
 
 /**

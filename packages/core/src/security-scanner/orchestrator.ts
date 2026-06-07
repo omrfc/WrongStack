@@ -1,3 +1,4 @@
+import { expectDefined } from '../utils/expect-defined.js';
 import { defaultTechStackDetector } from './detector.js';
 import { defaultGitignoreUpdater } from './gitignore-updater.js';
 import type { TechStackInfo } from './types.js';
@@ -14,16 +15,6 @@ import { readFile, readdir, mkdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { atomicWrite } from '../utils/atomic-write.js';
 import { sanitizeJsonString } from '../utils/safe-json.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export interface SecurityScannerOptions {
   projectRoot: string;
   scanOptions?: {

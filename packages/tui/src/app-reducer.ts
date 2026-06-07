@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 // Reducer — pure state transformation. Types are in app-state.ts.
 // This file has NO React or Ink dependencies.
 import type { HistoryEntry } from './components/history.js';
@@ -18,14 +19,6 @@ import type {
   QueueItem,
   State,
 } from './app-state.js';
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 // Re-export types from app-state.ts for backward compatibility.
 export type {
   Action,

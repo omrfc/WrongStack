@@ -1,15 +1,8 @@
+import { expectDefined } from '../utils/expect-defined.js';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { atomicWrite, withFileLock } from '../utils/atomic-write.js';
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 /**
  * L2-B: AnnotationsStore — sidecar storage for collaboration annotations
  * (Phase 2 of idea #13 from IDEAS.md).

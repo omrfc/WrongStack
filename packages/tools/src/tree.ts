@@ -1,17 +1,8 @@
+import { expectDefined } from '@wrongstack/core';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Tool, ToolProgressEvent, ToolStreamEvent } from '@wrongstack/core';
 import { safeResolve } from './_util.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 const DEFAULT_IGNORE = [
   'node_modules',
   '.git',

@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import type { Plugin } from '@wrongstack/core';
 import { autoDiscoverServers } from './auto-discover.js';
 import { PLUGIN_NAME, plugLspConfigSchema, readPlugLSPConfig } from './config.js';
@@ -5,16 +6,6 @@ import { DocumentTracker } from './document-tracker.js';
 import { LSPRegistry } from './registry.js';
 import { registerSlashCommands } from './slash-commands/index.js';
 import { makeLSPTools } from './tools/index.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export type {
   AutoStartMode,
   DiagnosticsAfterEdit,

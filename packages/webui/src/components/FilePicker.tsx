@@ -1,19 +1,10 @@
+import { expectDefined } from '@wrongstack/core';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
 import { getWSClient } from '@/lib/ws-client';
 import { useConfigStore } from '@/stores';
 import { FileText, Folder } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 interface FilePickerProps {
   /** Whatever the user typed after the `@` trigger (case-preserved). */
   query: string;

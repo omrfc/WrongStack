@@ -1,10 +1,4 @@
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
+import { expectDefined } from '../utils/expect-defined.js';
 export type ContextWindowModeId = 'balanced' | 'frugal' | 'deep' | 'archival';
 
 export type ContextWindowAggressiveOn = 'hard' | 'soft' | 'warn';

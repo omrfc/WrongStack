@@ -1,16 +1,9 @@
+import { expectDefined } from '../utils/expect-defined.js';
 import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { atomicWrite, withFileLock } from '../utils/atomic-write.js';
 import { safeParse } from '../utils/safe-json.js';
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 /**
  * ToolAuditLog — idea #9 from IDEAS.md.
  *

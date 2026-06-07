@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import * as fs from 'node:fs/promises';
 import {
   AGENT_CATALOG,
@@ -13,16 +14,6 @@ import {
   matrixKeyKind,
 } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 /** No-op vault: round-trips already-encrypted fields untouched. We never
  *  read or write secrets here (the matrix holds none), so we must NOT
  *  decrypt/re-encrypt the providers block — that would mangle stored keys. */

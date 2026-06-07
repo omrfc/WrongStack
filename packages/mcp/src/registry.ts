@@ -1,17 +1,8 @@
+import { expectDefined } from '@wrongstack/core';
 import type { EventBus, Logger, MCPServerConfig, ToolRegistry } from '@wrongstack/core';
 import { MCP_CONSTANTS } from './constants.js';
 import { type ConnectionState, MCPClient } from './client.js';
 import { wrapMCPTool } from './wrap-tool.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 interface ServerSlot {
   cfg: MCPServerConfig;
   client?: MCPClient | undefined;

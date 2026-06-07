@@ -2,9 +2,9 @@
  *  Useful after optional chaining and indexed access when the
  *  control flow guarantees the value exists but TypeScript can't
  *  prove it (e.g. after a check on a related field). */
-export function expectDefined<T>(value: T | null | undefined): T {
+export function expectDefined<T>(value: T | null | undefined, label?: string): T {
   if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
+    throw new Error(label ? `Expected ${label} to be defined` : 'Expected value to be defined');
   }
   return value;
 }

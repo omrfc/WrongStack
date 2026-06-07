@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 /**
  * MCP management command utilities.
  * Contains the argument parser and the actual management logic shared between
@@ -8,16 +9,6 @@ import * as fs from 'node:fs/promises';
 import { color } from '@wrongstack/core';
 import type { Config, MCPServerConfig } from '@wrongstack/core';
 import type { MCPRegistry } from '@wrongstack/mcp';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export interface McpParsedArgs {
   action: 'list' | 'add' | 'remove' | 'enable' | 'disable' | 'restart';
   name: string;

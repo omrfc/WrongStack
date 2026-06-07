@@ -1,3 +1,4 @@
+import { expectDefined } from '../utils/expect-defined.js';
 /**
  * ExtensionRegistry — manages AgentExtension registrations.
  *
@@ -21,16 +22,6 @@ import type {
   OnErrorHook,
   ProviderRunnerFn,
 } from './extension-points.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export class ExtensionRegistry {
   private readonly extensions: AgentExtension[] = [];
   private readonly promptContributors: SystemPromptContributor[] = [];

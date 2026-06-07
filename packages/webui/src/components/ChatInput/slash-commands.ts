@@ -1,10 +1,4 @@
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
+import { expectDefined } from '@wrongstack/core';
 // Slash command registry and matching utilities for ChatInput
 
 export type SlashCategory = 'Run' | 'Session' | 'Inspect' | 'Agent' | 'Config' | 'App';

@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 /**
  * semver-bump plugin — Conventional-commit-driven semver version bumps.
  *
@@ -9,16 +10,6 @@
 import type { Plugin } from '@wrongstack/core';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 const API_VERSION = '^0.1.10';
 
 type BumpType = 'major' | 'minor' | 'patch' | 'auto';

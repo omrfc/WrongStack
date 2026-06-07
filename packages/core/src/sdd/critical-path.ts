@@ -1,15 +1,6 @@
+import { expectDefined } from '../utils/expect-defined.js';
 import type { TaskGraph } from '../types/task-graph.js';
 import { topologicalSort } from '../types/task-graph.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 /**
  * Enhanced critical path analysis with bottleneck detection,
  * parallel execution groups, and time estimation.

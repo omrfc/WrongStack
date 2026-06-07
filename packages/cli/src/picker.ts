@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import type { Config, ModelsRegistry, ResolvedProvider } from '@wrongstack/core';
 import { color } from '@wrongstack/core';
 import os from 'node:os';
@@ -5,16 +6,6 @@ import type { ReadlineInputReader } from './input-reader.js';
 import { hasApiKey } from './provider-helpers.js';
 import type { TerminalRenderer } from './renderer.js';
 import { backupCurrent, appendHistory } from './config-history.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 // Simple theme alias (avoids importing the full theme module just for one color)
 const theme = { primary: color.amber };
 

@@ -1,20 +1,11 @@
 #!/usr/bin/env node
+import { expectDefined } from '@wrongstack/core';
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildChildEnv } from '@wrongstack/core';
 import { commandExistsOnPath, resolveServerCommand } from './utils/command-resolver.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 type PackageManager = 'pnpm' | 'npm' | 'yarn' | 'bun';
 
 interface LanguageInstall {

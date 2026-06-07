@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 /**
  * `codebase-search` tool — search the symbol index with BM25 ranking.
  *
@@ -17,16 +18,6 @@ import { IndexStore, codebaseIndexDirOverride } from './writer.js';
 import { buildBm25Index, buildIndexableText, tokenise } from './bm25.js';
 import type { SearchResult, SymbolKind, SymbolLang } from './schema.js';
 import { getIndexState } from './background-indexer.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export const codebaseSearchTool: Tool<CodebaseSearchInput, CodebaseSearchOutput> = {
   name: 'codebase-search',
   category: 'Project',

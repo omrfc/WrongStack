@@ -1,3 +1,5 @@
+import { expectDefined } from '@wrongstack/core';
+export { expectDefined };
 /**
  * Pure helpers for ProviderConfig shape normalisation, key masking, and
  * timestamp generation — plus config file I/O (load/mutate providers).
@@ -8,16 +10,6 @@ import * as fs from 'node:fs/promises';
 import type { ProviderApiKey, ProviderConfig, SecretVault } from '@wrongstack/core';
 import { atomicWrite, color } from '@wrongstack/core';
 import { decryptConfigSecrets, encryptConfigSecrets } from '@wrongstack/core/security';
-
-
-
-export function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 /**
  * Normalize a ProviderConfig to the canonical `apiKeys[]` form.
  * Migrates the legacy single-key `apiKey` field on the fly so every

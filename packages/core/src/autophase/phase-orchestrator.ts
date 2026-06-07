@@ -42,14 +42,14 @@ type NormalizedAutoPhaseOptions = Omit<
 };
 
 /**
- * PhaseOrchestrator — Fazları dependency-aware, otonom olarak çalıştıran motor.
+ * PhaseOrchestrator - dependency-aware engine for running phases autonomously.
  *
- * Özellikler:
- * - Bir faz tamamlandıkça sonrakini otomatik başlatır (autonomous mode)
- * - Parallel faz desteği (parallelizable=true)
- * - Agent atama / serbest bırakma
- * - Event bus entegrasyonu
- * - Pause / resume desteği
+ * Features:
+ * - Automatically starts the next phase as each phase completes in autonomous mode
+ * - Supports parallel phases with parallelizable=true
+ * - Assigns and releases agents
+ * - Integrates with the event bus
+ * - Supports pause and resume
  */
 export class PhaseOrchestrator {
   private graph: PhaseGraph;
@@ -92,8 +92,8 @@ export class PhaseOrchestrator {
   // ─── Lifecycle ────────────────────────────────────────────────────────────
 
   /**
-   * Tüm faz akışını başlat.
-   * Autonomous mode'da: kök faz(lar)ı başlatır, bitince sonrakini otomatik başlatır.
+   * Start the full phase flow.
+   * In autonomous mode, starts root phases and automatically starts the next phase when they finish.
    */
   async start(): Promise<void> {
     this.stopped = false;
@@ -101,7 +101,7 @@ export class PhaseOrchestrator {
     this.graph.startedAt = Date.now();
     this.graph.updatedAt = Date.now();
 
-    // Tüm fazları sırayla çalıştır (autonomous=false'da da sonraki fazlar başlar)
+    // Run phases in order; later phases still start when autonomous=false.
     let readyPhases = this.getReadyPhases();
     while (readyPhases.length > 0 && !this.stopped) {
       await this.waitWhilePaused();
@@ -110,7 +110,7 @@ export class PhaseOrchestrator {
       const batch = readyPhases.slice(0, this.opts.maxConcurrentPhases);
       await Promise.all(batch.map((p) => this.startPhase(p)));
 
-      // Faz gecikmesi uygula
+      // Apply phase delay.
       if (this.opts.phaseDelayMs > 0) {
         await this.delay(this.opts.phaseDelayMs);
       }
@@ -118,34 +118,34 @@ export class PhaseOrchestrator {
       await this.waitWhilePaused();
       if (this.stopped) break;
 
-      // Yeni ready fazları kontrol et (bir faz tamamlanınca sonrakiler ready olur)
+      // Check for newly ready phases after a phase completes.
       readyPhases = this.getReadyPhases().filter(
         (p) => !this.runningPhases.has(p.id) && p.status !== 'completed' && p.status !== 'failed',
       );
     }
 
-    // Tüm worktree merge'lerinin (arka planda, sıralı) bitmesini bekle ki
-    // graph "completed" ilan edilmeden önce değişiklikler ana branch'e inmiş olsun.
+    // Wait for all queued worktree merges to finish in the background so
+    // changes reach the base branch before the graph is declared completed.
     await this.drainMerges();
 
-    // Autonomous tick loop (gerçek zamanlı monitoring için)
+    // Autonomous tick loop for real-time monitoring.
     if (this.opts.autonomous) {
       this.tickInterval = setInterval(() => this.tick(), 1000);
     }
   }
 
-  /** Bekleyen tüm faz merge'lerini (dep-sıralı + global seri) bekle. */
+  /** Wait for all pending phase merges, dependency-ordered and globally serialized. */
   private async drainMerges(): Promise<void> {
     await Promise.allSettled([...this.phaseMergePromise.values()]);
     await this.mergeQueue.catch(() => {});
   }
 
-  /** Duraklat — aktif fazlar çalışmaya devam eder ama yeni faz başlamaz */
+  /** Pause: active phases continue, but no new phase starts. */
   pause(): void {
     this.paused = true;
   }
 
-  /** Devam et — yeni fazlar başlayabilir */
+  /** Resume: new phases may start again. */
   resume(): void {
     this.paused = false;
     this.tick().catch((err) => {
@@ -156,7 +156,7 @@ export class PhaseOrchestrator {
     });
   }
 
-  /** Tamamen durdur — aktif fazlar da durdurulur */
+  /** Stop completely, including active phases. */
   stop(): void {
     this.stopped = true;
     if (this.tickInterval) {
@@ -192,7 +192,7 @@ export class PhaseOrchestrator {
 
     this.ctx.onTick?.({ activePhases: active, readyPhases: queued });
 
-    // Yeni faz başlatma slotu var mı?
+    // Is there a slot to start a new phase?
     const availableSlots = this.opts.maxConcurrentPhases - active.length;
     if (availableSlots > 0 && queued.length > 0) {
       for (const phase of queued.slice(0, availableSlots)) {
@@ -202,13 +202,13 @@ export class PhaseOrchestrator {
       }
     }
 
-    // Tüm fazlar tamamlandı mı?
+    // Are all phases complete?
     if (this.isComplete()) {
       this.onGraphComplete();
       return;
     }
 
-    // Bir faz failed ve stopOnFailure?
+    // Did a phase fail while stopOnFailure is enabled?
     if (this.opts.stopOnFailure && this.graph.failedPhaseIds.length > 0) {
       const failedPhase = this.graph.phases.get(this.graph.failedPhaseIds[0] ?? '');
       if (failedPhase) {

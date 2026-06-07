@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
 import { useChatStore, useSessionStore, useUIStore } from '@/stores';
@@ -9,15 +10,6 @@ import { FilePicker } from './FilePicker';
 import { Button } from './ui/button';
 
 import { type SlashCommandDef, SLASH_COMMANDS, SLASH_CATEGORY_ORDER, matchSlash, detectAtMention } from './ChatInput/slash-commands.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
 
 export function ChatInput() {
   const { isLoading, setLoading, addMessage, clearMessages } = useChatStore();

@@ -1,46 +1,46 @@
 /**
- * AutoPhasePlanner — Bir hedefi (goal) gerçek bir LLM çağrısıyla faz faz,
- * her fazın altında bir sürü todo içeren büyük bir task listesine dönüştürür.
+ * AutoPhasePlanner - converts a goal into phases using a real LLM call,
+ * producing a large task list with todos under each phase.
  *
- * SDD'nin spec→task akışına benzer ama farklı: burada çıktı doğrudan
- * `PhaseTemplate[]` — her faz `taskTemplates` taşır, böylece
- * `PhaseGraphBuilder` dolu bir `PhaseGraph` üretir ve `PhaseOrchestrator`
- * her görevi gerçek bir agent koşusuyla çalıştırır.
+ * Similar to SDD's spec-to-task flow, but different: the output is directly
+ * `PhaseTemplate[]`; each phase carries `taskTemplates`, so
+ * `PhaseGraphBuilder` produces a populated `PhaseGraph` and `PhaseOrchestrator`
+ * runs each task through a real agent execution.
  *
- * Planner LLM'e bağımlı değildir: çağıran taraf bir `runOnce(prompt)` fonksiyonu
- * verir (CLI'de bu bir subagent koşusudur, testte bir stub olabilir).
+ * The planner is not tied to a specific LLM: callers provide a `runOnce(prompt)` function
+ * (a subagent run in the CLI, or a deterministic stub in tests).
  */
 
 import type { TaskPriority, TaskType } from '../types/task-graph.js';
 import type { PhaseNode, PhaseTemplate } from './types.js';
 
-/** Tek bir todo şablonu — PhaseTemplate.taskTemplates'in eleman tipi. */
+/** Single todo template, the element type of PhaseTemplate.taskTemplates. */
 type PhaseTaskTemplate = NonNullable<PhaseTemplate['taskTemplates']>[number];
 
 export interface AutoPhasePlannerOptions {
   /**
-   * Tek seferlik LLM çağrısı: prompt verir, modelin metin çıktısını döndürür.
-   * CLI'de bir subagent.run sarmalayıcısıdır; testte deterministik stub.
+   * One-shot LLM call: receives a prompt and returns the model text output.
+   * In the CLI this wraps subagent.run; in tests it can be a deterministic stub.
    */
   runOnce: (prompt: string) => Promise<string>;
-  /** Hedef/proje başlığı. */
+  /** Goal or project title. */
   goal: string;
-  /** package.json/dizin yapısı gibi opsiyonel proje bağlamı. */
+  /** Optional project context such as package.json or directory structure. */
   projectContext?: string | undefined;
-  /** İstenen minimum faz sayısı (default 3). */
+  /** Requested minimum phase count. Defaults to 3. */
   minPhases?: number | undefined;
-  /** İstenen maksimum faz sayısı (default 8). */
+  /** Requested maximum phase count. Defaults to 8. */
   maxPhases?: number | undefined;
-  /** Faz başına hedeflenen todo sayısı (default 6). */
+  /** Target todo count per phase. Defaults to 6. */
   todosPerPhase?: number | undefined;
 }
 
 export interface AutoPhasePlanResult {
-  /** PhaseGraphBuilder'a verilecek faz şablonları. */
+  /** Phase templates passed to PhaseGraphBuilder. */
   phases: PhaseTemplate[];
-  /** Modelin ham çıktısı (debug/log için). */
+  /** Raw model output for debugging and logs. */
   raw: string;
-  /** JSON ayrıştırılamadıysa true; bu durumda `phases` boş döner. */
+  /** True when JSON could not be parsed; `phases` is empty in that case. */
   parseFailed: boolean;
 }
 
@@ -60,12 +60,12 @@ const VALID_PRIORITIES: ReadonlySet<TaskPriority> = new Set([
 ]);
 
 /**
- * AutoPhasePlanner — `plan()` çağrısı modeli sürer ve `PhaseTemplate[]` üretir.
+ * AutoPhasePlanner drives the model through `plan()` and produces `PhaseTemplate[]`.
  */
 export class AutoPhasePlanner {
   constructor(private readonly opts: AutoPhasePlannerOptions) {}
 
-  /** Hedefi faz+todo planına dönüştür. */
+  /** Convert the goal into a phase-and-todo plan. */
   async plan(): Promise<AutoPhasePlanResult> {
     const prompt = this.buildPrompt();
     const raw = await this.opts.runOnce(prompt);
@@ -73,7 +73,7 @@ export class AutoPhasePlanner {
     return { phases, raw, parseFailed: phases.length === 0 };
   }
 
-  /** Modelin üreteceği plan için talimat prompt'u. */
+  /** Instruction prompt for the plan the model should produce. */
   buildPrompt(): string {
     const minP = this.opts.minPhases ?? 3;
     const maxP = this.opts.maxPhases ?? 8;
@@ -122,7 +122,7 @@ export class AutoPhasePlanner {
       .join('\n');
   }
 
-  /** Ham çıktıdan JSON'u çıkar, doğrula ve PhaseTemplate[]'e dönüştür. */
+  /** Extract JSON from raw output, validate it, and convert it to PhaseTemplate[]. */
   parse(raw: string): PhaseTemplate[] {
     const json = extractJSONArray(raw);
     if (!json) return [];
@@ -203,9 +203,9 @@ function coerceHours(value: unknown, fallback: number): number {
 }
 
 /**
- * Bir metinden ilk JSON dizisini çıkarır. Sırasıyla dener:
- *  1. ```json ... ``` (veya çıplak ```) kod bloğu içindeki ilk [ ... ]
- *  2. Metindeki ilk dengeli [ ... ] bloğu (string/escape farkındalıklı)
+ * Extract the first JSON array from text. Tries, in order:
+ *  1. The first [ ... ] inside a ```json ... ``` or bare ``` code block
+ *  2. The first balanced [ ... ] block in the text, aware of strings and escapes
  */
 export function extractJSONArray(text: string): string | null {
   // 1) Fenced code block
@@ -221,7 +221,7 @@ export function extractJSONArray(text: string): string | null {
   return null;
 }
 
-/** String/escape farkındalıklı, ilk dengeli `[ ... ]` bloğunu döndürür. */
+/** Return the first balanced `[ ... ]` block, aware of strings and escapes. */
 function firstBalancedArray(text: string): string | null {
   const start = text.indexOf('[');
   if (start === -1) return null;

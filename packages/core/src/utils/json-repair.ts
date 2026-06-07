@@ -1,10 +1,4 @@
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
+import { expectDefined } from './expect-defined.js';
 /**
  * Attempt to close an incomplete JSON object string by auto-closing braces
  * and completing any unclosed double-quoted string values.

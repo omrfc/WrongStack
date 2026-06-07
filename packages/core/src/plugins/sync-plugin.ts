@@ -1,3 +1,4 @@
+import { expectDefined } from '../utils/expect-defined.js';
 import type { Plugin } from '../types/plugin.js';
 import type { SlashCommand, Context } from '../index.js';
 import type { SyncCategory } from '../types/config.js';
@@ -5,16 +6,6 @@ import { CloudSync, ALL_SYNC_CATEGORIES } from '../storage/cloud-sync.js';
 import type { WstackPaths } from '../utils/wstack-paths.js';
 import type { ConfigStore } from '../types/config.js';
 import { atomicWrite } from '../utils/atomic-write.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 interface SyncPluginOptions {
   paths?: WstackPaths | undefined;
   configStore?: ConfigStore | undefined;

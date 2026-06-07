@@ -1,14 +1,5 @@
+import { expectDefined } from '@wrongstack/core';
 import type { WorktreeHandleView } from '@/types';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 const LANE_COLORS = ['#3b82f6', '#06b6d4', '#22c55e', '#eab308', '#f97316', '#a855f7', '#ec4899'];
 
 const shortBranch = (b: string) => b.replace(/^wstack\/ap\//, '');

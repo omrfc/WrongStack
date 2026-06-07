@@ -1,18 +1,9 @@
+import { expectDefined } from '@wrongstack/core';
 import * as fs from 'node:fs/promises';
 import { atomicWrite } from '@wrongstack/core';
 import { allServers } from '@wrongstack/core/infrastructure';
 import { serveMcpStdio } from '../../mcp-serve.js';
 import type { SubcommandDeps, SubcommandHandler } from '../index.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 const BUILT_IN_MCP = allServers();
 
 export const mcpCmd: SubcommandHandler = async (args, deps) => {

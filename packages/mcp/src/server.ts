@@ -1,15 +1,6 @@
+import { expectDefined } from '@wrongstack/core';
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import { MCP_CONSTANTS } from './constants.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 /**
  * Server-side MCP. The mirror image of `MCPClient`: instead of consuming a
  * remote MCP server, this lets WrongStack *be* an MCP server — exposing its

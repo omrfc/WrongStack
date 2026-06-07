@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import * as fs from 'node:fs/promises';
 import * as http from 'node:http';
 import * as path from 'node:path';
@@ -57,14 +58,6 @@ import { setupEvents } from './setup-events.js';
 import { maskedKey, normalizeKeys } from './provider-keys.js';
 import { send, broadcast, sendResult, errMessage, generateAuthToken } from './ws-utils.js';
 import { estimateContextBreakdown } from './token-estimator.js';
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 // Re-export types — shared message shapes and options used by both the
 // standalone server and the CLI's `--webui` embedded mode.
 export type { WebUIOptions, BackendServices } from './types.js';

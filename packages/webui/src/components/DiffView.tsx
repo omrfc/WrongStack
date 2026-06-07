@@ -1,15 +1,6 @@
+import { expectDefined } from '@wrongstack/core';
 import { cn } from '@/lib/utils';
 import { memo, useMemo } from 'react';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 interface DiffViewProps {
   oldText: string;
   newText: string;

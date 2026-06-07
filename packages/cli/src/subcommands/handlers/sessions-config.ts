@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import { color } from '@wrongstack/core';
 import type { SubcommandDeps, SubcommandHandler } from '../index.js';
 import { redactKeys } from './helpers.js';
@@ -8,16 +9,6 @@ import {
   restoreFromHistory,
   restoreLast,
 } from '../../config-history.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export const sessionsCmd: SubcommandHandler = async (args, deps) => {
   const sub = args[0];
   // `wrongstack sessions fleet [runId]` — fleet run inspection

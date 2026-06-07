@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
@@ -13,16 +14,6 @@ import {
 import type { Context, Tool } from '@wrongstack/core';
 import { compileUserRegex } from './_regex.js';
 import { isBinaryBuffer, safeResolve } from './_util.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 interface ReplaceInput {
   pattern: string;
   replacement: string;

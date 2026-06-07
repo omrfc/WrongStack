@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
@@ -5,16 +6,6 @@ import type { Tool, ToolStreamEvent } from '@wrongstack/core';
 import { buildChildEnv, compileGlob } from '@wrongstack/core';
 import { capSubject, compileUserRegex } from './_regex.js';
 import { isBinaryBuffer, safeResolve } from './_util.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 interface GrepInput {
   pattern: string;
   path?: string | undefined;

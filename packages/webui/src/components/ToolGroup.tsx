@@ -1,18 +1,9 @@
+import { expectDefined } from '@wrongstack/core';
 import { cn } from '@/lib/utils';
 import type { ChatMessage } from '@/stores';
 import { CheckCircle2, ChevronDown, ChevronRight, Loader2, Terminal, XCircle } from 'lucide-react';
 import { memo, useState } from 'react';
 import { MessageBubble } from './MessageBubble';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 interface ToolGroupProps {
   /** A run of consecutive tool messages (>=1). Rendered as one chip while
    *  collapsed, expanded into the usual MessageBubble list on click. */

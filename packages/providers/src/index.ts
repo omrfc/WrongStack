@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import type {
   Logger,
   ModelsRegistry,
@@ -16,16 +17,6 @@ import {
   OpenAICompatibleProvider,
 } from './openai-compatible.js';
 import { OpenAIProvider } from './openai.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export { AnthropicProvider, type AnthropicProviderOptions } from './anthropic.js';
 export { OpenAIProvider, type OpenAIProviderOptions } from './openai.js';
 export {

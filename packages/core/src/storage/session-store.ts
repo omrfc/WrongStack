@@ -1,3 +1,4 @@
+import { expectDefined } from '../utils/expect-defined.js';
 import { randomBytes } from 'node:crypto';
 import type { Dirent } from 'node:fs';
 import * as fsp from 'node:fs/promises';
@@ -17,16 +18,6 @@ import type {
 } from '../types/session.js';
 import { atomicWrite, ensureDir } from '../utils/atomic-write.js';
 import { repairToolUseAdjacency } from '../utils/message-invariants.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 // ─── Session ID naming ───────────────────────────────────────────────────────
 
 /** Sanitize a model name for use in filenames: alphanumeric + dash + underscore. */

@@ -1,18 +1,9 @@
+import { expectDefined } from '../utils/expect-defined.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { SkillLoader } from '../types/skill.js';
 import { downloadGitHubTarball, parseSkillRef } from './github-fetcher.js';
 import { type InstalledSkillEntry, SkillManifestStore } from './manifest-store.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export interface SkillInstallerOptions {
   /** Path to the manifest file (~/.wrongstack/installed-skills.json) */
   manifestPath: string;

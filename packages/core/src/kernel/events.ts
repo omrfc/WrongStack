@@ -5,12 +5,7 @@
 
 import type { BrainDecision, BrainDecisionRequest } from '../coordination/brain.js';
 import type { Context } from '../core/context.js';
-import type {
-  MemoryClearedPayload,
-  MemoryConsolidatedPayload,
-  MemoryForgottenPayload,
-  MemoryRememberedPayload,
-} from '../types/memory.js';
+import type { MemoryClearedPayload, MemoryConsolidatedPayload, MemoryForgottenPayload, MemoryRememberedPayload } from '../types/memory.js';
 import type { Usage } from '../types/provider.js';
 import type { Tool, ToolProgressEvent } from '../types/tool.js';
 

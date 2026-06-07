@@ -1,16 +1,7 @@
+import { expectDefined } from '@wrongstack/core';
 import type { EventBus } from '@wrongstack/core';
 import { useCallback, useEffect, useRef } from 'react';
 import type { Action } from '../app-reducer.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 const STREAM_COLORS = ['cyan', 'magenta', 'yellow', 'green', 'blue'];
 
 function labelFor(

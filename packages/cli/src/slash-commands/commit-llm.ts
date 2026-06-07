@@ -1,10 +1,4 @@
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
+import { expectDefined } from '@wrongstack/core';
 /**
  * LLM-powered commit message generation.
  * Generates proper commit messages by analyzing git diffs via the configured LLM provider.

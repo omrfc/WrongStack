@@ -11,41 +11,41 @@ import type {
 } from './types.js';
 
 export interface AutoPhaseRunnerOptions extends AutoPhaseOptions {
-  /** Proje başlığı */
+  /** Project title. */
   title: string;
   description?: string | undefined;
-  /** Faz şablonları */
+  /** Phase templates. */
   phases: PhaseTemplate[];
-  /** Task çalıştırma fonksiyonu */
+  /** Function that executes a task. */
   executeTask: PhaseExecutionContext['executeTask'];
-  /** Opsiyonel doğrulama kapısı */
+  /** Optional verification gate. */
   verifyPhase?: PhaseExecutionContext['verifyPhase'] | undefined;
-  /** Doğrulama başarısız olduğunda opsiyonel onarım geçişi */
+  /** Optional repair pass after verification failure. */
   repairPhase?: PhaseExecutionContext['repairPhase'] | undefined;
-  /** Worktree merge çakışmaları için opsiyonel çözücü */
+  /** Optional resolver for worktree merge conflicts. */
   resolveConflict?: PhaseExecutionContext['resolveConflict'] | undefined;
   /** Opsiyonel Brain arbiter */
   brain?: PhaseExecutionContext['brain'] | undefined;
-  /** Faz tamamlandığında */
+  /** Called when a phase completes. */
   onPhaseComplete?: ((phase: PhaseNode) => void) | undefined;
-  /** Faz başarısız olduğunda */
+  /** Called when a phase fails. */
   onPhaseFail?: (phase: PhaseNode, error: Error) => void;
   /** Her tick'te */
   onTick?: (ctx: { activePhases: PhaseNode[]; readyPhases: PhaseNode[] }) => void;
-  /** Progress değiştiğinde */
+  /** Called when progress changes. */
   onProgress?: ((progress: PhaseProgress) => void) | undefined;
   /** Safety net that stops a phase graph if cleanup is bypassed. Default: 24h. */
   maxRunDurationMs?: number | undefined;
-  /** Graph tamamlandığında */
+  /** Called when the graph completes. */
   onComplete?: ((graph: PhaseGraph) => void) | undefined;
-  /** Graph başarısız olduğunda */
+  /** Called when the graph fails. */
   onFail?: (graph: PhaseGraph, failedPhase: PhaseNode, error: Error) => void;
 }
 
 /**
- * AutoPhaseRunner — Tek bir entry point'ten tüm otonom faz akışını yöneten üst seviye API.
+ * AutoPhaseRunner - high-level API for managing the whole autonomous phase flow from one entry point.
  *
- * Kullanım:
+ * Usage:
  *   const runner = new AutoPhaseRunner({
  *     title: 'Auth Refactor',
  *     phases: [...],
@@ -89,7 +89,7 @@ export class AutoPhaseRunner {
   }
 
   async start(): Promise<PhaseGraph> {
-    // Phase graph oluştur
+    // Create the phase graph.
     const builder = new PhaseGraphBuilder({
       title: this.opts.title,
       description: this.opts.description,
@@ -118,7 +118,7 @@ export class AutoPhaseRunner {
     if (this.opts.repairPhase !== undefined) ctx.repairPhase = this.opts.repairPhase;
     if (this.opts.resolveConflict !== undefined) ctx.resolveConflict = this.opts.resolveConflict;
 
-    // Orchestrator oluştur ve başlat
+    // Create and start the orchestrator.
     this.orchestrator = new PhaseOrchestrator({
       graph: this.graph,
       ctx,
@@ -219,7 +219,7 @@ export class AutoPhaseRunner {
 }
 
 /**
- * Quick-start helper: Var olan bir TaskGraph'tan AutoPhaseRunner oluştur.
+ * Quick-start helper: create an AutoPhaseRunner from an existing TaskGraph.
  */
 export async function createAutoPhaseFromTaskGraph(
   taskGraph: import('../types/task-graph.js').TaskGraph,
@@ -233,7 +233,7 @@ export async function createAutoPhaseFromTaskGraph(
     tasksPerPhase: options.tasksPerPhase,
   });
 
-  // PhaseGraph'tan phase template'leri çıkar
+  // Extract phase templates from the PhaseGraph.
   const phases: PhaseTemplate[] = Array.from(graph.phases.values()).map((p) => ({
     name: p.name,
     description: p.description,

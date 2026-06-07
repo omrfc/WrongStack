@@ -1,15 +1,6 @@
+import { expectDefined } from './expect-defined.js';
 import type { ContentBlock, ToolResultBlock, ToolUseBlock } from '../types/blocks.js';
 import type { Message } from '../types/messages.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export interface MessageRepairReport {
   changed: boolean;
   removedToolUses: string[];

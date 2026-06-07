@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 /**
  * Main indexing orchestrator.
  *
@@ -24,16 +25,6 @@ import { parseSymbols as parseJson } from './json-parser.js';
 import { parseSymbols as parseYaml } from './yaml-parser.js';
 import { loadGitignoreMatcher, type IgnoreMatcher } from './gitignore.js';
 import { _setIndexProgress } from './background-indexer.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 /** Yield the event loop every N files so the main thread stays responsive. */
 const YIELD_EVERY_N = 50;
 

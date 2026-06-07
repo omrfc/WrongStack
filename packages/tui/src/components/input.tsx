@@ -1,18 +1,9 @@
+import { expectDefined } from '@wrongstack/core';
 import { Box, Text, useInput, useStdin, useStdout } from 'ink';
 import type React from 'react';
 import { memo, useEffect, useState } from 'react';
 import { fnKey } from '../fn-keys.js';
 import { type InputCell, layoutInputRows } from '../input-tokens.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export interface InputProps {
   prompt?: string | undefined;
   value: string;

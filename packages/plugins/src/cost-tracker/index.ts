@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 /**
  * cost-tracker plugin — Tracks LLM token usage and cost per session.
  *
@@ -7,16 +8,6 @@
  * - cost_export: Export cost report as JSON or CSV
  */
 import type { Plugin } from '@wrongstack/core';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 const API_VERSION = '^0.1.10';
 
 interface TokenUsage {
@@ -51,6 +42,18 @@ const PRICING: Record<string, { input: number; output: number }> = {
 };
 
 const DEFAULT_PRICING = { input: 5.0, output: 15.0 };
+
+interface CostTrackerConfig {
+  budgetLimit: number;
+  warningThreshold: number;
+}
+
+function readCostTrackerConfig(raw: Record<string, unknown> | undefined): CostTrackerConfig {
+  return {
+    budgetLimit: typeof raw?.['budgetLimit'] === 'number' ? raw['budgetLimit'] : 0,
+    warningThreshold: typeof raw?.['warningThreshold'] === 'number' ? raw['warningThreshold'] : 80,
+  };
+}
 
 function estimateCost(model: string, promptTokens: number, completionTokens: number): number {
   const pricing = PRICING[model.toLowerCase()] ?? DEFAULT_PRICING;
@@ -141,8 +144,9 @@ const plugin: Plugin = {
       permission: 'auto',
       mutating: false,
       async execute() {
-        const budgetLimit = (api.config.extensions?.['cost-tracker'] as Record<string, unknown>)?.['budgetLimit'] as number ?? 0;
-        const warningThreshold = (api.config.extensions?.['cost-tracker'] as Record<string, unknown>)?.['warningThreshold'] as number ?? 80;
+        const { budgetLimit, warningThreshold } = readCostTrackerConfig(
+          api.config.extensions?.['cost-tracker'],
+        );
 
         const usage = {
           totalRequests: sessionCost.requests.length,
@@ -182,7 +186,7 @@ const plugin: Plugin = {
       description: 'Resets all token usage and cost counters for the current session.',
       inputSchema: { type: 'object', properties: {} },
       permission: 'auto',
-      mutating: false,
+      mutating: true,
       async execute() {
         const prev = {
           totalTokens: sessionCost.totalTokens,
@@ -265,8 +269,7 @@ const plugin: Plugin = {
     });
 
     // Write cost data to session log on shutdown
-    // biome-ignore lint/suspicious/noExplicitAny: event name is a string literal
-    api.onEvent('session.close' as any, async () => {
+    api.onEvent('session.ended', async () => {
       if (sessionCost.requests.length > 0) {
         await api.session.append({
           type: 'cost-tracker:session_summary',

@@ -1,9 +1,9 @@
 /**
- * AutoPhase — Otonom faz tabanlı iş akışı tipleri.
+ * AutoPhase - types for autonomous phase-based workflows.
  *
- * Bir proje fazlara (phase) bölünür; her fazın alt görevleri (tasks) vardır.
- * Fazlar dependency-aware çalışır: bir fazın tüm görevleri tamamlanmadan
- * sonraki faz başlayamaz (opsiyonel olarak parallel fazlar da mümkün).
+ * A project is split into phases; each phase contains tasks.
+ * Phases are dependency-aware: the next phase cannot start until all tasks
+ * in the current phase complete. Parallel phases are optionally supported.
  */
 
 import type { BrainArbiter } from '../coordination/brain.js';
@@ -12,43 +12,43 @@ import type { TaskGraph, TaskNode } from '../types/task-graph.js';
 // ─── Phase Status ───────────────────────────────────────────────────────────
 
 export type PhaseStatus =
-  | 'pending' // Henüz başlamadı, önceki faz bekleniyor
-  | 'ready' // Başlamaya hazır (önceki faz tamamlandı)
-  | 'running' // Aktif çalışıyor
-  | 'paused' // Kullanıcı duraklattı
-  | 'completed' // Tüm görevleri bitti
-  | 'failed' // En az bir görev başarısız ve retry hakkı bitti
-  | 'skipped'; // Atlandı
+  | 'pending' // Not started yet; waiting for a previous phase
+  | 'ready' // Ready to start because previous phases completed
+  | 'running' // Actively running
+  | 'paused' // Paused by the user
+  | 'completed' // All tasks finished
+  | 'failed' // At least one task failed and retries are exhausted
+  | 'skipped'; // Skipped
 
 // ─── Phase Node ─────────────────────────────────────────────────────────────
 
 export interface PhaseNode {
   id: string;
-  /** Faz adı, örn: "Discovery", "Design", "Implementation", "Testing" */
+  /** Phase name, e.g. "Discovery", "Design", "Implementation", "Testing". */
   name: string;
   description: string;
   status: PhaseStatus;
-  /** Bu fazın görev grafiği */
+  /** Task graph for this phase. */
   taskGraph: TaskGraph;
-  /** Önceki faz ID'leri — bunlar tamamlanmadan bu faz başlayamaz */
+  /** Previous phase IDs; this phase cannot start until they complete. */
   dependsOn: string[];
-  /** Sonraki faz ID'leri */
+  /** Next phase IDs. */
   nextPhases: string[];
-  /** Bu faz parallel çalışabilir mi? (önceki faz bitmeden başlayabilir) */
+  /** Whether this phase can run in parallel before the previous phase finishes. */
   parallelizable: boolean;
-  /** Faz önceliği */
+  /** Phase priority. */
   priority: 'critical' | 'high' | 'medium' | 'low';
-  /** Tahmini süre (saat) */
+  /** Estimated duration in hours. */
   estimateHours: number;
-  /** Gerçekleşen süre (ms) */
+  /** Actual duration in milliseconds. */
   actualDurationMs?: number | undefined;
-  /** Başlangıç zamanı */
+  /** Start time. */
   startedAt?: number | undefined;
-  /** Bitiş zamanı */
+  /** Completion time. */
   completedAt?: number | undefined;
-  /** Bu fazda atanmış agent'lar */
+  /** Agents assigned to this phase. */
   assignedAgents: string[];
-  /** Faz metadata */
+  /** Phase metadata. */
   metadata?: Record<string, unknown> | undefined;
   createdAt: number;
   updatedAt: number;
@@ -58,21 +58,21 @@ export interface PhaseNode {
 
 export interface PhaseGraph {
   id: string;
-  /** Proje başlığı */
+  /** Project title. */
   title: string;
   description: string;
   phases: Map<string, PhaseNode>;
-  /** Başlangıç faz ID'leri */
+  /** Starting phase IDs. */
   rootPhaseIds: string[];
-  /** Aktif faz ID'leri (running durumunda olanlar) */
+  /** Active phase IDs with running status. */
   activePhaseIds: string[];
-  /** Tamamlanan faz ID'leri */
+  /** Completed phase IDs. */
   completedPhaseIds: string[];
-  /** Başarısız faz ID'leri */
+  /** Failed phase IDs. */
   failedPhaseIds: string[];
-  /** Otonom mod aktif mi? */
+  /** Whether autonomous mode is active. */
   autonomous: boolean;
-  /** Tüm fazlar tamamlandığında dur */
+  /** Stop when all phases complete. */
   stopOnComplete: boolean;
   createdAt: number;
   updatedAt: number;
@@ -134,8 +134,8 @@ export type PhaseEventName = keyof PhaseEventMap;
 
 export interface PhaseExecutionContext {
   /**
-   * Bir görevi çalıştır — AI agent tarafından yapılır. `env`, fazın git
-   * worktree'sine (varsa) işaret eder; agent'ı izole çalışma dizininde koştur.
+   * Execute a task through an AI agent. `env` points to the phase git
+   * worktree when available, so the agent runs in an isolated working directory.
    */
   executeTask: (
     task: TaskNode,
@@ -143,23 +143,23 @@ export interface PhaseExecutionContext {
     env?: { cwd?: string | undefined; branch?: string | undefined },
   ) => Promise<unknown>;
   /**
-   * Opsiyonel doğrulama kapısı. Bir fazın tüm görevleri bittikten *sonra*,
-   * faz "completed" işaretlenmeden ve worktree'si ana branch'e merge edilmeden
-   * *önce* çağrılır. `env`, fazın worktree'sine (varsa) işaret eder; doğrulama
-   * o izole dizinde koşmalıdır (örn. typecheck/test). `ok:false` dönerse merge
-   * bloklanır ve (varsa) `repairPhase` ile onarım denenir.
+   * Optional verification gate. Called after all tasks in a phase finish,
+   * but before the phase is marked "completed" and its worktree is merged
+   * back to the base branch. `env` points to the phase worktree when available;
+   * verification should run in that isolated directory, such as typecheck/test.
+   * If `ok:false` is returned, merge is blocked and `repairPhase` is attempted when available.
    *
-   * Tanımlanmazsa kapı atlanır (geriye dönük uyumlu — eski davranış).
+   * If undefined, the gate is skipped for backward compatibility.
    */
   verifyPhase?: (
     phase: PhaseNode,
     env?: { cwd?: string | undefined; branch?: string | undefined },
   ) => Promise<{ ok: boolean; output?: string | undefined }>;
   /**
-   * Opsiyonel onarım geçişi. `verifyPhase` başarısız olduğunda, yakalanan hata
-   * çıktısı ile çağrılır. Worktree'deki kodu düzeltmeye çalışmalıdır (örn. bir
-   * onarım subagent'ı). Dönüş beklenmez; orchestrator ardından `verifyPhase`'i
-   * yeniden koşar. `verifyPhase` tanımlı değilse hiç çağrılmaz.
+   * Optional repair pass. When `verifyPhase` fails, it is called with the
+   * captured error output. It should try to fix the code in the worktree
+   * for example, through a repair subagent. Its return value is ignored;
+   * the orchestrator reruns `verifyPhase` afterward. It is never called when `verifyPhase` is undefined.
    */
   repairPhase?: (
     phase: PhaseNode,
@@ -168,54 +168,54 @@ export interface PhaseExecutionContext {
     env?: { cwd?: string | undefined; branch?: string | undefined },
   ) => Promise<void>;
   /**
-   * Opsiyonel birleştirme-çakışması çözücü. Bir fazın worktree'si ana branch'e
-   * squash-merge edilirken çakışma çıkarsa çağrılır. `info.cwd` ana çalışma
-   * ağacına (çakışma işaretçilerinin bulunduğu yer) işaret eder; çözücü oradaki
-   * işaretçileri temizlemeli ve `true` döndürmelidir. Başarılı olursa merge
-   * commit'lenir; aksi halde merge iptal edilir ve worktree `needs-review`'da
-   * saklanır. Tanımlanmazsa çakışma eski davranışla parked-for-review olur.
+   * Optional merge-conflict resolver. Called when a phase worktree conflicts
+   * during squash-merge into the base branch. `info.cwd` points to the base
+   * working tree where conflict markers exist; the resolver should clean those
+   * markers and return `true`. On success the merge is committed; otherwise
+   * the merge is aborted and the worktree is kept in `needs-review`.
+   * If undefined, conflicts keep the old parked-for-review behavior.
    */
   resolveConflict?: (
     phase: PhaseNode,
     info: { conflictFiles: string[]; cwd: string },
   ) => Promise<boolean>;
-  /** Opsiyonel global Brain arbiter: policy/karar/escalation katmanı. */
+  /** Optional global Brain arbiter for the policy, decision, and escalation layer. */
   brain?: BrainArbiter | undefined;
-  /** Bir faz tamamlandığında çağrılır */
+  /** Called when a phase completes. */
   onPhaseComplete?: ((phase: PhaseNode) => void) | undefined;
-  /** Bir faz başarısız olduğunda çağrılır */
+  /** Called when a phase fails. */
   onPhaseFail?: (phase: PhaseNode, error: Error) => void;
-  /** Her tick'te çağrılır (otonom modda) */
+  /** Called on every tick in autonomous mode. */
   onTick?: (ctx: { activePhases: PhaseNode[]; readyPhases: PhaseNode[] }) => void;
 }
 
 // ─── AutoPhase Options ──────────────────────────────────────────────────────
 
 export interface AutoPhaseOptions {
-  /** Maksimum parallel faz sayısı */
+  /** Maximum number of parallel phases. */
   maxConcurrentPhases?: number | undefined;
-  /** Maksimum parallel görev sayısı (faz içinde) */
+  /** Maximum number of parallel tasks within a phase. */
   maxConcurrentTasks?: number | undefined;
-  /** Başarısız görev retry sayısı */
+  /** Retry count for failed tasks. */
   maxRetries?: number | undefined;
   /**
-   * Doğrulama kapısı başarısız olduğunda yapılacak maksimum onarım denemesi.
-   * Toplam doğrulama koşusu = maxVerifyAttempts + 1 (ilk koşu + her onarım
-   * sonrası yeniden koşu). Varsayılan 2. `verifyPhase` verilmezse etkisizdir.
+   * Maximum number of repair attempts after the verification gate fails.
+   * Total verification runs = maxVerifyAttempts + 1: the first run plus one
+   * rerun after each repair. Defaults to 2. Has no effect without `verifyPhase`.
    */
   maxVerifyAttempts?: number | undefined;
-  /** Otonom mod: faz tamamlandıkça otomatik sonrakine geç */
+  /** Autonomous mode: automatically advance as phases complete. */
   autonomous?: boolean | undefined;
-  /** Fazlar arası bekleme süresi (ms) */
+  /** Delay between phases in milliseconds. */
   phaseDelayMs?: number | undefined;
-  /** Bir faz failed olursa dur */
+  /** Stop when a phase fails. */
   stopOnFailure?: boolean | undefined;
   /** Event bus */
   events?: import('../kernel/events.js').EventBus | undefined;
   /**
-   * Opsiyonel git-worktree yöneticisi. Verilirse her faz kendi
-   * worktree+branch'inde izole çalışır ve tamamlanınca ana branch'e sıralı
-   * squash-merge edilir. Yoksa davranış değişmez (paylaşılan working tree).
+   * Optional git-worktree manager. When provided, each phase runs in its own
+   * isolated worktree and branch, then is squash-merged back into the base
+   * branch in order. Without it, behavior is unchanged and uses the shared working tree.
    */
   worktrees?: import('../worktree/worktree-manager.js').WorktreeManager | undefined;
 }
@@ -240,7 +240,7 @@ export interface PhaseTemplate {
   priority: PhaseNode['priority'];
   estimateHours: number;
   parallelizable: boolean;
-  /** Otomatik oluşturulacak task şablonları */
+  /** Task templates to create automatically. */
   taskTemplates?: Array<{
     title: string;
     description: string;

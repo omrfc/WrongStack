@@ -1,15 +1,6 @@
+import { expectDefined } from '@wrongstack/core';
 import type { Tool, ToolStreamEvent } from '@wrongstack/core';
 import { guardedFetch } from './fetch.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 interface SearchInput {
   query: string;
   num_results?: number | undefined;

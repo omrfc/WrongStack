@@ -1,3 +1,4 @@
+import { expectDefined } from '../utils/expect-defined.js';
 /**
  * SddParallelRun
  *
@@ -29,16 +30,6 @@ import type { TaskGraph, TaskProgress } from '../types/task-graph.js';
 import type { TaskTracker } from './task-tracker.js';
 import { SddTaskDecomposer, type TaskBatch } from './sdd-task-decomposer.js';
 import { computeTaskProgress } from '../types/task-graph.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export interface SddParallelRunOptions {
   /** Pre-constructed TaskTracker (must already hold the graph's initial state). */
   tracker: TaskTracker;

@@ -1,17 +1,8 @@
+import { expectDefined } from '@wrongstack/core';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as Core from '@wrongstack/core';
 import type { Context } from '@wrongstack/core';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 /** Detected package manager for a project directory. */
 export type PackageManager = 'pnpm' | 'yarn' | 'npm';
 

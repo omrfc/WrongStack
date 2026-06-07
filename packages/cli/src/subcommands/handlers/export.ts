@@ -1,17 +1,8 @@
+import { expectDefined } from '@wrongstack/core';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { DefaultSessionReader } from '@wrongstack/core';
 import type { SubcommandHandler } from '../index.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export const exportCmd: SubcommandHandler = async (args, deps) => {
   if (!deps.sessionStore) {
     deps.renderer.writeError('No session store configured.');

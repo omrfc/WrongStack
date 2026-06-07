@@ -1,10 +1,4 @@
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
+import { expectDefined } from './expect-defined.js';
 /**
  * Minimal glob matcher for trust patterns.
  * Supports: *, **, ?, character classes [abc], [a-z], negation [!...] or [^...].

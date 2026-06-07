@@ -1,16 +1,7 @@
+import { expectDefined } from '../utils/expect-defined.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { SessionEvent } from '../types/session.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 /**
  * Idea #1 from IDEAS.md — Stateful Session Recovery.
  *

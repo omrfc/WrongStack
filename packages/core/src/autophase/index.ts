@@ -1,9 +1,9 @@
-// AutoPhase — Otonom faz tabanlı iş akışı sistemi
+// AutoPhase - autonomous phase-based workflow system
 //
-// AutoPhase, büyük projeleri fazlara ve alt görevlere böler,
-// dependency-aware çalıştırır, ve otonom olarak faz faz ilerler.
+// AutoPhase splits large projects into phases and subtasks,
+// runs them with dependency awareness, and advances phase by phase autonomously.
 //
-// Kullanım:
+// Usage:
 //   const runner = new AutoPhaseRunner({
 //     title: 'Auth Refactor',
 //     phases: [

@@ -1,10 +1,4 @@
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
+import { expectDefined } from './expect-defined.js';
 /**
  * Shared token estimation with JSON.stringify caching.
  * Avoids repeated stringification of tool input objects.

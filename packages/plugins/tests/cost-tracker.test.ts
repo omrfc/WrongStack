@@ -55,6 +55,22 @@ describe('cost-tracker plugin', () => {
     expect(schema.required ?? []).toEqual([]);
   });
 
+  it('marks cost_reset as mutating', () => {
+    costTrackerPlugin.setup(mockApi as any);
+    const tool = mockApi.tools.register.mock.calls.find(
+      ([t]: any[]) => t.name === 'cost_reset'
+    )?.[0];
+
+    expect(tool).toBeDefined();
+    expect(tool?.mutating).toBe(true);
+  });
+
+  it('subscribes to the typed session.ended lifecycle event', () => {
+    costTrackerPlugin.setup(mockApi as any);
+
+    expect(mockApi.onEvent).toHaveBeenCalledWith('session.ended', expect.any(Function));
+  });
+
   it('setup does not throw', () => {
     expect(() => costTrackerPlugin.setup(mockApi as any)).not.toThrow();
   });

@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import { cn } from '@/lib/utils';
 import { useChatStore, useSessionStore, useUIStore } from '@/stores';
 import type { ChatMessage } from '@/stores';
@@ -29,16 +30,6 @@ import { Button } from '../ui/button';
 import { ScrollArea } from '../ui/scroll-area';
 import { fmtTok } from './utils.js';
 import { ThinkingBubble } from './ThinkingBubble.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export function ChatView() {
   const { messages, isLoading } = useChatStore();
   const setPaletteOpen = useUIStore((s) => s.setPaletteOpen);

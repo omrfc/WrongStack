@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 /**
  * ProcessRegistry — global singleton that tracks all spawned child processes
  * from `bash` and `exec` tools. Enables:
@@ -13,16 +14,6 @@
 import type { ChildProcess } from 'node:child_process';
 import * as os from 'node:os';
 import { CircuitBreaker, type CircuitBreakerSnapshot, type CircuitBreakerConfig } from './circuit-breaker.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export type { CircuitBreakerSnapshot, CircuitBreakerConfig } from './circuit-breaker.js';
 
 export interface TrackedProcess {

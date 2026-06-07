@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type {
@@ -64,15 +65,6 @@ import {
   type State,
   reducer,
 } from './app-reducer.js';
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export {
   reducer,
   type Action,

@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import { useWebSocketBootstrap } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
 import { getWSClient } from '@/lib/ws-client';
@@ -17,16 +18,6 @@ import { Sidebar } from './components/Sidebar';
 import { ThemeProvider, useTheme } from './components/ThemeProvider';
 import { Toaster } from './components/Toaster';
 import { TodosPanel } from './components/TodosPanel';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 function AppInner() {
   const { theme } = useTheme();
   const { currentView, sidebarOpen, toggleSidebar, setSearchOpen, setSidebarOpen } = useUIStore();

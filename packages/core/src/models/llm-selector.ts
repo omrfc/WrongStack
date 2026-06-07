@@ -1,17 +1,8 @@
+import { expectDefined } from '../utils/expect-defined.js';
 import { isTextBlock } from '../types/blocks.js';
 import type { Message } from '../types/messages.js';
 import type { Provider, Request } from '../types/provider.js';
 import type { MessageSelector, SelectorResult } from '../types/selector.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export interface LLMSelectorOptions {
   /** Provider used for the selector LLM call. Required. */
   provider: Provider;

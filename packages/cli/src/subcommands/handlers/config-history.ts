@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import { color } from '@wrongstack/core';
 import {
   listHistory,
@@ -6,16 +7,6 @@ import {
   restoreLast,
 } from '../../config-history.js';
 import type { SubcommandHandler } from '../index.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 /**
  * `wrongstack config history` — list history entries or show details.
  */

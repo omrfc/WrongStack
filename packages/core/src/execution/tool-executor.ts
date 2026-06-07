@@ -1,3 +1,4 @@
+import { expectDefined } from '../utils/expect-defined.js';
 import type { Context } from '../core/context.js';
 import type { ToolResultBlock, ToolUseBlock } from '../types/blocks.js';
 import type {
@@ -14,14 +15,6 @@ import {
 } from '../security/capabilities.js';
 import { validateAgainstSchema } from '../utils/json-schema-validate.js';
 import { createToolOutputSerializer } from '../utils/tool-output-serializer.js';
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export class ToolExecutor {
   private readonly serializer;
   private readonly iterationTimeoutMs: number;

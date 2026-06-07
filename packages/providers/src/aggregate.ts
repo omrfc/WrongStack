@@ -1,15 +1,6 @@
+import { expectDefined } from '@wrongstack/core';
 import type { ContentBlock, Response, StopReason, StreamEvent, Usage } from '@wrongstack/core';
 import { parseToolInput } from './_tool-input.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 /**
  * Consume an `AsyncIterable<StreamEvent>` and reduce it to a non-streaming
  * `Response`. Used by `Provider.complete()` default impls so that the

@@ -1,16 +1,7 @@
+import { expectDefined } from '@wrongstack/core';
 import { parseAuthFlags } from '../../arg-parser.js';
 import { runAuthDirect, runAuthMenu } from '../../auth-menu.js';
 import type { SubcommandHandler } from '../index.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export const authCmd: SubcommandHandler = async (args, deps) => {
   const flags = parseAuthFlags(args);
   const menuDeps = {

@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 /**
  * Pure provider/API-key record transforms for the WebUI server's `key.*` and
  * `provider.*` WebSocket handlers.
@@ -14,16 +15,6 @@
  * same way the original handlers did before calling `saveProviders`.
  */
 import type { ProviderApiKey, ProviderConfig } from '@wrongstack/core';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export type ProvidersRecord = Record<string, ProviderConfig>;
 
 export interface KeyOpResult {

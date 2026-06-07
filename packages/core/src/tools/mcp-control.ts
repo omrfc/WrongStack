@@ -1,3 +1,4 @@
+import { expectDefined } from '../utils/expect-defined.js';
 /**
  * `mcp_control` — LLM-driven MCP server lifecycle management.
  *
@@ -14,16 +15,6 @@
 import * as fs from 'node:fs/promises';
 import { allServers } from '../infrastructure/mcp-servers.js';
 import type { Config, JSONSchema, MCPServerConfig, Tool } from '../index.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export interface MCPRegistryHandle {
   start(cfg: MCPServerConfig): Promise<void>;
   stop(name: string): Promise<void>;

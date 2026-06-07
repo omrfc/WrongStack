@@ -1,17 +1,8 @@
+import { expectDefined } from '../utils/expect-defined.js';
 import type { Plugin } from '../types/plugin.js';
 import type { SlashCommand, Context } from '../index.js';
 import { DefaultPromptStore } from '../storage/prompt-store.js';
 import type { WstackPaths } from '../utils/wstack-paths.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 interface PromptsPluginOptions {
   store?: DefaultPromptStore | undefined;
   paths?: WstackPaths | undefined;

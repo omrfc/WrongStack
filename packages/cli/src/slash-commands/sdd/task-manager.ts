@@ -1,15 +1,6 @@
+import { expectDefined } from '@wrongstack/core';
 import { DefaultTaskStore, TaskTracker, renderProgress, type TaskProgress } from '@wrongstack/core';
 import { sddState } from './state.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export { renderProgress };
 export type { TaskProgress };
 

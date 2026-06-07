@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 /**
  * `codebase-lsp-search` — index-first, LSP-fallback symbol search.
  *
@@ -23,16 +24,6 @@ import { LSP_CONSTANTS } from '../constants.js';
 import { formatCodebaseLspResults } from '../formatters/symbols.js';
 import { supportsWorkspaceSymbol } from '../server/capabilities.js';
 import { type ToolDeps, stringifyToolError } from './shared.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 // ─── Input / Output types ───────────────────────────────────────────────────────
 
 interface CodebaseLspSearchInput {

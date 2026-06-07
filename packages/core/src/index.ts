@@ -4,6 +4,7 @@ export * from './utils/index.js';
 export * from './defaults/index.js';
 export * from './skills/index.js';
 export * from './storage/index.js';
+export { expectDefined } from './utils/expect-defined.js';
 
 // Explicit re-exports for the new session audit bridge (helps some consumers
 // and declaration bundlers pick them up reliably).
@@ -184,7 +185,7 @@ export {
 } from './types/context-window.js';
 export { DEFAULT_SESSION_PRUNE_DAYS } from './types/default-config.js';
 
-// ─── AutoPhase — Otonom faz tabanlı iş akışı ────────────────────────────────
+// AutoPhase - autonomous phase-based workflow
 export {
   AutoPhaseRunner,
   createAutoPhaseFromTaskGraph,

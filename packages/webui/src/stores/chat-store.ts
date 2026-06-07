@@ -1,16 +1,7 @@
+import { expectDefined } from '@wrongstack/core';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ChatMessage } from './types.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 /**
  * Strip immediately-repeated paragraphs/lines from an assistant reply.
  * MiniMax-M2.7 (and other smaller open models) sometimes emit the same

@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import * as fsp from 'node:fs/promises';
 import type { SlashCommand, SpecRequirement, AISpecPhase } from '@wrongstack/core';
 import {
@@ -21,15 +22,6 @@ import type { SlashCommandContext } from './index.js';
 import { sddState, getSessionState } from './sdd/state.js';
 import { advanceToNextTask, formatElapsed, getTaskProgress } from './sdd/task-manager.js';
 import { findSpec, gatherProjectContext } from './sdd/project-context.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
 
 // Re-exports for backward compat
 export { sddState, getSessionState, SDDState } from './sdd/state.js';

@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import type { Agent, AttachmentStore, GoalFile, SlashCommandRegistry, TokenCounter } from '@wrongstack/core';
 import {
   InputBuilder,
@@ -19,15 +20,6 @@ import { getActiveSDDContext, trySaveSpecFromAIOutput, trySaveTasksFromAIOutput,
 import { theme } from './theme.js';
 import { fmtTok } from './utils.js';
 import { CLI_VERSION } from './version.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
 
 export interface ReplOptions {
   agent: Agent;

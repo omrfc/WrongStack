@@ -1,16 +1,7 @@
+import { expectDefined } from '@wrongstack/core';
 import { spawn } from 'node:child_process';
 import { buildChildEnv } from '@wrongstack/core';
 import type { ToolProgressEvent } from '@wrongstack/core';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 export interface SpawnStreamResult {
   stdout: string;
   stderr: string;

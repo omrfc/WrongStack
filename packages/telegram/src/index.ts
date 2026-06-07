@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 import type { Plugin } from '@wrongstack/core';
 import { TelegramBot } from './bot.js';
 import type { TelegramIncomingMessage } from './bot.js';
@@ -7,16 +8,6 @@ import { formatDelegateCompleted } from './format.js';
 import { registerSlashCommands } from './slash-commands/index.js';
 import { makeTelegramReadTool } from './tools/telegram-read.js';
 import { makeTelegramSendTool } from './tools/telegram-send.js';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 // ---------------------------------------------------------------------------
 // Teardown state
 // ---------------------------------------------------------------------------

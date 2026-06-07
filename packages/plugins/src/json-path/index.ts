@@ -1,3 +1,4 @@
+import { expectDefined } from '@wrongstack/core';
 /**
  * json-path plugin — JMESPath query, validate, and transform JSON/YAML.
  *
@@ -8,16 +9,6 @@
  * - json_merge: Deep merge two JSON objects
  */
 import type { Plugin } from '@wrongstack/core';
-
-
-
-function expectDefined<T>(value: T | null | undefined): T {
-  if (value === null || value === undefined) {
-    throw new Error('Expected value to be defined');
-  }
-  return value;
-}
-
 const API_VERSION = '^0.1.10';
 
 // ---------------------------------------------------------------------------
