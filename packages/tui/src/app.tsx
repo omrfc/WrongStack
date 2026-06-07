@@ -2747,16 +2747,30 @@ export function App({
     // History scrolling is delegated to the terminal's native scrollback
     // (mouse wheel, Shift+PgUp in Windows Terminal, etc.) — Ink's <Static>
     // emits each finalized entry once and never repaints over it.
-    // Skip when an overlay that uses arrow keys for its own navigation is open.
+    // Skip when ANY overlay below the statusline is open — these overlays
+    // use arrow keys for their own navigation (↑↓ selection, scrolling).
+    // Pickers (settings/model/autonomy) are already intercepted earlier
+    // and never reach this point, so they don't need listing here.
+    const overlayOpen =
+      state.monitorOpen ||
+      state.agentsMonitorOpen ||
+      state.worktreeMonitorOpen ||
+      state.todosMonitorOpen ||
+      state.queuePanelOpen ||
+      state.processListOpen ||
+      state.helpOpen ||
+      (state.autoPhase?.monitorOpen ?? false) ||
+      state.rewindOverlay !== null;
+
     if (key.upArrow) {
-      if (!state.processListOpen && !state.agentsMonitorOpen) {
-        if (state.inputHistory.length > 0) dispatch({ type: 'historyUp' });
+      if (!overlayOpen && state.inputHistory.length > 0) {
+        dispatch({ type: 'historyUp' });
       }
       return;
     }
     if (key.downArrow) {
-      if (!state.processListOpen && !state.agentsMonitorOpen) {
-        if (state.historyIndex > 0) dispatch({ type: 'historyDown' });
+      if (!overlayOpen && state.historyIndex > 0) {
+        dispatch({ type: 'historyDown' });
       }
       return;
     }
