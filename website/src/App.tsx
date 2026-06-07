@@ -3,12 +3,14 @@
 import { Footer } from '@/components/layout/Footer';
 import { Header } from '@/components/layout/Header';
 import { Architecture } from '@/components/sections/Architecture';
+import { Changelog } from '@/components/sections/Changelog';
 import { FAQ } from '@/components/sections/FAQ';
 import { Features } from '@/components/sections/Features';
 import { Hero } from '@/components/sections/Hero';
 import { Install } from '@/components/sections/Install';
 import { Interfaces } from '@/components/sections/Interfaces';
 import { ProviderStrip } from '@/components/sections/ProviderStrip';
+import { Release } from '@/components/sections/Release';
 import { Security } from '@/components/sections/Security';
 import { Skills } from '@/components/sections/Skills';
 import { TUIDemo } from '@/components/sections/TUIDemo';
@@ -110,6 +112,8 @@ export default function App() {
         <TUIDemo />
         <Skills />
         <Security />
+        <Changelog />
+        <Release />
         <FAQ />
         <Install />
       </main>

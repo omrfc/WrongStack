@@ -277,6 +277,16 @@ export type State = {
   enhanceEnabled: boolean;
   /** True while the refiner LLM call is in flight (before the panel appears). Drives a "refining…" indicator. */
   enhanceBusy: boolean;
+  /**
+   * Pending ESC-interrupt confirmation. Null when none is pending.
+   * When `confirmExit` is enabled and Esc is pressed mid-iteration, the
+   * snapshot is captured and `escConfirm` opens instead of immediately
+   * aborting. The prompt shows "Süreci durdurup yeni yön mü vereceksin?"
+   * (or similar) and waits for y/n/Esc.
+   */
+  escConfirm: {
+    snapshot: NonNullable<State['steerSnapshot']>;
+  } | null;
   /** Incremented on /clear so the context chip re-reads from agent.ctx tokens. */
   contextChipVersion: number;
   /** Live fleet state: per-subagent entries from FleetBus events. Keyed by subagentId. */
@@ -499,6 +509,15 @@ export type Action =
   | { type: 'enhanceClose' }
   | { type: 'enhanceSet'; enabled: boolean }
   | { type: 'enhanceBusy'; on: boolean }
+  /**
+   * Open the ESC-interrupt confirmation dialog with a context snapshot.
+   * Fired when Esc is pressed mid-iteration and `confirmExit` is enabled.
+   * The snapshot is replayed into `steerStart` on confirmation so the
+   * STEERING preamble can describe the interrupted state to the LLM.
+   */
+  | { type: 'escConfirmOpen'; snapshot: NonNullable<State['steerSnapshot']> }
+  /** Dismiss the ESC-interrupt confirmation (user cancelled). */
+  | { type: 'escConfirmClose' }
   | { type: 'resetContextChip' }
   // Fleet actions
   | { type: 'fleetSeed'; entries: FleetEntry[]; cost: number }
@@ -1129,6 +1148,10 @@ export function reducer(state: State, action: Action): State {
       return { ...state, enhanceEnabled: action.enabled };
     case 'enhanceBusy':
       return { ...state, enhanceBusy: action.on };
+    case 'escConfirmOpen':
+      return { ...state, escConfirm: { snapshot: action.snapshot } };
+    case 'escConfirmClose':
+      return { ...state, escConfirm: null };
     case 'resetContextChip':
       return { ...state, contextChipVersion: state.contextChipVersion + 1 };
     // --- Fleet ---

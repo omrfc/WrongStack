@@ -37,6 +37,10 @@ const faqs = [
     q: 'What does it cost?',
     a: 'WrongStack is open source under the MIT license. You bring your own provider API key, so you pay your model provider directly — there’s no WrongStack subscription in between.',
   },
+  {
+    q: 'How often is it released?',
+    a: 'WrongStack ships continuously. Push a git tag matching v* and GitHub Actions typechecks, builds, and tests on Ubuntu, macOS, and Windows — then publishes all 15 workspace packages to npm. Every release is lockstep (all packages at the same version) and documented in the changelog.',
+  },
 ];
 
 export function FAQ() {
