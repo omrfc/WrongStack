@@ -395,7 +395,7 @@ export function App({
   confirmExit = true,
   enhanceEnabled = true,
   enhanceController,
-  enhanceDelayMs = 4000,
+  enhanceDelayMs = 15_000,
   getYolo,
   getAutonomy,
   getEternalEngine,
@@ -4180,25 +4180,25 @@ export function App({
         />
         <Box flexDirection="column" flexShrink={0}>
           <LiveActivityStrip entries={state.fleet} nowTick={nowTick} />
-          <Input
-            prompt={INPUT_PROMPT}
-            // While the prompt-refinement flow is in flight (refining… / panel
-            // open) the draft hasn't been cleared yet (clearDraft runs after the
-            // flow resolves). The 1s nowTick + countdown re-renders would
-            // otherwise redraw the still-populated input each tick, and in
-            // inline mode log-update bleeds that top row into native scrollback
-            // — the user sees their typed prompt "cloned" several times. Render
-            // an empty prompt during the flow; the buffer is preserved in state
-            // for the [e]dit path and Esc-abort.
-            value={enhanceActive ? '' : state.buffer}
-            cursor={enhanceActive ? 0 : state.cursor}
-            disabled={
-              (state.status === 'aborting' && !state.steeringPending) ||
-              state.confirmQueue.length > 0
-            }
-            hint={enhanceActive ? '' : inputHint}
-            onKey={handleKey}
-          />
+          {/* While enhance is active (refining… or panel countdown), don't render
+              the Input at all — even an empty-prompt render redraws every tick
+              and the Ink inline-mode log-update bleeds it into native scrollback.
+              The draft buffer is preserved in state for the [e]dit / Esc paths. */}
+          {enhanceActive ? (
+            <Box height={1} />
+          ) : (
+            <Input
+              prompt={INPUT_PROMPT}
+              value={state.buffer}
+              cursor={state.cursor}
+              disabled={
+                (state.status === 'aborting' && !state.steeringPending) ||
+                state.confirmQueue.length > 0
+              }
+              hint={inputHint}
+              onKey={handleKey}
+            />
+          )}
           {state.picker.open ? (
             <FilePicker
               query={state.picker.query}

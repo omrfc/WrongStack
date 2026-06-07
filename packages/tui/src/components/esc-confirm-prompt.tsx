@@ -43,18 +43,18 @@ export function EscConfirmPrompt({
     <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginY={1}>
       <Box flexDirection="row">
         <Text bold color="yellow">
-          ⏸ Oturumu durdurmak istediğine emin misin?
+          ⏸ Interrupt the current run?
         </Text>
       </Box>
       <Box flexDirection="column" marginTop={1}>
         <Text dimColor>
-          Ajan şu anda çalışıyor{toolHint}.
+          The agent is working{toolHint}.
           {subagentCount > 0
-            ? ` ${subagentCount} alt ajan${subagentCount === 1 ? '' : ''} aktif.`
+            ? ` ${subagentCount} subagent${subagentCount === 1 ? '' : 's'} active.`
             : ''}
         </Text>
         <Text dimColor>
-          Durdurursan yeni bir yön verebilirsin; devam ederse çalışma sürer.
+          Stop to give a new direction now, or let it finish.
         </Text>
       </Box>
       <Text dimColor>─────────────────</Text>
@@ -63,11 +63,11 @@ export function EscConfirmPrompt({
           <Text bold color="green">
             [y]
           </Text>
-          <Text dimColor>es — durdur ve yeni yön ver </Text>
+          <Text dimColor>es — stop and steer </Text>
           <Text bold color="red">
             [n]
           </Text>
-          <Text dimColor>o — devam et</Text>
+          <Text dimColor>o / Esc — keep running</Text>
         </Text>
       </Box>
     </Box>

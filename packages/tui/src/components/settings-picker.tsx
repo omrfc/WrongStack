@@ -138,7 +138,7 @@ export function SettingsPicker({
     {
       label: 'Confirm before exit',
       value: boolVal(confirmExit),
-      detail: 'Ask for confirmation on Ctrl+C exit',
+      detail: 'Confirmation on Esc interrupt & Ctrl+C exit',
     },
     {
       label: 'Next-step prediction',

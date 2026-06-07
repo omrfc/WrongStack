@@ -1,4 +1,4 @@
-import { Box, Text, useStdout } from 'ink';
+import { Box, Text } from 'ink';
 import type React from 'react';
 import type { SlashCommandMatch } from '../app.js';
 
@@ -12,10 +12,11 @@ type Row =
   | { type: 'header'; category: string }
   | { type: 'item'; match: SlashCommandMatch; index: number };
 
+/** Hard cap on visible items so the menu never outgrows a single screen pane. */
+const MAX_VISIBLE_ITEMS = 8;
+
 export function SlashMenu({ query, matches, selected }: SlashMenuProps): React.ReactElement {
   const placeholder = query ? `/${query}` : '/';
-  const { stdout } = useStdout();
-  const termRows = stdout?.rows ?? 24;
 
   // Build the flat row list (category headers interleaved with items) while
   // preserving the flat item ordering used for keyboard navigation.
@@ -30,29 +31,22 @@ export function SlashMenu({ query, matches, selected }: SlashMenuProps): React.R
     rows.push({ type: 'item', match: m, index: i });
   }
 
-  // Budget how many rows we can show without overflowing the terminal. Reserve
-  // space for: hint line (1) + border (2) + padding (2) + the two "+N more"
-  // indicators (2) + a few rows for the prompt/input below the menu (~6).
-  const overhead = 1 + 2 + 2 + 2 + 6;
-  const maxBodyRows = Math.max(4, termRows - overhead);
-
-  // Window the rows around the selected item so the menu fits on screen and
-  // scrolls as the selection moves. We window over the flat `rows` array (which
-  // includes headers) and re-attach the header for the first visible item so a
+  // Window the rows around the selected item so the menu scrolls as the
+  // selection moves. We window over the flat `rows` array (which includes
+  // headers) and re-attach the header for the first visible item so a
   // scrolled view never loses its category context.
   const selectedRowIdx = rows.findIndex((r) => r.type === 'item' && r.index === selected);
-  const visible = windowRows(rows, selectedRowIdx < 0 ? 0 : selectedRowIdx, maxBodyRows);
+  const visible = windowRows(rows, selectedRowIdx < 0 ? 0 : selectedRowIdx, MAX_VISIBLE_ITEMS);
 
   const hiddenAbove = visible.start;
   const hiddenBelow = rows.length - visible.end;
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+    <Box flexDirection="column">
       <Text dimColor>
-        {placeholder || '/'} — ↑/↓ select, Enter dispatch, Tab autocomplete, Esc close
-        {matches.length > 0 ? `  (${selected + 1}/${matches.length})` : ''}
+        {placeholder} {matches.length > 0 ? `(${selected + 1}/${matches.length})` : ''}
       </Text>
-      {hiddenAbove > 0 && <Text dimColor>{'  '}↑ {hiddenAbove} more</Text>}
+      {hiddenAbove > 0 && <Text dimColor>  ↑ {hiddenAbove} more</Text>}
       {visible.contextHeader && (
         <Text bold color="yellow" dimColor>
           {'  '}{visible.contextHeader}
@@ -76,8 +70,9 @@ export function SlashMenu({ query, matches, selected }: SlashMenuProps): React.R
           </Text>
         );
       })}
-      {hiddenBelow > 0 && <Text dimColor>{'  '}↓ {hiddenBelow} more</Text>}
+      {hiddenBelow > 0 && <Text dimColor>  ↓ {hiddenBelow} more</Text>}
       {matches.length === 0 && <Text dimColor>No matching commands</Text>}
+      <Text dimColor>─── ↑↓ nav · Enter run · Tab fill · Esc close</Text>
     </Box>
   );
 }
