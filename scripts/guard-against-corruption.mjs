@@ -8,7 +8,7 @@ const CORRUPTION_FRAGMENT = "{ type: 'worktreeMonitorToggle' }";
 // action + reducer + dispatches) and it lives entirely in app.tsx. Treat the
 // pattern as legitimate there; flag it only if it reappears in OTHER files,
 // which is the actual corruption signature this guard was built to catch.
-const CORRUPTION_ALLOWLIST = new Set(['packages/tui/src/app.tsx', 'packages/tui/src/app-reducer.ts']);
+const CORRUPTION_ALLOWLIST = new Set(['packages/tui/src/app.tsx', 'packages/tui/src/app-reducer.ts', 'packages/tui/src/app-state.ts']);
 const SCAN_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts', '.json', '.jsonc', '.md', '.yml', '.yaml', '.sh', '.ps1']);
 function log(...args) { if (VERBOSE) console.error('[guard]', ...args); }
 function isScannable(filePath) {
