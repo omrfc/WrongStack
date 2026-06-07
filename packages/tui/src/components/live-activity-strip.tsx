@@ -1,4 +1,4 @@
-import { Box, Text } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import React from 'react';
 import type { FleetEntry } from '../app.js';
 import { theme } from '../theme.js';
@@ -40,89 +40,106 @@ function fmtRecentTool(tool: FleetEntry['recentTools'][number]): string {
   return parts.join(' ');
 }
 
+/** Single-line, no-wrap truncation to `width` columns with an ellipsis. */
+function truncToWidth(s: string, width: number): string {
+  if (width <= 0) return '';
+  if (s.length <= width) return s;
+  if (width === 1) return '…';
+  return `${s.slice(0, width - 1)}…`;
+}
+
+function formatRow(e: FleetEntry, now: number): string {
+  const toolElapsed = e.currentTool ? now - e.currentTool.startedAt : 0;
+  const taskElapsed = now - e.startedAt;
+  const toolSeg = e.currentTool ? `→ ${e.currentTool.name} (${fmtElapsed(toolElapsed)})` : '·';
+  const recentTools = (e.recentTools ?? []).slice(-2).map(fmtRecentTool).join(' | ');
+  const head = `${e.name.slice(0, 14).padEnd(14)} · ${toolSeg} · ${e.iterations}it ${e.toolCalls}tc · ${fmtElapsed(taskElapsed)}`;
+  return recentTools ? `${head} | last: ${recentTools}` : head;
+}
+
 /**
- * Compact one-line-per-subagent strip that sits directly above the
- * input area. Shows only RUNNING subagents — completed/failed entries
- * already surfaced as history rows and don't need to crowd the
- * always-visible band.
+ * Build the fixed-height set of strip rows. ALWAYS returns exactly
+ * `maxRows` strings, each already truncated to `width` columns (no wrap).
  *
- * Each row carries: `→ <label> <currentTool?> (elapsed) · <iter>it
- * <tool>tc`. The currentTool segment updates on `tool.started` /
- * `tool.executed` so the user can tell at a glance "AGENT#1 has been
- * inside `bash` for 12s now" without grep-tailing the JSONL.
+ * This is the inline-mode contract every bottom live region in the TUI
+ * must honor (see live-tail-fixed-height.test.ts): a region whose height
+ * or visual-row count changes between renders scrolls the screen on every
+ * update, and in inline mode each scroll strands the changed rows into
+ * native scrollback — the "● Security Scanner …" line re-stamped dozens of
+ * times per second when a fleet is busy. Constant height + hard truncation
+ * keeps Ink's log-update clear-and-rewrite in lockstep with what's drawn,
+ * so nothing leaks. The leading "● " bullet is rendered by the component
+ * (colored), so these strings exclude it and are truncated to `width - 2`.
+ */
+export function activityStripRows(
+  entries: Record<string, FleetEntry>,
+  now: number,
+  maxRows: number,
+  width: number,
+): string[] {
+  const bodyWidth = Math.max(0, width - 2); // account for the "● " bullet
+  const running = Object.values(entries)
+    .filter((e) => e.status === 'running')
+    // Stable order: oldest-started first, so the strip doesn't shuffle
+    // every time a tool starts/ends on one of the rows.
+    .sort((a, b) => a.startedAt - b.startedAt);
+
+  const rows: string[] = [];
+  const overflow = running.length > maxRows;
+  // When more subagents run than fit, reserve the last row for the count.
+  const shown = overflow ? running.slice(0, maxRows - 1) : running.slice(0, maxRows);
+  for (const e of shown) rows.push(truncToWidth(formatRow(e, now), bodyWidth));
+  if (overflow)
+    rows.push(truncToWidth(`…+${running.length - (maxRows - 1)} more running`, bodyWidth));
+  // Pad to a constant height so the region never grows/shrinks between renders.
+  while (rows.length < maxRows) rows.push('');
+  return rows;
+}
+
+/**
+ * Compact strip that sits directly above the input area, one line per
+ * running subagent. Renders at a CONSTANT height (`maxRows`) with every
+ * row hard-truncated to the terminal width, so it can never bleed into
+ * native scrollback in inline mode (see `activityStripRows`).
  *
- * Renders nothing when no subagents are running, so the input area
- * sits flush against history during idle / solo work.
+ * Renders nothing only when the fleet table is completely empty (e.g.
+ * after /clear), so the input sits flush against history during solo work.
  */
 export const LiveActivityStrip = React.memo(function LiveActivityStrip({
   entries,
   nowTick,
   maxRows = 4,
 }: LiveActivityStripProps): React.ReactElement | null {
-  const running = Object.values(entries)
-    .filter((e) => e.status === 'running')
-    // Stable order: oldest-started first, so the strip doesn't shuffle
-    // every time a tool starts/ends on one of the rows.
-    .sort((a, b) => a.startedAt - b.startedAt)
-    .slice(0, maxRows);
-  // When the fleet is completely empty (no entries of any status — e.g.
-  // after /clear) we return null so the Input area sits flush against
-  // history. When fleet entries exist but none are running we still render
-  // spacers: this keeps the live-region height stable and prevents the
-  // Input from scrolling into scrollback when the first subagent starts.
-  if (running.length === 0) {
-    if (Object.keys(entries).length === 0) return null;
-    return (
-      <Box flexDirection="column" paddingX={1}>
-        {Array.from({ length: maxRows }, (_, slot) => slot).map((slot) => (
-          <Box key={`empty-${slot}`} height={1}>
-            <Text> </Text>
-          </Box>
-        ))}
-      </Box>
-    );
-  }
+  const { stdout } = useStdout();
+  // paddingX={1} on the container eats 2 columns.
+  const width = Math.max(10, (stdout?.columns ?? 80) - 2);
+
+  // When the fleet table is empty there's nothing to show — collapse the
+  // region entirely so the Input sits flush against history.
+  if (Object.keys(entries).length === 0) return null;
 
   // Reference nowTick so React knows we depend on it — otherwise the
-  // 1s ticker won't re-render the elapsed values.
+  // ticker won't re-render the elapsed values.
   void nowTick;
-  const now = Date.now();
+  const rows = activityStripRows(entries, Date.now(), maxRows, width);
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      {running.map((e) => {
-        const toolElapsed = e.currentTool ? now - e.currentTool.startedAt : 0;
-        const taskElapsed = now - e.startedAt;
-        const toolSeg = e.currentTool
-          ? `→ ${e.currentTool.name} (${fmtElapsed(toolElapsed)})`
-          : '';
-        const recentTools = (e.recentTools ?? []).slice(-2).map(fmtRecentTool).join(' | ');
-        return (
-          <Box key={e.id} flexDirection="row" gap={1}>
-            <Text color={theme.accent}>●</Text>
-            <Text>{e.name.slice(0, 14).padEnd(14)}</Text>
-            <Text dimColor>·</Text>
-            <Text color={e.currentTool ? theme.success : theme.warn}>{toolSeg}</Text>
-            <Text dimColor>·</Text>
-            <Text dimColor>
-              {e.iterations}it {e.toolCalls}tc · {fmtElapsed(taskElapsed)}
-            </Text>
-            {recentTools ? (
-              <>
-                <Text dimColor>|</Text>
-                <Text dimColor>last: {recentTools}</Text>
-              </>
-            ) : null}
-          </Box>
-        );
-      })}
-      {Object.values(entries).filter((e) => e.status === 'running').length > maxRows ? (
-        <Box paddingLeft={2}>
-          <Text dimColor>
-            …+{Object.values(entries).filter((e) => e.status === 'running').length - maxRows} more
-          </Text>
+      {rows.map((text, slot) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: fixed-height slots, index IS the identity
+        <Box key={`strip-${slot}`} height={1}>
+          {text === '' ? (
+            <Text> </Text>
+          ) : (
+            <>
+              <Text color={theme.accent}>● </Text>
+              <Text dimColor wrap="truncate">
+                {text}
+              </Text>
+            </>
+          )}
         </Box>
-      ) : null}
+      ))}
     </Box>
   );
 });

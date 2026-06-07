@@ -222,7 +222,7 @@ export class TelegramBot {
       } catch (err) {
         lastErr = err;
         if (attempt < 3) {
-          this.log.warn(`Telegram sendMessage attempt ${attempt} failed, retrying in 1s...`);
+          this.log.debug(`Telegram sendMessage attempt ${attempt} failed, retrying in 1s...`);
           await sleep(1000);
         }
       }
@@ -266,7 +266,7 @@ export class TelegramBot {
       const data = (await res.json()) as TgResponse<TgUpdate[]>;
 
       if (!data.ok) {
-        this.log.warn(`Telegram getUpdates failed: ${data.description}`);
+        this.log.debug(`Telegram getUpdates failed: ${data.description}`);
         return;
       }
 
@@ -286,7 +286,7 @@ export class TelegramBot {
       }
     } catch (err) {
       if ((err as Error).name === 'AbortError') return;
-      this.log.warn(`Telegram poll error: ${(err as Error).message}`);
+      this.log.debug(`Telegram poll error: ${(err as Error).message}`);
     }
   }
 
@@ -344,7 +344,7 @@ export class TelegramBot {
       // Write atomically so a crash mid-write can't leave a corrupt file.
       writeFileSync(this.offsetStoragePath, String(this.offset), 'utf8');
     } catch (err) {
-      this.log.warn(`Failed to persist Telegram offset: ${err}`);
+      this.log.debug(`Failed to persist Telegram offset: ${err}`);
     }
   }
 }
