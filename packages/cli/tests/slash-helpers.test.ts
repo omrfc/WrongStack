@@ -84,14 +84,16 @@ describe('slash-commands/helpers — estimateTokens', () => {
     expect(estimateTokens([])).toBe(0);
   });
 
-  it('uses ceil(len/4) for string content', () => {
+  it('uses ceil(len/3.5) for string content', () => {
+    // chars/3.5: 4 chars → ceil(4/3.5) = 2, 5 chars → ceil(5/3.5) = 2
     const msgs: Msg[] = [{ role: 'user', content: 'abcd' } as Msg];
-    expect(estimateTokens(msgs)).toBe(1);
+    expect(estimateTokens(msgs)).toBe(2);
     const msgs2: Msg[] = [{ role: 'user', content: 'abcde' } as Msg];
     expect(estimateTokens(msgs2)).toBe(2);
   });
 
   it('sums text block lengths', () => {
+    // chars/3.5: each 4-char block → ceil(4/3.5) = 2 tokens
     const msgs: Msg[] = [
       {
         role: 'assistant',
@@ -101,7 +103,7 @@ describe('slash-commands/helpers — estimateTokens', () => {
         ],
       } as Msg,
     ];
-    expect(estimateTokens(msgs)).toBe(2);
+    expect(estimateTokens(msgs)).toBe(4); // 2 + 2
   });
 
   it('counts tool_use and tool_result blocks by serialized length', () => {
@@ -116,11 +118,12 @@ describe('slash-commands/helpers — estimateTokens', () => {
   });
 
   it('handles mixed string + block messages', () => {
+    // chars/3.5: 'abcd' → 2, 'efgh' → 2 → total 4
     const msgs: Msg[] = [
       { role: 'user', content: 'abcd' } as Msg,
       { role: 'assistant', content: [{ type: 'text', text: 'efgh' }] } as Msg,
     ];
-    expect(estimateTokens(msgs)).toBe(2);
+    expect(estimateTokens(msgs)).toBe(4);
   });
 });
 

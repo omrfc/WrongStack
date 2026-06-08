@@ -57,8 +57,24 @@ export function createAgentLoopHandler(
 
   /** Emit ctx.pct event for live context-fill bar in UIs. */
   function emitContextPct(): void {
-    const maxContext = a.ctx.provider.capabilities.maxContext ?? 200_000;
-    const { total } = estimateRequestTokens(a.ctx.messages, a.ctx.systemPrompt, a.ctx.tools ?? []);
+    // Mirror the denominator AutoCompactionMiddleware uses: an explicit
+    // effectiveMaxContext override (ctx.meta) wins, then the provider window,
+    // then a safe default. Avoids divide-by-zero when the window is unknown (0).
+    const metaLimit = a.ctx.meta?.['effectiveMaxContext'];
+    const providerMax = a.ctx.provider.capabilities.maxContext;
+    const maxContext =
+      typeof metaLimit === 'number' && metaLimit > 0
+        ? metaLimit
+        : typeof providerMax === 'number' && providerMax > 0
+          ? providerMax
+          : 200_000;
+    // Use the calibrated estimate so the live context bar matches the figure
+    // the middleware uses to decide when to compact.
+    const { total } = estimateRequestTokensCalibrated(
+      a.ctx.messages,
+      a.ctx.systemPrompt,
+      a.ctx.tools ?? [],
+    );
     a.events.emit('ctx.pct', { load: total / maxContext, tokens: total, maxContext });
   }
 

@@ -160,7 +160,7 @@ export function buildContextCommand(opts: SlashCommandContext): SlashCommand {
       const lines = [
         `${color.bold('Context Window')}`,
         `  messages:    ${messages.length} total (${countTurnPairs(messages)} user+assistant pairs)`,
-        `  tokens (est): ${estimateTokens(messages).toLocaleString()} (chars / 4 estimate)`,
+        `  tokens (est): ${estimateTokens(messages).toLocaleString()} (≈ chars/3.5)`,
         `  mode:        ${policy ? `${policy.id} (${policy.name})` : 'balanced'}`,
         `  limit:       ${formatLimit(readEffectiveLimit(ctx, opts))}`,
         `  system prompt: ${ctx.systemPrompt.length} block${ctx.systemPrompt.length !== 1 ? 's' : ''}`,
