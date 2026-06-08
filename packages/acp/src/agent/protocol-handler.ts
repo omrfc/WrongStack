@@ -45,7 +45,7 @@ export class ACPProtocolHandler {
   wireAbortController(abortController: AbortController): void {
     abortController.signal.addEventListener('abort', () => {
       for (const id of this.pendingCalls.keys()) {
-        this.transport.send({id, method: 'cancel', result: {ok: true}}).catch(() => {});
+        this.transport.send({id, method: 'cancel', result: {ok: true}}).catch((err) => console.debug(`[protocol-handler] cancel send failed: ${err}`));
       }
     });
   }
