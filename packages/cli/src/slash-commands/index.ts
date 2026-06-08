@@ -241,6 +241,8 @@ export interface SlashCommandContext {
   onWorktree?: (action: 'list' | 'merge' | 'prune' | 'clean', target?: string) => Promise<string>;
   /** Config store for reading/writing config sections at runtime (e.g. settings menu). */
   configStore: import('@wrongstack/core').ConfigStore;
+  /** Models registry for looking up provider/model capabilities. */
+  modelsRegistry?: import('@wrongstack/core').ModelsRegistry | undefined;
   /** Terminal reader for interactive user input (e.g. settings menu, auth menu). */
   reader: import('@wrongstack/core').InputReader;
 }
@@ -275,6 +277,7 @@ import { buildPruneCommand } from './prune.js';
 import { buildSddCommand } from './sdd.js';
 import { buildExitCommand, buildLoadCommand, buildSaveCommand } from './session.js';
 import { buildSetModelCommand } from './setmodel.js';
+import { buildModelCapsCommand } from './modelcaps.js';
 import { buildSettingsCommand } from './settings.js';
 import { buildTelegramSetupCommand } from './telegram-setup.js';
 import { buildAgentsCommand, buildDirectorCommand, buildSpawnCommand } from './spawn-agents.js';
@@ -324,6 +327,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildSettingsCommand(opts),
     buildTelegramSetupCommand(opts),
     buildSetModelCommand(opts),
+    buildModelCapsCommand(opts),
     buildModelsCommand(opts),
     buildCollabCommand(opts),
     buildStatuslineCommand({
