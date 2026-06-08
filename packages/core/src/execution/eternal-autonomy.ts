@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import type { Agent } from '../core/agent.js';
 import type { TodoItem } from '../core/context.js';
 import type { Compactor } from '../types/compactor.js';
+import type { BrainArbiter } from '../coordination/brain.js';
 import {
   appendJournal,
   loadGoal,
@@ -133,6 +134,15 @@ export interface EternalAutonomyOptions {
   transientBackoffMaxMs?: number | undefined;
   /** Called when the eternal loop stops for any reason (manual stop, goal complete, etc.). */
   onEternalStop?: ((() => void)) | undefined;
+  /**
+   * Optional brain arbiter for autonomous decision-making. When wired,
+   * the engine consults the brain instead of auto-stopping on:
+   * - Brainstorm DONE threshold reached
+   * - Consecutive failures exceeding failure budget
+   * - Goal completion verification
+   * Without a brain, the engine uses its built-in heuristics.
+   */
+  brain?: BrainArbiter | undefined;
 }
 
 export type EternalEngineState = 'idle' | 'running' | 'stopped';
@@ -258,8 +268,8 @@ export class EternalAutonomyEngine {
         if (this.stopRequested) break;
 
         // Brief gap so SIGINT can land between iterations even if the
-        // agent is bouncing back results fast.
-        await sleep(this.opts.cycleGapMs ?? 1000);
+        // agent is bouncing back results fast. 0 by default for 24/7 mode.
+        await sleep(this.opts.cycleGapMs ?? 0);
       }
     } finally {
       this.state = 'stopped';
@@ -615,17 +625,21 @@ export class EternalAutonomyEngine {
 
     const brainstormed = await this.brainstormTask(goal);
     if (brainstormed === BRAINSTORM_DONE) {
-      // Model says there's nothing to do. Count consecutive DONEs — if
-      // we hit the threshold, treat the mission as finished and stop
-      // instead of sleeping forever on null actions.
       this.consecutiveBrainstormDone++;
       const threshold = this.opts.brainstormDoneStopThreshold ?? 3;
       if (this.consecutiveBrainstormDone >= threshold) {
-        await this.markGoalCompleted(
-          { source: 'brainstorm', task: 'no further work', directive: '' },
-          `brainstorm returned DONE ${this.consecutiveBrainstormDone}x in a row`,
-        );
-        this.stopRequested = true;
+        // Consult the brain before stopping — it may decide to continue
+        const shouldStop = await this.consultBrainForDone(goal);
+        if (shouldStop) {
+          await this.markGoalCompleted(
+            { source: 'brainstorm', task: 'no further work', directive: '' },
+            `brainstorm returned DONE ${this.consecutiveBrainstormDone}x in a row${this.opts.brain ? ', brain confirmed' : ''}`,
+          );
+          this.stopRequested = true;
+        } else {
+          // Brain says keep going — reset the DONE streak
+          this.consecutiveBrainstormDone = 0;
+        }
       }
       return null;
     }
@@ -890,6 +904,51 @@ export class EternalAutonomyEngine {
 
   private async appendFailure(task: string, note: string): Promise<void> {
     await this.appendIterationEntry({ source: 'manual', task, status: 'failure', note });
+  }
+
+  /**
+   * Consult the brain on whether the goal is truly complete.
+   * Without a brain, always returns true (use heuristic: DONE threshold met = done).
+   */
+  private async consultBrainForDone(goal: GoalFile): Promise<boolean> {
+    if (!this.opts.brain) return true; // No brain — trust the heuristic
+
+    const deliverablesStatus = goal.deliverables?.length
+      ? `\nDeliverables: ${goal.deliverables.length} total, progress ${goal.progress ?? 'unknown'}%`
+      : '';
+    const recentJournal = goal.journal.slice(-5).map(e =>
+      `  #${e.iteration} [${e.status}] ${e.task}`
+    ).join('\n');
+
+    try {
+      const decision = await this.opts.brain.decide({
+        id: `goal-done-${goal.iterations}`,
+        source: 'system',
+        question: `Brainstorm returned DONE ${this.consecutiveBrainstormDone}x. Is the goal truly complete?`,
+        context: [
+          `Goal: ${goal.goal}`,
+          `Iterations: ${goal.iterations}`,
+          `Progress: ${goal.progress ?? 'unknown'}%`,
+          deliverablesStatus,
+          recentJournal ? `\nRecent work:\n${recentJournal}` : '',
+        ].join('\n'),
+        risk: 'high',
+        fallback: 'continue',
+      });
+
+      if (decision.type === 'deny') {
+        // Brain says explicitly no — keep running
+        return false;
+      }
+      if (decision.type === 'answer') {
+        // Brain says yes (contains "complete"/"done") or no
+        const text = decision.text.toLowerCase();
+        return text.includes('complete') || text.includes('done') || text.includes('yes');
+      }
+      return true; // ask_human → treat as done (safe default)
+    } catch {
+      return true; // Brain failed → trust the heuristic
+    }
   }
 
   /**
