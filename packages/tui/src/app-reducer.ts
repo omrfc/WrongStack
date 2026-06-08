@@ -856,6 +856,9 @@ export function reducer(state: State, action: Action): State {
     case 'toggleProcessList': {
       return { ...state, processListOpen: !state.processListOpen };
     }
+    case 'toggleGoalPanel': {
+      return { ...state, goalPanelOpen: !state.goalPanelOpen };
+    }
     case 'checkpointReceived': {
       const existing = state.checkpoints.find((c) => c.promptIndex === action.cp.promptIndex);
       if (existing) return state;

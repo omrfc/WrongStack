@@ -39,6 +39,7 @@ import { PhaseMonitor } from './components/phase-monitor.js';
 import { PhasePanel } from './components/phase-panel.js';
 import { QueuePanel } from './components/queue-panel.js';
 import { ProcessListMonitor } from './components/process-list.js';
+import { GoalPanel } from './components/goal-panel.js';
 import { SettingsPicker } from './components/settings-picker.js';
 import { SlashMenu } from './components/slash-menu.js';
 import { StatusBar } from './components/status-bar.js';
@@ -455,8 +456,13 @@ export function App({
             type: 'goalSummary',
             summary: {
               goal: goal.goal,
+              refinedGoal: goal.refinedGoal,
               goalState: goal.goalState ?? 'active',
               iterations: goal.iterations,
+              progress: goal.progress,
+              progressNote: goal.progressNote,
+              progressTrend: goal.progressTrend,
+              deliverables: goal.deliverables,
               lastTask: lastEntry?.task,
               lastStatus: lastEntry?.status,
             },
@@ -557,6 +563,7 @@ export function App({
     todosMonitorOpen: false,
     queuePanelOpen: false,
     processListOpen: false,
+    goalPanelOpen: false,
     collabSession: null,
     checkpoints: [],
     rewindOverlay: null,
@@ -2693,6 +2700,24 @@ export function App({
       }
       return;
     }
+    // F9 → goal panel. Opening closes any other overlay or panel.
+    if (key.fn === 9) {
+      if (state.goalPanelOpen) {
+        dispatch({ type: 'toggleGoalPanel' });
+      } else {
+        if (state.agentsMonitorOpen) dispatch({ type: 'toggleAgentsMonitor' });
+        if (state.monitorOpen) dispatch({ type: 'toggleMonitor' });
+        if (state.worktreeMonitorOpen) dispatch({ type: 'worktreeMonitorToggle' });
+        if (state.todosMonitorOpen) dispatch({ type: 'toggleTodosMonitor' });
+        if (state.autoPhase?.monitorOpen) dispatch({ type: 'autoPhaseMonitorToggle' });
+        if (state.settingsPicker.open) dispatch({ type: 'settingsClose' });
+        if (state.queuePanelOpen) dispatch({ type: 'toggleQueuePanel' });
+        if (state.processListOpen) dispatch({ type: 'toggleProcessList' });
+        if (state.helpOpen) dispatch({ type: 'toggleHelp' });
+        dispatch({ type: 'toggleGoalPanel' });
+      }
+      return;
+    }
     // Ctrl+S toggles the autonomy settings editor (also openable via
     // F5 and `/settings`). Opening closes any other overlay or panel.
     if (key.ctrl && input === 's') {
@@ -2765,6 +2790,10 @@ export function App({
       }
       if (state.processListOpen) {
         dispatch({ type: 'toggleProcessList' });
+        return;
+      }
+      if (state.goalPanelOpen) {
+        dispatch({ type: 'toggleGoalPanel' });
         return;
       }
     }
@@ -2918,6 +2947,7 @@ export function App({
       state.todosMonitorOpen ||
       state.queuePanelOpen ||
       state.processListOpen ||
+      state.goalPanelOpen ||
       state.helpOpen ||
       (state.autoPhase?.monitorOpen ?? false) ||
       state.rewindOverlay !== null;
@@ -3942,6 +3972,8 @@ export function App({
           {state.queuePanelOpen ? <QueuePanel items={state.queue} /> : null}
           {/* Process list overlay (F8) — shows background bash/exec processes. */}
           {state.processListOpen ? <ProcessListMonitor /> : null}
+          {/* Goal panel (F9) — shows current goal, deliverables, progress. */}
+          {state.goalPanelOpen ? <GoalPanel goal={state.goalSummary} /> : null}
         </Box>
       </Box>
     </Box>

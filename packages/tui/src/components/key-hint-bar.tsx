@@ -39,6 +39,7 @@ export function hintsFor(ctx: KeyHintContext): Hint[] {
       { key: '^G', label: 'agents' },
       { key: '^T', label: 'worktrees' },
       { key: 'F6', label: 'todos' },
+      { key: 'F9', label: 'goal' },
     ];
   }
   // Idle / chat.

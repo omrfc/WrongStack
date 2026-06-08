@@ -104,8 +104,13 @@ export type DraftEntry = HistoryEntry extends infer T
 
 export type GoalSummary = {
   goal: string;
+  refinedGoal?: string | undefined;
   goalState: 'active' | 'paused' | 'completed' | 'abandoned';
   iterations: number;
+  progress?: number | undefined;
+  progressNote?: string | undefined;
+  progressTrend?: 'accelerating' | 'steady' | 'stalling' | undefined;
+  deliverables?: string[] | undefined;
   lastTask?: string | undefined;
   lastStatus?: string | undefined;
 } | null;
@@ -324,6 +329,8 @@ export type State = {
   queuePanelOpen: boolean;
   /** When true, the process list overlay is shown (F8). */
   processListOpen: boolean;
+  /** When true, the goal panel is shown (F9). */
+  goalPanelOpen: boolean;
   /**
    * Active or completed collaborative debugging session state.
    * Null when no collab session has run. Tracks counts + the event timeline
@@ -697,4 +704,5 @@ export type Action =
   /** A collab subagent (bug-hunter / refactor-planner / critic) was spawned. */
   | { type: 'collabSubagentSpawned'; subagentId: string; role: string }
   /** Toggle the process list overlay (F8). */
-  | { type: 'toggleProcessList' };
+  | { type: 'toggleProcessList' }
+  | { type: 'toggleGoalPanel' };
