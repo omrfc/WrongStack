@@ -22,7 +22,7 @@ import {
   collabInjectMiddleware,
   estimateRequestTokensCalibrated,
   EventBus,
-  HybridCompactor,
+  createStrategyCompactor,
   type ProviderConfig,
   type Provider,
   ProviderRegistry,
@@ -394,13 +394,14 @@ export async function startWebUI(
   const collabInject = collabInjectMiddleware(collabBus, { logger });
   Object.defineProperty(collabInject, 'name', { value: 'collab-inject' });
   pipelines.toolCall.prepend(collabInject as never);
-  // Compactor
-  const compactor = new HybridCompactor({
-    // eliseThreshold is a TOKEN COUNT (not a fraction); 0.7 elided every
-    // tool_result. Mirror the 'balanced' mode defaults — the policy in
-    // ctx.meta overrides these at runtime.
+  // Compactor — honors config.context.strategy ('hybrid' default, lossless
+  // rules; 'intelligent'/'selective' resolve their provider from ctx at
+  // compact()-time). eliseThreshold is a TOKEN COUNT (not a fraction).
+  const compactor = createStrategyCompactor({
+    strategy: config.context?.strategy,
     preserveK: config.context?.preserveK ?? 10,
     eliseThreshold: config.context?.eliseThreshold ?? 2000,
+    summarizerModel: config.context?.summarizerModel,
   });
 
   // Auto-compaction
