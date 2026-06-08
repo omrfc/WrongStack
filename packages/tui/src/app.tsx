@@ -552,7 +552,7 @@ export function App({
       searchQuery: '',
     },
     autonomyPicker: { open: false, options: [], selected: 0 },
-    settingsPicker: { open: false, field: 0, mode: 'off', delayMs: 0, titleAnimation: true, yolo: false, streamFleet: true, chime: false, confirmExit: true, nextPrediction: false, featureMcp: true, featurePlugins: true, featureMemory: true, featureSkills: true, featureModelsRegistry: true, contextAutoCompact: true, contextStrategy: 'hybrid', logLevel: 'info', auditLevel: 'standard', indexOnStart: true, maxIterations: 500 },
+    settingsPicker: { open: false, field: 0, mode: 'off', delayMs: 0, titleAnimation: true, yolo: false, streamFleet: true, chime: false, confirmExit: true, nextPrediction: false, featureMcp: true, featurePlugins: true, featureMemory: true, featureSkills: true, featureModelsRegistry: true, contextAutoCompact: true, contextStrategy: 'hybrid', logLevel: 'info', auditLevel: 'standard', indexOnStart: true, maxIterations: 500, enhanceDelayMs: 60_000 },
     confirmQueue: [],
     enhance: null,
     enhanceEnabled,
@@ -1128,6 +1128,7 @@ export function App({
             auditLevel: sp.auditLevel,
             indexOnStart: sp.indexOnStart,
             maxIterations: sp.maxIterations,
+            enhanceDelayMs: sp.enhanceDelayMs,
           });
         }
         if (prev.help) dispatch({ type: 'toggleHelp' });
@@ -1578,6 +1579,7 @@ export function App({
       auditLevel: s.auditLevel ?? 'standard',
       indexOnStart: s.indexOnStart ?? true,
       maxIterations: s.maxIterations ?? 500,
+      enhanceDelayMs: s.enhanceDelayMs ?? 60_000,
     });
   }, [getSettings]);
 
@@ -1626,6 +1628,7 @@ export function App({
       auditLevel: sp.auditLevel,
       indexOnStart: sp.indexOnStart,
       maxIterations: sp.maxIterations,
+      enhanceDelayMs: sp.enhanceDelayMs,
     })).then((err: string | null) => {
       if (err) dispatch({ type: 'settingsHint', text: err });
     });
@@ -1650,6 +1653,7 @@ export function App({
     state.settingsPicker.auditLevel,
     state.settingsPicker.indexOnStart,
     state.settingsPicker.maxIterations,
+    state.settingsPicker.enhanceDelayMs,
     saveSettings,
   ]);
 
@@ -2723,6 +2727,7 @@ export function App({
           auditLevel: cfg.auditLevel ?? 'standard',
           indexOnStart: cfg.indexOnStart ?? true,
           maxIterations: cfg.maxIterations ?? 500,
+          enhanceDelayMs: cfg.enhanceDelayMs ?? 60_000,
         });
       }
       return;
@@ -2820,6 +2825,7 @@ export function App({
           auditLevel: cfg.auditLevel ?? 'standard',
           indexOnStart: cfg.indexOnStart ?? true,
           maxIterations: cfg.maxIterations ?? 500,
+          enhanceDelayMs: cfg.enhanceDelayMs ?? 60_000,
         });
       }
       return;
@@ -3882,6 +3888,7 @@ export function App({
               auditLevel={state.settingsPicker.auditLevel}
               indexOnStart={state.settingsPicker.indexOnStart}
               maxIterations={state.settingsPicker.maxIterations}
+              enhanceDelayMs={state.settingsPicker.enhanceDelayMs}
               hint={state.settingsPicker.hint}
             />
           ) : null}

@@ -8,6 +8,7 @@ import {
   AUDIT_LEVELS,
   COMPACTOR_STRATEGIES,
   DELAY_PRESETS_MS,
+  ENHANCE_DELAY_PRESETS,
   LOG_LEVELS,
   MAX_ITERATIONS_PRESETS,
   SETTINGS_FIELD_COUNT,
@@ -394,6 +395,7 @@ export function reducer(state: State, action: Action): State {
           auditLevel: action.auditLevel,
           indexOnStart: action.indexOnStart,
           maxIterations: action.maxIterations,
+          enhanceDelayMs: action.enhanceDelayMs,
           hint: undefined,
         },
       };
@@ -476,6 +478,11 @@ export function reducer(state: State, action: Action): State {
         const next = (base + action.delta + MAX_ITERATIONS_PRESETS.length) % MAX_ITERATIONS_PRESETS.length;
         return { ...state, settingsPicker: { ...sp, maxIterations: expectDefined(MAX_ITERATIONS_PRESETS[next]), hint: undefined } };
       }
+      // Field 19: enhance delay (cycle presets)
+      const ej = ENHANCE_DELAY_PRESETS.indexOf(sp.enhanceDelayMs);
+      const ebase = ej < 0 ? 0 : ej;
+      const enext = (ebase + (action as { delta: number }).delta + ENHANCE_DELAY_PRESETS.length) % ENHANCE_DELAY_PRESETS.length;
+      return { ...state, settingsPicker: { ...sp, enhanceDelayMs: expectDefined(ENHANCE_DELAY_PRESETS[enext]), hint: undefined } };
     }
     case 'settingsHint':
       return { ...state, settingsPicker: { ...state.settingsPicker, hint: action.text } };

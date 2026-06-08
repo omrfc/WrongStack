@@ -19,6 +19,9 @@ export type CompactorStrategy = (typeof COMPACTOR_STRATEGIES)[number];
 /** Presets for max iterations — cyclable via ←/→. 0 = unlimited. */
 export const MAX_ITERATIONS_PRESETS = [100, 200, 500, 1000, 0];
 
+/** Presets for prompt refinement preview countdown. */
+export const ENHANCE_DELAY_PRESETS = [30_000, 45_000, 60_000, 90_000, 120_000];
+
 export function formatSettingsDelay(ms: number): string {
   if (ms === 0) return 'disabled';
   if (ms >= 60_000) return `${Math.round(ms / 60_000)}m`;
@@ -28,6 +31,10 @@ export function formatSettingsDelay(ms: number): string {
 export function formatMaxIterations(n: number): string {
   if (n === 0) return 'unlimited';
   return String(n);
+}
+
+export function formatEnhanceDelay(ms: number): string {
+  return `${Math.round(ms / 1000)}s`;
 }
 
 const MODE_DESC: Record<SettingsMode, string> = {
@@ -66,11 +73,13 @@ export interface SettingsPickerProps {
   indexOnStart: boolean;
   // ── Tools ──
   maxIterations: number;
+  /** Prompt refinement preview countdown (ms). Cycled via ENHANCE_DELAY_PRESETS. */
+  enhanceDelayMs: number;
   hint?: string | undefined;
 }
 
 /** Total number of settings rows (used for wrap-around navigation). */
-export const SETTINGS_FIELD_COUNT = 19;
+export const SETTINGS_FIELD_COUNT = 20;
 
 export function SettingsPicker({
   field,
@@ -93,6 +102,7 @@ export function SettingsPicker({
   auditLevel,
   indexOnStart,
   maxIterations,
+  enhanceDelayMs,
   hint,
 }: SettingsPickerProps): React.ReactElement {
   const boolVal = (v: boolean) => (v ? 'on' : 'off');
@@ -211,6 +221,11 @@ export function SettingsPicker({
       label: 'Max iterations',
       value: formatMaxIterations(maxIterations),
       detail: '100–1000 or unlimited (0)',
+    },
+    {
+      label: 'Refine preview countdown',
+      value: formatEnhanceDelay(enhanceDelayMs),
+      detail: 'Timeout for prompt refinement preview (30s–120s)',
     },
   ];
 

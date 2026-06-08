@@ -245,6 +245,8 @@ export type State = {
     indexOnStart: boolean;
     // Tools
     maxIterations: number;
+    /** Prompt refinement preview countdown (ms). */
+    enhanceDelayMs: number;
     hint?: string | undefined;
   };
   /** Pending tool confirmations — queue to handle multiple tools requesting confirmation. */
@@ -438,6 +440,8 @@ export type Settings = {
   auditLevel: 'minimal' | 'standard' | 'full';
   indexOnStart: boolean;
   maxIterations: number;
+  /** Prompt refinement preview countdown (ms). */
+  enhanceDelayMs: number;
 };
 
 export type Action =
@@ -516,6 +520,7 @@ export type Action =
       auditLevel: AuditLevel;
       indexOnStart: boolean;
       maxIterations: number;
+      enhanceDelayMs: number;
     }
   | { type: 'settingsClose' }
   | { type: 'settingsFieldMove'; delta: number }
