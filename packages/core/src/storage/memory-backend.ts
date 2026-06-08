@@ -3,7 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { MemoryEntry, MemoryScope } from '../types/memory.js';
 import { MEMORY_TYPE_LABELS, type MemoryPriority, type MemoryType } from '../types/memory.js';
-import { atomicWrite, ensureDir } from '../utils/atomic-write.js';
+import { atomicWrite, ensureDir, withFileLock } from '../utils/atomic-write.js';
 import type { WstackPaths } from '../utils/wstack-paths.js';
 
 // ── Backend interface ──────────────────────────────────────────────────
@@ -157,30 +157,32 @@ export class FileMemoryBackend implements MemoryBackend {
 
   async forget(scope: MemoryScope, query: string, filePath: string): Promise<number> {
     const file = this.resolveFile(filePath, scope);
-    let existing: string;
-    try { existing = await fs.readFile(file, 'utf8'); } catch { return 0; }
+    return withFileLock(file, async () => {
+      let existing: string;
+      try { existing = await fs.readFile(file, 'utf8'); } catch { return 0; }
 
-    const needle = query.toLowerCase();
-    const idMatcher = /mem_\d+_\w+/;
-    let removed = 0;
-    const lines = existing.split('\n').filter((line) => {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith('- ')) return true;
-      if (idMatcher.test(query)) {
-        const entryIdMatch = /mem_\d+_\w+/.exec(trimmed);
-        if (entryIdMatch && entryIdMatch[0] === query) { removed++; return false; }
+      const needle = query.toLowerCase();
+      const idMatcher = /mem_\d+_\w+/;
+      let removed = 0;
+      const lines = existing.split('\n').filter((line) => {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('- ')) return true;
+        if (idMatcher.test(query)) {
+          const entryIdMatch = /mem_\d+_\w+/.exec(trimmed);
+          if (entryIdMatch && entryIdMatch[0] === query) { removed++; return false; }
+        }
+        if (trimmed.toLowerCase().includes(needle)) { removed++; return false; }
+        return true;
+      });
+      if (removed > 0) {
+        if (lines.length === 0 || (lines.length === 1 && !lines[0]?.trim())) {
+          await atomicWrite(file, '');
+        } else {
+          await atomicWrite(file, lines.join('\n'));
+        }
       }
-      if (trimmed.toLowerCase().includes(needle)) { removed++; return false; }
-      return true;
+      return removed;
     });
-    if (removed > 0) {
-      if (lines.length === 0 || (lines.length === 1 && !lines[0]?.trim())) {
-        await atomicWrite(file, '');
-      } else {
-        await atomicWrite(file, lines.join('\n'));
-      }
-    }
-    return removed;
   }
 
   async readAll(scope: MemoryScope, filePath: string): Promise<string> {

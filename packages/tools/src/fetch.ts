@@ -20,6 +20,13 @@ const MAX_BYTES = 131_072;
 const TIMEOUT_MS = 20_000;
 
 const ALLOW_PRIVATE = process.env['WRONGSTACK_FETCH_ALLOW_PRIVATE'] === '1';
+if (ALLOW_PRIVATE && !process.env['CI']) {
+  console.warn(
+    '[WrongStack] WARNING: WRONGSTACK_FETCH_ALLOW_PRIVATE=1 is active —\n' +
+    '  fetch tool can now access private IPs (10.x, 192.168.x, 169.254.x),\n' +
+    '  cloud metadata endpoints, and plaintext HTTP. Use only on isolated networks.',
+  );
+}
 
 /**
  * Combine multiple AbortSignals into one. Prefers the native `AbortSignal.any`
@@ -115,10 +122,16 @@ function getPinnedDispatcher(): Agent {
 }
 // Clean up the global dispatcher on exit — undici Agents maintain connection
 // pools and DNS caches that should be torn down in long-running processes.
-process.on('beforeExit', () => {
-  pinnedAgent?.destroy();
-  pinnedAgent = undefined;
-});
+// Guard against duplicate registration (module reload/HMR would otherwise
+// accumulate listeners).
+let _beforeExitRegistered = false;
+if (!_beforeExitRegistered) {
+  _beforeExitRegistered = true;
+  process.on('beforeExit', () => {
+    pinnedAgent?.destroy();
+    pinnedAgent = undefined;
+  });
+}
 
 /**
  * SSRF-guarded fetch with manual, per-hop-revalidated redirects, exported so
