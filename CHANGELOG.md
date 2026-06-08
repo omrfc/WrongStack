@@ -5,6 +5,98 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.104.0] - 2026-06-08
+
+> The autonomy-control & release-realignment release. Consolidates the
+> intermediate `0.89.5`-`0.103.2` bumps into the first fully documented
+> `0.104.0` line. The headline work is a richer **goal lifecycle** with LLM
+> refinement, deliverables, progress estimates, and a TUI **F9 goal panel**;
+> a self-driving **AutonomyBrain** for bounded unattended decisions; a modular
+> auth manager with an in-session **`/auth` dashboard**; and the previously
+> shipped structured task system, `/setmodel` diagnostics, tech-stack validator,
+> and humanized Telegram notifications. Additive only; no breaking changes.
+
+### Added - Goal and Autonomy
+
+- **Goal auto-refinement.** `/goal set <text>` now refines the raw mission with
+  the active LLM when available, falls back to a heuristic refiner otherwise,
+  extracts concrete deliverables, and stores both the original and refined goal
+  in `~/.wrongstack/projects/<hash>/goal.json`.
+
+- **Goal progress tracking.** Goals now persist deliverables, progress percent,
+  progress notes, progress history, trend state (`accelerating | steady |
+  stalling`), lifecycle state (`active | paused | completed | abandoned`), and a
+  bounded 500-entry journal for long autonomous runs.
+
+- **TUI F9 goal panel.** A new goal overlay shows the current mission,
+  refined/original text, deliverables checklist, progress bar, trend, iteration
+  count, lifecycle state, and last task without leaving the TUI.
+
+- **AutonomyBrain.** A dedicated autonomous decision layer evaluates blocked or
+  uncertain workflows inside configured risk bounds. It fast-paths common
+  cases (deadlocks, exhausted retries, continue/proceed decisions), can ask the
+  session LLM for complex decisions, and emits human-readable decision summaries
+  for chat history or journals.
+
+### Added - Auth and Model Operations
+
+- **`/auth` slash command.** Active sessions now have a non-blocking credential
+  dashboard: `/auth`, `/auth status <provider>`, `/auth open`, and `/auth help`.
+  It works in both the plain REPL and Ink TUI and points users to `wstack auth`
+  for interactive key management.
+
+- **Modular auth manager.** The old monolithic `auth-menu.ts` is now a
+  backward-compatible shim over `auth-menu/` modules (`top-menu`,
+  `provider-menu`, `add-provider`, `direct`, shared helpers, and types), making
+  provider/key flows smaller and testable.
+
+- **`/setmodel resolve` and `/setmodel doctor`.** `/setmodel resolve <role>`
+  explains the exact role -> phase -> `*` -> leader fallback chain, while
+  `/setmodel doctor` validates matrix entries, provider availability, API key
+  coverage, model names, stale keys, and uncovered roles.
+
+### Added - Task, Fleet, and Telegram
+
+- **Structured `task` tool and `/tasks` command.** Tasks now sit between plans
+  and todos, with dependencies, type/priority classification, estimates, agent
+  assignment, persistence, progress rendering, and promote-to-todos flow.
+
+- **Tech-stack validator.** A bundled `tech-stack` skill and fleet role validate
+  package/framework choices against current registry reality, reject dead or
+  obsolete dependencies, and prefer Node built-ins when practical.
+
+- **47-role fleet roster.** The Director catalog grows to 47 roles, including
+  the single-shot `tech-stack` meta agent, with count-dependent catalog,
+  dispatcher, and spawnability tests updated.
+
+- **Humanized Telegram notifications.** Telegram tool/session notifications now
+  format output as natural prose, show meaningful lines instead of raw object
+  dumps, preserve semantic truncation boundaries, and include clearer token/cache
+  summaries.
+
+### Changed - Website and Documentation
+
+- **README realigned for 0.104.0.** Current tool, skill, fleet, slash-command,
+  goal, auth, and release-gate details now match the shipped workspace.
+
+- **Marketing site realigned for 0.104.0.** `website/` package metadata, JSON-LD,
+  OpenGraph/Twitter descriptions, hero stats, feature cards, skills/tools counts,
+  and site changelog now describe the current release.
+
+### Tests
+
+- Auth, `/auth`, `/setmodel`, Telegram formatting, bot truncation, agent catalog,
+  dispatcher, and task/fleet count tests were expanded alongside the release.
+
+### Changed - versions
+
+- **All workspace packages bumped to 0.104.0**: `wrongstack`, `@wrongstack/cli`,
+  `@wrongstack/core`, `@wrongstack/mcp`, `@wrongstack/plug-lsp`,
+  `@wrongstack/plugins`, `@wrongstack/providers`, `@wrongstack/runtime`,
+  `@wrongstack/skills`, `@wrongstack/telegram`, `@wrongstack/tools`,
+  `@wrongstack/tui`, `@wrongstack/webui`, and `@wrongstack/acp`. The app
+  package and the marketing site (`website/`) are aligned in lockstep.
+
 ## [0.89.4] - 2026-06-08
 
 > The task-system & agent-enhancement release. Ships a new **structured task
