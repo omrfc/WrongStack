@@ -1,5 +1,5 @@
 import * as fs from 'node:fs/promises';
-import { color, type ModelMatrixEntry } from '@wrongstack/core';
+import { color, type ModelMatrixEntry, type ProviderConfig } from '@wrongstack/core';
 import { makeProviderFromConfig } from '@wrongstack/providers';
 import type { SubcommandHandler } from '../index.js';
 
@@ -248,19 +248,18 @@ function roleCat(role: string): string {
 // Provider construction
 // ---------------------------------------------------------------------------
 
-type ProviderConfig = { apiKey?: string; apiKeys?: Array<{ apiKey?: string }>; type?: string; baseUrl?: string };
-
 function createProviderForId(
   providerId: string,
   cfg: { providers?: Record<string, ProviderConfig>; apiKey?: string; baseUrl?: string },
 ): ReturnType<typeof makeProviderFromConfig> | undefined {
   const savedCfg = cfg.providers?.[providerId];
   const resolvedProviderId = savedCfg?.type ?? providerId;
-  // biome-ignore lint/suspicious/noExplicitAny: makeProviderFromConfig uses loose config shapes
-  const cfgWithType: any = {
-    ...(savedCfg ?? { type: providerId, apiKey: cfg.apiKey, baseUrl: cfg.baseUrl }),
-    type: resolvedProviderId,
-  };
+  // Object.assign preserves the required `type: string` from resolvedProviderId
+  // without union'ing with the optional type from the savedCfg spread.
+  const cfgWithType = Object.assign(
+    { type: resolvedProviderId },
+    savedCfg ?? { apiKey: cfg.apiKey, baseUrl: cfg.baseUrl },
+  );
   try {
     return makeProviderFromConfig(resolvedProviderId, cfgWithType);
   } catch {
@@ -642,8 +641,7 @@ export const modeldiagCmd: SubcommandHandler = async (args, deps) => {
         const firstLineClean = firstText.replace(/\n/g, ' ').slice(0, 80) || color.dim('(empty)');
 
         const provColor = c.provider === config.provider ? color.green : color.cyan;
-        // biome-ignore lint/suspicious/noExplicitAny: usage shape varies by provider
-        const usage = resp.usage as any;
+        const usage = resp.usage;
         writeLine(
           `  ${label} ${provColor(modelKey.padEnd(50))} ${scoreBar(c.score, 110).slice(0, 11)}  ${color.amber(fmtMs(latency).padEnd(8))} ${color.dim(`in${usage?.input ?? '?'}/out${usage?.output ?? '?'}`.padEnd(12))} ${firstLineClean}`,
         );
@@ -795,8 +793,7 @@ export const modeldiagCmd: SubcommandHandler = async (args, deps) => {
             const respText = resp.content[0] && 'text' in resp.content[0]
               ? (resp.content[0] as { text: string }).text
               : '';
-            // biome-ignore lint/suspicious/noExplicitAny: usage shape varies
-            const respUsage = resp.usage as any;
+            const respUsage = resp.usage;
             collected.get(cat)!.set(modelKey, {
               model: modelKey,
               latency: Date.now() - start,

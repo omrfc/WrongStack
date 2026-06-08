@@ -89,7 +89,10 @@ export class ReadlineInputReader implements InputReader {
       // half-typed draft in scrollback. Cleared the moment the read settles.
       this.installPromptGuard(fresh);
       return new Promise<string>((resolve) => {
+        let settled = false;
         const settle = (line: string): void => {
+          if (settled) return;
+          settled = true;
           setOutputLineGuard(null);
           resolve(line);
         };
@@ -104,6 +107,10 @@ export class ReadlineInputReader implements InputReader {
         // string so callers treat it as cancel instead of crashing with
         // an unhandled EOF error.
         fresh.once('close', () => settle(''));
+        // Handle any unexpected throw inside the executor by settling to
+        // empty string so callers treat it as cancel rather than crashing.
+        // biome-ignore lint/suspicious/noExplicitAny: safe forward-compat fallback
+        fresh.on && fresh.on('error', (_e: unknown) => settle(''));
       }).then((result) => {
         // Close the interface so the next readLine call tears it down
         // first (see the guard above).  On Windows / Node ≥ 24 the
