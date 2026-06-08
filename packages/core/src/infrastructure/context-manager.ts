@@ -3,7 +3,7 @@ import type { Compactor } from '../types/compactor.js';
 import type { Message } from '../types/messages.js';
 import type { Tool } from '../types/tool.js';
 import { repairToolUseAdjacency } from '../utils/message-invariants.js';
-import { estimateRequestTokens } from '../utils/token-estimate.js';
+import { estimateMessageTokens, estimateRequestTokens } from '../utils/token-estimate.js';
 
 /**
  * Context introspection and management tool.
@@ -97,21 +97,10 @@ export interface ContextManagerToolOptions {
   compactThresholdFraction?: number | undefined;
 }
 
+/** Messages-only token estimate. Delegates to the canonical shared estimator
+ *  so the context_manager tool agrees with compaction and the `/context` bar. */
 function roughEstimate(messages: Message[]): number {
-  let total = 0;
-  for (const m of messages) {
-    if (typeof m.content === 'string') {
-      total += Math.ceil(m.content.length / 4);
-    } else if (Array.isArray(m.content)) {
-      for (const b of m.content) {
-        if (b.type === 'text') total += Math.ceil(b.text.length / 4);
-        else if (b.type === 'tool_use' || b.type === 'tool_result') {
-          total += Math.ceil(JSON.stringify(b).length / 4);
-        }
-      }
-    }
-  }
-  return total;
+  return estimateMessageTokens(messages);
 }
 
 export function createContextManagerTool(

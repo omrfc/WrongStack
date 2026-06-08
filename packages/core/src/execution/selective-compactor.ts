@@ -1,6 +1,5 @@
 import type { Context } from '../core/context.js';
 import { LLMSelector } from '../models/llm-selector.js';
-import type { ContentBlock } from '../types/blocks.js';
 import { isTextBlock } from '../types/blocks.js';
 import type { CompactReport, Compactor } from '../types/compactor.js';
 import type { Message } from '../types/messages.js';
@@ -8,6 +7,7 @@ import type { Provider, Request } from '../types/provider.js';
 import type { MessageSelector, SelectorResult } from '../types/selector.js';
 import { estimateRequestTokens } from '../utils/token-estimate.js';
 import { repairToolUseAdjacency } from '../utils/message-invariants.js';
+import { eliseOldToolResults as coreEliseOldToolResults } from './compaction-core.js';
 
 /**
  * Options for SelectiveCompactor — the most configurable compactor.
@@ -283,54 +283,16 @@ export class SelectiveCompactor implements Compactor {
   }
 
   private eliseOldToolResults(ctx: Context): number {
-    const messages = ctx.messages;
-    let pairCount = 0;
-    let preserveStart = messages.length;
-    for (let i = messages.length - 1; i >= 0 && pairCount < this.preserveK; i--) {
-      const m = messages[i];
-      if (!m) continue;
-      if (m.role === 'user' || m.role === 'assistant') {
-        pairCount++;
-        preserveStart = i;
-      }
-    }
-    let saved = 0;
-    let changed = false;
-    const nextMessages = new Array(messages.length);
-    for (let i = 0; i < messages.length; i++) {
-      const msg = messages[i];
-      // Only process messages before the preservation window
-      if (i >= preserveStart) {
-        nextMessages[i] = msg;
-        continue;
-      }
-      if (!msg || !Array.isArray(msg.content)) {
-        nextMessages[i] = msg;
-        continue;
-      }
-      const newContent: ContentBlock[] = msg.content.map((b) => {
-        if (b.type !== 'tool_result') return b;
-        const text = typeof b.content === 'string' ? b.content : JSON.stringify(b.content);
-        const tokens = this.roughTokenEstimate(text);
-        if (tokens < this.eliseThreshold) return b;
-        saved += tokens;
-        return {
-          type: 'tool_result',
-          tool_use_id: b.tool_use_id,
-          content: `[elided: ~${tokens} tokens]`,
-          is_error: b.is_error,
-        };
-      });
-      // map() preserves length, so only block ref-equality matters here.
-      if (newContent.every((b, idx) => b === msg.content[idx])) {
-        nextMessages[i] = msg;
-      } else {
-        nextMessages[i] = { ...msg, content: newContent };
-        changed = true;
-      }
-    }
-    if (changed) ctx.state.replaceMessages(nextMessages);
-    return saved;
+    // Delegate to the shared core so SelectiveCompactor gets the same
+    // tool_use/tool_result pair preservation as the other compactors — its
+    // previous local copy lacked the forward walk and could elide the result
+    // of a tool call it was supposed to keep.
+    const result = coreEliseOldToolResults(ctx.messages, {
+      preserveK: this.preserveK,
+      eliseThreshold: this.eliseThreshold,
+    });
+    if (result.changed) ctx.state.replaceMessages(result.messages);
+    return result.saved;
   }
 
   private hasTextContent(m: Message): boolean {

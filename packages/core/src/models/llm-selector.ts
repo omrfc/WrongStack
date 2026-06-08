@@ -1,4 +1,5 @@
 import { expectDefined } from '../utils/expect-defined.js';
+import { estimateMessageTokens } from '../utils/token-estimate.js';
 import { isTextBlock } from '../types/blocks.js';
 import type { Message } from '../types/messages.js';
 import type { Provider, Request } from '../types/provider.js';
@@ -42,22 +43,6 @@ Rules:
 - If unsure, keep rather than collapse (errors are more costly than waste)
 
 Return ONLY the JSON object, no markdown, no explanation outside the JSON.`;
-
-/** Rough token estimation for a message array */
-function estimateTokens(messages: Message[]): number {
-  let total = 0;
-  for (const m of messages) {
-    if (typeof m.content === 'string') {
-      total += Math.ceil(m.content.length / 4);
-    } else if (Array.isArray(m.content)) {
-      for (const b of m.content) {
-        if (b.type === 'text') total += Math.ceil(b.text.length / 4);
-        else total += Math.ceil(JSON.stringify(b).length / 4);
-      }
-    }
-  }
-  return total;
-}
 
 /** Format messages as a compact text dump for the selector LLM */
 function formatMessages(messages: Message[], maxChars = 8000): string {
@@ -112,7 +97,7 @@ export class LLMSelector implements MessageSelector {
 
     // Build a concise representation of the conversation
     const historyText = formatMessages(messages);
-    const totalTokens = estimateTokens(messages);
+    const totalTokens = estimateMessageTokens(messages);
     const systemText = `${this.systemPrompt}\n\nConversation (${messages.length} messages, ~${totalTokens} tokens, budget: ${effectiveBudget}):\n`;
 
     // Add instruction to stay within budget
@@ -159,17 +144,7 @@ export class LLMSelector implements MessageSelector {
     // Scan from the end backwards
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = expectDefined(messages[i]);
-      const cost =
-        typeof m.content === 'string'
-          ? Math.ceil(m.content.length / 4)
-          : m.content.reduce(
-              (acc, b) =>
-                acc +
-                (b.type === 'text'
-                  ? Math.ceil(b.text.length / 4)
-                  : Math.ceil(JSON.stringify(b).length / 4)),
-              0,
-            );
+      const cost = estimateMessageTokens([m]);
 
       if (tokenCount + cost <= budget) {
         tokenCount += cost;

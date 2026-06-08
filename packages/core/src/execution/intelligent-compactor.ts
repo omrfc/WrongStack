@@ -1,16 +1,17 @@
 import type { Context } from '../core/context.js';
-import type { ContentBlock, TextBlock } from '../types/blocks.js';
+import type { TextBlock } from '../types/blocks.js';
 import { isTextBlock } from '../types/blocks.js';
 import type { CompactReport, Compactor } from '../types/compactor.js';
 import type { Message } from '../types/messages.js';
 import type { Provider, Request } from '../types/provider.js';
-import {
-  estimateTextTokens,
-  estimateToolInputTokens,
-  estimateToolResultTokens,
-  estimateRequestTokens,
-} from '../utils/token-estimate.js';
+import { estimateRequestTokens } from '../utils/token-estimate.js';
 import { repairToolUseAdjacency } from '../utils/message-invariants.js';
+import {
+  buildLosslessDigest,
+  eliseOldToolResults,
+  estimateMessages,
+  findSafeBoundary,
+} from './compaction-core.js';
 
 /**
  * Options for IntelligentCompactor.
@@ -59,7 +60,9 @@ export interface ImportanceAnalysis {
  *  - Generate semantic summaries for old message ranges
  *  - Make intelligent decisions about what to compact
  *
- * It extends HybridCompactor's elision logic with LLM-assisted summarization.
+ * It builds on the shared `compaction-core` elision/boundary primitives and
+ * adds LLM-assisted summarization on top. When the summarizer call fails it
+ * falls back to the same lossless rule-based digest used by HybridCompactor.
  */
 export class IntelligentCompactor implements Compactor {
   private readonly provider: Provider;
@@ -87,7 +90,7 @@ export class IntelligentCompactor implements Compactor {
   }
 
   async compact(ctx: Context, opts: { aggressive?: boolean | undefined } = {}): Promise<CompactReport> {
-    const beforeTokens = this.estimateTokens(ctx.messages);
+    const beforeTokens = estimateMessages(ctx.messages);
     const beforeFull = this.estimateFullRequest(ctx);
     const reductions: CompactReport['reductions'] = [];
 
@@ -99,23 +102,25 @@ export class IntelligentCompactor implements Compactor {
       load >= this.hardThreshold ? true : (opts.aggressive ?? load >= this.softThreshold);
 
     // Phase 1: always run elision (preserves recent K pairs)
-    const saved1 = this.eliseOldToolResults(ctx);
+    const saved1 = this.elide(ctx);
     if (saved1 > 0) reductions.push({ phase: 'elision', saved: saved1 });
 
     // Phase 2: LLM summarization of ancient turns
+    let collapsedDigest: string | undefined;
     if (aggressive) {
-      const saved2 = await this.summarizeAncientTurns(ctx);
-      if (saved2 > 0) reductions.push({ phase: 'summary', saved: saved2 });
+      const phase2 = await this.summarizeAncientTurns(ctx);
+      if (phase2.saved > 0) reductions.push({ phase: 'summary', saved: phase2.saved });
+      collapsedDigest = phase2.digest;
     } else if (load >= this.warnThreshold) {
-      // Non-aggressive: do lightweight summarization via direct analysis
-      const saved2 = this.lightweightCompact(ctx);
+      // Non-aggressive: lightweight elision only.
+      const saved2 = this.elide(ctx);
       if (saved2 > 0) reductions.push({ phase: 'elision', saved: saved2 });
     }
 
     const repaired = repairToolUseAdjacency(ctx.messages);
     if (repaired.report.changed) ctx.state.replaceMessages(repaired.messages);
 
-    const afterTokens = this.estimateTokens(ctx.messages);
+    const afterTokens = estimateMessages(ctx.messages);
     const afterFull = this.estimateFullRequest(ctx);
     return {
       before: beforeTokens,
@@ -123,6 +128,7 @@ export class IntelligentCompactor implements Compactor {
       fullRequestTokensBefore: beforeFull,
       fullRequestTokensAfter: afterFull,
       reductions,
+      collapsedDigest,
       repaired: repaired.report.changed
         ? {
             removedToolUses: repaired.report.removedToolUses,
@@ -138,106 +144,54 @@ export class IntelligentCompactor implements Compactor {
    * This is the accurate figure for context-window pressure monitoring.
    */
   private estimateFullRequest(ctx: Context): number {
-    const breakdown = estimateRequestTokens(ctx.messages, ctx.systemPrompt, ctx.tools ?? []);
-    return breakdown.total;
+    return estimateRequestTokens(ctx.messages, ctx.systemPrompt, ctx.tools ?? []).total;
   }
 
-  private async summarizeAncientTurns(ctx: Context): Promise<number> {
+  /** Run shared tool-result elision and commit through ConversationState. */
+  private elide(ctx: Context): number {
+    const result = eliseOldToolResults(ctx.messages, {
+      preserveK: this.preserveK,
+      eliseThreshold: this.eliseThreshold,
+    });
+    if (result.changed) ctx.state.replaceMessages(result.messages);
+    return result.saved;
+  }
+
+  private async summarizeAncientTurns(
+    ctx: Context,
+  ): Promise<{ saved: number; digest?: string | undefined }> {
     const messages = ctx.messages;
     const cutoff = Math.max(0, messages.length - this.preserveK * 2);
-    if (cutoff <= 2) return 0;
+    if (cutoff <= 2) return { saved: 0 };
 
     // Find the best boundary in the ancient region
-    const boundary = this.findSafeBoundary(messages, 0, cutoff);
-    if (boundary <= 1) return 0;
+    const boundary = findSafeBoundary(messages, 0, cutoff);
+    if (boundary <= 1) return { saved: 0 };
 
     const toSummarize = messages.slice(0, boundary);
-    const removedTokens = this.estimateTokens(toSummarize);
+    const removedTokens = estimateMessages(toSummarize);
 
     let summaryText: string;
     try {
       summaryText = await this.callSummarizer(toSummarize, ctx);
     } catch {
-      // Fallback: preserve user/assistant text content while eliding tool results.
-      // This keeps semantic information (instructions, decisions, conclusions)
-      // without the token overhead of large tool outputs. Unlike the LLM summarizer,
-      // this rule-based approach cannot fail and preserves factual content.
-      const preservedMessages: Message[] = [];
-      for (const m of toSummarize) {
-        if (m.role === 'system') continue; // skip existing summaries
-        if (typeof m.content === 'string') {
-          preservedMessages.push(m);
-        } else if (Array.isArray(m.content)) {
-          const textParts = m.content.filter(isTextBlock);
-          const toolParts = m.content.filter((b) => b.type === 'tool_use' || b.type === 'tool_result');
-          // Keep text content; replace tool calls with a lightweight marker.
-          const next: Message = {
-            role: m.role,
-            content: [
-              ...textParts,
-              ...(toolParts.length > 0
-                ? [{ type: 'text' as const, text: `[${toolParts.length} tool call(s) omitted]` }]
- : []),
-            ],
-          };
-          preservedMessages.push(next);
-        }
-      }
-      summaryText = preservedMessages
-        .map((m) => `[${m.role}]: ${typeof m.content === 'string' ? m.content : m.content.filter(isTextBlock).map((b) => b.text).join(' ')}`)
-        .join('\n');
-      if (!summaryText) summaryText = `${toSummarize.length} earlier turns (semantic content preserved)`;
+      // Fallback: lossless rule-based digest (text preserved, tool I/O dropped).
+      // Cannot fail and preserves the semantic content the summarizer would have.
+      summaryText =
+        buildLosslessDigest(toSummarize) ||
+        `${toSummarize.length} earlier turns (semantic content preserved)`;
     }
 
     const summaryMsg: Message = {
       role: 'system',
       content: `[prior_turns_summary: ${summaryText}]`,
     };
-    const summaryTokens = this.estimateTokens([summaryMsg]);
+    const summaryTokens = estimateMessages([summaryMsg]);
 
     // L1-A: route through ConversationState so subscribers see the rewrite.
     const tail = ctx.messages.slice(boundary);
     ctx.state.replaceMessages([summaryMsg, ...tail]);
-    return Math.max(0, removedTokens - summaryTokens);
-  }
-
-  private findSafeBoundary(messages: Message[], from: number, to: number): number {
-    // Find the nearest user message with text content at or after `to`
-    // and walk backwards to find a safe cut point.
-    for (let i = to; i >= from; i--) {
-      const m = messages[i];
-      if (!m) continue;
-      if (m.role === 'user' && this.hasTextContent(m)) {
-        // Ensure we don't cut inside a multi-message exchange
-        // by finding the start of this exchange.
-        return this.findExchangeStart(messages, i);
-      }
-    }
-    return -1;
-  }
-
-  private findExchangeStart(messages: Message[], userIndex: number): number {
-    // Walk backwards from userIndex to find where this logical exchange began.
-    // An exchange starts after the last assistant message that had no tool calls.
-    for (let i = userIndex - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (!m) continue;
-      if (m.role === 'assistant') {
-        const hasToolUse = Array.isArray(m.content)
-          ? m.content.some((b) => b.type === 'tool_use')
-          : false;
-        if (!hasToolUse) {
-          // This assistant msg had no tool calls — it's a boundary
-          return i + 1;
-        }
-      } else if (m.role !== 'user') {
-        // system or other — skip
-      } else {
-        // another user msg — boundary
-        return i;
-      }
-    }
-    return 0;
+    return { saved: Math.max(0, removedTokens - summaryTokens), digest: summaryText };
   }
 
   private async callSummarizer(messages: Message[], ctx: Context): Promise<string> {
@@ -286,109 +240,5 @@ export class IntelligentCompactor implements Compactor {
       }
     }
     return [{ type: 'text', text: lines.join('\n') }];
-  }
-
-  private lightweightCompact(ctx: Context): number {
-    // Lightweight: just elide very large tool results without full summarization
-    return this.eliseOldToolResults(ctx);
-  }
-
-  private eliseOldToolResults(ctx: Context): number {
-    const messages = ctx.messages;
-    let pairCount = 0;
-    let preserveStart = messages.length;
-    for (let i = messages.length - 1; i >= 0 && pairCount < this.preserveK; i--) {
-      const m = messages[i];
-      if (!m) continue;
-      if (m.role === 'user' || m.role === 'assistant') {
-        pairCount++;
-        preserveStart = i;
-      }
-    }
-
-    // Ensure tool_use/tool_result protocol pairs are preserved together.
-    // Walk forward through the preserved window: if an assistant message
-    // at or after preserveStart contains a tool_use, also preserve the
-    // immediately following message (the tool_result) so neither is elided.
-    for (let i = preserveStart; i < messages.length; i++) {
-      const m = messages[i];
-      if (!m || typeof m.content === 'string' || !Array.isArray(m.content)) continue;
-      const hasToolUse = m.content.some((b) => b.type === 'tool_use');
-      if (hasToolUse && i + 1 < messages.length) {
-        const next = messages[i + 1];
-        if (
-          next &&
-          next.role === 'user' &&
-          typeof next.content !== 'string' &&
-          Array.isArray(next.content) &&
-          next.content.some((b) => b.type === 'tool_result')
-        ) {
-          // Extend preserveStart to cover the tool_result as well so
-          // the protocol pair stays complete and readable.
-          preserveStart = i + 1;
-        }
-      }
-    }
-
-    let saved = 0;
-    let changed = false;
-    const nextMessages = new Array(messages.length);
-    for (let i = 0; i < messages.length; i++) {
-      const msg = messages[i];
-      // Only process messages before the preservation window
-      if (i >= preserveStart) {
-        nextMessages[i] = msg;
-        continue;
-      }
-      if (!msg || !Array.isArray(msg.content)) {
-        nextMessages[i] = msg;
-        continue;
-      }
-      const newContent: ContentBlock[] = msg.content.map((b) => {
-        if (b.type !== 'tool_result') return b;
-        const tokens = estimateToolResultTokens(b.content);
-        if (tokens < this.eliseThreshold) return b;
-        saved += tokens;
-        return {
-          type: 'tool_result',
-          tool_use_id: b.tool_use_id,
-          content: `[elided: ~${tokens} tokens]`,
-          is_error: b.is_error,
-        };
-      });
-      // Check by reference equality whether any block actually changed
-      if (
-        newContent.length === msg.content.length &&
-        newContent.every((b, idx) => b === msg.content[idx])
-      ) {
-        nextMessages[i] = msg;
-      } else {
-        nextMessages[i] = { ...msg, content: newContent };
-        changed = true;
-      }
-    }
-    if (changed) ctx.state.replaceMessages(nextMessages);
-    return saved;
-  }
-
-  private hasTextContent(m: Message): boolean {
-    if (typeof m.content === 'string') return m.content.trim().length > 0;
-    return m.content.some((b) => b.type === 'text' && b.text.trim().length > 0);
-  }
-
-  private estimateTokens(messages: Message[]): number {
-    let total = 0;
-    for (const m of messages) {
-      if (typeof m.content === 'string') {
-        total += estimateTextTokens(m.content);
-      } else {
-        for (const b of m.content) {
-          if (b.type === 'text') total += estimateTextTokens(b.text);
-          else if (b.type === 'tool_use') total += estimateToolInputTokens(b.input);
-          else if (b.type === 'tool_result') total += estimateToolResultTokens(b.content);
-        }
-      }
-    }
-    return total;
   }
 }

@@ -1,4 +1,5 @@
 import { expectDefined } from './expect-defined.js';
+import type { Message } from '../types/messages.js';
 /**
  * Shared token estimation with JSON.stringify caching.
  * Avoids repeated stringification of tool input objects.
@@ -87,6 +88,28 @@ export function estimateToolResultTokens(content: string | unknown): number {
  */
 export function estimateTextTokens(text: string): number {
   return RoughTokenEstimate(text);
+}
+
+/**
+ * Estimate tokens for an array of messages (text + tool I/O), using the shared
+ * 3.5 chars/token basis. This is the single canonical message-array estimator —
+ * compactors, the context_manager tool, and the `/context` display all route
+ * through it so the number a user sees matches the number compaction decides on.
+ */
+export function estimateMessageTokens(messages: readonly Message[]): number {
+  let total = 0;
+  for (const m of messages) {
+    if (typeof m.content === 'string') {
+      total += estimateTextTokens(m.content);
+    } else {
+      for (const b of m.content) {
+        if (b.type === 'text') total += estimateTextTokens(b.text);
+        else if (b.type === 'tool_use') total += estimateToolInputTokens(b.input);
+        else if (b.type === 'tool_result') total += estimateToolResultTokens(b.content);
+      }
+    }
+  }
+  return total;
 }
 
 /**

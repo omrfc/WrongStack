@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Context } from '@wrongstack/core';
-import { color } from '@wrongstack/core';
+import { color, estimateMessageTokens } from '@wrongstack/core';
 
 export interface ProjectFacts {
   build?: string | undefined;
@@ -212,21 +212,10 @@ export function countToolResults(messages: Context['messages']): number {
   return count;
 }
 
+/** Messages-only token estimate. Delegates to the canonical shared estimator so
+ *  `/context` shows the same number compaction and the context bar work with. */
 export function estimateTokens(messages: Context['messages']): number {
-  let total = 0;
-  for (const m of messages) {
-    const content = m.content;
-    if (typeof content === 'string') {
-      total += Math.ceil(content.length / 4);
-    } else if (Array.isArray(content)) {
-      for (const b of content) {
-        if (b.type === 'text') total += Math.ceil(b.text.length / 4);
-        else if (b.type === 'tool_use' || b.type === 'tool_result')
-          total += Math.ceil(JSON.stringify(b).length / 4);
-      }
-    }
-  }
-  return total;
+  return estimateMessageTokens(messages);
 }
 
 export function statusIcon(status: string): string {
