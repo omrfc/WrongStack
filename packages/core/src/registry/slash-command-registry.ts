@@ -158,7 +158,12 @@ export class SlashCommandRegistry {
     if (!entry) {
       return { message: `Unknown command "/${name}". Type /help for a list.` };
     }
-    const res = await entry.cmd.run(args, ctx);
-    return res ?? {};
+    try {
+      const res = await entry.cmd.run(args, ctx);
+      return res ?? {};
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { message: `Command "/${name}" failed: ${msg}` };
+    }
   }
 }
