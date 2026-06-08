@@ -55,6 +55,16 @@ export interface GoalFile {
   progress?: number | undefined;
   /** Human-readable note explaining the current progress estimate. */
   progressNote?: string | undefined;
+  /**
+   * Time-series of progress measurements for trend analysis.
+   * Last 200 entries retained. Use `recordProgress()` to append.
+   */
+  progressHistory?: ProgressSnapshot[] | undefined;
+  /**
+   * Computed trend from recent progress measurements.
+   * 'accelerating' | 'steady' | 'stalling' | undefined.
+   */
+  progressTrend?: 'accelerating' | 'steady' | 'stalling' | undefined;
   /** When the goal was first set or last replaced. */
   setAt: string;
   /** Updated on every iteration completion. */
@@ -217,6 +227,13 @@ export function formatGoal(goal: GoalFile, journalLimit = 10): string {
     if (goal.progressNote) {
       lines.push('  ' + color.dim(goal.progressNote));
     }
+    // Trend indicator
+    if (goal.progressTrend) {
+      const trendIcon = goal.progressTrend === 'accelerating' ? '🚀'
+        : goal.progressTrend === 'stalling' ? '⚠️'
+        : '➡️';
+      lines.push('  Trend: ' + trendIcon + ' ' + goal.progressTrend);
+    }
   }
 
   // Deliverables checklist
@@ -256,4 +273,70 @@ export function formatGoal(goal: GoalFile, journalLimit = 10): string {
     }
   }
   return lines.join('\n');
+}
+
+/** A single progress measurement at a point in time. */
+export interface ProgressSnapshot {
+  at: string;
+  progress: number;
+  note?: string | undefined;
+}
+
+/**
+ * Parse [PROGRESS: N%] from agent final text.
+ * Supports formats:
+ *   [PROGRESS: 45%]
+ *   [PROGRESS: 45%] — 3/5 deliverables done
+ *   [progress: 100%]
+ * Returns null if no match.
+ */
+export function parseProgressFromText(text: string): { progress: number; note?: string } | null {
+  const re = /\[progress:\s*(\d{1,3})%\]\s*(?:[—\-]\s*(.+))?/i;
+  const m = text.match(re);
+  if (!m) return null;
+  const progress = Math.min(100, Math.max(0, Number.parseInt(m[1]!, 10)));
+  const note = m[2]?.trim() || undefined;
+  return { progress, note };
+}
+
+/**
+ * Record a progress measurement. Returns a new GoalFile with:
+ * - progress + progressNote updated
+ * - progressHistory appended (last 200 entries kept)
+ * - progress trend computed (accelerating/steady/stalling)
+ */
+export function recordProgress(
+  goal: GoalFile,
+  progress: number,
+  note?: string,
+): GoalFile {
+  const clamped = Math.min(100, Math.max(0, progress));
+  const history = [...(goal.progressHistory ?? []), { at: new Date().toISOString(), progress: clamped, note }];
+  // Keep last 200 snapshots
+  const trimmed = history.length > 200 ? history.slice(-200) : history;
+
+  return {
+    ...goal,
+    progress: clamped,
+    progressNote: note ?? `${clamped}% complete`,
+    progressHistory: trimmed,
+    progressTrend: computeTrend(trimmed),
+  };
+}
+
+/** Max progress history entries to retain. */
+export const MAX_PROGRESS_HISTORY = 200;
+
+function computeTrend(history: ProgressSnapshot[]): 'accelerating' | 'steady' | 'stalling' | undefined {
+  if (history.length < 3) return undefined;
+  const recent = history.slice(-5);
+  const deltas: number[] = [];
+  for (let i = 1; i < recent.length; i++) {
+    deltas.push(recent[i]!.progress - recent[i - 1]!.progress);
+  }
+  if (deltas.length < 2) return undefined;
+  const avgDelta = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+  if (avgDelta > 2) return 'accelerating';
+  if (avgDelta < -1) return 'stalling';
+  return 'steady';
 }

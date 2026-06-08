@@ -117,11 +117,15 @@ export {
   appendJournal,
   formatGoal,
   setProgress,
+  recordProgress,
+  parseProgressFromText,
   goalFilePath,
   summarizeUsage,
   MAX_JOURNAL_ENTRIES,
+  MAX_PROGRESS_HISTORY,
   type GoalFile,
   type JournalEntry,
+  type ProgressSnapshot,
 } from './goal-store.js';
 export {
   DefaultPromptStore,

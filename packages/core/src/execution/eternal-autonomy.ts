@@ -8,6 +8,8 @@ import {
   loadGoal,
   saveGoal,
   goalFilePath,
+  parseProgressFromText,
+  recordProgress,
   type GoalFile,
   type JournalEntry,
 } from '../storage/goal-store.js';
@@ -496,6 +498,24 @@ export class EternalAutonomyEngine {
       this.stopRequested = true;
       return true;
     }
+
+    // ── Progress tracking ──
+    // Parse [PROGRESS: N%] from the agent's final text and persist it.
+    // Also auto-complete the goal when the agent reports 100% progress.
+    const parsed = parseProgressFromText(finalText);
+    if (parsed) {
+      await this.updateProgress(parsed.progress, parsed.note);
+      if (parsed.progress >= 100) {
+        // Agent claims 100% — add a final journal entry and complete.
+        await this.markGoalCompleted(
+          { source: action.source, task: action.task, directive: action.directive },
+          `progress reached 100%: ${parsed.note ?? 'goal complete'}`,
+        );
+        this.stopRequested = true;
+        return true;
+      }
+    }
+
     // Compaction runs only on successful iterations — there's no point
     // compacting after a failed/aborted iteration that didn't add much to
     // the message history.
@@ -870,6 +890,16 @@ export class EternalAutonomyEngine {
 
   private async appendFailure(task: string, note: string): Promise<void> {
     await this.appendIterationEntry({ source: 'manual', task, status: 'failure', note });
+  }
+
+  /**
+   * Persist a progress update from the agent's [PROGRESS: N%] output.
+   */
+  private async updateProgress(progress: number, note?: string): Promise<void> {
+    const current = await loadGoal(this.goalPath);
+    if (!current) return;
+    const updated = recordProgress(current, progress, note);
+    await saveGoal(this.goalPath, updated);
   }
 
   private async persistEngineState(state: GoalFile['engineState']): Promise<void> {
