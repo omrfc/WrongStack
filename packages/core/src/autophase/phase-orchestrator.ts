@@ -137,7 +137,7 @@ export class PhaseOrchestrator {
   /** Wait for all pending phase merges, dependency-ordered and globally serialized. */
   private async drainMerges(): Promise<void> {
     await Promise.allSettled([...this.phaseMergePromise.values()]);
-    await this.mergeQueue.catch(() => {});
+    await this.mergeQueue.catch((err) => console.warn(`[phase-orchestrator] mergeQueue failed: ${err}`));
   }
 
   /** Pause: active phases continue, but no new phase starts. */

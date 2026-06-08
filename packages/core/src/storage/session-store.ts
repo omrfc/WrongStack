@@ -122,7 +122,7 @@ export class DefaultSessionStore implements SessionStore {
         onClose: (s) => this.appendToIndex(s),
       });
     } catch (err) {
-      await handle.close().catch(() => {});
+      await handle.close().catch((e) => console.warn(`[session-store] handle.close() failed: ${e}`));
       throw err;
     }
   }
@@ -154,7 +154,7 @@ export class DefaultSessionStore implements SessionStore {
       );
       return { writer, data };
     } catch (err) {
-      await handle.close().catch(() => {});
+      await handle.close().catch((e) => console.warn(`[session-store] handle.close() failed: ${e}`));
       throw err;
     }
   }
@@ -381,17 +381,17 @@ export class DefaultSessionStore implements SessionStore {
    */
   private async deleteSession(id: string): Promise<void> {
     // Remove the JSONL and summary.
-    await fsp.unlink(this.sessionPath(id, '.jsonl')).catch(() => undefined);
-    await fsp.unlink(this.sessionPath(id, '.summary.json')).catch(() => undefined);
+    await fsp.unlink(this.sessionPath(id, '.jsonl')).catch((err) => console.warn(`[session-store] delete .jsonl failed: ${err}`));
+    await fsp.unlink(this.sessionPath(id, '.summary.json')).catch((err) => console.warn(`[session-store] delete .summary.json failed: ${err}`));
     // Remove sidecar files that live next to the JSONL.
     const shardDir = path.dirname(path.join(this.dir, id));
     const base = path.basename(id);
     for (const ext of ['.plan.json', '.todos.json']) {
-      await fsp.unlink(path.join(shardDir, `${base}${ext}`)).catch(() => undefined);
+      await fsp.unlink(path.join(shardDir, `${base}${ext}`)).catch((err) => console.warn(`[session-store] delete ${ext} failed: ${err}`));
     }
     // Remove the session directory (may contain fleet.json, shared/, subagents/).
     const sessDir = path.join(shardDir, base);
-    await fsp.rm(sessDir, { recursive: true, force: true }).catch(() => undefined);
+    await fsp.rm(sessDir, { recursive: true, force: true }).catch((err) => console.warn(`[session-store] delete session dir failed: ${err}`));
     // Write an index tombstone so readIndex() filters this session out.
     await this.writeTombstone(id);
   }

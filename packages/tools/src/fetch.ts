@@ -28,25 +28,8 @@ if (ALLOW_PRIVATE && !process.env['CI']) {
   );
 }
 
-/**
- * Combine multiple AbortSignals into one. Prefers the native `AbortSignal.any`
- * when available, falling back to a manual controller for older runtimes that
- * lack it. The combined signal aborts as soon as any input signal aborts.
- */
-function combineSignals(signals: AbortSignal[]): AbortSignal {
-  const anyFn = (AbortSignal as { any?: (s: AbortSignal[]) => AbortSignal }).any;
-  if (typeof anyFn === 'function') return anyFn(signals);
-
-  const ctrl = new AbortController();
-  for (const sig of signals) {
-    if (sig.aborted) {
-      ctrl.abort(sig.reason);
-      return ctrl.signal;
-    }
-    sig.addEventListener('abort', () => ctrl.abort(sig.reason), { once: true });
-  }
-  return ctrl.signal;
-}
+/** Abort when any of the signals abort (Node 22+ — AbortSignal.any shipped in Node 20). */
+const combineSignals = (signals: AbortSignal[]): AbortSignal => AbortSignal.any(signals);
 
 type LookupCallback = (
   err: NodeJS.ErrnoException | null,

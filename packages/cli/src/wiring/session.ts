@@ -68,7 +68,7 @@ export async function setupSession(params: {
     .then((count) => {
       if (count > 0) renderer.writeInfo(`Pruned ${count} old session${count === 1 ? '' : 's'}.`);
     })
-    .catch(() => undefined);
+    .catch((err) => console.debug(`[session] prune failed: ${err}`));
 
   let resumeId = typeof flags['resume'] === 'string' ? (flags['resume'] as string) : undefined;
 

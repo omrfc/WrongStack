@@ -364,67 +364,6 @@ describe('fetchTool', () => {
   });
 });
 
-// ─── Coverage: combineSignals fallback ───────────────────────────────────────
-describe('fetch combineSignals fallback', () => {
-  it('uses fallback path when AbortSignal.any is unavailable', async () => {
-    // Temporarily remove AbortSignal.any so the fallback branch is taken
-    const originalAny = (AbortSignal as { any?: unknown }).any;
-    delete (AbortSignal as { any?: unknown }).any;
-
-    try {
-      globalThis.fetch = vi.fn(async () =>
-        mkResponse({ body: 'ok', contentType: 'text/plain' }),
-      ) as unknown as typeof fetch;
-      const sb = await mkSandbox();
-      try {
-        const out = await fetchTool.execute({ url: 'https://example.com/' }, sb.ctx, {
-          signal: newSignal(),
-        });
-        expect(out.status).toBe(200);
-        expect(out.content).toBe('ok');
-      } finally {
-        await sb.cleanup();
-      }
-    } finally {
-      // Restore AbortSignal.any
-      if (originalAny !== undefined) {
-        (AbortSignal as { any: unknown }).any = originalAny;
-      }
-    }
-  });
-
-  it('combineSignals fallback path works with normal signals', async () => {
-    const originalAny = (AbortSignal as { any?: unknown }).any;
-    delete (AbortSignal as { any?: unknown }).any;
-
-    try {
-      globalThis.fetch = vi.fn(async () =>
-        mkResponse({ body: 'should not reach', contentType: 'text/plain' }),
-      ) as unknown as typeof fetch;
-      const sb = await mkSandbox();
-      try {
-        const ac = new AbortController();
-        ac.abort();
-        // Already-aborted signal: combined signal is immediately aborted.
-        // The fetchTool should detect this and handle gracefully.
-        try {
-          await fetchTool.execute({ url: 'https://example.com/' }, sb.ctx, { signal: ac.signal });
-          // If it resolves, the combined signal short-circuited before fetch was called.
-          // The mock was still invoked because AbortController.abort() is async.
-        } catch {
-          // Expected — the aborted signal causes rejection.
-        }
-      } finally {
-        await sb.cleanup();
-      }
-    } finally {
-      if (originalAny !== undefined) {
-        (AbortSignal as { any: unknown }).any = originalAny;
-      }
-    }
-  });
-});
-
 // ─── Coverage: prettyJson error handling ──────────────────────────────────────
 describe('fetch prettyJson error handling', () => {
   it('returns original string when JSON.parse fails', async () => {

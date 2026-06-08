@@ -605,7 +605,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                 const encrypted = encryptConfigSecrets(toWrite, vault);
                 // Ensure the project directory exists before writing
                 if (targetPath !== wpaths.globalConfig) {
-                  await fs.mkdir(path.dirname(targetPath), { recursive: true }).catch(() => {});
+                  await fs.mkdir(path.dirname(targetPath), { recursive: true }).catch((err) => console.debug(`[execution] mkdir failed: ${err}`));
                 }
                 await atomicWrite(targetPath, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
 
@@ -709,15 +709,20 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           registerDebugStreamCallback: (cb) => {
             // Swap the debug-stream callback from stderr → TUI reducer.
             // Restored on TUI unmount via the cleanup in app.tsx.
-            void import('@wrongstack/providers').then(
-              ({ setDebugStreamCallback }) => setDebugStreamCallback(cb),
-            );
+            void import('@wrongstack/providers')
+              .then(({ setDebugStreamCallback }) => setDebugStreamCallback(cb))
+              .catch((err) =>
+                console.error('[execution] failed to register debug stream callback:', err),
+              );
           },
           restoreDebugStreamCallback: () => {
-            void import('@wrongstack/providers').then(
-              ({ setDebugStreamCallback, defaultDebugStreamCallback }) =>
+            void import('@wrongstack/providers')
+              .then(({ setDebugStreamCallback, defaultDebugStreamCallback }) =>
                 setDebugStreamCallback(defaultDebugStreamCallback),
-            );
+              )
+              .catch((err) =>
+                console.error('[execution] failed to restore debug stream callback:', err),
+              );
           },
         });
       } finally {
@@ -772,7 +777,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
       } finally {
         // webuiPromise must be awaited regardless of whether runRepl threw,
         // so the HTTP/WS server can shut down cleanly.
-        await webuiPromise.catch(() => undefined);
+        await webuiPromise.catch((err) => console.debug(`[execution] webui shutdown failed: ${err}`));
       }
     } else {
       code = await runRepl({

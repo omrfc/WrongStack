@@ -920,9 +920,8 @@ export class Director implements ICoordinator {
     // then sees the signal and exits with status 'aborted', so no context
     // is silently lost.
     for (const [_role, subagentId] of entry.session.getSubagentIds()) {
-      this.coordinator.stop(subagentId).catch(() => {
-        // Subagent may have already completed naturally — that's fine.
-        // The stop() call is best-effort cleanup, not a guarantee.
+      this.coordinator.stop(subagentId).catch((err) => {
+        console.debug(`[director] stop subagent ${subagentId} failed (may have already completed): ${err}`);
       });
     }
   }

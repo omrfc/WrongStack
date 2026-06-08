@@ -209,7 +209,7 @@ export class WrongStackWebSocketClient {
       this.reconnectTimer = null;
     }
     this.reconnectAttempts = 0;
-    void this.connect().catch(() => undefined);
+    void this.connect().catch((err) => console.warn(`[ws-client] reconnect failed: ${err}`));
   }
 
   private flushMessageQueue() {

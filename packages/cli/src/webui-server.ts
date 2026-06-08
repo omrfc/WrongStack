@@ -527,7 +527,7 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
       clients.clear();
       // Best-effort: drop ourselves from the running-instance registry and
       // stop the frontend HTTP server before the WS server resolves the run.
-      void unregisterInstance(process.pid, registryBaseDir).catch(() => {});
+      void unregisterInstance(process.pid, registryBaseDir).catch((err) => console.debug(`[webui-server] unregister failed: ${err}`));
       httpServer?.close();
       wss.close(() => {
         console.log('[WebUI] Server stopped');

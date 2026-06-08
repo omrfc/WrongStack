@@ -276,7 +276,7 @@ export abstract class WireAdapter implements Provider {
         if ('timedOut' in result && result.timedOut) {
           // The read is still pending — this is a hang.
           // Cancel the reader and throw.
-          reader.cancel('stream hang detected').catch(() => {});
+          reader.cancel('stream hang detected').catch((err) => console.debug(`[wire-adapter] cancel after stream hang failed: ${err}`));
           const elapsedMs = Date.now() - startTime;
           throw new StreamHangError({
             providerId,
