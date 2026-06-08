@@ -2769,16 +2769,12 @@ export function App({
         dispatch({ type: 'toggleMonitor' });
         return;
       }
-      if (state.worktreeMonitorOpen) {
-        dispatch({ type: 'worktreeMonitorToggle' });
-        return;
-      }
+      // worktreeMonitor and the autoPhase PhaseMonitor are intentionally NOT
+      // handled here: each owns its own Esc close via its own useInput. Because
+      // the Input stays mounted alongside them, dispatching the toggle here too
+      // would fire it twice in one keypress and the panel would re-open.
       if (state.todosMonitorOpen) {
         dispatch({ type: 'toggleTodosMonitor' });
-        return;
-      }
-      if (state.autoPhase?.monitorOpen) {
-        dispatch({ type: 'autoPhaseMonitorToggle' });
         return;
       }
       if (state.settingsPicker.open) {
@@ -2797,6 +2793,19 @@ export function App({
         dispatch({ type: 'toggleGoalPanel' });
         return;
       }
+    }
+
+    // ── Hidden-input guard (process list only) ────────────────────────
+    // The process list is the one monitor that keeps the Input hidden (its
+    // single-key kill actions own the keyboard). The overlay-control keys above
+    // (F8 toggle + Esc close) have already had their turn; swallow every
+    // remaining key so nothing types into the hidden buffer and so the panel's
+    // own ↑↓/Enter/Del/a/A/r shortcuts aren't echoed as text. ProcessList reads
+    // these keys through its OWN useInput, which is unaffected by this return.
+    // The other monitor panels deliberately fall through so the live chat input
+    // below them keeps receiving text.
+    if (state.processListOpen) {
+      return;
     }
 
     // `?` on an empty prompt opens the keys-&-commands help overlay (lazygit
@@ -3708,21 +3717,17 @@ export function App({
   );
   const inputHeight = Math.max(1, inputCellRows.length);
 
-  // Monitor overlays that replace the bottom region. While any of these is
-  // open the input must be hidden so its characters can't bleed into the
-  // Static history above (Ink redraws the live region on every render, and
-  // an open overlay pushes the input down into the scrollback area).
-  const monitorOpen =
-    state.monitorOpen ||
-    state.agentsMonitorOpen ||
-    state.worktreeMonitorOpen ||
-    state.todosMonitorOpen ||
-    state.queuePanelOpen ||
-    state.processListOpen ||
-    state.goalPanelOpen ||
-    state.helpOpen;
-
-  const hideInput = enhanceActive || monitorOpen;
+  // The chat input stays LIVE underneath the read-only monitor panels (fleet,
+  // agents, worktree, todos, queue, goal) so the user can keep typing and
+  // submitting while watching them. Only three states hide the input:
+  //   • enhance — the EnhancePanel owns the input area
+  //   • help    — modal `?` overlay (handleKey swallows all but Esc/?/q)
+  //   • process list — its single-key kill actions (Enter/Del/a/A/r) own the
+  //     keyboard and would collide with typing, so it stays modal.
+  // (Each live panel that needs navigation reads ↑↓ through its own useInput;
+  // letter shortcuts that would clash with typing have been removed — see
+  // AgentsMonitor.)
+  const hideInput = enhanceActive || state.helpOpen || state.processListOpen;
 
   return (
     <Box flexDirection="column">
@@ -3734,26 +3739,28 @@ export function App({
         />
         <Box flexDirection="column" flexShrink={0}>
           <LiveActivityStrip entries={state.fleet} nowTick={nowTick} />
-          {/* While enhance is active or a monitor overlay is open, hide the Input
-              and replace it with a placeholder of matching height. This prevents
-              the live region from changing height (which Ink's log-update would
-              bleed into static scrollback) and stops input characters from
-              polluting the history area when overlays are open. */}
-          {hideInput ? (
-            <Box height={inputHeight} />
-          ) : (
-            <Input
-              prompt={INPUT_PROMPT}
-              value={state.buffer}
-              cursor={state.cursor}
-              disabled={
-                (state.status === 'aborting' && !state.steeringPending) ||
-                state.confirmQueue.length > 0
-              }
-              hint={inputHint}
-              onKey={stableOnKey}
-            />
-          )}
+          {/* While enhance is active or a monitor overlay is open, the Input is
+              rendered HIDDEN: its visible rows collapse to a constant-height
+              placeholder (so Ink's log-update never bleeds the live region into
+              static scrollback, and no characters pollute the history area), but
+              its keyboard listeners stay mounted. Keeping them mounted is what
+              keeps the central `handleKey` router — and the F-key/Esc toggles
+              that close the monitor overlays — alive. Unmounting the Input here
+              previously left the F3 agents monitor (and the other panels)
+              un-closable: F-key parsing and Esc handling both live in Input. */}
+          <Input
+            prompt={INPUT_PROMPT}
+            value={state.buffer}
+            cursor={state.cursor}
+            hidden={hideInput}
+            placeholderHeight={inputHeight}
+            disabled={
+              (state.status === 'aborting' && !state.steeringPending) ||
+              state.confirmQueue.length > 0
+            }
+            hint={inputHint}
+            onKey={stableOnKey}
+          />
           {state.picker.open ? (
             <FilePicker
               query={state.picker.query}
