@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 const MAX_FILES = Number.parseInt(process.env.GUARD_MAX_FILES ?? '', 120) || 150;
 const FORCE_FLAG = process.argv.includes('--force');
 const VERBOSE = process.argv.includes('--verbose') || process.argv.includes('-v');
@@ -38,7 +38,7 @@ function findCorruptionInStagedFiles(stagedFiles) {
     if (CORRUPTION_ALLOWLIST.has(file)) continue;
     let diff;
     try {
-      diff = execSync(`git diff --cached -- "${file}"`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+      diff = execFileSync('git', ['diff', '--cached', '--', file], { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
     } catch {
       continue;
     }

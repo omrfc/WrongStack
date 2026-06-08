@@ -226,9 +226,16 @@ export function serveStdio(server: MCPServer, opts: ServeStdioOptions = {}): Ser
       buffer = buffer.slice(idx + 1);
       idx = buffer.indexOf('\n');
       if (!line.trim()) continue;
-      void server.handleMessage(line).then((res) => {
-        if (res !== null && !closed) writeLine(res);
-      });
+      void server
+        .handleMessage(line)
+        .then((res) => {
+          if (res !== null && !closed) writeLine(res);
+        })
+        .catch((err) => {
+          // Malformed JSON from a peer — log and continue so one bad line
+          // doesn't kill the entire session.
+          console.error(`[mcp:Server] handleMessage error: ${err}`);
+        });
     }
   };
 

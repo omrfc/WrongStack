@@ -308,7 +308,7 @@ export class WrongStackWebSocketClient {
     this.send({
       type: 'abort',
       payload: {},
-    } as unknown as WSClientMessage);
+    });
   }
 
   sendConfirm(id: string, decision: 'yes' | 'no' | 'always' | 'deny') {

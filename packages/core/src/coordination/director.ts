@@ -461,10 +461,13 @@ export class Director implements ICoordinator {
   private workCompleteFlag = false;
   /** Pending /btw notes stashed by the leader agent (see setLeaderBtwNote). */
   private _leaderBtwNotes: string[] = [];
-  /** Active collab sessions tracked by sessionId (see spawnCollab). */
+  /** Active collab sessions tracked by sessionId (see spawnCollab).
+   *  The tuple holds the session and its Director-registered listener unsubs.
+   *  Calling the unsubs on cancel/premature-cleanup prevents listener accumulation
+   *  on CollabSession (EventEmitter) across many spawnCollab() calls. */
   private readonly _activeCollabSessions = new Map<
     string,
-    import('./collab-debug.js').CollabSession
+    { session: import('./collab-debug.js').CollabSession; unsubs: (() => void)[] }
   >();
   /** Prevents large `ask_subagent` answers from bloating the leader's context window. */
   readonly largeAnswerStore: LargeAnswerStore;
@@ -903,9 +906,11 @@ export class Director implements ICoordinator {
    * The CollabDebugReport will reflect 'cancelled' disposition when awaited.
    */
   cancelCollabSession(sessionId: string, reason = 'Director cancelled'): void {
-    const session = this._activeCollabSessions.get(sessionId);
-    if (!session || session.isCancelled()) return;
-    session.cancel(reason);
+    const entry = this._activeCollabSessions.get(sessionId);
+    if (!entry || entry.session.isCancelled()) return;
+    // Unsubscribe Director listeners first so they don't fire after cancel.
+    for (const unsub of entry.unsubs) unsub();
+    entry.session.cancel(reason);
     // Stop each collab agent via the coordinator so their run() aborts.
     // This is the critical difference from a natural finish: we call
     // abortController.abort() on each subagent's run signal, which
@@ -914,7 +919,7 @@ export class Director implements ICoordinator {
     // The abort is cooperative — the agent finishes its current iteration
     // then sees the signal and exits with status 'aborted', so no context
     // is silently lost.
-    for (const [_role, subagentId] of session.getSubagentIds()) {
+    for (const [_role, subagentId] of entry.session.getSubagentIds()) {
       this.coordinator.stop(subagentId).catch(() => {
         // Subagent may have already completed naturally — that's fine.
         // The stop() call is best-effort cleanup, not a guarantee.
@@ -1695,10 +1700,21 @@ export class Director implements ICoordinator {
         return options.onBudgetWarning?.(alert) ?? 'ignore';
       },
     });
-    // Track so cancelCollabSession(sessionId) works and Director knows what's active
-    this._activeCollabSessions.set(session.sessionId, session);
-    session.on('session.done', () => this._activeCollabSessions.delete(session.sessionId));
-    session.on('session.error', () => this._activeCollabSessions.delete(session.sessionId));
+    // Track so cancelCollabSession(sessionId) works and Director knows what's active.
+    // Store explicit unsubscribe wrappers so we can detach these listeners on cancel —
+    // without cleanup, repeated spawnCollab() calls would accumulate listeners
+    // on CollabSession (EventEmitter) for the Director's lifetime.
+    // Note: EventEmitter.on() returns `this`, not an unsubscribe function,
+    // so we create explicit wrappers that call .off() with the same handler ref.
+    const doneHandler = () => this._activeCollabSessions.delete(session.sessionId);
+    const errorHandler = () => this._activeCollabSessions.delete(session.sessionId);
+    session.on('session.done', doneHandler);
+    session.on('session.error', errorHandler);
+    const unsubs: (() => void)[] = [
+      () => session.off('session.done', doneHandler),
+      () => session.off('session.error', errorHandler),
+    ];
+    this._activeCollabSessions.set(session.sessionId, { session, unsubs });
     return session.start();
   }
 
