@@ -3,7 +3,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 // ── auth handler ────────────────────────────────────────────────────────────
 const runAuthMenu = vi.fn().mockResolvedValue(0);
 const runAuthDirect = vi.fn().mockResolvedValue(0);
-vi.mock('../src/auth-menu.js', () => ({
+vi.mock('../src/auth-menu/index.js', () => ({
   runAuthMenu: (...a: unknown[]) => runAuthMenu(...a),
   runAuthDirect: (...a: unknown[]) => runAuthDirect(...a),
 }));
@@ -61,6 +61,26 @@ describe('authCmd', () => {
   it('invokes the menu when no positional args', async () => {
     await authCmd([], fakeDeps());
     expect(runAuthMenu).toHaveBeenCalledTimes(1);
+    expect(runAuthDirect).not.toHaveBeenCalled();
+  });
+
+  it('invokes the menu when "list" is passed (read-only, no mock needed)', async () => {
+    // runAuthList handles ENOENT gracefully and prints "No providers".
+    const deps = fakeDeps();
+    const code = await authCmd(['list'], deps);
+    expect(code).toBe(0);
+    expect(runAuthMenu).not.toHaveBeenCalled();
+    expect(runAuthDirect).not.toHaveBeenCalled();
+    expect(deps.renderer.write).toHaveBeenCalledWith(
+      expect.stringContaining('No providers configured'),
+    );
+  });
+
+  it('invokes the menu when "ls" alias is passed', async () => {
+    const deps = fakeDeps();
+    const code = await authCmd(['ls'], deps);
+    expect(code).toBe(0);
+    expect(runAuthMenu).not.toHaveBeenCalled();
     expect(runAuthDirect).not.toHaveBeenCalled();
   });
 
