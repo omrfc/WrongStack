@@ -108,11 +108,9 @@ export function createContextManagerTool(
 ): Tool<ContextManagerInput, ContextManagerResult> {
   const minCompactThreshold = opts.minCompactThreshold ?? 0;
   const noopRetryDeltaTokens = opts.noopRetryDeltaTokens ?? 2_000;
-  const maxContext = opts.maxContext ?? 128_000;
+  /** Hard override for maxContext. When absent, the runtime value from ctx.provider is used. */
+  const configuredMaxContext = opts.maxContext;
   const compactThresholdFraction = opts.compactThresholdFraction ?? 0.5;
-  const effectiveThreshold = minCompactThreshold > 0
-    ? minCompactThreshold
-    : Math.floor(maxContext * compactThresholdFraction);
 
   // Tracks the most recent NOOP attempt so we can skip retry until context grows.
   let lastNoopTokens = 0;
@@ -239,6 +237,16 @@ export function createContextManagerTool(
             : { total: beforeTokens, messages: beforeTokens, systemPrompt: 0, tools: 0 };
           const currentTokens = fullEstimate.total;
 
+          // Resolve maxContext at execution time from the live provider capabilities.
+          // This is the actual model limit — from models.dev catalog, provider config,
+          // or explicit effectiveMaxContext override. Falls back to the creation-time
+          // value only when no runtime value is available (e.g. in test environments).
+          const runtimeMaxContext =
+            configuredMaxContext ?? ctx.provider?.capabilities?.maxContext ?? 128_000;
+          const runtimeThreshold = minCompactThreshold > 0
+            ? minCompactThreshold
+            : Math.floor(runtimeMaxContext * compactThresholdFraction);
+
           // NOOP retry prevention: skip if the previous compaction saved nothing
           // and context hasn't grown enough to make another attempt worthwhile.
           if (lastNoopTokens > 0) {
@@ -255,13 +263,13 @@ export function createContextManagerTool(
           }
 
           // Minimum threshold check: skip if context is too small to benefit.
-          if (currentTokens < effectiveThreshold) {
+          if (runtimeThreshold > 0 && currentTokens < runtimeThreshold) {
             return {
               action: 'compact',
               beforeTokens,
               afterTokens: beforeTokens,
               messageCount: messages.length,
-              notes: `Context tokens (${currentTokens}) below compact threshold (${effectiveThreshold}). Skipping.`,
+              notes: `Context tokens (${currentTokens}) below compact threshold (${runtimeThreshold}, based on provider maxContext ${runtimeMaxContext}). Skipping.`,
             };
           }
 
