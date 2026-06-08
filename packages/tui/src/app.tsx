@@ -456,7 +456,12 @@ export function App({
     const goalPath = resolveWstackPaths({ projectRoot }).projectGoal;
     loadGoal(goalPath)
       .then((goal) => {
-        if (!goal) return; // no goal file yet — that's fine
+        if (!goal) {
+          // Goal was cleared or never existed — clear the panel so
+          // stale data doesn't linger after /goal clear.
+          dispatch({ type: 'goalSummary', summary: null });
+          return;
+        }
         const lastEntry = goal.journal?.[goal.journal.length - 1];
         dispatch({
           type: 'goalSummary',

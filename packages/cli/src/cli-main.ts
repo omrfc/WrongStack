@@ -281,9 +281,12 @@ export async function main(argv: string[]): Promise<number> {
   // REPL/TUI modes keep the EventBus alive across multiple runs — stale
   // handlers from a re-entrant main() would otherwise accumulate.
   const teardownHandlers: Array<() => void> = [];
-  const evOn = (event: string, handler: (...args: unknown[]) => void) => {
-    (events.on as (event: string, handler: (...args: unknown[]) => void) => void)(event, handler);
-    teardownHandlers.push(() => (events.off as (event: string, handler: (...args: unknown[]) => void) => void)(event, handler));
+  // biome-ignore lint/suspicious/noExplicitAny: event bus uses any for dispatch
+  const evOn = (event: string, handler: (...args: any[]) => void) => {
+    // biome-ignore lint/suspicious/noExplicitAny: type cast for event bus
+    (events.on as (event: string, handler: (...args: any[]) => void) => void)(event, handler);
+    // biome-ignore lint/suspicious/noExplicitAny: type cast for event bus
+    teardownHandlers.push(() => (events.off as (event: string, handler: (...args: any[]) => void) => void)(event, handler));
   };
 
   evOn('provider.response', (e) => {

@@ -43,6 +43,11 @@ const STATE_CONFIG: Record<GoalState['goalState'], { color: string; bg: string; 
     bg: 'bg-red-100 dark:bg-red-900/40',
     label: 'Failed',
   },
+  abandoned: {
+    color: 'text-stone-600 dark:text-stone-400',
+    bg: 'bg-stone-100 dark:bg-stone-900/40',
+    label: 'Abandoned',
+  },
 };
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -69,11 +74,11 @@ export function GoalPanel({ goal, className }: GoalPanelProps): React.ReactEleme
   // Hide the panel when there's no goal, or when the goal is terminal
   // (completed / failed) — it's served its purpose and shouldn't linger.
   if (!goal) return null;
-  if (goal.goalState === 'completed' || goal.goalState === 'failed') return null;
+  if (goal.goalState === 'completed' || goal.goalState === 'failed' || goal.goalState === 'abandoned') return null;
 
   // Auto-collapse when goal state changes (e.g. completed → null)
   useEffect(() => {
-    if (!goal || goal.goalState === 'completed' || goal.goalState === 'failed') {
+    if (!goal || goal.goalState === 'completed' || goal.goalState === 'failed' || goal.goalState === 'abandoned') {
       setCollapsed(true);
     }
   }, [goal]);

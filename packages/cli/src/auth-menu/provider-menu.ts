@@ -48,7 +48,7 @@ export async function manageProvider(
       return;
     }
 
-    const [verb, argRaw = ''] = raw.split(/\s+/, 2);
+    const [verb = '', argRaw = ''] = raw.split(/\s+/, 2);
     const arg = argRaw ? Number.parseInt(argRaw, 10) : Number.NaN;
 
     const handled = await dispatchAction(verb, arg, providerId, keys, cfg, deps);

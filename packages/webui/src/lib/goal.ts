@@ -21,7 +21,7 @@ export interface GoalJournalEntry {
 export interface GoalState {
   goal: string;
   refinedGoal?: string | undefined;
-  goalState: 'active' | 'paused' | 'completed' | 'failed';
+  goalState: 'active' | 'paused' | 'completed' | 'failed' | 'abandoned';
   iterations: number;
   progress: number;
   progressNote?: string | undefined;
@@ -41,17 +41,26 @@ export function parseGoalState(raw: Record<string, unknown> | null): GoalState |
   return {
     goal: raw.goal as string,
     refinedGoal: typeof raw.refinedGoal === 'string' ? raw.refinedGoal : undefined,
-    goalState: (['active', 'paused', 'completed', 'failed'].includes(raw.goalState as string)
+    goalState: (['active', 'paused', 'completed', 'failed', 'abandoned'].includes(raw.goalState as string)
       ? (raw.goalState as GoalState['goalState'])
       : 'active') as GoalState['goalState'],
     iterations: typeof raw.iterations === 'number' ? raw.iterations : 0,
     progress: typeof raw.progress === 'number' ? raw.progress : 0,
     progressNote: typeof raw.progressNote === 'string' ? raw.progressNote : undefined,
-    progressTrend: (['up', 'down', 'stable'].includes(raw.progressTrend as string)
-      ? (raw.progressTrend as GoalState['progressTrend'])
-      : undefined) as GoalState['progressTrend'] | undefined,
+    progressTrend: raw.progressTrend === 'accelerating' ? 'up'
+      : raw.progressTrend === 'stalling' ? 'down'
+      : raw.progressTrend === 'steady' ? 'stable'
+      : undefined,
     deliverables: Array.isArray(raw.deliverables)
-      ? (raw.deliverables as GoalDeliverable[])
+      ? (raw.deliverables as unknown[]).map((d, i) =>
+          typeof d === 'string'
+            ? {
+                id: `d${i}`,
+                text: d,
+                status: /^\[[x✓]\]|✅|\(done\)/i.test(d) ? ('done' as const) : ('pending' as const),
+              }
+            : (d as GoalDeliverable),
+        )
       : undefined,
     journal: Array.isArray(raw.journal) ? (raw.journal as GoalJournalEntry[]) : undefined,
     lastTask: typeof raw.lastTask === 'string' ? raw.lastTask : undefined,
