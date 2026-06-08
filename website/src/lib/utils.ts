@@ -11,7 +11,7 @@ export function cn(...inputs: ClassValue[]) {
    ========================================================================= */
 
 export const META = {
-  version: '0.89.3',
+  version: '0.89.4',
   repo: 'https://github.com/WrongStack/WrongStack',
   npm: 'wrongstack',
   node: '22',
@@ -20,8 +20,8 @@ export const META = {
 } as const;
 
 export const heroStats = [
-  { value: '36', label: 'built-in tools' },
-  { value: '16', label: 'bundled skills' },
+  { value: '37', label: 'built-in tools' },
+  { value: '17', label: 'bundled skills' },
   { value: '~110', label: 'model providers' },
   { value: '10', label: 'official plugins' },
 ] as const;
@@ -42,6 +42,7 @@ export const skills = [
   { name: 'sdd', description: 'Spec-Driven Development workflow' },
   { name: 'security-scanner', description: 'Find vulnerabilities before they ship' },
   { name: 'skill-creator', description: 'Build custom skills for specialized tasks' },
+  { name: 'tech-stack', description: 'Validate package versions, reject dead/obsolete tech' },
   { name: 'testing', description: 'Vitest patterns, mocks, coverage, and test strategy' },
   { name: 'typescript-strict', description: 'Strict TypeScript for bulletproof code' },
 ] as const;
@@ -58,7 +59,7 @@ export const toolGroups = [
   { label: 'Packages', tools: ['install', 'audit', 'outdated'] },
   { label: 'Codegen', tools: ['document', 'scaffold'] },
   { label: 'Data', tools: ['json', 'logs'] },
-  { label: 'Project', tools: ['git', 'todo'] },
+  { label: 'Project', tools: ['git', 'todo', 'task', 'plan'] },
   { label: 'Codebase index', tools: ['codebase-index', 'codebase-search', 'codebase-stats'] },
   { label: 'Memory', tools: ['remember', 'forget'] },
   {
@@ -156,6 +157,7 @@ export const slashCommands = [
   '/telegram-setup',
   '/tools',
   '/todos',
+  '/tasks',
   '/usage',
   '/version-help',
   '/worktree',
@@ -210,9 +212,24 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
-    version: '0.89.3',
+    version: '0.89.4',
     date: '2026-06-08',
     latest: true,
+    tagline: 'Task system & agent enhancements',
+    highlights: [
+      'New task tool — structured work items with dependencies, types, priorities, and agent assignment',
+      '/tasks slash command — human-facing task management with promote-to-todos',
+      'Three-layer work hierarchy: plan (strategic) → task (structured) → todo (tactical)',
+      '/setmodel resolve <role> — walk the full resolution chain step by step',
+      '/setmodel doctor — validate matrix entries against current config',
+      'tech-stack validator agent — 43rd fleet agent, single-shot version checking',
+      'Telegram notifications humanized — no more raw JSON dumps, semantic truncation',
+      'Fleet roster 46 → 47 agents (43 catalog + 4 legacy)',
+    ],
+  },
+  {
+    version: '0.89.3',
+    date: '2026-06-08',
     tagline: 'TUI hardening & code consolidation',
     consolidated: true,
     highlights: [

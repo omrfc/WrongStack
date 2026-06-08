@@ -3473,20 +3473,37 @@ export function App({
     // one-shot LLM call (its own system prompt, no history) that rewrites it
     // into a clearer instruction, then briefly preview it. The user can let
     // it auto-send (countdown), accept now (Enter), keep the original (Esc),
-    // or edit (e). Skipped for steering interrupts, messages carrying inline
-    // attachment chips (the refiner would drop the tokens), and inputs the
-    // heuristic judges not worth refining. Best-effort — any failure falls
+    // or edit (e). Skipped for steering interrupts and inputs the heuristic
+    // judges not worth refining. When chips (file/image/paste tokens) are
+    // present, they are stripped before refinement and re-attached afterwards
+    // so file references survive the rewrite. Best-effort — any failure falls
     // straight through to the original text.
     let effectiveText = trimmed;
-    const hasChips = trimmed
-      ? new RegExp(INLINE_TOKEN_SRC, 'g').test(trimmed)
-      : false;
+    // Extract inline chips so the enhancer sees clean text, then re-attach
+    // them after refinement so file/image references survive.
+    const chips: string[] = [];
+    let cleanText = trimmed;
+    const chipRe = new RegExp(INLINE_TOKEN_SRC, 'g');
+    let chipMatch: RegExpExecArray | null;
+    while ((chipMatch = chipRe.exec(trimmed)) !== null) {
+      chips.push(chipMatch[0]);
+    }
+    if (chips.length > 0) {
+      // Strip chips from the text for the enhancer — keeps file paths out of
+      // the text the model might mangle, but preserves them for re-attachment.
+      cleanText = trimmed.replace(chipRe, '').replace(/\s{2,}/g, ' ').trim();
+      // If the message is nothing but chips (e.g. pasting a file with no
+      // comment), don't bother refining — there's no prose to improve.
+      if (!cleanText) {
+        cleanText = trimmed; // fall through to send-as-is
+        chips.length = 0;    // already in the text, nothing to re-attach
+      }
+    }
     if (
       enhanceEnabledRef.current &&
       state.status === 'idle' &&
       !steering &&
-      !hasChips &&
-      shouldEnhance(trimmed)
+      shouldEnhance(cleanText)
     ) {
       dispatch({ type: 'enhanceBusy', on: true });
       // Let the user bail out of a slow refine (reasoning models can take many
@@ -3500,7 +3517,7 @@ export function App({
         result = await enhanceUserPrompt({
           provider: agent.ctx.provider,
           model: agent.ctx.model,
-          text: trimmed,
+          text: cleanText,
           signal: ac.signal,
           onError: (reason) => {
             enhanceErr = reason;
@@ -3527,14 +3544,19 @@ export function App({
           },
         });
       }
-      if (result && !normalizedEqual(result.refined, trimmed)) {
+      if (result && !normalizedEqual(result.refined, cleanText)) {
+        // Re-attach chips that were stripped before refinement so file/image
+        // references survive the rewrite. Chips are appended at the end.
+        const chipSuffix = chips.length > 0 ? ` ${chips.join(' ')}` : '';
+        const refinedWithChips = result.refined + chipSuffix;
+        const englishWithChips = result.english + chipSuffix;
         const decision = await new Promise<'refined' | 'english' | 'original' | 'edit'>((resolve) => {
           dispatch({
             type: 'enhanceOpen',
             info: {
               original: trimmed,
-              refined: result.refined,
-              english: result.english,
+              refined: refinedWithChips,
+              english: englishWithChips,
               resolve,
             },
           });
@@ -3543,13 +3565,13 @@ export function App({
         if (decision === 'edit') {
           // Load the refined text back into the input so the user can tweak
           // it and re-submit. Nothing is sent this round.
-          setDraft(result.refined, result.refined.length);
+          setDraft(refinedWithChips, refinedWithChips.length);
           return;
         }
         if (decision === 'english') {
-          effectiveText = result.english;
+          effectiveText = englishWithChips;
         } else {
-          effectiveText = decision === 'refined' ? result.refined : trimmed;
+          effectiveText = decision === 'refined' ? refinedWithChips : trimmed;
         }
       }
     }

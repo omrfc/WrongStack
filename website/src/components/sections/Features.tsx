@@ -5,6 +5,7 @@ import { SpotlightCard } from '@/components/ui/spotlight-card';
 import {
   Boxes,
   Infinity as InfinityIcon,
+  Layers,
   ListChecks,
   Plug,
   ShieldCheck,
@@ -24,7 +25,7 @@ const features = [
   {
     icon: Users,
     title: 'Multi-agent fleet',
-    tag: 'Director + 46 roles',
+    tag: 'Director + 47 roles',
     body: 'A Director promotes the session and drives a fleet through 14 orchestration tools — spawn, assign, await, ask, roll_up, health, transcripts, and collab debug. A smart dispatcher routes each task to the best-matching role.',
   },
   {
@@ -62,6 +63,12 @@ const features = [
     title: 'AutoPhase',
     tag: '0.9.x',
     body: '/autophase breaks a project into ordered phases — Discovery, Design, Implementation, Testing, Deployment — and runs them autonomously with a live phase view in the web UI.',
+  },
+  {
+    icon: Layers,
+    title: 'Structured task system',
+    tag: 'plan → task → todo',
+    body: 'Three-layer work hierarchy. Plans outline strategy, tasks break work into typed/prioritized items with dependencies and agent assignment, todos track the immediate next step. Promote down the chain as work progresses.',
   },
   {
     icon: Plug,

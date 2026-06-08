@@ -23,6 +23,7 @@ import { readTool } from './read.js';
 import { replaceTool } from './replace.js';
 import { scaffoldTool } from './scaffold.js';
 import { searchTool } from './search.js';
+import { taskTool } from './task.js';
 import { testTool } from './test.js';
 import { todoTool } from './todo.js';
 import { toolHelpTool } from './tool-help.js';
@@ -45,6 +46,7 @@ export const builtinTools: Tool[] = [
   searchTool,
   todoTool,
   planTool,
+  taskTool,
   gitTool,
   patchTool,
   jsonTool,

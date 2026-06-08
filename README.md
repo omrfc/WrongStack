@@ -21,12 +21,12 @@ npm i -g wrongstack && wrongstack
 
 ---
 
-WrongStack drives **autonomous goal loops**, **parallel subagent fan-out**, **multi-agent Director orchestration**, **Brain-governed policy decisions**, and **collaborative debugging** — and walks you through full **Spec-Driven Development** cycles. It ships with **36 built-in tools**, **16 skills**, **7 first-party plugins**, **10 more** in `@wrongstack/plugins`, and **~110 providers** pulled live from [models.dev](https://models.dev) — no hardcoded model names, no hardcoded pricing, no hardcoded lists. Secrets are **AES-256-GCM** encrypted at rest with a per-machine key; every tool call clears a **per-tool permission policy**. Everything lives under `~/.wrongstack/` — the only thing you'd ever commit is `.wrongstack/AGENTS.md`.
+WrongStack drives **autonomous goal loops**, **parallel subagent fan-out**, **multi-agent Director orchestration**, **Brain-governed policy decisions**, and **collaborative debugging** — and walks you through full **Spec-Driven Development** cycles. It ships with **37 built-in tools**, **17 skills**, **7 first-party plugins**, **10 more** in `@wrongstack/plugins`, and **~110 providers** pulled live from [models.dev](https://models.dev) — no hardcoded model names, no hardcoded pricing, no hardcoded lists. Secrets are **AES-256-GCM** encrypted at rest with a per-machine key; every tool call clears a **per-tool permission policy**. Everything lives under `~/.wrongstack/` — the only thing you'd ever commit is `.wrongstack/AGENTS.md`.
 
 ### ✨ Why it slaps
 
 - 🧠 **Three surfaces, one brain** — a plain readline REPL, an Ink/React **TUI** (`--tui`), and a standalone **web UI**.
-- 🤖 **A fleet, not a lone agent** — a 46-role roster + smart dispatcher fan out under a Director, each subagent fully isolated with its own budget and JSONL transcript.
+- 🤖 **A fleet, not a lone agent** — a 47-role roster + smart dispatcher fan out under a Director, each subagent fully isolated with its own budget and JSONL transcript.
 - 🧠 **Brain as an authority seam** — risky AutoPhase and Director choices can be auto-decided by policy, denied, or escalated to the human through the TUI.
 - ♾️ **Set a goal, walk away** — `/goal` locks in a contract and the eternal / parallel engines grind until it's _verifiably_ done.
 - 🔌 **~110 providers, zero lock-in** — Anthropic, OpenAI, Google, and ~100 OpenAI-compatible endpoints, catalog refreshed from models.dev at boot.
@@ -87,7 +87,7 @@ WS_HOST=0.0.0.0 webui          # expose on the LAN
 wrongstack --webui
 ```
 
-### 36 built-in tools
+### 37 built-in tools
 
 All tools are registered out of the box — no plugin required.
 
@@ -120,6 +120,7 @@ All tools are registered out of the box — no plugin required.
 | `tool_search` / `tool_use` / `batch_tool_use` / `tool_help` | Meta-tooling for tool discovery and orchestration |
 | `todo` | Track multi-step tasks |
 | `git` | Common git operations |
+| `task` | Structured work items with dependencies, types, and priorities |
 | `context_manager` | Inspect / trim / compact the in-flight context window |
 | `remember` / `forget` | Persist notes across sessions (project- or user-scoped, gated by `features.memory`) |
 | `codebase-index` | Build / update the SQLite symbol index (incremental; multi-language) |
@@ -177,7 +178,7 @@ BEGIN.]
 
 Architecture: Host EventBus (always-on bridge) → Leader Agent (Director) + FleetBus (director-only fan-in) → `DefaultMultiAgentCoordinator` → `AgentSubagentRunner` per task (fresh Agent + Context + EventBus, full isolation) → per-subagent JSONL transcripts on disk.
 
-**46-agent roster + smart dispatcher.** The Director draws from a 46-role agent catalog; a smart dispatcher routes each task to the best-matching role instead of spawning generic clones. The TUI fleet monitor (**Ctrl+F**) shows per-subagent status and a fleet-wide token gauge, and auto-extended budgets surface as a `⚡ extended ×N` badge across all fleet UIs. Spawned subagents take a memorable scientist nickname (Turing, Shannon, Gauss, …) so you can track them across the fleet at a glance.
+**47-agent roster + smart dispatcher.** The Director draws from a 46-role agent catalog; a smart dispatcher routes each task to the best-matching role instead of spawning generic clones. The TUI fleet monitor (**Ctrl+F**) shows per-subagent status and a fleet-wide token gauge, and auto-extended budgets surface as a `⚡ extended ×N` badge across all fleet UIs. Spawned subagents take a memorable scientist nickname (Turing, Shannon, Gauss, …) so you can track them across the fleet at a glance.
 
 **Collaborative debugging.** `Director.spawnCollab()` runs **BugHunter, RefactorPlanner, and Critic in parallel on one shared, immutable file snapshot**. Findings flow through the FleetBus as structured events (`bug.found → refactor.plan → critic.evaluation`); the Director routes each output to its dependents through a shared scratchpad — so agents build on each other's conclusions without exchanging full transcripts — and returns a single structured `CollabDebugReport`. Subagents signal upward with the `fleet_emit` tool.
 
@@ -332,13 +333,13 @@ Four-layer observability:
 - **Plugin trust tiers**: only first-party (`official`) plugins may register bare slash-command names, override builtins, or `wrap`/`unregister` tools they don't own
 - Threat model and adversary trust assumptions in [`SECURITY.md`](SECURITY.md); audit findings and verification in [`security-report/`](security-report/)
 
-### Bundled skills (16)
+### Bundled skills (17)
 
-`api-design`, `audit-log`, `bug-hunter`, `docker-deploy`, `git-flow`, `multi-agent`, `node-modern`, `observability`, `prompt-engineering`, `react-modern`, `refactor-planner`, `sdd`, `security-scanner`, `skill-creator`, `testing`, `typescript-strict` — all following one structure (Overview → Rules → Patterns → Skills in scope). Discovered in order: project → user → bundled, with first-seen winning on name collisions.
+`api-design`, `audit-log`, `bug-hunter`, `docker-deploy`, `git-flow`, `multi-agent`, `node-modern`, `observability`, `prompt-engineering`, `react-modern`, `refactor-planner`, `sdd`, `security-scanner`, `skill-creator`, `tech-stack`, `testing`, `typescript-strict` — all following one structure (Overview → Rules → Patterns → Skills in scope). Discovered in order: project → user → bundled, with first-seen winning on name collisions.
 
 ### `--no-features` minimal kernel
 
-Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. What's left: kernel (`Container` + `Pipeline` + `EventBus` + `RunController`, 505 lines) + agent (525 lines) + 36 tools + permission policy + curated system prompt. The minimal-viable WrongStack runs offline with no network calls at startup. Provider family must be declared explicitly in config when using this mode.
+Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. What's left: kernel (`Container` + `Pipeline` + `EventBus` + `RunController`, 505 lines) + agent (525 lines) + 37 tools + permission policy + curated system prompt. The minimal-viable WrongStack runs offline with no network calls at startup. Provider family must be declared explicitly in config when using this mode.
 
 ---
 
@@ -420,7 +421,7 @@ wrongstack --provider openrouter --model anthropic/claude-opus-4-7
 
 ## Slash commands
 
-**Core** (both the plain REPL and the TUI): `/init` `/help` `/clear` `/compact` `/context` `/diag` `/stats` `/tools` `/plugin` `/mcp` `/memory` `/todos` `/mode` `/yolo` `/autonomy` `/btw` `/fix` `/autophase` `/worktree` `/settings` `/sdd` `/image` `/save` `/resume` `/prune` `/exit`
+**Core** (both the plain REPL and the TUI): `/init` `/help` `/clear` `/compact` `/context` `/diag` `/stats` `/tools` `/plugin` `/mcp` `/memory` `/todos` `/tasks` `/mode` `/yolo` `/autonomy` `/btw` `/fix` `/autophase` `/worktree` `/settings` `/sdd` `/image` `/save` `/resume` `/prune` `/exit`
 
 Every built-in command is tagged with a category (`Run` · `Session` · `Inspect` · `Agent` · `Config` · `App`); the TUI slash picker groups matches under category headers, and the WebUI surfaces 39 commands in its slash list.
 
@@ -547,7 +548,7 @@ Commit this file to share project conventions with the agent across all develope
 
 **2. Zero non-overridable behavior.** 16 services bound through `Container` (Logger, TokenCounter, SessionStore, MemoryStore, PermissionPolicy, Compactor, PathResolver, ConfigLoader, Renderer, InputReader, ErrorHandler, RetryPolicy, SkillLoader, SystemPromptBuilder, SecretScrubber, ModelsRegistry). 6 pipelines as middleware chains. Tools, providers, MCP servers, and slash commands all live in registries.
 
-**3. Standalone sufficiency.** Works with 36 built-in tools, 4 wire-family transports, permission policy, and a curated system prompt — no plugins required.
+**3. Standalone sufficiency.** Works with 37 built-in tools, 4 wire-family transports, permission policy, and a curated system prompt — no plugins required.
 
 **4. Layered, not monolithic.** `--no-features` flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. The minimal-viable WrongStack runs offline with no network calls at startup.
 
@@ -558,7 +559,7 @@ Commit this file to share project conventions with the agent across all develope
 | `@wrongstack/core` | Kernel, agent, types, registries, plugin contract |
 | `@wrongstack/runtime` | Default runtime implementations, host composition helpers, extension pack contracts |
 | `@wrongstack/providers` | Anthropic/OpenAI/OpenAI-compatible/Google wire adapters + SSE |
-| `@wrongstack/tools` | 36 built-in tools (incl. SQLite codebase index) |
+| `@wrongstack/tools` | 37 built-in tools (incl. SQLite codebase index) |
 | `@wrongstack/mcp` | MCP server registry + reconnection logic |
 | `@wrongstack/cli` | REPL, subcommands, slash commands, terminal renderer |
 | `@wrongstack/tui` | Ink-based TUI (lazy-loaded behind `--tui`) |
@@ -586,7 +587,7 @@ For the full walk-through — including the L1-A reactive `ConversationState`, h
 
 ## Status
 
-- **5500+ tests passing** across 412+ test files in the 0.89.3 release gate
+- **5530+ tests passing** across 412+ test files in the 0.89.3 release gate
 - Coverage thresholds: ≥85 % lines / ≥85 % functions / ≥70 % branches / ≥82 % statements
 - All workspace packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles

@@ -155,6 +155,9 @@ export async function setupSession(params: {
   const planPath = path.join(wpaths.projectSessions, `${session?.id}.plan.json`);
   context.state.setMeta('plan.path', planPath);
 
+  const taskPath = path.join(wpaths.projectSessions, `${session?.id}.tasks.json`);
+  context.state.setMeta('task.path', taskPath);
+
   let dirState;
   if (resumeId) {
     try {

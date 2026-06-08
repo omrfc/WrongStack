@@ -2,7 +2,7 @@
 
 ## What it does
 
-Manages provider API credentials. Can run interactively (menu mode) or with flags for scripted use.
+Manages provider API credentials. Supports interactive menu, quick listing, and flag-based scripted use. Also available as a slash command (`/auth`) during active sessions.
 
 ## Usage modes
 
@@ -10,30 +10,86 @@ Manages provider API credentials. Can run interactively (menu mode) or with flag
 ```
 wstack auth
 ```
-Opens a menu listing all providers, their env vars, and key status (env / vault / missing). Allows adding, removing, or editing credentials.
+Opens the full interactive key manager: browse catalog providers, add custom entries, manage keys, set active key, edit family/baseUrl/models.
+
+### Quick listing
+```
+wstack auth list
+wstack auth ls
+```
+Prints all saved providers with their keys (masked), active indicators, families, and base URLs. No prompt — read-only, safe for scripts and CI.
 
 ### Direct (flag-based)
 ```
 wstack auth <provider-id>
-wstack auth <provider-id> --label <name> --family <family> --base-url <url> --env-vars <var1,var2>
+wstack auth <provider-id> --label <name> --family <family> --base-url <url>
 ```
 
-## Flags
+### In-session slash command
+```
+/auth                    # List saved providers and key status
+/auth status <provider>   # Detailed view of one provider
+/auth open               # Show how to launch the interactive menu
+/auth help               # Usage reference
+```
+Non-blocking — works under both the plain REPL and the Ink TUI.
+
+## Flags (direct mode only)
 
 | Flag | Effect |
 |---|---|
-| `--label` | Human label for this credential set |
-| `--family` | Provider family (e.g. `openai-compatible`) |
+| `--label` | Human label for this credential set (default: "default") |
+| `--family` | Provider family: `anthropic`, `openai`, `openai-compatible`, `google` |
 | `--base-url` | Custom API base URL |
-| `--env-vars` | Comma-separated env vars to check (e.g. `ANTHROPIC_API_KEY`) |
+| `--env` | Comma-separated env vars to check (e.g. `ANTHROPIC_API_KEY`) |
+
+## Interactive menu keys
+
+### Top level
+| Key | Action |
+|-----|--------|
+| `a` | Add a provider from the models.dev catalog |
+| `c` | Add a custom provider (bypass catalog) |
+| `1`-`N` | Manage a saved provider |
+| `q` | Quit |
+
+### Provider submenu
+| Key | Action |
+|-----|--------|
+| `a` | Add another key |
+| `u <n>` | Update key `<n>` |
+| `d <n>` | Delete key `<n>` (with confirmation) |
+| `s <n>` | Set key `<n>` as active |
+| `f` | Edit wire family |
+| `B` | Edit base URL |
+| `m` | Edit visible model list |
+| `x` | Remove this provider entirely (with confirmation) |
+| `b` | Back to top menu |
+| `q` | Quit |
 
 ## How credentials are stored
 
-1. Prompt for API key (if not in env)
+1. Prompt for API key (masked input, paste-safe)
 2. Encrypt with `DefaultSecretVault` using `~/.wrongstack/.key`
-3. Write to `~/.wrongstack/config.json` under `providers.<id>`
+3. Write atomically to `~/.wrongstack/config.json` under `providers.<id>`
 
-## Code reference
+Keys are encrypted at rest using AES-256-GCM. The vault intentionally does not defeat a determined local attacker who can read both the config file and the key file — that level of secrecy needs the OS keychain.
 
-- `packages/cli/src/subcommands/handlers/auth.ts` — handler entry
-- `packages/cli/src/auth-menu.ts` — interactive menu implementation
+## Code structure
+
+```
+packages/cli/src/auth-menu/         # Modular auth menu implementation
+  types.ts         — AuthMenuDeps interface
+  shared.ts        — Rendering helpers, key input, confirmations, validation
+  top-menu.ts      — Main menu loop
+  provider-menu.ts — Provider detail submenu
+  add-provider.ts  — Catalog + custom provider addition flows
+  direct.ts        — One-shot `wstack auth <provider>` flow
+  helpers.ts       — Config I/O wrappers
+  index.ts         — Public API re-exports
+
+packages/cli/src/auth-menu.ts       # Backward-compatible re-export shim
+packages/cli/src/slash-commands/auth.ts  # /auth slash command
+packages/cli/src/subcommands/handlers/auth.ts  # Subcommand handler
+packages/cli/src/provider-config-utils.ts  # Shared config I/O + normalization
+```

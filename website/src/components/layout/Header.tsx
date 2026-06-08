@@ -16,7 +16,6 @@ const navItems = [
   { href: '#skills', label: 'Skills' },
   { href: '#security', label: 'Security' },
   { href: '#changelog', label: 'Changelog' },
-  { href: '#release', label: 'Release' },
 ];
 
 function ThemeToggle() {

@@ -150,4 +150,105 @@ describe('/setmodel slash command', () => {
     const out = await cmd.run!('list', undefined);
     expect(out!.message).toMatch(/not available/);
   });
+
+  // ---- resolve ----
+  it('resolve shows the resolution chain for a role', async () => {
+    const { ctx } = makeCtx(baseConfig());
+    const cmd = buildSetModelCommand(ctx);
+    const out = await cmd.run!('resolve explore', undefined);
+    expect(out!.message).toContain('Resolution chain');
+    expect(out!.message).toContain('explore');
+    expect(out!.message).toContain('not set'); // no matrix entry
+    expect(out!.message).toContain('leader fallback');
+    expect(out!.message).toContain('✓ Resolved');
+  });
+
+  it('resolve shows exact role match when set', async () => {
+    const initial = {
+      ...baseConfig(),
+      modelMatrix: { explore: { model: 'claude-opus-5' } },
+    };
+    const { ctx } = makeCtx(initial);
+    const cmd = buildSetModelCommand(ctx);
+    const out = await cmd.run!('resolve explore', undefined);
+    expect(out!.message).toContain('✓ exact role');
+    expect(out!.message).toContain('claude-opus-5');
+  });
+
+  it('resolve rejects an unknown role', async () => {
+    const { ctx } = makeCtx(baseConfig());
+    const cmd = buildSetModelCommand(ctx);
+    const out = await cmd.run!('resolve not-a-role', undefined);
+    expect(out!.message).toMatch(/Unknown role/);
+  });
+
+  // ---- doctor ----
+  it('doctor reports clean when matrix is empty', async () => {
+    const { ctx } = makeCtx(baseConfig());
+    const cmd = buildSetModelCommand(ctx);
+    const out = await cmd.run!('doctor', undefined);
+    expect(out!.message).toContain('All matrix entries are valid');
+  });
+
+  it('doctor flags unknown keys', async () => {
+    const initial = {
+      ...baseConfig(),
+      modelMatrix: { 'stale-role': { model: 'x' } as { model: string } },
+    };
+    const { ctx } = makeCtx(initial);
+    const cmd = buildSetModelCommand(ctx);
+    const out = await cmd.run!('doctor', undefined);
+    expect(out!.message).toContain('not a valid role');
+  });
+
+  it('doctor flags missing providers', async () => {
+    const initial = {
+      ...baseConfig(),
+      modelMatrix: { [sampleRole]: { provider: 'nonexistent', model: 'x' } },
+    };
+    const { ctx } = makeCtx(initial);
+    const cmd = buildSetModelCommand(ctx);
+    const out = await cmd.run!('doctor', undefined);
+    expect(out!.message).toContain('not configured');
+  });
+
+  it('doctor warns about uncovered roles when no * default', async () => {
+    const initial = {
+      ...baseConfig(),
+      modelMatrix: { 'security-scanner': { model: 'x' } },
+    };
+    const { ctx } = makeCtx(initial);
+    fs.writeFileSync(globalConfigPath, JSON.stringify(initial, null, 2));
+    const cmd = buildSetModelCommand(ctx);
+    const out = await cmd.run!('doctor', undefined);
+    expect(out!.message).toContain('no matrix coverage');
+  });
+
+  // ---- enhanced default view ----
+  it('shows resolution summary in default view', async () => {
+    const { ctx } = makeCtx(baseConfig());
+    const cmd = buildSetModelCommand(ctx);
+    const out = await cmd.run!('', undefined);
+    expect(out!.message).toContain('resolution');
+    expect(out!.message).toContain('leader');
+  });
+
+  it('default view shows matrix entries when set', async () => {
+    const initial = {
+      ...baseConfig(),
+      modelMatrix: { '*': { model: 'gemini-pro' } },
+    };
+    const { ctx } = makeCtx(initial);
+    fs.writeFileSync(globalConfigPath, JSON.stringify(initial, null, 2));
+    const cmd = buildSetModelCommand(ctx);
+    const out = await cmd.run!('', undefined);
+    expect(out!.message).toContain('gemini-pro');
+    expect(out!.message).toContain('default');
+  });
+
+  it('updated help text includes new subcommands', () => {
+    const cmd = buildSetModelCommand(makeCtx(baseConfig()).ctx);
+    expect(cmd.help).toContain('/setmodel resolve');
+    expect(cmd.help).toContain('/setmodel doctor');
+  });
 });

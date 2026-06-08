@@ -355,13 +355,55 @@ export class TelegramBot {
 
 /**
  * Truncate text to fit Telegram's 4096-char message limit.
- * Splits on a newline when possible; otherwise hard-cuts with "…" suffix.
+ * Preserves semantic boundaries in this priority order:
+ *   1. Paragraph break (double newline)
+ *   2. Sentence break (. ! ? followed by space/newline)
+ *   3. Word break (space)
+ *   4. Hard cut with ellipsis
+ *
+ * When a clean boundary is found, appends "…" to signal intentional truncation.
  */
 export function truncateForTelegram(text: string, maxLen = 4000): string {
   if (text.length <= maxLen) return text;
-  const cut = text.lastIndexOf('\n', maxLen - 20);
-  const idx = cut > maxLen / 2 ? cut : maxLen - 20;
-  return `${text.slice(0, idx)}\n\n…[truncated ${text.length - idx} chars]`;
+
+  // Reserve room for truncation suffix
+  const cutoff = maxLen - 30;
+  if (cutoff <= 0) return `${text.slice(0, maxLen - 1)}…`;
+
+  const searchEnd = Math.min(text.length, maxLen);
+
+  // 1. Paragraph boundary (double newline)
+  const paraIdx = text.lastIndexOf('\n\n', searchEnd);
+  if (paraIdx > cutoff) {
+    return `${text.slice(0, paraIdx)}\n\n…`;
+  }
+
+  // 2. Single newline boundary
+  const nlIdx = text.lastIndexOf('\n', searchEnd);
+  if (nlIdx > cutoff) {
+    return `${text.slice(0, nlIdx)}\n…`;
+  }
+
+  // 3. Sentence boundary (. ! ? followed by space or newline)
+  const sentenceRe = /[.!?](?=\s)/g;
+  let match: RegExpExecArray | null;
+  let sentenceIdx = -1;
+  while ((match = sentenceRe.exec(text)) !== null) {
+    if (match.index >= searchEnd) break;
+    if (match.index > cutoff) sentenceIdx = match.index + 1;
+  }
+  if (sentenceIdx > cutoff) {
+    return `${text.slice(0, sentenceIdx)}…`;
+  }
+
+  // 4. Word boundary (space)
+  const spaceIdx = text.lastIndexOf(' ', searchEnd);
+  if (spaceIdx > cutoff) {
+    return `${text.slice(0, spaceIdx)} …`;
+  }
+
+  // 5. Hard cut
+  return `${text.slice(0, maxLen - 20)}…[+${text.length - maxLen + 20} chars]`;
 }
 
 /**

@@ -4,7 +4,8 @@ import { TelegramBot } from './bot.js';
 import type { TelegramIncomingMessage } from './bot.js';
 import { truncateForTelegram } from './bot.js';
 import { PLUGIN_NAME, readTelegramConfig, telegramConfigSchema } from './config.js';
-import { formatDelegateCompleted } from './format.js';
+import { formatDelegateCompleted, formatSessionEnded, formatToolExecuted } from './format.js';
+import type { SessionEndedLike, ToolExecutedLike } from './format.js';
 import { registerSlashCommands } from './slash-commands/index.js';
 import { makeTelegramReadTool } from './tools/telegram-read.js';
 import { makeTelegramSendTool } from './tools/telegram-send.js';
@@ -111,22 +112,21 @@ const plugin: Plugin = {
     // Register slash commands
     const commandNames = registerSlashCommands(api, bot, cfg);
 
-    // Notify on session end
+    // Notify on session end — humanized multi-line summary
     if (cfg.notifyOnSessionEnd && cfg.notifyChatId) {
       offs.push(
         api.events.on('session.ended', (event) => {
-          const inputTokens = event.usage.input ?? 0;
-          const outputTokens = event.usage.output ?? 0;
-          const totalTokens = inputTokens + outputTokens;
-          const msg = [
-            `✅ Session ended`,
-            '',
-            `Session: ${event.id.slice(0, 8)}`,
-            `Input:  ${inputTokens} tokens`,
-            `Output: ${outputTokens} tokens`,
-            `Total:  ${totalTokens} tokens`,
-          ].join('\n');
-
+          const payload: SessionEndedLike = {
+            id: event.id,
+            inputTokens: event.usage.input,
+            outputTokens: event.usage.output,
+            cacheRead: event.usage.cacheRead,
+            cacheWrite: event.usage.cacheWrite,
+          };
+          const msg = truncateForTelegram(
+            formatSessionEnded(payload),
+            cfg.maxMessageLength,
+          );
           void bot.sendMessage(expectDefined(cfg.notifyChatId), msg).catch((err) => {
             log.debug(`Failed to send session end notification: ${(err as Error).message}`);
           });
@@ -134,23 +134,21 @@ const plugin: Plugin = {
       );
     }
 
-    // Notify for long-running tools
+    // Notify for long-running tools — humanized output, not raw JSON
     if (cfg.longToolThresholdMs && cfg.longToolThresholdMs > 0 && cfg.notifyChatId) {
       offs.push(
         api.events.on('tool.executed', (event) => {
           if (event.durationMs < expectDefined(cfg.longToolThresholdMs)) return;
-          const sec = (event.durationMs / 1000).toFixed(1);
-          const status = event.ok ? '✅' : '❌';
-          const preview = event.output
-            ? truncateForTelegram(event.output, 500)
-            : '(no output)';
-
-          const msg = [
-            `${status} ${event.name} completed in ${sec}s`,
-            '',
-            preview,
-          ].join('\n');
-
+          const payload: ToolExecutedLike = {
+            name: event.name,
+            ok: event.ok,
+            durationMs: event.durationMs,
+            output: event.output,
+          };
+          const msg = truncateForTelegram(
+            formatToolExecuted(payload),
+            cfg.maxMessageLength,
+          );
           void bot.sendMessage(expectDefined(cfg.notifyChatId), msg).catch((err) => {
             log.debug(`Failed to send tool notification: ${(err as Error).message}`);
           });

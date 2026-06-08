@@ -19,8 +19,8 @@ export function makeTelegramReadTool(opts: {
   return {
     name: 'telegram_read',
     description:
-      'Read incoming Telegram messages from the bot. Returns recent messages the bot received, newest first. Use this to check if anyone sent instructions, questions, or feedback via Telegram. After processing messages, pass the last message_id to ack_last to clear them from the inbox.',
-    usageHint: 'telegram_read(chat_id: "123456789", limit: 5)',
+      'Read recent incoming Telegram messages the bot has received, newest first. Returns messages with sender, text, and timestamp. After reading, acknowledge them with ack_last so they are cleared. When responding to a user via telegram_send, format your reply as natural prose — summarize findings, report outcomes clearly, do not paste raw data.',
+    usageHint: 'telegram_read(chat_id: "123456789", limit: 5, ack_last: 42) — read messages, then ack the highest message_id to clear them.',
     category: 'Telegram',
     inputSchema: {
       type: 'object',

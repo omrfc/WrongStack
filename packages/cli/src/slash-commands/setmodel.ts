@@ -2,7 +2,9 @@ import { expectDefined } from '@wrongstack/core';
 import * as fs from 'node:fs/promises';
 import {
   AGENT_CATALOG,
+  AGENTS_BY_PHASE,
   MATRIX_PHASE_KEYS,
+  type AgentPhase,
   type ModelMatrixEntry,
   type ProviderConfig,
   type SecretVault,
@@ -12,6 +14,8 @@ import {
   decryptConfigSecrets,
   encryptConfigSecrets,
   matrixKeyKind,
+  phaseForRole,
+  resolveModelMatrix,
 } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
 /** No-op vault: round-trips already-encrypted fields untouched. We never
@@ -103,16 +107,29 @@ async function patchGlobalConfig(
  * `/setmodel` — view or change the active leader model and the per-task
  * model matrix. Argument-driven (never blocks on readline) so it behaves
  * identically in the REPL and the TUI. Persists to ~/.wrongstack/config.json.
+ *
+ * Subcommands:
+ *   (none)       Show leader model, matrix, and a summary of which model each
+ *                catalog role resolves to.
+ *   list         List keyed providers, their models, and valid matrix keys.
+ *   leader       Set the main (leader / brain) model.
+ *   set          Pin a role, phase, or * to a specific model.
+ *   clear        Remove a matrix entry.
+ *   resolve      Walk the resolution chain for one role and show the result.
+ *   doctor       Validate all matrix entries against available providers and
+ *                models. Flag orphans, missing providers, and typos.
  */
 export function buildSetModelCommand(opts: SlashCommandContext): SlashCommand {
   const help = [
     'Usage:',
-    '  /setmodel                              Show leader model + the task→model matrix',
+    '  /setmodel                              Show leader model + matrix + resolution summary',
     '  /setmodel list                         List keyed providers, their models, and valid keys',
-    '  /setmodel leader <provider> <model>    Set the main (leader) model',
+    '  /setmodel leader <provider> <model>    Set the main (leader / brain) model',
     '  /setmodel set <key> <provider>/<model> Pin a role/phase/* to a model',
     '  /setmodel set <key> <model>            Pin to a model on the leader provider',
     '  /setmodel clear <key>                  Remove a matrix entry',
+    '  /setmodel resolve <role>              Walk the resolution chain for one role',
+    '  /setmodel doctor                       Validate matrix entries (orphans, typos, missing keys)',
     '',
     'Keys: a catalog role (e.g. security-scanner), a phase (' + MATRIX_PHASE_KEYS.join(', ') + '),',
     'or * for the fleet-wide default. Precedence at spawn: role → phase → * → leader.',
@@ -127,23 +144,70 @@ export function buildSetModelCommand(opts: SlashCommandContext): SlashCommand {
     const lines = [
       `${color.bold('WrongStack')} ${color.dim('— Models')}`,
       '',
-      `  leader: ${color.cyan(`${config.provider}/${config.model}`)}   ${color.dim('change: /setmodel leader <provider> <model>')}`,
+      `  ${color.bold('leader')}  ${color.cyan(`${config.provider}/${config.model}`)}   ${color.dim('/setmodel leader <provider> <model>')}`,
       '',
-      `  ${color.bold('task → model matrix')} ${color.dim('(role → phase → * → leader)')}`,
     ];
+
+    // Matrix entries
     if (keys.length === 0) {
       lines.push(
-        `    ${color.dim('(empty)  set one: /setmodel set <role|phase|*> <provider>/<model>')}`,
+        `  ${color.bold('matrix')} ${color.dim('(empty)')}`,
+        `    ${color.dim('pin a role: /setmodel set <role> <provider>/<model>')}`,
+        `    ${color.dim('set default: /setmodel set * <provider>/<model>')}`,
       );
     } else {
+      lines.push(`  ${color.bold('matrix')} ${color.dim('(role → phase → * → leader)')}`);
       for (const k of keys.sort()) {
         const kind = matrixKeyKind(k);
         const tag = kind === 'unknown' ? color.red('?') : color.dim(kind);
         lines.push(`    ${color.amber(k.padEnd(22))} → ${fmtEntry(expectDefined(matrix[k]))}   ${tag}`);
       }
     }
-    lines.push('', color.dim('  /setmodel list for valid keys · /setmodel help for usage'));
+
+    // Resolution summary — show what key roles resolve to
+    const summaryRoles = getSummaryRoles();
+    if (summaryRoles.length > 0) {
+      lines.push('');
+      lines.push(`  ${color.bold('resolution')} ${color.dim('(selected roles)')}`);
+      for (const role of summaryRoles) {
+        const entry = resolveModelMatrix(matrix, role);
+        const provider = entry?.provider ?? config.provider;
+        const model = entry?.model ?? config.model;
+        const source = resolutionSource(matrix, role);
+        lines.push(`    ${color.dim(role.padEnd(22))} → ${color.cyan(`${provider}/${model}`)}  ${color.dim(source)}`);
+      }
+    }
+
+    lines.push('', color.dim('  /setmodel list · resolve <role> · doctor · help'));
     return lines.join('\n');
+  }
+
+  /** Roles worth showing in the summary: one per phase + key legacy roles. */
+  function getSummaryRoles(): string[] {
+    const picks: string[] = [];
+    // One representative from each phase
+    for (const phase of MATRIX_PHASE_KEYS) {
+      const agents = AGENTS_BY_PHASE[phase as AgentPhase];
+      if (agents && agents.length > 0) {
+        picks.push(agents[0]!.config.role as string);
+      }
+    }
+    // Key legacy roles
+    picks.push('security-scanner', 'bug-hunter');
+    return [...new Set(picks)].sort();
+  }
+
+  /** Human-readable description of where a role's model comes from. */
+  function resolutionSource(
+    matrix: Record<string, ModelMatrixEntry> | undefined,
+    role: string,
+  ): string {
+    if (!matrix) return 'leader';
+    if (matrix[role]) return 'role';
+    const phase = phaseForRole(role);
+    if (phase && matrix[phase]) return `phase (${phase})`;
+    if (matrix['*']) return 'default (*)';
+    return 'leader';
   }
 
   return {
@@ -164,6 +228,7 @@ export function buildSetModelCommand(opts: SlashCommandContext): SlashCommand {
       const config = opts.configStore.get();
       const keyed = keyedProviderIds(config);
       const globalConfigPath = opts.paths.globalConfig;
+      const matrix = (config.modelMatrix ?? {}) as Record<string, ModelMatrixEntry>;
 
       if (sub === 'list') {
         const provLines = keyed.map((id) => {
@@ -184,6 +249,150 @@ export function buildSetModelCommand(opts: SlashCommandContext): SlashCommand {
             `    ${roles.join(', ')}`,
           ].join('\n'),
         };
+      }
+
+      // ---- resolve <role> ----
+      if (sub === 'resolve') {
+        const role = parts[1];
+        if (!role) {
+          return { message: `${color.amber('Usage:')} /setmodel resolve <role>` };
+        }
+        const kind = matrixKeyKind(role);
+        if (kind === 'unknown' && role !== '*') {
+          return {
+            message: `${color.red('Unknown role')}: "${role}". Use ${color.dim('/setmodel list')} to see valid roles.`,
+          };
+        }
+        const lines: string[] = [
+          `${color.bold('Resolution chain')} for ${color.amber(role)}`,
+          '',
+        ];
+
+        // Walk the chain step by step
+        const phase = phaseForRole(role);
+        const resolved = resolveModelMatrix(matrix, role);
+
+        // Step 1: exact role
+        if (matrix[role]) {
+          lines.push(`  1. matrix["${role}"] → ${fmtEntry(expectDefined(matrix[role]))}  ${color.green('✓ exact role')}`);
+        } else {
+          lines.push(`  1. matrix["${role}"] → ${color.dim('not set')}`);
+        }
+
+        // Step 2: phase
+        if (phase) {
+          if (matrix[phase]) {
+            lines.push(`  2. matrix["${phase}"] → ${fmtEntry(expectDefined(matrix[phase]))}  ${matrix[role] ? color.dim('(skipped — role matched)') : color.green('✓ phase match')}`);
+          } else {
+            lines.push(`  2. matrix["${phase}"] → ${color.dim('not set')}`);
+          }
+        }
+
+        // Step 3: *
+        if (matrix['*']) {
+          const skipped = matrix[role] || (phase && matrix[phase]);
+          lines.push(`  3. matrix["*"] → ${fmtEntry(expectDefined(matrix['*']))}  ${skipped ? color.dim('(skipped)') : color.green('✓ default')}`);
+        } else {
+          lines.push(`  3. matrix["*"] → ${color.dim('not set')}`);
+        }
+
+        // Step 4: leader fallback
+        const leaderSkipped = matrix[role] || (phase && matrix[phase]) || matrix['*'];
+        lines.push(`  4. ${color.dim('leader fallback')} → ${color.cyan(`${config.provider}/${config.model}`)}  ${leaderSkipped ? color.dim('(skipped)') : color.green('✓ used')}`);
+
+        lines.push('');
+
+        // Final result
+        if (resolved) {
+          const rp = resolved.provider ?? config.provider;
+          lines.push(`${color.green('✓ Resolved')}: ${color.cyan(`${rp}/${resolved.model}`)}`);
+        } else {
+          lines.push(`${color.green('✓ Resolved')}: ${color.cyan(`${config.provider}/${config.model}`)} ${color.dim('(leader)')}`);
+        }
+
+        return { message: lines.join('\n') };
+      }
+
+      // ---- doctor ----
+      if (sub === 'doctor') {
+        const issues: string[] = [];
+        const warnings: string[] = [];
+
+        for (const [key, entry] of Object.entries(matrix)) {
+          // 1. Check key validity
+          const kind = matrixKeyKind(key);
+          if (kind === 'unknown') {
+            issues.push(
+              `${color.red('✗')} ${color.amber(key)}: not a valid role, phase, or * — ${color.dim('typo or stale entry?')}`,
+            );
+          }
+
+          // 2. Check provider exists and has a key
+          if (entry.provider) {
+            const provCfg = config.providers?.[entry.provider];
+            if (!provCfg) {
+              issues.push(
+                `${color.red('✗')} ${color.amber(key)}: provider "${entry.provider}" is not configured`,
+              );
+            } else if (!providerHasKey(provCfg)) {
+              warnings.push(
+                `${color.amber('⚠')} ${color.amber(key)}: provider "${entry.provider}" has no API key`,
+              );
+            }
+          }
+
+          // 3. Check model is in provider's model list (if list is defined)
+          const effectiveProvider = entry.provider ?? config.provider;
+          const provCfg = config.providers?.[effectiveProvider];
+          if (provCfg?.models && provCfg.models.length > 0) {
+            if (!provCfg.models.includes(entry.model)) {
+              warnings.push(
+                `${color.amber('⚠')} ${color.amber(key)}: model "${entry.model}" not in ${effectiveProvider}'s model list (${provCfg.models.join(', ')})`,
+              );
+            }
+          }
+        }
+
+        // 4. Check for orphaned roles (roles in catalog not covered by any matrix key)
+        if (Object.keys(matrix).length > 0 && !matrix['*']) {
+          const covered = new Set<string>();
+          for (const [key] of Object.entries(matrix)) {
+            covered.add(key);
+          }
+          // Phase-level coverage
+          const phasesCovered = new Set(Object.keys(matrix).filter((k) => matrixKeyKind(k) === 'phase'));
+          const unprotected: string[] = [];
+          for (const role of Object.keys(AGENT_CATALOG)) {
+            if (covered.has(role)) continue;
+            const ph = phaseForRole(role);
+            if (ph && phasesCovered.has(ph)) continue;
+            unprotected.push(role);
+          }
+          if (unprotected.length > 0) {
+            const sample = unprotected.slice(0, 10);
+            const suffix = unprotected.length > 10 ? ` +${unprotected.length - 10} more` : '';
+            warnings.push(
+              `${color.amber('⚠')} ${unprotected.length} role(s) have no matrix coverage and no * default: ${sample.join(', ')}${suffix}`,
+            );
+          }
+        }
+
+        const header = [
+          `${color.bold('Matrix Doctor')} ${color.dim('— ' + Object.keys(matrix).length + ' entries')}`,
+          '',
+        ];
+
+        if (issues.length === 0 && warnings.length === 0) {
+          header.push(`${color.green('✓')} All matrix entries are valid. No issues found.`);
+        }
+
+        const allLines = [
+          ...header,
+          ...(issues.length ? ['', `${color.bold('Issues')}:`, ...issues] : []),
+          ...(warnings.length ? ['', `${color.bold('Warnings')}:`, ...warnings] : []),
+        ];
+
+        return { message: allLines.join('\n') };
       }
 
       try {

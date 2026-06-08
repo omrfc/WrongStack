@@ -280,6 +280,7 @@ import { buildTelegramSetupCommand } from './telegram-setup.js';
 import { buildAgentsCommand, buildDirectorCommand, buildSpawnCommand } from './spawn-agents.js';
 import { buildStatuslineCommand } from './statusline.js';
 import { buildTodosCommand } from './todos.js';
+import { buildTasksCommand } from './tasks.js';
 import { buildToolsCommand } from './tools.js';
 import { buildWorktreeCommand } from './worktree.js';
 import { buildYoloCommand } from './yolo.js';
@@ -306,6 +307,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildEnhanceCommand(opts),
     buildMemoryCommand(opts),
     buildTodosCommand(opts),
+    buildTasksCommand(opts),
     buildSddCommand(opts),
     buildSaveCommand(opts),
     buildLoadCommand(opts),

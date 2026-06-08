@@ -19,8 +19,8 @@ export function makeTelegramSendTool(opts: {
   return {
     name: 'telegram_send',
     description:
-      'Send a message via Telegram to a specified chat. Use this to notify users, report results, or communicate through Telegram.',
-    usageHint: 'telegram_send(chat_id: "123456789", message: "Task completed ✓")',
+      'Send a message to a Telegram chat. Write the message in natural prose — a human reads it. Summarize results, state what happened, and include only the key details. Never paste raw JSON, object dumps, or truncated tool output directly into the message field.',
+    usageHint: 'telegram_send(chat_id: "123456789", message: "Build completed — 12 tests passed, 0 failed. Deploying to staging now.")',
     category: 'Telegram',
     inputSchema: {
       type: 'object',
@@ -32,7 +32,7 @@ export function makeTelegramSendTool(opts: {
         message: {
           type: 'string',
           description:
-            'Message text.',
+            'Message text in natural, human-readable prose. Summarize results, include only key details. Do NOT paste raw JSON, object dumps, or unformatted tool output. Target 1–4 lines for readability on mobile.',
         },
       },
       required: ['message'],

@@ -104,6 +104,12 @@ export {
   type PlanTemplate,
 } from './plan-templates.js';
 export {
+  loadTasks,
+  saveTasks,
+  emptyTaskFile,
+  type TaskFile,
+} from './task-store.js';
+export {
   DirectorStateCheckpoint,
   loadDirectorState,
   type DirectorStateSnapshot,

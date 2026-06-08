@@ -127,35 +127,62 @@ describe('TelegramBot buffer', () => {
 // ---------------------------------------------------------------------------
 
 describe('helpers', () => {
-  it('truncateForTelegram shortens long messages', () => {
-    const short = 'hello';
-    expect(truncateForTelegram(short, 4000)).toBe('hello');
+  describe('truncateForTelegram', () => {
+    it('passes through short messages', () => {
+      expect(truncateForTelegram('hello', 4000)).toBe('hello');
+    });
 
-    const long = 'a'.repeat(5000);
-    const result = truncateForTelegram(long, 100);
-    expect(result.length).toBeLessThanOrEqual(110); // close to 100
-    expect(result).toContain('…[truncated');
+    it('hard-cuts when no boundaries exist', () => {
+      const long = 'a'.repeat(5000);
+      const result = truncateForTelegram(long, 100);
+      expect(result.length).toBeLessThanOrEqual(110);
+      expect(result).toContain('…[+');
+    });
+
+    it('splits on double newline (paragraph) boundary first', () => {
+      const text = 'First paragraph with enough text.\n\nSecond paragraph here.';
+      const result = truncateForTelegram(text, 40);
+      // Should split at the double newline (pos ~25), not mid-word
+      expect(result).toContain('First paragraph');
+      expect(result).toContain('\n\n…');
+    });
+
+    it('falls back to single newline when no paragraph break', () => {
+      // Text has a newline well past cutoff=70, within searchEnd=100
+      const prefix = 'Line one\n' + 'x'.repeat(80);
+      const text = prefix + '\n' + 'a'.repeat(200);
+      const result = truncateForTelegram(text, 100);
+      expect(result).toContain('Line one');
+      // Should find the newline after "xxxx...", not mid-word
+      expect(result).toContain('\n…');
+    });
+
+    it('falls back to sentence boundary when no newline', () => {
+      const text = 'Hello world. This is a sentence. And here is more text that goes on.';
+      const result = truncateForTelegram(text, 45);
+      // Should split after the second period (sentence boundary), not mid-word
+      expect(result).toContain('Hello world. This is a sentence.');
+    });
+
+    it('falls back to word boundary when no sentence break', () => {
+      const text = 'word1 word2 word3 word4 word5 word6 word7 word8 ' + 'z'.repeat(60);
+      const result = truncateForTelegram(text, 55);
+      // Should split at a space, keeping complete words
+      expect(result).toContain(' …');
+    });
+
+    it('hard-cuts as last resort', () => {
+      const text = 'a'.repeat(200);
+      const result = truncateForTelegram(text, 50);
+      expect(result.length).toBeLessThan(60);
+      expect(result).toContain('…[+');
+    });
   });
 
   it('escapeHtml replaces special chars', () => {
     expect(escapeHtml('<b>bold</b> & text')).toBe(
       '&lt;b&gt;bold&lt;/b&gt; &amp; text',
     );
-  });
-
-  it('truncateForTelegram splits on newline when possible', () => {
-    const text = 'short line\n' + 'a'.repeat(200);
-    const result = truncateForTelegram(text, 50);
-    // Should split at the newline, not mid-string
-    expect(result).toContain('short line');
-    expect(result).toContain('truncated');
-  });
-
-  it('truncateForTelegram hard-cuts when no good newline', () => {
-    const text = 'a'.repeat(200);
-    const result = truncateForTelegram(text, 50);
-    expect(result.length).toBeLessThan(60);
-    expect(result).toContain('truncated');
   });
 });
 
