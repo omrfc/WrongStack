@@ -75,6 +75,8 @@ After install, `wrongstack` is on your `PATH`. (`wstack` works too — it's an a
 - Per-message footer: token usage, Pin / Edit & resend / Retry
 - Tool bubbles: live `tool.progress` stream, collapsible gutter, Download/Copy on hover
 - Sidebar: live TODO snapshot, Pinned panel, History with grouping + search
+- Operations panels: Goal, Process Monitor, Checkpoint Timeline, AutoPhase, phase agents, task board, and worktree lanes
+- Autonomy picker: switch `off` / `suggest` / `auto` / `eternal` / `eternal-parallel` from the UI
 - Overlays: `Ctrl+K` command palette, `Ctrl+M` model switcher, `Ctrl+F` chat search, `?` shortcuts
 - Slash commands with keyboard nav, day-separator dividers, dynamic tab title
 
@@ -345,12 +347,11 @@ Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. Wha
 
 ## Recent changes
 
-**Current release: 0.104.0.** Goal mode now auto-refines missions into
-deliverables, tracks progress/trends, and gets a TUI F9 goal panel. The autonomy
-engine has an `AutonomyBrain` for bounded unattended decisions, active sessions
-gain a non-blocking `/auth` credential dashboard, and the task / `/tasks`,
-`/setmodel doctor`, tech-stack validator, and Telegram notification work is
-documented as part of the 0.104.0 line.
+**Current release: 0.107.2.** The WebUI now has operations-grade panels for
+active goals, running processes, session checkpoints/rewind, AutoPhase, phase
+agents, tasks, and worktree lanes. It also adds a visible autonomy picker and
+local preference controls. The TUI side gets tighter assistant-body width and
+markdown table wrapping so long output behaves better in narrow terminals.
 
 See **[CHANGELOG.md](CHANGELOG.md)** for the full, versioned history.
 
@@ -596,7 +597,7 @@ For the full walk-through — including the L1-A reactive `ConversationState`, h
 
 ## Status
 
-- **5530+ tests passing** across 412+ test files in the 0.104.0 release gate
+- **5530+ tests passing** across 412+ test files in the 0.107.2 release gate
 - Coverage thresholds: ≥85 % lines / ≥85 % functions / ≥70 % branches / ≥82 % statements
 - All workspace packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles

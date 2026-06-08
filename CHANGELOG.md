@@ -5,6 +5,71 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.107.2] - 2026-06-08
+
+> The WebUI operations & terminal-polish release. Consolidates the
+> `0.104.1`-`0.107.2` line into a documented release: the WebUI gains live
+> goal, process, checkpoint, autonomy, and preference surfaces; AutoPhase and
+> phase monitoring are easier to scan; and the TUI gets safer markdown table
+> wrapping plus assistant-body width fixes. Additive only; no breaking changes.
+
+### Added - WebUI operations surfaces
+
+- **Goal panel.** The WebUI now polls `goal.json` through the WebSocket backend
+  and renders the active goal, refined/original text, deliverable checklist,
+  progress, trend, recent journal entries, and lifecycle state in a collapsible
+  panel.
+
+- **Process monitor.** A new WebUI process overlay lists running tool processes,
+  shows active counts, marks protected processes, and exposes kill / kill-all
+  actions through `process.list`, `process.kill`, and `process.killAll` messages.
+
+- **Checkpoint timeline.** The WebUI can list session checkpoints and request a
+  rewind to a previous checkpoint through `session.checkpoints` and
+  `session.rewind`, giving long sessions a visible recovery path.
+
+- **Autonomy picker.** The WebUI gets a compact mode picker for `off`, `suggest`,
+  `auto`, `eternal`, and `eternal-parallel`, keeping autonomy state visible and
+  switchable without typing slash commands.
+
+- **Local preference controls.** Settings now include reusable slider/select
+  controls and local preference storage for UI-level behavior.
+
+### Changed - WebUI and AutoPhase
+
+- **AutoPhase view refinement.** The AutoPhase view, phase agents monitor,
+  phase panel, task board, worktree lanes, sidebar wiring, and WebSocket
+  handlers were tightened so fleet/phase state is easier to read while work is
+  running.
+
+- **WebUI server endpoints.** The WebUI backend now handles goal, process,
+  checkpoint, and preference-related WebSocket messages alongside the existing
+  agent/session stream.
+
+- **Browser launch behavior.** The WebUI server open-browser helper was hardened
+  so starting the standalone UI is more predictable across environments.
+
+### Fixed - TUI rendering
+
+- **Markdown table width handling.** TUI markdown tables now use separator
+  widths as minimums, measure visible inline-marker width correctly, and wrap
+  long cells instead of blowing past the terminal width.
+
+- **Assistant body width.** Assistant history rendering now gives message bodies
+  a more stable width, reducing awkward wrapping in narrow terminals.
+
+- **Live activity strip/process registry polish.** Running-process and activity
+  display paths were tightened so live status is less noisy while tools execute.
+
+### Changed - versions
+
+- **All published workspace packages and the marketing site are aligned to
+  0.107.2**: `wrongstack`, `@wrongstack/cli`, `@wrongstack/core`,
+  `@wrongstack/mcp`, `@wrongstack/plug-lsp`, `@wrongstack/plugins`,
+  `@wrongstack/providers`, `@wrongstack/runtime`, `@wrongstack/skills`,
+  `@wrongstack/telegram`, `@wrongstack/tools`, `@wrongstack/tui`,
+  `@wrongstack/webui`, and `@wrongstack/acp`.
+
 ## [0.104.0] - 2026-06-08
 
 > The autonomy-control & release-realignment release. Consolidates the
