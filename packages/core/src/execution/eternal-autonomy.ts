@@ -15,6 +15,7 @@ import {
   type JournalEntry,
 } from '../storage/goal-store.js';
 import { sleep } from '../utils/sleep.js';
+import { formatDecisionSummary } from './autonomy-brain.js';
 
 const execFileP = promisify(execFile);
 
@@ -936,18 +937,32 @@ export class EternalAutonomyEngine {
         fallback: 'continue',
       });
 
+      // Log the brain decision into the journal
+      const summary = formatDecisionSummary(decision, {
+        id: `goal-done-${goal.iterations}`,
+        source: 'system',
+        question: 'Is the goal complete?',
+        risk: 'high',
+        fallback: 'continue',
+      });
+      const rationale = 'rationale' in decision ? decision.rationale : undefined;
+      await this.appendIterationEntry({
+        source: 'brainstorm',
+        task: summary,
+        status: 'success',
+        note: rationale,
+      });
+
       if (decision.type === 'deny') {
-        // Brain says explicitly no — keep running
         return false;
       }
       if (decision.type === 'answer') {
-        // Brain says yes (contains "complete"/"done") or no
         const text = decision.text.toLowerCase();
         return text.includes('complete') || text.includes('done') || text.includes('yes');
       }
-      return true; // ask_human → treat as done (safe default)
+      return true;
     } catch {
-      return true; // Brain failed → trust the heuristic
+      return true;
     }
   }
 
