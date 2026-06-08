@@ -1201,5 +1201,21 @@ export function reducer(state: State, action: Action): State {
         },
       };
     }
+    case 'debugStreamStats': {
+      return {
+        ...state,
+        debugStreamStats: {
+          chunkCount: action.chunkCount,
+          lastChunkSize: action.lastChunkSize,
+          lastDeltaMs: action.lastDeltaMs,
+          totalBytes: action.totalBytes,
+          lastChunkAt: action.lastChunkAt,
+        },
+      };
+    }
+    case 'debugStreamStatsClear': {
+      if (state.debugStreamStats === null) return state;
+      return { ...state, debugStreamStats: null };
+    }
   }
 }

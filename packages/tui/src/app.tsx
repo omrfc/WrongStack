@@ -337,6 +337,26 @@ export interface AppProps {
   };
   /** Active agent mode label shown in the status bar (e.g. "teach", "brief"). */
   modeLabel?: string | undefined;
+  /**
+   * Called ONCE on mount by the App to install its debug-stream telemetry
+   * callback. The callback receives throttled DebugStreamStats every ~200 ms
+   * while the stream debug feature is active. The App dispatches to its
+   * reducer; the StatusBar renders the stats on line 3. When omitted (headless
+   * CLI/no TTY), debug stats go to stderr via the default callback.
+   */
+  registerDebugStreamCallback?: ((cb: (stats: {
+    chunkCount: number;
+    lastChunkSize: number;
+    lastDeltaMs: number;
+    totalBytes: number;
+    lastChunkAt: string;
+  }) => void) => void) | undefined;
+  /**
+   * Called on App unmount (via useEffect cleanup). Restores the debug-stream
+   * callback to the default stderr writer so non-TUI invocations continue to
+   * print debug lines.
+   */
+  restoreDebugStreamCallback?: (() => void) | undefined;
 }
 
 const PASTE_THRESHOLD_CHARS = 200;
@@ -403,6 +423,8 @@ export function App({
   sessionsDir,
   modeLabel,
   getModeLabel,
+  registerDebugStreamCallback,
+  restoreDebugStreamCallback,
 }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -592,6 +614,7 @@ export function App({
     totalLines: 0,
     viewportRows: 0,
     pendingNewLines: 0,
+    debugStreamStats: null,
   });
 
   const builderRef = useRef<InputBuilder | null>(null);
@@ -1938,6 +1961,44 @@ export function App({
     };
   }, [events, agent.ctx.todos]);
 
+  // ── Debug-stream callback bridge ──
+  // The CLI passes a registerDebugStreamCallback prop; this effect
+  // installs it once on mount and tears it down on unmount.
+  // The callback translates throttled DebugStreamStats from
+  // stream-debug-state.ts into reducer dispatches so the stats render
+  // inside Ink's StatusBar line 3 instead of bypassing the layout.
+  useEffect(() => {
+    if (!registerDebugStreamCallback) return;
+
+    let cancelled = false;
+    registerDebugStreamCallback((stats) => {
+      if (cancelled) return;
+      dispatch({
+        type: 'debugStreamStats',
+        chunkCount: stats.chunkCount,
+        lastChunkSize: stats.lastChunkSize,
+        lastDeltaMs: stats.lastDeltaMs,
+        totalBytes: stats.totalBytes,
+        lastChunkAt: stats.lastChunkAt,
+      });
+    });
+
+    // Clear stats on every provider.response (per-iteration stream reset).
+    const offResp = events.on('provider.response', () => {
+      dispatch({ type: 'debugStreamStatsClear' });
+    });
+    const offErr = events.on('provider.error', () => {
+      dispatch({ type: 'debugStreamStatsClear' });
+    });
+
+    return () => {
+      cancelled = true;
+      offResp();
+      offErr();
+      restoreDebugStreamCallback?.();
+    };
+  }, [events, registerDebugStreamCallback, restoreDebugStreamCallback]);
+
   // Live mirror of the prompt-refinement toggle, read synchronously inside
   // submit() (which can't see the latest reducer state through its closure).
   const enhanceEnabledRef = useRef(state.enhanceEnabled);
@@ -2428,7 +2489,7 @@ export function App({
     }
 
     if (state.settingsPicker.open) {
-      if (key.escape || (key.ctrl && input === 's')) {
+      if (key.escape || (key.ctrl && input === 's') || key.fn === 5) {
         dispatch({ type: 'settingsClose' });
         return;
       }
@@ -4054,6 +4115,7 @@ export function App({
             goalSummary={state.goalSummary}
             indexState={indexState}
             modeLabel={liveModeLabel || undefined}
+            debugStreamStats={state.debugStreamStats}
           />
           {/* Keys-&-commands help overlay (`?` on an empty prompt). Modal: while
           open, handleKey swallows everything but Esc/?/q, so it never coexists

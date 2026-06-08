@@ -26,7 +26,15 @@ export {
 } from './openai-compatible.js';
 export { GoogleProvider, type GoogleProviderOptions } from './google.js';
 export { WireAdapter, type WireAdapterStreamOptions } from './wire-adapter.js';
-export { isDebugStreamEnabled, setDebugStreamEnabled } from './stream-debug-state.js';
+export {
+  isDebugStreamEnabled,
+  setDebugStreamEnabled,
+  setDebugStreamCallback,
+  pushDebugChunkStats,
+  defaultDebugStreamCallback,
+  type DebugStreamStats,
+  type DebugStreamCallback,
+} from './stream-debug-state.js';
 export {
   WireFormatProvider,
   defineWireFormat,

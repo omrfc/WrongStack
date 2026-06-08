@@ -1,7 +1,7 @@
 import type { Capabilities, Provider, Request, Response, StreamEvent } from '@wrongstack/core';
 import { ProviderError, StreamHangError } from '@wrongstack/core';
 import { parseProviderHttpError } from './error-parse.js';
-import { isDebugStreamEnabled } from './stream-debug-state.js';
+import { isDebugStreamEnabled, pushDebugChunkStats } from './stream-debug-state.js';
 import { Readable } from 'node:stream';
 
 type Response2 = {
@@ -14,10 +14,14 @@ type Response2 = {
 /** Configuration for WireAdapter stream-level debugging and hang detection. */
 export interface WireAdapterStreamOptions {
   /**
-   * When true, log a compact status line per chunk to stderr:
-   * `[DEBUG-STREAM <provider>] chunk #<num> (<size>B, +<delta>ms) <iso8601>`
-   * Does NOT log chunk bodies. Controlled by WRONGSTACK_DEBUG_STREAM=1 env var
-   * or the runtime /settings debug-stream toggle.
+   * When true, accumulate per-chunk stats into the shared debug-sink
+   * (stream-debug-state.ts). The sink batches every 200 ms and pushes to
+   * a registered callback. The CLI default callback writes to stderr; the
+   * TUI replaces it with a reducer dispatch that renders in StatusBar line 3,
+   * keeping all output inside Ink's layout.
+   *
+   * Controlled by WRONGSTACK_DEBUG_STREAM=1 env var or the runtime
+   * /settings debug-stream toggle.
    */
   debugStream?: boolean | undefined;
   /**
@@ -55,17 +59,18 @@ async function safeText(res: Response2): Promise<string> {
   }
 }
 
-/** Log a single compact status line per chunk to stderr. */
+/**
+ * Feed debug-chunk stats into the shared singleton sink. The sink batches
+ * and throttles writes so the TUI can render them inside Ink's StatusBar
+ * line 3 (~5 Hz) instead of raw stderr interfering with the terminal layout.
+ */
 function logRawChunk(
-  providerId: string,
-  chunkIndex: number,
+  _providerId: string,
+  _chunkIndex: number,
   bytes: Uint8Array,
   deltaMs: number,
 ): void {
-  const ts = new Date().toISOString();
-  process.stderr.write(
-    `[DEBUG-STREAM ${providerId}] chunk #${chunkIndex} (${bytes.length}B, +${deltaMs}ms) ${ts}\n`,
-  );
+  pushDebugChunkStats(bytes.length, deltaMs);
 }
 
 const DEFAULT_STREAM_HANG_TIMEOUT_MS = 60_000;

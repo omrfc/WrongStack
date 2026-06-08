@@ -706,6 +706,19 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             const metaMode = context.meta?.['mode'];
             return typeof metaMode === 'string' ? metaMode : (modeId ?? 'default');
           },
+          registerDebugStreamCallback: (cb) => {
+            // Swap the debug-stream callback from stderr → TUI reducer.
+            // Restored on TUI unmount via the cleanup in app.tsx.
+            void import('@wrongstack/providers').then(
+              ({ setDebugStreamCallback }) => setDebugStreamCallback(cb),
+            );
+          },
+          restoreDebugStreamCallback: () => {
+            void import('@wrongstack/providers').then(
+              ({ setDebugStreamCallback, defaultDebugStreamCallback }) =>
+                setDebugStreamCallback(defaultDebugStreamCallback),
+            );
+          },
         });
       } finally {
         renderer.setSilent(false);

@@ -422,6 +422,18 @@ export type State = {
   totalLines: number;
   viewportRows: number;
   pendingNewLines: number;
+  /**
+   * Live debug-stream telemetry rendered in StatusBar line 3 when
+   * stream debugging is active. Updated every ~200 ms by the throttled
+   * callback from stream-debug-state.ts. Null when disabled or idle.
+   */
+  debugStreamStats: {
+    chunkCount: number;
+    lastChunkSize: number;
+    lastDeltaMs: number;
+    totalBytes: number;
+    lastChunkAt: string;
+  } | null;
 };
 
 export type Settings = {
@@ -728,4 +740,15 @@ export type Action =
   | { type: 'collabSubagentSpawned'; subagentId: string; role: string }
   /** Toggle the process list overlay (F8). */
   | { type: 'toggleProcessList' }
-  | { type: 'toggleGoalPanel' };
+  | { type: 'toggleGoalPanel' }
+  /** Push throttled debug-stream telemetry from the provider's chunk callback. */
+  | {
+      type: 'debugStreamStats';
+      chunkCount: number;
+      lastChunkSize: number;
+      lastDeltaMs: number;
+      totalBytes: number;
+      lastChunkAt: string;
+    }
+  /** Clear debug-stream stats (fired on stream reset / idle). */
+  | { type: 'debugStreamStatsClear' };

@@ -102,6 +102,21 @@ export interface RunTuiOptions {
   modeLabel?: string | undefined;
   /** Live getter for the agent mode label so the status bar updates after /mode. */
   getModeLabel?: (() => string) | undefined;
+  /**
+   * Called ONCE on mount by the App to install its debug-stream telemetry
+   * callback. The CLI wires this to setDebugStreamCallback() from
+   * @wrongstack/providers. On App unmount, the default stderr callback
+   * is restored.
+   */
+  registerDebugStreamCallback?: ((cb: (stats: {
+    chunkCount: number;
+    lastChunkSize: number;
+    lastDeltaMs: number;
+    totalBytes: number;
+    lastChunkAt: string;
+  }) => void) => void) | undefined;
+  /** Called on App unmount — restores the default stderr debug-stream callback. */
+  restoreDebugStreamCallback?: (() => void) | undefined;
   /** Called from /clear so the TUI can wipe its history entries while agent.ctx + memory are cleared separately. */
   onClearHistory?: ((
     dispatch: React.Dispatch<{ type: 'clearHistory' } | { type: 'resetContextChip' }>,
@@ -399,6 +414,8 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           confirmExit: opts.confirmExit,
           modeLabel: opts.modeLabel,
           getModeLabel: opts.getModeLabel,
+          registerDebugStreamCallback: opts.registerDebugStreamCallback,
+          restoreDebugStreamCallback: opts.restoreDebugStreamCallback,
         }),
         { exitOnCtrlC: false, stdin: inkStdin },
       );

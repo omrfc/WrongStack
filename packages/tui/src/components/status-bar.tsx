@@ -184,6 +184,19 @@ export interface StatusBarProps {
   indexState?: { ready: boolean; indexing: boolean; currentFile: number; totalFiles: number };
   /** Active agent mode label with icon (e.g. "🧑‍🏫 teach", "⚡ brief"). Rendered on line 2. */
   modeLabel?: string | undefined;
+  /**
+   * Live debug-stream telemetry — pushed into the TUI reducer by the
+   * throttled callback from stream-debug-state.ts. When non-null, renders
+   * a "🐛 stream" chip on line 3 with chunk count, size, delta, and total
+   * bytes. Cleared on provider.response (per-iteration stream reset).
+   */
+  debugStreamStats?: {
+    chunkCount: number;
+    lastChunkSize: number;
+    lastDeltaMs: number;
+    totalBytes: number;
+    lastChunkAt: string;
+  } | null | undefined;
 }
 
 /**
@@ -218,6 +231,7 @@ export function StatusBar({
   goalSummary,
   indexState,
   modeLabel,
+  debugStreamStats,
 }: StatusBarProps): React.ReactElement {
   // Track terminal width so we can adapt layout on narrow terminals.
   // We snapshot into state so that renders are stable — we don't want
@@ -289,11 +303,13 @@ export function StatusBar({
     (fleet && (fleet.running > 0 || fleet.idle > 0 || fleet.pending > 0 || fleet.completed > 0)) ||
     subagentCount > 0;
   const hasBrainActivity = !!brain && brain.state !== 'idle';
+  const hasDebugStream = !!debugStreamStats;
   const hasThirdLine =
     (todos && (todos.pending > 0 || todos.inProgress > 0 || todos.completed > 0)) ||
     (plan && (plan.open > 0 || plan.inProgress > 0 || plan.done > 0)) ||
     fleetHasActivity ||
-    hasBrainActivity;
+    hasBrainActivity ||
+    hasDebugStream;
 
   return (
     <Box
@@ -565,6 +581,23 @@ export function StatusBar({
                 <Text dimColor>│</Text>
               ) : null}
               <BrainChip brain={brain} />
+            </>
+          ) : null}
+          {hasDebugStream && debugStreamStats ? (
+            <>
+              {(todos && (todos.pending > 0 || todos.inProgress > 0 || todos.completed > 0)) ||
+              (plan && (plan.open > 0 || plan.inProgress > 0 || plan.done > 0)) ||
+              fleetHasActivity ||
+              hasBrainActivity ? (
+                <Text dimColor>│</Text>
+              ) : null}
+              <Text color="cyan">
+                <Text bold>🐛 stream</Text>
+                <Text dimColor> #{debugStreamStats.chunkCount}</Text>
+                <Text dimColor> · {debugStreamStats.lastChunkSize}B</Text>
+                <Text dimColor> · +{debugStreamStats.lastDeltaMs}ms</Text>
+                <Text dimColor> · {fmtDebugBytes(debugStreamStats.totalBytes)}</Text>
+              </Text>
             </>
           ) : null}
         </Box>
@@ -857,6 +890,12 @@ export function fmtElapsed(ms: number): string {
     return `${h}:${pad2(m)}:${pad2(s)}`;
   }
   return `${pad2(m)}:${pad2(s)}`;
+}
+
+function fmtDebugBytes(n: number): string {
+  if (n < 1024) return `${n}B`;
+  if (n < 1_048_576) return `${(n / 1024).toFixed(1)}KB`;
+  return `${(n / 1_048_576).toFixed(1)}MB`;
 }
 
 function pad2(n: number): string {
