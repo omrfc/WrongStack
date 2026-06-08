@@ -26,8 +26,8 @@ import { helpCmd } from '../src/subcommands/handlers/version-help.js';
 
 function fakeDeps() {
   return {
-    renderer: { write: vi.fn() },
-    reader: {} as never,
+    renderer: { write: vi.fn(), writeError: vi.fn(), writeInfo: vi.fn(), writeWarning: vi.fn() },
+    reader: { readLine: vi.fn() } as never,
     modelsRegistry: {} as never,
     vault: {} as never,
     paths: { globalConfig: '/tmp/cfg.json' } as never,
@@ -95,6 +95,42 @@ describe('authCmd', () => {
     expect(opts.label).toBe('work');
     expect(opts.family).toBe('anthropic');
     expect(opts.baseUrl).toBe('https://x');
+  });
+
+  it('status with no provider id prints usage and exits 1', async () => {
+    const deps = fakeDeps();
+    const code = await authCmd(['status'], deps);
+    expect(code).toBe(1);
+    expect(deps.renderer.writeError).toHaveBeenCalledWith(
+      expect.stringContaining('Usage:'),
+    );
+  });
+
+  it('status with unknown provider reports not found', async () => {
+    const deps = fakeDeps();
+    const code = await authCmd(['status', 'unknown-prov'], deps);
+    expect(code).toBe(1);
+    expect(deps.renderer.writeError).toHaveBeenCalledWith(
+      expect.stringContaining('not found'),
+    );
+  });
+
+  it('remove with no provider id prints usage and exits 1', async () => {
+    const deps = fakeDeps();
+    const code = await authCmd(['remove'], deps);
+    expect(code).toBe(1);
+    expect(deps.renderer.writeError).toHaveBeenCalledWith(
+      expect.stringContaining('Usage:'),
+    );
+  });
+
+  it('rm alias works like remove', async () => {
+    const deps = fakeDeps();
+    const code = await authCmd(['rm'], deps);
+    expect(code).toBe(1);
+    expect(deps.renderer.writeError).toHaveBeenCalledWith(
+      expect.stringContaining('Usage:'),
+    );
   });
 });
 

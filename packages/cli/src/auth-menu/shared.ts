@@ -92,9 +92,9 @@ export function renderKeyLine(
   renderer: AuthMenuDeps['renderer'],
   key: ProviderApiKey,
   idx: number,
-  activeLabel: string | undefined,
+  active: string | undefined,
 ): void {
-  const marker = key.label === activeLabel ? color.green('●') : color.dim('○');
+  const marker = key.label === active ? color.green('●') : color.dim('○');
   renderer.write(
     `  ${color.dim(`${idx}.`.padStart(4))} ${marker} ${key.label.padEnd(20)} ` +
       `${maskedKey(key.apiKey)}  ${color.dim(key.createdAt)}\n`,
