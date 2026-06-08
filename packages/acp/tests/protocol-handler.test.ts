@@ -312,7 +312,12 @@ describe('ACPProtocolHandler', () => {
 
     it('does not throw when transport.send fails during abort', async () => {
       const transport = fakeTransport();
-      transport.send.mockRejectedValueOnce(new Error('transport gone'));
+      // Reject only after initialize (track call count via mockImplementation)
+      let callCount = 0;
+      transport.send.mockImplementation(async () => {
+        callCount++;
+        if (callCount > 1) throw new Error('transport gone');
+      });
 
       const registry = fakeRegistry();
       registry.has.mockReturnValue(true);
@@ -353,6 +358,8 @@ describe('ACPProtocolHandler', () => {
       const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
       await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
 
+      // Reset call count so we only check calls from the notification itself
+      transport.send.mockClear();
       transport.sent.length = 0;
       const terminal = await handler.handleMessage({ method: 'someNotification' } as never);
       expect(terminal).toBe(false);
