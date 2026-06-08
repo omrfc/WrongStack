@@ -154,9 +154,12 @@ export {
   IntelligentCompactor,
   SelectiveCompactor,
   AutoCompactionMiddleware,
+  createStrategyCompactor,
   type CompactorOptions,
   type IntelligentCompactorOptions,
   type SelectiveCompactorOptions,
+  type CompactorStrategy,
+  type StrategyCompactorOptions,
 } from './defaults/index.js';
 export {
   ENHANCER_SYSTEM_PROMPT,

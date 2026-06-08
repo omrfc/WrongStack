@@ -143,13 +143,8 @@ function AgentRow({
       <Text bold={selected} color={selected ? 'magenta' : undefined}>
         {entry.name}
       </Text>
-      {/* Provider / Model */}
+      {/* Provider / Model — fmtModelLabel handles all cases (including undefined model) */}
       {modelLabel ? <Text dimColor>{modelLabel}</Text> : null}
-      {entry.provider || entry.model ? (
-        <Text color="blue">
-          {entry.provider ? `${entry.provider}/` : ''}{entry.model ?? ''}
-        </Text>
-      ) : null}
       {/* Iterations / tool calls */}
       <Text dimColor>
         L{entry.iterations} {entry.toolCalls}t
@@ -211,8 +206,8 @@ function AgentDetail({
         </Box>
       ) : null}
 
-      {/* Provider + Model info */}
-      {(entry.provider || entry.model) ? (
+      {/* Provider + Model info — only show fallback when fmtModelLabel returned nothing */}
+      {!modelLabel && (entry.provider || entry.model) ? (
         <Box>
           <Text dimColor>
             provider: {entry.provider || '(leader)'}  ·  model: {entry.model || '—'}

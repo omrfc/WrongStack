@@ -55,6 +55,11 @@ export function createAgentLoopHandler(
     await a.pipelines.contextWindow.run(a.ctx);
   }
 
+  /** Per-(provider,model) calibration bucket so a model-switching or fleet
+   *  process doesn't collapse every tokenizer onto one shared ratio. */
+  const calibrationKey = (model: string = a.ctx.model): string =>
+    `${a.ctx.provider?.id ?? 'unknown'}/${model}`;
+
   /** Emit ctx.pct event for live context-fill bar in UIs. */
   function emitContextPct(): void {
     // Mirror the denominator AutoCompactionMiddleware uses: an explicit
@@ -74,6 +79,7 @@ export function createAgentLoopHandler(
       a.ctx.messages,
       a.ctx.systemPrompt,
       a.ctx.tools ?? [],
+      calibrationKey(),
     );
     a.events.emit('ctx.pct', { load: total / maxContext, tokens: total, maxContext });
   }
@@ -219,8 +225,9 @@ export function createAgentLoopHandler(
         let res: Response;
         try {
           res = await customRunner(a.ctx, req);
-          const calibratedEstimate = estimateRequestTokensCalibrated(req.messages, req.system, req.tools ?? []).total;
-          recordActualUsage(res.usage.input, calibratedEstimate);
+          const key = calibrationKey(req.model);
+          const calibratedEstimate = estimateRequestTokensCalibrated(req.messages, req.system, req.tools ?? [], key).total;
+          recordActualUsage(res.usage.input, calibratedEstimate, key);
           recoveryRetries = 0;
         } catch (err) {
           if (controller.signal.aborted) {

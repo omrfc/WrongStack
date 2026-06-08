@@ -124,7 +124,12 @@ export class AutoCompactionMiddleware {
       // context pressure readings converge on the real token count.
       const tokens = this._estimator
         ? this._estimator(ctx)
-        : estimateRequestTokensCalibrated(ctx.messages, ctx.systemPrompt, ctx.tools ?? []).total;
+        : estimateRequestTokensCalibrated(
+            ctx.messages,
+            ctx.systemPrompt,
+            ctx.tools ?? [],
+            `${ctx.provider?.id ?? 'unknown'}/${ctx.model}`,
+          ).total;
       const load = tokens / this._maxContext;
       const policy = this.policyProvider?.(ctx);
       const thresholds = policy?.thresholds ?? {

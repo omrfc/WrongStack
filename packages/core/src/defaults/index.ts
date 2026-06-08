@@ -146,6 +146,11 @@ export {
   SelectiveCompactor,
   type SelectiveCompactorOptions,
 } from '../execution/selective-compactor.js';
+export {
+  createStrategyCompactor,
+  type CompactorStrategy,
+  type StrategyCompactorOptions,
+} from '../execution/strategy-compactor.js';
 export { AutoCompactionMiddleware } from '../execution/auto-compaction-middleware.js';
 export { ToolExecutor } from '../execution/tool-executor.js';
 export {

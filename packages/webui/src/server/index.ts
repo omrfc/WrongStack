@@ -425,7 +425,12 @@ export async function startWebUI(
       compactor,
       effectiveMaxContext,
       (ctx) =>
-        estimateRequestTokensCalibrated(ctx.messages, ctx.systemPrompt, ctx.tools ?? []).total,
+        estimateRequestTokensCalibrated(
+          ctx.messages,
+          ctx.systemPrompt,
+          ctx.tools ?? [],
+          `${ctx.provider?.id ?? 'unknown'}/${ctx.model}`,
+        ).total,
       {
         warn: initialContextPolicy.thresholds.warn,
         soft: initialContextPolicy.thresholds.soft,

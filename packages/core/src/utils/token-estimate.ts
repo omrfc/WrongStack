@@ -24,13 +24,33 @@ const RoughTokenEstimate = (text: string, charsPerToken = 3.5): number =>
   Math.max(1, Math.ceil(text.length / charsPerToken));
 
 /** Calibration state: actual/estimated ratio via exponential weighted moving average. */
-const _cal = {
-  ratio: 1.0,     // current calibration multiplier (actual / estimated)
-  count: 0,        // number of samples recorded
-  prevEst: 0,     // estimated tokens from the most recent estimateRequestTokens call
-  /** EWM α — higher = faster adaptation, more volatile */
-  alpha: 0.3,
-};
+interface CalState {
+  ratio: number; // current calibration multiplier (actual / estimated)
+  count: number; // number of samples recorded
+  prevEst: number; // estimated tokens from the most recent estimateRequestTokens call
+}
+
+/** EWM α — higher = faster adaptation, more volatile. */
+const CAL_ALPHA = 0.3;
+
+/**
+ * Calibration is keyed so that, in a multi-agent / model-switching process,
+ * each (provider, model) tokenizer gets its own ratio instead of all of them
+ * collapsing onto one shared number. Callers that don't pass a key use the
+ * shared `__global__` bucket — that preserves the original single-session
+ * behavior and keeps all existing call sites working unchanged.
+ */
+const CALIBRATION_GLOBAL_KEY = '__global__';
+const _cals = new Map<string, CalState>();
+
+function calState(key: string): CalState {
+  let state = _cals.get(key);
+  if (!state) {
+    state = { ratio: 1.0, count: 0, prevEst: 0 };
+    _cals.set(key, state);
+  }
+  return state;
+}
 
 const MIN_SAMPLES_FOR_CALIBRATION = 3;
 
@@ -146,6 +166,7 @@ export function estimateRequestTokens(
   messages: unknown,
   systemPrompt: unknown,
   tools: { name: string; description?: string | undefined; inputSchema: unknown }[],
+  calibrationKey: string = CALIBRATION_GLOBAL_KEY,
 ): RequestTokenBreakdown {
   // Messages: apply the same logic as roughEstimate
   let messagesTokens = 0;
@@ -195,7 +216,7 @@ export function estimateRequestTokens(
   // Record the raw estimate for calibration: the next recordActualUsage()
   // call will pair this against the actual API usage so the rolling ratio
   // stays in sync with the real chars/token ratio of the content.
-  _cal.prevEst = total;
+  calState(calibrationKey).prevEst = total;
 
   return {
     messages: messagesTokens,
@@ -214,36 +235,46 @@ export function estimateRequestTokens(
  * also calls `estimateRequestTokens` between the pre-flight and this call
  * (e.g. audit logging in agent.ts).
  *
- * When `estimatedInputTokens` is omitted, falls back to `_cal.prevEst`
- * for backward compatibility with callers that don't have the pre-flight value.
+ * When `estimatedInputTokens` is omitted, falls back to the keyed bucket's
+ * `prevEst` for backward compatibility with callers that don't have the
+ * pre-flight value. `calibrationKey` selects the per-(provider,model) bucket
+ * (defaults to the shared global bucket).
  */
-export function recordActualUsage(actualInputTokens: number, estimatedInputTokens?: number): void {
+export function recordActualUsage(
+  actualInputTokens: number,
+  estimatedInputTokens?: number,
+  calibrationKey: string = CALIBRATION_GLOBAL_KEY,
+): void {
   if (actualInputTokens <= 0) return;
-  const est = estimatedInputTokens ?? _cal.prevEst;
+  const cal = calState(calibrationKey);
+  const est = estimatedInputTokens ?? cal.prevEst;
   if (est <= 0) return;
 
   const sampleRatio = actualInputTokens / est;
-  if (_cal.count === 0) {
-    _cal.ratio = sampleRatio;
+  if (cal.count === 0) {
+    cal.ratio = sampleRatio;
   } else {
     // EWM: new = α * sample + (1-α) * old  →  α=0.3 = fast initial converge
-    _cal.ratio = _cal.alpha * sampleRatio + (1 - _cal.alpha) * _cal.ratio;
+    cal.ratio = CAL_ALPHA * sampleRatio + (1 - CAL_ALPHA) * cal.ratio;
   }
   // Sanity bound: keep the rolling ratio within [0.5, 1.5] so a sequence
   // of bad samples can't blow up the calibration for everyone.
-  _cal.ratio = Math.min(1.5, Math.max(0.5, _cal.ratio));
-  _cal.count++;
+  cal.ratio = Math.min(1.5, Math.max(0.5, cal.ratio));
+  cal.count++;
 }
 
 /**
- * Returns the current calibration state. Exposed for debugging and
- * tests — not needed by normal callers.
+ * Returns the current calibration state for a bucket. Exposed for debugging
+ * and tests — not needed by normal callers.
  */
-export function getCalibrationState(): { ratio: number; count: number; calibrated: boolean } {
+export function getCalibrationState(
+  calibrationKey: string = CALIBRATION_GLOBAL_KEY,
+): { ratio: number; count: number; calibrated: boolean } {
+  const cal = calState(calibrationKey);
   return {
-    ratio: _cal.ratio,
-    count: _cal.count,
-    calibrated: _cal.count >= MIN_SAMPLES_FOR_CALIBRATION,
+    ratio: cal.ratio,
+    count: cal.count,
+    calibrated: cal.count >= MIN_SAMPLES_FOR_CALIBRATION,
   };
 }
 
@@ -260,11 +291,13 @@ export function estimateRequestTokensCalibrated(
   messages: unknown,
   systemPrompt: unknown,
   tools: { name: string; description?: string | undefined; inputSchema: unknown }[],
+  calibrationKey: string = CALIBRATION_GLOBAL_KEY,
 ): RequestTokenBreakdown {
-  const result = estimateRequestTokens(messages, systemPrompt, tools);
+  const result = estimateRequestTokens(messages, systemPrompt, tools, calibrationKey);
+  const cal = calState(calibrationKey);
 
-  if (_cal.count >= MIN_SAMPLES_FOR_CALIBRATION) {
-    const safeRatio = Math.min(1.5, Math.max(0.5, _cal.ratio));
+  if (cal.count >= MIN_SAMPLES_FOR_CALIBRATION) {
+    const safeRatio = Math.min(1.5, Math.max(0.5, cal.ratio));
     return {
       messages: Math.round(result.messages * safeRatio),
       systemPrompt: Math.round(result.systemPrompt * safeRatio),
@@ -278,10 +311,13 @@ export function estimateRequestTokensCalibrated(
 
 /**
  * Resets calibration state. Primarily for tests that run in the same
- * process and need a clean slate between suites.
+ * process and need a clean slate between suites. With no argument it clears
+ * every bucket (including the global one); pass a key to reset just that bucket.
  */
-export function resetCalibration(): void {
-  _cal.ratio = 1.0;
-  _cal.count = 0;
-  _cal.prevEst = 0;
+export function resetCalibration(calibrationKey?: string): void {
+  if (calibrationKey === undefined) {
+    _cals.clear();
+    return;
+  }
+  _cals.delete(calibrationKey);
 }

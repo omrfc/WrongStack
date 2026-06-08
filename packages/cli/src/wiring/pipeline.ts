@@ -127,7 +127,12 @@ export async function setupCompaction(params: {
       // Calibrated estimator: recordActualUsage() is called after each API
       // response so this converges on real token counts for compaction decisions.
       (ctx) =>
-        estimateRequestTokensCalibrated(ctx.messages, ctx.systemPrompt, ctx.tools ?? []).total,
+        estimateRequestTokensCalibrated(
+          ctx.messages,
+          ctx.systemPrompt,
+          ctx.tools ?? [],
+          `${ctx.provider?.id ?? 'unknown'}/${ctx.model}`,
+        ).total,
       initialPolicy.thresholds,
       {
         aggressiveOn: initialPolicy.aggressiveOn,

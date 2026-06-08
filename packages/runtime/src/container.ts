@@ -13,7 +13,7 @@ import {
   DefaultSystemPromptBuilder,
   DefaultTokenCounter,
   type EventBus,
-  HybridCompactor,
+  createStrategyCompactor,
   buildRecoveryStrategies,
   type Logger,
   type ModelsRegistry,
@@ -130,15 +130,19 @@ export function createDefaultContainer(opts: CreateContainerOptions): Container 
   container.bind(
     TOKENS.Compactor,
     () =>
-      new HybridCompactor({
-        // preserveK / eliseThreshold here are class-level fallbacks; the active
-        // ContextWindowPolicy in ctx.meta normally overrides both at runtime.
-        // Keep them consistent with the 'balanced' mode defaults so any path
-        // that compacts WITHOUT a policy (tests, future callers) behaves sanely.
-        // eliseThreshold is a TOKEN COUNT — a previous value of 0.7 elided
-        // essentially every tool_result (anything > 1 token).
+      // Strategy comes from config.context.strategy: 'hybrid' (default, lossless
+      // rules, no LLM), 'intelligent' (LLM summarization), or 'selective'
+      // (LLM-driven selection). The LLM strategies resolve their provider from
+      // ctx at compact()-time, so binding here (before context.provider exists)
+      // is safe. preserveK / eliseThreshold are class-level fallbacks; the active
+      // ContextWindowPolicy in ctx.meta normally overrides both at runtime.
+      // eliseThreshold is a TOKEN COUNT — a previous value of 0.7 elided
+      // essentially every tool_result (anything > 1 token).
+      createStrategyCompactor({
+        strategy: config.context?.strategy,
         preserveK: opts.compactor?.preserveK ?? 10,
         eliseThreshold: opts.compactor?.eliseThreshold ?? 2000,
+        summarizerModel: config.context?.summarizerModel,
       }),
   );
 
