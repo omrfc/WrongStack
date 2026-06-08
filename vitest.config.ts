@@ -1,6 +1,18 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 export default defineConfig({
+  // The `@` alias is webui-only (no other package uses it). Mapping it here lets
+  // webui tests picked up by this root config (packages/**/tests/**) resolve
+  // `@/...` imports the same way the webui Vite/vitest configs do.
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './packages/webui/src'),
+    },
+  },
   test: {
     globals: false,
     environment: 'node',
