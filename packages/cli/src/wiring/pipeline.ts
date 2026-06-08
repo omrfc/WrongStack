@@ -76,12 +76,12 @@ export async function setupCompaction(params: {
       effectiveMaxContext?: number | undefined;
     };
     /** Slice that may contain session.auditLevel (for future richer logging). */
-    session?: { auditLevel?: 'minimal' | 'standard' | 'full' | undefined };
+    session?: { auditLevel?: 'minimal' | 'standard' | 'full' | undefined } | undefined;
   };
   provider: Provider;
   pipelines: AgentPipelines;
   /** Full config object (preferred) so we can reliably read session.auditLevel. */
-  fullConfig?: { session?: { auditLevel?: 'minimal' | 'standard' | 'full' | undefined } };
+  fullConfig?: { session?: { auditLevel?: 'minimal' | 'standard' | 'full' | undefined } | undefined } | undefined;
   /** Real SessionWriter (used if no pre-created bridge is passed). */
   sessionWriter?: import('@wrongstack/core').SessionWriter | undefined;
   /** Pre-created SessionEventBridge (preferred for sharing across error + compaction + future events). */

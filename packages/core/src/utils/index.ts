@@ -11,6 +11,7 @@ export * from './wstack-paths.js';
 export * from './child-env.js';
 export * from './sleep.js';
 export * from './expect-defined.js';
+export * from './assert-never.js';
 export {
   createToolOutputSerializer,
   type ToolOutputSerializerOptions,

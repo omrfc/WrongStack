@@ -252,7 +252,7 @@ export interface DirectorOptions {
    * A function may be supplied when the leader can switch models at runtime;
    * spawn() reads it lazily so the threshold follows the active model.
    */
-  maxContext?: number | (() => number | undefined);
+  maxContext?: number | (() => number | undefined) | undefined;
   /**
    * Per-task model matrix (Config.modelMatrix). When set, a spawn whose
    * config has no explicit `model` is resolved against this matrix by role

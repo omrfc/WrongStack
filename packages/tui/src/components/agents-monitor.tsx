@@ -140,7 +140,7 @@ function AgentRow({
         {s.icon}
       </Text>
       {/* Name */}
-      <Text bold={selected} color={selected ? 'magenta' : undefined}>
+      <Text bold={selected} {...(selected ? { color: 'magenta' } : {})}>
         {entry.name}
       </Text>
       {/* Provider / Model — fmtModelLabel handles all cases (including undefined model) */}

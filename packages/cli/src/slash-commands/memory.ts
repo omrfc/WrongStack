@@ -137,9 +137,9 @@ interface CompactEntry {
   id: string;
   text: string;
   ts: string;
-  type?: string;
-  tags?: string[];
-  priority?: string;
+  type?: string | undefined;
+  tags?: string[] | undefined;
+  priority?: string | undefined;
 }
 
 async function runCompact(opts: SlashCommandContext): Promise<{ message: string }> {

@@ -834,7 +834,7 @@ function WaveText({ text, phase }: { text: string; phase: number }): React.React
     <Text bold>
       {Array.from(text).map((ch, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: glyph order is positional and re-rendered each tick
-        <Text key={i} color={WAVE_COLORS[(i + phase) % WAVE_COLORS.length]}>
+        <Text key={i} color={WAVE_COLORS[(i + phase) % WAVE_COLORS.length] ?? '#ffffff'}>
           {ch}
         </Text>
       ))}

@@ -1,5 +1,5 @@
 import * as fs from 'node:fs/promises';
-import { decryptConfigSecrets } from '../security/config-secrets.js';
+import { decryptConfigSecrets } from '../security/secret-vault.js';
 import { atomicWrite } from '../utils/atomic-write.js';
 import {
   DEFAULT_CONTEXT_WINDOW_MODE_ID,

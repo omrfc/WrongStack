@@ -333,10 +333,11 @@ export function parseProgressFromText(text: string): { progress: number; note?: 
   const re = /\[progress:\s*(\d{1,3})%\]\s*(?:[—\-]\s*(.+))?/i;
   const m = text.match(re);
   if (!m) return null;
-  // biome-ignore lint/style/noNonNullAssertion: regex match guarantees capture group
-  const progress = Math.min(100, Math.max(0, Number.parseInt(m[1]!, 10)));
+  // Regex match guarantees capture group 1 exists, but use ?? fallback to
+  // satisfy noUncheckedIndexedAccess without a non-null assertion.
+  const progress = Math.min(100, Math.max(0, Number.parseInt(m[1] ?? '0', 10)));
   const note = m[2]?.trim() || undefined;
-  return { progress, note };
+  return note === undefined ? { progress } : { progress, note };
 }
 
 /**

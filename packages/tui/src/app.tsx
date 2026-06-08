@@ -34,7 +34,6 @@ import { FleetPanel } from './components/fleet-panel.js';
 import { HelpOverlay } from './components/help-overlay.js';
 import { History } from './components/history.js';
 import { Input, type KeyEvent } from './components/input.js';
-import { LiveActivityStrip } from './components/live-activity-strip.js';
 import { ModelPicker, type ProviderOption } from './components/model-picker.js';
 import { PhaseMonitor } from './components/phase-monitor.js';
 import { PhasePanel } from './components/phase-panel.js';
@@ -331,10 +330,12 @@ export interface AppProps {
    * setter on mount so the `/agents on|off` slash command can toggle the
    * overlay without a round-trip.
    */
-  agentsMonitorController?: {
-    visible: boolean;
-    setVisible: (visible: boolean) => void;
-  };
+  agentsMonitorController?:
+    | {
+        visible: boolean;
+        setVisible: (visible: boolean) => void;
+      }
+    | undefined;
   /** Active agent mode label shown in the status bar (e.g. "teach", "brief"). */
   modeLabel?: string | undefined;
   /**
@@ -3884,7 +3885,18 @@ export function App({
           toolStream={state.toolStream}
         />
         <Box flexDirection="column" flexShrink={0}>
-          <LiveActivityStrip entries={state.fleet} nowTick={nowTick} />
+          {/* NOTE: the LiveActivityStrip is deliberately NOT rendered in inline
+              mode. Like the live tool-stream box (see history/index.tsx), it sits
+              at the bottom edge of a full terminal, so every fleet tool.progress
+              re-render scrolls the screen by a line and strands the strip's top
+              row permanently in native scrollback — a busy subagent (100+ rapid
+              tool calls) re-stamps the "● <name> … last: …" line dozens of times,
+              differing only by the elapsed timer. The strip's constant-height
+              guard only defends against height-change leaks, not bottom-edge
+              scroll; Ink can't avoid this without owning the screen. Fleet
+              activity stays visible via the status bar and the F3 agents monitor.
+              The component + its tests are kept for a future managed (alt-screen)
+              ScrollableHistory path, where in-place redraw is leak-safe. */}
           {/* While enhance is active or a monitor overlay is open, the Input is
               rendered HIDDEN: its visible rows collapse to a constant-height
               placeholder (so Ink's log-update never bleeds the live region into

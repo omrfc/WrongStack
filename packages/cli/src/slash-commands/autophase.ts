@@ -186,6 +186,7 @@ export function buildAutoPhaseCommand(opts: SlashCommandContext): SlashCommand {
           };
         }
       }
+      return { message: `Unknown subcommand "${sub}". Run \`/autophase\` for usage.` };
     },
   };
 }

@@ -54,7 +54,7 @@ export async function runSettingsMenu(deps: SettingsMenuDeps): Promise<number> {
   }
 }
 
-function renderSettingsTopMenu(renderer: TerminalRenderer, config: { autonomy?: { autoProceedDelayMs?: number | undefined; defaultMode?: string | undefined } }): void {
+function renderSettingsTopMenu(renderer: TerminalRenderer, config: { autonomy?: { autoProceedDelayMs?: number | undefined; defaultMode?: string | undefined } | undefined }): void {
   const delay = config.autonomy?.autoProceedDelayMs ?? 45_000;
   const defMode = config.autonomy?.defaultMode ?? 'off';
   renderer.write(`\n${color.bold('WrongStack')} ${color.dim('— Settings')}\n\n`);
@@ -369,7 +369,7 @@ export async function persistTelegramConfig(
   await atomicWrite(deps.globalConfigPath, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
 
   // Also update the in-memory config store so changes are immediately visible
-  deps.configStore.update({ extensions: decrypted.extensions as Parameters<typeof deps.configStore.update>[0]['extensions'] });
+  deps.configStore.update({ extensions: extensions as NonNullable<Parameters<typeof deps.configStore.update>[0]['extensions']> });
 }
 
 /** Interactive-menu adapter over {@link persistAutonomySetting}. */

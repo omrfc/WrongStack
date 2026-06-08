@@ -2,6 +2,7 @@ import type { Agent, RunResult } from '../core/agent.js';
 import type { Context } from '../core/context.js';
 import { toWrongStackError } from '../types/errors.js';
 import type { DoneCondition } from '../types/multi-agent.js';
+import { assertNever } from '../utils/assert-never.js';
 import { compileUserRegex } from '../utils/regex-guard.js';
 
 type AutonomousResult = RunResult & { toolCalls: number; reason?: string | undefined };
@@ -74,9 +75,16 @@ export class DoneConditionChecker {
         }
         break;
 
+      case 'all_tasks_done':
+        // Coordinator-managed: completion is decided by the multi-agent
+        // coordinator's pending-task queue, not by per-iteration state here.
+        break;
+
       case 'custom':
         // Reserved for future extension
         break;
+      default:
+        return assertNever(this.condition.type);
     }
 
     return { done: false, iterations: state.iterations, toolCalls: state.toolCalls };

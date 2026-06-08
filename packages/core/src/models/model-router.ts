@@ -205,7 +205,10 @@ export class ModelRouter {
 
     if (scored.length === 0) return undefined;
 
-    const best = scored[0]!.profile;
+    // Guarded by scored.length === 0 check above — but use optional
+    // chaining instead of `!` to satisfy the non-null assertion lint rule.
+    const best = scored[0]?.profile;
+    if (!best) return undefined;
     // Find the actual model id from the provider's configured models
     const models = this.getProviderModels(best.provider);
     const match = models.find((m) => best.pattern.test(m)) ?? models[0];

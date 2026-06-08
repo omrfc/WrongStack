@@ -151,22 +151,26 @@ export interface PhaseExecutionContext {
    *
    * If undefined, the gate is skipped for backward compatibility.
    */
-  verifyPhase?: (
-    phase: PhaseNode,
-    env?: { cwd?: string | undefined; branch?: string | undefined },
-  ) => Promise<{ ok: boolean; output?: string | undefined }>;
+  verifyPhase?:
+    | ((
+        phase: PhaseNode,
+        env?: { cwd?: string | undefined; branch?: string | undefined },
+      ) => Promise<{ ok: boolean; output?: string | undefined }>)
+    | undefined;
   /**
    * Optional repair pass. When `verifyPhase` fails, it is called with the
    * captured error output. It should try to fix the code in the worktree
    * for example, through a repair subagent. Its return value is ignored;
    * the orchestrator reruns `verifyPhase` afterward. It is never called when `verifyPhase` is undefined.
    */
-  repairPhase?: (
-    phase: PhaseNode,
-    failure: string,
-    attempt: number,
-    env?: { cwd?: string | undefined; branch?: string | undefined },
-  ) => Promise<void>;
+  repairPhase?:
+    | ((
+        phase: PhaseNode,
+        failure: string,
+        attempt: number,
+        env?: { cwd?: string | undefined; branch?: string | undefined },
+      ) => Promise<void>)
+    | undefined;
   /**
    * Optional merge-conflict resolver. Called when a phase worktree conflicts
    * during squash-merge into the base branch. `info.cwd` points to the base
@@ -175,18 +179,20 @@ export interface PhaseExecutionContext {
    * the merge is aborted and the worktree is kept in `needs-review`.
    * If undefined, conflicts keep the old parked-for-review behavior.
    */
-  resolveConflict?: (
-    phase: PhaseNode,
-    info: { conflictFiles: string[]; cwd: string },
-  ) => Promise<boolean>;
+  resolveConflict?:
+    | ((
+        phase: PhaseNode,
+        info: { conflictFiles: string[]; cwd: string },
+      ) => Promise<boolean>)
+    | undefined;
   /** Optional global Brain arbiter for the policy, decision, and escalation layer. */
   brain?: BrainArbiter | undefined;
   /** Called when a phase completes. */
   onPhaseComplete?: ((phase: PhaseNode) => void) | undefined;
   /** Called when a phase fails. */
-  onPhaseFail?: (phase: PhaseNode, error: Error) => void;
+  onPhaseFail?: ((phase: PhaseNode, error: Error) => void) | undefined;
   /** Called on every tick in autonomous mode. */
-  onTick?: (ctx: { activePhases: PhaseNode[]; readyPhases: PhaseNode[] }) => void;
+  onTick?: ((ctx: { activePhases: PhaseNode[]; readyPhases: PhaseNode[] }) => void) | undefined;
 }
 
 // ─── AutoPhase Options ──────────────────────────────────────────────────────

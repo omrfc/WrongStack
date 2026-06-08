@@ -3,7 +3,7 @@ import {
   decryptConfigSecrets,
   encryptConfigSecrets,
   isSecretField,
-} from '../../src/security/config-secrets.js';
+} from '../../src/security/secret-vault.js';
 import type { SecretVault } from '../../src/types/secret-vault.js';
 
 const makeVault = (): SecretVault => ({

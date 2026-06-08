@@ -11,9 +11,9 @@ interface GraphNode {
   firstSeen: string;
   count: number;
   /** Extracted metadata for fast lookup. */
-  type?: MemoryEntry['type'];
-  tags?: string[];
-  priority?: MemoryEntry['priority'];
+  type?: MemoryEntry['type'] | undefined;
+  tags?: string[] | undefined;
+  priority?: MemoryEntry['priority'] | undefined;
 }
 
 interface GraphEdge {

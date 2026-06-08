@@ -18,7 +18,7 @@ export type SeverityName = 'error' | 'warning' | 'info' | 'hint';
 export interface ServerConfig {
   command: string;
   args?: string[] | undefined;
-  env?: Record<string, string>;
+  env?: Record<string, string> | undefined;
   languages: string[];
   rootPatterns?: string[] | undefined;
   initializationOptions?: unknown | undefined;

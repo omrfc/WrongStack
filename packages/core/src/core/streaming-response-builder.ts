@@ -246,53 +246,66 @@ export async function streamProviderToResponse(
       const next = await iter.next();
       if (next.done) break;
       const ev = next.value;
-      switch (ev.type) {
-        case 'message_start':
-          handleMessageStart(state, ev.model);
-          break;
-        case 'content_block_start':
-          handleContentBlockStart(state, ev as Parameters<typeof handleContentBlockStart>[1]);
-          break;
-        case 'content_block_stop':
-          handleContentBlockStop(state, ev as Parameters<typeof handleContentBlockStop>[1]);
-          break;
-        case 'text_delta':
-          handleTextDelta(state, ev.text);
-          events.emit('provider.text_delta', { ctx, text: ev.text });
-          break;
-        case 'tool_use_start': {
-          const idVal = ev.id;
-          const nameVal = ev.name;
-          handleToolUseStart(state, { id: idVal, name: nameVal });
-          const emittedPayload = { ctx, id: idVal ?? 'unknown', name: nameVal ?? 'unknown' };
-          events.emit('provider.tool_use_start', emittedPayload);
-          break;
+      try {
+        switch (ev.type) {
+          case 'message_start':
+            handleMessageStart(state, ev.model);
+            break;
+          case 'content_block_start':
+            handleContentBlockStart(state, ev as Parameters<typeof handleContentBlockStart>[1]);
+            break;
+          case 'content_block_stop':
+            handleContentBlockStop(state, ev as Parameters<typeof handleContentBlockStop>[1]);
+            break;
+          case 'text_delta':
+            handleTextDelta(state, ev.text);
+            events.emit('provider.text_delta', { ctx, text: ev.text });
+            break;
+          case 'tool_use_start': {
+            const idVal = ev.id;
+            const nameVal = ev.name;
+            handleToolUseStart(state, { id: idVal, name: nameVal });
+            const emittedPayload = { ctx, id: idVal ?? 'unknown', name: nameVal ?? 'unknown' };
+            events.emit('provider.tool_use_start', emittedPayload);
+            break;
+          }
+          case 'tool_use_input_delta':
+            handleToolUseInputDelta(state, ev as Parameters<typeof handleToolUseInputDelta>[1]);
+            break;
+          case 'tool_use_stop': {
+            const stoppedName = state.tools.get(ev.id)?.name ?? 'unknown';
+            handleToolUseStop(state, ev as Parameters<typeof handleToolUseStop>[1]);
+            events.emit('provider.tool_use_stop', { ctx, id: ev.id, name: stoppedName });
+            break;
+          }
+          case 'thinking_start':
+            handleThinkingStart(state, ev as Parameters<typeof handleThinkingStart>[1]);
+            break;
+          case 'thinking_delta':
+            handleThinkingDelta(state, ev.text);
+            events.emit('provider.thinking_delta', { ctx, text: ev.text });
+            break;
+          case 'thinking_signature':
+            handleThinkingSignature(state, ev.signature);
+            break;
+          case 'thinking_stop':
+            handleThinkingStop(state);
+            break;
+          case 'message_stop':
+            handleMessageStop(state, ev as Parameters<typeof handleMessageStop>[1]);
+            break;
+          default:
+            // Unknown SSE event type — silently skip
+            break;
         }
-        case 'tool_use_input_delta':
-          handleToolUseInputDelta(state, ev as Parameters<typeof handleToolUseInputDelta>[1]);
-          break;
-        case 'tool_use_stop': {
-          const stoppedName = state.tools.get(ev.id)?.name ?? 'unknown';
-          handleToolUseStop(state, ev as Parameters<typeof handleToolUseStop>[1]);
-          events.emit('provider.tool_use_stop', { ctx, id: ev.id, name: stoppedName });
-          break;
-        }
-        case 'thinking_start':
-          handleThinkingStart(state, ev as Parameters<typeof handleThinkingStart>[1]);
-          break;
-        case 'thinking_delta':
-          handleThinkingDelta(state, ev.text);
-          events.emit('provider.thinking_delta', { ctx, text: ev.text });
-          break;
-        case 'thinking_signature':
-          handleThinkingSignature(state, ev.signature);
-          break;
-        case 'thinking_stop':
-          handleThinkingStop(state);
-          break;
-        case 'message_stop':
-          handleMessageStop(state, ev as Parameters<typeof handleMessageStop>[1]);
-          break;
+      } catch (handlerErr) {
+        // Best-effort: a single malformed event should not abort the entire
+        // stream. The partial response built from earlier events is preserved.
+        events.emit('provider.stream_error', {
+          ctx,
+          eventType: ev.type,
+          msg: handlerErr instanceof Error ? handlerErr.message : String(handlerErr),
+        });
       }
     }
   } catch (err) {
@@ -319,8 +332,13 @@ export async function streamProviderToResponse(
       // making abort/exit paths feel stuck.
       let drainTimer: ReturnType<typeof setTimeout> | null = null;
       try {
+        // Attach a noop catch to the loser so a rejected iter.return()
+        // doesn't become an unhandled promise rejection when the timeout wins.
+        const drainPromise = Promise.resolve(iter.return?.()).catch(() => {
+          // best-effort — iter.return() may reject on abrupt stream close
+        });
         await Promise.race([
-          Promise.resolve(iter.return?.()),
+          drainPromise,
           new Promise<void>((resolve) => {
             drainTimer = setTimeout(resolve, STREAM_DRAIN_TIMEOUT_MS);
           }),

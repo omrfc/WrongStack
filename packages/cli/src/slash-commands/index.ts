@@ -94,12 +94,14 @@ export interface SlashCommandContext {
    * before that, calls are buffered into the initial-value field so
    * `/fleet stream off` issued before mount still takes effect.
    */
-  fleetStreamController?: {
-    /** Current state, readable for the slash command's reply. */
-    enabled: boolean;
-    /** Replaced by the TUI on mount with a dispatch-backed setter. */
-    setEnabled: (enabled: boolean) => void;
-  };
+  fleetStreamController?:
+    | {
+        /** Current state, readable for the slash command's reply. */
+        enabled: boolean;
+        /** Replaced by the TUI on mount with a dispatch-backed setter. */
+        setEnabled: (enabled: boolean) => void;
+      }
+    | undefined;
   /**
    * Toggle prompt refinement ("did you mean this?"). The TUI installs the
    * actual dispatch-backed setter on mount via this shared controller; before
@@ -202,12 +204,14 @@ export interface SlashCommandContext {
    * setter on mount via a shared controller; before that, calls are buffered
    * into the initial-value field so `/agents off` issued before mount still takes effect.
    */
-  agentsMonitorController?: {
-    /** Current state, readable for the slash command's reply. */
-    visible: boolean;
-    /** Replaced by the TUI on mount with a dispatch-backed setter. */
-    setVisible: (visible: boolean) => void;
-  };
+  agentsMonitorController?:
+    | {
+        /** Current state, readable for the slash command's reply. */
+        visible: boolean;
+        /** Replaced by the TUI on mount with a dispatch-backed setter. */
+        setVisible: (visible: boolean) => void;
+      }
+    | undefined;
   /** Manage MCP servers: add, remove, enable, disable, restart. */
   onMcp?: ((args: string) => Promise<string>) | undefined;
   /**

@@ -1,5 +1,6 @@
 import type { Specification, SpecRequirement } from '../types/spec.js';
 import type { TaskGraph, TaskNode } from '../types/task-graph.js';
+import { assertNever } from '../utils/assert-never.js';
 
 export interface SpecVersion {
   version: string;
@@ -202,6 +203,8 @@ export class SpecVersioning {
     switch (type) {
       case 'functional':
         return 'feature';
+      case 'non-functional':
+        return 'feature';
       case 'security':
         return 'feature';
       case 'performance':
@@ -209,7 +212,7 @@ export class SpecVersioning {
       case 'ux':
         return 'feature';
       default:
-        return 'feature';
+        return assertNever(type);
     }
   }
 }

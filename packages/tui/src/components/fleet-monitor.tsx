@@ -218,7 +218,7 @@ export function FleetMonitor({
             {collabSession.overallVerdict ? (
               <>
                 <Text dimColor>│</Text>
-                <Text bold color={VERDICT_COLOR[collabSession.overallVerdict]}>
+                <Text bold color={VERDICT_COLOR[collabSession.overallVerdict] ?? 'white'}>
                   {collabSession.overallVerdict}
                 </Text>
               </>

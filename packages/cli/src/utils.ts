@@ -58,7 +58,8 @@ export function fmtTaskResultLine(
     status: 'success' | 'failed' | 'timeout' | 'stopped';
     error?:
       | string
-      | { kind?: string | undefined; message?: string | undefined; retryable?: boolean | undefined; backoffMs?: number | undefined };
+      | { kind?: string | undefined; message?: string | undefined; retryable?: boolean | undefined; backoffMs?: number | undefined }
+      | undefined;
     iterations: number;
     toolCalls: number;
     durationMs: number;

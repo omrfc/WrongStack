@@ -191,7 +191,7 @@ const SECRET_KEY_PATTERN =
 // Keep this list short; the substring rule itself is intentionally narrow.
 const NON_SECRET_OVERRIDES = new Set(['publickey', 'public_key']);
 
-function isSecretField(name: string): boolean {
+export function isSecretField(name: string): boolean {
   const lc = name.toLowerCase();
   if (NON_SECRET_OVERRIDES.has(lc)) return false;
   return SECRET_KEY_PATTERN.test(lc);

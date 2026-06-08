@@ -225,6 +225,12 @@ export class DefaultBrainArbiter implements BrainArbiter {
           options: request.options,
           rationale: 'Decision requires human authority or lacks a safe automatic option.',
         };
+      default:
+        // Runtime safety: deserialized or unknown fallback defaults to deny
+        return {
+          type: 'deny',
+          reason: `Brain could not safely decide (unknown fallback: ${String(request.fallback)}): ${request.question}`,
+        };
     }
   }
 }

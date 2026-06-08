@@ -40,6 +40,6 @@
     "vitest": "^4.1.8"
   },
   "overrides": {
-    "undici-types": "^7.25.0"
+    "undici-types": "^7.27.2"
   }
 }

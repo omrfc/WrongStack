@@ -91,9 +91,9 @@ function scoreBar(score: number, max: number): string {
 
 interface CacheModel {
   id: string;
-  name?: string;
-  capabilities?: { contextWindow?: number; maxOutputTokens?: number };
-  pricing?: { input?: number; output?: number };
+  name?: string | undefined;
+  capabilities?: { contextWindow?: number | undefined; maxOutputTokens?: number | undefined } | undefined;
+  pricing?: { input?: number; output?: number } | undefined;
 }
 
 interface CacheProvider {
@@ -106,12 +106,12 @@ interface CacheProvider {
 interface ScoredModel {
   provider: string;
   model: string;
-  profile?: ModelProfile;
+  profile?: ModelProfile | undefined;
   score: number;
   ctxWindow: number;
   maxOutput: number;
-  inputPrice?: number;
-  outputPrice?: number;
+  inputPrice?: number | undefined;
+  outputPrice?: number | undefined;
 }
 
 const ROLE_CATEGORY: Record<string, string> = {
@@ -143,7 +143,7 @@ function scoreModel(
   mid: string,
   category: string,
   ctxWindow: number,
-): { score: number; profile?: ModelProfile } {
+): { score: number; profile?: ModelProfile | undefined } {
   const profile = findProfile(pid, mid);
   let score = 50;
 

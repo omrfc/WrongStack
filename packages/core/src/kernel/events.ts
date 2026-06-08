@@ -47,6 +47,13 @@ export interface EventMap {
   'provider.tool_use_start': { ctx: Context; id: string; name: string };
   'provider.tool_use_stop': { ctx: Context; id: string; name: string };
   /**
+   * Fired when a single SSE event handler throws mid-stream. Best-effort: the
+   * malformed event is skipped and the partial response built from earlier
+   * events is preserved, so the stream is not aborted. `eventType` is the SSE
+   * event's `type`; `msg` is the handler error message.
+   */
+  'provider.stream_error': { ctx: Context; eventType: string; msg: string };
+  /**
    * Fired before each retry of a failed provider call. `attempt` is 1-based
    * (the first retry is attempt 1, etc.). `description` is the human-readable
    * one-liner from `ProviderError.describe()` — render this in the CLI/TUI
@@ -381,13 +388,15 @@ export interface EventMap {
      * lazily as a structural object to avoid a coordination → kernel
      * cycle in the dependency graph.
      */
-    error?: {
-      kind: string;
-      message: string;
-      retryable: boolean;
-      backoffMs?: number | undefined;
-      cause?: { name: string | undefined; message: string; stack?: string | undefined };
-    };
+    error?:
+      | {
+          kind: string;
+          message: string;
+          retryable: boolean;
+          backoffMs?: number | undefined;
+          cause?: { name: string | undefined; message: string; stack?: string | undefined } | undefined;
+        }
+      | undefined;
   };
   /**
    * Fired by the delegate tool when a subagent finishes. The agent's run

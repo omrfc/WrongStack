@@ -705,7 +705,7 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
       const negotiateTimeout = async (
         used: number,
         limit: number,
-      ): Promise<'stop' | 'continue' | 'throw' | { extend: { timeoutMs?: number } }> => {
+      ): Promise<'stop' | 'continue' | 'throw' | { extend: { timeoutMs?: number | undefined } }> => {
         const handler = budget.onThreshold;
         if (!handler) return 'stop';
         const result = handler({
@@ -713,7 +713,7 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
           used,
           limit,
           requestDecision: () =>
-            new Promise<'stop' | { extend: { timeoutMs?: number } }>((resolveDecision) => {
+            new Promise<'stop' | { extend: { timeoutMs?: number | undefined } }>((resolveDecision) => {
               budget._events?.emit('budget.threshold_reached', {
                 kind: 'timeout',
                 used,

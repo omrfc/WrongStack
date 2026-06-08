@@ -88,7 +88,7 @@ export function GoalPanel({ goal }: GoalPanelProps): React.ReactElement {
             return (
               // biome-ignore lint/suspicious/noArrayIndexKey: deliverables are stable text strings
               <Box key={i}>
-                <Text color={done ? 'green' : undefined} dimColor={!done}>
+                <Text {...(done ? { color: 'green' } : {})} dimColor={!done}>
                   {'  '}{done ? '✓' : '○'} {d}
                 </Text>
               </Box>

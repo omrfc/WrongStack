@@ -93,7 +93,7 @@ export function ProcessListMonitor(): React.ReactElement {
             <Text dimColor>{String(p.pid).padEnd(7)}</Text>
             <Text dimColor>{p.name.padEnd(6)}</Text>
             <Text dimColor>{`${age}s`.padEnd(7)}</Text>
-            <Text color={isSelected ? 'red' : undefined} bold={isSelected}>
+            <Text {...(isSelected ? { color: 'red' } : {})} bold={isSelected}>
               {cmd}
             </Text>
             {p.killed ? <Text color="red">[killed]</Text> : null}

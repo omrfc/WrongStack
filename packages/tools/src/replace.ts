@@ -252,7 +252,13 @@ function checkRg(): Promise<boolean> {
 
 function spawnRgFind(pattern: string, base: string): { promise: Promise<string[]> } {
   const args = ['--files', '--glob', pattern, base];
-  const child = spawn('rg', args, { env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+  // 30-second safety net to prevent zombie rg processes. Unlike the main
+  // grep tool, glob file enumeration is fast and should never need more time.
+  const child = spawn('rg', args, {
+    signal: AbortSignal.timeout(30_000),
+    env: buildChildEnv(),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   let buf = '';
   child.stdout?.on('data', (chunk: Buffer) => {
     buf += chunk.toString();

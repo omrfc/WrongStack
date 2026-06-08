@@ -8,7 +8,7 @@ export {
   rewriteConfigEncrypted,
   migratePlaintextSecrets,
 } from './secret-vault.js';
-export { isSecretField } from './config-secrets.js';
+export { isSecretField } from './secret-vault.js';
 export {
   DefaultPermissionPolicy,
   AutoApprovePermissionPolicy,

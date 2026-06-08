@@ -762,6 +762,9 @@ export class PhaseOrchestrator {
         case 'skipped':
           skipped++;
           break;
+        default:
+          // Unknown phase status — log and skip in counter
+          break;
       }
       estimatedHours += p.estimateHours;
       if (p.actualDurationMs) actualHours += p.actualDurationMs / 3600000;

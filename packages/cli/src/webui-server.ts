@@ -58,9 +58,9 @@ interface WebUIOptions {
    * through REPL/TUI or the `--eternal` flag (the WebUI has no slash
    * command dispatch surface yet).
    */
-  subscribeEternalIteration?: (
-    fn: (entry: import('@wrongstack/core').JournalEntry) => void,
-  ) => () => void;
+  subscribeEternalIteration?:
+    | ((fn: (entry: import('@wrongstack/core').JournalEntry) => void) => () => void)
+    | undefined;
 }
 
 interface ConnectedClient {
@@ -624,6 +624,16 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
         await handleProviderRemove(ws, m.payload.providerId);
         break;
       }
+
+      default:
+        send(ws, {
+          type: 'error',
+          payload: {
+            phase: 'ws.dispatch',
+            message: `Unknown message type: ${String((msg as { type: string }).type)}`,
+          },
+        });
+        break;
     }
   }
 

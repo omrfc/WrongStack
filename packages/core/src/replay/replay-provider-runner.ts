@@ -42,10 +42,12 @@ export interface ReplayProviderRunnerOptions {
    * real signal, but the warn helps when the throw is caught
    * upstream).
    */
-  logger?: {
-    debug?: ((msg: string) => void) | undefined;
-    warn?: ((msg: string) => void) | undefined;
-  };
+  logger?:
+    | {
+        debug?: ((msg: string) => void) | undefined;
+        warn?: ((msg: string) => void) | undefined;
+      }
+    | undefined;
 }
 
 export class ReplayProviderRunner implements ProviderRunner {

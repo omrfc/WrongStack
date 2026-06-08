@@ -36,9 +36,9 @@ function contextBar(maxContext: number): string {
 
 interface CacheModel {
   id: string;
-  name?: string;
-  capabilities?: { contextWindow?: number; maxOutputTokens?: number };
-  pricing?: { input?: number; output?: number };
+  name?: string | undefined;
+  capabilities?: { contextWindow?: number | undefined; maxOutputTokens?: number | undefined } | undefined;
+  pricing?: { input?: number; output?: number } | undefined;
 }
 
 interface CacheProvider {

@@ -192,7 +192,7 @@ export { CORE_RECONSTRUCT_EVENTS, STANDARD_AUDIT_EVENTS };
  * Falls back to 'standard' if not present or invalid.
  */
 export function resolveAuditLevel(
-  cfg?: { session?: { auditLevel?: AuditLevel | undefined } } | null,
+  cfg?: { session?: { auditLevel?: AuditLevel | undefined } | undefined } | null,
 ): AuditLevel {
   const raw = cfg?.session?.auditLevel;
   if (raw === 'minimal' || raw === 'standard' || raw === 'full') {

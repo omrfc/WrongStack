@@ -68,7 +68,7 @@ export function createCodeActionsTool(deps: ToolDeps): Tool<CodeActionsInput, st
             range: { start, end },
             context: {
               diagnostics: server.getDiagnostics(pathToUri(file)),
-              only: input.kind_filter ? [input.kind_filter] : undefined,
+              ...(input.kind_filter ? { only: [input.kind_filter] } : {}),
             },
           },
           10_000,

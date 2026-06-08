@@ -23,7 +23,7 @@ export interface FleetManagerOptions {
   sessionWriter?: SessionWriter | undefined;
   manifestDebounceMs?: number | undefined;
   checkpointDebounceMs?: number | undefined;
-  directorBudget?: { maxCostUsd?: number | undefined };
+  directorBudget?: { maxCostUsd?: number | undefined } | undefined;
   /**
    * Maximum context load (as a fraction of maxContext) the leader agent
    * is allowed to reach before a new spawn is rejected. Default: 0.85.
@@ -39,7 +39,7 @@ export interface FleetManagerOptions {
    * A function may be supplied when the leader can switch models at runtime;
    * canSpawn() reads it lazily so the spawn threshold follows the active model.
    */
-  maxContext?: number | (() => number | undefined);
+  maxContext?: number | (() => number | undefined) | undefined;
 }
 
 /**

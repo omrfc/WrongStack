@@ -64,15 +64,19 @@ export interface ReplOptions {
   /** Skill loader for the skill generator wizard. */
   skillLoader?: import('@wrongstack/core').SkillLoader | undefined;
   /** Controller for the agents monitor overlay. */
-  agentsMonitorController?: {
-    visible: boolean;
-    setVisible: (visible: boolean) => void;
-  };
+  agentsMonitorController?:
+    | {
+        visible: boolean;
+        setVisible: (visible: boolean) => void;
+      }
+    | undefined;
   /** Controller for fleet stream (subagent output to history). */
-  fleetStreamController?: {
-    enabled: boolean;
-    setEnabled: (enabled: boolean) => void;
-  };
+  fleetStreamController?:
+    | {
+        enabled: boolean;
+        setEnabled: (enabled: boolean) => void;
+      }
+    | undefined;
   /**
    * Called after each agent.run() iteration completes so the host can
    * report context pressure to the Director (for spawn pre-checks) or

@@ -1530,7 +1530,7 @@ export async function main(argv: string[]): Promise<number> {
         configPath: wpaths.globalConfig,
       });
       if (result.patch) {
-        const patch = result.patch as Partial<Config>;
+        const patch = result.patch as unknown as Partial<Config>;
         config = patchConfig(config, patch);
         configStore.update(patch);
       }
@@ -1672,6 +1672,7 @@ export async function main(argv: string[]): Promise<number> {
           message: `⚠ ${color.yellow(`${lines.length} uncommitted change${lines.length > 1 ? 's' : ''}`)} — session ended without commit`,
         };
       }
+      return undefined;
     },
     onClear: () => {
       // In TUI mode Ink owns the live area; writing `\x1b[2J` here would
