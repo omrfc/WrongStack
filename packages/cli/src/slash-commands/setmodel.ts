@@ -189,7 +189,7 @@ export function buildSetModelCommand(opts: SlashCommandContext): SlashCommand {
     for (const phase of MATRIX_PHASE_KEYS) {
       const agents = AGENTS_BY_PHASE[phase as AgentPhase];
       if (agents && agents.length > 0) {
-        picks.push(agents[0]!.config.role as string);
+        picks.push(agents[0]?.config.role as string);
       }
     }
     // Key legacy roles

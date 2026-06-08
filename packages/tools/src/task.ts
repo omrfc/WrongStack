@@ -135,7 +135,7 @@ export const taskTool: Tool<TaskInput, TaskOutput> = {
       return { ok: false, message: 'Task storage path not configured.', count: 0, completed: 0, inProgress: 0 };
     }
     const sessionId = ctx.session?.id ?? 'unknown';
-    let file: TaskFile = (await loadTasks(taskPath)) ?? emptyTaskFile(sessionId);
+    const file: TaskFile = (await loadTasks(taskPath)) ?? emptyTaskFile(sessionId);
 
     switch (input.action) {
       case 'show':

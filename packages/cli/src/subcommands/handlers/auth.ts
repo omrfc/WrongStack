@@ -19,6 +19,7 @@ export const authCmd: SubcommandHandler = async (args, deps) => {
     return runAuthMenu(menuDeps);
   }
 
+  // biome-ignore lint/style/noNonNullAssertion: guarded by .length === 0 check above
   const first = flags.positional[0]!;
 
   // `wstack auth list` / `wstack auth ls` — quick listing

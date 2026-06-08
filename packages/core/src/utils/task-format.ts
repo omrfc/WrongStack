@@ -1,8 +1,8 @@
-import {
-  type TaskPriority,
-  type TaskStatus,
-  type TaskType,
-  type TaskProgress as TaskGraphProgress,
+import type {
+  TaskPriority,
+  TaskStatus,
+  TaskType,
+  TaskProgress as TaskGraphProgress,
 } from '../types/task-graph.js';
 import { color } from './color.js';
 
@@ -43,7 +43,7 @@ export function computeTaskItemProgress(tasks: TaskItem[]): TaskGraphProgress {
   let failed = 0;
   let review = 0;
   let estimatedHours = 0;
-  let actualHours = 0;
+  const actualHours = 0;
   for (const t of tasks) {
     switch (t.status) {
       case 'completed':

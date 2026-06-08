@@ -302,6 +302,7 @@ export function parseProgressFromText(text: string): { progress: number; note?: 
   const re = /\[progress:\s*(\d{1,3})%\]\s*(?:[—\-]\s*(.+))?/i;
   const m = text.match(re);
   if (!m) return null;
+  // biome-ignore lint/style/noNonNullAssertion: regex match guarantees capture group
   const progress = Math.min(100, Math.max(0, Number.parseInt(m[1]!, 10)));
   const note = m[2]?.trim() || undefined;
   return { progress, note };
@@ -340,7 +341,7 @@ function computeTrend(history: ProgressSnapshot[]): 'accelerating' | 'steady' | 
   const recent = history.slice(-5);
   const deltas: number[] = [];
   for (let i = 1; i < recent.length; i++) {
-    deltas.push(recent[i]!.progress - recent[i - 1]!.progress);
+    deltas.push((recent[i]?.progress ?? 0) - (recent[i - 1]?.progress ?? 0));
   }
   if (deltas.length < 2) return undefined;
   const avgDelta = deltas.reduce((a, b) => a + b, 0) / deltas.length;

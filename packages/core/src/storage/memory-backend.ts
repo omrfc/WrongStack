@@ -91,6 +91,7 @@ function lineToEntry(line: string, scope: MemoryScope): MemoryEntry | null {
   const tags: string[] = [];
   let tagMatch: RegExpExecArray | null;
   TAG_RE.lastIndex = 0;
+  // biome-ignore lint/suspicious/noAssignInExpressions: standard regex loop
   while ((tagMatch = TAG_RE.exec(text)) !== null) {
     tags.push(tagMatch[1] ?? '');
   }

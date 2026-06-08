@@ -388,9 +388,11 @@ export function truncateForTelegram(text: string, maxLen = 4000): string {
   const sentenceRe = /[.!?](?=\s)/g;
   let match: RegExpExecArray | null;
   let sentenceIdx = -1;
-  while ((match = sentenceRe.exec(text)) !== null) {
+  match = sentenceRe.exec(text);
+  while (match !== null) {
     if (match.index >= searchEnd) break;
     if (match.index > cutoff) sentenceIdx = match.index + 1;
+    match = sentenceRe.exec(text);
   }
   if (sentenceIdx > cutoff) {
     return `${text.slice(0, sentenceIdx)}…`;

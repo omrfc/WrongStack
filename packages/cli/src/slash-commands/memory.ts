@@ -342,6 +342,7 @@ function parseCompactEntries(raw: string): CompactEntry[] {
     const tags: string[] = [];
     const tagRe = /#([\w-]+)/g;
     let tm: RegExpExecArray | null;
+    // biome-ignore lint/suspicious/noAssignInExpressions: standard regex loop
     while ((tm = tagRe.exec(afterId)) !== null) {
       tags.push(tm[1] ?? '');
     }

@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.109.1] - 2026-06-08
+
+> The TUI monitor-control & goal-path cleanup release. Consolidates the
+> `0.108.0`-`0.109.1` line into one documented entry: monitor overlays keep the
+> chat input alive without losing F-key/Esc handling, the F9 goal panel now reads
+> the same canonical goal file as `/goal` and the autonomy engines, code blocks
+> stop wrapping their borders, and the Windows build script resolves package
+> binaries reliably. Additive only; no breaking changes.
+
+### Fixed - TUI monitor input handling
+
+- **Hidden input mode.** The TUI `Input` component can now render as a
+  constant-height placeholder while keeping both keyboard listeners mounted.
+  This keeps F-key and Esc routing alive while modal panels occupy the bottom
+  region.
+
+- **Monitor overlays stay controllable.** Fleet, agents, worktree, todos, queue,
+  and goal panels keep the chat input live underneath them. The process list
+  remains modal because its kill actions own single-key shortcuts.
+
+- **No double-toggle on Esc.** Worktree and AutoPhase phase monitors now own
+  their own Esc handling instead of being toggled twice by the central router.
+
+- **Agents monitor no longer captures `j`/`k`.** Navigation is arrow-key only so
+  typing into the live chat input under the panel does not get swallowed.
+
+### Fixed - Goal persistence and autonomy
+
+- **Single canonical goal path.** `goalFilePath(projectRoot)` now delegates to
+  `resolveWstackPaths({ projectRoot }).projectGoal`, so `/goal`, the eternal and
+  parallel autonomy engines, the CLI, and the TUI F9 panel all read/write the
+  same per-project `~/.wrongstack/projects/<slug>/goal.json`.
+
+- **F9 goal panel refresh.** The TUI refreshes goal state on open and while the
+  panel stays open, so goals created mid-session and progress updates from
+  autonomy loops appear without restarting the TUI.
+
+- **Goal-store tests updated.** Tests now assert that the goal file path matches
+  `resolveWstackPaths().projectGoal` instead of the old standalone hash
+  directory.
+
+### Fixed - Rendering and build
+
+- **Code block width clamping.** TUI code blocks now use an explicit frame width
+  so bordered boxes do not overflow and wrap the right border into the next line.
+
+- **Build script PATH hardening.** `scripts/build.mjs` prepends root and
+  package-local `node_modules/.bin` directories before spawning package builds,
+  improving `tsup`/`tsc` resolution under `cmd.exe` on Windows.
+
+### Changed - versions
+
+- **All published workspace packages and the marketing site are aligned to
+  0.109.1**: `wrongstack`, `@wrongstack/cli`, `@wrongstack/core`,
+  `@wrongstack/mcp`, `@wrongstack/plug-lsp`, `@wrongstack/plugins`,
+  `@wrongstack/providers`, `@wrongstack/runtime`, `@wrongstack/skills`,
+  `@wrongstack/telegram`, `@wrongstack/tools`, `@wrongstack/tui`,
+  `@wrongstack/webui`, and `@wrongstack/acp`.
+
 ## [0.107.2] - 2026-06-08
 
 > The WebUI operations & terminal-polish release. Consolidates the

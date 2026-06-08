@@ -710,6 +710,7 @@ export function App({
   // Keep the F9 goal panel live: refresh the moment it opens and on every tick
   // while it stays open, so a goal set mid-session via `/goal` — or progress
   // updated by the autonomy engine — appears without restarting the TUI.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: nowTick drives polling refresh
   useEffect(() => {
     if (state.goalPanelOpen) refreshGoalSummary();
   }, [state.goalPanelOpen, nowTick, refreshGoalSummary]);
@@ -1548,6 +1549,7 @@ export function App({
 
   // Persist settings whenever a value field changes (mode, delayMs, toggles, …).
   // Does NOT fire on field-navigation (↑/↓) — only on value mutation (←/→).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: individual field deps are intentional — whole sp object would fire on nav changes
   useEffect(() => {
     const sp = state.settingsPicker;
     const save = saveSettings;
@@ -3512,6 +3514,7 @@ export function App({
     let cleanText = trimmed;
     const chipRe = new RegExp(INLINE_TOKEN_SRC, 'g');
     let chipMatch: RegExpExecArray | null;
+    // biome-ignore lint/suspicious/noAssignInExpressions: standard regex loop
     while ((chipMatch = chipRe.exec(trimmed)) !== null) {
       chips.push(chipMatch[0]);
     }

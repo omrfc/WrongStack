@@ -173,6 +173,7 @@ export function MarkdownView({
           {/[\u2500-\u257F]/.test(qContent) ? (
             <Box flexDirection="row">
               {[...qContent].slice(0, (contentWidth ?? termWidth) - 2).map((ch, ci) => (
+                /* biome-ignore lint/suspicious/noArrayIndexKey: characters are not reorderable */
                 <Text key={ci} dimColor>{ch}</Text>
               ))}
             </Box>
@@ -214,6 +215,7 @@ export function MarkdownView({
       rows.push(
         <Box key={`bx${key++}`} flexDirection="row">
           {chars.map((ch, ci) => (
+            /* biome-ignore lint/suspicious/noArrayIndexKey: characters are not reorderable */
             <Text key={ci}>{ch}</Text>
           ))}
         </Box>,

@@ -55,7 +55,8 @@ describe('renderMarkdownTables', () => {
     const input = ['| L | C | R |', '|:--|:-:|--:|', '| 1 | 2 | 3 |'].join('\n');
     const out = renderMarkdownTables(input, 80);
     // Strip ANSI escape codes so regex assertions only see visible text.
-    const stripAnsi = (s: string) => s.replace(/\x1b\[\d*m/g, '');
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequence stripping
+    const stripAnsi = (s: string) => s.replace(/\x1B\[\d*m/g, '');
     const row = stripAnsi(out.split('\n').find((l) => l.includes('1'))!);
     // Right column ends with the digit + ` │` (no trailing spaces).
     expect(row).toMatch(/\s3 │$/);

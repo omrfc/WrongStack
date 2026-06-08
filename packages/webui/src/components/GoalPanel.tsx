@@ -11,7 +11,7 @@ import {
   Minus,
 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
-import { type GoalState } from '@/lib/goal';
+import type { GoalState } from '@/lib/goal';
 import { getWSClient } from '@/lib/ws-client';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -180,7 +180,7 @@ export function GoalPanel({ goal, className }: GoalPanelProps): React.ReactEleme
                 </span>
               </div>
               <ul className="space-y-0.5">
-                {goal.deliverables!.map((d) => (
+                {goal.deliverables?.map((d) => (
                   <li key={d.id} className="flex items-start gap-1.5 text-[11px]">
                     {d.status === 'done' ? (
                       <CheckCircle2 className="h-3 w-3 text-emerald-500 mt-0.5 shrink-0" />

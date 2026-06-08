@@ -82,7 +82,8 @@ export function renderProviderHeader(
     renderer.write(color.dim('  (no keys saved)\n'));
   } else {
     for (let i = 0; i < keys.length; i++) {
-      renderKeyLine(renderer, keys[i]!, i + 1, active);
+      const key = keys[i];
+      if (key) renderKeyLine(renderer, key, i + 1, active);
     }
   }
 }
@@ -198,7 +199,7 @@ export async function confirm(
 
 /** Suggest a default label that doesn't conflict with existing keys. */
 export function suggestLabel(usedLabels: Set<string>): string {
-  let candidate = 'default';
+  const candidate = 'default';
   if (!usedLabels.has(candidate)) return candidate;
   let n = 2;
   while (usedLabels.has(`key${n}`)) n++;

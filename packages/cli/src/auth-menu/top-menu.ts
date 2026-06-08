@@ -44,6 +44,7 @@ export async function runTopMenu(deps: AuthMenuDeps): Promise<number> {
     // Numeric selection
     const idx = Number.parseInt(choice, 10);
     if (!Number.isNaN(idx) && idx >= 1 && idx <= ids.length) {
+      // biome-ignore lint/style/noNonNullAssertion: guarded by bounds check above
       const pid = ids[idx - 1]!;
       await manageProvider(pid, deps);
       continue;

@@ -12,7 +12,7 @@ import {
   DefaultSkillLoader,
   DefaultSystemPromptBuilder,
   DefaultTokenCounter,
-  EventBus,
+  type EventBus,
   HybridCompactor,
   type Logger,
   type ModelsRegistry,

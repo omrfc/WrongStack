@@ -86,6 +86,7 @@ export function GoalPanel({ goal }: GoalPanelProps): React.ReactElement {
           {goal.deliverables.map((d, i) => {
             const done = /^\[[x✓]\]|✅|\(done\)/i.test(d);
             return (
+              // biome-ignore lint/suspicious/noArrayIndexKey: deliverables are stable text strings
               <Box key={i}>
                 <Text color={done ? 'green' : undefined} dimColor={!done}>
                   {'  '}{done ? '✓' : '○'} {d}

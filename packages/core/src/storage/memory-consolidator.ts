@@ -190,7 +190,7 @@ export class SessionMemoryConsolidator implements AgentExtension {
       for (const op of parsed.operations) {
         switch (op.action) {
           case 'add': {
-            if (op.text && op.text.trim()) {
+            if (op.text?.trim()) {
               await this.memoryStore.remember(op.text.trim(), undefined, {
                 type: op.type as MemoryEntry['type'],
                 tags: op.tags,
