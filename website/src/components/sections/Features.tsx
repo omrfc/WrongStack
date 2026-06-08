@@ -31,8 +31,8 @@ const features = [
   {
     icon: Target,
     title: 'Goal system',
-    tag: '/goal — locked in',
-    body: '/goal persists to goal.json and injects a full-autonomy preamble. Pause and resume without losing work — the engine exits gracefully after the current iteration.',
+    tag: '/goal + F9',
+    body: '/goal persists to the canonical per-project goal.json shared by autonomy engines, the TUI F9 panel, and the WebUI. Pause, resume, and watch progress refresh live while work continues.',
   },
   {
     icon: Wrench,

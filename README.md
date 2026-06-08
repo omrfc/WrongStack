@@ -347,11 +347,12 @@ Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. Wha
 
 ## Recent changes
 
-**Current release: 0.107.2.** The WebUI now has operations-grade panels for
-active goals, running processes, session checkpoints/rewind, AutoPhase, phase
-agents, tasks, and worktree lanes. It also adds a visible autonomy picker and
-local preference controls. The TUI side gets tighter assistant-body width and
-markdown table wrapping so long output behaves better in narrow terminals.
+**Current release: 0.109.1.** TUI monitor overlays now keep keyboard routing
+alive while preserving a live chat input underneath non-modal panels. The F9
+goal panel reads the same canonical per-project `goal.json` as `/goal` and the
+autonomy engines, refreshes while open, and code blocks clamp their frame width
+instead of wrapping borders. The build script also hardens PATH resolution for
+package-local binaries on Windows.
 
 See **[CHANGELOG.md](CHANGELOG.md)** for the full, versioned history.
 
@@ -597,7 +598,7 @@ For the full walk-through — including the L1-A reactive `ConversationState`, h
 
 ## Status
 
-- **5530+ tests passing** across 412+ test files in the 0.107.2 release gate
+- **5530+ tests passing** across 412+ test files in the 0.109.1 release gate
 - Coverage thresholds: ≥85 % lines / ≥85 % functions / ≥70 % branches / ≥82 % statements
 - All workspace packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles

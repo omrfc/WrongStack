@@ -212,9 +212,37 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
-    version: '0.104.0',
+    version: '0.109.1',
     date: '2026-06-08',
     latest: true,
+    consolidated: true,
+    tagline: 'TUI monitor control & goal-path cleanup',
+    highlights: [
+      'TUI hidden-input mode keeps F-key and Esc routing alive while overlays occupy the bottom region',
+      'Monitor panels keep the chat input live underneath them; the process list remains modal for kill shortcuts',
+      'F9 goal panel reads the canonical per-project goal.json shared by /goal and autonomy engines',
+      'Goal state refreshes when the F9 panel opens and while it remains open',
+      'Code-block frames clamp width so bordered boxes no longer wrap into the next line',
+      'Build script prepends root/package node_modules/.bin for reliable Windows package builds',
+    ],
+  },
+  {
+    version: '0.107.2',
+    date: '2026-06-08',
+    consolidated: true,
+    tagline: 'WebUI operations & terminal polish',
+    highlights: [
+      'WebUI Goal panel with deliverables, progress, trend, recent journal, and lifecycle state',
+      'Process monitor for running tools with process.list, process.kill, and process.killAll',
+      'Checkpoint timeline with session checkpoint listing and rewind requests',
+      'Autonomy picker for off, suggest, auto, eternal, and eternal-parallel modes',
+      'AutoPhase, phase agents, task board, worktree lanes, and WebSocket handlers tightened',
+      'Markdown tables and assistant bodies render more predictably in narrow TUI terminals',
+    ],
+  },
+  {
+    version: '0.104.0',
+    date: '2026-06-08',
     consolidated: true,
     tagline: 'Autonomy control & release realignment',
     highlights: [
