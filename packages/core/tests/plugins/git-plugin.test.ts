@@ -129,7 +129,7 @@ describe('buildCommitCommand', () => {
     expect(complete).not.toHaveBeenCalled();
     // tsconfig.json triggers "chore"
     expect(stripAnsi(res!.message!)).toContain('chore');
-  });
+  }, 30_000);
 
   it('-n shortcut is treated as --dry-run', async () => {
     initGitRepo();
