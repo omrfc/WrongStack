@@ -1,7 +1,7 @@
 import { color } from '@wrongstack/core';
 import { parseAuthFlags } from '../../arg-parser.js';
 import { runAuthDirect, runAuthMenu, type AuthMenuDeps } from '../../auth-menu/index.js';
-import { loadConfigProviders, maskedKey, normalizeKeys } from '../../provider-config-utils.js';
+import { loadConfigProviders, maskedKey, mutateConfigProviders, normalizeKeys } from '../../provider-config-utils.js';
 import type { SubcommandHandler } from '../index.js';
 
 export const authCmd: SubcommandHandler = async (args, deps) => {
@@ -223,7 +223,6 @@ async function runAuthRemove(
   }
 
   try {
-    const { mutateConfigProviders } = await import('../../provider-config-utils.js');
     await mutateConfigProviders(deps.globalConfigPath, deps.vault, (all) => {
       delete all[providerId];
     });
