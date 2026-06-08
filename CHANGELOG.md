@@ -5,6 +5,110 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.89.4] - 2026-06-08
+
+> The task-system & agent-enhancement release. Ships a new **structured task
+> system** with dependency tracking, type/priority classification, and agent
+> assignment — bridging the gap between flat todos and strategic plans. The
+> **`/setmodel` command** gains `resolve` and `doctor` subcommands, and a new
+> **`tech-stack` validator agent** joins the fleet roster (43rd agent) as a
+> single-shot version-checking layer. Telegram notifications are humanized across
+> the board — no more raw JSON dumps. Additive only; no breaking changes.
+
+### Added — Task System
+
+- **`task` tool — structured work items with dependencies, types, and priorities.**
+  Unlike `todo` (flat, session-scoped), tasks support dependency chains
+  (`dependsOn`), type classification (`feature | bugfix | refactor | docs | test |
+  chore`), priority ranking (`critical | high | medium | low`), agent assignment,
+  and hour estimates. Stored per-session as JSON; the tool replaces the full list
+  on every call (like `todo`). Registered in the builtin tools pack — total
+  built-in tools: **36 → 37**.
+
+- **`/tasks` slash command.** Human-facing task management:
+  `/tasks` (progress + list), `add <title> [type] [priority]`,
+  `start | done | fail <id>`, `status <id> <s>`, `depends <id> <deps>`,
+  `assign <id> <agent>`, `promote <id>` (→ todos), `clear`.
+
+- **Task persistence.** Tasks are stored per-session at
+  `<projectSessions>/<id>.tasks.json` with automatic save on every mutation.
+  Session wiring sets `ctx.meta['task.path']` at startup so the tool and slash
+  command share the same storage.
+
+- **Three-layer work hierarchy.** `plan` (strategic) → `task` (structured) →
+  `todo` (tactical) — each layer promotes into the next. Plans outline the big
+  picture, tasks break it into typed/prioritized work, todos track the immediate
+  next step.
+
+- **`task-format.ts` and `task-store.ts`** in `@wrongstack/core`. Shared rendering
+  (`formatTaskList`, `formatTaskProgress`, `computeTaskItemProgress`) and
+  persistence (`loadTasks`, `saveTasks`, `emptyTaskFile`) for all consumers.
+
+### Added — /setmodel Enhancements
+
+- **`/setmodel resolve <role>`** — walks the full resolution chain for one role
+  step by step: exact role → phase → `*` default → leader fallback. Shows which
+  step matched (with ✓) and which were skipped, then the resolved model.
+
+- **`/setmodel doctor`** — validates all matrix entries against the current config:
+  flags unknown keys (stale/typo'd roles), missing/unconfigured providers,
+  providers without API keys, models not in the provider's model list, and
+  uncovered roles when no `*` default is set.
+
+- **Enhanced default view.** `/setmodel` (no args) now shows a **resolution
+  summary** — one representative role per phase plus key legacy roles,
+  each annotated with its resolution source (`role`, `phase`, `default`, `leader`).
+
+### Added — Tech Stack Validator Agent
+
+- **`tech-stack` skill** (`packages/core/skills/tech-stack/SKILL.md`). Activates
+  on package/library/framework decisions. Enforces: verify existence via npm
+  registry, check latest version, reject dead packages (>2yr no releases), reject
+  prehistoric tech (≥5yr obsolete — axios, moment, jQuery, Gulp, etc.), prefer
+  Node built-ins over npm packages. Outputs the intervention phrase:
+  *"This isn't code, this is X-year-old technology."*
+
+- **`tech-stack` fleet agent** — 43rd catalog agent in phase 9 (meta). Single-shot
+  budget: 60s timeout, 5 iterations, 20 tool calls, $0.10 max. Tools: `search`,
+  `fetch`, `read`, `grep`, `glob`, `outdated`, `audit`, `json`. Fires via
+  `delegate({ role: 'tech-stack' })` to validate technology choices before
+  committing them.
+
+- Fleet roster: **46 → 47** (43 catalog + 4 legacy). All count-dependent tests
+  updated (agent-catalog, dispatcher, fleet roster derivation, spawnability).
+
+### Changed — Telegram Notifications
+
+- **Human-readable formatters.** New `formatToolExecuted()`, `formatSessionEnded()`,
+  `fmtToolOutput()`, and `fmtTokens()` in `@wrongstack/telegram/src/format.ts`.
+  Tool notifications no longer dump raw JSON or truncated tool output — they
+  strip JSON braces, unquote keys, and show the first 3 meaningful lines.
+  Session-end notifications show comma-separated token counts with cache stats.
+
+- **Smarter truncation.** `truncateForTelegram()` now preserves semantic boundaries:
+  paragraph → sentence → word → hard cut. No more mid-word truncation in
+  Telegram messages.
+
+- **Tool description guidance.** `telegram_send` and `telegram_read` descriptions
+  now explicitly instruct the agent to format messages as natural prose for a
+  human reader — never paste raw JSON, object dumps, or unformatted tool output.
+  Target 1–4 lines for mobile readability.
+
+### Tests
+
+- **+30 new test cases**: format.test.ts (+15: fmtTokens, fmtToolOutput,
+  formatToolExecuted, formatSessionEnded), bot.test.ts (+6: truncation
+  boundary tests), slash-setmodel.test.ts (+10: resolve, doctor, enhanced view).
+
+### Changed — versions
+
+- **All workspace packages bumped to 0.89.4**: `wrongstack`, `@wrongstack/cli`,
+  `@wrongstack/core`, `@wrongstack/mcp`, `@wrongstack/plug-lsp`, `@wrongstack/plugins`,
+  `@wrongstack/providers`, `@wrongstack/runtime`, `@wrongstack/skills`,
+  `@wrongstack/telegram`, `@wrongstack/tools`, `@wrongstack/tui`, `@wrongstack/webui`.
+  `@wrongstack/acp` tracks the same version, and the marketing site (`website/`) is
+  bumped in lockstep.
+
 ## [0.89.3] - 2026-06-08
 
 > The TUI-hardening & code-consolidation release. Consolidates everything since
