@@ -378,8 +378,15 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
     flags['autonomy'] = choices.autonomy;
 
     // Persist launch preferences so the next boot remembers them.
+    // When --webui is active the mode is pinned to REPL (TUI owns stdout),
+    // but we must NOT persist that choice — the user's last non-webui mode
+    // (likely TUI) should survive so the next plain `wstack` session returns
+    // to their preferred surface instead of silently landing in REPL.
     try {
-      await persistLaunchChoices(wpaths.globalConfig, choices);
+      const toPersist = flags['webui']
+        ? { ...choices, mode: lastChoices?.mode ?? config.launch?.mode ?? 'tui' }
+        : choices;
+      await persistLaunchChoices(wpaths.globalConfig, toPersist);
     } catch {
       // Best-effort — never blocks launch.
     }

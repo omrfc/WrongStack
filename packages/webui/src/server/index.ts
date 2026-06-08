@@ -1757,14 +1757,18 @@ export async function startWebUI(
       }
 
       case 'goal.get': {
-        // Read goal.json from disk and broadcast.
+        // Read goal.json from disk and broadcast to all clients so every
+        // connected browser sees the same goal state. The file is polled
+        // by the frontend every 10s — we serve the latest snapshot here.
         try {
           const goalPath = path.join(projectRoot, '.wrongstack', 'goal.json');
           const raw = await fs.readFile(goalPath, 'utf8');
           const goal = JSON.parse(raw);
-          send(ws, { type: 'goal.updated', payload: goal });
+          broadcast(clients, { type: 'goal.updated', payload: goal });
         } catch {
-          send(ws, { type: 'goal.updated', payload: null });
+          // No goal file yet or parse error — broadcast null so the
+          // frontend clears any stale goal state.
+          broadcast(clients, { type: 'goal.updated', payload: null });
         }
         break;
       }

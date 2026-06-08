@@ -10,38 +10,9 @@ import {
   TrendingUp,
   Minus,
 } from 'lucide-react';
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
-
-// ── Types ──────────────────────────────────────────────────────────────────
-
-export interface GoalDeliverable {
-  id: string;
-  text: string;
-  status: 'pending' | 'done';
-}
-
-export interface GoalJournalEntry {
-  iteration: number;
-  task?: string | undefined;
-  status?: string | undefined;
-  progress?: number | undefined;
-  progressNote?: string | undefined;
-  timestamp?: string | undefined;
-}
-
-export interface GoalState {
-  goal: string;
-  refinedGoal?: string | undefined;
-  goalState: 'active' | 'paused' | 'completed' | 'failed';
-  iterations: number;
-  progress: number;
-  progressNote?: string | undefined;
-  progressTrend?: 'up' | 'down' | 'stable' | undefined;
-  deliverables?: GoalDeliverable[] | undefined;
-  journal?: GoalJournalEntry[] | undefined;
-  lastTask?: string | undefined;
-  lastStatus?: string | undefined;
-}
+import { type ReactNode, useCallback, useEffect, useState } from 'react';
+import { type GoalState } from '@/lib/goal';
+import { getWSClient } from '@/lib/ws-client';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -84,12 +55,28 @@ export interface GoalPanelProps {
 export function GoalPanel({ goal, className }: GoalPanelProps): React.ReactElement | null {
   const [collapsed, setCollapsed] = useState(false);
 
-  // Auto-collapse when no goal
+  // Request goal data on mount and poll every 10s so the panel stays
+  // in sync with the disk (goal.json is written by the agent / CLI).
   useEffect(() => {
-    if (!goal) setCollapsed(true);
-  }, [goal]);
+    const ws = getWSClient();
+    ws?.send?.({ type: 'goal.get' });
+    const timer = setInterval(() => {
+      ws?.send?.({ type: 'goal.get' });
+    }, 10_000);
+    return () => clearInterval(timer);
+  }, []);
 
+  // Hide the panel when there's no goal, or when the goal is terminal
+  // (completed / failed) — it's served its purpose and shouldn't linger.
   if (!goal) return null;
+  if (goal.goalState === 'completed' || goal.goalState === 'failed') return null;
+
+  // Auto-collapse when goal state changes (e.g. completed → null)
+  useEffect(() => {
+    if (!goal || goal.goalState === 'completed' || goal.goalState === 'failed') {
+      setCollapsed(true);
+    }
+  }, [goal]);
 
   const stateCfg = STATE_CONFIG[goal.goalState];
   const completedDeliverables =
@@ -243,33 +230,4 @@ export function GoalPanel({ goal, className }: GoalPanelProps): React.ReactEleme
       )}
     </div>
   );
-}
-
-/**
- * Formats raw goal JSON from the server into a GoalState.
- * Gracefully handles missing / partial data.
- */
-export function parseGoalState(raw: Record<string, unknown> | null): GoalState | null {
-  if (!raw || typeof raw.goal !== 'string' || !raw.goal.trim()) return null;
-  return {
-    goal: raw.goal as string,
-    refinedGoal: typeof raw.refinedGoal === 'string' ? raw.refinedGoal : undefined,
-    goalState: (['active', 'paused', 'completed', 'failed'].includes(raw.goalState as string)
-      ? (raw.goalState as GoalState['goalState'])
-      : 'active') as GoalState['goalState'],
-    iterations: typeof raw.iterations === 'number' ? raw.iterations : 0,
-    progress: typeof raw.progress === 'number' ? raw.progress : 0,
-    progressNote: typeof raw.progressNote === 'string' ? raw.progressNote : undefined,
-    progressTrend: (['up', 'down', 'stable'].includes(raw.progressTrend as string)
-      ? (raw.progressTrend as GoalState['progressTrend'])
-      : undefined) as GoalState['progressTrend'] | undefined,
-    deliverables: Array.isArray(raw.deliverables)
-      ? (raw.deliverables as GoalDeliverable[])
-      : undefined,
-    journal: Array.isArray(raw.journal)
-      ? (raw.journal as GoalJournalEntry[])
-      : undefined,
-    lastTask: typeof raw.lastTask === 'string' ? raw.lastTask : undefined,
-    lastStatus: typeof raw.lastStatus === 'string' ? raw.lastStatus : undefined,
-  };
 }
