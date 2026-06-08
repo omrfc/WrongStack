@@ -1,4 +1,3 @@
-import { expectDefined } from '@wrongstack/core';
 import { spawn } from 'node:child_process';
 import { buildChildEnv } from '@wrongstack/core';
 import type { ToolProgressEvent } from '@wrongstack/core';
@@ -85,7 +84,7 @@ export async function* spawnStream(
         waiter = resolve;
       });
     }
-    const chunk = expectDefined(queue.shift());
+    const chunk = queue.shift()!;
     if (chunk.kind === 'close') {
       // If we already saw a spawn error (ENOENT etc.), keep exitCode=1
       // rather than the negative platform code Node fabricates.

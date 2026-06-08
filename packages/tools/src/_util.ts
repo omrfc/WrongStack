@@ -1,4 +1,3 @@
-import { expectDefined } from '@wrongstack/core';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as Core from '@wrongstack/core';
@@ -155,9 +154,9 @@ export function collapseConsecutiveDuplicates(text: string, minRun = REPEAT_RUN_
     while (j < lines.length && lines[j] === lines[i]) j++;
     const run = j - i;
     if (run >= minRun) {
-      out.push(expectDefined(lines[i]), `… ⟨repeated ${run}×⟩`);
+      out.push(lines[i]!, `… ⟨repeated ${run}×⟩`);
     } else {
-      for (let k = i; k < j; k++) out.push(expectDefined(lines[k]));
+      for (let k = i; k < j; k++) out.push(lines[k]!);
     }
     i = j;
   }
