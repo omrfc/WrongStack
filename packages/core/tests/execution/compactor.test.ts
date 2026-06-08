@@ -125,15 +125,40 @@ describe('HybridCompactor', () => {
       removedMessages: 0,
     });
     expect(JSON.stringify(ctx.messages)).not.toContain('"tool_use"');
-    expect(ctx.messages).toEqual([
-      {
-        role: 'user',
-        content:
-          '[previous_session_summary: 2 earlier turns compacted. Todo state preserved in context.]',
-      },
-      { role: 'assistant', content: 'Continuing from compacted context.' },
+    // Lossless collapse: ancient turns become a single `system` digest that
+    // PRESERVES the original user text (no more placeholder data loss). The
+    // dropped tool_use is noted as an omitted-tool marker, not silently lost.
+    const digestMsg = ctx.messages[0];
+    expect(digestMsg?.role).toBe('system');
+    expect(String(digestMsg?.content)).toContain('[prior_turns_digest:');
+    expect(String(digestMsg?.content)).toContain('old'); // original user instruction kept
+    expect(String(digestMsg?.content)).toContain('tool call(s) omitted');
+    // Tail preserved; orphan tool_result stripped down to its text block.
+    expect(ctx.messages.slice(1)).toEqual([
       { role: 'user', content: [{ type: 'text', text: 'tail' }] },
       { role: 'assistant', content: 'done' },
     ]);
+  });
+
+  it('aggressive collapse preserves earlier text (lossless) and reports the digest', async () => {
+    const messages: Message[] = [];
+    messages.push({ role: 'user', content: 'IMPORTANT: always use tabs not spaces' });
+    messages.push({ role: 'assistant', content: 'Understood, using tabs.' });
+    for (let i = 0; i < 20; i++) {
+      messages.push({ role: 'user', content: `q${i}` });
+      messages.push({ role: 'assistant', content: `a${i}` });
+    }
+    const ctx = fakeContext(messages);
+    const c = new HybridCompactor({ preserveK: 3 });
+    const report = await c.compact(ctx, { aggressive: true });
+
+    // The early instruction must survive collapse — previously it was deleted
+    // and replaced with a static placeholder.
+    const digestMsg = ctx.messages.find(
+      (m) => typeof m.content === 'string' && m.content.includes('prior_turns_digest'),
+    );
+    expect(digestMsg).toBeDefined();
+    expect(String(digestMsg?.content)).toContain('IMPORTANT: always use tabs not spaces');
+    expect(report.collapsedDigest).toContain('IMPORTANT: always use tabs not spaces');
   });
 });

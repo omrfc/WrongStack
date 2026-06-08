@@ -10,6 +10,14 @@ import { estimateRequestTokensCalibrated } from '../utils/token-estimate.js';
 type PressureLevel = 'warn' | 'soft' | 'hard';
 const LEVEL_RANK: Record<PressureLevel, number> = { warn: 0, soft: 1, hard: 2 };
 
+/** Max chars of collapse digest persisted to the session log line. */
+const MAX_DIGEST_LOG_CHARS = 4_000;
+
+function truncateDigest(digest: string): string {
+  if (digest.length <= MAX_DIGEST_LOG_CHARS) return digest;
+  return `${digest.slice(0, MAX_DIGEST_LOG_CHARS)}… [+${digest.length - MAX_DIGEST_LOG_CHARS} chars; full turns in session log]`;
+}
+
 export type CompactionFailureMode = 'throw' | 'throw_on_hard' | 'continue';
 
 export interface AutoCompactionOptions {
@@ -213,6 +221,12 @@ export class AutoCompactionMiddleware {
         level: pressure.level,
         aggressive,
         reductions: report.reductions?.map((r) => ({ phase: r.phase, saved: r.saved })),
+        // Record what was collapsed so the audit trail shows the preserved
+        // content, not just token counts. Bounded to keep the log line small;
+        // the full original turns are already in the session JSONL.
+        ...(report.collapsedDigest
+          ? { digest: truncateDigest(report.collapsedDigest) }
+          : {}),
       });
 
       // Stale file-read metadata from before the compaction boundary is no
