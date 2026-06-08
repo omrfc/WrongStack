@@ -35,9 +35,9 @@ const KEBAB = /^[a-z][a-z0-9-]*$/;
 const TOOL_ID = /^[a-z][a-z0-9_-]*$/;
 
 describe('agent catalog integrity', () => {
-  it('has 43 catalog definitions and AGENT_CATALOG keys match 1:1', () => {
-    expect(ALL_AGENT_DEFINITIONS.length).toBe(43);
-    expect(Object.keys(AGENT_CATALOG).length).toBe(43);
+  it('has 47 catalog definitions and AGENT_CATALOG keys match 1:1', () => {
+    expect(ALL_AGENT_DEFINITIONS.length).toBe(47);
+    expect(Object.keys(AGENT_CATALOG).length).toBe(47);
     for (const def of ALL_AGENT_DEFINITIONS) {
       expect(AGENT_CATALOG[def.config.role as string]).toBe(def);
     }
@@ -78,7 +78,7 @@ describe('agent catalog integrity', () => {
     }
   });
 
-  it('groups every catalog agent into exactly one phase and the groups sum to 43', () => {
+  it('groups every catalog agent into exactly one phase and the groups sum to 47', () => {
     let total = 0;
     const seen = new Set<string>();
     for (const phase of PHASES) {
@@ -91,8 +91,8 @@ describe('agent catalog integrity', () => {
       }
       total += group.length;
     }
-    expect(total).toBe(43);
-    expect(seen.size).toBe(43);
+    expect(total).toBe(47);
+    expect(seen.size).toBe(47);
   });
 
   it('getAgentDefinition resolves known roles and rejects unknown ones', () => {
