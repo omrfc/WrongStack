@@ -28,6 +28,7 @@ import { DefaultMultiAgentCoordinator } from '../coordination/multi-agent-coordi
 import type { MultiAgentConfig } from '../types/multi-agent.js';
 import type { TaskGraph, TaskProgress } from '../types/task-graph.js';
 import type { TaskTracker } from './task-tracker.js';
+import { SddError, ERROR_CODES } from '../types/errors.js';
 import { SddTaskDecomposer, type TaskBatch } from './sdd-task-decomposer.js';
 import { computeTaskProgress } from '../types/task-graph.js';
 export interface SddParallelRunOptions {
@@ -216,7 +217,10 @@ export class SddParallelRun {
     ].join('\n');
 
     // Phase 1: spawn all subagents
-    if (!this.coordinator) throw new Error('SDD parallel runner requires a coordinator');
+    if (!this.coordinator) throw new SddError({
+      message: 'SDD parallel runner requires a coordinator',
+      code: ERROR_CODES.SDD_INVALID_STATE,
+    });
     const coordinator = this.coordinator;
     const spawns = subagentIds.map((subagentId) =>
       coordinator.spawn({
@@ -229,7 +233,10 @@ export class SddParallelRun {
     const spawnResults = await Promise.all(spawns);
     // All spawns succeeded or we bail entirely — no partial waves
     if (!spawnResults.every((r) => Boolean(r.subagentId))) {
-      throw new Error('One or more subagent spawns failed');
+      throw new SddError({
+        message: 'One or more subagent spawns failed',
+        code: ERROR_CODES.SDD_INVALID_STATE,
+      });
     }
 
     // Phase 2: assign task specs to spawned subagents
