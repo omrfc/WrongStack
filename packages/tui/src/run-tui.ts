@@ -256,6 +256,69 @@ export interface RunTuiOptions {
 const BRACKETED_PASTE_ON = '\x1b[?2004h';
 const BRACKETED_PASTE_OFF = '\x1b[?2004l';
 
+// ── Console / stderr / warning silencing ──────────────────────────────
+// Ink owns the terminal while the TUI is running. Any write to stdout or
+// stderr that doesn't go through Ink's render cycle will interleave with
+// ANSI control sequences, causing visible content to jump from the bottom
+// and corrupt the chat-history / input-area layout.
+//
+// What we silence:
+//  1. console.log / warn / error / debug — 60+ sites across core + CLI
+//     that bypass the DefaultLogger (which already suppresses stderr in
+//     TUI mode). These fire during AutoPhase, session store, security
+//     scanner, config loader, and plugin teardown.
+//  2. process.emitWarning — used by Director, FleetManager, and
+//     SpecBuilder for non-fatal warnings. Node writes these to stderr by
+//     default. A no-op 'warning' listener swallows them.
+//  3. process.stderr.write — the memory-consolidator writes a summary
+//     line on every session close. Patching this is safe because Ink's
+//     rendering goes through process.stdout, which we leave untouched.
+//
+// All silenced output is lost during TUI mode — it never reaches disk or
+// memory. The DefaultLogger still writes structured logs to the log file
+// even with stderr suppressed. For post-hoc debugging, check the log file
+// at ~/.wrongstack/logs/<date>.log.
+// ──────────────────────────────────────────────────────────────────────
+
+const origConsoleLog = console.log;
+const origConsoleWarn = console.warn;
+const origConsoleError = console.error;
+const origConsoleDebug = console.debug;
+const origConsoleInfo = console.info;
+const origConsoleTable = console.table;
+const origConsoleTrace = console.trace;
+const origStderrWrite = process.stderr.write.bind(process.stderr);
+
+const consoleNoop = (..._args: unknown[]): void => {};
+const stderrNoop = ((_chunk: string | Uint8Array, _encodingOrCb?: BufferEncoding | ((err?: Error) => void), _cb?: (err?: Error) => void): boolean => {
+  // Preserve Node's callback contract so callers that pass a cb don't hang.
+  // process.stderr.write has two overloads:
+  //   write(buffer, cb?)          → second arg is a callback
+  //   write(str, encoding?, cb?)  → second arg is encoding, third is callback
+  if (typeof _encodingOrCb === 'function') _encodingOrCb();
+  else if (typeof _cb === 'function') _cb();
+  return true;
+}) as typeof process.stderr.write;
+const warningNoop = (_warning: Error): void => {};
+
+function silenceTerminal(): void {
+  console.log = consoleNoop;
+  console.warn = consoleNoop;
+  console.error = consoleNoop;
+  console.debug = consoleNoop;
+  process.stderr.write = stderrNoop as typeof process.stderr.write;
+  process.on('warning', warningNoop);
+}
+
+function unsilenceTerminal(): void {
+  console.log = origConsoleLog;
+  console.warn = origConsoleWarn;
+  console.error = origConsoleError;
+  console.debug = origConsoleDebug;
+  process.stderr.write = origStderrWrite;
+  process.off('warning', warningNoop);
+}
+
 export async function runTui(opts: RunTuiOptions): Promise<number> {
   const stdout = process.stdout;
   const stdin = process.stdin;
@@ -271,6 +334,11 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
     );
     return 2;
   }
+
+  // Silence all console / stderr / process-warning output so external
+  // writes don't interleave with Ink's terminal control sequences. See
+  // the block comment above `silenceTerminal` for the full rationale.
+  silenceTerminal();
 
   stdout.write(BRACKETED_PASTE_ON);
 
@@ -327,6 +395,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
+    unsilenceTerminal();
     try {
       stopTitle();
     } catch {

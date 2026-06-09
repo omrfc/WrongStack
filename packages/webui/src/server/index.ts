@@ -3,7 +3,17 @@ import * as fs from 'node:fs/promises';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import { createHttpServer } from './http-server.js';
-import { SKIP_DIRS, isHiddenEntry, rankFiles } from './file-picker.js';
+import {
+  handleFilesTree,
+  handleFilesRead,
+  handleFilesWrite,
+  handleFilesList,
+} from './file-handlers.js';
+import {
+  handleMemoryList,
+  handleMemoryRemember,
+  handleMemoryForget,
+} from './memory-handlers.js';
 import {
   Agent,
   AutoCompactionMiddleware,
@@ -88,6 +98,21 @@ export {
   errMessage,
   generateAuthToken,
 } from './ws-utils.js';
+
+// File operation handlers shared with CLI (files.tree, files.read, files.write, files.list)
+export {
+  handleFilesTree,
+  handleFilesRead,
+  handleFilesWrite,
+  handleFilesList,
+} from './file-handlers.js';
+
+// Memory operation handlers shared with CLI (memory.list, memory.remember, memory.forget)
+export {
+  handleMemoryList,
+  handleMemoryRemember,
+  handleMemoryForget,
+} from './memory-handlers.js';
 
 // WS auth — pure functions for verifying WebSocket connections
 export {
@@ -1325,63 +1350,13 @@ export async function startWebUI(
         break;
       }
 
-      case 'memory.list': {
-        // All three scopes (project-agents, project-memory, user-memory)
-        // rolled up as readAll already does. Returned as raw markdown so
-        // the UI can render with the same style as everything else.
-        try {
-          const text = await memoryStore.readAll();
-          send(ws, { type: 'memory.list', payload: { text } });
-        } catch (err) {
-          send(ws, {
-            type: 'memory.list',
-            payload: { text: '', error: errMessage(err) },
-          });
-        }
-        break;
-      }
-
-      case 'memory.remember': {
-        const { text, scope } = (
-          msg as {
-            payload: {
-              text: string;
-              scope?: 'project-agents' | 'project-memory' | 'user-memory' | undefined;
-            };
-          }
-        ).payload;
-        try {
-          await memoryStore.remember(text, scope ?? 'project-memory');
-          sendResult(ws, true, 'Saved to memory');
-        } catch (err) {
-          sendResult(ws, false, errMessage(err));
-        }
-        break;
-      }
-
-      case 'memory.forget': {
-        const { text, scope } = (
-          msg as {
-            payload: {
-              text: string;
-              scope?: 'project-agents' | 'project-memory' | 'user-memory' | undefined;
-            };
-          }
-        ).payload;
-        try {
-          const removed = await memoryStore.forget(text, scope ?? 'project-memory');
-          sendResult(
-            ws,
-            removed > 0,
-            removed > 0
-              ? `Removed ${removed} entr${removed === 1 ? 'y' : 'ies'}`
-              : 'No matching entries',
-          );
-        } catch (err) {
-          sendResult(ws, false, errMessage(err));
-        }
-        break;
-      }
+      // ── Memory operations — delegated to shared handlers (memory-handlers.ts) ──
+      case 'memory.list':
+        return handleMemoryList(ws, memoryStore);
+      case 'memory.remember':
+        return handleMemoryRemember(ws, msg, memoryStore);
+      case 'memory.forget':
+        return handleMemoryForget(ws, msg, memoryStore);
 
       case 'skills.list': {
         if (!skillLoader) {
@@ -1573,127 +1548,18 @@ export async function startWebUI(
         break;
       }
 
-      case 'files.list': {
-        // Lightweight project file picker for the chat `@` mention popup.
-        // Walks projectRoot, skipping the heavyweight build/vcs/node_modules
-        // dirs that would blow up the response on a real project. Applies
-        // a fuzzy substring match against the (lowercased) query and caps
-        // the result so the popup never has to paginate.
-        const payload =
-          (msg as { payload?: { query?: string | undefined; limit?: number | undefined } })
-            .payload ?? {};
-        const limit = payload.limit ?? 50;
-        // Filtering (isHiddenEntry/SKIP_DIRS) and ranking (rankFiles) live in
-        // ./file-picker.ts; the walk itself stays here since it's disk I/O.
-        const results: string[] = [];
-        async function walk(dir: string, rel: string, depth: number): Promise<void> {
-          if (depth > 8 || results.length >= 600) return;
-          let entries: import('node:fs').Dirent[] = [];
-          try {
-            entries = await fs.readdir(dir, { withFileTypes: true });
-          } catch {
-            return;
-          }
-          for (const e of entries) {
-            if (results.length >= 600) return;
-            if (isHiddenEntry(e.name)) continue;
-            const childRel = rel ? `${rel}/${e.name}` : e.name;
-            if (e.isDirectory()) {
-              if (SKIP_DIRS.has(e.name)) continue;
-              await walk(path.join(dir, e.name), childRel, depth + 1);
-            } else if (e.isFile()) {
-              results.push(childRel);
-            }
-          }
-        }
-        await walk(projectRoot, '', 0);
-        send(ws, {
-          type: 'files.list',
-          payload: { files: rankFiles(results, payload.query ?? '', limit) },
-        });
-        break;
-      }
-
-      // ── IDE file operations ──────────────────────────────────────────
-      // files.tree: returns a nested directory tree for the File Explorer.
-      // files.read: returns file content for the Monaco editor.
-      // files.write: writes file content back to disk (atomic write).
-      case 'files.tree': {
-        interface TreeNode {
-          name: string;
-          path: string;
-          type: 'file' | 'directory';
-          children?: TreeNode[];
-        }
-        async function buildTree(dir: string, rel: string, depth: number): Promise<TreeNode[]> {
-          if (depth > 10) return [];
-          let entries: import('node:fs').Dirent[] = [];
-          try {
-            entries = await fs.readdir(dir, { withFileTypes: true });
-          } catch {
-            return [];
-          }
-          // Sort: directories first, then alphabetical
-          entries.sort((a, b) => {
-            if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
-            return a.name.localeCompare(b.name);
-          });
-          const nodes: TreeNode[] = [];
-          for (const e of entries) {
-            if (isHiddenEntry(e.name)) continue;
-            const childRel = rel ? `${rel}/${e.name}` : e.name;
-            const childAbs = path.join(dir, e.name);
-            if (e.isDirectory()) {
-              if (SKIP_DIRS.has(e.name)) continue;
-              const children = await buildTree(childAbs, childRel, depth + 1);
-              nodes.push({ name: e.name, path: childRel, type: 'directory', children });
-            } else if (e.isFile()) {
-              nodes.push({ name: e.name, path: childRel, type: 'file' });
-            }
-          }
-          return nodes;
-        }
-        try {
-          const tree = await buildTree(projectRoot, '', 0);
-          send(ws, { type: 'files.tree', payload: { root: projectRoot, tree } });
-        } catch (err) {
-          send(ws, { type: 'files.tree', payload: { root: projectRoot, tree: [], error: errMessage(err) } });
-        }
-        break;
-      }
-
-      case 'files.read': {
-        const { filePath } = (msg as { payload: { filePath: string } }).payload;
-        // Path traversal guard: resolve and verify the file stays inside projectRoot.
-        const resolved = path.resolve(projectRoot, filePath);
-        if (!resolved.startsWith(projectRoot + path.sep) && resolved !== projectRoot) {
-          send(ws, { type: 'files.read', payload: { filePath, content: '', error: 'Forbidden' } });
-          break;
-        }
-        try {
-          const content = await fs.readFile(resolved, 'utf8');
-          send(ws, { type: 'files.read', payload: { filePath, content } });
-        } catch (err) {
-          send(ws, { type: 'files.read', payload: { filePath, content: '', error: errMessage(err) } });
-        }
-        break;
-      }
-
-      case 'files.write': {
-        const { filePath, content } = (msg as { payload: { filePath: string; content: string } }).payload;
-        const resolved = path.resolve(projectRoot, filePath);
-        if (!resolved.startsWith(projectRoot + path.sep) && resolved !== projectRoot) {
-          send(ws, { type: 'files.written', payload: { filePath, success: false, error: 'Forbidden' } });
-          break;
-        }
-        try {
-          await atomicWrite(resolved, content);
-          send(ws, { type: 'files.written', payload: { filePath, success: true } });
-        } catch (err) {
-          send(ws, { type: 'files.written', payload: { filePath, success: false, error: errMessage(err) } });
-        }
-        break;
-      }
+      // ── File operations — delegated to shared handlers (file-handlers.ts) ──
+      // These handlers are also used by the CLI's webui-server.ts. When
+      // adding or modifying file-operation WebSocket messages, update
+      // file-handlers.ts — NOT these case blocks individually.
+      case 'files.list':
+        return handleFilesList(ws, msg, projectRoot);
+      case 'files.tree':
+        return handleFilesTree(ws, msg, projectRoot);
+      case 'files.read':
+        return handleFilesRead(ws, msg, projectRoot);
+      case 'files.write':
+        return handleFilesWrite(ws, msg, projectRoot);
 
       case 'modes.list': {
         try {

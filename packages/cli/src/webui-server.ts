@@ -8,6 +8,13 @@ import {
   openBrowser,
   registerInstance,
   unregisterInstance,
+  handleFilesTree,
+  handleFilesRead,
+  handleFilesWrite,
+  handleFilesList,
+  handleMemoryList,
+  handleMemoryRemember,
+  handleMemoryForget,
 } from '@wrongstack/webui/server';
 import type { Agent, EventBus, MemoryStore, ModeStore, ModelsRegistry, SessionStore, SessionWriter, SkillLoader } from '@wrongstack/core';
 import { DefaultSecretScrubber, type ProviderConfig } from '@wrongstack/core';
@@ -16,62 +23,6 @@ import { DefaultSecretVault } from '@wrongstack/core/security';
 import { TOKENS, repairToolUseAdjacency, listContextWindowModes, resolveContextWindowPolicy, DEFAULT_CONTEXT_WINDOW_MODE_ID } from '@wrongstack/core';
 import { WebSocket, WebSocketServer } from 'ws';
 import { expectDefined, loadConfigProviders, maskedKey, mutateConfigProviders, normalizeKeys, nowIso, writeKeysBack } from './provider-config-utils.js';
-
-// ── File-picker helpers (inlined from @wrongstack/webui/server/file-picker.ts) ──
-
-/** Heavyweight build/vcs/dependency dirs the picker never descends into. */
-const SKIP_DIRS: ReadonlySet<string> = new Set([
-  '.git',
-  'node_modules',
-  'dist',
-  'build',
-  '.next',
-  '.turbo',
-  '.cache',
-  'target',
-  'coverage',
-  '.nyc_output',
-  'out',
-  '.pnpm-store',
-  '.parcel-cache',
-]);
-
-/** Dotfiles/dirs kept despite the hide-dotfiles-by-default rule. */
-const KEEP_DOTFILES: ReadonlySet<string> = new Set([
-  '.wrongstack',
-  '.env.example',
-  '.gitignore',
-  '.eslintrc',
-  '.prettierrc',
-]);
-
-function isHiddenEntry(name: string): boolean {
-  return name.startsWith('.') && !KEEP_DOTFILES.has(name);
-}
-
-function rankFiles(paths: readonly string[], query: string, limit: number): string[] {
-  const q = query.toLowerCase();
-  const scored: Array<{ path: string; score: number }> = [];
-  for (const p of paths) {
-    if (!q) {
-      scored.push({ path: p, score: 0 });
-      continue;
-    }
-    const lower = p.toLowerCase();
-    const base = lower.split('/').pop() ?? lower;
-    let score = 0;
-    if (base === q) score = 100;
-    else if (base.startsWith(q)) score = 60;
-    else if (lower.includes(q)) score = 20;
-    else continue;
-    score -= p.split('/').length;
-    scored.push({ path: p, score });
-  }
-  scored.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
-  return scored.slice(0, limit).map((s) => s.path);
-}
-
-
 
 // ── Token estimator helpers (inlined from @wrongstack/webui/server/token-estimator.ts) ──
 
@@ -1087,41 +1038,52 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
         break;
       }
 
-      case 'files.list': {
-        // Lightweight project file picker for the chat `@` mention popup.
-        // Walks projectRoot, skipping heavy build/vcs/node_modules dirs.
+      case 'session.rewind': {
+        const { checkpointIndex } = (msg as { payload: { checkpointIndex: number } }).payload;
         const projectRoot = opts.projectRoot ?? opts.agent.ctx.projectRoot;
-        const payload =
-          (msg as { payload?: { query?: string | undefined; limit?: number | undefined } })
-            .payload ?? {};
-        const limit = payload.limit ?? 50;
-        const results: string[] = [];
-        async function walk(dir: string, rel: string, depth: number): Promise<void> {
-          if (depth > 8 || results.length >= 600) return;
-          let entries: import('node:fs').Dirent[] = [];
-          try {
-            entries = await fs.readdir(dir, { withFileTypes: true });
-          } catch {
-            return;
-          }
-          for (const e of entries) {
-            if (results.length >= 600) return;
-            if (isHiddenEntry(e.name)) continue;
-            const childRel = rel ? `${rel}/${e.name}` : e.name;
-            if (e.isDirectory()) {
-              if (SKIP_DIRS.has(e.name)) continue;
-              await walk(path.join(dir, e.name), childRel, depth + 1);
-            } else if (e.isFile()) {
-              results.push(childRel);
-            }
-          }
+        try {
+          const { DefaultSessionRewinder } = await import('@wrongstack/core');
+          const rewinder = new DefaultSessionRewinder(
+            path.join(projectRoot, '.wrongstack', 'sessions'),
+            projectRoot,
+          );
+          await rewinder.rewindToCheckpoint(opts.session.id, checkpointIndex);
+          await opts.session.truncateToCheckpoint(checkpointIndex);
+          sendResult(ws, true, `Rewound to checkpoint ${checkpointIndex}`);
+          broadcast({
+            type: 'session.start',
+            payload: {
+              sessionId: opts.session.id,
+              model: opts.agent.ctx.model,
+              provider: (opts.agent.ctx.provider as { id: string }).id,
+              reset: true,
+            },
+          });
+        } catch (err) {
+          sendResult(ws, false, err instanceof Error ? err.message : String(err));
         }
-        await walk(projectRoot, '', 0);
-        send(ws, {
-          type: 'files.list',
-          payload: { files: rankFiles(results, payload.query ?? '', limit) },
-        });
         break;
+      }
+
+      // ── File operations — delegated to shared handlers (file-handlers.ts) ──
+      // These handlers are also used by the standalone WebUI server. When
+      // adding or modifying file-operation WebSocket messages, update
+      // file-handlers.ts — NOT these case blocks individually.
+      case 'files.list': {
+        const projectRoot = opts.projectRoot ?? opts.agent.ctx.projectRoot;
+        return handleFilesList(ws, msg, projectRoot);
+      }
+      case 'files.tree': {
+        const projectRoot = opts.projectRoot ?? opts.agent.ctx.projectRoot;
+        return handleFilesTree(ws, msg, projectRoot);
+      }
+      case 'files.read': {
+        const projectRoot = opts.projectRoot ?? opts.agent.ctx.projectRoot;
+        return handleFilesRead(ws, msg, projectRoot);
+      }
+      case 'files.write': {
+        const projectRoot = opts.projectRoot ?? opts.agent.ctx.projectRoot;
+        return handleFilesWrite(ws, msg, projectRoot);
       }
 
       case 'session.delete': {
@@ -1188,71 +1150,59 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
         break;
       }
 
+      case 'plan.template_use': {
+        const { template } = (msg as { payload: { template: string } }).payload;
+        const planPath = (opts.agent.ctx.meta as Record<string, unknown>)['plan.path'];
+        if (typeof planPath !== 'string' || !planPath) {
+          sendResult(ws, false, 'Plan storage is not configured for this session.');
+          break;
+        }
+        try {
+          const { getPlanTemplate, loadPlan, savePlan, emptyPlan, addPlanItem } = await import(
+            '@wrongstack/core'
+          );
+          const tpl = getPlanTemplate(template);
+          if (!tpl) {
+            sendResult(ws, false, `Unknown template "${template}".`);
+            break;
+          }
+          let plan = (await loadPlan(planPath)) ?? emptyPlan(opts.session.id);
+          for (const item of tpl.items) {
+            ({ plan } = addPlanItem(plan, item.title, item.details));
+          }
+          await savePlan(planPath, plan);
+          sendResult(ws, true, `Applied template "${tpl.name}" — ${tpl.items.length} items added.`);
+          broadcast({
+            type: 'plan.updated',
+            payload: { plan },
+          });
+        } catch (err) {
+          sendResult(ws, false, err instanceof Error ? err.message : String(err));
+        }
+        break;
+      }
+
+      // ── Memory operations — delegated to shared handlers (memory-handlers.ts) ──
       case 'memory.list': {
         if (!opts.memoryStore) {
           send(ws, { type: 'memory.list', payload: { text: '', error: 'Memory store not available' } });
           break;
         }
-        try {
-          const text = await opts.memoryStore.readAll();
-          send(ws, { type: 'memory.list', payload: { text } });
-        } catch (err) {
-          send(ws, {
-            type: 'memory.list',
-            payload: { text: '', error: err instanceof Error ? err.message : String(err) },
-          });
-        }
-        break;
+        return handleMemoryList(ws, opts.memoryStore);
       }
-
       case 'memory.remember': {
         if (!opts.memoryStore) {
           sendResult(ws, false, 'Memory store not available');
           break;
         }
-        const { text, scope } = (
-          msg as {
-            payload: {
-              text: string;
-              scope?: 'project-agents' | 'project-memory' | 'user-memory' | undefined;
-            };
-          }
-        ).payload;
-        try {
-          await opts.memoryStore.remember(text, scope ?? 'project-memory');
-          sendResult(ws, true, 'Saved to memory');
-        } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
-        }
-        break;
+        return handleMemoryRemember(ws, msg, opts.memoryStore);
       }
-
       case 'memory.forget': {
         if (!opts.memoryStore) {
           sendResult(ws, false, 'Memory store not available');
           break;
         }
-        const { text, scope } = (
-          msg as {
-            payload: {
-              text: string;
-              scope?: 'project-agents' | 'project-memory' | 'user-memory' | undefined;
-            };
-          }
-        ).payload;
-        try {
-          const removed = await opts.memoryStore.forget(text, scope ?? 'project-memory');
-          sendResult(
-            ws,
-            removed > 0,
-            removed > 0
-              ? `Removed ${removed} entr${removed === 1 ? 'y' : 'ies'}`
-              : 'No matching entries',
-          );
-        } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
-        }
-        break;
+        return handleMemoryForget(ws, msg, opts.memoryStore);
       }
 
       case 'skills.list': {

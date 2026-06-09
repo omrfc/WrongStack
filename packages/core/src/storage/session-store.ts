@@ -638,6 +638,18 @@ class FileSessionWriter implements SessionWriter {
   private readonly secretScrubber?: SecretScrubber | undefined;
   private readonly onCloseCb?: (((summary: SessionSummary) => void | Promise<void>)) | undefined;
 
+  // ── Write buffer — batches events to reduce per-event disk I/O ─────────
+  //
+  // Every append() pushes the scrubbed event into an in-memory buffer instead
+  // of calling handle.appendFile() synchronously. The buffer flushes to disk
+  // when it reaches FLUSH_SIZE events OR after FLUSH_INTERVAL_MS of inactivity.
+  // This cuts the number of disk writes by ~95% without changing the on-disk
+  // format — the JSONL is still one JSON object per line.
+  private writeBuffer: SessionEvent[] = [];
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly FLUSH_INTERVAL_MS = 500;
+  private static readonly FLUSH_SIZE = 50;
+
   // ── Enriched summary tracking ──────────────────────────────────────────
   private iterationCount = 0;
   private toolCallCount = 0;
@@ -750,20 +762,62 @@ class FileSessionWriter implements SessionWriter {
       await this.writeSessionStartLazy();
     }
     // Scrub before observing (the summary title is derived from user_input
-    // content) and before writing, so neither the JSONL nor the sidecar holds
-    // a cleartext secret.
+    // content) and before buffering, so neither the JSONL nor the sidecar
+    // ever holds a cleartext secret.
     const scrubbed = this.scrubEvent(event);
+    // observeForSummary MUST run synchronously here — the summary counters
+    // (toolCallCount, tokenIn/Out, outcome) drive the .summary.json sidecar
+    // and the session index. Deferring observation to flush time would leave
+    // the summary stale if close() fires before the next timer tick.
     this.observeForSummary(scrubbed);
+    this.writeBuffer.push(scrubbed);
+
+    if (this.writeBuffer.length >= FileSessionWriter.FLUSH_SIZE) {
+      // Buffer full — flush immediately. Cancel any pending timer so we
+      // don't double-flush on the next tick.
+      if (this.flushTimer) {
+        clearTimeout(this.flushTimer);
+        this.flushTimer = null;
+      }
+      await this.flushBuffer();
+    } else {
+      this.scheduleFlush();
+    }
+  }
+
+  /** Schedule a deferred flush. No-op if a timer is already pending. */
+  private scheduleFlush(): void {
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      this.flushBuffer().catch(() => {
+        // flushBuffer already logs via the throttled-warning path;
+        // this catch prevents an unhandled rejection in the timer callback.
+      });
+    }, FileSessionWriter.FLUSH_INTERVAL_MS);
+  }
+
+  /**
+   * Flush all buffered events to disk as a single appendFile call.
+   * Errors use the same throttled-warning pattern the old per-event
+   * append path used — one warning every 5s with a suppressed count.
+   * On failure the buffer is cleared (events are best-effort, same as
+   * the old per-event path where a failed write was silently dropped).
+   */
+  private async flushBuffer(): Promise<void> {
+    if (this.writeBuffer.length === 0) return;
+    const batch = this.writeBuffer.map((e) => JSON.stringify(e)).join('\n') + '\n';
+    this.writeBuffer = [];
     try {
-      await this.handle.appendFile(`${JSON.stringify(scrubbed)}\n`, 'utf8');
+      await this.handle.appendFile(batch, 'utf8');
     } catch (err) {
-      this.appendFailCount++;
+      this.appendFailCount += batch.length; // count each lost event
       const now = Date.now();
       if (now - this.lastAppendWarnAt > 5000) {
         const suppressed = this.appendFailCount - 1;
         const tail = suppressed > 0 ? ` (+${suppressed} suppressed)` : '';
         console.warn(
-          '[session] append failed:',
+          '[session] flush failed:',
           err instanceof Error ? err.message : String(err),
           tail,
         );
@@ -813,6 +867,15 @@ class FileSessionWriter implements SessionWriter {
     if (this.closing) return;
     this.closing = true;
     this.closed = true;
+    // Flush any buffered events before finalizing. The summary counters
+    // (toolCallCount, tokenIn/Out, outcome) are already up to date because
+    // observeForSummary runs synchronously on every append, but the JSONL
+    // must have all events on disk before we write the .summary.json sidecar.
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    await this.flushBuffer();
     // Finalize the summary before writing.
     this.summary = {
       ...this.summary,
@@ -883,6 +946,14 @@ class FileSessionWriter implements SessionWriter {
 
   async truncateToCheckpoint(targetPromptIndex: number): Promise<number> {
     if (!this.filePath) return 0;
+    // Flush buffered events to disk before reading — otherwise the in-memory
+    // events that haven't hit the JSONL yet would be invisible to the
+    // truncation logic and would be silently dropped by the rewrite.
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    await this.flushBuffer();
     const raw = await fsp.readFile(this.filePath, 'utf8');
     const lines = raw.split('\n');
     const kept: string[] = [];
@@ -959,6 +1030,14 @@ class FileSessionWriter implements SessionWriter {
 
   async clearSession(): Promise<void> {
     if (!this.filePath) return;
+    // Discard any buffered events — the caller is explicitly resetting the
+    // session to a clean slate. Cancel the timer so it doesn't fire and
+    // append stale events to the freshly-cleared file.
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    this.writeBuffer = [];
     const record = `${JSON.stringify({
       type: 'session_start',
       ts: new Date().toISOString(),
