@@ -197,7 +197,7 @@ export interface ServeStdioOptions {
  * this runs — it is the JSON-RPC channel. Route all logging to stderr.
  */
 export function serveStdio(server: MCPServer, opts: ServeStdioOptions = {}): ServeStdioHandle {
-  const stdin = opts.stdin ?? process.stdin;
+  const stdin: NodeJS.ReadableStream = opts.stdin ?? process.stdin;
   const stdout = opts.stdout ?? process.stdout;
   let buffer = '';
   let closed = false;

@@ -52,7 +52,8 @@ function formatDiagnostic(d: Diagnostic): string {
   /* v8 ignore next -- fallback handles invalid server severity values defensively. */
   const sev = SEVERITY[d.severity ?? 1] ?? 'error';
   const source = d.source ? ` ${d.source}${d.code !== undefined ? `(${String(d.code)})` : ''}` : '';
-  const msg = d.message.replace(/\s*\r?\n\s*/g, ' | ');
+  const msgRaw = typeof d.message === 'string' ? d.message : d.message.value;
+  const msg = msgRaw.replace(/\s*\r?\n\s*/g, ' | ');
   return `L${d.range.start.line + 1}:${d.range.start.character + 1} ${LABEL[sev]}${source}: ${msg}`;
 }
 

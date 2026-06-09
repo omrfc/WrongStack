@@ -60,6 +60,7 @@ export class Agent {
   private readonly _toolHandler: AgentToolHandler;
   private readonly _responseHandler: AgentResponseHandler;
   private readonly _loopHandler: AgentLoopHandler;
+  private readonly _logger: Logger;
 
   constructor(init: AgentInit) {
     this.container = init.container;
@@ -75,7 +76,11 @@ export class Agent {
     this.autonomousContinue = init.autonomousContinue ?? false;
     this.tracer = init.tracer;
     this.extensions = init.extensions ?? new ExtensionRegistry();
-    this.extensions.setLogger(this.container.resolve(TOKENS.Logger));
+    // Create a child logger that auto-carries the session ID so every
+    // log entry from provider calls, stream handling, and tool execution
+    // is correlated to its session without any call-site plumbing.
+    this._logger = this.container.resolve(TOKENS.Logger).child({ sessionId: this.ctx.session.id });
+    this.extensions.setLogger(this._logger);
     this.toolExecutor = init.toolExecutor;
     this._toolHandler = createAgentToolHandler(this);
     this._responseHandler = createAgentResponseHandler(this);
@@ -86,7 +91,7 @@ export class Agent {
   }
 
   get logger(): Logger {
-    return this.container.resolve(TOKENS.Logger);
+    return this._logger;
   }
   get retry(): RetryPolicy {
     return this.container.resolve(TOKENS.RetryPolicy);

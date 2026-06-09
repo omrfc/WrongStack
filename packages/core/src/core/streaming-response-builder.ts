@@ -297,28 +297,31 @@ export async function streamProviderToResponse(
           case 'message_stop':
             handleMessageStop(state, ev as Parameters<typeof handleMessageStop>[1]);
             break;
-          default:
+          default: {
             // Unknown SSE event type — log for observability
-            logger.warn(`Stream received unknown event type: "${String(ev.type)}"`, {
+            const unknownEv = ev as { type: unknown };
+            logger.warn(`Stream received unknown event type: "${String(unknownEv.type)}"`, {
               providerId: provider.id,
               model: req.model,
-              eventType: String(ev.type),
+              eventType: String(unknownEv.type),
             });
             break;
+          }
         }
       } catch (handlerErr) {
         // Best-effort: a single malformed event should not abort the entire
         // stream. The partial response built from earlier events is preserved.
         const errMsg = handlerErr instanceof Error ? handlerErr.message : String(handlerErr);
-        logger.warn(`Stream handler error for event type "${String(ev.type)}": ${errMsg}`, {
+        const evAny = ev as { type: unknown };
+        logger.warn(`Stream handler error for event type "${String(evAny.type)}": ${errMsg}`, {
           providerId: provider.id,
           model: req.model,
-          eventType: String(ev.type),
+          eventType: String(evAny.type),
           errorMessage: errMsg,
         });
         events.emit('provider.stream_error', {
           ctx,
-          eventType: ev.type,
+          eventType: String(evAny.type),
           msg: errMsg,
         });
       }

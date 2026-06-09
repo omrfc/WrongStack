@@ -35,16 +35,16 @@
   },
   "dependencies": {
     "@wrongstack/tools": "workspace:*",
-    "vscode-languageserver-protocol": "^3.17.5"
+    "vscode-languageserver-protocol": "^3.18.0"
   },
   "peerDependencies": {
     "@wrongstack/core": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^22.19.19",
+    "@types/node": "^25.9.2",
     "@wrongstack/core": "workspace:*",
     "tsup": "^8.5.1",
-    "typescript": "^6.0.0"
+    "typescript": "^6.0.3"
   },
   "publishConfig": {
     "access": "public"
