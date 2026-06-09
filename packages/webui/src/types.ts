@@ -487,6 +487,9 @@ export type WSClientMessage =
   | { type: 'context.debug' }
   | { type: 'context.modes.list' }
   | { type: 'context.mode.switch'; payload: { id: string } }
+  | { type: 'context.mode.create'; payload: { id: string; name: string; description: string; thresholds: { warn: number; soft: number; hard: number }; preserveK: number; eliseThreshold: number } }
+  | { type: 'context.mode.update'; payload: { id: string; name?: string | undefined; description?: string | undefined; thresholds?: { warn?: number | undefined; soft?: number | undefined; hard?: number | undefined } | undefined; preserveK?: number | undefined; eliseThreshold?: number | undefined } }
+  | { type: 'context.mode.delete'; payload: { id: string } }
   | WSModelSwitch
   | { type: 'providers.list' }
   | { type: 'provider.models'; payload: { providerId: string } }

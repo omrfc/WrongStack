@@ -25,20 +25,20 @@ import { fmtTok } from './ChatView/utils';
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-function fmtCost(v: number): string {
+export function fmtCost(v: number): string {
   if (v <= 0) return '$0';
   if (v >= 0.01) return `$${v.toFixed(3)}`;
   return `$${v.toFixed(5)}`.replace(/0+$/, '').replace(/\.$/, '');
 }
 
-function fmtDuration(ms: number): string {
+export function fmtDuration(ms: number): string {
   const sec = Math.floor(ms / 1000);
   if (sec < 60) return `${sec}s`;
   const min = Math.floor(sec / 60);
   return `${min}m ${sec % 60}s`;
 }
 
-function fmtElapsed(ms: number): string {
+export function fmtElapsed(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
@@ -50,7 +50,7 @@ function fmtElapsed(ms: number): string {
 const SPARK = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
 /** Bucket recent tool timestamps into N bins of binMs each. */
-function bucketActivity(
+export function bucketActivity(
   timestamps: number[],
   now: number,
   bins = 12,
@@ -68,7 +68,7 @@ function bucketActivity(
   return out;
 }
 
-function sparkline(values: number[]): string {
+export function sparkline(values: number[]): string {
   if (values.length === 0) return '';
   const max = Math.max(1, ...values);
   return values.map((v) => (v <= 0 ? SPARK[0] : SPARK[Math.min(SPARK.length - 1, Math.ceil((v / max) * (SPARK.length - 1)))] ?? SPARK[0])).join('');
@@ -414,12 +414,12 @@ function AgentRow({
   );
 }
 
-function getLastEventAt(a: AgentView): number {
+export function getLastEventAt(a: AgentView): number {
   if (a.id === 'leader') return (a as LeaderEntry).lastEventAt;
   return (a as SubagentView).completedAt ?? (a as SubagentView).startedAt;
 }
 
-function getIterations(a: AgentView): number {
+export function getIterations(a: AgentView): number {
   if (a.id === 'leader') return (a as LeaderEntry).iterations;
   return (a as SubagentView).iteration;
 }
@@ -471,9 +471,35 @@ export function AgentsPage({
   }, [provider, model, sessionStore.cost, sessionStore.lastInputTokens, sessionStore.maxContext, sessionStore.startTime, chatMessages, chatIsLoading]);
 
   // ── Merge leader + fleet ──
+  // The server now emits subagent.event for subagentId 'leader' as well.
+  // We merge that live data into our synthetic LeaderEntry so the leader row
+  // gets real-time tool tracking, context updates, and cost — just like the TUI.
+  // Fleet store's 'leader' entry is excluded from subagents to avoid duplication.
   const allAgents = useMemo(() => {
-    const list: AgentView[] = [leaderEntry];
-    const subs = Array.from(fleetAgents.values());
+    const fleetLeader = fleetAgents.get('leader');
+    const mergedLeader: LeaderEntry = fleetLeader
+      ? {
+          ...leaderEntry,
+          status: fleetLeader.status === 'running' ? 'running' : leaderEntry.status,
+          iterations: fleetLeader.iteration || leaderEntry.iterations,
+          toolCalls: fleetLeader.toolCalls || leaderEntry.toolCalls,
+          costUsd: fleetLeader.costUsd || leaderEntry.costUsd,
+          ctxPct: fleetLeader.ctxPct,
+          ctxTokens: fleetLeader.ctxTokens,
+          maxContext: fleetLeader.maxContext || leaderEntry.maxContext,
+          extensions: fleetLeader.extensions,
+          currentTool: fleetLeader.currentTool ?? fleetLeader.lastTool,
+          toolLog: fleetLeader.toolLog,
+          partialText: fleetLeader.partialText,
+          finalText: fleetLeader.finalText,
+          error: fleetLeader.error,
+          lastEventAt: fleetLeader.completedAt ?? fleetLeader.startedAt ?? leaderEntry.lastEventAt,
+        }
+      : leaderEntry;
+
+    const list: AgentView[] = [mergedLeader];
+    // Exclude the 'leader' entry from the fleet store to avoid duplication.
+    const subs = Array.from(fleetAgents.values()).filter((a) => a.id !== 'leader');
     list.push(...subs);
     return list;
   }, [leaderEntry, fleetAgents]);

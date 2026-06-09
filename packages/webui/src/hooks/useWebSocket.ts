@@ -152,6 +152,9 @@ export function useWebSocket() {
   const switchMode = useCallback((id: string) => client.switchMode(id), [client]);
   const listContextModes = useCallback(() => client.listContextModes(), [client]);
   const switchContextMode = useCallback((id: string) => client.switchContextMode(id), [client]);
+  const createContextMode = useCallback((mode: { id: string; name: string; description: string; thresholds: { warn: number; soft: number; hard: number }; preserveK: number; eliseThreshold: number }) => client.createContextMode(mode), [client]);
+  const updateContextMode = useCallback((id: string, patch: { name?: string | undefined; description?: string | undefined; thresholds?: { warn?: number | undefined; soft?: number | undefined; hard?: number | undefined } | undefined; preserveK?: number | undefined; eliseThreshold?: number | undefined }) => client.updateContextMode(id, patch), [client]);
+  const deleteContextMode = useCallback((id: string) => client.deleteContextMode(id), [client]);
   const repairContext = useCallback(() => client.repairContext(), [client]);
 
   // AutoPhase
@@ -177,7 +180,8 @@ export function useWebSocket() {
     addKey, updateKey, deleteKey, setActiveKey, addProvider, removeProvider,
     listSessions, deleteSession, resumeSession, saveSession,
     listTools, listMemory, listSkills, getDiag, getStats,
-    listModes, switchMode, listContextModes, switchContextMode, repairContext,
+    listModes, switchMode, listContextModes, switchContextMode,
+    createContextMode, updateContextMode, deleteContextMode, repairContext,
     toggleAutoPhaseAutonomous, startAutoPhase, pauseAutoPhase, resumeAutoPhase, stopAutoPhase, selectAutoPhase,
   };
 }

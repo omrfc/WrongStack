@@ -396,6 +396,18 @@ export class WrongStackWebSocketClient {
     this.send({ type: 'context.mode.switch', payload: { id } });
   }
 
+  createContextMode(mode: { id: string; name: string; description: string; thresholds: { warn: number; soft: number; hard: number }; preserveK: number; eliseThreshold: number }) {
+    this.send({ type: 'context.mode.create', payload: mode });
+  }
+
+  updateContextMode(id: string, patch: { name?: string | undefined; description?: string | undefined; thresholds?: { warn?: number | undefined; soft?: number | undefined; hard?: number | undefined } | undefined; preserveK?: number | undefined; eliseThreshold?: number | undefined }) {
+    this.send({ type: 'context.mode.update', payload: { id, ...patch } });
+  }
+
+  deleteContextMode(id: string) {
+    this.send({ type: 'context.mode.delete', payload: { id } });
+  }
+
   // ---- Inspect commands (mirror TUI/CLI's /tools /memory /skill /diag /stats) ----
 
   listTools() {

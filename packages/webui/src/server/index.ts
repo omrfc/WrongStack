@@ -65,6 +65,7 @@ import { openBrowser } from './open-browser.js';
 import { computeUsageCost, getCostRates } from './usage-cost.js';
 import { createProviderHandlers } from './provider-handlers.js';
 import { setupEvents } from './setup-events.js';
+import { createCustomModeStore } from './custom-context-modes.js';
 import { maskedKey, normalizeKeys } from './provider-keys.js';
 import { send, broadcast, sendResult, errMessage, generateAuthToken } from './ws-utils.js';
 import { estimateContextBreakdown } from './token-estimator.js';
@@ -304,6 +305,16 @@ export async function startWebUI(
   const activeMode = await modeStore.getActiveMode();
   let modeId = activeMode?.id ?? 'default';
   const modePrompt = activeMode?.prompt ?? '';
+
+  // Custom context modes store — user-defined presets persisted to disk.
+  // Loaded once on startup; merges with built-in modes in the list handler.
+  const customModeStore = createCustomModeStore(wpaths.configDir);
+  await customModeStore.load();
+  console.log(
+    '[WebUI] Custom context modes loaded:',
+    customModeStore.list().filter((m) => (m as { custom?: boolean }).custom).length,
+    'custom',
+  );
 
   // System prompt builder
   const resolvedModel = await modelsRegistry.getModel(config.provider, config.model);
@@ -1026,30 +1037,39 @@ export async function startWebUI(
 
       case 'context.modes.list': {
         const active = String(context.meta['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID);
+        const allModes = customModeStore.list().map((m) => ({
+          id: m.id,
+          name: m.name,
+          description: m.description,
+          isActive: m.id === active,
+          thresholds: m.thresholds,
+          preserveK: m.preserveK,
+          eliseThreshold: m.eliseThreshold,
+          custom: (m as { custom?: boolean }).custom === true,
+        }));
         send(ws, {
           type: 'context.modes.list',
-          payload: {
-            activeId: active,
-            modes: listContextWindowModes().map((m) => ({
-              id: m.id,
-              name: m.name,
-              description: m.description,
-              isActive: m.id === active,
-              thresholds: m.thresholds,
-              preserveK: m.preserveK,
-              eliseThreshold: m.eliseThreshold,
-            })),
-          },
+          payload: { activeId: active, modes: allModes },
         });
         break;
       }
 
       case 'context.mode.switch': {
         const { id } = (msg as { payload: { id: string } }).payload;
-        const policy = resolveContextWindowPolicy({}, id);
+        // Try built-in first, then custom
+        let policy = resolveContextWindowPolicy({}, id);
         if (policy.id !== id) {
-          sendResult(ws, false, `Unknown context mode "${id}"`);
-          break;
+          // Check custom modes
+          const customModes = customModeStore.list().filter(
+            (m) => (m as { custom?: boolean }).custom === true,
+          );
+          const custom = customModes.find((m) => m.id === id);
+          if (!custom) {
+            sendResult(ws, false, `Unknown context mode "${id}"`);
+            break;
+          }
+          // Create a policy from the custom mode
+          policy = custom as unknown as typeof policy;
         }
         context.meta['contextWindowMode'] = policy.id;
         context.meta['contextWindowPolicy'] = policy;
@@ -1058,6 +1078,52 @@ export async function startWebUI(
           type: 'context.mode.changed',
           payload: { id: policy.id, name: policy.name, policy },
         });
+        break;
+      }
+
+      case 'context.mode.create': {
+        const payload = (msg as { payload: { id: string; name: string; description: string; thresholds: { warn: number; soft: number; hard: number }; preserveK: number; eliseThreshold: number } }).payload;
+        const result = customModeStore.create({
+          id: payload.id,
+          name: payload.name,
+          description: payload.description,
+          thresholds: payload.thresholds,
+          preserveK: payload.preserveK,
+          eliseThreshold: payload.eliseThreshold,
+          custom: true,
+          aggressiveOn: 'soft',
+          targetLoad: 0.65,
+        });
+        sendResult(ws, result.ok, result.error ?? `Mode "${payload.id}" created`);
+        break;
+      }
+
+      case 'context.mode.update': {
+        const payload = (msg as { payload: { id: string; name?: string | undefined; description?: string | undefined; thresholds?: { warn?: number | undefined; soft?: number | undefined; hard?: number | undefined } | undefined; preserveK?: number | undefined; eliseThreshold?: number | undefined } }).payload;
+        const result = customModeStore.update(payload.id, {
+          name: payload.name,
+          description: payload.description,
+          thresholds: payload.thresholds ? {
+            warn: payload.thresholds.warn ?? 0.6,
+            soft: payload.thresholds.soft ?? 0.75,
+            hard: payload.thresholds.hard ?? 0.9,
+          } : undefined,
+          preserveK: payload.preserveK,
+          eliseThreshold: payload.eliseThreshold,
+        });
+        sendResult(ws, result.ok, result.error ?? `Mode "${payload.id}" updated`);
+        break;
+      }
+
+      case 'context.mode.delete': {
+        const { id } = (msg as { payload: { id: string } }).payload;
+        // If the active mode is being deleted, reset to default
+        if (String(context.meta['contextWindowMode'] ?? '') === id) {
+          context.meta['contextWindowMode'] = DEFAULT_CONTEXT_WINDOW_MODE_ID;
+          context.meta['contextWindowPolicy'] = resolveContextWindowPolicy({}, DEFAULT_CONTEXT_WINDOW_MODE_ID);
+        }
+        const result = customModeStore.remove(id);
+        sendResult(ws, result.ok, result.error ?? `Mode "${id}" deleted`);
         break;
       }
 

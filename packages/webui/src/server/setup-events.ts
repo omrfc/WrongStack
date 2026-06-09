@@ -80,4 +80,68 @@ export function setupEvents(deps: SetupEventsDeps): void {
   events.on('subagent.budget_extended', (e) => forwardSubagent('budget_extended', { subagentId: e.subagentId, totalExtensions: e.totalExtensions }));
   events.on('subagent.ctx_pct', (e) => forwardSubagent('ctx_pct', { subagentId: e.subagentId, load: e.load, tokens: e.tokens, maxContext: e.maxContext }));
   events.on('subagent.task_completed', (e) => forwardSubagent('task_completed', { subagentId: e.subagentId, status: e.status, iterations: e.iterations, toolCalls: e.toolCalls, finalText: (e as Record<string, unknown>).finalText as string | undefined, error: e.error ? { kind: e.error.kind, message: e.error.message } : undefined }));
+
+  // ── Leader (main session) events — forwarded as subagent.event with subagentId 'leader' ──
+  // These give the AgentsPage a live leader row with real-time tool tracking,
+  // context pressure — matching the TUI's leader entry.
+  // Iteration counts, cost, and overall status come from the sessionStore on the frontend.
+
+  // Leader spawned: sent on first iteration so the frontend creates the leader row.
+  let leaderSpawned = false;
+  events.on('iteration.started', () => {
+    if (!leaderSpawned) {
+      leaderSpawned = true;
+      const provider = (context.provider as { id?: string } | undefined)?.id ?? 'unknown';
+      forwardSubagent('spawned', {
+        subagentId: 'leader',
+        name: 'LEADER',
+        provider,
+        model: context.model,
+        description: `Main agent session (${context.session.id})`,
+      });
+    }
+  });
+
+  // Leader tool execution: emitted on every tool.executed in the main session.
+  events.on('tool.executed', (e) => {
+    forwardSubagent('tool_executed', {
+      subagentId: 'leader',
+      toolName: e.name,
+      durationMs: e.durationMs,
+      ok: e.ok,
+    });
+  });
+
+  // Leader context pressure: emitted on every provider response.
+  events.on('provider.response', (e) => {
+    if (e.usage?.input != null) {
+      const maxCtx = context.provider.capabilities.maxContext;
+      const pct = maxCtx > 0 ? e.usage.input / maxCtx : 0;
+      forwardSubagent('ctx_pct', {
+        subagentId: 'leader',
+        load: pct,
+        tokens: e.usage.input,
+        maxContext: maxCtx,
+      });
+    }
+  });
+
+  // Leader iteration updates: we already track iteration started above.
+  // The frontend uses sessionStore for accurate cost/iteration counts.
+  // When the run completes, the frontend's run.result handler resets isLoading,
+  // making the leader go idle. We reset leader state on iteration.started.
+  events.on('iteration.completed', () => {
+    // Respawn leader if it was cleared (e.g., on session resume).
+    if (!leaderSpawned) {
+      leaderSpawned = true;
+      const provider = (context.provider as { id?: string } | undefined)?.id ?? 'unknown';
+      forwardSubagent('spawned', {
+        subagentId: 'leader',
+        name: 'LEADER',
+        provider,
+        model: context.model,
+        description: `Main agent session (${context.session.id})`,
+      });
+    }
+  });
 }

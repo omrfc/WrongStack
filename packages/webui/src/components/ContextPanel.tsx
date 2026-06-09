@@ -11,13 +11,32 @@ import {
   Cpu,
   Eraser,
   Gauge,
+  Pencil,
+  Plus,
   RefreshCw,
   Shrink,
+  Trash2,
   Wrench,
+  X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ContextBar, ContextFillBar } from './ContextBar';
 import { fmtTok } from './ChatView/utils';
+
+// ── Mode editor form state ──
+interface ModeEditorState {
+  open: boolean;
+  mode: 'create' | 'edit';
+  editId?: string | undefined;
+  id: string;
+  name: string;
+  description: string;
+  warnThreshold: number;
+  softThreshold: number;
+  hardThreshold: number;
+  preserveK: number;
+  eliseThreshold: number;
+}
 
 const FALLBACK_MODES = [
   {
@@ -100,8 +119,98 @@ export function ContextPanel({
   const contextModes = sessionStore.contextModes;
   const { lastInputTokens, maxContext, totalTokens, startTime, cost } = sessionStore;
 
-  const { switchContextMode } = useWebSocket();
+  const { switchContextMode, createContextMode, updateContextMode, deleteContextMode, listContextModes } = useWebSocket();
   const wsUrl = useConfigStore((s) => s.wsUrl);
+
+  // Ref to refresh modes after CRUD
+  const listContextModesRef = useRef(listContextModes);
+  listContextModesRef.current = listContextModes;
+
+  // Mode editor state
+  const [editor, setEditor] = useState<ModeEditorState>({
+    open: false,
+    mode: 'create',
+    id: '',
+    name: '',
+    description: '',
+    warnThreshold: 60,
+    softThreshold: 75,
+    hardThreshold: 90,
+    preserveK: 10,
+    eliseThreshold: 2000,
+  });
+
+  const openCreate = () => {
+    setEditor({
+      open: true,
+      mode: 'create',
+      id: '',
+      name: '',
+      description: '',
+      warnThreshold: 60,
+      softThreshold: 75,
+      hardThreshold: 90,
+      preserveK: 10,
+      eliseThreshold: 2000,
+    });
+  };
+
+  const openEdit = (m: typeof modes[0]) => {
+    setEditor({
+      open: true,
+      mode: 'edit',
+      editId: m.id,
+      id: m.id,
+      name: m.name,
+      description: m.description,
+      warnThreshold: m.thresholds ? Math.round((m.thresholds.warn ?? 0.6) * 100) : 60,
+      softThreshold: m.thresholds ? Math.round(m.thresholds.soft * 100) : 75,
+      hardThreshold: m.thresholds ? Math.round(m.thresholds.hard * 100) : 90,
+      preserveK: m.preserveK ?? 10,
+      eliseThreshold: m.eliseThreshold ?? 2000,
+    });
+  };
+
+  const handleCreate = () => {
+    createContextMode({
+      id: editor.id.trim(),
+      name: editor.name.trim(),
+      description: editor.description.trim(),
+      thresholds: {
+        warn: editor.warnThreshold / 100,
+        soft: editor.softThreshold / 100,
+        hard: editor.hardThreshold / 100,
+      },
+      preserveK: editor.preserveK,
+      eliseThreshold: editor.eliseThreshold,
+    });
+    setEditor((e) => ({ ...e, open: false }));
+    // Refresh modes list
+    setTimeout(() => listContextModesRef.current?.(), 300);
+  };
+
+  const handleUpdate = () => {
+    if (!editor.editId) return;
+    updateContextMode(editor.editId, {
+      name: editor.name.trim() || undefined,
+      description: editor.description.trim() || undefined,
+      thresholds: {
+        warn: editor.warnThreshold / 100,
+        soft: editor.softThreshold / 100,
+        hard: editor.hardThreshold / 100,
+      },
+      preserveK: editor.preserveK,
+      eliseThreshold: editor.eliseThreshold,
+    });
+    setEditor((e) => ({ ...e, open: false }));
+    setTimeout(() => listContextModesRef.current?.(), 300);
+  };
+
+  const handleDelete = (id: string) => {
+    if (!window.confirm(`Delete context mode "${id}"?`)) return;
+    deleteContextMode(id);
+    setTimeout(() => listContextModesRef.current?.(), 300);
+  };
 
   // Modes — fetched or fallback
   const [modesOpen, setModesOpen] = useState(false);
@@ -334,64 +443,140 @@ export function ContextPanel({
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
             Context Policy
           </span>
-          <div ref={modesRef} className="relative">
+          <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={() => setModesOpen((v) => !v)}
-              className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+              onClick={openCreate}
+              className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+              title="Create custom context mode"
             >
-              <Cpu className="h-3 w-3" />
-              {contextMode || 'balanced'}
-              <ChevronDown className="h-3 w-3" />
+              <Plus className="h-3 w-3" />
+              New
             </button>
-            {modesOpen && (
-              <div className="absolute right-0 top-full mt-1 w-72 rounded-md border bg-popover shadow-lg z-30 py-1">
-                <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground border-b">
-                  Select Policy
-                </div>
-                {modes.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => {
-                      switchContextMode(m.id);
-                      setModesOpen(false);
-                    }}
-                    className={cn(
-                      'w-full text-left px-3 py-2 hover:bg-accent/40 flex items-start gap-2',
-                      m.id === contextMode && 'bg-accent/30',
-                    )}
-                  >
-                    <Check
+            <div ref={modesRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setModesOpen((v) => !v)}
+                className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+              >
+                <Cpu className="h-3 w-3" />
+                {contextMode || 'balanced'}
+                <ChevronDown className="h-3 w-3" />
+              </button>
+              {modesOpen && (
+                <div className="absolute right-0 top-full mt-1 w-80 rounded-md border bg-popover shadow-lg z-30 py-1 max-h-80 overflow-y-auto">
+                  <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground border-b flex items-center justify-between">
+                    <span>Built-in</span>
+                  </div>
+                  {modes.filter((m) => !(m as { custom?: boolean }).custom).map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => {
+                        switchContextMode(m.id);
+                        setModesOpen(false);
+                      }}
                       className={cn(
-                        'h-3.5 w-3.5 mt-0.5 shrink-0',
-                        m.id === contextMode ? 'opacity-100 text-primary' : 'opacity-0',
+                        'w-full text-left px-3 py-2 hover:bg-accent/40 flex items-start gap-2',
+                        m.id === contextMode && 'bg-accent/30',
                       )}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-mono font-medium">{m.id}</span>
-                        {'thresholds' in m && (m as ContextMode).thresholds && (
-                          <span className="text-[10px] text-muted-foreground tabular-nums">
-                            {Math.round((m as ContextMode).thresholds.warn * 100)}/
-                            {Math.round((m as ContextMode).thresholds.soft * 100)}/
-                            {Math.round((m as ContextMode).thresholds.hard * 100)}%
-                          </span>
+                    >
+                      <Check
+                        className={cn(
+                          'h-3.5 w-3.5 mt-0.5 shrink-0',
+                          m.id === contextMode ? 'opacity-100 text-primary' : 'opacity-0',
+                        )}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-mono font-medium">{m.id}</span>
+                          {m.thresholds && (
+                            <span className="text-[10px] text-muted-foreground tabular-nums">
+                              {Math.round((m.thresholds.warn ?? 0.6) * 100)}/
+                              {Math.round(m.thresholds.soft * 100)}/
+                              {Math.round(m.thresholds.hard * 100)}%
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground leading-snug">
+                          {m.description}
+                        </div>
+                        {m.preserveK != null && m.eliseThreshold != null && (
+                          <div className="mt-1 text-[10px] text-muted-foreground/80">
+                            keep {m.preserveK} recent · elide {m.eliseThreshold}+ tokens
+                          </div>
                         )}
                       </div>
-                      <div className="text-[11px] text-muted-foreground leading-snug">
-                        {m.description}
+                    </button>
+                  ))}
+
+                  {/* Custom modes section */}
+                  {modes.filter((m) => (m as { custom?: boolean }).custom).length > 0 && (
+                    <>
+                      <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground border-b border-t">
+                        Custom
                       </div>
-                      {'preserveK' in m && 'eliseThreshold' in m && (
-                        <div className="mt-1 text-[10px] text-muted-foreground/80">
-                          keep {(m as ContextMode).preserveK} recent · elide {(m as ContextMode).eliseThreshold}+ tokens
+                      {modes.filter((m) => (m as { custom?: boolean }).custom).map((m) => (
+                        <div key={m.id} className="group flex items-start">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              switchContextMode(m.id);
+                              setModesOpen(false);
+                            }}
+                            className={cn(
+                              'flex-1 text-left px-3 py-2 hover:bg-accent/40 flex items-start gap-2',
+                              m.id === contextMode && 'bg-accent/30',
+                            )}
+                          >
+                            <Check
+                              className={cn(
+                                'h-3.5 w-3.5 mt-0.5 shrink-0',
+                                m.id === contextMode ? 'opacity-100 text-primary' : 'opacity-0',
+                              )}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-mono font-medium">{m.id}</span>
+                                {m.thresholds && (
+                                  <span className="text-[10px] text-muted-foreground tabular-nums">
+                                    {Math.round((m.thresholds.warn ?? 0.6) * 100)}/
+                                    {Math.round(m.thresholds.soft * 100)}/
+                                    {Math.round(m.thresholds.hard * 100)}%
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-muted-foreground leading-snug">
+                                {m.description}
+                              </div>
+                            </div>
+                          </button>
+                          {/* Edit/Delete buttons */}
+                          <div className="flex items-center gap-0.5 pr-2 opacity-0 group-hover:opacity-100 transition-opacity pt-2">
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); openEdit(m); setModesOpen(false); }}
+                              className="p-1 rounded hover:bg-accent transition-colors"
+                              title="Edit mode"
+                            >
+                              <Pencil className="h-3 w-3 text-muted-foreground" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleDelete(m.id); setModesOpen(false); }}
+                              className="p-1 rounded hover:bg-destructive/10 transition-colors"
+                              title="Delete mode"
+                            >
+                              <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
+                            </button>
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
+                      ))}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -399,22 +584,142 @@ export function ContextPanel({
         <div className="text-[11px] text-muted-foreground leading-relaxed">
           {activeMode?.description ?? 'No description'}
         </div>
-        {activeMode && 'thresholds' in activeMode && (activeMode as ContextMode).thresholds && (
+        {activeMode && activeMode.thresholds && (
           <div className="mt-1.5 flex gap-3 text-[10px]">
             <span className="text-[hsl(var(--warning))]">
-              warn: {Math.round((activeMode as ContextMode).thresholds.warn * 100)}%
+              warn: {Math.round((activeMode.thresholds.warn ?? 0.6) * 100)}%
             </span>
             <span className="text-destructive/80">
-              soft: {Math.round((activeMode as ContextMode).thresholds.soft * 100)}%
+              soft: {Math.round(activeMode.thresholds.soft * 100)}%
             </span>
             <span className="text-destructive/60">
-              hard: {Math.round((activeMode as ContextMode).thresholds.hard * 100)}%
+              hard: {Math.round(activeMode.thresholds.hard * 100)}%
             </span>
-            {'preserveK' in activeMode && (
+            {activeMode.preserveK != null && (
               <span className="text-muted-foreground">
-                keep {(activeMode as ContextMode).preserveK} recent
+                keep {activeMode.preserveK} recent
               </span>
             )}
+          </div>
+        )}
+
+        {/* Inline mode editor */}
+        {editor.open && (
+          <div className="mt-3 border-t pt-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold">
+                {editor.mode === 'create' ? 'Create Custom Mode' : `Edit "${editor.editId}"`}
+              </span>
+              <button
+                type="button"
+                onClick={() => setEditor((e) => ({ ...e, open: false }))}
+                className="p-0.5 rounded hover:bg-muted transition-colors"
+              >
+                <X className="h-3.5 w-3.5 text-muted-foreground" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[9px] text-muted-foreground">ID (slug)</label>
+                <input
+                  type="text"
+                  value={editor.id}
+                  onChange={(e) => setEditor((s) => ({ ...s, id: e.target.value }))}
+                  disabled={editor.mode === 'edit'}
+                  placeholder="my-custom-mode"
+                  className="w-full mt-0.5 px-2 py-1 text-xs border rounded bg-background focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <label className="text-[9px] text-muted-foreground">Name</label>
+                <input
+                  type="text"
+                  value={editor.name}
+                  onChange={(e) => setEditor((s) => ({ ...s, name: e.target.value }))}
+                  placeholder="My Custom Mode"
+                  className="w-full mt-0.5 px-2 py-1 text-xs border rounded bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="text-[9px] text-muted-foreground">Description</label>
+                <input
+                  type="text"
+                  value={editor.description}
+                  onChange={(e) => setEditor((s) => ({ ...s, description: e.target.value }))}
+                  placeholder="Brief description..."
+                  className="w-full mt-0.5 px-2 py-1 text-xs border rounded bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="text-[9px] text-muted-foreground">Warn (%)</label>
+                <input
+                  type="number"
+                  value={editor.warnThreshold}
+                  onChange={(e) => setEditor((s) => ({ ...s, warnThreshold: Number(e.target.value) }))}
+                  min={10} max={95}
+                  className="w-full mt-0.5 px-2 py-1 text-xs border rounded bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="text-[9px] text-muted-foreground">Soft (%)</label>
+                <input
+                  type="number"
+                  value={editor.softThreshold}
+                  onChange={(e) => setEditor((s) => ({ ...s, softThreshold: Number(e.target.value) }))}
+                  min={15} max={98}
+                  className="w-full mt-0.5 px-2 py-1 text-xs border rounded bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="text-[9px] text-muted-foreground">Hard (%)</label>
+                <input
+                  type="number"
+                  value={editor.hardThreshold}
+                  onChange={(e) => setEditor((s) => ({ ...s, hardThreshold: Number(e.target.value) }))}
+                  min={20} max={99}
+                  className="w-full mt-0.5 px-2 py-1 text-xs border rounded bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="text-[9px] text-muted-foreground">Preserve K</label>
+                <input
+                  type="number"
+                  value={editor.preserveK}
+                  onChange={(e) => setEditor((s) => ({ ...s, preserveK: Number(e.target.value) }))}
+                  min={1} max={100}
+                  className="w-full mt-0.5 px-2 py-1 text-xs border rounded bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="text-[9px] text-muted-foreground">Elise Threshold</label>
+                <input
+                  type="number"
+                  value={editor.eliseThreshold}
+                  onChange={(e) => setEditor((s) => ({ ...s, eliseThreshold: Number(e.target.value) }))}
+                  min={100}
+                  className="w-full mt-0.5 px-2 py-1 text-xs border rounded bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setEditor((e) => ({ ...e, open: false }))}
+                className="px-3 py-1 text-xs rounded-md border hover:bg-muted transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={editor.mode === 'create' ? handleCreate : handleUpdate}
+                disabled={!editor.id.trim() || !editor.name.trim()}
+                className="px-3 py-1 text-xs rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+              >
+                {editor.mode === 'create' ? 'Create' : 'Save'}
+              </button>
+            </div>
           </div>
         )}
       </div>

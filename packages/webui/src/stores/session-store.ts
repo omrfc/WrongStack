@@ -39,6 +39,7 @@ interface SessionState {
     thresholds?: { warn: number | undefined; soft: number; hard: number };
     preserveK?: number | undefined;
     eliseThreshold?: number | undefined;
+    custom?: boolean | undefined;
   }>;
   /** Iteration progress while the agent is running. Resets on run.result. */
   iteration: { index: number; max: number } | null;
