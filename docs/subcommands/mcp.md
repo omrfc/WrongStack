@@ -88,6 +88,34 @@ All presets are available via `allServers()` and can be added with either
 | `sentinel` | Security vulnerability scanning | `deny` |
 | `zai-vision` | Image analysis and screenshot understanding | `auto` |
 | `minimax-vision` | MiniMax image understanding (read-only) | `auto` |
+| `playwright` | Browser automation — navigate, screenshot, click, type, evaluate JS | `confirm` |
+
+### Playwright + Browser Agent
+
+The Playwright MCP server pairs with the **browser** roster agent for isolated
+browser tasks. Instead of cluttering the main agent's context with
+screenshots and page HTML, delegate browser work to a dedicated subagent:
+
+```bash
+# 1. Start the Playwright MCP server
+/mcp enable playwright
+
+# 2. Delegate to the browser agent (lightweight: no bash/write)
+/delegate browser "Open https://example.com, take a screenshot, extract the page title"
+
+# 3. (Optional) Stop Playwright when done
+/mcp disable playwright
+```
+
+The **browser** agent is read-focused — it has Playwright tools + `read`/`grep`
++/`glob` but no `bash`, `exec`, `write`, or `edit`. For full end-to-end test
+flows that need the build toolchain, use the **e2e** agent instead:
+`/delegate e2e "test the login flow at https://... including backend assertions"`.
+
+| Agent | Tools | Best for |
+|---|---|---|
+| `browser` | Playwright + read/grep/glob/fetch | Quick browser tasks: screenshot, scrape, form fill |
+| `e2e` | Playwright + full build (bash, exec, test, …) | Full end-to-end scenarios across UI + API + CLI |
 
 ## Connection states
 
