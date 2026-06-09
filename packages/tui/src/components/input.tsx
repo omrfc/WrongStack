@@ -181,16 +181,26 @@ export const Input = memo(function Input({
   placeholderHeight,
   onKey,
 }: InputProps): React.ReactElement {
-  // Suppress duplicate Esc events: when our raw-stdin ESC buffer fires,
-  // Ink's useInput also saw the `\x1b` byte and will emit its own escape
-  // event. This ref prevents the double-emit from triggering the
-  // double-Esc clear-buffer feature unintentionally.
+  // Suppress duplicate key events: when our raw-stdin handler catches a key
+  // before Ink's useInput does, we set a suppression flag so Ink doesn't
+  // fire a duplicate event. Without this, Backspace deletes two characters
+  // — both the raw-stdin handler AND Ink fire onKey() for the same keystroke.
   const suppressInkEscRef = useRef(false);
+  const suppressInkBackspaceRef = useRef(false);
+  const suppressInkDeleteRef = useRef(false);
 
   useInput((input, key) => {
     if (disabled) return;
     if (key.escape && suppressInkEscRef.current) {
       suppressInkEscRef.current = false;
+      return;
+    }
+    if (key.backspace && suppressInkBackspaceRef.current) {
+      suppressInkBackspaceRef.current = false;
+      return;
+    }
+    if (key.delete && suppressInkDeleteRef.current) {
+      suppressInkDeleteRef.current = false;
       return;
     }
     onKey(input, key as KeyEvent);
@@ -226,6 +236,7 @@ export const Input = memo(function Input({
         clearTimeout(escTimer);
         escTimer = null;
         if (s === '\x7f' || s === '\x08') {
+          suppressInkBackspaceRef.current = true;
           onKey('', { ...EMPTY_KEY, backspace: true, ctrl: true });
           return;
         }
@@ -246,12 +257,16 @@ export const Input = memo(function Input({
 
       // Backspace / Delete — caught here because Ink's useInput may miss
       // \x08 (BS) on Windows Terminal. We fire before Ink so the key is never lost.
+      // Set suppression flags so Ink's useInput doesn't fire a duplicate event
+      // (Backspace would delete two characters otherwise — both handlers fire onKey).
       const bsdel = isBackspaceOrDelete(s);
       if (bsdel === 'backspace') {
+        suppressInkBackspaceRef.current = true;
         onKey('', { ...EMPTY_KEY, backspace: true });
         return;
       }
       if (bsdel === 'delete') {
+        suppressInkDeleteRef.current = true;
         onKey('', { ...EMPTY_KEY, delete: true });
         return;
       }
@@ -259,6 +274,7 @@ export const Input = memo(function Input({
         // ALT+Backspace / Opt+Backspace — delete previous word.
         // Translate to Ctrl+Backspace which the handleKey router already
         // handles by slicing from the last space to the cursor.
+        suppressInkBackspaceRef.current = true;
         onKey('', { ...EMPTY_KEY, backspace: true, ctrl: true });
         return;
       }

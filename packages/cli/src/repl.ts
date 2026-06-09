@@ -6,6 +6,7 @@ import {
   estimateRequestTokensCalibrated,
   goalFilePath,
   loadGoal,
+  summarizeUsage,
 } from '@wrongstack/core';
 import {
   readClipboardImage,
@@ -169,6 +170,40 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
                 `  ${mark} ${color.dim(`#${last.iteration}`)} ${color.dim(`[${last.source}]`)} ${last.task}${tail}\n`,
               );
             }
+            // Check if the engine stopped because the goal completed.
+            // The engine calls onEternalStop internally, which calls stop(),
+            // but the REPL needs to flip autonomy mode so the loop exits
+            // eternal mode and returns to reading user input.
+            if (engine.currentState === 'stopped') {
+              const goal = await loadGoalSafe(opts);
+              if (goal?.goalState === 'completed') {
+                const u = goal.journal.length > 0
+                  ? summarizeUsage(goal)
+                  : null;
+                const costLine = u && u.iterationsWithUsage > 0
+                  ? color.dim(` — ${u.totalCostUsd.toFixed(4)} · ${u.totalInputTokens} in / ${u.totalOutputTokens} out · ${goal.iterations} iterations`)
+                  : goal.iterations > 0
+                    ? color.dim(` — ${goal.iterations} iterations`)
+                    : '';
+                opts.renderer.write(
+                  color.green(`\n  🎯 Goal completed!${costLine}\n\n`) +
+                  color.dim('  Goal cleared. Use /goal set <mission> to create a new goal.\n'),
+                );
+                // Auto-clear the goal file so the completed goal doesn't
+                // linger across restarts. The goal's journal is already
+                // in the session log.
+                if (opts.projectRoot) {
+                  try {
+                    const { unlink } = await import('node:fs/promises');
+                    await unlink(goalFilePath(opts.projectRoot));
+                  } catch {
+                    // best-effort — file may already be gone
+                  }
+                }
+              }
+              opts.onAutonomy?.('off');
+              continue;
+            }
           } catch (err) {
             opts.renderer.writeError(
               `[eternal] ${err instanceof Error ? err.message : String(err)}`,
@@ -219,6 +254,37 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
               opts.renderer.write(
                 `  ${mark} ${color.dim(`#${last.iteration}`)} ${color.dim(`[${last.source}]`)} ${last.task}${tail}\n`,
               );
+            }
+            // Exit parallel mode if the engine stopped (goal completed or user stopped).
+            if (engine.currentState === 'stopped') {
+              const goal = await loadGoalSafe(opts);
+              if (goal?.goalState === 'completed') {
+                const u = goal.journal.length > 0
+                  ? summarizeUsage(goal)
+                  : null;
+                const costLine = u && u.iterationsWithUsage > 0
+                  ? color.dim(` — ${u.totalCostUsd.toFixed(4)} · ${u.totalInputTokens} in / ${u.totalOutputTokens} out · ${goal.iterations} iterations`)
+                  : goal.iterations > 0
+                    ? color.dim(` — ${goal.iterations} iterations`)
+                    : '';
+                opts.renderer.write(
+                  color.green(`\n  🎯 Goal completed!${costLine}\n\n`) +
+                  color.dim('  Goal cleared. Use /goal set <mission> to create a new goal.\n'),
+                );
+                // Auto-clear the goal file so the completed goal doesn't
+                // linger across restarts. The goal's journal is already
+                // in the session log.
+                if (opts.projectRoot) {
+                  try {
+                    const { unlink } = await import('node:fs/promises');
+                    await unlink(goalFilePath(opts.projectRoot));
+                  } catch {
+                    // best-effort — file may already be gone
+                  }
+                }
+              }
+              opts.onAutonomy?.('off');
+              continue;
             }
           } catch (err) {
             opts.renderer.writeError(

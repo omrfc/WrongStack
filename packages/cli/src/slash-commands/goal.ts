@@ -196,6 +196,10 @@ export function buildGoalCommand(opts: SlashCommandContext): SlashCommand {
             // best-effort
           }
           if (opts.onEternalStop) opts.onEternalStop();
+          // Flip autonomy back to 'off' so the REPL exits eternal mode.
+          // Without this, the REPL keeps spinning in the eternal loop
+          // even though the goal file is gone.
+          if (opts.onAutonomy) opts.onAutonomy('off');
           const msg = `${color.amber('Goal cleared.')} Previous goal marked abandoned; eternal mode will stop.`;
           opts.renderer.write(msg);
           return { message: msg };

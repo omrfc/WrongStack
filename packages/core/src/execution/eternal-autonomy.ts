@@ -875,6 +875,10 @@ export class EternalAutonomyEngine {
       note: note.slice(0, 240),
     });
     await saveGoal(this.goalPath, withEntry);
+    // Fire stop callbacks so the REPL knows to exit eternal mode
+    // and show a goal-completion banner. Without this the engine
+    // stops internally but the REPL keeps spinning in the eternal loop.
+    this.opts.onEternalStop?.();
   }
 
   /**
