@@ -22,6 +22,7 @@ import type {
 import type { MemoryStore, ModeStore } from '@wrongstack/core';
 import { color, mergeCustomModelDefs, writeOut, type AutonomyStage, decryptConfigSecrets, encryptConfigSecrets, atomicWrite } from '@wrongstack/core';
 import { filterSafeForProject, persistAutonomySetting } from './settings-menu.js';
+import { noOpVault } from './slash-commands/helpers.js';
 import type { ProviderConfig, ResolvedProvider, WstackPaths } from '@wrongstack/core';
 import type { MCPRegistry } from '@wrongstack/mcp';
 import { createToolVisionAdapters } from '@wrongstack/runtime/vision';
@@ -526,7 +527,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                   configStore,
                   globalConfigPath: wpaths.globalConfig,
                   inProjectConfigPath: wpaths.inProjectConfig,
-                  vault: { encrypt: (v) => v, decrypt: (v) => v, isEncrypted: () => false },
+                  vault: noOpVault,
                 },
                 (autonomy) => {
                   autonomy.defaultMode = s.mode;
