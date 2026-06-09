@@ -289,6 +289,7 @@ import { buildCodebaseReindexCommand } from './codebase-reindex.js';
 import { buildCollabCommand } from './collab.js';
 import { buildCompactCommand } from './compact.js';
 import { buildContextCommand } from './context.js';
+import { buildDevCommand } from './dev.js';
 import { buildDiagCommand, buildStatsCommand } from './diag-stats.js';
 import { buildEnhanceCommand } from './enhance.js';
 import { buildFixCommand } from './fix.js';
@@ -328,6 +329,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildClearCommand(opts),
     buildCompactCommand(opts),
     buildContextCommand(opts),
+    buildDevCommand(opts),
     buildCodebaseReindexCommand(opts),
     buildTechStackCommand(opts),
     buildToolsCommand(opts),

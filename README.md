@@ -429,7 +429,7 @@ wrongstack --provider openrouter --model anthropic/claude-opus-4-7
 
 ## Slash commands
 
-**Core** (both the plain REPL and the TUI): `/init` `/help` `/clear` `/compact` `/context` `/codebase-reindex` `/diag` `/stats` `/tools` `/plugin` `/mcp` `/auth` `/memory` `/todos` `/tasks` `/mode` `/yolo` `/autonomy` `/btw` `/next` `/enhance` `/fix` `/autophase` `/worktree` `/settings` `/sdd` `/save` `/load` `/prune` `/exit`
+**Core** (both the plain REPL and the TUI): `/init` `/help` `/clear` `/compact` `/context` `/codebase-reindex` `/dev` `/diag` `/stats` `/tools` `/plugin` `/mcp` `/auth` `/memory` `/todos` `/tasks` `/mode` `/yolo` `/autonomy` `/btw` `/next` `/enhance` `/fix` `/autophase` `/worktree` `/settings` `/sdd` `/save` `/load` `/prune` `/exit`
 
 Every built-in command is tagged with a category (`Run` · `Session` · `Inspect` · `Agent` · `Config` · `App`); the TUI slash picker groups matches under category headers, and the WebUI surfaces 55 commands in its slash list.
 
@@ -444,6 +444,7 @@ Every built-in command is tagged with a category (`Run` · `Session` · `Inspect
 | Command | Effect |
 |---|---|
 | `/init` | Create `.wrongstack/AGENTS.md` — auto-detects build system (package.json / pyproject.toml / go.mod / Cargo.toml / Makefile) and pre-fills build/test/lint/run commands |
+| `/dev <shell command>` | Run a shell command from the chat input and see the output. The LLM does NOT see the result — this is a developer convenience shortcut. Timeout: 60 s. Max output: 500 lines |
 | `/spawn [--provider --model --name --tools] <task>` | Launch a single subagent with optional overrides. No implicit budget cap |
 | `/director` | Promote session to Director mode at runtime (must be before any subagent spawns) |
 | `/fleet status\|usage\|kill\|manifest\|retry\|log\|stream on\|off\|journal\|spawn\|terminate` | Inspect and control the subagent fleet. `log <id>` summarises; `log <id> raw` dumps full JSONL |

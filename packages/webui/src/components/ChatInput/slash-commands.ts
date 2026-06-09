@@ -13,6 +13,10 @@ export interface SlashCommandDef {
 export const SLASH_COMMANDS: SlashCommandDef[] = [
   // Run
   { name: '/abort', category: 'Run', aliases: ['/stop'], description: 'Abort the current run' },
+  { name: '/dev', category: 'Run', description: 'Run a shell command and see the output (LLM does not see it)' },
+  { name: '/commit', category: 'Run', aliases: ['/gc'], description: 'Generate a conventional commit message (LLM-powered)' },
+  { name: '/gitcheck', category: 'Run', aliases: ['/gcstatus'], description: 'Pre-commit sanity check (branch, diff, lint)' },
+  { name: '/push', category: 'Run', description: 'Push the current branch to remote' },
 
   // Session
   { name: '/new', category: 'Session', description: 'Start a brand-new session (fresh on disk and in memory)' },
@@ -33,6 +37,9 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: '/stats', category: 'Inspect', description: 'Session stats: tokens, cache hit ratio, cost, elapsed' },
   { name: '/todos', category: 'Inspect', description: 'List current todos (try `/todos clear` to reset)' },
   { name: '/codebase-reindex', category: 'Inspect', aliases: ['/reindex'], description: 'Rebuild the codebase symbol index' },
+  { name: '/security', category: 'Inspect', description: 'Security scanning: /security scan | audit | report' },
+  { name: '/metrics', category: 'Inspect', description: 'Show runtime metrics snapshot (requires --metrics)' },
+  { name: '/health', category: 'Inspect', description: 'Show health check status' },
 
   // Agent
   { name: '/spawn', category: 'Agent', description: 'Spawn an isolated subagent to handle a task' },
@@ -46,6 +53,12 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: '/sdd', category: 'Agent', description: 'AI-driven Specification-Driven Development workflow' },
   { name: '/btw', category: 'Agent', description: 'Drop a mid-run note without interrupting the agent' },
   { name: '/collab', category: 'Agent', description: 'Live collaboration helpers (status / invite / history)' },
+  { name: '/prompts', category: 'Agent', description: 'Manage prompt library: list, view, add, delete, edit, extend' },
+  { name: '/plan', category: 'Agent', description: 'Strategic plan board: show, add, start, done, promote, clear' },
+  { name: '/skill-gen', category: 'Agent', description: 'Generate a new skill from a description (LLM-powered)' },
+  { name: '/skill-install', category: 'Agent', description: 'Install a skill from GitHub (user/repo or URL)' },
+  { name: '/skill-update', category: 'Agent', description: 'Update an installed skill to the latest version' },
+  { name: '/skill-uninstall', category: 'Agent', description: 'Remove an installed skill' },
 
   // Config
   { name: '/settings', category: 'Config', aliases: ['/model'], description: 'Open settings (provider/model/keys)' },
@@ -61,6 +74,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: '/telegram-setup', category: 'Config', aliases: ['/tg-setup'], description: 'Configure Telegram bot token and chat' },
   { name: '/init', category: 'Config', description: 'Create or update .wrongstack/AGENTS.md project context' },
   { name: '/worktree', category: 'Config', aliases: ['/wt'], description: 'Inspect/manage git worktrees for AutoPhase' },
+  { name: '/sync', category: 'Config', description: 'GitHub cloud sync for settings, skills, prompts, memory' },
 
   // App
   { name: '/help', category: 'App', description: 'Show every slash command and what it does' },
