@@ -324,33 +324,4 @@ function walkCount<T>(node: T, vault: SecretVault, counter: { n: number }): T {
 
 /** Keys that, when written into a plain object, can poison the prototype
  *  chain. We never want user config to carry these. */
-const FORBIDDEN_PROTO_KEYS = new Set([
-  '__proto__',
-  'constructor',
-  'prototype',
-  '__defineGetter__',
-  '__defineSetter__',
-  '__lookupGetter__',
-  '__lookupSetter__',
-]);
-
-function deepMerge<T extends Record<string, unknown>>(a: T, b: Record<string, unknown>): T {
-  const out: Record<string, unknown> = { ...a };
-  for (const [k, v] of Object.entries(b)) {
-    if (FORBIDDEN_PROTO_KEYS.has(k)) continue;
-    const existing = out[k];
-    if (
-      v !== null &&
-      typeof v === 'object' &&
-      !Array.isArray(v) &&
-      existing !== null &&
-      typeof existing === 'object' &&
-      !Array.isArray(existing)
-    ) {
-      out[k] = deepMerge(existing as Record<string, unknown>, v as Record<string, unknown>);
-    } else {
-      out[k] = v;
-    }
-  }
-  return out as T;
-}
+import { deepMerge } from '../utils/deep-merge.js';
