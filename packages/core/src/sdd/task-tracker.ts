@@ -6,6 +6,7 @@ import type {
   TaskSort,
 } from '../types/task-graph.js';
 import { computeTaskProgress } from '../types/task-graph.js';
+import { SddError, ERROR_CODES } from '../types/errors.js';
 
 export interface TaskStore {
   saveGraph(graph: TaskGraph): Promise<void>;
@@ -67,7 +68,10 @@ export class TaskTracker {
   }
 
   addNode(node: Omit<TaskNode, 'id' | 'createdAt' | 'updatedAt'>): TaskNode {
-    if (!this.graph) throw new Error('No graph loaded');
+    if (!this.graph) throw new SddError({
+      message: 'No graph loaded',
+      code: ERROR_CODES.SDD_INVALID_STATE,
+    });
 
     const now = Date.now();
     const newNode: TaskNode = {
@@ -91,7 +95,10 @@ export class TaskTracker {
   }
 
   addEdge(from: string, to: string, type: TaskGraph['edges'][0]['type'] = 'depends_on'): void {
-    if (!this.graph) throw new Error('No graph loaded');
+    if (!this.graph) throw new SddError({
+      message: 'No graph loaded',
+      code: ERROR_CODES.SDD_INVALID_STATE,
+    });
 
     this.graph.edges.push({
       id: crypto.randomUUID(),
@@ -104,10 +111,17 @@ export class TaskTracker {
   }
 
   updateNodeStatus(id: string, status: TaskNode['status'], reason?: string): void {
-    if (!this.graph) throw new Error('No graph loaded');
+    if (!this.graph) throw new SddError({
+      message: 'No graph loaded',
+      code: ERROR_CODES.SDD_INVALID_STATE,
+    });
 
     const node = this.graph.nodes.get(id);
-    if (!node) throw new Error(`Node ${id} not found`);
+    if (!node) throw new SddError({
+      message: `Node ${id} not found`,
+      code: ERROR_CODES.SDD_NOT_READY,
+      context: { nodeId: id },
+    });
 
     const from = node.status;
     const now = Date.now();
@@ -139,10 +153,17 @@ export class TaskTracker {
   }
 
   updateNode(id: string, patch: Partial<Pick<TaskNode, 'title' | 'description' | 'priority' | 'estimateHours' | 'tags'>>): void {
-    if (!this.graph) throw new Error('No graph loaded');
+    if (!this.graph) throw new SddError({
+      message: 'No graph loaded',
+      code: ERROR_CODES.SDD_INVALID_STATE,
+    });
 
     const node = this.graph.nodes.get(id);
-    if (!node) throw new Error(`Node ${id} not found`);
+    if (!node) throw new SddError({
+      message: `Node ${id} not found`,
+      code: ERROR_CODES.SDD_NOT_READY,
+      context: { nodeId: id },
+    });
 
     if (patch.title !== undefined) node.title = patch.title;
     if (patch.description !== undefined) node.description = patch.description;

@@ -96,7 +96,7 @@ describe('TaskFlow', () => {
       // Low completeness: no sections, no requirements
       const specContent = `# Test\n\nSome content without proper sections`;
 
-      await expect(flow.fromSpec(specContent)).rejects.toThrow('Spec too incomplete');
+      await expect(flow.fromSpec(specContent)).rejects.toThrow('Spec completeness too low');
     });
 
     it('emits error event when spec too incomplete', async () => {
