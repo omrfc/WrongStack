@@ -217,7 +217,7 @@ function AppInner() {
       {sidebarOpen && <Sidebar />}
       <main className="flex-1 flex flex-col overflow-hidden">
         <ConnectionBanner />
-        {currentView === 'chat' && (
+        {(currentView === 'chat' || currentView === 'agents') && (
           <>
             {sessionId && (
               <div className="px-4 pt-2 space-y-2">

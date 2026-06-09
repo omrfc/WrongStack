@@ -36,7 +36,7 @@ function fmtDuration(ms: number): string {
 
 // ── Agent detail overlay ──────────────────────────────────────────────
 
-function AgentDetail({
+export function AgentDetail({
   agent,
   onClose,
 }: {
