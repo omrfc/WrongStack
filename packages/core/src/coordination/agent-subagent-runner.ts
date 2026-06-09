@@ -7,6 +7,7 @@ import type {
   SubagentRunner,
   TaskSpec,
 } from '../types/multi-agent.js';
+import { AgentError, ERROR_CODES } from '../types/errors.js';
 import {
   BudgetExceededError,
   BudgetThresholdSignal,
@@ -312,18 +313,29 @@ export function makeAgentSubagentRunner(opts: AgentRunnerOptions): SubagentRunne
     }
 
     if (result.status === 'failed') {
-      throw result.error instanceof Error
+      throw result.error instanceof AgentError
         ? result.error
-        : new Error(String(result.error ?? 'agent failed'));
+        : new AgentError({
+            message: result.error instanceof Error ? result.error.message : String(result.error ?? 'agent failed'),
+            code: ERROR_CODES.AGENT_RUN_FAILED,
+            cause: result.error,
+          });
     }
     // 'aborted' and 'max_iterations' aren't successes — let the coordinator
     // classify them. When the parent signal was aborted, coordinator marks
     // the task 'stopped' (matched against subagent.abortController.aborted).
     if (result.status === 'aborted') {
-      throw new Error('agent aborted');
+      throw new AgentError({
+        message: 'agent aborted',
+        code: ERROR_CODES.AGENT_ABORTED,
+      });
     }
     if (result.status === 'max_iterations') {
-      throw new Error('agent exhausted iteration limit');
+      throw new AgentError({
+        message: 'agent exhausted iteration limit',
+        code: ERROR_CODES.AGENT_ITERATION_LIMIT,
+        recoverable: true,
+      });
     }
 
     const usage = ctx.budget.usage();
@@ -336,7 +348,11 @@ export function makeAgentSubagentRunner(opts: AgentRunnerOptions): SubagentRunne
     // with tool calls are legit (e.g. "run npm test then end_turn").
     const finalText = (result.finalText ?? '').trim();
     if (finalText.length === 0 && usage.toolCalls === 0) {
-      throw new Error('empty response');
+      throw new AgentError({
+        message: 'empty response — agent produced no text and no tool calls',
+        code: ERROR_CODES.AGENT_RUN_FAILED,
+        context: { iterations: result.iterations },
+      });
     }
     // Unrecovered-tool-failure guard. If the last executed tool came
     // back ok:false AND the agent ended its turn with no closing text,
@@ -348,7 +364,11 @@ export function makeAgentSubagentRunner(opts: AgentRunnerOptions): SubagentRunne
     // silently. Surface as `tool_failed` so callers see the actual
     // failure mode instead of a clean ✓ with no output.
     if (finalText.length === 0 && lastToolFailed !== null) {
-      throw new Error(`tool failed: ${lastToolFailed}`);
+      throw new AgentError({
+        message: `unrecovered tool failure: ${lastToolFailed} — agent ended turn without acknowledging the error`,
+        code: ERROR_CODES.AGENT_RUN_FAILED,
+        context: { tool: lastToolFailed, iterations: result.iterations },
+      });
     }
     return {
       result: result.finalText,

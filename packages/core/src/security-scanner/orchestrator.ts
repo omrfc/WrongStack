@@ -237,7 +237,13 @@ Return ONLY the JSON object, no markdown, no explanation.`;
         };
       }
     } catch (err) {
-      console.error('LLM skill generation failed, using fallback:', err);
+      console.error(JSON.stringify({
+        level: 'error',
+        event: 'security_scanner.skill_generation_failed',
+        message: err instanceof Error ? err.message : String(err),
+        techStack: techStack.stack,
+        timestamp: new Date().toISOString(),
+      }));
     }
 
     // Fallback: return basic skill without LLM
@@ -396,7 +402,13 @@ Return ONLY the JSON array. If no issues found, return [].`;
         }));
       }
     } catch (err) {
-      console.error('LLM scan batch failed:', err);
+      console.error(JSON.stringify({
+        level: 'error',
+        event: 'security_scanner.llm_scan_batch_failed',
+        message: err instanceof Error ? err.message : String(err),
+        fileCount: files.length,
+        timestamp: new Date().toISOString(),
+      }));
     }
 
     return [];
@@ -462,7 +474,13 @@ Be specific about the vulnerabilities found and how to fix them.`;
       const response = await this.completeWithRetry(provider, request, abortController);
       return response.content.filter(b => b.type === 'text').map(b => b.text).join('');
     } catch (err) {
-      console.error('LLM report synthesis failed:', err);
+      console.error(JSON.stringify({
+        level: 'error',
+        event: 'security_scanner.report_synthesis_failed',
+        message: err instanceof Error ? err.message : String(err),
+        findingsCount: scanResult.findings.length,
+        timestamp: new Date().toISOString(),
+      }));
       // Fallback to basic report
       return this.generateBasicReport(projectRoot, techStack, scanResult);
     }

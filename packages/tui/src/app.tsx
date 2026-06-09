@@ -229,6 +229,12 @@ export interface AppProps {
     assistantSummary: string;
   }) => Promise<string[]>) | undefined;
   /**
+   * Called after each agent turn with the assistant's final output text.
+   * The host parses "💡 Next steps" suggestions from the text and stores
+   * them in the shared suggestion store so `/next 1`, `/next 1 2 3` work.
+   */
+  onSuggestionsParsed?: ((finalText: string) => void) | undefined;
+  /**
    * SDD session context getter. When an SDD session is active, returns
    * the AI prompt context to inject into user messages so the model
    * knows it's in a spec-building conversation.
@@ -409,6 +415,7 @@ export function App({
   getSettings,
   saveSettings,
   predictNext,
+  onSuggestionsParsed,
   switchAutonomy,
   effectiveMaxContext,
   onExit,
@@ -3332,6 +3339,18 @@ export function App({
           }
         } catch {
           // Non-fatal — SDD detection is best-effort
+        }
+      }
+
+      // ── Next-Step Suggestions (/next) ──────────────────────────────
+      // Parse 💡 Next steps from the assistant's final output and store
+      // them in the shared suggestion store so `/next 1`, `/next 1 2 3`
+      // can discover and execute them without requiring /suggest first.
+      if (result.status === 'done' && result.finalText && onSuggestionsParsed) {
+        try {
+          onSuggestionsParsed(result.finalText);
+        } catch {
+          // Best-effort — never let suggestion parsing break the turn.
         }
       }
 

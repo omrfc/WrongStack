@@ -27,7 +27,7 @@ import { CLI_VERSION } from './version.js';
  * Looks for numbered lines under a "Next steps" or "💡 Next steps" heading.
  * Returns null when no suggestions are found.
  */
-function parseSuggestionsFromOutput(finalText: string): string[] | null {
+export function parseSuggestionsFromOutput(finalText: string): string[] | null {
   // Find the "Next steps" section — look for heading patterns
   const patterns = [
     /💡\s*Next\s+steps?\s*\n((?:\d+\.\s+.+\n?)+)/i,

@@ -137,7 +137,15 @@ export class PhaseOrchestrator {
   /** Wait for all pending phase merges, dependency-ordered and globally serialized. */
   private async drainMerges(): Promise<void> {
     await Promise.allSettled([...this.phaseMergePromise.values()]);
-    await this.mergeQueue.catch((err) => console.warn(`[phase-orchestrator] mergeQueue failed: ${err}`));
+    await this.mergeQueue.catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(JSON.stringify({
+        level: 'warn',
+        event: 'orchestrator.merge_queue_failed',
+        message: msg,
+        timestamp: new Date().toISOString(),
+      }));
+    });
   }
 
   /** Pause: active phases continue, but no new phase starts. */
@@ -149,10 +157,13 @@ export class PhaseOrchestrator {
   resume(): void {
     this.paused = false;
     this.tick().catch((err) => {
-      console.error(
-        '[phase-orchestrator] tick failed:',
-        err instanceof Error ? err.message : String(err),
-      );
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(JSON.stringify({
+        level: 'error',
+        event: 'orchestrator.tick_failed',
+        message: msg,
+        timestamp: new Date().toISOString(),
+      }));
     });
   }
 
@@ -412,7 +423,14 @@ export class PhaseOrchestrator {
           // Log and keep the queue alive — a failed merge must not
           // poison the chain and silently stop all subsequent merges.
           const msg = err instanceof Error ? err.message : String(err);
-          console.error(`[PhaseOrchestrator] mergeOne failed for phase ${phase.id}: ${msg}`);
+          console.error(JSON.stringify({
+            level: 'error',
+            event: 'orchestrator.merge_failed',
+            phaseId: phase.id,
+            message: msg,
+            timestamp: new Date().toISOString(),
+          }));
+          this.emit('phase.failed', { phaseId: phase.id, name: phase.name, error: msg });
         });
       await this.mergeQueue;
     })();

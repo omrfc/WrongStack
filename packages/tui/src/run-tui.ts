@@ -243,6 +243,12 @@ export interface RunTuiOptions {
     userRequest: string;
     assistantSummary: string;
   }) => Promise<string[]>) | undefined;
+  /**
+   * Called after each agent turn with the assistant's final output text.
+   * The host parses "💡 Next steps" suggestions from the text and stores
+   * them in the shared suggestion store so `/next 1`, `/next 1 2 3` work.
+   */
+  onSuggestionsParsed?: ((finalText: string) => void) | undefined;
 }
 
 // Bracketed paste mode wraps any pasted text with these markers, letting us
@@ -416,6 +422,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           getSettings: opts.getSettings,
           saveSettings: opts.saveSettings,
           predictNext: opts.predictNext,
+          onSuggestionsParsed: opts.onSuggestionsParsed,
           chime: opts.chime,
           confirmExit: opts.confirmExit,
           modeLabel: opts.modeLabel,

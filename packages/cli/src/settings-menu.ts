@@ -7,6 +7,9 @@ import {
   decryptConfigSecrets,
   encryptConfigSecrets,
   atomicWrite,
+  FsError,
+  ConfigError,
+  ERROR_CODES,
 } from '@wrongstack/core';
 import type { ReadlineInputReader } from './input-reader.js';
 import type { TerminalRenderer } from './renderer.js';
@@ -221,7 +224,12 @@ export async function persistAutonomySetting(
     raw = await fs.readFile(targetPath, 'utf8');
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw new Error(`Could not read ${targetPath}: ${(err as Error).message}`);
+      throw new FsError({
+        message: `Could not read ${targetPath}`,
+        code: ERROR_CODES.FS_READ_FAILED,
+        path: targetPath,
+        cause: err,
+      });
     }
     fileExists = false;
     raw = '{}';
@@ -232,7 +240,12 @@ export async function persistAutonomySetting(
     parsed = JSON.parse(raw) as Record<string, unknown>;
   } catch (err) {
     if (fileExists) {
-      throw new Error(`Config at ${targetPath} is not valid JSON: ${(err as Error).message}`);
+      throw new ConfigError({
+        message: `Config at ${targetPath} is not valid JSON`,
+        code: ERROR_CODES.CONFIG_PARSE_FAILED,
+        context: { path: targetPath },
+        cause: err,
+      });
     }
     parsed = {};
   }
@@ -283,7 +296,12 @@ export async function persistConfigSetting(
     raw = await fs.readFile(targetPath, 'utf8');
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw new Error(`Could not read ${targetPath}: ${(err as Error).message}`);
+      throw new FsError({
+        message: `Could not read ${targetPath}`,
+        code: ERROR_CODES.FS_READ_FAILED,
+        path: targetPath,
+        cause: err,
+      });
     }
     fileExists = false;
     raw = '{}';
@@ -294,7 +312,12 @@ export async function persistConfigSetting(
     parsed = JSON.parse(raw) as Record<string, unknown>;
   } catch (err) {
     if (fileExists) {
-      throw new Error(`Config at ${targetPath} is not valid JSON: ${(err as Error).message}`);
+      throw new ConfigError({
+        message: `Config at ${targetPath} is not valid JSON`,
+        code: ERROR_CODES.CONFIG_PARSE_FAILED,
+        context: { path: targetPath },
+        cause: err,
+      });
     }
     parsed = {};
   }

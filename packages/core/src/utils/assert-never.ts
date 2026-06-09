@@ -11,7 +11,9 @@
  * }
  */
 export function assertNever(x: never, message?: string): never {
-  throw new Error(
+  const err = new Error(
     message ?? `Unhandled case: ${JSON.stringify(x)}`,
   );
+  err.name = 'AssertNeverError';
+  throw err;
 }

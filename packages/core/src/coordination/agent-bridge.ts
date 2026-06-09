@@ -5,6 +5,7 @@ import type {
   BridgeMessage,
   BridgeTransport,
 } from '../types/agent-bridge.js';
+import { AgentError, ERROR_CODES } from '../types/errors.js';
 import { InMemoryBridgeTransport } from './in-memory-transport.js';
 
 // Re-export for backwards compatibility
@@ -75,7 +76,10 @@ export class InMemoryAgentBridge implements AgentBridge {
   }
 
   async request<T>(msg: BridgeMessage, timeoutMs?: number): Promise<BridgeMessage<T>> {
-    if (this.stopped) throw new Error('Bridge is stopped');
+    if (this.stopped) throw new AgentError({
+      message: 'Bridge is stopped',
+      code: ERROR_CODES.AGENT_ABORTED,
+    });
     const timeout = timeoutMs ?? this.timeoutMs;
     const correlationId = msg.id;
 
@@ -85,9 +89,11 @@ export class InMemoryAgentBridge implements AgentBridge {
     // the second caller now has no entry to resolve when its timer fires.
     // Throwing here surfaces the caller bug rather than letting it hang.
     if (this.inflightGuards.has(correlationId)) {
-      throw new Error(
-        `Bridge request id "${correlationId}" collides with an in-flight request — caller is reusing message ids`,
-      );
+      throw new AgentError({
+        message: `Bridge request id "${correlationId}" collides with an in-flight request — caller is reusing message ids`,
+        code: ERROR_CODES.AGENT_RUN_FAILED,
+        context: { correlationId },
+      });
     }
     this.inflightGuards.add(correlationId);
 
@@ -96,7 +102,11 @@ export class InMemoryAgentBridge implements AgentBridge {
       const timer = setTimeout(() => {
         this.inflightGuards.delete(correlationId);
         this.pendingRequests.delete(correlationId);
-        reject(new Error(`Request ${correlationId} timed out after ${timeout}ms`));
+        reject(new AgentError({
+          message: `Request ${correlationId} timed out after ${timeout}ms`,
+          code: ERROR_CODES.AGENT_RUN_FAILED,
+          context: { correlationId, timeoutMs: timeout },
+        }));
       }, timeout);
 
       // Double-check stopped after setting up the pending entry, so stop()
@@ -106,7 +116,10 @@ export class InMemoryAgentBridge implements AgentBridge {
       // stop() has already released the lock on pendingRequests.
       if (!this.inflightGuards.has(correlationId)) {
         clearTimeout(timer);
-        reject(new Error('Bridge stopped'));
+        reject(new AgentError({
+          message: 'Bridge stopped',
+          code: ERROR_CODES.AGENT_ABORTED,
+        }));
         return;
       }
 
@@ -130,7 +143,10 @@ export class InMemoryAgentBridge implements AgentBridge {
     this.stopped = true;
     for (const [, p] of this.pendingRequests) {
       clearTimeout(p.timer);
-      p.reject(new Error('Bridge stopped'));
+      p.reject(new AgentError({
+        message: 'Bridge stopped',
+        code: ERROR_CODES.AGENT_ABORTED,
+      }));
     }
     this.pendingRequests.clear();
     this.inflightGuards.clear();
