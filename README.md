@@ -347,14 +347,14 @@ Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. Wha
 
 ## Recent changes
 
-**Current release: 0.155.0.** The `/delegate` slash command lets you hand
+**Current release: 0.156.1.** The `/delegate` slash command lets you hand
 discrete work to specialized subagents from the chat input. The WebUI FleetPanel
 now features clickable agent cards with detail overlays and an Agents sidebar
 tab. Subagent output streams live into the TUI AgentDetail panel with a
 copy-to-clipboard button. `/next` and `/suggest` surface AI-suggested next
 actions as clickable buttons. A new Playwright browser automation agent joins
 the fleet roster. All 15 workspace packages and the marketing site are aligned
-to 0.155.0 in lockstep.
+to 0.156.1 in lockstep.
 
 See **[CHANGELOG.md](CHANGELOG.md)** for the full, versioned history.
 
@@ -601,7 +601,7 @@ For the full walk-through — including the L1-A reactive `ConversationState`, h
 
 ## Status
 
-- **5800+ tests passing** across 300+ test files in the 0.155.0 release gate
+- **5800+ tests passing** across 300+ test files in the 0.156.1 release gate
 - Coverage thresholds: ≥85 % lines / ≥85 % functions / ≥70 % branches / ≥82 % statements
 - All workspace packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles
