@@ -1,6 +1,7 @@
 import { color } from '@wrongstack/core';
 import type { SlashCommand } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
+import { parseSubcommand, unknownSubcommand } from './helpers.js';
 
 /**
  * /collab — operator-side controls for the live-collaboration feature
@@ -30,17 +31,15 @@ export function buildCollabCommand(opts: SlashCommandContext): SlashCommand {
     category: 'Agent',
     description: 'Live collaboration helpers (status / invite / history).',
     async run(args, ctx) {
-      // SlashCommand.run receives `args` as a single string — split it
-      // here so each handler can treat it as an array.
-      const parts = args.split(/\s+/).filter(Boolean);
-      const sub = (parts[0] ?? 'status').toLowerCase();
+      const { cmd, rest } = parseSubcommand(args);
+      const sub = cmd || 'status';
       switch (sub) {
         case 'status':
           return statusCommand(ctx.session?.id);
         case 'invite':
           return inviteCommand(ctx.session?.id);
         case 'history':
-          return historyCommand(opts, ctx.session?.id, parts.slice(1));
+          return historyCommand(opts, ctx.session?.id, rest);
         case 'annotations':
         case 'notes':
           return annotationsCommand(opts, ctx.session?.id);
@@ -51,7 +50,7 @@ export function buildCollabCommand(opts: SlashCommandContext): SlashCommand {
         default:
           return {
             message: color.yellow(
-              `Unknown subcommand: ${sub}. Try: /collab status | invite | history | annotations`,
+              unknownSubcommand(sub, ['status', 'invite', 'history', 'annotations'], 'collab'),
             ),
           };
       }
