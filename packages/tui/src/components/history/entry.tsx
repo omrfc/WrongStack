@@ -1,5 +1,5 @@
 import { Box, Text } from 'ink';
-import React from 'react';
+import React, { useMemo } from 'react';
 import { theme } from '../../theme.js';
 import { Banner } from './banner.js';
 import { DiffBlock, extractDiffPreview } from './code-block.js';
@@ -12,6 +12,34 @@ import {
   formatToolArgs,
   formatToolOutput,
 } from './utils.js';
+
+// ── Next steps parsing ─────────────────────────────────────────────────
+
+/** Regex that matches "💡 Next steps" heading + numbered items. */
+const NEXT_STEPS_RE = /💡\s*Next steps?\s*\n+((?:\d+\.\s+.+\n?)+)/i;
+
+interface ParsedNextStep {
+  index: number;
+  text: string;
+}
+
+function parseNextSteps(content: string): { steps: ParsedNextStep[]; stripped: string } {
+  const match = NEXT_STEPS_RE.exec(content);
+  if (!match?.[1]) return { steps: [], stripped: content };
+
+  const block = match[1];
+  const steps: ParsedNextStep[] = [];
+  const lines = block.split('\n').filter(Boolean);
+  for (const line of lines) {
+    const m = /^(\d+)\.\s+(.+)$/.exec(line.trim());
+    if (m) steps.push({ index: Number.parseInt(m[1]!, 10), text: m[2]!.trim() });
+  }
+
+  // Strip the entire "💡 Next steps" block from content
+  const stripped = content.replace(NEXT_STEPS_RE, '').replace(/\n{3,}/g, '\n\n').trim();
+
+  return { steps: steps.slice(0, 6), stripped };
+}
 
 // ── Internal helpers ──
 
@@ -50,6 +78,13 @@ export const Entry = React.memo(function Entry({
   entry,
   termWidth,
 }: { entry: HistoryEntry; termWidth: number }): React.ReactElement {
+  // Parse next steps from assistant text — computed once, used only in
+  // the assistant case. Must live at the top level (hooks rules).
+  const nextSteps = useMemo(() => {
+    if (entry.kind !== 'assistant') return { steps: [] as ParsedNextStep[], stripped: '' };
+    return parseNextSteps(entry.text);
+  }, [entry.kind, (entry as { text?: string }).text]);
+
   switch (entry.kind) {
     case 'user':
       return (
@@ -82,24 +117,56 @@ export const Entry = React.memo(function Entry({
       );
     case 'assistant': {
       const contentWidth = assistantContentWidth(termWidth);
+      const { steps, stripped } = nextSteps;
+      const hasNext = steps.length > 0;
       return (
-        <Box
-          flexDirection="column"
-          marginX={MESSAGE_PANEL_MARGIN}
-          marginY={1}
-          borderStyle="single"
-          borderTop={false}
-          borderRight={false}
-          borderBottom={false}
-          borderColor={theme.assistant}
-          paddingLeft={1}
-        >
-          <Box flexDirection="row">
-            <Text bold color={theme.assistant}>
-              {'ASSISTANT'}
-            </Text>
+        <Box flexDirection="column">
+          <Box
+            flexDirection="column"
+            marginX={MESSAGE_PANEL_MARGIN}
+            marginY={1}
+            borderStyle="single"
+            borderTop={false}
+            borderRight={false}
+            borderBottom={hasNext ? false : undefined}
+            borderColor={theme.assistant}
+            paddingLeft={1}
+          >
+            <Box flexDirection="row">
+              <Text bold color={theme.assistant}>
+                {'ASSISTANT'}
+              </Text>
+            </Box>
+            <AssistantBody text={stripped} termWidth={termWidth} contentWidth={contentWidth} />
           </Box>
-          <AssistantBody text={entry.text} termWidth={termWidth} contentWidth={contentWidth} />
+          {hasNext && (
+            <Box
+              flexDirection="column"
+              marginX={MESSAGE_PANEL_MARGIN}
+              marginY={1}
+              borderStyle="single"
+              borderTop={false}
+              borderRight={false}
+              borderBottom={false}
+              borderColor={theme.accent}
+              paddingLeft={1}
+            >
+              <Box flexDirection="row">
+                <Text bold color={theme.accent}>
+                  {'💡 NEXT STEPS  '}
+                </Text>
+                <Text dimColor>(use /next 1, /next 1 2 3 to select)</Text>
+              </Box>
+              {steps.map((s) => (
+                <Box key={s.index} flexDirection="row" marginTop={0}>
+                  <Text>
+                    <Text bold color={theme.accent}>{`  ${s.index}. `}</Text>
+                    <Text>{s.text}</Text>
+                  </Text>
+                </Box>
+              ))}
+            </Box>
+          )}
         </Box>
       );
     }
