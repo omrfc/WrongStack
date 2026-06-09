@@ -117,7 +117,7 @@ export function buildTasksCommand(_opts: SlashCommandContext): SlashCommand {
         case 'start':
         case 'done':
         case 'fail': {
-          if (!restJoined) return { message: `Usage: /tasks ${verb} <id|index>` };
+          if (!restJoined) return { message: `Usage: /tasks ${cmd} <id|index>` };
           const found = findTask(file.tasks, restJoined);
           if (!found) return { message: `No task matched "${restJoined}".` };
           const statusMap: Record<string, TaskStatus> = {
@@ -125,7 +125,7 @@ export function buildTasksCommand(_opts: SlashCommandContext): SlashCommand {
             done: 'completed',
             fail: 'failed',
           };
-          found.item.status = statusMap[verb] ?? 'pending';
+          found.item.status = statusMap[cmd] ?? 'pending';
           found.item.updatedAt = new Date().toISOString();
           await saveTasks(taskPath, file);
           return { message: `Marked ${verb}: ${found.item.title}\n\n${formatTaskProgress(file.tasks)}` };
