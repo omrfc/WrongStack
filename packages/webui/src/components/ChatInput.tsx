@@ -157,12 +157,109 @@ export function ChatInput() {
         case '/model':
           setCurrentView('settings');
           return true;
+        case '/suggest':
+        case '/next-steps':
+          // Ask the agent to suggest next steps
+          sendMsg('What are the next steps I should take? Be specific and actionable.');
+          return true;
+        case '/next': {
+          const narg = args.trim().toLowerCase();
+          if (!narg || narg === 'list' || narg === 'ls' || narg === 'show') return handleNextList();
+          if (narg === 'clear' || narg === 'reset') {
+            addMessage({ role: 'assistant', content: '💡 _Suggestion list cleared._' });
+            return true;
+          }
+          return handleNextSelect(args.trim());
+        }
         default:
           return false;
       }
     },
     [addMessage, clearMessages, client, sendAbort, setLoading, setCurrentView, ws],
   );
+
+  // ── /next helpers ──────────────────────────────────────────────────
+
+  /** Regex matching "💡 Next steps" heading + numbered items. */
+  const NEXT_STEPS_RE = /💡\s*Next steps?\s*\n+((?:\d+\.\s+.+\n?)+)/i;
+
+  function parseNextStepsFromContent(content: string): Array<{ index: number; text: string }> {
+    const match = NEXT_STEPS_RE.exec(content);
+    if (!match?.[1]) return [];
+    const steps: Array<{ index: number; text: string }> = [];
+    for (const line of match[1].split('\n').filter(Boolean)) {
+      const m = /^(\d+)\.\s+(.+)$/.exec(line.trim());
+      if (m) steps.push({ index: Number.parseInt(m[1]!, 10), text: m[2]!.trim() });
+    }
+    return steps.slice(0, 6);
+  }
+
+  function parseNextStepsFromLastAssistant(): Array<{ index: number; text: string }> {
+    const all = useChatStore.getState().messages;
+    for (let i = all.length - 1; i >= 0; i--) {
+      const m = all[i];
+      if (m?.role === 'assistant' && m.content) {
+        return parseNextStepsFromContent(m.content);
+      }
+    }
+    return [];
+  }
+
+  /** Send a user message through the agent. */
+  function sendMsg(content: string) {
+    if (isLoading) {
+      enqueue(content);
+      return;
+    }
+    addMessage({ role: 'user', content });
+    const id = sendMessage(content);
+    if (id) setLoading(true);
+  }
+
+  /** Parse 💡 Next steps from the last assistant message and show them. */
+  function handleNextList(): true {
+    const all = useChatStore.getState().messages;
+    let lastAssistant = '';
+    for (let i = all.length - 1; i >= 0; i--) {
+      const m = all[i];
+      if (m?.role === 'assistant' && m.content) { lastAssistant = m.content; break; }
+    }
+    const steps = parseNextStepsFromContent(lastAssistant);
+    if (steps.length === 0) {
+      addMessage({ role: 'assistant', content: '💡 _No next-step suggestions found. Use `/suggest` to generate some._' });
+      return true;
+    }
+    const lines = ['💡 **Next steps**', ''];
+    for (const s of steps) lines.push(`${s.index}. ${s.text}`);
+    lines.push('', '_Use `/next 1`, `/next 1 2 3` to execute._');
+    addMessage({ role: 'assistant', content: lines.join('\n') });
+    return true;
+  }
+
+  /** Parse 💡 Next steps and execute the selected item(s). */
+  function handleNextSelect(input: string): true {
+    const steps = parseNextStepsFromLastAssistant();
+    if (steps.length === 0) {
+      addMessage({ role: 'assistant', content: '💡 _No suggestions available. Use `/suggest` first._' });
+      return true;
+    }
+    const parts = input.split(/[\s,]+/).filter(Boolean);
+    const indices = parts.map((p) => Number.parseInt(p, 10)).filter((n) => !Number.isNaN(n) && n > 0);
+    if (indices.length === 0) {
+      addMessage({ role: 'assistant', content: '💡 _No valid suggestion numbers._' });
+      return true;
+    }
+    const invalid = indices.filter((i) => i > steps.length);
+    if (invalid.length > 0) {
+      addMessage({ role: 'assistant', content: `💡 _Invalid suggestion(s): ${invalid.join(', ')}. Valid range: 1–${steps.length}._` });
+      return true;
+    }
+    for (const i of indices) {
+      const s = steps[i - 1];
+      if (s) sendMsg(s.text);
+    }
+    return true;
+  }
 
   // Suggest slash commands as the user types. Only when the buffer is
   // exactly a slash command head — `/foo bar` shouldn't open the popup.
