@@ -61,11 +61,11 @@ export function ResumePicker({
             <Box key={s.id} flexDirection="column">
               <Text
                 inverse={isSelected}
-                dimColor={isCurrent}
+                dimColor={isCurrent ?? false}
                 {...(isSelected ? { color: isCurrent ? 'gray' : 'cyan' } : {})}
               >
                 {isSelected ? '› ' : '  '}
-                <Text bold dimColor={isCurrent}>{s.id}</Text>
+                <Text bold dimColor={isCurrent ?? false}>{s.id}</Text>
                 {isCurrent ? <Text dimColor> (current)</Text> : null}
                 <Text dimColor> {date}</Text>
               </Text>

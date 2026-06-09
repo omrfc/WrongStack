@@ -1,4 +1,4 @@
-import type { SessionEvent } from '@wrongstack/core';
+import type { DistributiveOmit, SessionEvent } from '@wrongstack/core';
 import type { HistoryEntry } from './types.js';
 
 /**
@@ -81,7 +81,7 @@ export function replaySessionEvents(
 function eventToEntry(
   ev: SessionEvent,
   pendingTools: Map<string, { name: string; input: unknown; ts: string }>,
-): Omit<HistoryEntry, 'id'> | null {
+): DistributiveOmit<HistoryEntry, 'id'> | null {
   switch (ev.type) {
     case 'user_input': {
       const text =

@@ -40,3 +40,4 @@ export * from './observability.js';
 export * from './system-prompt-contributor.js';
 export * from '../storage/session-reader.js';
 export * from './autonomy.js';
+export * from './utility-types.js';

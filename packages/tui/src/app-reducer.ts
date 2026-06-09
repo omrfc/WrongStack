@@ -20,7 +20,6 @@ import type {
   Action,
   FleetEntry,
   QueueItem,
-  ResumeSessionEntry,
   State,
 } from './app-state.js';
 // Re-export types from app-state.ts for backward compatibility.
