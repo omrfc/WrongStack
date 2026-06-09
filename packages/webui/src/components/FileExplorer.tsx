@@ -298,6 +298,38 @@ export function FileExplorer() {
   // Single-click selection highlight (separate from open/sActive state)
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
 
+  // Global expand/collapse: null = user-managed, true = all open, false = all closed.
+  // Resets to null when the user manually toggles any individual directory.
+  const [globalExpand, setGlobalExpand] = useState<boolean | null>(null);
+
+  // Count total directories in tree for the toolbar badge
+  const dirCount = useMemo(() => {
+    let count = 0;
+    const walk = (nodes: TreeNode[]) => {
+      for (const n of nodes) {
+        if (n.type === 'directory') count++;
+        if (n.children) walk(n.children);
+      }
+    };
+    walk(tree);
+    return count;
+  }, [tree]);
+
+  // Reset globalExpand when user manually toggles — we detect this by
+  // tracking whether the last action was a button click vs a tree click.
+  const userInteractedRef = { value: false };
+  const handleGlobalCollapse = useCallback(() => {
+    userInteractedRef.value = true;
+    setGlobalExpand(false);
+    // After a beat, allow user to manually toggle again
+    setTimeout(() => { userInteractedRef.value = false; }, 400);
+  }, []);
+  const handleGlobalExpand = useCallback(() => {
+    userInteractedRef.value = true;
+    setGlobalExpand(true);
+    setTimeout(() => { userInteractedRef.value = false; }, 400);
+  }, []);
+
   // Single-click: if already open → switch to that tab. Otherwise → highlight.
   const handleSelect = useCallback(
     (filePath: string) => {
@@ -344,22 +376,57 @@ export function FileExplorer() {
   }
 
   return (
-    <div className="h-full overflow-y-auto py-1">
-      {tree.map((node) => (
-        <TreeNodeItem
-          key={node.path}
-          node={node}
-          depth={0}
-          selectedPath={selectedPath}
-          onSelect={handleSelect}
-          onOpen={handleOpen}
-        />
-      ))}
-      {tree.length === 0 && (
-        <p className="text-[11px] text-muted-foreground italic p-2">
-          No files found
-        </p>
+    <div className="h-full flex flex-col overflow-hidden">
+      {/* ── Toolbar ── */}
+      {tree.length > 0 && dirCount > 0 && (
+        <div className="flex items-center gap-0.5 px-2 py-0.5 border-b shrink-0">
+          <button
+            type="button"
+            onClick={handleGlobalExpand}
+            className={cn(
+              'flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors',
+              'hover:bg-muted/60 text-muted-foreground hover:text-foreground',
+            )}
+            title="Expand all directories"
+          >
+            <Folders className="h-3 w-3" />
+            <span>Expand all</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleGlobalCollapse}
+            className={cn(
+              'flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors',
+              'hover:bg-muted/60 text-muted-foreground hover:text-foreground',
+            )}
+            title="Collapse all directories"
+          >
+            <Minimize2 className="h-3 w-3" />
+            <span>Collapse</span>
+          </button>
+          <span className="ml-auto text-[9px] text-muted-foreground/50 tabular-nums">
+            {dirCount} folder{dirCount === 1 ? '' : 's'}
+          </span>
+        </div>
       )}
+      <div className="flex-1 overflow-y-auto py-1">
+        {tree.map((node) => (
+          <TreeNodeItem
+            key={node.path}
+            node={node}
+            depth={0}
+            selectedPath={selectedPath}
+            forceExpand={globalExpand}
+            onSelect={handleSelect}
+            onOpen={handleOpen}
+          />
+        ))}
+        {tree.length === 0 && (
+          <p className="text-[11px] text-muted-foreground italic p-2">
+            No files found
+          </p>
+        )}
+      </div>
     </div>
   );
 }

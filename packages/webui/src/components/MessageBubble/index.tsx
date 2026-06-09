@@ -246,41 +246,46 @@ export const MessageBubble = memo(function MessageBubble({
 
         <div className={cn('flex items-center gap-2 px-1', isUser ? 'flex-row-reverse' : 'flex-row')}>
           <span className="text-xs text-muted-foreground/50">{new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+          {/* ── Separator ── */}
+          <span className="w-px h-3 bg-border/60 shrink-0" aria-hidden />
           {message.runSummary && (
             <span className="text-[10px] text-muted-foreground/60 font-mono tabular-nums"
-              title={[`Iterations: ${message.runSummary.iterations}`, `Tool calls: ${message.runSummary.tools}`, `Elapsed: ${(message.runSummary.durationMs / 1000).toFixed(2)}s`, message.runSummary.costDelta > 0 ? `Cost: $${message.runSummary.costDelta.toFixed(4)}` : ''].filter(Boolean).join('  ·  ')}>
-              {message.runSummary.iterations} iter{message.runSummary.tools > 0 ? ` · ${message.runSummary.tools} tool${message.runSummary.tools === 1 ? '' : 's'}` : ''} · {message.runSummary.durationMs < 60_000 ? `${(message.runSummary.durationMs / 1000).toFixed(1)}s` : `${Math.floor(message.runSummary.durationMs / 60_000)}m ${Math.floor((message.runSummary.durationMs % 60_000) / 1000)}s`}{message.runSummary.costDelta > 0 ? ` · $${message.runSummary.costDelta >= 0.01 ? message.runSummary.costDelta.toFixed(4) : message.runSummary.costDelta.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')}` : ''}
+              title={[`Iterations: ${message.runSummary.iterations}`, `Tool calls: ${message.runSummary.tools}`, `Elapsed: ${(message.runSummary.durationMs / 1000).toFixed(2)}s`, message.runSummary.costDelta > 0 ? `Cost: ${message.runSummary.costDelta.toFixed(4)}` : ''].filter(Boolean).join('  ·  ')}>
+              {message.runSummary.iterations} iter{message.runSummary.tools > 0 ? ` · ${message.runSummary.tools} tool${message.runSummary.tools === 1 ? '' : 's'}` : ''} · {message.runSummary.durationMs < 60_000 ? `${(message.runSummary.durationMs / 1000).toFixed(1)}s` : `${Math.floor(message.runSummary.durationMs / 60_000)}m ${Math.floor((message.runSummary.durationMs % 60_000) / 1000)}s`}{message.runSummary.costDelta > 0 ? ` · ${message.runSummary.costDelta >= 0.01 ? message.runSummary.costDelta.toFixed(4) : message.runSummary.costDelta.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')}` : ''}
             </span>
           )}
           {message.usage && (message.usage.input > 0 || message.usage.output > 0) && (() => {
             const u = message.usage;
             const dollars = (u.input * inputCost + u.output * outputCost + (u.cacheRead ?? 0) * cacheReadCost) / 1_000_000;
             const haveCost = inputCost > 0 || outputCost > 0;
-            const dollarStr = dollars >= 0.01 ? `$${dollars.toFixed(4)}` : dollars > 0 ? `$${dollars.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')}` : '';
+            const dollarStr = dollars >= 0.01 ? `${dollars.toFixed(4)}` : dollars > 0 ? `${dollars.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')}` : '';
             return (<span className="text-[10px] text-muted-foreground/60 font-mono tabular-nums" title={[`Input: ${u.input.toLocaleString()}`, `Output: ${u.output.toLocaleString()}`, u.cacheRead ? `Cache read: ${u.cacheRead.toLocaleString()}` : '', haveCost ? `Cost: ${dollarStr}` : ''].filter(Boolean).join('  ·  ')}>
               {u.input.toLocaleString()}→{u.output.toLocaleString()}{u.cacheRead ? ` · ${u.cacheRead.toLocaleString()} ↺` : ''}{haveCost && dollarStr ? ` · ${dollarStr}` : ''}
             </span>);
           })()}
-          {!isTool && message.content && !message.streaming && <CopyButton text={message.content} label="" className="opacity-0 group-hover:opacity-100 transition-opacity" />}
+          {/* ── Actions — always visible, subtle opacity, full on hover ── */}
+          {!isTool && message.content && !message.streaming && (
+            <CopyButton text={message.content} label="Copy" className="opacity-50 hover:opacity-100 transition-opacity" />
+          )}
           {message.role === 'assistant' && message.content && !message.streaming && (
             <button type="button" onClick={() => setShowRaw((v) => !v)} title={showRaw ? 'Show rendered markdown' : 'Show raw markdown source'}
-              className={cn('text-xs inline-flex items-center gap-1 transition-opacity', showRaw ? 'text-primary hover:text-primary/80 opacity-100' : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground')}>
+              className={cn('text-xs inline-flex items-center gap-1 transition-opacity', showRaw ? 'text-primary hover:text-primary/80 opacity-100' : 'opacity-50 hover:opacity-100 text-muted-foreground hover:text-foreground')}>
               <FileCode2 className="h-3 w-3" /><span>{showRaw ? 'Rendered' : 'Raw'}</span>
             </button>
           )}
           {isUser && !editing && !isLoading && message.content && (
-            <button type="button" onClick={startEdit} title="Edit & resend this prompt" className="opacity-0 group-hover:opacity-100 transition-opacity text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+            <button type="button" onClick={startEdit} title="Edit & resend this prompt" className="opacity-50 hover:opacity-100 transition-opacity text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
               <Pencil className="h-3 w-3" /><span>Edit</span>
             </button>
           )}
           {message.role === 'assistant' && message.content && !message.streaming && (
             <button type="button" onClick={() => togglePin(message.id)} title={isPinned ? 'Unpin' : 'Pin this answer'}
-              className={cn('text-xs inline-flex items-center gap-1 transition-opacity', isPinned ? 'text-amber-500 hover:text-amber-600 opacity-100' : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground')}>
+              className={cn('text-xs inline-flex items-center gap-1 transition-opacity', isPinned ? 'text-amber-500 hover:text-amber-600 opacity-100' : 'opacity-50 hover:opacity-100 text-muted-foreground hover:text-foreground')}>
               {isPinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}<span>{isPinned ? 'Pinned' : 'Pin'}</span>
             </button>
           )}
           {isLatestAssistant && message.content && !message.streaming && (
-            <button type="button" onClick={regenerate} title="Regenerate this response" className="opacity-0 group-hover:opacity-100 transition-opacity text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+            <button type="button" onClick={regenerate} title="Regenerate this response" className="opacity-50 hover:opacity-100 transition-opacity text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
               <RotateCcw className="h-3 w-3" /><span>Retry</span>
             </button>
           )}

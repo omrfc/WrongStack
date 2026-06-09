@@ -1,4 +1,4 @@
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, Lightbulb, MousePointerClick } from 'lucide-react';
 import type React from 'react';
 import { useMemo } from 'react';
 
@@ -50,8 +50,13 @@ function fillInput(text: string): void {
 }
 
 /**
- * Renders extracted next steps as clickable buttons.
+ * Renders extracted next steps as a prominent, clickable action bar.
  * Each button fills the chat input with the suggestion text.
+ *
+ * Design goals:
+ * - Immediately noticeable after the agent's reply (not buried in tiny text)
+ * - Distinct from the message body via card-like appearance and accent colors
+ * - One-click execution — no copy-paste, just click and send
  */
 export function NextStepsBar({
   steps,
@@ -61,21 +66,44 @@ export function NextStepsBar({
   if (steps.length === 0) return null;
 
   return (
-    <div className="mt-3 pt-2 border-t border-border/50">
-      <div className="flex flex-wrap gap-1.5">
+    <div className="mt-4 rounded-xl border border-primary/20 bg-primary/[0.03] overflow-hidden animate-message">
+      {/* ── Header ── */}
+      <div className="flex items-center gap-2 px-3.5 py-2 border-b border-primary/10 bg-primary/[0.04]">
+        <span className="flex items-center justify-center w-5 h-5 rounded-md bg-primary/15 text-primary">
+          <Lightbulb className="h-3 w-3" />
+        </span>
+        <span className="text-xs font-semibold text-foreground/90">Next steps</span>
+        <span className="text-[10px] text-muted-foreground ml-auto">
+          click to fill input
+        </span>
+      </div>
+
+      {/* ── Steps ── */}
+      <div className="flex flex-col p-2 gap-1">
         {steps.map((s) => (
           <button
             key={s.index}
             type="button"
             onClick={() => fillInput(s.text)}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] border border-border/60 bg-muted/40 hover:bg-muted hover:border-primary/40 text-foreground/80 hover:text-foreground transition-colors group"
-            title={`Execute: ${s.text}`}
+            className="group flex items-center gap-2.5 w-full text-left px-3 py-2 rounded-lg transition-all
+                       hover:bg-primary/[0.08] hover:shadow-sm
+                       border border-transparent hover:border-primary/20"
+            title={`Click to fill: ${s.text}`}
           >
-            <span className="font-mono text-[10px] text-muted-foreground group-hover:text-primary tabular-nums">
+            {/* Index badge */}
+            <span className="flex items-center justify-center w-5 h-5 rounded-md bg-muted/80 group-hover:bg-primary/20
+                             text-[11px] font-mono font-semibold tabular-nums shrink-0
+                             text-muted-foreground group-hover:text-primary transition-colors">
               {s.index}
             </span>
-            <ArrowRight className="h-2.5 w-2.5 text-muted-foreground group-hover:text-primary" />
-            <span className="line-clamp-1 max-w-[28rem]">{s.text}</span>
+            {/* Arrow */}
+            <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-primary group-hover:translate-x-0.5 transition-all shrink-0" />
+            {/* Text */}
+            <span className="text-sm leading-snug text-foreground/80 group-hover:text-foreground transition-colors flex-1 min-w-0">
+              {s.text}
+            </span>
+            {/* Click indicator — visible on hover */}
+            <MousePointerClick className="h-3.5 w-3.5 opacity-0 group-hover:opacity-100 text-primary/60 transition-all shrink-0" />
           </button>
         ))}
       </div>
