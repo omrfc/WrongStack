@@ -31,6 +31,7 @@ import { ChatInput } from '../ChatInput';
 import { CheckpointTimeline } from '../CheckpointTimeline';
 import { ConnectionChip } from '../ConnectionChip';
 import { ContextModePicker } from '../ContextModePicker';
+import { ContextBar, ContextFillBar } from '../ContextBar';
 import { CostChip } from '../CostChip';
 import { MessageBubble } from '../MessageBubble';
 import { ModePicker } from '../ModePicker';
@@ -480,15 +481,11 @@ export function ChatView() {
           <div className="flex items-center justify-between gap-3 px-3 py-1 border-t bg-muted/20 text-[11px] text-muted-foreground">
             <div className="flex items-center gap-3 min-w-0 flex-1 tabular-nums">
               {maxContext > 0 && lastInputTokens > 0 && (
-                <span
-                  className={cn(
-                    'flex items-center gap-1 px-1.5 py-0.5 rounded-full font-medium shrink-0',
-                    ctxTone,
-                  )}
-                  title={`Last input: ${lastInputTokens.toLocaleString()} / ${maxContext.toLocaleString()} tokens`}
-                >
-                  ctx {ctxPct}% · {fmtTok(lastInputTokens)}/{fmtTok(maxContext)}
-                </span>
+                <ContextFillBar
+                  pct={ctxPct}
+                  tokens={lastInputTokens}
+                  maxTokens={maxContext}
+                />
               )}
               {totalTokens.input > 0 && (
                 <>

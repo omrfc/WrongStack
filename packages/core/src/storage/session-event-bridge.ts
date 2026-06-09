@@ -36,6 +36,8 @@ export interface SessionEventBridgeOptions {
 export interface SessionEventBridge {
   /** Append an event if allowed by the current audit level. */
   append(event: SessionEvent): Promise<void>;
+  /** Batch-append events allowed by the current audit level. */
+  appendBatch(events: SessionEvent[]): Promise<void>;
 
   /** Current audit level this bridge was created with. */
   readonly level: AuditLevel;
@@ -179,6 +181,19 @@ export function createSessionEventBridge(
         // The existing FileSessionWriter already does throttled warnings,
         // but we keep this wrapper silent by default to avoid log spam.
         // Callers that care can listen to EventBus 'session.damaged' etc.
+      }
+    },
+
+    async appendBatch(events) {
+      if (!writer || events.length === 0) return;
+      const allowed = events.filter(
+        (e) => isAllowed(e.type, normalizedLevel) && shouldSample(e),
+      );
+      if (allowed.length === 0) return;
+      try {
+        await writer.appendBatch(allowed);
+      } catch {
+        // best-effort — same contract as append()
       }
     },
   };

@@ -788,6 +788,28 @@ class FileSessionWriter implements SessionWriter {
     }
   }
 
+  async appendBatch(events: SessionEvent[]): Promise<void> {
+    if (this.closed || events.length === 0) return;
+    if (!this.initDone) {
+      this.initDone = true;
+      await this.writeSessionStartLazy();
+    }
+    for (const event of events) {
+      const scrubbed = this.scrubEvent(event);
+      this.observeForSummary(scrubbed);
+      this.writeBuffer.push(scrubbed);
+    }
+    if (this.writeBuffer.length >= FileSessionWriter.FLUSH_SIZE) {
+      if (this.flushTimer) {
+        clearTimeout(this.flushTimer);
+        this.flushTimer = null;
+      }
+      await this.flushBuffer();
+    } else {
+      this.scheduleFlush();
+    }
+  }
+
   /** Schedule a deferred flush. No-op if a timer is already pending. */
   private scheduleFlush(): void {
     if (this.flushTimer) return;

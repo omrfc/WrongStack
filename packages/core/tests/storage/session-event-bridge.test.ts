@@ -13,6 +13,7 @@ function makeMockWriter() {
     transcriptPath: undefined,
     pendingToolUses: [],
     append,
+    appendBatch: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
     recordFileChange: vi.fn(),
     writeCheckpoint: vi.fn().mockResolvedValue(undefined),

@@ -60,6 +60,7 @@ function makeDeps(): MultiAgentDeps {
   const session: SessionWriter = {
     id: 'sess-test',
     append: vi.fn(async () => undefined),
+    appendBatch: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
   };
 

@@ -22,6 +22,7 @@ const fakeProvider = {} as Provider;
 const fakeSession: SessionWriter = {
   id: 'sess-l1a',
   append: async () => undefined,
+  appendBatch: async () => undefined,
   close: async () => undefined,
 };
 

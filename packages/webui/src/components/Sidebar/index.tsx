@@ -9,6 +9,7 @@ import {
   Clock,
   Cpu,
   FolderOpen,
+  Gauge,
   History,
   Layers,
   MessageSquare,
@@ -21,6 +22,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { AgentDetail } from '../FleetPanel';
+import { ContextPanel } from '../ContextPanel';
 import { ConfigSection } from './ConfigSection.js';
 import { SessionActions } from './SessionActions.js';
 import { SessionList } from './SessionList.js';
@@ -207,14 +209,18 @@ export function Sidebar() {
         </Button>
       </div>
 
-      <Tabs value={currentView === 'chat' || currentView === 'history' || currentView === 'agents' || currentView === 'files' ? currentView : '__none__'} onValueChange={(v) => setCurrentView(v as 'chat' | 'history' | 'agents' | 'files')} className="flex-1 flex flex-col">
-        <TabsList className="w-full rounded-none bg-transparent p-2 h-auto grid grid-cols-4">
+      <Tabs value={currentView === 'chat' || currentView === 'history' || currentView === 'agents' || currentView === 'context' || currentView === 'files' ? currentView : '__none__'} onValueChange={(v) => setCurrentView(v as 'chat' | 'history' | 'agents' | 'context' | 'files')} className="flex-1 flex flex-col">
+        <TabsList className="w-full rounded-none bg-transparent p-2 h-auto grid grid-cols-5">
           <TabsTrigger value="chat" className="flex-col gap-1.5 py-2 data-[state=active]:bg-primary/10">
             <MessageSquare className="h-4 w-4" /><span className="text-xs">Chat</span>
           </TabsTrigger>
           <TabsTrigger value="agents" className="flex-col gap-1.5 py-2 data-[state=active]:bg-primary/10">
             <Bot className="h-4 w-4" />
             <span className="text-xs">Agents{fleetTotal > 0 ? ` · ${fleetTotal}` : ''}</span>
+          </TabsTrigger>
+          <TabsTrigger value="context" className="flex-col gap-1.5 py-2 data-[state=active]:bg-primary/10">
+            <Gauge className="h-4 w-4" />
+            <span className="text-xs">Context</span>
           </TabsTrigger>
           <TabsTrigger value="history" className="flex-col gap-1.5 py-2 data-[state=active]:bg-primary/10">
             <History className="h-4 w-4" /><span className="text-xs">History</span>
@@ -272,6 +278,12 @@ export function Sidebar() {
               ))}
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="context" className="flex-1 m-0 flex flex-col overflow-hidden">
+          <div className="flex-1 overflow-y-auto p-3">
+            <ContextPanel />
+          </div>
         </TabsContent>
 
         <TabsContent value="files" className="flex-1 m-0 flex flex-col overflow-hidden" />

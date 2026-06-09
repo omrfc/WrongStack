@@ -19,3 +19,6 @@ export { WorktreeGraph } from './WorktreeGraph';
 export { WorktreeLanes } from './WorktreeLanes';
 export { AutoPhaseView } from './AutoPhaseView';
 export { TaskBoard, type TaskItem } from './TaskBoard';
+export { ContextBar, ContextFillBar } from './ContextBar';
+export { ContextPanel } from './ContextPanel';
+export { AgentsPage } from './AgentsPage';

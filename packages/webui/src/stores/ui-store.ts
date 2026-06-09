@@ -8,7 +8,7 @@ import { persist } from 'zustand/middleware';
 interface UIState {
   sidebarOpen: boolean;
   settingsOpen: boolean;
-  currentView: 'chat' | 'history' | 'settings' | 'autophase' | 'agents' | 'files';
+  currentView: 'chat' | 'history' | 'settings' | 'autophase' | 'agents' | 'files' | 'context';
   showConfirmDialog: boolean;
   confirmInfo: {
     id: string;
@@ -32,7 +32,7 @@ interface UIState {
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
-  setCurrentView: (view: 'chat' | 'history' | 'settings' | 'autophase' | 'agents' | 'files') => void;
+  setCurrentView: (view: 'chat' | 'history' | 'settings' | 'autophase' | 'agents' | 'files' | 'context') => void;
   showConfirm: (info: UIState['confirmInfo']) => void;
   hideConfirm: () => void;
   setPaletteOpen: (open: boolean) => void;

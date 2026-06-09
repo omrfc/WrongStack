@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { getWSClient } from '@/lib/ws-client';
 import { useChatStore, useConfigStore, useFileStore, useGoalStore, useSessionStore, useUIStore, useWorktreeStore, useAutoPhaseStore } from '@/stores';
 import { useEffect, useState, useCallback } from 'react';
+import { AgentsPage } from './components/AgentsPage';
 import { AutoPhaseView } from './components/AutoPhaseView';
 import { AutonomyPicker } from './components/AutonomyPicker';
 import { ChatView } from './components/ChatView';
@@ -12,6 +13,7 @@ import { CollabPanel } from './components/CollabPanel';
 import { CommandPalette, downloadChatAsMarkdown } from './components/CommandPalette';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { ConnectionBanner } from './components/ConnectionBanner';
+import { ContextPanel } from './components/ContextPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { FileExplorer } from './components/FileExplorer';
 import { FleetPanel } from './components/FleetPanel';
@@ -319,7 +321,7 @@ function AppInner() {
       {/* ── Main area ── */}
       <main className="flex-1 flex flex-col overflow-hidden">
         <ConnectionBanner />
-        {(currentView === 'chat' || currentView === 'agents') && (
+        {currentView === 'chat' && (
           <>
             {sessionId && (
               <div className="px-4 pt-2 space-y-2">
@@ -382,6 +384,16 @@ function AppInner() {
         {currentView === 'settings' && <SettingsPanel />}
         {currentView === 'autophase' && (
           <AutoPhaseView onClose={() => setCurrentView('chat')} />
+        )}
+        {currentView === 'agents' && (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <AgentsPage />
+          </div>
+        )}
+        {currentView === 'context' && (
+          <div className="flex-1 overflow-y-auto p-4 max-w-2xl mx-auto">
+            <ContextPanel />
+          </div>
         )}
         {/* ── IDE Code Editor (only in Files view) ── */}
         {currentView === 'files' && <CodeEditor />}

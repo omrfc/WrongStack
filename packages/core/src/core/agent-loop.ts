@@ -7,7 +7,7 @@ import type { Request, Response } from '../types/provider.js';
 import type { ContentBlock, TextBlock } from '../types/blocks.js';
 import { isToolUseBlock } from '../types/blocks.js';
 import { toWrongStackError } from '../types/errors.js';
-import { estimateRequestTokens, estimateRequestTokensCalibrated, recordActualUsage } from '../utils/token-estimate.js';
+import { estimateRequestTokens, estimateRequestTokensCalibrated, getCalibrationState, recordActualUsage } from '../utils/token-estimate.js';
 import { consumeAutonomousContinue } from './continue-to-next-iteration.js';
 import { buildBtwBlock, consumeBtwNotes } from './btw.js';
 import { runProviderWithRetry } from './provider-runner.js';
@@ -65,14 +65,17 @@ export function createAgentLoopHandler(
     // Mirror the denominator AutoCompactionMiddleware uses: an explicit
     // effectiveMaxContext override (ctx.meta) wins, then the provider window,
     // then a safe default. Avoids divide-by-zero when the window is unknown (0).
-    const metaLimit = a.ctx.meta?.['effectiveMaxContext'];
-    const providerMax = a.ctx.provider.capabilities.maxContext;
-    const maxContext =
-      typeof metaLimit === 'number' && metaLimit > 0
-        ? metaLimit
-        : typeof providerMax === 'number' && providerMax > 0
-          ? providerMax
-          : 200_000;
+    // Cached — maxContext does not change during a session run.
+    if (!_maxContext) {
+      const metaLimit = a.ctx.meta?.['effectiveMaxContext'];
+      const providerMax = a.ctx.provider.capabilities.maxContext;
+      _maxContext =
+        typeof metaLimit === 'number' && metaLimit > 0
+          ? metaLimit
+          : typeof providerMax === 'number' && providerMax > 0
+            ? providerMax
+            : 200_000;
+    }
     // Use the calibrated estimate so the live context bar matches the figure
     // the middleware uses to decide when to compact.
     const { total } = estimateRequestTokensCalibrated(
@@ -81,8 +84,9 @@ export function createAgentLoopHandler(
       a.ctx.tools ?? [],
       calibrationKey(),
     );
-    a.events.emit('ctx.pct', { load: total / maxContext, tokens: total, maxContext });
+    a.events.emit('ctx.pct', { load: total / _maxContext, tokens: total, maxContext: _maxContext });
   }
+  let _maxContext = 0;
 
   /** Fold pending /btw notes into conversation before each iteration. */
   function injectPendingBtwNotes(): void {
@@ -213,21 +217,35 @@ export function createAgentLoopHandler(
 
         const req = await handlers.response.buildAndRunRequestPipeline(opts);
 
+        // Compute the token estimate ONCE for both the session audit log
+        // and the post-response calibration update. Previously these were
+        // two separate calls that walked the same messages/system/tools arrays.
+        const preFlight = estimateRequestTokens(req.messages, req.system, req.tools ?? []);
+
         await a.ctx.session.append({
           type: 'llm_request',
           ts: new Date().toISOString(),
           model: req.model,
           messageCount: req.messages.length,
-          estimatedInputTokens: estimateRequestTokens(req.messages, req.system, req.tools ?? []).total,
+          estimatedInputTokens: preFlight.total,
           toolCount: (req.tools ?? []).length,
         }).catch(() => { /* best-effort */ });
 
         let res: Response;
         try {
           res = await customRunner(a.ctx, req);
+          // Derive the calibrated estimate from the pre-flight result instead
+          // of calling estimateRequestTokensCalibrated() which would re-walk
+          // the same messages/system/tools arrays. The calibration ratio is
+          // the same per-(provider,model) bucket — applying it to the raw
+          // total is equivalent to the per-component rounding in the full
+          // calibrated function.
           const key = calibrationKey(req.model);
-          const calibratedEstimate = estimateRequestTokensCalibrated(req.messages, req.system, req.tools ?? [], key).total;
-          recordActualUsage(res.usage.input, calibratedEstimate, key);
+          const cal = getCalibrationState(key);
+          const calibratedTotal = cal.calibrated
+            ? Math.round(preFlight.total * Math.min(1.5, Math.max(0.5, cal.ratio)))
+            : preFlight.total;
+          recordActualUsage(res.usage.input, calibratedTotal, key);
           recoveryRetries = 0;
         } catch (err) {
           if (controller.signal.aborted) {

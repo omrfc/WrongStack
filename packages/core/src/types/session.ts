@@ -264,6 +264,13 @@ export interface SessionWriter {
    * Used by the REPL to serialize pending state into `session_end` for proper resume. */
   readonly pendingToolUses: string[];
   append(event: SessionEvent): Promise<void>;
+  /**
+   * Append a batch of events in one call. Semantically equivalent to calling
+   * `append()` for each event sequentially, but avoids N individual function
+   * calls, scrub/observe cycles, and timer rescheduling. The caller is
+   * responsible for ensuring events are in the correct order.
+   */
+  appendBatch(events: SessionEvent[]): Promise<void>;
   close(): Promise<void>;
   /**
    * Register a file change for later snapshotting.

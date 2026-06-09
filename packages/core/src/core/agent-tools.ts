@@ -5,6 +5,7 @@
  */
 import type { ToolUseBlock, ToolResultBlock } from '../types/blocks.js';
 import type { Tool } from '../types/tool.js';
+import type { SessionEvent } from '../types/session.js';
 import { sizeSignals, truncateForEvent } from '../utils/tool-output-serializer.js';
 import type { AgentInternals } from './agent-internals.js';
 
@@ -94,6 +95,7 @@ export function createAgentToolHandler(a: AgentInternals): AgentToolHandler {
 
     const useById = new Map(selectedToolUses.map((u) => [u.id, u]));
     const resultsForMessage: ToolResultBlock[] = [];
+    const sessionEvents: SessionEvent[] = [];
 
     for (const { result, tool, durationMs } of outputs) {
       if (result.type === 'tool_confirm_pending' && tool) {
@@ -149,7 +151,7 @@ export function createAgentToolHandler(a: AgentInternals): AgentToolHandler {
         const use = useById.get(reRunResult.result.tool_use_id);
         if (use) {
           await a.pipelines.toolCall.run({ toolUse: use, result: reRunResult.result, ctx: a.ctx, tool });
-          await a.ctx.session.append({
+          sessionEvents.push({
             type: 'tool_result',
             ts: new Date().toISOString(),
             id: reRunResult.result.tool_use_id,
@@ -175,7 +177,7 @@ export function createAgentToolHandler(a: AgentInternals): AgentToolHandler {
       const use = useById.get(result.tool_use_id);
       if (!use) continue;
       await a.pipelines.toolCall.run({ toolUse: use, result, ctx: a.ctx, tool: tool ?? undefined });
-      await a.ctx.session.append({
+      sessionEvents.push({
         type: 'tool_result',
         ts: new Date().toISOString(),
         id: result.tool_use_id,
@@ -183,6 +185,14 @@ export function createAgentToolHandler(a: AgentInternals): AgentToolHandler {
         isError: !!result.is_error,
       });
       emitToolExecuted(result.tool_use_id, use.name, durationMs, !result.is_error, use.input, result.content);
+    }
+
+    // Batch-append all tool_result events to the session log in one call.
+    // This replaces N sequential append() calls (one per tool result) with a
+    // single batch write, avoiding N-1 function calls, scrub/observe cycles,
+    // and timer rescheduling overhead.
+    if (sessionEvents.length > 0) {
+      await a.ctx.session.appendBatch(sessionEvents);
     }
 
     a.ctx.state.appendMessage({ role: 'user', content: resultsForMessage });
