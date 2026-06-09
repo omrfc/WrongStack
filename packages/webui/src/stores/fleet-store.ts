@@ -22,6 +22,7 @@ function blankAgent(id: string, name?: string): SubagentView {
     maxContext: 0,
     extensions: 0,
     startedAt: Date.now(),
+    toolLog: [],
   };
 }
 
@@ -50,12 +51,20 @@ export const useFleetStore = create<FleetState>()((set) => ({
         case 'tool_executed':
           next.lastTool = e.toolName ?? next.lastTool;
           next.toolCalls = next.toolCalls + 1;
+          // Prepend to tool log, cap at 50
+          next.toolLog = [
+            { name: e.toolName ?? 'unknown', ok: typeof e.ok === 'boolean' ? e.ok : true, durationMs: typeof e.durationMs === 'number' ? e.durationMs : 0, at: Date.now() },
+            ...next.toolLog,
+          ].slice(0, 50);
           break;
         case 'iteration_summary':
           next.iteration = e.iteration ?? next.iteration;
           if (typeof e.toolCalls === 'number') next.toolCalls = e.toolCalls;
           if (typeof e.costUsd === 'number') next.costUsd = e.costUsd;
           next.currentTool = e.currentTool ?? next.currentTool;
+          if (typeof e.partialText === 'string' && e.partialText) {
+            next.partialText = e.partialText;
+          }
           break;
         case 'budget_extended':
           next.extensions = e.totalExtensions ?? next.extensions + 1;

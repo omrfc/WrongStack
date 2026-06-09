@@ -194,16 +194,56 @@ export function AgentDetail({
             </div>
           )}
 
-          {/* Output placeholder */}
-          <div className="rounded-lg border border-dashed border-border p-4 text-center space-y-1">
-            <span className="text-xs text-muted-foreground">
-              Agent output stream coming soon
-            </span>
-            <p className="text-[10px] text-muted-foreground/60">
-              Real-time text deltas and tool results will appear here once the backend
-              forwards subagent message content to the WebUI.
-            </p>
-          </div>
+          {/* Output — partial text from subagent streaming */}
+          {agent.partialText ? (
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Live Output
+              </span>
+              <pre className="text-xs mt-1.5 whitespace-pre-wrap font-mono text-foreground/80 leading-relaxed max-h-48 overflow-y-auto">
+                {agent.partialText}
+              </pre>
+            </div>
+          ) : active ? (
+            <div className="rounded-lg border border-dashed border-border p-3 text-center">
+              <span className="text-xs text-muted-foreground">
+                Waiting for output…
+              </span>
+              <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+                Output appears here as the agent streams text.
+              </p>
+            </div>
+          ) : null}
+
+          {/* Tool execution log */}
+          {agent.toolLog.length > 0 && (
+            <div className="space-y-1">
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Tool Log ({agent.toolLog.length})
+              </span>
+              <div className="max-h-40 overflow-y-auto space-y-0.5">
+                {agent.toolLog.slice(0, 15).map((tl, i) => (
+                  <div
+                    key={`${tl.name}-${tl.at}-${i}`}
+                    className={cn(
+                      'flex items-center gap-2 rounded px-2 py-1 text-[10px]',
+                      tl.ok ? 'bg-muted/30' : 'bg-destructive/5 border border-destructive/20',
+                    )}
+                  >
+                    <span className={cn('led shrink-0', tl.ok ? 'text-[hsl(var(--success))]' : 'text-destructive')} />
+                    <span className="font-mono truncate flex-1">{tl.name}</span>
+                    <span className="tabular text-muted-foreground">{tl.durationMs}ms</span>
+                    {!tl.ok && <span className="text-destructive font-medium">fail</span>}
+                  </div>
+                ))}
+                {agent.toolLog.length > 15 && (
+                  <p className="text-[9px] text-muted-foreground text-center px-2 py-0.5">
+                    +{agent.toolLog.length - 15} more tools
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

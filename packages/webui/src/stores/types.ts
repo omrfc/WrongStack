@@ -110,6 +110,13 @@ export interface SubagentView {
   error?: { kind: string | undefined; message: string };
   startedAt: number;
   completedAt?: number | undefined;
+  /** Accumulated partial text from periodic iteration_summary snapshots.
+   *  Last ~200 chars of the subagent's streaming output — gives live
+   *  visibility into what the subagent is writing. */
+  partialText?: string | undefined;
+  /** Running log of tool executions: name, ok/fail, duration. Most recent
+   *  first, capped at ~50 entries to avoid memory bloat on long runs. */
+  toolLog: Array<{ name: string; ok: boolean; durationMs: number; at: number }>;
 }
 
 /** Discriminated payload mirroring the subagent.* events the backend forwards. */
@@ -140,4 +147,10 @@ export interface SubagentEvent {
   status?: 'success' | 'failed' | 'timeout' | 'stopped' | undefined;
   iterations?: number | undefined;
   error?: { kind: string | undefined; message: string };
+  /** Tool execution result (tool_executed event). */
+  ok?: boolean | undefined;
+  /** Tool execution duration in ms (tool_executed event). */
+  durationMs?: number | undefined;
+  /** Accumulated partial text (iteration_summary event). */
+  partialText?: string | undefined;
 }
