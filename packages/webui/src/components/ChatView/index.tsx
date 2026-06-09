@@ -350,43 +350,49 @@ export function ChatView() {
             )}
             {/* Todo chip */}
             {(pendingCount > 0 || inProgressCount > 0) && (
-              <span
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0"
-                title={`Todos: ${completedCount}/${todos.length} done`}
+              <button
+                type="button"
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0 hover:bg-amber-500/20 transition-colors cursor-pointer"
+                title={`Todos: ${completedCount}/${todos.length} done — click to jump`}
+                onClick={() => document.getElementById('panel-todos')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
               >
                 <CheckCircle2 className="h-3 w-3" />
                 {completedCount}/{todos.length}
-              </span>
+              </button>
             )}
             {/* Fleet chip */}
             {fleetTotal > 0 && (
-              <span
+              <button
+                type="button"
                 className={cn(
-                  'flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-medium shrink-0',
+                  'flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-medium shrink-0 cursor-pointer transition-colors',
                   fleetRunning > 0
-                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                    : 'bg-muted text-muted-foreground',
+                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20'
+                    : 'bg-muted text-muted-foreground hover:bg-muted/80',
                 )}
-                title={`Fleet: ${fleetRunning}/${fleetTotal} running`}
+                title={`Fleet: ${fleetRunning}/${fleetTotal} running — click to jump`}
+                onClick={() => document.getElementById('panel-fleet')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
               >
                 <Users className="h-3 w-3" />
                 {fleetRunning}/{fleetTotal}
-              </span>
+              </button>
             )}
             {/* Goal chip */}
             {goal && (
-              <span
+              <button
+                type="button"
                 className={cn(
-                  'flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-medium shrink-0',
+                  'flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-medium shrink-0 cursor-pointer transition-colors',
                   goal.goalState === 'active'
-                    ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
-                    : 'bg-muted text-muted-foreground',
+                    ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20'
+                    : 'bg-muted text-muted-foreground hover:bg-muted/80',
                 )}
-                title={`Goal: ${goal.progress}% — ${goal.goal.slice(0, 60)}`}
+                title={`Goal: ${goal.progress}% — ${goal.goal.slice(0, 60)} — click to jump`}
+                onClick={() => document.getElementById('panel-goal')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
               >
                 <Activity className="h-3 w-3" />
                 {goal.progress}%
-              </span>
+              </button>
             )}
             {/* Worktree chip */}
             {baseBranch && (

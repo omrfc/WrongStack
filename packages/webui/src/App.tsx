@@ -221,8 +221,8 @@ function AppInner() {
           <>
             {sessionId && (
               <div className="px-4 pt-2 space-y-2">
-                <CollabPanel sessionId={sessionId} />
-                <GoalPanel goal={goal} />
+                <div id="panel-collab"><CollabPanel sessionId={sessionId} /></div>
+                <div id="panel-goal"><GoalPanel goal={goal} /></div>
                 {/* AutoPhase panel — self-hides when no phases */}
                 {autoPhase.phases.length > 0 && (
                   <PhasePanel
@@ -233,9 +233,9 @@ function AppInner() {
                   />
                 )}
                 {/* Live subagent roster — self-hides when no fleet is running. */}
-                <FleetPanel />
+                <div id="panel-fleet"><FleetPanel /></div>
                 {/* Live agent todo list — self-hides when empty. */}
-                <TodosPanel />
+                <div id="panel-todos"><TodosPanel /></div>
                 {/* Worktree graph — only when active. Toggle between graph and lanes view. */}
                 {worktrees.length > 0 && (
                   <div className="space-y-2">
