@@ -11,7 +11,9 @@ WrongStack's REPL supports core slash commands plus commands registered by built
 | `/clear` | `packages/cli/src/slash-commands/clear.ts` | Wipe session state and terminal view |
 | `/compact` | `packages/cli/src/slash-commands/compact.ts` | Run the context-window compactor |
 | `/context` | `packages/cli/src/slash-commands/context.ts` | Context summary, repair, mode, and limit controls; `/ctx` alias |
+| `/dev` | `packages/cli/src/slash-commands/dev.ts` | Run a shell command and see output (LLM does not see it) |
 | `/codebase-reindex` | `packages/cli/src/slash-commands/codebase-reindex.ts` | Rebuild the codebase symbol index; `/reindex` alias |
+| `/techstack` | `packages/cli/src/slash-commands/techstack.ts` | Scan dependencies, verify versions, write techstack report; `/tech`, `/deps` aliases |
 | `/diag` | `packages/cli/src/slash-commands/diag-stats.ts` | Runtime diagnostics |
 | `/stats` | `packages/cli/src/slash-commands/diag-stats.ts` | Session report |
 | `/memory` | `packages/cli/src/slash-commands/memory.ts` | Persistent memory: show, remember, forget, clear |
@@ -86,31 +88,125 @@ REPL input "/<command> <args>"
 
 ## Adding a core slash command
 
-1. Create `packages/cli/src/slash-commands/<name>.ts`.
-2. Export `buildXxxCommand(opts: SlashCommandContext): SlashCommand`.
-3. Import and add it to `buildBuiltinSlashCommands()` in `packages/cli/src/slash-commands/index.ts`.
-4. Add tests under `packages/cli/tests/`.
-5. Add or update docs under `docs/slash/`.
+### Checklist
 
-### Recommended patterns
+1. **Create** `packages/cli/src/slash-commands/<name>.ts`.
+2. **Define** `buildXxxCommand(opts: SlashCommandContext): SlashCommand` — return
+   an object with `name`, `category`, `description`, `help`, and `run`.
+3. **Register** — import and add to `buildBuiltinSlashCommands()` in
+   `packages/cli/src/slash-commands/index.ts`.
+4. **Test** — add tests under `packages/cli/tests/` using vitest.
+5. **Document** — add or update docs under `docs/slash/` and the README table.
 
-**Arg parsing:** Use `parseSubcommand(args)` from `helpers.ts` instead of raw
-`args.trim().split(/\s+/)`. Returns `{ cmd, rest }` where `cmd` is the lowercase
-first token and `rest` is the remaining tokens.
+### SlashCommand shape
 
 ```typescript
-import { parseSubcommand, unknownSubcommand } from './helpers.js';
-
-async run(args) {
-  const { cmd, rest } = parseSubcommand(args);
-  switch (cmd) {
-    case 'sub1': return handleSub1(rest);
-    case 'sub2': return handleSub2(rest);
-    default:
-      return { message: unknownSubcommand(cmd, ['sub1', 'sub2'], 'mycommand') };
-  }
+interface SlashCommand {
+  name: string;           // e.g. 'delegate' — becomes /delegate
+  category?: 'Run' | 'Session' | 'Inspect' | 'Agent' | 'Config' | 'App';
+  aliases?: string[];     // e.g. ['del', 'dlg']
+  description: string;    // one-line shown in /help listing
+  argsHint?: string;      // e.g. '[--role=<role>] <task>'
+  help?: string;          // detailed help shown by /help <name>
+  run(args: string, ctx: Context): Promise<{ message?: string; runText?: string; exit?: boolean }>;
 }
 ```
+
+### Minimal example (from `/delegate`)
+
+```typescript
+// packages/cli/src/slash-commands/mycommand.ts
+import { color } from '@wrongstack/core';
+import type { SlashCommand } from '@wrongstack/core';
+import type { SlashCommandContext } from './index.js';
+import { parseSubcommand, unknownSubcommand } from './helpers.js';
+
+export function buildMyCommand(opts: SlashCommandContext): SlashCommand {
+  return {
+    name: 'mycommand',
+    category: 'Agent',
+    description: 'What /mycommand does in one line.',
+    argsHint: '[sub] [args]',
+    help: [
+      'Usage:',
+      '  /mycommand           Show status',
+      '  /mycommand sub1      Do thing one',
+      '  /mycommand sub2      Do thing two',
+    ].join('\n'),
+
+    async run(args) {
+      const { cmd, rest } = parseSubcommand(args);
+
+      switch (cmd) {
+        case '':
+        case 'status':
+          return { message: 'Status: all good.' };
+        case 'sub1':
+          return handleSub1(rest);
+        default:
+          return {
+            message: unknownSubcommand(cmd, ['sub1', 'sub2'], 'mycommand'),
+          };
+      }
+    },
+  };
+}
+```
+
+### Registration
+
+```typescript
+// packages/cli/src/slash-commands/index.ts
+import { buildMyCommand } from './mycommand.js';
+// ...inside buildBuiltinSlashCommands():
+buildMyCommand(opts),
+```
+
+### Testing
+
+```typescript
+// packages/cli/tests/slash-mycommand.test.ts
+import { describe, expect, it, vi } from 'vitest';
+import { buildMyCommand } from '../src/slash-commands/mycommand.js';
+
+function ctx(extra = {}) {
+  return {
+    session: { id: 's1' },
+    renderer: { write: () => {}, writeWarning: () => {} },
+    projectRoot: '/tmp',
+    cwd: '/tmp',
+    ...extra,
+  } as never;
+}
+
+describe('buildMyCommand', () => {
+  it('shows usage when no args', async () => {
+    const cmd = buildMyCommand(ctx());
+    const res = await cmd.run('');
+    expect(res?.message).toContain('Status');
+  });
+});
+```
+
+### Key imports
+
+| Import | From | Purpose |
+|---|---|---|
+| `color`, `noOpVault`, `dispatchAgent` | `@wrongstack/core` | Core utilities |
+| `type SlashCommand` | `@wrongstack/core` | Return type |
+| `type SlashCommandContext` | `./index.js` | DI context |
+| `parseSubcommand`, `unknownSubcommand` | `./helpers.js` | Arg parsing + error messages |
+
+### Category values
+
+| Category | When to use |
+|---|---|
+| `Run` | Commands that execute something (`/dev`) |
+| `Session` | Session lifecycle (`/clear`, `/compact`, `/save`, `/sessions`) |
+| `Inspect` | Read-only inspection (`/context`, `/tools`, `/memory`, `/tasks`) |
+| `Agent` | Multi-agent and AI steering (`/spawn`, `/fleet`, `/delegate`, `/fix`) |
+| `Config` | Settings and configuration (`/mode`, `/settings`, `/models`) |
+| `App` | Application-level (`/help`, `/exit`)
 
 ## Adding a plugin slash command
 
