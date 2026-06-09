@@ -14,6 +14,12 @@ export interface EnhancePanelProps {
   delayMs: number;
   /** Called once with the chosen action (by key press or countdown expiry). */
   onDecision: (decision: EnhanceDecision) => void;
+  /**
+   * Called every second with the remaining seconds. Lets the statusline
+   * render the countdown without the panel's re-renders bleeding into the
+   * chat scrollback as blank entries.
+   */
+  onTick?: ((remaining: number) => void) | undefined;
 }
 
 /**
@@ -36,24 +42,30 @@ export function EnhancePanel({
   english,
   delayMs,
   onDecision,
+  onTick,
 }: EnhancePanelProps): React.ReactElement {
   const totalSecs = Math.max(1, Math.ceil(delayMs / 1000));
-  const [remaining, setRemaining] = React.useState(totalSecs);
+
+  // Countdown runs internally via a ref — no React state, no re-renders, no
+  // blank entries bleeding into the chat scrollback. The statusline receives
+  // ticks via onTick() and owns the visible display.
+  const remainingRef = React.useRef(totalSecs);
 
   // Tick the countdown once per second; fire 'refined' when it reaches 0.
-  // The latest onDecision is read from a ref so the interval never goes stale.
+  // The latest callbacks are read from refs so the interval never goes stale.
   const decideRef = React.useRef(onDecision);
   decideRef.current = onDecision;
+  const tickRef = React.useRef(onTick);
+  tickRef.current = onTick;
   React.useEffect(() => {
     const id = setInterval(() => {
-      setRemaining((r) => {
-        if (r <= 1) {
-          clearInterval(id);
-          decideRef.current('refined');
-          return 0;
-        }
-        return r - 1;
-      });
+      const r = remainingRef.current - 1;
+      remainingRef.current = r;
+      tickRef.current?.(r);
+      if (r <= 0) {
+        clearInterval(id);
+        decideRef.current('refined');
+      }
     }, 1000);
     return () => clearInterval(id);
   }, []);
@@ -76,8 +88,6 @@ export function EnhancePanel({
         <Text bold color="cyan">
           ✨ Refined request
         </Text>
-        <Text> </Text>
-        <Text dimColor>— sending in {remaining}s</Text>
       </Box>
       <Box flexDirection="row">
         <Text dimColor>original: </Text>

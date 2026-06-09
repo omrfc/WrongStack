@@ -2013,6 +2013,11 @@ export function App({
   // "refining..." and send the original immediately.
   const enhanceAbortRef = useRef<AbortController | null>(null);
 
+  // Seconds remaining in the prompt-refinement auto-send countdown. Lifted
+  // out of EnhancePanel so the statusline can display it — panel re-renders
+  // during the countdown were causing blank entries in chat scrollback.
+  const [enhanceCountdown, setEnhanceCountdown] = useState<number | null>(null);
+
   useTuiEventBridge({
     events,
     dispatch,
@@ -4112,6 +4117,7 @@ export function App({
                 const onDecision = (decision: 'refined' | 'english' | 'original' | 'edit') => {
                   if (resolved) return;
                   resolved = true;
+                  setEnhanceCountdown(null);
                   info.resolve(decision);
                 };
                 return (
@@ -4121,6 +4127,7 @@ export function App({
                     english={info.english}
                     delayMs={enhanceDelayMs}
                     onDecision={onDecision}
+                    onTick={(r) => setEnhanceCountdown(r > 0 ? r : null)}
                   />
                 );
               })()
@@ -4150,6 +4157,7 @@ export function App({
             indexState={indexState}
             modeLabel={liveModeLabel || undefined}
             debugStreamStats={state.debugStreamStats}
+            enhanceCountdown={enhanceCountdown}
           />
           {/* Keys-&-commands help overlay (`?` on an empty prompt). Modal: while
           open, handleKey swallows everything but Esc/?/q, so it never coexists

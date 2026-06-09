@@ -197,6 +197,13 @@ export interface StatusBarProps {
     totalBytes: number;
     lastChunkAt: string;
   } | null | undefined;
+  /**
+   * Seconds remaining in the prompt-refinement auto-send countdown.
+   * When non-null, replaces the old in-panel timer display with a
+   * line-3 chip like `⏳ auto-send in 5s` so the countdown never
+   * causes blank entries in the chat scrollback.
+   */
+  enhanceCountdown?: number | null | undefined;
 }
 
 /**
@@ -232,6 +239,7 @@ export function StatusBar({
   indexState,
   modeLabel,
   debugStreamStats,
+  enhanceCountdown,
 }: StatusBarProps): React.ReactElement {
   // Track terminal width so we can adapt layout on narrow terminals.
   // We snapshot into state so that renders are stable — we don't want
@@ -304,12 +312,14 @@ export function StatusBar({
     subagentCount > 0;
   const hasBrainActivity = !!brain && brain.state !== 'idle';
   const hasDebugStream = !!debugStreamStats;
+  const hasEnhanceCountdown = enhanceCountdown != null && enhanceCountdown > 0;
   const hasThirdLine =
     (todos && (todos.pending > 0 || todos.inProgress > 0 || todos.completed > 0)) ||
     (plan && (plan.open > 0 || plan.inProgress > 0 || plan.done > 0)) ||
     fleetHasActivity ||
     hasBrainActivity ||
-    hasDebugStream;
+    hasDebugStream ||
+    hasEnhanceCountdown;
 
   return (
     <Box
@@ -597,6 +607,20 @@ export function StatusBar({
                 <Text dimColor> · {debugStreamStats.lastChunkSize}B</Text>
                 <Text dimColor> · +{debugStreamStats.lastDeltaMs}ms</Text>
                 <Text dimColor> · {fmtDebugBytes(debugStreamStats.totalBytes)}</Text>
+              </Text>
+            </>
+          ) : null}
+          {hasEnhanceCountdown && enhanceCountdown != null ? (
+            <>
+              {(todos && (todos.pending > 0 || todos.inProgress > 0 || todos.completed > 0)) ||
+              (plan && (plan.open > 0 || plan.inProgress > 0 || plan.done > 0)) ||
+              fleetHasActivity ||
+              hasBrainActivity ||
+              hasDebugStream ? (
+                <Text dimColor>│</Text>
+              ) : null}
+              <Text color={enhanceCountdown <= 5 ? 'yellow' : 'cyan'}>
+                ⏳ auto-send in {enhanceCountdown}s
               </Text>
             </>
           ) : null}

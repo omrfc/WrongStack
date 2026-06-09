@@ -875,25 +875,46 @@ export function reducer(state: State, action: Action): State {
       return { ...state, streamFleet: action.enabled };
     }
     case 'toggleMonitor': {
-      return { ...state, monitorOpen: !state.monitorOpen };
+      const opening = !state.monitorOpen;
+      return opening
+        ? { ...state, monitorOpen: true, agentsMonitorOpen: false, helpOpen: false, todosMonitorOpen: false, queuePanelOpen: false, processListOpen: false, goalPanelOpen: false }
+        : { ...state, monitorOpen: false };
     }
     case 'toggleAgentsMonitor': {
-      return { ...state, agentsMonitorOpen: !state.agentsMonitorOpen };
+      const opening = !state.agentsMonitorOpen;
+      return opening
+        ? { ...state, agentsMonitorOpen: true, monitorOpen: false, helpOpen: false, todosMonitorOpen: false, queuePanelOpen: false, processListOpen: false, goalPanelOpen: false }
+        : { ...state, agentsMonitorOpen: false };
     }
     case 'toggleHelp': {
-      return { ...state, helpOpen: !state.helpOpen };
+      const opening = !state.helpOpen;
+      return opening
+        ? { ...state, helpOpen: true, monitorOpen: false, agentsMonitorOpen: false, todosMonitorOpen: false, queuePanelOpen: false, processListOpen: false, goalPanelOpen: false }
+        : { ...state, helpOpen: false };
     }
     case 'toggleTodosMonitor': {
-      return { ...state, todosMonitorOpen: !state.todosMonitorOpen };
+      const opening = !state.todosMonitorOpen;
+      return opening
+        ? { ...state, todosMonitorOpen: true, monitorOpen: false, agentsMonitorOpen: false, helpOpen: false, queuePanelOpen: false, processListOpen: false, goalPanelOpen: false }
+        : { ...state, todosMonitorOpen: false };
     }
     case 'toggleQueuePanel': {
-      return { ...state, queuePanelOpen: !state.queuePanelOpen };
+      const opening = !state.queuePanelOpen;
+      return opening
+        ? { ...state, queuePanelOpen: true, monitorOpen: false, agentsMonitorOpen: false, helpOpen: false, todosMonitorOpen: false, processListOpen: false, goalPanelOpen: false }
+        : { ...state, queuePanelOpen: false };
     }
     case 'toggleProcessList': {
-      return { ...state, processListOpen: !state.processListOpen };
+      const opening = !state.processListOpen;
+      return opening
+        ? { ...state, processListOpen: true, monitorOpen: false, agentsMonitorOpen: false, helpOpen: false, todosMonitorOpen: false, queuePanelOpen: false, goalPanelOpen: false }
+        : { ...state, processListOpen: false };
     }
     case 'toggleGoalPanel': {
-      return { ...state, goalPanelOpen: !state.goalPanelOpen };
+      const opening = !state.goalPanelOpen;
+      return opening
+        ? { ...state, goalPanelOpen: true, monitorOpen: false, agentsMonitorOpen: false, helpOpen: false, todosMonitorOpen: false, queuePanelOpen: false, processListOpen: false }
+        : { ...state, goalPanelOpen: false };
     }
     case 'checkpointReceived': {
       const existing = state.checkpoints.find((c) => c.promptIndex === action.cp.promptIndex);
