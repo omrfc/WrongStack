@@ -81,6 +81,9 @@ export const useFleetStore = create<FleetState>()((set) => ({
           next.error = e.error;
           next.currentTool = undefined;
           next.completedAt = Date.now();
+          if (typeof e.finalText === 'string' && e.finalText) {
+            next.finalText = e.finalText;
+          }
           break;
       }
       agents.set(e.subagentId, next);

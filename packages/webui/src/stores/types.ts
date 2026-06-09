@@ -114,6 +114,8 @@ export interface SubagentView {
    *  Last ~200 chars of the subagent's streaming output — gives live
    *  visibility into what the subagent is writing. */
   partialText?: string | undefined;
+  /** Final output text from task_completed — the subagent's complete response. */
+  finalText?: string | undefined;
   /** Running log of tool executions: name, ok/fail, duration. Most recent
    *  first, capped at ~50 entries to avoid memory bloat on long runs. */
   toolLog: Array<{ name: string; ok: boolean; durationMs: number; at: number }>;
@@ -153,4 +155,6 @@ export interface SubagentEvent {
   durationMs?: number | undefined;
   /** Accumulated partial text (iteration_summary event). */
   partialText?: string | undefined;
+  /** Final output text (task_completed event). */
+  finalText?: string | undefined;
 }

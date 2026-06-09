@@ -194,8 +194,17 @@ export function AgentDetail({
             </div>
           )}
 
-          {/* Output — partial text from subagent streaming */}
-          {agent.partialText ? (
+          {/* Output — partial text from subagent streaming, or final text on completion */}
+          {agent.finalText ? (
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Final Output
+              </span>
+              <pre className="text-xs mt-1.5 whitespace-pre-wrap font-mono text-foreground/80 leading-relaxed max-h-64 overflow-y-auto">
+                {agent.finalText}
+              </pre>
+            </div>
+          ) : agent.partialText ? (
             <div className="rounded-lg border bg-muted/20 p-3">
               <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                 Live Output

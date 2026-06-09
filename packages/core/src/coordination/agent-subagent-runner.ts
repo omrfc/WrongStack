@@ -75,6 +75,7 @@ export function makeAgentSubagentRunner(opts: AgentRunnerOptions): SubagentRunne
   const format = opts.formatTaskInput ?? defaultFormatTaskInput;
 
   return async (task: TaskSpec, ctx: SubagentRunContext): Promise<SubagentRunOutcome> => {
+    const taskStartedAt = Date.now();
     const factoryResult = await opts.factory(ctx.config);
     const { agent, events } = factoryResult;
 
@@ -235,8 +236,8 @@ export function makeAgentSubagentRunner(opts: AgentRunnerOptions): SubagentRunne
         // Streamed assistant text is forward motion too — keep the idle
         // clock fresh while the model is actively generating.
         ctx.budget.markActivity();
-        // Accumulate last ~200 chars for the partial text snapshot.
-        streamingTextAcc = (streamingTextAcc + e.text).slice(-200);
+        // Accumulate last ~2000 chars for the partial text snapshot.
+        streamingTextAcc = (streamingTextAcc + e.text).slice(-2000);
       }),
     );
 
@@ -247,6 +248,17 @@ export function makeAgentSubagentRunner(opts: AgentRunnerOptions): SubagentRunne
     let result: RunResult;
     try {
       result = await agent.run(format(task, ctx.config), { signal: aborter.signal });
+      // Emit task_completed BEFORE the finally block unsubscribes the
+      // FleetBus — this lets the WebUI see the subagent's final output.
+      events.emit('subagent.task_completed', {
+        subagentId: ctx.subagentId,
+        taskId: task.id,
+        status: result.status === 'done' ? 'success' : 'failed',
+        iterations: result.iterations,
+        toolCalls: ctx.budget.usage().toolCalls,
+        durationMs: Date.now() - taskStartedAt,
+        finalText: result.finalText?.trim() || undefined,
+      });
     } finally {
       detachFleet?.();
       ctx.signal.removeEventListener('abort', onParentAbort);

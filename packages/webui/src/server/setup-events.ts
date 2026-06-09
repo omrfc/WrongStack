@@ -79,5 +79,5 @@ export function setupEvents(deps: SetupEventsDeps): void {
   events.on('subagent.iteration_summary', (e) => forwardSubagent('iteration_summary', { subagentId: e.subagentId, iteration: e.iteration, toolCalls: e.toolCalls, costUsd: e.costUsd, currentTool: e.currentTool, partialText: e.partialText }));
   events.on('subagent.budget_extended', (e) => forwardSubagent('budget_extended', { subagentId: e.subagentId, totalExtensions: e.totalExtensions }));
   events.on('subagent.ctx_pct', (e) => forwardSubagent('ctx_pct', { subagentId: e.subagentId, load: e.load, tokens: e.tokens, maxContext: e.maxContext }));
-  events.on('subagent.task_completed', (e) => forwardSubagent('task_completed', { subagentId: e.subagentId, status: e.status, iterations: e.iterations, toolCalls: e.toolCalls, error: e.error ? { kind: e.error.kind, message: e.error.message } : undefined }));
+  events.on('subagent.task_completed', (e) => forwardSubagent('task_completed', { subagentId: e.subagentId, status: e.status, iterations: e.iterations, toolCalls: e.toolCalls, finalText: (e as Record<string, unknown>).finalText as string | undefined, error: e.error ? { kind: e.error.kind, message: e.error.message } : undefined }));
 }

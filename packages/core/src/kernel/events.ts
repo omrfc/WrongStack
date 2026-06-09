@@ -397,6 +397,8 @@ export interface EventMap {
           cause?: { name: string | undefined; message: string; stack?: string | undefined } | undefined;
         }
       | undefined;
+    /** Final assistant text from the subagent's last turn. */
+    finalText?: string | undefined;
   };
   /**
    * Fired by the delegate tool when a subagent finishes. The agent's run
