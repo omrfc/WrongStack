@@ -219,9 +219,21 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '0.148.0',
+    date: '2026-06-09',
+    latest: true,
+    tagline: 'Developer experience & release consolidation',
+    highlights: [
+      '/dev slash command — run shell commands from chat without LLM involvement',
+      'Commands execute in the current working directory, timeout after 60 s, cap output at 500 lines',
+      'test tool correctly falls back to vitest when no test-runner config file is detected',
+      'All 15 workspace packages and the marketing site aligned to 0.148.0 in lockstep',
+      '~30 intermediate version bumps consolidated into one documented release line',
+    ],
+  },
+  {
     version: '0.109.1',
     date: '2026-06-08',
-    latest: true,
     consolidated: true,
     tagline: 'TUI monitor control & goal-path cleanup',
     highlights: [

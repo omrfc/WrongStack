@@ -347,12 +347,11 @@ Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. Wha
 
 ## Recent changes
 
-**Current release: 0.118.1.** TUI monitor overlays now keep keyboard routing
-alive while preserving a live chat input underneath non-modal panels. The F9
-goal panel reads the same canonical per-project `goal.json` as `/goal` and the
-autonomy engines, refreshes while open, and code blocks clamp their frame width
-instead of wrapping borders. The build script also hardens PATH resolution for
-package-local binaries on Windows.
+**Current release: 0.148.0.** The `/dev` slash command lets you run shell
+commands from the chat input — the LLM never sees the result, making it a pure
+developer shortcut. The `test` tool now correctly falls back to vitest when no
+test-runner config file is detected. All 15 workspace packages and the marketing
+site are aligned to 0.148.0 in lockstep.
 
 See **[CHANGELOG.md](CHANGELOG.md)** for the full, versioned history.
 
@@ -599,7 +598,7 @@ For the full walk-through — including the L1-A reactive `ConversationState`, h
 
 ## Status
 
-- **5796+ tests passing** across 412+ test files in the 0.118.1 release gate
+- **5800+ tests passing** across 300+ test files in the 0.148.0 release gate
 - Coverage thresholds: ≥85 % lines / ≥85 % functions / ≥70 % branches / ≥82 % statements
 - All workspace packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles
