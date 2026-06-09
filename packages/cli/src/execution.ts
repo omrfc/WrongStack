@@ -14,10 +14,12 @@ import type {
   EventBus,
   ModelsRegistry,
   RecoveryLock,
+  SessionStore,
   SessionWriter,
   SlashCommandRegistry,
   TokenCounter,
 } from '@wrongstack/core';
+import type { MemoryStore, ModeStore } from '@wrongstack/core';
 import { color, mergeCustomModelDefs, writeOut, type AutonomyStage, decryptConfigSecrets, encryptConfigSecrets, atomicWrite } from '@wrongstack/core';
 import { filterSafeForProject, persistAutonomySetting } from './settings-menu.js';
 import type { ProviderConfig, ResolvedProvider, WstackPaths } from '@wrongstack/core';
@@ -143,6 +145,12 @@ export interface ExecutionDeps {
   skillLoader?: import('@wrongstack/core').SkillLoader | undefined;
   /** Active agent mode id shown in the status bar (e.g. "teach", "brief"). */
   modeId?: string | undefined;
+  /** Session store — used by WebUI for session.resume, session.delete, sessions.list. */
+  sessionStore?: SessionStore | undefined;
+  /** Memory store — used by WebUI for the MemoryPanel. */
+  memoryStore?: MemoryStore | undefined;
+  /** Mode store — used by WebUI for the ModePicker panel. */
+  modeStore?: ModeStore | undefined;
 }
 
 export async function execute(deps: ExecutionDeps): Promise<number> {
@@ -195,6 +203,9 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     subscribeEternalStage,
     skillLoader,
     modeId,
+    sessionStore,
+    memoryStore,
+    modeStore,
   } = deps;
 
   let code = 0;
@@ -774,6 +785,11 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         modelsRegistry,
         globalConfigPath: wpaths.globalConfig,
         subscribeEternalIteration,
+        sessionStore,
+        memoryStore,
+        skillLoader,
+        modeStore,
+        modeId,
       });
       try {
         code = await runRepl({

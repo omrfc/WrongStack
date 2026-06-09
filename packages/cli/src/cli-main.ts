@@ -1970,6 +1970,9 @@ export async function main(argv: string[]): Promise<number> {
     },
     skillLoader: config.features.skills ? skillLoader : undefined,
     modeId,
+    sessionStore,
+    memoryStore,
+    modeStore,
   });
 }
 
