@@ -238,7 +238,7 @@ function AppInner() {
                 <div id="panel-todos"><TodosPanel /></div>
                 {/* Worktree graph — only when active. Toggle between graph and lanes view. */}
                 {worktrees.length > 0 && (
-                  <div className="space-y-2">
+                  <div id="panel-worktree" className="space-y-2">
                     <div className="flex items-center gap-2">
                       <button
                         type="button"

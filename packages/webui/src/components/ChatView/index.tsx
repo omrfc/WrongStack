@@ -339,14 +339,16 @@ export function ChatView() {
             <ModePicker />
             <ContextModePicker />
             {iteration && (
-              <span
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-medium bg-primary/10 text-primary shrink-0"
-                title="Agent iteration"
+              <button
+                type="button"
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-medium bg-primary/10 text-primary shrink-0 hover:bg-primary/20 transition-colors cursor-pointer"
+                title="Agent iteration — click to jump to live activity"
+                onClick={() => document.getElementById('chat-activity')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
               >
                 <Activity className="h-3 w-3 animate-pulse" />
                 iter {iteration.index}
                 {iteration.max > 0 ? `/${iteration.max}` : ''}
-              </span>
+              </button>
             )}
             {/* Todo chip */}
             {(pendingCount > 0 || inProgressCount > 0) && (
@@ -396,13 +398,15 @@ export function ChatView() {
             )}
             {/* Worktree chip */}
             {baseBranch && (
-              <span
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-medium bg-violet-500/10 text-violet-600 dark:text-violet-400 shrink-0"
-                title={`Branch: ${baseBranch}${worktrees.length > 0 ? ` · ${worktrees.length} worktree${worktrees.length === 1 ? '' : 's'}` : ''}`}
+              <button
+                type="button"
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-medium bg-violet-500/10 text-violet-600 dark:text-violet-400 shrink-0 hover:bg-violet-500/20 transition-colors cursor-pointer"
+                title={`Branch: ${baseBranch}${worktrees.length > 0 ? ` · ${worktrees.length} worktree${worktrees.length === 1 ? '' : 's'}` : ''} — click to jump`}
+                onClick={() => document.getElementById('panel-worktree')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
               >
                 <GitBranch className="h-3 w-3" />
                 {baseBranch}
-              </span>
+              </button>
             )}
             <AutonomyPicker value={autonomy} onChange={handleAutonomyChange} compact />
           </div>
@@ -695,6 +699,7 @@ export function ChatView() {
               return out;
             })()}
 
+            <div id="chat-activity">
             <ThinkingBubble />
 
             {/* Running status bubble */}
@@ -786,6 +791,7 @@ export function ChatView() {
                   </div>
                 );
               })()}
+            </div>
           </div>
         </ScrollArea>
       </div>
