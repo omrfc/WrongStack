@@ -94,6 +94,7 @@ export {
   clearPlan,
   formatPlan,
   deriveTodosFromPlanItem,
+  mutatePlan,
   type PlanItem,
   type PlanFile,
 } from './plan-store.js';
@@ -107,6 +108,7 @@ export {
   loadTasks,
   saveTasks,
   emptyTaskFile,
+  mutateTasks,
   type TaskFile,
 } from './task-store.js';
 export {

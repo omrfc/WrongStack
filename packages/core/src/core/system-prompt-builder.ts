@@ -169,6 +169,14 @@ export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
   }
 
   /**
+   * Cached plan content keyed by (planPath, mtimeMs). The plan is read
+   * once per system-prompt build; most turns don't change the plan, so
+   * this avoids a blocking fs.readFile + JSON.parse on every iteration.
+   * Cleared when the file's mtime changes (the `/plan` tool mutated it).
+   */
+  private _planCache?: { path: string; mtimeMs: number; text: string } | undefined;
+
+  /**
    * Reads `<sessionId>.plan.json` (when configured) and produces a short
    * "Active plan" block listing open items so the model is anchored to
    * the strategic roadmap every turn. Reads on every `build()` so a
@@ -179,12 +187,32 @@ export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
     const planPath =
       typeof this.opts.planPath === 'function' ? this.opts.planPath() : this.opts.planPath;
     if (!planPath) return '';
+
     let raw: string;
     try {
+      // Check mtime before reading — plans change at human pace (a few times
+      // per session), not on every iteration. Stat is O(1) metadata; readFile
+      // + JSON.parse is O(n) for the file content.
+      const stat = await fs.stat(planPath);
+      if (
+        this._planCache &&
+        this._planCache.path === planPath &&
+        this._planCache.mtimeMs === stat.mtimeMs
+      ) {
+        return this._planCache.text;
+      }
       raw = await fs.readFile(planPath, 'utf8');
+      const text = this._formatPlan(raw);
+      this._planCache = { path: planPath, mtimeMs: stat.mtimeMs, text };
+      return text;
     } catch {
-      return ''; // no plan yet — silent
+      // File missing, unreadable, or corrupt — clear cache and return empty.
+      this._planCache = undefined;
+      return '';
     }
+  }
+
+  private _formatPlan(raw: string): string {
     let parsed: { items?: Array<{ status?: string | undefined; title?: string | undefined }>; title?: string | undefined };
     try {
       parsed = JSON.parse(raw);

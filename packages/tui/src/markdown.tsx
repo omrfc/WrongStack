@@ -21,12 +21,28 @@ export interface InlineToken {
 }
 
 /**
+ * Memoization cache for parseInline. Lines of assistant prose are frequently
+ * identical across re-renders (the same heading, bullet prefix, or repeated
+ * prose), and the char-by-char + indexOf parsing is O(n²) per line. Caching
+ * turns repeated lines into O(1) lookups. LRU-evicted at 5000 entries to cap
+ * memory — a typical session rarely exceeds a few thousand unique lines.
+ */
+const _parseCache = new Map<string, InlineToken[]>();
+const _PARSE_CACHE_MAX = 5000;
+
+/**
  * Parse one line of prose into inline-emphasis tokens. Markers are stripped
  * (this is display text, not length-preserving). `_..._` is intentionally NOT
  * treated as italic so snake_case / file_names aren't mangled. An unterminated
  * marker is emitted literally so no text is ever lost.
+ *
+ * Results are memoized: repeated calls with the same text return the identical
+ * cached array, eliminating redundant parsing on every TUI re-render.
  */
 export function parseInline(text: string): InlineToken[] {
+  const cached = _parseCache.get(text);
+  if (cached) return cached;
+
   const tokens: InlineToken[] = [];
   let plain = '';
   let i = 0;
@@ -84,6 +100,17 @@ export function parseInline(text: string): InlineToken[] {
     i += 1;
   }
   flush();
+
+  // LRU eviction: when near capacity, drop the oldest quarter.
+  if (_parseCache.size >= _PARSE_CACHE_MAX) {
+    let dropped = 0;
+    const target = Math.floor(_PARSE_CACHE_MAX / 4);
+    for (const key of _parseCache.keys()) {
+      _parseCache.delete(key);
+      if (++dropped >= target) break;
+    }
+  }
+  _parseCache.set(text, tokens);
   return tokens;
 }
 

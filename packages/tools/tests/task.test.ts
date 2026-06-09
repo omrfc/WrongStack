@@ -16,11 +16,12 @@ interface TaskSandbox {
 async function mkTaskSandbox(): Promise<TaskSandbox> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-task-tool-'));
   const taskPath = path.join(dir, 'sess.tasks.json');
+  const planPath = path.join(dir, 'sess.plan.json');
   const ctx = {
     cwd: dir,
     projectRoot: dir,
     session: { id: 'sess', append: async () => undefined, close: async () => undefined },
-    meta: { 'task.path': taskPath },
+    meta: { 'task.path': taskPath, 'plan.path': planPath },
   } as unknown as Context;
   return {
     dir,
@@ -277,6 +278,48 @@ describe('taskTool', () => {
     expect(replacedTodos[0]?.status).toBe('in_progress'); // parent active
     expect(replacedTodos[1]?.status).toBe('pending');      // subtask 1
     expect(replacedTodos[2]?.status).toBe('pending');      // subtask 2
+  });
+
+  // -------------------------------------------------------------------
+  // planify (task → plan)
+  // -------------------------------------------------------------------
+  it('planify converts a task to a plan item', async () => {
+    await taskTool.execute(
+      {
+        action: 'replace',
+        tasks: [{ id: 't1', title: 'Strategic initiative', description: 'Big picture goal', type: 'feature', priority: 'high', status: 'pending' }],
+      },
+      sb.ctx,
+      { signal: newSignal() },
+    );
+
+    const out = await taskTool.execute(
+      { action: 'planify', target: 't1' },
+      sb.ctx,
+      { signal: newSignal() },
+    );
+    expect(out.ok).toBe(true);
+    expect(out.message).toMatch(/planify ok/i);
+    expect(out.message).toContain('Strategic initiative');
+
+    // Verify the plan file was written
+    const planPath = (sb.ctx.meta as Record<string, unknown>)['plan.path'] as string;
+    const raw = JSON.parse(await fs.readFile(planPath, 'utf8')) as {
+      items: Array<{ title: string; details: string }>;
+    };
+    expect(raw.items).toHaveLength(1);
+    expect(raw.items[0]?.title).toBe('Strategic initiative');
+    expect(raw.items[0]?.details).toBe('Big picture goal');
+  });
+
+  it('planify without target returns ok=false', async () => {
+    const out = await taskTool.execute(
+      { action: 'planify' },
+      sb.ctx,
+      { signal: newSignal() },
+    );
+    expect(out.ok).toBe(false);
+    expect(out.message).toMatch(/target/i);
   });
 
   // -------------------------------------------------------------------

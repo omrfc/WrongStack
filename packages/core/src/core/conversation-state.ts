@@ -1,4 +1,5 @@
 import type { Message } from '../types/messages.js';
+import { computeMessageTokens } from '../utils/token-estimate.js';
 import type { Context, TodoItem } from './context.js';
 
 /**
@@ -52,26 +53,58 @@ export class ConversationState {
   /**
    * Cheap immutable snapshot. Useful for tests and for compaction passes
    * that need a stable view across an async boundary.
+   *
+   * Uses shallow-freeze instead of deep-freeze: only the wrapper object
+   * and the three content arrays are frozen. Individual message/todo
+   * objects are NOT recursively frozen — they are reconstructed via
+   * spread copies and are immutable by convention. This cuts the freeze
+   * count from O(n·m·d) (n=messages, m=content blocks, d=depth) to O(1).
    */
   snapshot(): ReadonlyConversationState {
-    // Return a deep-frozen view — both the arrays and the message/todo/meta
-    // objects they contain are immutable so callers can't accidentally mutate
-    // state through a snapshot reference.
-    return deepFreeze({
+    const snap = {
       messages: [...this.ctx.messages],
       todos: [...this.ctx.todos],
       meta: { ...this.ctx.meta },
-    });
+    };
+    Object.freeze(snap.messages);
+    Object.freeze(snap.todos);
+    Object.freeze(snap.meta);
+    return Object.freeze(snap) as ReadonlyConversationState;
   }
 
   appendMessage(message: Message): void {
+    // Pre-compute token estimate once at mutation time so every downstream
+    // estimateMessageTokens / estimateRequestTokens call is an O(1) sum
+    // instead of re-walking the content blocks on every invocation.
+    if (message._estTokens === undefined) {
+      message._estTokens = computeMessageTokens(message);
+    }
     this.ctx.messages.splice(this.ctx.messages.length, 0, message);
     this.emit({ kind: 'message_appended', message });
   }
 
   replaceMessages(messages: Message[]): void {
-    this.ctx.messages.length = 0;
-    this.ctx.messages.splice(0, 0, ...messages);
+    // Compute per-message token estimates for any message that doesn't
+    // already carry one (e.g. fresh messages from eliseOldToolResults or
+    // repairToolUseAdjacency). Messages that already have _estTokens
+    // (from a prior appendMessage) are left untouched.
+    for (const m of messages) {
+      if (m._estTokens === undefined) {
+        m._estTokens = computeMessageTokens(m);
+      }
+    }
+    // In-place replacement without array spread to avoid a temporary
+    // allocation of 200+ elements on large compaction rewrites.
+    // When messages.length > arr.length, JavaScript auto-extends the array
+    // on indexed assignment (arr[i] = val where i >= arr.length sets
+    // arr.length = i + 1 per ECMAScript §9.4.2.1).
+    const arr = this.ctx.messages;
+    if (messages.length < arr.length) {
+      arr.length = messages.length;
+    }
+    for (let i = 0; i < messages.length; i++) {
+      arr[i] = messages[i]!;
+    }
     this.emit({ kind: 'messages_replaced', messages: [...messages] });
   }
 
@@ -131,17 +164,4 @@ export class ConversationState {
  */
 export function wrapAsState(ctx: Context): ConversationState {
   return new ConversationState(ctx);
-}
-
-function deepFreeze<T>(obj: T): T {
-  if (obj === null || typeof obj !== 'object') return obj;
-  if (Object.isFrozen(obj)) return obj;
-  Object.freeze(obj);
-  for (const key of Object.keys(obj as object)) {
-    const v = (obj as Record<string, unknown>)[key];
-    if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) {
-      deepFreeze(v);
-    }
-  }
-  return obj;
 }

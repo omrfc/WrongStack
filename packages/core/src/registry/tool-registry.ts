@@ -1,5 +1,6 @@
 import { WrongStackError, ERROR_CODES } from '../types/errors.js';
 import type { Tool } from '../types/tool.js';
+import { estimateToolDefTokens } from '../utils/token-estimate.js';
 
 /**
  * A function that wraps (decorates) an existing tool. Receives the
@@ -27,6 +28,13 @@ export type ToolWrapper = (tool: Tool) => Tool;
 export class ToolRegistry {
   private readonly tools = new Map<string, { tool: Tool; owner: string }>();
 
+  /** Pre-compute tool definition token estimate once at registration time. */
+  private _stampDefTokens(tool: Tool): void {
+    if (tool._estDefTokens === undefined) {
+      tool._estDefTokens = estimateToolDefTokens(tool);
+    }
+  }
+
   register(tool: Tool, owner = 'core'): void {
     if (this.tools.has(tool.name)) {
       throw new WrongStackError({
@@ -48,6 +56,7 @@ export class ToolRegistry {
       });
     }
 
+    this._stampDefTokens(tool);
     this.tools.set(tool.name, { tool, owner });
   }
 
@@ -63,6 +72,7 @@ export class ToolRegistry {
       return false; // silently reject invalid schema in tryRegister
     }
 
+    this._stampDefTokens(tool);
     this.tools.set(tool.name, { tool, owner });
     return true;
   }
@@ -91,6 +101,7 @@ export class ToolRegistry {
    */
   registerDefault(tool: Tool, owner = 'core'): void {
     if (this.tools.has(tool.name)) return;
+    this._stampDefTokens(tool);
     this.tools.set(tool.name, { tool, owner });
   }
 
@@ -111,6 +122,7 @@ export class ToolRegistry {
         context: { tool: name },
       });
     }
+    this._stampDefTokens(tool);
     this.tools.set(name, { tool, owner });
   }
 
@@ -136,6 +148,9 @@ export class ToolRegistry {
       });
     }
     const wrapped = wrapper(entry.tool);
+    // The wrapper may have changed name/description/inputSchema — recompute.
+    wrapped._estDefTokens = undefined;
+    this._stampDefTokens(wrapped);
     this.tools.set(name, { tool: wrapped, owner: `${entry.owner}+${owner}` });
   }
 

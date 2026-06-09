@@ -60,6 +60,13 @@ export type ToolStreamEvent<O = unknown> = ToolProgressEvent | ToolFinalEvent<O>
 export interface Tool<I = unknown, O = unknown> {
   name: string;
   description: string;
+  /**
+   * Pre-computed token estimate for this tool's definition (name +
+   * description + JSON-serialized inputSchema). Set by ToolRegistry on
+   * registration; consumed by estimateToolDefTokens / estimateRequestTokens
+   * to skip redundant JSON.stringify on every context-pressure check.
+   */
+  _estDefTokens?: number | undefined;
   usageHint?: string | undefined;
   /** Optional category for grouping in help lists and system prompts. */
   category?: string | undefined;

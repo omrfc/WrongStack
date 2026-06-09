@@ -1,7 +1,7 @@
 import * as fsp from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import type { ConversationState } from '../core/conversation-state.js';
-import { atomicWrite } from '../utils/atomic-write.js';
+import { atomicWrite, withFileLock } from '../utils/atomic-write.js';
 
 /**
  * Plan items are the strategic counterpart to todos. Where `ctx.todos`
@@ -187,6 +187,23 @@ export function deriveTodosFromPlanItem(
   }
 
   return { plan: updatedPlan, todos };
+}
+
+/**
+ * Load, modify, and save the plan file under a file-level lock.
+ * Prevents races from parallel tool invocations (e.g. batch_tool_use).
+ */
+export async function mutatePlan(
+  filePath: string,
+  sessionId: string,
+  fn: (plan: PlanFile) => PlanFile | Promise<PlanFile>,
+): Promise<PlanFile> {
+  return withFileLock(filePath, async () => {
+    const plan = (await loadPlan(filePath)) ?? emptyPlan(sessionId);
+    const updated = await fn(plan);
+    await savePlan(filePath, updated);
+    return updated;
+  });
 }
 
 /**

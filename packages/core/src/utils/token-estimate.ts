@@ -157,6 +157,10 @@ export function estimateMessageTokens(messages: readonly Message[]): number {
  * but NOT included in roughEstimate(content).
  */
 export function estimateToolDefTokens(tool: { name: string; description?: string | undefined; inputSchema: unknown }): number {
+  // Fast path: pre-computed by ToolRegistry at registration time.
+  const cached = (tool as { _estDefTokens?: number | undefined })._estDefTokens;
+  if (typeof cached === 'number' && cached > 0) return cached;
+
   return RoughTokenEstimate(tool.name) +
     RoughTokenEstimate(tool.description ?? '') +
     RoughTokenEstimate(JSON.stringify(tool.inputSchema));

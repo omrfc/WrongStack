@@ -16,11 +16,12 @@ interface PlanSandbox {
 async function mkPlanSandbox(): Promise<PlanSandbox> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-plan-tool-'));
   const planPath = path.join(dir, 'sess.plan.json');
+  const taskPath = path.join(dir, 'sess.tasks.json');
   const ctx = {
     cwd: dir,
     projectRoot: dir,
     session: { id: 'sess', append: async () => undefined, close: async () => undefined },
-    meta: { 'plan.path': planPath },
+    meta: { 'plan.path': planPath, 'task.path': taskPath },
   } as unknown as Context;
   return {
     dir,
@@ -150,5 +151,35 @@ describe('planTool', () => {
     expect(out.todos).toBeDefined();
     expect(out.todos!.length).toBe(3); // 1 parent + 2 subtasks
     expect(replacedTodos.length).toBe(3);
+  });
+
+  // -------------------------------------------------------------------
+  // taskify (plan → task)
+  // -------------------------------------------------------------------
+  it('taskify converts a plan item to a task', async () => {
+    await planTool.execute({ action: 'add', title: 'Implement auth', details: 'Add OAuth flow' }, sb.ctx, { signal: newSignal() });
+
+    const out = await planTool.execute({ action: 'taskify', target: '1' }, sb.ctx, { signal: newSignal() });
+    expect(out.ok).toBe(true);
+    expect(out.message).toMatch(/taskify ok/i);
+    expect(out.message).toContain('Implement auth');
+
+    // Verify the task file was written
+    const taskPath = (sb.ctx.meta as Record<string, unknown>)['task.path'] as string;
+    const raw = JSON.parse(await fs.readFile(taskPath, 'utf8')) as {
+      tasks: Array<{ title: string; description: string; type: string; priority: string; status: string }>;
+    };
+    expect(raw.tasks).toHaveLength(1);
+    expect(raw.tasks[0]?.title).toBe('Implement auth');
+    expect(raw.tasks[0]?.description).toBe('Add OAuth flow');
+    expect(raw.tasks[0]?.type).toBe('feature');
+    expect(raw.tasks[0]?.priority).toBe('medium');
+    expect(raw.tasks[0]?.status).toBe('pending');
+  });
+
+  it('taskify without target returns ok=false', async () => {
+    const out = await planTool.execute({ action: 'taskify' }, sb.ctx, { signal: newSignal() });
+    expect(out.ok).toBe(false);
+    expect(out.message).toMatch(/target/i);
   });
 });

@@ -11,6 +11,13 @@ import {
   savePlan,
   setPlanItemStatus,
 } from '@wrongstack/core';
+import {
+  type TaskFile,
+  emptyTaskFile,
+  loadTasks,
+  saveTasks,
+  formatTaskList,
+} from '@wrongstack/core';
 import type { Tool } from '@wrongstack/core';
 
 /**
@@ -35,7 +42,8 @@ interface PlanInput {
     | 'remove'
     | 'promote'
     | 'template_use'
-    | 'clear';
+    | 'clear'
+    | 'taskify';
   /** Required for add. */
   title?: string | undefined;
   /** Optional detail line for add. */
@@ -71,6 +79,7 @@ export const planTool: Tool<PlanInput, PlanOutput> = {
     'RECOMMENDED FOR COMPLEX, MULTI-PHASE WORK:\n\n' +
     '- Start by creating a high-level plan with `action: "add"` or using templates (`template_use`).\n' +
     '- Use `promote` to turn a plan item into actionable todos.\n' +
+    '- Use `taskify` to convert a plan item into a structured task (with type/priority/deps).\n' +
     '- Keep plans at the "why and what" level, and todos at the "how and next step" level.\n' +
     '- Common templates: "new-feature", "bug-fix", "refactor", "release", "security-audit".\n\n' +
     'This tool is excellent for maintaining long-term direction across many turns or even multiple sessions.',
@@ -92,6 +101,7 @@ export const planTool: Tool<PlanInput, PlanOutput> = {
           'promote',
           'template_use',
           'clear',
+          'taskify',
         ],
         description: 'The operation to perform on the plan board.',
       },
@@ -219,6 +229,54 @@ export const planTool: Tool<PlanInput, PlanOutput> = {
         plan = clearPlan(plan);
         await savePlan(planPath, plan);
         break;
+
+      case 'taskify': {
+        if (!input.target) {
+          return mkResult(plan, false, 'taskify requires `target` (plan item id|index|substring).');
+        }
+        // Find plan item by 1-based index, exact id, or title substring
+        let itemIdx = -1;
+        const asNum = Number.parseInt(input.target, 10);
+        if (!Number.isNaN(asNum) && asNum >= 1 && asNum <= plan.items.length) {
+          itemIdx = asNum - 1;
+        } else {
+          itemIdx = plan.items.findIndex((it) => it.id === input.target);
+          if (itemIdx === -1) {
+            const lower = input.target.toLowerCase();
+            itemIdx = plan.items.findIndex((it) => it.title.toLowerCase().includes(lower));
+          }
+        }
+        if (itemIdx === -1 || !plan.items[itemIdx]) {
+          return mkResult(plan, false, `No plan item matched "${input.target}".`);
+        }
+        const item = plan.items[itemIdx]!;
+
+        const taskPath = (ctx.meta as Record<string, unknown>)['task.path'];
+        if (typeof taskPath !== 'string' || !taskPath) {
+          return mkResult(plan, false, 'Task storage path not configured — cannot taskify.');
+        }
+
+        const taskFile: TaskFile = (await loadTasks(taskPath)) ?? emptyTaskFile(sessionId);
+        const now = new Date().toISOString();
+        taskFile.tasks.push({
+          id: `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          title: item.title,
+          description: item.details,
+          type: 'feature',
+          priority: 'medium',
+          status: 'pending',
+          createdAt: now,
+          updatedAt: now,
+        });
+        await saveTasks(taskPath, taskFile);
+
+        return mkResult(
+          plan,
+          true,
+          `taskify ok — added "${item.title}" to tasks.\n${formatTaskList(taskFile.tasks)}`,
+        );
+      }
+
       default:
         return mkResult(plan, false, `Unknown action "${(input as { action: string }).action}".`);
     }

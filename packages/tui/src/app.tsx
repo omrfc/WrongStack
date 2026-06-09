@@ -760,35 +760,23 @@ export function App({
     return () => clearInterval(t);
   }, [state.enhanceBusy]);
 
-  // Todos polling — separate 2s interval so the status-bar chip stays fresh
-  // without relying on the 10s global tick. Compares with a ref to skip
-  // dispatching when nothing changed.
+  // ── Consolidated 2s tick: todos status + autonomy/yolo/mode/model/provider sync ──
+  // Previously two separate 2s intervals, each triggering its own React state
+  // update and re-render when their values changed. Merged into one tick so the
+  // two checks share a single interval timer, and when BOTH change in the same
+  // cycle (common after an agent turn that calls the `todo` tool and potentially
+  // mutates the model), they batch into one re-render instead of two.
   const todosRef = useRef(JSON.stringify([]));
-  useEffect(() => {
-    const poll = () => {
-      const snap = JSON.stringify(agent.ctx.todos.map((t) => ({ s: t.status })));
-      if (snap !== todosRef.current) {
-        todosRef.current = snap;
-        setNowTick(Date.now()); // trigger a re-render so useMemo re-evaluates
-      }
-    };
-    const t = setInterval(poll, 2000);
-    return () => clearInterval(t);
-  }, [agent.ctx.todos]);
-
-  // ── Status-bar live sync: autonomy, yolo, mode, model, provider ──
-  // These values are mutated inside the CLI (slash commands, engine
-  // callbacks, /model picks), but the TUI only picks them up on mount
-  // + slash-command dispatch. Without a poll, every other path that
-  // changes them (programmatic engine state flip, external /autonomy
-  // toggle, yolo toggle via hotkey) leaves the status bar stale.
-  //
-  // Polling every 2s with a ref gate keeps the cost near zero — each
-  // check is a synchronous property/function read; no filesystem, no
-  // subprocess. Only a state setter fires when the value actually changed.
   const staleGuardRef = useRef(JSON.stringify({ a: '', y: false, m: '', model: '', provider: '' }));
   useEffect(() => {
     const poll = () => {
+      // ── Todos check ──
+      const todoSnap = JSON.stringify(agent.ctx.todos.map((t) => ({ s: t.status })));
+      if (todoSnap !== todosRef.current) {
+        todosRef.current = todoSnap;
+        setNowTick(Date.now());
+      }
+      // ── Status-bar live sync (autonomy, yolo, mode, model, provider) ──
       const a = getAutonomy?.() ?? 'off';
       const y = getYolo?.() ?? false;
       const m = getModeLabel?.() ?? '';
@@ -802,8 +790,6 @@ export function App({
         if (m !== liveModeLabel) setLiveModeLabel(m);
         if (curModel !== liveModel) setLiveModel(curModel);
         if (curProvider !== liveProvider) setLiveProvider(curProvider);
-        // Kick off autonomy loops when the mode enters eternal/eternal-parallel
-        // outside of a slash command (e.g. programmatic launch).
         if (a === 'eternal' && getEternalEngine) void runEternalLoopRef.current();
         if (a === 'eternal-parallel' && getParallelEngine) void runParallelLoopRef.current();
       }
@@ -814,7 +800,7 @@ export function App({
     getAutonomy, getYolo, getModeLabel,
     getEternalEngine, getParallelEngine,
     autonomyLive, yoloLive, liveModeLabel, liveModel, liveProvider,
-    agent.ctx.model, agent.ctx.provider,
+    agent.ctx.model, agent.ctx.provider, agent.ctx.todos,
   ]);
 
   // Git branch + change counts. Polled every 5s (cheap, two short-lived

@@ -10,6 +10,13 @@ import {
   savePlan,
   setPlanItemStatus,
 } from '../storage/plan-store.js';
+import {
+  type TaskFile,
+  emptyTaskFile,
+  loadTasks,
+  saveTasks,
+} from '../storage/task-store.js';
+import { formatTaskList } from '../utils/task-format.js';
 import { formatPlanTemplates, getPlanTemplate } from '../storage/plan-templates.js';
 import { formatTodosList } from '../utils/todos-format.js';
 import type { Plugin } from '../types/plugin.js';
@@ -53,11 +60,21 @@ export function createPlanPlugin(opts?: PlanPluginOptions): Plugin {
   };
 }
 
+/** Find a plan item by 1-based index, exact id, or case-insensitive title substring. */
+function findPlanItemIndex(plan: PlanFile, query: string): number {
+  const asNum = Number.parseInt(query, 10);
+  if (!Number.isNaN(asNum) && asNum >= 1 && asNum <= plan.items.length) return asNum - 1;
+  const byId = plan.items.findIndex((it) => it.id === query);
+  if (byId >= 0) return byId;
+  const lower = query.toLowerCase();
+  return plan.items.findIndex((it) => it.title.toLowerCase().includes(lower));
+}
+
 export function buildPlanCommand(planPath?: string): SlashCommand {
   return {
     name: 'plan',
     description:
-      'Strategic plan board: /plan [show|add <title>|start <id|#>|done <id|#>|remove <id|#>|promote <id|#> [subtask ...]|template [list|use <name>]|clear]',
+      'Strategic plan board: /plan [show|add <title>|start <id|#>|done <id|#>|remove <id|#>|promote <id|#> [subtask ...]|taskify <id|#>|template [list|use <name>]|clear]',
     async run(args: string, ctx: Context) {
       if (!planPath) return { message: 'Plan storage is not configured for this session.' };
       const sessionId = ctx?.session?.id ?? 'unknown';
@@ -117,6 +134,39 @@ export function buildPlanCommand(planPath?: string): SlashCommand {
           };
         }
 
+        case 'taskify': {
+          if (!restJoined) return { message: 'Usage: /plan taskify <id|index>' };
+          // Find plan item by index, id, or title substring
+          const itemIdx = findPlanItemIndex(plan, restJoined);
+          if (itemIdx === -1 || !plan.items[itemIdx]) {
+            return { message: `No plan item matched "${restJoined}".` };
+          }
+          const item = plan.items[itemIdx]!;
+
+          const taskPath = (ctx?.meta as Record<string, unknown>)?.['task.path'];
+          if (typeof taskPath !== 'string' || !taskPath) {
+            return { message: 'Task storage is not configured for this session.' };
+          }
+
+          const taskFile: TaskFile = (await loadTasks(taskPath)) ?? emptyTaskFile(sessionId);
+          const now = new Date().toISOString();
+          taskFile.tasks.push({
+            id: `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            title: item.title,
+            description: item.details,
+            type: 'feature',
+            priority: 'medium',
+            status: 'pending',
+            createdAt: now,
+            updatedAt: now,
+          });
+          await saveTasks(taskPath, taskFile);
+
+          return {
+            message: `Taskified "${item.title}" → task.\n${formatTaskList(taskFile.tasks)}`,
+          };
+        }
+
         case 'template': {
           const subVerb = rest[0] ?? '';
           const subRest = rest.slice(1).join(' ').trim();
@@ -149,7 +199,7 @@ export function buildPlanCommand(planPath?: string): SlashCommand {
 
         default:
           return {
-            message: `Unknown subcommand "${verb}". Try: show | add <title> | start <id|#> | done <id|#> | remove <id|#> | promote <id|#> | template [list|use <name>] | clear`,
+            message: `Unknown subcommand "${verb}". Try: show | add <title> | start <id|#> | done <id|#> | remove <id|#> | promote <id|#> | taskify <id|#> | template [list|use <name>] | clear`,
           };
       }
     },

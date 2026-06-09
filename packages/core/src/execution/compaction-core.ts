@@ -87,6 +87,25 @@ export function eliseOldToolResults(
   opts: { preserveK: number; eliseThreshold: number },
 ): EliseResult {
   const preserveStart = findPreserveStart(messages, opts.preserveK);
+
+  // Fast path: scan for any oversized tool_result before allocating a full
+  // copy of the message array. Most compaction passes fire when pressure is
+  // borderline — the elision threshold catches only truly oversized results
+  // (>2000 tokens), and many passes find nothing. Skipping the allocation
+  // here avoids ~200 message-object allocations per idle compaction cycle.
+  let hasOversized = false;
+  for (let i = 0; i < preserveStart && !hasOversized; i++) {
+    const msg = messages[i];
+    if (!msg || !Array.isArray(msg.content)) continue;
+    for (const b of msg.content) {
+      if (b.type === 'tool_result' && estimateToolResultTokens(b.content) >= opts.eliseThreshold) {
+        hasOversized = true;
+        break;
+      }
+    }
+  }
+  if (!hasOversized) return { messages: messages as Message[], saved: 0, changed: false };
+
   let saved = 0;
   let changed = false;
   const next = new Array<Message>(messages.length);
