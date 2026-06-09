@@ -17,7 +17,12 @@ if (argv.includes('--list') || argv.includes('-l') || argv[0] === 'ls') {
       process.exit(0);
     })
     .catch((err) => {
-      console.error('[WebUI] Could not read instance registry:', err);
+      console.error(JSON.stringify({
+        level: 'fatal',
+        event: 'webui.instance_registry_read_failed',
+        message: err instanceof Error ? err.message : String(err),
+        timestamp: new Date().toISOString(),
+      }));
       process.exit(1);
     });
 } else {
@@ -29,7 +34,12 @@ if (argv.includes('--list') || argv.includes('-l') || argv[0] === 'ls') {
   console.log(`[WebUI] Starting standalone server on ${wsHost}:${wsPort}...`);
 
   startWebUI({ wsPort, wsHost, open }).catch((err) => {
-    console.error('[WebUI] Fatal error:', err);
+    console.error(JSON.stringify({
+      level: 'fatal',
+      event: 'webui.startup_failed',
+      message: err instanceof Error ? err.message : String(err),
+      timestamp: new Date().toISOString(),
+    }));
     process.exit(1);
   });
 }

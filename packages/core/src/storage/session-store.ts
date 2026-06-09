@@ -122,7 +122,12 @@ export class DefaultSessionStore implements SessionStore {
         onClose: (s) => this.appendToIndex(s),
       });
     } catch (err) {
-      await handle.close().catch((e) => console.warn(`[session-store] handle.close() failed: ${e}`));
+      await handle.close().catch((e) => console.warn(JSON.stringify({
+        level: 'warn',
+        event: 'session_store.handle_close_failed',
+        message: e instanceof Error ? e.message : String(e),
+        timestamp: new Date().toISOString(),
+      })));
       throw err;
     }
   }
@@ -154,7 +159,12 @@ export class DefaultSessionStore implements SessionStore {
       );
       return { writer, data };
     } catch (err) {
-      await handle.close().catch((e) => console.warn(`[session-store] handle.close() failed: ${e}`));
+      await handle.close().catch((e) => console.warn(JSON.stringify({
+        level: 'warn',
+        event: 'session_store.handle_close_failed',
+        message: e instanceof Error ? e.message : String(e),
+        timestamp: new Date().toISOString(),
+      })));
       throw err;
     }
   }
@@ -368,10 +378,13 @@ export class DefaultSessionStore implements SessionStore {
       const stat = await fsp.stat(full);
       const summary = await this.summarize(id, stat.mtime.toISOString());
       await atomicWrite(manifest, JSON.stringify(summary), { mode: 0o600 }).catch((err) => {
-        console.warn(
-          `[session-store] Failed to write manifest for "${id}":`,
-          err instanceof Error ? err.message : String(err),
-        );
+        console.warn(JSON.stringify({
+          level: 'warn',
+          event: 'session_store.manifest_write_failed',
+          sessionId: id,
+          message: err instanceof Error ? err.message : String(err),
+          timestamp: new Date().toISOString(),
+        }));
       });
       return summary;
     }
@@ -380,20 +393,54 @@ export class DefaultSessionStore implements SessionStore {
   /**
    * Delete a session and all associated files: JSONL, summary, plan/todos
    * sidecars, and the session directory (fleet.json, shared/, subagents/).
+   *
+   * Individual file deletions are best-effort (logged as structured warnings),
+   * but a tombstone is always written so readIndex() filters this session out.
+   * If the session directory itself can't be removed, the error is surfaced
+   * to the caller so prune() can report it.
    */
   private async deleteSession(id: string): Promise<void> {
-    // Remove the JSONL and summary.
-    await fsp.unlink(this.sessionPath(id, '.jsonl')).catch((err) => console.warn(`[session-store] delete .jsonl failed: ${err}`));
-    await fsp.unlink(this.sessionPath(id, '.summary.json')).catch((err) => console.warn(`[session-store] delete .summary.json failed: ${err}`));
-    // Remove sidecar files that live next to the JSONL.
+    const jsonlPath = this.sessionPath(id, '.jsonl');
+    const summaryPath = this.sessionPath(id, '.summary.json');
     const shardDir = path.dirname(path.join(this.dir, id));
     const base = path.basename(id);
-    for (const ext of ['.plan.json', '.todos.json']) {
-      await fsp.unlink(path.join(shardDir, `${base}${ext}`)).catch((err) => console.warn(`[session-store] delete ${ext} failed: ${err}`));
-    }
-    // Remove the session directory (may contain fleet.json, shared/, subagents/).
     const sessDir = path.join(shardDir, base);
-    await fsp.rm(sessDir, { recursive: true, force: true }).catch((err) => console.warn(`[session-store] delete session dir failed: ${err}`));
+
+    const deletions: Array<Promise<void>> = [
+      fsp.unlink(jsonlPath),
+      fsp.unlink(summaryPath),
+      fsp.unlink(path.join(shardDir, `${base}.plan.json`)),
+      fsp.unlink(path.join(shardDir, `${base}.todos.json`)),
+    ];
+
+    const results = await Promise.allSettled(deletions);
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
+        // ENOENT is expected (file may not exist — sidecars are optional).
+        if ((r.reason as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+          console.warn(JSON.stringify({
+            level: 'warn',
+            event: 'session_store.delete_failed',
+            sessionId: id,
+            message: msg,
+            timestamp: new Date().toISOString(),
+          }));
+        }
+      }
+    }
+
+    // Remove the session directory (may contain fleet.json, shared/, subagents/).
+    await fsp.rm(sessDir, { recursive: true, force: true }).catch((err) => {
+      console.warn(JSON.stringify({
+        level: 'warn',
+        event: 'session_store.rmdir_failed',
+        sessionId: id,
+        message: err instanceof Error ? err.message : String(err),
+        timestamp: new Date().toISOString(),
+      }));
+    });
+
     // Write an index tombstone so readIndex() filters this session out.
     await this.writeTombstone(id);
   }

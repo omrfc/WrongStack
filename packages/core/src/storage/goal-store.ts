@@ -116,12 +116,24 @@ export async function loadGoal(filePath: string): Promise<GoalFile | null> {
   try {
     const parsed = JSON.parse(raw) as GoalFile;
     if (parsed?.version !== 1 || typeof parsed.goal !== 'string' || !Array.isArray(parsed.journal)) {
-      console.warn(`[goal-store] Corrupt goal.json at ${filePath} — invalid schema. Consider deleting it and re-creating.`);
+      console.warn(JSON.stringify({
+        level: 'warn',
+        event: 'goal_store.invalid_schema',
+        path: filePath,
+        message: 'invalid schema — consider deleting and re-creating',
+        timestamp: new Date().toISOString(),
+      }));
       return null;
     }
     return parsed;
   } catch {
-    console.warn(`[goal-store] Corrupt goal.json at ${filePath} — JSON parse failed. Consider deleting it and re-creating.`);
+    console.warn(JSON.stringify({
+      level: 'warn',
+      event: 'goal_store.parse_failed',
+      path: filePath,
+      message: 'JSON parse failed — consider deleting and re-creating',
+      timestamp: new Date().toISOString(),
+    }));
     return null;
   }
 }

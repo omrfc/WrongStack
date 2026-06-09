@@ -15,7 +15,13 @@ export function normalizeMCPTools(value: unknown): MCPTool[] {
     // broken, misbehaving, or (if the server is untrusted) adversarial MCP
     // server trying to confuse the LLM with misleading type info.
     if (!t.inputSchema || typeof t.inputSchema !== 'object' || Array.isArray(t.inputSchema)) {
-      console.warn(`[mcp] Tool "${t.name}" has no/invalid inputSchema — defaulting to empty object`);
+      console.warn(JSON.stringify({
+        level: 'warn',
+        event: 'mcp.tool_schema_invalid',
+        tool: t.name,
+        message: 'no/invalid inputSchema — defaulting to empty object',
+        timestamp: new Date().toISOString(),
+      }));
     }
     tools.push({
       name: t.name,

@@ -32,7 +32,12 @@ export function createProviderHandlers(deps: ProviderHandlerDeps) {
       .then(() => saveProviders(globalConfigPath, vault, providers))
       .catch((err) => {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[ProviderHandlers] saveProviders failed: ${msg}`);
+        console.error(JSON.stringify({
+          level: 'error',
+          event: 'webui.provider_save_failed',
+          message: msg,
+          timestamp: new Date().toISOString(),
+        }));
       });
     configWriteLock = next;
     deps.setConfigWriteLock(next);

@@ -2,4 +2,5 @@
 # .githooks/pre-commit
 # Guards against known corruption patterns and suspicious mass-changes
 node scripts/guard-against-corruption.mjs --verbose
+node scripts/lint-console-logging.mjs --verbose
 exit $?

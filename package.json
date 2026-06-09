@@ -16,6 +16,8 @@
     "bench:perf": "node scripts/bench.mjs",
     "test:coverage": "cross-env NODE_OPTIONS=--max-old-space-size=4096 vitest run --coverage",
     "lint": "biome lint .",
+    "lint:distributive": "node scripts/lint-distributive-types.mjs",
+    "lint:console": "node scripts/lint-console-logging.mjs --all",
     "format": "biome format --write .",
     "typecheck": "cross-env NODE_OPTIONS=--max-old-space-size=4096 pnpm -r --parallel typecheck",
     "clean": "pnpm -r --parallel clean && node -e \"require('node:fs').rmSync('node_modules',{recursive:true,force:true})\"",

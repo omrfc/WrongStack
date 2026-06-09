@@ -183,10 +183,24 @@ export async function startWebUI(
     httpPort = await findFreePort(wsHost, requestedHttpPort);
     wsPort = await findFreePort(wsHost, requestedWsPort, { exclude: new Set([httpPort]) });
     if (httpPort !== requestedHttpPort) {
-      console.warn(`[WebUI] HTTP port ${requestedHttpPort} in use → using ${httpPort}`);
+      console.warn(JSON.stringify({
+        level: 'warn',
+        event: 'webui.port_reassigned',
+        protocol: 'HTTP',
+        requested: requestedHttpPort,
+        assigned: httpPort,
+        timestamp: new Date().toISOString(),
+      }));
     }
     if (wsPort !== requestedWsPort) {
-      console.warn(`[WebUI] WS port ${requestedWsPort} in use → using ${wsPort}`);
+      console.warn(JSON.stringify({
+        level: 'warn',
+        event: 'webui.port_reassigned',
+        protocol: 'WS',
+        requested: requestedWsPort,
+        assigned: wsPort,
+        timestamp: new Date().toISOString(),
+      }));
     }
   }
 
@@ -244,7 +258,12 @@ export async function startWebUI(
     for (const f of factories) providerRegistry.register(f);
     console.log('[WebUI] Provider registry loaded:', providerRegistry.list().length, 'providers');
   } catch (err) {
-    console.warn('[WebUI] Failed to load provider registry:', err);
+    console.warn(JSON.stringify({
+      level: 'warn',
+      event: 'webui.provider_registry_load_failed',
+      message: err instanceof Error ? err.message : String(err),
+      timestamp: new Date().toISOString(),
+    }));
   }
 
   // Tool registry
@@ -363,7 +382,12 @@ export async function startWebUI(
         provider = makeProviderFromConfig(config.provider, cfgWithType);
       }
     } catch (err) {
-      console.error('[WebUI] Failed to create provider:', err);
+      console.error(JSON.stringify({
+        level: 'error',
+        event: 'webui.provider_create_failed',
+        message: err instanceof Error ? err.message : String(err),
+        timestamp: new Date().toISOString(),
+      }));
       throw err;
     }
   } else {
@@ -383,7 +407,12 @@ export async function startWebUI(
         });
         console.log('[WebUI] Using saved provider:', firstKey);
       } catch (err) {
-        console.error('[WebUI] Could not create provider stub:', err);
+        console.error(JSON.stringify({
+          level: 'error',
+          event: 'webui.provider_stub_create_failed',
+          message: err instanceof Error ? err.message : String(err),
+          timestamp: new Date().toISOString(),
+        }));
         throw err;
       }
     } else {
@@ -771,7 +800,12 @@ export async function startWebUI(
           await handleMessage(ws, client, rawObj as unknown as WSClientMessage);
         }
       } catch (err) {
-        console.error('[WebUI] Failed to parse message', err);
+        console.error(JSON.stringify({
+          level: 'error',
+          event: 'webui.ws_message_parse_failed',
+          message: err instanceof Error ? err.message : String(err),
+          timestamp: new Date().toISOString(),
+        }));
       }
     });
 
@@ -792,7 +826,12 @@ export async function startWebUI(
 
     ws.on('error', (err) => {
       // Without this handler an errored socket would crash the process.
-      console.warn('[WebUI] Client socket error:', err.message);
+      console.warn(JSON.stringify({
+        level: 'warn',
+        event: 'webui.client_socket_error',
+        message: err.message,
+        timestamp: new Date().toISOString(),
+      }));
     });
   };
 
@@ -807,7 +846,13 @@ export async function startWebUI(
   wssPrimary.on('listening', () => armOnce(`${wsHost}:${wsPort}`));
   wssPrimary.on('connection', handleConnection);
   wssPrimary.on('error', (err) => {
-    console.error(`[WebUI] Primary WS server error (${wsHost}):`, err);
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'webui.ws_server_error',
+      host: wsHost,
+      message: err instanceof Error ? err.message : String(err),
+      timestamp: new Date().toISOString(),
+    }));
   });
 
   if (wssSecondary) {
@@ -817,9 +862,21 @@ export async function startWebUI(
       // Best-effort secondary: if IPv6 loopback isn't available on this host
       // (e.g. disabled in OS), just log and continue. Primary v4 is enough.
       if (err.code === 'EAFNOSUPPORT' || err.code === 'EADDRNOTAVAIL') {
-        console.warn('[WebUI] IPv6 loopback not available, v4-only:', err.code);
+        console.warn(JSON.stringify({
+          level: 'warn',
+          event: 'webui.ipv6_unavailable',
+          code: err.code,
+          message: err.message,
+          timestamp: new Date().toISOString(),
+        }));
       } else {
-        console.error('[WebUI] Secondary WS server error (::1):', err);
+        console.error(JSON.stringify({
+          level: 'error',
+          event: 'webui.ws_server_error',
+          host: '::1',
+          message: err.message,
+          timestamp: new Date().toISOString(),
+        }));
       }
     });
   }
@@ -1241,7 +1298,12 @@ export async function startWebUI(
             });
             await configWriteLock;
           } catch (err) {
-            console.warn('[WebUI] Failed to save config:', err);
+            console.warn(JSON.stringify({
+              level: 'warn',
+              event: 'webui.config_save_failed',
+              message: err instanceof Error ? err.message : String(err),
+              timestamp: new Date().toISOString(),
+            }));
           }
 
           // Toast for the SettingsPanel
@@ -2024,7 +2086,12 @@ export async function startWebUI(
         url: `http://${wsHost}:${httpPort}`,
       },
       registryBaseDir,
-    ).catch((err) => console.warn('[WebUI] Could not record instance:', errMessage(err)));
+    ).catch((err) => console.warn(JSON.stringify({
+      level: 'warn',
+      event: 'webui.instance_record_failed',
+      message: errMessage(err),
+      timestamp: new Date().toISOString(),
+    })));
   });
 
   // Graceful shutdown on SIGINT/SIGTERM — see `lifecycle.ts`. The session

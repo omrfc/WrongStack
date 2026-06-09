@@ -23,7 +23,13 @@ export class DoneConditionChecker {
       this.compiledRegex = result.ok ? result.regex : null;
       if (!result.ok) {
         // Log warning but don't throw — the done condition simply won't match
-        console.warn(`[DoneConditionChecker] Invalid regex pattern "${condition.pattern}": ${result.reason}`);
+        console.warn(JSON.stringify({
+          level: 'warn',
+          event: 'autonomous.done_condition_invalid_regex',
+          pattern: condition.pattern,
+          reason: result.reason,
+          timestamp: new Date().toISOString(),
+        }));
       }
     } else {
       this.compiledRegex = null;

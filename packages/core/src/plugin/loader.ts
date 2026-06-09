@@ -192,8 +192,15 @@ export async function loadPlugins(
   try {
     sorted = topoSort(plugins);
   } catch (err) {
-    opts.log.error('Plugin sort failed', err);
-    throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    opts.log.error('Plugin dependency sort failed', message);
+    throw new PluginError({
+      message: `Plugin dependency sort failed: ${message}`,
+      code: ERROR_CODES.PLUGIN_LOAD_FAILED,
+      pluginName: '(topological sort)',
+      context: { pluginCount: plugins.length },
+      cause: err,
+    });
   }
 
   for (const plugin of sorted) {

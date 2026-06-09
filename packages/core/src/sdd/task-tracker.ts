@@ -309,7 +309,12 @@ export class TaskTracker {
     this.opts.store.saveGraph(this.graph).catch((err) => {
       this.opts.onPersistError
         ? this.opts.onPersistError(err)
-        : console.warn('[task-tracker] saveGraph failed:', err instanceof Error ? err.message : String(err));
+        : console.warn(JSON.stringify({
+            level: 'warn',
+            event: 'task_tracker.save_graph_failed',
+            message: err instanceof Error ? err.message : String(err),
+            timestamp: new Date().toISOString(),
+          }));
     });
   }
 }

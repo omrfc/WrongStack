@@ -762,9 +762,12 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                 const toWrite =
                   targetPath === wpaths.globalConfig ? decrypted : filterSafeForProject(decrypted);
                 const encrypted = encryptConfigSecrets(toWrite, noOpVault);
-                // Ensure the project directory exists before writing
+                // Ensure the project directory exists before writing.
+                // `recursive: true` handles EEXIST internally — only permission
+                // errors or invalid paths will throw. Let those propagate to the
+                // outer catch so the user sees the real root cause.
                 if (targetPath !== wpaths.globalConfig) {
-                  await fs.mkdir(path.dirname(targetPath), { recursive: true }).catch((err) => console.debug(`[execution] mkdir failed: ${err}`));
+                  await fs.mkdir(path.dirname(targetPath), { recursive: true });
                 }
                 await atomicWrite(targetPath, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
 
@@ -795,7 +798,17 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
               }
               return null;
             } catch (err) {
-              return err instanceof Error ? err.message : String(err);
+              // The outer caller expects string | null (null = success, string = error message).
+              // Log the full error with structure before returning the message string.
+              const message = err instanceof Error ? err.message : String(err);
+              console.debug(JSON.stringify({
+                level: 'error',
+                event: 'execution.settings_persist_failed',
+                message,
+                errorName: err instanceof Error ? err.name : undefined,
+                timestamp: new Date().toISOString(),
+              }));
+              return message;
             }
           },
           effectiveMaxContext,
@@ -871,7 +884,12 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             void import('@wrongstack/providers')
               .then(({ setDebugStreamCallback }) => setDebugStreamCallback(cb))
               .catch((err) =>
-                console.error('[execution] failed to register debug stream callback:', err),
+                console.error(JSON.stringify({
+                  level: 'error',
+                  event: 'execution.debug_stream_register_failed',
+                  message: err instanceof Error ? err.message : String(err),
+                  timestamp: new Date().toISOString(),
+                })),
               );
           },
           restoreDebugStreamCallback: () => {
@@ -880,7 +898,12 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                 setDebugStreamCallback(defaultDebugStreamCallback),
               )
               .catch((err) =>
-                console.error('[execution] failed to restore debug stream callback:', err),
+                console.error(JSON.stringify({
+                  level: 'error',
+                  event: 'execution.debug_stream_restore_failed',
+                  message: err instanceof Error ? err.message : String(err),
+                  timestamp: new Date().toISOString(),
+                })),
               );
           },
           restoredMessages,

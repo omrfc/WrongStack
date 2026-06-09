@@ -222,7 +222,13 @@ export class DefaultConfigLoader implements ConfigLoader {
         }
       } catch (err) {
         // Best-effort: skip failing sources so one bad source doesn't block boot.
-        console.warn(`Config source "${src.name}" failed`, err);
+        console.warn(JSON.stringify({
+          level: 'warn',
+          event: 'config.source_load_failed',
+          source: src.name,
+          message: err instanceof Error ? err.message : String(err),
+          timestamp: new Date().toISOString(),
+        }));
       }
     }
 
@@ -317,7 +323,12 @@ export class DefaultConfigLoader implements ConfigLoader {
       return parsed.value;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
-      console.warn('[config] Failed to load sync config:', err);
+      console.warn(JSON.stringify({
+        level: 'warn',
+        event: 'config.sync_load_failed',
+        message: err instanceof Error ? err.message : String(err),
+        timestamp: new Date().toISOString(),
+      }));
       return null;
     }
   }
@@ -331,7 +342,13 @@ export class DefaultConfigLoader implements ConfigLoader {
       // exists at start). Surface anything else (EACCES, EISDIR) so a
       // mis-permissioned config doesn't silently fall back to defaults.
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-        console.warn(`[config] Failed to read "${file}":`, err);
+        console.warn(JSON.stringify({
+          level: 'warn',
+          event: 'config.read_failed',
+          path: file,
+          message: err instanceof Error ? err.message : String(err),
+          timestamp: new Date().toISOString(),
+        }));
       }
       return {};
     }
@@ -340,9 +357,13 @@ export class DefaultConfigLoader implements ConfigLoader {
       // The file exists but isn't valid JSON. Don't silently reset to
       // defaults — that's hours of debug timesink for users who'd typo'd
       // their config. Warn loudly and keep the in-memory defaults.
-      console.warn(
-        `[config] Failed to parse "${file}": invalid JSON. Falling back to defaults for this layer.`,
-      );
+      console.warn(JSON.stringify({
+        level: 'warn',
+        event: 'config.parse_failed',
+        path: file,
+        message: 'invalid JSON — falling back to defaults for this layer',
+        timestamp: new Date().toISOString(),
+      }));
       return {};
     }
     return parsed.value;

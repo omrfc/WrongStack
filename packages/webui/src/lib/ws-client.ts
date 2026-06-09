@@ -131,12 +131,22 @@ export class WrongStackWebSocketClient {
             const msg = JSON.parse(event.data) as WSServerMessage;
             this.handleMessage(msg);
           } catch (err) {
-            console.error('[WS Client] Failed to parse message', err);
+            console.error(JSON.stringify({
+              level: 'error',
+              event: 'ws_client.message_parse_failed',
+              message: err instanceof Error ? err.message : String(err),
+              timestamp: new Date().toISOString(),
+            }));
           }
         };
 
         this.ws.onerror = (error) => {
-          console.error('[WS Client] Error', error);
+          console.error(JSON.stringify({
+            level: 'error',
+            event: 'ws_client.error',
+            message: error instanceof Error ? error.message : String(error),
+            timestamp: new Date().toISOString(),
+          }));
           // ErrorEvent in browsers is intentionally opaque — Chrome won't
           // expose the underlying reason for security. We stash a generic
           // hint so the UI has something to display.
@@ -195,7 +205,12 @@ export class WrongStackWebSocketClient {
         try {
           await this.connect();
         } catch (err) {
-          console.error('[WS Client] Reconnect failed', err);
+          console.error(JSON.stringify({
+            level: 'error',
+            event: 'ws_client.reconnect_failed',
+            message: err instanceof Error ? err.message : String(err),
+            timestamp: new Date().toISOString(),
+          }));
         }
       }
     }, delay);
@@ -209,7 +224,12 @@ export class WrongStackWebSocketClient {
       this.reconnectTimer = null;
     }
     this.reconnectAttempts = 0;
-    void this.connect().catch((err) => console.warn(`[ws-client] reconnect failed: ${err}`));
+    void this.connect().catch((err) => console.warn(JSON.stringify({
+      level: 'warn',
+      event: 'ws_client.reconnect_failed',
+      message: err instanceof Error ? err.message : String(err),
+      timestamp: new Date().toISOString(),
+    })));
   }
 
   private flushMessageQueue() {
@@ -263,7 +283,13 @@ export class WrongStackWebSocketClient {
         try {
           handler(msg);
         } catch (err) {
-          console.error(`[WS Client] Handler error for ${msg.type}`, err);
+          console.error(JSON.stringify({
+            level: 'error',
+            event: 'ws_client.handler_error',
+            messageType: msg.type,
+            message: err instanceof Error ? err.message : String(err),
+            timestamp: new Date().toISOString(),
+          }));
         }
       }
     }
@@ -487,12 +513,24 @@ export class WrongStackWebSocketClient {
     this.send({ type: 'todos.remove', payload });
   }
 
+  updateTodoStatus(id: string, status: 'pending' | 'in_progress' | 'completed') {
+    this.send({ type: 'todo.update', payload: { id, status } });
+  }
+
   getTasks() {
     this.send({ type: 'tasks.get' });
   }
 
+  updateTaskStatus(id: string, status: string) {
+    this.send({ type: 'task.update', payload: { id, status } });
+  }
+
   getPlan() {
     this.send({ type: 'plan.get' });
+  }
+
+  updatePlanItem(target: string, status: 'open' | 'in_progress' | 'done') {
+    this.send({ type: 'plan.item.update', payload: { target, status } });
   }
 
   listSessions(limit = 50) {

@@ -40,7 +40,12 @@ export async function saveToGlobalConfig(
     try {
       await backupCurrent(homeFn);
     } catch (err) {
-      console.warn('[picker] backupCurrent failed:', err);
+      console.warn(JSON.stringify({
+        level: 'warn',
+        event: 'picker.backup_failed',
+        message: err instanceof Error ? err.message : String(err),
+        timestamp: new Date().toISOString(),
+      }));
     }
 
     await atomicWrite(configPath, JSON.stringify(existing, null, 2), { mode: 0o600 });
@@ -59,7 +64,12 @@ export async function saveToGlobalConfig(
 
     return true;
   } catch (err) {
-    console.warn('[picker] saveToGlobalConfig failed:', err instanceof Error ? err.message : String(err));
+    console.warn(JSON.stringify({
+      level: 'warn',
+      event: 'picker.save_failed',
+      message: err instanceof Error ? err.message : String(err),
+      timestamp: new Date().toISOString(),
+    }));
     return false;
   }
 }

@@ -214,7 +214,12 @@ export function serveStdio(server: MCPServer, opts: ServeStdioOptions = {}): Ser
       )
       .catch((err) => {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error(`[mcp:Server] stdout write failed: ${msg}`);
+        console.error(JSON.stringify({
+          level: 'error',
+          event: 'mcp_server.stdout_write_failed',
+          message: msg,
+          timestamp: new Date().toISOString(),
+        }));
       });
   };
 
@@ -234,7 +239,12 @@ export function serveStdio(server: MCPServer, opts: ServeStdioOptions = {}): Ser
         .catch((err) => {
           // Malformed JSON from a peer — log and continue so one bad line
           // doesn't kill the entire session.
-          console.error(`[mcp:Server] handleMessage error: ${err}`);
+          console.error(JSON.stringify({
+            level: 'error',
+            event: 'mcp_server.handle_message_failed',
+            message: err instanceof Error ? err.message : String(err),
+            timestamp: new Date().toISOString(),
+          }));
         });
     }
   };

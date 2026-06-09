@@ -3,6 +3,7 @@ import type { Logger } from '../types/logger.js';
 import type { Tracer } from '../types/observability.js';
 import type { Provider, Request, Response } from '../types/provider.js';
 import { ProviderError } from '../types/provider.js';
+import { toWrongStackError } from '../types/errors.js';
 import type { RetryPolicy } from '../types/retry-policy.js';
 import type { Context } from './context.js';
 import { streamProviderToResponse } from './streaming-response-builder.js';
@@ -89,7 +90,10 @@ export async function runProviderWithRetry(opts: RunProviderOptions): Promise<Re
           errorName: err instanceof Error ? err.name : undefined,
           errorStack: err instanceof Error ? err.stack?.split('\n').slice(0, 3).join('\n') : undefined,
         });
-        throw err;
+        // ProviderError already extends WrongStackError — passes through unchanged.
+        // Raw Errors (network, timeout) get wrapped so callers can branch on .code
+        // instead of parsing error messages.
+        throw toWrongStackError(err);
       }
       const delay = Math.round(retry.delayMs(attempt));
       const attemptNum = attempt + 1;

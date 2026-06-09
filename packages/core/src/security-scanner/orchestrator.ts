@@ -91,7 +91,15 @@ export class SecurityScannerOrchestrator {
 
       const delay = Math.round(policy.delayMs(attempt));
       const status = isProviderErr ? (err as ProviderError).status : 0;
-      console.warn(`[SecurityScanner] retry ${attempt + 1} after ${delay}ms (status=${status}) — ${errAsErr.message}`);
+      console.warn(JSON.stringify({
+        level: 'warn',
+        event: 'security_scanner.retry',
+        attempt: attempt + 1,
+        delayMs: delay,
+        status,
+        message: errAsErr.message,
+        timestamp: new Date().toISOString(),
+      }));
 
       await new Promise<void>((resolve) => setTimeout(resolve, delay));
       return this.completeWithRetry(provider, request, abortController, attempt + 1);
