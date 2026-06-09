@@ -9,9 +9,9 @@ import {
 } from '../../src/coordination/index.js';
 
 describe('catalog', () => {
-  it('has 47 catalog agents, all with role/prompt/keywords', () => {
+  it('has 48 catalog agents, all with role/prompt/keywords', () => {
     const roles = Object.keys(AGENT_CATALOG);
-    expect(roles.length).toBe(47);
+    expect(roles.length).toBe(48);
     for (const def of Object.values(AGENT_CATALOG)) {
       expect(def.config.role).toBeTruthy();
       expect((def.config.prompt ?? '').length).toBeGreaterThan(50);

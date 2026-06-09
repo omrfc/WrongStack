@@ -35,9 +35,9 @@ const KEBAB = /^[a-z][a-z0-9-]*$/;
 const TOOL_ID = /^[a-z][a-z0-9_-]*$/;
 
 describe('agent catalog integrity', () => {
-  it('has 47 catalog definitions and AGENT_CATALOG keys match 1:1', () => {
-    expect(ALL_AGENT_DEFINITIONS.length).toBe(47);
-    expect(Object.keys(AGENT_CATALOG).length).toBe(47);
+  it('has 48 catalog definitions and AGENT_CATALOG keys match 1:1', () => {
+    expect(ALL_AGENT_DEFINITIONS.length).toBe(48);
+    expect(Object.keys(AGENT_CATALOG).length).toBe(48);
     for (const def of ALL_AGENT_DEFINITIONS) {
       expect(AGENT_CATALOG[def.config.role as string]).toBe(def);
     }
@@ -78,7 +78,7 @@ describe('agent catalog integrity', () => {
     }
   });
 
-  it('groups every catalog agent into exactly one phase and the groups sum to 47', () => {
+  it('groups every catalog agent into exactly one phase and the groups sum to 48', () => {
     let total = 0;
     const seen = new Set<string>();
     for (const phase of PHASES) {
@@ -91,8 +91,8 @@ describe('agent catalog integrity', () => {
       }
       total += group.length;
     }
-    expect(total).toBe(47);
-    expect(seen.size).toBe(47);
+    expect(total).toBe(48);
+    expect(seen.size).toBe(48);
   });
 
   it('getAgentDefinition resolves known roles and rejects unknown ones', () => {
@@ -102,8 +102,8 @@ describe('agent catalog integrity', () => {
 });
 
 describe('fleet roster derivation', () => {
-  it('FLEET_ROSTER is the 43 catalog agents + 4 legacy = 47', () => {
-    expect(Object.keys(FLEET_ROSTER).length).toBe(47);
+  it('FLEET_ROSTER is the 44 catalog agents + 4 legacy = 48', () => {
+    expect(Object.keys(FLEET_ROSTER).length).toBe(48);
     // Legacy four are preserved alongside the catalog.
     for (const legacy of ['audit-log', 'bug-hunter', 'refactor-planner', 'security-scanner']) {
       expect(FLEET_ROSTER[legacy]).toBeDefined();
@@ -138,7 +138,7 @@ describe('catalog spawnability (real Director + spawn tool)', () => {
     });
   }
 
-  it('spawns every one of the 47 roster roles without error', async () => {
+  it('spawns every one of the 48 roster roles without error', async () => {
     const director = makeDirector();
     const spawn = makeSpawnTool(director, FLEET_ROSTER);
     const spawnedIds: string[] = [];
@@ -150,10 +150,10 @@ describe('catalog spawnability (real Director + spawn tool)', () => {
       spawnedIds.push(result.subagentId!);
     }
 
-    // All 47 produced distinct subagent ids (instantiateRosterConfig must not
+    // All 48 produced distinct subagent ids (instantiateRosterConfig must not
     // reuse the template id) and the director registered each one.
-    expect(new Set(spawnedIds).size).toBe(47);
-    expect(director.status().subagents.length).toBe(47);
+    expect(new Set(spawnedIds).size).toBe(48);
+    expect(director.status().subagents.length).toBe(48);
   });
 
   it('reports a clean error for an unknown role instead of throwing', async () => {
@@ -161,5 +161,80 @@ describe('catalog spawnability (real Director + spawn tool)', () => {
     const spawn = makeSpawnTool(director, FLEET_ROSTER);
     const result = (await spawn.execute({ role: 'no-such-role' })) as { error?: string };
     expect(result.error).toMatch(/unknown role/i);
+  });
+});
+
+describe('browser and e2e agent tool lists', () => {
+  const BROWSER_ROLE = 'browser';
+  const E2E_ROLE = 'e2e';
+
+  const PLAYWRIGHT_TOOLS = [
+    'playwright_navigate',
+    'playwright_screenshot',
+    'playwright_click',
+    'playwright_type',
+    'playwright_evaluate',
+    'playwright_select_option',
+    'playwright_hover',
+    'playwright_fill_form',
+    'playwright_wait_for',
+    'playwright_press_key',
+    'playwright_drag',
+  ] as const;
+
+  const READ_TOOLS = ['read', 'grep', 'glob', 'search', 'tree'] as const;
+  const HEAVY_TOOLS = ['bash', 'exec', 'write', 'edit', 'replace', 'patch', 'lint', 'format', 'typecheck', 'test'] as const;
+
+  const browserDef = getAgentDefinition(BROWSER_ROLE);
+  const e2eDef = getAgentDefinition(E2E_ROLE);
+
+  it('browser agent exists in the catalog', () => {
+    expect(browserDef).toBeDefined();
+    expect(browserDef!.config.role).toBe(BROWSER_ROLE);
+  });
+
+  it('browser agent has all 11 playwright tools', () => {
+    const tools = browserDef!.config.tools!;
+    for (const pt of PLAYWRIGHT_TOOLS) {
+      expect(tools, `browser agent missing ${pt}`).toContain(pt);
+    }
+  });
+
+  it('browser agent has read-only tools (read, grep, glob, search, tree)', () => {
+    const tools = browserDef!.config.tools!;
+    for (const rt of READ_TOOLS) {
+      expect(tools, `browser agent missing ${rt}`).toContain(rt);
+    }
+  });
+
+  it('browser agent has fetch', () => {
+    expect(browserDef!.config.tools!).toContain('fetch');
+  });
+
+  it('browser agent does NOT have heavy tools (bash, exec, write, edit, ...)', () => {
+    const tools = browserDef!.config.tools!;
+    for (const ht of HEAVY_TOOLS) {
+      expect(tools, `browser agent should NOT have ${ht}`).not.toContain(ht);
+    }
+  });
+
+  it('e2e agent has all 11 playwright tools', () => {
+    const tools = e2eDef!.config.tools!;
+    for (const pt of PLAYWRIGHT_TOOLS) {
+      expect(tools, `e2e agent missing ${pt}`).toContain(pt);
+    }
+  });
+
+  it('e2e agent DOES have heavy tools (bash, exec, write, edit, ...)', () => {
+    const tools = e2eDef!.config.tools!;
+    for (const ht of HEAVY_TOOLS) {
+      expect(tools, `e2e agent should have ${ht}`).toContain(ht);
+    }
+  });
+
+  it('browser agent total tool count is reasonable (read + fetch + playwright, no heavy)', () => {
+    const tools = browserDef!.config.tools!;
+    // 5 read + 1 fetch + 11 playwright = 17
+    expect(tools.length).toBe(17);
   });
 });

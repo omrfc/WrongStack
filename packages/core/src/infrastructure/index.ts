@@ -15,6 +15,7 @@ export {
   sentinelServer,
   zaiVisionServer,
   miniMaxVisionServer,
+  playwrightServer,
   allServers,
 } from './mcp-servers.js';
 export {

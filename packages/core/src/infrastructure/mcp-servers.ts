@@ -158,6 +158,22 @@ export const zaiVisionServer = (): MCPServerConfig => ({
 });
 
 /**
+ * Playwright — browser automation: navigate, click, type, screenshot, evaluate JS.
+ * Spawns a headless Chromium browser via @modelcontextprotocol/server-playwright.
+ * Tools can read and interact with live web pages — permission defaults to
+ * `confirm` because form submission / DOM mutation is possible.
+ */
+export const playwrightServer = (): MCPServerConfig => ({
+  name: 'playwright',
+  description:
+    'Browser automation — navigate, screenshot, click, type, evaluate JS (headless Chromium)',
+  transport: 'stdio',
+  command: 'npx',
+  args: ['-y', '@modelcontextprotocol/server-playwright'],
+  permission: 'confirm',
+});
+
+/**
  * MiniMax Token Plan MCP — web_search + understand_image.
  * This preset exposes only the read-only image understanding tool by default.
  * Requires MINIMAX_API_KEY and uvx on PATH.
@@ -191,4 +207,5 @@ export const allServers = (): Record<string, MCPServerConfig> => ({
   sentinel: { ...sentinelServer(), enabled: false },
   'zai-vision': { ...zaiVisionServer(), enabled: false },
   'minimax-vision': { ...miniMaxVisionServer(), enabled: false },
+  playwright: { ...playwrightServer(), enabled: false },
 });

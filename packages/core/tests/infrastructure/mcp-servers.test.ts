@@ -10,6 +10,7 @@ import {
   githubServer,
   googleMapsServer,
   miniMaxVisionServer,
+  playwrightServer,
   sentinelServer,
   slackServer,
   zaiVisionServer,
@@ -57,6 +58,7 @@ describe('built-in MCP server presets (V0-D)', () => {
     ['sentinel', sentinelServer],
     ['zai-vision', zaiVisionServer],
     ['minimax-vision', miniMaxVisionServer],
+    ['playwright', playwrightServer],
   ];
 
   for (const [label, factory] of presets) {
