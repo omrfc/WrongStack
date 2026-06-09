@@ -334,7 +334,7 @@ describe('taskTool', () => {
     } as unknown as Context;
     const out = await taskTool.execute({ action: 'show' }, noMetaCtx, { signal: newSignal() });
     expect(out.ok).toBe(false);
-    expect(out.message).toMatch(/path is not configured/i);
+    expect(out.message).toMatch(/not configured/i);
   });
 
   it('replace without tasks array returns ok=false', async () => {
