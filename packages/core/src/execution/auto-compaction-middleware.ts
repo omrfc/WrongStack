@@ -71,6 +71,16 @@ export class AutoCompactionMiddleware {
   private lastNoopAttempt: { level: PressureLevel; tokens: number } | null = null;
 
   /**
+   * Cached token estimate from the last handler() invocation. When the
+   * message count and tool count haven't changed since the last estimate
+   * (autonomous idle loops), we skip the expensive O(n) token estimation
+   * and reuse this value. Reset to -1 when the context changes.
+   */
+  private _cachedTokens = -1;
+  private _cachedMsgCount = -1;
+  private _cachedToolCount = -1;
+
+  /**
    * @param compactor        Compactor to use for compaction.
    * @param maxContext Provider's max context window in tokens.
    * @param _estimator       Deprecated parameter kept for backward compatibility.
@@ -117,19 +127,31 @@ export class AutoCompactionMiddleware {
 
   handler(): MiddlewareHandler<Context> {
     return async (ctx, next) => {
-      // Use _estimator when provided (backward-compat with existing tests that
-      // pass simpleEstimator). Otherwise use estimateRequestTokensCalibrated:
-      // before any API calls it returns the same as estimateRequestTokens, but
-      // after recordActualUsage() is called each iteration it self-corrects so
-      // context pressure readings converge on the real token count.
-      const tokens = this._estimator
-        ? this._estimator(ctx)
-        : estimateRequestTokensCalibrated(
-            ctx.messages,
-            ctx.systemPrompt,
-            ctx.tools ?? [],
-            `${ctx.provider?.id ?? 'unknown'}/${ctx.model}`,
-          ).total;
+      // Reuse the last token estimate when the context hasn't grown since
+      // the previous check — common in autonomous idle loops. The cached
+      // value is invalidated whenever messages or tools change.
+      const msgCount = ctx.messages.length;
+      const toolCount = (ctx.tools ?? []).length;
+      const tokens =
+        msgCount === this._cachedMsgCount && toolCount === this._cachedToolCount && this._cachedTokens >= 0
+          ? this._cachedTokens
+          : this._estimator
+            ? this._estimator(ctx)
+            : estimateRequestTokensCalibrated(
+                ctx.messages,
+                ctx.systemPrompt,
+                ctx.tools ?? [],
+                `${ctx.provider?.id ?? 'unknown'}/${ctx.model}`,
+              ).total;
+
+      // Update the cache whenever we compute a fresh estimate or when
+      // the message/tool counts change (they match now since we either
+      // just computed or reused).
+      if (this._cachedMsgCount !== msgCount || this._cachedToolCount !== toolCount) {
+        this._cachedTokens = tokens;
+        this._cachedMsgCount = msgCount;
+        this._cachedToolCount = toolCount;
+      }
       const load = tokens / this._maxContext;
       const policy = this.policyProvider?.(ctx);
       const thresholds = policy?.thresholds ?? {

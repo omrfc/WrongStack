@@ -417,4 +417,70 @@ describe('AutoCompactionMiddleware', () => {
     expect(event.level).toBe('hard');
     expect(typeof event.ts).toBe('string');
   });
+
+  it('skips token estimation when context has not changed (idle loop elision)', async () => {
+    // When messages and tools haven't changed since the last invocation,
+    // the handler should reuse the cached token estimate instead of calling
+    // the estimator or estimateRequestTokensCalibrated() again.
+    let estimatorCalls = 0;
+    const countingEstimator = () => {
+      estimatorCalls++;
+      return 3000; // 30% load — below all thresholds
+    };
+
+    const mw = new AutoCompactionMiddleware(
+      compactor,
+      10000,
+      countingEstimator,
+      { warn: 0.5, soft: 0.75, hard: 0.9 },
+    );
+
+    const ctx = mockContext(0);
+
+    // First call: estimator should be invoked (cache miss)
+    await mw.handler()(ctx, async (c) => c);
+    expect(estimatorCalls).toBe(1);
+
+    // Second call with same context: cache hit — estimator skipped
+    await mw.handler()(ctx, async (c) => c);
+    expect(estimatorCalls).toBe(1); // still 1 — reused cache
+
+    // Third call with same context: cache still hit
+    await mw.handler()(ctx, async (c) => c);
+    expect(estimatorCalls).toBe(1); // still 1 — reused cache
+  });
+
+  it('recomputes token estimate when context changes (cache invalidation)', async () => {
+    let estimatorCalls = 0;
+    const countingEstimator = () => {
+      estimatorCalls++;
+      return 3000;
+    };
+
+    const mw = new AutoCompactionMiddleware(
+      compactor,
+      10000,
+      countingEstimator,
+      { warn: 0.5, soft: 0.75, hard: 0.9 },
+    );
+
+    // First call: cache miss
+    const ctx1 = mockContext(0);
+    await mw.handler()(ctx1, async (c) => c);
+    expect(estimatorCalls).toBe(1);
+
+    // Same context: cache hit
+    await mw.handler()(ctx1, async (c) => c);
+    expect(estimatorCalls).toBe(1);
+
+    // DIFFERENT context (messages changed): cache miss → recompute
+    const ctx2 = mockContext(0);
+    ctx2.messages = [{ role: 'user', content: 'new message' } as any];
+    await mw.handler()(ctx2, async (c) => c);
+    expect(estimatorCalls).toBe(2);
+
+    // Back to same context as before: cache hit (counts match ctx2 now)
+    await mw.handler()(ctx2, async (c) => c);
+    expect(estimatorCalls).toBe(2);
+  });
 });
