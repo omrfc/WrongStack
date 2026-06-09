@@ -38,7 +38,7 @@ export function startTerminalTitle(opts: TerminalTitleOptions): () => void {
     return () => {};
   }
 
-  const app = opts.appName ?? 'agent';
+  const app = opts.appName ?? 'WrongStack';
   const idleAfter = opts.idleAfterMs ?? 3500;
   const suffix = ` · ${app}`;
 

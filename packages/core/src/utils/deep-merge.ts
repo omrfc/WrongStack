@@ -165,6 +165,10 @@ export function deepMerge(
     ) {
       // Recursive merge for nested plain objects.
       out[k] = deepMerge(existing, v, options);
+    } else if (Array.isArray(v) && Array.isArray(existing)) {
+      // Delegate to top-level array handling so arrayMode
+      // (e.g. 'concat-primitives') applies to nested arrays too.
+      out[k] = deepMerge(existing, v, options);
     } else if (v !== undefined) {
       // Fire debug hook when a non-primitive (object) array replaces an
       // existing value in concat-primitives mode.
