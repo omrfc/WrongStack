@@ -57,7 +57,7 @@ export function buildPlanCommand(planPath?: string): SlashCommand {
   return {
     name: 'plan',
     description:
-      'Strategic plan board: /plan [show|add <title>|start <id|#>|done <id|#>|remove <id|#>|promote <id|#> [subtask ...]|derive <id|#>|template [list|use <name>]|clear]',
+      'Strategic plan board: /plan [show|add <title>|start <id|#>|done <id|#>|remove <id|#>|promote <id|#> [subtask ...]|template [list|use <name>]|clear]',
     async run(args: string, ctx: Context) {
       if (!planPath) return { message: 'Plan storage is not configured for this session.' };
       const sessionId = ctx?.session?.id ?? 'unknown';
@@ -117,17 +117,6 @@ export function buildPlanCommand(planPath?: string): SlashCommand {
           };
         }
 
-        case 'derive': {
-          if (!restJoined) return { message: 'Usage: /plan derive <id|index>' };
-          const derived = deriveTodosFromPlanItem(plan, restJoined);
-          if (!derived) return { message: `No plan item matched "${restJoined}".` };
-          await savePlan(planPath, derived.plan);
-          ctx?.state?.replaceTodos(derived.todos);
-          return {
-            message: `Derived ${derived.todos.length} todo(s):\n${formatTodosList(derived.todos)}\n\n${formatPlan(derived.plan)}`,
-          };
-        }
-
         case 'template': {
           const subVerb = rest[0] ?? '';
           const subRest = rest.slice(1).join(' ').trim();
@@ -160,7 +149,7 @@ export function buildPlanCommand(planPath?: string): SlashCommand {
 
         default:
           return {
-            message: `Unknown subcommand "${verb}". Try: show | add <title> | start <id|#> | done <id|#> | remove <id|#> | promote <id|#> | derive <id|#> | template [list|use <name>] | clear`,
+            message: `Unknown subcommand "${verb}". Try: show | add <title> | start <id|#> | done <id|#> | remove <id|#> | promote <id|#> | template [list|use <name>] | clear`,
           };
       }
     },

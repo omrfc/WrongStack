@@ -5,6 +5,14 @@ export type MessageRole = 'user' | 'assistant' | 'system';
 export interface Message {
   role: MessageRole;
   content: string | ContentBlock[];
+  /**
+   * Pre-computed token estimate for this message, set by
+   * ConversationState on append/replace. Used by estimateMessageTokens
+   * and estimateRequestTokens to skip the O(n·m) content-block walk
+   * on every context-pressure check. Undefined means "not yet computed"
+   * — the estimator falls back to walking content blocks.
+   */
+  _estTokens?: number | undefined;
 }
 
 export function asBlocks(content: string | ContentBlock[]): ContentBlock[] {

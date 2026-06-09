@@ -111,23 +111,42 @@ export function estimateTextTokens(text: string): number {
 }
 
 /**
+ * Compute and cache the token estimate for a single message. This is the
+ * canonical per-message estimator — called once by ConversationState on
+ * append/replace so the O(n·m) content-block walk happens at mutation time,
+ * not on every context-pressure check.
+ */
+export function computeMessageTokens(msg: Message): number {
+  if (typeof msg.content === 'string') return estimateTextTokens(msg.content);
+  let total = 0;
+  for (const b of msg.content) {
+    if (b.type === 'text') total += estimateTextTokens(b.text);
+    else if (b.type === 'tool_use') total += estimateToolInputTokens(b.input);
+    else if (b.type === 'tool_result') total += estimateToolResultTokens(b.content);
+    else total += RoughTokenEstimate(JSON.stringify(b));
+  }
+  return total;
+}
+
+/**
  * Estimate tokens for an array of messages (text + tool I/O), using the shared
  * 3.5 chars/token basis. This is the single canonical message-array estimator —
  * compactors, the context_manager tool, and the `/context` display all route
  * through it so the number a user sees matches the number compaction decides on.
+ *
+ * When a message carries a pre-computed `_estTokens` field (set by
+ * ConversationState on append/replace), it is used directly instead of
+ * re-walking the content blocks — turning the O(n·m) scan into an O(n)
+ * sum for fully-cached arrays.
  */
 export function estimateMessageTokens(messages: readonly Message[]): number {
   let total = 0;
   for (const m of messages) {
-    if (typeof m.content === 'string') {
-      total += estimateTextTokens(m.content);
-    } else {
-      for (const b of m.content) {
-        if (b.type === 'text') total += estimateTextTokens(b.text);
-        else if (b.type === 'tool_use') total += estimateToolInputTokens(b.input);
-        else if (b.type === 'tool_result') total += estimateToolResultTokens(b.content);
-      }
+    if (typeof m._estTokens === 'number' && m._estTokens > 0) {
+      total += m._estTokens;
+      continue;
     }
+    total += computeMessageTokens(m);
   }
   return total;
 }
@@ -175,6 +194,14 @@ export function estimateRequestTokens(
   } else if (Array.isArray(messages)) {
     for (const m of messages) {
       if (typeof m === 'object' && m !== null && 'content' in m) {
+        // Fast path: pre-computed per-message token estimate (set by
+        // ConversationState on append/replace). Skips the O(m) content-block
+        // walk entirely for cached messages.
+        const cached = (m as { _estTokens?: number | undefined })._estTokens;
+        if (typeof cached === 'number' && cached > 0) {
+          messagesTokens += cached;
+          continue;
+        }
         const content = (m as { content: unknown }).content;
         if (typeof content === 'string') {
           messagesTokens += RoughTokenEstimate(content);

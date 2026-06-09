@@ -34,16 +34,15 @@ interface PlanInput {
     | 'done'
     | 'remove'
     | 'promote'
-    | 'derive'
     | 'template_use'
     | 'clear';
   /** Required for add. */
   title?: string | undefined;
   /** Optional detail line for add. */
   details?: string | undefined;
-  /** Required for start/done/remove/promote/derive — accepts plan item id OR 1-based index OR title substring. */
+  /** Required for start/done/remove/promote — accepts plan item id OR 1-based index OR title substring. */
   target?: string | undefined;
-  /** Optional subtasks for promote/derive. If omitted, a single todo is created from the plan item title. */
+  /** Optional subtasks for promote. If omitted, a single todo is created from the plan item title. */
   subtasks?: string[] | undefined;
   /** Required for template_use — the template name (e.g. "new-feature", "bug-fix"). */
   template?: string | undefined;
@@ -91,7 +90,6 @@ export const planTool: Tool<PlanInput, PlanOutput> = {
           'done',
           'remove',
           'promote',
-          'derive',
           'template_use',
           'clear',
         ],
@@ -114,7 +112,7 @@ export const planTool: Tool<PlanInput, PlanOutput> = {
         type: 'array',
         items: { type: 'string' },
         description:
-          'List of subtask titles. Used with promote or derive to break a plan item into multiple todos.',
+          'List of subtask titles. Used with promote to break a plan item into multiple todos.',
       },
       template: {
         type: 'string',
@@ -179,8 +177,7 @@ export const planTool: Tool<PlanInput, PlanOutput> = {
         await savePlan(planPath, plan);
         break;
       }
-      case 'promote':
-      case 'derive': {
+      case 'promote': {
         if (!input.target) {
           return mkResult(plan, false, `${input.action} requires \`target\` (id|index|substring).`);
         }
