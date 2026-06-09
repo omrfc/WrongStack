@@ -5,6 +5,115 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.155.0] - 2026-06-09
+
+> The WebUI-fleet & slash-command-polish release. Consolidates the
+> `0.148.2`–`0.154.1` line into a single documented release. The headlines are
+> a new **`/delegate` slash command** for handing work to specialized subagents,
+> a redesigned **WebUI FleetPanel** with clickable agent cards and detail
+> overlays, **live subagent output streaming** in the TUI AgentDetail overlay,
+> **`/next` and `/suggest` slash commands** with clickable next-step buttons in
+> both WebUI and TUI, a new **Playwright browser automation agent** joining the
+> fleet roster, and a **slash-command refactoring pass** that standardises
+> subcommand parsing across the CLI. Additive only; no breaking changes.
+
+### Added
+
+- **`/delegate` slash command.** A new `Agent`-category slash command hands a
+  discrete piece of work to a dedicated subagent and waits for its result. The
+  subagent runs with its own context, its own LLM call, and its own budget —
+  useful for self-contained tasks that would otherwise blow up the leader's
+  context. Supports both roster roles (`bug-hunter`, `security-scanner`, …) and
+  free-form name-based delegates. (`packages/cli/src/slash-commands/delegate.ts`,
+  `docs/slash/delegate.md`)
+
+- **`/next` and `/suggest` slash commands.** Two new `Run`-category commands
+  surface AI-suggested next actions after a task completes. `/next` runs the
+  first suggestion immediately through a `delegate` call; `/suggest` lists
+  available suggestions as clickable buttons in the WebUI and as a dedicated
+  panel in the TUI assistant messages. Both commands read from the session's
+  active context and the task/todo state.
+
+- **Playwright browser automation agent.** A new fleet role and MCP server
+  preset let the Director spawn subagents that drive a headless Chromium browser
+  via Playwright — useful for end-to-end testing, visual regression checks, and
+  scraping workflows that need JavaScript execution.
+
+- **Live subagent output stream in AgentDetail overlay.** The TUI agent detail
+  panel now renders a live streaming tail of the subagent's text output and tool
+  calls, updated in real time as events arrive from the FleetBus. A
+  copy-to-clipboard button captures the subagent's final output on task
+  completion, and the streaming buffer is larger for smoother rendering.
+
+- **WebUI FleetPanel redesigned.** Subagent cards in the FleetPanel are now
+  clickable — clicking opens a detail overlay showing the agent's full status,
+  current tool, iteration/tool counts, and live output stream. A new **Agents
+  tab** in the sidebar lists all spawned agents as a compact clickable list.
+
+- **Clickable header chips.** Every header chip in the WebUI (Fleet, Process,
+  Checkpoint Timeline, Phase) now scrolls to its corresponding panel on click —
+  no more hunting through the sidebar to find the right instrument.
+
+- **`/resume` renamed to `/sessions`.** The command now surfaces a richer
+  session list with metadata (provider, model, token count, duration, outcome)
+  instead of just a prompt for a session ID. The old `/resume` name is preserved
+  as an alias for backward compatibility.
+
+- **SessionStore, MemoryStore, ModeStore wired to WebUI via CLI.** The WebUI
+  backend now receives the session store, memory store, and mode store from the
+  CLI host, so the WebUI can browse past sessions, search memory, and switch
+  modes without a separate backend process.
+
+### Changed
+
+- **Slash command subcommand parsing standardised.** A new `parseSubcommand`
+  helper in `@wrongstack/cli` provides a consistent pattern for slash commands
+  with sub-actions (list/add/remove/enable/disable/…). Commands migrated:
+  `collab`, `settings`, `models`, `autophase`. An `unknownSubcommand` helper
+  produces a standardised error message with available subcommands.
+
+- **Core user-facing strings generalised.** Hardcoded brand references across
+  the WebUI, TUI, and CLI were replaced with configurable placeholders, making
+  the codebase more adaptable and reducing the number of strings that need
+  manual updating on each release.
+
+- **`noOpVault` deduplicated to `@wrongstack/core`.** The no-op secret vault
+  helper was duplicated across CLI helpers and inline objects in several
+  execution paths; it now lives in one place at
+  `@wrongstack/core/defaults/no-op-vault`.
+
+- **WebUI TodosPanel improved.** The sidebar todos panel now supports sorting
+  controls and a collapsible completed section, making it easier to scan
+  in-progress work in long task lists.
+
+- **Collab debug noise suppressed.** Verbose `collab.*` message logging in the
+  CLI WebUI server was downgraded to DEBUG level so it no longer spams the
+  console during normal multi-agent sessions.
+
+### Fixed
+
+- **ProcessMonitor and CheckpointTimeline overlays now open with one click.**
+  Previously both overlays required a double-click to activate; they now
+  respond on the first click, matching the other panel activation behaviour.
+
+### Docs
+
+- **Slash command documentation expanded.** New reference pages for `/delegate`,
+  `/next`, `/suggest`, `/prune`, `/suggest` (suggestions), `/auth`, `/tasks`,
+  and `/modelcaps`. Existing pages for fleet, MCP, sessions, yolo, and
+  spawn-agents updated with current behaviour. The "Adding a core slash
+  command" contributor guide was expanded with concrete examples and the
+  `parseSubcommand` pattern.
+
+### Changed — versions
+
+- **All workspace packages aligned to 0.155.0**: `wrongstack`,
+  `@wrongstack/cli`, `@wrongstack/core`, `@wrongstack/mcp`,
+  `@wrongstack/plug-lsp`, `@wrongstack/plugins`, `@wrongstack/providers`,
+  `@wrongstack/runtime`, `@wrongstack/skills`, `@wrongstack/telegram`,
+  `@wrongstack/tools`, `@wrongstack/tui`, `@wrongstack/webui`, and
+  `@wrongstack/acp`. The marketing site (`website/`) is aligned in lockstep.
+
 ## [0.148.0] - 2026-06-09
 
 > The developer-experience & release-consolidation release. Ships a **`/dev`
