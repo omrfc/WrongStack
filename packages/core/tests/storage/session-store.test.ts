@@ -399,6 +399,8 @@ describe('DefaultSessionStore — in-flight markers', () => {
       provider: 'p',
     });
     await writer.writeInFlightMarker('iteration 1 / tool: read');
+    // Flush the write buffer so store.load() sees the events on disk.
+    await writer.close();
     const events = await store.load('s1');
     const last = events.events[events.events.length - 1]!;
     expect(last.type).toBe('in_flight_start');
@@ -415,6 +417,8 @@ describe('DefaultSessionStore — in-flight markers', () => {
     });
     await writer.writeInFlightMarker('iteration 5');
     await writer.clearInFlightMarker('clean');
+    // Flush the write buffer so store.load() sees the events on disk.
+    await writer.close();
     const events = await store.load('s1');
     const last = events.events[events.events.length - 1]!;
     expect(last.type).toBe('in_flight_end');
@@ -431,7 +435,8 @@ describe('DefaultSessionStore — in-flight markers', () => {
     });
     await writer.writeInFlightMarker('iteration 7 / tool: bash');
     // No clearInFlightMarker — simulating a crash.
-    writer.close();
+    // Flush the buffer so the stale marker is visible on disk.
+    await writer.close();
     const { SessionRecovery } = await import('../../src/storage/session-recovery.js');
     const recovery = new SessionRecovery(tmp);
     const stale = await recovery.detectStale('crash');
@@ -468,6 +473,8 @@ describe('DefaultSessionStore — in-flight markers', () => {
       isError: false,
     });
     await writer.clearInFlightMarker('clean');
+    // Flush the write buffer so store.load() sees the events on disk.
+    await writer.close();
     const events = await store.load('s1');
     const types = events.events.map((e: { type: string }) => e.type);
     expect(types).toContain('in_flight_start');

@@ -739,6 +739,11 @@ class FileSessionWriter implements SessionWriter {
   }
 
   private async writeSessionStartLazy(): Promise<void> {
+    // Write through the SAME file handle that flushBuffer() uses — avoids
+    // cross-fd issues on Windows where a separate fsp.writeFile can contend
+    // with the already-open append-mode handle. The handle was opened with
+    // O_APPEND so this write lands at the current end-of-file regardless of
+    // whether the file is empty or already contains prior session data.
     const record = `${JSON.stringify({
       type: this.resumed ? 'session_resumed' : 'session_start',
       ts: this.startedAt,
@@ -747,9 +752,7 @@ class FileSessionWriter implements SessionWriter {
       provider: this.meta.provider ?? 'unknown',
     })}\n`;
     try {
-      if (this.filePath) {
-        await fsp.writeFile(this.filePath, record, { flag: 'a', mode: 0o600 });
-      }
+      await this.handle.appendFile(record, 'utf8');
     } catch {
       // best-effort
     }
