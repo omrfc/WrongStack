@@ -70,8 +70,23 @@ export const testTool: Tool<TestInput, TestOutput> = {
     const cwd = input.cwd ? safeResolve(input.cwd, ctx) : ctx.cwd;
     const runner = input.runner ?? 'auto';
 
-    // When auto-detection finds no config file, fall back to vitest (the project default).
-    const detected = runner === 'auto' ? (await detectRunner(cwd)) ?? 'vitest' : runner;
+    const detected = runner === 'auto' ? await detectRunner(cwd) : runner;
+    if (!detected) {
+      yield {
+        type: 'final',
+        output: {
+          runner: 'none',
+          exit_code: 0,
+          tests_run: 0,
+          passed: 0,
+          failed: 0,
+          duration_ms: 0,
+          output: 'No test runner found (vitest.config.ts, jest.config.js, .mocharc.json)',
+          truncated: false,
+        },
+      };
+      return;
+    }
 
     yield { type: 'log', text: `Running ${detected}…`, data: { runner: detected } };
 

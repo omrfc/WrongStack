@@ -25,22 +25,20 @@ describe('testTool', () => {
 
   it('returns none when no runner found', async () => {
     const ctx = { cwd: '/', tools: [], projectRoot: '/' } as any;
-    // With mock returning exitCode: 0, runner will be detected as 'none' if nothing found
-    // but since '/' is an empty dir with no config, detectRunner returns 'vitest' as fallback
-    // The 'none' input isn't valid - we test the path by using auto in an empty dir
+    // When no config file is found in the directory, detectRunner returns null
+    // and the tool short-circuits with runner: 'none'.
     const result = await testTool.execute({ runner: 'auto' }, ctx, {
       signal: new AbortController().signal,
     });
-    // In a directory with no vitest.config.ts, jest.config.js, or .mocharc.json,
-    // detectRunner falls back to 'vitest' anyway
-    expect(result.runner).toBeDefined();
+    expect(result.runner).toBe('none');
   });
 
-  it('defaults to vitest', async () => {
+  it('short-circuits when auto-detect finds nothing', async () => {
     const ctx = { cwd: '/', tools: [], projectRoot: '/' } as any;
     const result = await testTool.execute({ runner: 'auto' }, ctx, {
       signal: new AbortController().signal,
     });
+    // Short-circuits with runner: 'none', producing a valid TestOutput
     expect(result).toHaveProperty('exit_code');
   });
 
@@ -109,7 +107,7 @@ describe('testTool executeStream API', () => {
     expect(final?.output.runner).toBe('none');
   });
 
-  it('emits a log event before final', async () => {
+  it('emits a single final event on short-circuit (no log)', async () => {
     const ctx = { cwd: '/', tools: [], projectRoot: '/' } as any;
     const events: any[] = [];
     for await (const ev of testTool.executeStream!({ runner: 'auto' }, ctx, {
@@ -117,8 +115,11 @@ describe('testTool executeStream API', () => {
     })) {
       events.push(ev);
     }
-    // Should have log events and final
-    expect(events.some((e) => e.type === 'log' || e.type === 'final')).toBe(true);
+    // When no runner config exists, the tool short-circuits with exactly one final event.
+    expect(events.filter((e) => e.type === 'log')).toHaveLength(0);
+    const finals = events.filter((e) => e.type === 'final');
+    expect(finals).toHaveLength(1);
+    expect(finals[0]?.output.runner).toBe('none');
   });
 });
 
@@ -165,13 +166,13 @@ describe('detectRunner (via executeStream in temp dirs)', () => {
     }
   });
 
-  it('falls back to vitest when no config file found', async () => {
+  it('short-circuits to none when no config file found', async () => {
     const ctx = { cwd: '/', tools: [], projectRoot: '/' } as any;
     const result = await testTool.execute({ runner: 'auto' }, ctx, {
       signal: new AbortController().signal,
     });
-    // Auto-detect should still return vitest as default
-    expect(result.runner).toBe('vitest');
+    // When no config is found, the tool short-circuits with runner: 'none'
+    expect(result.runner).toBe('none');
   });
 });
 
