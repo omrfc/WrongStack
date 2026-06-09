@@ -1,5 +1,6 @@
 import type { SubagentError, SubagentErrorKind } from '../../types/multi-agent.js';
 import { ProviderError } from '../../types/provider.js';
+import { AgentError } from '../../types/errors.js';
 import { BudgetExceededError } from '../subagent-budget.js';
 
 /**
@@ -16,6 +17,14 @@ export function classifySubagentError(
   err: unknown,
   hints: { parentAborted?: boolean | undefined } = {},
 ): SubagentError {
+  // Unwrap AgentError wrappers — the runner wraps non-AgentError
+  // throwables (ProviderError, TypeError, etc.) in AgentError so the
+  // coordinator's try/catch catches a consistent type. Recurse into the
+  // inner cause so classification sees the original error kind.
+  if (err instanceof AgentError && err.cause) {
+    return classifySubagentError(err.cause, hints);
+  }
+
   const cause = err instanceof Error
     ? { name: err.name, message: err.message, stack: err.stack }
     : undefined;
@@ -55,7 +64,7 @@ export function classifySubagentError(
   if (/agent exhausted iteration limit$/i.test(baseMessage)) {
     return { kind: 'budget_iterations', message: baseMessage, retryable: false, cause };
   }
-  if (/empty response$/i.test(baseMessage)) {
+  if (/empty response/i.test(baseMessage)) {
     return { kind: 'empty_response', message: baseMessage, retryable: false, cause };
   }
   if (/^tool failed: /i.test(baseMessage)) {

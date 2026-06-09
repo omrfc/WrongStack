@@ -2,6 +2,7 @@ import type { EventBus } from '../kernel/events.js';
 import type { DoneCondition } from '../types/multi-agent.js';
 import type { SpecAnalysis, Specification } from '../types/spec.js';
 import type { TaskGraph, TaskNode } from '../types/task-graph.js';
+import { SddError, ERROR_CODES } from '../types/errors.js';
 import { SpecParser } from './spec-parser.js';
 import { DefaultTaskStore, TaskGenerator } from './task-generator.js';
 import { TaskTracker } from './task-tracker.js';
@@ -74,12 +75,14 @@ export class TaskFlow {
     this.emit('spec.analyzed', { analysis });
 
     if (analysis.completeness < 50) {
-      this.emit('error', {
-        phase: 'analyzing',
-        error: new Error(`Spec completeness too low: ${analysis.completeness}%`),
+      const err = new SddError({
+        message: `Spec completeness too low: ${analysis.completeness}%`,
+        code: ERROR_CODES.SDD_VALIDATION_FAILED,
+        context: { completeness: analysis.completeness },
       });
+      this.emit('error', { phase: 'analyzing', error: err });
       this.setPhase('failed');
-      throw new Error('Spec too incomplete');
+      throw err;
     }
 
     this.setPhase('generating');
@@ -90,7 +93,11 @@ export class TaskFlow {
   }
 
   async execute(ctx: TaskFlowExecutionContext): Promise<TaskGraph> {
-    if (!this.graph) throw new Error('No graph loaded. Call fromSpec first.');
+    if (!this.graph) throw new SddError({
+      message: 'No graph loaded. Call fromSpec first.',
+      code: ERROR_CODES.SDD_INVALID_STATE,
+      context: { phase: this.phase },
+    });
 
     this.setPhase('executing');
     this.stopped = false;
@@ -144,7 +151,11 @@ export class TaskFlow {
 
   async reviewTask(taskId: string, approved: boolean, comment?: string): Promise<void> {
     const task = this.opts.tracker.getNode(taskId);
-    if (!task) throw new Error(`Task ${taskId} not found`);
+    if (!task) throw new SddError({
+      message: `Task ${taskId} not found`,
+      code: ERROR_CODES.SDD_NOT_READY,
+      context: { taskId },
+    });
 
     if (approved) {
       this.opts.tracker.updateNodeStatus(taskId, 'completed', comment);

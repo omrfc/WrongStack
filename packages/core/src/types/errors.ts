@@ -392,3 +392,7 @@ export function isAgentError(err: unknown): err is AgentError {
 export function isFsError(err: unknown): err is FsError {
   return err instanceof FsError;
 }
+
+export function isSddError(err: unknown): err is SddError {
+  return err instanceof SddError;
+}

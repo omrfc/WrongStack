@@ -1,6 +1,7 @@
 import { expectDefined } from '../utils/expect-defined.js';
 import type { Specification, SpecRequirement, SpecSection } from '../types/spec.js';
 import type { SpecStore } from './spec-store.js';
+import { SddError, ERROR_CODES } from '../types/errors.js';
 
 // ─── Session Types ────────────────────────────────────────────────────────────
 
@@ -434,7 +435,11 @@ export class AISpecBuilder {
     switch (this.session.phase) {
       case 'questioning':
         if (!this.session.spec) {
-          throw new Error('Cannot approve: no spec generated yet.');
+          throw new SddError({
+            message: 'Cannot approve: no spec generated yet.',
+            code: ERROR_CODES.SDD_INVALID_STATE,
+            context: { phase: 'questioning', sessionId: this.session.id },
+          });
         }
         this.session.phase = 'spec_review';
         break;
@@ -500,7 +505,11 @@ export class AISpecBuilder {
    */
   async saveSpec(): Promise<Specification> {
     if (!this.session.spec) {
-      throw new Error('No spec to save.');
+      throw new SddError({
+        message: 'No spec to save.',
+        code: ERROR_CODES.SDD_NOT_READY,
+        context: { sessionId: this.session.id },
+      });
     }
     await this.store.save(this.session.spec);
     return this.session.spec;
@@ -517,11 +526,20 @@ export class AISpecBuilder {
     try {
       parsed = JSON.parse(jsonStr);
     } catch (e) {
-      throw new Error(`Invalid JSON for spec: ${e instanceof Error ? e.message : 'parse error'}`);
+      throw new SddError({
+        message: 'Invalid JSON for spec',
+        code: ERROR_CODES.SDD_PARSE_FAILED,
+        cause: e,
+        context: { detail: e instanceof Error ? e.message : 'parse error' },
+      });
     }
 
     if (!parsed || typeof parsed !== 'object') {
-      throw new Error('Spec JSON must be an object.');
+      throw new SddError({
+        message: 'Spec JSON must be an object',
+        code: ERROR_CODES.SDD_VALIDATION_FAILED,
+        context: { actualType: typeof parsed },
+      });
     }
 
     const raw = parsed as Record<string, unknown>;
@@ -532,7 +550,11 @@ export class AISpecBuilder {
 
     // Validate overview is not empty
     if (!overview || overview === 'undefined') {
-      throw new Error('Spec must have an overview.');
+      throw new SddError({
+        message: 'Spec must have an overview',
+        code: ERROR_CODES.SDD_VALIDATION_FAILED,
+        context: { field: 'overview', title },
+      });
     }
 
     const rawSections = Array.isArray(raw.sections) ? raw.sections : [];
