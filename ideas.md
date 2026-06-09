@@ -1375,4 +1375,615 @@ For strategic planning, here are the findings grouped by theme with rough effort
 
 ---
 
-*End of report. Total findings: 10 new features + 10 existing improvements + 23 deep-scan findings + 12 quick wins.*
+---
+
+## 14. Third-Pass Deep Scan — Storage, Observability, Fleet, DX
+
+Additional findings from scanning storage layer, observability, fleet agent definitions, TUI hooks, WebUI stores, Telegram integration, build system, and memory system.
+
+---
+
+### 14.1 Memory System
+
+#### M-6: Memory Store Has a 32 KB Hard Limit with No Tiered Storage
+
+**What:** `DefaultMemoryStore` has a hardcoded `MAX_BYTES_TOTAL = 32_000` (~8K tokens). When memory exceeds this, the consolidator must compress or delete entries. There's no tiered storage (hot/recent vs. cold/archived).
+
+**Why it matters:** For long-lived projects, 32 KB of memory is insufficient. The agent forgets important architectural decisions from months ago because they were consolidated away to make room.
+
+**Fix:**
+1. Add tiered storage: hot (recent, full fidelity), warm (older, compressed), cold (ancient, summary-only)
+2. Make the limit configurable per scope
+3. Add a "memory budget" concept (X tokens for project, Y for user-global)
+4. Let memory overflow to disk-based vector storage when the in-memory budget is full
+
+**Building blocks:** `MemoryConsolidator` already handles compression. `GraphMemoryBackend` tracks relationships. These can be extended for tiered storage.
+
+**Estimated effort:** 5–7 days.
+
+---
+
+#### M-7: GraphMemoryBackend Exists but Isn't Wired by Default
+
+**What:** `GraphMemoryBackend` (`packages/core/src/storage/memory-graph-backend.ts`) is a sophisticated graph-based memory backend that tracks co-occurrence, similarity, and turn-based relationships between memory entries. It supports graph traversal queries (`findRelated`).
+
+**But:** The default `DefaultMemoryStore` uses `FileMemoryBackend` (flat markdown). The graph backend is available as a pluggable backend but isn't wired by default. Most users never benefit from it.
+
+**Why it matters:** Graph-based memory would let the agent find related memories much more effectively. "Remember that bug with auth?" could traverse the graph to find related entries about tokens, sessions, and providers.
+
+**Fix:**
+1. Wire `GraphMemoryBackend` as the default for `project-memory` scope
+2. Keep `FileMemoryBackend` for `project-agents` (AGENTS.md) and `user-memory` (simple markdown)
+3. Add a `/memory graph` command to visualize relationships
+4. Add a `/memory search <query>` command that uses graph traversal
+
+**Estimated effort:** 3–5 days.
+
+---
+
+#### M-8: Memory Consolidator Uses LLM — But No Cost Awareness
+
+**What:** `MemoryConsolidator` (`packages/core/src/storage/memory-consolidator.ts`) is an `AgentExtension` that fires after every run. It sends the existing memory entries + session summary to the LLM and asks it to produce consolidation operations (add/edit/delete).
+
+**But:** It doesn't track how much the consolidation itself costs. On a long session, consolidation can cost $0.05–$0.10 per run. With eternal autonomy doing hundreds of runs, this adds up significantly.
+
+**Fix:**
+1. Log consolidation cost explicitly
+2. Allow users to configure consolidation frequency (every N runs, not every run)
+3. Support a cheaper model for consolidation (the `model` option exists but isn't advertised)
+4. Add a budget threshold: skip consolidation if session cost is already over X
+
+**Estimated effort:** 1–2 days.
+
+---
+
+### 14.2 Observability
+
+#### O-1: Prometheus Metrics — No Dashboard Template
+
+**What:** `packages/core/src/observability/prometheus.ts` renders metrics in Prometheus text format. `otel-tracer.ts`, `otlp-metrics.ts`, and `otlp-traces.ts` support OpenTelemetry export. But there's no pre-built Grafana dashboard JSON or Prometheus alerting rules.
+
+**Why it matters:** Users who enable `--metrics` get raw Prometheus endpoints but must build their own dashboards from scratch. A pre-built dashboard would make observability immediately useful.
+
+**Fix:** Ship a `contrib/` directory with:
+1. `grafana-dashboard.json` — pre-built WrongStack dashboard
+2. `prometheus-alerts.yml` — alerting rules (high error rate, budget exceeded, session stuck)
+3. `docker-compose.observability.yml` — Prometheus + Grafana + OTel Collector stack
+
+**Estimated effort:** 2–3 days.
+
+---
+
+#### O-2: Health Registry — No Automatic Health Checks
+
+**What:** `packages/core/src/observability/health.ts` provides a `HealthRegistry` interface, but health checks must be manually registered by each subsystem. There are no automatic health checks for:
+- Session storage integrity
+- MCP server connectivity
+- Provider API reachability
+- Disk space in session directory
+- Memory store consistency
+
+**Fix:** Register built-in health checks at boot time for critical subsystems. Expose via `wstack health` and `--metrics`.
+
+**Estimated effort:** 2–3 days.
+
+---
+
+#### O-3: OTLP Traces — No Sampling Strategy
+
+**What:** `otlp-traces.ts` exports traces via OpenTelemetry, but every tool call and provider request generates a span. In a 500-iteration autonomous session, this produces tens of thousands of spans.
+
+**Fix:** Add configurable sampling:
+- Always trace errors and slow calls
+- Sample 10% of normal tool calls
+- Sample 1% of fast reads
+- Let users configure the sampling rate
+
+**Estimated effort:** 1–2 days.
+
+---
+
+### 14.3 Session Analysis & Replay
+
+#### R-1: SessionAnalyzer — Basic Analysis Only
+
+**What:** `SessionAnalyzer` (`packages/core/src/storage/session-analyzer.ts`) is only 150 lines and produces a basic analysis: tool usage counts, error count, mode changes, and task summaries. It doesn't produce:
+
+- **Cost trend analysis** (cost per iteration over time)
+- **Tool failure clustering** (which tools fail together)
+- **Context growth tracking** (token usage per iteration)
+- **Decision quality scoring** (did the agent make good choices?)
+- **Time-to-resolution metrics** (how long from first attempt to success)
+- **Tool sequence patterns** (common tool chains)
+
+**Why it matters:** The `audit-log` skill expects rich session analysis. The current analyzer provides only surface-level statistics.
+
+**Fix:** Extend `SessionAnalyzer` with:
+1. Per-iteration cost tracking
+2. Tool failure pattern detection
+3. Context growth timeline
+4. Tool sequence mining (frequent tool chains)
+5. Export as structured JSON for dashboard consumption
+
+**Estimated effort:** 5–7 days.
+
+---
+
+#### R-2: ReplayLogStore — Not Wired into Default Boot
+
+**What:** `ReplayLogStore` (`packages/core/src/storage/replay-log-store.ts`) is a well-designed sidecar store that records provider request/response pairs for deterministic replay. But it's not wired into the default boot flow — it's only activated when the user explicitly enables replay mode.
+
+**Why it matters:** Replay is one of the most powerful features (N-1 in this report). But users don't know it exists because it's opt-in with no UI affordance.
+
+**Fix:**
+1. Add a `/replay record on` slash command
+2. Show a hint when replay is available: "This session can be replayed. Use `/replay` to step through."
+3. Add a `wstack replay list` command to find replayable sessions
+
+**Estimated effort:** 2–3 days.
+
+---
+
+#### R-3: ToolAuditLog Uses `randomUUID` Instead of ULID
+
+**What:** `packages/core/src/storage/tool-audit-log.ts` line 2 imports `randomUUID` from `node:crypto`. Same issue as M-1 — project convention is ULIDs.
+
+**Fix:** Same as M-1 — replace with project's ULID generator.
+
+**Estimated effort:** 5 minutes.
+
+---
+
+#### R-4: AnnotationsStore — No UI for Viewing/Managing Annotations
+
+**What:** `AnnotationsStore` (`packages/core/src/storage/annotations-store.ts`) is a well-designed sidecar store for collaboration annotations. It supports add, resolve, delete, and query. But there's no TUI or WebUI component to view or manage annotations.
+
+**Fix:** Add annotation rendering in:
+1. TUI history view (show annotations inline with events)
+2. WebUI chat view (click on a message to add/view annotations)
+3. `/annotations` slash command for CLI management
+
+**Estimated effort:** 3–5 days for TUI + WebUI integration.
+
+---
+
+### 14.4 Fleet & Agent Definitions
+
+#### F-1: 47 Agent Roles — No Documentation for Most
+
+**What:** The fleet roster has 47 agent roles across 9 phases (discovery → meta). Each agent has a detailed prompt, budget tier, tool set, and capability metadata. But this catalog is not documented anywhere users can discover it.
+
+**Why it matters:** Users don't know what agents are available. They can't make informed choices about which agent to dispatch for a task.
+
+**Fix:**
+1. Add `/fleet catalog` command that lists all agents with descriptions
+2. Add a `fleet.catalog` page to the WebUI
+3. Document the 9-phase system and agent roles in `docs/director-architecture.md`
+4. Add `wstack fleet catalog --format json` for programmatic access
+
+**Estimated effort:** 2–3 days.
+
+---
+
+#### F-2: Smart Dispatcher Has No Learning / Feedback Loop
+
+**What:** The `dispatcher.ts` uses a two-stage strategy: heuristic keyword scoring + optional LLM fallback. It works well for clear-cut tasks but has no feedback mechanism:
+
+- It doesn't learn from past dispatches (was the chosen agent successful?)
+- It doesn't adjust keyword weights based on outcomes
+- It doesn't track which agents are consistently over/under-utilized
+- It doesn't consider current agent load (all 47 agents are equal candidates)
+
+**Fix:**
+1. Track dispatch outcomes (success/failure/timeout per agent)
+2. Adjust heuristic weights based on historical success rates
+3. Add load-awareness: prefer idle agents over busy ones
+4. Add a "dispatch reason" in the fleet status so users understand routing decisions
+
+**Estimated effort:** 3–5 days.
+
+---
+
+#### F-3: Auto-Extend Policy — No User Visibility
+
+**What:** `AutoExtendPolicy` (`packages/core/src/coordination/auto-extend.ts`) automatically extends subagent budgets when they hit soft limits, with heartbeat-aware timeout handling and per-kind extension caps. But users have no visibility into:
+
+- How many extensions were granted per agent
+- Why an agent's budget was extended
+- What the current effective budget is (original + extensions)
+- When an extension was denied (and why)
+
+**Fix:**
+1. Emit `subagent.budget_extended` events with details (which limit, old/new value, reason)
+2. Show extension history in fleet status
+3. Add a `--budget-strict` flag to disable auto-extend for debugging
+4. Log extension decisions to the session JSONL
+
+**Estimated effort:** 2–3 days.
+
+---
+
+### 14.5 Telegram Integration
+
+#### T-9: Telegram Bot — No Command Handling
+
+**What:** The Telegram bot (`packages/telegram/src/bot.ts`) receives messages and emits `TelegramIncomingMessage` events. But there's no built-in command handling:
+
+- No `/status` command to check session state
+- No `/stop` command to abort a running task
+- No `/model` command to switch models
+- No `/cost` command to check spending
+- No approval flow for tool calls via Telegram
+
+**Why it matters:** Users who monitor WrongStack via Telegram can see output but can't control it. They must switch to the terminal/WebUI for any interaction.
+
+**Fix:** Add Telegram command handlers for:
+1. `/status` — current session state, iteration, cost
+2. `/stop` — abort current run
+3. `/model <name>` — switch model
+4. `/approve` — approve a pending tool call
+5. `/deny` — deny a pending tool call
+6. `/cost` — cost summary
+
+**Estimated effort:** 3–5 days.
+
+---
+
+#### T-10: Telegram — No Rate Limiting or Spam Protection
+
+**What:** The Telegram bot processes every incoming message as a potential prompt. There's no rate limiting, no user allowlist, and no spam filtering.
+
+**Why it matters:** Anyone who knows the bot token can send unlimited messages, which translates to unlimited WrongStack agent runs (and unlimited API costs).
+
+**Fix:**
+1. Add a configurable user allowlist (Telegram user IDs)
+2. Add per-user rate limiting (X messages per minute)
+3. Add message length limits
+4. Add a cost guard: stop processing messages when session cost exceeds a threshold
+
+**Estimated effort:** 1–2 days.
+
+---
+
+### 14.6 Build System & Infrastructure
+
+#### B-1: Build Script Has Windows-Specific Workaround
+
+**What:** `scripts/build.mjs` has a 20-line comment explaining a pnpm 11 + cmd.exe compatibility issue:
+
+> *"pnpm 11's `; echo "EXIT=$?"` wrapper, which cmd.exe does not understand as a separator"*
+
+The build script manually discovers packages and runs their build scripts to bypass this. This is fragile — if pnpm fixes the issue or changes the wrapper, the script breaks silently.
+
+**Fix:**
+1. Track the pnpm issue and remove the workaround when fixed
+2. Add a version check that warns when the workaround may be unnecessary
+3. Consider switching to `tsx scripts/build.mjs` with explicit `--shell bash` on Windows
+
+**Estimated effort:** 0.5–1 day.
+
+---
+
+#### B-2: No CI/CD Pipeline Configuration
+
+**What:** The security hardening plan references `.github/workflows/ci.yml` and `release.yml`, but these files don't exist in the repository. There are no CI workflows for:
+
+- Automated testing on push/PR
+- Automated type checking
+- Automated linting
+- Automated security audits
+- Release automation
+- Cross-platform testing (Windows, macOS, Linux)
+
+**Why it matters:** Without CI, there's no automated gate preventing regressions from reaching main.
+
+**Fix:** Create GitHub Actions workflows:
+1. `ci.yml` — test + typecheck + lint + audit on every PR
+2. `release.yml` — build + publish on tag push
+3. `weekly-audit.yml` — scheduled security audit
+4. Matrix testing: ubuntu-latest, macos-latest, windows-latest
+
+**Estimated effort:** 2–3 days.
+
+---
+
+#### B-3: WebUI Uses Core-Browser-Shim for a Single Export
+
+**What:** `packages/webui/src/lib/core-browser-shim.ts` is a 19-line file that exists solely to re-export `expectDefined` from `@wrongstack/core/utils/expect-defined`:
+
+```typescript
+export { expectDefined } from '@wrongstack/core/utils/expect-defined';
+```
+
+**Why it matters:** If the WebUI only needs `expectDefined` from core, it should import it directly from the subpath export. The shim adds indirection and maintenance burden.
+
+**Fix:**
+1. Import `expectDefined` directly in the WebUI components that need it
+2. If Vite can't handle the subpath import, fix the Vite config alias
+3. Delete the shim
+
+**Estimated effort:** 0.5 days.
+
+---
+
+#### B-4: No Automated Dependency Update Strategy
+
+**What:** The project has no automated dependency update strategy (no Dependabot, Renovate, or similar). The `outdated` tool exists but must be run manually.
+
+**Fix:**
+1. Add Dependabot or Renovate configuration
+2. Auto-merge minor/patch updates that pass CI
+3. Review major updates manually
+4. Exclude the website from monorepo-wide updates (it uses a separate lockfile)
+
+**Estimated effort:** 0.5–1 day to configure.
+
+---
+
+### 14.7 TUI Architecture
+
+#### T-11: TUI Event Bridge — No Error Boundary
+
+**What:** `useTuiEventBridge` (`packages/tui/src/hooks/use-tui-event-bridge.ts`) subscribes to ~50 EventBus events and dispatches reducer actions. If any event handler throws, the subscription is lost silently — the TUI stops updating but doesn't crash or show an error.
+
+**Why it matters:** Users see a frozen TUI with no feedback. They can't tell if the agent stopped or the UI broke.
+
+**Fix:** Add error boundaries around each event subscription:
+```typescript
+events.on('provider.text_delta', (e) => {
+  try {
+    dispatch({ type: 'textDelta', ... });
+  } catch (err) {
+    dispatch({ type: 'error', message: `UI error: ${err}` });
+  }
+});
+```
+
+**Estimated effort:** 1 day.
+
+---
+
+#### T-12: TUI Components Not Extracted as a Library
+
+**What:** The TUI has 30+ well-designed Ink/React components: fleet monitor, goal panel, phase monitor, process list, status bar, slash menu, etc. These are valuable building blocks that other terminal applications could use.
+
+**Fix:**
+1. Extract a `@wrongstack/tui-components` package with generic Ink components
+2. Keep WrongStack-specific wiring in `@wrongstack/tui`
+3. Publish as a separate package for the Ink/React community
+
+**Why it matters:** WrongStack's TUI is one of the most sophisticated Ink applications. Publishing the components would grow the ecosystem and attract contributors.
+
+**Estimated effort:** 5–7 days for extraction + documentation.
+
+---
+
+#### T-13: No TUI Theming / Customization
+
+**What:** The TUI has a hardcoded color scheme in `packages/tui/src/theme.ts`. Users can't customize:
+- Color palette (for accessibility or personal preference)
+- Layout (compact vs. spacious)
+- Key bindings (for non-QWERTY keyboards)
+- Font size (for high-DPI terminals)
+
+**Fix:** Add a `~/.wrongstack/tui-theme.json` configuration file:
+```json
+{
+  "colors": { "primary": "#00ff00", "error": "#ff0000" },
+  "compact": true,
+  "keyBindings": { "fleet": "Ctrl+F" }
+}
+```
+
+**Estimated effort:** 2–3 days.
+
+---
+
+### 14.8 WebUI Architecture
+
+#### W-4: WebUI Stores — Zustand with No Devtools Integration
+
+**What:** The WebUI uses Zustand stores (`chat-store.ts`, `fleet-store.ts`, `session-store.ts`, etc.) but doesn't integrate Zustand devtools. Developers can't inspect state changes during debugging.
+
+**Fix:** Add devtools middleware in development mode:
+```typescript
+export const useFleetStore = create<FleetState>()(
+  process.env.NODE_ENV === 'development' ? devtools(set => ({ ... })) : (set => ({ ... }))
+);
+```
+
+**Estimated effort:** 0.5 days.
+
+---
+
+#### W-5: WebUI Has No Keyboard Shortcuts System
+
+**What:** The WebUI has no keyboard shortcuts. The TUI has rich key bindings (Ctrl+F for fleet, Ctrl+G for agents, F9 for goal, Esc to close panels). The WebUI has none.
+
+**Fix:** Add a keyboard shortcut system:
+- `Cmd/Ctrl+K` — command palette
+- `Cmd/Ctrl+B` — toggle sidebar
+- `Cmd/Ctrl+Shift+F` — search overlay
+- `Escape` — close modals/panels
+
+**Estimated effort:** 2–3 days.
+
+---
+
+#### W-6: WebUI Fleet Store — No Historical Data
+
+**What:** The `useFleetStore` Zustand store only tracks live subagent state. When a subagent completes, its entry is eventually overwritten. There's no fleet history — users can't review past fleet activity.
+
+**Fix:**
+1. Keep completed subagent entries for the session duration
+2. Add a "completed" tab to the fleet panel
+3. Persist fleet history to session JSONL (director already does this via `fleet.json`)
+
+**Estimated effort:** 2–3 days.
+
+---
+
+#### W-7: WebUI — No Mobile-Responsive Layout
+
+**What:** The WebUI is designed for desktop browsers. The sidebar, chat view, and settings panel don't adapt to mobile screen sizes.
+
+**Why it matters:** Users want to monitor WrongStack on their phones, especially during long autonomous runs.
+
+**Fix:** Add responsive breakpoints for:
+- Sidebar → hamburger menu on mobile
+- Chat view → full-width on mobile
+- Settings → full-screen modal on mobile
+- Fleet panel → tab-based navigation on mobile
+
+**Estimated effort:** 3–5 days.
+
+---
+
+### 14.9 Autonomy Prompt Engineering
+
+#### A-9: Autonomy Prompt Contributor — Not Versioned
+
+**What:** `autonomy-prompt-contributor.ts` injects an "autonomy-state" block into the system prompt on every turn. The block contains the goal state, journal tail, and iteration counter. But there's no versioning — if the prompt format changes, old sessions can't be replayed with the new format.
+
+**Fix:** Add a `version` field to the prompt block:
+```typescript
+{ version: 2, goal: ..., journal: ..., iteration: ... }
+```
+
+And maintain backward compatibility in the parser.
+
+**Estimated effort:** 0.5–1 day.
+
+---
+
+#### A-10: No "Autonomy Pause" via Natural Language
+
+**What:** The eternal autonomy engine (`EternalAutonomy`) runs until `stop()` is called externally (SIGINT, `/autonomy stop`). But there's no way to pause via natural language — saying "hold on, let me review" in the chat doesn't pause the loop.
+
+**Why it matters:** Users interact with the agent conversationally. Having to use a slash command or Ctrl+C to pause is a mode mismatch.
+
+**Fix:** Add natural language pause detection:
+1. Watch for pause signals in user input ("wait", "hold on", "pause", "stop")
+2. Enter a paused state that waits for user confirmation before continuing
+3. Resume via "continue", "go ahead", "resume"
+
+**Estimated effort:** 2–3 days.
+
+---
+
+### 14.10 Queue & Task Management
+
+#### Q-1: QueueStore — No Priority or Scheduling
+
+**What:** `QueueStore` (`packages/core/src/storage/queue-store.ts`) persists queued user messages as a flat array. There's no priority ordering, no scheduled delivery (send at 8am), and no conditional delivery (send when tests pass).
+
+**Fix:**
+1. Add priority levels (low, normal, high)
+2. Add scheduled delivery (ISO timestamp)
+3. Add conditional delivery (event trigger: "when tool X succeeds")
+4. Add queue size limits and eviction policies
+
+**Estimated effort:** 3–5 days.
+
+---
+
+#### Q-2: No Cross-Session Task Handoff
+
+**What:** Sessions are isolated. If session A creates a plan with tasks, session B can't pick up where A left off. The plan store persists, but the execution context (what was done, what failed, what was learned) is lost.
+
+**Fix:**
+1. Add a "session handoff" protocol: when session A ends, write a handoff summary
+2. Session B reads the handoff summary and continues from the same state
+3. Include: completed tasks, failed attempts, learned patterns, file state
+
+**Why it matters:** Multi-session workflows are common. Users start a task, close WrongStack, and come back the next day. Currently they must re-explain the context from scratch.
+
+**Estimated effort:** 5–7 days.
+
+---
+
+## 15. Revised Totals
+
+| Category | Count |
+|----------|-------|
+| New feature ideas (N-1 to N-10) | 10 |
+| Existing improvements (E-1 to E-10) | 10 |
+| Architecture & code quality (A-1 to A-10) | 10 |
+| Developer experience (D-1 to D-5) | 5 |
+| Testing & QA (T-1 to T-13) | 13 |
+| Security & hardening (S-1 to S-6) | 6 |
+| Documentation & community (C-1 to C-7) | 7 |
+| Plugin system (P-1 to P-6) | 6 |
+| Provider & model (P-4 to P-6) | 3 |
+| Website (W-1 to W-7) | 7 |
+| Examples (X-1 to X-2) | 2 |
+| Observability (O-1 to O-3) | 3 |
+| Session & replay (R-1 to R-4) | 4 |
+| Fleet & agents (F-1 to F-3) | 3 |
+| Telegram (T-9 to T-10) | 2 |
+| Build & infra (B-1 to B-4) | 4 |
+| TUI architecture (T-11 to T-13) | 3 |
+| WebUI architecture (W-4 to W-7) | 4 |
+| Autonomy (A-6 to A-10) | 5 |
+| Queue & tasks (Q-1 to Q-2) | 2 |
+| Miscellaneous (M-1 to M-8) | 8 |
+| **Quick wins** | **12** |
+| **Total unique findings** | **~117** |
+
+---
+
+## 16. Revised Theme Roadmap
+
+### 🛡️ Security & Reliability (20–25 days)
+- S-1: Complete capability migration
+- S-2: Secret rotation helpers
+- S-3: MCP server sandboxing
+- S-4: Audit log integrity
+- A-6: Eternal autonomy persistent state
+- T-7: Circuit breaker for all tools
+- T-10: Telegram spam protection
+
+### 🧪 Testing & Quality (25–35 days)
+- E-2: WebUI test coverage
+- E-3: CLI test coverage
+- T-1: Integration test suite
+- T-2: Property-based testing
+- A-1: File decomposition
+- B-2: CI/CD pipeline setup
+
+### 🚀 Developer Experience (20–25 days)
+- D-1: `wstack doctor`
+- D-2: Interactive onboarding
+- D-3: Better Windows support
+- E-8: Better error messages
+- P-1: Plugin state threading
+- T-13: TUI theming
+- W-5: WebUI keyboard shortcuts
+
+### 🤖 AI & Intelligence (20–25 days)
+- N-5: Semantic code search
+- N-9: Smart context budgeting
+- M-6: Tiered memory storage
+- M-7: Wire GraphMemoryBackend by default
+- F-2: Smart dispatcher feedback loop
+- A-10: Natural language autonomy pause
+
+### 🌐 Ecosystem & Community (20–25 days)
+- N-3: Skill marketplace
+- D-4: VS Code extension
+- T-12: Extract TUI components as library
+- W-7: Mobile-responsive WebUI
+- C-3: Contributing guide
+- F-1: Fleet catalog documentation
+
+### 📊 Observability & Ops (10–15 days)
+- O-1: Grafana dashboard template
+- O-2: Automatic health checks
+- R-1: Enhanced session analysis
+- M-5: Opt-in telemetry
+- P-4: Provider health monitoring
+- F-3: Auto-extend visibility
+
+---
+
+*End of report. Total: ~117 unique findings across 21 categories, organized into 16 sections with theme-based roadmap estimates.*

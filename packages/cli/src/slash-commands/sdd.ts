@@ -19,6 +19,7 @@ import {
   type SpecVersion,
 } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
+import { parseSubcommand, unknownSubcommand } from './helpers.js';
 import { sddState, getSessionState } from './sdd/state.js';
 import { advanceToNextTask, formatElapsed, getTaskProgress } from './sdd/task-manager.js';
 import { findSpec, gatherProjectContext } from './sdd/project-context.js';
@@ -56,10 +57,10 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
       const specStore = new SpecStore({ baseDir: specsDir });
       const versioning = sddState.getVersioning();
 
-      const [verb, ...rest] = args.trim().split(/\s+/);
-      const restJoined = rest.join(' ').trim();
+      const { cmd, rest: restArgs } = parseSubcommand(args);
+      const restJoined = restArgs.join(' ').trim();
 
-      switch (verb) {
+      switch (cmd) {
         case '':
         case 'help':
           return { message: sddHelp() };
@@ -68,8 +69,8 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
 
         case 'new':
         case 'create': {
-          const forceFlag = rest.includes('--force') || rest.includes('-f');
-          const title = rest.filter(a => !a.startsWith('-')).join(' ').trim() || 'Untitled Feature';
+          const forceFlag = restArgs.includes('--force') || restArgs.includes('-f');
+          const title = restArgs.filter(a => !a.startsWith('-')).join(' ').trim() || 'Untitled Feature';
 
           // Check for existing session and offer to resume (unless --force)
           if (!sessionState.getBuilder() && !forceFlag) {
@@ -1128,7 +1129,7 @@ export function buildSddCommand(opts: SlashCommandContext): SlashCommand {
 
         default:
           return {
-            message: `Unknown command "${verb}".\n\n${sddHelp()}`,
+            message: `${unknownSubcommand(cmd, ['new', 'approve', 'execute', 'cancel', 'status', 'list', 'show', 'templates', 'resume'], 'sdd')}\n\n${sddHelp()}`,
           };
       }
     },

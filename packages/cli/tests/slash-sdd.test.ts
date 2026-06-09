@@ -311,7 +311,7 @@ describe('buildSddCommand verbs without an active session', () => {
   it('unknown verb falls through to default branch + appends help', async () => {
     const cmd = build();
     const res = await cmd.run('frobulate');
-    expect(res?.message).toContain('Unknown command "frobulate"');
+    expect(res?.message).toContain('Unknown subcommand "frobulate" for /sdd');
     expect(res?.message).toContain('Spec Builder');
   });
 
