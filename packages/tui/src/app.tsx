@@ -1614,6 +1614,41 @@ export function App({
     });
   }, [getSettings]);
 
+  // ── Auto-proceed countdown timer ───────────────────────────────
+  // When autonomy mode is 'auto', tick a countdown that the StatusBar
+  // renders as a live "⏳ auto in Ns" chip.  The actual auto-proceed
+  // execution is handled by the REPL's runAutoProceed(); this timer is
+  // display-only so the TUI user can see the countdown shrinking.
+  // Resets whenever autonomyLive or the suggestion list mutates.
+  const [autoProceedCountdown, setAutoProceedCountdown] = useState<number | null>(null);
+  const autoProceedTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+  useEffect(() => {
+    if (autonomyLive !== 'auto') {
+      clearInterval(autoProceedTimerRef.current);
+      autoProceedTimerRef.current = undefined;
+      setAutoProceedCountdown(null);
+      return;
+    }
+    const cfg = getSettings?.();
+    const delay = cfg?.delayMs ?? 45_000;
+    const start = Date.now();
+    setAutoProceedCountdown(Math.ceil(delay / 1000));
+    autoProceedTimerRef.current = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((delay - (Date.now() - start)) / 1000));
+      if (remaining <= 0) {
+        clearInterval(autoProceedTimerRef.current);
+        autoProceedTimerRef.current = undefined;
+        setAutoProceedCountdown(null);
+      } else {
+        setAutoProceedCountdown(remaining);
+      }
+    }, 500);
+    return () => {
+      clearInterval(autoProceedTimerRef.current);
+      autoProceedTimerRef.current = undefined;
+    };
+  }, [autonomyLive, getSettings]);
+
   // ── Auto-save settings on value change (←/→ arrow keys) ──
   // Gate ref: skip the first effect fire when settings just opened (all fields
   // were populated from getSettings(), so saving would be a no-op double-write).
@@ -4158,6 +4193,7 @@ export function App({
             modeLabel={liveModeLabel || undefined}
             debugStreamStats={state.debugStreamStats}
             enhanceCountdown={enhanceCountdown}
+            autoProceedCountdown={autoProceedCountdown}
           />
           {/* Keys-&-commands help overlay (`?` on an empty prompt). Modal: while
           open, handleKey swallows everything but Esc/?/q, so it never coexists

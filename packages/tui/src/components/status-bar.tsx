@@ -240,6 +240,7 @@ export function StatusBar({
   modeLabel,
   debugStreamStats,
   enhanceCountdown,
+  autoProceedCountdown,
 }: StatusBarProps): React.ReactElement {
   // Track terminal width so we can adapt layout on narrow terminals.
   // We snapshot into state so that renders are stable — we don't want
@@ -295,6 +296,7 @@ export function StatusBar({
   // Line 2 is *session context* — slow-moving facts about where you
   // are: the project, the branch, the elapsed clock, YOLO chip. These
   // change at most once per session.
+  const hasAutoProceed = autoProceedCountdown != null && autoProceedCountdown > 0;
   const hasSecondLine =
     yolo ||
     (autonomy && autonomy !== 'off') ||
@@ -302,7 +304,8 @@ export function StatusBar({
     (git !== null && git !== undefined) ||
     (projectName !== undefined && projectName.length > 0) ||
     (goalSummary !== null && goalSummary !== undefined) ||
-    !!modeLabel;
+    !!modeLabel ||
+    hasAutoProceed;
 
   // Line 3 is *active work* — the dynamic chips that mutate as the
   // agent / subagents make progress. Hidden when nothing is in flight
@@ -509,6 +512,22 @@ export function StatusBar({
                 <Text dimColor>│</Text>
               ) : null}
               <Text color="cyan">{modeIcon(modeLabel)}</Text>
+            </>
+          ) : null}
+          {hasAutoProceed ? (
+            <>
+              {yolo ||
+              (autonomy && autonomy !== 'off') ||
+              eternalStage ||
+              startedAt != null ||
+              projectName ||
+              goalSummary ||
+              modeLabel ? (
+                <Text dimColor>│</Text>
+              ) : null}
+              <Text color={autoProceedCountdown != null && autoProceedCountdown <= 5 ? 'yellow' : 'cyan'}>
+                ⏳ auto in {autoProceedCountdown}s
+              </Text>
             </>
           ) : null}
           {git ? (
