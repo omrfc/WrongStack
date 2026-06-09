@@ -112,12 +112,15 @@ export async function main(argv: string[]): Promise<number> {
   // Seed the stream-debug singleton from persisted config so WireAdapter
   // picks it up on construction. Runtime toggles update this singleton
   // directly; the config file is the source of truth for restarts.
-  const { setDebugStreamEnabled, setDebugStreamCallback, defaultDebugStreamCallback } =
+  const { setDebugStreamEnabled } =
     await import('@wrongstack/providers');
   if (config.debugStream) setDebugStreamEnabled(true);
-  // Default: write debug stats to stderr. The TUI overrides this later
-  // with a reducer-bound callback that renders inside Ink's StatusBar.
-  setDebugStreamCallback(defaultDebugStreamCallback);
+  // Default debug-stream callback is intentionally left unset.
+  // The TUI installs its own reducer-bound callback that renders inside
+  // Ink's StatusBar. In REPL/headless mode, stderr output from the default
+  // callback interferes with the readline prompt and floods the terminal;
+  // debug-stream data is still collected (and accessible via /diag-stats)
+  // but not dumped to the console.
 
   // PathResolver is created from the resolved projectRoot
   const pathResolver = new DefaultPathResolver(cwd);

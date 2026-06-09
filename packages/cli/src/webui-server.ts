@@ -625,15 +625,20 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
         break;
       }
 
-      default:
-        send(ws, {
-          type: 'error',
-          payload: {
-            phase: 'ws.dispatch',
-            message: `Unknown message type: ${String((msg as { type: string }).type)}`,
-          },
-        });
+      default: {
+        // Log unknown message types for debugging but do NOT send an error
+        // to the client. The client sends many message types (autophase.*,
+        // collab.*, context.*, tools.list, memory.list, skills.list, etc.)
+        // that the server does not yet implement handlers for. Sending an
+        // error for each one would flood the Web UI with visible error
+        // bubbles every time the user opens a panel or triggers an action.
+        // When a message type genuinely needs a response, the handler
+        // should be implemented in this switch — not error here.
+        console.debug(
+          `[WebUI] Unhandled message type: ${String((msg as { type: string }).type)}`,
+        );
         break;
+      }
     }
   }
 
