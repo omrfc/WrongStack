@@ -14,9 +14,11 @@ import {
   Folder,
   FolderGit,
   FolderOpen,
+  Folders,
   Loader2,
+  Minimize2,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 // ── File icon by extension ────────────────────────────────────────────
 
@@ -181,18 +183,26 @@ function TreeNodeItem({
   node,
   depth,
   selectedPath,
+  forceExpand,
   onSelect,
   onOpen,
 }: {
   node: TreeNode;
   depth: number;
   selectedPath: string | null;
+  /** null = user-controlled (default), true = expand all, false = collapse all */
+  forceExpand: boolean | null;
   onSelect: (filePath: string) => void;
   onOpen: (filePath: string) => void;
 }) {
   const [expanded, setExpanded] = useState(depth < 1); // auto-expand root level
   const activeFilePath = useFileStore((s) => s.activeFilePath);
   const isActive = node.type === 'file' && node.path === activeFilePath;
+
+  // Sync local expanded state when forceExpand changes globally
+  useEffect(() => {
+    if (forceExpand !== null) setExpanded(forceExpand);
+  }, [forceExpand]);
 
   if (node.type === 'directory') {
     const hasChildren = (node.children?.length ?? 0) > 0;
@@ -231,6 +241,7 @@ function TreeNodeItem({
                 node={child}
                 depth={depth + 1}
                 selectedPath={selectedPath}
+                forceExpand={forceExpand}
                 onSelect={onSelect}
                 onOpen={onOpen}
               />

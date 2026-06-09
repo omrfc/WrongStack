@@ -113,7 +113,7 @@ export function buildLoadCommand(opts: SlashCommandContext): SlashCommand {
       if (!opts.sessionStore) return { message: 'No session store configured.' };
       const list = await opts.sessionStore.list(10);
       if (list.length === 0) return { message: 'No saved sessions.' };
-      const currentId = (opts as unknown as { currentSessionId?: string | undefined }).currentSessionId;
+      const currentId = opts.context?.session?.id;
       const lines = list.map((s) => {
         // Build a compact stats column: tools, errors, outcome badge.
         const parts: string[] = [];

@@ -42,8 +42,16 @@ export function ChatInput() {
   const [atMention, setAtMention] = useState<{ start: number; query: string } | null>(null);
   /** Transient hint shown after a large paste. The user can read it for a
    *  few seconds then it auto-dismisses. We only surface it for genuinely
-   *  big drops (>800 chars) — smaller pastes don't need a callout. */
-  const [pasteHint, setPasteHint] = useState<{ chars: number; lines: number } | null>(null);
+   *  big drops (>800 chars) — smaller pastes don't need a callout.
+   *  When `lang` is set, the paste was auto-fenced as code. */
+  const [pasteHint, setPasteHint] = useState<{
+    chars: number;
+    lines: number;
+    /** Detected language if code was auto-fenced. */
+    lang?: string | undefined;
+    /** If set, the fenced version can be undone via this callback. */
+    undoFence?: (() => void) | undefined;
+  } | null>(null);
   /** True while an OS-drag is hovering over the input area. Triggers the
    *  drop overlay so the user gets visual confirmation they're about to
    *  attach. Browsers don't expose full filesystem paths from drops for
@@ -483,25 +491,53 @@ export function ChatInput() {
 
   return (
     <div className="flex flex-col gap-2">
-      {/* Smart paste hint — transient, auto-dismisses after 4s. We don't
-          *do* anything with it (no auto-attach), just inform; users who
-          pasted by accident can still Cmd+Z. */}
+      {/* Smart paste hint — shows when code is auto-fenced (with undo)
+          or when a large text block is pasted. Auto-dismisses. */}
       {pasteHint && (
-        <div className="rounded-md border border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-300 px-2.5 py-1.5 text-xs flex items-center justify-between gap-2 animate-message">
+        <div className={cn(
+          'rounded-md border px-2.5 py-1.5 text-xs flex items-center justify-between gap-2 animate-message',
+          pasteHint.lang
+            ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300'
+            : 'border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-300',
+        )}>
           <span>
-            Pasted{' '}
-            <span className="font-mono tabular-nums">{pasteHint.chars.toLocaleString()}</span> chars
-            (<span className="font-mono tabular-nums">{pasteHint.lines}</span> lines) — fenced code
-            blocks render best with <span className="font-mono">```</span>.
+            {pasteHint.lang ? (
+              <>
+                Auto-fenced as{' '}
+                <span className="font-mono font-semibold">{pasteHint.lang}</span>
+                {' — '}
+                <span className="font-mono tabular-nums">{pasteHint.chars.toLocaleString()}</span> chars
+                {' ('}<span className="font-mono tabular-nums">{pasteHint.lines}</span> lines)
+              </>
+            ) : (
+              <>
+                Pasted{' '}
+                <span className="font-mono tabular-nums">{pasteHint.chars.toLocaleString()}</span> chars
+                {' ('}<span className="font-mono tabular-nums">{pasteHint.lines}</span> lines) — fenced code
+                blocks render best with <span className="font-mono">```</span>.
+              </>
+            )}
           </span>
-          <button
-            type="button"
-            onClick={() => setPasteHint(null)}
-            className="text-amber-600/70 hover:text-amber-600 dark:text-amber-300/70 dark:hover:text-amber-300 shrink-0"
-            title="Dismiss"
-          >
-            ×
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {pasteHint.undoFence && (
+              <button
+                type="button"
+                onClick={pasteHint.undoFence}
+                className="underline underline-offset-2 hover:opacity-80"
+                title="Remove fences and restore raw text"
+              >
+                Undo
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setPasteHint(null)}
+              className="opacity-60 hover:opacity-100 shrink-0"
+              title="Dismiss"
+            >
+              ×
+            </button>
+          </div>
         </div>
       )}
       {/* Queue visualization — shows messages the user stacked while the
@@ -732,10 +768,61 @@ export function ChatInput() {
             }}
             onKeyDown={handleKeyDown}
             onPaste={(e) => {
+              const text = e.clipboardData?.getData('text') ?? '';
+              if (!text) return;
+
+              // ── Code detection & auto-fencing ──
+              // Check if the pasted content looks like source code.
+              // If it does and isn't already fenced, auto-wrap in ``` fences
+              // so the markdown renderer shows syntax highlighting.
+              const result = autoFenceCode(text);
+              if (result) {
+                e.preventDefault();
+                const ta = textareaRef.current;
+                if (!ta) return;
+                const start = ta.selectionStart;
+                const end = ta.selectionEnd;
+                const before = input.slice(0, start);
+                const after = input.slice(end);
+                const fenced = result.fenced;
+                const next = before + fenced + after;
+                setInput(next);
+                const lines = text.split('\n').length;
+                // Store undo callback — replaces the paste with the raw text
+                const undo = () => {
+                  const raw = before + text + after;
+                  setInput(raw);
+                  setPasteHint(null);
+                  requestAnimationFrame(() => {
+                    if (ta) {
+                      ta.focus();
+                      ta.style.height = 'auto';
+                      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+                    }
+                  });
+                };
+                setPasteHint({
+                  chars: text.length,
+                  lines,
+                  lang: result.lang,
+                  undoFence: undo,
+                });
+                setTimeout(() => setPasteHint(null), 6000);
+                requestAnimationFrame(() => {
+                  ta.style.height = 'auto';
+                  ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+                  // Place cursor after the closing ```
+                  const newPos = before.length + fenced.length;
+                  ta.setSelectionRange(newPos, newPos);
+                });
+                // Exit — don't run the large-paste hint
+                return;
+              }
+
+              // ── Large paste hint (non-code) ──
               // Surface a tiny hint when the user drops a chunky payload —
               // helps them realize they pasted the wrong thing (e.g. an
               // entire file when they meant a snippet). 4-second TTL.
-              const text = e.clipboardData?.getData('text') ?? '';
               if (text.length > 800) {
                 const lines = text.split('\n').length;
                 setPasteHint({ chars: text.length, lines });

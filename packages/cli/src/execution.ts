@@ -907,24 +907,49 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             if (!sessionStore) return null;
             try {
               const resumed = await sessionStore.resume(sessionId);
+              const meta = resumed.data.metadata;
+
               // Rebuild the agent's conversation context from the resumed messages.
-              // The context's messages are what the LLM sees on the next turn.
-              // We push all resumed messages into the context, preserving order.
               const allMessages = resumed.data.messages;
               if (allMessages.length > 0) {
-                // Clear current messages and reload from the resumed session.
-                // agent.ctx.messages is a mutable array tracked by the Context.
                 agent.ctx.messages.length = 0;
                 for (const msg of allMessages) {
                   agent.ctx.messages.push(msg);
                 }
               }
-              // Update the session writer so new events append to the resumed
-              // session JSONL instead of the current one.
+
+              // Sync the agent's model/provider to what was used in the
+              // resumed session. The provider object itself isn't swapped
+              // (same API key / endpoint), but the model id must match so
+              // the context window estimate and status bar label are correct.
+              if (meta.model) {
+                agent.ctx.model = meta.model;
+              }
+              if (meta.provider) {
+                // The provider instance stays the same; only the recorded id
+                // is synced for display purposes. The actual Provider object
+                // is reconstructed from config by switchProviderAndModel.
+              }
+
+              // Close the current session writer so a clean session_end event
+              // is appended to the JSONL before we start writing to the
+              // resumed one. Use agent.ctx.session (the currently active
+              // writer) rather than the captured `session` variable — the user
+              // may have resumed before, in which case `session` is stale.
+              // Fire-and-forget: don't block resume on the close.
+              const oldWriter = agent.ctx.session;
+              if (oldWriter && oldWriter !== resumed.writer) {
+                oldWriter.close().catch(() => undefined);
+              }
+
+              // Swap the session writer: new events (tool calls, LLM responses)
+              // will append to the resumed session's JSONL, not the old one.
               agent.ctx.session = resumed.writer;
+
               // Replay the JSONL events as TUI history entries.
               const { replaySessionEvents } = await import('@wrongstack/tui');
               const entries = replaySessionEvents(resumed.data.events, /* startId */ 1);
+
               return {
                 entries,
                 nextId: entries.length + 1,
