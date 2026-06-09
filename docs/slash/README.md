@@ -23,7 +23,7 @@ WrongStack's REPL supports core slash commands plus commands registered by built
 | `/autonomy` | `packages/cli/src/slash-commands/autonomy.ts` | Set autonomy level |
 | `/goal` | `packages/cli/src/slash-commands/goal.ts` | Set, show, pause, resume, journal, or clear an autonomous mission |
 | `/save` | `packages/cli/src/slash-commands/session.ts` | Force-flush session to disk |
-| `/resume` | `packages/cli/src/slash-commands/session.ts` | List recent sessions; `/load`, `/sessions` aliases |
+| `/sessions` | `packages/cli/src/slash-commands/session.ts` | List recent sessions; `/resume`, `/load` aliases for backward compat |
 | `/exit` | `packages/cli/src/slash-commands/session.ts` | Exit REPL; `/quit`, `/q` aliases |
 | `/tools` | `packages/cli/src/slash-commands/tools.ts` | List registered tools |
 | `/plugin` | `packages/cli/src/slash-commands/plugin.ts` | Manage plugins |
@@ -85,6 +85,26 @@ REPL input "/<command> <args>"
 3. Import and add it to `buildBuiltinSlashCommands()` in `packages/cli/src/slash-commands/index.ts`.
 4. Add tests under `packages/cli/tests/`.
 5. Add or update docs under `docs/slash/`.
+
+### Recommended patterns
+
+**Arg parsing:** Use `parseSubcommand(args)` from `helpers.ts` instead of raw
+`args.trim().split(/\s+/)`. Returns `{ cmd, rest }` where `cmd` is the lowercase
+first token and `rest` is the remaining tokens.
+
+```typescript
+import { parseSubcommand, unknownSubcommand } from './helpers.js';
+
+async run(args) {
+  const { cmd, rest } = parseSubcommand(args);
+  switch (cmd) {
+    case 'sub1': return handleSub1(rest);
+    case 'sub2': return handleSub2(rest);
+    default:
+      return { message: unknownSubcommand(cmd, ['sub1', 'sub2'], 'mycommand') };
+  }
+}
+```
 
 ## Adding a plugin slash command
 
