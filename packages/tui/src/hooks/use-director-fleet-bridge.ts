@@ -305,6 +305,25 @@ export function useDirectorFleetBridge({
           }
           break;
         }
+        case 'ctx.pct': {
+          const payload = event.payload as {
+            load?: number | undefined;
+            tokens?: number | undefined;
+            maxContext?: number | undefined;
+            ctxCost?: number | undefined;
+          };
+          if (payload?.load !== undefined) {
+            enqueue({
+              type: 'fleetCtxPct',
+              id: event.subagentId,
+              load: payload.load,
+              tokens: payload.tokens ?? 0,
+              maxContext: payload.maxContext ?? 0,
+              ctxCost: payload.ctxCost,
+            });
+          }
+          break;
+        }
         case 'bug.found':
           handleCollabBugFound(event, enqueue, stateRef);
           break;

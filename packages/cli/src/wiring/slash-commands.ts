@@ -116,6 +116,30 @@ export async function setupSlashCommands(params: SlashCommandsDeps): Promise<voi
       const tag = tags.length > 0 ? ` (${tags.join(' / ')})` : '';
       return `Spawned subagent ${subagentId}${tag} for task ${taskId}. Use /agents to track progress.`;
     },
+    onSpawnAndWait: async (description, spawnOpts) => {
+      const result = await multiAgentHost.spawnAndWait(description, spawnOpts);
+      const tags: string[] = [];
+      if (spawnOpts?.provider) tags.push(spawnOpts.provider);
+      if (spawnOpts?.model) tags.push(spawnOpts.model);
+      if (spawnOpts?.name) tags.push(spawnOpts.name);
+      const tag = tags.length > 0 ? ` (${tags.join(' / ')})` : '';
+
+      const secs = (result.durationMs / 1000).toFixed(result.durationMs < 10_000 ? 1 : 0);
+      const icon =
+        result.status === 'success' ? '✓' : result.status === 'timeout' ? '⏱' : result.status === 'stopped' ? '⊘' : '✗';
+      const resultPreview =
+        typeof result.result === 'string' && result.result.trim()
+          ? `\n${result.result.trim().slice(0, 600)}${result.result.trim().length > 600 ? '\n…' : ''}`
+          : '';
+
+      return [
+        `${icon} ${tag ? tag.slice(1) : 'subagent'} ${result.status} (${result.iterations} iter / ${result.toolCalls} tools / ${secs}s)`,
+        resultPreview,
+        result.error ? `  error: ${result.error.message}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+    },
     onAgents: () => {
       const s = multiAgentHost.status();
       const lines: string[] = [];

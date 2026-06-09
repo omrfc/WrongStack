@@ -53,7 +53,17 @@ export interface SlashCommandContext {
    * When omitted /commit falls back to heuristics-only messages.
    */
   generateCommitMessage?: ((diff: string) => Promise<string>) | undefined;
+  /** Fire-and-forget spawn — returns immediately with spawn metadata. Used by /spawn. */
   onSpawn?: (
+    description: string,
+    opts?: { provider?: string | undefined; model?: string | undefined; tools?: string[] | undefined; name?: string | undefined },
+  ) => Promise<string>;
+  /**
+   * Blocking spawn — waits for the subagent to complete and returns the full
+   * result. Used by /techstack and any other command that needs the subagent's
+   * actual output inline.
+   */
+  onSpawnAndWait?: (
     description: string,
     opts?: { provider?: string | undefined; model?: string | undefined; tools?: string[] | undefined; name?: string | undefined },
   ) => Promise<string>;
@@ -301,6 +311,7 @@ import { buildTodosCommand } from './todos.js';
 import { buildTasksCommand } from './tasks.js';
 import { buildToolsCommand } from './tools.js';
 import { buildWorktreeCommand } from './worktree.js';
+import { buildTechStackCommand } from './techstack.js';
 import { buildYoloCommand } from './yolo.js';
 
 export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashCommand[] {
@@ -311,6 +322,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildCompactCommand(opts),
     buildContextCommand(opts),
     buildCodebaseReindexCommand(opts),
+    buildTechStackCommand(opts),
     buildToolsCommand(opts),
     buildPluginCommand(opts),
     buildPruneCommand(opts),

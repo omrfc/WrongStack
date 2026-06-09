@@ -738,7 +738,7 @@ export class MultiAgentHost {
     // so the director's manifest entries get populated. Calling the
     // underlying coordinator directly would still execute the task, but
     // the manifest would be empty — that surprised the first test.
-    const { subagentId, taskId } = await this._spawnAndAssign(subagentConfig);
+    const { subagentId, taskId } = await this._spawnAndAssign(subagentConfig, description);
     // Track the pending task via FleetManager so status() can show descriptions
     // without host-side state duplication.
     this.fleetManager?.addPendingTask(taskId, subagentId, description);
@@ -746,6 +746,30 @@ export class MultiAgentHost {
     // and bridged to EventBus in buildDirector(). This ensures the correct
     // nickname (e.g. "Einstein (Bug Hunter)") is captured, not the placeholder.
     return { subagentId, taskId };
+  }
+
+  /**
+   * Spawn a fresh subagent, assign a task, and **await** its completion.
+   *
+   * Unlike `spawn()`, which returns immediately with spawn metadata, this
+   * method blocks until the subagent finishes (success, failure, or timeout)
+   * and returns the full `TaskResult`. Use this when the caller needs the
+   * subagent's actual output — e.g. `/techstack` displaying the generated report
+   * in chat, or `/spawn` showing the result inline.
+   *
+   * Optional `opts` lets the caller override the subagent's provider, model,
+   * and tool slice per spawn.
+   */
+  async spawnAndWait(
+    description: string,
+    opts?: { provider?: string | undefined; model?: string | undefined; tools?: string[] | undefined; name?: string | undefined },
+  ): Promise<TaskResult> {
+    const { taskId } = await this.spawn(description, opts);
+    if (!this.director) throw new Error('Director is not initialized');
+    const results = await this.director.awaitTasks([taskId]);
+    const result = results[0];
+    if (!result) throw new Error(`Task ${taskId} completed but no result returned`);
+    return result;
   }
 
   /**
@@ -757,18 +781,21 @@ export class MultiAgentHost {
    * Returns `{ subagentId, taskId }`. Caller holds `pending` tracking
    * and event emission — the helper only talks to the coordinator.
    */
-  private async _spawnAndAssign(subagentConfig: {
-    name: string;
-    role?: string | undefined;
-    provider?: string | undefined;
-    model?: string | undefined;
-    tools?: string[] | undefined;
-  }): Promise<{ subagentId: string; taskId: string }> {
+  private async _spawnAndAssign(
+    subagentConfig: {
+      name: string;
+      role?: string | undefined;
+      provider?: string | undefined;
+      model?: string | undefined;
+      tools?: string[] | undefined;
+    },
+    description: string = '',
+  ): Promise<{ subagentId: string; taskId: string }> {
     const taskId = randomUUID();
     // Always goes through the Director — single code path after buildDirector()
     if (!this.director) throw new Error('Director is not initialized');
     const subagentId = await this.director.spawn(subagentConfig);
-    await this.director.assign({ id: taskId, description: '', subagentId });
+    await this.director.assign({ id: taskId, description, subagentId });
     return { subagentId, taskId };
   }
 

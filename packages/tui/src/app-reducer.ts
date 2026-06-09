@@ -101,6 +101,11 @@ export function reducer(state: State, action: Action): State {
     case 'streamReset':
       return { ...state, streamingText: '' };
     case 'status':
+      // Going idle means the stream has finished — clear any lingering
+      // debug-stream stats so the statusline doesn't show stale "🐛 stream".
+      if (action.status === 'idle') {
+        return { ...state, status: 'idle', debugStreamStats: null };
+      }
       return { ...state, status: action.status };
     case 'interrupt':
       return { ...state, interrupts: state.interrupts + 1 };

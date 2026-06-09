@@ -1068,6 +1068,30 @@ export async function main(argv: string[]): Promise<number> {
       const tag = tags.length > 0 ? ` (${tags.join(' / ')})` : '';
       return `Spawned subagent ${subagentId}${tag} for task ${taskId}. Use /agents to track progress.`;
     },
+    onSpawnAndWait: async (description, spawnOpts) => {
+      const result = await multiAgentHost.spawnAndWait(description, spawnOpts);
+      const tags: string[] = [];
+      if (spawnOpts?.provider) tags.push(spawnOpts.provider);
+      if (spawnOpts?.model) tags.push(spawnOpts.model);
+      if (spawnOpts?.name) tags.push(spawnOpts.name);
+      const tag = tags.length > 0 ? ` (${tags.join(' / ')})` : '';
+
+      const secs = (result.durationMs / 1000).toFixed(result.durationMs < 10_000 ? 1 : 0);
+      const icon =
+        result.status === 'success' ? '✓' : result.status === 'timeout' ? '⏱' : result.status === 'stopped' ? '⊘' : '✗';
+      const resultPreview =
+        typeof result.result === 'string' && result.result.trim()
+          ? `\n${color.dim('─'.repeat(40))}\n${result.result.trim().slice(0, 600)}${result.result.trim().length > 600 ? '\n…' : ''}\n${color.dim('─'.repeat(40))}`
+          : '';
+
+      return [
+        `${icon} ${color.bold(tag ? tag.slice(1) : 'subagent')} ${result.status} (${result.iterations} iter · ${result.toolCalls} tools · ${secs}s)`,
+        resultPreview,
+        result.error ? `  ${color.amber(`error: ${result.error.message}`)}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+    },
     onAgents: (subagentId?: string) => {
       const s = multiAgentHost.status();
       // When given a specific subagent id, return a live monitor view.
