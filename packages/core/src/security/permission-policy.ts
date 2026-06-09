@@ -388,46 +388,21 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
  * declared capabilities.
  */
 export class AutoApprovePermissionPolicy implements PermissionPolicy {
-  /**
-   * Legacy name-based denylist.
-   * @deprecated Prefer declaring `capabilities` on the Tool and using capability-based checks.
-   */
-  private static readonly LEGACY_NAME_DENY = new Set([
-    'bash',
-    'write',
-    'edit',
-    'replace',
-    'scaffold',
-    'patch',
-    'install',
-    'exec',
-  ]);
-
-  // Note: hasDangerousCapabilityForSubagents is now the shared helper from capabilities.ts
-  // The old private method was removed in favor of the centralized utility.
-
-  /**
-   * Tools from MCP servers (`mcp__<server>__<tool>`) are external code of
-   * unknown capability — they may wrap a shell or filesystem. They are
-   * fail-closed here: not auto-approved for subagents by default, so the
-   * leader must allow them explicitly per-spawn.
-   */
   private static isMcpTool(name: string): boolean {
     return name.startsWith('mcp__');
   }
 
   async evaluate(tool: Tool): Promise<PermissionDecision> {
     const hasDangerousCap = hasDangerousCapabilityForSubagents(tool);
-    const legacyNameBlock = AutoApprovePermissionPolicy.LEGACY_NAME_DENY.has(tool.name);
     const isMcp = AutoApprovePermissionPolicy.isMcpTool(tool.name);
 
-    const blocked = tool.permission === 'deny' || hasDangerousCap || legacyNameBlock || isMcp;
+    const blocked = tool.permission === 'deny' || hasDangerousCap || isMcp;
 
     if (blocked) {
       const reason = hasDangerousCap
         ? `tool declares dangerous capability (${tool.capabilities?.join(', ')}) — not auto-approved for subagents`
-        : legacyNameBlock || isMcp
-          ? `tool ${tool.name} is not auto-approved for subagents — ask the leader to allow it explicitly`
+        : isMcp
+          ? `MCP tool ${tool.name} is not auto-approved for subagents — ask the leader to allow it explicitly`
           : 'tool default deny';
 
       return {

@@ -564,15 +564,18 @@ export const modeldiagCmd: SubcommandHandler = async (args, deps) => {
     const providersEqIdx = benchArgs.findIndex((a) => a.startsWith('--providers='));
     let providerFilter: string[] | undefined;
     if (providersEqIdx >= 0) {
-      providerFilter = benchArgs[providersEqIdx]!
-        .replace('--providers=', '')
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-      benchArgs.splice(providersEqIdx, 1);
+      const rawFilter = benchArgs[providersEqIdx]?.replace('--providers=', '').split(',');
+      if (rawFilter) {
+        providerFilter = rawFilter.map((s) => s.trim()).filter(Boolean);
+        benchArgs.splice(providersEqIdx, 1);
+      }
     }
 
-    const benchRole = benchArgs[0]!;
+    const benchRole = benchArgs[0];
+    if (!benchRole) {
+      writeLine(`${color.amber('No benchmark role specified')}. Usage: wstack diag bench <role> [prompt]`);
+      return 1;
+    }
     const benchPrompt = benchArgs.slice(1).join(' ');
 
     const cat = roleCat(benchRole);
@@ -585,7 +588,7 @@ export const modeldiagCmd: SubcommandHandler = async (args, deps) => {
 
     let targetCandidates: typeof candidates;
     if (providerFilter && providerFilter.length > 0) {
-      targetCandidates = candidates.filter((c) => providerFilter!.includes(c.provider));
+      targetCandidates = candidates.filter((c) => providerFilter.includes(c.provider));
       if (targetCandidates.length === 0) {
         writeLine(`${color.amber('No candidates match the specified providers')}: ${providerFilter.join(', ')}`);
         writeLine(`Candidate providers: ${[...new Set(candidates.map((c) => c.provider))].join(', ')}`);

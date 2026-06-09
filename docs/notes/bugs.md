@@ -228,7 +228,7 @@ A curl command from the same machine bypassing token and Origin checks on loopba
 ---
 
 ### L-5: Encrypted Config Has No MAC — Malformed ciphertext could corrupt state
-**File:** `packages/core/src/security/secret-vault.ts`, `packages/core/src/security/config-secrets.ts`
+**File:** `packages/core/src/security/secret-vault.ts`
 **CWE:** [CWE-310](https://cwe.mitre.org/data/definitions/310.html) — Cryptographic Failure
 **Severity:** Low
 **Status:** Acknowledged — AES-GCM provides authentication

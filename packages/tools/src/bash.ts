@@ -234,50 +234,44 @@ export const bashTool: Tool<BashInput, BashOutput> = {
     let pending = '';
     let timedOut = false;
     const timers: NodeJS.Timeout[] = [];
-    const timer = setTimeout(() => {
-      timedOut = true;
+
+    function killWithTimeout(
+      child: ReturnType<typeof spawn>,
+      timeoutMs: number,
+    ): void {
       if (isWin) {
-        try {
-          child.kill();
-        } catch {
-          /* ignore */
+        try { child.kill(); } catch { /* ignore */ }
+        return;
+      }
+
+      // Best-effort SIGTERM: try process-group kill first, fall back to child.kill.
+      try {
+        if (typeof child.pid === 'number') {
+          try { process.kill(-child.pid, 'SIGTERM'); }
+          catch { child.kill('SIGTERM'); }
+        } else {
+          child.kill('SIGTERM');
         }
-      } else {
+      } catch { /* ignore */ }
+
+      // After timeoutMs, assert-kill with SIGKILL.
+      const killTimer = setTimeout(() => {
         try {
           if (typeof child.pid === 'number') {
-            try {
-              process.kill(-child.pid, 'SIGTERM');
-            } catch {
-              child.kill('SIGTERM');
-            }
+            try { process.kill(-child.pid, 'SIGKILL'); }
+            catch { child.kill('SIGKILL'); }
           } else {
-            child.kill('SIGTERM');
+            child.kill('SIGKILL');
           }
-          const killTimer = setTimeout(() => {
-            try {
-              if (typeof child.pid === 'number') {
-                try {
-                  process.kill(-child.pid, 'SIGKILL');
-                } catch {
-                  child.kill('SIGKILL');
-                }
-              } else {
-                child.kill('SIGKILL');
-              }
-            } catch {
-              /* ignore */
-            } finally {
-              // Only unref after the callback fires; prevents a stray SIGKILL
-              // from firing ~2s after a process that exited cleanly before the
-              // timeout's SIGTERM was even sent.
-              killTimer.unref?.();
-            }
-          }, 2000);
-          timers.push(killTimer);
-        } catch {
-          /* ignore */
-        }
-      }
+        } catch { /* ignore */ }
+      }, timeoutMs);
+      timers.push(killTimer);
+      killTimer.unref?.();
+    }
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killWithTimeout(child, 2000);
     }, timeoutMs);
     timers.push(timer);
     timer.unref?.();

@@ -661,7 +661,10 @@ async function readSubagentPartial(
             if (txt) lastAssistantText = txt;
           }
         }
-      } catch {}
+      } catch {
+        // best-effort: a single corrupt JSONL line or unexpected content
+        // shape should not invalidate the entire session transcript
+      }
     }
     return {
       lastAssistantText,

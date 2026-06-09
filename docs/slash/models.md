@@ -41,4 +41,4 @@ This is separate from `/setmodel`: `/models` defines model capabilities, while
 
 - `packages/cli/src/slash-commands/models.ts`
 - `packages/core/src/types/config.ts`
-- `packages/core/src/security/config-secrets.ts`
+- `packages/core/src/security/secret-vault.ts`

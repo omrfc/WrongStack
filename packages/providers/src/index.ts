@@ -166,6 +166,8 @@ function makeProvider(p: ResolvedProvider, cfg: ProviderConfig): Provider {
       });
     case 'google':
       return new GoogleProvider({ id: p.id, apiKey: expectDefined(apiKey), baseUrl });
+    default:
+      throw new Error(`Unknown provider family: ${String(family)}`);
   }
 }
 

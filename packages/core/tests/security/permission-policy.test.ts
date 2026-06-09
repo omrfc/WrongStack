@@ -315,11 +315,21 @@ describe('AutoApprovePermissionPolicy', () => {
     expect(auto.source).toBe('yolo');
   });
 
-  // F-03: the subagent guard must deny write-equivalent tools (not just
-  // `write`) and MCP tools of unknown capability — fail closed.
-  it.each(['bash', 'write', 'edit', 'replace', 'scaffold', 'patch', 'install', 'exec'])(
-    'denies dangerous builtin "%s" for subagents',
-    async (name) => {
+  // Subagent guard: tools declaring dangerous capabilities are denied,
+  // regardless of name. The legacy name-based denylist was removed — all
+  // authorization is now purely capability-driven.
+  it.each([
+    { name: 'bash', caps: ['shell.arbitrary'] },
+    { name: 'write', caps: ['fs.write'] },
+    { name: 'edit', caps: ['fs.write'] },
+    { name: 'replace', caps: ['fs.write'] },
+    { name: 'scaffold', caps: ['fs.write.outside-project'] },
+    { name: 'patch', caps: ['fs.write'] },
+    { name: 'install', caps: ['package.install'] },
+    { name: 'exec', caps: ['shell.restricted'] },
+  ])(
+    'denies dangerous builtin "%s" for subagents via capabilities',
+    async ({ name, caps }) => {
       const p = new AutoApprovePermissionPolicy();
       const d = await p.evaluate({
         name,
@@ -327,6 +337,7 @@ describe('AutoApprovePermissionPolicy', () => {
         inputSchema: { type: 'object' },
         permission: 'confirm',
         mutating: true,
+        capabilities: caps,
         async execute() {
           return 'x';
         },
@@ -407,10 +418,11 @@ describe('AutoApprovePermissionPolicy', () => {
     expect(decision.permission).toBe('auto');
   });
 
-  it('still respects legacy name deny for tools without capabilities (backward compat)', async () => {
+  it('auto-approves tools without capabilities (no legacy name deny)', async () => {
     const p = new AutoApprovePermissionPolicy();
     const d = await p.evaluate(tool('bash')); // no capabilities declared
-    expect(d.permission).toBe('deny');
+    expect(d.permission).toBe('auto');
+    expect(d.source).toBe('yolo');
   });
 
   it('MCP tools are still denied regardless of capabilities', async () => {

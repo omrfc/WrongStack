@@ -44,7 +44,7 @@
     "@types/node": "^22.19.19",
     "@wrongstack/core": "workspace:*",
     "tsup": "^8.5.1",
-    "typescript": "^5.9.3"
+    "typescript": "^6.0.0"
   },
   "publishConfig": {
     "access": "public"

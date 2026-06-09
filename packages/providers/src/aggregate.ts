@@ -132,6 +132,9 @@ export async function aggregateStream(
         stopReason = ev.stopReason;
         usage = ev.usage;
         break;
+      default:
+        // Unknown SSE event — silently skip
+        break;
     }
   }
 

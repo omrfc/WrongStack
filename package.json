@@ -6,7 +6,7 @@
   "type": "module",
   "packageManager": "pnpm@11.5.2+sha512.71c631e382066efc25625d5cf029075de07b61b37f6e27350fbd84b1bda5864c8c1967adc280776b45c30a715c0359a3be08fef42d5bb09e2b99029979692916",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.19.0"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -30,16 +30,16 @@
     "postinstall": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
+    "@biomejs/biome": "^2.1.0",
     "@types/node": "^22.19.20",
     "@vitest/coverage-v8": "^4.1.8",
     "cross-env": "^10.1.0",
     "tsup": "^8.5.1",
-    "typescript": "^5.9.3",
-    "undici-types": "^7.27.2",
+    "typescript": "^6.0.0",
+    "undici-types": "^8.4.0",
     "vitest": "^4.1.8"
   },
   "overrides": {
-    "undici-types": "^7.27.2"
+    "undici-types": "^8.4.0"
   }
 }

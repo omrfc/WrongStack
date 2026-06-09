@@ -216,7 +216,8 @@ The following items from this plan have been implemented in detail:
 **P1 — Capability Model (Initial Wave)**
 - ✅ Added `capabilities?: readonly string[]` to the `Tool` interface.
 - ✅ Created `packages/core/src/security/capabilities.ts` with well-known capabilities + `DANGEROUS_FOR_SUBAGENTS`.
-- ✅ `AutoApprovePermissionPolicy` is now capability-first (with legacy name denylist fallback for compatibility).
+- ✅ `AutoApprovePermissionPolicy` is now **fully capability-based** — the legacy name denylist (`LEGACY_NAME_DENY`) was removed. Authorization decisions are entirely driven by declared capabilities.
+- ✅ Added `shell.restricted` to `DANGEROUS_FOR_SUBAGENTS` (previously only blocked by name denylist).
 - ✅ Updated core high-risk tools with capabilities:
   - `bash` → `shell.arbitrary`
   - `write`, `edit`, `replace`, `patch`, `scaffold` → `fs.write` (+ `fs.write.outside-project` where relevant)
@@ -253,11 +254,13 @@ The following items from this plan have been implemented in detail:
 - ✅ `SECURITY.md` now has an explicit "Accepted risks & deliberate trade-offs" section referencing the 2026 audits.
 
 **Remaining / Future Work**
-- Continue migrating the long tail of tools to declare capabilities.
+- Continue migrating the long tail of tools to declare capabilities (most core tools done).
 - Evolve more policies (DefaultPermissionPolicy, plugin mutation rules) to be capability-aware (initial groundwork done).
 - Consider adding capability enforcement / visibility in the TUI Fleet / permission prompts.
 - Add richer capability documentation and examples to the public tool authoring surface.
 - Potential: Surface capabilities in tool help / audit logs.
+
+**2026-06-08 Update:** Legacy name denylist fully removed. `SHELL_RESTRICTED` added to dangerous capabilities. All authorization decisions are now capability-based.
 
 Next review recommended after the next batch of capability migrations or any new high-privilege MCP/tool addition.
 

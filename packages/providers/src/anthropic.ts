@@ -253,6 +253,9 @@ async function* parseAnthropicStream(
           body: { type: err?.type, message: err?.message },
         });
       }
+      default:
+        // Unknown SSE event type from deserialized JSON — silently skip
+        break;
     }
   }
   if (started && !stopped) {

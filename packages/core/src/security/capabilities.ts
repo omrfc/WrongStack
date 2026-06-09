@@ -50,6 +50,7 @@ export type ToolCapability = (typeof ToolCapabilities)[keyof typeof ToolCapabili
  */
 export const DANGEROUS_FOR_SUBAGENTS: readonly ToolCapability[] = [
   ToolCapabilities.SHELL_ARBITRARY,
+  ToolCapabilities.SHELL_RESTRICTED,
   ToolCapabilities.FS_WRITE,
   ToolCapabilities.FS_WRITE_OUTSIDE_PROJECT,
   ToolCapabilities.MCP_PROXY,
