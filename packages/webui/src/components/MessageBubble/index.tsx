@@ -26,6 +26,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { DiffView, diffFromToolInput } from '../DiffView';
 import { ToolResult } from '../ToolResult';
+import { NextStepsBar, parseNextSteps } from '../NextStepsBar';
 import { CopyButton } from './CopyButton.js';
 import { ErrorBodyWithStack } from './ErrorBody.js';
 import { ToolInputView } from './ToolInputView.js';
@@ -235,6 +236,13 @@ export const MessageBubble = memo(function MessageBubble({
             </div>
           )}
         </div>
+
+        {/* Next steps — parse 💡 Next steps from assistant output */}
+        {isLatestAssistant && message.content && (() => {
+          const steps = parseNextSteps(message.content);
+          if (steps.length === 0) return null;
+          return <NextStepsBar steps={steps} />;
+        })()}
 
         <div className={cn('flex items-center gap-2 px-1', isUser ? 'flex-row-reverse' : 'flex-row')}>
           <span className="text-xs text-muted-foreground/50">{new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
