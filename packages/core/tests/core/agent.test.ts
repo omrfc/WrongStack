@@ -847,6 +847,7 @@ describe('Agent — additional coverage', () => {
       shouldRetry: (err: Error | ProviderError, attempt: number) =>
         err instanceof ProviderError && err.retryable && attempt < 3,
       delayMs: () => 1,
+      maxAttempts: () => 3,
     }));
     // Replace the context's provider with our flaky one.
     (ctx as unknown as { provider: Provider }).provider = provider;

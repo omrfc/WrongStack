@@ -25,6 +25,7 @@
 export {
   DefaultLogger,
   type DefaultLoggerOptions,
+  type LogFormat,
 } from '../infrastructure/logger.js';
 
 // ---- Storage ----

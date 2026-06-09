@@ -36,6 +36,7 @@ function fakeContext(overrides: Partial<Record<string, unknown>> = {}) {
     systemPrompt: [],
     tools: [],
     state: {},
+    session: { id: 'test-session' },
     ...overrides,
   } as never;
 }

@@ -65,4 +65,62 @@ describe('DefaultLogger', () => {
     expect(entry.ctx.message).toBe('inner');
     expect(typeof entry.ctx.stack).toBe('string');
   });
+
+  // ── format: 'json' stderr output ────────────────────────────────────────
+
+  it('format: json writes valid JSON lines to stderr', () => {
+    const log = new DefaultLogger({ level: 'debug', format: 'json' });
+    log.info('hello', { x: 1 });
+    log.debug('details');
+    expect(stderrWrites).toHaveLength(2);
+    const info = JSON.parse(stderrWrites[0]!);
+    expect(info.level).toBe('info');
+    expect(info.msg).toBe('hello');
+    expect(info.ctx).toEqual({ x: 1 });
+    expect(typeof info.ts).toBe('string');
+    const debug = JSON.parse(stderrWrites[1]!);
+    expect(debug.level).toBe('debug');
+    expect(debug.msg).toBe('details');
+  });
+
+  it('format: json respects level threshold for stderr', () => {
+    const log = new DefaultLogger({ level: 'warn', format: 'json' });
+    log.info('skipped');
+    log.warn('included');
+    expect(stderrWrites).toHaveLength(1);
+    const entry = JSON.parse(stderrWrites[0]!);
+    expect(entry.msg).toBe('included');
+    expect(entry.level).toBe('warn');
+  });
+
+  it('format: json child logger inherits format and merges bindings in stderr', () => {
+    const log = new DefaultLogger({ level: 'info', format: 'json', bindings: { app: 'x' } });
+    const child = log.child({ comp: 'y' });
+    child.info('m');
+    expect(stderrWrites).toHaveLength(1);
+    const entry = JSON.parse(stderrWrites[0]!);
+    expect(entry.app).toBe('x');
+    expect(entry.comp).toBe('y');
+    expect(entry.msg).toBe('m');
+  });
+
+  it('format: json serialises Error context to stderr JSON', () => {
+    const log = new DefaultLogger({ level: 'error', format: 'json' });
+    log.error('boom', new Error('inner'));
+    expect(stderrWrites).toHaveLength(1);
+    const entry = JSON.parse(stderrWrites[0]!);
+    expect(entry.level).toBe('error');
+    expect(entry.msg).toBe('boom');
+    expect(entry.ctx.message).toBe('inner');
+    expect(typeof entry.ctx.stack).toBe('string');
+  });
+
+  it('default format is pretty (not JSON on stderr)', () => {
+    const log = new DefaultLogger({ level: 'info' });
+    log.info('hello');
+    expect(stderrWrites).toHaveLength(1);
+    // Pretty-printed lines start with the timestamp, not a JSON object
+    expect(stderrWrites[0]).not.toContain('{"ts"');
+    expect(stderrWrites[0]).toContain('hello');
+  });
 });
