@@ -57,6 +57,7 @@ import { buildPickableProviders } from './provider-helpers.js';
 import { bindReplayToContainer } from './wiring/replay.js';
 import { SessionStats } from './session-stats.js';
 import { buildBuiltinSlashCommands } from './slash-commands/index.js';
+import { setSuggestions, getSuggestions } from './slash-commands/suggestion-store.js';
 import { createAutoPhaseHost } from './autophase-host.js';
 import { loadStatuslineConfig, saveStatuslineConfig } from './slash-commands/statusline.js';
 import { Spinner } from './spinner.js';
@@ -1619,8 +1620,13 @@ export async function main(argv: string[]): Promise<number> {
     onSuggestions: (suggestions?: string[]) => {
       if (suggestions !== undefined) {
         currentSuggestions = suggestions;
+        // Also sync to the shared module-level store so /next works
+        // reliably across all surfaces (REPL, TUI, WebUI).
+        setSuggestions(suggestions);
       }
-      return currentSuggestions;
+      // Read from shared store first for consistency across surfaces
+      const shared = getSuggestions();
+      return shared.length > 0 ? shared : currentSuggestions;
     },
     onAutonomy: (setTo?) => {
       if (setTo !== undefined) {
@@ -1910,8 +1916,13 @@ export async function main(argv: string[]): Promise<number> {
       // clear the list so the auto-proceed loop doesn't get stuck
       // re-feeding stale suggestions.
       currentSuggestions = suggestions ?? [];
+      setSuggestions(suggestions ?? []);
     },
-    getSuggestions: () => currentSuggestions,
+    getSuggestions: () => {
+      // Read from shared store first for cross-surface consistency
+      const shared = getSuggestions();
+      return shared.length > 0 ? shared : currentSuggestions;
+    },
     autoProceedDelayMs:
       ((config.autonomy as Record<string, unknown> | undefined)?.autoProceedDelayMs as number) ??
       45_000,

@@ -11,7 +11,7 @@ export function cn(...inputs: ClassValue[]) {
    ========================================================================= */
 
 export const META = {
-  version: '0.148.0',
+  version: '0.155.0',
   repo: 'https://github.com/WrongStack/WrongStack',
   npm: 'wrongstack',
   node: '22',
@@ -219,9 +219,28 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '0.155.0',
+    date: '2026-06-09',
+    consolidated: true,
+    latest: true,
+    tagline: 'WebUI fleet, delegate command & slash command polish',
+    highlights: [
+      '/delegate slash command — hand a discrete piece of work to a specialized subagent',
+      'WebUI FleetPanel redesigned — clickable agent cards with detail overlay, Agents tab in sidebar',
+      'Live subagent output stream in AgentDetail overlay + copy-to-clipboard button',
+      '/next and /suggest slash commands — clickable next-step buttons in WebUI and TUI',
+      '/resume renamed to /sessions — clearer intent, session list with metadata',
+      'Playwright browser automation agent + MCP server preset added to fleet roster',
+      'Header chips made clickable — scroll to panels on click across Fleet, Process, Checkpoint',
+      'TodosPanel improved — sorting controls, collapsible completed section',
+      'SessionStore, MemoryStore, ModeStore wired to WebUI via CLI-backed backend',
+      'Core refactoring: parseSubcommand helpers, noOpVault dedup, brand string generalization',
+      'Documentation expansion for fleet, MCP, /prune, /suggest, /auth, /tasks, /modelcaps, /delegate',
+    ],
+  },
+  {
     version: '0.148.0',
     date: '2026-06-09',
-    latest: true,
     tagline: 'Developer experience & release consolidation',
     highlights: [
       '/dev slash command — run shell commands from chat without LLM involvement',

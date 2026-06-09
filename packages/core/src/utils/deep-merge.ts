@@ -168,6 +168,12 @@ export function deepMerge(
     } else if (Array.isArray(v) && Array.isArray(existing)) {
       // Delegate to top-level array handling so arrayMode
       // (e.g. 'concat-primitives') applies to nested arrays too.
+      // Fire debug hook when a non-primitive array replaces an existing
+      // array (for non-primitive arrays, concat-primitives is a no-op and
+      // the result is always a wholesale replacement).
+      if (onNonPrimitiveArrayReplace && !isPrimitiveArray(v)) {
+        onNonPrimitiveArrayReplace(k, existing.length, v.length);
+      }
       out[k] = deepMerge(existing, v, options);
     } else if (v !== undefined) {
       // Fire debug hook when a non-primitive (object) array replaces an

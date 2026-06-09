@@ -347,11 +347,14 @@ Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. Wha
 
 ## Recent changes
 
-**Current release: 0.148.0.** The `/dev` slash command lets you run shell
-commands from the chat input — the LLM never sees the result, making it a pure
-developer shortcut. The `test` tool now correctly falls back to vitest when no
-test-runner config file is detected. All 15 workspace packages and the marketing
-site are aligned to 0.148.0 in lockstep.
+**Current release: 0.155.0.** The `/delegate` slash command lets you hand
+discrete work to specialized subagents from the chat input. The WebUI FleetPanel
+now features clickable agent cards with detail overlays and an Agents sidebar
+tab. Subagent output streams live into the TUI AgentDetail panel with a
+copy-to-clipboard button. `/next` and `/suggest` surface AI-suggested next
+actions as clickable buttons. A new Playwright browser automation agent joins
+the fleet roster. All 15 workspace packages and the marketing site are aligned
+to 0.155.0 in lockstep.
 
 See **[CHANGELOG.md](CHANGELOG.md)** for the full, versioned history.
 
@@ -598,7 +601,7 @@ For the full walk-through — including the L1-A reactive `ConversationState`, h
 
 ## Status
 
-- **5800+ tests passing** across 300+ test files in the 0.148.0 release gate
+- **5800+ tests passing** across 300+ test files in the 0.155.0 release gate
 - Coverage thresholds: ≥85 % lines / ≥85 % functions / ≥70 % branches / ≥82 % statements
 - All workspace packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles
