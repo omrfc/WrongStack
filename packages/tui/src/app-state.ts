@@ -245,6 +245,8 @@ export type State = {
     indexOnStart: boolean;
     // Tools
     maxIterations: number;
+    /** Maximum auto-proceed iterations (0 = unlimited). */
+    autoProceedMaxIterations: number;
     /** Prompt refinement preview countdown (ms). */
     enhanceDelayMs: number;
     /** Raw SSE stream debugging toggle. */
@@ -456,6 +458,8 @@ export type Settings = {
   auditLevel: 'minimal' | 'standard' | 'full';
   indexOnStart: boolean;
   maxIterations: number;
+  /** Maximum auto-proceed iterations (0 = unlimited). */
+  autoProceedMaxIterations: number;
   /** Prompt refinement preview countdown (ms). */
   enhanceDelayMs: number;
   /** Raw SSE stream debugging — hex-dump every byte received from providers. */
@@ -540,6 +544,7 @@ export type Action =
       auditLevel: AuditLevel;
       indexOnStart: boolean;
       maxIterations: number;
+      autoProceedMaxIterations: number;
       enhanceDelayMs: number;
       debugStream: boolean;
       configScope: 'global' | 'project';

@@ -95,7 +95,7 @@ export async function expandGlob(pattern: string): Promise<string[]> {
       return;
     }
 
-    const firstGlob = pat.search(/[*?[\[]/);
+    const firstGlob = pat.search(/[*?[[]/);
 
     if (firstGlob < 0) {
       const re = globToRegex(pat);

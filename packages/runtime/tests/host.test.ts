@@ -175,7 +175,7 @@ describe('runtime host composition', () => {
 
   it('invokes pack.teardown(api) when teardown is defined and api is provided', async () => {
     const host = hostParts();
-    let teardownCalledWith: unknown = undefined;
+    let teardownCalledWith: unknown ;
     const api = { token: 'api-instance' } as never;
     const pack: WrongStackPack = {
       name: 'with-teardown',

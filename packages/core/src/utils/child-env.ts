@@ -108,8 +108,8 @@ export function buildChildEnv(optsOrSessionId?: BuildChildEnvOptions | string): 
   // sources do NOT go through process.env — only the actual shell environment
   // does — so checking Object.prototype.hasOwnProperty.call(process.env, ...)
   // is sufficient to exclude config-driven values.
-  const hasOwn = Object.prototype.hasOwnProperty.call(process.env, 'WRONGSTACK_CHILD_ENV_PASSTHROUGH');
-  const legacyHasOwn = Object.prototype.hasOwnProperty.call(process.env, 'WRONGSTACK_BASH_ENV_PASSTHROUGH');
+  const hasOwn = Object.hasOwn(process.env, 'WRONGSTACK_CHILD_ENV_PASSTHROUGH');
+  const legacyHasOwn = Object.hasOwn(process.env, 'WRONGSTACK_BASH_ENV_PASSTHROUGH');
   const passthrough = (hasOwn && process.env['WRONGSTACK_CHILD_ENV_PASSTHROUGH'] === '1')
     || (legacyHasOwn && process.env['WRONGSTACK_BASH_ENV_PASSTHROUGH'] === '1');
   if (passthrough && !process.env['CI']) {

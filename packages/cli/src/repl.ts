@@ -383,6 +383,12 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
         if (mode === 'auto' && suggestions.length > 0) {
           const maxIter = opts.autoProceedMaxIterations ?? 50;
           if (maxIter > 0 && autoIterCount >= maxIter) {
+            console.log(JSON.stringify({
+              level: 'info',
+              event: 'auto_proceed_limit_reached',
+              iterations: autoIterCount,
+              maxIterations: maxIter,
+            }));
             opts.renderer.write(
               `\n${color.amber('  ⚠ Auto-proceed limit reached')} — ${color.dim(`${autoIterCount} iterations. Waiting for input.`)}\n\n`,
             );
@@ -1004,11 +1010,25 @@ async function runAutoProceed(
   delayMs: number,
   ctrl: AbortController,
 ): Promise<void> {
+  const truncated = suggestion.length > 80 ? `${suggestion.slice(0, 77)}…` : suggestion;
+  console.log(JSON.stringify({
+    level: 'info',
+    event: 'auto_proceed_started',
+    suggestion: truncated,
+    delayMs,
+  }));
   try {
     await autoProceedCountdown(opts, delayMs, suggestion, ctrl.signal);
     // ── Feed the suggestion as if it were runText ──────────────────
     const runBlocks = [{ type: 'text' as const, text: suggestion }];
     const runResult = await opts.agent.run(runBlocks, { signal: ctrl.signal });
+    console.log(JSON.stringify({
+      level: 'info',
+      event: 'auto_proceed_completed',
+      suggestion: truncated,
+      status: runResult.status,
+      iterations: runResult.iterations,
+    }));
     opts.onAgentIterationComplete?.(
       estimateRequestTokensCalibrated(
         opts.agent.ctx.messages,

@@ -14,6 +14,14 @@ export interface StrategyCompactorOptions {
   preserveK?: number | undefined;
   /** Token threshold below which tool results are not elided. */
   eliseThreshold?: number | undefined;
+  /**
+   * Enable content-aware smart digest for 'hybrid' strategy. When true,
+   * collapsed ancient turns use buildSmartDigest: critical content (errors,
+   * corrections, decisions) stays verbatim; normal exchanges get first-sentence
+   * summaries; noise (repeated failures, large tool outputs) is aggressively
+   * compressed. Defaults to false (lossless digest).
+   */
+  smart?: boolean | undefined;
   /** Model used by the LLM-backed strategies for summarization/selection. */
   summarizerModel?: string | undefined;
   /**
@@ -46,6 +54,7 @@ export function createStrategyCompactor(opts: StrategyCompactorOptions = {}): Co
   return new HybridCompactor({
     preserveK: opts.preserveK,
     eliseThreshold: opts.eliseThreshold,
+    smart: opts.smart,
   });
 }
 

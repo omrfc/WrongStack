@@ -182,7 +182,7 @@ export interface SubagentUsageSnapshot {
 export class FleetUsageAggregator {
   private readonly perSubagent = new Map<string, SubagentUsageSnapshot>();
   private readonly total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
-  private readonly unsub = new Array<() => void>();
+  private readonly unsub = [] as (() => void)[];
 
   constructor(
     bus: FleetBus,

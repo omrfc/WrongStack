@@ -330,7 +330,7 @@ export interface ProgressSnapshot {
  * Returns null if no match.
  */
 export function parseProgressFromText(text: string): { progress: number; note?: string } | null {
-  const re = /\[progress:\s*(\d{1,3})%\]\s*(?:[—\-]\s*(.+))?/i;
+  const re = /\[progress:\s*(\d{1,3})%\]\s*(?:[—-]\s*(.+))?/i;
   const m = text.match(re);
   if (!m) return null;
   // Regex match guarantees capture group 1 exists, but use ?? fallback to

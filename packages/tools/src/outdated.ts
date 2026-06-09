@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { buildChildEnv } from '@wrongstack/core';
 import type { Tool } from '@wrongstack/core';
 import { detectPackageManager, safeResolve } from './_util.js';
+import { resolveWin32Command } from './_win32-resolve.js';
 
 interface OutdatedInput {
   cwd?: string | undefined;
@@ -83,7 +84,9 @@ function runOutdated(
     let stderr = '';
     const MAX = 100_000;
 
-    const child = spawn(manager, args, { cwd, signal, env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    const resolved = resolveWin32Command(manager);
+    const needsShell = process.platform === 'win32' && (resolved.endsWith('.cmd') || resolved.endsWith('.bat'));
+    const child = spawn(resolved, args, { cwd, signal, env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'], ...(needsShell ? { shell: true, windowsVerbatimArguments: true } : {}) });
     child.stdout?.on('data', (c) => {
       if (stdout.length < MAX) stdout += c.toString();
     });

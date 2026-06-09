@@ -19,6 +19,9 @@ export type CompactorStrategy = (typeof COMPACTOR_STRATEGIES)[number];
 /** Presets for max iterations — cyclable via ←/→. 0 = unlimited. */
 export const MAX_ITERATIONS_PRESETS = [100, 200, 500, 1000, 0];
 
+/** Presets for auto-proceed max iterations. 0 = unlimited, 50 default. */
+export const AUTO_PROCEED_MAX_PRESETS = [10, 25, 50, 100, 250, 0];
+
 /** Presets for prompt refinement preview countdown. */
 export const ENHANCE_DELAY_PRESETS = [30_000, 45_000, 60_000, 90_000, 120_000];
 
@@ -73,6 +76,8 @@ export interface SettingsPickerProps {
   indexOnStart: boolean;
   // ── Tools ──
   maxIterations: number;
+  /** Maximum auto-proceed iterations before stopping (0 = unlimited). */
+  autoProceedMaxIterations: number;
   /** Prompt refinement preview countdown (ms). Cycled via ENHANCE_DELAY_PRESETS. */
   enhanceDelayMs: number;
   /** Raw SSE stream debugging toggle — hex-dump every byte received from providers. */
@@ -83,7 +88,7 @@ export interface SettingsPickerProps {
 }
 
 /** Total number of settings rows (used for wrap-around navigation). */
-export const SETTINGS_FIELD_COUNT = 22;
+export const SETTINGS_FIELD_COUNT = 23;
 
 export const CONFIG_SCOPES = ['global', 'project'] as const;
 export type ConfigScope = (typeof CONFIG_SCOPES)[number];
@@ -109,6 +114,7 @@ export function SettingsPicker({
   auditLevel,
   indexOnStart,
   maxIterations,
+  autoProceedMaxIterations,
   enhanceDelayMs,
   debugStream,
   configScope,
@@ -230,6 +236,11 @@ export function SettingsPicker({
       label: 'Max iterations',
       value: formatMaxIterations(maxIterations),
       detail: '100–1000 or unlimited (0)',
+    },
+    {
+      label: 'Auto-proceed max iterations',
+      value: formatMaxIterations(autoProceedMaxIterations),
+      detail: 'Stop auto-proceed after N iterations (0 = unlimited, default 50)',
     },
     {
       label: 'Refine preview countdown',

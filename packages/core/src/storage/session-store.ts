@@ -486,7 +486,7 @@ export class DefaultSessionStore implements SessionStore {
       let toolErrorCount = 0;
       let fileChangeCount = 0;
       const toolBreakdown: Record<string, number> = {};
-      let outcome: SessionSummary['outcome'] = undefined;
+      let outcome: SessionSummary['outcome'] ;
       const lastEvent = data.events[data.events.length - 1];
 
       for (const e of data.events) {

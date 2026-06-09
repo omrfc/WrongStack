@@ -6,6 +6,7 @@ import type { WorktreeRow } from './components/worktree-panel.js';
 
 import {
   AUDIT_LEVELS,
+  AUTO_PROCEED_MAX_PRESETS,
   COMPACTOR_STRATEGIES,
   CONFIG_SCOPES,
   DELAY_PRESETS_MS,
@@ -414,6 +415,7 @@ export function reducer(state: State, action: Action): State {
           auditLevel: action.auditLevel,
           indexOnStart: action.indexOnStart,
           maxIterations: action.maxIterations,
+          autoProceedMaxIterations: action.autoProceedMaxIterations,
           enhanceDelayMs: action.enhanceDelayMs,
           debugStream: action.debugStream,
           configScope: action.configScope,
@@ -499,17 +501,24 @@ export function reducer(state: State, action: Action): State {
         const next = (base + action.delta + MAX_ITERATIONS_PRESETS.length) % MAX_ITERATIONS_PRESETS.length;
         return { ...state, settingsPicker: { ...sp, maxIterations: expectDefined(MAX_ITERATIONS_PRESETS[next]), hint: undefined } };
       }
-      // Field 19: enhance delay (cycle presets)
+      // Field 19: auto-proceed max iterations (cycle presets)
       if (f === 19) {
+        const aj = AUTO_PROCEED_MAX_PRESETS.indexOf(sp.autoProceedMaxIterations);
+        const abase = aj < 0 ? 0 : aj;
+        const anext = (abase + action.delta + AUTO_PROCEED_MAX_PRESETS.length) % AUTO_PROCEED_MAX_PRESETS.length;
+        return { ...state, settingsPicker: { ...sp, autoProceedMaxIterations: expectDefined(AUTO_PROCEED_MAX_PRESETS[anext]), hint: undefined } };
+      }
+      // Field 20: enhance delay (cycle presets)
+      if (f === 20) {
         const ej = ENHANCE_DELAY_PRESETS.indexOf(sp.enhanceDelayMs);
         const ebase = ej < 0 ? 0 : ej;
         const enext = (ebase + action.delta + ENHANCE_DELAY_PRESETS.length) % ENHANCE_DELAY_PRESETS.length;
         return { ...state, settingsPicker: { ...sp, enhanceDelayMs: expectDefined(ENHANCE_DELAY_PRESETS[enext]), hint: undefined } };
       }
-      // Field 20: debug stream (boolean toggle)
-      if (f === 20) return { ...state, settingsPicker: { ...sp, debugStream: !sp.debugStream, hint: undefined } };
-      // Field 21: config scope (cycle global/project)
-      if (f === 21) {
+      // Field 21: debug stream (boolean toggle)
+      if (f === 21) return { ...state, settingsPicker: { ...sp, debugStream: !sp.debugStream, hint: undefined } };
+      // Field 22: config scope (cycle global/project)
+      if (f === 22) {
         const i = CONFIG_SCOPES.indexOf(sp.configScope);
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + CONFIG_SCOPES.length) % CONFIG_SCOPES.length;

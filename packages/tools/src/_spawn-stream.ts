@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { buildChildEnv } from '@wrongstack/core';
 import type { ToolProgressEvent } from '@wrongstack/core';
+import { resolveWin32Command } from './_win32-resolve.js';
 export interface SpawnStreamResult {
   stdout: string;
   stderr: string;
@@ -36,11 +37,15 @@ export async function* spawnStream(
   let pending = '';
   let error: string | undefined;
 
-  const child = spawn(opts.cmd, opts.args, {
+  const cmd = resolveWin32Command(opts.cmd);
+  const needsShell = process.platform === 'win32' && (cmd.endsWith('.cmd') || cmd.endsWith('.bat'));
+
+  const child = spawn(cmd, opts.args, {
     cwd: opts.cwd,
     signal: opts.signal,
     env: buildChildEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
+    ...(needsShell ? { shell: true, windowsVerbatimArguments: true } : {}),
   });
 
   type Chunk = { kind: 'out' | 'err' | 'close' | 'error'; data: string; code?: number | undefined };

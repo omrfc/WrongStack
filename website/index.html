@@ -97,7 +97,7 @@
 
     <!-- Apply persisted theme before paint to avoid a flash -->
     <script>
-      (function () {
+      (() => {
         try {
           var t = localStorage.getItem("theme");
           var sysDark = window.matchMedia("(prefers-color-scheme: dark)").matches;

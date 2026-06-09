@@ -519,7 +519,7 @@ export class ToolExecutor {
   private subjectFor(toolName: string, input: unknown, subjectKey?: string): string | undefined {
     if (!input || typeof input !== 'object') return undefined;
     const obj = input as Record<string, unknown>;
-    const globChars = /[*?\[\]]/g;
+    const globChars = /[*?[\]]/g;
     const escapeGlob = (s: string) => s.replace(globChars, (c) => `\\${c}`);
     const normalizePath = (s: string) => escapeGlob(s.replace(/\\/g, '/'));
 

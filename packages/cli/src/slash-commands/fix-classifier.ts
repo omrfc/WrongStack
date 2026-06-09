@@ -19,9 +19,10 @@ export interface Classification {
 
 export type ErrorCategory =
   | 'ts' | 'security' | 'runtime' | 'logic' | 'compile'
-  | 'lint' | 'dep' | 'perf' | 'infra' | 'general';
+  | 'lint' | 'dep' | 'perf' | 'infra' | 'tech' | 'general';
 
 const TS = ['typescript-strict'];
+const TC = ['tech-stack'];
 const BH = ['bug-hunter'];
 const SS = ['security-scanner'];
 const NM = ['node-modern'];
@@ -280,6 +281,55 @@ const P: Pat[] = [
     hints: NM, detail: 'JavaScript runtime error', conf: 0.95,
   },
 
+  // ── Tech stack validation — BEFORE generic dep patterns ─────────────
+  // Technology choice questions: "should I use X?", "is Y deprecated?", etc.
+  {
+    pat: /\b(should I (use|install|add|pick|choose)|is .+ (still (good|maintained|supported|relevant)|deprecated|dead|obsolete|outdated)|what replaces|alternative to|instead of)\b/i,
+    cat: 'tech', sub: 'tech-choice', lang: undefined,
+    hints: TC, detail: 'Technology choice validation', conf: 0.85,
+  },
+  {
+    pat: /\bwhat (is the latest|are the latest|version of|versions of)|what version|upgrade to latest|downgrade to|which version of\b/i,
+    cat: 'tech', sub: 'version-check', lang: undefined,
+    hints: TC, detail: 'Version verification needed', conf: 0.9,
+  },
+  {
+    pat: /\b(adding|installing|using|switching to|migrating to) (a |an |the )?(package|dependency|library|module|framework|gem|crate)\b/i,
+    cat: 'tech', sub: 'tech-choice', lang: undefined,
+    hints: TC, detail: 'Technology choice validation', conf: 0.8,
+  },
+  // Commands that imply tech choices: "pip install X", "cargo add X", etc.
+  {
+    pat: /\b(pip install|pip3 install|pipenv install|poetry add|uv add)\s+[a-zA-Z0-9_-]+/i,
+    cat: 'tech', sub: 'python-pkg', lang: 'python',
+    hints: TC, detail: 'Python package choice — validate before installing', conf: 0.85,
+  },
+  {
+    pat: /\b(cargo add|cargo install)\s+[a-zA-Z0-9_-]+/i,
+    cat: 'tech', sub: 'rust-crate', lang: 'rust',
+    hints: TC, detail: 'Rust crate choice — validate before installing', conf: 0.85,
+  },
+  {
+    pat: /\b(go get|go install)\s+[a-zA-Z0-9_./-]+/i,
+    cat: 'tech', sub: 'go-module', lang: 'go',
+    hints: TC, detail: 'Go module choice — validate before installing', conf: 0.85,
+  },
+  {
+    pat: /\b(gem install|bundle add)\s+[a-zA-Z0-9_-]+/i,
+    cat: 'tech', sub: 'ruby-gem', lang: 'ruby',
+    hints: TC, detail: 'Ruby gem choice — validate before installing', conf: 0.85,
+  },
+  {
+    pat: /\b(npm install|pnpm add|yarn add)\s+[a-zA-Z0-9@/_-]+/i,
+    cat: 'tech', sub: 'js-pkg', lang: 'javascript',
+    hints: TC, detail: 'JS package choice — validate before installing', conf: 0.85,
+  },
+  {
+    pat: /\b(composer require|nuget install|dotnet add package)\s+[a-zA-Z0-9./_-]+/i,
+    cat: 'tech', sub: 'pkg-choice', lang: undefined,
+    hints: TC, detail: 'Package choice — validate before installing', conf: 0.85,
+  },
+
   // ── Dependency / Import ───────────────────────────────────────────────
   {
     pat: /\bcannot find module|modulenotfounderror|no such module|missing module/i,
@@ -395,6 +445,7 @@ export function needsSubagent(c: Classification): boolean {
 export function isSimpleFix(c: Classification): boolean {
   return (
     (c.category === 'ts' && c.confidence >= 0.9) ||
-    (c.category === 'runtime' && c.subcategory === 'null-undefined-access' && c.confidence >= 0.85)
+    (c.category === 'runtime' && c.subcategory === 'null-undefined-access' && c.confidence >= 0.85) ||
+    (c.category === 'tech' && c.confidence >= 0.85)
   );
 }

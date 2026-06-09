@@ -78,7 +78,7 @@ Each entry: **[TYPE]** \`file:line\` — description + suggested fix
 Bug pattern reference you know:
 | Pattern | Regex hint | Severity |
 |---------|------------|----------|
-| Uncaught promise | /\.then\\(.*\\)/ without catch | high |
+| Uncaught promise | /.then\\(.*\\)/ without catch | high |
 | Event leak | on\\( without off/removeListener | high |
 | Hardcoded secret | [a-zA-Z0-9/_-]{20,} in config files | critical |
 | unsafe any | : any\\b or <any> | medium |

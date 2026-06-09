@@ -146,6 +146,12 @@ export interface SlashCommandContext {
   onYolo?: ((setTo?: boolean) => boolean) | undefined;
   /** Toggle or query next-task prediction. Pass undefined to query, boolean to set. */
   onNextPredict?: ((setTo?: boolean) => boolean) | undefined;
+  /**
+   * Store or retrieve the current suggestion list for `/next` selection.
+   * Pass a string array to set suggestions. Call without args to get the
+   * current list (returns empty array when no suggestions stored).
+   */
+  onSuggestions?: ((suggestions?: string[]) => string[]) | undefined;
   /** Toggle or query autonomy mode. Pass undefined to query, AutonomyMode to set. */
   onAutonomy?: (
     setTo?: import('./autonomy.js').AutonomyMode | undefined,
@@ -301,6 +307,7 @@ import { buildSddCommand } from './sdd.js';
 import { buildExitCommand, buildLoadCommand, buildSaveCommand } from './session.js';
 import { buildSetModelCommand } from './setmodel.js';
 import { buildModelCapsCommand } from './modelcaps.js';
+import { buildSuggestCommand } from './suggest.js';
 // modeldiag is now a CLI subcommand (wstack modeldiag), not a slash command.
 
 import { buildSettingsCommand } from './settings.js';
@@ -327,6 +334,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildPluginCommand(opts),
     buildPruneCommand(opts),
     buildMcpSlashCommand(opts),
+    buildSuggestCommand(opts),
     buildAuthCommand(opts),
     buildDiagCommand(opts),
     buildStatsCommand(opts),

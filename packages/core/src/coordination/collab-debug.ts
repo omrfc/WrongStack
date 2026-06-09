@@ -292,7 +292,7 @@ export class CollabSession extends EventEmitter {
   private readonly bugs = new Map<string, BugFinding>();
   private readonly plans = new Map<string, RefactorPlan>();
   private readonly evaluations = new Map<string, CriticEvaluation>();
-  private readonly disposers = new Array<() => void>();
+  private readonly disposers = [] as (() => void)[];
   private settled = false;
   private readonly timeoutMs: number;
   private cancelled = false;

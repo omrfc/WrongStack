@@ -4,6 +4,7 @@ import type { Tool } from '@wrongstack/core';
 import { buildChildEnv } from './_env.js';
 import { COMMAND_OUTPUT_MAX_BYTES, normalizeCommandOutput } from './_util.js';
 import { getProcessRegistry, redactCommand } from './process-registry.js';
+import { resolveWin32Command } from './_win32-resolve.js';
 
 const ALLOWED_COMMANDS: Record<string, string[]> = {
   node: ['--version', '-r', '--input-type=module'],
@@ -268,11 +269,19 @@ function runCommand(
     let killed = false;
     const startedAt = Date.now();
 
-    const child = spawn(cmd, args, {
+    // On Windows, .cmd/.bat resolution requires shell: true — same rationale
+    // as _spawn-stream.ts. resolveWin32Command() finds the full path to the
+    // .cmd file so spawn can locate it; shell: true is still needed because
+    // .cmd/.bat files are not natively executable by CreateProcess.
+    const resolved = resolveWin32Command(cmd);
+    const needsShell = process.platform === 'win32' && (resolved.endsWith('.cmd') || resolved.endsWith('.bat'));
+
+    const child = spawn(resolved, args, {
       cwd,
       signal,
       env: buildChildEnv(sessionId),
       stdio: ['ignore', 'pipe', 'pipe'],
+      ...(needsShell ? { shell: true, windowsVerbatimArguments: true } : {}),
     });
 
     const registry = getProcessRegistry();

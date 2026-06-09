@@ -6,6 +6,7 @@ import { estimateRequestTokens } from '../utils/token-estimate.js';
 import { repairToolUseAdjacency } from '../utils/message-invariants.js';
 import {
   buildLosslessDigest,
+  buildSmartDigest,
   eliseOldToolResults,
   estimateMessages,
   hasTextContent,
@@ -14,6 +15,14 @@ import {
 export interface CompactorOptions {
   preserveK?: number | undefined;
   eliseThreshold?: number | undefined;
+  /**
+   * Enable content-aware digest mode. When true, `collapseAncientTurns` uses
+   * `buildSmartDigest` which scores messages by importance: critical content
+   * (errors, corrections, decisions) is kept verbatim; normal exchanges get
+   * first-sentence summaries; large tool outputs and repeated failures are
+   * aggressively compressed. Defaults to false (lossless digest).
+   */
+  smart?: boolean | undefined;
   /**
    * @deprecated Ignored. Token estimation is centralized in
    * `compaction-core`/`token-estimate` so all compactors and the context-pressure
@@ -35,10 +44,12 @@ export { DEFAULT_TOOLS_CONFIG, DEFAULT_CONTEXT_CONFIG, DEFAULT_AUTONOMY_CONFIG }
 export class HybridCompactor implements Compactor {
   private readonly preserveK: number;
   private readonly eliseThreshold: number;
+  private readonly smart: boolean;
 
   constructor(opts: CompactorOptions = {}) {
     this.preserveK = opts.preserveK ?? 5;
     this.eliseThreshold = opts.eliseThreshold ?? 2000;
+    this.smart = opts.smart ?? false;
   }
 
   async compact(ctx: Context, opts: { aggressive?: boolean | undefined } = {}): Promise<CompactReport> {
@@ -131,8 +142,11 @@ export class HybridCompactor implements Compactor {
     const removedTokens = estimateMessages(removed);
 
     const digest =
-      buildLosslessDigest(removed) ||
-      `${removed.length} earlier turns (no textual content; tool I/O omitted — see session log)`;
+      this.smart
+        ? buildSmartDigest(removed) ||
+          `${removed.length} earlier turns (no textual content; tool I/O omitted — see session log)`
+        : buildLosslessDigest(removed) ||
+          `${removed.length} earlier turns (no textual content; tool I/O omitted — see session log)`;
 
     const summaryMsg: Message = {
       role: 'system',

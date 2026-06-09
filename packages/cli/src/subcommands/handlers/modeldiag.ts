@@ -307,7 +307,7 @@ async function rankResponses(
       : '';
     const rankings: number[] = [];
     for (const line of text.split('\n')) {
-      const m = line.match(/^\s*(\d+)[\.\)]\s*Response\s+([A-Z])/i);
+      const m = line.match(/^\s*(\d+)[.)]\s*Response\s+([A-Z])/i);
       if (m) {
         const label = m[2]!.toUpperCase();
         const idx = labelToIdx.get(label);

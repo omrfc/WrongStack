@@ -575,7 +575,7 @@ export function App({
       searchQuery: '',
     },
     autonomyPicker: { open: false, options: [], selected: 0 },
-    settingsPicker: { open: false, field: 0, mode: 'off', delayMs: 0, titleAnimation: true, yolo: false, streamFleet: true, chime: false, confirmExit: true, nextPrediction: false, featureMcp: true, featurePlugins: true, featureMemory: true, featureSkills: true, featureModelsRegistry: true, contextAutoCompact: true, contextStrategy: 'hybrid', logLevel: 'info', auditLevel: 'standard', indexOnStart: true, maxIterations: 500, enhanceDelayMs: 60_000, debugStream: false, configScope: 'global' },
+    settingsPicker: { open: false, field: 0, mode: 'off', delayMs: 0, titleAnimation: true, yolo: false, streamFleet: true, chime: false, confirmExit: true, nextPrediction: false, featureMcp: true, featurePlugins: true, featureMemory: true, featureSkills: true, featureModelsRegistry: true, contextAutoCompact: true, contextStrategy: 'hybrid', logLevel: 'info', auditLevel: 'standard', indexOnStart: true, maxIterations: 500, autoProceedMaxIterations: 50, enhanceDelayMs: 60_000, debugStream: false, configScope: 'global' },
     confirmQueue: [],
     enhance: null,
     enhanceEnabled,
@@ -1152,6 +1152,7 @@ export function App({
             auditLevel: sp.auditLevel,
             indexOnStart: sp.indexOnStart,
             maxIterations: sp.maxIterations,
+            autoProceedMaxIterations: sp.autoProceedMaxIterations,
             enhanceDelayMs: sp.enhanceDelayMs,
             debugStream: sp.debugStream,
             configScope: sp.configScope,
@@ -1608,6 +1609,7 @@ export function App({
       auditLevel: s.auditLevel ?? 'standard',
       indexOnStart: s.indexOnStart ?? true,
       maxIterations: s.maxIterations ?? 500,
+      autoProceedMaxIterations: s.autoProceedMaxIterations ?? 50,
       enhanceDelayMs: s.enhanceDelayMs ?? 60_000,
       debugStream: s.debugStream ?? false,
       configScope: s.configScope ?? 'global',
@@ -1694,6 +1696,7 @@ export function App({
       auditLevel: sp.auditLevel,
       indexOnStart: sp.indexOnStart,
       maxIterations: sp.maxIterations,
+      autoProceedMaxIterations: sp.autoProceedMaxIterations,
       enhanceDelayMs: sp.enhanceDelayMs,
       debugStream: sp.debugStream,
       configScope: sp.configScope,
@@ -1721,6 +1724,7 @@ export function App({
     state.settingsPicker.auditLevel,
     state.settingsPicker.indexOnStart,
     state.settingsPicker.maxIterations,
+    state.settingsPicker.autoProceedMaxIterations,
     state.settingsPicker.enhanceDelayMs,
     saveSettings,
   ]);
@@ -2832,6 +2836,7 @@ export function App({
           auditLevel: cfg.auditLevel ?? 'standard',
           indexOnStart: cfg.indexOnStart ?? true,
           maxIterations: cfg.maxIterations ?? 500,
+          autoProceedMaxIterations: cfg.autoProceedMaxIterations ?? 50,
           enhanceDelayMs: cfg.enhanceDelayMs ?? 60_000,
           debugStream: cfg.debugStream ?? false,
           configScope: cfg.configScope ?? 'global',
@@ -2932,6 +2937,7 @@ export function App({
           auditLevel: cfg.auditLevel ?? 'standard',
           indexOnStart: cfg.indexOnStart ?? true,
           maxIterations: cfg.maxIterations ?? 500,
+          autoProceedMaxIterations: cfg.autoProceedMaxIterations ?? 50,
           enhanceDelayMs: cfg.enhanceDelayMs ?? 60_000,
           debugStream: cfg.debugStream ?? false,
           configScope: cfg.configScope ?? 'global',
@@ -4036,6 +4042,7 @@ export function App({
               auditLevel={state.settingsPicker.auditLevel}
               indexOnStart={state.settingsPicker.indexOnStart}
               maxIterations={state.settingsPicker.maxIterations}
+              autoProceedMaxIterations={state.settingsPicker.autoProceedMaxIterations}
               enhanceDelayMs={state.settingsPicker.enhanceDelayMs}
               debugStream={state.settingsPicker.debugStream}
               configScope={state.settingsPicker.configScope}

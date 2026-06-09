@@ -325,7 +325,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     // Glob metacharacters are dangerous: a crafted subject like "**" or "foo/**/bar"
     // can match too broadly in the allow/deny pattern match. Escape them so the
     // matching is done on the literal string.
-    const globChars = /[*?\[\]]/g;
+    const globChars = /[*?[\]]/g;
     const escapeGlob = (s: string) => s.replace(globChars, (c) => `\\${c}`);
     const normalizePath = (s: string) => escapeGlob(s.replace(/\\/g, '/'));
 

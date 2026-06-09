@@ -1,8 +1,8 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.1.0/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
-    "ignore": ["dist", "node_modules", "coverage", ".changeset", "**/*.md"]
+    "includes": ["**", "!**/dist", "!**/node_modules", "!**/coverage", "!**/.changeset", "!**/*.md"]
   },
   "formatter": {
     "enabled": true,
@@ -11,21 +11,21 @@
     "lineWidth": 100,
     "lineEnding": "lf"
   },
-  "organizeImports": { "enabled": true },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "linter": {
     "enabled": true,
     "rules": {
       "recommended": true,
       "suspicious": {
         "noExplicitAny": "warn",
-        "noConsoleLog": "off",
         "noImplicitAnyLet": "off",
         "noGlobalIsFinite": "off",
         "noConfusingVoidType": "off",
         "noAssignInExpressions": "warn",
         "noControlCharactersInRegex": "warn",
         "noGlobalAssign": "error",
-        "noPrototypeBuiltins": "warn"
+        "noPrototypeBuiltins": "warn",
+        "noConsole": { "level": "off", "options": { "allow": ["log"] } }
       },
       "style": {
         "useNodejsImportProtocol": "error",
@@ -52,7 +52,7 @@
   },
   "overrides": [
     {
-      "include": ["**/*.test.ts", "**/*.test.tsx"],
+      "includes": ["**/*.test.ts", "**/*.test.tsx"],
       "linter": {
         "rules": {
           "suspicious": {

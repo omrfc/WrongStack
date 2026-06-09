@@ -149,6 +149,221 @@ export function buildLosslessDigest(messages: readonly Message[]): string {
   return lines.join('\n');
 }
 
+// ── Content-aware scoring ─────────────────────────────────────────────────
+
+/** Importance score for a message — drives retention vs. summarization. */
+export type ContentScore = 0 | 1 | 2 | 3 | 4 | 5;
+// 5 = critical (error, correction, decision) — keep verbatim
+// 3 = medium   (normal exchange, successful tool) — keep first sentence
+// 1 = low      (large tool result, grep output)    — one-line summary
+// 0 = noise    (repeated failure pattern)          — collapse to count
+
+/**
+ * Extract the plain text from a message (ignoring tool blocks).
+ * Returns empty string if no text content exists.
+ */
+export function extractText(m: Message): string {
+  if (typeof m.content === 'string') return m.content;
+  return m.content.filter(isTextBlock).map((b) => b.text).join(' ');
+}
+
+/** Check if a message contains a tool_use block. */
+export function hasToolUse(m: Message): boolean {
+  if (typeof m.content === 'string') return false;
+  return m.content.some((b) => b.type === 'tool_use');
+}
+
+/** Check if a message contains a tool_result block over the given char threshold. */
+export function hasLargeToolResult(m: Message, threshold = 3000): boolean {
+  if (typeof m.content === 'string') return false;
+  return m.content.some(
+    (b) =>
+      b.type === 'tool_result' &&
+      (b as ToolResultBlock).content &&
+      (typeof (b as ToolResultBlock).content === 'string'
+        ? (b as ToolResultBlock).content.length
+        : JSON.stringify((b as ToolResultBlock).content).length) > threshold,
+  );
+}
+
+/**
+ * Score a message by content importance.
+ *
+ * CRITICAL (5): user corrections, explicit "no/wrong/stop", error messages,
+ *   architecture decisions, security findings.
+ * MEDIUM (3): normal exchanges, successful tool calls, file reads, edits.
+ * LOW (1): large tool results (>3K chars), grep/file-list outputs, boilerplate.
+ * NOISE (0): repeated identical failures (same tool, same error, 5th+ occurrence
+ *   within the range), pure tool I/O with no text.
+ */
+export function scoreMessage(
+  m: Message,
+  context?: { failureCounts?: Map<string, number> },
+): ContentScore {
+  const text = extractText(m).toLowerCase();
+
+  // ── Noise detection: pure tool I/O with no text ─────────────────────
+  if (text.trim().length === 0 && (hasToolUse(m) || typeof m.content !== 'string')) {
+    const hasResult = typeof m.content !== 'string' && m.content.some((b) => b.type === 'tool_result');
+    if (hasToolUse(m) || hasResult) return 0;
+  }
+
+  // ── Repeated failure detection ─────────────────────────────────────
+  if (context?.failureCounts && m.role === 'user' && hasToolUse(m) === false) {
+    // Check if this is a tool_result that matches a failure pattern
+    const isFailure =
+      /error|fail|exception|timeout|enonet|eacces|eperm|enoent|abort/i.test(text);
+    if (isFailure) {
+      // Build a key from the error type
+      const errKey =
+        /(error|fail|exception|timeout|enonet|eacces|eperm|enoent|abort)/i.exec(text)?.[0]?.toLowerCase() ?? 'error';
+      const count = (context.failureCounts.get(errKey) ?? 0) + 1;
+      context.failureCounts.set(errKey, count);
+      if (count >= 5) return 0; // 5th+ identical failure → noise
+      if (count >= 3) return 1; // 3rd-4th → low priority
+    }
+  }
+
+  // ── Critical: user corrections / stop signals ──────────────────────
+  if (m.role === 'user') {
+    if (
+      /\b(wrong|no\b|stop\b|don'?t\b|actually|fix that|undo|revert|forget|ignore|skip)\b/i.test(
+        text,
+      )
+    ) {
+      return 5;
+    }
+  }
+
+  // ── Critical: error / exception messages ───────────────────────────
+  if (
+    /\b(error|exception|fatal|critical|crash|panic|abort|segfault|core dump|undefined is not|null pointer|typeerror|referenceerror|syntaxerror)\b/i.test(
+      text,
+    )
+  ) {
+    return 5;
+  }
+
+  // ── Critical: security findings ────────────────────────────────────
+  if (
+    /\b(security|vulnerability|injection|xss|csrf|secret|apikey|api.key|hardcoded|leak|exploit|cve)\b/i.test(
+      text,
+    )
+  ) {
+    return 5;
+  }
+
+  // ── Critical: architecture / design decisions ──────────────────────
+  if (
+    m.role === 'assistant' &&
+    /\b(architecture|design|approach|strategy|pattern|refactor|migrate|restructure|decision|trade.?off)\b/i.test(
+      text,
+    )
+  ) {
+    return 5;
+  }
+
+  // ── Low: large tool results ────────────────────────────────────────
+  if (hasLargeToolResult(m)) return 1;
+
+  // ── Low: grep / list / tree outputs ────────────────────────────────
+  if (
+    m.role === 'user' && !hasToolUse(m) &&
+    /\b(files_with_matches|count|found \d+ match|directory tree|\.\.\. and \d+ more)\b/i.test(text)
+  ) {
+    return 1;
+  }
+
+  // ── Default: medium ────────────────────────────────────────────────
+  return 3;
+}
+
+/**
+ * Build a content-aware digest of messages.
+ *
+ * Unlike `buildLosslessDigest` which preserves all text equally, this uses
+ * `scoreMessage` to apply tiered treatment:
+ * - Score 5 (critical): verbatim text
+ * - Score 3 (medium):   first sentence only
+ * - Score 1 (low):      one-line summary
+ * - Score 0 (noise):    collapsed to count marker
+ */
+export function buildSmartDigest(messages: readonly Message[]): string {
+  const lines: string[] = [];
+  const failureCounts = new Map<string, number>();
+  let noiseCount = 0;
+
+  for (const m of messages) {
+    const score = scoreMessage(m, { failureCounts });
+    const text = extractText(m);
+    const toolCount = countToolBlocks(m);
+
+    if (score === 0) {
+      noiseCount++;
+      continue;
+    }
+
+    const marker = toolCount > 0 ? ` [${toolCount} tool call(s)]` : '';
+    let display: string;
+
+    switch (score) {
+      case 5: // Critical — keep verbatim
+        display = text.trim();
+        break;
+      case 3: // Medium — first sentence
+        display = firstSentence(text);
+        break;
+      case 1: // Low — one-line summary
+        display = oneLineSummary(m, text);
+        break;
+      default:
+        display = firstSentence(text);
+    }
+
+    if (display.length === 0 && toolCount === 0) continue;
+    lines.push(`[${m.role}]: ${display}${marker}`);
+  }
+
+  if (noiseCount > 0) {
+    lines.push(`[system]: ${noiseCount} low-importance turn(s) collapsed (repeated failures / pure tool I/O)`);
+  }
+
+  return lines.join('\n');
+}
+
+function countToolBlocks(m: Message): number {
+  if (typeof m.content === 'string') return 0;
+  return m.content.filter(
+    (b) => b.type === 'tool_use' || b.type === 'tool_result',
+  ).length;
+}
+
+function firstSentence(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return '';
+  const dot = trimmed.indexOf('. ');
+  if (dot === -1) return trimmed.length > 150 ? `${trimmed.slice(0, 147)}…` : trimmed;
+  const sentence = trimmed.slice(0, dot + 1);
+  return sentence.length > 150 ? `${sentence.slice(0, 147)}…` : sentence;
+}
+
+function oneLineSummary(m: Message, text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    // Pure tool result with no text
+    if (typeof m.content !== 'string') {
+      const results = m.content.filter((b) => b.type === 'tool_result');
+      if (results.length > 0) {
+        return `[${results.length} tool result(s) — see session log]`;
+      }
+    }
+    return '[no text content]';
+  }
+  // Truncate to one line (~100 chars)
+  const firstLine = trimmed.split('\n')[0] ?? '';
+  return firstLine.length > 100 ? `${firstLine.slice(0, 97)}…` : firstLine;
+}
+
 /**
  * Nearest safe cut boundary in [from, to]: the start of the exchange of the
  * closest user-with-text message. Returns -1 when no such boundary exists.

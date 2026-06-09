@@ -477,6 +477,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
               auditLevel: cfg.session?.auditLevel ?? 'standard',
               indexOnStart: cfg.indexing?.onSessionStart !== false,
               maxIterations: cfg.tools?.maxIterations ?? 500,
+              autoProceedMaxIterations: (cfg.autonomy as Record<string, unknown> | undefined)?.autoProceedMaxIterations as number ?? 50,
               debugStream: cfg.debugStream ?? false,
               configScope: cfg.configScope ?? 'global',
               enhanceDelayMs: (cfg.autonomy as Record<string, unknown> | undefined)?.enhanceDelayMs as number ?? 60_000,
@@ -502,6 +503,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             auditLevel?: string | undefined;
             indexOnStart?: boolean | undefined;
             maxIterations?: number | undefined;
+            autoProceedMaxIterations?: number | undefined;
             debugStream?: boolean | undefined;
             configScope?: 'global' | 'project' | undefined;
             enhanceDelayMs?: number | undefined;
@@ -617,6 +619,11 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                 if (s.enhanceDelayMs !== undefined) {
                   const autonomy = (decrypted.autonomy as Record<string, unknown>) ?? {};
                   autonomy.enhanceDelayMs = s.enhanceDelayMs;
+                  decrypted.autonomy = autonomy;
+                }
+                if (s.autoProceedMaxIterations !== undefined) {
+                  const autonomy = (decrypted.autonomy as Record<string, unknown>) ?? {};
+                  autonomy.autoProceedMaxIterations = s.autoProceedMaxIterations;
                   decrypted.autonomy = autonomy;
                 }
                 // When writing to the project-local config, strip credentials

@@ -119,6 +119,23 @@ function buildDirective(cli: Classification, errorText: string): string {
         '4. Verify',
       ].join('\n');
 
+    case 'tech':
+      return [
+        `## Tech Stack Validation${lang}`,
+        '',
+        '```',
+        `${errorText}`,
+        '```',
+        '',
+        'Your task:',
+        '1. Detect the ecosystem from project files or context',
+        '2. Verify the package/version against the correct registry',
+        '3. Check if the package is dead, deprecated, or superseded (prehistoric)',
+        '4. Check if the language standard library already covers this need',
+        '5. Report APPROVED (with install command) or REJECTED (with replacement + migration)',
+        '6. Use "This isn\'t code, this is X-year-old technology" when rejecting on age grounds',
+      ].join('\n');
+
     case 'perf':
       return [
         `## Fix: Performance / Memory Issue${lang}`,
@@ -158,6 +175,7 @@ function delegateRoleFor(cli: Classification): string | undefined {
     case 'ts':       return 'typescript-strict';
     case 'security': return 'security-scanner';
     case 'perf':     return 'refactor-planner';
+    case 'tech':     return 'tech-stack';
     default:        return 'bug-hunter';
   }
 }
@@ -206,7 +224,8 @@ Docker, Git, CI/CD, and more.
 | Security / secrets  | Any                      | \`security-scanner\`     |
 | Compiler error      | Rust, Go, C/C++, Python  | \`bug-hunter\`           |
 | Dependency / import | Any                      | \`bug-hunter\`           |
-| Performance / leak | Any                      | \`bug-hunter\` + \`refactor-planner\` |
+| Tech choice / pkg   | Any                      | \`tech-stack\`           |
+| Performance / leak  | Any                      | \`bug-hunter\` + \`refactor-planner\` |
 | Infrastructure      | Config, Docker, Git, CI  | \`bug-hunter\`           |
 | React / Next.js     | JavaScript               | \`react-modern\`         |
 | Node.js             | JavaScript               | \`node-modern\`           |
@@ -228,6 +247,10 @@ When the error confidence is low (< 0.85) or the problem spans multiple files,
 /fix react-dom.development.js:172 Error: Invalid hook call
 /fix Security: hardcoded API key in config.ts
 /fix ERRO1014: SQL injection vulnerability in query builder
+/fix Should I use axios for API calls?
+/fix is moment.js still maintained?
+/fix pip install urllib2
+/fix what replaces lodash?
 \`\`\`
 `,
     async run(args: string, _ctx: Context): Promise<FixResult> {
@@ -250,6 +273,7 @@ When the error confidence is low (< 0.85) or the problem spans multiple files,
             `  /fix ${color.dim("AttributeError: 'NoneType' object has no attribute 'encode'")}`,
             `  /fix ${color.dim("react-dom.development.js:172 Error: Invalid hook call")}`,
             `  /fix ${color.dim("Security: hardcoded API key in config.ts")}`,
+            `  /fix ${color.dim('Should I use axios for API calls?')}`,
             '',
             'Run `/help fix` for full documentation.',
           ].join('\n'),
