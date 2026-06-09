@@ -7,6 +7,7 @@
 //
 // Usage: node scripts/bench.mjs
 
+import { writeFileSync } from 'node:fs';
 import * as core from '../packages/core/dist/index.js';
 import { parseInline } from '../packages/tui/dist/index.js';
 
@@ -160,6 +161,7 @@ function bench1_tokenCache() {
   const sizes = [50, 100, 200, 400];
   const systemPrompt = makeSystemPrompt();
   const tools = makeToolDefs(40);
+  const rows = [];
 
   for (const sz of sizes) {
     const msgs = buildConversation(sz);
@@ -170,14 +172,24 @@ function bench1_tokenCache() {
     stamp(msgs);
     const r2 = bench(() => estimateRequestTokens(msgs, systemPrompt, tools));
 
-    const speedup = (r1.median / Math.max(r2.median, 0.001)).toFixed(1);
-    const savedPerIter = ((r1.median - r2.median) * 4).toFixed(3);
-    const reduction = ((1 - r2.median / Math.max(r1.median, 0.001)) * 100).toFixed(0);
+    const speedup = (r1.median / Math.max(r2.median, 0.001));
+    const savedPerIter = (r1.median - r2.median) * 4;
+    const reduction = (1 - r2.median / Math.max(r1.median, 0.001)) * 100;
 
     console.log(
-      `${String(sz).padStart(4)}msg  ${r1.median.toFixed(3).padStart(8)}ms  ${r2.median.toFixed(3).padStart(8)}ms  ${(speedup + 'x').padStart(6)}  ${savedPerIter.padStart(10)}ms  ${(reduction + '%').padStart(8)}`,
+      `${String(sz).padStart(4)}msg  ${r1.median.toFixed(3).padStart(8)}ms  ${r2.median.toFixed(3).padStart(8)}ms  ${(speedup.toFixed(1) + 'x').padStart(6)}  ${savedPerIter.toFixed(3).padStart(10)}ms  ${(reduction.toFixed(0) + '%').padStart(8)}`,
     );
+
+    rows.push({
+      messages: sz,
+      uncachedMs: +r1.median.toFixed(4),
+      cachedMs: +r2.median.toFixed(4),
+      speedup: +speedup.toFixed(1),
+      savedPerIterMs: +savedPerIter.toFixed(4),
+      reductionPct: +reduction.toFixed(0),
+    });
   }
+  return { rows };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -242,6 +254,14 @@ function bench2_parseInline() {
   console.log(`  Lines: ${allLines.length}  Unique: ${uniqueLines}  (${((1 - uniqueLines / allLines.length) * 100).toFixed(0)}% dup)`);
   console.log(`  Full parse (warm):  ${r.median.toFixed(4)}ms  (${(r.median / LINES * 1_000_000).toFixed(0)}ns/line)`);
   console.log(`  Per-line (warm):    ${(r.median / LINES * 1_000).toFixed(2)}µs  → essentially Map.get lookup`);
+
+  return {
+    lines: allLines.length,
+    uniqueLines,
+    duplicationPct: +((1 - uniqueLines / allLines.length) * 100).toFixed(0),
+    warmFullParseMs: +r.median.toFixed(4),
+    warmPerLineNs: +(r.median / LINES * 1_000_000).toFixed(0),
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -298,6 +318,12 @@ function bench3_elision() {
   eliseOldToolResults(msgsLarge, { preserveK: 5, eliseThreshold: 2000 });
   const rLarge = bench(() => eliseOldToolResults(msgsLarge, { preserveK: 5, eliseThreshold: 2000 }));
   console.log(`    With large results (full allocation):   ${rLarge.median.toFixed(3)}ms — full array copy + block mapping`);
+
+  return {
+    earlyExitMs: +rNoLarge.median.toFixed(4),
+    fullAllocMs: +rLarge.median.toFixed(4),
+    messages: 200,
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -310,9 +336,23 @@ console.log(`║     Node ${process.version.padEnd(31)}║`);
 console.log(`║     ${ITER} iterations, ${WARM} warmup per test`.padEnd(53) + '║');
 console.log('╚══════════════════════════════════════════════════════╝');
 
-bench1_tokenCache();
-bench2_parseInline();
-bench3_elision();
+const results = {
+  meta: {
+    node: process.version,
+    iterations: ITER,
+    warmup: WARM,
+    timestamp: new Date().toISOString(),
+  },
+  benchmarks: {},
+};
+
+results.benchmarks.tokenCache = bench1_tokenCache();
+results.benchmarks.parseInline = bench2_parseInline();
+results.benchmarks.elision = bench3_elision();
+
+// Write CI artifact
+writeFileSync('bench-results.json', JSON.stringify(results, null, 2));
 
 console.log(`\n${'═'.repeat(60)}`);
-console.log(`  ${PASS} All benchmarks complete.\n`);
+console.log(`  ${PASS} All benchmarks complete.`);
+console.log(`  ${PASS} Results written to bench-results.json\n`);

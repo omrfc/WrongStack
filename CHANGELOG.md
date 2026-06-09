@@ -5,6 +5,82 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — 2026-06-09
+
+> The hot-path performance release. Seven targeted optimizations eliminate
+> redundant CPU work, allocations, and TUI re-renders in the agent loop,
+> token estimation, compaction, and markdown rendering paths. Benchmarked
+> at 59.5× estimation speedup @ 400 messages and 15.3× parseInline speedup
+> on cache-warm TUI re-renders. No breaking changes; additive barrel exports
+> only.
+
+### Changed
+
+- **Token estimation cache.** `_estTokens` pre-computed per-message field
+  eliminates the O(n·m) content-block walk on every `estimateMessageTokens`
+  and `estimateRequestTokens` call. Computed once at message-append time via
+  `ConversationState.appendMessage()` / `replaceMessages()`; checked by both
+  the typed and untyped estimation paths. Cached time flat at ~0.006ms
+  regardless of message count (was 0.369ms @ 400 messages).
+  (`packages/core/src/types/messages.ts`,
+  `packages/core/src/core/conversation-state.ts`,
+  `packages/core/src/utils/token-estimate.ts`)
+
+- **Tool definition token pre-computation.** `estimateToolDefTokens` result
+  cached on `Tool._estDefTokens` by `ToolRegistry` at registration time,
+  eliminating 50+ `JSON.stringify(tool.inputSchema)` calls per estimation
+  invocation. Recomputed on `wrap()` since wrappers may change metadata.
+  (`packages/core/src/types/tool.ts`,
+  `packages/core/src/registry/tool-registry.ts`)
+
+- **`eliseOldToolResults` early-exit scan.** Lightweight scan for oversized
+  tool results before allocating a full message-array copy. Most compaction
+  passes find nothing to elide (threshold >2000 tokens); skipping the
+  allocation avoids ~200 object allocations per idle compaction cycle.
+  (`packages/core/src/execution/compaction-core.ts`)
+
+- **`parseInline()` memoization.** 5000-entry LRU cache on the markdown
+  inline parser eliminates redundant char-by-char parsing on TUI re-renders.
+  Typical assistant responses have ~67% line duplication; warm cache hits
+  resolve in ~11ns (essentially `Map.get`).
+  (`packages/tui/src/markdown.tsx`)
+
+- **Polling consolidation.** Merged the todos-poll (2s) and status-bar
+  stale-guard (2s) into a single `setInterval` tick, eliminating one
+  React re-render per cycle when both values change after an agent turn.
+  (`packages/tui/src/app.tsx`)
+
+- **`buildActivePlan` mtime cache.** `DefaultSystemPromptBuilder` now stats
+  the plan file before reading — plans change at human pace, not on every
+  iteration. Avoids `fs.readFile` + `JSON.parse` on every system-prompt build.
+  (`packages/core/src/core/system-prompt-builder.ts`)
+
+- **`ConversationState.snapshot()` shallow-freeze.** Replaced recursive
+  `deepFreeze` (O(n·m·d) freeze calls) with inline `Object.freeze` on the
+  wrapper + 3 content arrays (4 calls total). Removed 12-line unused utility.
+  (`packages/core/src/core/conversation-state.ts`)
+
+### Fixed
+
+- **`AutoCompactionMiddleware` estimator cache bypass.** Custom estimators
+  passed to the middleware are now called fresh on every invocation — the
+  `_cachedTokens`/`_cachedMsgCount` cache only applies to the deterministic
+  `estimateRequestTokensCalibrated` path. Fixes 3 test failures where the
+  cache returned stale values from mutable estimator closures.
+  (`packages/core/src/execution/auto-compaction-middleware.ts`)
+
+### Added
+
+- **`pnpm bench:perf`** benchmark script. Runs three micro-benchmarks
+  (token estimation cache, `parseInline` memoization, `eliseOldToolResults`
+  early-exit) against the built dist. 500 iterations, 50 warmup.
+  (`scripts/bench.mjs`, `package.json`)
+
+- **Barrel exports.** `computeMessageTokens` and `eliseOldToolResults`
+  added to `@wrongstack/core`; `parseInline` added to `@wrongstack/tui`.
+  (`packages/core/src/utils/index.ts`, `packages/core/src/index.ts`,
+  `packages/tui/src/index.ts`)
+
 ## [0.166.1] - 2026-06-09
 
 > The WebUI-fleet & slash-command-polish release. Consolidates the
