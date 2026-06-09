@@ -62,6 +62,17 @@ export function createAgentLoopHandler(
 
   /** Emit ctx.pct event for live context-fill bar in UIs. */
   function emitContextPct(): void {
+    // In autonomous idle loops the conversation doesn't grow between
+    // iterations — skip the expensive token estimation and event emission
+    // when nothing has changed since the last emit.
+    const msgCount = a.ctx.messages.length;
+    const toolCount = (a.ctx.tools ?? []).length;
+    if (msgCount === _lastEmittedMsgCount && toolCount === _lastEmittedToolCount && _maxContext > 0) {
+      return;
+    }
+    _lastEmittedMsgCount = msgCount;
+    _lastEmittedToolCount = toolCount;
+
     // Mirror the denominator AutoCompactionMiddleware uses: an explicit
     // effectiveMaxContext override (ctx.meta) wins, then the provider window,
     // then a safe default. Avoids divide-by-zero when the window is unknown (0).
@@ -87,6 +98,8 @@ export function createAgentLoopHandler(
     a.events.emit('ctx.pct', { load: total / _maxContext, tokens: total, maxContext: _maxContext });
   }
   let _maxContext = 0;
+  let _lastEmittedMsgCount = -1;
+  let _lastEmittedToolCount = -1;
 
   /** Fold pending /btw notes into conversation before each iteration. */
   function injectPendingBtwNotes(): void {

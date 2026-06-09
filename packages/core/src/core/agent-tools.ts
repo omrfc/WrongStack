@@ -196,6 +196,11 @@ export function createAgentToolHandler(a: AgentInternals): AgentToolHandler {
     }
 
     a.ctx.state.appendMessage({ role: 'user', content: resultsForMessage });
+    // Tool results were added — mark adjacency as potentially needing repair
+    // before the next provider request.
+    if (resultsForMessage.length > 0) {
+      a.ctx.toolAdjacencyDirty = true;
+    }
     await a.extensions.runAfterToolExecution(a.ctx, outputs);
     return resultsForMessage;
   }

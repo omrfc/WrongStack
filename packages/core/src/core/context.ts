@@ -64,6 +64,14 @@ export class Context implements RunEnv {
   tools: Tool[] = [];
   meta: Record<string, unknown> = {};
 
+  /**
+   * Set to true when the conversation gains new tool_use or tool_result
+   * blocks — the only time repairToolUseAdjacency() can find new issues.
+   * buildAndRunRequestPipeline() checks this flag to skip an O(n) scan
+   * on iterations where no tool content was added (pure text responses).
+   */
+  toolAdjacencyDirty = false;
+
   constructor(init: ContextInit) {
     this.systemPrompt = init.systemPrompt;
     this.provider = init.provider;
