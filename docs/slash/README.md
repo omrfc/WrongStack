@@ -16,18 +16,22 @@ WrongStack's REPL supports core slash commands plus commands registered by built
 | `/stats` | `packages/cli/src/slash-commands/diag-stats.ts` | Session report |
 | `/memory` | `packages/cli/src/slash-commands/memory.ts` | Persistent memory: show, remember, forget, clear |
 | `/todos` | `packages/cli/src/slash-commands/todos.ts` | Session todo list |
+| `/tasks` | `packages/cli/src/slash-commands/tasks.ts` | Structured task management with dependencies and priorities |
 | `/mode` | `packages/cli/src/slash-commands/mode.ts` | Switch or view session mode |
 | `/setmodel` | `packages/cli/src/slash-commands/setmodel.ts` | View or set leader model and per-task model matrix |
 | `/models` | `packages/cli/src/slash-commands/models.ts` | Manage custom model definitions |
+| `/modelcaps` | `packages/cli/src/slash-commands/modelcaps.ts` | Browse model capacities and pricing across providers |
 | `/yolo` | `packages/cli/src/slash-commands/yolo.ts` | Toggle or query YOLO mode |
 | `/autonomy` | `packages/cli/src/slash-commands/autonomy.ts` | Set autonomy level |
 | `/goal` | `packages/cli/src/slash-commands/goal.ts` | Set, show, pause, resume, journal, or clear an autonomous mission |
 | `/save` | `packages/cli/src/slash-commands/session.ts` | Force-flush session to disk |
 | `/sessions` | `packages/cli/src/slash-commands/session.ts` | List recent sessions; `/resume`, `/load` aliases for backward compat |
+| `/prune` | `packages/cli/src/slash-commands/prune.ts` | Delete old sessions; `/prune --dry-run` to preview |
 | `/exit` | `packages/cli/src/slash-commands/session.ts` | Exit REPL; `/quit`, `/q` aliases |
 | `/tools` | `packages/cli/src/slash-commands/tools.ts` | List registered tools |
 | `/plugin` | `packages/cli/src/slash-commands/plugin.ts` | Manage plugins |
 | `/mcp` | `packages/cli/src/slash-commands/mcp.ts` | Manage MCP servers |
+| `/auth` | `packages/cli/src/slash-commands/auth.ts` | API key status dashboard; run `wstack auth` for full key manager |
 | `/spawn` | `packages/cli/src/slash-commands/spawn-agents.ts` | Spawn an isolated subagent |
 | `/agents` | `packages/cli/src/slash-commands/spawn-agents.ts` | Show subagents or toggle the agents monitor |
 | `/director` | `packages/cli/src/slash-commands/spawn-agents.ts` | Promote to director mode |
@@ -36,6 +40,7 @@ WrongStack's REPL supports core slash commands plus commands registered by built
 | `/sdd` | `packages/cli/src/slash-commands/sdd.ts` | Spec-driven development workflow |
 | `/btw` | `packages/cli/src/slash-commands/btw.ts` | Quick side-note workflow |
 | `/next` | `packages/cli/src/slash-commands/next.ts` | Toggle next-task prediction |
+| `/suggest` | `packages/cli/src/slash-commands/suggest.ts` | Generate context-aware next-step suggestions; `/suggest --fast` for heuristics |
 | `/enhance` | `packages/cli/src/slash-commands/enhance.ts` | Toggle prompt refinement ("did you mean this?") before sending |
 | `/fix` | `packages/cli/src/slash-commands/fix.ts` | Classify and route a bug/error fix |
 | `/autophase` | `packages/cli/src/slash-commands/autophase.ts` | Autonomous phase-based workflow |
