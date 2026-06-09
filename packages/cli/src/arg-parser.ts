@@ -34,6 +34,7 @@ export const BOOLEAN_FLAGS = new Set([
   'no-hints',
   'hints',
   'no-hooks',
+  'skip-index',
 ]);
 
 // ------------------------------------------------------------------ main args

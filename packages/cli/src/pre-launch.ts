@@ -420,13 +420,25 @@ const SKIP_DIRS = new Set([
 ]);
 
 /** Minimum number of indexable files before we consider asking about indexing. */
-const INDEX_QUESTION_THRESHOLD = 500;
+const DEFAULT_INDEX_QUESTION_THRESHOLD = 500;
+
+/**
+ * Resolve the indexing question threshold from the env var
+ * `WRONGSTACK_INDEX_QUESTION_THRESHOLD`. Falls back to 500 when unset or invalid.
+ */
+function resolveIndexThreshold(): number {
+  const raw = process.env['WRONGSTACK_INDEX_QUESTION_THRESHOLD'];
+  if (raw === undefined || raw === '') return DEFAULT_INDEX_QUESTION_THRESHOLD;
+  const n = Number(raw);
+  if (Number.isFinite(n) && n > 0) return n;
+  return DEFAULT_INDEX_QUESTION_THRESHOLD;
+}
 
 /**
  * Count indexable source files in the project. Stops early once the
  * threshold is reached — large codebases don't need a precise count.
  */
-async function countProjectFiles(projectRoot: string): Promise<number> {
+async function countProjectFiles(projectRoot: string, threshold: number): Promise<number> {
   let count = 0;
   const walk = async (dir: string): Promise<void> => {
     let entries: fs.Dirent[];
@@ -437,7 +449,7 @@ async function countProjectFiles(projectRoot: string): Promise<number> {
     }
     for (const e of entries) {
       if (SKIP_DIRS.has(e.name)) continue;
-      if (count >= INDEX_QUESTION_THRESHOLD) return; // early exit
+      if (count >= threshold) return; // early exit
       const full = path.join(dir, e.name);
       if (e.isDirectory()) {
         await walk(full);
@@ -475,10 +487,11 @@ export async function maybeAskAboutIndexing(opts: {
   // In bare mode there's no indexing block — the question is meaningless.
   if (!indexingConfigured) return undefined;
 
-  const fileCount = await countProjectFiles(projectRoot);
+  const threshold = resolveIndexThreshold();
+  const fileCount = await countProjectFiles(projectRoot, threshold);
 
   // Small / medium codebases — indexing is fast enough, don't bother the user.
-  if (fileCount < INDEX_QUESTION_THRESHOLD) return undefined;
+  if (fileCount < threshold) return undefined;
 
   renderer.write(
     `\n  ${color.dim('○')} Large codebase detected ${color.dim(`(~${fileCount}+ indexable files)`)}\n`,

@@ -369,3 +369,5 @@ export { createSecurityPlugin } from './plugins/security-plugin.js';
 export { createSkillsPlugin } from './plugins/skills-plugin.js';
 export { createPlanPlugin } from './plugins/plan-plugin.js';
 export { createChimeraPlugin } from './plugins/chimera-plugin.js';
+export type { ResolvedChimeraConfig, ChimeraReviewNeededPayload } from './plugins/chimera-plugin.js';
+export { CHIMERA_REVIEW_PROMPT, resolveChimeraConfig } from './plugins/chimera-plugin.js';

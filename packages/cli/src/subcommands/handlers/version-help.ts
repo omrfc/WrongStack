@@ -53,6 +53,7 @@ export const helpCmd: SubcommandHandler = async (_args, deps) => {
     '                               agent; auto-picks free ports)',
     '  --eternal "<mission>"        Start an eternal-autonomy loop',
     '  --no-hints                   Hide launch hints',
+    '  --skip-index                 Skip codebase indexing and the large-codebase prompt',
   ];
   deps.renderer.write(lines.join('\n') + '\n');
   return 0;

@@ -43,7 +43,7 @@ import {
 } from '@wrongstack/core';
 import { builtinToolsPack } from '@wrongstack/tools';
 import { parseArgs } from './arg-parser.js';
-import { LaunchAbortedError, persistLaunchChoices, runLaunchPrompts } from './pre-launch.js';
+import { LaunchAbortedError, maybeAskAboutIndexing, persistLaunchChoices, runLaunchPrompts } from './pre-launch.js';
 import { bootConfig } from './boot-config.js';
 import { ReadlineInputReader } from './input-reader.js';
 import { runPicker, saveToGlobalConfig, type PickerResult } from './picker.js';
@@ -376,6 +376,28 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
     if (choices.yolo !== config.yolo) config = patchConfig(config, { yolo: choices.yolo });
     if (choices.director) flags['director'] = true;
     flags['autonomy'] = choices.autonomy;
+
+    // Indexing question — one-time per-session decision, never persisted.
+    // Large codebases can take a while to index on first launch; let the
+    // user skip it. The answer overrides config.indexing.onSessionStart
+    // for this session only.
+    // --skip-index bypasses the question and skips indexing entirely.
+    let indexingAnswer: boolean | undefined;
+    if (flags['skip-index']) {
+      indexingAnswer = false;
+    } else {
+      indexingAnswer = await maybeAskAboutIndexing({
+        projectRoot,
+        renderer,
+        reader,
+        indexingConfigured: !!config.indexing,
+      });
+    }
+    if (indexingAnswer === false && config.indexing) {
+      config = patchConfig(config, {
+        indexing: { ...config.indexing, onSessionStart: false },
+      });
+    }
 
     // Persist launch preferences so the next boot remembers them.
     // When --webui is active the mode is pinned to REPL (TUI owns stdout),
