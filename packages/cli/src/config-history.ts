@@ -65,22 +65,42 @@ const PROTECTED_BASENAMES = new Set([
 function assertSafeToDelete(filename: string, parentDir: string): void {
   // 1. Exact-match protected files
   if (PROTECTED_BASENAMES.has(filename)) {
-    throw new Error(`Refusing to delete protected file: ${filename}`);
+    throw new FsError({
+      message: `Refusing to delete protected file: ${filename}`,
+      code: ERROR_CODES.FS_DELETE_FAILED,
+      path: path.join(parentDir, filename),
+      context: { reason: 'protected_basename' },
+    });
   }
   // 2. No path traversal
   if (filename !== path.basename(filename)) {
-    throw new Error(`Refusing to delete path with traversal: ${filename}`);
+    throw new FsError({
+      message: `Refusing to delete path with traversal: ${filename}`,
+      code: ERROR_CODES.FS_DELETE_FAILED,
+      path: filename,
+      context: { reason: 'path_traversal' },
+    });
   }
   // 3. Validate it's a timestamped config backup (config.json.{ts}.bak)
   //    before we ever consider deleting it.
   if (!filename.startsWith('config.json.') || !filename.endsWith('.bak')) {
     // Unknown files — be conservative, refuse
-    throw new Error(`Refusing to delete unknown file: ${filename}`);
+    throw new FsError({
+      message: `Refusing to delete unknown file: ${filename}`,
+      code: ERROR_CODES.FS_DELETE_FAILED,
+      path: path.join(parentDir, filename),
+      context: { reason: 'unknown_file_pattern' },
+    });
   }
   // 4. Check parent is the .wrongstack root and the target is not a dir
   const resolvedParent = path.resolve(parentDir);
   if (!resolvedParent.endsWith('.wrongstack')) {
-    throw new Error(`Unexpected parent directory for bak prune: ${resolvedParent}`);
+    throw new FsError({
+      message: `Unexpected parent directory for bak prune: ${resolvedParent}`,
+      code: ERROR_CODES.FS_DELETE_FAILED,
+      path: resolvedParent,
+      context: { reason: 'invalid_parent' },
+    });
   }
 }
 
