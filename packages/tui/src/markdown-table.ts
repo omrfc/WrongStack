@@ -385,7 +385,10 @@ function stripInlineMarkers(text: string): string {
 // ANSI SGR codes for terminal text styling inside <Text> strings.
 const ANSI_BOLD = '\x1b[1m';
 const ANSI_DIM = '\x1b[2m';
-const ANSI_CYAN = '\x1b[36m';
+// Pastel cyan (#94e2d5, Catppuccin teal) as a truecolor SGR so inline `code`
+// in table cells matches the rest of the pastel palette instead of the
+// terminal's harsh ANSI cyan (\x1b[36m). See theme.ts / ink.tsx.
+const ANSI_CYAN = '\x1b[38;2;148;226;213m';
 const ANSI_STRIKE = '\x1b[9m';
 const ANSI_RESET_ALL = '\x1b[0m';
 

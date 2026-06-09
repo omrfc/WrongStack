@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReadlineInputReader } from '../src/input-reader.js';
-import { detectProjectKind, LaunchAbortedError, persistLaunchChoices, runLaunchPrompts, runProjectCheck } from '../src/pre-launch.js';
+import { detectProjectKind, LaunchAbortedError, maybeAskAboutIndexing, persistLaunchChoices, runLaunchPrompts, runProjectCheck } from '../src/pre-launch.js';
 import type { TerminalRenderer } from '../src/renderer.js';
 
 /**
@@ -399,5 +399,283 @@ describe('runLaunchPrompts', () => {
     expect(parsed.model).toBe('claude'); // preserved
     expect(parsed.yolo).toBe(false); // updated
     expect(parsed.launch).toEqual({ mode: 'repl', director: true, autonomy: 'off' }); // added
+  });
+});
+
+// ─── maybeAskAboutIndexing ────────────────────────────────────────────────────
+
+/**
+ * Minimal Dirent stub — the file counter only touches `.name`,
+ * `.isDirectory()`, and `.isFile()`.
+ */
+function dirent(name: string, isDir: boolean): fs.Dirent {
+  return {
+    name,
+    isDirectory: () => isDir,
+    isFile: () => !isDir,
+    isBlockDevice: () => false,
+    isCharacterDevice: () => false,
+    isSymbolicLink: () => false,
+    isFIFO: () => false,
+    isSocket: () => false,
+    parentPath: '',
+    path: '',
+  } as unknown as fs.Dirent;
+}
+
+/**
+ * Stub `fs.readdir` to return a controlled directory tree. The map keys
+ * are absolute directory paths; values are the entries in that directory.
+ */
+function stubReaddir(tree: Record<string, fs.Dirent[]>) {
+  vi.spyOn(fs, 'readdir').mockImplementation(
+    async (dirPath) => {
+      const key = typeof dirPath === 'string' ? dirPath : String(dirPath);
+      return tree[key] ?? [];
+    },
+  );
+}
+
+describe('maybeAskAboutIndexing', () => {
+  let renderer: TerminalRenderer;
+
+  beforeEach(() => {
+    renderer = makeRenderer();
+    vi.restoreAllMocks();
+  });
+
+  it('returns undefined when indexing is not configured (bare mode)', async () => {
+    const reader = makeReader([]);
+
+    const result = await maybeAskAboutIndexing({
+      projectRoot: '/proj',
+      renderer,
+      reader,
+      indexingConfigured: false,
+    });
+
+    expect(result).toBeUndefined();
+    // Never touches the filesystem or the reader — short-circuits immediately.
+    expect(reader.readLine).not.toHaveBeenCalled();
+    expect(fs.readdir).not.toHaveBeenCalled();
+  });
+
+  it('returns undefined for a small codebase (< 500 indexable files)', async () => {
+    const root = '/proj';
+    const reader = makeReader([]);
+
+    // 2 indexable files — well below the 500 threshold.
+    stubReaddir({
+      [root]: [
+        dirent('README.md', false),
+        dirent('src', true),
+      ],
+      [path.join(root, 'src')]: [
+        dirent('index.ts', false),
+        dirent('helper.ts', false),
+      ],
+    });
+
+    const result = await maybeAskAboutIndexing({
+      projectRoot: root,
+      renderer,
+      reader,
+      indexingConfigured: true,
+    });
+
+    expect(result).toBeUndefined();
+    expect(reader.readLine).not.toHaveBeenCalled();
+  });
+
+  it('returns true when user answers "y" on a large codebase', async () => {
+    const root = '/proj';
+    const reader = makeReader(['y']);
+
+    // 500 .ts files in a single directory — hits the threshold exactly.
+    const entries = Array.from({ length: 500 }, (_, i) =>
+      dirent(`file_${i}.ts`, false),
+    );
+    stubReaddir({ [root]: entries });
+
+    const result = await maybeAskAboutIndexing({
+      projectRoot: root,
+      renderer,
+      reader,
+      indexingConfigured: true,
+    });
+
+    expect(result).toBe(true);
+    expect(reader.readLine).toHaveBeenCalledTimes(1);
+    const prompt = stripAnsi(String(vi.mocked(reader.readLine).mock.calls[0]?.[0] ?? ''));
+    expect(prompt).toContain('Run codebase indexing now');
+  });
+
+  it('returns false when user answers "n" on a large codebase', async () => {
+    const root = '/proj';
+    const reader = makeReader(['n']);
+
+    const entries = Array.from({ length: 500 }, (_, i) =>
+      dirent(`file_${i}.ts`, false),
+    );
+    stubReaddir({ [root]: entries });
+
+    const result = await maybeAskAboutIndexing({
+      projectRoot: root,
+      renderer,
+      reader,
+      indexingConfigured: true,
+    });
+
+    expect(result).toBe(false);
+    expect(reader.readLine).toHaveBeenCalledTimes(1);
+    // Verify the skip message was written.
+    const writeCalls = vi.mocked(renderer.write).mock.calls.map(
+      (c) => stripAnsi(String(c[0])),
+    );
+    const skipLine = writeCalls.find((l) => l.includes('Skipping indexing'));
+    expect(skipLine).toBeDefined();
+  });
+
+  it('returns false when user answers "q" (skip, not abort)', async () => {
+    const root = '/proj';
+    const reader = makeReader(['q']);
+
+    const entries = Array.from({ length: 500 }, (_, i) =>
+      dirent(`file_${i}.ts`, false),
+    );
+    stubReaddir({ [root]: entries });
+
+    const result = await maybeAskAboutIndexing({
+      projectRoot: root,
+      renderer,
+      reader,
+      indexingConfigured: true,
+    });
+
+    // 'q' is NOT LaunchAbortedError — we're past the project check.
+    expect(result).toBe(false);
+    expect(reader.readLine).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns true on empty input (defaults to yes)', async () => {
+    const root = '/proj';
+    const reader = makeReader(['']);
+
+    const entries = Array.from({ length: 500 }, (_, i) =>
+      dirent(`file_${i}.ts`, false),
+    );
+    stubReaddir({ [root]: entries });
+
+    const result = await maybeAskAboutIndexing({
+      projectRoot: root,
+      renderer,
+      reader,
+      indexingConfigured: true,
+    });
+
+    expect(result).toBe(true);
+  });
+
+  it('counts recursively across nested directories', async () => {
+    const root = '/proj';
+
+    // 2 dirs × 250 files each = 500 — hits the threshold.
+    const entriesA = Array.from({ length: 250 }, (_, i) =>
+      dirent(`a_${i}.ts`, false),
+    );
+    const entriesB = Array.from({ length: 250 }, (_, i) =>
+      dirent(`b_${i}.ts`, false),
+    );
+    stubReaddir({
+      [root]: [dirent('dir_a', true), dirent('dir_b', true)],
+      [path.join(root, 'dir_a')]: entriesA,
+      [path.join(root, 'dir_b')]: entriesB,
+    });
+
+    const reader = makeReader(['y']);
+    const result = await maybeAskAboutIndexing({
+      projectRoot: root,
+      renderer,
+      reader,
+      indexingConfigured: true,
+    });
+
+    // Recursive count reaches the threshold -> question asked -> user said yes.
+    expect(result).toBe(true);
+    expect(reader.readLine).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips node_modules, .git, and other ignore dirs', async () => {
+    const root = '/proj';
+
+    // 500 files inside node_modules — should be skipped entirely.
+    const nodeModulesFiles = Array.from({ length: 500 }, (_, i) =>
+      dirent(`mod_${i}.ts`, false),
+    );
+    stubReaddir({
+      [root]: [
+        dirent('node_modules', true),
+        dirent('index.ts', false), // 1 indexable file in root
+      ],
+      [path.join(root, 'node_modules')]: nodeModulesFiles,
+    });
+
+    const reader = makeReader([]);
+    const result = await maybeAskAboutIndexing({
+      projectRoot: root,
+      renderer,
+      reader,
+      indexingConfigured: true,
+    });
+
+    // Only 1 indexable file after filtering — below threshold → no prompt.
+    expect(result).toBeUndefined();
+    expect(reader.readLine).not.toHaveBeenCalled();
+  });
+
+  it('stops counting early once threshold is reached', async () => {
+    const root = '/proj';
+
+    // 1000 files — the counter should stop at 500 and return.
+    const entries = Array.from({ length: 1000 }, (_, i) =>
+      dirent(`file_${i}.ts`, false),
+    );
+    stubReaddir({ [root]: entries });
+
+    const reader = makeReader(['y']);
+    const result = await maybeAskAboutIndexing({
+      projectRoot: root,
+      renderer,
+      reader,
+      indexingConfigured: true,
+    });
+
+    expect(result).toBe(true);
+    expect(reader.readLine).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows approximate file count in the prompt', async () => {
+    const root = '/proj';
+    const reader = makeReader(['']);
+
+    const entries = Array.from({ length: 500 }, (_, i) =>
+      dirent(`file_${i}.ts`, false),
+    );
+    stubReaddir({ [root]: entries });
+
+    await maybeAskAboutIndexing({
+      projectRoot: root,
+      renderer,
+      reader,
+      indexingConfigured: true,
+    });
+
+    const writeCalls = vi.mocked(renderer.write).mock.calls.map(
+      (c) => stripAnsi(String(c[0])),
+    );
+    const detectLine = writeCalls.find((l) => l.includes('Large codebase detected'));
+    expect(detectLine).toBeDefined();
+    // Should mention the approximate count.
+    expect(detectLine).toContain('500');
   });
 });

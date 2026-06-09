@@ -12,26 +12,18 @@
 // Everything else from Ink is re-exported untouched so callers can switch that
 // one import line without losing hooks.
 
-import {
-  Box as InkBox,
-  type BoxProps,
-  type DOMElement,
-  Text as InkText,
-  type TextProps,
-} from 'ink';
-import { forwardRef, type PropsWithChildren, type ReactElement } from 'react';
+import { Box as InkBox, type DOMElement, Text as InkText } from 'ink';
+import { type ComponentProps, forwardRef, type ReactElement } from 'react';
 import { softColor } from './theme.js';
 
-export {
-  Static,
-  measureElement,
-  useApp,
-  useFocus,
-  useFocusManager,
-  useInput,
-  useStdin,
-  useStdout,
-} from 'ink';
+// Mirror Ink's own prop types exactly so any call site that compiled against
+// Ink's `Box`/`Text` compiles unchanged against these wrappers (including the
+// `borderBottom={cond ? false : undefined}`-style explicit `undefined` that
+// `exactOptionalPropertyTypes` permits on Ink's props).
+type TextOwnProps = ComponentProps<typeof InkText>;
+type BoxOwnProps = Omit<ComponentProps<typeof InkBox>, 'ref'>;
+
+export { Static, measureElement, useApp, useInput, useStdin, useStdout } from 'ink';
 export type { BoxProps, DOMElement, TextProps, Key } from 'ink';
 
 // `exactOptionalPropertyTypes` forbids passing `color={undefined}`, so we only
@@ -43,7 +35,7 @@ const colorProps = (color?: string, backgroundColor?: string) => {
 };
 
 /** Ink `Text` with `color`/`backgroundColor` remapped to the pastel palette. */
-export function Text({ color, backgroundColor, ...rest }: TextProps): ReactElement {
+export function Text({ color, backgroundColor, ...rest }: TextOwnProps): ReactElement {
   return <InkText {...rest} {...colorProps(color, backgroundColor)} />;
 }
 
@@ -51,7 +43,7 @@ export function Text({ color, backgroundColor, ...rest }: TextProps): ReactEleme
  * Ink `Box` with `borderColor`/`backgroundColor` remapped to pastels. Forwards
  * `ref` so `measureElement` (used by the scrollable history) keeps working.
  */
-export const Box = forwardRef<DOMElement, PropsWithChildren<BoxProps>>(function Box(
+export const Box = forwardRef<DOMElement, BoxOwnProps>(function Box(
   { borderColor, backgroundColor, ...rest },
   ref,
 ) {
