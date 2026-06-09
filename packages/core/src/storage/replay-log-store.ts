@@ -149,6 +149,13 @@ export class ReplayLogStore {
       entries = await fs.readdir(this.dir);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      // EACCES, ENOTDIR, etc. — log the real error so the operator can
+      // diagnose a misconfiguration, but still return empty list so the
+      // caller (slash command display) doesn't crash.
+      console.warn(
+        `[replay-log-store] list() readdir failed for ${this.dir}:`,
+        err instanceof Error ? err.message : String(err),
+      );
       return [];
     }
     const out: Array<{ sessionId: string; entryCount: number; path: string }> = [];

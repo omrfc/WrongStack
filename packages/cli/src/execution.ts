@@ -156,6 +156,24 @@ export interface ExecutionDeps {
   memoryStore?: MemoryStore | undefined;
   /** Mode store — used by WebUI for the ModePicker panel. */
   modeStore?: ModeStore | undefined;
+  /**
+   * Messages restored from a previous session resume. When non-empty, the
+   * TUI renders the prior conversation as visible history entries.
+   */
+  restoredMessages?: import('@wrongstack/core').Message[] | undefined;
+  /**
+   * Tool execution records from a previous session (tool_call_end JSONL
+   * events). Used by the TUI to render tool entries on resume.
+   */
+  restoredToolCalls?: Array<{
+    name: string;
+    id: string;
+    durationMs: number;
+    ok: boolean;
+    outputBytes?: number | undefined;
+    outputTokens?: number | undefined;
+    outputLines?: number | undefined;
+  }> | undefined;
 }
 
 export async function execute(deps: ExecutionDeps): Promise<number> {
@@ -211,6 +229,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     sessionStore,
     memoryStore,
     modeStore,
+    restoredMessages,
+    restoredToolCalls,
   } = deps;
 
   // ── Chimera post-session review: spawns subagent on chimera.review_needed ──
@@ -862,6 +882,57 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
               .catch((err) =>
                 console.error('[execution] failed to restore debug stream callback:', err),
               );
+          },
+          restoredMessages,
+          restoredToolCalls,
+          // ── Session resume support ──────────────────────────────────
+          listSessions: async (limit = 20) => {
+            if (!sessionStore) return [];
+            const summaries = await sessionStore.list(limit);
+            const currentId = session.id;
+            return summaries.map((s) => ({
+              id: s.id,
+              title: s.title ?? '',
+              startedAt: s.startedAt ?? '',
+              endedAt: s.endedAt,
+              tokenTotal: s.tokenTotal ?? 0,
+              iterationCount: s.iterationCount ?? 0,
+              toolCallCount: s.toolCallCount ?? 0,
+              toolErrorCount: s.toolErrorCount ?? 0,
+              outcome: s.outcome,
+              isCurrent: s.id === currentId,
+            }));
+          },
+          onResumeSession: async (sessionId: string) => {
+            if (!sessionStore) return null;
+            try {
+              const resumed = await sessionStore.resume(sessionId);
+              // Rebuild the agent's conversation context from the resumed messages.
+              // The context's messages are what the LLM sees on the next turn.
+              // We push all resumed messages into the context, preserving order.
+              const allMessages = resumed.data.messages;
+              if (allMessages.length > 0) {
+                // Clear current messages and reload from the resumed session.
+                // agent.ctx.messages is a mutable array tracked by the Context.
+                agent.ctx.messages.length = 0;
+                for (const msg of allMessages) {
+                  agent.ctx.messages.push(msg);
+                }
+              }
+              // Update the session writer so new events append to the resumed
+              // session JSONL instead of the current one.
+              agent.ctx.session = resumed.writer;
+              // Replay the JSONL events as TUI history entries.
+              const { replaySessionEvents } = await import('@wrongstack/tui');
+              const entries = replaySessionEvents(resumed.data.events, /* startId */ 1);
+              return {
+                entries,
+                nextId: entries.length + 1,
+                sessionId: resumed.writer.id,
+              };
+            } catch {
+              return null;
+            }
           },
         });
       } finally {

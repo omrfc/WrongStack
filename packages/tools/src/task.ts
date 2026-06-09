@@ -305,7 +305,7 @@ export const taskTool: Tool<TaskInput, TaskOutput> = {
           }
 
           // Build todo items
-          const todos: Array<{ id: string; content: string; status: 'pending' | 'in_progress' | 'completed'; activeForm?: string }> = [];
+          const todos: Array<{ id: string; content: string; status: 'pending' | 'in_progress' | 'completed'; activeForm?: string; promotedFromTask?: string }> = [];
           const ts = Date.now();
           todos.push({
             id: `todo_${ts}_task`,

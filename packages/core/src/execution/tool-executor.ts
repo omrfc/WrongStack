@@ -10,8 +10,8 @@ import type {
 } from '../types/tool-executor.js';
 import type { Tool } from '../types/tool.js';
 import {
-  hasDangerousCapabilityForSubagents,
   getDangerousCapabilities,
+  hasDangerousCapabilityForSubagents,
 } from '../security/capabilities.js';
 import { validateAgainstSchema } from '../utils/json-schema-validate.js';
 import { createToolOutputSerializer } from '../utils/tool-output-serializer.js';
@@ -89,17 +89,11 @@ export class ToolExecutor {
       }
 
       // Capability safety net at the executor level (defense in depth).
-      // For tools declaring dangerous capabilities, we ensure the permission
-      // decision cannot silently become "auto" in non-yolo contexts.
+      // Tools declaring dangerous capabilities are subject to stricter
+      // permission enforcement in the post-policy block below (line ~150+).
+      // In non-YOLO contexts, an `auto` permission is elevated to `confirm`
+      // for dangerous-capability tools, reducing prompt-injection blast radius.
       const toolDangerousCaps = getDangerousCapabilities(tool);
-      if (toolDangerousCaps.length > 0) {
-        // If the tool has dangerous capabilities and we're not in full yolo mode,
-        // we can force the downstream permission policy to treat it more strictly.
-        // For now we record it; future policy profiles can act on this.
-        if (this.opts.events) {
-          // Observability hook for dangerous capability usage
-        }
-      }
 
       // Provider boundary: the model's tool arguments arrive as a raw JSON
       // string accumulated over streamed deltas. When that string is not a
@@ -429,19 +423,31 @@ export class ToolExecutor {
       throw new Error(`Tool "${tool.name}" does not support streaming execution`);
     }
     const stream = tool.executeStream(input, ctx, { signal });
-    for await (const ev of stream) {
-      if (ev.type === 'final') {
-        finalOutput = ev.output;
-        sawFinal = true;
-        // Drain whatever the iterator wants to surface after final, but the
-        // result is locked in. Most tools won't yield more.
-        break;
+    // Manual iteration so we can explicitly close the async iterator after
+    // receiving the final event, ensuring any cleanup in the tool's generator
+    // finally block runs regardless of whether the engine calls return() on
+    // break of a for-await-of loop.
+    const iter = stream[Symbol.asyncIterator]();
+    try {
+      while (true) {
+        const { done, value: ev } = await iter.next();
+        if (done) break;
+        if (ev.type === 'final') {
+          finalOutput = ev.output;
+          sawFinal = true;
+          // Result is locked — stop consuming further events.
+          break;
+        }
+        this.opts.events?.emit('tool.progress', {
+          name: tool.name,
+          id: toolUseId ?? '<unknown>',
+          event: ev,
+        });
       }
-      this.opts.events?.emit('tool.progress', {
-        name: tool.name,
-        id: toolUseId ?? '<unknown>',
-        event: ev,
-      });
+    } finally {
+      // Always close the iterator so the tool's generator finally block
+      // runs even if we broke early on a final event or errored.
+      await iter.return?.(undefined);
     }
     if (!sawFinal) {
       throw new Error(`tool "${tool.name}" executeStream completed without a 'final' event`);

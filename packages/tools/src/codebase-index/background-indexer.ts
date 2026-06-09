@@ -157,20 +157,24 @@ export async function runStartupIndex(opts: {
   signal?: AbortSignal | undefined;
 }): Promise<IndexResult> {
   _indexing = true;
-  _currentFile = 0;
-  _totalFiles = 0;
-  _lastError = null;
   emitState();
 
   try {
-    const result = await withMutex(() =>
-      runIndexer(stubCtx(opts.projectRoot), {
+    const result = await withMutex(() => {
+      // Reset counters inside the mutex — if runStartupIndex is called
+      // twice concurrently, the second caller must not clobber a running
+      // index's progress counters. The mutex serializes `runIndexer`, so
+      // the second call waits for the first to finish before resetting.
+      _currentFile = 0;
+      _totalFiles = 0;
+      _lastError = null;
+      return runIndexer(stubCtx(opts.projectRoot), {
         projectRoot: opts.projectRoot,
         indexDir: opts.indexDir,
         force: opts.force,
         signal: opts.signal,
-      }),
-    );
+      });
+    });
     _ready = true;
     return result;
   } catch (err) {

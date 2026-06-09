@@ -10,6 +10,7 @@ import '@fontsource/ibm-plex-mono/500.css';
 import '@fontsource/ibm-plex-mono/600.css';
 import { App } from './App';
 import './index.css';
+import './syntax-highlight.css';
 ReactDOM.createRoot(expectDefined(document.getElementById('root'))).render(
   <React.StrictMode>
     <App />

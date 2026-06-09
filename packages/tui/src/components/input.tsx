@@ -1,9 +1,9 @@
-import { expectDefined } from '@wrongstack/core';
 import { Box, Text, useInput, useStdin, useStdout } from '../ink.js';
 import type React from 'react';
 import { memo, useEffect, useRef, useState } from 'react';
 import { fnKey } from '../fn-keys.js';
 import { type InputCell, layoutInputRows } from '../input-tokens.js';
+import { type MouseEventInfo, parseMouseEvent } from '../mouse.js';
 export interface InputProps {
   prompt?: string | undefined;
   value: string;
@@ -97,6 +97,12 @@ export interface KeyEvent {
   end: boolean;
   /** Mouse wheel scroll: positive = up (away from user), negative = down. */
   wheelDeltaY?: number | undefined;
+  /**
+   * Full mouse report (click/release/drag/hover/wheel) when terminal mouse
+   * tracking is enabled. `wheelDeltaY` above is the back-compat shorthand for
+   * `mouse.wheel`; consumers wanting clicks/coords should read `mouse`.
+   */
+  mouse?: MouseEventInfo | undefined;
   /** Function-key number 1–12 when a plain F-key was pressed, else undefined.
    *  Ink's useInput does not decode F-keys, so these are caught from raw stdin
    *  (same mechanism as Home/End) and surfaced here. F-keys are terminal-safe
@@ -133,22 +139,6 @@ function isBackspaceOrDelete(data: string): 'backspace' | 'delete' | 'metaBacksp
   if (data === '\x1b\x7f' || data === '\x1b\x08') return 'metaBackspace';
   if (data === '\x7f' || data === '\x08') return 'backspace';
   if (data === '\x1b[3~') return 'delete';
-  return null;
-}
-
-/**
- * Parse SGR mouse protocol (\x1b[?1006h) wheel events from raw stdin.
- * Format: \x1b[<Cb;Cx;CyM (press) or \x1b[<Cb;Cx;Cym (release, ignored).
- * Cb=64 → wheel up (positive delta), Cb=65 → wheel down (negative delta).
- * Returns null when the data is not a mouse event or not a wheel event.
- */
-function parseMouseWheel(data: string): number | null {
-  // SGR mouse: ESC [ < Cb ; Cx ; Cy (M|m)
-  const m = data.match(new RegExp(`^${String.fromCharCode(27)}\\[<(\\d+);(\\d+);(\\d+)([Mm])$`, 'u'));
-  if (!m) return null;
-  const cb = Number.parseInt(expectDefined(m[1]), 10);
-  if (cb === 64) return 1;  // wheel up
-  if (cb === 65) return -1; // wheel down
   return null;
 }
 
@@ -279,11 +269,16 @@ export const Input = memo(function Input({
         return;
       }
 
-      // Mouse wheel (SGR protocol — terminal must have \x1b[?1000h + \x1b[?1006h set).
-      // Wheel events scroll the chat viewport; button events are ignored here.
-      const wheelDelta = parseMouseWheel(s);
-      if (wheelDelta !== null) {
-        onKey('', { ...EMPTY_KEY, wheelDeltaY: wheelDelta });
+      // Mouse report (SGR protocol — terminal must have ?1000h + ?1006h set;
+      // see mouse.ts and run-tui's lifecycle). Surface the full event plus the
+      // wheelDeltaY back-compat shorthand so existing wheel consumers keep working.
+      const mouse = parseMouseEvent(s);
+      if (mouse) {
+        onKey('', {
+          ...EMPTY_KEY,
+          mouse,
+          wheelDeltaY: mouse.kind === 'wheel' ? mouse.wheel : undefined,
+        });
         return;
       }
 

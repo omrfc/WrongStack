@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { buildChildEnv } from '../utils/child-env.js';
 import type { HookInput, HookOutcome } from '../types/hooks.js';
 import type { Logger } from '../types/logger.js';
 
@@ -43,7 +44,7 @@ export async function runShellHook(
       // command is intentionally a user-authored shell string.
       child = spawn(spec.command, {
         cwd: input.cwd,
-        env: process.env,
+        env: buildChildEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: true,
       });

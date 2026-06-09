@@ -1,4 +1,5 @@
 export { App } from '../App';
+export { ActivityBar } from './ActivityBar';
 export { ThemeProvider, useTheme } from './ThemeProvider';
 export { ChatView } from './ChatView';
 export { ChatInput } from './ChatInput';

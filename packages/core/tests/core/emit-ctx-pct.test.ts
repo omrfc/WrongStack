@@ -41,8 +41,12 @@ function mockProvider(): Provider & { complete: (req: Request) => Promise<Respon
         usage: { input: 50, output: 10 },
       };
     },
-    async stream(): Promise<AsyncIterable<import('../../src/types/provider.js').StreamEvent>> {
-      throw new Error('not used');
+    async *stream(): AsyncGenerator<import('../../src/types/provider.js').StreamEvent> {
+      yield { type: 'message_start', model: 'mock' };
+      yield { type: 'content_block_start', kind: 'text' };
+      yield { type: 'text_delta', text: 'I received your message.' };
+      yield { type: 'content_block_stop', index: 0 };
+      yield { type: 'message_stop', stopReason: 'end_turn', usage: { input: 50, output: 10 } };
     },
     health: async () => ({ ok: true }),
   };

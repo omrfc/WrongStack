@@ -74,7 +74,7 @@ export function buildPlanCommand(planPath?: string): SlashCommand {
   return {
     name: 'plan',
     description:
-      'Strategic plan board: /plan [show|add <title>|start <id|#>|done <id|#>|remove <id|#>|promote <id|#> [subtask ...]|taskify <id|#>|template [list|use <name>]|clear]',
+      'Strategic plan board: /plan [show|add <title>|start <id|#>|done <id|#>|remove <id|#>|promote <id|#> [subtask ...]|derive <id|#> [subtask ...]|taskify <id|#>|template [list|use <name>]|clear]',
     async run(args: string, ctx: Context) {
       if (!planPath) return { message: 'Plan storage is not configured for this session.' };
       const sessionId = ctx?.session?.id ?? 'unknown';
@@ -142,14 +142,16 @@ export function buildPlanCommand(planPath?: string): SlashCommand {
             outputMessage = formatPlan(updated);
             return updated;
           }
-          case 'promote': {
-            if (!restJoined) { outputMessage = 'Usage: /plan promote <id|index> [subtask ...]'; return plan; }
+          case 'promote':
+          case 'derive': {
+            if (!restJoined) { outputMessage = `Usage: /plan ${verb} <id|index> [subtask ...]`; return plan; }
             const [target, ...subtasks] = restJoined.split(/\s+/);
-            if (!target) { outputMessage = 'Usage: /plan promote <id|index> [subtask ...]'; return plan; }
+            if (!target) { outputMessage = `Usage: /plan ${verb} <id|index> [subtask ...]`; return plan; }
             const derived = deriveTodosFromPlanItem(plan, target, subtasks.length > 0 ? subtasks : undefined);
             if (!derived) { outputMessage = `No plan item matched "${target}".`; return plan; }
             ctx?.state?.replaceTodos(derived.todos);
-            outputMessage = `Promoted to ${derived.todos.length} todo(s):\n${formatTodosList(derived.todos)}\n\n${formatPlan(derived.plan)}`;
+            const label = verb === 'derive' ? 'Derived' : 'Promoted to';
+            outputMessage = `${label} ${derived.todos.length} todo(s):\n${formatTodosList(derived.todos)}\n\n${formatPlan(derived.plan)}`;
             return derived.plan;
           }
           case 'template': {

@@ -104,12 +104,21 @@ async function runGit(
   args: string[],
   cwd: string,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
-  return new Promise((resolve) => {
-    const child = spawn('git', args, {
-      cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      signal: AbortSignal.timeout(15_000),
-    });
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawn('git', args, {
+        cwd,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (err) {
+      // `spawn` throws synchronously when the binary is not found (e.g.,
+      // git not installed on Windows). Reject the promise so callers can
+      // handle it gracefully instead of surfacing as an unhandled rejection.
+      reject(err);
+      return;
+    }
     let stdout = '';
     let stderr = '';
     child.stdout?.on('data', (d) => { stdout += d; });
@@ -236,6 +245,7 @@ export function createChimeraPlugin(): Plugin {
 
       // ── session.ended → emit review event ─────────────────────────
       api.onEvent('session.ended', async () => {
+        try {
         const cfg = resolved;
         if (!cfg.enabled) return;
 
@@ -285,6 +295,9 @@ export function createChimeraPlugin(): Plugin {
         } satisfies ChimeraReviewNeededPayload);
 
         api.log.info(`[chimera] emitted review_needed event (${filesWithContent.length} files)`);
+        } catch (err) {
+          api.log.warn(`[chimera] session.ended handler failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
       });
     },
 

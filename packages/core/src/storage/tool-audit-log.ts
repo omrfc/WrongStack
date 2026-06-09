@@ -109,7 +109,7 @@ export class ToolAuditLog {
     output: unknown;
     isError: boolean;
   }): Promise<AuditEntry> {
-    let entry: AuditEntry = null as never; // assigned in enqueue
+    let entry!: AuditEntry; // assigned inside the enqueue callback
     await this.enqueue(input.sessionId, async () => {
       await withFileLock(this.filePath(input.sessionId), async () => {
         const entries = await this.readAll(input.sessionId);
@@ -118,7 +118,6 @@ export class ToolAuditLog {
         const index = prev ? prev.index + 1 : 0;
         const id = randomUUID();
         const ts = new Date().toISOString();
-        // Compute the hash with index included so the hash covers the index.
         const content = {
           id,
           ts,

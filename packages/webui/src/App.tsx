@@ -3,7 +3,8 @@ import { useWebSocketBootstrap } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
 import { getWSClient } from '@/lib/ws-client';
 import { useChatStore, useConfigStore, useFileStore, useGoalStore, useSessionStore, useUIStore, useWorktreeStore, useAutoPhaseStore } from '@/stores';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
+import { ActivityBar } from './components/ActivityBar';
 import { AgentsPage } from './components/AgentsPage';
 import { AutoPhaseView } from './components/AutoPhaseView';
 import { AutonomyPicker } from './components/AutonomyPicker';
@@ -15,7 +16,6 @@ import { ConfirmDialog } from './components/ConfirmDialog';
 import { ConnectionBanner } from './components/ConnectionBanner';
 import { ContextPanel } from './components/ContextPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { FileExplorer } from './components/FileExplorer';
 import { FleetPanel } from './components/FleetPanel';
 import { GoalPanel } from './components/GoalPanel';
 import { PhasePanel } from './components/PhasePanel';
@@ -49,20 +49,7 @@ function AppInner() {
   // Worktree view toggle
   const [worktreeView, setWorktreeView] = useState<'graph' | 'lanes'>('graph');
 
-  // ── IDE file explorer ────────────────────────────────────────────────
-  const fileExplorerWidth = useUIStore((s) => s.fileExplorerWidth);
-  const setFileExplorerWidth = useUIStore((s) => s.setFileExplorerWidth);
-
-  // Load file tree when entering Files view
-  useEffect(() => {
-    if (currentView !== 'files') return;
-    const ws = getWSClient(useConfigStore.getState().wsUrl);
-    if (!ws) return;
-    useFileStore.getState().setTreeLoading(true);
-    ws.send({ type: 'files.tree', payload: {} });
-  }, [currentView]);
-
-  // Handle file open requests from FileExplorer
+  // Handle file open requests from FileExplorer (dispatches custom events on window)
   useEffect(() => {
     const onOpenFile = (e: Event) => {
       const { filePath } = (e as CustomEvent<{ filePath: string }>).detail;
@@ -92,29 +79,6 @@ function AppInner() {
     window.addEventListener('wrongstack:save-file', onSaveFile);
     return () => window.removeEventListener('wrongstack:save-file', onSaveFile);
   }, []);
-
-  // File explorer resize drag
-  const startFileDrag = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      const startX = e.clientX;
-      const startWidth = fileExplorerWidth;
-      const onMove = (ev: MouseEvent) => {
-        setFileExplorerWidth(startWidth + (ev.clientX - startX));
-      };
-      const onUp = () => {
-        window.removeEventListener('mousemove', onMove);
-        window.removeEventListener('mouseup', onUp);
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-      };
-      window.addEventListener('mousemove', onMove);
-      window.addEventListener('mouseup', onUp);
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-    },
-    [fileExplorerWidth, setFileExplorerWidth],
-  );
 
   // Mobile-friendly: collapse the sidebar automatically below the md
   // breakpoint (768px). Tracks viewport changes so a window resize behaves
@@ -287,38 +251,11 @@ function AppInner() {
 
   return (
     <div className={cn('flex h-screen', theme)}>
-      {sidebarOpen && <Sidebar />}
+      {/* ── Activity Bar — always visible, app-level navigation ── */}
+      <ActivityBar />
 
-      {/* ── File Explorer panel (only in Files view) ── */}
-      {currentView === 'files' && sidebarOpen && (
-        <aside
-          style={{ width: `${fileExplorerWidth}px` }}
-          className="relative border-r bg-card flex flex-col shrink-0 overflow-hidden"
-        >
-          {/* Header */}
-          <div className="flex items-center gap-2 px-3 py-2 border-b text-[11px] font-semibold text-muted-foreground uppercase tracking-wider shrink-0">
-            Explorer
-          </div>
-          {/* Tree */}
-          <div className="flex-1 overflow-y-auto">
-            <FileExplorer />
-          </div>
-          {/* Drag handle */}
-          <div
-            onMouseDown={startFileDrag}
-            onDoubleClick={() => setFileExplorerWidth(220)}
-            className="group/handle absolute top-0 right-0 h-full w-2 cursor-col-resize z-10 flex items-center justify-end"
-            title="Drag to resize · double-click to reset"
-          >
-            <div className="h-full w-px bg-border group-hover/handle:bg-primary/60 group-hover/handle:w-0.5 transition-all" />
-            <div className="absolute right-0 top-1/2 -translate-y-1/2 flex flex-col gap-0.5 opacity-0 group-hover/handle:opacity-100 transition-opacity pr-0.5">
-              <span className="h-1 w-1 rounded-full bg-primary/70" />
-              <span className="h-1 w-1 rounded-full bg-primary/70" />
-              <span className="h-1 w-1 rounded-full bg-primary/70" />
-            </div>
-          </div>
-        </aside>
-      )}
+      {/* ── Secondary Panel — collapsible, context-sensitive ── */}
+      {sidebarOpen && <Sidebar />}
 
       {/* ── Main area ── */}
       <main className="flex-1 flex flex-col overflow-hidden">

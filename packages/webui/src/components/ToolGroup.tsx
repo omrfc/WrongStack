@@ -99,7 +99,7 @@ export const ToolGroup = memo(function ToolGroup({
         </button>
 
         {open && (
-          <div className="space-y-2 pl-3 border-l-2 border-border/40 ml-2">
+          <div className="space-y-2 pl-3 border-l-2 border-border/40 ml-2 tool-details">
             {tools.map((tool) => (
               <MessageBubble key={tool.id} message={tool} isFirst={false} />
             ))}

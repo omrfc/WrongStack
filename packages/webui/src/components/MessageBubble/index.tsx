@@ -30,7 +30,7 @@ import { NextStepsBar, parseNextSteps } from '../NextStepsBar';
 import { CopyButton } from './CopyButton.js';
 import { ErrorBodyWithStack } from './ErrorBody.js';
 import { ToolInputView } from './ToolInputView.js';
-import { downloadTextFile, fileExtensionFor, formatToolDuration, markdownComponents } from './utils.js';
+import { downloadTextFile, fileExtensionFor, formatToolDuration, markdownComponents, rehypePlugins } from './utils.js';
 interface MessageBubbleProps {
   message: ChatMessage;
   isFirst?: boolean | undefined;
@@ -122,7 +122,7 @@ export const MessageBubble = memo(function MessageBubble({
       data-message-id={message.id}
       data-pinned={isPinned ? '1' : undefined}
       className={cn(
-        'group flex animate-message rounded-lg transition-shadow',
+        'group flex msg-bubble animate-message rounded-lg transition-shadow',
         compactMode ? 'gap-2' : 'gap-3',
         isUser ? 'flex-row-reverse' : 'flex-row',
         isPinned && 'ring-1 ring-amber-500/30 bg-amber-500/[0.02] px-1 -mx-1',
@@ -166,7 +166,7 @@ export const MessageBubble = memo(function MessageBubble({
             const inputSummary = message.toolInput !== undefined ? summarizeToolInput(message.toolName, message.toolInput) : '';
             const lines = message.toolResult ? message.toolResult.split('\n').length : 0;
             return (
-              <div className="space-y-1">
+              <div className="space-y-1 tool-details">
                 {inputSummary && !expanded && <div className="text-xs text-muted-foreground font-mono truncate">{inputSummary}</div>}
                 {message.toolResult === undefined && message.progressLines && message.progressLines.length > 0 && (
                   <div className="mt-1 rounded-md border border-amber-500/20 bg-amber-500/5 p-1.5 text-[11px] font-mono leading-snug max-h-32 overflow-auto">
@@ -221,13 +221,13 @@ export const MessageBubble = memo(function MessageBubble({
               </div>
             </div>
           ) : (
-            <div className="text-sm leading-relaxed markdown-content">
+            <div className={cn('text-sm leading-relaxed markdown-content', message.streaming && 'streaming-cursor')}>
               {message.content ? (showRaw && message.role === 'assistant' ? (
                 <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground/90 max-h-[40rem] overflow-auto">{message.content}</pre>
               ) : message.role === 'assistant' && message.isError ? (
                 <ErrorBodyWithStack text={message.content} />
               ) : (
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{message.content}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>{message.content}</ReactMarkdown>
               )) : message.streaming ? (
                 <span className="inline-block animate-pulse text-muted-foreground">Typing...</span>
               ) : (

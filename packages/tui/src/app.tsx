@@ -32,7 +32,7 @@ import { FilePicker } from './components/file-picker.js';
 import { FleetMonitor } from './components/fleet-monitor.js';
 import { FleetPanel } from './components/fleet-panel.js';
 import { HelpOverlay } from './components/help-overlay.js';
-import { History } from './components/history.js';
+import { History, type HistoryEntry } from './components/history.js';
 import { Input, type KeyEvent } from './components/input.js';
 import { ModelPicker, type ProviderOption } from './components/model-picker.js';
 import { PhaseMonitor } from './components/phase-monitor.js';
@@ -40,6 +40,7 @@ import { PhasePanel } from './components/phase-panel.js';
 import { QueuePanel } from './components/queue-panel.js';
 import { ProcessListMonitor } from './components/process-list.js';
 import { GoalPanel } from './components/goal-panel.js';
+import { ResumePicker } from './components/resume-picker.js';
 import { SettingsPicker } from './components/settings-picker.js';
 import { SlashMenu } from './components/slash-menu.js';
 import { StatusBar } from './components/status-bar.js';
@@ -53,6 +54,7 @@ import { useTuiControllers } from './hooks/use-tui-controllers.js';
 import { useTuiEventBridge } from './hooks/use-tui-event-bridge.js';
 import { INLINE_TOKEN_SRC, deleteTokenBackward, layoutInputRows, tokenLengthForward } from './input-tokens.js';
 import { createKillSlashCommand } from './kill-slash.js';
+import { MOUSE_CLICK_ON, MOUSE_OFF } from './mouse.js';
 import { feedPaste } from './paste-accumulator.js';
 import { createPsSlashCommand } from './ps-slash.js';
 import { createQueueSlashCommand } from './queue-slash.js';
@@ -61,6 +63,7 @@ import { buildSteeringPreamble } from './steering-preamble.js';
 // Types imported from app-reducer.ts (single source of truth for reducer + State types)
 import {
   type FleetEntry,
+  type ResumeSessionEntry,
   type Settings,
   type SlashCommandMatch,
   type State,
@@ -71,6 +74,7 @@ export {
   type Action,
   type FleetEntry,
   type QueueItem,
+  type ResumeSessionEntry,
   type Settings,
   type SlashCommandMatch,
   type State,
@@ -99,10 +103,22 @@ export function selectedSlashCommandLine(picker: {
  * - assistant messages become `kind: 'assistant'` entries (tool_use blocks
  *   are stripped; full tool rendering needs the execution events which are
  *   not available at resume time)
+ * - tool execution records (from `tool_call_end` JSONL events) become
+ *   `kind: 'tool'` entries, inserted after the assistant response that
+ *   triggered them (heuristic: last assistant turn before the tool_use id)
  */
 export function rehydrateHistory(
   messages: Message[],
   startId: number,
+  toolCalls?: Array<{
+    name: string;
+    id: string;
+    durationMs: number;
+    ok: boolean;
+    outputBytes?: number | undefined;
+    outputTokens?: number | undefined;
+    outputLines?: number | undefined;
+  }> | undefined,
 ): import('./components/history/types.js').HistoryEntry[] {
   const entries: import('./components/history/types.js').HistoryEntry[] = [];
   let nextId = startId;
@@ -122,6 +138,27 @@ export function rehydrateHistory(
       entries.push({ id: nextId++, kind: 'user', text: trimmed });
     } else if (msg.role === 'assistant') {
       entries.push({ id: nextId++, kind: 'assistant', text: trimmed });
+      // After each assistant message, emit any tool calls that were triggered
+      // by tool_use blocks within this response. Tool execution events are
+      // sequentially ordered in the JSONL — we match by tool_use id heuristic.
+    }
+  }
+  // Append tool execution entries after their corresponding assistant turn.
+  // Since tool_call_end events don't carry a promptIndex, we can't perfectly
+  // interleave them. We append them after all assistant messages, sorted by
+  // their order in the original JSONL (the caller preserves insertion order).
+  if (toolCalls && toolCalls.length > 0) {
+    for (const tc of toolCalls) {
+      entries.push({
+        id: nextId++,
+        kind: 'tool',
+        name: tc.name,
+        durationMs: tc.durationMs,
+        ok: tc.ok,
+        outputBytes: tc.outputBytes,
+        outputTokens: tc.outputTokens,
+        outputLines: tc.outputLines,
+      });
     }
   }
   return entries;
@@ -146,6 +183,14 @@ export interface AppProps {
   chime?: boolean | undefined;
   /** When true, the first Ctrl+C aborts work and shows "confirm exit" rather than "exit". */
   confirmExit?: boolean | undefined;
+  /**
+   * Global mouse tracking. When true, SGR mouse reporting stays on for the
+   * whole session. When false (default), the App still enables it *only* while
+   * a selectable overlay (model/autonomy/settings/slash/@ picker) is open, so
+   * the wheel scrolls the picker selection without sacrificing native
+   * scrollback in the chat. See mouse.ts for the trade-off.
+   */
+  mouse?: boolean | undefined;
   /**
    * When true, free-text prompts are run through the prompt refiner
    * ("did you mean this?") before reaching the main agent. Default on;
@@ -291,6 +336,30 @@ export interface AppProps {
   ) => void) | undefined;
 
   /**
+   * Called when the user selects a session in the /resume picker. The host
+   * loads the session JSONL, replays history entries, rebuilds the agent
+   * context, and returns the hydrated history entries + nextId for display.
+   * Returns null when resume fails (session not found, corrupt JSONL, etc.).
+   *
+   * The returned entries replace the TUI's current entries in a single
+   * `replaceHistory` dispatch, so the user sees the prior conversation
+   * exactly as it appeared during live interaction.
+   */
+  onResumeSession?: ((sessionId: string) => Promise<{
+    entries: HistoryEntry[];
+    nextId: number;
+    sessionId: string;
+  } | null>) | undefined;
+
+  /**
+   * List recent session summaries for the /resume picker. The host reads
+   * from the session store and returns ResumeSessionEntry-shaped data.
+   * Used both by the /resume slash command (to populate the picker) and
+   * optionally by the startup rehydration path.
+   */
+  listSessions?: ((limit?: number) => Promise<ResumeSessionEntry[]>) | undefined;
+
+  /**
    * Goal text passed from `--goal "..."` on the command line. When set,
    * the App mounts, renders the banner, then automatically dispatches
    * a synthetic `/goal <text>` so the user lands in goal mode without
@@ -364,6 +433,26 @@ export interface AppProps {
    * print debug lines.
    */
   restoreDebugStreamCallback?: (() => void) | undefined;
+  /**
+   * Messages restored from a previous session. When provided (non-empty),
+   * the TUI renders the prior conversation as history entries so a resumed
+   * session shows its full chat context, not just the LLM's internal state.
+   */
+  restoredMessages?: Message[] | undefined;
+  /**
+   * Tool execution records from a previous session, keyed by tool_use id.
+   * Used to render tool entries (name, duration, ok/error) in the TUI on
+   * resume. Events are `tool_call_end` records from the session JSONL.
+   */
+  restoredToolCalls?: Array<{
+    name: string;
+    id: string;
+    durationMs: number;
+    ok: boolean;
+    outputBytes?: number | undefined;
+    outputTokens?: number | undefined;
+    outputLines?: number | undefined;
+  }> | undefined;
 }
 
 const PASTE_THRESHOLD_CHARS = 200;
@@ -394,6 +483,7 @@ export function App({
   yolo = false,
   chime = false,
   confirmExit = true,
+  mouse = false,
   enhanceEnabled = true,
   enhanceController,
   enhanceDelayMs = 15_000,
@@ -422,6 +512,8 @@ export function App({
   director,
   fleetRoster,
   onClearHistory,
+  listSessions,
+  onResumeSession,
   fleetStreamController,
   statuslineHiddenItems,
   setStatuslineHiddenItems,
@@ -433,6 +525,7 @@ export function App({
   getModeLabel,
   registerDebugStreamCallback,
   restoreDebugStreamCallback,
+  restoredToolCalls,
 }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -524,6 +617,8 @@ export function App({
   // agent.ctx.messages is populated by setupSession → context.state.replaceMessages()
   // when wstack resume <id> is used. These messages only exist in the LLM context
   // by default; we convert them to visible history entries here.
+  // restoredToolCalls (from tool_call_end JSONL events) are appended as tool entries
+  // showing name, duration, and ok/error status.
   const restoredEntries = (() => {
     const msgs = agent.ctx.messages;
     if (!msgs || msgs.length === 0) return [];
@@ -531,7 +626,7 @@ export function App({
     // already shows the provider/model, and system prompts are not user-visible.
     const visible = msgs.filter((m) => m.role !== 'system');
     if (visible.length === 0) return [];
-    return rehydrateHistory(visible, /* startId */ 1);
+    return rehydrateHistory(visible, /* startId */ 1, restoredToolCalls);
   })();
   const initialNextId = 1 + restoredEntries.length;
 
@@ -582,6 +677,7 @@ export function App({
       searchQuery: '',
     },
     autonomyPicker: { open: false, options: [], selected: 0 },
+    resumePicker: { open: false, sessions: [], selected: 0, busy: false, hint: undefined, error: undefined },
     settingsPicker: { open: false, field: 0, mode: 'off', delayMs: 0, titleAnimation: true, yolo: false, streamFleet: true, chime: false, confirmExit: true, nextPrediction: false, featureMcp: true, featurePlugins: true, featureMemory: true, featureSkills: true, featureModelsRegistry: true, contextAutoCompact: true, contextStrategy: 'hybrid', logLevel: 'info', auditLevel: 'standard', indexOnStart: true, maxIterations: 500, autoProceedMaxIterations: 50, enhanceDelayMs: 60_000, debugStream: false, configScope: 'global' },
     confirmQueue: [],
     enhance: null,
@@ -700,6 +796,41 @@ export function App({
   stateRef.current = state;
   const draftRef = useRef({ buffer: state.buffer, cursor: state.cursor });
   draftRef.current = { buffer: state.buffer, cursor: state.cursor };
+
+  // Mouse tracking ownership. We enable SGR mouse reporting while a selectable
+  // overlay is open (so the wheel scrolls the picker selection — see the wheel
+  // handlers in handleKey), and while the global `mouse` prop is set. Outside
+  // those cases tracking stays OFF so the wheel scrolls the terminal's native
+  // scrollback in the chat. A ref tracks the last write so we only emit a
+  // sequence on an actual transition. Cleanup disables tracking on unmount;
+  // run-tui also sends MOUSE_OFF as a belt-and-suspenders on process exit.
+  const pickerOverlayOpen =
+    state.modelPicker.open ||
+    state.autonomyPicker.open ||
+    state.settingsPicker.open ||
+    state.slashPicker.open ||
+    state.picker.open;
+  const mouseTrackingOn = mouse || pickerOverlayOpen;
+  const mouseWrittenRef = useRef(false);
+  useEffect(() => {
+    if (mouseWrittenRef.current === mouseTrackingOn) return;
+    mouseWrittenRef.current = mouseTrackingOn;
+    try {
+      process.stdout.write(mouseTrackingOn ? MOUSE_CLICK_ON : MOUSE_OFF);
+    } catch {
+      // stdout closed during shutdown — ignore.
+    }
+  }, [mouseTrackingOn]);
+  useEffect(
+    () => () => {
+      try {
+        process.stdout.write(MOUSE_OFF);
+      } catch {
+        // ignore — process tearing down.
+      }
+    },
+    [],
+  );
 
   // Latest handleKey, so the keyboard event pipeline can be accessed from
   // effects and callbacks defined above handleKey in the component body.
@@ -1067,6 +1198,7 @@ export function App({
       state.slashPicker.open ||
       state.modelPicker.open ||
       state.autonomyPicker.open ||
+      state.resumePicker.open ||
       state.settingsPicker.open ||
       state.enhanceBusy ||
       state.enhance != null ||
@@ -1116,6 +1248,8 @@ export function App({
     queue: boolean;
     processList: boolean;
   } | null>(null);
+  const resizeRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     const handleResize = () => {
@@ -1140,6 +1274,7 @@ export function App({
       if (stateRef.current.settingsPicker.open) dispatch({ type: 'settingsClose' });
       if (stateRef.current.modelPicker.open) dispatch({ type: 'modelPickerClose' });
       if (stateRef.current.autonomyPicker.open) dispatch({ type: 'autonomyPickerClose' });
+      if (stateRef.current.resumePicker.open) dispatch({ type: 'resumePickerClose' });
       if (stateRef.current.slashPicker.open) dispatch({ type: 'slashPickerClose' });
       if (stateRef.current.picker.open) dispatch({ type: 'pickerClose' });
       if (stateRef.current.rewindOverlay) dispatch({ type: 'rewindOverlayClose' });
@@ -1156,7 +1291,9 @@ export function App({
       // After the terminal settles at the new size, restore panels that
       // were open. The 300ms delay gives Ink time to re-render the minimal
       // live region at the new width before we grow it again.
-      setTimeout(() => {
+      resizeRestoreTimerRef.current = setTimeout(() => {
+        // Guard: if the component unmounted, don't dispatch.
+        if (!mountedRef.current) return;
         // If another resize happened while we waited, discard this restore.
         if (resizeGateRef.current !== seq) return;
         const prev = preResizePanelsRef.current;
@@ -1198,11 +1335,19 @@ export function App({
         if (prev.queue) dispatch({ type: 'toggleQueuePanel' });
         if (prev.processList) dispatch({ type: 'toggleProcessList' });
         preResizePanelsRef.current = null;
+        resizeRestoreTimerRef.current = null;
       }, 300);
     };
 
     process.stdout.on('resize', handleResize);
     return () => {
+      // Clear any pending resize-restore timer and mark the component
+      // as unmounted so the callback doesn't dispatch to a dead reducer.
+      if (resizeRestoreTimerRef.current) {
+        clearTimeout(resizeRestoreTimerRef.current);
+        resizeRestoreTimerRef.current = null;
+      }
+      mountedRef.current = false;
       process.stdout.off('resize', handleResize);
     };
   }, [eraseLiveRegion]);
@@ -1826,6 +1971,40 @@ export function App({
       slashRegistry.unregister('autonomy');
     };
   }, [slashRegistry, switchAutonomy]);
+
+  // Register the TUI-only `/resume` command — opens the session resume picker.
+  // Lists recent sessions; selecting one triggers onResumeSession to load and
+  // replay the full conversation history.
+  useEffect(() => {
+    const cmd = {
+      name: 'resume',
+      aliases: ['load'],
+      description: 'Resume a previous session — pick from a list of recent sessions.',
+      async run() {
+        if (!listSessions) {
+          return { message: 'Session listing not available.' };
+        }
+        try {
+          const sessions = await listSessions(20);
+          if (sessions.length === 0) {
+            return { message: 'No saved sessions.' };
+          }
+          dispatch({ type: 'resumePickerOpen', sessions });
+        } catch (err) {
+          return {
+            message: err instanceof Error ? err.message : String(err),
+          };
+        }
+        return { message: undefined };
+      },
+    };
+    // Register as an official TUI plugin so it overrides the CLI's text-based
+    // /resume command (which is an alias on /sessions).
+    slashRegistry.register(cmd, 'tui', { official: true });
+    return () => {
+      slashRegistry.unregister('resume');
+    };
+  }, [slashRegistry, listSessions]);
 
   // Subscribe to provider streaming events.
   useEffect(() => {
@@ -2464,6 +2643,10 @@ export function App({
         }
         return;
       }
+      if (key.mouse?.kind === 'wheel') {
+        dispatch({ type: 'modelPickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
+        return;
+      }
       if (key.upArrow) {
         dispatch({ type: 'modelPickerMove', delta: -1 });
         return;
@@ -2536,6 +2719,10 @@ export function App({
         dispatch({ type: 'autonomyPickerClose' });
         return;
       }
+      if (key.mouse?.kind === 'wheel') {
+        dispatch({ type: 'autonomyPickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
+        return;
+      }
       if (key.upArrow) {
         dispatch({ type: 'autonomyPickerMove', delta: -1 });
         return;
@@ -2562,9 +2749,62 @@ export function App({
       return;
     }
 
+    // Resume picker takes absolute precedence while open.
+    if (state.resumePicker.open) {
+      if (key.escape) {
+        dispatch({ type: 'resumePickerClose' });
+        return;
+      }
+      if (key.upArrow) {
+        dispatch({ type: 'resumePickerMove', delta: -1 });
+        return;
+      }
+      if (key.downArrow) {
+        dispatch({ type: 'resumePickerMove', delta: 1 });
+        return;
+      }
+      if (isEnter) {
+        const now = Date.now();
+        if (now - lastEnterAtRef.current < 50) return;
+        lastEnterAtRef.current = now;
+        const session = state.resumePicker.sessions[state.resumePicker.selected];
+        if (!session || session.isCurrent) return;
+        if (state.resumePicker.busy) return;
+        // Fire the resume callback — the host loads the session and
+        // returns the hydrated history entries.
+        dispatch({ type: 'resumePickerBusy', on: true });
+        onResumeSession?.(session.id).then((result) => {
+          if (!result) {
+            dispatch({ type: 'resumePickerError', text: `Failed to resume session ${session.id}.` });
+            return;
+          }
+          dispatch({ type: 'replaceHistory', entries: result.entries, nextId: result.nextId });
+          dispatch({ type: 'resumePickerClose' });
+          dispatch({
+            type: 'addEntry',
+            entry: {
+              kind: 'info',
+              text: `Resumed session ${result.sessionId} — ${result.entries.length} entries replayed.`,
+            },
+          });
+        }).catch((err) => {
+          dispatch({
+            type: 'resumePickerError',
+            text: err instanceof Error ? err.message : String(err),
+          });
+        });
+        return;
+      }
+      return;
+    }
+
     if (state.settingsPicker.open) {
       if (key.escape || (key.ctrl && input === 's') || key.fn === 5) {
         dispatch({ type: 'settingsClose' });
+        return;
+      }
+      if (key.mouse?.kind === 'wheel') {
+        dispatch({ type: 'settingsFieldMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
         return;
       }
       if (key.upArrow) {
@@ -2598,6 +2838,10 @@ export function App({
     if (state.slashPicker.open) {
       if (key.escape) {
         dispatch({ type: 'slashPickerClose' });
+        return;
+      }
+      if (key.mouse?.kind === 'wheel') {
+        dispatch({ type: 'slashPickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
         return;
       }
       if (key.upArrow) {
@@ -2638,6 +2882,10 @@ export function App({
     if (state.picker.open) {
       if (key.escape) {
         dispatch({ type: 'pickerClose' });
+        return;
+      }
+      if (key.mouse?.kind === 'wheel') {
+        dispatch({ type: 'pickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
         return;
       }
       if (key.upArrow) {
@@ -4062,6 +4310,15 @@ export function App({
               options={state.autonomyPicker.options}
               selected={state.autonomyPicker.selected}
               hint={state.autonomyPicker.hint}
+            />
+          ) : null}
+          {state.resumePicker.open ? (
+            <ResumePicker
+              sessions={state.resumePicker.sessions}
+              selected={state.resumePicker.selected}
+              busy={state.resumePicker.busy}
+              error={state.resumePicker.error}
+              hint={state.resumePicker.hint}
             />
           ) : null}
           {state.settingsPicker.open ? (

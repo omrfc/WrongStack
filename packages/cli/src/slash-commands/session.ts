@@ -113,6 +113,7 @@ export function buildLoadCommand(opts: SlashCommandContext): SlashCommand {
       if (!opts.sessionStore) return { message: 'No session store configured.' };
       const list = await opts.sessionStore.list(10);
       if (list.length === 0) return { message: 'No saved sessions.' };
+      const currentId = (opts as unknown as { currentSessionId?: string | undefined }).currentSessionId;
       const lines = list.map((s) => {
         // Build a compact stats column: tools, errors, outcome badge.
         const parts: string[] = [];
@@ -132,13 +133,15 @@ export function buildLoadCommand(opts: SlashCommandContext): SlashCommand {
         }
         const stat = parts.join(' ');
         const date = color.dim(s.startedAt.slice(0, 16).replace('T', ' '));
-        return `  ${s.id.padEnd(42)} ${date}  ${stat}\n    ${color.dim(s.title)}`;
+        const isCurrent = s.id === currentId;
+        const marker = isCurrent ? color.cyan(' (current)') : '';
+        return `  ${color.bold(s.id)}${marker}\n    ${date}  ${stat}\n    ${color.dim(s.title)}`;
       });
       const msg = [
         color.bold(`Recent sessions (${list.length}):`),
         ...lines,
         '',
-        color.dim(`Resume: wstack resume ${list[0]?.id ?? '<id>'}`),
+        color.dim(`Resume: /resume to open interactive picker, or wstack resume ${list[0]?.id ?? '<id>'}`),
         color.dim('Tip: /resume --incomplete — list crashed sessions'),
       ].join('\n');
       opts.renderer.write(msg);

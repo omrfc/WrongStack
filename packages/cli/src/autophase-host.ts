@@ -40,14 +40,21 @@ const WORKTREE_PHASE_CONCURRENCY = 4;
 
 /** Run a git command, returning trimmed stdout (empty string on failure). */
 function gitText(args: string[], cwd: string): Promise<{ code: number; out: string }> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawn('git', args, {
+        cwd,
+        env: buildChildEnv(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (err) {
+      // spawn throws synchronously when git is not installed.
+      reject(err);
+      return;
+    }
     let out = '';
-    const child = spawn('git', args, {
-      cwd,
-      env: buildChildEnv(),
-      stdio: ['ignore', 'pipe', 'pipe'],
-      signal: AbortSignal.timeout(10_000),
-    });
     child.stdout?.on('data', (c: Buffer) => {
       out += c.toString();
     });
@@ -64,6 +71,26 @@ async function isGitRepo(cwd: string): Promise<boolean> {
   return code === 0 && out.trim() === 'true';
 }
 
+// Commands allowed for autonomous autophase verification. This mirrors
+// @wrongstack/tools exec.ts ALLOWED_COMMANDS but is intentionally narrower:
+// autophase only ever runs package-manager script invocations and an optional
+// user-configured custom verify command.
+const AUTOPHASE_SAFE_CMDS: ReadonlySet<string> = new Set([
+  'pnpm', 'npm', 'yarn', 'bun',
+]);
+
+// Destructive shell patterns that must never execute autonomously.
+// Mirrors the yolo-risk.ts pattern set for autophase context.
+const DESTRUCTIVE_PATTERNS: readonly RegExp[] = [
+  /\brm\s+-rf\s+\//,
+  /\bdangerously\s+(?:force|reset|--hard)\b/,
+  /\bgit\s+clean\s+-[xdf]{2,}/,
+  /\bgit\s+reset\s+--hard\b/,
+  /([;&|]\s*)(?!\s*$)/,  // command chaining (; && || |)
+  /`[^`]+`/,              // backtick subshell
+  /\$\(/,                 // $(...) subshell
+];
+
 /** Run an arbitrary command, capturing combined stdout+stderr. */
 function runCmd(
   cmd: string,
@@ -71,15 +98,44 @@ function runCmd(
   cwd: string,
   shell = false,
 ): Promise<{ code: number; out: string }> {
-  return new Promise((resolve) => {
-    let out = '';
-    const child = spawn(cmd, args, {
-      cwd,
-      env: buildChildEnv(),
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: shell || process.platform === 'win32',
-      signal: AbortSignal.timeout(30_000),
+  // ── allowlist gate ──────────────────────────────────────────────────
+  if (!AUTOPHASE_SAFE_CMDS.has(cmd)) {
+    return Promise.resolve({
+      code: 1,
+      out: `autophase: command "${cmd}" not in autonomous safe-commands allowlist. ` +
+           `Allowed: ${[...AUTOPHASE_SAFE_CMDS].join(', ')}. ` +
+           `Set WRONGSTACK_AUTOPHASE_VERIFY_CMD to one of these.`,
     });
+  }
+
+  // ── destructive-pattern gate ────────────────────────────────────────
+  const fullCmd = [cmd, ...args].join(' ');
+  for (const pat of DESTRUCTIVE_PATTERNS) {
+    if (pat.test(fullCmd)) {
+      return Promise.resolve({
+        code: 1,
+        out: `autophase: rejected destructive command pattern: ${fullCmd}`,
+      });
+    }
+  }
+
+  return new Promise((resolve, reject) => {
+    let out = '';
+    let child;
+    try {
+      child = spawn(cmd, args, {
+        cwd,
+        env: buildChildEnv(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        // Pass through explicitly — allowlist validation already runs above,
+        // so the caller's shell preference is authoritative.
+        shell,
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch (err) {
+      reject(err);
+      return;
+    }
     child.stdout?.on('data', (c: Buffer) => {
       out += c.toString();
     });

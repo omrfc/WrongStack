@@ -3,6 +3,7 @@ import type {
   AttachmentStore,
   Director,
   EventBus,
+  Message,
   QueueStore,
   SlashCommandRegistry,
   TokenCounter,
@@ -13,6 +14,7 @@ import { render } from 'ink';
 import * as path from 'node:path';
 import React from 'react';
 import { App } from './app.js';
+import { MOUSE_OFF } from './mouse.js';
 import { startTerminalTitle } from './terminal-title.js';
 
 // Re-export autonomy stage types from core for backward compatibility
@@ -97,6 +99,14 @@ export interface RunTuiOptions {
   titleAnimation?: boolean | undefined;
   /** Play terminal bell (\\x07) when agent run completes. */
   chime?: boolean | undefined;
+  /**
+   * Enable terminal mouse tracking (SGR; click + wheel). Stays in the normal
+   * screen buffer so native scrollback survives, BUT while tracking is on the
+   * plain wheel reports to the app instead of scrolling history — only
+   * Shift+wheel reaches native scrollback. Off by default; opt in here or via
+   * WRONGSTACK_MOUSE=1. See mouse.ts for the trade-off rationale.
+   */
+  mouse?: boolean | undefined;
   /** Show "confirm exit" message on first Ctrl+C instead of "exit". */
   confirmExit?: boolean | undefined;
   /** Active agent mode label shown in the status bar (e.g. "teach", "brief"). */
@@ -249,6 +259,43 @@ export interface RunTuiOptions {
    * them in the shared suggestion store so `/next 1`, `/next 1 2 3` work.
    */
   onSuggestionsParsed?: ((finalText: string) => void) | undefined;
+  /**
+   * Messages restored from a previous session. When provided (non-empty),
+   * the TUI renders the prior conversation as history entries so a resumed
+   * session shows its full chat context, not just the LLM's internal state.
+   */
+  restoredMessages?: Message[] | undefined;
+  /**
+   * Tool execution records from a previous session, keyed by tool_use id.
+   * Used to render tool entries (name, duration, ok/error) in the TUI on
+   * resume. Events are `tool_call_end` records from the session JSONL.
+   */
+  restoredToolCalls?: Array<{
+    name: string;
+    id: string;
+    durationMs: number;
+    ok: boolean;
+    outputBytes?: number | undefined;
+    outputTokens?: number | undefined;
+    outputLines?: number | undefined;
+  }> | undefined;
+
+  /**
+   * List recent session summaries for the /resume picker. The CLI reads
+   * from the session store and returns ResumeSessionEntry-shaped data.
+   */
+  listSessions?: ((limit?: number) => Promise<import('./app-state.js').ResumeSessionEntry[]>) | undefined;
+
+  /**
+   * Resume a session by id: load JSONL events, replay history entries,
+   * rebuild agent context, and return hydrated entries for the TUI to
+   * display. Returns null when resume fails.
+   */
+  onResumeSession?: ((sessionId: string) => Promise<{
+    entries: import('./components/history/types.js').HistoryEntry[];
+    nextId: number;
+    sessionId: string;
+  } | null>) | undefined;
 }
 
 // Bracketed paste mode wraps any pasted text with these markers, letting us
@@ -348,6 +395,12 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
 
   stdout.write(BRACKETED_PASTE_ON);
 
+  // Resolve the global mouse-tracking opt-in. The App component owns the actual
+  // enable/disable lifecycle (it also turns tracking on per-overlay); cleanup()
+  // below sends MOUSE_OFF unconditionally so the terminal is never left
+  // reporting mouse events after exit.
+  const mouseEnabled = opts.mouse ?? process.env.WRONGSTACK_MOUSE === '1';
+
   // Clear the VISIBLE screen (not scrollback) before Ink's first paint. The
   // REPL boot output (provider banner, Director roster, fleet paths, recovery
   // prompts) typically fills the terminal, so without this Ink mounts with its
@@ -409,6 +462,9 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
     }
     try {
       stdout.write(BRACKETED_PASTE_OFF);
+      // Disabling unset modes is a no-op, so this is safe even when mouse
+      // tracking was never enabled — guarantees no leaked mouse reporting.
+      stdout.write(MOUSE_OFF);
     } catch {
       // stdout may already be closed during shutdown — ignore.
     }
@@ -500,10 +556,15 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           onSuggestionsParsed: opts.onSuggestionsParsed,
           chime: opts.chime,
           confirmExit: opts.confirmExit,
+          mouse: mouseEnabled,
           modeLabel: opts.modeLabel,
           getModeLabel: opts.getModeLabel,
           registerDebugStreamCallback: opts.registerDebugStreamCallback,
           restoreDebugStreamCallback: opts.restoreDebugStreamCallback,
+          restoredMessages: opts.restoredMessages,
+          restoredToolCalls: opts.restoredToolCalls,
+          listSessions: opts.listSessions,
+          onResumeSession: opts.onResumeSession,
         }),
         { exitOnCtrlC: false, stdin: inkStdin },
       );

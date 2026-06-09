@@ -485,6 +485,103 @@ describe('DefaultSessionStore — in-flight markers', () => {
     const toolIdx = types.lastIndexOf('tool_result');
     expect(endIdx).toBeGreaterThan(toolIdx);
   });
+
+  it('extracts tool_call_end events into toolCallEnds on load()', async () => {
+    const store = new DefaultSessionStore({ dir: tmp });
+    const writer = await store.create({ id: 'tools1', title: '', model: 'm', provider: 'p' });
+    await writer.append({ type: 'user_input', ts: new Date().toISOString(), content: 'read file' });
+    await writer.append({
+      type: 'llm_response',
+      ts: new Date().toISOString(),
+      content: [{ type: 'tool_use', id: 'tu-1', name: 'read', input: { path: 'src/x.ts' } }],
+      stopReason: 'tool_use',
+      usage: { input: 10, output: 5 },
+    } as Parameters<typeof writer.append>[0]);
+    await writer.append({
+      type: 'tool_call_end',
+      ts: new Date().toISOString(),
+      name: 'read',
+      id: 'tu-1',
+      durationMs: 42,
+      outputSize: 100,
+      ok: true,
+      outputBytes: 100,
+      outputTokens: 28,
+      outputLines: 5,
+    });
+    await writer.append({
+      type: 'tool_result',
+      ts: new Date().toISOString(),
+      id: 'tu-1',
+      content: 'file contents here',
+      isError: false,
+    });
+    await writer.close();
+
+    const data = await store.load('tools1');
+    expect(data.toolCallEnds).toHaveLength(1);
+    expect(data.toolCallEnds[0]).toMatchObject({
+      name: 'read',
+      id: 'tu-1',
+      durationMs: 42,
+      ok: true,
+      outputBytes: 100,
+      outputTokens: 28,
+      outputLines: 5,
+    });
+    // Messages should still replay correctly.
+    expect(data.messages).toHaveLength(2); // user_input + assistant with tool_use
+  });
+
+  it('returns empty toolCallEnds when no tool_call_end events exist', async () => {
+    const store = new DefaultSessionStore({ dir: tmp });
+    const writer = await store.create({ id: 'tools2', title: '', model: 'm', provider: 'p' });
+    await writer.append({ type: 'user_input', ts: new Date().toISOString(), content: 'hello' });
+    await writer.append({
+      type: 'llm_response',
+      ts: new Date().toISOString(),
+      content: [{ type: 'text', text: 'hi back' }],
+      stopReason: 'end_turn',
+      usage: { input: 10, output: 5 },
+    });
+    await writer.close();
+
+    const data = await store.load('tools2');
+    expect(data.toolCallEnds).toEqual([]);
+    expect(data.messages).toHaveLength(2);
+  });
+
+  it('toolCallEnds preserves insertion order from JSONL', async () => {
+    const store = new DefaultSessionStore({ dir: tmp });
+    const writer = await store.create({ id: 'tools3', title: '', model: 'm', provider: 'p' });
+
+    // Write two tool calls interleaved with multiple user/llm turns.
+    await writer.append({ type: 'user_input', ts: new Date().toISOString(), content: 'first' });
+    await writer.append({
+      type: 'llm_response', ts: new Date().toISOString(),
+      content: [{ type: 'tool_use', id: 'a1', name: 'read', input: {} }],
+      stopReason: 'tool_use', usage: { input: 1, output: 1 },
+    } as Parameters<typeof writer.append>[0]);
+    await writer.append({ type: 'tool_call_end', ts: new Date().toISOString(), name: 'read', id: 'a1', durationMs: 10, outputSize: 0, ok: true });
+    await writer.append({ type: 'tool_result', ts: new Date().toISOString(), id: 'a1', content: 'ok', isError: false });
+
+    await writer.append({ type: 'user_input', ts: new Date().toISOString(), content: 'second' });
+    await writer.append({
+      type: 'llm_response', ts: new Date().toISOString(),
+      content: [{ type: 'tool_use', id: 'b2', name: 'bash', input: {} }],
+      stopReason: 'tool_use', usage: { input: 1, output: 1 },
+    } as Parameters<typeof writer.append>[0]);
+    await writer.append({ type: 'tool_call_end', ts: new Date().toISOString(), name: 'bash', id: 'b2', durationMs: 200, outputSize: 0, ok: false });
+    await writer.append({ type: 'tool_result', ts: new Date().toISOString(), id: 'b2', content: 'err', isError: true });
+    await writer.close();
+
+    const data = await store.load('tools3');
+    expect(data.toolCallEnds).toHaveLength(2);
+    expect(data.toolCallEnds[0]).toMatchObject({ name: 'read', id: 'a1', ok: true, durationMs: 10 });
+    expect(data.toolCallEnds[1]).toMatchObject({ name: 'bash', id: 'b2', ok: false, durationMs: 200 });
+    // Messages replay: 2 user (first + tool_result) + 2 assistant + 2 user (second + tool_result)
+    expect(data.messages).toHaveLength(6);
+  });
 });
 
 // F-06 (CWE-532): secrets in user/model turns must be scrubbed before they are

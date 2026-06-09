@@ -1,31 +1,29 @@
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
-import { useConfigStore, useFleetStore, useHistoryStore, useSessionStore, useUIStore } from '@/stores';
+import { type Activity, useConfigStore, useFileStore, useFleetStore, useHistoryStore, useSessionStore, useUIStore } from '@/stores';
 import type { SubagentView } from '@/stores';
 import {
-  Bot,
-  ChevronDown,
-  ChevronRight,
-  Clock,
-  Cpu,
-  FolderOpen,
-  Gauge,
-  History,
-  Layers,
-  MessageSquare,
   PanelLeftClose,
-  Settings as SettingsIcon,
   Wrench,
-  Zap,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { AgentDetail } from '../FleetPanel';
 import { ContextSidebar } from '../ContextSidebar';
+import { FileExplorer } from '../FileExplorer';
 import { ConfigSection } from './ConfigSection.js';
 import { SessionActions } from './SessionActions.js';
 import { SessionList } from './SessionList.js';
+
+// ── Activity label map ────────────────────────────────────────────────
+
+const ACTIVITY_LABEL: Record<Activity, string> = {
+  chat: 'Chat',
+  agents: 'Agents',
+  context: 'Context',
+  history: 'History',
+  files: 'Files',
+};
 
 // ── Agent row for sidebar list ────────────────────────────────────────
 
@@ -96,19 +94,19 @@ function AgentRow({
   );
 }
 
-// ── Sidebar ────────────────────────────────────────────────────────────
+// ── Secondary Panel ────────────────────────────────────────────────────
 
 export function Sidebar() {
-  const { toggleSidebar, currentView, setCurrentView } = useUIStore();
+  const activeActivity = useUIStore((s) => s.activeActivity);
+  const setSidebarOpen = useUIStore((s) => s.setSidebarOpen);
   const sidebarWidth = useUIStore((s) => s.sidebarWidth);
   const setSidebarWidth = useUIStore((s) => s.setSidebarWidth);
-  const { wsConnected, wsUrl } = useConfigStore();
+  const { wsConnected } = useConfigStore();
   const { entries: historyEntries, loading: historyLoading, error: historyError } = useHistoryStore();
   const { listSessions, deleteSession, resumeSession, client } = useWebSocket();
   const session = useSessionStore((s) => s.session);
-  const projectName = useSessionStore((s) => s.projectName);
 
-  // ── Fleet state for Agents tab ──
+  // ── Fleet state for Agents view ──
   const fleetAgents = useFleetStore((s) => s.agents);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
@@ -127,7 +125,6 @@ export function Sidebar() {
     ? fleetList.find((a) => a.id === selectedAgentId) ?? null
     : null;
 
-  const fleetRunning = fleetList.filter((a) => a.status === 'running').length;
   const fleetTotal = fleetList.length;
 
   const [historyQuery, setHistoryQuery] = useState('');
@@ -139,13 +136,20 @@ export function Sidebar() {
 
   useEffect(() => {
     void activeSessionId;
-    if (currentView === 'history' && wsConnected) listSessions(50);
-  }, [currentView, wsConnected, activeSessionId, listSessions]);
+    if (activeActivity === 'history' && wsConnected) listSessions(50);
+  }, [activeActivity, wsConnected, activeSessionId, listSessions]);
 
-  // Auto-refresh session list when session changes (new, resume, clear)
+  // Auto-refresh session list when session changes
   useEffect(() => {
     if (wsConnected) listSessions(50);
   }, [wsConnected, activeSessionId, listSessions]);
+
+  // Load file tree when Files activity is selected
+  useEffect(() => {
+    if (activeActivity !== 'files' || !wsConnected) return;
+    useFileStore.getState().setTreeLoading(true);
+    client?.send({ type: 'files.tree', payload: {} });
+  }, [activeActivity, wsConnected, client]);
 
   const formatDuration = (start: number | null) => {
     if (!start) return '--';
@@ -174,7 +178,7 @@ export function Sidebar() {
   };
 
   return (
-    <aside style={{ width: `${sidebarWidth}px` }} className="relative border-r bg-card flex flex-col shrink-0">
+    <aside style={{ width: `${sidebarWidth}px` }} className="relative border-r bg-card flex flex-col shrink-0 animate-slide-in">
       {/* Drag handle */}
       <div
         onMouseDown={startDrag}
@@ -190,61 +194,32 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b">
-        <div className="flex items-center gap-2.5">
-          <div className="relative w-7 h-7 rounded-md bg-primary flex items-center justify-center shadow-[0_0_0_1px_hsl(var(--primary)/0.4),0_2px_8px_-2px_hsl(var(--primary)/0.5)]">
-            <Zap className="h-4 w-4 text-primary-foreground" strokeWidth={2.4} />
-          </div>
-          <div className="flex flex-col leading-none">
-            <span className="text-sm font-semibold tracking-tight">{projectName || 'Agent'}</span>
-            <span className="flex items-center gap-1 text-[10px] text-muted-foreground mt-0.5">
-              <span className={cn('led', wsConnected ? 'text-[hsl(var(--success))] led-pulse' : 'text-[hsl(var(--warning))]')} />
-              <span className="tabular font-medium uppercase tracking-wider">{wsConnected ? 'online' : 'offline'}</span>
-            </span>
-          </div>
-        </div>
-        <Button variant="ghost" size="icon" onClick={toggleSidebar} title="Collapse sidebar (Ctrl+\\)">
-          <PanelLeftClose className="h-4 w-4" />
+      {/* ── Panel header ── */}
+      <div className="flex items-center justify-between px-3 py-2.5 border-b shrink-0">
+        <span className="text-xs font-semibold tracking-tight text-muted-foreground uppercase">
+          {ACTIVITY_LABEL[activeActivity]}
+        </span>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6"
+          onClick={() => setSidebarOpen(false)}
+          title="Collapse panel"
+        >
+          <PanelLeftClose className="h-3.5 w-3.5" />
         </Button>
       </div>
 
-      <Tabs value={currentView === 'chat' || currentView === 'history' || currentView === 'agents' || currentView === 'context' || currentView === 'files' ? currentView : '__none__'} onValueChange={(v) => setCurrentView(v as 'chat' | 'history' | 'agents' | 'context' | 'files')} className="flex-1 flex flex-col">
-        <TabsList className="w-full rounded-none bg-transparent p-2 h-auto grid grid-cols-5">
-          <TabsTrigger value="chat" className="flex-col gap-1.5 py-2 data-[state=active]:bg-primary/10">
-            <MessageSquare className="h-4 w-4" /><span className="text-xs">Chat</span>
-          </TabsTrigger>
-          <TabsTrigger value="agents" className="flex-col gap-1.5 py-2 data-[state=active]:bg-primary/10">
-            <Bot className="h-4 w-4" />
-            <span className="text-xs">Agents{fleetTotal > 0 ? ` · ${fleetTotal}` : ''}</span>
-          </TabsTrigger>
-          <TabsTrigger value="context" className="flex-col gap-1.5 py-2 data-[state=active]:bg-primary/10">
-            <Gauge className="h-4 w-4" />
-            <span className="text-xs">Context</span>
-          </TabsTrigger>
-          <TabsTrigger value="history" className="flex-col gap-1.5 py-2 data-[state=active]:bg-primary/10">
-            <History className="h-4 w-4" /><span className="text-xs">History</span>
-          </TabsTrigger>
-          <TabsTrigger value="files" className="flex-col gap-1.5 py-2 data-[state=active]:bg-primary/10">
-            <FolderOpen className="h-4 w-4" /><span className="text-xs">Files</span>
-          </TabsTrigger>
-        </TabsList>
+      {/* ── Panel body ── */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {activeActivity === 'chat' && (
+          <>
+            <ConfigSection formatDuration={formatDuration} />
+            <SessionActions wsConnected={wsConnected} />
+          </>
+        )}
 
-        <TabsContent value="chat" className="flex-1 flex flex-col m-0 overflow-hidden">
-          <ConfigSection formatDuration={formatDuration} />
-          <SessionActions wsConnected={wsConnected} />
-          <div className="flex-1" />
-          <div className="px-3 py-3 border-t space-y-1">
-            <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => setCurrentView('settings')}>
-              <SettingsIcon className="h-4 w-4 mr-2" />Settings
-            </Button>
-            <Button variant="ghost" size="sm" className="w-full justify-start" onClick={() => setCurrentView('autophase')}>
-              <Layers className="h-4 w-4 mr-2" />Phases
-            </Button>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="history" className="flex-1 m-0 flex flex-col overflow-hidden">
+        {activeActivity === 'history' && (
           <SessionList
             historyQuery={historyQuery}
             setHistoryQuery={setHistoryQuery}
@@ -256,10 +231,10 @@ export function Sidebar() {
             resumeSession={resumeSession}
             deleteSession={deleteSession}
           />
-        </TabsContent>
+        )}
 
-        <TabsContent value="agents" className="flex-1 m-0 flex flex-col overflow-hidden">
-          {fleetTotal === 0 ? (
+        {activeActivity === 'agents' && (
+          fleetTotal === 0 ? (
             <div className="flex-1 flex items-center justify-center p-4">
               <p className="text-xs text-muted-foreground text-center">
                 No agents running.
@@ -277,17 +252,21 @@ export function Sidebar() {
                 />
               ))}
             </div>
-          )}
-        </TabsContent>
+          )
+        )}
 
-        <TabsContent value="context" className="flex-1 m-0 flex flex-col overflow-hidden">
+        {activeActivity === 'context' && (
           <div className="flex-1 overflow-y-auto p-3">
             <ContextSidebar />
           </div>
-        </TabsContent>
+        )}
 
-        <TabsContent value="files" className="flex-1 m-0 flex flex-col overflow-hidden" />
-      </Tabs>
+        {activeActivity === 'files' && (
+          <div className="flex-1 overflow-y-auto">
+            <FileExplorer />
+          </div>
+        )}
+      </div>
 
       {/* Agent detail overlay */}
       {selectedAgent && (

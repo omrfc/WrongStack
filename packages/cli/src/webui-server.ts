@@ -1503,6 +1503,74 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
         break;
       }
 
+      // ── Preferences ──────────────────────────────────────────
+
+      case 'prefs.get': {
+        // Return the current pref snapshot from context.meta so the
+        // frontend can seed its local-prefs store from the server's truth.
+        const prefKeys = [
+          'autonomy', 'autonomyDelayMs', 'yolo', 'maxIterations',
+          'confirmExit', 'streamFleet', 'nextPrediction',
+          'featureMcp', 'featurePlugins', 'featureMemory', 'featureSkills',
+          'featureModelsRegistry', 'indexOnStart',
+          'contextAutoCompact', 'contextStrategy', 'logLevel', 'auditLevel',
+        ];
+        const snapshot: Record<string, unknown> = {};
+        for (const k of prefKeys) {
+          if (k in opts.agent.ctx.meta) snapshot[k] = opts.agent.ctx.meta[k];
+        }
+        send(ws, { type: 'prefs.updated', payload: snapshot });
+        break;
+      }
+
+      case 'prefs.update': {
+        // Batch preference update. Merges arbitrary key/value pairs into
+        // context.meta so the runtime can read them immediately, and
+        // broadcasts the full pref snapshot to every connected client so
+        // all browser tabs stay in sync.
+        const payload = (msg as { payload: Record<string, unknown> }).payload;
+        for (const [key, val] of Object.entries(payload)) {
+          opts.agent.ctx.meta[key] = val;
+        }
+
+        // Broadcast the current snapshot.
+        const prefKeys = [
+          'autonomy', 'autonomyDelayMs', 'yolo', 'maxIterations',
+          'confirmExit', 'streamFleet', 'nextPrediction',
+          'featureMcp', 'featurePlugins', 'featureMemory', 'featureSkills',
+          'featureModelsRegistry', 'indexOnStart',
+          'contextAutoCompact', 'contextStrategy', 'logLevel', 'auditLevel',
+        ];
+        const snapshot: Record<string, unknown> = {};
+        for (const k of prefKeys) {
+          if (k in opts.agent.ctx.meta) snapshot[k] = opts.agent.ctx.meta[k];
+        }
+        broadcast({ type: 'prefs.updated', payload: snapshot });
+        break;
+      }
+
+      // ── Tasks ───────────────────────────────────────────────
+
+      case 'tasks.get': {
+        // On-demand task snapshot — loads from <sessionId>.tasks.json
+        const taskPath = (opts.agent.ctx.meta as Record<string, unknown>)['task.path'];
+        if (typeof taskPath === 'string' && taskPath) {
+          try {
+            const { loadTasks } = await import('@wrongstack/core');
+            const file = await loadTasks(taskPath);
+            send(ws, {
+              type: 'tasks.updated',
+              payload: { tasks: file?.tasks ?? [] },
+            });
+          } catch {
+            send(ws, { type: 'tasks.updated', payload: { tasks: [] } });
+          }
+        } else {
+          send(ws, { type: 'tasks.updated', payload: { tasks: [], error: 'Task storage not configured.' } });
+        }
+        break;
+      }
+
       // Collaboration messages — the CLI webui-server doesn't run a
       // full collab hub; silently acknowledge and ignore.
       case 'collab.join':

@@ -20,6 +20,7 @@ import type {
   Action,
   FleetEntry,
   QueueItem,
+  ResumeSessionEntry,
   State,
 } from './app-state.js';
 // Re-export types from app-state.ts for backward compatibility.
@@ -29,6 +30,7 @@ export type {
   FleetEntry,
   GoalSummary,
   QueueItem,
+  ResumeSessionEntry,
   Settings,
   SlashCommandMatch,
   State,
@@ -390,6 +392,39 @@ export function reducer(state: State, action: Action): State {
         ...state,
         autonomyPicker: { ...state.autonomyPicker, hint: action.text },
       };
+    case 'resumePickerOpen':
+      return {
+        ...state,
+        resumePicker: { open: true, sessions: action.sessions, selected: 0, busy: false, hint: undefined, error: undefined },
+      };
+    case 'resumePickerClose':
+      return {
+        ...state,
+        resumePicker: { open: false, sessions: [], selected: 0, busy: false, hint: undefined, error: undefined },
+      };
+    case 'resumePickerMove': {
+      const nr = state.resumePicker.sessions.length;
+      if (nr === 0) return state;
+      const nextR = (state.resumePicker.selected + action.delta + nr) % nr;
+      return { ...state, resumePicker: { ...state.resumePicker, selected: nextR } };
+    }
+    case 'resumePickerBusy':
+      return { ...state, resumePicker: { ...state.resumePicker, busy: action.on } };
+    case 'resumePickerHint':
+      return { ...state, resumePicker: { ...state.resumePicker, hint: action.text } };
+    case 'resumePickerError':
+      return { ...state, resumePicker: { ...state.resumePicker, error: action.text, busy: false } };
+    case 'replaceHistory': {
+      // Preserve any existing banner entries (kind='banner') and prepend them
+      // to the replayed history so the startup greeting survives a resume.
+      const banners = state.entries.filter((e) => e.kind === 'banner');
+      // Re-compute entry ids to avoid collisions: banners stay at their original
+      // ids, replayed entries shift to start after the last banner id.
+      const maxBannerId = banners.length > 0 ? Math.max(...banners.map((b) => b.id)) : 0;
+      const shifted = action.entries.map((e, i) => ({ ...e, id: maxBannerId + 1 + i }));
+      const nextId = maxBannerId + 1 + shifted.length;
+      return { ...state, entries: [...banners, ...shifted], nextId };
+    }
     case 'settingsOpen':
       return {
         ...state,

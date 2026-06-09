@@ -205,6 +205,55 @@
   background-color: hsl(var(--primary) / 0.6);
 }
 
+/* — Message bubble depth — */
+.msg-bubble {
+  transition: box-shadow 0.2s ease, transform 0.15s ease;
+}
+.msg-bubble:hover {
+  box-shadow: 0 2px 12px -2px hsl(var(--shadow-color) / 0.08);
+}
+
+/* — Chat turn separator — subtle horizontal divider between turns */
+.chat-turn + .chat-turn {
+  border-top: 1px solid hsl(var(--border) / 0.3);
+  padding-top: 1.25rem;
+  margin-top: 1.25rem;
+}
+
+/* — Tool card expansion animation — */
+.tool-details {
+  animation: toolExpand 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes toolExpand {
+  from { opacity: 0; max-height: 0; }
+  to { opacity: 1; max-height: 2000px; }
+}
+
+/* — Jump-to-bottom button pulse — */
+.jump-bottom {
+  animation: jumpPulse 2s ease-in-out infinite;
+}
+@keyframes jumpPulse {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50% { transform: translateX(-50%) translateY(-2px); }
+}
+
+/* — Keyboard shortcut bar at bottom — */
+.shortcut-bar {
+  background: linear-gradient(to top, hsl(var(--background)), transparent);
+}
+
+/* — Better stream cursor — */
+.streaming-cursor::after {
+  content: '▍';
+  animation: blink 1s step-end infinite;
+  color: hsl(var(--primary));
+  opacity: 0.8;
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
 /* — Motion — */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(8px); }
@@ -294,12 +343,6 @@
 /* Monaco editor container — fill available space */
 .monaco-editor-container {
   @apply flex-1 relative;
-}
-
-/* Monaco overrides — match the WrongStack theme */
-.monaco-editor .margin,
-.monaco-editor .monaco-editor-background {
-  background-color: hsl(var(--background)) !important;
 }
 
 /* Dirty file indicator dot */

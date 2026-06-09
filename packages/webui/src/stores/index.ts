@@ -15,6 +15,7 @@ export { useConfigStore } from './config-store.js';
 export type { ConfigState } from './config-store.js';
 export { useSessionStore } from './session-store.js';
 export { useUIStore } from './ui-store.js';
+export type { Activity } from './ui-store.js';
 export { useHistoryStore } from './history-store.js';
 export { useWorktreeStore } from './worktree-store.js';
 export { useFleetStore } from './fleet-store.js';

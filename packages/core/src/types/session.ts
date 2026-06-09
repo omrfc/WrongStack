@@ -210,6 +210,16 @@ export interface SessionData {
   events: SessionEvent[];
   messages: Message[];
   usage: Usage;
+  /** Tool execution records extracted from `tool_call_end` events — used for TUI tool entry rendering on resume. */
+  toolCallEnds: Array<{
+    name: string;
+    id: string;
+    durationMs: number;
+    ok: boolean;
+    outputBytes?: number | undefined;
+    outputTokens?: number | undefined;
+    outputLines?: number | undefined;
+  }>;
 }
 
 export interface ResumedSession {

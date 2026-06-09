@@ -1,9 +1,13 @@
 import { useFileStore } from '@/stores/file-store';
 import { cn } from '@/lib/utils';
 import { X, Circle } from 'lucide-react';
-import { useCallback, useEffect, useMemo } from 'react';
-import Editor, { loader } from '@monaco-editor/react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import Editor, { type OnMount, loader } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
+import { useTheme } from './ThemeProvider';
+// Side-effect import: defines Monaco themes on module load
+import './monaco-theme';
+import { getMonacoTheme } from './monaco-theme';
 
 // Configure Monaco to use the local package (not CDN)
 loader.config({ monaco });
@@ -106,6 +110,8 @@ export function CodeEditor() {
   const openFiles = useFileStore((s) => s.openFiles);
   const activeFilePath = useFileStore((s) => s.activeFilePath);
   const updateContent = useFileStore((s) => s.updateContent);
+  const { theme: appTheme } = useTheme();
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
 
   const activeFile = useMemo(
     () => openFiles.find((f) => f.path === activeFilePath) ?? null,
@@ -113,6 +119,19 @@ export function CodeEditor() {
   );
 
   const language = activeFilePath ? getLanguage(activeFilePath) : 'plaintext';
+  const monacoTheme = getMonacoTheme();
+
+  // Sync Monaco theme with app theme
+  useEffect(() => {
+    const resolved = getMonacoTheme();
+    monaco.editor.setTheme(resolved);
+  }, [appTheme]);
+
+  const handleMount: OnMount = useCallback((editor) => {
+    editorRef.current = editor;
+    // Ensure the editor uses the correct theme on mount
+    monaco.editor.setTheme(getMonacoTheme());
+  }, []);
 
   const handleChange = useCallback(
     (value: string | undefined) => {
@@ -180,7 +199,8 @@ export function CodeEditor() {
             language={language}
             value={activeFile.content}
             onChange={handleChange}
-            theme="vs-dark"
+            theme={monacoTheme}
+            onMount={handleMount}
             loading={
               <div className="flex items-center justify-center h-full">
                 <span className="text-[11px] text-muted-foreground animate-pulse">
@@ -202,6 +222,7 @@ export function CodeEditor() {
               cursorBlinking: 'smooth',
               cursorSmoothCaretAnimation: 'on',
               bracketPairColorization: { enabled: true },
+              'semanticHighlighting.enabled': true,
               automaticLayout: true,
               padding: { top: 8 },
             }}

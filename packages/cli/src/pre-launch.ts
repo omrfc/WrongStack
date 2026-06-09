@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
 import * as path from 'node:path';
 import { atomicWrite, color } from '@wrongstack/core';
 import type { ReadlineInputReader } from './input-reader.js';
@@ -443,7 +444,7 @@ export function resolveIndexThreshold(): number {
 async function countProjectFiles(projectRoot: string, threshold: number): Promise<number> {
   let count = 0;
   const walk = async (dir: string): Promise<void> => {
-    let entries: fs.Dirent[];
+    let entries: Dirent[];
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });
     } catch {

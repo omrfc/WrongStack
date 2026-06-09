@@ -29,6 +29,16 @@ export interface SessionResult {
   detachTodosCheckpoint: () => void;
   /** Director state checkpoint from the prior run — null if this is not a resume. */
   priorFleetState?: import('@wrongstack/core').DirectorStateSnapshot | undefined;
+  /** Tool execution records from the prior session (tool_call_end JSONL events). */
+  restoredToolCalls: Array<{
+    name: string;
+    id: string;
+    durationMs: number;
+    ok: boolean;
+    outputBytes?: number | undefined;
+    outputTokens?: number | undefined;
+    outputLines?: number | undefined;
+  }>;
 }
 
 export async function setupSession(params: {
@@ -90,13 +100,15 @@ export async function setupSession(params: {
 
   let session: SessionWriter | undefined;
   let restoredMessages: import('@wrongstack/core').Message[] = [];
+  let restoredToolCalls: SessionResult['restoredToolCalls'] = [];
   if (resumeId) {
     try {
       const resumed = await sessionStore.resume(resumeId);
       session = resumed.writer;
       restoredMessages = resumed.data.messages;
+      restoredToolCalls = resumed.data.toolCallEnds;
       renderer.writeInfo(
-        `Resumed session ${resumed.data.metadata.id} — ${restoredMessages.length} messages, ${resumed.data.usage.input + resumed.data.usage.output} tokens used previously.`,
+        `Resumed session ${resumed.data.metadata.id} — ${restoredMessages.length} messages, ${restoredToolCalls.length} tool executions, ${resumed.data.usage.input + resumed.data.usage.output} tokens used previously.`,
       );
     } catch (err) {
       renderer.writeError(`Resume failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -201,6 +213,7 @@ export async function setupSession(params: {
     planPath,
     detachTodosCheckpoint,
     priorFleetState: dirState ?? undefined,
+    restoredToolCalls,
   };
 }
 

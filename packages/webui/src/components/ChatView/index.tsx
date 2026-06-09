@@ -538,7 +538,7 @@ export function ChatView() {
             type="button"
             onClick={scrollToBottom}
             className={cn(
-              'absolute bottom-4 left-1/2 -translate-x-1/2 z-10',
+              'absolute bottom-4 left-1/2 -translate-x-1/2 z-10 jump-bottom',
               'flex items-center gap-2 px-4 py-2 rounded-full shadow-lg',
               'bg-primary text-primary-foreground text-xs font-medium',
               'hover:bg-primary/90 transition-colors animate-message',
@@ -663,7 +663,7 @@ export function ChatView() {
                 }
                 const isLastTurn = idx === turns.length - 1;
                 out.push(
-                  <div key={t.key} className={cn(compactMode ? 'space-y-1' : 'space-y-1.5')}>
+                  <div key={t.key} className={cn('chat-turn', compactMode ? 'space-y-1' : 'space-y-1.5')}>
                     {t.items.map((g, gi) => {
                       const continuation = gi > 0;
                       if (g.kind === 'msg') {
@@ -794,12 +794,49 @@ export function ChatView() {
       </div>
 
       {/* Input */}
-      <div className="border-t bg-card/50 backdrop-blur supports-[backdrop-filter]:bg-card/50 p-4 shrink-0">
-        <div className="max-w-5xl mx-auto">
-          <ChatInput />
-          <p className="text-xs text-center text-muted-foreground/50 mt-2">
-            Press Enter to send, Shift+Enter for new line
-          </p>
+      <div className="border-t bg-card/50 backdrop-blur supports-[backdrop-filter]:bg-card/50 shrink-0">
+        {/* Keyboard shortcut hints — subtle, always visible */}
+        <div className="max-w-5xl mx-auto px-4 pt-1.5 flex items-center gap-3 text-[10px] text-muted-foreground/50 select-none overflow-x-auto">
+          <span title="Enter" className="inline-flex items-center gap-1">
+            <kbd>Enter</kbd> send
+          </span>
+          <span className="opacity-30">·</span>
+          <span title="Shift+Enter" className="inline-flex items-center gap-1">
+            <kbd>Shift</kbd>+<kbd>↵</kbd> newline
+          </span>
+          <span className="opacity-30">·</span>
+          <span title="Ctrl+\\" className="inline-flex items-center gap-1">
+            <kbd>Ctrl+\</kbd> sidebar
+          </span>
+          <span className="opacity-30">·</span>
+          <span title="Ctrl+F" className="inline-flex items-center gap-1">
+            <kbd>Ctrl+F</kbd> search
+          </span>
+          <span className="opacity-30">·</span>
+          <span title="Ctrl+K" className="inline-flex items-center gap-1">
+            <kbd>Ctrl+K</kbd> palette
+          </span>
+          <span className="opacity-30">·</span>
+          <span title="Ctrl+L / Ctrl+N" className="inline-flex items-center gap-1">
+            <kbd>Ctrl+L</kbd> clear
+          </span>
+          <span className="opacity-30">·</span>
+          <span title="j/k to navigate" className="inline-flex items-center gap-1">
+            <kbd>j</kbd><kbd>k</kbd> navigate
+          </span>
+          <span className="opacity-30">·</span>
+          <span title="Ctrl+M" className="inline-flex items-center gap-1">
+            <kbd>Ctrl+M</kbd> model
+          </span>
+          <span className="opacity-30">·</span>
+          <span title="Ctrl+Shift+D" className="inline-flex items-center gap-1">
+            <kbd>Ctrl+⇧D</kbd> density
+          </span>
+        </div>
+        <div className="p-4">
+          <div className="max-w-5xl mx-auto">
+            <ChatInput />
+          </div>
         </div>
       </div>
 

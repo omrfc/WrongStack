@@ -92,10 +92,12 @@ export class DefaultMemoryStore implements MemoryStore {
 
   private async runSerialized<T>(scope: MemoryScope, work: () => Promise<T>): Promise<T> {
     const prior = this.writeChain.get(scope) ?? Promise.resolve();
-    prior.catch((err) => {
-      this.writeErrors.set(scope, err as Error);
-    });
-    const next = prior.catch(() => undefined).then(work);
+    // Chain: catch errors from the prior write, then run the next work item.
+    const next = prior
+      .catch((err) => {
+        this.writeErrors.set(scope, err as Error);
+      })
+      .then(() => work());
     this.writeChain.set(scope, next as Promise<unknown>);
     try {
       return await next;

@@ -102,6 +102,21 @@ export interface SlashCommandMatch {
   category: 'Run' | 'Session' | 'Inspect' | 'Agent' | 'Config' | 'App';
 }
 
+/** Thin view over a SessionSummary for the resume picker. */
+export interface ResumeSessionEntry {
+  id: string;
+  title: string;
+  startedAt: string;
+  endedAt?: string | undefined;
+  tokenTotal: number;
+  iterationCount: number;
+  toolCallCount: number;
+  toolErrorCount: number;
+  outcome?: 'completed' | 'error' | 'timeout' | 'aborted' | undefined;
+  /** The current session — marked so the picker can disallow resuming into itself. */
+  isCurrent?: boolean | undefined;
+}
+
 export type DraftEntry = HistoryEntry extends infer T
   ? T extends { id: number }
     ? Omit<T, 'id'>
@@ -212,6 +227,17 @@ export type State = {
     options: AutonomyOption[];
     selected: number;
     hint?: string | undefined;
+  };
+  /** Session resume picker — opened by `/resume`. Lists recent sessions with metadata. */
+  resumePicker: {
+    open: boolean;
+    sessions: ResumeSessionEntry[];
+    selected: number;
+    /** True while the resume operation is in flight (fetching + replaying). */
+    busy: boolean;
+    hint?: string | undefined;
+    /** Error message if the resume operation failed. */
+    error?: string | undefined;
   };
   /** Settings editor — opened by `/settings` or Ctrl+S. */
   settingsPicker: {
@@ -523,6 +549,14 @@ export type Action =
   | { type: 'autonomyPickerClose' }
   | { type: 'autonomyPickerMove'; delta: number }
   | { type: 'autonomyPickerHint'; text?: string | undefined }
+  | { type: 'resumePickerOpen'; sessions: ResumeSessionEntry[] }
+  | { type: 'resumePickerClose' }
+  | { type: 'resumePickerMove'; delta: number }
+  | { type: 'resumePickerBusy'; on: boolean }
+  | { type: 'resumePickerHint'; text?: string | undefined }
+  | { type: 'resumePickerError'; text: string }
+  /** Replace all history entries with the given hydrated entries from a resumed session. */
+  | { type: 'replaceHistory'; entries: HistoryEntry[]; nextId: number }
   | {
       type: 'settingsOpen';
       mode: SettingsMode;

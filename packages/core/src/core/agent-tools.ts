@@ -24,9 +24,19 @@ export function createAgentToolHandler(a: AgentInternals): AgentToolHandler {
   ): Promise<{ result: ToolResultBlock; durationMs: number }> {
     const start = Date.now();
     try {
+      // The provider always sends properly typed tool_use blocks through
+      // JSON deserialization. The executor needs the `type: 'tool_use'`
+      // discriminant and `input: Record<string, unknown>`, so we construct
+      // the full shape explicitly rather than using a blind `as ToolUseBlock`
+      // cast that would silence a missing `type` field.
       const result = await a.toolExecutor.executeTool(
         tool,
-        use as ToolUseBlock,
+        {
+          type: 'tool_use' as const,
+          id: use.id,
+          name: use.name,
+          input: use.input as Record<string, unknown>,
+        },
         a.ctx,
         a.perIterationOutputCapBytes,
       );

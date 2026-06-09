@@ -1984,6 +1984,8 @@ export async function main(argv: string[]): Promise<number> {
     sessionStore,
     memoryStore,
     modeStore,
+    restoredMessages: sessResult.restoredMessages,
+    restoredToolCalls: sessResult.restoredToolCalls,
   });
 }
 

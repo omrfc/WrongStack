@@ -5,8 +5,13 @@ import { persist } from 'zustand/middleware';
 // UI Store
 // ============================================
 
+// Activity types shown in the ActivityBar (secondary panel content).
+export type Activity = 'chat' | 'agents' | 'context' | 'history' | 'files';
+
 interface UIState {
   sidebarOpen: boolean;
+  /** Which activity icon is selected in the ActivityBar — controls secondary panel content. */
+  activeActivity: Activity;
   settingsOpen: boolean;
   currentView: 'chat' | 'history' | 'settings' | 'autophase' | 'agents' | 'files' | 'context';
   showConfirmDialog: boolean;
@@ -29,6 +34,8 @@ interface UIState {
   sessionNicknames: Record<string, string>;
   fileExplorerWidth: number;
 
+  /** Select an activity. If clicking the already-active icon, closes the sidebar. */
+  selectActivity: (activity: Activity) => void;
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
@@ -54,6 +61,7 @@ export const useUIStore = create<UIState>()(
   persist(
     (set) => ({
       sidebarOpen: true,
+      activeActivity: 'chat',
       settingsOpen: false,
       currentView: 'chat',
       showConfirmDialog: false,
@@ -71,6 +79,7 @@ export const useUIStore = create<UIState>()(
       sessionNicknames: {},
       fileExplorerWidth: 220,
 
+      selectActivity: (activity) => set({ activeActivity: activity }),
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       setSettingsOpen: (open) => set({ settingsOpen: open }),
@@ -123,6 +132,7 @@ export const useUIStore = create<UIState>()(
       name: 'wrongstack-ui',
       partialize: (s) => ({
         sidebarOpen: s.sidebarOpen,
+        activeActivity: s.activeActivity,
         sidebarWidth: s.sidebarWidth,
         promptHistory: s.promptHistory,
         pinnedIds: s.pinnedIds,

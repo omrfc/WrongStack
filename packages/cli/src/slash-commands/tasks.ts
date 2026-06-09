@@ -98,21 +98,29 @@ export function buildTasksCommand(_opts: SlashCommandContext): SlashCommand {
         return { message: formatTaskProgress(file?.tasks ?? []) };
       }
 
-      // planify: reads tasks, writes plan — handled outside the task lock
+      // planify: reads tasks, writes plan — handled inside the task lock
+      // to prevent TOCTOU between loadTasks and savePlan.
       if (cmd === 'planify') {
         if (!restJoined) return { message: 'Usage: /tasks planify <id|index>' };
-        const file = await loadTasks(taskPath);
-        const found = findTask(file?.tasks ?? [], restJoined);
-        if (!found) return { message: `No task matched "${restJoined}".` };
-
         const planPath = (ctx.meta as Record<string, unknown>)?.['plan.path'];
         if (typeof planPath !== 'string' || !planPath) {
           return { message: 'Plan storage is not configured for this session.' };
         }
-        const planCfg = (await loadPlan(planPath)) ?? emptyPlan(sessionId);
-        const { plan: updated } = addPlanItem(planCfg, found.item.title, found.item.description);
-        await savePlan(planPath, updated);
-        return { message: `Planified "${found.item.title}" → plan item.\n${formatPlan(updated)}` };
+
+        let outputMessage = '';
+        await mutateTasks(taskPath, sessionId, async (file) => {
+          const found = findTask(file.tasks, restJoined);
+          if (!found) {
+            outputMessage = `No task matched "${restJoined}".`;
+            return file;
+          }
+          const planCfg = (await loadPlan(planPath)) ?? emptyPlan(sessionId);
+          const { plan: updated } = addPlanItem(planCfg, found.item.title, found.item.description);
+          await savePlan(planPath, updated);
+          outputMessage = `Planified "${found.item.title}" → plan item.\n${formatPlan(updated)}`;
+          return file;
+        });
+        return { message: outputMessage };
       }
 
       // Mutating ops — locked via mutateTasks

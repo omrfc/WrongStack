@@ -10,6 +10,7 @@ import { FilePicker } from './FilePicker';
 import { Button } from './ui/button';
 
 import { type SlashCommandDef, SLASH_COMMANDS, SLASH_CATEGORY_ORDER, matchSlash, detectAtMention } from './ChatInput/slash-commands.js';
+import { autoFenceCode, detectLanguage, unfenceCode } from './ChatInput/code-detect.js';
 
 export function ChatInput() {
   const { isLoading, setLoading, addMessage, clearMessages } = useChatStore();

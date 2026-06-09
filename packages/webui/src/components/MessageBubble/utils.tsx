@@ -1,6 +1,8 @@
 import { cn } from '@/lib/utils';
-import { CopyButton } from './CopyButton.js';
+import { Check, Copy, FileCode2 } from 'lucide-react';
 import type React from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import rehypeHighlight from 'rehype-highlight';
 
 export { copyToClipboard };
 
@@ -56,6 +58,37 @@ export function formatToolDuration(ms: number): string {
   return `${m}m ${s}s`;
 }
 
+/** Rehype plugins for react-markdown — syntax highlighting via highlight.js. */
+export const rehypePlugins = [rehypeHighlight];
+
+/** A copy button that shows a checkmark for 1.5s after successful copy.
+ *  Used inside code block headers for better UX feedback. */
+function CodeCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback(async () => {
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
+  }, [text]);
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className={cn(
+        'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors',
+        'hover:bg-muted-foreground/10',
+        copied ? 'text-emerald-500' : 'text-muted-foreground hover:text-foreground',
+      )}
+      title={copied ? 'Copied!' : 'Copy code'}
+    >
+      {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+      <span>{copied ? 'Copied' : 'Copy'}</span>
+    </button>
+  );
+}
+
 export const markdownComponents = {
   code({
     inline,
@@ -76,15 +109,51 @@ export const markdownComponents = {
         </code>
       );
     }
+    const lines = useMemo(() => codeText.split('\n'), [codeText]);
+    const hasLineNumbers = lines.length > 1;
     return (
-      <div className="not-prose relative my-3 rounded-lg border bg-muted/30 overflow-hidden">
-        <div className="flex items-center justify-between px-3 py-1.5 border-b bg-muted/40 text-xs">
-          <span className="font-mono text-muted-foreground">{match[1]}</span>
-          <CopyButton text={codeText} label="" />
+      <div className="not-prose relative my-3 rounded-lg border bg-muted/30 overflow-hidden group/codeblock">
+        {/* Header: language badge + copy button */}
+        <div className="flex items-center justify-between px-3 py-1 border-b bg-muted/40 text-xs">
+          <div className="flex items-center gap-2">
+            <FileCode2 className="h-3 w-3 text-muted-foreground" />
+            <span className="font-mono text-muted-foreground font-medium">{match[1]}</span>
+            {lines.length > 0 && (
+              <span className="text-[10px] text-muted-foreground/60 tabular-nums">
+                {lines.length} line{lines.length === 1 ? '' : 's'}
+              </span>
+            )}
+          </div>
+          <CodeCopyButton text={codeText} />
         </div>
-        <pre className="overflow-x-auto p-3 text-xs leading-relaxed font-mono max-h-[40rem]">
-          <code>{codeText}</code>
-        </pre>
+        {/* Code body — with/without line numbers */}
+        {hasLineNumbers ? (
+          <div className="flex max-h-[40rem] overflow-auto">
+            {/* Line number gutter */}
+            <pre
+              aria-hidden
+              className="text-xs font-mono leading-[1.55] py-3 pl-3 pr-2 text-muted-foreground/40 select-none border-r border-border/30 bg-muted/10 tabular-nums text-right shrink-0"
+            >
+              {lines.map((_, i) => (
+                <div key={i}>{i + 1}</div>
+              ))}
+            </pre>
+            {/* Highlighted code */}
+            <pre className="overflow-x-auto py-3 px-3 text-xs leading-[1.55] font-mono flex-1">
+              <code className={cn('hljs', className)} {...props}>
+                {children}
+              </code>
+            </pre>
+          </div>
+        ) : (
+          <pre className="overflow-x-auto p-3 text-xs leading-relaxed font-mono max-h-[40rem]">
+            <code className={cn('hljs', className)} {...props}>
+              {children}
+            </code>
+          </pre>
+        )}
+        {/* Fade-out gradient at bottom when scrollable — only visible on hover */}
+        <div className="pointer-events-none absolute bottom-8 left-0 right-0 h-8 bg-gradient-to-t from-muted/30 to-transparent opacity-0 group-hover/codeblock:opacity-100 transition-opacity" />
       </div>
     );
   },

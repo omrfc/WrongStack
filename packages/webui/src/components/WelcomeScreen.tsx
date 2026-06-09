@@ -214,12 +214,13 @@ export function WelcomeScreen() {
 
       {/* Prompt cards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {CARDS.map((card) => {
+        {CARDS.map((card, ci) => {
           const Icon = card.icon;
           return (
             <div
               key={card.title}
-              className="rounded-xl border bg-card/40 backdrop-blur-sm p-4 flex flex-col gap-3"
+              className="rounded-xl border bg-card/40 backdrop-blur-sm p-4 flex flex-col gap-3 animate-message hover:border-primary/20 hover:shadow-sm transition-all"
+              style={{ animationDelay: `${ci * 80}ms` }}
             >
               <div className="flex items-center gap-2">
                 <span

@@ -181,7 +181,9 @@ export class DefaultSessionStore implements SessionStore {
     }
     const meta = this.metaFromEvents(id, events);
     const { messages, usage } = this.replay(events, id);
-    return { metadata: meta, events, messages, usage };
+    // Extract tool_call_end events for TUI tool entry rendering on resume.
+    const toolCallEnds = extractToolCallEnds(events);
+    return { metadata: meta, events, messages, usage, toolCallEnds };
   }
 
   async list(limit = 20): Promise<SessionSummary[]> {
@@ -618,6 +620,30 @@ export class DefaultSessionStore implements SessionStore {
     }
     return { messages: repaired.messages, usage };
   }
+}
+
+/**
+ * Extract tool execution records from `tool_call_end` events in the JSONL.
+ * These are used by the TUI to render tool entries (name, duration, ok/error)
+ * when a session is resumed. Events are returned in JSONL order (the order
+ * they appear in the file, which is chronological insertion order).
+ */
+function extractToolCallEnds(events: SessionEvent[]): SessionData['toolCallEnds'] {
+  const result: SessionData['toolCallEnds'] = [];
+  for (const e of events) {
+    if (e.type === 'tool_call_end') {
+      result.push({
+        name: e.name,
+        id: e.id,
+        durationMs: e.durationMs,
+        ok: e.ok ?? false,
+        outputBytes: e.outputBytes,
+        outputTokens: e.outputTokens,
+        outputLines: e.outputLines,
+      });
+    }
+  }
+  return result;
 }
 
 class FileSessionWriter implements SessionWriter {

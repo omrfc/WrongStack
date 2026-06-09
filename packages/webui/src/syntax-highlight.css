@@ -1,0 +1,135 @@
+/* ===========================================================================
+   Syntax Highlighting Theme — WrongStack
+   Uses CSS custom properties to adapt to light/dark mode automatically.
+   Color palette: warm graphite base, signal-amber accents.
+   =========================================================================== */
+
+.hljs {
+  color: hsl(var(--foreground));
+  background: transparent;
+}
+
+/* ── Comments ── */
+.hljs-comment,
+.hljs-quote {
+  color: hsl(var(--muted-foreground) / 0.6);
+  font-style: italic;
+}
+
+/* ── Keywords (reddish-warm) ── */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-type,
+.hljs-literal {
+  color: #d65a9a;
+}
+.dark .hljs-keyword,
+.dark .hljs-selector-tag,
+.dark .hljs-type,
+.dark .hljs-literal {
+  color: #f28dbc;
+}
+
+/* ── Strings (green) ── */
+.hljs-string,
+.hljs-attr,
+.hljs-template-tag,
+.hljs-template-variable {
+  color: #3b8c5a;
+}
+.dark .hljs-string,
+.dark .hljs-attr {
+  color: #64d488;
+}
+
+/* ── Numbers (amber) ── */
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet {
+  color: hsl(var(--primary));
+}
+
+/* ── Functions (blue-teal) ── */
+.hljs-function .hljs-keyword,
+.hljs-title.function_,
+.hljs-title.class_,
+.hljs-title.class_.inherited__ {
+  color: #3178c6;
+}
+.dark .hljs-function .hljs-keyword,
+.dark .hljs-title.function_,
+.dark .hljs-title.class_,
+.dark .hljs-title.class_.inherited__ {
+  color: #6cb6ff;
+}
+
+/* ── Variables and parameters (foreground) ── */
+.hljs-variable,
+.hljs-params {
+  color: hsl(var(--foreground));
+}
+
+/* ── Tags (JSX/HTML) — warm rose ── */
+.hljs-tag,
+.hljs-name {
+  color: #c93a5e;
+}
+.dark .hljs-tag,
+.dark .hljs-name {
+  color: #f47a95;
+}
+
+/* ── Attributes / properties ── */
+.hljs-attribute,
+.hljs-property {
+  color: #d4893a;
+}
+.dark .hljs-attribute,
+.dark .hljs-property {
+  color: #ffb055;
+}
+
+/* ── Regex (teal) ── */
+.hljs-regexp {
+  color: #17998e;
+}
+.dark .hljs-regexp {
+  color: #49d3c5;
+}
+
+/* ── Punctuation / operators — muted ── */
+.hljs-punctuation,
+.hljs-operator {
+  color: hsl(var(--muted-foreground) / 0.8);
+}
+
+/* ── Meta / doctype — muted ── */
+.hljs-meta,
+.hljs-doctag,
+.hljs-section {
+  color: hsl(var(--muted-foreground));
+}
+
+/* ── Additions / deletions (diff) ── */
+.hljs-addition {
+  color: #3b8c5a;
+  background: hsl(150 58% 36% / 0.1);
+}
+.hljs-deletion {
+  color: #d63c3c;
+  background: hsl(0 72% 48% / 0.1);
+}
+
+/* ── Emphasis ── */
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 600;
+}
+
+/* ── Links ── */
+.hljs-link {
+  text-decoration: underline;
+  color: hsl(var(--primary));
+}
