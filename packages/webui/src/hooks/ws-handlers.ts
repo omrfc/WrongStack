@@ -19,6 +19,7 @@ import {
   useUIStore,
   useWorktreeStore,
 } from '@/stores';
+import { useLocalPrefs } from '@/stores/local-prefs';
 import type { WorktreeHandleView, WSServerMessage } from '@/types';
 // ── Session handlers ──
 
@@ -414,6 +415,19 @@ export function handleGoalUpdated(msg: WSServerMessage) {
   useGoalStore.getState().setGoal(p);
 }
 
+// ── Preferences sync ──
+// The server broadcasts prefs.updated whenever any client changes a
+// preference. This handler hydrates the local-prefs store so every
+// connected browser tab sees the new value immediately.
+
+export function handlePrefsUpdated(msg: WSServerMessage) {
+  const p = msg.payload as Record<string, unknown>;
+  // The payload is a partial LocalPrefs snapshot from the server.
+  // Cast through unknown because Record<string, unknown> doesn't
+  // directly match Partial<LocalPrefs> at the type level.
+  useLocalPrefs.getState().set(p as unknown as Parameters<typeof useLocalPrefs.getState>['set']>[0]);
+}
+
 // ── File operation handlers ──
 
 import { useFileStore } from '@/stores/file-store';
@@ -478,6 +492,7 @@ export const WS_HANDLERS: Record<string, (msg: WSServerMessage) => void> = {
   'worktree.event': handleWorktreeEvent,
   'subagent.event': handleSubagentEvent,
   'goal.updated': handleGoalUpdated,
+  'prefs.updated': handlePrefsUpdated,
   'files.tree': handleFilesTree,
   'files.read': handleFilesRead,
   'files.written': handleFilesWritten,

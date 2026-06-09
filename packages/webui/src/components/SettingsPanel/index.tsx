@@ -51,7 +51,19 @@ export function SettingsPanel() {
   const { theme, setTheme } = useTheme();
   const ws = useWebSocket();
   const wsClient = ws.client;
+  const { updatePrefs, switchAutonomy } = ws;
   const localPrefs = useLocalPrefs();
+
+  // Helper: apply a pref change locally AND push it to the server so the
+  // running agent sees the new value immediately. Uses the batch
+  // prefs.update message for efficient multi-key updates.
+  const syncPref = useCallback(
+    (key: string, value: unknown) => {
+      localPrefs.set({ [key]: value } as Parameters<typeof localPrefs.set>[0]);
+      updatePrefs({ [key]: value });
+    },
+    [localPrefs, updatePrefs],
+  );
 
   // Catalog data (unchanged)
   const [catalogProviders, setCatalogProviders] = useState<CatalogProvider[]>([]);
@@ -350,7 +362,10 @@ export function SettingsPanel() {
                     { value: 'eternal' as const, label: 'Eternal — autonomous until goal done' },
                     { value: 'eternal-parallel' as const, label: 'Eternal Parallel — multi-agent fleet' },
                   ]}
-                  onChange={(v) => localPrefs.set({ autonomy: v })}
+                  onChange={(v) => {
+                    localPrefs.set({ autonomy: v });
+                    switchAutonomy(v);
+                  }}
                 />
                 <PreferenceSlider
                   label="Auto-proceed delay"
@@ -365,8 +380,8 @@ export function SettingsPanel() {
                 <PreferenceToggle
                   label="YOLO mode"
                   hint="Bypass tool confirmation prompts — the agent runs without asking."
-                  selector={null}
-                  onChange={() => localPrefs.set({ yolo: !localPrefs.yolo })}
+                  value={localPrefs.yolo}
+                  onChange={() => syncPref('yolo', !localPrefs.yolo)}
                 />
               </div>
 
@@ -382,19 +397,19 @@ export function SettingsPanel() {
                   min={10}
                   max={2000}
                   step={10}
-                  onChange={(v) => localPrefs.set({ maxIterations: v })}
+                  onChange={(v) => syncPref('maxIterations', v)}
                 />
                 <PreferenceToggle
                   label="Confirm before exit"
                   hint="First Ctrl+C aborts work, second confirms exit."
-                  selector={null}
-                  onChange={() => localPrefs.set({ confirmExit: !localPrefs.confirmExit })}
+                  value={localPrefs.confirmExit}
+                  onChange={() => syncPref('confirmExit', !localPrefs.confirmExit)}
                 />
                 <PreferenceToggle
                   label="Chime on completion"
                   hint="Terminal bell when an agent run finishes."
-                  selector={null}
-                  onChange={() => localPrefs.set({ chime: !localPrefs.chime })}
+                  value={localPrefs.chime}
+                  onChange={() => syncPref('chime', !localPrefs.chime)}
                 />
               </div>
 

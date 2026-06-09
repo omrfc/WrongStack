@@ -408,6 +408,20 @@ export class WrongStackWebSocketClient {
     this.send({ type: 'context.mode.delete', payload: { id } });
   }
 
+  // ---- Autonomy / Preferences ----
+
+  switchAutonomy(mode: string) {
+    this.send({ type: 'autonomy.switch', payload: { mode } });
+  }
+
+  updatePrefs(prefs: Record<string, unknown>) {
+    this.send({ type: 'prefs.update', payload: prefs });
+  }
+
+  getPrefs() {
+    this.send({ type: 'prefs.get' });
+  }
+
   // ---- Inspect commands (mirror TUI/CLI's /tools /memory /skill /diag /stats) ----
 
   listTools() {

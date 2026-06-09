@@ -157,6 +157,16 @@ export function useWebSocket() {
   const deleteContextMode = useCallback((id: string) => client.deleteContextMode(id), [client]);
   const repairContext = useCallback(() => client.repairContext(), [client]);
 
+  // Autonomy / Preferences
+  const switchAutonomy = useCallback(
+    (mode: string) => client.switchAutonomy(mode),
+    [client],
+  );
+  const updatePrefs = useCallback(
+    (prefs: Record<string, unknown>) => client.updatePrefs(prefs),
+    [client],
+  );
+
   // AutoPhase
   const toggleAutoPhaseAutonomous = useCallback(
     (autonomous: boolean) => { client.send({ type: 'autophase.toggleAutonomous', payload: { autonomous } }); },
@@ -183,5 +193,6 @@ export function useWebSocket() {
     listModes, switchMode, listContextModes, switchContextMode,
     createContextMode, updateContextMode, deleteContextMode, repairContext,
     toggleAutoPhaseAutonomous, startAutoPhase, pauseAutoPhase, resumeAutoPhase, stopAutoPhase, selectAutoPhase,
+    switchAutonomy, updatePrefs,
   };
 }

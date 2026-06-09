@@ -1825,6 +1825,67 @@ export async function startWebUI(
         break;
       }
 
+      case 'prefs.update': {
+        // Batch preference update from the webui. Merges arbitrary key/value
+        // pairs into context.meta so the runtime can read them immediately,
+        // and broadcasts the full pref snapshot to every connected client so
+        // all browser tabs stay in sync.
+        const payload = (msg as { payload: Record<string, unknown> }).payload;
+        // Write each pref into context.meta
+        for (const [key, val] of Object.entries(payload)) {
+          context.meta[key] = val;
+        }
+        // Also update config.features for feature flags that affect tool/skill
+        // initialisation (these were read at startup but can be changed at runtime
+        // by the agent's permission middleware or tool guards).
+        if (typeof payload['featureMcp'] === 'boolean')
+          config.features.mcp = payload['featureMcp'];
+        if (typeof payload['featurePlugins'] === 'boolean')
+          config.features.plugins = payload['featurePlugins'];
+        if (typeof payload['featureMemory'] === 'boolean')
+          config.features.memory = payload['featureMemory'];
+        if (typeof payload['featureSkills'] === 'boolean')
+          config.features.skills = payload['featureSkills'];
+        if (typeof payload['featureModelsRegistry'] === 'boolean')
+          config.features.modelsRegistry = payload['featureModelsRegistry'];
+        if (typeof payload['indexOnStart'] === 'boolean')
+          config.features.indexOnStart = payload['indexOnStart'];
+
+        // Broadcast the full current prefs snapshot to ALL clients.
+        // Build the snapshot from context.meta (only the pref keys we care about).
+        const prefKeys = [
+          'autonomy', 'autonomyDelayMs', 'yolo', 'maxIterations',
+          'confirmExit', 'streamFleet', 'nextPrediction',
+          'featureMcp', 'featurePlugins', 'featureMemory', 'featureSkills',
+          'featureModelsRegistry', 'indexOnStart',
+          'contextAutoCompact', 'contextStrategy', 'logLevel', 'auditLevel',
+        ];
+        const snapshot: Record<string, unknown> = {};
+        for (const k of prefKeys) {
+          if (k in context.meta) snapshot[k] = context.meta[k];
+        }
+        broadcast(clients, { type: 'prefs.updated', payload: snapshot });
+        break;
+      }
+
+      case 'prefs.get': {
+        // Return the current pref snapshot so a freshly-connected client
+        // can seed its local-prefs store from the server's truth.
+        const prefKeys = [
+          'autonomy', 'autonomyDelayMs', 'yolo', 'maxIterations',
+          'confirmExit', 'streamFleet', 'nextPrediction',
+          'featureMcp', 'featurePlugins', 'featureMemory', 'featureSkills',
+          'featureModelsRegistry', 'indexOnStart',
+          'contextAutoCompact', 'contextStrategy', 'logLevel', 'auditLevel',
+        ];
+        const snapshot: Record<string, unknown> = {};
+        for (const k of prefKeys) {
+          if (k in context.meta) snapshot[k] = context.meta[k];
+        }
+        send(ws, { type: 'prefs.updated', payload: snapshot });
+        break;
+      }
+
       case 'session.checkpoints': {
         // Return session checkpoints for the rewind timeline.
         try {
