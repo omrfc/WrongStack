@@ -154,6 +154,7 @@ export async function runStartupIndex(opts: {
   projectRoot: string;
   indexDir?: string | undefined;
   force?: boolean | undefined;
+  signal?: AbortSignal | undefined;
 }): Promise<IndexResult> {
   _indexing = true;
   _currentFile = 0;
@@ -167,6 +168,7 @@ export async function runStartupIndex(opts: {
         projectRoot: opts.projectRoot,
         indexDir: opts.indexDir,
         force: opts.force,
+        signal: opts.signal,
       }),
     );
     _ready = true;

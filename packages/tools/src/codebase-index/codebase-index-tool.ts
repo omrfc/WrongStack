@@ -34,7 +34,7 @@ export const codebaseIndexTool: Tool<CodebaseIndexInput, CodebaseIndexOutput> = 
       },
     },
   },
-  async execute(input, ctx) {
+  async execute(input, ctx, execOpts) {
     // If the startup index is still running, tell the agent to wait instead of
     // firing a second reindex that would just queue behind the mutex.
     if (isIndexing()) {
@@ -53,6 +53,7 @@ export const codebaseIndexTool: Tool<CodebaseIndexInput, CodebaseIndexOutput> = 
       force: input.force ?? false,
       langs: input.langs,
       indexDir: codebaseIndexDirOverride(ctx),
+      signal: execOpts?.signal,
     });
     // Mark ready so downstream tools (search, stats) don't gate on a
     // missing startup index when runIndexer was called directly.

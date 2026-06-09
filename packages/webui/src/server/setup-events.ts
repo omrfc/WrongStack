@@ -65,6 +65,14 @@ export function setupEvents(deps: SetupEventsDeps): void {
     broadcast(clients, { type: 'tool.confirm_needed', payload: { id, toolName: e.tool?.name ?? 'unknown', input: e.input, suggestedPattern: e.suggestedPattern } });
   });
 
+  // Belt-and-suspenders: `tool.executed` already broadcasts todos.updated after
+  // every tool call (including the `todo` tool), but if replaceTodos is ever
+  // called outside a tool execution path (e.g. via /plan promote, /todos clear,
+  // or a future refactor), this listener ensures the WebUI stays in sync.
+  events.on('todos_replaced', (e) => {
+    broadcast(clients, { type: 'todos.updated', payload: { todos: e.todos } });
+  });
+
   events.on('error', (e) => {
     broadcast(clients, { type: 'error', payload: { phase: e.phase, message: e.err instanceof Error ? e.err.message : String(e.err) } });
   });

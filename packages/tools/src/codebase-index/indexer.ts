@@ -32,6 +32,29 @@ function yieldEventLoop(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
+/**
+ * Cooperatively abort if the signal is set. Throws with the signal's reason
+ * (or a descriptive Error) so callers know *why* the operation was cancelled.
+ * Called at yield points — never after a Promise resolve (that would be a
+ * microtask that the signal check could miss).
+ */
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  if (signal.reason instanceof Error) throw signal.reason;
+  throw new Error(
+    typeof signal.reason === 'string' ? signal.reason : 'Indexing cancelled',
+  );
+}
+
+/**
+ * Detect AbortError (DOMException with name 'AbortError') thrown by signal-aware
+ * fs.promises calls (stat, readFile). We must re-throw these so the cancellation
+ * propagates — catching them as ordinary errors would keep the loop running.
+ */
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'AbortError';
+}
+
 const DEFAULT_IGNORE = [
   'node_modules', '.git', 'dist', 'build', '.next', 'coverage',
   '.turbo', '__snapshots__', '.nyc_output',
@@ -45,12 +68,20 @@ interface IndexerOptions {
   ignore?: string[] | undefined;
   /** Override the index directory (default: the global per-project dir). */
   indexDir?: string | undefined;
+  /**
+   * Signal that cancels indexing cooperatively. Polled at yield points
+   * (file walk, per-file loop) so a hung filesystem won't lock up the
+   * process. When the tool executor's timeout fires, this signal aborts
+   * and `runIndexer` throws, releasing the mutex and resetting flags.
+   */
+  signal?: AbortSignal | undefined;
 }
 
 async function findSourceFiles(
   projectRoot: string,
   ignore: string[],
   isGitIgnored: IgnoreMatcher,
+  signal?: AbortSignal | undefined,
 ): Promise<string[]> {
   const results: string[] = [];
   const ignoreSet = new Set([...DEFAULT_IGNORE, ...ignore]);
@@ -68,13 +99,27 @@ async function findSourceFiles(
     { ext: '.yml',  pat: compileGlob('**/*.yml') },
   ];
 
+  let dirCount = 0;
+
   const walk = async (dir: string): Promise<void> => {
+    // Yield + abort check before every readdir so a cancelled indexer
+    // doesn't descend deeper into the tree.
+    throwIfAborted(signal);
+    // Periodically yield the event loop so the main thread stays responsive
+    // during deep directory walks (Node 22's fs.promises.readdir doesn't
+    // accept AbortSignal, so we rely on cooperative polling).
+    if (dirCount > 0 && dirCount % YIELD_EVERY_N === 0) {
+      await yieldEventLoop();
+      throwIfAborted(signal);
+    }
     let entries: Dirent[];
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });
     } catch {
       return;
     }
+    dirCount++;
+
     for (const e of entries) {
       if (ignoreSet.has(e.name)) continue;
       const full = path.join(dir, e.name);
@@ -134,7 +179,7 @@ export async function runIndexer(
   _ctx: Context,
   opts: IndexerOptions,
 ): Promise<IndexResult> {
-  const { projectRoot, force = false, langs, ignore = [], indexDir } = opts;
+  const { projectRoot, force = false, langs, ignore = [], indexDir, signal } = opts;
 
   const store = new IndexStore(projectRoot, { indexDir });
   const startMs = Date.now();
@@ -155,7 +200,7 @@ export async function runIndexer(
       .map((f) => path.resolve(projectRoot, f))
       .filter((f) => !isGitIgnored(path.relative(projectRoot, f).replace(/\\/g, '/'), false));
   } else {
-    files = await findSourceFiles(projectRoot, ignore, isGitIgnored);
+    files = await findSourceFiles(projectRoot, ignore, isGitIgnored, signal);
   }
 
   if (langs && langs.length > 0) {
@@ -182,14 +227,22 @@ export async function runIndexer(
 
     // Yield the event loop periodically so the main thread stays responsive
     // (TUI rendering, input handling, etc.) during large index builds.
+    // Also check for cancellation — the tool executor's timeout or a
+    // session abort propagates through `signal`.
     if (fi > 0 && fi % YIELD_EVERY_N === 0) {
       await yieldEventLoop();
+      throwIfAborted(signal);
     }
 
     let stat: Stats;
     try {
-      stat = await fs.stat(file);
-    } catch {
+      // @types/node hasn't added `signal` to StatOptions yet (runtime
+      // support added in Node 20.15+). Cast to the signature Node 22 uses.
+      const statOpts = signal ? { signal } : {};
+      stat = await (fs.stat as (path: string, opts: { signal?: AbortSignal }) => Promise<Stats>)(file, statOpts);
+    } catch (e) {
+      // If the signal fired, stop immediately — don't mutate the store.
+      if (isAbortError(e)) throw e;
       store.deleteFile(file);
       continue;
     }
@@ -214,8 +267,9 @@ export async function runIndexer(
 
     let content: string;
     try {
-      content = await fs.readFile(file, 'utf8');
+      content = await fs.readFile(file, { encoding: 'utf8', signal });
     } catch (e) {
+      if (isAbortError(e)) throw e;
       errors.push(`read error: ${file}: ${e instanceof Error ? e.message : String(e)}`);
       continue;
     }
