@@ -1,4 +1,4 @@
-import { Box, type DOMElement, Text, measureElement, useStdout } from 'ink';
+import { Box, type DOMElement, Text, measureElement, useStdout } from '../ink.js';
 import type React from 'react';
 import { useLayoutEffect, useRef } from 'react';
 import { theme } from '../theme.js';

@@ -1,4 +1,4 @@
-import { Box, Text } from 'ink';
+import { Box, Text } from '../../ink.js';
 import React, { useEffect, useState } from 'react';
 import { theme } from '../../theme.js';
 

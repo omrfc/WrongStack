@@ -18,7 +18,7 @@ import { InputBuilder, buildGoalPreamble, formatTodosList, writeOut } from '@wro
 import { enhanceUserPrompt, normalizedEqual, recentTextTurns, shouldEnhance } from '@wrongstack/core';
 import { type VisionAdapters, routeImagesForModel } from '@wrongstack/runtime/vision';
 import { getProcessRegistry, getIndexState, onIndexStateChange } from '@wrongstack/tools';
-import { Box, Text, useApp, useStdout } from 'ink';
+import { Box, Text, useApp, useStdout } from './ink.js';
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { readClipboardImage } from './clipboard.js';
 import { AgentsMonitor } from './components/agents-monitor.js';

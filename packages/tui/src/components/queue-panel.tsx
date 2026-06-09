@@ -1,5 +1,5 @@
 import type { ContentBlock } from '@wrongstack/core';
-import { Box, Text, useStdout } from 'ink';
+import { Box, Text, useStdout } from '../ink.js';
 import type React from 'react';
 
 export interface QueueItem {

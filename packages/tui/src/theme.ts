@@ -1,12 +1,57 @@
 // Central TUI palette. Until now colors were hardcoded as Ink color names
-// (`color="cyan"`, `borderColor="magenta"`, …) scattered across ~18
+// (`color="cyan"`, `borderColor="magenta"`, …) scattered across ~30
 // components, so there was no single place to tune the look. This module is
-// that place: semantic tokens whose *values* are the Ink color names already
-// in use, so adopting it is a pure rename with zero visual change. Re-skinning
-// later is then a one-line edit here that propagates everywhere.
+// that place.
 //
-// Values are Ink color names (https://github.com/vadimdemedes/ink#color) — any
-// of the 16 ANSI names, `gray`, the *Bright variants, or a hex/rgb string.
+// The values are now soft *pastel hex* (Catppuccin Mocha) rather than the bare
+// 16-color ANSI names. ANSI names render against the terminal's own palette,
+// which is typically dark and harsh; pinning truecolor pastels makes the look
+// uniformly soft regardless of the host terminal theme.
+//
+// Most components don't reference `theme` directly — they still pass bare ANSI
+// names (`color="red"`). Those are caught at render time by the Ink shim in
+// `ink.tsx`, which routes every `color` / `backgroundColor` / `borderColor`
+// through {@link softColor}. So this `pastel` map is the single source of truth
+// for *both* the semantic tokens below and every hardcoded ANSI name.
+
+// ─── Pastel palette (Catppuccin Mocha) ──────────────────────────────────────
+// Keys are the Ink/ANSI color names a component might pass; values are the
+// pastel hex they resolve to. `softColor` maps name → hex and passes anything
+// already-hex (or unknown, e.g. 'dim') through untouched.
+export const pastel = Object.freeze({
+  // Base 8
+  black: '#11111b',
+  red: '#f38ba8',
+  green: '#a6e3a1',
+  yellow: '#f9e2af',
+  blue: '#89b4fa',
+  magenta: '#cba6f7',
+  cyan: '#94e2d5',
+  white: '#cdd6f4',
+  // Greys
+  gray: '#7f849c',
+  grey: '#7f849c',
+  // Bright variants — a touch lighter / shifted within the same family
+  blackBright: '#585b70',
+  redBright: '#eba0ac',
+  greenBright: '#b8e8b0',
+  yellowBright: '#f5e6b8',
+  blueBright: '#89dceb',
+  magentaBright: '#b4befe',
+  cyanBright: '#99e6da',
+  whiteBright: '#ffffff',
+} as const);
+
+/**
+ * Resolve a color value to its pastel equivalent. Known ANSI names map to the
+ * {@link pastel} hex; hex/rgb strings and unknown values (e.g. Ink's `'dim'`)
+ * pass through unchanged. `undefined` stays `undefined` so callers can spread
+ * it without forcing a color.
+ */
+export function softColor(color?: string): string | undefined {
+  if (!color) return color;
+  return (pastel as Record<string, string>)[color] ?? color;
+}
 
 export interface Theme {
   /** Primary accent — prompts, links, tool names, assistant label. */
@@ -43,28 +88,28 @@ export interface Theme {
   diffDelBg: string;
 }
 
-// Single tuned dark palette. The values intentionally mirror the colors already
-// hardcoded today (cyan/yellow/green/red/magenta), so the first adoption pass is
-// visually identical. A second palette can be added later as a drop-in; we keep
-// the shape (a `Theme`) ready for that without paying the tuning cost now.
+// Single tuned pastel palette. Semantic tokens point at the `pastel` hexes
+// above, so re-skinning is a one-line edit there that propagates everywhere.
 export const theme: Theme = Object.freeze({
-  accent: 'cyan',
-  user: 'yellow',
-  assistant: 'cyan',
-  tool: 'cyan',
-  success: 'green',
-  warn: 'yellow',
-  error: 'red',
+  accent: pastel.cyan,
+  user: pastel.yellow,
+  assistant: pastel.cyan,
+  tool: pastel.cyan,
+  success: pastel.green,
+  warn: pastel.yellow,
+  error: pastel.red,
   dim: true,
-  borderDefault: 'gray',
-  borderActive: 'yellow',
-  brand: 'magenta',
+  // Subtle slate border — present but never harsh.
+  borderDefault: pastel.blackBright,
+  borderActive: pastel.yellow,
+  brand: pastel.magenta,
   monitor: {
-    fleet: 'cyan',
-    agents: 'magenta',
-    worktree: 'green',
-    phase: 'cyan',
+    fleet: pastel.cyan,
+    agents: pastel.magenta,
+    worktree: pastel.green,
+    phase: pastel.cyan,
   },
-  diffAddBg: 'greenBright',
-  diffDelBg: 'redBright',
+  // Diff blocks render dark text on a pastel wash (see DiffBlock).
+  diffAddBg: pastel.green,
+  diffDelBg: pastel.red,
 });

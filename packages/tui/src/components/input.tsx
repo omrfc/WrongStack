@@ -1,5 +1,5 @@
 import { expectDefined } from '@wrongstack/core';
-import { Box, Text, useInput, useStdin, useStdout } from 'ink';
+import { Box, Text, useInput, useStdin, useStdout } from '../ink.js';
 import type React from 'react';
 import { memo, useEffect, useRef, useState } from 'react';
 import { fnKey } from '../fn-keys.js';

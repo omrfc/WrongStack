@@ -383,3 +383,126 @@ export async function persistLaunchChoices(
 
   await atomicWrite(configPath, JSON.stringify(existing, null, 2), { mode: 0o600 });
 }
+
+// ─── Indexing question ────────────────────────────────────────────────────────
+
+/**
+ * File extensions the codebase indexer can parse. Matches `extToLang` in
+ * `packages/tools/src/codebase-index/ts-parser.ts`.
+ */
+const INDEXABLE_EXTS = new Set([
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.go',
+  '.py',
+  '.rs',
+  '.json',
+  '.yaml',
+  '.yml',
+]);
+
+/**
+ * Directories that should never be descended into when counting files.
+ * Mirrors `DEFAULT_IGNORE` in the indexer.
+ */
+const SKIP_DIRS = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  'build',
+  '.next',
+  'coverage',
+  '.turbo',
+  '__snapshots__',
+  '.nyc_output',
+]);
+
+/** Minimum number of indexable files before we consider asking about indexing. */
+const INDEX_QUESTION_THRESHOLD = 500;
+
+/**
+ * Count indexable source files in the project. Stops early once the
+ * threshold is reached — large codebases don't need a precise count.
+ */
+async function countProjectFiles(projectRoot: string): Promise<number> {
+  let count = 0;
+  const walk = async (dir: string): Promise<void> => {
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return; // permission errors, missing dirs — skip
+    }
+    for (const e of entries) {
+      if (SKIP_DIRS.has(e.name)) continue;
+      if (count >= INDEX_QUESTION_THRESHOLD) return; // early exit
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        await walk(full);
+      } else if (e.isFile()) {
+        if (INDEXABLE_EXTS.has(path.extname(e.name))) {
+          count++;
+        }
+      }
+    }
+  };
+  await walk(projectRoot);
+  return count;
+}
+
+/**
+ * When the project has many indexable files, ask the user whether to run
+ * startup codebase indexing now. Large codebases can take a while to index
+ * on first launch — this lets the user skip it for the current session.
+ *
+ * The answer is **not persisted** — it affects only this session.
+ *
+ * @returns `true` (yes, index), `false` (skip), or `undefined` when
+ *   no question was asked (codebase is small enough or indexing isn't
+ *   configured).
+ */
+export async function maybeAskAboutIndexing(opts: {
+  projectRoot: string;
+  renderer: TerminalRenderer;
+  reader: ReadlineInputReader;
+  /** Only ask when the config has an `indexing` block (non-bare mode). */
+  indexingConfigured: boolean;
+}): Promise<boolean | undefined> {
+  const { projectRoot, renderer, reader, indexingConfigured } = opts;
+
+  // In bare mode there's no indexing block — the question is meaningless.
+  if (!indexingConfigured) return undefined;
+
+  const fileCount = await countProjectFiles(projectRoot);
+
+  // Small / medium codebases — indexing is fast enough, don't bother the user.
+  if (fileCount < INDEX_QUESTION_THRESHOLD) return undefined;
+
+  renderer.write(
+    `\n  ${color.dim('○')} Large codebase detected ${color.dim(`(~${fileCount}+ indexable files)`)}\n`,
+  );
+
+  const answer = (
+    await reader.readLine(
+      `  ${color.amber('?')} Run codebase indexing now? ${color.dim('(needed for codebase-search) [Y/n/q]')} `,
+    )
+  )
+    .trim()
+    .toLowerCase();
+
+  // 'q' means skip indexing (not abort launch — we're past the project check).
+  if (answer === 'q') {
+    renderer.write(color.dim('  Skipping indexing for this session.\n'));
+    return false;
+  }
+
+  if (answer === 'n' || answer === 'no') {
+    renderer.write(color.dim('  Skipping indexing for this session.\n'));
+    return false;
+  }
+
+  // Default: yes (empty input, 'y', 'yes', or anything else).
+  return true;
+}

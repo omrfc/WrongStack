@@ -1,4 +1,4 @@
-import { Box, Text } from 'ink';
+import { Box, Text } from '../../ink.js';
 import * as path from 'node:path';
 import type React from 'react';
 import type { HistoryEntry } from './types.js';

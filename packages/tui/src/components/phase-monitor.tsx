@@ -1,4 +1,4 @@
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from '../ink.js';
 import type React from 'react';
 
 const fmtElapsed = (ms: number): string => {

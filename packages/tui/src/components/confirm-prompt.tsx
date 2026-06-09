@@ -1,4 +1,4 @@
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from '../ink.js';
 import { writeOut } from '@wrongstack/core';
 import React from 'react';
 

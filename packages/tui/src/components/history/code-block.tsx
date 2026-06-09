@@ -1,4 +1,4 @@
-import { Box, Text } from 'ink';
+import { Box, Text } from '../../ink.js';
 import type React from 'react';
 import { type HLState, type Lang, highlightLine } from '../../highlight.js';
 import { theme } from '../../theme.js';

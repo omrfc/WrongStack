@@ -2,31 +2,40 @@ import { spawn } from 'node:child_process';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Plugin } from '../types/plugin.js';
+import type { SlashCommand } from '../types/slash-command.js';
 import type { Usage, StopReason } from '../types/provider.js';
 
 // ---------------------------------------------------------------------------
 // Chimera configuration — read from config.extensions['wstack-chimera']
 // ---------------------------------------------------------------------------
 interface ChimeraConfig {
-  /** Set to false to disable post-session review. Default: true. */
   enabled?: boolean | undefined;
-  /** Provider id to use for the review LLM call (e.g. "anthropic"). */
   provider?: string | undefined;
-  /** Model id to use for the review. Defaults to the session's model. */
   model?: string | undefined;
-  /**
-   * Max number of changed files to review in one run. Prevents token
-   * blowout on large sessions. Default: 15.
-   */
   maxFiles?: number | undefined;
-  /**
-   * Maximum output tokens for the review response. Default: 4096.
-   */
   maxTokens?: number | undefined;
+}
+
+interface ResolvedChimeraConfig {
+  enabled: boolean;
+  provider: string;
+  model: string;
+  maxFiles: number;
+  maxTokens: number;
 }
 
 const DEFAULT_MAX_FILES = 15;
 const DEFAULT_MAX_TOKENS = 4096;
+
+function resolveConfig(cfg: ChimeraConfig, sessionProvider: string, sessionModel: string): ResolvedChimeraConfig {
+  return {
+    enabled: cfg.enabled !== false,
+    provider: cfg.provider ?? sessionProvider,
+    model: cfg.model ?? sessionModel,
+    maxFiles: cfg.maxFiles ?? DEFAULT_MAX_FILES,
+    maxTokens: cfg.maxTokens ?? DEFAULT_MAX_TOKENS,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // System prompt (condensed from packages/core/skills/chimera/SKILL.md)
@@ -107,28 +116,19 @@ interface ChangedFile {
   status: 'added' | 'modified';
 }
 
-/**
- * Get files added or modified in the working tree (unstaged + staged).
- * Filters to only A (added) and M (modified) statuses.
- */
 async function getChangedFiles(cwd: string): Promise<ChangedFile[]> {
-  // --porcelain gives machine-readable status
   const r = await runGit(['status', '--porcelain'], cwd);
   if (r.code !== 0) return [];
 
   const files: ChangedFile[] = [];
   for (const line of r.stdout.split('\n')) {
     if (!line.trim()) continue;
-    // porcelain format: "XY filename" where X=index status, Y=worktree status
     const statusCode = line.slice(0, 2).trim();
     const filePath = line.slice(3).trim();
 
-    // Added: 'A ' (staged add), ' A' (unstaged add), '??' (untracked)
     if (statusCode === 'A' || statusCode === 'A ' || statusCode === ' A' || statusCode === '??') {
       files.push({ path: filePath, status: 'added' });
-    }
-    // Modified: 'M ' (staged), ' M' (unstaged), 'MM'
-    else if (statusCode.includes('M')) {
+    } else if (statusCode.includes('M')) {
       files.push({ path: filePath, status: 'modified' });
     }
   }
@@ -158,10 +158,6 @@ function asLLMProvider(provider: unknown): ChimeraLLMProvider | null {
   return null;
 }
 
-/**
- * Call the LLM with the chimera system prompt and file contents.
- * Returns the review text, or null on failure.
- */
 async function runChimeraReview(
   files: ChangedFile[],
   fileContents: Map<string, string>,
@@ -170,7 +166,6 @@ async function runChimeraReview(
   model: string,
   maxTokens: number,
 ): Promise<string | null> {
-  // Build the user message: list of files with their contents
   const fileList = files.map((f) => {
     const status = f.status === 'added' ? '[ADDED]' : '[MODIFIED]';
     return `### ${status} ${f.path}`;
@@ -178,9 +173,8 @@ async function runChimeraReview(
 
   const contents = files.map((f) => {
     const content = fileContents.get(f.path) ?? '(file not readable)';
-    // Truncate very large files to prevent token blowout
     const truncated = content.length > 80_000
-      ? content.slice(0, 80_000) + '\n\n... (file truncated at 80KB)'
+      ? `${content.slice(0, 80_000)}\n\n... (file truncated at 80KB)`
       : content;
     return `\`\`\`${f.path}\n${truncated}\n\`\`\``;
   }).join('\n\n');
@@ -199,7 +193,7 @@ async function runChimeraReview(
   ].join('\n');
 
   const ac = new AbortController();
-  const timeout = setTimeout(() => ac.abort(), 120_000); // 2-minute timeout for review
+  const timeout = setTimeout(() => ac.abort(), 120_000);
 
   try {
     const resp = await provider.complete(
@@ -207,10 +201,7 @@ async function runChimeraReview(
         model,
         system: [{ type: 'text', text: CHIMERA_SYSTEM_PROMPT }],
         messages: [
-          {
-            role: 'user',
-            content: [{ type: 'text', text: userMessage }],
-          },
+          { role: 'user', content: [{ type: 'text', text: userMessage }] },
         ],
         maxTokens,
         temperature: 0.2,
@@ -219,7 +210,6 @@ async function runChimeraReview(
     );
     clearTimeout(timeout);
 
-    // Extract text from response content
     const raw = resp.content;
     if (Array.isArray(raw)) {
       const texts = raw
@@ -234,12 +224,64 @@ async function runChimeraReview(
       return raw.trim();
     }
     return null;
-  } catch (_err) {
-    // Provider call failed — return null (never crash the session)
+  } catch {
     return null;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Slash command
+// ---------------------------------------------------------------------------
+function buildChimeraCommand(getConfig: () => ResolvedChimeraConfig): SlashCommand {
+  return {
+    name: 'chimera',
+    category: 'Session',
+    description: 'Show or configure the Chimera post-session code review agent.',
+    help: [
+      '╔═══ Chimera ═══╗',
+      '',
+      'Post-session code quality guardian. Reviews files changed during',
+      'each session and appends a quality report to chat history.',
+      '',
+      'Usage:',
+      '  /chimera              Show current status and configuration',
+      '',
+      'Configuration (edit config.json):',
+      '  extensions.wstack-chimera.enabled   true | false',
+      '  extensions.wstack-chimera.provider  provider id (e.g. "deepseek")',
+      '  extensions.wstack-chimera.model     model id (e.g. "deepseek-v4-flash")',
+      '  extensions.wstack-chimera.maxFiles  max files to review (default 15)',
+      '  extensions.wstack-chimera.maxTokens max output tokens (default 4096)',
+      '',
+      'Example config.json:',
+      '  "extensions": {',
+      '    "wstack-chimera": {',
+      '      "provider": "deepseek",',
+      '      "model": "deepseek-v4-flash"',
+      '    }',
+      '  }',
+    ].join('\n'),
+    async run() {
+      const cfg = getConfig();
+
+      const lines = [
+        `🦂 Chimera — ${cfg.enabled ? 'enabled' : 'disabled'}`,
+        '',
+        `  Provider:  ${cfg.provider}`,
+        `  Model:     ${cfg.model}`,
+        `  Max files: ${cfg.maxFiles}`,
+        `  Max tokens: ${cfg.maxTokens}`,
+        '',
+        cfg.enabled
+          ? 'Chimera will review changed files after each session ends.'
+          : 'Set extensions.wstack-chimera.enabled = true to enable.',
+      ];
+
+      return { message: lines.join('\n') };
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -251,46 +293,57 @@ export function createChimeraPlugin(): Plugin {
     version: '1.0.0',
     description: 'Post-session code quality guardian — reviews changed files after each session.',
     apiVersion: '^0.1',
-    capabilities: {},
+    capabilities: { slashCommands: true },
     defaultConfig: {},
 
     setup(api) {
-      // Read chimera config from extensions namespace
-      const chimeraConfig: ChimeraConfig =
-        (api.config.extensions?.['wstack-chimera'] as ChimeraConfig | undefined) ?? {};
+      // ── Reactive config: read on setup, update on config change ──────
+      const recompute = (): ResolvedChimeraConfig => {
+        const raw: ChimeraConfig =
+          (api.config.extensions?.['wstack-chimera'] as ChimeraConfig | undefined) ?? {};
+        return resolveConfig(raw, api.config.provider, api.config.model);
+      };
+      let resolved = recompute();
 
-      // Respect explicit disable
-      if (chimeraConfig.enabled === false) {
+      // React to runtime config changes
+      api.onConfigChange(() => {
+        const old = resolved;
+        resolved = recompute();
+        if (old.enabled !== resolved.enabled || old.provider !== resolved.provider || old.model !== resolved.model) {
+          api.log.info(
+            `[chimera] config changed — enabled=${resolved.enabled} provider=${resolved.provider} model=${resolved.model}`,
+          );
+        }
+      });
+
+      if (!resolved.enabled) {
         api.log.info('[chimera] disabled by config (extensions.wstack-chimera.enabled = false)');
         return;
       }
 
-      // Resolve provider and model — chimera-specific first, fall back to session defaults
-      const chimeraProviderId = chimeraConfig.provider ?? api.config.provider;
-      const chimeraModel = chimeraConfig.model ?? api.config.model;
-      const maxFiles = chimeraConfig.maxFiles ?? DEFAULT_MAX_FILES;
-      const maxTokens = chimeraConfig.maxTokens ?? DEFAULT_MAX_TOKENS;
-
       api.log.info(
-        `[chimera] loaded — provider=${chimeraProviderId} model=${chimeraModel} maxFiles=${maxFiles}`,
+        `[chimera] loaded — provider=${resolved.provider} model=${resolved.model} maxFiles=${resolved.maxFiles}`,
       );
 
-      // Listen for the session.ended event — fires exactly once per session,
-      // emitted by the CLI execution flow right before session.close().
-      // api.onEvent is a one-shot listener: it auto-removes after first fire.
-      api.onEvent('session.ended', async (_payload) => {
+      // ── Register slash command ────────────────────────────────────────
+      api.slashCommands.register(buildChimeraCommand(() => resolved));
+      api.log.info('[chimera] /chimera command registered');
+
+      // ── Session-ended listener (fires every session, before close) ────
+      api.onEvent('session.ended', async () => {
+        // Re-read config in case it changed between setup and session end
+        const cfg = resolved;
+        if (!cfg.enabled) return;
+
         const cwd = api.config.cwd ?? process.cwd();
 
-        // Must be a git repo
         if (!(await isGitRepo(cwd))) {
           api.log.info('[chimera] skipped — not a git repository');
           return;
         }
 
-        // Get changed files from the working tree
         const allChanged = await getChangedFiles(cwd);
 
-        // Filter to files that actually exist (skip deleted and .wrongstack/)
         const existing: ChangedFile[] = [];
         for (const f of allChanged) {
           if (f.path.startsWith('.wrongstack/')) continue;
@@ -307,15 +360,13 @@ export function createChimeraPlugin(): Plugin {
           return;
         }
 
-        // Respect maxFiles limit
-        const toReview = existing.slice(0, maxFiles);
-        if (existing.length > maxFiles) {
+        const toReview = existing.slice(0, cfg.maxFiles);
+        if (existing.length > cfg.maxFiles) {
           api.log.info(
-            `[chimera] limiting review to ${maxFiles} of ${existing.length} changed files`,
+            `[chimera] limiting review to ${cfg.maxFiles} of ${existing.length} changed files`,
           );
         }
 
-        // Read file contents
         const fileContents = new Map<string, string>();
         for (const f of toReview) {
           try {
@@ -332,44 +383,41 @@ export function createChimeraPlugin(): Plugin {
           return;
         }
 
-        // Create the chimera provider
-        let provider: ChimeraLLMProvider | null = null;
+        // Create chimera provider from reactive config
+        let llmProvider: ChimeraLLMProvider | null = null;
         try {
-          // Build a plain object to satisfy ProviderRegistryView.create()
           const providerCfg: Record<string, unknown> = {
-            type: chimeraProviderId,
-            model: chimeraModel,
+            type: cfg.provider,
+            model: cfg.model,
           };
-          // Copy relevant fields from the session config
           if (api.config.apiKey) providerCfg.apiKey = api.config.apiKey;
           if (api.config.baseUrl) providerCfg.baseUrl = api.config.baseUrl;
-          const providerSection = api.config.providers?.[chimeraProviderId];
+          const providerSection = api.config.providers?.[cfg.provider];
           if (providerSection) Object.assign(providerCfg, providerSection);
 
           const rawProvider = api.providers.create(
             providerCfg as { type: string } & Record<string, unknown>,
           );
-          provider = asLLMProvider(rawProvider);
+          llmProvider = asLLMProvider(rawProvider);
         } catch (err) {
           api.log.warn(
-            `[chimera] failed to create provider "${chimeraProviderId}": ${err instanceof Error ? err.message : String(err)}`,
+            `[chimera] failed to create provider "${cfg.provider}": ${err instanceof Error ? err.message : String(err)}`,
           );
         }
 
-        if (!provider) {
+        if (!llmProvider) {
           api.log.warn('[chimera] no usable provider — review skipped');
           return;
         }
 
-        // Run the review
-        api.log.info(`[chimera] reviewing ${fileContents.size} file(s)...`);
+        api.log.info(`[chimera] reviewing ${fileContents.size} file(s) with ${cfg.provider}/${cfg.model}...`);
         const reviewText = await runChimeraReview(
           toReview,
           fileContents,
           cwd,
-          provider,
-          chimeraModel,
-          maxTokens,
+          llmProvider,
+          cfg.model,
+          cfg.maxTokens,
         );
 
         if (!reviewText) {
@@ -377,8 +425,6 @@ export function createChimeraPlugin(): Plugin {
           return;
         }
 
-        // Append the review to the session transcript as a synthetic LLM response.
-        // Written BEFORE session.close() since session.ended fires before close.
         const ts = new Date().toISOString();
         try {
           await api.session.append({
@@ -400,8 +446,7 @@ export function createChimeraPlugin(): Plugin {
     },
 
     teardown(api) {
-      // The onEvent listener is one-shot and auto-removes after firing.
-      // No explicit cleanup needed beyond logging.
+      api.slashCommands.unregister('chimera');
       api.log.info('[chimera] unloaded');
     },
 

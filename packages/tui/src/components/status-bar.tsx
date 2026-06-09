@@ -1,6 +1,6 @@
 import { expectDefined } from '@wrongstack/core';
 import type { TokenCounter, AutonomyStage } from '@wrongstack/core';
-import { Box, Text, useStdout } from 'ink';
+import { Box, Text, useStdout } from '../ink.js';
 import type React from 'react';
 import { useEffect, useState } from 'react';
 import type { GitInfo } from '../git-info.js';
@@ -886,21 +886,22 @@ export function stateChip(
   return { label: 'thinking…', color: 'green' };
 }
 
-// Hue-wheel palette for the animated "thinking…" wave. 12 stops give a smooth
-// gradient as the per-character offset shifts each spinner tick.
+// Pastel (Catppuccin Mocha) hue-wheel for the animated "thinking…" wave. 12
+// stops give a smooth gradient as the per-character offset shifts each spinner
+// tick — soft tones so the wave stays gentle rather than neon.
 const WAVE_COLORS = [
-  '#ff5f5f',
-  '#ff8f3f',
-  '#ffd23f',
-  '#bce84a',
-  '#6bcb77',
-  '#3dd9c0',
-  '#3fb6ff',
-  '#5f8bff',
-  '#845ef7',
-  '#b15bff',
-  '#f06595',
-  '#ff5fa2',
+  '#f38ba8', // red
+  '#eba0ac', // maroon
+  '#fab387', // peach
+  '#f9e2af', // yellow
+  '#a6e3a1', // green
+  '#94e2d5', // teal
+  '#89dceb', // sky
+  '#89b4fa', // blue
+  '#b4befe', // lavender
+  '#cba6f7', // mauve
+  '#f5c2e7', // pink
+  '#f2cdcd', // flamingo
 ];
 
 /**

@@ -1,4 +1,4 @@
-import { Box, Static, useStdout } from 'ink';
+import { Box, Static, useStdout } from '../../ink.js';
 import type React from 'react';
 import { useEffect, useState } from 'react';
 import { AssistantTail } from './assistant.js';

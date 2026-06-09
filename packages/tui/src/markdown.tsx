@@ -1,4 +1,4 @@
-import { Box, Text } from 'ink';
+import { Box, Text } from './ink.js';
 import type React from 'react';
 import { detectTable, renderTable } from './markdown-table.js';
 import { theme } from './theme.js';

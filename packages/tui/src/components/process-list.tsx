@@ -1,4 +1,4 @@
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from '../ink.js';
 import { useEffect, useState } from 'react';
 import type React from 'react';
 import { getProcessRegistry } from '@wrongstack/tools';

@@ -1,4 +1,4 @@
-import { Box, Text, useStdout } from 'ink';
+import { Box, Text, useStdout } from '../ink.js';
 import React from 'react';
 import type { FleetEntry } from '../app.js';
 import { theme } from '../theme.js';

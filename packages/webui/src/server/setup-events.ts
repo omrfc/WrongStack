@@ -49,6 +49,28 @@ export function setupEvents(deps: SetupEventsDeps): void {
       payload: { id: e.id, name: e.name, durationMs: e.durationMs, ok: e.ok, input: e.input, output: e.output },
     });
     broadcast(clients, { type: 'todos.updated', payload: { todos: [...context.todos] } });
+
+    // Broadcast task/plan updates after task/plan/todo tool executions.
+    if (e.name === 'task' || e.name === 'plan' || e.name === 'todo') {
+      void (async () => {
+        try {
+          const taskPath = (context.meta as Record<string, unknown>)['task.path'];
+          if (typeof taskPath === 'string' && taskPath) {
+            const { loadTasks } = await import('@wrongstack/core');
+            const file = await loadTasks(taskPath);
+            broadcast(clients, { type: 'tasks.updated', payload: { tasks: file?.tasks ?? [] } });
+          }
+        } catch { /* best-effort */ }
+        try {
+          const planPath = (context.meta as Record<string, unknown>)['plan.path'];
+          if (typeof planPath === 'string' && planPath) {
+            const { loadPlan } = await import('@wrongstack/core');
+            const plan = await loadPlan(planPath);
+            broadcast(clients, { type: 'plan.updated', payload: { plan: plan ?? { version: 1, sessionId: context.session?.id ?? '', updatedAt: new Date().toISOString(), items: [] } } });
+          }
+        } catch { /* best-effort */ }
+      })();
+    }
   });
 
   events.on('provider.response', (e) => {

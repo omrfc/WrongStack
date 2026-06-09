@@ -884,6 +884,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
       ts: new Date().toISOString(),
       usage: tokenCounter.total(),
     });
+    events.emit('session.ended', { id: session.id, usage: tokenCounter.total() });
     await session.close();
     await recoveryLock.clear().catch(() => undefined);
     await reader.close();

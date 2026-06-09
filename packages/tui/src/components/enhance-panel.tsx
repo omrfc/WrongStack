@@ -1,4 +1,4 @@
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from '../ink.js';
 import React from 'react';
 
 export type EnhanceDecision = 'refined' | 'english' | 'original' | 'edit';
