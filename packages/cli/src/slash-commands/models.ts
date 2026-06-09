@@ -8,7 +8,7 @@ import {
   encryptConfigSecrets,
 } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
-import { noOpVault } from './helpers.js';
+import { noOpVault, parseSubcommand, unknownSubcommand } from './helpers.js';
 
 async function patchGlobalConfig(
   globalConfigPath: string,
@@ -174,8 +174,8 @@ export function buildModelsCommand(opts: SlashCommandContext): SlashCommand {
     description: 'Manage custom model definitions.',
     help,
     async run(args) {
-      const parts = args.trim().split(/\s+/).filter(Boolean);
-      const sub = (parts[0] ?? '').toLowerCase();
+      const { cmd, rest } = parseSubcommand(args);
+      const sub = cmd;
 
       if (sub === 'help' || sub === '--help') return { message: help };
       if (!opts.configStore || !opts.paths) {
@@ -215,7 +215,7 @@ export function buildModelsCommand(opts: SlashCommandContext): SlashCommand {
       try {
         // ---- ADD ----
         if (sub === 'add') {
-          const { modelId, def, error } = parseFlags(parts.slice(1));
+          const { modelId, def, error } = parseFlags(rest);
           if (error) {
             return { message: `${color.red('Error')}: ${error}. ${color.dim('/models help')}` };
           }
@@ -245,7 +245,7 @@ export function buildModelsCommand(opts: SlashCommandContext): SlashCommand {
 
         // ---- REMOVE ----
         if (sub === 'remove' || sub === 'rm') {
-          const modelId = parts[1];
+          const modelId = rest;
           if (!modelId) {
             return { message: `${color.amber('Usage:')} /models remove <id>` };
           }
