@@ -19,6 +19,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { FleetPanel } from './components/FleetPanel';
 import { GoalPanel } from './components/GoalPanel';
 import { PhasePanel } from './components/PhasePanel';
+import { ProjectsPanel } from './components/ProjectsPanel';
 import { QuickModelSwitcher } from './components/QuickModelSwitcher';
 import { SettingsPanel } from './components/SettingsPanel';
 import { ShortcutsOverlay } from './components/ShortcutsOverlay';
@@ -319,6 +320,11 @@ function AppInner() {
           </>
         )}
         {currentView === 'settings' && <SettingsPanel />}
+        {currentView === 'projects' && (
+          <div className="flex-1 flex flex-col overflow-hidden max-w-lg border-r bg-card/50">
+            <ProjectsPanel fullView />
+          </div>
+        )}
         {currentView === 'autophase' && (
           <AutoPhaseView onClose={() => setCurrentView('chat')} />
         )}

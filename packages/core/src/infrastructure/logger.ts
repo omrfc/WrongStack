@@ -144,3 +144,17 @@ function formatCtx(ctx: unknown): string {
     return color.dim(String(ctx));
   }
 }
+
+/**
+ * A logger that silently discards all messages. Used during boot before
+ * the real logger is configured, and in test contexts where logging
+ * would be noise.
+ */
+export const noOpLogger: Logger = {
+  error: () => {},
+  warn: () => {},
+  info: () => {},
+  debug: () => {},
+  trace: () => {},
+  child: () => noOpLogger,
+};

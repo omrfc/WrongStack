@@ -13,9 +13,12 @@ interface ProjectEntry {
 /**
  * Projects panel — reads from ~/.wrongstack/projects.json via the backend.
  * Shows all known projects with names, paths, and last-seen times.
- * Designed to be embedded in the Settings panel as a subsection.
+ *
+ * When `fullView` is true, renders as a standalone sidebar panel with a
+ * header. When false (default), renders as a compact subsection suitable
+ * for embedding in the Settings panel.
  */
-export function ProjectsPanel() {
+export function ProjectsPanel({ fullView }: { fullView?: boolean | undefined }) {
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -47,19 +50,23 @@ export function ProjectsPanel() {
   };
 
   if (loading) {
-    return (
+    const spinner = (
       <div className="flex items-center justify-center py-6">
         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
       </div>
     );
+    if (fullView) return <div className="h-full flex flex-col overflow-hidden"><div className="px-3 py-2 border-b"><h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Projects</h2></div><div className="flex-1 flex items-center justify-center">{spinner}</div></div>;
+    return spinner;
   }
 
   if (projects.length === 0) {
-    return (
+    const empty = (
       <div className="text-xs text-muted-foreground italic py-2">
         No projects registered. Run <code className="font-mono bg-muted/40 px-1 rounded">wstack</code> in a directory to register it.
       </div>
     );
+    if (fullView) return <div className="h-full flex flex-col overflow-hidden"><div className="px-3 py-2 border-b"><h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Projects</h2></div><div className="flex-1 flex items-center justify-center">{empty}</div></div>;
+    return empty;
   }
 
   // Sort by lastSeen descending
@@ -70,8 +77,8 @@ export function ProjectsPanel() {
     return a.name.localeCompare(b.name);
   });
 
-  return (
-    <div className="space-y-1">
+  const list = (
+    <div className={cn('space-y-1', fullView && 'p-2')}>
       {sorted.map((p) => (
         <div
           key={p.slug}
@@ -97,4 +104,25 @@ export function ProjectsPanel() {
       ))}
     </div>
   );
+
+  if (fullView) {
+    return (
+      <div className="h-full flex flex-col overflow-hidden">
+        <div className="px-3 py-2 border-b shrink-0">
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Projects</h2>
+          <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+            Known projects from <code className="font-mono bg-muted/40 px-0.5 rounded">~/.wrongstack/projects.json</code>
+          </p>
+        </div>
+        <div className="flex-1 overflow-y-auto">{list}</div>
+        <div className="px-3 py-2 border-t shrink-0">
+          <p className="text-[9px] text-muted-foreground/40 text-center">
+            Use <code className="font-mono bg-muted/40 px-1 rounded">/project add</code> in the CLI to register projects
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return list;
 }

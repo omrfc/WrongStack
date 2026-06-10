@@ -9,12 +9,13 @@ import {
   MessageSquare,
   Settings as SettingsIcon,
   Zap,
+  Folders,
 } from 'lucide-react';
 import { type ReactElement } from 'react';
 
 // ── Activity definition ───────────────────────────────────────────────
 
-type MainView = 'chat' | 'files' | 'settings' | 'autophase';
+type MainView = 'chat' | 'files' | 'projects' | 'settings' | 'autophase';
 
 interface ActivityDef {
   id: Activity | 'settings' | 'autophase';
@@ -34,6 +35,7 @@ const TOP_ACTIVITIES: ActivityDef[] = [
   { id: 'context', icon: <Gauge />, label: 'Context', mainView: 'chat' },
   { id: 'history', icon: <Clock />, label: 'History', mainView: 'chat' },
   { id: 'files', icon: <FolderOpen />, label: 'Files', mainView: 'files' },
+  { id: 'projects', icon: <Folders />, label: 'Projects', mainView: 'projects' },
 ];
 
 const BOTTOM_ACTIVITIES: ActivityDef[] = [
