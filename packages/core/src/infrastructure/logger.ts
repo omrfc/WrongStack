@@ -151,6 +151,9 @@ function formatCtx(ctx: unknown): string {
  * would be noise.
  */
 export const noOpLogger: Logger = {
+  // 'error' is the quietest level the Logger contract offers; the methods
+  // discard everything regardless, this only matters to level checks.
+  level: 'error',
   error: () => {},
   warn: () => {},
   info: () => {},

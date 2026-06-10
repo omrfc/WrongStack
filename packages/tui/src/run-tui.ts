@@ -33,6 +33,14 @@ export interface RunTuiOptions {
   banner?: boolean | undefined;
   /** Persists the input queue across crashes; if omitted, the queue is in-memory only. */
   queueStore?: QueueStore | undefined;
+  /**
+   * Called with the queue's display texts (head first) on EVERY queue change
+   * — enqueue, /queue delete, /queue clear, dequeue-for-delivery. The CLI
+   * mirrors the snapshot onto the live agent Context (core's
+   * setQueuedMessagesSnapshot) so a running agent learns what's waiting at
+   * its next iteration boundary without the queue being delivered early.
+   */
+  onQueueChange?: ((items: string[]) => void) | undefined;
   /** Surfaces the "⚠ YOLO" chip in the status bar. */
   yolo?: boolean | undefined;
   /** Query live YOLO state from the permission policy. */
@@ -517,6 +525,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           model: opts.model,
           banner: opts.banner ?? true,
           queueStore: opts.queueStore,
+          onQueueChange: opts.onQueueChange,
           yolo: opts.yolo,
           getYolo: opts.getYolo,
           getAutonomy: opts.getAutonomy,

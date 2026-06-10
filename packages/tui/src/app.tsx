@@ -193,6 +193,12 @@ export interface AppProps {
   banner?: boolean | undefined;
   /** Persists the queue across crashes; rehydrated on mount, written on every mutation. */
   queueStore?: QueueStore | undefined;
+  /**
+   * Mirrors the queue's display texts (head first) to the host on every
+   * queue change, so a running agent can be told what's waiting (queue
+   * awareness — see core's queued-messages.ts). Display state is unaffected.
+   */
+  onQueueChange?: ((items: string[]) => void) | undefined;
   /** Reflects the policy's --yolo flag for the status bar's "⚠ YOLO" chip. */
   yolo?: boolean | undefined;
   /** Play terminal bell when an agent run completes. */
@@ -496,6 +502,7 @@ export function App({
   model,
   banner = true,
   queueStore,
+  onQueueChange,
   yolo = false,
   chime = false,
   confirmExit = true,
@@ -1621,6 +1628,14 @@ export function App({
       .write(state.queue.map(({ displayText, blocks }) => ({ displayText, blocks })))
       .catch(() => undefined);
   }, [state.queue, queueStore]);
+
+  // Mirror the queue snapshot to the host on every change (enqueue, /queue
+  // delete, /queue clear, dequeue-for-delivery) so a running agent learns
+  // what's waiting at its next iteration boundary — without the queued
+  // messages being delivered early. See core's queued-messages.ts.
+  useEffect(() => {
+    onQueueChange?.(state.queue.map((q) => q.displayText));
+  }, [state.queue, onQueueChange]);
 
   // Register the TUI-only /queue command for the lifetime of this App.
   useEffect(() => {

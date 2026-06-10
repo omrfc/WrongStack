@@ -95,6 +95,12 @@ export {
   pendingBtwCount,
   buildBtwBlock,
 } from './core/btw.js';
+export {
+  setQueuedMessagesSnapshot,
+  consumeQueuedMessagesUpdate,
+  peekQueuedMessages,
+  buildQueuedMessagesBlock,
+} from './core/queued-messages.js';
 export { Context, type ContextInit, type RunOptions, type TodoItem } from './core/context.js';
 export { extractRunEnv, type RunEnv } from './core/run-env.js';
 export {

@@ -10,6 +10,7 @@ import { toWrongStackError } from '../types/errors.js';
 import { estimateRequestTokens, estimateRequestTokensCalibrated, getCalibrationState, recordActualUsage } from '../utils/token-estimate.js';
 import { consumeAutonomousContinue } from './continue-to-next-iteration.js';
 import { buildBtwBlock, consumeBtwNotes } from './btw.js';
+import { buildQueuedMessagesBlock, consumeQueuedMessagesUpdate } from './queued-messages.js';
 import { runProviderWithRetry } from './provider-runner.js';
 import { requestLimitExtension } from './iteration-limit.js';
 import { TOKENS } from '../kernel/tokens.js';
@@ -101,12 +102,12 @@ export function createAgentLoopHandler(
   let _lastEmittedMsgCount = -1;
   let _lastEmittedToolCount = -1;
 
-  /** Fold pending /btw notes into conversation before each iteration. */
-  function injectPendingBtwNotes(): void {
-    const notes = consumeBtwNotes(a.ctx);
-    if (notes.length === 0) return;
-    const block: TextBlock = { type: 'text', text: buildBtwBlock(notes) };
-
+  /**
+   * Append an informational block to the conversation, merging into the
+   * trailing user message when there is one (keeps user/assistant
+   * alternation intact between tool batches).
+   */
+  function foldBlockIntoConversation(block: TextBlock): void {
     const messages = a.ctx.messages;
     const last = messages[messages.length - 1];
     if (last && last.role === 'user') {
@@ -118,6 +119,26 @@ export function createAgentLoopHandler(
     } else {
       a.ctx.state.appendMessage({ role: 'user', content: [block] });
     }
+  }
+
+  /** Fold pending /btw notes into conversation before each iteration. */
+  function injectPendingBtwNotes(): void {
+    const notes = consumeBtwNotes(a.ctx);
+    if (notes.length === 0) return;
+    foldBlockIntoConversation({ type: 'text', text: buildBtwBlock(notes) });
+  }
+
+  /**
+   * Surface the host's pending-message queue (messages typed while this run
+   * was busy) when it changed since the model last saw it. Informational
+   * only — the queued messages still arrive later as their own user turns;
+   * this just lets the model factor the backlog into in-flight decisions.
+   * See {@link ./queued-messages.ts}.
+   */
+  function injectQueueAwareness(): void {
+    const items = consumeQueuedMessagesUpdate(a.ctx);
+    if (!items) return;
+    foldBlockIntoConversation({ type: 'text', text: buildQueuedMessagesBlock(items) });
   }
 
   /**
@@ -227,6 +248,7 @@ export function createAgentLoopHandler(
         a.events.emit('iteration.started', { ctx: a.ctx, index: i });
 
         injectPendingBtwNotes();
+        injectQueueAwareness();
 
         const req = await handlers.response.buildAndRunRequestPipeline(opts);
 

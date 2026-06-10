@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
+import type { Logger } from '../types/logger.js';
 import type { SecretVault } from '../types/secret-vault.js';
 import { ConfigError, ERROR_CODES } from '../types/errors.js';
 import { ENCRYPTED_PREFIX } from '../types/secret-vault.js';
@@ -283,6 +284,7 @@ export async function rewriteConfigEncrypted(
 export async function migratePlaintextSecrets(
   configPath: string,
   vault: SecretVault,
+  logger?: Pick<Logger, 'warn'>,
 ): Promise<{ migrated: number; file: string }> {
   let raw: string;
   try {
@@ -301,7 +303,10 @@ export async function migratePlaintextSecrets(
   if (counter.n === 0) return { migrated: 0, file: configPath };
   // atomicWrite: runs on every boot for legacy users — torn write = wipe.
   await atomicWrite(configPath, JSON.stringify(migrated, null, 2), { mode: 0o600 });
-  await restrictFilePermissions(configPath);
+  await restrictFilePermissions(
+    configPath,
+    logger ? { warn: (msg) => logger.warn(msg) } : undefined,
+  );
   return { migrated: counter.n, file: configPath };
 }
 
