@@ -1,0 +1,95 @@
+import * as fs from 'node:fs/promises';
+import type { Context, Tool } from '@wrongstack/core';
+
+// ── Types ──────────────────────────────────────────────────────────────────
+
+interface SetWorkingDirInput {
+  /** Relative or absolute path to navigate to. Must stay within projectRoot. */
+  path?: string | undefined;
+}
+
+interface SetWorkingDirOutput {
+  /** The new working directory (absolute path). */
+  current: string;
+  /** The previous working directory (absolute path). */
+  previous?: string | undefined;
+  /** Human-readable confirmation message. */
+  message?: string | undefined;
+  /** Error if the directory doesn't exist or is outside the project root. */
+  error?: string | undefined;
+}
+
+// ── Tool ───────────────────────────────────────────────────────────────────
+
+export const setWorkingDirTool: Tool<SetWorkingDirInput, SetWorkingDirOutput> = {
+  name: 'set_working_dir',
+  category: 'Context',
+  description:
+    'Change the current working directory for all subsequent file operations. ' +
+    'The new directory must be inside the project root. ' +
+    'Use this to navigate between subdirectories when working on files in different parts of the project.',
+  usageHint:
+    'Change the working directory so relative paths in subsequent tool calls resolve from a ' +
+    'different directory. Pass `path` to set a new directory, or omit to query the current one. ' +
+    'The directory must exist and be inside the project root.',
+  permission: 'auto',
+  mutating: true,
+  capabilities: ['fs.read'],
+  timeoutMs: 5_000,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      path: {
+        type: 'string',
+        description:
+          'Directory to navigate to. Can be relative (to projectRoot) or absolute. ' +
+          'If omitted, returns the current working directory without changing it.',
+      },
+    },
+  },
+  async execute(input, ctx: Context) {
+    if (!input.path) {
+      return {
+        current: ctx.workingDir,
+        message: `Current working directory is ${ctx.workingDir}`,
+      };
+    }
+
+    const previous = ctx.workingDir;
+
+    // Validate and set the new working directory
+    let resolved: string;
+    try {
+      resolved = ctx.setWorkingDir(input.path);
+    } catch (err) {
+      return {
+        current: ctx.workingDir,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+
+    // Verify the directory actually exists on disk
+    try {
+      await fs.access(resolved);
+    } catch {
+      // Rollback — setWorkingDir validated containment but the dir may not exist
+      // Restore the previous directory and report the error
+      try {
+        ctx.setWorkingDir(previous);
+      } catch {
+        // If rollback fails, the workingDir is in an inconsistent state.
+        // This shouldn't happen since `previous` was valid before.
+      }
+      return {
+        current: ctx.workingDir,
+        error: `Directory does not exist: ${resolved}`,
+      };
+    }
+
+    return {
+      current: resolved,
+      previous,
+      message: `Working directory changed to ${resolved}`,
+    };
+  },
+};

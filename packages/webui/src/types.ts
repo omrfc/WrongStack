@@ -539,6 +539,7 @@ export type WSClientMessage =
   | { type: 'projects.add'; payload: { root: string; name?: string | undefined } }
   | { type: 'projects.select'; payload: { root: string; name?: string | undefined } }
   | { type: 'working_dir.set'; payload: { path: string } }
+  | { type: 'shell.open'; payload: { path: string; target: 'terminal' | 'file-manager' } }
   | WSCollabJoin
   | WSCollabLeave
   | WSCollabAnnotate

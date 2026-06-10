@@ -12,6 +12,7 @@ export interface StatuslineConfig {
   elapsed?: boolean | undefined;
   context?: boolean | undefined;
   cost?: boolean | undefined;
+  working_dir?: boolean | undefined;
 }
 
 const DEFAULTS: StatuslineConfig = {
@@ -22,6 +23,7 @@ const DEFAULTS: StatuslineConfig = {
   elapsed: true,
   context: true,
   cost: true,
+  working_dir: true,
 };
 
 function resolveConfigPath(): string {
@@ -58,8 +60,8 @@ export async function saveStatuslineConfig(cfg: StatuslineConfig): Promise<void>
 export interface StatuslineCommandDeps {
   cwd: string;
   /** Current hidden items list. Written by the command when toggling. */
-  hiddenItems: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>;
-  setHiddenItems: (items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>) => void;
+  hiddenItems: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'>;
+  setHiddenItems: (items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'>) => void;
   getConfig: () => Promise<StatuslineConfig>;
   setConfig: (cfg: StatuslineConfig) => Promise<void>;
 }
@@ -77,7 +79,7 @@ export function buildStatuslineCommand(deps: StatuslineCommandDeps): SlashComman
       '       /statusline <item> off — disable a chip',
       '       /statusline reset      — restore defaults',
       '',
-      'Available items: todos, plan, fleet, git, elapsed, context, cost',
+      'Available items: todos, plan, fleet, git, elapsed, context, cost, working_dir',
       'Persistent across sessions (saved to ~/.wrongstack/statusline.json).',
     ].join('\n'),
     async run(args: string) {
@@ -90,7 +92,7 @@ export function buildStatuslineCommand(deps: StatuslineCommandDeps): SlashComman
       if (!item) {
         const lines = ['StatusBar chips:'];
         const items: (keyof StatuslineConfig)[] = [
-          'todos', 'plan', 'fleet', 'git', 'elapsed', 'context', 'cost',
+          'todos', 'plan', 'fleet', 'git', 'elapsed', 'context', 'cost', 'working_dir',
         ];
         for (const k of items) {
           const val = cfg[k];
@@ -109,7 +111,7 @@ export function buildStatuslineCommand(deps: StatuslineCommandDeps): SlashComman
 
       // Toggle
       const validItems: (keyof StatuslineConfig)[] = [
-        'todos', 'plan', 'fleet', 'git', 'elapsed', 'context', 'cost',
+        'todos', 'plan', 'fleet', 'git', 'elapsed', 'context', 'cost', 'working_dir',
       ];
       if (!validItems.includes(item as keyof StatuslineConfig)) {
         return {

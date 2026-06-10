@@ -171,12 +171,18 @@ export interface StatusBarProps {
    * `agent.ctx.projectRoot`.
    */
   projectName?: string | undefined;
+  /**
+   * Working directory relative to the project root. Rendered on line 2
+   * as a 📂 chip so the user knows which subdirectory tools will resolve
+   * against. Updated live via `ctx.onWorkingDirChanged()`.
+   */
+  workingDir?: string | undefined;
   /** Autonomy mode chip: 'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-parallel'. */
   autonomy?: 'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-parallel' | undefined;
   /** Number of tracked bash/exec processes from the process registry. */
   processCount?: number | undefined;
   /** Items to hide from the status bar. */
-  hiddenItems?: Array<'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'> | undefined;
+  hiddenItems?: Array<'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'> | undefined;
   /**
    * Live iteration stage from the active autonomy engine. When set, renders
    * a chip like `⏸ decide` or `▶ execute(todo:fix-auth)` next to the
@@ -248,6 +254,7 @@ export function StatusBar({
   subagentCount = 0,
   brain,
   projectName,
+  workingDir,
   processCount,
   context,
   hiddenItems,
@@ -320,6 +327,7 @@ export function StatusBar({
     startedAt != null ||
     (git !== null && git !== undefined) ||
     (projectName !== undefined && projectName.length > 0) ||
+    (workingDir !== undefined && workingDir.length > 0) ||
     (goalSummary !== null && goalSummary !== undefined) ||
     !!modeLabel ||
     hasAutoProceed;
@@ -498,12 +506,22 @@ export function StatusBar({
               <Text color="blue">📁 {projectName}</Text>
             </>
           ) : null}
+          {workingDir && !hiddenSet.has('working_dir') ? (
+            <>
+              {yolo ||
+              startedAt != null ||
+              projectName ||
+              goalSummary ? (
+                <Text dimColor>│</Text>
+              ) : null}
+              <Text color="blue">📂 {workingDir}</Text>
+            </>
+          ) : null}
           {goalSummary ? (
             <>
-              {yolo || startedAt != null || projectName ? <Text dimColor>│</Text> : null}
+              {yolo || startedAt != null || projectName || workingDir ? <Text dimColor>│</Text> : null}
               <Text
                 color={
-                  goalSummary.goalState === 'active'
                     ? 'green'
                     : goalSummary.goalState === 'paused'
                       ? 'yellow'
@@ -527,6 +545,7 @@ export function StatusBar({
               eternalStage ||
               startedAt != null ||
               projectName ||
+              workingDir ||
               goalSummary ? (
                 <Text dimColor>│</Text>
               ) : null}
@@ -540,6 +559,7 @@ export function StatusBar({
               eternalStage ||
               startedAt != null ||
               projectName ||
+              workingDir ||
               goalSummary ||
               modeLabel ? (
                 <Text dimColor>│</Text>
@@ -551,10 +571,9 @@ export function StatusBar({
           ) : null}
           {git ? (
             <>
-              {yolo || startedAt != null || projectName ? <Text dimColor>│</Text> : null}
+              {yolo || startedAt != null || projectName || workingDir ? <Text dimColor>│</Text> : null}
               <Text>
                 <Text color="magenta">⎇ {git.branch}</Text>
-                {git.added > 0 ? <Text color="green"> +{git.added}</Text> : null}
                 {git.deleted > 0 ? <Text color="red"> -{git.deleted}</Text> : null}
                 {git.untracked > 0 ? <Text dimColor> ?{git.untracked}</Text> : null}
               </Text>

@@ -797,6 +797,24 @@ export function App({
     return base && base !== path.sep ? base : undefined;
   }, [projectRoot]);
 
+  // Working directory chip — relative path within the project. Uses
+  // React state + subscription to ctx.onWorkingDirChanged() so it stays
+  // live when the agent or user changes directories mid-session.
+  const [workingDirChip, setWorkingDirChip] = React.useState<string | undefined>(() => {
+    const ctx = agent.ctx;
+    if (ctx.workingDir && ctx.workingDir !== projectRoot) {
+      return path.relative(projectRoot, ctx.workingDir) || '.';
+    }
+    return undefined;
+  });
+  React.useEffect(() => {
+    const ctx = agent.ctx;
+    return ctx.onWorkingDirChanged((newDir) => {
+      const rel = path.relative(projectRoot, newDir) || '.';
+      setWorkingDirChip(rel === '.' ? undefined : rel);
+    });
+  }, [agent.ctx, projectRoot]);
+
   const chimeRef = useRef(chime);
   chimeRef.current = chime;
   const confirmExitRef = useRef(confirmExit);
@@ -4743,6 +4761,7 @@ export function App({
             context={contextWindow}
             brain={state.brain}
             projectName={projectName}
+            workingDir={workingDirChip}
             subagentCount={Object.keys(state.fleet).length}
             processCount={getProcessRegistry().activeCount}
             hiddenItems={hiddenItems}

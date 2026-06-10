@@ -297,8 +297,18 @@ export function FileExplorer() {
   const treeLoading = useFileStore((s) => s.treeLoading);
   const error = useFileStore((s) => s.error);
   const openFiles = useFileStore((s) => s.openFiles);
+  const activeFilePath = useFileStore((s) => s.activeFilePath);
   const cwd = useSessionStore((s) => s.cwd);
   const projectName = useSessionStore((s) => s.projectName);
+
+  // Detect OS path separator from cwd (server sends native paths).
+  const pathSep = cwd?.includes('\\') ? '\\' : '/';
+
+  /** Middle-truncate a string: keep first N and last M chars, insert … */
+  const truncateMiddle = (s: string, keepStart = 8, keepEnd = 4): string => {
+    if (s.length <= keepStart + keepEnd + 2) return s;
+    return `${s.slice(0, keepStart)}…${s.slice(-keepEnd)}`;
+  };
 
   // Are we in a subdirectory of the project root? Check by comparing
   // the last segment of cwd against the project name.
@@ -338,8 +348,72 @@ export function FileExplorer() {
     }));
   }, [cwd, projectName]);
 
+  // Breadcrumb scroll container — auto-scroll to the rightmost
+  // (current) segment so the user always sees where they are.
+  const bcRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = bcRef.current;
+    if (el && breadcrumbs.length > 1) {
+      el.scrollLeft = el.scrollWidth;
+    }
+  }, [breadcrumbs]);
+
   const handleBreadcrumbClick = useCallback((crumbPath: string) => {
     getWSClient().send({ type: 'working_dir.set', payload: { path: crumbPath } });
+  }, []);
+
+  // ── Context menu on breadcrumb right-click ──────────────────────────
+
+  interface CrumbContext {
+    absPath: string;
+    relPath: string;
+  }
+
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    crumb: CrumbContext;
+  } | null>(null);
+
+  // Close context menu on any click outside or Escape
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('click', close);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [contextMenu]);
+
+  const handleBreadcrumbContext = useCallback(
+    (e: React.MouseEvent, crumb: CrumbContext) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setContextMenu({ x: e.clientX, y: e.clientY, crumb });
+    },
+    [],
+  );
+
+  const copyToClipboard = useCallback((text: string) => {
+    void navigator.clipboard.writeText(text);
+    setContextMenu(null);
+  }, []);
+
+  // ── Current file → navigate to its parent directory ─────────────────
+
+  const handleFileIndicatorClick = useCallback(() => {
+    if (!activeFilePath) return;
+    const norm = activeFilePath.replace(/\\/g, '/');
+    const parent = norm.split('/').slice(0, -1).join('/') || '.';
+    getWSClient().send({ type: 'working_dir.set', payload: { path: parent } });
+  }, [activeFilePath]);
+
+  const handleShellOpen = useCallback((dirPath: string, target: 'terminal' | 'file-manager') => {
+    getWSClient().send({ type: 'shell.open', payload: { path: dirPath, target } });
+    setContextMenu(null);
   }, []);
 
   const handleGoUp = useCallback(() => {
@@ -387,6 +461,17 @@ export function FileExplorer() {
     return count;
   }, [tree]);
 
+  // Count files and folders in the current directory (first-level only)
+  const cwdStats = useMemo(() => {
+    let files = 0;
+    let dirs = 0;
+    for (const n of tree) {
+      if (n.type === 'directory') dirs++;
+      else files++;
+    }
+    return { files, dirs };
+  }, [tree]);
+
   // Reset globalExpand when user manually toggles — we detect this by
   // tracking whether the last action was a button click vs a tree click.
   const userInteractedRef = { value: false };
@@ -426,7 +511,6 @@ export function FileExplorer() {
 
   // When a file is opened (via double-click or external tab switch),
   // clear the local selection highlight so it doesn't linger.
-  const activeFilePath = useFileStore((s) => s.activeFilePath);
   useEffect(() => {
     if (activeFilePath) setSelectedPath(null);
   }, [activeFilePath]);
@@ -484,28 +568,90 @@ export function FileExplorer() {
       <div className="flex-1 overflow-y-auto py-1">
         {/* ── Breadcrumb bar — clickable path segments ── */}
         {breadcrumbs.length > 0 && (
-          <div className="flex items-center gap-0.5 px-1 pb-1 border-b border-border/30 overflow-x-auto">
-            {breadcrumbs.map((crumb, i) => (
+          <div
+            ref={bcRef}
+            className="relative flex items-center gap-0.5 px-1 pb-1 border-b border-border/30 overflow-x-auto"
+          >
+            {/* Left-edge fade mask — visible when content overflows to the left */}
+            <span className="sticky left-0 shrink-0 w-3 h-full bg-gradient-to-r from-background to-transparent pointer-events-none" />
+            {breadcrumbs.map((crumb, i) => {
+              const displayLabel = crumb.isLast
+                ? crumb.label
+                : truncateMiddle(crumb.label);
+              const tooltipPath = crumb.path.replace(/\//g, pathSep);
+
+              // Build absolute and relative paths for context menu
+              const normSegments = cwd
+                ? cwd.replace(/\\/g, '/').split('/').filter(Boolean)
+                : [];
+              const rootIdx = (() => {
+                for (let j = normSegments.length - 1; j >= 0; j--) {
+                  if (normSegments[j] === projectName) return j;
+                }
+                return -1;
+              })();
+              const absSegments = rootIdx >= 0
+                ? normSegments.slice(0, rootIdx + i + 1)
+                : normSegments.slice(0, i + 1);
+              const absPath = pathSep === '\\'
+                ? absSegments.join('\\')
+                : '/' + absSegments.join('/');
+              const relSegments = rootIdx >= 0
+                ? normSegments.slice(rootIdx + 1, rootIdx + i + 1)
+                : [];
+              const relPath = relSegments.join(pathSep) || '.';
+
+              return (
               <span key={crumb.path} className="flex items-center gap-0.5 shrink-0">
                 {i > 0 && (
-                  <span className="text-[9px] text-muted-foreground/40 select-none">/</span>
+                  <span className="text-[9px] text-muted-foreground/40 select-none">{pathSep}</span>
                 )}
                 <button
                   type="button"
                   onClick={() => handleBreadcrumbClick(crumb.path)}
+                  onContextMenu={(e) => handleBreadcrumbContext(e, { absPath, relPath })}
                   className={cn(
                     'px-1 py-0.5 rounded text-[11px] transition-colors whitespace-nowrap',
                     crumb.isLast
                       ? 'text-foreground font-medium'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
                   )}
-                  title={crumb.isLast ? 'Current directory' : `Navigate to ${crumb.path}`}
+                  title={crumb.isLast ? `Current directory: ${tooltipPath}` : `Navigate to ${tooltipPath}`}
                 >
-                  {crumb.label}
+                  {displayLabel}
                 </button>
               </span>
-            ))}
+              );
+            })}
+            {/* ── File/folder counter badge ── */}
+            {tree.length > 0 && (
+              <span className="ml-auto shrink-0 text-[9px] text-muted-foreground/50 tabular-nums pl-2">
+                {cwdStats.files > 0 && `${cwdStats.files} file${cwdStats.files === 1 ? '' : 's'}`}
+                {cwdStats.files > 0 && cwdStats.dirs > 0 && ', '}
+                {cwdStats.dirs > 0 && `${cwdStats.dirs} folder${cwdStats.dirs === 1 ? '' : 's'}`}
+              </span>
+            )}
           </div>
+        )}
+        {/* ── Current file indicator — shows which file is open/selected ── */}
+        {activeFilePath && (
+          <button
+            type="button"
+            onClick={handleFileIndicatorClick}
+            className="flex items-center gap-1 w-full text-left px-2 py-0.5 border-b border-border/30 text-[10px] text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+            title={`Navigate to parent directory of ${activeFilePath.replace(/\//g, pathSep)}`}
+          >
+            <FileCode className="h-3 w-3 shrink-0" />
+            <span className="truncate">
+              {(() => {
+                const segments = activeFilePath.replace(/\\/g, '/').split('/');
+                return segments[segments.length - 1] ?? activeFilePath;
+              })()}
+            </span>
+            <span className="ml-auto text-[8px] text-muted-foreground/40 shrink-0">
+              go to dir
+            </span>
+          </button>
         )}
         {/* ── Parent directory fallback (when breadcrumbs can't be computed) ── */}
         {breadcrumbs.length === 0 && !isAtRoot && (
@@ -542,6 +688,49 @@ export function FileExplorer() {
           </p>
         )}
       </div>
+
+      {/* ── Breadcrumb right-click context menu ── */}
+      {contextMenu && (
+        <div
+          className="fixed z-50 min-w-[140px] bg-popover border rounded-md shadow-md py-1 text-[11px]"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            type="button"
+            onClick={() => copyToClipboard(contextMenu.crumb.absPath)}
+            className="flex items-center gap-2 w-full text-left px-3 py-1.5 hover:bg-accent transition-colors"
+          >
+            Copy absolute path
+          </button>
+          <button
+            type="button"
+            onClick={() => copyToClipboard(contextMenu.crumb.relPath)}
+            className="flex items-center gap-2 w-full text-left px-3 py-1.5 hover:bg-accent transition-colors"
+          >
+            Copy relative path
+          </button>
+          <div className="border-t border-border/50 my-0.5" />
+          <button
+            type="button"
+            onClick={() => handleShellOpen(contextMenu.crumb.absPath, 'terminal')}
+            className="flex items-center gap-2 w-full text-left px-3 py-1.5 hover:bg-accent transition-colors"
+          >
+            Open in terminal
+          </button>
+          <button
+            type="button"
+            onClick={() => handleShellOpen(contextMenu.crumb.absPath, 'file-manager')}
+            className="flex items-center gap-2 w-full text-left px-3 py-1.5 hover:bg-accent transition-colors"
+          >
+            Open in file manager
+          </button>
+          <div className="border-t border-border/50 mt-0.5 pt-0.5">
+            <div className="px-3 py-1 text-[9px] text-muted-foreground/50 truncate max-w-[200px]">
+              {contextMenu.crumb.absPath}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

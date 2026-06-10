@@ -714,6 +714,19 @@ export async function startWebUI(
       : null;
   const clients = new Map<WebSocket, ConnectedClient>();
 
+  // ── Subscribe to working directory changes from the CLI ──────────────
+  // When ctx.setWorkingDir() is called from the CLI (e.g. /wd, /cd, or
+  // the set_working_dir tool), update the server's workingDir reference
+  // and broadcast to all connected WebUI clients so the file explorer
+  // and the WorkingDirChip UI stay in sync.
+  context.onWorkingDirChanged((newDir) => {
+    workingDir = newDir;
+    broadcast(clients, {
+      type: 'working_dir.changed',
+      payload: { cwd: newDir, projectRoot },
+    });
+  });
+
   // Per-connection message rate limiting: 60 messages per 60-second window.
   // Exceeding clients are temporarily blocked to prevent flooding.
   // Uses sessionId as the key once connected, falling back to ws for
@@ -2330,6 +2343,54 @@ export async function startWebUI(
           });
 
           sendResult(ws, true, `Working directory set to ${resolved}`);
+        } catch (err) {
+          sendResult(ws, false, errMessage(err));
+        }
+        break;
+      }
+
+      // ── Shell open — spawn terminal or file manager at a path ─────────
+
+      case 'shell.open': {
+        const { path: targetPath, target } = (
+          msg as { payload: { path: string; target: 'terminal' | 'file-manager' } }
+        ).payload;
+        try {
+          const resolved = path.resolve(targetPath);
+          await fs.access(resolved);
+
+          const { exec } = await import('node:child_process');
+          const platform = process.platform; // 'win32' | 'darwin' | 'linux'
+
+          let cmd: string;
+          if (target === 'file-manager') {
+            if (platform === 'win32') {
+              cmd = `explorer "${resolved}"`;
+            } else if (platform === 'darwin') {
+              cmd = `open "${resolved}"`;
+            } else {
+              cmd = `xdg-open "${resolved}"`;
+            }
+          } else {
+            // terminal
+            if (platform === 'win32') {
+              cmd = `start cmd /k cd /d "${resolved}"`;
+            } else if (platform === 'darwin') {
+              cmd = `open -a Terminal "${resolved}"`;
+            } else {
+              // Try several terminal emulators
+              cmd = `x-terminal-emulator --working-directory="${resolved}" 2>/dev/null || gnome-terminal --working-directory="${resolved}" 2>/dev/null || xterm -e "cd '${resolved}' && $SHELL"`;
+            }
+          }
+
+          exec(cmd, { timeout: 5000 }, (err) => {
+            // Fire-and-forget — errors are logged but not surfaced
+            if (err) {
+              logger.warn(`shell.open failed: ${err.message}`);
+            }
+          });
+
+          sendResult(ws, true, `Opened ${target} at ${resolved}`);
         } catch (err) {
           sendResult(ws, false, errMessage(err));
         }

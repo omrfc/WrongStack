@@ -210,10 +210,10 @@ export interface SlashCommandContext {
    * so the TUI can update without a restart.
    */
   statuslineHiddenItems?: Array<
-    'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'
+    'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
   >;
   setStatuslineHiddenItems?: (
-    items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>,
+    items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'>,
   ) => void;
   /**
    * Controller for the agents monitor overlay. The TUI installs the actual
@@ -320,6 +320,7 @@ import { buildTodosCommand } from './todos.js';
 import { buildTasksCommand } from './tasks.js';
 import { buildToolsCommand } from './tools.js';
 import { buildWorktreeCommand } from './worktree.js';
+import { buildWorkingDirCommand } from './working-dir.js';
 import { buildProjectCommand } from './project.js';
 import { buildTechStackCommand } from './techstack.js';
 import { buildYoloCommand } from './yolo.js';
@@ -375,6 +376,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildCollabCommand(opts),
     buildReviewCommand(opts),
     buildProjectCommand(opts),
+    buildWorkingDirCommand(opts),
     buildStatuslineCommand({
       cwd: opts.cwd,
       hiddenItems: opts.statuslineHiddenItems ?? [],

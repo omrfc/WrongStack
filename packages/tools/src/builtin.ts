@@ -23,6 +23,7 @@ import { readTool } from './read.js';
 import { replaceTool } from './replace.js';
 import { scaffoldTool } from './scaffold.js';
 import { searchTool } from './search.js';
+import { setWorkingDirTool } from './set-working-dir.js';
 import { taskTool } from './task.js';
 import { testTool } from './test.js';
 import { todoTool } from './todo.js';
@@ -69,4 +70,5 @@ export const builtinTools: Tool[] = [
   codebaseIndexTool,
   codebaseSearchTool,
   codebaseStatsTool,
+  setWorkingDirTool,
 ];
