@@ -89,7 +89,10 @@ export async function buildPickerItems(opts: {
 }): Promise<PickerItem[]> {
   const manifest = await loadManifest(opts.globalConfigPath);
   const sorted = [...manifest.projects].sort((a, b) => {
-    if (a.lastSeen && b.lastSeen) return b.lastSeen.localeCompare(a.lastSeen);
+    if (a.lastSeen && b.lastSeen) {
+      const cmp = b.lastSeen.localeCompare(a.lastSeen);
+      return cmp !== 0 ? cmp : a.name.localeCompare(b.name);
+    }
     if (a.lastSeen) return -1;
     if (b.lastSeen) return 1;
     return a.name.localeCompare(b.name);

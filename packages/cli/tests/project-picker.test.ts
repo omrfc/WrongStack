@@ -67,7 +67,7 @@ describe('filterItems', () => {
   it('filters project items by label (case-insensitive)', () => {
     const items: PickerItem[] = [
       projectItem({ key: 'a', label: 'My Project', subtitle: '/home/projects/my-project' }),
-      projectItem({ key: 'b', label: 'Another Repo', subtitle: '/home/projects/other' }),
+      projectItem({ key: 'b', label: 'Another Repo', subtitle: '/home/work/other-repo' }),
     ];
     const result = filterItems(items, 'project');
     expect(result).toHaveLength(1);
@@ -140,8 +140,10 @@ describe('skipDivider', () => {
       dividerItem(),
       projectItem({ key: 'b', label: 'B' }),
     ];
-    expect(skipDivider(items, 3, -1)).toBe(0);
+    // Start at index 2 (a divider), skip backward to 0 (project A)
     expect(skipDivider(items, 2, -1)).toBe(0);
+    // Start at index 1 (a divider), skip backward to 0 (project A)
+    expect(skipDivider(items, 1, -1)).toBe(0);
   });
 
   it('clamps to bounds when all items are dividers', () => {
