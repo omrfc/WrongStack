@@ -35,6 +35,7 @@ describe('loadStatuslineConfig', () => {
     const cfg = await loadStatuslineConfig();
     expect(cfg.todos).toBe(true);
     expect(cfg.cost).toBe(true);
+    expect(cfg.working_dir).toBe(true);
   });
 
   it('returns DEFAULTS merged with user overrides', async () => {
@@ -87,7 +88,7 @@ describe('saveStatuslineConfig', () => {
 
 // ── /statusline command ──────────────────────────────────────────────────────
 
-function makeDeps(initial: StatuslineConfig = { todos: true, plan: true, fleet: true, git: true, elapsed: true, context: true, cost: true }): StatuslineCommandDeps & { _cfg: StatuslineConfig } {
+function makeDeps(initial: StatuslineConfig = { todos: true, plan: true, fleet: true, git: true, elapsed: true, context: true, cost: true, working_dir: true }): StatuslineCommandDeps & { _cfg: StatuslineConfig } {
   const state = { cfg: { ...initial } };
   return {
     cwd: tmp,
@@ -161,5 +162,22 @@ describe('buildStatuslineCommand', () => {
     const cmd = buildStatuslineCommand(makeDeps());
     const res = await cmd.run('todos OFF');
     expect(res.message).toBe('statusline todos: off');
+  });
+
+  it('working_dir off persists and appends to hidden items', async () => {
+    const setHidden = vi.fn();
+    const deps = { ...makeDeps(), hiddenItems: ['cost'], setHiddenItems: setHidden } as never as StatuslineCommandDeps;
+    const cmd = buildStatuslineCommand(deps);
+    const res = await cmd.run('working_dir off');
+    expect(res.message).toBe('statusline working_dir: off');
+    expect(setHidden).toHaveBeenCalledWith(['cost', 'working_dir']);
+  });
+
+  it('working_dir on persists and removes from hidden items', async () => {
+    const setHidden = vi.fn();
+    const deps = { ...makeDeps(), hiddenItems: ['working_dir', 'cost'], setHiddenItems: setHidden } as never as StatuslineCommandDeps;
+    const cmd = buildStatuslineCommand(deps);
+    await cmd.run('working_dir on');
+    expect(setHidden).toHaveBeenCalledWith(['cost']);
   });
 });

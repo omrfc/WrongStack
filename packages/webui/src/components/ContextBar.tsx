@@ -95,9 +95,10 @@ export function ContextBar({
         className,
       )}
       title={
-        tokens !== undefined && maxTokens !== undefined
+        (tokens !== undefined && maxTokens !== undefined
           ? `Context window: ${tokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens (${pctText})`
-          : `Context window: ${pctText}`
+          : `Context window: ${pctText}`) +
+        (onClick ? ' — click for breakdown' : '')
       }
       onClick={onClick ? (e: React.MouseEvent) => { e.stopPropagation(); onClick(); } : undefined}
       onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onClick(); } } : undefined}
@@ -150,9 +151,10 @@ export function ContextFillBar({
         className,
       )}
       title={
-        tokens !== undefined && maxTokens !== undefined
-          ? `Context window: ${tokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens (${pctText}) — click for breakdown`
-          : `Context window: ${pctText}`
+        (tokens !== undefined && maxTokens !== undefined
+          ? `Context window: ${tokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens (${pctText})`
+          : `Context window: ${pctText}`) +
+        (onClick ? ' — click for breakdown' : '')
       }
       onClick={onClick ? (e: React.MouseEvent) => { e.stopPropagation(); onClick(); } : undefined}
       onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onClick(); } } : undefined}

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ContextBar, ContextFillBar } from './ContextBar';
+import { ContextBreakdownModal } from './ContextBreakdownModal';
 import { fmtTok } from './ChatView/utils';
 
 // ── Mode editor form state ──
@@ -81,20 +82,6 @@ type ContextMode = {
   preserveK: number;
   eliseThreshold: number;
 };
-
-/** Debug payload from context.debug WS response. */
-interface ContextDebugPayload {
-  total: number;
-  mode?: string | undefined;
-  policy?: unknown | undefined;
-  systemPrompt: number;
-  tools: { total: number; count: number; breakdown: Array<{ name: string; tokens: number }> };
-  messages: {
-    total: number;
-    count: number;
-    breakdown: Array<{ index: number; role: string; tokens: number; preview: string }>;
-  };
-}
 
 /** Compacted payload from context.compacted WS response. */
 interface ContextCompactedPayload {
@@ -218,9 +205,7 @@ export function ContextPanel({
   const modes = contextModes.length > 0 ? contextModes : FALLBACK_MODES as unknown as typeof contextModes;
 
   // Context debug
-  const [debugData, setDebugData] = useState<ContextDebugPayload | null>(null);
-  const [debugOpen, setDebugOpen] = useState(false);
-  const [debugLoading, setDebugLoading] = useState(false);
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
 
   // Compaction result
   const [compactResult, setCompactResult] = useState<ContextCompactedPayload | null>(null);
@@ -294,19 +279,6 @@ export function ContextPanel({
     setTimeout(() => {
       setRepairLoading(false);
     }, 2000);
-  };
-
-  const handleDebug = () => {
-    setDebugLoading(true);
-    setDebugData(null);
-    setDebugOpen(true);
-    const ws = getWSClient(wsUrl);
-    ws?.send?.({ type: 'context.debug' });
-    // The server will reply with context.debug event — we listen in ws-handlers
-    // For now, show loading state
-    setTimeout(() => {
-      setDebugLoading(false);
-    }, 3000);
   };
 
   const formatDuration = (start: number | null) => {
@@ -785,16 +757,11 @@ export function ContextPanel({
 
           <button
             type="button"
-            onClick={handleDebug}
-            disabled={debugLoading}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-xs hover:bg-accent transition-colors group disabled:opacity-50"
+            onClick={() => setBreakdownOpen(true)}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-xs hover:bg-accent transition-colors group"
             title="Show context breakdown for debugging"
           >
-            {debugLoading ? (
-              <RefreshCw className="h-3.5 w-3.5 text-muted-foreground animate-spin" />
-            ) : (
-              <AlertTriangle className="h-3.5 w-3.5 text-muted-foreground group-hover:text-[hsl(var(--warning))] transition-colors" />
-            )}
+            <AlertTriangle className="h-3.5 w-3.5 text-muted-foreground group-hover:text-[hsl(var(--warning))] transition-colors" />
             <span className="flex-1 text-left">Debug Context</span>
           </button>
         </div>
@@ -812,87 +779,7 @@ export function ContextPanel({
         )}
       </div>
 
-      {/* ── Debug Overlay ── */}
-      {debugOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh] bg-black/40 backdrop-blur-sm">
-          <div className="w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-xl border bg-card shadow-2xl">
-            <div className="flex items-center justify-between px-4 py-3 border-b">
-              <h3 className="text-sm font-semibold flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-[hsl(var(--warning))]" />
-                Context Debug
-              </h3>
-              <button
-                type="button"
-                onClick={() => setDebugOpen(false)}
-                className="p-1 rounded-md hover:bg-muted transition-colors"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="p-4">
-              {debugLoading ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                  Loading context debug…
-                </div>
-              ) : debugData ? (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="rounded bg-muted/30 px-3 py-2">
-                      <span className="text-[10px] text-muted-foreground">Total Tokens</span>
-                      <span className="block text-sm font-mono font-medium">{debugData.total}</span>
-                    </div>
-                    <div className="rounded bg-muted/30 px-3 py-2">
-                      <span className="text-[10px] text-muted-foreground">System Prompt</span>
-                      <span className="block text-sm font-mono font-medium">{debugData.systemPrompt}</span>
-                    </div>
-                    <div className="rounded bg-muted/30 px-3 py-2">
-                      <span className="text-[10px] text-muted-foreground">Tools</span>
-                      <span className="block text-sm font-mono font-medium">
-                        {debugData.tools.total} ({debugData.tools.count} tools)
-                      </span>
-                    </div>
-                  </div>
-                  <div>
-                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-                      Tool Breakdown
-                    </span>
-                    <div className="mt-1 space-y-1">
-                      {debugData.tools.breakdown.map((t) => (
-                        <div key={t.name} className="flex items-center justify-between text-xs">
-                          <span className="font-mono">{t.name}</span>
-                          <span className="tabular-nums text-muted-foreground">{t.tokens} tok</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-                      Messages ({debugData.messages.count}) — {debugData.messages.total} tok
-                    </span>
-                    <div className="mt-1 space-y-1">
-                      {debugData.messages.breakdown.slice(0, 15).map((m) => (
-                        <div key={m.index} className="flex items-center gap-2 text-xs">
-                          <span className="text-muted-foreground font-mono w-6">{m.index}</span>
-                          <span className="text-muted-foreground font-mono w-12">{m.role}</span>
-                          <span className="tabular-nums text-muted-foreground w-12">{m.tokens}t</span>
-                          <span className="text-muted-foreground/80 truncate">
-                            {m.preview.slice(0, 60)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  No debug data received yet. Click Debug Context again.
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <ContextBreakdownModal open={breakdownOpen} onClose={() => setBreakdownOpen(false)} />
     </div>
   );
 }
