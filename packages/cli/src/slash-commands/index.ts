@@ -320,6 +320,7 @@ import { buildTodosCommand } from './todos.js';
 import { buildTasksCommand } from './tasks.js';
 import { buildToolsCommand } from './tools.js';
 import { buildWorktreeCommand } from './worktree.js';
+import { buildProjectCommand } from './project.js';
 import { buildTechStackCommand } from './techstack.js';
 import { buildYoloCommand } from './yolo.js';
 import { buildMouseCommand } from './mouse.js';
@@ -373,6 +374,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildModelsCommand(opts),
     buildCollabCommand(opts),
     buildReviewCommand(opts),
+    buildProjectCommand(opts),
     buildStatuslineCommand({
       cwd: opts.cwd,
       hiddenItems: opts.statuslineHiddenItems ?? [],

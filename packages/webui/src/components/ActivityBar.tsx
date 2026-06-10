@@ -163,8 +163,6 @@ export function ActivityBar() {
   );
 }
 
-// ── Icon button ────────────────────────────────────────────────────────
-
 function ActivityIcon({
   def,
   active,

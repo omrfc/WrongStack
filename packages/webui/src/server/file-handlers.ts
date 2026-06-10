@@ -21,6 +21,9 @@ import { send, errMessage } from './ws-utils.js';
 interface FilesListPayload {
   query?: string | undefined;
   limit?: number | undefined;
+  /** Optional directory root for the file list (relative to projectRoot).
+   *  When set, only files under this directory are returned. */
+  path?: string | undefined;
 }
 
 interface FilesReadPayload {
@@ -43,7 +46,7 @@ interface FilesWritePayload {
  */
 export async function handleFilesTree(
   ws: WebSocket,
-  _msg: unknown,
+  msg: unknown,
   projectRoot: string,
 ): Promise<void> {
   interface TreeNode {
@@ -52,6 +55,29 @@ export async function handleFilesTree(
     type: 'file' | 'directory';
     children?: TreeNode[];
   }
+
+  // Use the optional `path` from the message payload as the tree root.
+  // When absent, fall back to projectRoot (backward compatible).
+  const payload = (msg as { payload?: { path?: string | undefined } }).payload;
+  const treeRoot = payload?.path
+    ? path.resolve(projectRoot, payload.path)
+    : projectRoot;
+
+  // Guard: treeRoot must stay inside projectRoot.
+  if (!treeRoot.startsWith(projectRoot + path.sep) && treeRoot !== projectRoot) {
+    send(ws, {
+      type: 'files.tree',
+      payload: { root: projectRoot, tree: [], error: 'Path outside project root' },
+    });
+    return;
+  }
+
+  // Compute the path prefix so tree paths are always relative to
+  // projectRoot (not treeRoot). This ensures double-clicking a file in
+  // the explorer sends the correct path to files.read/files.write.
+  const pathPrefix = treeRoot === projectRoot
+    ? ''
+    : (path.relative(projectRoot, treeRoot) + '/').replace(/\\/g, '/');
 
   async function buildTree(dir: string, rel: string, depth: number): Promise<TreeNode[]> {
     if (depth > 10) return [];
@@ -70,24 +96,32 @@ export async function handleFilesTree(
       if (isHiddenEntry(e.name)) continue;
       const childRel = rel ? `${rel}/${e.name}` : e.name;
       const childAbs = path.join(dir, e.name);
+      // Prepend the workingDir prefix so the path is projectRoot-relative
+      const childPath = pathPrefix + childRel;
       if (e.isDirectory()) {
         if (SKIP_DIRS.has(e.name)) continue;
         const children = await buildTree(childAbs, childRel, depth + 1);
-        nodes.push({ name: e.name, path: childRel, type: 'directory', children });
+        nodes.push({ name: e.name, path: childPath, type: 'directory', children });
       } else if (e.isFile()) {
-        nodes.push({ name: e.name, path: childRel, type: 'file' });
+        nodes.push({ name: e.name, path: childPath, type: 'file' });
       }
     }
     return nodes;
   }
 
   try {
-    const tree = await buildTree(projectRoot, '', 0);
-    send(ws, { type: 'files.tree', payload: { root: projectRoot, tree } });
+    const tree = await buildTree(treeRoot, '', 0);
+    const rootLabel = treeRoot === projectRoot
+      ? projectRoot
+      : path.relative(projectRoot, treeRoot) || '.';
+    send(ws, { type: 'files.tree', payload: { root: rootLabel, tree } });
   } catch (err) {
+    const rootLabel = treeRoot === projectRoot
+      ? projectRoot
+      : path.relative(projectRoot, treeRoot) || '.';
     send(ws, {
       type: 'files.tree',
-      payload: { root: projectRoot, tree: [], error: errMessage(err) },
+      payload: { root: rootLabel, tree: [], error: errMessage(err) },
     });
   }
 }
@@ -168,6 +202,16 @@ export async function handleFilesList(
 ): Promise<void> {
   const payload = (msg as { payload?: FilesListPayload }).payload ?? {};
   const limit = payload.limit ?? 50;
+  const listRoot = payload.path
+    ? path.resolve(projectRoot, payload.path)
+    : projectRoot;
+
+  // Guard: listRoot must stay inside projectRoot.
+  if (!listRoot.startsWith(projectRoot + path.sep) && listRoot !== projectRoot) {
+    send(ws, { type: 'files.list', payload: { files: [] } });
+    return;
+  }
+
   const results: string[] = [];
 
   async function walk(dir: string, rel: string, depth: number): Promise<void> {
@@ -191,7 +235,7 @@ export async function handleFilesList(
     }
   }
 
-  await walk(projectRoot, '', 0);
+  await walk(listRoot, '', 0);
   send(ws, {
     type: 'files.list',
     payload: { files: rankFiles(results, payload.query ?? '', limit) },

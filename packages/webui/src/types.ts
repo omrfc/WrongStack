@@ -515,8 +515,8 @@ export type WSClientMessage =
   | { type: 'session.delete'; payload: { id: string } }
   | { type: 'modes.list' }
   | { type: 'mode.switch'; payload: { id: string } }
-  | { type: 'files.list'; payload: { query?: string | undefined; limit?: number | undefined } }
-  | { type: 'files.tree'; payload: Record<string, never> }
+  | { type: 'files.list'; payload: { query?: string | undefined; limit?: number | undefined; path?: string | undefined } }
+  | { type: 'files.tree'; payload: { path?: string | undefined } | Record<string, never> }
   | { type: 'files.read'; payload: { filePath: string } }
   | { type: 'files.write'; payload: { filePath: string; content: string } }
   | { type: 'todos.get' }

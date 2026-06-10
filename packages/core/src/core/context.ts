@@ -51,6 +51,12 @@ export interface ContextInit {
  * `state` accessor). New code should declare the narrower type at its
  * parameter — pass `ctx` for it. Existing tools that accept `Context`
  * still work because `Context` structurally satisfies both.
+ *
+ * The single source of truth for the project directory is `projectRoot`.
+ * All tools (read/write/bash/exec) resolve paths relative to this.
+ * Sessions, config, memory, and logs are also stored under this root.
+ * There is no separate mutable "working directory" — the working directory
+ * IS the project root.
  */
 export class Context implements RunEnv {
   messages: Message[] = [];

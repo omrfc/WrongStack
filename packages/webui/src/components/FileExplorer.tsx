@@ -18,7 +18,7 @@ import {
   Loader2,
   Minimize2,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 // ── File icon by extension ────────────────────────────────────────────
 
@@ -231,7 +231,7 @@ function TreeNodeItem({
           ) : (
             <DirIcon className={cn('h-3.5 w-3.5 shrink-0', dirColor)} />
           )}
-          <span className="truncate font-medium">{node.name}</span>
+          <span className="truncate font-medium flex-1 min-w-0">{node.name}</span>
         </button>
         {expanded && hasChildren && (
           <div>
@@ -294,6 +294,22 @@ export function FileExplorer() {
   const treeLoading = useFileStore((s) => s.treeLoading);
   const error = useFileStore((s) => s.error);
   const openFiles = useFileStore((s) => s.openFiles);
+
+  // Debounce the loading indicator: only show the spinner after 150ms of
+  // continuous loading. Fast refreshes (<150ms) skip the flash entirely.
+  const [showSpinner, setShowSpinner] = useState(false);
+  const spinnerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (treeLoading) {
+      spinnerTimer.current = setTimeout(() => setShowSpinner(true), 150);
+    } else {
+      if (spinnerTimer.current) clearTimeout(spinnerTimer.current);
+      setShowSpinner(false);
+    }
+    return () => {
+      if (spinnerTimer.current) clearTimeout(spinnerTimer.current);
+    };
+  }, [treeLoading]);
 
   // Single-click selection highlight (separate from open/sActive state)
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -359,7 +375,7 @@ export function FileExplorer() {
     if (activeFilePath) setSelectedPath(null);
   }, [activeFilePath]);
 
-  if (treeLoading) {
+  if (showSpinner) {
     return (
       <div className="flex items-center justify-center h-full py-8">
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />

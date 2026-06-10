@@ -494,8 +494,8 @@ export class WrongStackWebSocketClient {
     this.send({ type: 'mode.switch', payload: { id } });
   }
 
-  listFiles(query?: string, limit?: number) {
-    this.send({ type: 'files.list', payload: { query, limit } });
+  listFiles(query?: string, limit?: number, path?: string) {
+    this.send({ type: 'files.list', payload: { query, limit, path } });
   }
 
   getTodos() {

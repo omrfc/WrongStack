@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { DefaultLogger } from './infrastructure/logger.js';
+import { DefaultLogger, noOpLogger } from './infrastructure/logger.js';
 import { DefaultPathResolver } from './infrastructure/path-resolver.js';
 import { DefaultSecretVault, migratePlaintextSecrets } from './security/secret-vault.js';
 import { DefaultConfigLoader } from './storage/config-loader.js';
@@ -81,6 +81,8 @@ export async function bootConfig(options: BootConfigOptions = {}): Promise<BootC
   await fs.mkdir(wpaths.projectDir, { recursive: true });
   await fs.mkdir(wpaths.projectSessions, { recursive: true });
   await writeProjectMeta(wpaths, projectRoot);
+  // Also register/update the project in ~/.wrongstack/projects.json
+  await registerProjectInManifest(wpaths, projectRoot);
   await ensureGitignore(projectRoot);
 
   // Clean up stale project directories left behind by tests or deleted
@@ -94,9 +96,13 @@ export async function bootConfig(options: BootConfigOptions = {}): Promise<BootC
   // Auto-encrypt any plaintext secrets still sitting in config files (left
   // over from before the vault existed, or hand-written). Silent no-op for
   // already-encrypted configs; never blocks boot on migration issues.
+  // Uses noOpLogger because the structured logger isn't built until after
+  // config loads; migration is best-effort and the warning it would emit
+  // (permission errors on restrictFilePermissions) is the same one the
+  // main logger would surface on the next boot.
   for (const file of [wpaths.globalConfig, wpaths.projectLocalConfig]) {
     try {
-      const { migrated } = await migratePlaintextSecrets(file, vault);
+      const { migrated } = await migratePlaintextSecrets(file, vault, noOpLogger);
       if (migrated > 0) {
         writeErr(`[${appLabel}] Encrypted ${migrated} plaintext secret(s) in ${file}\n`);
       }
@@ -183,6 +189,37 @@ async function writeProjectMeta(paths: WstackPaths, projectRoot: string): Promis
     await fs.writeFile(paths.projectMeta, JSON.stringify(meta, null, 2));
   } catch {
     // best-effort
+  }
+}
+
+/**
+ * Register or update the current project in ~/.wrongstack/projects.json.
+ * This is the central manifest that the /project command uses.
+ */
+async function registerProjectInManifest(paths: WstackPaths, projectRoot: string): Promise<void> {
+  try {
+    const manifestPath = path.join(paths.globalRoot, 'projects.json');
+    let manifest: { projects: Array<{ name: string; root: string; slug: string; lastSeen?: string; createdAt?: string }> };
+    try {
+      const raw = await fs.readFile(manifestPath, 'utf8');
+      manifest = JSON.parse(raw);
+    } catch {
+      manifest = { projects: [] };
+    }
+
+    const now = new Date().toISOString();
+    const existing = manifest.projects.find((p) => p.root === projectRoot);
+    if (existing) {
+      existing.lastSeen = now;
+    } else {
+      const slug = paths.projectSlug;
+      const name = path.basename(projectRoot);
+      manifest.projects.push({ name, root: projectRoot, slug, lastSeen: now, createdAt: now });
+    }
+
+    await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+  } catch {
+    // best-effort — never blocks boot
   }
 }
 

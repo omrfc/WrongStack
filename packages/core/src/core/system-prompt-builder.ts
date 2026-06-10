@@ -92,6 +92,7 @@ export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
     const layer1 = LAYER_1_IDENTITY;
     const layer2 = this.buildToolUsage(ctx.tools);
     const layer3 = await this.buildEnvironment(ctx);
+    const layer3WithDir = `${layer3}\n- Project root: ${ctx.projectRoot}`;
     const layer4 = await this.buildMemoryAndSkills();
     const layer5 = await this.buildMode();
     // Plans anchor the HOST agent across turns. Subagents run one
@@ -103,7 +104,7 @@ export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
     const blocks: TextBlock[] = [
       { type: 'text', text: layer1 },
       { type: 'text', text: layer2 },
-      { type: 'text', text: layer3 },
+      { type: 'text', text: layer3WithDir },
     ];
 
     if (layer4.trim()) {
@@ -413,8 +414,6 @@ summarize it, and let the tool result hold only the summary.`);
     const lines = [
       '## Environment',
       '',
-      `- Working directory: ${ctx.cwd}`,
-      `- Project root: ${ctx.projectRoot}`,
       `- Operating system: ${platform}`,
       `- Shell: ${shell}`,
       `- Node.js: ${node}`,
