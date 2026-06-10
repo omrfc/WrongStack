@@ -183,7 +183,7 @@ async function addProjectCommand(opts: SlashCommandContext, ctx: Context | undef
 
 // ── Rename ──────────────────────────────────────────────────────────────
 
-async function renameProjectCommand(opts: SlashCommandContext, ctx: Context | undefined, slugOrName: string, newName: string) {
+async function renameProjectCommand(opts: SlashCommandContext, _ctx: Context | undefined, slugOrName: string, newName: string) {
   const manifest = await loadManifest(opts.paths?.globalConfig);
   const project = findProject(manifest, slugOrName);
   if (!project) {
@@ -199,7 +199,7 @@ async function renameProjectCommand(opts: SlashCommandContext, ctx: Context | un
 
 // ── Remove ──────────────────────────────────────────────────────────────
 
-async function removeProjectCommand(opts: SlashCommandContext, ctx: Context | undefined, slugOrName: string) {
+async function removeProjectCommand(opts: SlashCommandContext, _ctx: Context | undefined, slugOrName: string) {
   const manifest = await loadManifest(opts.paths?.globalConfig);
   const idx = manifest.projects.findIndex(
     (p) => p.slug === slugOrName || p.name.toLowerCase() === slugOrName.toLowerCase(),
