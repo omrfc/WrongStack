@@ -82,6 +82,12 @@ export function createAgentResponseHandler(a: AgentInternals): AgentResponseHand
       stopReason: res.stopReason,
       usage: res.usage,
     });
+    // Flush the LLM response to disk before we begin tool execution.
+    // If the process is killed during a long-running tool, the response
+    // (with its tool_use blocks + any text) is already durable. Without
+    // this, a SIGKILL mid-tool leaves the session log with orphaned
+    // tool_call_end events and no corresponding user_input/llm_response.
+    await a.ctx.session.flush();
 
     if (a.ctx.signal.aborted) {
       let finalText = '';

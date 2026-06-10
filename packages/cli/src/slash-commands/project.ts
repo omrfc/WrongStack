@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import type { Context, SlashCommand } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
 import { loadManifest, saveManifest, findProject, generateSlug, ensureProjectDataDir } from './project-utils.js';
+import { runProjectPicker } from '../project-picker.js';
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 function fmtLastSeen(iso: string | undefined): string {
@@ -37,7 +38,9 @@ export function buildProjectCommand(opts: SlashCommandContext): SlashCommand {
       '  /project add <path> [name]        Register a new project',
       '  /project rename <slug> <name>     Rename a project',
       '  /project remove <slug>            Remove a project from the list',
+      '  /project switch                   Open interactive project picker (arrow keys)',
       '  /project switch <dir> [--name <n>]  Spawn wstack in target directory',
+      '  /project switch --interactive       Force interactive picker even with args',
       '',
       'Projects are registered in ~/.wrongstack/projects.json.',
       'Each project has a name (user-friendly), root path, and slug.',
@@ -77,7 +80,23 @@ export function buildProjectCommand(opts: SlashCommandContext): SlashCommand {
 
       if (lower.startsWith('switch ') || lower === 'switch') {
         const rest = trimmed.slice(lower.startsWith('switch ') ? 7 : 6).trim();
-        if (!rest) return { message: 'Usage: /project switch <dir> [--name <name>]' };
+
+        // Check for --interactive / -i flag (can appear anywhere in args)
+        const interactiveFlag = /\s--interactive\b|\s-i\b|^--interactive\b|^-i\b/.test(rest);
+        if (interactiveFlag) {
+          if (!process.stdin.isTTY) {
+            return { message: 'Usage: /project switch --interactive (interactive picker requires a TTY)' };
+          }
+          return switchInteractiveCommand(opts, ctx);
+        }
+
+        if (!rest) {
+          // No args — launch interactive project picker
+          if (!process.stdin.isTTY) {
+            return { message: 'Usage: /project switch <dir> [--name <name>] (interactive picker requires a TTY)' };
+          }
+          return switchInteractiveCommand(opts, ctx);
+        }
         // Parse optional --name flag
         let target = rest;
         let displayName: string | undefined;
@@ -134,7 +153,7 @@ async function listProjectsCommand(opts: SlashCommandContext, ctx: Context | und
     }
     lines.push('');
   }
-  lines.push(color.dim('Commands: add <path> [name]  |  rename <slug> <name>  |  remove <slug>  |  switch <dir>'));
+  lines.push(color.dim('Commands: add <path> [name]  |  rename <slug> <name>  |  remove <slug>  |  switch [dir] (no args = picker)'));
 
   return { message: lines.join('\n') };
 }
@@ -283,4 +302,209 @@ async function switchProjectCommand(opts: SlashCommandContext, ctx: Context | un
       '',
     ].join('\n'),
   };
+}
+
+// ── Interactive Switch ────────────────────────────────────────────────────
+
+async function switchInteractiveCommand(
+  opts: SlashCommandContext,
+  ctx: Context | undefined,
+): Promise<{ message: string }> {
+  const manifest = await loadManifest(opts.paths?.globalConfig);
+  const currentRoot = ctx?.projectRoot;
+
+  // Open the interactive picker
+  const result = await runProjectPicker({
+    globalConfigPath: opts.paths?.globalConfig,
+    currentProjectRoot: currentRoot,
+  });
+
+  if (!result) {
+    return { message: color.dim('Cancelled.') };
+  }
+
+  switch (result.kind) {
+    case 'project': {
+      // Find the project by slug
+      const project = manifest.projects.find((p) => p.slug === result.key);
+      if (!project) {
+        return { message: color.red(`Project not found: ${result.key}`) };
+      }
+
+      // If already in the selected project, don't respawn
+      if (project.root === currentRoot) {
+        return { message: color.dim(`Already in ${project.name} (${project.root})`) };
+      }
+
+      return spawnInProject(opts, ctx, project.root, project.name);
+    }
+
+    case 'action': {
+      switch (result.action) {
+        case 'new-session':
+          return handleNewSession(opts, ctx);
+        case 'prev-sessions':
+          return handlePrevSessions(opts, ctx);
+        default:
+          return { message: color.dim('Cancelled.') };
+      }
+    }
+
+    default:
+      return { message: color.dim('Cancelled.') };
+  }
+}
+
+/**
+ * Spawn a new wstack process in the given project root.
+ */
+async function spawnInProject(
+  opts: SlashCommandContext,
+  _ctx: Context | undefined,
+  root: string,
+  projectName: string,
+): Promise<{ message: string }> {
+  // Try to resolve the CLI binary
+  let cliPath: string;
+  try {
+    const req = createRequire(import.meta.url);
+    const pkgPath = req.resolve('@wrongstack/cli/package.json');
+    const pkgDir = path.dirname(pkgPath);
+    cliPath = path.join(pkgDir, 'dist', 'index.js');
+    await fs.access(cliPath);
+  } catch {
+    cliPath = process.argv[1] ?? '';
+    if (!cliPath) {
+      return {
+        message: color.red('Could not locate the CLI entry point. Run `wstack` manually in the target directory.'),
+      };
+    }
+  }
+
+  // Update the manifest with the new lastSeen before spawning
+  const manifest = await loadManifest(opts.paths?.globalConfig);
+  const existing = manifest.projects.find((p) => p.root === root);
+  if (existing) {
+    existing.lastSeen = new Date().toISOString();
+  } else {
+    // Auto-register if not in manifest
+    const name = projectName || path.basename(root);
+    const slug = generateSlug(root);
+    manifest.projects.push({ name, root, slug, lastSeen: new Date().toISOString() });
+    await ensureProjectDataDir(slug, opts.paths?.globalConfig);
+  }
+  await saveManifest(manifest, opts.paths?.globalConfig);
+
+  const nodeExe = process.execPath;
+  const child = spawn(nodeExe, [cliPath], {
+    cwd: root,
+    stdio: 'inherit',
+    detached: false,
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  child.on('error', (err) => {
+    console.error(color.red(`Failed to spawn wstack: ${err.message}`));
+  });
+
+  child.unref();
+
+  return {
+    message: [
+      '',
+      color.green(`  Switched to ${projectName}`),
+      color.dim(`  Root: ${root}`),
+      color.dim('  (current session stays open — Ctrl+C to return)'),
+      '',
+    ].join('\n'),
+  };
+}
+
+/**
+ * Start a new session in the current project.
+ */
+async function handleNewSession(
+  _opts: SlashCommandContext,
+  _ctx: Context | undefined,
+): Promise<{ message: string }> {
+  // Restart in the current directory — spawn a fresh wstack
+  let cliPath: string;
+  try {
+    const req = createRequire(import.meta.url);
+    const pkgPath = req.resolve('@wrongstack/cli/package.json');
+    const pkgDir = path.dirname(pkgPath);
+    cliPath = path.join(pkgDir, 'dist', 'index.js');
+    await fs.access(cliPath);
+  } catch {
+    cliPath = process.argv[1] ?? '';
+    if (!cliPath) {
+      return {
+        message: color.red('Could not locate the CLI entry point. Run `wstack` manually.'),
+      };
+    }
+  }
+
+  const nodeExe = process.execPath;
+  const child = spawn(nodeExe, [cliPath], {
+    cwd: process.cwd(),
+    stdio: 'inherit',
+    detached: false,
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  child.on('error', (err) => {
+    console.error(color.red(`Failed to spawn wstack: ${err.message}`));
+  });
+
+  child.unref();
+
+  return {
+    message: [
+      '',
+      color.green('  Starting new session ...'),
+      color.dim('  (current session stays open — Ctrl+C to return)'),
+      '',
+    ].join('\n'),
+  };
+}
+
+/**
+ * Show previously saved sessions (delegates to the /sessions command output).
+ */
+async function handlePrevSessions(
+  opts: SlashCommandContext,
+  _ctx: Context | undefined,
+): Promise<{ message: string }> {
+  if (!opts.sessionStore) {
+    return { message: 'No session store configured. Start the REPL first.' };
+  }
+
+  const list = await opts.sessionStore.list(15);
+  if (list.length === 0) {
+    return { message: color.dim('No saved sessions.') };
+  }
+
+  const currentId = opts.context?.session?.id;
+  const lines = [color.bold(`Recent sessions (${list.length}):`), ''];
+  for (const s of list) {
+    const isCurrent = s.id === currentId;
+    const marker = isCurrent ? color.cyan('●') : ' ';
+    const date = color.dim(s.startedAt.slice(0, 16).replace('T', ' '));
+    const stats = [
+      color.dim(`${s.tokenTotal.toLocaleString()} tok`),
+      s.toolCallCount ? color.cyan(`${s.toolCallCount} calls`) : '',
+      s.iterationCount ? color.dim(`${s.iterationCount} iter`) : '',
+    ].filter(Boolean).join(' ');
+    const outcome = s.outcome === 'completed' ? color.green('✓')
+      : s.outcome === 'aborted' ? color.yellow('⚠')
+      : s.outcome === 'error' ? color.red('✗')
+      : color.dim('?');
+
+    lines.push(`  ${marker} ${color.bold(s.id)}  ${date}`);
+    lines.push(`       ${stats}  ${outcome}  ${color.dim(s.title)}`);
+    lines.push('');
+  }
+  lines.push(color.dim('Resume: /sessions or wstack resume <id>'));
+
+  return { message: lines.join('\n') };
 }

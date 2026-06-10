@@ -13,7 +13,7 @@ function makeContext(): Context {
   return new Context({
     systemPrompt: [],
     provider: {} as never,
-    session: { id: 'sess', append: async () => {}, close: async () => {} },
+    session: { id: 'sess', pendingToolUses: [], append: async () => {}, flush: async () => {}, close: async () => {} },
     signal: new AbortController().signal,
     tokenCounter: { total: () => ({ input: 0, output: 0 }), record: () => {} } as never,
     cwd: process.cwd(),

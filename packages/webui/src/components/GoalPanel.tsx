@@ -71,17 +71,18 @@ export function GoalPanel({ goal, className }: GoalPanelProps): React.ReactEleme
     return () => clearInterval(timer);
   }, []);
 
-  // Hide the panel when there's no goal, or when the goal is terminal
-  // (completed / failed) — it's served its purpose and shouldn't linger.
-  if (!goal) return null;
-  if (goal.goalState === 'completed' || goal.goalState === 'failed' || goal.goalState === 'abandoned') return null;
-
-  // Auto-collapse when goal state changes (e.g. completed → null)
+  // Auto-collapse when goal state changes (e.g. completed → null).
+  // Must come BEFORE any early returns — hook count must be stable.
   useEffect(() => {
     if (!goal || goal.goalState === 'completed' || goal.goalState === 'failed' || goal.goalState === 'abandoned') {
       setCollapsed(true);
     }
   }, [goal]);
+
+  // Hide the panel when there's no goal, or when the goal is terminal
+  // (completed / failed) — it's served its purpose and shouldn't linger.
+  if (!goal) return null;
+  if (goal.goalState === 'completed' || goal.goalState === 'failed' || goal.goalState === 'abandoned') return null;
 
   const stateCfg = STATE_CONFIG[goal.goalState];
   const completedDeliverables =

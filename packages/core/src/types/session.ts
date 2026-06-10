@@ -281,6 +281,13 @@ export interface SessionWriter {
    * responsible for ensuring events are in the correct order.
    */
   appendBatch(events: SessionEvent[]): Promise<void>;
+  /**
+   * Flush any buffered events to disk immediately. Use after critical
+   * events (user_input, llm_response) to ensure they survive a crash
+   * or SIGKILL that would otherwise leave them in the in-memory buffer.
+   * Idempotent — safe to call even when the buffer is empty.
+   */
+  flush(): Promise<void>;
   close(): Promise<void>;
   /**
    * Register a file change for later snapshotting.

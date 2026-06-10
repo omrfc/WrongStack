@@ -29,7 +29,7 @@ export async function detectPackageManager(cwd: string): Promise<PackageManager>
 }
 
 export function resolvePath(input: string, ctx: Context): string {
-  return path.isAbsolute(input) ? path.normalize(input) : path.resolve(ctx.cwd, input);
+  return path.isAbsolute(input) ? path.normalize(input) : path.resolve(ctx.workingDir ?? ctx.cwd, input);
 }
 
 export function ensureInsideRoot(absPath: string, ctx: Context): string {

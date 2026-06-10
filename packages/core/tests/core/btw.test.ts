@@ -10,7 +10,7 @@ function makeCtx(): Context {
   return new Context({
     systemPrompt: [],
     provider: null as never,
-    session: { id: 'x', append: async () => {} },
+    session: { id: 'x', pendingToolUses: [], append: async () => {}, flush: async () => {} },
     signal: new AbortController().signal,
     tokenCounter: { account: () => {} } as never,
     cwd: '/tmp',

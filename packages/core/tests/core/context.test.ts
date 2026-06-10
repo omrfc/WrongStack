@@ -5,8 +5,10 @@ import type { Provider, SessionWriter, TextBlock } from '../../src/index.js';
 const fakeProvider = {} as Provider;
 const fakeSession: SessionWriter = {
   id: 't',
+  pendingToolUses: [],
   append: async () => undefined,
   appendBatch: async () => undefined,
+  flush: async () => undefined,
   close: async () => undefined,
 };
 

@@ -11,8 +11,10 @@ import type { Message, Provider, SessionWriter, TextBlock } from '../../src/inde
 const fakeProvider = {} as Provider;
 const fakeSession: SessionWriter = {
   id: 'sess-1',
+  pendingToolUses: [],
   append: async () => undefined,
   appendBatch: async () => undefined,
+  flush: async () => undefined,
   close: async () => undefined,
 };
 

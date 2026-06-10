@@ -545,6 +545,18 @@ export class WrongStackWebSocketClient {
     this.send({ type: 'projects.list' });
   }
 
+  addProject(root: string, name?: string | undefined) {
+    this.send({ type: 'projects.add', payload: { root, name } });
+  }
+
+  selectProject(root: string, name?: string | undefined) {
+    this.send({ type: 'projects.select', payload: { root, name } });
+  }
+
+  setWorkingDir(path: string) {
+    this.send({ type: 'working_dir.set', payload: { path } });
+  }
+
   resumeSession(sessionId: string) {
     this.send({
       type: 'session.resume',

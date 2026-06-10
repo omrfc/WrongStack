@@ -23,6 +23,7 @@ const ACTIVITY_LABEL: Record<Activity, string> = {
   context: 'Context',
   history: 'History',
   files: 'Files',
+  projects: 'Projects',
 };
 
 // ── Agent row for sidebar list ────────────────────────────────────────
@@ -148,7 +149,8 @@ export function Sidebar() {
   useEffect(() => {
     if (activeActivity !== 'files' || !wsConnected) return;
     useFileStore.getState().setTreeLoading(true);
-    client?.send({ type: 'files.tree', payload: {} });
+    const cwd = useSessionStore.getState().cwd;
+    client?.send({ type: 'files.tree', payload: cwd ? { path: cwd } : {} });
   }, [activeActivity, wsConnected, client]);
 
   const formatDuration = (start: number | null) => {

@@ -92,7 +92,7 @@ describe('makeContinueToNextIterationTool', () => {
     const ctx = new Context({
       systemPrompt: [],
       provider: null as never,
-      session: { id: 'x', append: async () => {} },
+      session: { id: 'x', pendingToolUses: [], append: async () => {}, flush: async () => {} },
       signal: new AbortController().signal,
       tokenCounter: { account: () => {} } as never,
       cwd: '/tmp',
@@ -108,7 +108,7 @@ describe('makeContinueToNextIterationTool', () => {
     const ctx = new Context({
       systemPrompt: [],
       provider: null as never,
-      session: { id: 'x', append: async () => {} },
+      session: { id: 'x', pendingToolUses: [], append: async () => {}, flush: async () => {} },
       signal: new AbortController().signal,
       tokenCounter: { account: () => {} } as never,
       cwd: '/tmp',
@@ -131,7 +131,7 @@ describe('autonomous continue meta helpers', () => {
     ctx = new Context({
       systemPrompt: [],
       provider: null as never,
-      session: { id: 'x', append: async () => {} },
+      session: { id: 'x', pendingToolUses: [], append: async () => {}, flush: async () => {} },
       signal: new AbortController().signal,
       tokenCounter: { account: () => {} } as never,
       cwd: '/tmp',

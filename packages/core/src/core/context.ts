@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import type { TextBlock } from '../types/blocks.js';
 import type { Message } from '../types/messages.js';
 import type { Provider, Usage } from '../types/provider.js';
@@ -40,6 +41,8 @@ export interface ContextInit {
   tokenCounter: TokenCounter;
   cwd: string;
   projectRoot: string;
+  /** Mutable working directory. Defaults to `cwd`. Must stay within `projectRoot`. */
+  workingDir?: string | undefined;
   model: string;
   tools?: Tool[] | undefined;
 }
@@ -55,8 +58,11 @@ export interface ContextInit {
  * The single source of truth for the project directory is `projectRoot`.
  * All tools (read/write/bash/exec) resolve paths relative to this.
  * Sessions, config, memory, and logs are also stored under this root.
- * There is no separate mutable "working directory" — the working directory
- * IS the project root.
+ *
+ * There IS a mutable `workingDir` (separate from `projectRoot`) that can be
+ * changed at runtime via `setWorkingDir()`. It starts as `cwd` and allows
+ * the agent and user to navigate within the project without spawning a new
+ * process. All changes must stay inside `projectRoot`.
  */
 export class Context implements RunEnv {
   messages: Message[] = [];
@@ -70,9 +76,14 @@ export class Context implements RunEnv {
   tokenCounter: TokenCounter;
   cwd: string;
   projectRoot: string;
+  /** Mutable working directory — starts as `cwd`. Change via `setWorkingDir()`. */
+  workingDir: string;
   model: string;
   tools: Tool[] = [];
   meta: Record<string, unknown> = {};
+
+  /** Callbacks fired when `setWorkingDir()` changes the working directory. */
+  private _onWorkingDirChanged: Array<(newDir: string, oldDir: string) => void> = [];
 
   /**
    * Set to true when the conversation gains new tool_use or tool_result
@@ -90,6 +101,7 @@ export class Context implements RunEnv {
     this.tokenCounter = init.tokenCounter;
     this.cwd = init.cwd;
     this.projectRoot = init.projectRoot;
+    this.workingDir = init.workingDir ?? init.cwd;
     this.model = init.model;
     this.tools = init.tools ?? [];
   }
@@ -157,6 +169,49 @@ export class Context implements RunEnv {
 
   lastReadMtime(absPath: string): number | undefined {
     return this.fileMtimes.get(absPath);
+  }
+
+  /**
+   * Change the working directory for path resolution. Resolves relative paths
+   * against `projectRoot` and validates the result is within the project root.
+   * Fires all registered `onWorkingDirChanged` callbacks.
+   * Returns the resolved absolute path.
+   */
+  setWorkingDir(dir: string): string {
+    const resolved = path.isAbsolute(dir)
+      ? path.resolve(dir)
+      : path.resolve(this.projectRoot, dir);
+
+    // Validate containment within projectRoot
+    const root = path.resolve(this.projectRoot);
+    const rel = path.relative(root, resolved);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      throw new Error(
+        `Working directory "${resolved}" is outside project root "${root}"`,
+      );
+    }
+
+    const old = this.workingDir;
+    this.workingDir = resolved;
+    // Fire callbacks (catch errors so one bad listener doesn't break others)
+    for (const cb of this._onWorkingDirChanged) {
+      try { cb(resolved, old); } catch { /* best-effort */ }
+    }
+    return resolved;
+  }
+
+  /**
+   * Register a callback that fires when the working directory changes.
+   * Returns an unsubscribe function. Callbacks are fired synchronously
+   * inside `setWorkingDir()` — errors in callbacks are swallowed so one
+   * bad listener doesn't prevent others from executing.
+   */
+  onWorkingDirChanged(cb: (newDir: string, oldDir: string) => void): () => void {
+    this._onWorkingDirChanged.push(cb);
+    return () => {
+      const idx = this._onWorkingDirChanged.indexOf(cb);
+      if (idx >= 0) this._onWorkingDirChanged.splice(idx, 1);
+    };
   }
 
   usage(): Usage {

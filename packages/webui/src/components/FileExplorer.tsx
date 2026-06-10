@@ -1,8 +1,11 @@
 import { cn } from '@/lib/utils';
 import { useFileStore } from '@/stores/file-store';
 import type { TreeNode } from '@/stores/file-store';
+import { useSessionStore } from '@/stores';
+import { getWSClient } from '@/lib/ws-client';
 import {
   ChevronRight,
+  CornerLeftUp,
   File,
   FileCode,
   FileCog,
@@ -294,6 +297,59 @@ export function FileExplorer() {
   const treeLoading = useFileStore((s) => s.treeLoading);
   const error = useFileStore((s) => s.error);
   const openFiles = useFileStore((s) => s.openFiles);
+  const cwd = useSessionStore((s) => s.cwd);
+  const projectName = useSessionStore((s) => s.projectName);
+
+  // Are we in a subdirectory of the project root? Check by comparing
+  // the last segment of cwd against the project name.
+  const isAtRoot = (() => {
+    if (!cwd || !projectName) return true;
+    const segments = cwd.replace(/\\/g, '/').split('/').filter(Boolean);
+    return (segments[segments.length - 1] ?? '') === projectName;
+  })();
+
+  // Breadcrumb: split cwd into segments, find the project-root anchor
+  // (where the segment matches projectName), then everything after is
+  // the relative path. Each segment is clickable to navigate there.
+  const breadcrumbs = useMemo(() => {
+    if (!cwd || !projectName) return [];
+    const norm = cwd.replace(/\\/g, '/');
+    const segments = norm.split('/').filter(Boolean);
+    // Find the index of the project-root segment (last match of projectName)
+    let rootIdx = -1;
+    for (let i = segments.length - 1; i >= 0; i--) {
+      if (segments[i] === projectName) { rootIdx = i; break; }
+    }
+    if (rootIdx === -1) {
+      // Fallback: treat the whole path as relative from the root
+      return segments.map((s, i) => ({
+        label: s,
+        path: '/' + segments.slice(0, i + 1).join('/'),
+        isLast: i === segments.length - 1,
+      }));
+    }
+    // Build from rootIdx onward. Segment 0 = project-root label,
+    // subsequent segments are the relative path into the project.
+    const rel = segments.slice(rootIdx);
+    return rel.map((s, i) => ({
+      label: i === 0 ? s : s,   // first segment = project name
+      path: '/' + segments.slice(0, rootIdx + i + 1).join('/'),
+      isLast: i === rel.length - 1,
+    }));
+  }, [cwd, projectName]);
+
+  const handleBreadcrumbClick = useCallback((crumbPath: string) => {
+    getWSClient().send({ type: 'working_dir.set', payload: { path: crumbPath } });
+  }, []);
+
+  const handleGoUp = useCallback(() => {
+    if (!cwd) return;
+    // Compute parent: strip the last path segment. On Windows, normalize
+    // separators first, then rebuild. Fall back to cwd if already at root.
+    const norm = cwd.replace(/\\/g, '/');
+    const parent = norm.split('/').slice(0, -1).join('/') || norm;
+    getWSClient().send({ type: 'working_dir.set', payload: { path: parent } });
+  }, [cwd]);
 
   // Debounce the loading indicator: only show the spinner after 150ms of
   // continuous loading. Fast refreshes (<150ms) skip the flash entirely.
@@ -426,6 +482,49 @@ export function FileExplorer() {
         </div>
       )}
       <div className="flex-1 overflow-y-auto py-1">
+        {/* ── Breadcrumb bar — clickable path segments ── */}
+        {breadcrumbs.length > 0 && (
+          <div className="flex items-center gap-0.5 px-1 pb-1 border-b border-border/30 overflow-x-auto">
+            {breadcrumbs.map((crumb, i) => (
+              <span key={crumb.path} className="flex items-center gap-0.5 shrink-0">
+                {i > 0 && (
+                  <span className="text-[9px] text-muted-foreground/40 select-none">/</span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleBreadcrumbClick(crumb.path)}
+                  className={cn(
+                    'px-1 py-0.5 rounded text-[11px] transition-colors whitespace-nowrap',
+                    crumb.isLast
+                      ? 'text-foreground font-medium'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
+                  )}
+                  title={crumb.isLast ? 'Current directory' : `Navigate to ${crumb.path}`}
+                >
+                  {crumb.label}
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        {/* ── Parent directory fallback (when breadcrumbs can't be computed) ── */}
+        {breadcrumbs.length === 0 && !isAtRoot && (
+          <button
+            type="button"
+            onClick={handleGoUp}
+            className={cn(
+              'flex items-center gap-1.5 w-full text-left px-1 py-0.5 text-[11px] rounded',
+              'hover:bg-muted/60 transition-colors text-muted-foreground hover:text-foreground',
+              'font-medium',
+            )}
+          >
+            <CornerLeftUp className="h-3.5 w-3.5 shrink-0" />
+            <span>..</span>
+            <span className="text-[9px] text-muted-foreground/50 ml-auto">
+              parent directory
+            </span>
+          </button>
+        )}
         {tree.map((node) => (
           <TreeNodeItem
             key={node.path}

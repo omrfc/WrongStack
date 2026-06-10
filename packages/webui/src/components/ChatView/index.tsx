@@ -40,6 +40,7 @@ import { SearchOverlay } from '../SearchOverlay';
 import { ThemeToggle } from '../ThemeToggle';
 import { ToolGroup } from '../ToolGroup';
 import { WelcomeScreen } from '../WelcomeScreen';
+import { WorkingDirChip } from '../WorkingDirChip';
 import { Button } from '../ui/button';
 import { ScrollArea } from '../ui/scroll-area';
 import { fmtTok } from './utils.js';
@@ -256,13 +257,16 @@ export function ChatView() {
               <span>{agentState}</span>
             </span>
             {projectName && (
-              <span
-                className="flex items-center gap-1 text-[11px] text-muted-foreground shrink-0 min-w-0"
-                title={cwd || `Project: ${projectName}`}
-              >
-                <FolderOpen className="h-3 w-3 shrink-0" />
-                <span className="truncate max-w-[8rem]">{projectName}</span>
-              </span>
+              <>
+                <span
+                  className="flex items-center gap-1 text-[11px] text-muted-foreground shrink-0 min-w-0"
+                  title={cwd || `Project: ${projectName}`}
+                >
+                  <FolderOpen className="h-3 w-3 shrink-0" />
+                  <span className="truncate max-w-[8rem]">{projectName}</span>
+                </span>
+                <WorkingDirChip />
+              </>
             )}
             {/* Session title — click to rename, shows nickname if set */}
             {sessionId && (

@@ -181,6 +181,10 @@ export function createAgentLoopHandler(
       ts: new Date().toISOString(),
       content: inputPayload.content,
     });
+    // Ensure user input is durable before we make the (expensive) LLM call.
+    // Without this, a SIGKILL mid-run leaves the user's message in the buffer
+    // and the resumed session shows only orphaned tool_call_end events.
+    await a.ctx.session.flush();
 
     const promptIndex = a.ctx.messages.filter((m) => m.role === 'user').length - 1;
     const preview = inputPayload.text.slice(0, 80) + (inputPayload.text.length > 80 ? '…' : '');

@@ -1,7 +1,9 @@
 import { expectDefined } from '@wrongstack/core';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as http from 'node:http';
 import * as path from 'node:path';
+import * as os from 'node:os';
 import { createHttpServer } from './http-server.js';
 import {
   handleFilesTree,
@@ -208,8 +210,15 @@ export async function startWebUI(
 
   // Boot configuration
   const boot = await bootConfig();
-  const { config: baseConfig, vault, globalConfigPath, projectRoot, wpaths, logger } = boot;
+  const { config: baseConfig, vault, globalConfigPath, wpaths, logger } = boot;
   let config = baseConfig;
+
+  /** Mutable project root — updated on `projects.select`. File handlers,
+   *  sessionStartPayload, and session store use this value. */
+  let projectRoot = boot.projectRoot;
+  /** Mutable working directory — starts at projectRoot, changeable via
+   *  `working_dir.set` WS message. Must always stay inside projectRoot. */
+  let workingDir = projectRoot;
 
   // Serialize concurrent config writes to prevent races between model.switch
   // and key.add/key.update handlers that both read-modify-write globalConfigPath.
@@ -284,8 +293,8 @@ export async function startWebUI(
   const events = new EventBus();
   events.setLogger(logger);
 
-  // Session store
-  const sessionStore = new DefaultSessionStore({ dir: wpaths.projectSessions });
+  // Session store — mutable so projects.select can swap it to the new project's dir.
+  let sessionStore = new DefaultSessionStore({ dir: wpaths.projectSessions });
   // Prune old sessions on server start (non-blocking).
   sessionStore
     .prune(DEFAULT_SESSION_PRUNE_DAYS)
@@ -429,7 +438,7 @@ export async function startWebUI(
     session,
     signal: new AbortController().signal,
     tokenCounter,
-    cwd: projectRoot,
+    cwd: workingDir,
     projectRoot,
     model: config.model,
   });
@@ -639,7 +648,7 @@ export async function startWebUI(
       outputCost,
       cacheReadCost,
       projectName: path.basename(projectRoot) || projectRoot,
-      cwd: projectRoot,
+      cwd: workingDir,
       mode: modeId,
       contextMode: String(context.meta['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID),
       wsToken,
@@ -892,6 +901,58 @@ export async function startWebUI(
         }));
       }
     });
+  }
+
+  // ── Project manifest helpers ──────────────────────────────────────────
+
+  interface ProjectEntry {
+    name: string;
+    root: string;
+    slug: string;
+    lastSeen?: string | undefined;
+    createdAt?: string | undefined;
+  }
+
+  interface ProjectsManifest {
+    projects: ProjectEntry[];
+  }
+
+  function projectsJsonPath(globalConfigPath: string): string {
+    const base = path.dirname(globalConfigPath);
+    return path.join(base, 'projects.json');
+  }
+
+  async function loadManifest(globalConfigPath: string): Promise<ProjectsManifest> {
+    try {
+      const raw = await fs.readFile(projectsJsonPath(globalConfigPath), 'utf8');
+      const parsed = JSON.parse(raw) as ProjectsManifest;
+      return { projects: parsed.projects ?? [] };
+    } catch {
+      return { projects: [] };
+    }
+  }
+
+  async function saveManifest(manifest: ProjectsManifest, globalConfigPath: string): Promise<void> {
+    const file = projectsJsonPath(globalConfigPath);
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, JSON.stringify(manifest, null, 2), 'utf8');
+  }
+
+  function generateProjectSlug(rootPath: string): string {
+    const base = path.basename(rootPath)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'project';
+    const hash = createHash('sha256').update(path.resolve(rootPath)).digest('hex').slice(0, 6);
+    return `${base}-${hash}`;
+  }
+
+  async function ensureProjectDataDir(slug: string, globalConfigPath: string): Promise<string> {
+    const base = path.dirname(globalConfigPath);
+    const dir = path.join(base, 'projects', slug);
+    await fs.mkdir(dir, { recursive: true });
+    return dir;
   }
 
   async function handleMessage(
@@ -2036,6 +2097,239 @@ export async function startWebUI(
             type: 'session.start',
             payload: { ...(await sessionStartPayload()), reset: true },
           });
+        } catch (err) {
+          sendResult(ws, false, errMessage(err));
+        }
+        break;
+      }
+
+      // ── Project management ────────────────────────────────────────────
+
+      case 'projects.list': {
+        try {
+          const manifest = await loadManifest(globalConfigPath);
+          send(ws, {
+            type: 'projects.list',
+            payload: { projects: manifest.projects },
+          });
+        } catch (err) {
+          send(ws, {
+            type: 'projects.list',
+            payload: { projects: [], error: errMessage(err) },
+          });
+        }
+        break;
+      }
+
+      case 'projects.add': {
+        const { root: addRoot, name: displayName } = (
+          msg as { payload: { root: string; name?: string | undefined } }
+        ).payload;
+        try {
+          const resolved = path.resolve(addRoot);
+          await fs.access(resolved);
+          const stat = await fs.stat(resolved);
+          if (!stat.isDirectory()) throw new Error(`Not a directory: ${resolved}`);
+
+          const manifest = await loadManifest(globalConfigPath);
+          const existing = manifest.projects.find((p) => p.root === resolved);
+          if (existing) {
+            send(ws, {
+              type: 'projects.added',
+              payload: {
+                name: existing.name,
+                root: existing.root,
+                slug: existing.slug,
+                message: `Already registered as "${existing.name}"`,
+              },
+            });
+            break;
+          }
+
+          const name = displayName?.trim() || path.basename(resolved);
+          const slug = generateProjectSlug(resolved);
+          await ensureProjectDataDir(slug, globalConfigPath);
+          const now = new Date().toISOString();
+          manifest.projects.push({ name, root: resolved, slug, lastSeen: now, createdAt: now });
+          await saveManifest(manifest, globalConfigPath);
+
+          send(ws, {
+            type: 'projects.added',
+            payload: {
+              name,
+              root: resolved,
+              slug,
+              message: `Registered project "${name}"`,
+            },
+          });
+        } catch (err) {
+          send(ws, {
+            type: 'projects.added',
+            payload: {
+              name: path.basename(addRoot),
+              root: addRoot,
+              slug: '',
+              message: errMessage(err),
+            },
+          });
+        }
+        break;
+      }
+
+      case 'projects.select': {
+        const { root: selRoot, name: selName } = (
+          msg as { payload: { root: string; name?: string | undefined } }
+        ).payload;
+        try {
+          const resolved = path.resolve(selRoot);
+
+          // Validate the directory exists
+          try {
+            await fs.access(resolved);
+            const stat = await fs.stat(resolved);
+            if (!stat.isDirectory()) throw new Error(`Not a directory: ${resolved}`);
+          } catch (err) {
+            send(ws, {
+              type: 'projects.selected',
+              payload: {
+                root: selRoot,
+                name: selName || path.basename(selRoot),
+                message: `Cannot switch: ${errMessage(err)}`,
+              },
+            });
+            break;
+          }
+
+          // Update lastSeen in manifest
+          const manifest = await loadManifest(globalConfigPath);
+          const entry = manifest.projects.find((p) => p.root === resolved);
+          if (entry) {
+            entry.lastSeen = new Date().toISOString();
+          } else {
+            // Auto-register if not in manifest
+            const name = selName?.trim() || path.basename(resolved);
+            const slug = generateProjectSlug(resolved);
+            manifest.projects.push({
+              name,
+              root: resolved,
+              slug,
+              lastSeen: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
+            });
+            await ensureProjectDataDir(slug, globalConfigPath);
+          }
+          await saveManifest(manifest, globalConfigPath);
+
+          // ── Hot-swap the project root + working dir ─────────────────
+          projectRoot = resolved;
+          workingDir = resolved;
+
+          // Update the live context so tools use the new directory
+          context.cwd = workingDir;
+          context.projectRoot = projectRoot;
+
+          // Create a new session store for the new project's sessions dir
+          const newSessionsDir = path.join(
+            path.dirname(globalConfigPath),
+            'projects',
+            entry?.slug ?? generateProjectSlug(resolved),
+            'sessions',
+          );
+          await fs.mkdir(newSessionsDir, { recursive: true });
+          const newSessionStore = new DefaultSessionStore({ dir: newSessionsDir });
+
+          // Switch the session store for the new project.
+          // Close the old session gracefully
+          try {
+            await session.append({
+              type: 'session_end',
+              ts: new Date().toISOString(),
+              usage: tokenCounter.total(),
+            });
+            await session.close();
+          } catch {
+            // best-effort
+          }
+
+          // Create a fresh session in the new project
+          sessionStore = newSessionStore;
+          session = await sessionStore.create({
+            id: '',
+            title: '',
+            model: config.model,
+            provider: config.provider,
+          });
+          context.session = session;
+          context.state.replaceMessages([]);
+          context.state.replaceTodos([]);
+          context.readFiles.clear();
+          context.fileMtimes.clear();
+          tokenCounter.reset();
+          sessionStartedAt = Date.now();
+
+          send(ws, {
+            type: 'projects.selected',
+            payload: {
+              root: resolved,
+              name: selName || path.basename(resolved),
+              message: `Switched to ${selName || path.basename(resolved)}`,
+            },
+          });
+
+          // Broadcast updated project info to ALL clients so file
+          // explorer / context bar pick up the new root.
+          broadcast(clients, {
+            type: 'session.start',
+            payload: {
+              ...(await sessionStartPayload()),
+              reset: true,
+            },
+          });
+        } catch (err) {
+          send(ws, {
+            type: 'projects.selected',
+            payload: {
+              root: selRoot,
+              name: selName || path.basename(selRoot),
+              message: errMessage(err),
+            },
+          });
+        }
+        break;
+      }
+
+      // ── Working directory (within current project) ───────────────────
+
+      case 'working_dir.set': {
+        const { path: newPath } = (msg as { payload: { path: string } }).payload;
+        try {
+          const resolved = path.resolve(projectRoot, newPath);
+
+          // Guard: must stay inside projectRoot
+          if (!resolved.startsWith(projectRoot + path.sep) && resolved !== projectRoot) {
+            sendResult(ws, false, `Path must stay inside the project root: ${projectRoot}`);
+            break;
+          }
+
+          try {
+            await fs.access(resolved);
+            const stat = await fs.stat(resolved);
+            if (!stat.isDirectory()) throw new Error('Not a directory');
+          } catch {
+            sendResult(ws, false, `Directory not found or not accessible: ${resolved}`);
+            break;
+          }
+
+          workingDir = resolved;
+          context.cwd = resolved;
+
+          // Notify all clients so the file explorer and context bar update
+          broadcast(clients, {
+            type: 'working_dir.changed',
+            payload: { cwd: resolved, projectRoot },
+          });
+
+          sendResult(ws, true, `Working directory set to ${resolved}`);
         } catch (err) {
           sendResult(ws, false, errMessage(err));
         }

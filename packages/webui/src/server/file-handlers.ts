@@ -57,10 +57,11 @@ export async function handleFilesTree(
   }
 
   // Use the optional `path` from the message payload as the tree root.
-  // When absent, fall back to projectRoot (backward compatible).
+  // When absent, empty, or ".", fall back to projectRoot (backward compatible).
   const payload = (msg as { payload?: { path?: string | undefined } }).payload;
-  const treeRoot = payload?.path
-    ? path.resolve(projectRoot, payload.path)
+  const rawPath = payload?.path?.trim();
+  const treeRoot = rawPath && rawPath !== '.'
+    ? path.resolve(projectRoot, rawPath)
     : projectRoot;
 
   // Guard: treeRoot must stay inside projectRoot.

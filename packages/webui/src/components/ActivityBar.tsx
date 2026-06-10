@@ -15,7 +15,7 @@ import { type ReactElement } from 'react';
 
 // ── Activity definition ───────────────────────────────────────────────
 
-type MainView = 'chat' | 'files' | 'projects' | 'settings' | 'autophase';
+type MainView = 'chat' | 'files' | 'projects' | 'settings' | 'autophase' | 'agents' | 'context' | 'history';
 
 interface ActivityDef {
   id: Activity | 'settings' | 'autophase';

@@ -18,6 +18,7 @@ import {
   useSessionStore,
   useUIStore,
   useWorktreeStore,
+  useFileStore,
 } from '@/stores';
 import { useLocalPrefs } from '@/stores/local-prefs';
 import type { WorktreeHandleView, WSServerMessage } from '@/types';
@@ -79,6 +80,9 @@ export function handleSessionStart(msg: WSServerMessage) {
   if (isReset) {
     useChatStore.getState().clearMessages();
     useFleetStore.getState().clear();
+    // Re-fetch the file tree so the explorer shows the new project's files.
+    useFileStore.getState().setTreeLoading(true);
+    getWSClient().send({ type: 'files.tree', payload: { path: useSessionStore.getState().cwd } });
   }
   // Resume hydration
   const replay = (payload as { replayMessages?: Array<{ role: string | undefined; content: unknown; ts?: string }> }).replayMessages;
@@ -450,8 +454,6 @@ export function handlePrefsUpdated(msg: WSServerMessage) {
 
 // ── File operation handlers ──
 
-import { useFileStore } from '@/stores/file-store';
-
 export function handleFilesTree(msg: WSServerMessage) {
   const p = msg.payload as { root: string; tree: import('@/stores/file-store').TreeNode[]; error?: string | undefined };
   if (p.error) {
@@ -532,7 +534,19 @@ export const WS_HANDLERS: Record<string, (msg: WSServerMessage) => void> = {
   'projects.list': (msg: WSServerMessage) => {
     // Handled directly by ProjectsPanel component
   },
+  'projects.added': (msg: WSServerMessage) => {
+    // Handled directly by ProjectsPanel component
+  },
   'projects.selected': (msg: WSServerMessage) => {
     // Handled directly by ProjectsPanel component
+  },
+  'working_dir.changed': (msg: WSServerMessage) => {
+    const p = msg.payload as { cwd: string; projectRoot: string };
+    useSessionStore.getState().setEnv({ cwd: p.cwd });
+    // Also update session.start-like metadata
+    useSessionStore.getState().setEnv({ projectName: p.projectRoot.split(/[/\\]/).pop() || p.projectRoot });
+    // Re-fetch the file tree so the explorer shows the new working dir.
+    useFileStore.getState().setTreeLoading(true);
+    getWSClient().send({ type: 'files.tree', payload: { path: p.cwd } });
   },
 };

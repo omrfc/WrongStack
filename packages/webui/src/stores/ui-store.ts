@@ -6,14 +6,14 @@ import { persist } from 'zustand/middleware';
 // ============================================
 
 // Activity types shown in the ActivityBar (secondary panel content).
-export type Activity = 'chat' | 'agents' | 'context' | 'history' | 'files';
+export type Activity = 'chat' | 'agents' | 'context' | 'history' | 'files' | 'projects';
 
 interface UIState {
   sidebarOpen: boolean;
   /** Which activity icon is selected in the ActivityBar — controls secondary panel content. */
   activeActivity: Activity;
   settingsOpen: boolean;
-  currentView: 'chat' | 'history' | 'settings' | 'autophase' | 'agents' | 'files' | 'context';
+  currentView: 'chat' | 'history' | 'settings' | 'autophase' | 'agents' | 'files' | 'context' | 'projects';
   showConfirmDialog: boolean;
   confirmInfo: {
     id: string;
@@ -39,7 +39,7 @@ interface UIState {
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
-  setCurrentView: (view: 'chat' | 'history' | 'settings' | 'autophase' | 'agents' | 'files' | 'context') => void;
+  setCurrentView: (view: UIState['currentView']) => void;
   showConfirm: (info: UIState['confirmInfo']) => void;
   hideConfirm: () => void;
   setPaletteOpen: (open: boolean) => void;

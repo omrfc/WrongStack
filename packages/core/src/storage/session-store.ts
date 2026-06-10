@@ -883,6 +883,23 @@ class FileSessionWriter implements SessionWriter {
     }
   }
 
+  /**
+   * Flush buffered events to disk immediately. Critical events
+   * (user_input, llm_response) call this so they survive SIGKILL/crash
+   * instead of sitting in the in-memory buffer for up to 500ms.
+   *
+   * Idempotent — cancels any pending timer and writes whatever has
+   * accumulated in the buffer. Safe to call even when the buffer
+   * is empty (no-op).
+   */
+  async flush(): Promise<void> {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    await this.flushBuffer();
+  }
+
   /** Schedule a deferred flush. No-op if a timer is already pending. */
   private scheduleFlush(): void {
     if (this.flushTimer) return;

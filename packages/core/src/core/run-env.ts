@@ -30,6 +30,8 @@ export interface RunEnv {
   readonly tokenCounter: TokenCounter;
   readonly cwd: string;
   readonly projectRoot: string;
+  /** Mutable working directory — starts as `cwd`. */
+  readonly workingDir: string;
   readonly model: string;
   readonly systemPrompt: readonly TextBlock[];
   readonly tools: readonly Tool[];
@@ -51,6 +53,7 @@ export function extractRunEnv(ctx: Context): RunEnv {
     tokenCounter: ctx.tokenCounter,
     cwd: ctx.cwd,
     projectRoot: ctx.projectRoot,
+    workingDir: ctx.workingDir,
     model: ctx.model,
     systemPrompt: ctx.systemPrompt,
     tools: ctx.tools,

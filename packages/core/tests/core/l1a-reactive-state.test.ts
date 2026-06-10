@@ -21,8 +21,10 @@ import {
 const fakeProvider = {} as Provider;
 const fakeSession: SessionWriter = {
   id: 'sess-l1a',
+  pendingToolUses: [],
   append: async () => undefined,
   appendBatch: async () => undefined,
+  flush: async () => undefined,
   close: async () => undefined,
 };
 
