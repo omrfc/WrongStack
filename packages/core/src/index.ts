@@ -348,6 +348,76 @@ export {
   CollaborationBus,
   type CollabBusState,
 } from './coordination/collab-bus.js';
+// ── Mailbox — inter-agent messaging ──────────────────────────────────────
+export { DefaultMailbox } from './coordination/mailbox.js';
+export { GlobalMailbox, resolveProjectDir } from './coordination/global-mailbox.js';
+export { makeMailboxTool, type MailboxToolOptions, type MailboxResolver } from './coordination/mailbox-tool.js';
+export type {
+  Mailbox,
+  MailboxMessage,
+  MailboxMessageType,
+  MailboxQuery,
+  MailboxSendInput,
+  MailboxAckInput,
+  MailboxAgentStatus,
+  MailboxTaskContext,
+  ReadReceipts,
+  RegisteredAgent,
+  AgentRegistrationInput,
+  AgentHeartbeatInput,
+} from './coordination/mailbox-types.js';
+export {
+  createMailboxChecker,
+  attachMailboxChecker,
+  buildMailboxBlock,
+  injectPendingMailboxMessages,
+  type MailboxLoopOptions,
+} from './core/mailbox-loop.js';
+// ── Dependency watcher — file-change → mailbox bridge ────────────────────
+export {
+  DEPENDENCY_FILE_PATTERNS,
+  makeDependencyWatcherConfig,
+  type DependencyWatcherConfig,
+  type DepWatchEntry,
+} from './coordination/dep-watcher.js';
+export {
+  attachDepWatcherBridge,
+  type DepWatcherBridgeOptions,
+} from './coordination/dep-watcher-bridge.js';
+export {
+  recordFileAction,
+  getLastAuthor,
+  getFileHistory,
+  getFilesByAgent,
+  getFullLog,
+  compactLog,
+  type FileAuthorEntry,
+  type FileAuthorLog,
+  type FileAuthorTrackerOptions,
+} from './coordination/file-author-tracker.js';
+export {
+  recordPackageAction,
+  getPackageAuthor,
+  getManifestPackages,
+  getPackagesByAgent,
+  updatePackageOutdatedStatus,
+  getFullPackageLog,
+  detectEcosystem as detectPackageEcosystem,
+  type PackageAuthorEntry,
+  type PackageAuthorLog,
+  type PackageAuthorTrackerOptions,
+} from './coordination/package-author-tracker.js';
+export {
+  startPackageOutdatedWatcher,
+  type PackageOutdatedEntry,
+  type PackageOutdatedResult,
+  type PackageOutdatedWatcherOptions,
+  type OutdatedNotifyMessage,
+} from './coordination/package-outdated-watcher.js';
+export {
+  startTechStackConsumer,
+  type TechStackConsumerOptions,
+} from './coordination/techstack-mailbox-consumer.js';
 export {
   collabPauseMiddleware,
   type CollabPauseMiddlewareOptions,

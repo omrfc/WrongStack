@@ -168,3 +168,59 @@ export {
   type CriticEvaluation,
   type CriticConcern,
 } from './collab-debug.js';
+// ── Mailbox — inter-agent messaging ──────────────────────────────────────
+export { DefaultMailbox } from './mailbox.js';
+export { GlobalMailbox, resolveProjectDir } from './global-mailbox.js';
+export { makeMailboxTool, type MailboxToolOptions, type MailboxResolver } from './mailbox-tool.js';
+export type {
+  Mailbox,
+  MailboxMessage,
+  MailboxMessageType,
+  MailboxQuery,
+  MailboxSendInput,
+  MailboxAckInput,
+  MailboxAgentStatus,
+  MailboxTaskContext,
+  ReadReceipts,
+  RegisteredAgent,
+  AgentRegistrationInput,
+  AgentHeartbeatInput,
+} from './mailbox-types.js';
+// ── Dependency watcher — file-change → mailbox bridge ────────────────────
+export {
+  DEPENDENCY_FILE_PATTERNS,
+  makeDependencyWatcherConfig,
+  type DependencyWatcherConfig,
+  type DepWatchEntry,
+} from './dep-watcher.js';
+// ── Dependency watcher bridge — file-watcher events → mailbox ────────────
+export {
+  attachDepWatcherBridge,
+  type DepWatcherBridgeOptions,
+} from './dep-watcher-bridge.js';
+// ── Mailbox hooks — tool-execution integration ────────────────────────────
+export {
+  createMailboxHooks,
+  type MailboxHooksOptions,
+} from './mailbox-hooks.js';
+// ── Package author tracker — tracks which agent added which package ─────────
+export {
+  recordPackageAction,
+  getPackageAuthor,
+  getManifestPackages,
+  getPackagesByAgent,
+  updatePackageOutdatedStatus,
+  getFullPackageLog,
+  detectEcosystem,
+  type PackageAuthorEntry,
+  type PackageAuthorLog,
+  type PackageAuthorTrackerOptions,
+} from './package-author-tracker.js';
+// ── Package outdated watcher — notifies original authors of outdated pkgs ──
+export {
+  startPackageOutdatedWatcher,
+  type PackageOutdatedEntry,
+  type PackageOutdatedResult,
+  type PackageOutdatedWatcherOptions,
+  type OutdatedNotifyMessage,
+} from './package-outdated-watcher.js';

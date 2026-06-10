@@ -298,6 +298,7 @@ import { buildFleetCommand } from './fleet.js';
 import { buildGoalCommand } from './goal.js';
 import { buildHelpCommand } from './help.js';
 import { buildInitCommand } from './init.js';
+import { buildMailboxDemoCommand } from './mailbox-demo.js';
 import { buildMcpSlashCommand } from './mcp.js';
 import { buildMemoryCommand } from './memory.js';
 import { buildModeCommand } from './mode.js';
@@ -364,6 +365,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildBtwCommand(opts),
     buildNextCommand(opts),
     buildModeCommand(opts),
+    buildMailboxDemoCommand(opts),
     buildExitCommand(opts),
     buildFixCommand(opts),
     buildAutoPhaseCommand(opts),
