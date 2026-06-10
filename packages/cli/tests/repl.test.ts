@@ -445,10 +445,9 @@ describe('runRepl', () => {
           if (parsed) suggestions.push(...parsed);
         },
         getSuggestions: () => suggestions,
-        onValidateAutoProceed: vi.fn(async () => true),
       }, 10_000);
 
-      // Verify suggestion text was fed to agent
+      // Suggestion fed directly — no validation gate needed in auto mode
       const allTexts = run.mock.calls
         .map((c: unknown[]) => {
           const blocks = c[0] as Array<{ type: string; text?: string }> | undefined;
@@ -457,7 +456,7 @@ describe('runRepl', () => {
       expect(allTexts.some((t) => t.includes('Run pnpm test'))).toBe(true);
     });
 
-    it('auto mode validation=false holds for user input', async () => {
+    it('auto mode ignores onValidateAutoProceed — feeds suggestion regardless', async () => {
       const run = vi.fn(
         async (): Promise<RunResult> => ({
           status: 'done',
@@ -467,7 +466,7 @@ describe('runRepl', () => {
       );
       const agent = makeFakeAgent({ run });
       const renderer = makeFakeRenderer();
-      const reader = makeFakeReader(['hello\n', 'I will handle this manually\n', '/exit\n']);
+      const reader = makeFakeReader(['hello\n', '/exit\n']);
       const slashRegistry = makeExitRegistry();
       const suggestions: string[] = [];
 
@@ -485,65 +484,15 @@ describe('runRepl', () => {
           if (parsed) suggestions.push(...parsed);
         },
         getSuggestions: () => suggestions,
-        onValidateAutoProceed: vi.fn(async () => false),
       });
 
-      // The suggestion "Risky migration" was NOT auto-fed
+      // The suggestion IS fed — validation gate was removed, auto mode feeds directly
       const allTexts = run.mock.calls
         .map((c: unknown[]) => {
           const blocks = c[0] as Array<{ type: string; text?: string }> | undefined;
           return blocks?.map((b) => b.text ?? '').join(' ') ?? '';
         });
-      expect(allTexts.some((t) => t.includes('Risky migration'))).toBe(false);
-      // Held message was shown
-      const writes = (renderer.write as ReturnType<typeof vi.fn>).mock.calls
-        .map((c: unknown[]) => String(c[0] ?? ''));
-      expect(writes.some((w) => w.includes('Auto-proceed held'))).toBe(true);
-    });
-
-    it('auto mode with validator throwing falls back to waiting', async () => {
-      const run = vi.fn(
-        async (): Promise<RunResult> => ({
-          status: 'done',
-          iterations: 1,
-          finalText: '💡 Next steps\n1. Run deploy\n',
-        }),
-      );
-      const agent = makeFakeAgent({ run });
-      const renderer = makeFakeRenderer();
-      const reader = makeFakeReader(['hello\n', 'ok\n', '/exit\n']);
-      const slashRegistry = makeExitRegistry();
-      const suggestions: string[] = [];
-
-      await runRepl({
-        agent,
-        renderer,
-        reader,
-        slashRegistry,
-        attachments: makeFakeAttachmentStore(),
-        banner: false,
-        getAutonomy: () => 'auto',
-        autoProceedDelayMs: 0,
-        onSuggestionsParsed: (parsed) => {
-          suggestions.length = 0;
-          if (parsed) suggestions.push(...parsed);
-        },
-        getSuggestions: () => suggestions,
-        onValidateAutoProceed: vi.fn(async () => {
-          throw new Error('network error');
-        }),
-      });
-
-      // Suggestion was NOT auto-fed (validator threw)
-      const allTexts = run.mock.calls
-        .map((c: unknown[]) => {
-          const blocks = c[0] as Array<{ type: string; text?: string }> | undefined;
-          return blocks?.map((b) => b.text ?? '').join(' ') ?? '';
-        });
-      expect(allTexts.some((t) => t.includes('Run deploy'))).toBe(false);
-      const writes = (renderer.write as ReturnType<typeof vi.fn>).mock.calls
-        .map((c: unknown[]) => String(c[0] ?? ''));
-      expect(writes.some((w) => w.includes('validation unavailable'))).toBe(true);
+      expect(allTexts.some((t) => t.includes('Risky migration'))).toBe(true);
     });
 
     it('auto mode with no validator proceeds directly', async () => {

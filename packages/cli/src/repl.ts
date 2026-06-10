@@ -360,11 +360,12 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
       // currentSuggestions via onSuggestionsParsed.  Here at the top of
       // the loop (before reading user input) we check the autonomy mode:
       //
-      //   'auto'    — validate with LLM, countdown, auto-feed suggestion#1
+      //   'auto'    — brief cooldown (runs compaction), then auto-feed
+      //               suggestion#1. No validation gate, no hard cap.
       //   'suggest' — display suggestions prominently, wait for user input
       //
       // Both modes stop when suggestions are exhausted.  Ctrl+C interrupts
-      // the countdown (reuses the existing activeCtrl SIGINT pattern).
+      // the cooldown (reuses the existing activeCtrl SIGINT pattern).
       {
         const mode = opts.getAutonomy?.() ?? 'off';
         const suggestions = opts.getSuggestions?.() ?? [];
@@ -379,78 +380,19 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
           );
         }
 
-        // ── 'auto' mode: validate → countdown → feed ───────────────
+        // ── 'auto' mode: brief cooldown → feed directly ────────────
         if (mode === 'auto' && suggestions.length > 0) {
-          const maxIter = opts.autoProceedMaxIterations ?? 50;
-          if (maxIter > 0 && autoIterCount >= maxIter) {
-            console.log(JSON.stringify({
-              level: 'info',
-              event: 'auto_proceed_limit_reached',
-              iterations: autoIterCount,
-              maxIterations: maxIter,
-            }));
-            opts.renderer.write(
-              `\n${color.amber('  ⚠ Auto-proceed limit reached')} — ${color.dim(`${autoIterCount} iterations. Waiting for input.`)}\n\n`,
-            );
-            autoIterCount = 0;
-            // Fall through to normal input reading
-          } else {
-            const top = suggestions[0] ?? '';
-            const delay = opts.autoProceedDelayMs ?? 45_000;
-
-            // ── LLM validation gate ─────────────────────────────────
-            if (opts.onValidateAutoProceed) {
-              try {
-                const lastOutput = /* last known agent output — use the stored suggestions
-                  and any recent context the host can provide */ '';
-                const ok = await opts.onValidateAutoProceed(top, lastOutput);
-                if (!ok) {
-                  opts.renderer.write(
-                    `\n${color.amber('  ⚠ Auto-proceed held')} — ${color.dim('suggestions need review. Waiting for input.')}\n\n`,
-                  );
-                  // Show suggestions so the user can pick
-                  const lines = suggestions.map(
-                    (s, i) => `  ${color.bold(`${i + 1}.`)} ${color.dim(s)}`,
-                  );
-                  opts.renderer.write(
-                    `${color.dim('  Next steps:')}\n${lines.join('\n')}\n\n`,
-                  );
-                  autoIterCount = 0;
-                  // Fall through to normal input reading
-                } else {
-                  // Validation passed — proceed to countdown
-                  const ctrl = new AbortController();
-                  activeCtrl = ctrl;
-                  try {
-                    autoIterCount++;
-                    await runAutoProceed(opts, top, delay, ctrl);
-                  } finally {
-                    activeCtrl = undefined;
-                  }
-                  continue;
-                }
-              } catch {
-                // Validation call failed (network, provider error) —
-                // err on the side of caution and wait for user input.
-                opts.renderer.write(
-                  color.dim('  Auto-proceed validation unavailable — waiting for input.\n'),
-                );
-                autoIterCount = 0;
-                // Fall through to normal input reading
-              }
-            } else {
-              // No validator configured — proceed directly
-              const ctrl = new AbortController();
-              activeCtrl = ctrl;
-              try {
-                autoIterCount++;
-                await runAutoProceed(opts, top, delay, ctrl);
-              } finally {
-                activeCtrl = undefined;
-              }
-              continue;
-            }
-          } // end maxIter guard
+          const top = suggestions[0] ?? '';
+          const delay = opts.autoProceedDelayMs ?? 1_000;
+          const ctrl = new AbortController();
+          activeCtrl = ctrl;
+          try {
+            autoIterCount++;
+            await runAutoProceed(opts, top, delay, ctrl);
+          } finally {
+            activeCtrl = undefined;
+          }
+          continue;
         }
       }
 
@@ -471,6 +413,21 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
       if (trimmed === 'q') {
         opts.renderer.write(color.dim('  Goodbye!\n'));
         break;
+      }
+
+      // `cd` and `wd` shortcuts → dispatch to /working_dir
+      if (trimmed === 'wd' || trimmed.startsWith('cd ')) {
+        const args = trimmed.startsWith('cd ') ? trimmed.slice(3).trim() : '';
+        try {
+          const res = await opts.slashRegistry.dispatch(
+            `/working_dir ${args}`,
+            opts.agent.ctx,
+          );
+          if (res?.message) opts.renderer.write(`${res.message}\n`);
+        } catch (err) {
+          opts.renderer.writeError(err instanceof Error ? err.message : String(err));
+        }
+        continue;
       }
 
       if (trimmed === '/image' || trimmed === '/paste-image' || raw === '\x1bv') {
@@ -1018,7 +975,8 @@ async function runAutoProceed(
     delayMs,
   }));
   try {
-    await autoProceedCountdown(opts, delayMs, suggestion, ctrl.signal);
+    // ── Productive cooldown: compact context while we wait ─────────
+    await autoProceedCooldown(opts, delayMs, suggestion, ctrl.signal);
     // ── Feed the suggestion as if it were runText ──────────────────
     const runBlocks = [{ type: 'text' as const, text: suggestion }];
     const runResult = await opts.agent.run(runBlocks, { signal: ctrl.signal });
@@ -1046,55 +1004,79 @@ async function runAutoProceed(
   }
 }
 /**
- * Show a countdown and return when it expires. Aborts immediately if the
- * given signal fires (Ctrl+C). Purely visual — the caller feeds the
- * suggestion to the agent after this returns.
+ * Productive cooldown between auto-proceed iterations.
+ * Instead of a dead countdown, runs context compaction in the background
+ * and only waits the full delay if compaction finishes early
+ * (so the user gets a responsive Ctrl+C while still compacting).
+ *
+ * When delayMs is 0, skips straight to feeding the suggestion.
  */
-async function autoProceedCountdown(
+async function autoProceedCooldown(
   opts: ReplOptions,
   delayMs: number,
   suggestion: string,
   signal: AbortSignal,
 ): Promise<void> {
-  const sec = Math.ceil(delayMs / 1000);
+  if (delayMs <= 0) return; // immediate — no wait at all
+
   const truncated = suggestion.length > 100 ? `${suggestion.slice(0, 97)}…` : suggestion;
+  const sec = Math.ceil(delayMs / 1000);
 
   opts.renderer.write(
-    `\n${color.cyan('⏳ Auto-proceeding')} in ${sec}s… ${color.dim('(Ctrl+C to cancel)')}\n`,
+    `\n${color.cyan('⏳ Auto')}  ${color.dim('(Ctrl+C to cancel)')}\n`,
   );
   opts.renderer.write(`${color.dim('  ▸')} ${color.dim(truncated)}\n`);
 
+  // ── Run compaction during the cooldown ────────────────────────
+  const compactJob = runContextCompaction(opts, signal);
+
   const start = Date.now();
-  let lastSec = sec;
+  const onAbort = (): void => {
+    /* rejected by caller when signal fires */
+  };
+  let interval: ReturnType<typeof setInterval> | undefined;
 
-  return new Promise<void>((resolve, reject) => {
-    const onAbort = (): void => {
-      clearInterval(interval);
-      reject(new DOMException('Aborted', 'AbortError'));
-    };
-    signal.addEventListener('abort', onAbort, { once: true });
+  return new Promise<void>((resolve) => {
+    signal.addEventListener('abort', () => resolve(), { once: true });
 
-    const interval = setInterval(() => {
-      if (signal.aborted) return;
+    interval = setInterval(() => {
+      if (signal.aborted) { resolve(); return; }
       const elapsed = Date.now() - start;
       const remaining = Math.max(0, Math.ceil((delayMs - elapsed) / 1000));
       if (remaining <= 0) {
-        clearInterval(interval);
-        signal.removeEventListener('abort', onAbort);
-        opts.renderer.write(color.dim(`  ↳ Proceeding with: ${truncated}\n`));
+        opts.renderer.write(color.dim(`  ↳ ${truncated}\n`));
         resolve();
         return;
       }
-      if (remaining !== lastSec) {
-        lastSec = remaining;
-        // Update the countdown line (overwrite in place is complex
-        // with a terminal renderer, so we append a new line)
-        opts.renderer.write(
-          color.dim(`  ⏳ ${remaining}s remaining…  (Ctrl+C to cancel)\n`),
-        );
+      if (remaining % 5 === 0 || remaining === sec) {
+        opts.renderer.write(color.dim(`  ⏳ ${remaining}s…\n`));
       }
-    }, 500);
+    }, 1000);
+  }).finally(() => {
+    if (interval) clearInterval(interval);
+    signal.removeEventListener('abort', onAbort);
   });
+}
+
+/**
+ * Run context compaction best-effort. Catches all errors silently so it
+ * never interrupts the auto-proceed flow. Returns immediately if the
+ * agent's context has no compactor wired up.
+ */
+async function runContextCompaction(
+  opts: ReplOptions,
+  signal: AbortSignal,
+): Promise<void> {
+  try {
+    const ctx = opts.agent.ctx;
+    if (!ctx?.compactor) return;
+    // Quick check: only compact if we've added meaningful message volume
+    // since the last compaction (heuristic: >50 messages).
+    if ((ctx.messages?.length ?? 0) < 50) return;
+    await ctx.compactor.compact(ctx, { aggressive: false });
+  } catch {
+    // Best-effort — never let compaction break the auto loop
+  }
 }
 
 /**
