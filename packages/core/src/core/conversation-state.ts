@@ -105,6 +105,16 @@ export class ConversationState {
     for (let i = 0; i < messages.length; i++) {
       arr[i] = messages[i]!;
     }
+
+    // Mark adjacency dirty when the replacement contains tool-use
+    // blocks — the next request pipeline must re-check adjacency.
+    // Without this, replaceMessages() can silently skip repair when
+    // it introduces or modifies tool_use/tool_result pairs (e.g. test
+    // setup, agent-loop content rewrite).
+    if (messages.some((m) => m.content?.some((b) => b.type === 'tool_use' || b.type === 'tool_result'))) {
+      this.ctx.toolAdjacencyDirty = true;
+    }
+
     this.emit({ kind: 'messages_replaced', messages: [...messages] });
   }
 

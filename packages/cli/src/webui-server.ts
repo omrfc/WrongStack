@@ -270,7 +270,7 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
       projectName: opts.projectRoot ? path.basename(opts.projectRoot) : undefined,
       cwd: opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '',
       contextMode: String(
-        opts.agent.ctx.meta['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID,
+        opts.agent.ctx.meta?.['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID,
       ),
       maxContext,
       inputCost,
