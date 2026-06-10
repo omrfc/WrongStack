@@ -3,7 +3,9 @@ import { useWebSocketBootstrap } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
 import { getWSClient } from '@/lib/ws-client';
 import { useChatStore, useConfigStore, useFileStore, useGoalStore, useSessionStore, useUIStore, useWorktreeStore, useAutoPhaseStore } from '@/stores';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { Layers, Play, Rocket } from 'lucide-react';
+import { Button } from './components/ui/button';
 import { ActivityBar } from './components/ActivityBar';
 import { AgentsPage } from './components/AgentsPage';
 import { AutoPhaseView } from './components/AutoPhaseView';
@@ -22,6 +24,8 @@ import { PhasePanel } from './components/PhasePanel';
 import { ProjectsPanel } from './components/ProjectsPanel';
 import { QuickModelSwitcher } from './components/QuickModelSwitcher';
 import { SettingsPanel } from './components/SettingsPanel';
+import { SetupScreen } from './components/SetupScreen';
+import { SessionsDashboard } from './components/SessionsDashboard';
 import { ShortcutsOverlay } from './components/ShortcutsOverlay';
 import { Sidebar } from './components/Sidebar';
 import { ThemeProvider, useTheme } from './components/ThemeProvider';
@@ -29,6 +33,7 @@ import { Toaster } from './components/Toaster';
 import { WorkDashboard } from './components/WorkDashboard';
 import { WorktreeGraph } from './components/WorktreeGraph';
 import { WorktreeLanes } from './components/WorktreeLanes';
+import { AgentFlowViz } from './components/AgentFlowViz';
 function AppInner() {
   const { theme } = useTheme();
   const { currentView, sidebarOpen, toggleSidebar, setSearchOpen, setSidebarOpen, setCurrentView } = useUIStore();
@@ -47,6 +52,15 @@ function AppInner() {
 
   // Worktree view toggle
   const [worktreeView, setWorktreeView] = useState<'graph' | 'lanes'>('graph');
+
+  // AutoPhase quick-start in chat view
+  const [autoPhaseGoal, setAutoPhaseGoal] = useState('');
+  const handleAutoPhaseStart = useCallback(() => {
+    const g = autoPhaseGoal.trim();
+    if (!g) return;
+    getWSClient(useConfigStore.getState().wsUrl).send({ type: 'autophase.start', payload: { title: g, autonomous: true } });
+    setAutoPhaseGoal('');
+  }, [autoPhaseGoal]);
 
   // Handle file open requests from FileExplorer (dispatches custom events on window)
   useEffect(() => {
@@ -250,29 +264,68 @@ function AppInner() {
 
   return (
     <div className={cn('flex h-screen', theme)}>
-      {/* ── Activity Bar — always visible, app-level navigation ── */}
-      <ActivityBar />
+      {/* ── Activity Bar — hidden during setup ── */}
+      {currentView !== 'setup' && <ActivityBar />}
 
       {/* ── Secondary Panel — collapsible, context-sensitive ── */}
-      {sidebarOpen && <Sidebar />}
+      {sidebarOpen && currentView !== 'setup' && <Sidebar />}
 
       {/* ── Main area ── */}
       <main className="flex-1 flex flex-col overflow-hidden">
-        <ConnectionBanner />
+        {currentView !== 'setup' && <ConnectionBanner />}
         {currentView === 'chat' && (
           <>
             {sessionId && (
               <div className="px-4 pt-2 space-y-2">
                 <div id="panel-collab"><CollabPanel sessionId={sessionId} /></div>
                 <div id="panel-goal"><GoalPanel goal={goal} /></div>
-                {/* AutoPhase panel — self-hides when no phases */}
-                {autoPhase.phases.length > 0 && (
+                {/* AutoPhase panel — monitor or quick-start */}
+                {autoPhase.phases.length > 0 ? (
                   <PhasePanel
                     phases={autoPhase.phases}
                     activePhaseId={autoPhase.activePhaseId ?? undefined}
                     overallPercent={autoPhase.overallPercent}
                     autonomous={autoPhase.autonomous}
                   />
+                ) : (
+                  <div className="rounded-lg border border-dashed border-border bg-card/50 p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Layers className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-xs font-semibold text-foreground flex-1">AutoPhase</span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 gap-1.5 text-xs"
+                        onClick={() => useUIStore.getState().setCurrentView('autophase')}
+                      >
+                        <Rocket className="h-3.5 w-3.5" />
+                        Full View
+                      </Button>
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        value={autoPhaseGoal}
+                        onChange={(e) => setAutoPhaseGoal(e.target.value)}
+                        placeholder="What do you want to build?"
+                        className="flex-1 h-8 rounded-md border border-border bg-background px-3 text-xs placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAutoPhaseStart();
+                          }
+                        }}
+                      />
+                      <Button
+                        size="sm"
+                        className="h-8 gap-1.5 text-xs"
+                        disabled={!autoPhaseGoal.trim()}
+                        onClick={handleAutoPhaseStart}
+                      >
+                        <Play className="h-3.5 w-3.5" />
+                        Start
+                      </Button>
+                    </div>
+                  </div>
                 )}
                 {/* Live subagent roster — self-hides when no fleet is running. */}
                 <div id="panel-fleet"><FleetPanel /></div>
@@ -320,6 +373,7 @@ function AppInner() {
           </>
         )}
         {currentView === 'settings' && <SettingsPanel />}
+        {currentView === 'setup' && <SetupScreen />}
         {currentView === 'projects' && (
           <div className="flex-1 flex flex-col overflow-hidden max-w-lg border-r bg-card/50">
             <ProjectsPanel fullView />
@@ -331,6 +385,16 @@ function AppInner() {
         {currentView === 'agents' && (
           <div className="flex-1 flex flex-col overflow-hidden">
             <AgentsPage />
+          </div>
+        )}
+        {currentView === 'agentflow' && (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <AgentFlowViz />
+          </div>
+        )}
+        {currentView === 'sessions' && (
+          <div className="flex-1 overflow-y-auto">
+            <SessionsDashboard />
           </div>
         )}
         {currentView === 'context' && (
