@@ -38,6 +38,12 @@ const MAILBOX_FILE = '_mailbox.jsonl';
 const AGENT_STALE_MS = 60_000;
 /** Heartbeat updates are throttled to at most this interval. */
 const HEARTBEAT_THROTTLE_MS = 5_000;
+/**
+ * How long a read may be served from the in-process registry cache before
+ * re-reading the shared file. Kept well below HEARTBEAT_THROTTLE_MS so
+ * cross-process registrations become visible promptly.
+ */
+const REGISTRY_CACHE_TTL_MS = 2_000;
 const LINE_SEPARATOR = '\n';
 
 /**
@@ -72,8 +78,15 @@ export class GlobalMailbox implements Mailbox {
   readonly registryPath: string;
   /** Optional event bus for emitting agent registration/heartbeat events. */
   private readonly _events?: EventBus | undefined;
-  /** Local cache of the agent registry to avoid re-reading on every heartbeat. */
+  /**
+   * Local cache of the agent registry to avoid re-reading on every call.
+   * Time-bounded: the registry file is shared ACROSS PROCESSES (that's the
+   * whole point of GlobalMailbox), so a cache served forever would never see
+   * agents registered by other sessions. Writers always bypass it.
+   */
   private _registryCache: Map<string, RegisteredAgent> | null = null;
+  /** When the registry cache was last refreshed from disk (epoch ms). */
+  private _registryCacheAt = 0;
   /** Last time each local agent sent a heartbeat (throttle). */
   private _lastHeartbeat = new Map<string, number>();
 
@@ -149,32 +162,37 @@ export class GlobalMailbox implements Mailbox {
   }
 
   async ack(input: MailboxAckInput): Promise<MailboxMessage | null> {
-    const all = await this._readMessages();
-    const idx = all.findIndex((m) => m.id === input.messageId);
-    if (idx === -1) return null;
-
-    const msg = all[idx]!;
-    const now = new Date().toISOString();
-
-    if (input.read !== false) {
-      msg.readBy[input.readerId] = now;
-    }
-    if (input.completed) {
-      msg.completed = true;
-      msg.completedBy = input.readerId;
-      msg.completedAt = now;
-    }
-    if (input.outcome !== undefined) {
-      msg.outcome = input.outcome;
-    }
-
-    // Atomic rewrite to avoid cross-process corruption
+    // Read-modify-write entirely under the lock. The file is shared across
+    // processes — reading before acquiring the lock lets two concurrent acks
+    // each start from a snapshot missing the other's receipt, so the last
+    // writer silently erases the first one's read/completed state.
+    let result: MailboxMessage | null = null;
     await withFileLock(this.messagePath, async () => {
+      const all = await this._readMessages();
+      const idx = all.findIndex((m) => m.id === input.messageId);
+      if (idx === -1) return;
+
+      const msg = all[idx]!;
+      const now = new Date().toISOString();
+
+      if (input.read !== false) {
+        msg.readBy[input.readerId] = now;
+      }
+      if (input.completed) {
+        msg.completed = true;
+        msg.completedBy = input.readerId;
+        msg.completedAt = now;
+      }
+      if (input.outcome !== undefined) {
+        msg.outcome = input.outcome;
+      }
+
       const serialized = all.map((m) => JSON.stringify(m)).join(LINE_SEPARATOR) + LINE_SEPARATOR;
       await fsp.writeFile(this.messagePath, serialized, 'utf8');
+      result = msg;
     });
 
-    return msg;
+    return result;
   }
 
   async unreadCount(forAgentId: string): Promise<number> {
@@ -209,13 +227,16 @@ export class GlobalMailbox implements Mailbox {
     };
 
     await withFileLock(this.registryPath, async () => {
-      const registry = await this._readRegistry();
+      // fresh: read-modify-write must start from the on-disk state, not the
+      // cache — other processes may have registered agents since.
+      const registry = await this._readRegistry({ fresh: true });
       // Prune stale agents
       this._pruneStaleInPlace(registry);
       // Upsert
       registry.set(input.agentId, agent);
       // Update cache
       this._registryCache = registry;
+      this._registryCacheAt = Date.now();
       await this._writeRegistry(registry);
     });
 
@@ -237,7 +258,8 @@ export class GlobalMailbox implements Mailbox {
     await this._ensureRegistry();
 
     await withFileLock(this.registryPath, async () => {
-      const registry = await this._readRegistry();
+      // fresh: see registerAgent — never read-modify-write from the cache.
+      const registry = await this._readRegistry({ fresh: true });
       this._pruneStaleInPlace(registry);
 
       const agent = registry.get(input.agentId);
@@ -253,6 +275,7 @@ export class GlobalMailbox implements Mailbox {
       // If agent not registered yet, silently skip — registerAgent first
 
       this._registryCache = registry;
+      this._registryCacheAt = Date.now();
       await this._writeRegistry(registry);
     });
 
@@ -340,8 +363,18 @@ export class GlobalMailbox implements Mailbox {
     await fsp.mkdir(path.dirname(this.registryPath), { recursive: true });
   }
 
-  private async _readRegistry(): Promise<Map<string, RegisteredAgent>> {
-    if (this._registryCache) return new Map(this._registryCache);
+  private async _readRegistry(opts?: { fresh?: boolean }): Promise<Map<string, RegisteredAgent>> {
+    // The registry file is shared across processes. Reads may use a short
+    // TTL cache; writers (under the file lock) MUST pass { fresh: true } —
+    // a read-modify-write from a stale cache would silently erase agents
+    // registered by other sessions.
+    if (
+      !opts?.fresh &&
+      this._registryCache &&
+      Date.now() - this._registryCacheAt < REGISTRY_CACHE_TTL_MS
+    ) {
+      return new Map(this._registryCache);
+    }
 
     try {
       const raw = await fsp.readFile(this.registryPath, 'utf8');
@@ -352,11 +385,13 @@ export class GlobalMailbox implements Mailbox {
         map.set(id, agent as RegisteredAgent);
       }
       this._registryCache = map;
+      this._registryCacheAt = Date.now();
       return new Map(map);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         const empty = new Map<string, RegisteredAgent>();
         this._registryCache = empty;
+        this._registryCacheAt = Date.now();
         return empty;
       }
       throw err;

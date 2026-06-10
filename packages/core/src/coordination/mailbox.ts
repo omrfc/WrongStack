@@ -100,27 +100,33 @@ export class DefaultMailbox implements Mailbox {
   // ── Ack ───────────────────────────────────────────────────────────────
 
   async ack(input: MailboxAckInput): Promise<MailboxMessage | null> {
-    const all = await this._readAll();
-    const idx = all.findIndex((m) => m.id === input.messageId);
-    if (idx === -1) return null;
-    const msg = all[idx]!;
-    const now = new Date().toISOString();
-    if (input.read !== false) {
-      msg.readBy[input.readerId] = now;
-    }
-    if (input.completed) {
-      msg.completed = true;
-      msg.completedBy = input.readerId;
-      msg.completedAt = now;
-    }
-    if (input.outcome !== undefined) {
-      msg.outcome = input.outcome;
-    }
+    // Read-modify-write must happen entirely under the lock: reading the
+    // file before acquiring it lets two concurrent acks each start from a
+    // snapshot missing the other's receipt — last writer wins and a read
+    // receipt is silently lost.
+    let result: MailboxMessage | null = null;
     await withFileLock(this.filePath, async () => {
+      const all = await this._readAll();
+      const idx = all.findIndex((m) => m.id === input.messageId);
+      if (idx === -1) return;
+      const msg = all[idx]!;
+      const now = new Date().toISOString();
+      if (input.read !== false) {
+        msg.readBy[input.readerId] = now;
+      }
+      if (input.completed) {
+        msg.completed = true;
+        msg.completedBy = input.readerId;
+        msg.completedAt = now;
+      }
+      if (input.outcome !== undefined) {
+        msg.outcome = input.outcome;
+      }
       const serialized = all.map((m) => JSON.stringify(m)).join(LINE_SEPARATOR) + LINE_SEPARATOR;
       await fsp.writeFile(this.filePath, serialized, 'utf8');
+      result = msg;
     });
-    return msg;
+    return result;
   }
 
   // ── Agent statuses ────────────────────────────────────────────────────
@@ -130,15 +136,17 @@ export class DefaultMailbox implements Mailbox {
     const latest = new Map<string, MailboxAgentStatus>();
     for (const m of all) {
       if (m.type !== 'status') continue;
-      if (!m.taskContext) continue;
+      // taskContext is optional — status messages posted through the mailbox
+      // tool carry only from/subject. Synthesize a minimal entry from those
+      // so fleet discovery still sees the agent.
       const existing = latest.get(m.from);
       if (existing && m.timestamp <= existing.lastActivityAt) continue;
       latest.set(m.from, {
         agentId: m.from,
-        name: m.taskContext.agentName ?? m.from,
-        role: m.taskContext.agentRole,
+        name: m.taskContext?.agentName ?? m.from,
+        role: m.taskContext?.agentRole,
         sessionId: m.senderSessionId ?? '?',
-        status: (m.taskContext.status as MailboxAgentStatus['status']) ?? 'idle',
+        status: (m.taskContext?.status as MailboxAgentStatus['status']) ?? 'idle',
         currentTool: undefined,
         currentTask: m.subject,
         iterations: 0,

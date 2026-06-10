@@ -2,7 +2,7 @@
  * Smoke test — full dependency watcher → mailbox → tech-stack round-trip.
  * Verifies the complete pipeline works end-to-end.
  */
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -30,10 +30,9 @@ describe('mailbox end-to-end smoke test', () => {
     };
   });
 
-  afterAll(() => {
-    // best effort cleanup of parent dir
-    const glob = new Bun?.Glob?.('ws-smoke-*') ?? { match: () => false };
-    // skip cleanup in CI — temp dirs are ephemeral
+  afterEach(async () => {
+    // Best-effort cleanup of the per-test temp dir.
+    await fs.rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it('full round-trip: dep-watcher → mailbox → tech-stack → result', async () => {

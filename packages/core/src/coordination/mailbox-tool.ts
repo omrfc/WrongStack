@@ -152,16 +152,23 @@ async function executeCheck(mb: Mailbox, agentId: string, i: Record<string, unkn
   const limit = (i.limit as number) ?? 20;
   const messages = await mb.query({ to: agentId, unreadBy: agentId, limit, minPriority: 'low' });
 
-  // Auto-read: add read receipt for each message
-  for (const m of messages) {
-    void mb.ack({ messageId: m.id, readerId: agentId, read: true }).catch(() => {});
-  }
+  // Auto-read: add a read receipt for each message. Await the acks (rather
+  // than fire-and-forget) and return the post-ack snapshots so readByMe in
+  // the response reflects the receipt that "check" just added.
+  const acked = await Promise.all(
+    messages.map(async (m) => {
+      const updated = await mb
+        .ack({ messageId: m.id, readerId: agentId, read: true })
+        .catch(() => null);
+      return updated ?? m;
+    }),
+  );
 
   return {
     ok: true,
-    count: messages.length,
-    messages: messages.map((m) => formatMessage(m, agentId)),
-    summary: messages.length === 0 ? 'No unread messages.' : `${messages.length} unread message(s).`,
+    count: acked.length,
+    messages: acked.map((m) => formatMessage(m, agentId)),
+    summary: acked.length === 0 ? 'No unread messages.' : `${acked.length} unread message(s).`,
   };
 }
 
@@ -176,7 +183,9 @@ async function executeSend(
   if (!to) return { ok: false, error: '"to" is required.' };
   if (!tp) return { ok: false, error: '"type" is required.' };
   if (!subject) return { ok: false, error: '"subject" is required.' };
-  if (!body) return { ok: false, error: '"body" is required.' };
+  // Empty string is a legitimate body (e.g. subject-only status pings) —
+  // only reject when the field is genuinely absent.
+  if (body === undefined || body === null) return { ok: false, error: '"body" is required.' };
 
   const msg = await mb.send({
     from: agentId,

@@ -62,7 +62,9 @@ describe('DefaultMailbox', () => {
     expect(msg.id).toBeDefined();
     expect(msg.from).toBe('agent-a');
     expect(msg.to).toBe('agent-b');
-    expect(msg.read).toBe(false);
+    // Per-recipient read receipts replaced the old `read: boolean` —
+    // a fresh message starts with an empty readBy map.
+    expect(msg.readBy).toEqual({});
     expect(msg.completed).toBe(false);
 
     // Verify file exists
@@ -301,7 +303,8 @@ describe('makeMailboxTool', () => {
     const result = await tool.execute({ action: 'check' }, mockCtx() as any);
     expect(result.ok).toBe(true);
     expect(result.count).toBe(2);
-    const remaining = await mailbox.query({ to: 'agent-b', unreadOnly: true });
+    // check auto-acks: nothing should remain unread by agent-b.
+    const remaining = await mailbox.query({ to: 'agent-b', unreadBy: 'agent-b' });
     expect(remaining.length).toBe(0);
   });
 

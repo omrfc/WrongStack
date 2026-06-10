@@ -368,11 +368,11 @@ export type {
 } from './coordination/mailbox-types.js';
 export {
   createMailboxChecker,
-  attachMailboxChecker,
   buildMailboxBlock,
   injectPendingMailboxMessages,
   type MailboxLoopOptions,
 } from './core/mailbox-loop.js';
+export { attachMailboxChecker } from './mailbox-attach.js';
 // ── Dependency watcher — file-change → mailbox bridge ────────────────────
 export {
   DEPENDENCY_FILE_PATTERNS,

@@ -234,7 +234,7 @@ describe('browser and e2e agent tool lists', () => {
 
   it('browser agent total tool count is reasonable (read + fetch + playwright, no heavy)', () => {
     const tools = browserDef!.config.tools!;
-    // 5 read + 1 fetch + 11 playwright = 17
-    expect(tools.length).toBe(17);
+    // TOOLS.read (read, grep, glob, search, tree, mailbox) + fetch + 11 playwright = 18
+    expect(tools.length).toBe(18);
   });
 });

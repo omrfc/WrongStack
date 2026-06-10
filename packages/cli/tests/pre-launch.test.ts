@@ -1,7 +1,16 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// ESM module namespaces are not configurable, so `vi.spyOn(fs, 'readdir')`
+// throws under Vitest. Wrap readdir in a vi.fn at module-mock time instead —
+// it delegates to the real implementation until a test overrides it, and
+// `vi.restoreAllMocks()` puts the real delegate back between tests.
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual, readdir: vi.fn(actual.readdir) };
+});
 import type { ReadlineInputReader } from '../src/input-reader.js';
 import { detectProjectKind, LaunchAbortedError, maybeAskAboutIndexing, persistLaunchChoices, resolveIndexThreshold, runLaunchPrompts, runProjectCheck } from '../src/pre-launch.js';
 import type { TerminalRenderer } from '../src/renderer.js';
@@ -428,8 +437,8 @@ function dirent(name: string, isDir: boolean): fs.Dirent {
  * are absolute directory paths; values are the entries in that directory.
  */
 function stubReaddir(tree: Record<string, fs.Dirent[]>) {
-  vi.spyOn(fs, 'readdir').mockImplementation(
-    async (dirPath) => {
+  (fs.readdir as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+    async (dirPath: unknown) => {
       const key = typeof dirPath === 'string' ? dirPath : String(dirPath);
       return tree[key] ?? [];
     },

@@ -8,8 +8,8 @@ import {
   type SessionWriter,
   Context,
 } from '@wrongstack/core';
-import { buildWorkingDirCommand } from '../src/slash-commands/working-dir.js';
-import type { SlashCommandContext } from '../src/slash-commands/index.js';
+import { buildWorkingDirCommand } from '../../src/slash-commands/working-dir.js';
+import type { SlashCommandContext } from '../../src/slash-commands/index.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -175,7 +175,10 @@ describe('/working_dir', () => {
     await cmd.run('src', ctx);
     expect(ctx.workingDir).toBe(subDir);
 
-    await cmd.run('lib', ctx);
+    // Relative paths resolve from the PROJECT ROOT (documented convention,
+    // pinned by the "resolves relative paths against projectRoot" test) —
+    // so going deeper requires the full root-relative path.
+    await cmd.run('src/lib', ctx);
     expect(ctx.workingDir).toBe(deeper);
   });
 

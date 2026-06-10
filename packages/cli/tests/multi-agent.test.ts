@@ -139,13 +139,20 @@ describe('MultiAgentHost', () => {
     expect(subagentId).toBeTruthy();
     expect(taskId).toBeTruthy();
     expect(deps.configStore.get).toHaveBeenCalled();
-    expect(
-      (deps.systemPromptBuilder as { build: ReturnType<typeof vi.fn> }).build,
-    ).toHaveBeenCalled();
+    // Pending tracking is synchronous in host.spawn — assert it before the
+    // task gets dispatched and leaves the pending list.
     const s = host.status();
     expect(s.pending).toHaveLength(1);
     expect(s.pending[0]!.description).toBe('do a thing');
     expect(s.summary).toMatch(/1 pending/);
+    // The agent factory runs on task dispatch (async, and it does real
+    // mailbox I/O before building the prompt) — wait for it rather than
+    // asserting the call landed within spawn()'s own promise chain.
+    await vi.waitFor(() =>
+      expect(
+        (deps.systemPromptBuilder as { build: ReturnType<typeof vi.fn> }).build,
+      ).toHaveBeenCalled(),
+    );
     await host.stopAll();
   });
 
@@ -265,12 +272,16 @@ describe('MultiAgentHost', () => {
     });
     const host = new MultiAgentHost(deps);
     await host.spawn('go');
-    await host.stopAll();
     // SystemPromptBuilder receives the unfiltered list via the factory closure;
-    // exercising the path is what matters for coverage.
-    expect(
-      (deps.systemPromptBuilder as { build: ReturnType<typeof vi.fn> }).build,
-    ).toHaveBeenCalled();
+    // exercising the path is what matters for coverage. The factory runs on
+    // async task dispatch (with mailbox I/O first), so wait for the call to
+    // land before tearing the fleet down.
+    await vi.waitFor(() =>
+      expect(
+        (deps.systemPromptBuilder as { build: ReturnType<typeof vi.fn> }).build,
+      ).toHaveBeenCalled(),
+    );
+    await host.stopAll();
   });
 
   describe('director mode', () => {

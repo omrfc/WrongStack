@@ -11,7 +11,8 @@ import { estimateRequestTokens, estimateRequestTokensCalibrated, getCalibrationS
 import { consumeAutonomousContinue } from './continue-to-next-iteration.js';
 import { buildBtwBlock, consumeBtwNotes } from './btw.js';
 import { buildQueuedMessagesBlock, consumeQueuedMessagesUpdate } from './queued-messages.js';
-import { attachMailboxChecker, injectPendingMailboxMessages } from './mailbox-loop.js';
+import { attachMailboxChecker } from '../mailbox-attach.js';
+import { injectPendingMailboxMessages } from './mailbox-loop.js';
 import { runProviderWithRetry } from './provider-runner.js';
 import { requestLimitExtension } from './iteration-limit.js';
 import { TOKENS } from '../kernel/tokens.js';
