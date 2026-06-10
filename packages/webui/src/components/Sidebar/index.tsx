@@ -26,6 +26,7 @@ const ACTIVITY_LABEL: Record<Activity, string> = {
   history: 'History',
   files: 'Files',
   projects: 'Projects',
+  sessions: 'Sessions',
   mailbox: 'Mailbox',
 };
 

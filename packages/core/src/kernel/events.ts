@@ -509,6 +509,14 @@ export interface EventMap {
     branch?: string | undefined;
     error: string;
   };
+  /**
+   * Auto-proceed countdown tick, emitted once per second by the REPL while
+   * autonomy mode `auto` is counting down to self-driving the next suggestion.
+   * `remaining` is the number of whole seconds left. Display-only: the TUI
+   * StatusBar renders it as an "auto-proceed in Ns" chip; no consumer should
+   * derive behavior from it (the REPL owns the actual timer).
+   */
+  'countdown.tick': { remaining: number };
   // ── Memory store events — emitted by DefaultMemoryStore so plugins can react ──
   'memory.remembered': MemoryRememberedPayload;
   'memory.forgotten': MemoryForgottenPayload;

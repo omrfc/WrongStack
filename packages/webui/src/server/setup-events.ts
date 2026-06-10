@@ -207,7 +207,7 @@ export function setupEvents(deps: SetupEventsDeps): void {
             pid: s.pid,
             startedAt: s.startedAt,
             agentCount: s.agentCount,
-            agents: (s.agents ?? []).map((a: { id: string; name: string; status: string; currentTool?: string; iterations?: number; toolCalls?: number; lastActivityAt?: number; costUsd?: number; ctxPct?: number; maxContext?: number }) => ({
+            agents: (s.agents ?? []).map((a) => ({
               id: a.id,
               name: a.name,
               status: a.status,
@@ -215,9 +215,6 @@ export function setupEvents(deps: SetupEventsDeps): void {
               iterations: a.iterations,
               toolCalls: a.toolCalls,
               lastActivityAt: a.lastActivityAt,
-              costUsd: a.costUsd,
-              ctxPct: a.ctxPct,
-              maxContext: a.maxContext,
             })),
           }));
         broadcast(clients, { type: 'sessions.status_update', payload: { sessions: live } });

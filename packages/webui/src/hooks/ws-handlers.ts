@@ -633,7 +633,7 @@ export const WS_HANDLERS: Record<string, (msg: WSServerMessage) => void> = {
       const { original } = refinePanel;
       useUIStore.getState().setRefinePanel(null);
       useChatStore.getState().addMessage({ role: 'user', content: original });
-      useUIStore.getState().setLoading(true);
+      useChatStore.getState().setLoading(true);
       getWSClient().send({ type: 'user_message', payload: { id: `msg_${Date.now()}`, content: original, timestamp: Date.now() } });
       return;
     }
@@ -643,7 +643,7 @@ export const WS_HANDLERS: Record<string, (msg: WSServerMessage) => void> = {
     if (normalizedEqual(p.refined, original)) {
       useUIStore.getState().setRefinePanel(null);
       useChatStore.getState().addMessage({ role: 'user', content: original });
-      useUIStore.getState().setLoading(true);
+      useChatStore.getState().setLoading(true);
       getWSClient().send({ type: 'user_message', payload: { id: `msg_${Date.now()}`, content: original, timestamp: Date.now() } });
       return;
     }

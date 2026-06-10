@@ -230,6 +230,10 @@ function useAutoPhaseEvents(
           if (!p.kept) dispatch({ type: 'worktreeRemove', handleId: p.handleId });
           break;
         }
+        case 'countdown.tick': {
+          dispatch({ type: 'countdownTick', remainingSeconds: (payload as { remaining: number }).remaining });
+          break;
+        }
       }
     };
 

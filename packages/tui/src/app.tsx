@@ -783,6 +783,7 @@ export function App({
     viewportRows: 0,
     pendingNewLines: 0,
     debugStreamStats: null,
+    countdown: null,
   });
 
   const builderRef = useRef<InputBuilder | null>(null);
@@ -5225,7 +5226,7 @@ export function App({
             modeLabel={liveModeLabel || undefined}
             debugStreamStats={state.debugStreamStats}
             enhanceCountdown={enhanceCountdown}
-            autoProceedCountdown={autoProceedCountdown}
+            autoProceedCountdown={state.countdown?.remainingSeconds ?? autoProceedCountdown}
             sessionCount={sessionCount}
             mailbox={mailboxStatus}
           />

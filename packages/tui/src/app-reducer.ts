@@ -1399,5 +1399,19 @@ export function reducer(state: State, action: Action): State {
     case 'sessionResumeConfirmClear': {
       return { ...state, sessionResumeConfirm: null };
     }
+    // --- Auto-proceed countdown ---
+    case 'countdownTick': {
+      // Upsert: the first tick creates the countdown (there is no separate
+      // "started" event from the host), and a 0-tick clears it so the chip
+      // never freezes at the last value.
+      if (action.remainingSeconds <= 0) {
+        return state.countdown ? { ...state, countdown: null } : state;
+      }
+      return { ...state, countdown: { remainingSeconds: action.remainingSeconds } };
+    }
+    case 'countdownEnded': {
+      if (state.countdown === null) return state;
+      return { ...state, countdown: null };
+    }
   }
 }

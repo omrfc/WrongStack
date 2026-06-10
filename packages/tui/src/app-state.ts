@@ -493,6 +493,14 @@ export type State = {
     totalBytes: number;
     lastChunkAt: string;
   } | null;
+  /**
+   * Auto-proceed countdown state, driven by `countdown.tick` events from
+   * the host. null when no countdown is active. A tick of 0 clears it.
+   */
+  countdown: {
+    /** Remaining seconds until auto-proceed fires. */
+    remainingSeconds: number;
+  } | null;
 };
 
 export type Settings = {
@@ -834,4 +842,8 @@ export type Action =
       lastChunkAt: string;
     }
   /** Clear debug-stream stats (fired on stream reset / idle). */
-  | { type: 'debugStreamStatsClear' };
+  | { type: 'debugStreamStatsClear' }
+  /** Auto-proceed countdown tick. Upserts the countdown; 0 clears it. */
+  | { type: 'countdownTick'; remainingSeconds: number }
+  /** Auto-proceed countdown ended (completed or aborted). */
+  | { type: 'countdownEnded' };

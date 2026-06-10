@@ -52,6 +52,10 @@ export const useFleetStore = create<FleetState>()((set, get) => ({
         return { agents };
       }
 
+      // Every other event kind addresses a single agent — without an id
+      // there is nothing to upsert (malformed/partial payload).
+      if (!e.subagentId) return state;
+
       const prev = agents.get(e.subagentId) ?? blankAgent(e.subagentId, e.name, e.sessionId);
       const next: SubagentView = { ...prev };
       switch (e.kind) {

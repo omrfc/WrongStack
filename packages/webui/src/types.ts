@@ -550,6 +550,8 @@ export type WSClientMessage =
   | WSCollabResume
   | WSCollabGrantControl
   | WSCollabInjectTool
+  | { type: 'mailbox.messages'; payload: { limit?: number | undefined; agentId?: string | undefined; unreadOnly?: boolean | undefined } }
+  | { type: 'mailbox.agents'; payload: { onlineOnly?: boolean | undefined } | Record<string, never> }
   | { type: 'model.refine'; payload: { text: string } };
 
 export type WSServerMessage =

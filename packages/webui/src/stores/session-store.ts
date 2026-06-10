@@ -63,6 +63,7 @@ interface SessionState {
   endSession: () => void;
   setEnv: (env: {
     maxContext?: number | undefined;
+    projectRoot?: string | undefined;
     projectName?: string | undefined;
     cwd?: string | undefined;
     mode?: string | undefined;

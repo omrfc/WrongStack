@@ -374,12 +374,23 @@ export async function main(argv: string[]): Promise<number> {
   // Provider instance — registry-driven by default, but falls through to
   // Build system prompt
   const promptBuilder = container.resolve(TOKENS.SystemPromptBuilder) as SystemPromptBuilder;
+
+  // Fetch online agents from the shared mailbox to include in system prompt
+  let onlineAgents: Awaited<ReturnType<GlobalMailbox['getAgentStatuses']>> = [];
+  try {
+    const systemMailbox = new GlobalMailbox(wpaths.projectDir);
+    onlineAgents = await systemMailbox.getAgentStatuses();
+  } catch {
+    // Non-fatal — mailbox errors should not block prompt building
+  }
+
   const systemPrompt = await promptBuilder.build({
     cwd,
     projectRoot,
     tools: toolRegistry.list(),
     provider: config.provider,
     model: config.model,
+    onlineAgents,
   });
 
   // Session — extracted to wiring/session
@@ -1172,16 +1183,14 @@ export async function main(argv: string[]): Promise<number> {
 
   // Statusline hidden items — derived from the config file, kept in sync with the TUI
   const hiddenItemsFromConfig = await loadStatuslineConfig();
-  const hiddenItemsList: Array<
-    'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
-  > = [];
-  const ALL_ITEMS = ['todos', 'plan', 'fleet', 'git', 'elapsed', 'context', 'cost', 'working_dir'] as const;
+  const hiddenItemsList: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'> = [];
+  const ALL_ITEMS = ['todos', 'plan', 'fleet', 'git', 'elapsed', 'context', 'cost'] as const;
   for (const k of ALL_ITEMS) {
     if (!hiddenItemsFromConfig[k]) hiddenItemsList.push(k);
   }
   const statuslineHiddenItems = hiddenItemsList;
-  let currentHiddenItems = [...statuslineHiddenItems];
-  const setStatuslineHiddenItems = (items: typeof statuslineHiddenItems) => {
+  let currentHiddenItems = [...statuslineHiddenItems] as Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'>;
+  const setStatuslineHiddenItems = (items: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'>) => {
     currentHiddenItems = items;
   };
 
@@ -2172,6 +2181,10 @@ export async function main(argv: string[]): Promise<number> {
     subscribeEternalStage: (fn) => {
       stageListeners.add(fn);
       return () => stageListeners.delete(fn);
+    },
+    onCountdownTick: (remaining) => {
+      events.emit('countdown.tick', { remaining });
+      return false;
     },
     skillLoader: config.features.skills ? skillLoader : undefined,
     modeId,

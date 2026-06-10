@@ -146,6 +146,12 @@ export interface ExecutionDeps {
    * (decide/execute/reflect or decompose/fanout/aggregate) in the status bar.
    */
   subscribeEternalStage?: ((fn: (stage: AutonomyStage) => void) => () => void) | undefined;
+  /**
+   * Called every second during the auto-proceed countdown with the
+   * remaining seconds. Return true to abort the countdown and switch
+   * to manual mode.
+   */
+  onCountdownTick?: ((remainingSeconds: number) => boolean | void) | undefined;
   /** Skill loader for the skill generator wizard. */
   skillLoader?: import('@wrongstack/core').SkillLoader | undefined;
   /** Active agent mode id shown in the status bar (e.g. "teach", "brief"). */
@@ -507,6 +513,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           'worktree.conflict',
           'worktree.released',
           'worktree.failed',
+          // Auto-proceed countdown tick events
+          'countdown.tick',
         ];
         // AutoPhase events are emitted on the untyped surface of the bus
         // (the orchestrator casts `emit` to a string-keyed signature), so we
@@ -1257,6 +1265,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         onAgentIterationComplete: director
           ? (tokens) => director.setLeaderContextPressure(tokens)
           : undefined,
+        onCountdownTick: deps.onCountdownTick,
       });
     }
   } finally {

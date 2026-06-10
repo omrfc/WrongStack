@@ -91,6 +91,7 @@ export interface VizNode {
   provider?: string | undefined;
   model?: string | undefined;
   /** For agents: stats */
+  iterations?: number | undefined;
   toolCalls?: number | undefined;
   costUsd?: number | undefined;
   ctxPct?: number | undefined;

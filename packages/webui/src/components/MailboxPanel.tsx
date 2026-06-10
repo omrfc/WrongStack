@@ -1,5 +1,6 @@
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
+import type { WSServerMessage } from '@/types';
 import {
   CheckCircle2,
   Mail,
@@ -79,42 +80,46 @@ export function MailboxPanel({ className }: { className?: string }) {
   const [messages, setMessages] = useState<MailboxMessage[]>([]);
   const [agents, setAgents] = useState<MailboxAgent[]>([]);
   const [collapsed, setCollapsed] = useState(false);
-  const { send, subscribe, ready } = useWebSocket();
+  const { client } = useWebSocket();
+  // Track the socket lifecycle so the initial queries fire once the
+  // connection is actually open (client.send drops messages otherwise).
+  const [ready, setReady] = useState(client.status.state === 'open');
+  useEffect(() => client.onStatus((s) => setReady(s.state === 'open')), [client]);
 
   // Query mailbox on mount and when WS becomes ready
   useEffect(() => {
     if (!ready) return;
-    send({ type: 'mailbox.messages', payload: { limit: 30 } });
-    send({ type: 'mailbox.agents', payload: {} });
-  }, [ready, send]);
+    client.send({ type: 'mailbox.messages', payload: { limit: 30 } });
+    client.send({ type: 'mailbox.agents', payload: {} });
+  }, [ready, client]);
 
   // Subscribe to live mailbox events
   useEffect(() => {
     if (!ready) return;
-    const unsub = subscribe('mailbox.event', (msg) => {
+    const unsub = client.on('mailbox.event', (msg: WSServerMessage) => {
       const p = msg.payload as Record<string, unknown> | undefined;
       if (!p) return;
 
       // Refresh messages on any mailbox event
-      send({ type: 'mailbox.messages', payload: { limit: 30 } });
-      send({ type: 'mailbox.agents', payload: {} });
+      client.send({ type: 'mailbox.messages', payload: { limit: 30 } });
+      client.send({ type: 'mailbox.agents', payload: {} });
     });
     return unsub;
-  }, [ready, subscribe, send]);
+  }, [ready, client]);
 
   // Handle response messages
   useEffect(() => {
     if (!ready) return;
-    const unsub1 = subscribe('mailbox.messages', (msg) => {
+    const unsub1 = client.on('mailbox.messages', (msg: WSServerMessage) => {
       const p = msg.payload as { messages?: MailboxMessage[] } | undefined;
       if (p?.messages) setMessages(p.messages);
     });
-    const unsub2 = subscribe('mailbox.agents', (msg) => {
+    const unsub2 = client.on('mailbox.agents', (msg: WSServerMessage) => {
       const p = msg.payload as { agents?: MailboxAgent[] } | undefined;
       if (p?.agents) setAgents(p.agents);
     });
     return () => { unsub1(); unsub2(); };
-  }, [ready, subscribe]);
+  }, [ready, client]);
 
   const unreadCount = messages.filter((m) => !m.completed).length;
   const onlineCount = agents.filter((a) => a.online).length;

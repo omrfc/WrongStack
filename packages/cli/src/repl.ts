@@ -142,6 +142,12 @@ export interface ReplOptions {
    * other systems that track token usage across the session.
    */
   onAgentIterationComplete?: ((estimatedTokens: number) => void) | undefined;
+  /**
+   * Called every second during the auto-proceed countdown with the
+   * remaining seconds until auto-proceed fires. Return true to abort
+   * the countdown and switch to manual mode.
+   */
+  onCountdownTick?: ((remainingSeconds: number) => boolean | void) | undefined;
 }
 
 export async function runRepl(opts: ReplOptions): Promise<number> {
@@ -976,7 +982,18 @@ async function runAutoProceed(
   }));
   try {
     // ── Productive cooldown: compact context while we wait ─────────
-    await autoProceedCooldown(opts, delayMs, suggestion, ctrl.signal);
+    const proceed = await autoProceedCooldown(opts, delayMs, suggestion, ctrl.signal);
+    if (!proceed) {
+      // Countdown was cancelled (host callback or abort signal) — do NOT
+      // feed the suggestion. Resolving here without running keeps the
+      // "cancel" semantics honest instead of fast-forwarding the run.
+      console.log(JSON.stringify({
+        level: 'info',
+        event: 'auto_proceed_cancelled',
+        suggestion: truncated,
+      }));
+      return;
+    }
     // ── Feed the suggestion as if it were runText ──────────────────
     const runBlocks = [{ type: 'text' as const, text: suggestion }];
     const runResult = await opts.agent.run(runBlocks, { signal: ctrl.signal });
@@ -1010,14 +1027,19 @@ async function runAutoProceed(
  * (so the user gets a responsive Ctrl+C while still compacting).
  *
  * When delayMs is 0, skips straight to feeding the suggestion.
+ *
+ * Resolves `true` when the countdown ran to completion (proceed with the
+ * suggestion) and `false` when it was cancelled — either by the abort
+ * signal or by `onCountdownTick` returning true. A final `onCountdownTick(0)`
+ * fires on every exit path so display consumers can clear their chip.
  */
 async function autoProceedCooldown(
   opts: ReplOptions,
   delayMs: number,
   suggestion: string,
   signal: AbortSignal,
-): Promise<void> {
-  if (delayMs <= 0) return; // immediate — no wait at all
+): Promise<boolean> {
+  if (delayMs <= 0) return true; // immediate — no wait at all
 
   const truncated = suggestion.length > 100 ? `${suggestion.slice(0, 97)}…` : suggestion;
   const sec = Math.ceil(delayMs / 1000);
@@ -1031,22 +1053,37 @@ async function autoProceedCooldown(
   void runContextCompaction(opts, signal);
 
   const start = Date.now();
-  const onAbort = (): void => {
-    /* rejected by caller when signal fires */
-  };
   let interval: ReturnType<typeof setInterval> | undefined;
+  let lastTickedSecond = sec + 1; // Start one ahead so first tick fires immediately
+  let onAbort: (() => void) | undefined;
 
-  return new Promise<void>((resolve) => {
-    signal.addEventListener('abort', () => resolve(), { once: true });
+  return new Promise<boolean>((resolve) => {
+    onAbort = () => resolve(false);
+    signal.addEventListener('abort', onAbort, { once: true });
 
     interval = setInterval(() => {
-      if (signal.aborted) { resolve(); return; }
+      if (signal.aborted) { resolve(false); return; }
       const elapsed = Date.now() - start;
       const remaining = Math.max(0, Math.ceil((delayMs - elapsed) / 1000));
       if (remaining <= 0) {
         opts.renderer.write(color.dim(`  ↳ ${truncated}\n`));
-        resolve();
+        resolve(true);
         return;
+      }
+      // Surface the tick to the host once per second; a `true` return
+      // cancels the countdown (and the pending suggestion with it).
+      if (opts.onCountdownTick && remaining !== lastTickedSecond) {
+        lastTickedSecond = remaining;
+        try {
+          const shouldAbort = opts.onCountdownTick(remaining);
+          if (shouldAbort === true) {
+            opts.renderer.write(color.yellow('  ↳ Countdown cancelled — switching to manual mode\n'));
+            resolve(false);
+            return;
+          }
+        } catch {
+          // Host callback errors must not break the countdown
+        }
       }
       if (remaining % 5 === 0 || remaining === sec) {
         opts.renderer.write(color.dim(`  ⏳ ${remaining}s…\n`));
@@ -1054,7 +1091,14 @@ async function autoProceedCooldown(
     }, 1000);
   }).finally(() => {
     if (interval) clearInterval(interval);
-    signal.removeEventListener('abort', onAbort);
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+    // Final 0-tick on every exit path — lets display consumers (TUI
+    // status-bar chip) clear instead of freezing at the last value.
+    try {
+      opts.onCountdownTick?.(0);
+    } catch {
+      /* display-only */
+    }
   });
 }
 
