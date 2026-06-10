@@ -24,6 +24,8 @@ interface SessionState {
   /** basename(projectRoot) for the topbar. */
   projectName: string;
   /** Full project root path — used for richer tooltips / hover context. */
+  projectRoot: string;
+  /** Full working directory path — can differ from projectRoot. */
   cwd: string;
   /** Active mode id (default | code | …). */
   mode: string;
@@ -88,6 +90,7 @@ export const useSessionStore = create<SessionState>()(
       outputCost: 0,
       cacheReadCost: 0,
       projectName: '',
+      projectRoot: '',
       cwd: '',
       mode: 'default',
       modes: [],
@@ -136,6 +139,7 @@ export const useSessionStore = create<SessionState>()(
       setEnv: (env) =>
         set((state) => ({
           maxContext: env.maxContext ?? state.maxContext,
+          projectRoot: env.projectRoot ?? state.projectRoot,
           projectName: env.projectName ?? state.projectName,
           cwd: env.cwd ?? state.cwd,
           mode: env.mode ?? state.mode,

@@ -98,7 +98,11 @@ export const bashTool: Tool<BashInput, BashOutput> = {
     if (!input?.command) throw new Error('bash: command is required');
 
     const registry = getProcessRegistry();
-    if (!registry.beforeCall()) {
+    // Background processes bypass the circuit breaker — they are fire-and-forget
+    // and should not affect breaker state. This allows background vitest, dev
+    // servers, etc. to run even when the breaker is open.
+    const bypassBreaker = !!input.background;
+    if (!registry.beforeCall(bypassBreaker)) {
       yield {
         type: 'final',
         output: {
@@ -208,7 +212,7 @@ export const bashTool: Tool<BashInput, BashOutput> = {
         }
       });
       child.on('close', () => {
-        registry.afterCall(Date.now() - startedAt, false);
+        registry.afterCall(Date.now() - startedAt, false, bypassBreaker);
       });
       if (typeof pid === 'number') child.unref(); // unref() so the event loop can exit while this background process runs.
       yield {

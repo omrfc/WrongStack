@@ -356,6 +356,10 @@ export class WrongStackWebSocketClient {
     });
   }
 
+  newSession() {
+    this.send({ type: 'session.new' });
+  }
+
   // ---- Provider/Model/Key management (mirrors TUI/CLI auth-menu) ----
 
   listProviders() {
@@ -392,10 +396,6 @@ export class WrongStackWebSocketClient {
 
   removeProvider(providerId: string) {
     this.send({ type: 'provider.remove', payload: { providerId } });
-  }
-
-  newSession() {
-    this.send({ type: 'session.new' });
   }
 
   clearContext() {
@@ -566,6 +566,10 @@ export class WrongStackWebSocketClient {
 
   ping() {
     this.send({ type: 'ping' });
+  }
+
+  refineModel(text: string) {
+    this.send({ type: 'model.refine', payload: { text } });
   }
 
   disconnect() {

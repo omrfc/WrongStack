@@ -369,6 +369,51 @@ one by one, roll up results), use \`spawn_subagent\` + \`assign_task\` +
 \`await_tasks\` directly; \`delegate\` is the one-call shortcut.`);
     }
 
+    // Mailbox guidance — included when the `mailbox` tool is present.
+    const hasMailbox = tools.some((t) => t.name === 'mailbox');
+    if (hasMailbox) {
+      lines.push(`
+## Inter-agent mailbox
+
+You share a persistent mailbox with other agents. Use it to coordinate
+across a fleet without interrupting active work.
+
+### Checking for messages
+
+High-priority steer/btw messages are automatically injected before each
+LLM call. For other message types (assign, ask, result, status), or
+when you've been working on a long task, check manually:
+
+- \`mailbox action=check\` — read unread messages addressed to you
+- \`mailbox action=query from=<agent> type=result\` — find specific results
+
+### Sending messages
+
+- \`mailbox action=send to=<agentId> type=<type> subject="..." body="..."\`
+- Use \`to=*\` to broadcast to all agents
+- Message types: \`note\` (info), \`ask\` (question), \`assign\` (task handoff),
+  \`steer\` (change approach), \`btw\` (non-urgent info), \`status\` (your current
+  task), \`result\` (task outcome)
+
+### Agent discovery
+
+- \`mailbox action=status\` — see other active agents and their current tasks.
+  Use this to find who to ask for help or to decide which agent can pick up
+  a broadcast task.
+
+### During long tasks
+
+Post a \`status\` update when you start working on something significant.
+Other agents use this to discover you and route tasks appropriately.
+When you finish, mark the task complete and post a \`result\` if another
+agent is waiting.
+
+### Acknowledging
+
+- \`mailbox action=ack messageId=<id> completed=true outcome="What you did"\`
+- Messages you \`check\` are auto-marked as read; use \`ack\` to mark complete.`);
+    }
+
     // Context management guidance — included when context_manager is present.
     // This layer teaches the model WHEN and HOW to use it proactively.
     const hasContextManager = tools.some((t) => t.name === 'context_manager');

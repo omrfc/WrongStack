@@ -113,6 +113,17 @@ export interface ContextWindow {
   max: number;
 }
 
+export interface MailboxStatus {
+  /** Number of unread messages for this agent. */
+  unread: number;
+  /** Number of online agents in the project. */
+  onlineAgents: number;
+  /** Latest received message subject (if any). Null = no messages yet. */
+  lastSubject?: string | null | undefined;
+  /** Latest received message sender (if any). */
+  lastFrom?: string | null | undefined;
+}
+
 export interface StatusBarProps {
   model: string;
   /**
@@ -226,6 +237,10 @@ export interface StatusBarProps {
    * causes blank entries in the chat scrollback.
    */
   enhanceCountdown?: number | null | undefined;
+  /** Number of live sessions across processes (from SessionRegistry). */
+  sessionCount?: number | undefined;
+  /** Mailbox activity — unread count, online agents, latest message. */
+  mailbox?: MailboxStatus | undefined;
 }
 
 /**
@@ -265,6 +280,8 @@ export function StatusBar({
   debugStreamStats,
   enhanceCountdown,
   autoProceedCountdown,
+  sessionCount,
+  mailbox,
 }: StatusBarProps): React.ReactElement {
   // Track terminal width so we can adapt layout on narrow terminals.
   // We snapshot into state so that renders are stable — we don't want
@@ -522,6 +539,7 @@ export function StatusBar({
               {yolo || startedAt != null || projectName || workingDir ? <Text dimColor>│</Text> : null}
               <Text
                 color={
+                  goalSummary.goalState === 'active'
                     ? 'green'
                     : goalSummary.goalState === 'paused'
                       ? 'yellow'
@@ -577,6 +595,12 @@ export function StatusBar({
                 {git.deleted > 0 ? <Text color="red"> -{git.deleted}</Text> : null}
                 {git.untracked > 0 ? <Text dimColor> ?{git.untracked}</Text> : null}
               </Text>
+            </>
+          ) : null}
+          {sessionCount != null && sessionCount > 0 ? (
+            <>
+              {yolo || startedAt != null || projectName || workingDir || git ? <Text dimColor>│</Text> : null}
+              <Text color="cyan">⧉ {sessionCount} session{sessionCount === 1 ? '' : 's'}</Text>
             </>
           ) : null}
         </Box>
@@ -708,11 +732,62 @@ export function StatusBar({
         </Box>
       )}
 
-      {/* Fleet agent detail line — always rendered with a spacer so the
-          live-region height never changes when subagents start/stop.
-          Without this the Input area above scrolls into static history
-          when the first agent appears (the "pyramid" bug). */}
-      {fleetAgents && fleetAgents.length > 0 ? (
+      {/* Line 4: mailbox activity + fleet agent detail */}
+      {mailbox ? (
+        <Box flexDirection="row" gap={2}>
+          {mailbox.unread > 0 ? (
+            <Text color="yellow" bold>
+              ✉ {mailbox.unread} new
+            </Text>
+          ) : (
+            <Text dimColor>✉ 0</Text>
+          )}
+          <Text dimColor>│</Text>
+          <Text color="cyan">👥 {mailbox.onlineAgents} online</Text>
+          {mailbox.lastSubject ? (
+            <>
+              <Text dimColor>│</Text>
+              <Text dimColor>
+                {mailbox.lastFrom ? `${mailbox.lastFrom}: ` : ''}
+                {mailbox.lastSubject.length > 40
+                  ? `${mailbox.lastSubject.slice(0, 37)}…`
+                  : mailbox.lastSubject}
+              </Text>
+            </>
+          ) : null}
+          {fleetAgents && fleetAgents.length > 0
+            ? fleetAgents.map((a, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: agent list is stable per render
+                <Text key={i}>
+                  <Text dimColor>│</Text>{' '}
+                  <Text color={a.color} bold>
+                    {a.label}
+                  </Text>
+                  <Text dimColor> </Text>
+                  <Text dimColor={!a.running} {...(a.running ? { color: 'yellow' } : {})}>
+                    {a.running ? '▶' : '·'}
+                  </Text>
+                  <Text dimColor> </Text>
+                  <Text dimColor>{fmtElapsed(a.elapsedMs)}</Text>
+                  <Text dimColor>{' · '}</Text>
+                  <Text dimColor>{a.toolCalls}t</Text>
+                  {a.tool ? (
+                    <>
+                      <Text dimColor>{' · '}</Text>
+                      <Text color="cyan">{a.tool}</Text>
+                    </>
+                  ) : null}
+                  {a.extensions && a.extensions > 0 ? (
+                    <>
+                      <Text dimColor>{' · '}</Text>
+                      <Text color="yellow">⚡×{a.extensions}</Text>
+                    </>
+                  ) : null}
+                </Text>
+              ))
+            : null}
+        </Box>
+      ) : fleetAgents && fleetAgents.length > 0 ? (
         <Box flexDirection="row" gap={2}>
           {fleetAgents.map((a, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: agent list is stable per render

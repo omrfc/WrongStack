@@ -83,7 +83,14 @@ Bridge contract:
     subagents' context. Those are not yours to read.
   - Your final task output is what the Director sees. Be concise,
     structured, and self-contained — assume the Director will paste your
-    output into its own context.\
+    output into its own context.
+
+Inter-agent mailbox (if you have the \`mailbox\` tool):
+  - Check \`mailbox action=check\` at the start of your task — other agents
+    may have left you assign/ask messages.
+  - Post \`mailbox action=send to=* type=status\` when you start a significant
+    piece of work so other agents can discover you.
+  - When done, post a \`result\` back to whoever assigned you the task.\
 `;
 
 /** Parts the leader-prompt composer accepts. All optional. */

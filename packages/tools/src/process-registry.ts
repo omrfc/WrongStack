@@ -162,17 +162,21 @@ class ProcessRegistryImpl {
   /**
    * Called before spawning a process. Returns true if allowed; false if
    * the circuit breaker is open.
+   *
+   * @param bypass - If true, skip circuit breaker check (for background processes).
    */
-  beforeCall(): boolean {
-    return this.breaker.beforeCall();
+  beforeCall(bypass = false): boolean {
+    return this.breaker.beforeCall(bypass);
   }
 
   /**
    * Called after a process finishes. `durationMs` is wall-clock time;
    * `failed` is true for non-zero exit codes.
+   *
+   * @param bypass - If true, do not update circuit breaker state (for background processes).
    */
-  afterCall(durationMs: number, failed: boolean): void {
-    this.breaker.afterCall(durationMs, failed);
+  afterCall(durationMs: number, failed: boolean, bypass = false): void {
+    this.breaker.afterCall(durationMs, failed, bypass);
   }
 
   /** Force-open the circuit breaker (Ctrl+C, /kill force). */

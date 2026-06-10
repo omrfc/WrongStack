@@ -2,8 +2,59 @@ import {
   color,
   SessionRecovery,
 } from '@wrongstack/core';
+import type { SessionRegistry } from '@wrongstack/core';
 import type { SlashCommand } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
+
+// ── Live session helpers (SessionRegistry) ──────────────────────────────
+
+function statusIcon(status: string): string {
+  switch (status) {
+    case 'active': return color.green('●');
+    case 'idle': return color.cyan('◉');
+    case 'closing': return color.yellow('◐');
+    case 'stale': return color.dim('○');
+    default: return color.dim('?');
+  }
+}
+
+function agentStatusIcon(status: string): string {
+  switch (status) {
+    case 'running': return color.green('▶');
+    case 'streaming': return color.cyan('↻');
+    case 'waiting_user': return color.yellow('⏳');
+    case 'error': return color.red('✗');
+    case 'idle': return color.dim('■');
+    default: return color.dim('?');
+  }
+}
+
+function fmtDuration(startedAt: string): string {
+  const diff = Date.now() - new Date(startedAt).getTime();
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return '<1m';
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h ${min % 60}m`;
+  return `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
+function fmtAgentLine(agent: { name: string; status: string; currentTool?: string | undefined; iterations: number; toolCalls: number }): string {
+  const icon = agentStatusIcon(agent.status);
+  const tool = agent.currentTool ? color.dim(` [${agent.currentTool}]`) : '';
+  const stats = color.dim(` ${agent.iterations} iter · ${agent.toolCalls} tools`);
+  return `    ${icon} ${agent.name}${tool}${stats}`;
+}
+
+function getRegistry(): SessionRegistry | undefined {
+  try {
+    // Dynamic require to avoid import cycle in headless mode
+    const mod = require('@wrongstack/core') as { getSessionRegistry?: () => SessionRegistry };
+    return mod.getSessionRegistry?.();
+  } catch {
+    return undefined;
+  }
+}
 
 export function buildSaveCommand(opts: SlashCommandContext): SlashCommand {
   return {
@@ -29,6 +80,36 @@ export function buildLoadCommand(opts: SlashCommandContext): SlashCommand {
     description: 'List recent sessions, show incomplete ones (--incomplete), or plan a recovery (--recover <id>).',
     async run(args) {
       const parts = args.split(/\s+/).filter(Boolean);
+      const first = parts[0]?.toLowerCase();
+
+      // /sessions status — live session tracking
+      if (first === 'status') {
+        const targetId = parts[1];
+        if (targetId) {
+          return sessionStatusDetail(targetId);
+        }
+        return listLiveSessions();
+      }
+
+      // /sessions live — alias for status
+      if (first === 'live') {
+        return listLiveSessions();
+      }
+
+      // /sessions agents — show only agent status across all sessions
+      if (first === 'agents') {
+        return listLiveAgents();
+      }
+
+      // /sessions kill <id> — terminate a running session by PID
+      if (first === 'kill') {
+        const targetId = parts[1];
+        if (!targetId) {
+          return { message: 'Usage: /sessions kill <sessionId>' };
+        }
+        return killSession(targetId);
+      }
+
       const showIncomplete = parts.includes('--incomplete') || parts.includes('-i');
       const recoverIdx = parts.findIndex((p) => p === '--recover');
       const recoverTarget = recoverIdx >= 0 ? parts[recoverIdx + 1] : undefined;
@@ -224,5 +305,184 @@ function summariseEvent(ev: import('@wrongstack/core').SessionEvent): string {
       return color.red(String((ev as { message?: string | undefined }).message ?? ''));
     default:
       return color.dim('…');
+  }
+}
+
+// ── Live session tracking (SessionRegistry) ────────────────────────────
+
+async function listLiveSessions(): Promise<{ message: string }> {
+  const registry = getRegistry();
+  if (!registry) {
+    return { message: color.dim('SessionRegistry not available (headless mode).') };
+  }
+
+  const sessions = await registry.list();
+  const live = sessions.filter((s) => s.status !== 'stale' && s.status !== 'closing');
+  const stale = sessions.filter((s) => s.status === 'stale');
+
+  if (live.length === 0 && stale.length === 0) {
+    return { message: color.dim('No live sessions. Start a session to see it here.') };
+  }
+
+  const lines: string[] = [color.bold('══ Live Sessions ══'), ''];
+
+  for (const s of live) {
+    const icon = statusIcon(s.status);
+    const name = color.bold(s.projectName);
+    const slug = color.dim(`[${s.projectSlug}]`);
+    const dur = color.dim(fmtDuration(s.startedAt));
+    const agents = color.cyan(`${s.agentCount} agent${s.agentCount === 1 ? '' : 's'}`);
+    const wd = color.dim(`wd: ${s.workingDir}`);
+    const branch = s.gitBranch ? color.magenta(`⎇ ${s.gitBranch}`) : '';
+
+    lines.push(`  ${icon} ${name} ${slug}  ${dur}  PID ${s.pid}`);
+    lines.push(`       ${agents}  ${wd}  ${branch}`);
+
+    if (s.agents.length > 0) {
+      for (const agent of s.agents.slice(0, 5)) {
+        lines.push(fmtAgentLine(agent));
+      }
+      if (s.agents.length > 5) {
+        lines.push(color.dim(`    ... and ${s.agents.length - 5} more`));
+      }
+    }
+    lines.push('');
+  }
+
+  if (stale.length > 0) {
+    lines.push(color.dim('Recently Closed:'));
+    for (const s of stale.slice(0, 3)) {
+      lines.push(color.dim(`  ○ ${s.projectName} [${s.projectSlug}]  ${fmtDuration(s.startedAt)}`));
+    }
+    lines.push('');
+  }
+
+  lines.push(
+    color.dim(`Registry: ${registry.registryPath}  |  /sessions status <id> for detail`),
+  );
+
+  return { message: lines.join('\n') };
+}
+
+async function sessionStatusDetail(sessionId: string): Promise<{ message: string }> {
+  const registry = getRegistry();
+  if (!registry) {
+    return { message: color.dim('SessionRegistry not available.') };
+  }
+
+  const entry = await registry.get(sessionId);
+  if (!entry) {
+    return { message: color.yellow(`Session not found: ${sessionId}. Use /sessions status to list live sessions.`) };
+  }
+
+  const lines: string[] = [
+    color.bold(`Session: ${entry.sessionId}`),
+    '',
+    `  Project:   ${entry.projectName} [${entry.projectSlug}]`,
+    `  Root:      ${entry.projectRoot}`,
+    `  Work Dir:  ${entry.workingDir}`,
+    `  Branch:    ${entry.gitBranch ? color.magenta('⎇ ' + entry.gitBranch) : color.dim('(none)')}`,
+    `  Status:    ${statusIcon(entry.status)} ${entry.status}`,
+    `  Started:   ${entry.startedAt}`,
+    `  Duration:  ${fmtDuration(entry.startedAt)}`,
+    `  PID:       ${entry.pid}`,
+    `  Agents:    ${entry.agentCount}`,
+    entry.status !== 'stale'
+      ? color.dim(`  Transcript: ~/.wrongstack/projects/${entry.projectSlug}/sessions/${entry.sessionId}.jsonl`)
+      : '',
+    '',
+  ];
+
+  if (entry.agents.length > 0) {
+    lines.push(color.bold('Agents:'));
+    for (const agent of entry.agents) {
+      lines.push(fmtAgentLine(agent));
+      lines.push(color.dim(`       last activity: ${agent.lastActivityAt}`));
+    }
+    lines.push('');
+  }
+
+  return { message: lines.join('\n') };
+}
+
+async function listLiveAgents(): Promise<{ message: string }> {
+  const registry = getRegistry();
+  if (!registry) {
+    return { message: color.dim('SessionRegistry not available.') };
+  }
+
+  const sessions = await registry.list();
+  const live = sessions.filter((s) => s.status !== 'stale' && s.status !== 'closing');
+
+  if (live.length === 0) {
+    return { message: color.dim('No live sessions.') };
+  }
+
+  const lines: string[] = [color.bold('══ Live Agents ══'), ''];
+
+  for (const s of live) {
+    lines.push(color.dim(`${s.projectName} [${s.projectSlug}] ⎇ ${s.gitBranch ?? '—'}`));
+    if (s.agents.length === 0) {
+      lines.push(color.dim('  (no agents)'));
+    } else {
+      for (const a of s.agents) {
+        const icon = agentStatusIcon(a.status);
+        const tool = a.currentTool ? color.dim(` [${a.currentTool}]`) : '';
+        const stats = color.dim(`${a.iterations} iter · ${a.toolCalls} tools`);
+        lines.push(`  ${icon} ${a.name}${tool}  ${stats}`);
+      }
+    }
+    lines.push('');
+  }
+
+  return { message: lines.join('\n') };
+}
+
+async function killSession(sessionId: string): Promise<{ message: string }> {
+  const registry = getRegistry();
+  if (!registry) {
+    return { message: color.dim('SessionRegistry not available.') };
+  }
+
+  const entry = await registry.get(sessionId);
+  if (!entry) {
+    return { message: color.yellow(`Session not found: ${sessionId}. It may have already exited.`) };
+  }
+
+  // Don't kill the current process
+  if (entry.pid === process.pid) {
+    return {
+      message: color.yellow(
+        `Cannot kill the current session (PID ${process.pid}). Use /exit or Ctrl+C instead.`,
+      ),
+    };
+  }
+
+  // Check if the process is still alive
+  try {
+    process.kill(entry.pid, 0);
+  } catch {
+    return {
+      message: color.dim(
+        `Session ${sessionId} (PID ${entry.pid}) is no longer running. It will be pruned automatically.`,
+      ),
+    };
+  }
+
+  // Send SIGTERM
+  try {
+    process.kill(entry.pid, 'SIGTERM');
+    return {
+      message: color.green(
+        `Sent termination signal to ${entry.projectName} (PID ${entry.pid}). ` +
+        `The session will be removed from the registry shortly.`,
+      ),
+    };
+  } catch (err) {
+    return {
+      message: color.red(
+        `Failed to kill session: ${err instanceof Error ? err.message : String(err)}`,
+      ),
+    };
   }
 }

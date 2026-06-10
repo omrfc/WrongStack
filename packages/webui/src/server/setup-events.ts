@@ -2,6 +2,8 @@ import type { EventBus, Context } from '@wrongstack/core';
 import type { WebSocket } from 'ws';
 import type { ConnectedClient, WSServerMessage } from './types.js';
 
+import * as path from 'node:path';
+
 export interface SetupEventsDeps {
   events: EventBus;
   broadcast: (clients: Map<WebSocket, ConnectedClient>, msg: WSServerMessage) => void;
@@ -9,10 +11,12 @@ export interface SetupEventsDeps {
   config: { tools?: { maxIterations?: number | undefined } };
   context: Context;
   pendingConfirms: Map<string, (d: 'yes' | 'no' | 'always' | 'deny') => void>;
+  /** Optional global config dir (~/.wrongstack) — enables SessionRegistry poll for fleet view. */
+  globalConfigPath?: string | undefined;
 }
 
 export function setupEvents(deps: SetupEventsDeps): void {
-  const { events, broadcast, clients, config, context, pendingConfirms } = deps;
+  const { events, broadcast, clients, config, context, pendingConfirms, globalConfigPath } = deps;
 
   events.on('iteration.started', (e) => {
     // Read maxIterations from context.meta so the UI reflects the
@@ -98,7 +102,7 @@ export function setupEvents(deps: SetupEventsDeps): void {
 
   // Subagent fleet lifecycle
   const forwardSubagent = (kind: string, payload: Record<string, unknown>) =>
-    broadcast(clients, { type: 'subagent.event', payload: { kind, ...payload } });
+    broadcast(clients, { type: 'subagent.event', payload: { kind, sessionId: context.session.id, ...payload } });
 
   events.on('subagent.spawned', (e) => forwardSubagent('spawned', { subagentId: e.subagentId, taskId: e.taskId, name: e.name, provider: e.provider, model: e.model, description: e.description }));
   events.on('subagent.task_started', (e) => forwardSubagent('task_started', { subagentId: e.subagentId, taskId: e.taskId, description: e.description }));
@@ -139,16 +143,18 @@ export function setupEvents(deps: SetupEventsDeps): void {
     });
   });
 
-  // Leader context pressure: emitted on every provider response.
+  // Leader context pressure + cost: emitted on every provider response.
   events.on('provider.response', (e) => {
     if (e.usage?.input != null) {
       const maxCtx = context.provider.capabilities.maxContext;
       const pct = maxCtx > 0 ? e.usage.input / maxCtx : 0;
+      const costUsd = context.tokenCounter.estimateCost().total;
       forwardSubagent('ctx_pct', {
         subagentId: 'leader',
         load: pct,
         tokens: e.usage.input,
         maxContext: maxCtx,
+        costUsd,
       });
     }
   });
@@ -171,4 +177,54 @@ export function setupEvents(deps: SetupEventsDeps): void {
       });
     }
   });
+
+  // ── Mailbox events — broadcast to WebUI for real-time per-project visibility ──
+  events.onPattern('mailbox.*', (eventName, payload) => {
+    broadcast(clients, { type: 'mailbox.event', payload: { event: eventName, ...payload as Record<string, unknown> } });
+  });
+
+  // ── Cross-process session / fleet status poll ──
+  // Periodically read the SessionRegistry and broadcast live session+agent status
+  // to all connected clients. Gives the AgentFlowViz a project-level overview of
+  // how many sessions are active, what agents are doing, costs, and context usage.
+  const globalRoot = globalConfigPath ? path.dirname(globalConfigPath) : undefined;
+  if (globalRoot) {
+    const statusInterval = setInterval(async () => {
+      try {
+        const { SessionRegistry } = await import('@wrongstack/core');
+        const registry = new SessionRegistry(globalRoot);
+        const sessions = await registry.list();
+        const live = sessions
+          .filter((s) => s.status !== 'stale')
+          .map((s) => ({
+            sessionId: s.sessionId,
+            projectName: s.projectName,
+            projectSlug: s.projectSlug,
+            projectRoot: s.projectRoot,
+            workingDir: s.workingDir,
+            gitBranch: s.gitBranch,
+            status: s.status,
+            pid: s.pid,
+            startedAt: s.startedAt,
+            agentCount: s.agentCount,
+            agents: (s.agents ?? []).map((a: { id: string; name: string; status: string; currentTool?: string; iterations?: number; toolCalls?: number; lastActivityAt?: number; costUsd?: number; ctxPct?: number; maxContext?: number }) => ({
+              id: a.id,
+              name: a.name,
+              status: a.status,
+              currentTool: a.currentTool,
+              iterations: a.iterations,
+              toolCalls: a.toolCalls,
+              lastActivityAt: a.lastActivityAt,
+              costUsd: a.costUsd,
+              ctxPct: a.ctxPct,
+              maxContext: a.maxContext,
+            })),
+          }));
+        broadcast(clients, { type: 'sessions.status_update', payload: { sessions: live } });
+      } catch {
+        // Best-effort — never crash for status polling errors
+      }
+    }, 5_000);
+    if (statusInterval.unref) statusInterval.unref();
+  }
 }

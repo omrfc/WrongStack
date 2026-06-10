@@ -39,6 +39,7 @@ import { EscConfirmPrompt } from './components/esc-confirm-prompt.js';
 import { FilePicker } from './components/file-picker.js';
 import { FleetMonitor } from './components/fleet-monitor.js';
 import { FleetPanel } from './components/fleet-panel.js';
+import { MailboxPanel } from './components/mailbox-panel.js';
 import { HelpOverlay } from './components/help-overlay.js';
 import { History, type HistoryEntry } from './components/history.js';
 import { ScrollableHistory, scrollOffsetForTrackRow } from './components/scrollable-history.js';
@@ -47,10 +48,12 @@ import { Input, type KeyEvent } from './components/input.js';
 import { ModelPicker, type ProviderOption } from './components/model-picker.js';
 import { PhaseMonitor } from './components/phase-monitor.js';
 import { PhasePanel } from './components/phase-panel.js';
+import { ProjectPicker } from './components/project-picker.js';
 import { QueuePanel } from './components/queue-panel.js';
 import { ProcessListMonitor } from './components/process-list.js';
 import { GoalPanel } from './components/goal-panel.js';
 import { ResumePicker } from './components/resume-picker.js';
+import { SessionsPanel } from './components/sessions-panel.js';
 import { SettingsPicker } from './components/settings-picker.js';
 import { SlashMenu } from './components/slash-menu.js';
 import {
@@ -59,6 +62,7 @@ import {
   statusBarAutonomySpan,
   statusBarModelSpan,
   statusBarTodosSpan,
+  type MailboxStatus,
 } from './components/status-bar.js';
 import { TodosMonitor } from './components/todos-monitor.js';
 import { WorktreeMonitor } from './components/worktree-monitor.js';
@@ -398,6 +402,31 @@ export interface AppProps {
   /** Directory for session JSONL files. Passed to App for /rewind. */
   sessionsDir?: string | undefined;
 
+  /**
+   * Load project picker items from the global manifest.
+   * Called each time the project picker panel opens (F1).
+   */
+  getProjectPickerItems?: (() => Promise<import('./components/project-picker.js').ProjectPickerItem[]>) | undefined;
+
+  /**
+   * Called when the user selects a project or action in the project picker.
+   * The host CLI handles project switching (stopping agents, spawning new session).
+   */
+  onProjectSelect?: ((key: string, kind: 'project' | 'action') => void) | undefined;
+
+  /**
+   * Load live session data from the cross-process SessionRegistry.
+   * Called when the sessions panel opens (F10).
+   */
+  getLiveSessions?: (() => Promise<import('./components/sessions-panel.js').LiveSessionEntry[]>) | undefined;
+
+  /**
+   * Called when the user selects a session from a DIFFERENT project
+   * in the F10 sessions panel. Spawns a new wstack terminal in the
+   * target project directory. Same-project sessions use onResumeSession.
+   */
+  onSwitchToSession?: ((sessionId: string, projectRoot: string, projectName: string) => void) | undefined;
+
   // --- Fleet ---
   /** Live director for fleet panel rendering. Null when director mode is off. */
   director: Director | null;
@@ -549,6 +578,10 @@ export function App({
   registerDebugStreamCallback,
   restoreDebugStreamCallback,
   restoredToolCalls,
+  getProjectPickerItems,
+  onProjectSelect,
+  getLiveSessions,
+  onSwitchToSession,
 }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -570,6 +603,10 @@ export function App({
   // updates after /mode <id> without remounting the App.
   const [liveModeLabel, setLiveModeLabel] = useState<string>(modeLabel ?? '');
   const [hiddenItems, setHiddenItems] = useState(statuslineHiddenItems);
+  const [sessionCount, setSessionCount] = useState<number>(0);
+
+  // Track previous git branch to detect switches
+  const prevBranchRef = useRef<string | null>(null);
 
   // Codebase indexing state — synced from the process-wide indexer
   // so the status bar shows "⚙ indexing 42/500" while the index builds.
@@ -702,6 +739,7 @@ export function App({
     autonomyPicker: { open: false, options: [], selected: 0 },
     resumePicker: { open: false, sessions: [], selected: 0, busy: false, hint: undefined, error: undefined },
     settingsPicker: { open: false, field: 0, mode: 'off', delayMs: 0, titleAnimation: true, yolo: false, streamFleet: true, chime: false, confirmExit: true, nextPrediction: false, featureMcp: true, featurePlugins: true, featureMemory: true, featureSkills: true, featureModelsRegistry: true, contextAutoCompact: true, contextStrategy: 'hybrid', logLevel: 'info', auditLevel: 'standard', indexOnStart: true, maxIterations: 500, autoProceedMaxIterations: 50, enhanceDelayMs: 60_000, debugStream: false, configScope: 'global' },
+    projectPicker: { open: false, allItems: [], items: [], selected: 0, filter: '', hint: undefined },
     confirmQueue: [],
     enhance: null,
     enhanceEnabled,
@@ -729,6 +767,9 @@ export function App({
     queuePanelOpen: false,
     processListOpen: false,
     goalPanelOpen: false,
+    sessionsPanelOpen: false,
+    sessionsPanel: { sessions: [], busy: false, selected: -1 },
+    sessionResumeConfirm: null,
     collabSession: null,
     checkpoints: [],
     rewindOverlay: null,
@@ -854,6 +895,7 @@ export function App({
     state.modelPicker.open ||
     state.autonomyPicker.open ||
     state.settingsPicker.open ||
+    state.projectPicker.open ||
     state.slashPicker.open ||
     state.picker.open;
   const mouseTrackingOn = mouseMode || pickerOverlayOpen;
@@ -1022,17 +1064,170 @@ export function App({
     const refresh = () => {
       readGitInfo(agent.ctx.cwd)
         .then((info) => {
-          if (!cancelled) setGitInfo(info);
+          if (cancelled) return;
+          setGitInfo(info);
+
+          // Detect branch switch
+          if (info && info.branch) {
+            const prev = prevBranchRef.current;
+            if (prev !== null && prev !== info.branch) {
+              // Branch changed — inject system message so the agent knows
+              const msg: Message = {
+                role: 'user',
+                content: [{ type: 'text', text: `[system] Git branch switched: ⎇ ${prev} → ⎇ ${info.branch}. The working tree is now on branch "${info.branch}". Any file changes from the previous branch are no longer visible.` }],
+              };
+              agent.ctx.messages.push(msg);
+              // Update SessionRegistry with the new branch (best-effort)
+              try {
+                import('@wrongstack/core').then(({ getSessionRegistry }) => {
+                  const reg = getSessionRegistry();
+                  if (reg) {
+                    reg.updateAgents([]).catch(() => {});
+                  }
+                }).catch(() => {});
+              } catch { /* silent */ }
+            }
+            prevBranchRef.current = info.branch;
+          }
         })
-        .catch(() => undefined);
+        .catch(() => {
+          if (!cancelled) setGitInfo(null);
+        });
     };
     refresh();
+    // Initialize prev branch on first successful read
+    if (gitInfo?.branch && prevBranchRef.current === null) {
+      prevBranchRef.current = gitInfo.branch;
+    }
     const t = setInterval(refresh, 5000);
     return () => {
       cancelled = true;
       clearInterval(t);
     };
-  }, [agent.ctx.cwd]);
+  }, [agent.ctx.cwd, gitInfo?.branch]);
+
+  // Live session count — polled from SessionRegistry every 30s for the status bar
+  useEffect(() => {
+    if (!getLiveSessions) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const sessions = await getLiveSessions();
+        if (!cancelled) setSessionCount(sessions.length);
+      } catch { /* silent */ }
+    };
+    void poll();
+    const t = setInterval(poll, 30_000);
+    if (t.unref) t.unref();
+    return () => { cancelled = true; clearInterval(t); };
+  }, [getLiveSessions]);
+
+  // ── Mailbox status for the status bar (4th line) ────────────────────
+  // Subscribes to mailbox events to keep unread count + online agents + latest message in sync.
+  const [mailboxStatus, setMailboxStatus] = useState<MailboxStatus>({
+    unread: 0,
+    onlineAgents: 0,
+  });
+  useEffect(() => {
+    const seenAgents = new Set<string>();
+    const unsub1 = events.onPattern('mailbox.unread_count', (_e, payload) => {
+      const p = payload as { count: number } | undefined;
+      setMailboxStatus((prev) => ({ ...prev, unread: p?.count ?? 0 }));
+    });
+    const unsub2 = events.onPattern('mailbox.received', (_e, payload) => {
+      const p = payload as { subject?: string; from?: string } | undefined;
+      setMailboxStatus((prev) => ({
+        ...prev,
+        lastSubject: p?.subject ?? prev.lastSubject,
+        lastFrom: p?.from ?? prev.lastFrom,
+      }));
+    });
+    // Track online agents from registration + heartbeat events
+    const unsub3 = events.onPattern('mailbox.agent_registered', (_e, payload) => {
+      const p = payload as { agentId?: string } | undefined;
+      if (p?.agentId) seenAgents.add(p.agentId);
+      setMailboxStatus((prev) => ({ ...prev, onlineAgents: seenAgents.size }));
+    });
+    const unsub4 = events.onPattern('mailbox.agent_heartbeat', (_e, payload) => {
+      const p = payload as { agentId?: string } | undefined;
+      if (p?.agentId) seenAgents.add(p.agentId);
+      setMailboxStatus((prev) => ({ ...prev, onlineAgents: seenAgents.size }));
+    });
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); };
+  }, [events]);
+
+  // ── Mailbox panel state ──────────────────────────────────────────────
+  const [mailboxPanelOpen, setMailboxPanelOpen] = useState(false);
+  const [mailboxMessages, setMailboxMessages] = useState<Array<{
+    id: string; from: string; to: string; type: string; subject: string;
+    body: string; priority: string; timestamp: string; readByCount: number;
+    readByMe: boolean; completed: boolean; completedBy?: string; outcome?: string;
+  }>>([]);
+  const [mailboxAgents, setMailboxAgents] = useState<Array<{
+    agentId: string; name: string; role?: string | undefined; sessionId: string;
+    status: string; currentTool?: string | undefined; currentTask?: string | undefined;
+    lastSeenAt: string; online: boolean; source?: string | undefined;
+  }>>([]);
+
+  // Poll mailbox when panel is open
+  useEffect(() => {
+    if (!mailboxPanelOpen) return;
+    const poll = async () => {
+      try {
+        // We call the mailbox tool indirectly — the agent exposes a method
+        // or we rely on events. For now, rely on events already subscribed.
+        // The mailboxStatus already has unread count and last subject.
+      } catch { /* silent */ }
+    };
+    void poll();
+    const t = setInterval(poll, 10_000);
+    return () => clearInterval(t);
+  }, [mailboxPanelOpen]);
+
+  // Populate mailbox panel data from events
+  useEffect(() => {
+    const unsub = events.onPattern('mailbox.received', (_e, payload) => {
+      const p = payload as {
+        messageId?: string; from?: string; subject?: string; type?: string;
+      } | undefined;
+      if (!p?.messageId) return;
+      setMailboxMessages((prev) => {
+        if (prev.some((m) => m.id === p.messageId)) return prev;
+        return [
+          {
+            id: p.messageId!,
+            from: p.from ?? 'unknown',
+            to: '*',
+            type: p.type ?? 'note',
+            subject: p.subject ?? '',
+            body: '',
+            priority: 'normal',
+            timestamp: new Date().toISOString(),
+            readByCount: 0,
+            readByMe: false,
+            completed: false,
+          },
+          ...prev,
+        ].slice(0, 50);
+      });
+    });
+    const unsub2 = events.onPattern('mailbox.agent_registered', (_e, payload) => {
+      const p = payload as {
+        agentId?: string; name?: string; role?: string; sessionId?: string; source?: string;
+      } | undefined;
+      if (!p?.agentId) return;
+      setMailboxAgents((prev) => {
+        if (prev.some((a) => a.agentId === p.agentId)) return prev;
+        return [...prev, {
+          agentId: p.agentId!, name: p.name ?? p.agentId!,
+          role: p.role, sessionId: p.sessionId ?? '?',
+          status: 'idle', lastSeenAt: new Date().toISOString(),
+          online: true, source: p.source as 'cli' | 'webui' | undefined,
+        }].slice(0, 30);
+      });
+    });
+    return () => { unsub(); unsub2(); };
+  }, [events]);
 
   // Latest provider request's input-token count. Tracked separately
   // from `tokenCounter` (which is cumulative) because for the context
@@ -1319,6 +1514,7 @@ export function App({
   const resizeGateRef = useRef(0);
   const preResizePanelsRef = useRef<{
     settings: boolean;
+    projectPicker: boolean;
     help: boolean;
     monitor: boolean;
     agents: boolean;
@@ -1326,6 +1522,8 @@ export function App({
     todos: boolean;
     queue: boolean;
     processList: boolean;
+    goalPanel: boolean;
+    sessionsPanel: boolean;
   } | null>(null);
   const resizeRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
@@ -1340,6 +1538,7 @@ export function App({
       // Capture current panel state from the latest render.
       preResizePanelsRef.current = {
         settings: stateRef.current.settingsPicker.open,
+        projectPicker: stateRef.current.projectPicker.open,
         help: stateRef.current.helpOpen,
         monitor: stateRef.current.monitorOpen,
         agents: stateRef.current.agentsMonitorOpen,
@@ -1347,10 +1546,13 @@ export function App({
         todos: stateRef.current.todosMonitorOpen,
         queue: stateRef.current.queuePanelOpen,
         processList: stateRef.current.processListOpen,
+        goalPanel: stateRef.current.goalPanelOpen,
+        sessionsPanel: stateRef.current.sessionsPanelOpen,
       };
 
       // Close all open panels so the live region shrinks to input+statusbar.
       if (stateRef.current.settingsPicker.open) dispatch({ type: 'settingsClose' });
+      if (stateRef.current.projectPicker.open) dispatch({ type: 'projectPickerClose' });
       if (stateRef.current.modelPicker.open) dispatch({ type: 'modelPickerClose' });
       if (stateRef.current.autonomyPicker.open) dispatch({ type: 'autonomyPickerClose' });
       if (stateRef.current.resumePicker.open) dispatch({ type: 'resumePickerClose' });
@@ -1364,6 +1566,8 @@ export function App({
       if (stateRef.current.todosMonitorOpen) dispatch({ type: 'toggleTodosMonitor' });
       if (stateRef.current.queuePanelOpen) dispatch({ type: 'toggleQueuePanel' });
       if (stateRef.current.processListOpen) dispatch({ type: 'toggleProcessList' });
+      if (stateRef.current.goalPanelOpen) dispatch({ type: 'toggleGoalPanel' });
+      if (stateRef.current.sessionsPanelOpen) dispatch({ type: 'toggleSessionsPanel' });
 
       eraseLiveRegion();
 
@@ -1406,6 +1610,10 @@ export function App({
             configScope: sp.configScope,
           });
         }
+        if (prev.projectPicker) {
+          const pp = stateRef.current.projectPicker;
+          dispatch({ type: 'projectPickerOpen', items: pp.allItems });
+        }
         if (prev.help) dispatch({ type: 'toggleHelp' });
         if (prev.monitor) dispatch({ type: 'toggleMonitor' });
         if (prev.agents) dispatch({ type: 'toggleAgentsMonitor' });
@@ -1413,6 +1621,8 @@ export function App({
         if (prev.todos) dispatch({ type: 'toggleTodosMonitor' });
         if (prev.queue) dispatch({ type: 'toggleQueuePanel' });
         if (prev.processList) dispatch({ type: 'toggleProcessList' });
+        if (prev.goalPanel) dispatch({ type: 'toggleGoalPanel' });
+        if (prev.sessionsPanel) dispatch({ type: 'toggleSessionsPanel' });
         preResizePanelsRef.current = null;
         resizeRestoreTimerRef.current = null;
       }, 300);
@@ -1849,6 +2059,27 @@ export function App({
     const providers = await getPickableProviders();
     dispatch({ type: 'modelPickerOpen', providers });
   }, [getPickableProviders]);
+  const openProjectPicker = React.useCallback(async () => {
+    if (!getProjectPickerItems) return;
+    const items = await getProjectPickerItems();
+    dispatch({ type: 'projectPickerOpen', items });
+  }, [getProjectPickerItems]);
+  const loadLiveSessions = React.useCallback(async () => {
+    if (!getLiveSessions) return;
+    dispatch({ type: 'sessionsPanelBusy', on: true });
+    try {
+      const sessions = await getLiveSessions();
+      dispatch({ type: 'sessionsPanelSet', sessions });
+    } catch {
+      dispatch({ type: 'sessionsPanelBusy', on: false });
+    }
+  }, [getLiveSessions]);
+  // Keep the F10 sessions panel live: refresh every 5s while open
+  useEffect(() => {
+    if (!state.sessionsPanelOpen || !getLiveSessions) return undefined;
+    const t = setInterval(() => { void loadLiveSessions(); }, 5_000);
+    return () => clearInterval(t);
+  }, [state.sessionsPanelOpen, getLiveSessions, loadLiveSessions]);
   const openSettings = React.useCallback(() => {
     if (!getSettings) return;
     const s = getSettings();
@@ -2036,6 +2267,23 @@ export function App({
       slashRegistry.unregister('settings');
     };
   }, [slashRegistry, getSettings, saveSettings, openSettings]);
+
+  // Register the TUI-only `/mailbox` command — toggles the mailbox panel.
+  useEffect(() => {
+    const cmd = {
+      name: 'mailbox',
+      aliases: ['inbox', 'mail'],
+      description: 'Toggle the inter-agent mailbox panel — messages, read receipts, online agents.',
+      async run() {
+        setMailboxPanelOpen((prev) => !prev);
+        return { message: undefined };
+      },
+    };
+    slashRegistry.register(cmd, 'tui', { official: true });
+    return () => {
+      slashRegistry.unregister('mailbox');
+    };
+  }, [slashRegistry]);
 
   // Register the TUI-only `/autonomy` command — opens a single-step picker.
   // When the user types `/autonomy` with no arg, the picker appears.
@@ -2720,6 +2968,7 @@ export function App({
       state.autonomyPicker.open ||
       state.resumePicker.open ||
       state.settingsPicker.open ||
+      state.projectPicker.open ||
       state.slashPicker.open ||
       state.picker.open;
     const clickConfirm =
@@ -2965,6 +3214,142 @@ export function App({
       return;
     }
 
+    // Project picker — keyboard-driven project switching panel.
+    if (state.projectPicker.open) {
+      if (key.escape) {
+        if (state.projectPicker.filter) {
+          // First Esc clears the filter
+          dispatch({ type: 'projectPickerFilter', filter: '' });
+        } else {
+          dispatch({ type: 'projectPickerClose' });
+        }
+        return;
+      }
+      if (key.mouse?.kind === 'wheel') {
+        dispatch({ type: 'projectPickerMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
+        return;
+      }
+      if (key.upArrow) {
+        dispatch({ type: 'projectPickerMove', delta: -1 });
+        return;
+      }
+      if (key.downArrow) {
+        dispatch({ type: 'projectPickerMove', delta: 1 });
+        return;
+      }
+      if (isEnter) {
+        const now = Date.now();
+        if (now - lastEnterAtRef.current < 50) return;
+        lastEnterAtRef.current = now;
+        const items = state.projectPicker.items;
+        const selected = state.projectPicker.selected;
+        if (selected < 0 || selected >= items.length) return;
+        const item = items[selected];
+        if (!item || item.key === '__divider__' || item.key === 'quit') {
+          dispatch({ type: 'projectPickerClose' });
+          return;
+        }
+        // Delegate to the host CLI for project switching or action handling
+        onProjectSelect?.(item.key, item.kind);
+        dispatch({ type: 'projectPickerClose' });
+        return;
+      }
+      // Printable characters → add to filter
+      if (input && input.length === 1 && input.charCodeAt(0) >= 0x20 && input.charCodeAt(0) < 0x7f) {
+        dispatch({ type: 'projectPickerFilter', filter: state.projectPicker.filter + input });
+        return;
+      }
+      // Backspace → remove last char from filter
+      if (key.backspace) {
+        if (state.projectPicker.filter.length > 0) {
+          dispatch({
+            type: 'projectPickerFilter',
+            filter: state.projectPicker.filter.slice(0, -1),
+          });
+        }
+        return;
+      }
+      return;
+    }
+
+    // Sessions panel (F10) — arrow-key navigation + Enter to resume/switch.
+    if (state.sessionsPanelOpen) {
+      if (key.escape) {
+        if (state.sessionResumeConfirm) {
+          // First Esc clears the confirmation
+          dispatch({ type: 'sessionResumeConfirmClear' });
+        } else {
+          dispatch({ type: 'toggleSessionsPanel' });
+        }
+        return;
+      }
+      if (key.upArrow) {
+        dispatch({ type: 'sessionsPanelMove', delta: -1 });
+        return;
+      }
+      if (key.downArrow) {
+        dispatch({ type: 'sessionsPanelMove', delta: 1 });
+        return;
+      }
+      if (key.mouse?.kind === 'wheel') {
+        dispatch({ type: 'sessionsPanelMove', delta: key.mouse.wheel > 0 ? -1 : 1 });
+        return;
+      }
+      if (isEnter) {
+        const now = Date.now();
+        if (now - lastEnterAtRef.current < 50) return;
+        lastEnterAtRef.current = now;
+
+        // Two-step resume: first Enter selects, second confirms
+        if (state.sessionResumeConfirm) {
+          // Second Enter — proceed with resume
+          const pending = state.sessionResumeConfirm;
+          dispatch({ type: 'sessionResumeConfirmClear' });
+          dispatch({ type: 'sessionsPanelBusy', on: true });
+          onResumeSession?.(pending.sessionId).then((result) => {
+            if (!result) {
+              dispatch({ type: 'sessionsPanelBusy', on: false });
+              return;
+            }
+            dispatch({ type: 'replaceHistory', entries: result.entries, nextId: result.nextId });
+            dispatch({ type: 'toggleSessionsPanel' });
+            dispatch({
+              type: 'addEntry',
+              entry: {
+                kind: 'info',
+                text: `Resumed session ${result.sessionId} — ${result.entries.length} entries replayed.`,
+              },
+            });
+          }).catch(() => {
+            dispatch({ type: 'sessionsPanelBusy', on: false });
+          });
+          return;
+        }
+
+        const sessions = state.sessionsPanel.sessions;
+        const sel = state.sessionsPanel.selected;
+        if (sel < 0 || sel >= sessions.length) return;
+        const session = sessions[sel];
+        if (!session) return;
+
+        // Determine if same project (resume) or different (spawn new terminal)
+        const isCurrentProject = session.projectRoot === projectRoot;
+        if (isCurrentProject) {
+          // First Enter — show confirmation
+          dispatch({
+            type: 'sessionResumeConfirmSet',
+            sessionId: session.sessionId,
+            sessionName: session.projectName,
+          });
+        } else {
+          // Different project — spawn immediately (no confirmation needed)
+          onSwitchToSession?.(session.sessionId, session.projectRoot ?? '', session.projectName);
+        }
+        return;
+      }
+      return;
+    }
+
     if (state.slashPicker.open) {
       if (key.escape) {
         dispatch({ type: 'slashPickerClose' });
@@ -3194,6 +3579,26 @@ export function App({
       if (state.helpOpen) dispatch({ type: 'toggleHelp' });
       dispatch({ type: 'toggleTodosMonitor' });
     };
+    // F1 → project switcher panel. Opening closes any other overlay or panel.
+    if (key.fn === 1) {
+      if (state.projectPicker.open) {
+        dispatch({ type: 'projectPickerClose' });
+      } else {
+        if (state.agentsMonitorOpen) dispatch({ type: 'toggleAgentsMonitor' });
+        if (state.monitorOpen) dispatch({ type: 'toggleMonitor' });
+        if (state.worktreeMonitorOpen) dispatch({ type: 'worktreeMonitorToggle' });
+        if (state.todosMonitorOpen) dispatch({ type: 'toggleTodosMonitor' });
+        if (state.autoPhase?.monitorOpen) dispatch({ type: 'autoPhaseMonitorToggle' });
+        if (state.settingsPicker.open) dispatch({ type: 'settingsClose' });
+        if (state.queuePanelOpen) dispatch({ type: 'toggleQueuePanel' });
+        if (state.processListOpen) dispatch({ type: 'toggleProcessList' });
+        if (state.goalPanelOpen) dispatch({ type: 'toggleGoalPanel' });
+        if (state.helpOpen) dispatch({ type: 'toggleHelp' });
+        // Load project items from the manifest
+        openProjectPicker();
+      }
+      return;
+    }
     // Ctrl+F / F2 → fleet orchestration monitor.
     if ((key.ctrl && input === 'f') || key.fn === 2) {
       toggleFleetOverlay();
@@ -3311,6 +3716,27 @@ export function App({
       }
       return;
     }
+    // F10 → live sessions panel. Opening closes any other overlay or panel.
+    if (key.fn === 10) {
+      if (state.sessionsPanelOpen) {
+        dispatch({ type: 'toggleSessionsPanel' });
+      } else {
+        if (state.agentsMonitorOpen) dispatch({ type: 'toggleAgentsMonitor' });
+        if (state.monitorOpen) dispatch({ type: 'toggleMonitor' });
+        if (state.worktreeMonitorOpen) dispatch({ type: 'worktreeMonitorToggle' });
+        if (state.todosMonitorOpen) dispatch({ type: 'toggleTodosMonitor' });
+        if (state.autoPhase?.monitorOpen) dispatch({ type: 'autoPhaseMonitorToggle' });
+        if (state.settingsPicker.open) dispatch({ type: 'settingsClose' });
+        if (state.queuePanelOpen) dispatch({ type: 'toggleQueuePanel' });
+        if (state.processListOpen) dispatch({ type: 'toggleProcessList' });
+        if (state.goalPanelOpen) dispatch({ type: 'toggleGoalPanel' });
+        if (state.helpOpen) dispatch({ type: 'toggleHelp' });
+        dispatch({ type: 'toggleSessionsPanel' });
+        // Load sessions from the registry
+        loadLiveSessions();
+      }
+      return;
+    }
     // Ctrl+S toggles the autonomy settings editor (also openable via
     // F5 and `/settings`). Opening closes any other overlay or panel.
     if (key.ctrl && input === 's') {
@@ -3377,6 +3803,10 @@ export function App({
         dispatch({ type: 'settingsClose' });
         return;
       }
+      if (state.projectPicker.open) {
+        dispatch({ type: 'projectPickerClose' });
+        return;
+      }
       if (state.queuePanelOpen) {
         dispatch({ type: 'toggleQueuePanel' });
         return;
@@ -3387,6 +3817,10 @@ export function App({
       }
       if (state.goalPanelOpen) {
         dispatch({ type: 'toggleGoalPanel' });
+        return;
+      }
+      if (state.sessionsPanelOpen) {
+        dispatch({ type: 'toggleSessionsPanel' });
         return;
       }
     }
@@ -3423,6 +3857,8 @@ export function App({
       !state.agentsMonitorOpen &&
       !state.worktreeMonitorOpen &&
       !state.todosMonitorOpen &&
+      !state.goalPanelOpen &&
+      !state.sessionsPanelOpen &&
       !state.autoPhase?.monitorOpen
     ) {
       dispatch({ type: 'toggleHelp' });
@@ -3554,6 +3990,7 @@ export function App({
       state.queuePanelOpen ||
       state.processListOpen ||
       state.goalPanelOpen ||
+      state.sessionsPanelOpen ||
       state.helpOpen ||
       (state.autoPhase?.monitorOpen ?? false) ||
       state.rewindOverlay !== null;
@@ -4617,6 +5054,23 @@ export function App({
               hint={state.settingsPicker.hint}
             />
           ) : null}
+          {state.projectPicker.open ? (
+            <ProjectPicker
+              items={state.projectPicker.items}
+              selected={state.projectPicker.selected}
+              filter={state.projectPicker.filter}
+              hint={state.projectPicker.hint}
+            />
+          ) : null}
+          {state.sessionsPanelOpen ? (
+            <SessionsPanel
+              sessions={state.sessionsPanel.sessions}
+              busy={state.sessionsPanel.busy}
+              selected={state.sessionsPanel.selected}
+              resumeConfirm={state.sessionResumeConfirm ? { sessionName: state.sessionResumeConfirm.sessionName } : undefined}
+              currentSessionId={agent.ctx.session?.id}
+            />
+          ) : null}
           {state.rewindOverlay
             ? (() => {
                 const overlay = state.rewindOverlay;
@@ -4772,8 +5226,17 @@ export function App({
             debugStreamStats={state.debugStreamStats}
             enhanceCountdown={enhanceCountdown}
             autoProceedCountdown={autoProceedCountdown}
+            sessionCount={sessionCount}
+            mailbox={mailboxStatus}
           />
           </Box>
+          {/* Mailbox panel — toggled via /mailbox slash command */}
+          <MailboxPanel
+            messages={mailboxMessages}
+            agents={mailboxAgents}
+            unreadCount={mailboxStatus.unread}
+            open={mailboxPanelOpen}
+          />
           {/* Everything below the status bar is wrapped so its height can be
               measured (via belowStatusBarRef) — the status-bar mouse hit-test
               subtracts it from termRows to find the bar's absolute rows. */}

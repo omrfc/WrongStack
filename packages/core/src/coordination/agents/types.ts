@@ -89,11 +89,11 @@ export const HEAVY_BUDGET: AgentBudgetTier = {
  */
 export const TOOLS = {
   /** Pure read/inspect — safe for analysis and review agents. */
-  read: ['read', 'grep', 'glob', 'search', 'tree'],
+  read: ['read', 'grep', 'glob', 'search', 'tree', 'mailbox'],
   /** Read + structured inspection (logs, diffs, json, dependency audit). */
-  inspect: ['read', 'grep', 'glob', 'search', 'tree', 'json', 'diff', 'logs', 'audit'],
+  inspect: ['read', 'grep', 'glob', 'search', 'tree', 'json', 'diff', 'logs', 'audit', 'mailbox'],
   /** Read + edit (no shell). For agents that write code/docs but don't run it. */
-  write: ['read', 'grep', 'glob', 'search', 'tree', 'write', 'edit', 'replace', 'patch'],
+  write: ['read', 'grep', 'glob', 'search', 'tree', 'write', 'edit', 'replace', 'patch', 'mailbox'],
   /** Full build loop: edit + run (lint/format/typecheck/test/bash). */
   build: [
     'read',
@@ -111,13 +111,14 @@ export const TOOLS = {
     'format',
     'typecheck',
     'test',
+    'mailbox',
   ],
   /** Version control. */
   vcs: ['read', 'grep', 'glob', 'git', 'diff'],
   /** Dependency management + CVE audit. */
-  deps: ['read', 'grep', 'glob', 'install', 'outdated', 'audit', 'json'],
+  deps: ['read', 'grep', 'glob', 'install', 'outdated', 'audit', 'json', 'mailbox'],
   /** Documentation authoring. */
-  docs: ['read', 'grep', 'glob', 'search', 'tree', 'write', 'edit', 'document'],
+  docs: ['read', 'grep', 'glob', 'search', 'tree', 'write', 'edit', 'document', 'mailbox'],
   /** Web research. */
-  research: ['read', 'grep', 'glob', 'search', 'fetch'],
+  research: ['read', 'grep', 'glob', 'search', 'fetch', 'mailbox'],
 } as const satisfies Record<string, readonly string[]>;

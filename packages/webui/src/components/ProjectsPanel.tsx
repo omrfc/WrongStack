@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils';
 import { getWSClient } from '@/lib/ws-client';
+import { useFleetStore, useSessionStore } from '@/stores';
 import { ExternalLink, Folder, FolderPlus, History, Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from './Toaster';
@@ -39,6 +40,13 @@ export function ProjectsPanel({ fullView }: { fullView?: boolean | undefined }) 
   const [projectName, setProjectName] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const projectNameRef = useRef<HTMLInputElement>(null);
+
+  // Confirm dialog state for project switch with running agents
+  const [confirmSwitch, setConfirmSwitch] = useState<{
+    open: boolean;
+    project: ProjectEntry | null;
+    agentCount: number;
+  }>({ open: false, project: null, agentCount: 0 });
 
   const fetchProjects = useCallback(() => {
     const ws = getWSClient();
@@ -85,6 +93,20 @@ export function ProjectsPanel({ fullView }: { fullView?: boolean | undefined }) 
   };
 
   const handleSelect = useCallback((p: ProjectEntry) => {
+    const sessionId = useSessionStore.getState().session?.id;
+    if (sessionId) {
+      const fleet = useFleetStore.getState();
+      const sessionAgents = fleet.getAgentsBySession(sessionId);
+      const running = sessionAgents.filter((a) => a.status === 'running');
+      if (running.length > 0) {
+        setConfirmSwitch({ open: true, project: p, agentCount: running.length });
+        return;
+      }
+    }
+    doSwitch(p);
+  }, []);
+
+  const doSwitch = useCallback((p: ProjectEntry) => {
     const ws = getWSClient();
     ws.send({ type: 'projects.select', payload: { root: p.root, name: p.name } });
     const off = ws.on('projects.selected', (msg) => {
@@ -122,6 +144,41 @@ export function ProjectsPanel({ fullView }: { fullView?: boolean | undefined }) 
       setProjectName('');
     });
   }, [folderPath, projectName]);
+
+  // ── Confirm dialog for project switch with running agents ─────────
+  const confirmDialog = confirmSwitch.open && confirmSwitch.project && (
+    <Dialog open onOpenChange={() => setConfirmSwitch({ open: false, project: null, agentCount: 0 })}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Running Agents</DialogTitle>
+          <DialogDescription>
+            {confirmSwitch.agentCount} agent{confirmSwitch.agentCount === 1 ? ' is' : 's are'} running in the current session.
+            Switching projects will stop them.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setConfirmSwitch({ open: false, project: null, agentCount: 0 })}
+          >
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={() => {
+              const p = confirmSwitch.project!;
+              setConfirmSwitch({ open: false, project: null, agentCount: 0 });
+              doSwitch(p);
+            }}
+          >
+            Switch anyway
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 
   // ── ALL hooks are above this line. Early returns below derive from
   // ── state but do not add or remove hooks across renders. ──────────────
@@ -259,6 +316,7 @@ export function ProjectsPanel({ fullView }: { fullView?: boolean | undefined }) 
   if (fullView) {
     return (
       <div className="h-full flex flex-col overflow-hidden">
+        {confirmDialog}
         <div className="px-3 py-2 border-b shrink-0">
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
@@ -296,6 +354,7 @@ export function ProjectsPanel({ fullView }: { fullView?: boolean | undefined }) 
   // Compact mode (used inside Settings panel)
   return (
     <div className="space-y-2">
+      {confirmDialog}
       <div className="flex items-center justify-between">
         {addButton}
       </div>

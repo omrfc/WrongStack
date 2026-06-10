@@ -56,6 +56,11 @@ const plugin: Plugin = {
     autoUnwatchOnExit: true,
     autoIndex: false,
     indexProjectRoot: '',
+    depWatcher: {
+      enabled: false,
+      targetAgent: 'tech-stack',
+      debounceMs: 3000,
+    },
   },
   configSchema: {
     type: 'object',
@@ -72,6 +77,16 @@ const plugin: Plugin = {
         type: 'string',
         default: '',
         description: 'Project root directory for the indexer. Defaults to cwd when empty.',
+      },
+      depWatcher: {
+        type: 'object',
+        default: { enabled: false },
+        description: 'Bridge dependency file changes (package.json, go.mod, etc.) to the inter-agent mailbox for tech-stack audits. Requires the mailbox tool to be registered.',
+        properties: {
+          enabled: { type: 'boolean', default: false },
+          targetAgent: { type: 'string', default: 'tech-stack' },
+          debounceMs: { type: 'number', default: 3000 },
+        },
       },
     },
   },

@@ -106,7 +106,7 @@ export function ContextPanel({
   const contextModes = sessionStore.contextModes;
   const { lastInputTokens, maxContext, totalTokens, startTime, cost } = sessionStore;
 
-  const { switchContextMode, createContextMode, updateContextMode, deleteContextMode, listContextModes } = useWebSocket();
+  const { switchContextMode, createContextMode, updateContextMode, deleteContextMode, listContextModes, client } = useWebSocket();
   const wsUrl = useConfigStore((s) => s.wsUrl);
 
   // Ref to refresh modes after CRUD
@@ -240,6 +240,18 @@ export function ContextPanel({
       document.removeEventListener('keydown', onKey);
     };
   }, [modesOpen]);
+
+  // Listen for context.compacted responses from the server
+  useEffect(() => {
+    if (!client) return;
+    const unsub = client.on('context.compacted', (msg: { type: string; payload?: unknown }) => {
+      if (msg.type === 'context.compacted') {
+        setCompactResult(msg.payload as ContextCompactedPayload);
+        setCompactLoading(false);
+      }
+    });
+    return () => unsub();
+  }, [client]);
 
   // Operations
   const handleClear = () => {

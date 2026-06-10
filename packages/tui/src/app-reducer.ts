@@ -22,6 +22,7 @@ import type {
   QueueItem,
   State,
 } from './app-state.js';
+import type { ProjectPickerItem } from './components/project-picker.js';
 // Re-export types from app-state.ts for backward compatibility.
 export type {
   Action,
@@ -34,6 +35,41 @@ export type {
   SlashCommandMatch,
   State,
 } from './app-state.js';
+
+// ── Project picker helpers ────────────────────────────────────────────────
+
+/**
+ * Find the first non-divider index in the list. Returns 0 when the list is
+ * empty or contains only dividers.
+ *
+ * @public — exported for unit tests
+ */
+export function firstSelectable(items: ProjectPickerItem[]): number {
+  const idx = items.findIndex((it) => it.key !== '__divider__');
+  return idx >= 0 ? idx : 0;
+}
+
+/**
+ * Skip divider items at the given index, moving forward (+1) or backward (-1).
+ * Clamps to [0, items.length - 1]. If every item is a divider the index stays
+ * put — the caller should already know the list has at least one selectable.
+ *
+ * @public — exported for unit tests
+ */
+export function skipDivider(items: ProjectPickerItem[], idx: number, dir: 1 | -1): number {
+  let i = idx;
+  for (let steps = 0; steps < items.length; steps++) {
+    const item = items[i];
+    if (!item || item.key === '__divider__') {
+      i += dir;
+      if (i < 0) i = items.length - 1;
+      if (i >= items.length) i = 0;
+      continue;
+    }
+    return i;
+  }
+  return idx; // all dividers — stay put
+}
 
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -562,6 +598,53 @@ export function reducer(state: State, action: Action): State {
     }
     case 'settingsHint':
       return { ...state, settingsPicker: { ...state.settingsPicker, hint: action.text } };
+    case 'projectPickerOpen':
+      return {
+        ...state,
+        projectPicker: {
+          open: true,
+          allItems: action.items,
+          items: action.items,
+          selected: firstSelectable(action.items),
+          filter: '',
+          hint: undefined,
+        },
+      };
+    case 'projectPickerClose':
+      return {
+        ...state,
+        projectPicker: { open: false, allItems: [], items: [], selected: 0, filter: '', hint: undefined },
+      };
+    case 'projectPickerMove': {
+      const cur = state.projectPicker;
+      const list = cur.items;
+      if (list.length === 0) return state;
+      const nextRaw = (cur.selected + action.delta + list.length) % list.length;
+      const next = skipDivider(list, nextRaw, action.delta > 0 ? 1 : (-1 as 1 | -1));
+      return { ...state, projectPicker: { ...cur, selected: next } };
+    }
+    case 'projectPickerFilter': {
+      const cur = state.projectPicker;
+      const filtered = action.filter
+        ? cur.allItems.filter(
+            (item) =>
+              item.kind !== 'project' ||
+              item.label.toLowerCase().includes(action.filter.toLowerCase()) ||
+              (item.subtitle ?? '').toLowerCase().includes(action.filter.toLowerCase()),
+          )
+        : cur.allItems;
+      return {
+        ...state,
+        projectPicker: {
+          ...cur,
+          filter: action.filter,
+          items: filtered,
+          selected: firstSelectable(filtered),
+        },
+      };
+    }
+    case 'projectPickerHint':
+      return { ...state, projectPicker: { ...state.projectPicker, hint: action.text } };
     case 'confirmOpen':
       return { ...state, confirmQueue: [...state.confirmQueue, action.info] };
     case 'confirmClose':
@@ -1285,6 +1368,36 @@ export function reducer(state: State, action: Action): State {
     case 'debugStreamStatsClear': {
       if (state.debugStreamStats === null) return state;
       return { ...state, debugStreamStats: null };
+    }
+    case 'toggleSessionsPanel': {
+      return { ...state, sessionsPanelOpen: !state.sessionsPanelOpen };
+    }
+    case 'sessionsPanelSet': {
+      return {
+        ...state,
+        sessionsPanel: { sessions: action.sessions, busy: false, selected: action.sessions.length > 0 ? 0 : -1 },
+      };
+    }
+    case 'sessionsPanelMove': {
+      const cur = state.sessionsPanel;
+      if (cur.sessions.length === 0) return state;
+      const next = (cur.selected + action.delta + cur.sessions.length) % cur.sessions.length;
+      return { ...state, sessionsPanel: { ...cur, selected: next } };
+    }
+    case 'sessionsPanelBusy': {
+      return {
+        ...state,
+        sessionsPanel: { ...state.sessionsPanel, busy: action.on },
+      };
+    }
+    case 'sessionResumeConfirmSet': {
+      return {
+        ...state,
+        sessionResumeConfirm: { sessionId: action.sessionId, sessionName: action.sessionName },
+      };
+    }
+    case 'sessionResumeConfirmClear': {
+      return { ...state, sessionResumeConfirm: null };
     }
   }
 }

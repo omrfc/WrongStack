@@ -32,7 +32,7 @@ export const setWorkingDirTool: Tool<SetWorkingDirInput, SetWorkingDirOutput> = 
     'Change the working directory so relative paths in subsequent tool calls resolve from a ' +
     'different directory. Pass `path` to set a new directory, or omit to query the current one. ' +
     'The directory must exist and be inside the project root.',
-  permission: 'auto',
+  permission: 'confirm',
   mutating: true,
   capabilities: ['fs.read'],
   timeoutMs: 5_000,

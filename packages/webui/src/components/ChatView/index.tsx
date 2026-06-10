@@ -844,7 +844,7 @@ export function ChatView() {
         </div>
         <div className="p-4">
           <div className="max-w-5xl mx-auto">
-            <ChatInput />
+            <ChatInput onOpenBreakdown={() => setBreakdownOpen(true)} />
           </div>
         </div>
       </div>

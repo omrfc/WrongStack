@@ -6,14 +6,14 @@ import { persist } from 'zustand/middleware';
 // ============================================
 
 // Activity types shown in the ActivityBar (secondary panel content).
-export type Activity = 'chat' | 'agents' | 'context' | 'history' | 'files' | 'projects';
+export type Activity = 'chat' | 'agents' | 'context' | 'history' | 'files' | 'projects' | 'sessions' | 'mailbox';
 
 interface UIState {
   sidebarOpen: boolean;
   /** Which activity icon is selected in the ActivityBar — controls secondary panel content. */
   activeActivity: Activity;
   settingsOpen: boolean;
-  currentView: 'chat' | 'history' | 'settings' | 'autophase' | 'agents' | 'files' | 'context' | 'projects';
+  currentView: 'chat' | 'history' | 'settings' | 'autophase' | 'agents' | 'files' | 'context' | 'projects' | 'sessions' | 'setup' | 'agentflow';
   showConfirmDialog: boolean;
   confirmInfo: {
     id: string;
@@ -33,6 +33,16 @@ interface UIState {
   favoriteSessionIds: string[];
   sessionNicknames: Record<string, string>;
   fileExplorerWidth: number;
+  /** When true, free-text prompts are run through the prompt refiner before sending. */
+  refineEnabled: boolean;
+
+  /** Active prompt-refinement panel. Set while RefinePanel is shown. Null when no refinement is pending. */
+  refinePanel: {
+    original: string;
+    refined: string;
+    english: string;
+    resolve: (decision: 'refined' | 'english' | 'original' | 'edit') => void;
+  } | null;
 
   /** Select an activity. If clicking the already-active icon, closes the sidebar. */
   selectActivity: (activity: Activity) => void;
@@ -55,6 +65,8 @@ interface UIState {
   toggleFavoriteSession: (id: string) => void;
   setSessionNickname: (id: string, nickname: string) => void;
   setFileExplorerWidth: (px: number) => void;
+  toggleRefineEnabled: () => void;
+  setRefinePanel: (panel: UIState['refinePanel']) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -78,6 +90,8 @@ export const useUIStore = create<UIState>()(
       favoriteSessionIds: [],
       sessionNicknames: {},
       fileExplorerWidth: 220,
+      refineEnabled: true,
+      refinePanel: null,
 
       selectActivity: (activity) => set({ activeActivity: activity }),
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
@@ -127,6 +141,8 @@ export const useUIStore = create<UIState>()(
         }),
       setFileExplorerWidth: (px) =>
         set({ fileExplorerWidth: Math.max(160, Math.min(400, Math.round(px))) }),
+      toggleRefineEnabled: () => set((s) => ({ refineEnabled: !s.refineEnabled })),
+      setRefinePanel: (panel) => set({ refinePanel: panel }),
     }),
     {
       name: 'wrongstack-ui',
@@ -140,6 +156,7 @@ export const useUIStore = create<UIState>()(
         favoriteSessionIds: s.favoriteSessionIds,
         sessionNicknames: s.sessionNicknames,
         fileExplorerWidth: s.fileExplorerWidth,
+        refineEnabled: s.refineEnabled,
       }),
     },
   ),

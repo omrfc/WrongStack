@@ -31,6 +31,17 @@ export const MOUSE_HOVER_ON = `${ESC}[?1000h${ESC}[?1003h${ESC}[?1006h`;
  */
 export const MOUSE_OFF = `${ESC}[?1003l${ESC}[?1002l${ESC}[?1000l${ESC}[?1006l`;
 
+/**
+ * Enter the alternate screen buffer (DECSET 1049). The normal screen is
+ * saved and restored on exit. Used by use-mouse-mode for full-screen overlays.
+ */
+export const ALT_SCREEN_ON = `${ESC}[?1049h`;
+
+/**
+ * Exit the alternate screen buffer (DECRST 1049), restoring the normal screen.
+ */
+export const ALT_SCREEN_OFF = `${ESC}[?1049l`;
+
 export type MouseEventKind = 'press' | 'release' | 'move' | 'wheel';
 export type MouseButton = 'left' | 'middle' | 'right' | 'none';
 

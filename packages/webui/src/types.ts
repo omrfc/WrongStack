@@ -24,6 +24,8 @@ export interface WSSessionStart {
     reset?: boolean | undefined;
     replayMessages?: Array<{ role: string | undefined; content: unknown }>;
     replayUsage?: Usage | undefined;
+    /** True when no provider+model is configured yet — show the setup screen. */
+    needsSetup?: boolean | undefined;
   };
 }
 
@@ -547,7 +549,8 @@ export type WSClientMessage =
   | WSCollabRequestPause
   | WSCollabResume
   | WSCollabGrantControl
-  | WSCollabInjectTool;
+  | WSCollabInjectTool
+  | { type: 'model.refine'; payload: { text: string } };
 
 export type WSServerMessage =
   | WSSessionStart
@@ -606,7 +609,8 @@ export type WSServerMessage =
   | { type: 'projects.list'; payload: { projects: Array<{ name: string; root: string; slug: string; lastSeen?: string | undefined }> } }
   | { type: 'projects.added'; payload: { name: string; root: string; slug: string; message: string } }
   | { type: 'projects.selected'; payload: { root: string; name: string; message: string } }
-  | { type: 'working_dir.changed'; payload: { cwd: string; projectRoot: string } };
+  | { type: 'working_dir.changed'; payload: { cwd: string; projectRoot: string } }
+  | { type: 'model.refine_result'; payload: { refined: string; english: string; error?: string | undefined } };
 
 // Helper to broadcast to all clients
 export type BroadcastFn = (msg: WSServerMessage) => void;

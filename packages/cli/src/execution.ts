@@ -21,7 +21,7 @@ import type {
   TokenCounter,
 } from '@wrongstack/core';
 import type { MemoryStore, ModeStore } from '@wrongstack/core';
-import { color, mergeCustomModelDefs, writeOut, type AutonomyStage, decryptConfigSecrets, encryptConfigSecrets, atomicWrite, noOpVault } from '@wrongstack/core';
+import { color, mergeCustomModelDefs, writeOut, type AutonomyStage, decryptConfigSecrets, encryptConfigSecrets, atomicWrite, noOpVault, setQueuedMessagesSnapshot } from '@wrongstack/core';
 import type { ChimeraReviewNeededPayload } from '@wrongstack/core';
 import { CHIMERA_REVIEW_PROMPT } from '@wrongstack/core';
 import { filterSafeForProject, persistAutonomySetting } from './settings-menu.js';
@@ -114,9 +114,9 @@ export interface ExecutionDeps {
   /** Maximum auto-proceed iterations before stopping. Default 50. 0 = unlimited. */
   autoProceedMaxIterations?: number | undefined;
   /**
-   * Validate a suggestion before auto-proceeding. Called in 'auto' mode
-   * before the countdown starts. Should make a lightweight LLM call.
-   * Returns `true` to proceed, `false` to hold for user input.
+   * LLM validation gate called before starting the auto-proceed countdown.
+   * Receives the top suggestion and the last agent output; returns `true`
+   * when auto-proceeding is safe. Forwarded verbatim to the REPL.
    */
   onValidateAutoProceed?:
     | ((suggestion: string, lastOutput: string) => Promise<boolean>)
@@ -174,6 +174,8 @@ export interface ExecutionDeps {
     outputTokens?: number | undefined;
     outputLines?: number | undefined;
   }> | undefined;
+  /** When true, the WebUI shows a provider/model setup screen instead of the chat. */
+  needsSetup?: boolean | undefined;
 }
 
 export async function execute(deps: ExecutionDeps): Promise<number> {
@@ -231,6 +233,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     modeStore,
     restoredMessages,
     restoredToolCalls,
+    needsSetup,
   } = deps;
 
   // ── Chimera post-session review: spawns subagent on chimera.review_needed ──
@@ -545,6 +548,12 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           model: context.model,
           banner: !flags['no-banner'],
           queueStore,
+          // Queue awareness: mirror the TUI's pending-message queue onto the
+          // live Context so the agent loop can surface "messages are waiting"
+          // at its next iteration boundary (see core/queued-messages.ts).
+          onQueueChange: (items: string[]) => {
+            setQueuedMessagesSnapshot(context, items);
+          },
           // --mouse forces full mouse mode on; when absent, leave undefined so
           // run-tui can still enable it from the saved setting / WRONGSTACK_MOUSE.
           mouse: flags.mouse ? true : undefined,
@@ -840,6 +849,69 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           statuslineHiddenItems,
           setStatuslineHiddenItems,
           agentsMonitorController,
+          getLiveSessions: async () => {
+            const { SessionRegistry } = await import('@wrongstack/core');
+            const globalRoot = path.dirname(wpaths.globalConfig);
+            const registry = new SessionRegistry(globalRoot);
+            const sessions = await registry.list();
+            return sessions
+              .filter((s) => s.status !== 'stale')
+              .map((s) => ({
+                sessionId: s.sessionId,
+                projectName: s.projectName,
+                projectSlug: s.projectSlug,
+                projectRoot: s.projectRoot,
+                workingDir: s.workingDir,
+                gitBranch: s.gitBranch,
+                status: s.status,
+                pid: s.pid,
+                startedAt: s.startedAt,
+                agentCount: s.agentCount,
+                agents: s.agents.map((a) => ({
+                  id: a.id,
+                  name: a.name,
+                  status: a.status,
+                  currentTool: a.currentTool,
+                  iterations: a.iterations,
+                  toolCalls: a.toolCalls,
+                  lastActivityAt: a.lastActivityAt,
+                })),
+              }));
+          },
+          onSwitchToSession: (_sessionId: string, targetRoot: string, _projectName: string) => {
+            // Spawn a new wstack terminal in the target project directory.
+            // The old session keeps running; this opens a fresh window.
+            const { spawn } = require('node:child_process');
+            const { createRequire } = require('node:module');
+            let cliPath: string;
+            try {
+              const req = createRequire(import.meta.url);
+              const pkgPath = req.resolve('@wrongstack/cli/package.json');
+              const pkgDir = path.dirname(pkgPath);
+              cliPath = path.join(pkgDir, 'dist', 'index.js');
+              require('node:fs').accessSync(cliPath);
+            } catch {
+              cliPath = process.argv[1] ?? '';
+              if (!cliPath) return;
+            }
+            const nodeExe = process.execPath;
+            spawn(nodeExe, [cliPath, '--no-interactive'], {
+              cwd: targetRoot,
+              stdio: 'inherit',
+              detached: false,
+              signal: AbortSignal.timeout(30_000),
+            }).on('error', (err: Error) => {
+              console.error(color.red(`Failed to spawn wstack: ${err.message}`));
+            }).unref();
+
+            renderer.write([
+              '',
+              color.green(`  Opening ${path.basename(targetRoot)}`),
+              color.dim(`  Root: ${targetRoot}`),
+              color.dim('  (current session stays open — Ctrl+C to return)'),
+              '',
+            ].join('\n'));
+          },
           initialGoal: goalFlag,
           initialAsk: askFlag,
           projectRoot,
@@ -951,16 +1023,21 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
               }
 
               // Sync the agent's model/provider to what was used in the
-              // resumed session. The provider object itself isn't swapped
-              // (same API key / endpoint), but the model id must match so
-              // the context window estimate and status bar label are correct.
-              if (meta.model) {
+              // resumed session. If the resumed session used a different
+              // provider or model, switch to it so the agent uses the
+              // correct API endpoint and context window.
+              if (meta.model && meta.model !== agent.ctx.model) {
                 agent.ctx.model = meta.model;
               }
               if (meta.provider) {
-                // The provider instance stays the same; only the recorded id
-                // is synced for display purposes. The actual Provider object
-                // is reconstructed from config by switchProviderAndModel.
+                const currentProviderId = (agent.ctx.provider as { id?: string }).id;
+                if (meta.provider !== currentProviderId && switchProviderAndModel) {
+                  // Full provider switch — rebuilds the Provider instance
+                  switchProviderAndModel(
+                    meta.provider as string,
+                    meta.model ?? agent.ctx.model,
+                  );
+                }
               }
 
               // Close the current session writer so a clean session_end event
@@ -991,6 +1068,111 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
               return null;
             }
           },
+          /**
+           * Load project picker items from the global manifest.
+           * Called each time the project picker panel opens (F1).
+           */
+          getProjectPickerItems: async () => {
+            const { buildPickerItems } = await import('./project-picker.js');
+            return buildPickerItems({
+              globalConfigPath: wpaths.globalConfig,
+              currentProjectRoot: projectRoot,
+            });
+          },
+          /**
+           * Called when the user selects a project in the picker.
+           * Handles agent shutdown confirmation and spawns a fresh wstack session.
+           */
+          onProjectSelect: async (slug: string, kind: 'project' | 'action') => {
+            if (kind === 'action') {
+              // new-session / prev-sessions — handled by the slash command path
+              return;
+            }
+
+            const { loadManifest } = await import('./slash-commands/project-utils.js');
+
+            try {
+              const manifest = await loadManifest(wpaths.globalConfig);
+              const project = manifest.projects.find((p) => p.slug === slug);
+              if (!project) return;
+
+              // Already in the selected project — no-op.
+              if (project.root === projectRoot) return;
+
+              // ── Notify about running agents (they keep running) ────
+              const fleetStatus = director?.status();
+              const fleetRunning = fleetStatus?.subagents.filter((a) => a.status === 'running').length ?? 0;
+              const eternalEngine = getEternalEngine?.();
+              const parallelEngine = getParallelEngine?.();
+              const eternalActive = eternalEngine?.currentState === 'running';
+              const parallelActive = parallelEngine?.currentState === 'running';
+              const hasActiveAgents = fleetRunning > 0 || eternalActive || parallelActive;
+
+              if (hasActiveAgents) {
+                const parts: string[] = [
+                  color.dim('ℹ  Agents continue running in the current session.'),
+                  '',
+                ];
+                if (fleetRunning > 0) {
+                  parts.push(color.dim(`  • ${fleetRunning} subagent(s) running in background`));
+                }
+                if (eternalActive) {
+                  parts.push(color.dim('  • Eternal engine stays active'));
+                }
+                if (parallelActive) {
+                  parts.push(color.dim('  • Parallel engine stays active'));
+                }
+                parts.push('');
+                parts.push(color.dim(`  Opening new session in: ${project.name}`));
+                renderer.write(`\n${parts.join('\n')}\n`);
+              }
+
+              // ── Spawn wstack in the target directory ──────────────
+              const { spawn } = await import('node:child_process');
+              const { createRequire } = await import('node:module');
+              let cliPath: string;
+              try {
+                const req = createRequire(import.meta.url);
+                const pkgPath = req.resolve('@wrongstack/cli/package.json');
+                const pkgDir = path.dirname(pkgPath);
+                cliPath = path.join(pkgDir, 'dist', 'index.js');
+                await fs.access(cliPath);
+              } catch {
+                cliPath = process.argv[1] ?? '';
+                if (!cliPath) {
+                  renderer.write(color.red('Could not locate the CLI entry point.\n'));
+                  return;
+                }
+              }
+
+              // Update lastSeen in manifest
+              project.lastSeen = new Date().toISOString();
+              const { saveManifest } = await import('./slash-commands/project-utils.js');
+              await saveManifest(manifest, wpaths.globalConfig);
+
+              const nodeExe = process.execPath;
+              spawn(nodeExe, [cliPath, '--no-interactive'], {
+                cwd: project.root,
+                stdio: 'inherit',
+                detached: false,
+                signal: AbortSignal.timeout(30_000),
+              }).on('error', (err: Error) => {
+                console.error(color.red(`Failed to spawn wstack: ${err.message}`));
+              }).unref();
+
+              renderer.write([
+                '',
+                color.green(`  Switched to ${project.name}`),
+                color.dim(`  Root: ${project.root}`),
+                color.dim('  (current session stays open — Ctrl+C to return)'),
+                '',
+              ].join('\n'));
+            } catch (err) {
+              renderer.write(
+                color.red(`Project switch failed: ${err instanceof Error ? err.message : String(err)}\n`),
+              );
+            }
+          },
         });
       } finally {
         renderer.setSilent(false);
@@ -1018,44 +1200,35 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         skillLoader,
         modeStore,
         modeId,
+        needsSetup,
       });
-      try {
-        code = await runRepl({
-          agent,
-          renderer,
-          reader,
-          slashRegistry,
-          tokenCounter,
-          visionAdapters,
-          supportsVision,
-          attachments,
-          effectiveMaxContext,
-          projectName: path.basename(projectRoot) || undefined,
-          projectRoot,
-          getAutonomy,
-          onAutonomy,
-          getNextPredict,
-          onSuggestionsParsed,
-          getSuggestions,
-          autoProceedDelayMs,
-          autoProceedMaxIterations,
-          onValidateAutoProceed,
-          getEternalEngine,
-          getParallelEngine,
-          skillLoader,
-          agentsMonitorController,
-          fleetStreamController,
-          // Report context pressure to the Director after each iteration so
-          // the spawn pre-check (maxLeaderContextLoad) stays accurate.
-          onAgentIterationComplete: director
-            ? (tokens) => director.setLeaderContextPressure(tokens)
-            : undefined,
+      // In --webui mode, skip the full REPL — just keep the process alive
+      // until the WebUI server shuts down. The WebUI WS handler listens for
+      // /exit or abort signals and resolves webuiPromise when the server stops.
+      renderer.writeInfo(
+        color.green(`  ✦ WebUI running → ${color.bold(`http://localhost:${Number.parseInt(String(flags.port ?? '3457'), 10)}`)}`),
+      );
+      renderer.writeInfo(color.dim('  Press Ctrl+C in this terminal to stop the WebUI server.\n'));
+      const webuiExit = new Promise<number>((resolve) => {
+        const onSigint = () => {
+          renderer.write('\n');
+          renderer.writeInfo(color.yellow('  Shutting down WebUI server…'));
+          resolve(0);
+        };
+        process.on('SIGINT', onSigint);
+        process.on('SIGTERM', onSigint);
+        webuiPromise.then(() => {
+          process.off('SIGINT', onSigint);
+          process.off('SIGTERM', onSigint);
+          resolve(0);
+        }).catch((err) => {
+          process.off('SIGINT', onSigint);
+          process.off('SIGTERM', onSigint);
+          console.debug(`[execution] webui error: ${err}`);
+          resolve(1);
         });
-      } finally {
-        // webuiPromise must be awaited regardless of whether runRepl threw,
-        // so the HTTP/WS server can shut down cleanly.
-        await webuiPromise.catch((err) => console.debug(`[execution] webui shutdown failed: ${err}`));
-      }
+      });
+      code = await webuiExit;
     } else {
       code = await runRepl({
         agent,

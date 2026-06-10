@@ -142,8 +142,13 @@ export class CircuitBreaker {
    * Call this BEFORE spawning a bash/exec process.
    * Returns true if the call is allowed; false if the breaker is open.
    * When false, callers MUST NOT spawn a process.
+   *
+   * @param bypass - If true, skip the circuit breaker check entirely.
+   *                  Use for background/fire-and-forget processes that should
+   *                  not affect breaker state.
    */
-  beforeCall(): boolean {
+  beforeCall(bypass = false): boolean {
+    if (bypass) return true;
     this._checkStateTransition();
     if (this.state === 'open') return false;
     return true;
@@ -154,8 +159,13 @@ export class CircuitBreaker {
    * `durationMs` is the wall-clock time the process ran.
    * `failed` is true when the process returned a non-zero exit code or
    * threw an exception before spawning.
+   *
+   * @param bypass - If true, do not update breaker state.
+   *                  Use for background/fire-and-forget processes.
    */
-  afterCall(durationMs: number, failed: boolean): void {
+  afterCall(durationMs: number, failed: boolean, bypass = false): void {
+    if (bypass) return;
+
     const now = Date.now();
 
     if (this.state === 'half-open') {

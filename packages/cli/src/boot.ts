@@ -71,6 +71,8 @@ export interface BootContext {
   logger: DefaultLogger;
   /** Set by background update check — if outdated, index.ts shows notification */
   updateInfo?: UpdateInfo | undefined;
+  /** True when running in --webui/--no-interactive mode but provider/model not configured */
+  needsSetup?: boolean | undefined;
 }
 
 function resolveBundledSkillsDir(): string | undefined {
@@ -212,7 +214,8 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
   }
 
   const isSingleShot = positional.length > 0 || typeof flags['prompt'] === 'string';
-  const isInteractiveTTY = isStdinTTY() && !isSingleShot;
+  // Skip interactive TTY prompts when: single-shot, --webui, or --no-interactive
+  const isInteractiveTTY = isStdinTTY() && !isSingleShot && !flags['webui'] && !flags['no-interactive'];
 
   if (isInteractiveTTY) {
     // If the current working directory has no .git repository, prompt the
@@ -230,8 +233,10 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
   // Provider + model selection
   const providerFlag = typeof flags['provider'] === 'string' ? flags['provider'] : undefined;
   const modelFlag = typeof flags['model'] === 'string' ? flags['model'] : undefined;
+  // When --webui or --no-interactive is active, skip interactive picker and require config values
+  const noInteractiveMode = flags['webui'] || flags['no-interactive'];
   if (!(!!providerFlag && !!modelFlag)) {
-    if (isStdinTTY()) {
+    if (isStdinTTY() && !noInteractiveMode) {
       let picked: PickerResult | undefined;
       let skipPicker = false;
 
@@ -423,6 +428,30 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
     printLaunchHints(renderer, flags, {
       cursorFile: path.join(wpaths.cacheDir, 'hint-cursor'),
     });
+  } else {
+    // When skipping interactive prompts (--webui or --no-interactive), use saved
+    // preferences or sensible defaults. Director and autonomy are OFF in non-interactive
+    // mode to prevent unexpected autonomous behavior.
+    const effectiveChoices = config.launch
+      ? {
+          mode: flags['no-tui'] ? 'repl' : (config.launch.mode ?? 'tui'),
+          yolo: config.yolo ?? true,
+          director: false, // Disable director in non-interactive mode
+          autonomy: 'off', // Disable autonomy in non-interactive mode
+        }
+      : {
+          mode: 'repl',
+          yolo: true,
+          director: false,
+          autonomy: 'off',
+        };
+
+    if (effectiveChoices.mode === 'repl') {
+      flags['tui'] = false;
+      flags['no-tui'] = true;
+    }
+    flags['autonomy'] = effectiveChoices.autonomy;
+    if (effectiveChoices.director) flags['director'] = true;
   }
 
   return {
@@ -439,6 +468,7 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
     reader,
     logger,
     updateInfo,
+    needsSetup: !noInteractiveMode ? false : (!config.provider || !config.model),
   };
 }
 

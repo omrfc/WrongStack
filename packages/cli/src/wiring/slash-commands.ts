@@ -71,8 +71,8 @@ export async function setupSlashCommands(params: SlashCommandsDeps): Promise<voi
 
   // Statusline hidden items — derived from the config file
   const hiddenItemsFromConfig = await loadStatuslineConfig();
-  const hiddenItemsList: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'> = [];
-  const ALL_ITEMS = ['todos', 'plan', 'fleet', 'git', 'elapsed', 'context', 'cost'] as const;
+  const hiddenItemsList: Array<'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'> = [];
+  const ALL_ITEMS = ['todos', 'plan', 'fleet', 'git', 'elapsed', 'context', 'cost', 'working_dir'] as const;
   for (const k of ALL_ITEMS) {
     if (!hiddenItemsFromConfig[k]) hiddenItemsList.push(k);
   }

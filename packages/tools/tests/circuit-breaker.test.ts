@@ -218,5 +218,40 @@ describe('CircuitBreaker', () => {
       vi.advanceTimersByTime(1500);
       expect(cb.beforeCall()).toBe(true);
     });
+
+    it('bypass returns true even when breaker is open', () => {
+      const cb = new CircuitBreaker();
+      cb.forceOpen();
+      expect(cb.beforeCall(true)).toBe(true);
+      expect(cb.beforeCall(false)).toBe(false);
+    });
+  });
+
+  describe('afterCall bypass', () => {
+    it('bypass does not update breaker state', () => {
+      const cb = new CircuitBreaker({ maxConsecutiveFailures: 2 });
+      cb.forceOpen();
+      // Bypass should not affect state
+      cb.afterCall(10_000, false, true);
+      expect(cb.snapshot().state).toBe('open');
+      expect(cb.snapshot().consecutiveFailures).toBe(0);
+    });
+
+    it('bypass allows calling afterCall repeatedly without tripping', () => {
+      const cb = new CircuitBreaker({ maxConsecutiveFailures: 3 });
+      // Without bypass, 3 failures would trip the breaker
+      cb.afterCall(10_000, true, true);
+      cb.afterCall(10_000, true, true);
+      cb.afterCall(10_000, true, true);
+      expect(cb.canProceed).toBe(true);
+    });
+
+    it('bypass success does not reset consecutive failure counter', () => {
+      const cb = new CircuitBreaker({ maxConsecutiveFailures: 2 });
+      cb.afterCall(10, true); // 1 failure
+      cb.afterCall(10, false, true); // success with bypass
+      cb.afterCall(10, true); // 2nd failure — should trip because bypass didn't reset counter
+      expect(cb.canProceed).toBe(false);
+    });
   });
 });

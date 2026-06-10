@@ -20,6 +20,8 @@ import {
 import type { Agent, EventBus, MemoryStore, ModeStore, ModelsRegistry, SessionStore, SessionWriter, SkillLoader } from '@wrongstack/core';
 import {
   DefaultSecretScrubber,
+  enhanceUserPrompt,
+  recentTextTurns,
   type ProviderConfig,
   type TodoItem,
   mutateTasks,
@@ -176,6 +178,8 @@ interface WebUIOptions {
   subscribeEternalIteration?:
     | ((fn: (entry: import('@wrongstack/core').JournalEntry) => void) => () => void)
     | undefined;
+  /** Callback to invoke when the WebUI is shut down by a client request. */
+  onExit?: (() => void) | undefined;
   /** Session store — enables session.resume and session.delete from the WebUI. */
   sessionStore?: SessionStore | undefined;
   /** Memory store — enables the MemoryPanel (memory.list, memory.remember, memory.forget). */
@@ -186,6 +190,8 @@ interface WebUIOptions {
   modeStore?: ModeStore | undefined;
   /** Active agent mode id passed to the frontend via session.start. */
   modeId?: string | undefined;
+  /** When true, the frontend shows a provider/model setup screen instead of the chat. */
+  needsSetup?: boolean | undefined;
 }
 
 interface ConnectedClient {
@@ -241,7 +247,7 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
    * (reset, mode, replayMessages, etc.). The connection handler adds
    * wsToken on top.
    */
-  async function buildSessionStartPayload(overrides?: Record<string, unknown>) {
+  async function buildSessionStartPayload(overrides?: Record<string, unknown>, needsSetup = false) {
     let maxContext = 0;
     let inputCost = 0;
     let outputCost = 0;
@@ -270,7 +276,7 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
       mode: opts.modeId ?? 'default',
       projectName: opts.projectRoot ? path.basename(opts.projectRoot) : undefined,
       cwd: opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '',
-
+      needsSetup, // true when provider/model not configured and running in --webui mode
       contextMode: String(
         opts.agent.ctx.meta?.['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID,
       ),
@@ -296,7 +302,12 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
     const requireFromHere = createRequire(import.meta.url);
     const serverEntry = requireFromHere.resolve('@wrongstack/webui/server');
     const distDir = path.resolve(path.dirname(serverEntry), '..'); // .../dist
-    httpServer = createHttpServer({ host, distDir, wsPort });
+    httpServer = createHttpServer({
+      host,
+      distDir,
+      wsPort,
+      globalRoot: path.dirname(opts.globalConfigPath ?? ''),
+    });
     const openUrl = `http://${host}:${httpPort}`;
     httpServer?.listen(httpPort, host, () => {
       console.log(
@@ -602,6 +613,14 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
         }),
       );
     }
+
+    // ── Mailbox events — broadcast to WebUI for real-time per-project visibility ──
+    // Enables the WebUI to update its online agent count and mailbox panel without polling.
+    eventUnsubscribers.push(
+      opts.events.onPattern('mailbox.*', (eventName, payload) => {
+        broadcast({ type: 'mailbox.event', payload: { event: eventName, ...payload as Record<string, unknown> } });
+      }),
+    );
   }
 
   return new Promise<void>((resolve) => {
@@ -609,6 +628,53 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
       console.log(`[WebUI] WebSocket server running on ws://${host}:${port}`);
       setupEvents();
       opts.onListening?.({ httpPort, wsPort, host });
+
+      // ── Live session status poll ──────────────────────────────────
+      // Periodically read the cross-process SessionRegistry and push
+      // live agent/session status to all connected WebSocket clients.
+      // This keeps the WebUI session panel in sync even when agents
+      // run in background (project switches, multiple processes).
+      const globalRoot = opts.globalConfigPath
+        ? path.dirname(opts.globalConfigPath)
+        : undefined;
+      if (globalRoot) {
+        const statusInterval = setInterval(async () => {
+          try {
+            // Lazy import to avoid bundling core into the webui runtime
+            const { SessionRegistry } = await import('@wrongstack/core');
+            const registry = new SessionRegistry(globalRoot);
+            const sessions = await registry.list();
+            const live = sessions
+              .filter((s) => s.status !== 'stale')
+              .map((s) => ({
+                sessionId: s.sessionId,
+                projectName: s.projectName,
+                projectSlug: s.projectSlug,
+                projectRoot: s.projectRoot,
+                workingDir: s.workingDir,
+                gitBranch: s.gitBranch,
+                status: s.status,
+                pid: s.pid,
+                startedAt: s.startedAt,
+                agentCount: s.agentCount,
+                agents: s.agents.map((a) => ({
+                  id: a.id,
+                  name: a.name,
+                  status: a.status,
+                  currentTool: a.currentTool,
+                  iterations: a.iterations,
+                  toolCalls: a.toolCalls,
+                  lastActivityAt: a.lastActivityAt,
+                })),
+              }));
+            broadcast({ type: 'sessions.status_update', payload: { sessions: live } });
+          } catch {
+            // Best-effort — never crash the WebSocket relay for status errors
+          }
+        }, 5_000);
+        if (statusInterval.unref) statusInterval.unref();
+        eventUnsubscribers.push(() => clearInterval(statusInterval));
+      }
     });
 
     wss.on('connection', async (ws, req) => {
@@ -729,7 +795,7 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
       // Send session.start to the new client — includes wsToken for
       // reconnection, plus per-model cost rates and context-window cap
       // so the frontend can compute accurate live costs.
-      const base = await buildSessionStartPayload();
+      const base = await buildSessionStartPayload({}, opts.needsSetup ?? false);
       send(ws, {
         type: 'session.start',
         payload: { ...base, wsToken: authToken },
@@ -1775,7 +1841,7 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
             if (!cliPath) throw new Error('CLI entry not found');
           }
           const { spawn } = await import('node:child_process');
-          const child = spawn(process.execPath, [cliPath], {
+          const child = spawn(process.execPath, [cliPath, '--no-interactive'], {
             cwd: root,
             stdio: 'inherit',
             detached: false,
@@ -1794,6 +1860,58 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
         }
         break;
       }
+
+      case 'model.refine': {
+        const { text } = (msg as { payload: { text: string } }).payload;
+        if (!text?.trim()) {
+          send(ws, {
+            type: 'model.refine_result',
+            payload: { refined: '', english: '', error: 'Empty text' },
+          });
+          break;
+        }
+        try {
+          const ctx = opts.agent.ctx;
+          const history = recentTextTurns(ctx.messages);
+          const result = await enhanceUserPrompt({
+            provider: ctx.provider,
+            model: ctx.model,
+            text,
+            history,
+            timeoutMs: 90000,
+            onError: (reason) => {
+              console.warn(JSON.stringify({
+                level: 'warn',
+                event: 'model.refine_failed',
+                reason,
+                timestamp: new Date().toISOString(),
+              }));
+            },
+          });
+          if (result) {
+            send(ws, {
+              type: 'model.refine_result',
+              payload: { refined: result.refined, english: result.english },
+            });
+          } else {
+            send(ws, {
+              type: 'model.refine_result',
+              payload: { refined: text, english: text, error: 'Refinement returned no result' },
+            });
+          }
+        } catch (err) {
+          send(ws, {
+            type: 'model.refine_result',
+            payload: { refined: text, english: text, error: err instanceof Error ? err.message : String(err) },
+          });
+        }
+        break;
+      }
+
+      case 'webui.shutdown':
+        console.log('[WebUI] Shutdown requested from client');
+        shutdown();
+        break;
 
       default: {
         // Log unknown message types for debugging but do NOT send an error
@@ -1865,6 +1983,12 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(msg));
     }
+  }
+
+  function shutdown(): void {
+    console.log('[WebUI] Shutting down...');
+    httpServer?.close();
+    opts.onExit?.();
   }
 
   function broadcast(msg: WSServerMessage): void {

@@ -29,7 +29,6 @@ const ENTER = '\r';
 const CTRL_C = '\x03';
 const ESC = '\x1b';
 const BS = '\x7f';
-const Q = 'q';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 

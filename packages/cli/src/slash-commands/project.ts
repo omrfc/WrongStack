@@ -31,18 +31,19 @@ export function buildProjectCommand(opts: SlashCommandContext): SlashCommand {
     name: 'project',
     category: 'Session',
     aliases: ['projects'],
-    description: 'Manage known projects — list, add, rename, remove, switch.',
+    description: 'Open project picker or manage known projects. Arrow keys to select, Enter to confirm.',
     help: [
       'Usage:',
-      '  /project                          List all known projects',
+      '  /project                          Open interactive project picker (arrow keys)',
+      '  /project ls|list                  List all known projects (text)',
       '  /project add <path> [name]        Register a new project',
       '  /project rename <slug> <name>     Rename a project',
       '  /project remove <slug>            Remove a project from the list',
-      '  /project switch                   Open interactive project picker (arrow keys)',
       '  /project switch <dir> [--name <n>]  Spawn wstack in target directory',
-      '  /project switch --interactive       Force interactive picker even with args',
       '',
       'Projects are registered in ~/.wrongstack/projects.json.',
+      'When a project is selected, running agents are stopped and a fresh',
+      'wstack session spawns in the selected project directory.',
       'Each project has a name (user-friendly), root path, and slug.',
       'The slug is auto-generated and used for per-project data storage.',
     ].join('\n'),
@@ -50,7 +51,15 @@ export function buildProjectCommand(opts: SlashCommandContext): SlashCommand {
       const trimmed = args.trim();
       const lower = trimmed.toLowerCase();
 
-      if (!trimmed || lower === 'ls' || lower === 'list') {
+      if (!trimmed) {
+        // Bare /project → launch interactive project picker (arrow keys)
+        if (!process.stdin.isTTY) {
+          return listProjectsCommand(opts, ctx);
+        }
+        return switchInteractiveCommand(opts, ctx);
+      }
+
+      if (lower === 'ls' || lower === 'list') {
         return listProjectsCommand(opts, ctx);
       }
 
@@ -280,8 +289,13 @@ async function switchProjectCommand(opts: SlashCommandContext, ctx: Context | un
   }
   await saveManifest(manifest, opts.paths?.globalConfig);
 
+  // Confirm before switching if agents are running
+  const targetName = displayName?.trim() || path.basename(resolved);
+  const canSwitch = await confirmProjectSwitch(opts, targetName);
+  if (!canSwitch) return { message: '' };
+
   const nodeExe = process.execPath;
-  const child = spawn(nodeExe, [cliPath], {
+  const child = spawn(nodeExe, [cliPath, '--no-interactive'], {
     cwd: resolved,
     stdio: 'inherit',
     detached: false,
@@ -305,6 +319,80 @@ async function switchProjectCommand(opts: SlashCommandContext, ctx: Context | un
 }
 
 // ── Interactive Switch ────────────────────────────────────────────────────
+
+/**
+ * Check for running agents/brain/fleet and warn the user before switching.
+ * Returns `true` if the switch should proceed, `false` if cancelled.
+ */
+async function confirmProjectSwitch(
+  opts: SlashCommandContext,
+  targetName: string,
+): Promise<boolean> {
+  // Check fleet status for running subagents
+  const fleetStatus = opts.onFleetStatus?.();
+  const fleetRunning = fleetStatus?.subagents.filter((a) => a.status === 'running').length ?? 0;
+
+  // Check for eternal/parallel engine activity
+  const eternalEngine = opts.getEternalEngine?.();
+  const parallelEngine = opts.getParallelEngine?.();
+  const eternalActive = eternalEngine?.currentState === 'running';
+  const parallelActive = parallelEngine?.currentState === 'running';
+
+  const hasActiveAgents = fleetRunning > 0 || eternalActive || parallelActive;
+
+  if (!hasActiveAgents) return true;
+
+  // Build the warning message
+  const parts: string[] = [
+    color.yellow(`⚠  Switching projects will stop all running agents.`),
+    '',
+  ];
+  if (fleetRunning > 0) {
+    parts.push(color.dim(`  • ${fleetRunning} subagent(s) currently running`));
+  }
+  if (eternalActive) {
+    parts.push(color.dim('  • Eternal engine is active'));
+  }
+  if (parallelActive) {
+    parts.push(color.dim('  • Parallel engine is active'));
+  }
+  parts.push('');
+  parts.push(color.dim(`  Target: ${targetName}`));
+
+  // Print the warning (already inside a slash command context, can write to renderer)
+  opts.renderer.write(`\n${parts.join('\n')}\n`);
+
+  // Ask for confirmation — if no confirm callback wired, proceed anyway (non-interactive)
+  if (!opts.confirm) return true;
+
+  const confirmed = await opts.confirm(
+    color.yellow(`Stop all agents and switch to "${targetName}"?`),
+    false, // default to No for safety
+  );
+
+  if (!confirmed) {
+    opts.renderer.write(color.dim('  Switch cancelled.\n'));
+    return false;
+  }
+
+  // Kill all running agents
+  if (fleetRunning > 0) {
+    const killed = opts.onFleetKill?.() ?? 0;
+    if (killed > 0) {
+      opts.renderer.write(color.dim(`  Stopped ${killed} subagent(s).\n`));
+    }
+  }
+  if (eternalActive) {
+    eternalEngine?.stop();
+    opts.renderer.write(color.dim('  Stopped eternal engine.\n'));
+  }
+  if (parallelActive) {
+    parallelEngine?.stop();
+    opts.renderer.write(color.dim('  Stopped parallel engine.\n'));
+  }
+
+  return true;
+}
 
 async function switchInteractiveCommand(
   opts: SlashCommandContext,
@@ -335,6 +423,10 @@ async function switchInteractiveCommand(
       if (project.root === currentRoot) {
         return { message: color.dim(`Already in ${project.name} (${project.root})`) };
       }
+
+      // Confirm before switching if agents are running
+      const canSwitch = await confirmProjectSwitch(opts, project.name);
+      if (!canSwitch) return { message: '' };
 
       return spawnInProject(opts, ctx, project.root, project.name);
     }
@@ -396,7 +488,7 @@ async function spawnInProject(
   await saveManifest(manifest, opts.paths?.globalConfig);
 
   const nodeExe = process.execPath;
-  const child = spawn(nodeExe, [cliPath], {
+  const child = spawn(nodeExe, [cliPath, '--no-interactive'], {
     cwd: root,
     stdio: 'inherit',
     detached: false,
@@ -445,7 +537,7 @@ async function handleNewSession(
   }
 
   const nodeExe = process.execPath;
-  const child = spawn(nodeExe, [cliPath], {
+  const child = spawn(nodeExe, [cliPath, '--no-interactive'], {
     cwd: process.cwd(),
     stdio: 'inherit',
     detached: false,

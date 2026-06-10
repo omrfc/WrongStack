@@ -10,6 +10,7 @@ import type {
   LogLevel,
   SettingsMode,
 } from './components/settings-picker.js';
+import type { ProjectPickerItem } from './components/project-picker.js';
 import type { WorktreeRow } from './components/worktree-panel.js';
 
 export interface QueueItem {
@@ -281,6 +282,17 @@ export type State = {
     configScope: 'global' | 'project';
     hint?: string | undefined;
   };
+  /** Project switcher panel — opened by F1 or `/project`. */
+  projectPicker: {
+    open: boolean;
+    /** Original unfiltered items. Never mutated after open. */
+    allItems: ProjectPickerItem[];
+    /** Currently displayed items (filtered from allItems). Navigation targets this list. */
+    items: ProjectPickerItem[];
+    selected: number;
+    filter: string;
+    hint?: string | undefined;
+  };
   /** Pending tool confirmations — queue to handle multiple tools requesting confirmation. */
   confirmQueue: {
     toolUseId: string;
@@ -371,6 +383,25 @@ export type State = {
   processListOpen: boolean;
   /** When true, the goal panel is shown (F9). */
   goalPanelOpen: boolean;
+  /** When true, the sessions panel is shown (F10). */
+  sessionsPanelOpen: boolean;
+  /** Live session data for the sessions panel (F10). */
+  sessionsPanel: {
+    sessions: import('./components/sessions-panel.js').LiveSessionEntry[];
+    busy: boolean;
+    /** Selected index for arrow-key navigation. -1 when nothing selected. */
+    selected: number;
+  };
+  /**
+   * Pending session resume confirmation. When set, the F10 panel shows a
+   * "Press Enter to confirm resume, Esc to cancel" prompt. Set by the first
+   * Enter on a same-project session; the second Enter triggers the actual
+   * onResumeSession call.
+   */
+  sessionResumeConfirm: {
+    sessionId: string;
+    sessionName: string;
+  } | null;
   /**
    * Active or completed collaborative debugging session state.
    * Null when no collab session has run. Tracks counts + the event timeline
@@ -590,6 +621,11 @@ export type Action =
   | { type: 'settingsFieldSet'; field: number }
   | { type: 'settingsValueChange'; delta: number }
   | { type: 'settingsHint'; text?: string | undefined }
+  | { type: 'projectPickerOpen'; items: ProjectPickerItem[] }
+  | { type: 'projectPickerClose' }
+  | { type: 'projectPickerMove'; delta: number }
+  | { type: 'projectPickerFilter'; filter: string }
+  | { type: 'projectPickerHint'; text?: string | undefined }
   | { type: 'historyPush'; text: string }
   | { type: 'historyUp' }
   | { type: 'historyDown' }
@@ -782,6 +818,12 @@ export type Action =
   /** Toggle the process list overlay (F8). */
   | { type: 'toggleProcessList' }
   | { type: 'toggleGoalPanel' }
+  | { type: 'toggleSessionsPanel' }
+  | { type: 'sessionsPanelSet'; sessions: import('./components/sessions-panel.js').LiveSessionEntry[] }
+  | { type: 'sessionsPanelMove'; delta: number }
+  | { type: 'sessionsPanelBusy'; on: boolean }
+  | { type: 'sessionResumeConfirmSet'; sessionId: string; sessionName: string }
+  | { type: 'sessionResumeConfirmClear' }
   /** Push throttled debug-stream telemetry from the provider's chunk callback. */
   | {
       type: 'debugStreamStats';

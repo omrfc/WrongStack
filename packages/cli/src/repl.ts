@@ -1028,7 +1028,7 @@ async function autoProceedCooldown(
   opts.renderer.write(`${color.dim('  ▸')} ${color.dim(truncated)}\n`);
 
   // ── Run compaction during the cooldown ────────────────────────
-  const compactJob = runContextCompaction(opts, signal);
+  void runContextCompaction(opts, signal);
 
   const start = Date.now();
   const onAbort = (): void => {
@@ -1065,10 +1065,10 @@ async function autoProceedCooldown(
  */
 async function runContextCompaction(
   opts: ReplOptions,
-  signal: AbortSignal,
+  _signal: AbortSignal,
 ): Promise<void> {
   try {
-    const ctx = opts.agent.ctx;
+    const ctx = opts.agent.ctx as unknown as { compactor?: { compact(ctx: unknown, opts: { aggressive: boolean }): Promise<void> } };
     if (!ctx?.compactor) return;
     // Quick check: only compact if we've added meaningful message volume
     // since the last compaction (heuristic: >50 messages).

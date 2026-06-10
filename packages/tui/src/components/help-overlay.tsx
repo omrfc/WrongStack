@@ -31,12 +31,16 @@ export function helpSections(): HelpSection[] {
     {
       title: 'Monitors',
       entries: [
+        { keys: 'F1', desc: 'project switcher (also /project)' },
         { keys: 'Ctrl+F / F2', desc: 'fleet orchestration monitor' },
         { keys: 'Ctrl+G / F3', desc: 'agents live monitor' },
         { keys: 'Ctrl+T / F4', desc: 'worktree monitor' },
         { keys: 'F5', desc: 'autonomy settings (also Ctrl+S)' },
         { keys: 'F6', desc: 'todos monitor overlay' },
         { keys: 'F7', desc: 'queue panel' },
+        { keys: 'F8', desc: 'process list overlay' },
+        { keys: 'F9', desc: 'goal panel' },
+        { keys: 'F10', desc: 'live sessions panel' },
         { keys: 'Esc', desc: 'close the open monitor / overlay' },
       ],
     },
@@ -53,6 +57,7 @@ export function helpSections(): HelpSection[] {
     {
       title: 'Commands',
       entries: [
+        { keys: '/project', desc: 'switch projects (also F1)' },
         { keys: '/help', desc: 'list all slash commands' },
         { keys: '/model', desc: 'switch the active model' },
         { keys: '/fleet', desc: 'multi-agent fleet controls' },

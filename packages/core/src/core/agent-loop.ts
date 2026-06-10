@@ -11,6 +11,7 @@ import { estimateRequestTokens, estimateRequestTokensCalibrated, getCalibrationS
 import { consumeAutonomousContinue } from './continue-to-next-iteration.js';
 import { buildBtwBlock, consumeBtwNotes } from './btw.js';
 import { buildQueuedMessagesBlock, consumeQueuedMessagesUpdate } from './queued-messages.js';
+import { attachMailboxChecker, injectPendingMailboxMessages } from './mailbox-loop.js';
 import { runProviderWithRetry } from './provider-runner.js';
 import { requestLimitExtension } from './iteration-limit.js';
 import { TOKENS } from '../kernel/tokens.js';
@@ -51,6 +52,11 @@ export function createAgentLoopHandler(
   a: AgentInternals,
   handlers: LoopHandlers,
 ): AgentLoopHandler {
+  // Mailbox checker — created once, reused every iteration. Derives
+  // mailbox path from the session transcript directory. Ephemeral
+  // sessions (no transcriptPath) get a no-op that returns [].
+  const checkMailbox = attachMailboxChecker(a);
+
   /** Run context window pipeline. */
   async function compactContextIfNeeded(): Promise<void> {
     await a.pipelines.contextWindow.run(a.ctx);
@@ -253,6 +259,15 @@ export function createAgentLoopHandler(
 
         injectPendingBtwNotes();
         injectQueueAwareness();
+
+        // Check inter-agent mailbox for steer/btw messages from other agents.
+        // Non-blocking best-effort — a broken mailbox must not stop the agent.
+        await injectPendingMailboxMessages(checkMailbox, foldBlockIntoConversation, {
+          // Cast to the broad parameter type — injectPendingMailboxMessages only
+          // calls emit('mailbox.received', ...) and uses logger.debug optionally.
+          events: a.events as unknown as { emit: (type: string, payload: unknown) => void },
+          logger: a.logger as unknown as { debug?: (...args: unknown[]) => void },
+        });
 
         const req = await handlers.response.buildAndRunRequestPipeline(opts);
 

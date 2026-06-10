@@ -41,6 +41,14 @@ import {
   type SessionEventBridge,
   type AutonomyStage,
   SessionMemoryConsolidator,
+  makeMailboxTool,
+  GlobalMailbox,
+  attachDepWatcherBridge,
+  startTechStackConsumer,
+  recordFileAction,
+  type FileAuthorTrackerOptions,
+  startPackageOutdatedWatcher,
+  type PackageAuthorTrackerOptions,
 } from '@wrongstack/core';
 import { MCPRegistry } from '@wrongstack/mcp';
 import { capabilitiesFor, makeProviderFromConfig } from '@wrongstack/providers';
@@ -105,6 +113,7 @@ export async function main(argv: string[]): Promise<number> {
     reader,
     logger,
     updateInfo,
+    needsSetup,
   } = ctx;
 
   // Show update notification (best-effort, never blocks boot).
@@ -263,6 +272,10 @@ export async function main(argv: string[]): Promise<number> {
     toolRegistry.register(searchMemoryTool(memoryStore));
     toolRegistry.register(relatedMemoryTool(memoryStore));
   }
+  // Register the inter-agent mailbox tool — resolves to project-level GlobalMailbox at runtime.
+  // events are passed so mailbox.agent_registered/heartbeat events are emitted for TUI/WebUI
+  // to update the online agent count in the status bar.
+  toolRegistry.register(makeMailboxTool({ projectDir: wpaths.projectDir, events }));
 
   // Metrics wiring — extracted to wiring/metrics.ts
   const { metricsSink, healthRegistry } = (() => {
@@ -396,6 +409,59 @@ export async function main(argv: string[]): Promise<number> {
   const detachTodosCheckpoint = sessResult.detachTodosCheckpoint;
   const priorFleetState = sessResult.priorFleetState;
 
+  // ── SessionRegistry + AgentStatusTracker ──────────────────────────
+  // Register this session in the cross-process registry so /sessions status
+  // and the WebUI can discover it. Start the agent status tracker that
+  // listens to EventBus events and pushes live status to the registry.
+  let tracker: import('@wrongstack/core').AgentStatusTracker | undefined;
+  try {
+    const { getSessionRegistry, AgentStatusTracker } = await import('@wrongstack/core');
+    const registry = getSessionRegistry(wpaths.globalRoot);
+    const projectSlug = path.basename(wpaths.projectDir);
+    const projectName = path.basename(projectRoot);
+
+    // Detect current git branch (best-effort, non-blocking)
+    let gitBranch: string | undefined;
+    try {
+      const { execSync } = await import('node:child_process');
+      gitBranch = execSync('git rev-parse --abbrev-ref HEAD', {
+        cwd: projectRoot,
+        timeout: 3000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).toString().trim();
+      if (gitBranch === 'HEAD') gitBranch = undefined; // detached HEAD
+    } catch {
+      // Not a git repo or git not available — leave undefined
+    }
+
+    await registry.register({
+      sessionId: session.id,
+      projectSlug,
+      projectRoot,
+      projectName,
+      workingDir: context.workingDir,
+      gitBranch,
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+    });
+
+    tracker = new AgentStatusTracker({ events, registry });
+    tracker.start();
+
+    // Clean up on process exit
+    const cleanup = async () => {
+      try {
+        await registry.markClosing();
+        tracker?.stop();
+      } catch { /* ignore */ }
+    };
+    process.once('beforeExit', () => { void cleanup(); });
+    process.once('SIGINT', () => { void cleanup(); process.exit(0); });
+    process.once('SIGTERM', () => { void cleanup(); process.exit(0); });
+  } catch {
+    // Non-critical — session tracking degrades gracefully
+  }
+
   // Central SessionEventBridge — used for compaction, errors, and future audit events.
   // This ensures consistent auditLevel behavior and a single writer.
   // Sampling configuration (especially for tool_progress) is now read from config.
@@ -476,6 +542,26 @@ export async function main(argv: string[]): Promise<number> {
       .catch(() => {
         // best-effort
       });
+
+    // ── File-author tracking: record which agent wrote/edited files ──
+    if (e.ok && (e.name === 'write' || e.name === 'edit' || e.name === 'replace' || e.name === 'patch')) {
+      const filePath = (e.input as Record<string, unknown>)?.path as string | undefined;
+      if (filePath) {
+        const projectDir = path.join(wpaths.globalRoot, 'projects', wpaths.projectSlug);
+        void recordFileAction(
+          { storageDir: projectDir, projectRoot },
+          {
+            filePath,
+            action: e.name === 'write' ? 'create' : 'edit',
+            agentId: 'leader',
+            agentName: 'Leader',
+            sessionId: session.id,
+          },
+        ).catch(() => {
+          // best-effort tracking
+        });
+      }
+    }
   });
 
   // Humanized `delegate` lifecycle lines for the plain (non-TUI) CLI. The
@@ -664,6 +750,36 @@ export async function main(argv: string[]): Promise<number> {
     paths: wpaths,
     hookRegistry,
   });
+
+  // ── Dep-watcher bridge: wire file-watcher events into the mailbox ────
+  // When the file-watcher plugin's depWatcher.enabled config is true,
+  // dependency manifest changes (package.json, go.mod, etc.) are posted
+  // to the project-level mailbox for tech-stack audit.
+  const fwCfg = config.extensions?.['file-watcher'] as Record<string, unknown> | undefined;
+  const dwCfg = fwCfg?.['depWatcher'] as Record<string, unknown> | undefined;
+  let depWatcherDispose: (() => void) | undefined;
+  if (dwCfg?.['enabled'] === true) {
+    try {
+      const projectDir = path.join(wpaths.globalRoot, 'projects', wpaths.projectSlug);
+      const dwMailbox = new GlobalMailbox(projectDir, events);
+      depWatcherDispose = attachDepWatcherBridge({
+        events,
+        mailbox: dwMailbox,
+        projectRoot,
+        targetAgent: (dwCfg['targetAgent'] as string) ?? 'tech-stack',
+        watcherAgentId: 'dep-watcher',
+        debounceMs: (dwCfg['debounceMs'] as number) ?? 3000,
+      });
+      logger.info('Dep-watcher bridge activated — dependency changes will trigger tech-stack audits');
+    } catch (err) {
+      logger.warn(`Failed to wire dep-watcher bridge: ${err}`);
+    }
+  }
+
+  // Clean up dep-watcher bridge on teardown
+  if (depWatcherDispose) {
+    teardownHandlers.push(depWatcherDispose);
+  }
 
   // Resolve a provider id (alias-resolved via `providers[id].type`) to the
   // concrete provider id + the runtime ProviderConfig used to build it and to
@@ -920,6 +1036,84 @@ export async function main(argv: string[]): Promise<number> {
     }),
   );
 
+  // ── Tech-stack mailbox consumer: auto-spawn agent on dep-watcher messages ──
+  // When dep-watcher posts assign messages to the mailbox, this consumer
+  // polls for them and spawns a tech-stack subagent to audit versions.
+  let techStackConsumerDispose: (() => void) | undefined;
+  if (dwCfg?.['enabled'] === true) {
+    try {
+      const projectDir = path.join(wpaths.globalRoot, 'projects', wpaths.projectSlug);
+      const tsMailbox = new GlobalMailbox(projectDir, events);
+      const fileAuthorOpts: FileAuthorTrackerOptions = {
+        storageDir: projectDir,
+        projectRoot,
+      };
+      techStackConsumerDispose = startTechStackConsumer({
+        mailbox: tsMailbox,
+        onSpawn: async (task, name) => {
+          return multiAgentHost.spawn(task, { name, tools: ['read', 'fetch', 'mailbox'] });
+        },
+        targetAgent: (dwCfg['targetAgent'] as string) ?? 'tech-stack',
+        consumerAgentId: 'tech-stack-consumer',
+        pollIntervalMs: (dwCfg['pollIntervalMs'] as number) ?? 5000,
+        fileAuthorOpts,
+        sessionId: session.id,
+        currentAgentId: 'leader',
+        currentAgentName: 'Leader',
+        onLog: (msg) => logger.debug(msg),
+        onError: (err) => logger.warn(`Tech-stack consumer error: ${err instanceof Error ? err.message : String(err)}`),
+      });
+      logger.info('Tech-stack mailbox consumer started — will auto-spawn agents on dependency changes');
+    } catch (err) {
+      logger.warn(`Failed to start tech-stack consumer: ${err}`);
+    }
+  }
+
+  // ── Package outdated watcher: notify original authors when packages are outdated ──
+  // When the tech-stack agent posts outdated-package results to the mailbox,
+  // this watcher looks up who originally added each package and notifies them.
+  let pkgOutdatedDispose: (() => void) | undefined;
+  if (dwCfg?.['enabled'] === true) {
+    try {
+      const projectDir = path.join(wpaths.globalRoot, 'projects', wpaths.projectSlug);
+      const pkgMailbox = new GlobalMailbox(projectDir, events);
+      const pkgTrackerOpts: Pick<PackageAuthorTrackerOptions, 'storageDir' | 'projectRoot'> = {
+        storageDir: projectDir,
+        projectRoot,
+      };
+      pkgOutdatedDispose = startPackageOutdatedWatcher({
+        mailbox: pkgMailbox,
+        packageTrackerOpts: pkgTrackerOpts,
+        pollIntervalMs: (dwCfg['pollIntervalMs'] as number) ?? 60 * 60 * 1000, // 1 hour default
+        watcherAgentId: 'pkg-outdated-watcher',
+        onNotify: async (msg) => {
+          await pkgMailbox.send({
+            from: msg.from,
+            to: msg.to,
+            type: 'note',
+            subject: msg.subject,
+            body: msg.body,
+            priority: msg.priority,
+          });
+        },
+        onLog: (m) => logger.debug(m),
+        onError: (err) => logger.warn(`Pkg-outdated-watcher error: ${err instanceof Error ? err.message : String(err)}`),
+      });
+      logger.info('Package outdated watcher started — will notify agents when their added packages are outdated');
+    } catch (err) {
+      logger.warn(`Failed to start package outdated watcher: ${err}`);
+    }
+  }
+
+  if (pkgOutdatedDispose) {
+    teardownHandlers.push(pkgOutdatedDispose);
+  }
+
+  // Clean up tech-stack consumer on teardown
+  if (techStackConsumerDispose) {
+    teardownHandlers.push(techStackConsumerDispose);
+  }
+
   if (directorMode) {
     // Eagerly build the director so its 8 LLM-callable orchestration
     // tools (`spawn_subagent`, `assign_task`, `await_tasks`,
@@ -979,9 +1173,9 @@ export async function main(argv: string[]): Promise<number> {
   // Statusline hidden items — derived from the config file, kept in sync with the TUI
   const hiddenItemsFromConfig = await loadStatuslineConfig();
   const hiddenItemsList: Array<
-    'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'
+    'todos' | 'plan' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
   > = [];
-  const ALL_ITEMS = ['todos', 'plan', 'fleet', 'git', 'elapsed', 'context', 'cost'] as const;
+  const ALL_ITEMS = ['todos', 'plan', 'fleet', 'git', 'elapsed', 'context', 'cost', 'working_dir'] as const;
   for (const k of ALL_ITEMS) {
     if (!hiddenItemsFromConfig[k]) hiddenItemsList.push(k);
   }
@@ -1986,6 +2180,7 @@ export async function main(argv: string[]): Promise<number> {
     modeStore,
     restoredMessages: sessResult.restoredMessages,
     restoredToolCalls: sessResult.restoredToolCalls,
+    needsSetup,
   });
 }
 

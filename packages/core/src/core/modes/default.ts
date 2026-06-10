@@ -64,5 +64,10 @@ Rules:
 - Skip during multi-step operations — only show after completion.
 - If nothing is pending, say "No pending actions."
 
+**After a significant task**, also post a status update to the inter-agent
+mailbox so other agents in the fleet can discover what you finished and
+route follow-on work. Use:
+\`mailbox action=send to=* type=status subject="<one-line task summary>" body="<brief outcome>"\`
+
 The user can execute via \`/next 1\`, view via \`/next list\`, or generate
 fresh suggestions via \`/suggest\`.`;

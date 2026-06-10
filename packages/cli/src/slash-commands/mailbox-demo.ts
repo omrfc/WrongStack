@@ -14,6 +14,7 @@
  *   /mailbox-demo clear           — clear all messages for the demo agent
  */
 
+import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   GlobalMailbox,
@@ -30,7 +31,7 @@ const DEMO_AGENT_ID = 'mailbox-demo';
 function buildMailbox(opts: SlashCommandContext): GlobalMailbox | null {
   // Prefer paths.projectDir (wstack-paths slug), fall back to projectRoot
   const projectDir =
-    opts.paths?.projectDir ?? resolveProjectDir(opts.projectRoot, path.join(process.env.XDG_CONFIG_HOME ?? '', '.wrongstack'));
+    opts.paths?.projectDir ?? resolveProjectDir(opts.projectRoot, path.join(os.homedir(), '.wrongstack'));
   try {
     return new GlobalMailbox(projectDir);
   } catch {

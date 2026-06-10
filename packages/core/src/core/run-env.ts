@@ -35,6 +35,8 @@ export interface RunEnv {
   readonly model: string;
   readonly systemPrompt: readonly TextBlock[];
   readonly tools: readonly Tool[];
+  readonly agentId: string;
+  readonly agentName: string;
 }
 
 /**
@@ -57,5 +59,7 @@ export function extractRunEnv(ctx: Context): RunEnv {
     model: ctx.model,
     systemPrompt: ctx.systemPrompt,
     tools: ctx.tools,
+    agentId: ctx.agentId,
+    agentName: ctx.agentName,
   });
 }

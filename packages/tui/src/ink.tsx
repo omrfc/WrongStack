@@ -13,15 +13,31 @@
 // one import line without losing hooks.
 
 import { Box as InkBox, type DOMElement, Text as InkText } from 'ink';
-import { type ComponentProps, forwardRef, type ReactElement } from 'react';
+import {
+  type ComponentProps,
+  type ForwardRefExoticComponent,
+  forwardRef,
+  type ReactElement,
+  type RefAttributes,
+} from 'react';
 import { softColor } from './theme.js';
 
 // Mirror Ink's own prop types exactly so any call site that compiled against
 // Ink's `Box`/`Text` compiles unchanged against these wrappers (including the
 // `borderBottom={cond ? false : undefined}`-style explicit `undefined` that
 // `exactOptionalPropertyTypes` permits on Ink's props).
-type TextOwnProps = ComponentProps<typeof InkText>;
-type BoxOwnProps = Omit<ComponentProps<typeof InkBox>, 'ref'>;
+// The color-ish props are widened with `| undefined`: the shim strips them and
+// only re-attaches when they resolve to a value, so an explicit `undefined`
+// (e.g. `color={isSelected ? 'cyan' : undefined}`) is safe here even though
+// Ink's own props reject it under `exactOptionalPropertyTypes`.
+type TextOwnProps = Omit<ComponentProps<typeof InkText>, 'color' | 'backgroundColor'> & {
+  color?: string | undefined;
+  backgroundColor?: string | undefined;
+};
+type BoxOwnProps = Omit<ComponentProps<typeof InkBox>, 'ref' | 'borderColor' | 'backgroundColor'> & {
+  borderColor?: string | undefined;
+  backgroundColor?: string | undefined;
+};
 
 export { Static, measureElement, useApp, useInput, useStdin, useStdout } from 'ink';
 export type { BoxProps, DOMElement, TextProps, Key } from 'ink';
@@ -43,7 +59,10 @@ export function Text({ color, backgroundColor, ...rest }: TextOwnProps): ReactEl
  * Ink `Box` with `borderColor`/`backgroundColor` remapped to pastels. Forwards
  * `ref` so `measureElement` (used by the scrollable history) keeps working.
  */
-export const Box = forwardRef<DOMElement, BoxOwnProps>(function Box(
+export const Box: ForwardRefExoticComponent<BoxOwnProps & RefAttributes<DOMElement>> = forwardRef<
+  DOMElement,
+  BoxOwnProps
+>(function Box(
   { borderColor, backgroundColor, ...rest },
   ref,
 ) {

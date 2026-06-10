@@ -13,7 +13,7 @@ import type { SlashCommandContext } from './index.js';
  * The path must be inside the project root. Relative paths resolve from
  * the project root, not the current working directory (by convention).
  */
-export function buildWorkingDirCommand(opts: SlashCommandContext): SlashCommand {
+export function buildWorkingDirCommand(_opts: SlashCommandContext): SlashCommand {
   return {
     name: 'working_dir',
     category: 'Session',

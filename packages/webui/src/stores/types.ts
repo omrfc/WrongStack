@@ -83,6 +83,9 @@ export interface SessionHistoryEntry {
 /** One live (or just-finished) subagent in the fleet roster. */
 export interface SubagentView {
   id: string;
+  /** Session this agent belongs to — ties the agent to a specific project/session.
+   *  Used to filter/cleanup agents on project switch. */
+  sessionId?: string | undefined;
   /** Display name — the leader-assigned nickname (may be multi-word, e.g.
    *  "Von Neumann"). Falls back to the raw id until `spawned` names it. */
   name: string;
@@ -130,8 +133,11 @@ export interface SubagentEvent {
     | 'iteration_summary'
     | 'budget_extended'
     | 'ctx_pct'
-    | 'task_completed';
-  subagentId: string;
+    | 'task_completed'
+    | 'session_stopped';
+  subagentId?: string | undefined;
+  /** Session this agent belongs to — forwarded from the server on every subagent event. */
+  sessionId?: string | undefined;
   name?: string | undefined;
   provider?: string | undefined;
   model?: string | undefined;

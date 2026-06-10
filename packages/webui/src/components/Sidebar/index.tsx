@@ -11,6 +11,8 @@ import { Button } from '../ui/button';
 import { AgentDetail } from '../FleetPanel';
 import { ContextSidebar } from '../ContextSidebar';
 import { FileExplorer } from '../FileExplorer';
+import { MailboxPanel } from '../MailboxPanel';
+import { ProjectsPanel } from '../ProjectsPanel';
 import { ConfigSection } from './ConfigSection.js';
 import { SessionActions } from './SessionActions.js';
 import { SessionList } from './SessionList.js';
@@ -24,6 +26,7 @@ const ACTIVITY_LABEL: Record<Activity, string> = {
   history: 'History',
   files: 'Files',
   projects: 'Projects',
+  mailbox: 'Mailbox',
 };
 
 // ── Agent row for sidebar list ────────────────────────────────────────
@@ -266,6 +269,37 @@ export function Sidebar() {
         {activeActivity === 'files' && (
           <div className="flex-1 overflow-y-auto">
             <FileExplorer />
+          </div>
+        )}
+
+        {activeActivity === 'mailbox' && (
+          <div className="flex-1 overflow-y-auto">
+            <MailboxPanel />
+          </div>
+        )}
+
+        {activeActivity === 'projects' && (
+          <div className="flex-1 overflow-y-auto p-3">
+            <ProjectsPanel />
+          </div>
+        )}
+
+        {activeActivity === 'sessions' && (
+          <div className="flex-1 overflow-y-auto p-3">
+            <p className="text-[11px] font-medium text-muted-foreground mb-2 uppercase tracking-wider">
+              Sessions
+            </p>
+            <SessionList
+              historyQuery=""
+              setHistoryQuery={() => {}}
+              historyEntries={historyEntries}
+              historyLoading={historyLoading}
+              historyError={historyError}
+              wsConnected={wsConnected}
+              listSessions={listSessions}
+              resumeSession={resumeSession}
+              deleteSession={deleteSession}
+            />
           </div>
         )}
       </div>

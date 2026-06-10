@@ -2,7 +2,7 @@ import { expectDefined } from '@wrongstack/core';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
 import { useChatStore, useSessionStore, useUIStore } from '@/stores';
-import { Pencil, Send, Square } from 'lucide-react';
+import { Pencil, Send, Square, Sparkles } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { downloadChatAsMarkdown } from './CommandPalette';
@@ -11,8 +11,13 @@ import { Button } from './ui/button';
 
 import { type SlashCommandDef, SLASH_COMMANDS, SLASH_CATEGORY_ORDER, matchSlash, detectAtMention } from './ChatInput/slash-commands.js';
 import { autoFenceCode, detectLanguage, unfenceCode } from './ChatInput/code-detect.js';
+import { RefinePanel } from './RefinePanel.js';
 
-export function ChatInput() {
+export function ChatInput({
+  onOpenBreakdown,
+}: {
+  onOpenBreakdown?: (() => void) | undefined;
+} = {}) {
   const { isLoading, setLoading, addMessage, clearMessages } = useChatStore();
   const queue = useChatStore((s) => s.queue);
   const enqueue = useChatStore((s) => s.enqueue);
@@ -22,7 +27,11 @@ export function ChatInput() {
   const pushPrompt = useUIStore((s) => s.pushPrompt);
   const promptHistory = useUIStore((s) => s.promptHistory);
   const ws = useWebSocket();
-  const { sendMessage, sendAbort, client } = ws;
+  const { sendMessage, sendAbort, client, refineModel } = ws;
+  const refineEnabled = useUIStore((s) => s.refineEnabled);
+  const refinePanel = useUIStore((s) => s.refinePanel);
+  const toggleRefineEnabled = useUIStore((s) => s.toggleRefineEnabled);
+  const setRefinePanel = useUIStore((s) => s.setRefinePanel);
   /** Live context-budget signals — drive the token-estimate chip beside
    *  the character counter. The estimate uses the universal 4-char-per-token
    *  heuristic which is wrong by ±25% for natural prose but accurate enough
@@ -91,6 +100,10 @@ export function ChatInput() {
         case '/new':
           client?.newSession?.();
           return true;
+        case '/exit':
+          client?.send?.({ type: 'webui.shutdown' as never, payload: {} });
+          addMessage({ role: 'assistant', content: '👋 Shutting down WebUI server…' });
+          return true;
         case '/compact':
         case '/compact!':
           client?.compactContext?.(cmd === '/compact!');
@@ -100,7 +113,7 @@ export function ChatInput() {
           return true;
         case '/debug':
         case '/context':
-          client?.debugContext?.();
+          onOpenBreakdown?.();
           return true;
         case '/tools':
           ws.listTools();
@@ -184,7 +197,7 @@ export function ChatInput() {
           return false;
       }
     },
-    [addMessage, clearMessages, client, sendAbort, setLoading, setCurrentView, ws],
+    [addMessage, clearMessages, client, sendAbort, setLoading, setCurrentView, ws, onOpenBreakdown],
   );
 
   // ── /next helpers ──────────────────────────────────────────────────
@@ -324,9 +337,26 @@ export function ChatInput() {
 
       try {
         if (client?.isConnected) {
-          addMessage({ role: 'user', content });
-          setLoading(true);
-          sendMessage(content);
+          // If refine is enabled, trigger the refinement flow instead of sending directly
+          if (refineEnabled && refineModel) {
+            // Show the refine panel with the original text; the backend will return refined + english
+            // We use the original text as both refined and english for now — the backend will update
+            setRefinePanel({
+              original: content,
+              refined: content, // Will be replaced when backend responds
+              english: content,
+              resolve: (decision) => {
+                // This is called when the refine panel is decided
+              },
+            });
+            // Send the text to the backend for refinement
+            console.log('[ChatInput] Calling refineModel, content length:', content.length);
+            refineModel(content);
+          } else {
+            addMessage({ role: 'user', content });
+            setLoading(true);
+            sendMessage(content);
+          }
         } else {
           console.error('WebSocket not connected');
         }
@@ -341,8 +371,11 @@ export function ChatInput() {
       enqueue,
       client,
       sendMessage,
-      setLoading,
+      refineModel,
+      refineEnabled,
+      setRefinePanel,
       addMessage,
+      setLoading,
       runSlashCommand,
       pushPrompt,
       _clearTextarea,
@@ -577,6 +610,37 @@ export function ChatInput() {
             ))}
           </ul>
         </div>
+      )}
+
+      {/* Prompt-refinement panel — shown when the user submits and refine is enabled */}
+      {refinePanel && (
+        <RefinePanel
+          original={refinePanel.original}
+          refined={refinePanel.refined}
+          english={refinePanel.english}
+          onDecision={(decision) => {
+            const { original, refined, english } = refinePanel;
+            let text = original;
+            if (decision === 'refined') text = refined;
+            else if (decision === 'english') text = english;
+            else if (decision === 'edit') text = refined;
+
+            // Send the chosen text as a user message
+            if (decision === 'edit') {
+              // For edit, the panel handles it differently — set input to refined text
+              setInput(refined);
+              return;
+            }
+
+            // For refined/english/original, proceed to send
+            setRefinePanel(null);
+            if (client?.isConnected) {
+              addMessage({ role: 'user', content: text });
+              setLoading(true);
+              sendMessage(text);
+            }
+          }}
+        />
       )}
 
       <form
@@ -916,14 +980,30 @@ export function ChatInput() {
               </Button>
             </>
           ) : (
-            <Button
-              type="submit"
-              size="icon"
-              disabled={!input.trim() || !client?.isConnected}
-              className="h-[44px] w-[44px] rounded-lg"
-            >
-              <Send className="h-4 w-4" />
-            </Button>
+            <>
+              <Button
+                type="button"
+                size="icon"
+                variant={refineEnabled ? 'default' : 'outline'}
+                disabled={!client?.isConnected}
+                onClick={toggleRefineEnabled}
+                className={cn(
+                  'h-[44px] w-[44px] rounded-lg transition-colors',
+                  refineEnabled && 'bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-600 dark:text-yellow-400 border-yellow-500/50',
+                )}
+                title={refineEnabled ? 'Refining enabled — click to disable' : 'Refining disabled — click to enable'}
+              >
+                <Sparkles className="h-4 w-4" />
+              </Button>
+              <Button
+                type="submit"
+                size="icon"
+                disabled={!input.trim() || !client?.isConnected}
+                className="h-[44px] w-[44px] rounded-lg"
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            </>
           )}
         </div>
       </form>

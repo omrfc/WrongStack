@@ -28,3 +28,6 @@ export { ContextBreakdownModal } from './ContextBreakdownModal';
 export { ContextPanel } from './ContextPanel';
 export { ContextSidebar } from './ContextSidebar';
 export { AgentsPage } from './AgentsPage';
+export { SetupScreen } from './SetupScreen';
+export { RefinePanel } from './RefinePanel';
+export { AgentFlowViz } from './AgentFlowViz';

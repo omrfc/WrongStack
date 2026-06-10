@@ -6,7 +6,9 @@ import {
   FolderOpen,
   Gauge,
   Layers,
+  Mail,
   MessageSquare,
+  Radio,
   Settings as SettingsIcon,
   Zap,
   Folders,
@@ -15,10 +17,10 @@ import { type ReactElement } from 'react';
 
 // ── Activity definition ───────────────────────────────────────────────
 
-type MainView = 'chat' | 'files' | 'projects' | 'settings' | 'autophase' | 'agents' | 'context' | 'history';
+type MainView = 'chat' | 'files' | 'projects' | 'settings' | 'autophase' | 'agents' | 'context' | 'history' | 'sessions' | 'agentflow';
 
 interface ActivityDef {
-  id: Activity | 'settings' | 'autophase';
+  id: Activity | 'settings' | 'autophase' | 'agentflow';
   icon: ReactElement;
   label: string;
   /** If true, this icon is in the bottom group. */
@@ -34,12 +36,15 @@ const TOP_ACTIVITIES: ActivityDef[] = [
   { id: 'agents', icon: <Bot />, label: 'Agents', mainView: 'chat' },
   { id: 'context', icon: <Gauge />, label: 'Context', mainView: 'chat' },
   { id: 'history', icon: <Clock />, label: 'History', mainView: 'chat' },
+  { id: 'mailbox', icon: <Mail />, label: 'Mailbox', mainView: 'chat' },
   { id: 'files', icon: <FolderOpen />, label: 'Files', mainView: 'files' },
   { id: 'projects', icon: <Folders />, label: 'Projects', mainView: 'projects' },
+  { id: 'sessions', icon: <Layers />, label: 'Sessions', mainView: 'sessions' },
 ];
 
 const BOTTOM_ACTIVITIES: ActivityDef[] = [
   { id: 'autophase', icon: <Layers />, label: 'Phases', bottom: true, mainView: 'autophase' },
+  { id: 'agentflow', icon: <Radio />, label: 'Flow', bottom: true, mainView: 'agentflow' },
   { id: 'settings', icon: <SettingsIcon />, label: 'Settings', bottom: true, mainView: 'settings' },
 ];
 

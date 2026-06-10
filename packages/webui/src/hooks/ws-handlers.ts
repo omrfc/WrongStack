@@ -9,6 +9,7 @@ import type { PhaseItem } from '@/components/PhasePanel';
 import {
   type SessionHistoryEntry,
   type SubagentEvent,
+  type SubagentView,
   useAutoPhaseStore,
   useChatStore,
   useConfigStore,
@@ -20,11 +21,19 @@ import {
   useWorktreeStore,
   useFileStore,
 } from '@/stores';
+import { useVizStore, wsToVizEvent } from '@/stores/viz-store';
 import { useLocalPrefs } from '@/stores/local-prefs';
 import type { WorktreeHandleView, WSServerMessage } from '@/types';
 // ── Session handlers ──
 
 export function handleSessionStart(msg: WSServerMessage) {
+  // Pipe to viz store — session start creates the session node
+  const vizStart = wsToVizEvent('session.start', msg.payload as Record<string, unknown>);
+  if (vizStart) {
+    useVizStore.getState().pushEvent(vizStart);
+    useVizStore.getState().setActive(true);
+  }
+
   const payload = msg.payload as {
     sessionId: string;
     model: string;
@@ -38,10 +47,20 @@ export function handleSessionStart(msg: WSServerMessage) {
     outputCost?: number | undefined;
     cacheReadCost?: number | undefined;
     reset?: boolean | undefined;
+    /** Session ID that was just closed — only present on project switch.
+     *  Used to selectively clear agents from the old session. */
+    clearedSessionId?: string | undefined;
+    /** True when no provider+model is configured yet — show the setup screen. */
+    needsSetup?: boolean | undefined;
   };
   const prev = useSessionStore.getState().session?.id;
   const isNew = !prev || prev !== payload.sessionId;
   const isReset = isNew || payload.reset;
+
+  // If the server says no provider/model is configured, switch to the setup screen.
+  if (payload.needsSetup) {
+    useUIStore.getState().setCurrentView('setup');
+  }
 
   // Only fully reset the session when it's genuinely new or the server
   // explicitly requests a reset. Model/mode switches update metadata
@@ -65,6 +84,7 @@ export function handleSessionStart(msg: WSServerMessage) {
 
   useSessionStore.getState().setEnv({
     maxContext: payload.maxContext,
+    projectRoot: (payload as { projectRoot?: string }).projectRoot ?? '',
     projectName: payload.projectName,
     cwd: payload.cwd,
     mode: payload.mode,
@@ -79,7 +99,25 @@ export function handleSessionStart(msg: WSServerMessage) {
   });
   if (isReset) {
     useChatStore.getState().clearMessages();
-    useFleetStore.getState().clear();
+
+    // Selectively clear fleet agents — if the server tells us which
+    // session was just closed, only remove those agents. Otherwise
+    // fall back to clearing everything (session.new / context.clear).
+    const fleet = useFleetStore.getState();
+    if (payload.clearedSessionId) {
+      // Only remove agents from the just-closed session.
+      // Surviving agents (if any) stay in the roster.
+      const survivors = new Map<string, SubagentView>();
+      for (const [id, agent] of fleet.agents) {
+        if (agent.sessionId !== payload.clearedSessionId) {
+          survivors.set(id, agent);
+        }
+      }
+      useFleetStore.setState({ agents: survivors });
+    } else {
+      fleet.clear();
+    }
+
     // Re-fetch the file tree so the explorer shows the new project's files.
     useFileStore.getState().setTreeLoading(true);
     getWSClient().send({ type: 'files.tree', payload: { path: useSessionStore.getState().cwd } });
@@ -153,6 +191,7 @@ export function handleKeyOperationResult(msg: WSServerMessage) {
 }
 
 export function handleContextCompacted(msg: WSServerMessage) {
+  pipeViz(msg);
   const payload = msg.payload as {
     before: number; after: number; saved: number;
     reductions: Array<{ phase: string; saved: number }>;
@@ -201,6 +240,7 @@ export function handleSessionEnd() {
 }
 
 export function handleIterationStarted(msg: WSServerMessage) {
+  pipeViz(msg);
   const payload = msg.payload as { index: number; maxIterations?: number | undefined };
   useSessionStore.getState().setIteration({ index: payload.index, max: payload.maxIterations ?? 0 });
   useChatStore.getState().setLoading(true);
@@ -418,6 +458,22 @@ export function handleWorktreeEvent(msg: WSServerMessage) {
 
 export function handleSubagentEvent(msg: WSServerMessage) {
   useFleetStore.getState().applyEvent(msg.payload as SubagentEvent);
+  // Pipe to viz store
+  const vizEv = wsToVizEvent('subagent.event', msg.payload as Record<string, unknown>);
+  if (vizEv) {
+    useVizStore.getState().pushEvent(vizEv);
+    useVizStore.getState().setActive(true);
+  }
+}
+
+/** Universal viz event pipe — called by every handler that generates a VizEvent. */
+function pipeViz(msg: WSServerMessage) {
+  const vizEv = wsToVizEvent(msg.type, msg.payload as Record<string, unknown>);
+  if (vizEv) {
+    useVizStore.getState().pushEvent(vizEv);
+    useVizStore.getState().setActive(true);
+  }
+  return msg; // chainable
 }
 
 // ── AutoPhase handler ──
@@ -521,6 +577,14 @@ export const WS_HANDLERS: Record<string, (msg: WSServerMessage) => void> = {
   'subagent.event': handleSubagentEvent,
   'goal.updated': handleGoalUpdated,
   'prefs.updated': handlePrefsUpdated,
+  'sessions.status_update': (msg: WSServerMessage) => {
+    // Pipe to viz store — creates fleet:snapshot event for AgentFlowViz
+    const vizEv = wsToVizEvent('sessions.status_update', msg.payload as Record<string, unknown>);
+    if (vizEv) {
+      useVizStore.getState().pushEvent(vizEv);
+      useVizStore.getState().setActive(true);
+    }
+  },
   'files.tree': handleFilesTree,
   'files.read': handleFilesRead,
   'files.written': handleFilesWritten,
@@ -540,13 +604,46 @@ export const WS_HANDLERS: Record<string, (msg: WSServerMessage) => void> = {
   'projects.selected': (msg: WSServerMessage) => {
     // Handled directly by ProjectsPanel component
   },
+  'mailbox.event': (msg: WSServerMessage) => {
+    const vizEv = wsToVizEvent('mailbox.event', msg.payload as Record<string, unknown>);
+    if (vizEv) {
+      useVizStore.getState().pushEvent(vizEv);
+      useVizStore.getState().setActive(true);
+    }
+  },
   'working_dir.changed': (msg: WSServerMessage) => {
     const p = msg.payload as { cwd: string; projectRoot: string };
-    useSessionStore.getState().setEnv({ cwd: p.cwd });
-    // Also update session.start-like metadata
-    useSessionStore.getState().setEnv({ projectName: p.projectRoot.split(/[/\\]/).pop() || p.projectRoot });
+    useSessionStore.getState().setEnv({
+      cwd: p.cwd,
+      projectRoot: p.projectRoot,
+      projectName: p.projectRoot.split(/[/\\]/).pop() || p.projectRoot,
+    });
     // Re-fetch the file tree so the explorer shows the new working dir.
     useFileStore.getState().setTreeLoading(true);
     getWSClient().send({ type: 'files.tree', payload: { path: p.cwd } });
+  },
+  'model.refine_result': (msg: WSServerMessage) => {
+    const p = msg.payload as { refined: string; english: string; error?: string | undefined };
+    console.log('[WS] model.refine_result received:', JSON.stringify({
+      error: p.error,
+      refinedLength: p.refined?.length,
+      englishLength: p.english?.length,
+      refinedPreview: p.refined?.slice(0, 50),
+    }));
+    const refinePanel = useUIStore.getState().refinePanel;
+    console.log('[WS] refinePanel exists:', !!refinePanel);
+    if (!refinePanel) return;
+    if (p.error) {
+      // Refinement failed — fall back to original
+      toast.error(`Refinement failed: ${p.error}`);
+      useUIStore.getState().setRefinePanel(null);
+      return;
+    }
+    // Update the refine panel with the actual refined and english text
+    useUIStore.getState().setRefinePanel({
+      ...refinePanel,
+      refined: p.refined,
+      english: p.english,
+    });
   },
 };

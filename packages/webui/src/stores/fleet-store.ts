@@ -7,12 +7,15 @@ interface FleetState {
   agents: Map<string, SubagentView>;
   applyEvent: (e: SubagentEvent) => void;
   clear: () => void;
+  /** Return all agents belonging to a session. Used for project-scoped filtering. */
+  getAgentsBySession: (sessionId: string) => SubagentView[];
 }
 
-function blankAgent(id: string, name?: string): SubagentView {
+function blankAgent(id: string, name?: string, sessionId?: string): SubagentView {
   return {
     id,
     name: name?.trim() || id,
+    sessionId,
     status: 'running',
     iteration: 0,
     toolCalls: 0,
@@ -26,13 +29,30 @@ function blankAgent(id: string, name?: string): SubagentView {
   };
 }
 
-export const useFleetStore = create<FleetState>()((set) => ({
+export const useFleetStore = create<FleetState>()((set, get) => ({
   agents: new Map(),
   clear: () => set({ agents: new Map() }),
+  getAgentsBySession: (sessionId) => {
+    const result: SubagentView[] = [];
+    for (const a of get().agents.values()) {
+      if (a.sessionId === sessionId) result.push(a);
+    }
+    return result;
+  },
   applyEvent: (e) =>
     set((state) => {
       const agents = new Map(state.agents);
-      const prev = agents.get(e.subagentId) ?? blankAgent(e.subagentId, e.name);
+
+      // session_stopped carries a sessionId instead of subagentId —
+      // remove ALL agents belonging to that session.
+      if (e.kind === 'session_stopped' && e.sessionId) {
+        for (const [id, agent] of agents) {
+          if (agent.sessionId === e.sessionId) agents.delete(id);
+        }
+        return { agents };
+      }
+
+      const prev = agents.get(e.subagentId) ?? blankAgent(e.subagentId, e.name, e.sessionId);
       const next: SubagentView = { ...prev };
       switch (e.kind) {
         case 'spawned':
@@ -41,6 +61,7 @@ export const useFleetStore = create<FleetState>()((set) => ({
           next.model = e.model ?? next.model;
           next.description = e.description ?? next.description;
           next.taskId = e.taskId ?? next.taskId;
+          next.sessionId = e.sessionId ?? next.sessionId;
           next.status = 'running';
           break;
         case 'task_started':
@@ -73,6 +94,7 @@ export const useFleetStore = create<FleetState>()((set) => ({
           next.ctxPct = Math.round(Math.min(1, Math.max(0, e.load ?? 0)) * 100);
           next.ctxTokens = e.tokens ?? next.ctxTokens;
           next.maxContext = e.maxContext ?? next.maxContext;
+          if (typeof e.costUsd === 'number') next.costUsd = e.costUsd;
           break;
         case 'task_completed':
           next.status = e.status === 'success' ? 'completed' : (e.status ?? 'completed');

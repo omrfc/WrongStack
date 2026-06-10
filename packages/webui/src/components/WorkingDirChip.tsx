@@ -18,21 +18,15 @@ import { Input } from './ui/input';
  */
 export function WorkingDirChip() {
   const cwd = useSessionStore((s) => s.cwd);
-  const projectRoot = cwd; // cwd IS the working dir in the session store
+  const projectRoot = useSessionStore((s) => s.projectRoot);
+  const projectName = useSessionStore((s) => s.projectName);
 
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState('');
   const [sending, setSending] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // We don't store projectRoot separately — derive it from cwd changes.
-  // When workingDir is at project root, cwd equals projectRoot.
-  // We show "." as root and the relative path otherwise.
-  // Since we don't have a separate projectRoot in the session store
-  // after cwd was set to workingDir, we use the `projectName` + cwd.
-  const projectName = useSessionStore((s) => s.projectName);
-
-  // Compute display path: if cwd ends with projectName, it's likely root
+  // Compute display path using the actual projectRoot
   const displayPath = computeDisplayPath(cwd, projectName);
 
   const openEditor = useCallback(() => {

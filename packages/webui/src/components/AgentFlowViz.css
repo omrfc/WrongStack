@@ -1,0 +1,127 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   AgentFlowViz.css — Cinematic styles for the Agent Flow visualization
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.agent-flow-viz {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: 'IBM Plex Mono', 'SF Mono', 'Fira Code', monospace;
+}
+
+/* ── Cosmic star twinkle ───────────────────────────────────────────── */
+@keyframes star-twinkle {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+/* ── Node pulse glow ────────────────────────────────────────────────── */
+@keyframes node-glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 15px currentColor 30,
+                0 0 45px currentColor 15,
+                inset 0 0 20px currentColor 08;
+  }
+  50% {
+    box-shadow: 0 0 25px currentColor 50,
+                0 0 70px currentColor 25,
+                inset 0 0 35px currentColor 12;
+  }
+}
+
+.node-pulse {
+  animation: node-glow-pulse 2s ease-in-out infinite;
+}
+
+/* ── Error pulse (red glow) ─────────────────────────────────────────── */
+@keyframes node-error-pulse {
+  0%, 100% {
+    box-shadow: 0 0 15px hsl(0, 80%, 55%, 0.3),
+                0 0 40px hsl(0, 80%, 55%, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 30px hsl(0, 80%, 55%, 0.6),
+                0 0 80px hsl(0, 80%, 55%, 0.3);
+  }
+}
+
+.node-error-pulse {
+  animation: node-error-pulse 1.5s ease-in-out infinite;
+}
+
+/* ── HUD stat cards ─────────────────────────────────────────────────── */
+.hud-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: hsla(260, 20%, 15%, 0.5);
+  border: 1px solid hsla(260, 30%, 30%, 0.2);
+  backdrop-filter: blur(8px);
+  min-width: 60px;
+}
+
+/* ── HUD buttons ────────────────────────────────────────────────────── */
+.hud-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid hsla(260, 30%, 30%, 0.3);
+  background: hsla(260, 20%, 15%, 0.6);
+  color: hsla(0, 0%, 80%, 0.7);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(8px);
+}
+
+.hud-btn:hover {
+  background: hsla(260, 30%, 20%, 0.8);
+  border-color: hsla(260, 40%, 50%, 0.5);
+  color: white;
+}
+
+/* ── Event ticker items ─────────────────────────────────────────────── */
+.event-tick {
+  padding: 2px 8px;
+  border-radius: 4px;
+  border-left: 2px solid;
+  background: hsla(260, 20%, 12%, 0.6);
+  transition: all 0.2s ease;
+  backdrop-filter: blur(4px);
+}
+
+.event-tick:hover {
+  background: hsla(260, 30%, 18%, 0.8);
+  transform: translateY(-1px);
+}
+
+/* ── Viz nodes ──────────────────────────────────────────────────────── */
+.viz-node {
+  will-change: transform, opacity, box-shadow;
+  transition: left 0.7s cubic-bezier(0.34, 1.56, 0.64, 1),
+              top 0.7s cubic-bezier(0.34, 1.56, 0.64, 1),
+              box-shadow 0.5s ease,
+              border-color 0.3s ease,
+              background 0.3s ease;
+}
+
+/* ── Scrollbar hide for ticker ──────────────────────────────────────── */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Canvas dimensions ──────────────────────────────────────────────── */
+canvas {
+  display: block;
+}

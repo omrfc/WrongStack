@@ -35,6 +35,12 @@ export interface CreateHttpServerOptions {
    * is allowed to open a WebSocket back to the local server.
    */
   wsPort: number;
+  /**
+   * Path to the global WrongStack root (~/.wrongstack). Used by the
+   * /api/sessions and /api/sessions/:id/agents endpoints to read the
+   * cross-process SessionRegistry.
+   */
+  globalRoot?: string | undefined;
 }
 
 const MIME_TYPES: Record<string, string> = {
@@ -110,6 +116,19 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
   return http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
+
+      // ── API routes ──────────────────────────────────────────────────
+      if (url.pathname === '/api/sessions' && req.method === 'GET') {
+        await handleApiSessions(res, opts.globalRoot);
+        return;
+      }
+
+      const agentsMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/agents$/);
+      if (agentsMatch && req.method === 'GET') {
+        await handleApiSessionAgents(res, opts.globalRoot, agentsMatch[1]!);
+        return;
+      }
+
       let filePath: string;
 
       if (url.pathname === '/' || url.pathname === '') {
@@ -180,4 +199,94 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
       }
     }
   });
+}
+
+// ── API handlers ─────────────────────────────────────────────────────────
+
+async function handleApiSessions(
+  res: http.ServerResponse,
+  globalRoot: string | undefined,
+): Promise<void> {
+  if (!globalRoot) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'SessionRegistry not available' }));
+    return;
+  }
+
+  try {
+    const { SessionRegistry } = await import('@wrongstack/core');
+    const registry = new SessionRegistry(globalRoot);
+    const sessions = await registry.list();
+
+    const result = sessions.map((s) => ({
+      sessionId: s.sessionId,
+      projectSlug: s.projectSlug,
+      projectName: s.projectName,
+      projectRoot: s.projectRoot,
+      workingDir: s.workingDir,
+      status: s.status,
+      pid: s.pid,
+      startedAt: s.startedAt,
+      lastHeartbeatAt: s.lastHeartbeatAt,
+      agentCount: s.agentCount,
+      agents: s.agents.map((a) => ({
+        id: a.id,
+        name: a.name,
+        status: a.status,
+        currentTool: a.currentTool,
+        iterations: a.iterations,
+        toolCalls: a.toolCalls,
+        lastActivityAt: a.lastActivityAt,
+      })),
+    }));
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: String(err) }));
+  }
+}
+
+async function handleApiSessionAgents(
+  res: http.ServerResponse,
+  globalRoot: string | undefined,
+  sessionId: string,
+): Promise<void> {
+  if (!globalRoot) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'SessionRegistry not available' }));
+    return;
+  }
+
+  try {
+    const { SessionRegistry } = await import('@wrongstack/core');
+    const registry = new SessionRegistry(globalRoot);
+    const entry = await registry.get(sessionId);
+
+    if (!entry) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Session not found' }));
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      sessionId: entry.sessionId,
+      projectName: entry.projectName,
+      status: entry.status,
+      agents: entry.agents.map((a) => ({
+        id: a.id,
+        name: a.name,
+        status: a.status,
+        currentTool: a.currentTool,
+        iterations: a.iterations,
+        toolCalls: a.toolCalls,
+        lastActivityAt: a.lastActivityAt,
+      })),
+    }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: String(err) }));
+  }
 }

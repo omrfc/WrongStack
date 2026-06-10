@@ -69,29 +69,29 @@ describe('set_working_dir tool', () => {
   it('queries current directory when no path provided', async () => {
     const ctx = mkContext(tmpRoot, subDir);
     const result = await setWorkingDirTool.execute({}, ctx, { signal: mkSignal() });
-    expect(result.current).toBe(subDir);
+    expect(result.current).toBe(path.resolve(subDir));
     expect(result.message).toContain('Current working directory');
   });
 
   it('changes to a relative subdirectory', async () => {
     const ctx = mkContext(tmpRoot);
     const result = await setWorkingDirTool.execute({ path: 'src' }, ctx, { signal: mkSignal() });
-    expect(result.current).toBe(subDir);
-    expect(result.previous).toBe(tmpRoot);
+    expect(result.current).toBe(path.resolve(subDir));
+    expect(result.previous).toBe(path.resolve(tmpRoot));
     expect(result.message).toContain('src');
   });
 
   it('changes to an absolute path within project root', async () => {
     const ctx = mkContext(tmpRoot);
     const result = await setWorkingDirTool.execute({ path: subDir }, ctx, { signal: mkSignal() });
-    expect(result.current).toBe(subDir);
+    expect(result.current).toBe(path.resolve(subDir));
     expect(result.message).toContain('changed');
   });
 
   it('updates ctx.workingDir after successful navigation', async () => {
     const ctx = mkContext(tmpRoot);
     await setWorkingDirTool.execute({ path: 'src' }, ctx, { signal: mkSignal() });
-    expect(ctx.workingDir).toBe(subDir);
+    expect(ctx.workingDir).toBe(path.resolve(subDir));
   });
 
   it('returns error when directory does not exist', async () => {
@@ -102,7 +102,7 @@ describe('set_working_dir tool', () => {
       { signal: mkSignal() },
     );
     expect(result.error).toContain('does not exist');
-    expect(result.current).toBe(tmpRoot); // stays at previous
+    expect(result.current).toBe(path.resolve(tmpRoot)); // stays at previous
   });
 
   it('returns error for path outside project root', async () => {
@@ -113,7 +113,7 @@ describe('set_working_dir tool', () => {
       { signal: mkSignal() },
     );
     expect(result.error).toContain('outside project root');
-    expect(result.current).toBe(tmpRoot); // unchanged
+    expect(result.current).toBe(path.resolve(tmpRoot)); // unchanged
   });
 
   it('returns error for relative path escaping via ..', async () => {
@@ -139,18 +139,18 @@ describe('set_working_dir tool', () => {
     expect(ctx.workingDir).toBe(before);
   });
 
-  it('navigates to nested subdirectories', async () => {
+  it('navigates to nested subdirectories (relative to project root)', async () => {
     const ctx = mkContext(tmpRoot);
     const libDir = path.join(subDir, 'lib');
     await fs.mkdir(libDir, { recursive: true });
 
-    // Navigate to src
+    // Navigate to src (relative to projectRoot)
     await setWorkingDirTool.execute({ path: 'src' }, ctx, { signal: mkSignal() });
-    expect(ctx.workingDir).toBe(subDir);
+    expect(ctx.workingDir).toBe(path.resolve(subDir));
 
-    // Navigate to src/lib
-    await setWorkingDirTool.execute({ path: 'lib' }, ctx, { signal: mkSignal() });
-    expect(ctx.workingDir).toBe(libDir);
+    // Navigate to src/lib — must use path relative to projectRoot, not cwd
+    await setWorkingDirTool.execute({ path: 'src/lib' }, ctx, { signal: mkSignal() });
+    expect(ctx.workingDir).toBe(path.resolve(libDir));
   });
 
   it('reports the previous directory in the result', async () => {
@@ -160,6 +160,6 @@ describe('set_working_dir tool', () => {
       ctx,
       { signal: mkSignal() },
     );
-    expect(result.previous).toBe(tmpRoot);
+    expect(result.previous).toBe(path.resolve(tmpRoot));
   });
 });

@@ -174,6 +174,12 @@ export function useWebSocket() {
   const deleteContextMode = useCallback((id: string) => client.deleteContextMode(id), [client]);
   const repairContext = useCallback(() => client.repairContext(), [client]);
 
+  // Model refine
+  const refineModel = useCallback(
+    (text: string) => client.refineModel(text),
+    [client],
+  );
+
   // Autonomy / Preferences
   const switchAutonomy = useCallback(
     (mode: string) => client.switchAutonomy(mode),
@@ -211,5 +217,6 @@ export function useWebSocket() {
     createContextMode, updateContextMode, deleteContextMode, repairContext,
     toggleAutoPhaseAutonomous, startAutoPhase, pauseAutoPhase, resumeAutoPhase, stopAutoPhase, selectAutoPhase,
     switchAutonomy, updatePrefs,
+    refineModel,
   };
 }

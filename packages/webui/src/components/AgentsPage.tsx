@@ -113,6 +113,8 @@ const STATUS_META: Record<string, { icon: React.ReactNode; color: string; label:
 interface LeaderEntry {
   id: 'leader';
   name: string;
+  /** Session this leader belongs to. */
+  sessionId?: string | undefined;
   provider?: string | undefined;
   model?: string | undefined;
   status: 'running' | 'idle';
@@ -339,6 +341,7 @@ function AgentRow({
   const modelLabel = agent.provider && agent.model
     ? `${agent.provider}/${agent.model}`
     : agent.model ?? '—';
+  const projectName = useSessionStore((s) => s.projectName);
 
   return (
     <button
@@ -366,6 +369,16 @@ function AgentRow({
       <span className={cn('text-xs font-semibold min-w-0 truncate max-w-[8rem]', selected && 'text-primary')}>
         {agent.name}
       </span>
+
+      {/* Session badge — shows which session/project the agent belongs to */}
+      {'sessionId' in agent && agent.sessionId && (
+        <span
+          className="shrink-0 text-[9px] font-mono text-muted-foreground/50 bg-muted/40 px-1 py-0.5 rounded select-none"
+          title={`Session: ${agent.sessionId}${projectName ? ` · Project: ${projectName}` : ''}`}
+        >
+          {agent.sessionId.slice(0, 8)}
+        </span>
+      )}
 
       {/* Model */}
       <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[10rem] shrink">
@@ -457,6 +470,7 @@ export function AgentsPage({
     return {
       id: 'leader',
       name: 'LEADER',
+      sessionId: sessionStore.session?.id,
       provider,
       model,
       status: isLoading ? ('running' as const) : ('idle' as const),
@@ -473,7 +487,7 @@ export function AgentsPage({
       extensions: 0,
       toolLog: [],
     };
-  }, [provider, model, sessionStore.cost, sessionStore.lastInputTokens, sessionStore.maxContext, sessionStore.startTime, chatMessages, chatIsLoading]);
+  }, [provider, model, sessionStore.cost, sessionStore.lastInputTokens, sessionStore.maxContext, sessionStore.startTime, sessionStore.session?.id, chatMessages, chatIsLoading]);
 
   // ── Merge leader + fleet ──
   // The server now emits subagent.event for subagentId 'leader' as well.
@@ -655,16 +669,64 @@ export function AgentsPage({
           </div>
         ) : (
           <div className="p-3 space-y-1.5">
-            {sorted.map((a) => (
-              <AgentRow
-                key={a.id}
-                agent={a}
-                now={nowTick}
-                selected={a.id === selected?.id}
-                onClick={() => setSelectedId(selectedId === a.id ? null : a.id)}
-                onContextClick={() => setBreakdownOpen(true)}
-              />
-            ))}
+            {(() => {
+              // Group agents by sessionId — show a subtle header when
+              // agents from multiple sessions exist in the roster.
+              const groups = new Map<string, AgentView[]>();
+              for (const a of sorted) {
+                const sid = 'sessionId' in a ? a.sessionId : undefined;
+                const key = sid ?? '__unknown__';
+                const list = groups.get(key) ?? [];
+                list.push(a);
+                groups.set(key, list);
+              }
+              const entries = [...groups.entries()];
+              const multiSession = entries.length > 1;
+
+              const rows: React.ReactNode[] = [];
+              for (const [sid, agents] of entries) {
+                if (multiSession) {
+                  const label = sid === '__unknown__' ? 'Unknown session' : sid.slice(0, 8);
+                  const agentCount = agents.length;
+                  rows.push(
+                    <button
+                      type="button"
+                      key={`grp-${sid}`}
+                      className="text-[9px] text-muted-foreground/50 font-mono px-1 pt-2 pb-0.5 uppercase tracking-wider hover:text-muted-foreground hover:bg-muted/30 rounded transition-colors cursor-pointer w-full text-left"
+                      title={`Session: ${sid} — click to copy ID`}
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(sid);
+                        } catch {
+                          // clipboard unavailable — no-op
+                        }
+                      }}
+                    >
+                      {label}
+                      {sid !== '__unknown__' && (
+                        <span className="ml-1.5 text-[8px] opacity-60">session</span>
+                      )}
+                      <span className="ml-1 text-[8px] opacity-40">
+                        · {agentCount} agent{agentCount !== 1 ? 's' : ''}
+                      </span>
+                    </button>,
+                  );
+                }
+                for (const a of agents) {
+                  rows.push(
+                    <AgentRow
+                      key={a.id}
+                      agent={a}
+                      now={nowTick}
+                      selected={a.id === selected?.id}
+                      onClick={() => setSelectedId(selectedId === a.id ? null : a.id)}
+                      onContextClick={() => setBreakdownOpen(true)}
+                    />,
+                  );
+                }
+              }
+              return rows;
+            })()}
           </div>
         )}
       </div>

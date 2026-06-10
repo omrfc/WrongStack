@@ -304,6 +304,12 @@ export interface RunTuiOptions {
     nextId: number;
     sessionId: string;
   } | null>) | undefined;
+
+  // --- Project / Session switching ---
+  getProjectPickerItems?: (() => Promise<import('./components/project-picker.js').ProjectPickerItem[]>) | undefined;
+  onProjectSelect?: ((key: string, kind: 'project' | 'action') => void) | undefined;
+  getLiveSessions?: (() => Promise<import('./components/sessions-panel.js').LiveSessionEntry[]>) | undefined;
+  onSwitchToSession?: ((sessionId: string, projectRoot: string, projectName: string) => void) | undefined;
 }
 
 // Bracketed paste mode wraps any pasted text with these markers, letting us
@@ -575,6 +581,10 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           restoredToolCalls: opts.restoredToolCalls,
           listSessions: opts.listSessions,
           onResumeSession: opts.onResumeSession,
+          getProjectPickerItems: opts.getProjectPickerItems,
+          onProjectSelect: opts.onProjectSelect,
+          getLiveSessions: opts.getLiveSessions,
+          onSwitchToSession: opts.onSwitchToSession,
         }),
         { exitOnCtrlC: false, stdin: inkStdin },
       );

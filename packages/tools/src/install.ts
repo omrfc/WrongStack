@@ -1,4 +1,6 @@
 import type { Tool, ToolStreamEvent } from '@wrongstack/core';
+import { detectPackageEcosystem, recordPackageAction } from '@wrongstack/core';
+import { join } from 'node:path';
 import { spawnStream } from './_spawn-stream.js';
 import { detectPackageManager, normalizeCommandOutput, safeResolve } from './_util.js';
 
@@ -135,16 +137,54 @@ export const installTool: Tool<InstallInput, InstallOutput> = {
       maxBytes: 100_000,
     });
 
-    yield {
-      type: 'final',
-      output: {
-        packages: pkgList,
-        exit_code: result.exitCode,
-        output: normalizeCommandOutput(result.stdout || result.stderr || result.error || ''),
-        dry_run: args.includes('--dry-run'),
-        truncated: result.truncated,
-      },
+    const output: InstallOutput = {
+      packages: pkgList,
+      exit_code: result.exitCode,
+      output: normalizeCommandOutput(result.stdout || result.stderr || result.error || ''),
+      dry_run: args.includes('--dry-run'),
+      truncated: result.truncated,
     };
+
+    // Record package authorship after a successful, non-dry-run install.
+    // Skip global installs (no manifest modification) and dry runs.
+    const isSuccess = result.exitCode === 0 && !output.dry_run && !input.global;
+    if (isSuccess && pkgList.length > 0) {
+      const trackerOpts = ctx.meta?.['packageTrackerOpts'] as {
+        storageDir: string;
+        projectRoot: string;
+      } | undefined;
+      if (trackerOpts) {
+        const manifestPath = resolveManifestPath(cwd, pkgManager);
+        for (const pkg of pkgList) {
+          try {
+            await recordPackageAction(trackerOpts, {
+              manifestPath,
+              packageName: pkg,
+              versionSpec: 'latest', // exact version resolved by package manager at install time
+              ecosystem: detectPackageEcosystem(manifestPath),
+              agentId: ctx.agentId,
+              agentName: ctx.agentName,
+              sessionId: ctx.session.id,
+            });
+          } catch {
+            // Best-effort — a failed record doesn't fail the install
+          }
+        }
+      }
+    }
+
+    yield { type: 'final', output };
   },
 };
+
+function resolveManifestPath(cwd: string, pkgManager: string): string {
+  switch (pkgManager) {
+    case 'pnpm':
+    case 'yarn':
+    case 'npm':
+      return join(cwd, 'package.json');
+    default:
+      return join(cwd, 'package.json');
+  }
+}
 

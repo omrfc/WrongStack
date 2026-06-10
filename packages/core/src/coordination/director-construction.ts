@@ -24,7 +24,6 @@
  */
 
 import type { TaskResult, TaskSpec } from '../types/multi-agent.js';
-import type { Director } from './director.js';
 
 /** Cap on the in-memory `completed` map. Trimmed oldest-first when exceeded. */
 export const MAX_COMPLETED = 10_000;
@@ -32,25 +31,31 @@ export const MAX_COMPLETED = 10_000;
 /** Narrow shape the wiring helpers need from a partially-constructed Director.
  *  The helpers accept a `Director` instance (structural typing — the class
  *  exposes every field this interface requires), so the constructor can pass
- *  `this` directly without an explicit cast. */
-export type DirectorInternals = Pick<
-  Director,
-  | 'id'
-  | 'completed'
-  | 'taskWaiters'
-  | 'taskDescriptions'
-  | 'stateCheckpoint'
-  | 'usage'
-  | 'fleetManager'
-  | 'fleet'
-  | 'coordinator'
-  | 'maxBudgetExtensions'
-  | 'maxFleetCostUsd'
-  | 'recordExtension'
-  | 'appendSessionEvent'
-  | 'scheduleManifest'
-  | 'brain'
->;
+ *  `this` directly without an explicit cast.
+ *
+ *  Note: Private/protected members cannot be picked via Pick<> because keyof
+ *  only returns public keys. We define the interface explicitly rather than
+ *  deriving from Director to include private fields the wiring code needs. */
+export interface DirectorInternals {
+  id: string;
+  completed: Map<string, import('../types/multi-agent.js').TaskResult>;
+  taskWaiters: Map<
+    string,
+    { promise: Promise<import('../types/multi-agent.js').TaskResult>; resolve: (r: import('../types/multi-agent.js').TaskResult) => void }
+  >;
+  taskDescriptions: Map<string, string>;
+  stateCheckpoint: import('../storage/director-state.js').DirectorStateCheckpoint | null;
+  usage: import('./fleet-bus.js').FleetUsageAggregator;
+  fleetManager: import('./fleet-manager.js').FleetManager | undefined;
+  fleet: import('./fleet-bus.js').FleetBus;
+  coordinator: import('./icoordinator.js').ICoordinator;
+  maxBudgetExtensions: number;
+  maxFleetCostUsd: number;
+  recordExtension: (subagentId: string, taskId: string | undefined, kind: string, newLimit: number) => void;
+  appendSessionEvent: (event: Parameters<import('../types/session.js').SessionWriter['append']>[0]) => Promise<void>;
+  scheduleManifest: () => void;
+  brain: import('./brain.js').BrainArbiter | undefined;
+}
 
 /** Payload shape for `budget.threshold_reached` events. */
 interface BudgetThresholdPayload {

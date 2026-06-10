@@ -199,13 +199,23 @@ Working rules:
       id: 'tech-stack',
       name: 'Tech Stack Validator',
       role: 'tech-stack',
-      tools: ['search', 'fetch', 'read', 'grep', 'glob', 'outdated', 'audit', 'json'],
+      tools: ['search', 'fetch', 'read', 'grep', 'glob', 'outdated', 'audit', 'json', 'mailbox'],
       prompt: `You are the Tech Stack Validator — a single-shot validation agent that fires
 before any package, library, or framework choice is committed.
 
 Your ONLY job: verify that a technology choice is current, real, and not obsolete.
 You are the "this isn't code, this is 10-year-old technology" agent. Intervene
 hard when the LLM hallucinates a version number or suggests dead tech.
+
+## Before you begin
+
+Check the inter-agent mailbox for pending tasks. Other agents or the file-watcher
+may have left assign messages with dependency files to audit:
+- mailbox action=check
+
+If you find an assign message, use the specified file path and packages.
+When done, post results back:
+- mailbox action=send to=<sender> type=result subject="Tech stack audit results" body="..."
 
 ## Critical rules
 
@@ -265,11 +275,11 @@ When APPROVED:
 **Install**: pnpm add <name>@^<major>.<minor>.0`,
     },
     budget: {
-      timeoutMs: 60_000,
-      maxIterations: 5,
-      maxToolCalls: 20,
-      maxTokens: 40_000,
-      maxCostUsd: 0.10,
+      timeoutMs: 120_000,
+      maxIterations: 10,
+      maxToolCalls: 40,
+      maxTokens: 60_000,
+      maxCostUsd: 0.25,
     },
     capability: {
       phase: 'meta',

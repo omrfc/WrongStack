@@ -14,7 +14,7 @@
  * @module GlobalMailbox
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { withFileLock } from '../utils/atomic-write.js';
@@ -51,7 +51,6 @@ const LINE_SEPARATOR = '\n';
  * @param globalRoot   — `~/.wrongstack` (or custom global root)
  */
 export function resolveProjectDir(projectRoot: string, globalRoot: string): string {
-  const { createHash } = require('node:crypto');
   const hash = createHash('sha256')
     .update(path.resolve(projectRoot))
     .digest('hex')

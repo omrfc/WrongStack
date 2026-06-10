@@ -1,10 +1,45 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { installTool } from '../src/install.js';
+import * as Core from '@wrongstack/core';
+import type { SpawnStreamResult } from '../src/_spawn-stream.js';
+import type { ToolProgressEvent } from '@wrongstack/core';
 
-const makeCtx = () => ({ cwd: '/fake', tools: [], projectRoot: '/fake' }) as any;
+// Mock spawnStream — an AsyncGenerator<ToolProgressEvent, SpawnStreamResult>.
+// executeStream calls: const result = yield* spawnStream({...})
+vi.mock('../src/_spawn-stream.js', () => ({
+  spawnStream: (async function * (): AsyncGenerator<ToolProgressEvent, SpawnStreamResult> {
+    yield { type: 'partial_output', text: 'added 1 package\n' };
+    return {
+      stdout: 'added 1 package',
+      stderr: '',
+      exitCode: 0,
+      truncated: false,
+    };
+  }) as unknown as () => AsyncGenerator<ToolProgressEvent, SpawnStreamResult>,
+}));
+
+const makeCtx = (overrides?: Record<string, unknown>) =>
+  ({
+    cwd: '/fake',
+    tools: [],
+    projectRoot: '/fake',
+    agentId: 'leader',
+    agentName: 'Leader',
+    ...overrides,
+  }) as any;
 const makeOpts = () => ({ signal: new AbortController().signal });
 
 describe('installTool', () => {
+  beforeEach(() => {
+    vi.spyOn(Core, 'recordPackageAction').mockResolvedValue(undefined);
+    vi.spyOn(Core, 'detectPackageEcosystem').mockReturnValue('npm');
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('has correct metadata', () => {
     expect(installTool.name).toBe('install');
     expect(installTool.permission).toBe('confirm');
@@ -53,5 +88,89 @@ describe('installTool', () => {
     const ctx = makeCtx();
     const result = await installTool.execute({ packages: 'foo', dry_run: true }, ctx, makeOpts());
     expect(result).toHaveProperty('exit_code');
+  });
+
+  // ── Authorship tracking ────────────────────────────────────────────────────
+
+  it('records package authorship when ctx.meta.packageTrackerOpts is set', async () => {
+    const ctx = makeCtx({
+      meta: {
+        packageTrackerOpts: { storageDir: '/tmp/pkg-test', projectRoot: '/fake' },
+      },
+      session: { id: 'sess-abc' } as any,
+    });
+    await installTool.execute({ packages: 'vitest' }, ctx, makeOpts());
+    expect(Core.recordPackageAction).toHaveBeenCalledWith(
+      { storageDir: '/tmp/pkg-test', projectRoot: '/fake' },
+      expect.objectContaining({
+        packageName: 'vitest',
+        agentId: 'leader',
+        agentName: 'Leader',
+        sessionId: 'sess-abc',
+        ecosystem: 'npm',
+      }),
+    );
+  });
+
+  it('records multiple packages in one install', async () => {
+    const ctx = makeCtx({
+      meta: {
+        packageTrackerOpts: { storageDir: '/tmp/pkg-test', projectRoot: '/fake' },
+      },
+      session: { id: 'sess-abc' } as any,
+    });
+    await installTool.execute({ packages: ['vitest', 'prettier'] }, ctx, makeOpts());
+    expect(Core.recordPackageAction).toHaveBeenCalledTimes(2);
+    expect(Core.recordPackageAction).toHaveBeenNthCalledWith(
+      1,
+      { storageDir: '/tmp/pkg-test', projectRoot: '/fake' },
+      expect.objectContaining({ packageName: 'vitest' }),
+    );
+    expect(Core.recordPackageAction).toHaveBeenNthCalledWith(
+      2,
+      { storageDir: '/tmp/pkg-test', projectRoot: '/fake' },
+      expect.objectContaining({ packageName: 'prettier' }),
+    );
+  });
+
+  it('does NOT record authorship when ctx.meta.packageTrackerOpts is absent', async () => {
+    const ctx = makeCtx({ meta: {} });
+    await installTool.execute({ packages: 'vitest' }, ctx, makeOpts());
+    expect(Core.recordPackageAction).not.toHaveBeenCalled();
+  });
+
+  it('does NOT record authorship for global installs', async () => {
+    const ctx = makeCtx({
+      meta: {
+        packageTrackerOpts: { storageDir: '/tmp/pkg-test', projectRoot: '/fake' },
+      },
+      session: { id: 'sess-abc' } as any,
+    });
+    await installTool.execute({ packages: 'vitest', global: true }, ctx, makeOpts());
+    expect(Core.recordPackageAction).not.toHaveBeenCalled();
+  });
+
+  it('does NOT record authorship for dry_run installs', async () => {
+    const ctx = makeCtx({
+      meta: {
+        packageTrackerOpts: { storageDir: '/tmp/pkg-test', projectRoot: '/fake' },
+      },
+      session: { id: 'sess-abc' } as any,
+    });
+    await installTool.execute({ packages: 'vitest', dry_run: true }, ctx, makeOpts());
+    expect(Core.recordPackageAction).not.toHaveBeenCalled();
+  });
+
+  it('does NOT throw when recordPackageAction fails (best-effort)', async () => {
+    vi.mocked(Core.recordPackageAction).mockRejectedValueOnce(new Error('disk full'));
+    const ctx = makeCtx({
+      meta: {
+        packageTrackerOpts: { storageDir: '/tmp/pkg-test', projectRoot: '/fake' },
+      },
+      session: { id: 'sess-abc' } as any,
+    });
+    const result = await installTool.execute({ packages: 'vitest' }, ctx, makeOpts());
+    expect(result.packages).toContain('vitest');
+    expect(Core.recordPackageAction).toHaveBeenCalled();
   });
 });

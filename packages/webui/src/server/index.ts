@@ -48,6 +48,8 @@ import {
   listContextWindowModes,
   repairToolUseAdjacency,
   resolveContextWindowPolicy,
+  enhanceUserPrompt,
+  recentTextTurns,
 } from '@wrongstack/core';
 import { ToolExecutor } from '@wrongstack/core/execution';
 import { decryptConfigSecrets, encryptConfigSecrets } from '@wrongstack/core/security';
@@ -59,6 +61,7 @@ import { bootConfig, patchConfig } from './boot.js';
 import { AutoPhaseWebSocketHandler } from './autophase-ws-handler.js';
 import { CollaborationWebSocketHandler } from './collaboration-ws-handler.js';
 import { WorktreeWebSocketHandler } from './worktree-ws-handler.js';
+import { handleMailboxMessages, handleMailboxAgents } from './mailbox-handlers.js';
 import { verifyClient as verifyWsClient } from './ws-auth.js';
 import { registerShutdownHandlers } from './lifecycle.js';
 import { registerInstance, unregisterInstance } from './instance-registry.js';
@@ -617,6 +620,7 @@ export async function startWebUI(
     /** USD per 1M cache-read tokens. */
     cacheReadCost: number;
     projectName: string;
+    projectRoot: string;
     cwd: string;
     mode: string;
     contextMode: string;
@@ -648,6 +652,7 @@ export async function startWebUI(
       outputCost,
       cacheReadCost,
       projectName: path.basename(projectRoot) || projectRoot,
+      projectRoot,
       cwd: workingDir,
       mode: modeId,
       contextMode: String(context.meta['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID),
@@ -875,7 +880,7 @@ export async function startWebUI(
     if (eventsArmed) return;
     eventsArmed = true;
     console.log(`[WebUI] Backend ready (${label})`);
-    setupEvents({ events, broadcast, clients, config, context, pendingConfirms });
+    setupEvents({ events, broadcast, clients, config, context, pendingConfirms, globalConfigPath });
   };
 
   wssPrimary.on('listening', () => armOnce(`${wsHost}:${wsPort}`));
@@ -1410,6 +1415,79 @@ export async function startWebUI(
         }
 
         broadcast(clients, { type: 'session.start', payload: await sessionStartPayload() });
+        break;
+      }
+
+      case 'model.refine': {
+        const { text } = (msg as { payload: { text: string } }).payload;
+        console.log(JSON.stringify({
+          level: 'debug',
+          event: 'model.refine.received',
+          textLength: text?.length,
+          provider: context.provider?.id,
+          model: context.model,
+          timestamp: new Date().toISOString(),
+        }));
+        if (!text?.trim()) {
+          send(ws, {
+            type: 'model.refine_result',
+            payload: { refined: '', english: '', error: 'Empty text' },
+          });
+          break;
+        }
+        try {
+          const history = recentTextTurns(context.messages);
+          console.log(JSON.stringify({
+            level: 'debug',
+            event: 'model.refine.enhancing',
+            historyLength: history.length,
+            timestamp: new Date().toISOString(),
+          }));
+          const result = await enhanceUserPrompt({
+            provider: context.provider,
+            model: context.model,
+            text,
+            history,
+            timeoutMs: 90000,
+            onError: (reason) => {
+              console.warn(JSON.stringify({
+                level: 'warn',
+                event: 'model.refine_failed',
+                reason,
+                timestamp: new Date().toISOString(),
+              }));
+            },
+          });
+          console.log(JSON.stringify({
+            level: 'debug',
+            event: 'model.refine.result',
+            resultExists: !!result,
+            resultRefined: result?.refined?.slice(0, 50),
+            timestamp: new Date().toISOString(),
+          }));
+          if (result) {
+            send(ws, {
+              type: 'model.refine_result',
+              payload: { refined: result.refined, english: result.english },
+            });
+          } else {
+            send(ws, {
+              type: 'model.refine_result',
+              payload: { refined: text, english: text, error: 'Refinement returned no result' },
+            });
+          }
+        } catch (err) {
+          console.error(JSON.stringify({
+            level: 'error',
+            event: 'model.refine.error',
+            error: errMessage(err),
+            timestamp: new Date().toISOString(),
+          }));
+          send(ws, {
+            type: 'model.refine_result',
+            payload: { refined: text, english: text, error: errMessage(err) },
+          });
+        }
         break;
       }
 
@@ -2234,6 +2312,14 @@ export async function startWebUI(
           await saveManifest(manifest, globalConfigPath);
 
           // ── Hot-swap the project root + working dir ─────────────────
+          // Abort any in-flight agent run before switching — the agent's
+          // context (cwd, projectRoot, session) is about to change and
+          // continuing would cause inconsistent state.
+          if (runLock) {
+            runLock.abort();
+            runLock = null;
+          }
+
           projectRoot = resolved;
           workingDir = resolved;
 
@@ -2253,6 +2339,7 @@ export async function startWebUI(
 
           // Switch the session store for the new project.
           // Close the old session gracefully
+          const oldSessionId = session.id;
           try {
             await session.append({
               type: 'session_end',
@@ -2289,6 +2376,16 @@ export async function startWebUI(
             },
           });
 
+          // Broadcast old-session subagents as stopped so the frontend
+          // fleet store cleans them via its normal event pipeline.
+          broadcast(clients, {
+            type: 'subagent.event',
+            payload: {
+              kind: 'session_stopped',
+              sessionId: oldSessionId,
+            },
+          });
+
           // Broadcast updated project info to ALL clients so file
           // explorer / context bar pick up the new root.
           broadcast(clients, {
@@ -2296,6 +2393,7 @@ export async function startWebUI(
             payload: {
               ...(await sessionStartPayload()),
               reset: true,
+              clearedSessionId: oldSessionId,
             },
           });
         } catch (err) {
@@ -2396,6 +2494,20 @@ export async function startWebUI(
         }
         break;
       }
+
+      // ── Mailbox operations — project-level inter-agent messaging ────
+      case 'mailbox.messages':
+        return handleMailboxMessages(
+          ws,
+          { projectRoot, globalRoot: path.dirname(globalConfigPath) },
+          (msg as { payload?: { limit?: number; agentId?: string; unreadOnly?: boolean } }).payload,
+        );
+      case 'mailbox.agents':
+        return handleMailboxAgents(
+          ws,
+          { projectRoot, globalRoot: path.dirname(globalConfigPath) },
+          (msg as { payload?: { onlineOnly?: boolean } }).payload,
+        );
 
       default:
         if (msg.type.startsWith('autophase.')) {

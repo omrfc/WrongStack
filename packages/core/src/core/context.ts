@@ -45,6 +45,10 @@ export interface ContextInit {
   workingDir?: string | undefined;
   model: string;
   tools?: Tool[] | undefined;
+  /** Agent id performing this run (e.g. 'leader', 'executor', 'tech-stack'). */
+  agentId?: string | undefined;
+  /** Human-readable agent name. */
+  agentName?: string | undefined;
 }
 
 /**
@@ -81,6 +85,10 @@ export class Context implements RunEnv {
   model: string;
   tools: Tool[] = [];
   meta: Record<string, unknown> = {};
+  /** Agent id performing this run (e.g. 'leader', 'executor'). */
+  agentId: string;
+  /** Human-readable agent name. */
+  agentName: string;
 
   /** Callbacks fired when `setWorkingDir()` changes the working directory. */
   private _onWorkingDirChanged: Array<(newDir: string, oldDir: string) => void> = [];
@@ -104,6 +112,8 @@ export class Context implements RunEnv {
     this.workingDir = init.workingDir ?? init.cwd;
     this.model = init.model;
     this.tools = init.tools ?? [];
+    this.agentId = init.agentId ?? 'unknown';
+    this.agentName = init.agentName ?? 'Unknown Agent';
   }
 
   /**

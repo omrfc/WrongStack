@@ -74,6 +74,19 @@ export {
 } from './tool-audit-log.js';
 export { SessionAnalyzer } from './session-analyzer.js';
 export {
+  SessionRegistry,
+  getSessionRegistry,
+  hasSessionRegistry,
+  type SessionRegistryEntry,
+  type AgentEntry,
+  type AgentLiveStatus,
+  type SessionLiveStatus,
+} from '../session-registry.js';
+export {
+  AgentStatusTracker,
+  type AgentStatusTrackerOptions,
+} from '../agent-status-tracker.js';
+export {
   DefaultSessionRewinder,
   type SessionRewinderOptions,
 } from './session-rewinder.js';

@@ -141,7 +141,14 @@ export async function setupSession(params: {
     cwd,
     projectRoot,
     model: config.model,
+    agentId: 'leader',
+    agentName: 'Leader Agent',
   });
+  // Inject package-author-tracker options so the install tool can record authorship.
+  context.meta['packageTrackerOpts'] = {
+    storageDir: wpaths.projectDir,
+    projectRoot,
+  };
   if (restoredMessages.length > 0) context.state.replaceMessages(restoredMessages);
 
   const todosCheckpointPath = path.join(wpaths.projectSessions, `${session?.id}.todos.json`);

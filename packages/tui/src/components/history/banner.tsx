@@ -56,7 +56,7 @@ export function Banner({
       </Text>
       <Text>
         <Text color="cyan">{'      hints     '}</Text>
-        <Text dimColor>/help · /init · /memory · /queue · /exit</Text>
+        <Text dimColor>/help · F1 projects · F10 sessions · /exit</Text>
       </Text>
     </Box>
   );
