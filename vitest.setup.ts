@@ -22,8 +22,5 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 if (!process.env['WRONGSTACK_HOME']) {
-  process.env['WRONGSTACK_HOME'] = path.join(
-    os.tmpdir(),
-    `wstack-vitest-${process.pid}`,
-  );
+  process.env['WRONGSTACK_HOME'] = path.join(os.tmpdir(), `wstack-vitest-${process.pid}`);
 }

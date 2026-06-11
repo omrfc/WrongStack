@@ -19,6 +19,7 @@ async function mkTempDir(prefix = 'wstack-boot-'): Promise<string> {
 
 describe('bootConfig', () => {
   let originalHome: string | undefined;
+  let originalWstackHome: string | undefined;
   let homeDir: string;
 
   beforeEach(async () => {
@@ -28,11 +29,19 @@ describe('bootConfig', () => {
     if (process.platform === 'win32') {
       process.env.USERPROFILE = homeDir;
     }
+    // bootConfig resolves the global root through the WRONGSTACK_HOME env
+    // override (set per-worker by vitest.setup.ts), which outranks a faked
+    // HOME/USERPROFILE. Point it at this test's temp home so files this
+    // suite writes under `<homeDir>/.wrongstack` are the ones boot reads.
+    originalWstackHome = process.env.WRONGSTACK_HOME;
+    process.env.WRONGSTACK_HOME = path.join(homeDir, '.wrongstack');
   });
 
   afterEach(() => {
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
+    if (originalWstackHome === undefined) delete process.env.WRONGSTACK_HOME;
+    else process.env.WRONGSTACK_HOME = originalWstackHome;
   });
 
   it('returns paths, config, and vault for an empty-config workspace', async () => {

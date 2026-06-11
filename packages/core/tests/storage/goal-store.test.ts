@@ -119,8 +119,10 @@ describe('goal-store', () => {
     const p = goalFilePath('/projects/foo');
     const expected = resolveWstackPaths({ projectRoot: '/projects/foo' }).projectGoal;
     expect(p).toBe(expected);
-    // Single source of truth: lives under ~/.wrongstack/projects/, NOT the repo.
-    expect(p.replace(/\\/g, '/')).toContain('/.wrongstack/projects/');
+    // Single source of truth: lives under the global root's projects/ dir
+    // (~/.wrongstack or the WRONGSTACK_HOME override), NOT the repo.
+    expect(p.replace(/\\/g, '/')).toContain('/projects/foo-');
+    expect(p.replace(/\\/g, '/')).not.toContain('/projects/foo/.wrongstack');
   });
 
   it('summarizeUsage aggregates tokens + cost across the journal', () => {
