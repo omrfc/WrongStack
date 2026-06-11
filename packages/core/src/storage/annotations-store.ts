@@ -1,9 +1,9 @@
 import { expectDefined } from '../utils/expect-defined.js';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
+import { sessionScopedPath } from '../utils/session-scoped-path.js';
 import { atomicWrite, withFileLock } from '../utils/atomic-write.js';
-import { FsError, WrongStackError, ERROR_CODES } from '../types/errors.js';
+import { WrongStackError, ERROR_CODES } from '../types/errors.js';
 /**
  * L2-B: AnnotationsStore — sidecar storage for collaboration annotations
  * (Phase 2 of idea #13 from IDEAS.md).
@@ -213,20 +213,10 @@ export class AnnotationsStore {
   // ── Internals ──────────────────────────────────────────────────────────
 
   private filePath(sessionId: string): string {
-    if (
-      !sessionId ||
-      sessionId.includes('/') ||
-      sessionId.includes('\\') ||
-      sessionId.includes('..')
-    ) {
-      throw new FsError({
-        message: `Invalid sessionId: ${sessionId}`,
-        code: ERROR_CODES.FS_DELETE_FAILED,
-        path: sessionId,
-        context: { reason: 'path_traversal' },
-      });
-    }
-    return path.join(this.dir, `${sessionId}.annotations.json`);
+    // Containment-checked: date-sharded ids ("2026-06-11/<base>") are
+    // legitimate; traversal is rejected. A plain slash ban here used to
+    // throw for every modern session id, breaking annotations entirely.
+    return sessionScopedPath(this.dir, sessionId, '.annotations.json');
   }
 
   private async readFile(sessionId: string): Promise<AnnotationsFile | null> {

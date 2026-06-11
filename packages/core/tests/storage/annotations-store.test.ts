@@ -102,9 +102,28 @@ describe('AnnotationsStore', () => {
     expect(texts.size).toBe(N);
   });
 
-  it('rejects path-traversal session ids', async () => {
+  it('rejects path-traversal session ids but accepts date-shard slashes', async () => {
     await expect(store.list('../escape')).rejects.toThrow(/invalid sessionid/i);
-    await expect(store.list('a/b')).rejects.toThrow(/invalid sessionid/i);
+    await expect(store.list('a/../../escape')).rejects.toThrow(/invalid sessionid/i);
+    await expect(store.list('a\\b')).rejects.toThrow(/invalid sessionid/i);
+    // Modern session ids are date-sharded ("2026-06-11/<base>") — the
+    // annotations sidecar must follow them into the shard dir instead of
+    // throwing (a slash ban here broke annotations for every live session).
+    const shardedId = '2026-06-11/12-00-00Z_model_ab12';
+    const added = await store.add({
+      sessionId: shardedId,
+      atEventIndex: 0,
+      authorId: 'p1',
+      text: 'sharded note',
+    });
+    expect(added.sessionId).toBe(shardedId);
+    const list = await store.list(shardedId);
+    expect(list).toHaveLength(1);
+    expect(list[0]!.text).toBe('sharded note');
+    // The sidecar sits inside the shard directory, next to the JSONL.
+    await expect(
+      fs.access(path.join(dir, '2026-06-11', '12-00-00Z_model_ab12.annotations.json')),
+    ).resolves.toBeUndefined();
   });
 
   it('corrupt JSON file is treated as empty store (does not crash)', async () => {

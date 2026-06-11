@@ -79,24 +79,41 @@ async function listAudits(
   dir: string,
   deps: import('../index.js').SubcommandDeps,
 ): Promise<number> {
-  // Sidecar files end in .audit.jsonl. Read the dir directly.
+  // Sidecar files end in .audit.jsonl. They sit next to their session
+  // JSONL — flat at the root for legacy ids, inside a date-shard dir for
+  // modern ids ("2026-06-11/<base>.audit.jsonl"). Scan both levels.
   const fs = await import('node:fs/promises');
-  let entries: string[];
-  try {
-    entries = await fs.readdir(dir);
-  } catch {
+  const path = await import('node:path');
+  const out: Array<{ sessionId: string; entryCount: number; ok: boolean }> = [];
+  let foundRoot = true;
+  const scan = async (scanDir: string, prefix: string, depth: number): Promise<void> => {
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await fs.readdir(scanDir, { withFileTypes: true });
+    } catch {
+      if (depth === 0) foundRoot = false;
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue;
+      if (entry.isDirectory()) {
+        if (depth === 0) await scan(path.join(scanDir, entry.name), entry.name, depth + 1);
+        continue;
+      }
+      if (!entry.isFile() || !entry.name.endsWith('.audit.jsonl')) continue;
+      const base = entry.name.slice(0, -'.audit.jsonl'.length);
+      const sessionId = prefix ? `${prefix}/${base}` : base;
+      const all = await log.load(sessionId);
+      const verify = await log.verify(sessionId);
+      out.push({ sessionId, entryCount: all.length, ok: verify.ok });
+    }
+  };
+  await scan(dir, '', 0);
+  if (!foundRoot) {
     deps.renderer.write(
       color.dim(`No sessions dir found at ${dir}. Run a session first.`) + '\n',
     );
     return 0;
-  }
-  const out: Array<{ sessionId: string; entryCount: number; ok: boolean }> = [];
-  for (const name of entries) {
-    if (!name.endsWith('.audit.jsonl')) continue;
-    const sessionId = name.slice(0, -'.audit.jsonl'.length);
-    const all = await log.load(sessionId);
-    const verify = await log.verify(sessionId);
-    out.push({ sessionId, entryCount: all.length, ok: verify.ok });
   }
   out.sort((a, b) => a.sessionId.localeCompare(b.sessionId));
   if (out.length === 0) {

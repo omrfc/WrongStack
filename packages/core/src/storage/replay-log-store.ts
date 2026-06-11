@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { atomicWrite, withFileLock } from '../utils/atomic-write.js';
+import { sessionScopedPath } from '../utils/session-scoped-path.js';
 import { hashRequest } from '../replay/hash.js';
 import type { Request, Response } from '../types/provider.js';
 import { safeParse } from '../utils/safe-json.js';
@@ -144,46 +145,57 @@ export class ReplayLogStore {
    * by sessionId for stable output. Used by `wstack replay --list`.
    */
   async list(): Promise<Array<{ sessionId: string; entryCount: number; path: string }>> {
-    let entries: string[];
-    try {
-      entries = await fs.readdir(this.dir);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
-      // EACCES, ENOTDIR, etc. — log the real error so the operator can
-      // diagnose a misconfiguration, but still return empty list so the
-      // caller (slash command display) doesn't crash.
-      console.warn(
-        `[replay-log-store] list() readdir failed for ${this.dir}:`,
-        err instanceof Error ? err.message : String(err),
-      );
-      return [];
-    }
     const out: Array<{ sessionId: string; entryCount: number; path: string }> = [];
-    for (const name of entries) {
-      if (!name.endsWith('.replay.jsonl')) continue;
-      const sessionId = name.slice(0, -'.replay.jsonl'.length);
-      const all = await this.load(sessionId);
-      out.push({
-        sessionId,
-        entryCount: all.length,
-        path: path.join(this.dir, name),
-      });
-    }
+    // Replay logs sit next to their session JSONL — flat at the root for
+    // legacy/`record-<ts>` ids, inside a date-shard dir for modern ids.
+    // Scan both levels; a root-only scan misses every sharded session.
+    const scan = async (dir: string, prefix: string, depth: number): Promise<void> => {
+      let entries: import('node:fs').Dirent[];
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch (err) {
+        if (depth === 0 && (err as NodeJS.ErrnoException).code !== 'ENOENT') {
+          // EACCES, ENOTDIR, etc. — log the real error so the operator can
+          // diagnose a misconfiguration, but still return empty list so the
+          // caller (slash command display) doesn't crash.
+          console.warn(JSON.stringify({
+            level: 'warn',
+            event: 'replay_log_store.list_readdir_failed',
+            dir,
+            message: err instanceof Error ? err.message : String(err),
+            timestamp: new Date().toISOString(),
+          }));
+        }
+        return;
+      }
+      for (const entry of entries) {
+        if (entry.name.startsWith('.')) continue;
+        if (entry.isDirectory()) {
+          if (depth === 0) await scan(path.join(dir, entry.name), entry.name, depth + 1);
+          continue;
+        }
+        if (!entry.isFile() || !entry.name.endsWith('.replay.jsonl')) continue;
+        const base = entry.name.slice(0, -'.replay.jsonl'.length);
+        const sessionId = prefix ? `${prefix}/${base}` : base;
+        const all = await this.load(sessionId);
+        out.push({
+          sessionId,
+          entryCount: all.length,
+          path: path.join(dir, entry.name),
+        });
+      }
+    };
+    await scan(this.dir, '', 0);
     return out.sort((a, b) => a.sessionId.localeCompare(b.sessionId));
   }
 
   // ── Internals ───────────────────────────────────────────────────────────
 
   private filePath(sessionId: string): string {
-    if (
-      !sessionId ||
-      sessionId.includes('/') ||
-      sessionId.includes('\\') ||
-      sessionId.includes('..')
-    ) {
-      throw new Error(`Invalid sessionId: ${sessionId}`);
-    }
-    return path.join(this.dir, `${sessionId}.replay.jsonl`);
+    // Containment-checked: date-sharded ids ("2026-06-11/<base>") are
+    // legitimate; traversal is rejected. A plain slash ban would throw
+    // the moment a real (sharded) session id is used for --replay.
+    return sessionScopedPath(this.dir, sessionId, '.replay.jsonl');
   }
 
   private async readAll(sessionId: string): Promise<ReplayEntry[]> {

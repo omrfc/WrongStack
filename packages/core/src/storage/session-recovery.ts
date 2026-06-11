@@ -2,7 +2,7 @@ import { expectDefined } from '../utils/expect-defined.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { SessionEvent } from '../types/session.js';
-import { FsError, ERROR_CODES } from '../types/errors.js';
+import { sessionScopedPath } from '../utils/session-scoped-path.js';
 /**
  * Idea #1 from IDEAS.md — Stateful Session Recovery.
  *
@@ -232,30 +232,10 @@ export class SessionRecovery {
   // ── Internals ──────────────────────────────────────────────────────────
 
   private filePath(sessionId: string): string {
-    // Modern session ids are date-sharded ("2026-06-11/12-30-45Z_model_ab12")
-    // so a forward slash is legitimate. Traversal is blocked by rejecting
-    // `..`/backslashes AND by verifying the resolved path stays inside the
-    // sessions dir — a containment check instead of a character ban.
-    if (!sessionId || sessionId.includes('\\') || sessionId.includes('..')) {
-      throw new FsError({
-        message: `Invalid sessionId: ${sessionId}`,
-        code: ERROR_CODES.FS_DELETE_FAILED,
-        path: sessionId,
-        context: { reason: 'path_traversal' },
-      });
-    }
-    const resolved = path.resolve(this.dir, `${sessionId}.jsonl`);
-    const root = path.resolve(this.dir);
-    const rel = path.relative(root, resolved);
-    if (rel.startsWith('..') || path.isAbsolute(rel)) {
-      throw new FsError({
-        message: `Invalid sessionId: ${sessionId}`,
-        code: ERROR_CODES.FS_DELETE_FAILED,
-        path: sessionId,
-        context: { reason: 'path_traversal' },
-      });
-    }
-    return resolved;
+    // Containment-checked: date-sharded ids ("2026-06-11/<base>") are
+    // legitimate; traversal is rejected. Shared with the other per-session
+    // sidecar stores so the contract can't drift.
+    return sessionScopedPath(this.dir, sessionId, '.jsonl');
   }
 
   constructor(private readonly dir: string) {}

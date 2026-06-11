@@ -219,4 +219,22 @@ describe('ToolAuditLog', () => {
       }),
     ).rejects.toThrow(/invalid sessionid/i);
   });
+
+  it('records and verifies under a date-sharded session id', async () => {
+    // Modern session ids contain a shard slash ("2026-06-11/<base>") —
+    // the audit chain must follow them into the shard dir, not throw.
+    const shardedId = '2026-06-11/12-00-00Z_model_ab12';
+    await log.record({
+      sessionId: shardedId,
+      toolName: 'read',
+      toolUseId: 'tu-1',
+      input: { path: 'a.ts' },
+      output: 'ok',
+      isError: false,
+    });
+    expect(await log.verify(shardedId)).toEqual({ ok: true, entries: 1 });
+    await expect(
+      fs.access(path.join(dir, '2026-06-11', '12-00-00Z_model_ab12.audit.jsonl')),
+    ).resolves.toBeUndefined();
+  });
 });

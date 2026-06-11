@@ -1,9 +1,9 @@
 import { expectDefined } from '../utils/expect-defined.js';
 import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import { atomicWrite, withFileLock } from '../utils/atomic-write.js';
 import { safeParse } from '../utils/safe-json.js';
+import { sessionScopedPath } from '../utils/session-scoped-path.js';
 /**
  * ToolAuditLog — idea #9 from IDEAS.md.
  *
@@ -212,15 +212,10 @@ export class ToolAuditLog {
   // ── Internals ────────────────────────────────────────────────────────────
 
   private filePath(sessionId: string): string {
-    if (
-      !sessionId ||
-      sessionId.includes('/') ||
-      sessionId.includes('\\') ||
-      sessionId.includes('..')
-    ) {
-      throw new Error(`Invalid sessionId: ${sessionId}`);
-    }
-    return path.join(this.dir, `${sessionId}.audit.jsonl`);
+    // Containment-checked: date-sharded ids ("2026-06-11/<base>") are
+    // legitimate; traversal is rejected. A plain slash ban would throw
+    // for every modern session id the moment record() gets wired in.
+    return sessionScopedPath(this.dir, sessionId, '.audit.jsonl');
   }
 
   private async readAll(sessionId: string): Promise<AuditEntry[]> {

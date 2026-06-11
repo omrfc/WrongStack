@@ -49,9 +49,14 @@ export function replaySessionEvents(
   let nextId = startId;
   // Pending tool_use events awaiting their tool_result
   const pendingTools = new Map<string, { name: string; input: unknown; ts: string }>();
+  // Tool ids already rendered from a richer `tool_call_end` event. At
+  // standard audit level every call logs tool_call_start → tool_call_end →
+  // tool_result; without this set the trailing tool_result would render the
+  // SAME call a second time (named by its raw id).
+  const completedTools = new Set<string>();
 
   for (const ev of events) {
-    const entry = eventToEntry(ev, pendingTools);
+    const entry = eventToEntry(ev, pendingTools, completedTools);
     if (entry) {
       entries.push({ ...entry, id: nextId++ } as HistoryEntry);
     }
@@ -81,6 +86,7 @@ export function replaySessionEvents(
 function eventToEntry(
   ev: SessionEvent,
   pendingTools: Map<string, { name: string; input: unknown; ts: string }>,
+  completedTools: Set<string>,
 ): DistributiveOmit<HistoryEntry, 'id'> | null {
   switch (ev.type) {
     case 'user_input': {
@@ -114,6 +120,12 @@ function eventToEntry(
     }
 
     case 'tool_result': {
+      // Already rendered from the richer tool_call_end for this id —
+      // emitting again would duplicate the call (named by its raw id).
+      if (completedTools.has(ev.id)) {
+        completedTools.delete(ev.id);
+        return null;
+      }
       // Pair with the previously stored tool_use.
       const tu = pendingTools.get(ev.id);
       pendingTools.delete(ev.id);
@@ -139,6 +151,9 @@ function eventToEntry(
     case 'tool_call_end': {
       const tu = pendingTools.get(ev.id);
       pendingTools.delete(ev.id);
+      // Mark the id as rendered so the trailing tool_result (which follows
+      // tool_call_end in the JSONL at standard audit level) is skipped.
+      completedTools.add(ev.id);
       // If we have a matching start, use its metadata; otherwise emit standalone.
       return {
         kind: 'tool',

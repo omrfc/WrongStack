@@ -129,6 +129,31 @@ describe('replaySessionEvents', () => {
     expect(entries[0]).toMatchObject({ kind: 'tool', name: 'read', ok: false });
   });
 
+  it('does not duplicate a tool call recorded as tool_call_start → tool_call_end → tool_result', () => {
+    // Standard audit level logs all three events for one call. The richer
+    // tool_call_end renders the entry; the trailing tool_result must be
+    // swallowed instead of rendering the same call again named by raw id.
+    const events: SessionEvent[] = [
+      { type: 'user_input', ts: '2026-01-01T00:00:00Z', content: 'read a file' },
+      { type: 'tool_call_start', ts: '2026-01-01T00:00:01Z', name: 'read', id: 'tu-1', input: { path: 'a.ts' } },
+      { type: 'tool_call_end', ts: '2026-01-01T00:00:02Z', name: 'read', id: 'tu-1', durationMs: 42, outputSize: 10, ok: true },
+      { type: 'tool_result', ts: '2026-01-01T00:00:03Z', id: 'tu-1', content: 'contents', isError: false },
+    ];
+    const entries = replaySessionEvents(events, 1);
+    const tools = entries.filter((e) => e.kind === 'tool');
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({ kind: 'tool', name: 'read', durationMs: 42, ok: true });
+  });
+
+  it('still renders tool_result alone at minimal audit level (no tool_call events)', () => {
+    const events: SessionEvent[] = [
+      { type: 'tool_result', ts: '2026-01-01T00:00:00Z', id: 'tu-9', content: 'ok', isError: false },
+    ];
+    const entries = replaySessionEvents(events, 1);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ kind: 'tool', ok: true });
+  });
+
   it('preserves event order for mixed event types', () => {
     const events: SessionEvent[] = [
       { type: 'user_input', ts: '2026-01-01T00:00:00Z', content: 'question 1' },
