@@ -113,6 +113,14 @@ export interface ExecutionDeps {
   autoProceedDelayMs?: number | undefined;
   /** Maximum auto-proceed iterations before stopping. Default 50. 0 = unlimited. */
   autoProceedMaxIterations?: number | undefined;
+  /** Host Brain arbiter (same instance bound at TOKENS.BrainArbiter). */
+  brain?: import('@wrongstack/core').BrainArbiter | undefined;
+  /** Host brain settings — the SAME object /brain mutates (shared ceiling). */
+  brainSettings?: { maxAutoRisk: import('@wrongstack/core').BrainAutoRisk } | undefined;
+  /** Read the host's rolling brain decision log (newest last, ≤20 entries). */
+  getBrainLog?:
+    | (() => Array<{ at: number; kind: string; question: string; outcome: string }>)
+    | undefined;
   /**
    * LLM validation gate called before starting the auto-proceed countdown.
    * Receives the top suggestion and the last agent output; returns `true`
@@ -227,6 +235,9 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     getSuggestions,
     autoProceedDelayMs,
     autoProceedMaxIterations,
+    brain,
+    brainSettings,
+    getBrainLog,
     onValidateAutoProceed,
     getEternalEngine,
     getParallelEngine,
@@ -1346,6 +1357,9 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         subscribeEternalIteration,
         sessionStore,
         sessionsDir: wpaths.projectSessions,
+        brain,
+        brainSettings,
+        getBrainLog,
         onSessionSwapped: (newSessionId: string) => {
           // Re-point crash recovery (active.json) at the resumed session —
           // otherwise a crash after an in-app resume would offer recovery

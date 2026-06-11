@@ -17,8 +17,10 @@ import {
   handleMemoryRemember,
   handleMemoryForget,
   AutoPhaseWebSocketHandler,
+  createCustomModeStore,
+  type CustomModeStore,
 } from '@wrongstack/webui/server';
-import type { Agent, Context, EventBus, Logger, MemoryStore, ModeStore, ModelsRegistry, SessionStore, SessionWriter, SkillLoader } from '@wrongstack/core';
+import type { Agent, BrainArbiter, BrainAutoRisk, Context, EventBus, Logger, MemoryStore, ModeStore, ModelsRegistry, SessionStore, SessionWriter, SkillLoader } from '@wrongstack/core';
 import {
   DefaultSecretScrubber,
   enhanceUserPrompt,
@@ -31,7 +33,7 @@ import {
 } from '@wrongstack/core';
 import { DefaultSessionStore } from '@wrongstack/core/storage';
 import { DefaultSecretVault, decryptConfigSecrets, encryptConfigSecrets } from '@wrongstack/core/security';
-import { TOKENS, atomicWrite, repairToolUseAdjacency, listContextWindowModes, resolveContextWindowPolicy, DEFAULT_CONTEXT_WINDOW_MODE_ID, GlobalMailbox, projectSlug, resolveProjectDir, wstackGlobalRoot } from '@wrongstack/core';
+import { TOKENS, atomicWrite, repairToolUseAdjacency, resolveContextWindowPolicy, DEFAULT_CONTEXT_WINDOW_MODE_ID, GlobalMailbox, projectSlug, resolveProjectDir, wstackGlobalRoot } from '@wrongstack/core';
 import { WebSocket, WebSocketServer } from 'ws';
 import { expectDefined, loadConfigProviders, maskedKey, mutateConfigProviders, normalizeKeys, nowIso, writeKeysBack } from './provider-config-utils.js';
 
@@ -198,6 +200,14 @@ interface WebUIOptions {
   onExit?: (() => void) | undefined;
   /** Session store — enables session.resume and session.delete from the WebUI. */
   sessionStore?: SessionStore | undefined;
+  /** Host Brain arbiter (same instance bound at TOKENS.BrainArbiter). */
+  brain?: BrainArbiter | undefined;
+  /** Host brain settings — the SAME object /brain mutates (shared ceiling). */
+  brainSettings?: { maxAutoRisk: BrainAutoRisk } | undefined;
+  /** Read the host's rolling brain decision log (newest last, ≤20 entries). */
+  getBrainLog?:
+    | (() => Array<{ at: number; kind: string; question: string; outcome: string }>)
+    | undefined;
   /**
    * Absolute path to the project's sessions directory (wpaths.projectSessions).
    * Used by checkpoint/rewind handlers to locate session JSONL files. When
@@ -261,6 +271,19 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
   const pendingConfirms = new Map<string, (d: 'yes' | 'no' | 'always' | 'deny') => void>();
   const secretScrubber = new DefaultSecretScrubber();
   let abortController: AbortController | null = null;
+
+  // Custom context modes — file-backed (~/.wrongstack/custom-context-modes.json),
+  // shared with the standalone server. Lazily loaded on first mode operation.
+  let customModeStoreP: Promise<CustomModeStore> | null = null;
+  const getCustomModeStore = (): Promise<CustomModeStore> => {
+    customModeStoreP ??= (async () => {
+      const dir = opts.globalConfigPath ? path.dirname(opts.globalConfigPath) : wstackGlobalRoot();
+      const store = createCustomModeStore(dir);
+      await store.load();
+      return store;
+    })();
+    return customModeStoreP;
+  };
 
   // AutoPhase handler — manages AutoPhase lifecycle via WS messages.
   // Initialized here so it can be used in the connection handler and message switch.
@@ -1970,14 +1993,17 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
       }
 
       case 'context.modes.list': {
+        // Built-ins + file-backed custom modes (store.list() merges both),
+        // matching the standalone server.
         const active = String(
           opts.agent.ctx.meta['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID,
         );
+        const modeStore = await getCustomModeStore();
         send(ws, {
           type: 'context.modes.list',
           payload: {
             activeId: active,
-            modes: listContextWindowModes().map((m) => ({
+            modes: modeStore.list().map((m) => ({
               id: m.id,
               name: m.name,
               description: m.description,
@@ -1985,6 +2011,7 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
               thresholds: m.thresholds,
               preserveK: m.preserveK,
               eliseThreshold: m.eliseThreshold,
+              custom: m.custom === true,
             })),
           },
         });
@@ -1993,10 +2020,17 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
 
       case 'context.mode.switch': {
         const { id } = (msg as { payload: { id: string } }).payload;
-        const policy = resolveContextWindowPolicy({}, id);
+        // Built-in first, then custom (parity with the standalone server —
+        // custom modes were previously unswitchable here).
+        let policy = resolveContextWindowPolicy({}, id);
         if (policy.id !== id) {
-          sendResult(ws, false, `Unknown context mode "${id}"`);
-          break;
+          const modeStore = await getCustomModeStore();
+          const custom = modeStore.list().find((m) => m.custom === true && m.id === id);
+          if (!custom) {
+            sendResult(ws, false, `Unknown context mode "${id}"`);
+            break;
+          }
+          policy = custom as unknown as typeof policy;
         }
         opts.agent.ctx.meta['contextWindowMode'] = policy.id;
         opts.agent.ctx.meta['contextWindowPolicy'] = policy;
@@ -2005,6 +2039,130 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
           type: 'context.mode.changed',
           payload: { id: policy.id, name: policy.name, policy },
         });
+        break;
+      }
+
+      case 'context.mode.create': {
+        const payload = (msg as { payload: { id: string; name: string; description: string; thresholds: { warn: number; soft: number; hard: number }; preserveK: number; eliseThreshold: number } }).payload;
+        const modeStore = await getCustomModeStore();
+        const result = modeStore.create({
+          id: payload.id,
+          name: payload.name,
+          description: payload.description,
+          thresholds: payload.thresholds,
+          preserveK: payload.preserveK,
+          eliseThreshold: payload.eliseThreshold,
+          custom: true,
+          aggressiveOn: 'soft',
+          targetLoad: 0.65,
+        });
+        if (result.ok) await modeStore.save().catch(() => undefined);
+        sendResult(ws, result.ok, result.error ?? `Mode "${payload.id}" created`);
+        break;
+      }
+
+      case 'context.mode.update': {
+        const payload = (msg as { payload: { id: string; name?: string | undefined; description?: string | undefined; thresholds?: { warn?: number | undefined; soft?: number | undefined; hard?: number | undefined } | undefined; preserveK?: number | undefined; eliseThreshold?: number | undefined } }).payload;
+        const modeStore = await getCustomModeStore();
+        // Build the patch without explicit-undefined keys
+        // (exactOptionalPropertyTypes).
+        const result = modeStore.update(payload.id, {
+          ...(payload.name !== undefined ? { name: payload.name } : {}),
+          ...(payload.description !== undefined ? { description: payload.description } : {}),
+          ...(payload.thresholds
+            ? {
+                thresholds: {
+                  warn: payload.thresholds.warn ?? 0.6,
+                  soft: payload.thresholds.soft ?? 0.75,
+                  hard: payload.thresholds.hard ?? 0.9,
+                },
+              }
+            : {}),
+          ...(payload.preserveK !== undefined ? { preserveK: payload.preserveK } : {}),
+          ...(payload.eliseThreshold !== undefined ? { eliseThreshold: payload.eliseThreshold } : {}),
+        });
+        if (result.ok) await modeStore.save().catch(() => undefined);
+        sendResult(ws, result.ok, result.error ?? `Mode "${payload.id}" updated`);
+        break;
+      }
+
+      case 'context.mode.delete': {
+        const { id } = (msg as { payload: { id: string } }).payload;
+        const ctx = opts.agent.ctx;
+        // If the active mode is being deleted, fall back to the default.
+        if (String(ctx.meta['contextWindowMode'] ?? '') === id) {
+          ctx.meta['contextWindowMode'] = DEFAULT_CONTEXT_WINDOW_MODE_ID;
+          ctx.meta['contextWindowPolicy'] = resolveContextWindowPolicy({}, DEFAULT_CONTEXT_WINDOW_MODE_ID);
+        }
+        const modeStore = await getCustomModeStore();
+        const result = modeStore.remove(id);
+        if (result.ok) await modeStore.save().catch(() => undefined);
+        sendResult(ws, result.ok, result.error ?? `Mode "${id}" deleted`);
+        break;
+      }
+
+      // ── Brain — status, autonomy ceiling, direct decision support ───
+      // Shares the HOST's brain (TOKENS.BrainArbiter) and the same settings
+      // object the /brain slash command mutates, so the ceiling shown in the
+      // terminal and the WebUI never diverge. These used to be unknown
+      // message types on the embedded server.
+      case 'brain.status': {
+        send(ws, {
+          type: 'brain.status',
+          payload: {
+            maxAutoRisk: opts.brainSettings?.maxAutoRisk ?? 'medium',
+            log: opts.getBrainLog?.() ?? [],
+          },
+        });
+        break;
+      }
+
+      case 'brain.risk': {
+        const level = (msg as { payload?: { level?: string } }).payload?.level ?? '';
+        const valid = ['off', 'low', 'medium', 'high', 'all'];
+        if (!valid.includes(level)) {
+          sendResult(ws, false, `Unknown risk level "${level}". Use: ${valid.join(', ')}.`);
+          break;
+        }
+        if (!opts.brainSettings) {
+          sendResult(ws, false, 'Brain settings are not wired into this server.');
+          break;
+        }
+        opts.brainSettings.maxAutoRisk = level as BrainAutoRisk;
+        send(ws, {
+          type: 'brain.status',
+          payload: { maxAutoRisk: opts.brainSettings.maxAutoRisk, log: opts.getBrainLog?.() ?? [] },
+        });
+        break;
+      }
+
+      case 'brain.ask': {
+        const question = (msg as { payload?: { question?: string } }).payload?.question?.trim();
+        if (!question) {
+          sendResult(ws, false, 'Usage: /brain ask <question>');
+          break;
+        }
+        const arbiter =
+          opts.brain ??
+          (opts.agent.container.has(TOKENS.BrainArbiter)
+            ? opts.agent.container.resolve(TOKENS.BrainArbiter)
+            : undefined);
+        if (!arbiter) {
+          sendResult(ws, false, 'No Brain is wired into this server.');
+          break;
+        }
+        try {
+          const decision = await arbiter.decide({
+            id: `brain-ask-${Date.now().toString(36)}`,
+            source: 'user',
+            question,
+            risk: 'medium',
+            fallback: 'ask_human',
+          });
+          send(ws, { type: 'brain.answer', payload: { question, decision } });
+        } catch (err) {
+          sendResult(ws, false, `Brain consultation failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
         break;
       }
 

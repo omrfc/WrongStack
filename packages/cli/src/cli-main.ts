@@ -2307,6 +2307,12 @@ export async function main(argv: string[]): Promise<number> {
     restoredMessages: sessResult.restoredMessages,
     restoredToolCalls: sessResult.restoredToolCalls,
     needsSetup,
+    // Brain plumbing for the embedded WebUI server: the SAME settings object
+    // the /brain slash command mutates, so the autonomy ceiling stays in sync
+    // across surfaces; brainLog is the shared 20-entry decision log.
+    brain,
+    brainSettings,
+    getBrainLog: () => brainLog,
   });
 }
 

@@ -131,6 +131,14 @@ export {
   handleMemoryForget,
 } from './memory-handlers.js';
 
+// Custom context-mode store shared with the CLI's embedded server
+// (context.mode.create/update/delete + custom-aware list/switch).
+export {
+  createCustomModeStore,
+  type CustomModeStore,
+  type CustomContextMode,
+} from './custom-context-modes.js';
+
 // WS auth — pure functions for verifying WebSocket connections
 export {
   verifyClient,
