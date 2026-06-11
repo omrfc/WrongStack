@@ -696,6 +696,47 @@ describe('DefaultSessionStore — JSONL correctness', () => {
     await w.close();
   });
 
+  it('prune() removes old sessions in BOTH layouts and protects the active one', async () => {
+    const old = new Date(Date.now() - 60 * 86_400_000); // 60 days ago
+
+    // Sharded old session.
+    const sharded = await store.create({ id: '2026-04-01/old-shard_aa11', model: 'm', provider: 'p' });
+    await sharded.append({ type: 'user_input', ts: new Date().toISOString(), content: 'x' });
+    await sharded.close();
+    await fs.utimes(path.join(tmp, '2026-04-01', 'old-shard_aa11.jsonl'), old, old);
+
+    // Flat legacy old session at the sessions root (pre-shard layout).
+    const flat = await store.create({ id: 'legacy-flat', model: 'm', provider: 'p' });
+    await flat.append({ type: 'user_input', ts: new Date().toISOString(), content: 'y' });
+    await flat.close();
+    await fs.utimes(path.join(tmp, 'legacy-flat.jsonl'), old, old);
+
+    // Old but ACTIVE session — must survive.
+    const active = await store.create({ id: '2026-04-01/active_bb22', model: 'm', provider: 'p' });
+    await active.append({ type: 'user_input', ts: new Date().toISOString(), content: 'z' });
+    await active.close();
+    await fs.utimes(path.join(tmp, '2026-04-01', 'active_bb22.jsonl'), old, old);
+    await fs.writeFile(
+      path.join(tmp, 'active.json'),
+      JSON.stringify({ sessionId: '2026-04-01/active_bb22' }),
+      'utf8',
+    );
+
+    // Recent session — must survive.
+    const recent = await store.create({ id: 'recent-flat', model: 'm', provider: 'p' });
+    await recent.append({ type: 'user_input', ts: new Date().toISOString(), content: 'r' });
+    await recent.close();
+
+    const deleted = await store.prune(30);
+    expect(deleted).toBe(2);
+    await expect(fs.access(path.join(tmp, '2026-04-01', 'old-shard_aa11.jsonl'))).rejects.toThrow();
+    await expect(fs.access(path.join(tmp, 'legacy-flat.jsonl'))).rejects.toThrow();
+    await expect(fs.access(path.join(tmp, '2026-04-01', 'active_bb22.jsonl'))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(tmp, 'recent-flat.jsonl'))).resolves.toBeUndefined();
+    // Bookkeeping survives the root-level sweep.
+    await expect(fs.access(path.join(tmp, '_index.jsonl'))).resolves.toBeUndefined();
+  });
+
   it('metadata endedAt comes from the LAST session_end, not a mid-stream one', async () => {
     const file = path.join(tmp, 'multi-end.jsonl');
     const events = [

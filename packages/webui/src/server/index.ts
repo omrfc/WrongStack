@@ -42,6 +42,8 @@ import {
   ToolRegistry,
   atomicWrite,
   createDefaultPipelines,
+  createSessionEventBridge,
+  resolveSessionLoggingConfig,
   DEFAULT_CONTEXT_WINDOW_MODE_ID,
   DEFAULT_SESSION_PRUNE_DAYS,
   DEFAULT_TOOLS_CONFIG,
@@ -888,12 +890,25 @@ export async function startWebUI(
     });
   };
 
+  // Audit-level-aware session log bridge — persists tool/error/provider
+  // events to the session JSONL with the same contract as the CLI. The
+  // getter form resolves the CURRENT writer on every append so events
+  // follow session.new / session.resume / projects.select swaps.
+  const sessionLogging = resolveSessionLoggingConfig(
+    config as unknown as Parameters<typeof resolveSessionLoggingConfig>[0],
+  );
+  const sessionBridge = createSessionEventBridge(
+    () => context.session ?? session,
+    sessionLogging.auditLevel,
+    { sampling: sessionLogging.sampling },
+  );
+
   let eventsArmed = false;
   const armOnce = (label: string): void => {
     if (eventsArmed) return;
     eventsArmed = true;
     console.log(`[WebUI] Backend ready (${label})`);
-    setupEvents({ events, broadcast, clients, config, context, pendingConfirms, globalConfigPath });
+    setupEvents({ events, broadcast, clients, config, context, pendingConfirms, globalConfigPath, sessionBridge });
   };
 
   wssPrimary.on('listening', () => armOnce(`${wsHost}:${wsPort}`));

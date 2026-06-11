@@ -1,4 +1,4 @@
-import type { EventBus, Context } from '@wrongstack/core';
+import type { EventBus, Context, SessionEventBridge } from '@wrongstack/core';
 import type { WebSocket } from 'ws';
 import type { ConnectedClient, WSServerMessage } from './types.js';
 
@@ -13,10 +13,17 @@ export interface SetupEventsDeps {
   pendingConfirms: Map<string, (d: 'yes' | 'no' | 'always' | 'deny') => void>;
   /** Optional global config dir (~/.wrongstack) — enables SessionRegistry poll for fleet view. */
   globalConfigPath?: string | undefined;
+  /**
+   * Audit-level-aware session log bridge. When provided, tool/error/provider
+   * events are persisted to the session JSONL (same contract as the CLI) —
+   * without it, standalone-WebUI sessions carry no audit events and resume
+   * with no tool history.
+   */
+  sessionBridge?: SessionEventBridge | undefined;
 }
 
 export function setupEvents(deps: SetupEventsDeps): void {
-  const { events, broadcast, clients, config, context, pendingConfirms, globalConfigPath } = deps;
+  const { events, broadcast, clients, config, context, pendingConfirms, globalConfigPath, sessionBridge } = deps;
 
   events.on('iteration.started', (e) => {
     // Read maxIterations from context.meta so the UI reflects the
@@ -43,6 +50,16 @@ export function setupEvents(deps: SetupEventsDeps): void {
       type: 'tool.started',
       payload: { id: e.id, name: e.name, input: e.input, messageId: `tool_${e.id}` },
     });
+    // Persist for audit + resume tool history (respects auditLevel).
+    sessionBridge
+      ?.append({
+        type: 'tool_call_start',
+        ts: new Date().toISOString(),
+        name: e.name,
+        id: e.id,
+        input: e.input,
+      })
+      .catch(() => { /* best-effort */ });
   });
 
   events.on('tool.progress', (e) => {
@@ -50,6 +67,15 @@ export function setupEvents(deps: SetupEventsDeps): void {
       type: 'tool.progress',
       payload: { id: e.id, name: e.name, eventType: e.event.type, text: e.event.text },
     });
+    sessionBridge
+      ?.append({
+        type: 'tool_progress',
+        ts: new Date().toISOString(),
+        name: e.name,
+        id: e.id,
+        event: { type: e.event.type, text: e.event.text, data: e.event.data },
+      })
+      .catch(() => { /* best-effort */ });
   });
 
   events.on('tool.executed', (e) => {
@@ -57,6 +83,20 @@ export function setupEvents(deps: SetupEventsDeps): void {
       type: 'tool.executed',
       payload: { id: e.id, name: e.name, durationMs: e.durationMs, ok: e.ok, input: e.input, output: e.output },
     });
+    sessionBridge
+      ?.append({
+        type: 'tool_call_end',
+        ts: new Date().toISOString(),
+        name: e.name,
+        id: e.id ?? '',
+        durationMs: e.durationMs,
+        outputSize: e.outputBytes ?? 0,
+        ok: e.ok,
+        outputBytes: e.outputBytes,
+        outputTokens: e.outputTokens,
+        outputLines: e.outputLines,
+      })
+      .catch(() => { /* best-effort */ });
     broadcast(clients, { type: 'todos.updated', payload: { todos: [...context.todos] } });
 
     // Broadcast task/plan updates after task/plan/todo tool executions.
@@ -98,6 +138,43 @@ export function setupEvents(deps: SetupEventsDeps): void {
 
   events.on('error', (e) => {
     broadcast(clients, { type: 'error', payload: { phase: e.phase, message: e.err instanceof Error ? e.err.message : String(e.err) } });
+    sessionBridge
+      ?.append({
+        type: 'error',
+        ts: new Date().toISOString(),
+        message: e.err instanceof Error ? e.err.message : String(e.err),
+        phase: e.phase,
+      })
+      .catch(() => { /* best-effort */ });
+  });
+
+  // Provider visibility — retry storms and provider failures in the JSONL
+  // for forensics, mirroring the CLI's bridge wiring.
+  events.on('provider.retry', (e) => {
+    sessionBridge
+      ?.append({
+        type: 'provider_retry',
+        ts: new Date().toISOString(),
+        providerId: e.providerId,
+        attempt: e.attempt,
+        delayMs: e.delayMs,
+        status: e.status,
+        description: e.description,
+      })
+      .catch(() => { /* best-effort */ });
+  });
+
+  events.on('provider.error', (e) => {
+    sessionBridge
+      ?.append({
+        type: 'provider_error',
+        ts: new Date().toISOString(),
+        providerId: e.providerId,
+        status: e.status,
+        description: e.description,
+        retryable: e.retryable,
+      })
+      .catch(() => { /* best-effort */ });
   });
 
   // Subagent fleet lifecycle

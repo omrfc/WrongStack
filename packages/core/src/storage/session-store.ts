@@ -472,26 +472,44 @@ export class DefaultSessionStore implements SessionStore {
       // no active.json — nothing to protect
     }
 
+    const isPrunableJsonl = (name: string): boolean =>
+      name.endsWith('.jsonl') &&
+      name !== '_index.jsonl' &&
+      name !== '_mailbox.jsonl' &&
+      !name.endsWith('.replay.jsonl') &&
+      !name.endsWith('.audit.jsonl');
+
+    const pruneFile = async (dir: string, name: string, prefix: string): Promise<void> => {
+      const jsonlPath = path.join(dir, name);
+      try {
+        const stat = await fsp.stat(jsonlPath);
+        if (stat.mtimeMs >= cutoff) return;
+      } catch {
+        return;
+      }
+      const base = name.replace(/\.jsonl$/, '');
+      const id = prefix ? `${prefix}/${base}` : base;
+      // Never prune the currently active session.
+      if (activeSessionId && id === activeSessionId) return;
+      await this.deleteSession(id);
+      deleted++;
+    };
+
     const entries = await fsp.readdir(this.dir, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
+      if (entry.isFile()) {
+        // Flat legacy sessions at the sessions root — pre-shard layout.
+        // A shard-only scan left these accumulating forever.
+        if (isPrunableJsonl(entry.name)) await pruneFile(this.dir, entry.name, '');
+        continue;
+      }
       if (!entry.isDirectory()) continue;
       // entry.name is a date-shard like "2026-06-06"
       const dateDir = path.join(this.dir, entry.name);
       const files = await fsp.readdir(dateDir, { withFileTypes: true }).catch(() => []);
       for (const file of files) {
-        if (!file.isFile() || !file.name.endsWith('.jsonl')) continue;
-        const jsonlPath = path.join(dateDir, file.name);
-        try {
-          const stat = await fsp.stat(jsonlPath);
-          if (stat.mtimeMs >= cutoff) continue;
-        } catch {
-          continue;
-        }
-        const id = `${entry.name}/${file.name.replace(/\.jsonl$/, '')}`;
-        // Never prune the currently active session.
-        if (activeSessionId && id === activeSessionId) continue;
-        await this.deleteSession(id);
-        deleted++;
+        if (!file.isFile() || !isPrunableJsonl(file.name)) continue;
+        await pruneFile(dateDir, file.name, entry.name);
       }
     }
     if (deleted > 0) {
