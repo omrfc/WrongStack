@@ -30,6 +30,7 @@ replies addressed to it are folded into your agent's next iteration.
 | `/mailbox send <id> <message>` | Direct message an agent (ids from `agents`). |
 | `/mailbox broadcast <message>` | Message every agent on the project. |
 | `/mailbox history [n]` | Last *n* messages on the project (default 20). |
+| `/mailbox clear` | Delete all messages from the mailbox. |
 
 Alias: `/mb`.
 
