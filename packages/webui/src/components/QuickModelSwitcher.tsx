@@ -5,6 +5,7 @@ import { useConfigStore, useUIStore } from '@/stores';
 import type { WSServerMessage } from '@/types';
 import { ArrowRight, Cpu, Search } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { buildModelCandidates } from './QuickModelSwitcher.filter';
 
 interface SavedProvider {
   id: string;
@@ -108,40 +109,17 @@ export function QuickModelSwitcher() {
   /** Flatten into a single list of {provider, model} candidates, then apply
    *  the search filter. The active row floats to the top so the user can
    *  see what they're currently on. */
-  const candidates = useMemo(() => {
-    const list: Array<{
-      provider: string;
-      model: string;
-      modelName: string;
-      contextWindow?: number | undefined;
-      isCurrent: boolean;
-    }> = [];
-    for (const sp of saved) {
-      const models = modelsByProvider[sp.id] ?? [];
-      for (const m of models) {
-        list.push({
-          provider: sp.id,
-          model: m.id,
-          modelName: m.name || m.id,
-          contextWindow: m.contextWindow,
-          isCurrent: sp.id === currentProvider && m.id === currentModel,
-        });
-      }
-    }
-    const q = query.toLowerCase().trim();
-    const filtered = q
-      ? list.filter(
-          (c) =>
-            c.provider.toLowerCase().includes(q) ||
-            c.model.toLowerCase().includes(q) ||
-            c.modelName.toLowerCase().includes(q),
-        )
-      : list;
-    return filtered.sort((a, b) => {
-      if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
-      return a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model);
-    });
-  }, [saved, modelsByProvider, query, currentProvider, currentModel]);
+  const candidates = useMemo(
+    () =>
+      buildModelCandidates(
+        saved,
+        modelsByProvider,
+        query,
+        currentProvider,
+        currentModel,
+      ),
+    [saved, modelsByProvider, query, currentProvider, currentModel],
+  );
 
   useEffect(() => {
     if (selected >= candidates.length) setSelected(0);

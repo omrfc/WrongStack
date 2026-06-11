@@ -1048,6 +1048,25 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           },
           onResumeSession: async (sessionId: string) => {
             if (!sessionStore) return null;
+            // Refuse to resume a session that a LIVE process owns — two
+            // writers on one session JSONL corrupt it. Thrown (not null) so
+            // the resume picker surfaces the reason instead of a generic
+            // failure. Best-effort: a broken registry must not block resume.
+            try {
+              const { SessionRegistry } = await import('@wrongstack/core');
+              const registry = new SessionRegistry(path.dirname(wpaths.globalConfig));
+              const live = (await registry.list()).find(
+                (s) => s.sessionId === sessionId && s.status !== 'stale' && s.pid !== process.pid,
+              );
+              if (live) {
+                throw new Error(
+                  `Session is open in another running wstack (pid ${live.pid}) — it cannot be resumed here while live.`,
+                );
+              }
+            } catch (err) {
+              if (err instanceof Error && err.message.startsWith('Session is open')) throw err;
+              // registry unreadable — fall through to the normal resume path
+            }
             try {
               const resumed = await sessionStore.resume(sessionId);
               const meta = resumed.data.metadata;
@@ -1210,18 +1229,20 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
               const hasActiveAgents = fleetRunning > 0 || eternalActive || parallelActive;
 
               if (hasActiveAgents) {
+                // Truthful warning: a project switch EXITS this process after
+                // spawning the new one, so in-process agents/engines die with
+                // it. (An older message claimed they "continue running".)
                 const parts: string[] = [
-                  color.dim('ℹ  Agents continue running in the current session.'),
-                  '',
+                  color.yellow('⚠  Switching projects exits this wstack — running agents will stop:'),
                 ];
                 if (fleetRunning > 0) {
-                  parts.push(color.dim(`  • ${fleetRunning} subagent(s) running in background`));
+                  parts.push(color.dim(`  • ${fleetRunning} subagent(s) currently running`));
                 }
                 if (eternalActive) {
-                  parts.push(color.dim('  • Eternal engine stays active'));
+                  parts.push(color.dim('  • Eternal engine is active'));
                 }
                 if (parallelActive) {
-                  parts.push(color.dim('  • Parallel engine stays active'));
+                  parts.push(color.dim('  • Parallel engine is active'));
                 }
                 parts.push('');
                 parts.push(color.dim(`  Opening new session in: ${project.name}`));

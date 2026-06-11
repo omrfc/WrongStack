@@ -3519,6 +3519,26 @@ export function App({
         // (clean exit + respawn in the target root, like the F1 switch).
         const isCurrentProject = session.projectRoot === projectRoot;
         if (isCurrentProject) {
+          // The F10 list shows LIVE sessions — guard before offering resume.
+          if (session.pid === process.pid) {
+            dispatch({
+              type: 'addEntry',
+              entry: { kind: 'info', text: 'That is this session — nothing to resume.' },
+            });
+            dispatch({ type: 'toggleSessionsPanel' });
+            return;
+          }
+          if (session.pid != null) {
+            dispatch({
+              type: 'addEntry',
+              entry: {
+                kind: 'warn',
+                text: `Session is open in another running wstack (pid ${session.pid}) — a live session cannot be resumed here. Use /resume for previous sessions.`,
+              },
+            });
+            dispatch({ type: 'toggleSessionsPanel' });
+            return;
+          }
           // First Enter — show confirmation
           dispatch({
             type: 'sessionResumeConfirmSet',
