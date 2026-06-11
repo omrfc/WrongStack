@@ -170,6 +170,7 @@ export {
 } from './collab-debug.js';
 // ── Mailbox — inter-agent messaging ──────────────────────────────────────
 export { DefaultMailbox } from './mailbox.js';
+export { normalizeRecipient } from './mailbox-types.js';
 export { GlobalMailbox, resolveProjectDir } from './global-mailbox.js';
 export { makeMailboxTool, resolveMailboxIdentity, mailboxSessionTag, type MailboxToolOptions, type MailboxResolver } from './mailbox-tool.js';
 export { makeMailSendTool, makeMailInboxTool, type MailToolsOptions } from './mail-tools.js';

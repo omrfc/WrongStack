@@ -21,6 +21,7 @@ import type { EventBus } from '../kernel/events.js';
 import type { Context } from '../core/context.js';
 import type { Tool } from '../types/tool.js';
 import { GlobalMailbox } from './global-mailbox.js';
+import { normalizeRecipient } from './mailbox-types.js';
 import type { Mailbox, MailboxMessage, MailboxMessageType } from './mailbox-types.js';
 import {
   defaultResolveProjectDir,
@@ -82,7 +83,7 @@ export function makeMailSendTool(opts: MailToolsOptions = {}): Tool {
       properties: {
         to: {
           type: 'string',
-          description: 'Recipient: exact agent id ("leader@a1b2c3d4"), base alias ("leader"), or "*" for everyone.',
+          description: 'Recipient: exact agent id ("leader@a1b2c3d4"), base alias ("leader"), or "*" / "all" for everyone.',
         },
         subject: { type: 'string', description: 'Short subject line.' },
         body: { type: 'string', description: 'The message.' },
@@ -98,12 +99,14 @@ export function makeMailSendTool(opts: MailToolsOptions = {}): Tool {
     },
     async execute(input: unknown, ctx: Context) {
       const i = (input ?? {}) as Record<string, unknown>;
-      const to = i.to as string | undefined;
+      const rawTo = i.to as string | undefined;
       const subject = i.subject as string | undefined;
       const body = i.body as string | undefined;
-      if (!to || !subject || body === undefined || body === null) {
+      if (!rawTo || !subject || body === undefined || body === null) {
         return { ok: false, error: '"to", "subject" and "body" are required.' };
       }
+      // "all" is an accepted spelling of the broadcast address.
+      const to = normalizeRecipient(rawTo);
       const mb = resolveMailbox(ctx);
       const identity = await register(mb, ctx);
       const type = (i.type as MailboxMessageType | undefined) ?? (to === '*' ? 'broadcast' : 'note');

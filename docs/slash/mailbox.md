@@ -12,8 +12,9 @@ Every process registers its agents under a **process-unique id**:
 `<base>@<session-tag>` (e.g. `leader@a1b2c3d4`). The bare base id (`leader`) stays
 addressable as an **alias** — a message sent to `leader` is received by
 *every* live leader session on the project, while `leader@a1b2c3d4` reaches
-exactly one. Broadcasts (`*`) reach everyone. Read receipts are recorded
-per unique id, so two terminals never consume each other's unread state.
+exactly one. Broadcasts (`*`, alias `all`) reach everyone. Read receipts are
+recorded per unique id, so two terminals never consume each other's unread
+state.
 
 `/mailbox` acts under the current session's leader identity, so messages
 you send are attributed to the same agent your conversation runs as, and

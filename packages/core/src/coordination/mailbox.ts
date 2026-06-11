@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import { withFileLock } from '../utils/atomic-write.js';
+import { normalizeRecipient } from './mailbox-types.js';
 import type {
   AgentHeartbeatInput,
   AgentRegistrationInput,
@@ -46,7 +47,9 @@ export class DefaultMailbox implements Mailbox {
     const msg: MailboxMessage = {
       id: randomUUID(),
       from: input.from,
-      to: input.to,
+      // "all" is an accepted spelling of the broadcast address — canonical
+      // form on disk is '*' so every query/checker matches it.
+      to: normalizeRecipient(input.to),
       type: input.type,
       subject: input.subject,
       body: input.body,

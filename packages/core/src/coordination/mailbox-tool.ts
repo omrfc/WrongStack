@@ -124,7 +124,7 @@ export function makeMailboxTool(opts: MailboxToolOptions = {}): Tool {
           enum: ['check', 'send', 'ack', 'query', 'status', 'online', 'unread'],
           description: 'Which mailbox operation to perform.',
         },
-        to: { type: 'string', description: "Recipient agent id, or '*' for broadcast." },
+        to: { type: 'string', description: "Recipient agent id, or '*' / 'all' for broadcast." },
         type: { type: 'string', enum: ['note', 'ask', 'assign', 'steer', 'btw', 'broadcast', 'status', 'result'], description: 'Message type.' },
         subject: { type: 'string', description: 'Short subject line.' },
         body: { type: 'string', description: 'Full message content.' },

@@ -414,6 +414,7 @@ inline, the rest as a summary. To catch up explicitly:
 
 - \`mail_send to=<agentId> subject="..." body="..."\` — direct message
 - \`mail_send to="*" subject="..." body="..."\` — broadcast to everyone
+  (\`to="all"\` works too)
 - Message types: \`note\` (info), \`ask\` (question), \`assign\` (task handoff),
   \`steer\` (change approach), \`btw\` (non-urgent info), \`status\` (your current
   task), \`result\` (task outcome)

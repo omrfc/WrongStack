@@ -187,10 +187,21 @@ export interface MailboxQuery {
 
 // ── Mailbox operations ───────────────────────────────────────────────────
 
+/**
+ * Normalize a recipient address. `"all"` (any casing) is an accepted
+ * spelling of the broadcast address and is canonicalized to `'*'` at send
+ * time — both agents and humans reach for "all" naturally, and a literal
+ * "all" recipient would otherwise be deliverable to nobody. The word is
+ * therefore RESERVED: no agent may register under the base id "all".
+ */
+export function normalizeRecipient(to: string): string {
+  return to.trim().toLowerCase() === 'all' ? '*' : to.trim();
+}
+
 export interface MailboxSendInput {
   /** Sender agent id. */
   from: string;
-  /** Recipient agent id, or '*' for broadcast. */
+  /** Recipient agent id, '*' for broadcast (alias: "all"). */
   to: string;
   /** Message category. */
   type: MailboxMessageType;

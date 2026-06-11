@@ -797,3 +797,48 @@ describe('mail_send + mail_inbox tools', () => {
     expect(res.ok).toBe(false);
   });
 });
+
+// ── "all" broadcast alias ────────────────────────────────────────────────────
+describe('recipient "all" normalizes to the broadcast address', () => {
+  let mailbox: DefaultMailbox;
+  let dir: string;
+
+  beforeEach(async () => {
+    const m = await createMailbox();
+    mailbox = m.mailbox;
+    dir = m.dir;
+  });
+
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('DefaultMailbox.send canonicalizes to:"all" (any casing) to "*"', async () => {
+    const msg = await mailbox.send({ from: 'a', to: 'all', type: 'note', subject: 's', body: 'b' });
+    expect(msg.to).toBe('*');
+    const upper = await mailbox.send({ from: 'a', to: ' ALL ', type: 'note', subject: 's2', body: 'b' });
+    expect(upper.to).toBe('*');
+    // Every agent receives it like any other broadcast.
+    const forAnyone = await mailbox.query({ to: 'random-agent' });
+    expect(forAnyone).toHaveLength(2);
+  });
+
+  it('mail_send with to:"all" defaults to type broadcast and reaches everyone', async () => {
+    const { makeMailSendTool, makeMailInboxTool } = await import(
+      '../../src/coordination/mail-tools.js'
+    );
+    const send = makeMailSendTool({ resolveMailbox: () => mailbox });
+    const inbox = makeMailInboxTool({ resolveMailbox: () => mailbox });
+
+    const res = await send.execute(
+      { to: 'all', subject: 'done', body: 'feature shipped' },
+      mockCtx({ meta: { agentId: 'coder' } }) as never,
+    );
+    expect(res.ok).toBe(true);
+    expect(res.to).toBe('*');
+
+    const got = await inbox.execute({}, mockCtx({ meta: { agentId: 'reviewer' } }) as never);
+    expect(got.count).toBe(1);
+    expect(got.messages[0]).toMatchObject({ to: '*', type: 'broadcast', subject: 'done' });
+  });
+});
