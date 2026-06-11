@@ -521,6 +521,7 @@ describe('runRepl', () => {
         banner: false,
         getAutonomy: () => 'auto',
         autoProceedDelayMs: 0,
+        autoProceedMaxIterations: 25,
         onSuggestionsParsed: (parsed) => {
           suggestions.length = 0;
           if (parsed) suggestions.push(...parsed);
@@ -529,8 +530,8 @@ describe('runRepl', () => {
       });
 
       // 1 manual turn + 1 post-turn autonomy "continue" run + at most 25
-      // auto-proceed turns, then control returns to the reader ('/exit' ends
-      // the loop). Unbounded would be ∞ / EOF-throw.
+      // auto-proceed turns (the configured cap), then control returns to the
+      // reader ('/exit' ends the loop). Unbounded would be ∞ / EOF-throw.
       expect(run.mock.calls.length).toBe(27);
       const warns = (renderer.writeWarning as ReturnType<typeof vi.fn>).mock.calls.map((c) =>
         String(c[0] ?? ''),

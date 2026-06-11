@@ -64,6 +64,13 @@ export type HistoryEntry =
 
 export interface HistoryProps {
   entries: HistoryEntry[];
+  /**
+   * Generation counter for wholesale history replacements (session resume).
+   * Keys the internal <Static> so a replacement remounts it — Ink's Static
+   * tracks written items by index and would otherwise skip replayed entries
+   * whenever the new array is shorter than what it already printed.
+   */
+  generation?: number | undefined;
   streamingText?: string | undefined;
   /**
    * Optional live tail of the currently streaming tool. Rendered below the

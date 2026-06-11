@@ -525,10 +525,18 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
 
   return new Promise<number>((resolve) => {
     let exitCode = 0;
+    let hardExitTimer: ReturnType<typeof setTimeout> | null = null;
     const onExit = (code: number) => {
       exitCode = code;
     };
     const settle = (code: number) => {
+      // The unmount completed normally — cancel the hang fallback. Leaving it
+      // armed used to hard-kill the HOST ~400ms after a project switch,
+      // racing the post-TUI respawn logic in execution.ts.
+      if (hardExitTimer) {
+        clearTimeout(hardExitTimer);
+        hardExitTimer = null;
+      }
       cleanup();
       detachListeners();
       resolve(code);
@@ -545,9 +553,11 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
       // Trigger Ink's unmount — it restores terminal state (raw mode off,
       // cursor shown) and resolves waitUntilExit(). A bare process.exit()
       // would skip this and leave the terminal in a broken state.
-      // Fall back to hard exit if Ink hangs.
+      // Hard-exit ONLY if Ink's unmount hangs (settle() cancels this timer
+      // on the normal path).
       instance?.unmount();
-      setTimeout(() => process.exit(code), 400).unref();
+      hardExitTimer = setTimeout(() => process.exit(code), 5_000);
+      hardExitTimer.unref();
     };
 
     // Wire requestExit to the options so the App can call it

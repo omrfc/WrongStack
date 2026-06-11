@@ -139,6 +139,15 @@ export type GoalSummary = {
 
 export type State = {
   entries: HistoryEntry[];
+  /**
+   * Monotonic generation counter for WHOLESALE history replacements
+   * (session resume). Ink's <Static> tracks how many items it has already
+   * written by INDEX — replacing `entries` with a shorter array makes it
+   * silently skip the replayed entries. The History component keys <Static>
+   * on this so a replacement remounts it and the replayed transcript
+   * actually prints.
+   */
+  historyGen: number;
   buffer: string;
   cursor: number;
   streamingText: string;

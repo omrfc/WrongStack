@@ -730,6 +730,7 @@ export function App({
         : []),
       ...restoredEntries,
     ],
+    historyGen: 0,
     buffer: '',
     cursor: 0,
     streamingText: '',
@@ -2174,45 +2175,40 @@ export function App({
     });
   }, [getSettings]);
 
-  // ── Auto-proceed countdown timer ───────────────────────────────
-  // When autonomy mode is 'auto', tick a countdown that the StatusBar
-  // renders as a live "⏳ auto in Ns" chip.  The actual auto-proceed
-  // execution is handled by the REPL's runAutoProceed(); this timer is
-  // display-only so the TUI user can see the countdown shrinking.
-  // Resets whenever autonomyLive or the suggestion list mutates.
-  const [autoProceedCountdown, setAutoProceedCountdown] = useState<number | null>(null);
-  const autoProceedTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
-  useEffect(() => {
-    if (autonomyLive !== 'auto') {
-      clearInterval(autoProceedTimerRef.current);
-      autoProceedTimerRef.current = undefined;
-      setAutoProceedCountdown(null);
-      return;
-    }
-    const cfg = getSettings?.();
-    const delay = cfg?.delayMs ?? 45_000;
-    const start = Date.now();
-    setAutoProceedCountdown(Math.ceil(delay / 1000));
-    autoProceedTimerRef.current = setInterval(() => {
-      const remaining = Math.max(0, Math.ceil((delay - (Date.now() - start)) / 1000));
-      if (remaining <= 0) {
-        clearInterval(autoProceedTimerRef.current);
-        autoProceedTimerRef.current = undefined;
-        setAutoProceedCountdown(null);
-      } else {
-        setAutoProceedCountdown(remaining);
-      }
-    }, 500);
-    return () => {
-      clearInterval(autoProceedTimerRef.current);
-      autoProceedTimerRef.current = undefined;
-    };
-  }, [autonomyLive, getSettings]);
+  // NOTE: there is deliberately NO local "auto-proceed countdown" timer here.
+  // The StatusBar's "⏳ auto in Ns" chip is driven exclusively by real
+  // `countdown.tick` events (state.countdown) emitted while an actual
+  // auto-proceed cooldown runs. A previous display-only local timer started
+  // the moment autonomy flipped to 'auto' — with no suggestions and nothing
+  // pending it showed a phantom 45s countdown on an idle, empty session,
+  // then silently vanished. The real TUI-side countdown (with execution) is
+  // the next-steps auto-submit below.
 
   // ── Next-steps auto-submit countdown ─────────────────────────────────
   // When autonomy is 'auto' and suggestions are available, start a countdown
-  // on line 3 of the status bar. When it expires, auto-submit the first suggestion.
-  // Cancels when user types anything or autonomy changes away from 'auto'.
+  // on line 3 of the status bar. When it expires, auto-submit the first
+  // suggestion. Autonomy is the USER'S setting — this loop never flips it
+  // off. Runaway protection is the consecutive-turn cap instead
+  // (settings `autoProceedMaxIterations`, same knob the REPL honors):
+  // at the cap the loop pauses and waits for input; manual input re-arms it.
+  //
+  // Declared HERE (not with the countdown useState further down) because
+  // `nextStepsRecheck` sits in the effect's deps array, which is evaluated
+  // at render time — declaring it after the effect would TDZ-throw.
+  // Consecutive auto-submitted turns since the last MANUAL input.
+  const autoSubmitStreakRef = useRef(0);
+  const autoSubmitCapWarnedRef = useRef(false);
+  // Bumped on a slow poll while idle+auto with no suggestions, so the
+  // auto-submit effect re-checks for suggestions that arrived out-of-band.
+  const [nextStepsRecheck, setNextStepsRecheck] = useState(0);
+  // A mode change is always a user action (the system never flips autonomy)
+  // — re-arm the cap on any switch. Deliberately NOT tied to state.status:
+  // every automatic turn passes through 'running', and resetting there
+  // would defeat the cap entirely.
+  useEffect(() => {
+    autoSubmitStreakRef.current = 0;
+    autoSubmitCapWarnedRef.current = false;
+  }, [autonomyLive]);
   useEffect(() => {
     // Only run when idle and in auto mode
     if (state.status !== 'idle' || autonomyLive !== 'auto') {
@@ -2235,11 +2231,33 @@ export function App({
 
     const suggestions = getSuggestions?.() ?? [];
     if (suggestions.length === 0) {
+      // Suggestions can arrive while we sit idle (e.g. /suggest, a fleet
+      // turn finishing) without any dep of this effect changing. Re-check
+      // on a slow poll instead of waiting for the next status transition.
+      const recheck = setTimeout(() => setNextStepsRecheck((t) => t + 1), 1_500);
+      return () => clearTimeout(recheck);
+    }
+
+    const cfg = getSettings?.();
+
+    // Consecutive-cap: pause (don't even show a countdown that won't fire)
+    // once the streak hits the limit. 0 = unlimited (user's explicit choice).
+    const maxAuto = cfg?.autoProceedMaxIterations ?? 50;
+    if (maxAuto > 0 && autoSubmitStreakRef.current >= maxAuto) {
+      if (!autoSubmitCapWarnedRef.current) {
+        autoSubmitCapWarnedRef.current = true;
+        dispatch({
+          type: 'addEntry',
+          entry: {
+            kind: 'warn',
+            text: `Auto-proceed paused after ${maxAuto} consecutive automatic turns — type anything to continue (autonomy stays on).`,
+          },
+        });
+      }
       return;
     }
 
     // Use the same delay as auto-proceed countdown
-    const cfg = getSettings?.();
     const delay = cfg?.delayMs ?? 45_000;
     const top = suggestions[0];
     if (!top) return;
@@ -2258,6 +2276,7 @@ export function App({
         const suggestion = nextStepsAutoSubmitSuggestionRef.current;
         nextStepsAutoSubmitSuggestionRef.current = null;
         if (suggestion) {
+          autoSubmitStreakRef.current += 1;
           setDraft(suggestion, suggestion.length);
           // Trigger submit
           void (async () => {
@@ -2266,9 +2285,6 @@ export function App({
             // Build blocks for the suggestion
             const blocks: ContentBlock[] = [{ type: 'text', text: trimmed }];
             dispatch({ type: 'addEntry', entry: { kind: 'user', text: trimmed } });
-            if (autonomyLive === 'auto') {
-              switchAutonomy?.('off');
-            }
             // Via ref: `runBlocks` is declared ~2000 lines below — naming it
             // in this effect's deps array evaluates it at render time and
             // throws a TDZ ReferenceError. The ref is only dereferenced when
@@ -2285,7 +2301,7 @@ export function App({
       clearInterval(nextStepsAutoSubmitTimerRef.current);
       nextStepsAutoSubmitTimerRef.current = undefined;
     };
-  }, [state.status, autonomyLive, state.enhance, state.enhanceBusy, getSettings, getSuggestions, switchAutonomy, dispatch]);
+  }, [state.status, autonomyLive, state.enhance, state.enhanceBusy, nextStepsRecheck, getSettings, getSuggestions, dispatch]);
 
   // ── Auto-save settings on value change (←/→ arrow keys) ──
   // Gate ref: skip the first effect fire when settings just opened (all fields
@@ -3401,15 +3417,24 @@ export function App({
         // For project selections, onProjectSelect stores the pending switch and
         // we request a clean TUI exit with code 42. The host CLI spawns wstack
         // in the new project after runTui returns.
-        // For actions (new-session, prev-sessions), onProjectSelect handles directly.
         if (item.kind === 'project') {
           onProjectSelect?.(item.key, item.kind);
           dispatch({ type: 'projectPickerClose' });
           requestExit?.(42);
           return;
         }
-        onProjectSelect?.(item.key, item.kind);
+        // Actions: 'new-session' restarts wstack in the current project via
+        // the same exit-42 path (onProjectSelect records the pending switch);
+        // 'prev-sessions' opens the in-TUI /resume picker. These used to be
+        // dead menu items — onProjectSelect no-op'd on actions and nothing
+        // else handled them.
         dispatch({ type: 'projectPickerClose' });
+        if (item.key === 'new-session') {
+          onProjectSelect?.(item.key, item.kind);
+          requestExit?.(42);
+        } else if (item.key === 'prev-sessions') {
+          void submit('/resume');
+        }
         return;
       }
       // Printable characters → add to filter
@@ -3490,7 +3515,8 @@ export function App({
         const session = sessions[sel];
         if (!session) return;
 
-        // Determine if same project (resume) or different (spawn new terminal)
+        // Determine if same project (in-process resume) or different project
+        // (clean exit + respawn in the target root, like the F1 switch).
         const isCurrentProject = session.projectRoot === projectRoot;
         if (isCurrentProject) {
           // First Enter — show confirmation
@@ -3500,8 +3526,12 @@ export function App({
             sessionName: session.projectName,
           });
         } else {
-          // Different project — spawn immediately (no confirmation needed)
+          // Different project — record the pending switch, then exit cleanly
+          // with the project-switch code so the host respawns wstack in the
+          // target project (resuming the chosen session).
           onSwitchToSession?.(session.sessionId, session.projectRoot ?? '', session.projectName);
+          dispatch({ type: 'toggleSessionsPanel' });
+          requestExit?.(42);
         }
         return;
       }
@@ -4670,6 +4700,10 @@ export function App({
     }
 
     dispatch({ type: 'resetInterrupts' });
+    // Manual input re-arms the next-steps auto-submit loop: the consecutive
+    // cap counts AUTOMATIC turns between user inputs only.
+    autoSubmitStreakRef.current = 0;
+    autoSubmitCapWarnedRef.current = false;
     // Submitting anything snaps the managed viewport back to the newest output
     // (no-op when already pinned or outside mouse mode).
     dispatch({ type: 'scrollToBottom' });
@@ -5129,6 +5163,7 @@ export function App({
         ) : (
           <History
             entries={state.entries}
+            generation={state.historyGen}
             streamingText={state.streamingText}
             toolStream={state.toolStream}
           />
@@ -5413,7 +5448,7 @@ export function App({
             debugStreamStats={state.debugStreamStats}
             enhanceCountdown={enhanceCountdown}
             nextStepsAutoSubmitCountdown={nextStepsAutoSubmitCountdown}
-            autoProceedCountdown={state.countdown?.remainingSeconds ?? autoProceedCountdown}
+            autoProceedCountdown={state.countdown?.remainingSeconds ?? null}
             sessionCount={sessionCount}
             mailbox={mailboxStatus}
           />

@@ -528,7 +528,10 @@ export function reducer(state: State, action: Action): State {
       const maxBannerId = banners.length > 0 ? Math.max(...banners.map((b) => b.id)) : 0;
       const shifted = action.entries.map((e, i) => ({ ...e, id: maxBannerId + 1 + i }));
       const nextId = maxBannerId + 1 + shifted.length;
-      return { ...state, entries: [...banners, ...shifted], nextId };
+      // Bump the generation so <Static> remounts — without this, Ink's
+      // already-written index exceeds the new array and the replayed
+      // entries never print (or print from a random offset).
+      return { ...state, entries: [...banners, ...shifted], nextId, historyGen: state.historyGen + 1 };
     }
     case 'settingsOpen':
       return {

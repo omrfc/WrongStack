@@ -562,10 +562,12 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
       // in the target project directory after the TUI unmounts.
       const PROJECT_SWITCH_EXIT_CODE = 42;
 
-      // Stores the pending project switch info set by onProjectSelect when the
-      // user selects a project from the F1 picker. Checked after runTui returns
-      // PROJECT_SWITCH_EXIT_CODE to spawn the new wstack process.
-      let pendingProjectSwitch: { root: string; name: string } | null = null;
+      // Stores the pending project switch info set by onProjectSelect (F1
+      // picker) or onSwitchToSession (F10 sessions panel). Checked after
+      // runTui returns PROJECT_SWITCH_EXIT_CODE to spawn the new wstack
+      // process. `resumeSessionId` makes the new instance resume that
+      // session (`--resume <id>`) instead of starting fresh.
+      let pendingProjectSwitch: { root: string; name: string; resumeSessionId?: string | undefined } | null = null;
 
       try {
         code = await runTui({
@@ -932,39 +934,22 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                 })),
               }));
           },
-          onSwitchToSession: (_sessionId: string, targetRoot: string, _projectName: string) => {
-            // Spawn a new wstack terminal in the target project directory.
-            // The old session keeps running; this opens a fresh window.
-            const { spawn } = require('node:child_process');
-            const { createRequire } = require('node:module');
-            let cliPath: string;
-            try {
-              const req = createRequire(import.meta.url);
-              const pkgPath = req.resolve('@wrongstack/cli/package.json');
-              const pkgDir = path.dirname(pkgPath);
-              cliPath = path.join(pkgDir, 'dist', 'index.js');
-              require('node:fs').accessSync(cliPath);
-            } catch {
-              cliPath = process.argv[1] ?? '';
-              if (!cliPath) return;
-            }
-            const nodeExe = process.execPath;
-            spawn(nodeExe, [cliPath, '--no-interactive'], {
-              cwd: targetRoot,
-              stdio: 'inherit',
-              detached: false,
-              signal: AbortSignal.timeout(30_000),
-            }).on('error', (err: Error) => {
-              console.error(color.red(`Failed to spawn wstack: ${err.message}`));
-            }).unref();
-
-            renderer.write([
-              '',
-              color.green(`  Opening ${path.basename(targetRoot)}`),
-              color.dim(`  Root: ${targetRoot}`),
-              color.dim('  (current session stays open — Ctrl+C to return)'),
-              '',
-            ].join('\n'));
+          onSwitchToSession: (_sessionId: string, targetRoot: string, projectName: string) => {
+            // Record the pending switch; the TUI follows up with
+            // requestExit(PROJECT_SWITCH_EXIT_CODE) and the spawn happens
+            // after runTui returns — exactly like the F1 project switch.
+            //
+            // Deliberately NOT `--resume <sessionId>`: the F10 panel lists
+            // LIVE sessions (their owner processes are alive — 'stale' is
+            // filtered out), and resuming one would put two processes on the
+            // same session JSONL. We open the target project fresh instead.
+            //
+            // This REPLACED an in-place `spawn(..., { stdio: 'inherit' })`
+            // that launched a second interactive wstack while this TUI kept
+            // running: two raw-mode processes fighting over one terminal,
+            // and a stray `AbortSignal.timeout(30_000)` that SIGTERM'd the
+            // new instance 30 seconds in.
+            pendingProjectSwitch = { root: targetRoot, name: projectName };
           },
           initialGoal: goalFlag,
           initialAsk: askFlag,
@@ -1067,14 +1052,11 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
               const resumed = await sessionStore.resume(sessionId);
               const meta = resumed.data.metadata;
 
-              // Rebuild the agent's conversation context from the resumed messages.
-              const allMessages = resumed.data.messages;
-              if (allMessages.length > 0) {
-                agent.ctx.messages.length = 0;
-                for (const msg of allMessages) {
-                  agent.ctx.messages.push(msg);
-                }
-              }
+              // Rebuild the agent's conversation context from the resumed
+              // messages. Go through the observable state wrapper (NOT direct
+              // array mutation) so onChange subscribers fire and tool-use
+              // adjacency is re-checked on the next request.
+              agent.ctx.state.replaceMessages(resumed.data.messages);
 
               // Sync the agent's model/provider to what was used in the
               // resumed session. If the resumed session used a different
@@ -1103,12 +1085,16 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
               // Fire-and-forget: don't block resume on the close.
               const oldWriter = agent.ctx.session;
               if (oldWriter && oldWriter !== resumed.writer) {
+                // Capture the OLD session's usage synchronously — the counter
+                // is reset for the resumed session below, and this closure
+                // runs after that reset.
+                const endedUsage = tokenCounter.total();
                 void (async () => {
                   try {
                     await oldWriter.append({
                       type: 'session_end',
                       ts: new Date().toISOString(),
-                      usage: tokenCounter.total(),
+                      usage: endedUsage,
                     });
                   } catch (err) {
                     console.error(JSON.stringify({
@@ -1134,6 +1120,10 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
               // Swap the session writer: new events (tool calls, LLM responses)
               // will append to the resumed session's JSONL, not the old one.
               agent.ctx.session = resumed.writer;
+
+              // Token accounting is per-session: without a reset the resumed
+              // session's summary/cost chips inherit the old session's totals.
+              tokenCounter.reset();
 
               // Re-point crash recovery (active.json) at the resumed session —
               // otherwise a crash after this resume would offer recovery for
@@ -1188,7 +1178,15 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
            */
           onProjectSelect: async (slug: string, kind: 'project' | 'action') => {
             if (kind === 'action') {
-              // new-session / prev-sessions — handled by the slash command path
+              if (slug === 'new-session') {
+                // Fresh session in the CURRENT project — same clean
+                // exit-42 + respawn mechanism as a project switch.
+                pendingProjectSwitch = {
+                  root: projectRoot,
+                  name: path.basename(projectRoot) || projectRoot,
+                };
+              }
+              // prev-sessions is handled inside the TUI (/resume picker).
               return;
             }
 
@@ -1252,7 +1250,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         // This replaces the old behavior of spawning mid-session (which left the TUI
         // running and corrupted the terminal state).
         if (code === PROJECT_SWITCH_EXIT_CODE && pendingProjectSwitch) {
-          const { root, name } = pendingProjectSwitch;
+          const { root, name, resumeSessionId } = pendingProjectSwitch;
 
           // Clear screen before spawning — removes TUI artifacts so the new wstack
           // banner starts fresh. \x1b[2J clears visible screen, \x1b[H homes cursor.
@@ -1276,11 +1274,16 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           }
 
           const nodeExe = process.execPath;
-          spawn(nodeExe, [cliPath, '--no-interactive'], {
+          const spawnArgs = [cliPath, '--no-interactive'];
+          if (resumeSessionId) spawnArgs.push('--resume', resumeSessionId);
+          // No abort signal here: the spawned wstack OUTLIVES this process
+          // (we exit right after; it inherits the terminal). A previous
+          // AbortSignal.timeout(30_000) on this spawn killed the successor
+          // 30 seconds in whenever the parent lingered.
+          spawn(nodeExe, spawnArgs, {
             cwd: root,
             stdio: 'inherit',
             detached: false,
-            signal: AbortSignal.timeout(30_000),
           }).on('error', (err: Error) => {
             console.error(color.red(`Failed to spawn wstack: ${err.message}`));
           }).unref();

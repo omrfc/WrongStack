@@ -212,8 +212,13 @@ export function ChatView() {
       {/* Header */}
       <header className="flex flex-col border-b bg-card/95 backdrop-blur-sm supports-[backdrop-filter]:bg-card/80 shrink-0 sticky top-0 z-20">
         <div className="flex items-center justify-between gap-2 px-3 py-2">
-          {/* overflow-hidden: on narrow viewports excess chips clip cleanly
-              instead of colliding with the right-hand button cluster. */}
+          {/* Static text chips live in the overflow-hidden group so long
+              session titles clip cleanly on narrow viewports. The
+              dropdown-bearing chips (model picker, mode/ctx pickers,
+              autonomy picker, session switcher) sit in their own sibling
+              below — overflow-hidden would otherwise chop their
+              `position: absolute` dropdown panels off at the row edge
+              and the user sees no menu open. */}
           <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
             {!sidebarOpen && (
               <Button
@@ -272,6 +277,12 @@ export function ChatView() {
                 </button>
               )
             )}
+          </div>
+          {/* Interactive chips (model picker, mode/ctx, autonomy, session
+              switcher, iter). No overflow-hidden so their absolutely
+              positioned dropdowns can extend below the row. shrink-0 so
+              they stay full-size when the header is narrow. */}
+          <div className="flex items-center gap-1.5 shrink-0">
             {/* Session switcher — quick dropdown to jump between recent sessions */}
             {historyEntries.length > 1 && (
               <div ref={switcherRef} className="relative shrink-0">

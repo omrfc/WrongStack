@@ -28,11 +28,13 @@ import { CLI_VERSION } from './version.js';
  * Returns null when no suggestions are found.
  */
 /**
- * Hard ceiling on consecutive auto-proceed turns ('auto' autonomy mode)
+ * Default ceiling on consecutive auto-proceed turns ('auto' autonomy mode)
  * between two manual inputs. Without it, a model that ends every reply with
  * a "Next steps" block drives the REPL in an unbounded self-feeding loop.
+ * Overridden by `ReplOptions.autoProceedMaxIterations` (settable from the
+ * settings panel; 0 means unlimited — the user's explicit choice).
  */
-const MAX_CONSECUTIVE_AUTO_PROCEED = 25;
+const DEFAULT_MAX_CONSECUTIVE_AUTO_PROCEED = 50;
 
 export function parseSuggestionsFromOutput(finalText: string): string[] | null {
   // Find the "Next steps" section — look for heading patterns
@@ -401,12 +403,15 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
 
         // ── 'auto' mode: brief cooldown → feed directly ────────────
         if (mode === 'auto' && suggestions.length > 0) {
-          if (autoIterCount >= MAX_CONSECUTIVE_AUTO_PROCEED) {
+          // The cap pauses the loop but NEVER flips autonomy off — the mode
+          // is the user's setting; only the user changes it.
+          const maxAuto = opts.autoProceedMaxIterations ?? DEFAULT_MAX_CONSECUTIVE_AUTO_PROCEED;
+          if (maxAuto > 0 && autoIterCount >= maxAuto) {
             if (!autoCapWarned) {
               autoCapWarned = true;
               opts.renderer.writeWarning(
-                `Auto-proceed paused after ${MAX_CONSECUTIVE_AUTO_PROCEED} consecutive automatic turns — ` +
-                  'enter input to continue (resets the counter) or /autonomy off.',
+                `Auto-proceed paused after ${maxAuto} consecutive automatic turns — ` +
+                  'enter input to continue (resets the counter). Autonomy stays on.',
               );
             }
             // Fall through to the input read below instead of looping.

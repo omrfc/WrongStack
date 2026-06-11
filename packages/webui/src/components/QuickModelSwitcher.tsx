@@ -37,7 +37,13 @@ export function QuickModelSwitcher() {
   const currentProvider = useConfigStore((s) => s.provider);
   const currentModel = useConfigStore((s) => s.model);
   const paletteOpen = useUIStore((s) => s.paletteOpen);
-  const ws = useWebSocket();
+  // Destructure the stable action callbacks from useWebSocket() so we
+  // can list them as effect deps without re-firing on every render.
+  // useWebSocket() returns a fresh object literal each call — putting
+  // that object itself in a dep array makes the effect run on every
+  // render, which would reset `query` to '' and clear the user's input
+  // mid-keystroke (the "filter doesn't work" symptom).
+  const { listSavedProviders, listProviderModels, switchModel } = useWebSocket();
 
   // Ctrl/Cmd+M opens. Skip when the command palette is already open so
   // the two overlays don't fight for focus.
@@ -83,21 +89,21 @@ export function QuickModelSwitcher() {
     if (!open) return;
     setQuery('');
     setSelected(0);
-    ws.listSavedProviders();
+    listSavedProviders();
     // Auto-focus the search input after the dialog paints. requestAnimationFrame
     // because the input ref isn't mounted on the same tick we flip `open`.
     requestAnimationFrame(() => inputRef.current?.focus());
-  }, [open, ws]);
+  }, [open, listSavedProviders]);
 
   // Lazy-load models per saved provider once we know what's saved.
   useEffect(() => {
     if (!open) return;
     for (const sp of saved) {
       if (!modelsByProvider[sp.id]) {
-        ws.listProviderModels(sp.id);
+        listProviderModels(sp.id);
       }
     }
-  }, [open, saved, modelsByProvider, ws]);
+  }, [open, saved, modelsByProvider, listProviderModels]);
 
   /** Flatten into a single list of {provider, model} candidates, then apply
    *  the search filter. The active row floats to the top so the user can
@@ -144,7 +150,7 @@ export function QuickModelSwitcher() {
   const commit = (idx: number) => {
     const pick = candidates[idx];
     if (!pick) return;
-    ws.switchModel(pick.provider, pick.model);
+    switchModel(pick.provider, pick.model);
     setOpen(false);
   };
 
