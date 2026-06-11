@@ -1214,18 +1214,49 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
       }
 
       case 'session.new': {
-        // CLI-mode session reset: wipe in-memory state (messages, todos,
-        // read-files, mtime cache) and broadcast session.start with reset=true.
-        // Unlike the standalone server, we do NOT create a new on-disk session
-        // — the CLI session lifecycle is managed by wiring/session.ts and a
-        // full reset requires the SessionStore (not wired into this path).
-        // This handles the visible UI cleanup the frontend expects.
+        // Full new session when the SessionStore is wired (the normal case):
+        // finalize the current writer (session_end + close → summary sidecar)
+        // and swap in a fresh on-disk session, exactly like the standalone
+        // server. Previously this only wiped in-memory state — the "new"
+        // conversation kept appending to the OLD session's JSONL.
         const ctx = opts.agent.ctx;
+        const oldId = ctx.session?.id ?? opts.session.id;
+        if (opts.sessionStore) {
+          try {
+            const oldWriter = ctx.session;
+            const oldUsage = ctx.tokenCounter.total();
+            if (oldWriter) {
+              void (async () => {
+                await oldWriter
+                  .append({ type: 'session_end', ts: new Date().toISOString(), usage: oldUsage })
+                  .catch(() => undefined);
+                await oldWriter.close().catch(() => undefined);
+              })();
+            }
+            const fresh = await opts.sessionStore.create({
+              id: '',
+              title: '',
+              model: ctx.model,
+              provider: (ctx.provider as { id?: string }).id ?? '',
+            });
+            ctx.session = fresh;
+            opts.onSessionSwapped?.(fresh.id);
+            ctx.tokenCounter.reset();
+          } catch (err) {
+            // Store failure degrades to the in-memory reset below.
+            console.warn(JSON.stringify({
+              level: 'warn',
+              event: 'webui.session_new_store_failed',
+              message: err instanceof Error ? err.message : String(err),
+              timestamp: new Date().toISOString(),
+            }));
+          }
+        }
         ctx.state.replaceMessages([]);
         ctx.state.replaceTodos([]);
         ctx.readFiles.clear();
         ctx.fileMtimes.clear();
-        const sessNewP = await buildSessionStartPayload({ reset: true });
+        const sessNewP = await buildSessionStartPayload({ reset: true, clearedSessionId: oldId });
         broadcast({ type: 'session.start', payload: sessNewP });
         break;
       }
@@ -2193,6 +2224,137 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
             clearedSessionId: oldSessionId,
           });
           broadcast({ type: 'session.start', payload: switchedP });
+        } catch (err) {
+          sendResult(ws, false, err instanceof Error ? err.message : String(err));
+        }
+        break;
+      }
+
+      case 'projects.add': {
+        // Register a folder in the project manifest (Projects panel "Add").
+        // Ported from the standalone server — this message used to fall
+        // through to "Unknown message type" here, so adding a project from
+        // the WebUI silently did nothing on the embedded server.
+        const { root: addRoot, name: addName } = (
+          msg as { payload: { root: string; name?: string | undefined } }
+        ).payload;
+        try {
+          const resolved = path.resolve(addRoot);
+          const stat = await fs.stat(resolved).catch(() => null);
+          if (!stat?.isDirectory()) throw new Error(`Not a directory: ${resolved}`);
+
+          const { loadManifest, saveManifest, ensureProjectDataDir } = await import(
+            './slash-commands/project-utils.js'
+          );
+          const manifest = await loadManifest(opts.globalConfigPath);
+          const existing = manifest.projects.find((p) => path.resolve(p.root) === resolved);
+          if (existing) {
+            send(ws, {
+              type: 'projects.added',
+              payload: {
+                name: existing.name,
+                root: existing.root,
+                slug: existing.slug,
+                message: `Already registered as "${existing.name}"`,
+              },
+            });
+            break;
+          }
+          const name = addName?.trim() || path.basename(resolved);
+          const slug = projectSlug(resolved);
+          await ensureProjectDataDir(slug, opts.globalConfigPath);
+          const now = new Date().toISOString();
+          manifest.projects.push({ name, root: resolved, slug, lastSeen: now, createdAt: now });
+          await saveManifest(manifest, opts.globalConfigPath);
+          send(ws, {
+            type: 'projects.added',
+            payload: { name, root: resolved, slug, message: `Registered project "${name}"` },
+          });
+        } catch (err) {
+          send(ws, {
+            type: 'projects.added',
+            payload: {
+              name: path.basename(addRoot),
+              root: addRoot,
+              slug: '',
+              message: err instanceof Error ? err.message : String(err),
+            },
+          });
+        }
+        break;
+      }
+
+      case 'working_dir.set': {
+        // FileExplorer breadcrumb navigation. Ported from the standalone
+        // server (used to be an unknown message here).
+        const { path: newPath } = (msg as { payload: { path: string } }).payload;
+        try {
+          const wdRoot = opts.projectRoot ?? opts.agent.ctx.projectRoot;
+          const resolved = path.resolve(wdRoot, newPath);
+          if (!resolved.startsWith(wdRoot + path.sep) && resolved !== wdRoot) {
+            sendResult(ws, false, `Path must stay inside the project root: ${wdRoot}`);
+            break;
+          }
+          const stat = await fs.stat(resolved).catch(() => null);
+          if (!stat?.isDirectory()) {
+            sendResult(ws, false, `Directory not found or not accessible: ${resolved}`);
+            break;
+          }
+          opts.agent.ctx.cwd = resolved;
+          broadcast({
+            type: 'working_dir.changed',
+            payload: { cwd: resolved, projectRoot: wdRoot },
+          });
+          sendResult(ws, true, `Working directory set to ${resolved}`);
+        } catch (err) {
+          sendResult(ws, false, err instanceof Error ? err.message : String(err));
+        }
+        break;
+      }
+
+      case 'shell.open': {
+        // Open the OS file manager / a terminal at a path (FileExplorer
+        // context actions). Ported from the standalone server, but WITHOUT
+        // a shell: the path arrives over the WebSocket, so it is passed as a
+        // spawn() argument array (no string interpolation into cmd/sh), with
+        // a metacharacter guard as defense in depth.
+        const { path: targetPath, target } = (
+          msg as { payload: { path: string; target: 'terminal' | 'file-manager' } }
+        ).payload;
+        try {
+          const resolved = path.resolve(targetPath);
+          await fs.access(resolved);
+          // Real directories virtually never contain these; rejecting them
+          // closes the cmd.exe re-parsing injection class outright.
+          if (/[&|<>^"'`\n\r]/.test(resolved)) {
+            sendResult(ws, false, 'Path contains unsupported characters.');
+            break;
+          }
+          const { spawn } = await import('node:child_process');
+          const platform = process.platform;
+          const launch = (cmd: string, args: string[], onError?: () => void) => {
+            const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+            child.on('error', () => onError?.());
+            child.unref();
+          };
+          if (target === 'file-manager') {
+            if (platform === 'win32') launch('explorer', [resolved]);
+            else if (platform === 'darwin') launch('open', [resolved]);
+            else launch('xdg-open', [resolved]);
+          } else if (platform === 'win32') {
+            // `start` is a cmd builtin; each token is a separate argv entry
+            // (Node quotes them individually — no string concatenation).
+            launch('cmd', ['/c', 'start', 'cmd', '/k', 'cd', '/d', resolved]);
+          } else if (platform === 'darwin') {
+            launch('open', ['-a', 'Terminal', resolved]);
+          } else {
+            launch('x-terminal-emulator', [`--working-directory=${resolved}`], () =>
+              launch('gnome-terminal', [`--working-directory=${resolved}`], () =>
+                launch('xterm', ['-e', `cd '${resolved}' && ${process.env['SHELL'] ?? 'sh'}`]),
+              ),
+            );
+          }
+          sendResult(ws, true, `Opened ${target} at ${resolved}`);
         } catch (err) {
           sendResult(ws, false, err instanceof Error ? err.message : String(err));
         }
