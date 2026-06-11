@@ -3,33 +3,16 @@ import type { SubcommandHandler } from '../index.js';
 /**
  * `wrongstack quick` — launch directly into the TUI with sensible defaults.
  *
- * - Skips all interactive setup prompts (provider picker, mode picker, etc.)
- * - Uses the last-used or default provider/model from config
- * - Logs configured plugins as debug lines (like a debug log dump)
- * - Opens the TUI immediately with the F3 agents monitor visible by default
+ * NOTE: The actual handling is done in `boot()` (boot.ts) which intercepts 'quick'
+ * before the subcommand dispatch in cli-main.ts. boot() sets flags.quick and
+ * flags.tui, lists plugins, clears positional, and returns BootContext.
+ * execute() then goes to the TUI path with initialAgentsMonitorOpen: true.
+ *
+ * This handler is kept for completeness (registered in subcommands/index.ts) but
+ * is never called in the `wrongstack quick` flow.
  */
-export const quickCmd: SubcommandHandler = (args, deps) => {
-  // Mark quick mode so execute() knows to pass initialAgentsMonitorOpen to runTui.
-  if (deps.flags) {
-    deps.flags['quick'] = true;
-    deps.flags['tui'] = true;
-  }
-  // Clear positional args so the TUI path is taken (enteringTui check).
-  args.length = 0;
-
-  // List configured plugins as debug logs — one line per plugin.
-  const plugins = deps.config.plugins ?? [];
-  if (plugins.length === 0) {
-    console.debug('[wrongstack:quick] No plugins configured');
-  } else {
-    for (const p of plugins) {
-      const name = typeof p === 'string' ? p : p.name;
-      const enabled = typeof p === 'object' && p.enabled === false ? ' (disabled)' : '';
-      console.debug(`[wrongstack:quick] plugin: ${name}${enabled}`);
-    }
-  }
-
-  // Return 0 — execute() will detect flags.quick and flags.tui, then call runTui.
-  // The actual exit code comes from runTui.
+export const quickCmd: SubcommandHandler = (_args, _deps) => {
+  // This handler is never reached when `wrongstack quick` is used (boot() handles it).
+  // Kept for discoverability and as a fallback if the boot() intercept is removed.
   return Promise.resolve(0);
 };

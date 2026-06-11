@@ -313,6 +313,13 @@ export interface RunTuiOptions {
   // --- Project / Session switching ---
   getProjectPickerItems?: (() => Promise<import('./components/project-picker.js').ProjectPickerItem[]>) | undefined;
   onProjectSelect?: ((key: string, kind: 'project' | 'action') => void) | undefined;
+  /**
+   * Request the TUI to exit with a specific code. Used by the project picker
+   * to trigger a clean exit before spawning a new wstack process in a different
+   * project directory. The host CLI catches this exit code and performs the
+   * actual project switch.
+   */
+  requestExit?: (code: number) => void;
   getLiveSessions?: (() => Promise<import('./components/sessions-panel.js').LiveSessionEntry[]>) | undefined;
   onSwitchToSession?: ((sessionId: string, projectRoot: string, projectName: string) => void) | undefined;
   /**
@@ -527,6 +534,27 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
       resolve(code);
     };
 
+    /**
+     * Request the TUI to exit with a specific code. This triggers Ink's unmount
+     * (restoring terminal state) and resolves the runTui promise with the given code.
+     * Used for clean exits when switching projects — the host CLI catches the exit
+     * code and spawns a new wstack process in the target directory.
+     */
+    const requestExit = (code: number) => {
+      onExit(code);
+      // Trigger Ink's unmount via the instance's exit() method. This restores
+      // terminal state (raw mode off, cursor shown). A bare process.exit() would
+      // skip this and leave the terminal in a broken state.
+      // Fall back to hard exit if Ink hangs.
+      if (instance?.exit) {
+        instance.exit();
+      }
+      setTimeout(() => process.exit(code), 400).unref();
+    };
+
+    // Wire requestExit to the options so the App can call it
+    opts.requestExit = requestExit;
+
     let instance: ReturnType<typeof render>;
     try {
       instance = render(
@@ -593,6 +621,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           onResumeSession: opts.onResumeSession,
           getProjectPickerItems: opts.getProjectPickerItems,
           onProjectSelect: opts.onProjectSelect,
+          requestExit: opts.requestExit,
           getLiveSessions: opts.getLiveSessions,
           onSwitchToSession: opts.onSwitchToSession,
           initialAgentsMonitorOpen: opts.initialAgentsMonitorOpen,

@@ -558,6 +558,15 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         };
       };
 
+      // Special exit code for project switch — triggers a clean wstack restart
+      // in the target project directory after the TUI unmounts.
+      const PROJECT_SWITCH_EXIT_CODE = 42;
+
+      // Stores the pending project switch info set by onProjectSelect when the
+      // user selects a project from the F1 picker. Checked after runTui returns
+      // PROJECT_SWITCH_EXIT_CODE to spawn the new wstack process.
+      let pendingProjectSwitch: { root: string; name: string } | null = null;
+
       try {
         code = await runTui({
           agent,
@@ -1171,7 +1180,11 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           },
           /**
            * Called when the user selects a project in the picker.
-           * Handles agent shutdown confirmation and spawns a fresh wstack session.
+           * For projects: loads manifest, validates the project, updates lastSeen,
+           * stores the pending switch, and returns. The TUI calls requestExit(42)
+           * which causes runTui to return. The host CLI then spawns wstack in
+           * the target directory.
+           * For actions: handled by the slash command path (no-op here).
            */
           onProjectSelect: async (slug: string, kind: 'project' | 'action') => {
             if (kind === 'action') {
@@ -1217,46 +1230,14 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                 renderer.write(`\n${parts.join('\n')}\n`);
               }
 
-              // ── Spawn wstack in the target directory ──────────────
-              const { spawn } = await import('node:child_process');
-              const { createRequire } = await import('node:module');
-              let cliPath: string;
-              try {
-                const req = createRequire(import.meta.url);
-                const pkgPath = req.resolve('@wrongstack/cli/package.json');
-                const pkgDir = path.dirname(pkgPath);
-                cliPath = path.join(pkgDir, 'dist', 'index.js');
-                await fs.access(cliPath);
-              } catch {
-                cliPath = process.argv[1] ?? '';
-                if (!cliPath) {
-                  renderer.write(color.red('Could not locate the CLI entry point.\n'));
-                  return;
-                }
-              }
-
-              // Update lastSeen in manifest
+              // Update lastSeen in manifest and store pending switch.
+              // The actual spawning happens after runTui returns PROJECT_SWITCH_EXIT_CODE.
               project.lastSeen = new Date().toISOString();
               const { saveManifest } = await import('./slash-commands/project-utils.js');
               await saveManifest(manifest, wpaths.globalConfig);
 
-              const nodeExe = process.execPath;
-              spawn(nodeExe, [cliPath, '--no-interactive'], {
-                cwd: project.root,
-                stdio: 'inherit',
-                detached: false,
-                signal: AbortSignal.timeout(30_000),
-              }).on('error', (err: Error) => {
-                console.error(color.red(`Failed to spawn wstack: ${err.message}`));
-              }).unref();
-
-              renderer.write([
-                '',
-                color.green(`  Switched to ${project.name}`),
-                color.dim(`  Root: ${project.root}`),
-                color.dim('  (current session stays open — Ctrl+C to return)'),
-                '',
-              ].join('\n'));
+              // Store the pending project switch — will be read after runTui returns
+              pendingProjectSwitch = { root: project.root, name: project.name };
             } catch (err) {
               renderer.write(
                 color.red(`Project switch failed: ${err instanceof Error ? err.message : String(err)}\n`),
@@ -1266,6 +1247,54 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           // `wrongstack quick` sets flags.quick — open the F3 agents monitor by default.
           initialAgentsMonitorOpen: !!flags.quick,
         });
+
+        // After TUI exits with PROJECT_SWITCH_EXIT_CODE, spawn wstack in the new project.
+        // This replaces the old behavior of spawning mid-session (which left the TUI
+        // running and corrupted the terminal state).
+        if (code === PROJECT_SWITCH_EXIT_CODE && pendingProjectSwitch) {
+          const { root, name } = pendingProjectSwitch;
+
+          // Clear screen before spawning — removes TUI artifacts so the new wstack
+          // banner starts fresh. \x1b[2J clears visible screen, \x1b[H homes cursor.
+          process.stdout.write('\x1b[2J\x1b[H');
+
+          const { spawn } = await import('node:child_process');
+          const { createRequire } = await import('node:module');
+          let cliPath: string;
+          try {
+            const req = createRequire(import.meta.url);
+            const pkgPath = req.resolve('@wrongstack/cli/package.json');
+            const pkgDir = path.dirname(pkgPath);
+            cliPath = path.join(pkgDir, 'dist', 'index.js');
+            await fs.access(cliPath);
+          } catch {
+            cliPath = process.argv[1] ?? '';
+            if (!cliPath) {
+              console.error(color.red('Could not locate the CLI entry point.\n'));
+              return 1;
+            }
+          }
+
+          const nodeExe = process.execPath;
+          spawn(nodeExe, [cliPath, '--no-interactive'], {
+            cwd: root,
+            stdio: 'inherit',
+            detached: false,
+            signal: AbortSignal.timeout(30_000),
+          }).on('error', (err: Error) => {
+            console.error(color.red(`Failed to spawn wstack: ${err.message}`));
+          }).unref();
+
+          console.log([
+            '',
+            color.green(`  Switched to ${name}`),
+            color.dim(`  Root: ${root}`),
+            color.dim('  (current session stays open — Ctrl+C to return)'),
+            '',
+          ].join('\n'));
+
+          return 0;
+        }
       } finally {
         renderer.setSilent(false);
       }

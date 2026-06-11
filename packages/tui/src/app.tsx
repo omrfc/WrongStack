@@ -422,6 +422,13 @@ export interface AppProps {
   onProjectSelect?: ((key: string, kind: 'project' | 'action') => void) | undefined;
 
   /**
+   * Request the TUI to exit with a specific code. When a project is selected in
+   * the F1 picker, this is called to trigger a clean exit before the host CLI
+   * spawns a new wstack process in the target project directory.
+   */
+  requestExit?: ((code: number) => void) | undefined;
+
+  /**
    * Load live session data from the cross-process SessionRegistry.
    * Called when the sessions panel opens (F10).
    */
@@ -593,6 +600,7 @@ export function App({
   restoredToolCalls,
   getProjectPickerItems,
   onProjectSelect,
+  requestExit,
   getLiveSessions,
   onSwitchToSession,
   initialAgentsMonitorOpen,
@@ -3385,7 +3393,16 @@ export function App({
           dispatch({ type: 'projectPickerClose' });
           return;
         }
-        // Delegate to the host CLI for project switching or action handling
+        // For project selections, onProjectSelect stores the pending switch and
+        // we request a clean TUI exit with code 42. The host CLI spawns wstack
+        // in the new project after runTui returns.
+        // For actions (new-session, prev-sessions), onProjectSelect handles directly.
+        if (item.kind === 'project') {
+          onProjectSelect?.(item.key, item.kind);
+          dispatch({ type: 'projectPickerClose' });
+          requestExit?.(42);
+          return;
+        }
         onProjectSelect?.(item.key, item.kind);
         dispatch({ type: 'projectPickerClose' });
         return;
@@ -5503,6 +5520,7 @@ export function App({
             const ctx: KeyHintContext = {
               monitor: anyMonitorOpen,
               managed: state.scrollOffset > 0,
+              picker: state.settingsPicker.open || state.modelPicker.open || state.autonomyPicker.open,
               nextPanelHint,
             };
             return <KeyHintBar context={ctx} />;

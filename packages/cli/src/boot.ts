@@ -121,6 +121,17 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
   const { cwd, projectRoot, userHome, wpaths, pathResolver } = paths;
   void pathResolver; // used by callers via container binding
 
+  // `wrongstack quick` — accept all defaults, list plugins, open TUI with F3 panel.
+  if (positional[0] === 'quick' && positional.length === 1) {
+    flags['quick'] = true;
+    flags['tui'] = true;
+    // List configured plugins as debug lines (user sees them with DEBUG=1).
+    for (const plugin of config.plugins ?? []) {
+      console.debug(`[wrongstack:quick] plugin: ${plugin}`);
+    }
+    positional.splice(0, 1); // clear positional so execute() takes the TUI path (enteringTui = true)
+  }
+
   const logger = new DefaultLogger({
     level: config.log.level,
     file: wpaths.logFile,
