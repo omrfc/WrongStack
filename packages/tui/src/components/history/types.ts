@@ -34,7 +34,7 @@ export type HistoryEntry =
   | {
       id: number;
       kind: 'brain';
-      status: 'thinking' | 'answered' | 'ask_human' | 'denied';
+      status: 'thinking' | 'answered' | 'ask_human' | 'denied' | 'intervention';
       source: string;
       risk: 'low' | 'medium' | 'high' | 'critical';
       question: string;

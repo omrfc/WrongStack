@@ -273,6 +273,11 @@ export function setupEvents(deps: SetupEventsDeps): void {
     broadcast(clients, { type: 'mailbox.event', payload: { event: eventName, ...payload as Record<string, unknown> } });
   });
 
+  // ── Brain events — decisions + proactive interventions, live in the browser ──
+  events.onPattern('brain.*', (eventName, payload) => {
+    broadcast(clients, { type: 'brain.event', payload: { event: eventName, ...payload as Record<string, unknown> } } as unknown as WSServerMessage);
+  });
+
   // ── Cross-process session / fleet status poll ──
   // Periodically read the SessionRegistry and broadcast live session+agent status
   // to all connected clients. Gives the AgentFlowViz a project-level overview of

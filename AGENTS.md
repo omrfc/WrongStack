@@ -185,6 +185,12 @@ agent's conversation by the mailbox loop. Emits `brain.intervention`
 either way; 120s per-signal cooldown; policy-only brains degrade to
 observe-only. `/brain` shows status + the last 20 decisions.
 
+**Surfaces:** TUI renders `brain.decision_*` as BRAIN history entries +
+the ask-human overlay, and `brain.intervention` as a ⚡ intervention
+entry (`use-brain-events.ts`). Both WebUI servers broadcast `brain.*` as
+`{type: 'brain.event'}` WS messages; the frontend (`ws-handlers.ts`)
+surfaces interventions as chat notices + toasts.
+
 ### Cross-surface coordination (multi-terminal / multi-WebUI)
 
 Any number of terminals, TUIs and WebUIs working on the same project share

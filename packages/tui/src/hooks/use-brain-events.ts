@@ -12,7 +12,10 @@ export function useBrainEvents(events: EventBus, dispatch: React.Dispatch<Action
       `${request.source}: ${request.question}`.slice(0, 80);
 
     const addBrainEntry = (
-      status: Exclude<Extract<HistoryEntry, { kind: 'brain' }>['status'], 'thinking'>,
+      status: Exclude<
+        Extract<HistoryEntry, { kind: 'brain' }>['status'],
+        'thinking' | 'intervention'
+      >,
       payload: unknown,
     ) => {
       const p = payload as {
@@ -43,7 +46,29 @@ export function useBrainEvents(events: EventBus, dispatch: React.Dispatch<Action
     const offAnswered = events.on('brain.decision_answered', (payload) => addBrainEntry('answered', payload));
     const offAskHuman = events.on('brain.decision_ask_human', (payload) => addBrainEntry('ask_human', payload));
     const offDenied = events.on('brain.decision_denied', (payload) => addBrainEntry('denied', payload));
+    // Self-activation: the BrainMonitor engaged on a distress signal
+    // (tool-failure streak / error storm). Show whether it steered the
+    // agent or just observed — the steer itself arrives as mailbox mail.
+    const offIntervention = events.on('brain.intervention', (payload) => {
+      const decision = payload.intervened
+        ? `steered the agent (${payload.kind.replace(/_/g, ' ')})`
+        : 'observed — no action needed';
+      const rationale =
+        payload.decision.type === 'answer' ? payload.decision.rationale : undefined;
+      dispatch({
+        type: 'addEntry',
+        entry: {
+          kind: 'brain',
+          status: 'intervention',
+          source: 'monitor',
+          risk: payload.request.risk,
+          question: payload.request.question,
+          decision,
+          rationale,
+        },
+      });
+    });
 
-    return () => { offRequested(); offAnswered(); offAskHuman(); offDenied(); };
+    return () => { offRequested(); offAnswered(); offAskHuman(); offDenied(); offIntervention(); };
   }, [events, dispatch]);
 }

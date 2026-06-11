@@ -663,6 +663,13 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
         broadcast({ type: 'mailbox.event', payload: { event: eventName, ...payload as Record<string, unknown> } });
       }),
     );
+
+    // ── Brain events — decisions + proactive interventions, live in the browser ──
+    eventUnsubscribers.push(
+      opts.events.onPattern('brain.*', (eventName, payload) => {
+        broadcast({ type: 'brain.event', payload: { event: eventName, ...payload as Record<string, unknown> } });
+      }),
+    );
   }
 
   return new Promise<void>((resolve) => {

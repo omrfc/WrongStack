@@ -56,6 +56,8 @@ function brainStatusStyle(status: Extract<HistoryEntry, { kind: 'brain' }>['stat
       return { icon: '?', color: 'yellow' };
     case 'denied':
       return { icon: '×', color: 'red' };
+    case 'intervention':
+      return { icon: '⚡', color: 'yellow' };
   }
 }
 

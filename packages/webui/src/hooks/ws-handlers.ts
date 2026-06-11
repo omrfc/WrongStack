@@ -611,6 +611,32 @@ export const WS_HANDLERS: Record<string, (msg: WSServerMessage) => void> = {
       useVizStore.getState().setActive(true);
     }
   },
+  'brain.event': (msg: WSServerMessage) => {
+    const p = msg.payload as {
+      event: string;
+      intervened?: boolean;
+      request?: { question?: string; source?: string; risk?: string };
+      decision?: { type?: string; optionId?: string; text?: string; reason?: string; rationale?: string };
+    };
+    // Interventions are the headline: the Brain engaged on its own and
+    // steered (or chose not to steer) the running agent. Surface them in
+    // chat; everything else stays observable via toasts only when denied.
+    if (p.event === 'brain.intervention') {
+      const guidance = p.decision?.rationale ?? p.decision?.text ?? '';
+      const headline = p.intervened
+        ? '🧠 **Brain intervention** — corrective guidance was sent to the agent.'
+        : '🧠 **Brain check** — a distress signal was reviewed; no action needed.';
+      useChatStore.getState().addMessage({
+        role: 'assistant',
+        content: [headline, p.request?.question ?? '', guidance ? `_${guidance}_` : '']
+          .filter(Boolean)
+          .join('\n\n'),
+      });
+      if (p.intervened) toast.info('Brain intervened: agent steered');
+    } else if (p.event === 'brain.decision_denied') {
+      toast.warn(`Brain denied: ${p.decision?.reason ?? p.request?.question ?? 'request'}`);
+    }
+  },
   'working_dir.changed': (msg: WSServerMessage) => {
     const p = msg.payload as { cwd: string; projectRoot: string };
     useSessionStore.getState().setEnv({
