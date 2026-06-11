@@ -227,6 +227,8 @@ describe('project picker with 50+ projects', () => {
       idx = skipDivider(items, idx, 1);
     }
     const elapsed = Date.now() - start;
-    expect(elapsed).toBeLessThan(50); // generous upper bound
+    // Pure-CPU work that takes <10ms idle; the wide bound only guards
+    // against accidental O(n²) blowups, not scheduler preemption.
+    expect(elapsed).toBeLessThan(1000);
   });
 });

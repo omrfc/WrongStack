@@ -292,9 +292,12 @@ describe('SubagentBudget', () => {
     it('idleMs reports time since the last activity, not since start', async () => {
       const b = new SubagentBudget({ idleTimeoutMs: 10_000 });
       b.start();
-      await new Promise((r) => setTimeout(r, 40));
+      // The sleep must dwarf the assertion bound so "since last activity"
+      // (small) is distinguishable from "since start" (>= the sleep) even
+      // when the event loop stalls under full-suite load.
+      await new Promise((r) => setTimeout(r, 1000));
       b.markActivity();
-      expect(b.idleMs()).toBeLessThan(20);
+      expect(b.idleMs()).toBeLessThan(800);
     });
 
     it('an explicit wall-clock timeoutMs still enforces a hard cap', async () => {

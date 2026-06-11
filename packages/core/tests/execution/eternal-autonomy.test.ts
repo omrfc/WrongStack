@@ -587,8 +587,9 @@ describe('EternalAutonomyEngine', () => {
     const t0 = Date.now();
     await engine.runOneIteration();
     const elapsed = Date.now() - t0;
-    // No backoff for permanent → should be fast (well under 1 s).
-    expect(elapsed).toBeLessThan(1_000);
+    // No backoff for permanent → must stay clearly under the 5s
+    // transientBackoffBaseMs; slack for event-loop stalls under suite load.
+    expect(elapsed).toBeLessThan(4_000);
   });
 
   it('resets the transient backoff streak on a successful iteration', async () => {

@@ -25,7 +25,10 @@ describe('spawnBackground', () => {
       command: 'node -e "setTimeout(() => {}, 5000)"',
     });
     const elapsed = Date.now() - start;
-    expect(elapsed).toBeLessThan(100); // Should return immediately
+    // Proves we don't block on the 5s child. Anything well under the child's
+    // sleep counts as "immediate" — a tight bound (100ms) flakes when spawn
+    // itself is slow under full-suite load.
+    expect(elapsed).toBeLessThan(2000);
     expect(result.pid).toBeDefined();
   });
 
@@ -55,7 +58,8 @@ describe('spawnBackgroundExec', () => {
     const start = Date.now();
     const result = spawnBackgroundExec('node', ['-e', 'setTimeout(() => {}, 2000)']);
     const elapsed = Date.now() - start;
-    expect(elapsed).toBeLessThan(100);
+    // Same rationale as above: must beat the child's 2s sleep, not 100ms.
+    expect(elapsed).toBeLessThan(1500);
     expect(result.pid).toBeDefined();
   });
 

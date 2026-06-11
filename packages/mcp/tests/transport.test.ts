@@ -164,8 +164,9 @@ describe('SSETransport — connection failure modes', () => {
     await expect(t.connect()).rejects.toThrow();
     const elapsed = Date.now() - start;
     // Generous bound: the timer fires at 150ms, plus fetch + abort
-    // bookkeeping. If we ever get above 2000ms the timeout isn't wired.
-    expect(elapsed).toBeLessThan(2000);
+    // bookkeeping. If we ever get above 5000ms the timeout isn't wired
+    // (unwired = hangs until the OS network stack gives up, far longer).
+    expect(elapsed).toBeLessThan(5000);
   });
 });
 
@@ -225,7 +226,7 @@ describe('StreamableHTTPTransport — connection failure modes', () => {
     const start = Date.now();
     await expect(t.connect()).rejects.toThrow();
     const elapsed = Date.now() - start;
-    expect(elapsed).toBeLessThan(2000);
+    expect(elapsed).toBeLessThan(5000);
   });
 
   it('onDisconnect returns unsubscribe function', () => {

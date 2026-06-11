@@ -101,7 +101,7 @@ describe('DefaultHealthRegistry', () => {
   });
 
   it('runs checks in parallel (total time ~ slowest)', async () => {
-    const r = new DefaultHealthRegistry({ timeoutMs: 500 });
+    const r = new DefaultHealthRegistry({ timeoutMs: 2000 });
     const slow = (ms: number) =>
       check(
         `slow-${ms}`,
@@ -110,14 +110,16 @@ describe('DefaultHealthRegistry', () => {
             setTimeout(() => resolve({ status: 'healthy' }), ms),
           ),
       );
-    r.register(slow(50));
-    r.register(slow(50));
-    r.register(slow(50));
+    r.register(slow(300));
+    r.register(slow(300));
+    r.register(slow(300));
     const start = Date.now();
     const result = await r.run();
     const elapsed = Date.now() - start;
     expect(result.status).toBe('healthy');
-    // Three 50ms checks in parallel should land well under 150ms.
-    expect(elapsed).toBeLessThan(140);
+    // Serial execution would take 900ms+. A 750ms bound proves parallelism
+    // while leaving slack for late timer firing under full-suite load (a
+    // 50ms/140ms version of this flaked: only a 10ms discrimination window).
+    expect(elapsed).toBeLessThan(750);
   });
 });
