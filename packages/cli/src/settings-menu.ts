@@ -213,7 +213,7 @@ export function filterSafeForProject(cfg: Record<string, unknown>): Record<strin
  */
 export async function persistAutonomySetting(
   deps: PersistSettingDeps,
-  mutator: (autonomy: { autoProceedDelayMs?: number | undefined; defaultMode?: string | undefined }) => void,
+  mutator: (autonomy: { autoProceedDelayMs?: number | undefined; defaultMode?: string | undefined; enhance?: boolean | undefined; enhanceDelayMs?: number | undefined; enhanceLanguage?: string | undefined }) => void,
 ): Promise<void> {
   const targetPath = resolvePersistPath(deps);
   await ensureProjectDir(targetPath);
@@ -398,7 +398,7 @@ export async function persistTelegramConfig(
 /** Interactive-menu adapter over {@link persistAutonomySetting}. */
 function mutateAutonomyConfig(
   deps: SettingsMenuDeps,
-  mutator: (autonomy: { autoProceedDelayMs?: number | undefined; defaultMode?: string | undefined }) => void,
+  mutator: (autonomy: { autoProceedDelayMs?: number | undefined; defaultMode?: string | undefined; enhance?: boolean | undefined; enhanceDelayMs?: number | undefined; enhanceLanguage?: string | undefined }) => void,
 ): Promise<void> {
   return persistAutonomySetting(deps, mutator);
 }

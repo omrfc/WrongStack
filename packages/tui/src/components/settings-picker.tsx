@@ -25,6 +25,10 @@ export const AUTO_PROCEED_MAX_PRESETS = [10, 25, 50, 100, 250, 0];
 /** Presets for prompt refinement preview countdown. */
 export const ENHANCE_DELAY_PRESETS = [30_000, 45_000, 60_000, 90_000, 120_000];
 
+/** Language options for prompt refinement. */
+export const ENHANCE_LANGUAGES = ['original', 'english'] as const;
+export type EnhanceLanguage = (typeof ENHANCE_LANGUAGES)[number];
+
 export function formatSettingsDelay(ms: number): string {
   if (ms === 0) return 'disabled';
   if (ms >= 60_000) return `${Math.round(ms / 60_000)}m`;
@@ -80,6 +84,10 @@ export interface SettingsPickerProps {
   autoProceedMaxIterations: number;
   /** Prompt refinement preview countdown (ms). Cycled via ENHANCE_DELAY_PRESETS. */
   enhanceDelayMs: number;
+  /** Enable/disable prompt refinement. */
+  enhanceEnabled: boolean;
+  /** Default language for refinement: original (keep user's language) or english. */
+  enhanceLanguage: EnhanceLanguage;
   /** Raw SSE stream debugging toggle — hex-dump every byte received from providers. */
   debugStream: boolean;
   /** Where settings are persisted. */
@@ -88,7 +96,7 @@ export interface SettingsPickerProps {
 }
 
 /** Total number of settings rows (used for wrap-around navigation). */
-export const SETTINGS_FIELD_COUNT = 23;
+export const SETTINGS_FIELD_COUNT = 25;
 
 export const CONFIG_SCOPES = ['global', 'project'] as const;
 export type ConfigScope = (typeof CONFIG_SCOPES)[number];
@@ -116,6 +124,8 @@ export function SettingsPicker({
   maxIterations,
   autoProceedMaxIterations,
   enhanceDelayMs,
+  enhanceEnabled,
+  enhanceLanguage,
   debugStream,
   configScope,
   hint,
@@ -246,6 +256,16 @@ export function SettingsPicker({
       label: 'Refine preview countdown',
       value: formatEnhanceDelay(enhanceDelayMs),
       detail: 'Timeout for prompt refinement preview (30s–120s)',
+    },
+    {
+      label: 'Refine',
+      value: boolVal(enhanceEnabled),
+      detail: 'Enable prompt refinement before sending',
+    },
+    {
+      label: 'Refine language',
+      value: enhanceLanguage,
+      detail: 'original (keep language) | english (translate)',
     },
     // ── Debug ──
     { section: 'Debug' },

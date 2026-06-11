@@ -11,6 +11,7 @@ import {
   CONFIG_SCOPES,
   DELAY_PRESETS_MS,
   ENHANCE_DELAY_PRESETS,
+  ENHANCE_LANGUAGES,
   LOG_LEVELS,
   MAX_ITERATIONS_PRESETS,
   SETTINGS_FIELD_COUNT,
@@ -503,6 +504,8 @@ export function reducer(state: State, action: Action): State {
           maxIterations: action.maxIterations,
           autoProceedMaxIterations: action.autoProceedMaxIterations,
           enhanceDelayMs: action.enhanceDelayMs,
+          enhanceEnabled: action.enhanceEnabled,
+          enhanceLanguage: action.enhanceLanguage,
           debugStream: action.debugStream,
           configScope: action.configScope,
           hint: undefined,
@@ -609,6 +612,15 @@ export function reducer(state: State, action: Action): State {
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + CONFIG_SCOPES.length) % CONFIG_SCOPES.length;
         return { ...state, settingsPicker: { ...sp, configScope: expectDefined(CONFIG_SCOPES[next]), hint: undefined } };
+      }
+      // Field 23: enhance enabled (boolean toggle)
+      if (f === 23) return { ...state, settingsPicker: { ...sp, enhanceEnabled: !sp.enhanceEnabled, hint: undefined } };
+      // Field 24: enhance language (cycle original/english)
+      if (f === 24) {
+        const i = ENHANCE_LANGUAGES.indexOf(sp.enhanceLanguage);
+        const base = i < 0 ? 0 : i;
+        const next = (base + action.delta + ENHANCE_LANGUAGES.length) % ENHANCE_LANGUAGES.length;
+        return { ...state, settingsPicker: { ...sp, enhanceLanguage: expectDefined(ENHANCE_LANGUAGES[next]), hint: undefined } };
       }
       return state;
     }

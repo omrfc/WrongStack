@@ -27,6 +27,9 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
     '  /settings hints on|off        Show or suppress rotating launch hints',
     '  /settings debug-stream on|off   Raw SSE hex-dump to stderr for debugging',
     '  /settings config-scope global|project   Save settings globally or per-project',
+    '  /settings refine on|off       Enable/disable prompt refinement',
+    '  /settings refine-delay <seconds>   Countdown duration for refine preview',
+    '  /settings refine-language original|english   Default language for refinement',
     '  /settings defaults            Show built-in default values',
     '',
     'Settings are persisted to ~/.wrongstack/config.json.',
@@ -34,13 +37,16 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
 
   function currentView(): string {
     const autonomy = opts.configStore.get().autonomy as
-      | { autoProceedDelayMs?: number | undefined; defaultMode?: string | undefined }
+      | { autoProceedDelayMs?: number | undefined; defaultMode?: string | undefined; enhance?: boolean | undefined; enhanceDelayMs?: number | undefined; enhanceLanguage?: string | undefined }
       | undefined;
     const delay = autonomy?.autoProceedDelayMs ?? 45_000;
     const mode = autonomy?.defaultMode ?? 'off';
     const hints = opts.configStore.get().hints !== false; // default true
     const debugStream = opts.configStore.get().debugStream === true;
     const configScope = opts.configStore.get().configScope ?? 'global';
+    const enhanceEnabled = autonomy?.enhance ?? true;
+    const enhanceDelay = autonomy?.enhanceDelayMs ?? 60_000;
+    const enhanceLanguage = (autonomy?.enhanceLanguage as string) ?? 'original';
     return [
       `${color.bold('WrongStack')} ${color.dim('— Settings')}`,
       '',
@@ -49,6 +55,9 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
       `  launch hints:          ${hints ? color.cyan('on') : color.dim('off')}   ${color.dim('change: /settings hints on|off')}`,
       `  debug stream:         ${debugStream ? color.cyan('on') : color.dim('off')}   ${color.dim('change: /settings debug-stream on|off')}`,
       `  config scope:         ${color.cyan(configScope)}   ${color.dim('change: /settings config-scope global|project')}`,
+      `  refine:              ${enhanceEnabled ? color.cyan('on') : color.dim('off')}   ${color.dim('change: /settings refine on|off')}`,
+      `  refine-delay:        ${color.cyan(formatDelay(enhanceDelay))}   ${color.dim('change: /settings refine-delay <seconds>')}`,
+      `  refine-language:     ${color.cyan(enhanceLanguage)}   ${color.dim('change: /settings refine-language original|english')}`,
       '',
       color.dim('  Persisted to ~/.wrongstack/config.json · /settings help for more'),
     ].join('\n');
@@ -174,8 +183,50 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
           return { message: `${color.green('✓')} config scope → ${label}` };
         }
 
+        if (sub === 'refine') {
+          const raw = (rest[0] ?? '').toLowerCase();
+          if (!['on', 'off'].includes(raw)) {
+            return { message: `${color.amber('Usage:')} /settings refine on|off` };
+          }
+          const on = raw === 'on';
+          await persistAutonomySetting(persistDeps, (autonomy) => {
+            (autonomy as Record<string, unknown>).enhance = on;
+          });
+          return { message: `${color.green('✓')} refine → ${on ? color.cyan('on') : color.dim('off')}   ${color.dim(on ? 'prompts will be refined before sending' : 'prompts sent verbatim')}` };
+        }
+
+        if (sub === 'refine-delay') {
+          const raw = rest[0];
+          if (raw === undefined) {
+            return { message: `${color.amber('Usage:')} /settings refine-delay <seconds>` };
+          }
+          const seconds = Number.parseFloat(raw);
+          if (Number.isNaN(seconds) || seconds < 0) {
+            return { message: `${color.red('Invalid number')}: "${raw}". Enter seconds, e.g. /settings refine-delay 30` };
+          }
+          const ms = Math.round(seconds * 1000);
+          await persistAutonomySetting(persistDeps, (autonomy) => {
+            (autonomy as Record<string, unknown>).enhanceDelayMs = ms;
+          });
+          return { message: `${color.green('✓')} refine-delay → ${formatDelay(ms)}` };
+        }
+
+        if (sub === 'refine-language') {
+          const raw = (rest[0] ?? '').toLowerCase();
+          if (!['original', 'english'].includes(raw)) {
+            return { message: `${color.amber('Usage:')} /settings refine-language original|english` };
+          }
+          await persistAutonomySetting(persistDeps, (autonomy) => {
+            (autonomy as Record<string, unknown>).enhanceLanguage = raw;
+          });
+          const label = raw === 'original'
+            ? `${color.cyan('original')} — use the language you wrote in`
+            : `${color.cyan('english')} — translate to English`;
+          return { message: `${color.green('✓')} refine-language → ${label}` };
+        }
+
         return {
-          message: `${color.red('Unknown setting')} "${sub}". ${unknownSubcommand(sub, ['delay', 'mode', 'hints', 'debug-stream', 'config-scope', 'defaults'], 'settings')}`,
+          message: `${color.red('Unknown setting')} "${sub}". ${unknownSubcommand(sub, ['delay', 'mode', 'hints', 'debug-stream', 'config-scope', 'refine', 'refine-delay', 'refine-language', 'defaults'], 'settings')}`,
         };
       } catch (err) {
         return {

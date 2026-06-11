@@ -390,6 +390,39 @@ export function SettingsPanel() {
               <div className="pt-2 border-t">
                 <h3 className="text-sm font-semibold mb-3 mt-3 flex items-center gap-2">
                   <Zap className="h-4 w-4 text-muted-foreground" />
+                  Prompt Refinement
+                </h3>
+                <PreferenceToggle
+                  label="Enable refine"
+                  hint="Rewrite prompts before sending — clearer instructions, better results."
+                  value={localPrefs.enhanceEnabled}
+                  onChange={() => syncPref('enhanceEnabled', !localPrefs.enhanceEnabled)}
+                />
+                <PreferenceSlider
+                  label="Refine delay"
+                  hint="Countdown before the refined prompt auto-sends."
+                  value={localPrefs.enhanceDelayMs}
+                  min={30000}
+                  max={120000}
+                  step={15000}
+                  unit="ms"
+                  onChange={(v) => syncPref('enhanceDelayMs', v)}
+                />
+                <PreferenceSelect
+                  label="Refine language"
+                  hint="Keep your language or translate to English for the model."
+                  value={localPrefs.enhanceLanguage}
+                  options={[
+                    { value: 'original' as const, label: 'Original — keep your language' },
+                    { value: 'english' as const, label: 'English — translate to English' },
+                  ]}
+                  onChange={(v) => syncPref('enhanceLanguage', v)}
+                />
+              </div>
+
+              <div className="pt-2 border-t">
+                <h3 className="text-sm font-semibold mb-3 mt-3 flex items-center gap-2">
+                  <Zap className="h-4 w-4 text-muted-foreground" />
                   Execution
                 </h3>
                 <PreferenceSlider

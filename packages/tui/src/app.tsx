@@ -1607,6 +1607,8 @@ export function App({
             maxIterations: sp.maxIterations,
             autoProceedMaxIterations: sp.autoProceedMaxIterations,
             enhanceDelayMs: sp.enhanceDelayMs,
+            enhanceEnabled: sp.enhanceEnabled,
+            enhanceLanguage: sp.enhanceLanguage,
             debugStream: sp.debugStream,
             configScope: sp.configScope,
           });
@@ -2107,6 +2109,8 @@ export function App({
       maxIterations: s.maxIterations ?? 500,
       autoProceedMaxIterations: s.autoProceedMaxIterations ?? 50,
       enhanceDelayMs: s.enhanceDelayMs ?? 60_000,
+      enhanceEnabled: s.enhanceEnabled ?? true,
+      enhanceLanguage: (s.enhanceLanguage as 'original' | 'english') ?? 'original',
       debugStream: s.debugStream ?? false,
       configScope: s.configScope ?? 'global',
     });
@@ -3654,6 +3658,8 @@ export function App({
           maxIterations: cfg.maxIterations ?? 500,
           autoProceedMaxIterations: cfg.autoProceedMaxIterations ?? 50,
           enhanceDelayMs: cfg.enhanceDelayMs ?? 60_000,
+          enhanceEnabled: cfg.enhanceEnabled ?? true,
+          enhanceLanguage: (cfg.enhanceLanguage as 'original' | 'english') ?? 'original',
           debugStream: cfg.debugStream ?? false,
           configScope: cfg.configScope ?? 'global',
         });
@@ -3776,6 +3782,8 @@ export function App({
           maxIterations: cfg.maxIterations ?? 500,
           autoProceedMaxIterations: cfg.autoProceedMaxIterations ?? 50,
           enhanceDelayMs: cfg.enhanceDelayMs ?? 60_000,
+          enhanceEnabled: cfg.enhanceEnabled ?? true,
+          enhanceLanguage: (cfg.enhanceLanguage as 'original' | 'english') ?? 'original',
           debugStream: cfg.debugStream ?? false,
           configScope: cfg.configScope ?? 'global',
         });

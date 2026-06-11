@@ -647,6 +647,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
               debugStream: cfg.debugStream ?? false,
               configScope: cfg.configScope ?? 'global',
               enhanceDelayMs: (cfg.autonomy as Record<string, unknown> | undefined)?.enhanceDelayMs as number ?? 60_000,
+              enhanceEnabled: (cfg.autonomy as Record<string, unknown> | undefined)?.enhance as boolean ?? true,
+              enhanceLanguage: ((cfg.autonomy as Record<string, unknown> | undefined)?.enhanceLanguage as string) ?? 'original',
               mouseMode: (autonomy?.mouseMode as boolean) ?? false,
             };
           },
@@ -674,6 +676,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             debugStream?: boolean | undefined;
             configScope?: 'global' | 'project' | undefined;
             enhanceDelayMs?: number | undefined;
+            enhanceEnabled?: boolean | undefined;
+            enhanceLanguage?: string | undefined;
             mouseMode?: boolean | undefined;
           }) {
             try {
@@ -698,6 +702,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                   // auto-save omits mouseMode, so an unconditional write would
                   // reset a /mouse-enabled session back to false on any toggle.
                   if (s.mouseMode !== undefined) a['mouseMode'] = s.mouseMode;
+                  if (s.enhanceEnabled !== undefined) a['enhance'] = s.enhanceEnabled;
+                  if (s.enhanceLanguage !== undefined) a['enhanceLanguage'] = s.enhanceLanguage;
                 },
               );
 
@@ -834,6 +840,12 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                   ...(s.configScope !== undefined ? { configScope: s.configScope as 'global' | 'project' } : {}),
                   ...(s.enhanceDelayMs !== undefined
                     ? { autonomy: { ...((configStore.get().autonomy as Record<string, unknown>) ?? {}), enhanceDelayMs: s.enhanceDelayMs } as Config['autonomy'] }
+                    : {}),
+                  ...(s.enhanceEnabled !== undefined
+                    ? { autonomy: { ...((configStore.get().autonomy as Record<string, unknown>) ?? {}), enhance: s.enhanceEnabled } as Config['autonomy'] }
+                    : {}),
+                  ...(s.enhanceLanguage !== undefined
+                    ? { autonomy: { ...((configStore.get().autonomy as Record<string, unknown>) ?? {}), enhanceLanguage: s.enhanceLanguage } as Config['autonomy'] }
                     : {}),
                 });
               }

@@ -527,6 +527,10 @@ export type Settings = {
   autoProceedMaxIterations: number;
   /** Prompt refinement preview countdown (ms). */
   enhanceDelayMs: number;
+  /** Enable/disable prompt refinement. */
+  enhanceEnabled: boolean;
+  /** Default language for refinement: original or english. */
+  enhanceLanguage: 'original' | 'english';
   /** Raw SSE stream debugging — hex-dump every byte received from providers. */
   debugStream: boolean;
   /** Where to persist settings: 'global' or 'project'. */
@@ -621,6 +625,8 @@ export type Action =
       maxIterations: number;
       autoProceedMaxIterations: number;
       enhanceDelayMs: number;
+      enhanceEnabled: boolean;
+      enhanceLanguage: 'original' | 'english';
       debugStream: boolean;
       configScope: 'global' | 'project';
     }

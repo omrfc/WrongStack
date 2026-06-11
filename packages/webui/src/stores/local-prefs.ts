@@ -39,6 +39,11 @@ export interface LocalPrefs {
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   auditLevel: 'minimal' | 'standard' | 'verbose';
 
+  // --- Refine ---
+  enhanceEnabled: boolean;
+  enhanceDelayMs: number;
+  enhanceLanguage: 'original' | 'english';
+
   set: (patch: Partial<LocalPrefs>) => void;
   reset: () => void;
 }
@@ -62,6 +67,9 @@ const DEFAULTS: Omit<LocalPrefs, 'set' | 'reset'> = {
   contextStrategy: 'balanced',
   logLevel: 'info',
   auditLevel: 'minimal',
+  enhanceEnabled: true,
+  enhanceDelayMs: 60_000,
+  enhanceLanguage: 'original',
 };
 
 export const useLocalPrefs = create<LocalPrefs>()(
