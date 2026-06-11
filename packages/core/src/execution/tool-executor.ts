@@ -1,6 +1,10 @@
-import { expectDefined } from '../utils/expect-defined.js';
 import type { Context } from '../core/context.js';
+import {
+  getDangerousCapabilities,
+  hasDangerousCapabilityForSubagents,
+} from '../security/capabilities.js';
 import type { ToolResultBlock, ToolUseBlock } from '../types/blocks.js';
+import type { Tool, ToolProgressEvent } from '../types/tool.js';
 import type {
   ToolBatchResult,
   ToolConfirmPendingResult,
@@ -8,11 +12,7 @@ import type {
   ToolExecutorOptions,
   ToolExecutorStrategy,
 } from '../types/tool-executor.js';
-import type { Tool, ToolProgressEvent } from '../types/tool.js';
-import {
-  getDangerousCapabilities,
-  hasDangerousCapabilityForSubagents,
-} from '../security/capabilities.js';
+import { expectDefined } from '../utils/expect-defined.js';
 import { validateAgainstSchema } from '../utils/json-schema-validate.js';
 import { createToolOutputSerializer } from '../utils/tool-output-serializer.js';
 export class ToolExecutor {

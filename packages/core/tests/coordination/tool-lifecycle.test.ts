@@ -85,6 +85,41 @@ describe('Tool lifecycle — executeStream', () => {
     expect((output as { content: string }).content).toContain('done');
   });
 
+  it('coalesces rapid partial_output bursts into few tool.progress emits', async () => {
+    const events = new EventBus();
+    const partials: string[] = [];
+    events.on('tool.progress', (e) => {
+      if (e.event.type === 'partial_output' && e.event.text) partials.push(e.event.text);
+    });
+
+    // 200 chunks yielded back-to-back (same tick) — a chatty child process.
+    // Pre-coalescing this produced 200 events; a real `pnpm test` produced
+    // 73k+ events / 300 MB through the bus and OOM'd the host.
+    const chunks = Array.from({ length: 200 }, (_, i) => `chunk-${i};`);
+    const chattyTool: Tool = {
+      name: 'chatty',
+      description: 'floods partial output',
+      inputSchema: { type: 'object' },
+      permission: 'auto',
+      mutating: false,
+      execute: vi.fn(),
+      async *executeStream(): AsyncGenerator<ToolStreamEvent<string>> {
+        for (const c of chunks) yield { type: 'partial_output', text: c };
+        yield { type: 'final', output: 'done' };
+      },
+    };
+
+    const executor = makeExecutor([chattyTool], events);
+    await executor.executeBatch([makeUse('chatty')], makeCtx(), 'sequential');
+
+    // First chunk emits immediately; the burst coalesces; the remainder is
+    // flushed once at stream end. Allow slack for a slow CI tick crossing
+    // the emit interval, but it must be far below one-event-per-chunk.
+    expect(partials.length).toBeLessThanOrEqual(10);
+    // No text lost (total volume here is below the tail cap).
+    expect(partials.join('')).toBe(chunks.join(''));
+  });
+
   it('progress event carries the tool name and call id', async () => {
     const events = new EventBus();
     let captured: { name: string; id: string } | null = null;

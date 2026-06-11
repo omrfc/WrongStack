@@ -495,6 +495,49 @@ describe('runRepl', () => {
       expect(allTexts.some((t) => t.includes('Risky migration'))).toBe(true);
     });
 
+    it('auto mode stops after the consecutive auto-proceed cap', async () => {
+      // The agent suggests next steps on EVERY turn — without the cap this
+      // self-feeding loop never returns to the reader (it has spun real
+      // sessions at full speed and flooded stdout until OOM).
+      const run = vi.fn(
+        async (): Promise<RunResult> => ({
+          status: 'done',
+          iterations: 1,
+          finalText: '💡 Next steps\n1. Keep going\n',
+        }),
+      );
+      const agent = makeFakeAgent({ run });
+      const renderer = makeFakeRenderer();
+      const reader = makeFakeReader(['hello\n', '/exit\n']);
+      const slashRegistry = makeExitRegistry();
+      const suggestions: string[] = [];
+
+      await runRepl({
+        agent,
+        renderer,
+        reader,
+        slashRegistry,
+        attachments: makeFakeAttachmentStore(),
+        banner: false,
+        getAutonomy: () => 'auto',
+        autoProceedDelayMs: 0,
+        onSuggestionsParsed: (parsed) => {
+          suggestions.length = 0;
+          if (parsed) suggestions.push(...parsed);
+        },
+        getSuggestions: () => suggestions,
+      });
+
+      // 1 manual turn + 1 post-turn autonomy "continue" run + at most 25
+      // auto-proceed turns, then control returns to the reader ('/exit' ends
+      // the loop). Unbounded would be ∞ / EOF-throw.
+      expect(run.mock.calls.length).toBe(27);
+      const warns = (renderer.writeWarning as ReturnType<typeof vi.fn>).mock.calls.map((c) =>
+        String(c[0] ?? ''),
+      );
+      expect(warns.some((w) => w.includes('Auto-proceed paused'))).toBe(true);
+    });
+
     it('auto mode with no validator proceeds directly', async () => {
       const finalTexts = [
         '💡 Next steps\n1. Clean up\n',
