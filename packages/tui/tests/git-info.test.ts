@@ -19,6 +19,8 @@ const describeIfGit = hasGit ? describe : describe.skip;
 describeIfGit('readGitInfo', () => {
   let repoDir: string;
 
+  // Generous timeout: under full-suite parallel load the git child
+  // processes can take far longer than the 10s default to get CPU time.
   beforeAll(async () => {
     repoDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'wstack-git-'));
     // Initialise repo with a stable default branch and a noisy-quiet
@@ -30,7 +32,7 @@ describeIfGit('readGitInfo', () => {
     await fsp.writeFile(path.join(repoDir, 'a.txt'), 'one\ntwo\nthree\n');
     run(repoDir, ['add', 'a.txt']);
     run(repoDir, ['commit', '-m', 'init', '--quiet']);
-  });
+  }, 60_000);
 
   afterAll(async () => {
     await fsp.rm(repoDir, { recursive: true, force: true });

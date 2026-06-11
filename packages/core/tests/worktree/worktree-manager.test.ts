@@ -186,7 +186,7 @@ describe.skipIf(!gitAvailable)('WorktreeManager (real repo)', () => {
     } finally {
       await fs.rm(base, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 120_000);
 
   it('commitAll on a clean tree returns committed:false', async () => {
     const base = await makeRepo();
@@ -198,7 +198,7 @@ describe.skipIf(!gitAvailable)('WorktreeManager (real repo)', () => {
     } finally {
       await fs.rm(base, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 120_000);
 
   it('conflicting merge → needs-review, run not aborted, worktree kept', async () => {
     const base = await makeRepo();
@@ -238,7 +238,7 @@ describe.skipIf(!gitAvailable)('WorktreeManager (real repo)', () => {
     } finally {
       await fs.rm(base, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 120_000);
 
   it('resolve callback clears the conflict → merge lands on base (resolved)', async () => {
     const base = await makeRepo();
@@ -274,7 +274,7 @@ describe.skipIf(!gitAvailable)('WorktreeManager (real repo)', () => {
     } finally {
       await fs.rm(base, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 120_000);
 
   it('resolve callback that leaves markers → aborts to needs-review (never commits)', async () => {
     const base = await makeRepo();
@@ -306,7 +306,7 @@ describe.skipIf(!gitAvailable)('WorktreeManager (real repo)', () => {
     } finally {
       await fs.rm(base, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 120_000);
 });
 
 describe('parseConflictPaths', () => {

@@ -113,7 +113,7 @@ const stdioCfg = (
   transport: 'stdio',
   command: 'node',
   args: [scriptPath],
-  startupTimeoutMs: 5000,
+  startupTimeoutMs: 30_000,
   ...extra,
 });
 
@@ -144,7 +144,7 @@ describe('MCPClient + MockMCPServer', () => {
       transport: 'stdio',
       command: 'node',
       args: [scriptPath],
-      startupTimeoutMs: 5000,
+      startupTimeoutMs: 30_000,
     });
     await client.connect();
     expect(client.getState()).toBe('connected');
@@ -160,7 +160,7 @@ describe('MCPClient + MockMCPServer', () => {
       transport: 'stdio',
       command: 'node',
       args: [scriptPath],
-      startupTimeoutMs: 5000,
+      startupTimeoutMs: 30_000,
     });
     await client.connect();
     const result = await client.callTool('hello', { name: 'test' });
@@ -180,7 +180,7 @@ describe('MCPClient + MockMCPServer', () => {
       transport: 'stdio',
       command: 'node',
       args: [scriptPath],
-      startupTimeoutMs: 5000,
+      startupTimeoutMs: 30_000,
     });
     await client.connect();
     const res = await client.callTool('hello', {});
@@ -196,7 +196,7 @@ describe('MCPClient + MockMCPServer', () => {
       transport: 'stdio',
       command: 'node',
       args: [scriptPath],
-      startupTimeoutMs: 5000,
+      startupTimeoutMs: 30_000,
     });
     await expect(client.callTool('hello', {})).rejects.toThrow(/not connected/);
   });
@@ -208,7 +208,7 @@ describe('MCPClient + MockMCPServer', () => {
       transport: 'stdio',
       command: 'node',
       args: [scriptPath],
-      startupTimeoutMs: 5000,
+      startupTimeoutMs: 30_000,
     });
     await client.connect();
     await client.close();
@@ -222,7 +222,7 @@ describe('MCPClient + MockMCPServer', () => {
       transport: 'stdio',
       command: 'node',
       args: [scriptPath],
-      startupTimeoutMs: 5000,
+      startupTimeoutMs: 30_000,
     });
     const exitEvents: unknown[] = [];
     client.addExitListener((_n, code, signal) => exitEvents.push({ code, signal }));
@@ -237,7 +237,7 @@ describe('MCPClient + MockMCPServer', () => {
       transport: 'stdio',
       command: 'node',
       args: ['/nonexistent'],
-      startupTimeoutMs: 5000,
+      startupTimeoutMs: 30_000,
     });
     expect(client.listTools()).toEqual([]);
   });
