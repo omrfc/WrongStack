@@ -45,6 +45,11 @@ import {
   makeMailSendTool,
   makeMailInboxTool,
   GlobalMailbox,
+  mailboxSessionTag,
+  createAutonomyBrain,
+  createTieredBrainArbiter,
+  type BrainAutoRisk,
+  BrainMonitor,
   attachDepWatcherBridge,
   startTechStackConsumer,
   recordFileAction,
@@ -988,13 +993,101 @@ export async function main(argv: string[]): Promise<number> {
   // a base dir to write manifest + scratchpad + per-subagent JSONLs into.
   const fleetRootForPromotion = path.join(wpaths.projectSessions, session.id);
 
-  // Global Brain chain: policy arbiter → human escalation queue → observable events.
-  // Everything talks to the same EventBus, so TUI can render and answer escalations.
+  // ── Global Brain chain — policy → LLM → human ──────────────────────────
+  // Positioning: the Brain is the authority layer above the leader/director
+  // and below the human. One instance serves every consumer (director,
+  // autophase, eternal engine, BrainMonitor, /brain) via TOKENS.BrainArbiter.
+  //   1. DefaultBrainArbiter — deterministic policy (low-risk fast path)
+  //   2. createAutonomyBrain — LLM decision support within the live risk
+  //      ceiling (adjust at runtime with /brain risk <level>)
+  //   3. HumanEscalating + Observable — escalation prompt + UI events
+  const brainSettings: { maxAutoRisk: BrainAutoRisk } = {
+    maxAutoRisk: 'medium',
+  };
   const brainQueue = new BrainDecisionQueue(events);
+  // Lazy wrapper so the LLM layer always sees the LIVE provider/model —
+  // `provider` and `config` are reassigned when the user switches models.
+  const autonomousBrain: import('@wrongstack/core').BrainArbiter = {
+    decide: (request) =>
+      createAutonomyBrain({
+        provider,
+        model: config.model,
+        maxAutoRisk: 'all', // the tiered ceiling gates risk — keep inner permissive
+      }).decide(request),
+  };
   const brain = new ObservableBrainArbiter(
-    new HumanEscalatingBrainArbiter(new DefaultBrainArbiter(), brainQueue),
+    new HumanEscalatingBrainArbiter(
+      createTieredBrainArbiter({
+        policy: new DefaultBrainArbiter(),
+        autonomous: autonomousBrain,
+        getMaxAutoRisk: () => brainSettings.maxAutoRisk,
+      }),
+      brainQueue,
+    ),
     events,
   );
+  container.bind(TOKENS.BrainArbiter, () => brain);
+
+  // Decision log for /brain status — last 20 decisions across all sources.
+  const brainLog: Array<{
+    at: number;
+    kind: 'answered' | 'ask_human' | 'denied' | 'intervention';
+    question: string;
+    outcome: string;
+  }> = [];
+  const pushBrainLog = (entry: (typeof brainLog)[number]) => {
+    brainLog.push(entry);
+    if (brainLog.length > 20) brainLog.shift();
+  };
+  evOn('brain.decision_answered', (e) => {
+    pushBrainLog({
+      at: e.at,
+      kind: 'answered',
+      question: e.request.question,
+      outcome: e.decision.type === 'answer' ? (e.decision.optionId ?? e.decision.text) : '',
+    });
+  });
+  evOn('brain.decision_ask_human', (e) => {
+    pushBrainLog({ at: e.at, kind: 'ask_human', question: e.request.question, outcome: 'escalated to human' });
+  });
+  evOn('brain.decision_denied', (e) => {
+    pushBrainLog({
+      at: e.at,
+      kind: 'denied',
+      question: e.request.question,
+      outcome: e.decision.type === 'deny' ? e.decision.reason : '',
+    });
+  });
+  evOn('brain.intervention', (e) => {
+    pushBrainLog({
+      at: e.at,
+      kind: 'intervention',
+      question: e.request.question,
+      outcome: e.intervened ? 'steered the agent' : 'observed (no action)',
+    });
+  });
+
+  // ── Brain self-activation — watch the bus, intervene via mailbox steer ──
+  // Tool-failure streaks and error storms engage the Brain proactively; a
+  // "steer" decision lands in THIS session's leader inbox and is injected
+  // before the agent's next step.
+  const brainMailbox = new GlobalMailbox(wpaths.projectDir, events);
+  const brainMonitor = new BrainMonitor({
+    events,
+    brain,
+    intervene: async ({ subject, body }) => {
+      const leaderUniqueId = `leader@${mailboxSessionTag(session.id)}`;
+      await brainMailbox.send({
+        from: `brain@${mailboxSessionTag(session.id)}`,
+        to: leaderUniqueId,
+        type: 'steer',
+        subject,
+        body,
+        priority: 'high',
+      });
+    },
+  });
+  brainMonitor.start();
 
   const multiAgentHost = new MultiAgentHost(
     {
@@ -1262,6 +1355,9 @@ export async function main(argv: string[]): Promise<number> {
     agentsMonitorController,
     configStore,
     reader,
+    brain,
+    brainSettings,
+    getBrainLog: () => brainLog,
     confirm: async (question, defaultYes = true): Promise<boolean | null> => {
       // Non-TTY / piped stdin → don't block. For destructive or surprising
       // actions (e.g. starting eternal mode against a stale goal) the safe
@@ -1887,6 +1983,7 @@ export async function main(argv: string[]): Promise<number> {
             maxContextTokens: effectiveMaxContext > 0 ? effectiveMaxContext : undefined,
             onIteration: broadcastEternalIteration,
             onStage: broadcastAutonomyStage,
+            brain,
           });
         }
         void eternalEngine.prime();
@@ -1899,6 +1996,7 @@ export async function main(argv: string[]): Promise<number> {
     onExit: () => {
       for (const teardown of teardownHandlers) teardown();
       teardownHandlers.length = 0;
+      brainMonitor.stop();
       brainQueue.dispose();
       void mcpRegistry.stopAll();
     },

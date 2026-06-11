@@ -98,6 +98,14 @@ export async function launchEternalFromFlag(
   policy.setYolo?.(true);
   deps.configRef.current = patchConfig(deps.configRef.current, { yolo: true });
   const compactor = deps.container.resolve(TOKENS.Compactor) as Compactor;
+  // Brain decision support is optional — the CLI binds TOKENS.BrainArbiter
+  // before this launch path runs, but bare test containers may not.
+  let brain: import('@wrongstack/core').BrainArbiter | undefined;
+  try {
+    brain = deps.container.resolve(TOKENS.BrainArbiter);
+  } catch {
+    brain = undefined;
+  }
   const engine = new EternalAutonomyEngine({
     agent: deps.agent,
     projectRoot: deps.projectRoot,
@@ -105,6 +113,7 @@ export async function launchEternalFromFlag(
     maxContextTokens:
       deps.effectiveMaxContext > 0 ? deps.effectiveMaxContext : undefined,
     onIteration: deps.broadcastEternalIteration,
+    brain,
   });
   await engine.prime();
   if (deps.eternalEngineRef) deps.eternalEngineRef.current = engine;

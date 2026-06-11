@@ -32,7 +32,14 @@ export {
   type AutonomyPromptContributorOptions,
 } from './autonomy-prompt-contributor.js';
 export { buildGoalPreamble } from './goal-preamble.js';
-export { createAutonomyBrain, formatDecisionSummary, type AutonomyBrainOptions } from './autonomy-brain.js';
+export {
+  createAutonomyBrain,
+  createTieredBrainArbiter,
+  formatDecisionSummary,
+  type AutonomyBrainOptions,
+  type TieredBrainArbiterOptions,
+  type BrainAutoRisk,
+} from './autonomy-brain.js';
 export { DefaultRetryPolicy } from './retry-policy.js';
 export { DefaultErrorHandler } from './error-handler.js';
 export { DefaultSkillLoader, type SkillLoaderOptions } from './skill-loader.js';

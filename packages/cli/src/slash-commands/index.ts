@@ -268,6 +268,20 @@ export interface SlashCommandContext {
    * wstack-managed worktrees + branches. Backs the /worktree command.
    */
   onWorktree?: (action: 'list' | 'merge' | 'prune' | 'clean', target?: string) => Promise<string>;
+  /**
+   * The session's global Brain arbiter (policy → LLM → human chain).
+   * `/brain ask <question>` consults it directly for decision support.
+   */
+  brain?: import('@wrongstack/core').BrainArbiter | undefined;
+  /**
+   * Live Brain autonomy settings — `/brain risk <level>` mutates
+   * `maxAutoRisk` in place and the tiered arbiter reads it on every decision.
+   */
+  brainSettings?: { maxAutoRisk: import('@wrongstack/core').BrainAutoRisk } | undefined;
+  /** Recent Brain decisions (newest last) for `/brain status`. */
+  getBrainLog?:
+    | (() => ReadonlyArray<{ at: number; kind: string; question: string; outcome: string }>)
+    | undefined;
   /** Config store for reading/writing config sections at runtime (e.g. settings menu). */
   configStore: import('@wrongstack/core').ConfigStore;
   /** Models registry for looking up provider/model capabilities. */
@@ -283,6 +297,7 @@ export { detectProjectFacts, renderAgentsTemplate } from './helpers.js';
 import { buildAuthCommand } from './auth.js';
 import { buildAutoPhaseCommand } from './autophase.js';
 import { buildAutonomyCommand } from './autonomy.js';
+import { buildBrainCommand } from './brain.js';
 import { buildBtwCommand } from './btw.js';
 import { buildClearCommand } from './clear.js';
 import { buildCodebaseReindexCommand } from './codebase-reindex.js';
@@ -363,6 +378,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildMouseCommand(opts),
     buildAutonomyCommand(opts),
     buildGoalCommand(opts),
+    buildBrainCommand(opts),
     buildBtwCommand(opts),
     buildNextCommand(opts),
     buildModeCommand(opts),

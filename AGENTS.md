@@ -88,6 +88,7 @@ const mw: Middleware<Request> = {
 | **Worktree** | `worktree.allocated`, `worktree.committed`, `worktree.merged`, `worktree.conflict`, `worktree.released`, `worktree.failed` |
 | **Session (audit)** | `checkpoint.written`, `in_flight.started`, `in_flight.ended`, `token.cost_estimate_unavailable` |
 | **Fleet** | `coordinator.stats` |
+| **Brain** | `brain.decision_requested`, `brain.decision_answered`, `brain.decision_ask_human`, `brain.human_answered`, `brain.decision_denied`, `brain.intervention` |
 | **Errors** | `error` |
 
 Total: **~50 events** across 12 categories. Source of truth is the `EventMap` type in `events.ts` — any new event must be added there AND to this table.
@@ -153,6 +154,36 @@ User/plugin-defined hooks that **steer** (not just observe — the EventBus can'
 - Subagent signal lifecycle: `AbortController` recycled between tasks
 
 For director-driven evolution, see `docs/director-architecture.md`.
+
+### The Brain (decision layer)
+
+One **Brain** instance per session, bound at `TOKENS.BrainArbiter`, sits
+between the agents and the human. Every autonomous consumer — Director
+(`director.ts`, `director-construction.ts`), AutoPhase
+(`phase-orchestrator.ts`), Eternal engine (`eternal-autonomy.ts`, incl.
+the `--eternal` flag path) — routes blocking decisions through it.
+
+**Three tiers** (`cli-main.ts` wires the chain):
+1. `DefaultBrainArbiter` — deterministic policy (low-risk fast path,
+   fallback semantics).
+2. `createTieredBrainArbiter` + `createAutonomyBrain`
+   (`core/execution/autonomy-brain.ts`) — LLM decision engine, gated by a
+   **live autonomy ceiling** (`/brain risk off|low|medium|high|all`,
+   default `medium`, read on every decision). Sees the live
+   provider/model via a lazy wrapper.
+3. `HumanEscalatingBrainArbiter` + `BrainDecisionQueue` — interactive
+   prompt (TUI `BrainDecisionPrompt`). `ObservableBrainArbiter` emits
+   `brain.decision_*` events around the whole chain.
+
+**Self-activation:** `BrainMonitor`
+(`core/coordination/brain-monitor.ts`) watches the EventBus for
+tool-failure streaks (3× same tool) and error storms (4 in 60s),
+consults the Brain (`source: 'system'`, options steer/continue, fallback
+`continue`), and on a steer decision sends a high-priority `steer` mail
+from `brain@<sessionTag>` to `leader@<sessionTag>` — folded into the
+agent's conversation by the mailbox loop. Emits `brain.intervention`
+either way; 120s per-signal cooldown; policy-only brains degrade to
+observe-only. `/brain` shows status + the last 20 decisions.
 
 ### Cross-surface coordination (multi-terminal / multi-WebUI)
 
@@ -390,7 +421,7 @@ Slash commands are documented in `docs/slash/`. When adding a new one:
 4. Add tests: `packages/cli/tests/slash-<name>.test.ts`
 5. Add docs: `docs/slash/<name>.md`
 
-**Currently registered (32):** `help`, `init`, `clear`, `compact`, `context`, `tools`, `plugin`, `mcp`, `diag`, `stats`, `spawn`, `agents`, `director`, `fleet`, `memory`, `todos`, `sdd`, `save`, `load`, `yolo`, `autonomy`, `goal`, `btw`, `next`, `mode`, `exit`, `fix`, `autophase`, `worktree`, `settings`, `collab`, `statusline`.
+**Currently registered (33):** `help`, `init`, `clear`, `compact`, `context`, `tools`, `plugin`, `mcp`, `diag`, `stats`, `spawn`, `agents`, `director`, `fleet`, `memory`, `todos`, `sdd`, `save`, `load`, `yolo`, `autonomy`, `goal`, `brain`, `btw`, `next`, `mode`, `exit`, `fix`, `autophase`, `worktree`, `settings`, `collab`, `statusline`.
 
 **Planned but not yet implemented (7):** `git`, `health`, `metrics`, `plan`, `security`, `skill-gen`, `skills`. Their `docs/slash/*.md` files exist but no buildXxxCommand has been registered yet. Either implement them or remove the orphan docs in a follow-up commit. See H13 in the 2026-06-03 audit.
 

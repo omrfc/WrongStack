@@ -265,6 +265,19 @@ export {
   type BrainRisk,
   type DefaultBrainArbiterOptions,
 } from './coordination/brain.js';
+export {
+  BrainMonitor,
+  type BrainMonitorOptions,
+  type BrainInterventionInput,
+} from './coordination/brain-monitor.js';
+export {
+  createAutonomyBrain,
+  createTieredBrainArbiter,
+  formatDecisionSummary,
+  type AutonomyBrainOptions,
+  type TieredBrainArbiterOptions,
+  type BrainAutoRisk,
+} from './execution/autonomy-brain.js';
 // Re-exported from ./coordination/index.js so they are available at the
 // top-level @wrongstack/core import path.  Without this, consumers that
 // `import { makeFleetEmitTool } from '@wrongstack/core'` get a runtime

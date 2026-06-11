@@ -25,6 +25,20 @@ export interface EventMap {
     at: number;
   };
   'brain.decision_denied': { request: BrainDecisionRequest; decision: BrainDecision; at: number };
+  /**
+   * Fired by the BrainMonitor when it PROACTIVELY engaged (self-activation):
+   * a watched signal (tool-failure streak, error storm) crossed its
+   * threshold, the Brain was consulted, and — when the decision called for
+   * it — a corrective steer was delivered to the working agent.
+   */
+  'brain.intervention': {
+    kind: 'tool_failure_streak' | 'error_storm';
+    request: BrainDecisionRequest;
+    decision: BrainDecision;
+    /** True when a steer was actually delivered to the agent. */
+    intervened: boolean;
+    at: number;
+  };
   'session.started': { id: string };
   'session.ended': { id: string; usage: Usage };
   'session.damaged': { sessionId: string; detail: string };

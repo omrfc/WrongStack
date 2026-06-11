@@ -59,6 +59,57 @@ const RISK_LEVELS: Record<string, number> = {
   critical: 3,
 };
 
+/** Runtime-adjustable autonomy ceiling for the tiered brain. */
+export type BrainAutoRisk = 'off' | 'low' | 'medium' | 'high' | 'all';
+
+export interface TieredBrainArbiterOptions {
+  /** Fast deterministic policy layer (DefaultBrainArbiter). Consulted first. */
+  policy: BrainArbiter;
+  /** LLM-backed autonomous layer (createAutonomyBrain). Consulted when the
+   *  policy layer would escalate to the human and the request's risk is
+   *  within the live ceiling. */
+  autonomous?: BrainArbiter | undefined;
+  /**
+   * Live autonomy ceiling — read on EVERY decision so `/brain risk <level>`
+   * changes take effect immediately. 'off' disables the autonomous layer
+   * entirely (everything the policy can't answer goes to the human).
+   */
+  getMaxAutoRisk?: (() => BrainAutoRisk) | undefined;
+}
+
+/**
+ * The standard Brain positioning: policy first, LLM second, human last.
+ *
+ *   1. POLICY  — deterministic DefaultBrainArbiter (low-risk fast path,
+ *      fallback semantics). Answers and denies pass through untouched.
+ *   2. LLM     — when the policy says `ask_human` and the request's risk is
+ *      within the live ceiling, the autonomous brain gets a chance to
+ *      answer. Only a real `answer` short-circuits; LLM denials/failures
+ *      fall through.
+ *   3. HUMAN   — anything left escalates (callers wrap this in
+ *      HumanEscalatingBrainArbiter so `ask_human` becomes a real prompt).
+ */
+export function createTieredBrainArbiter(opts: TieredBrainArbiterOptions): BrainArbiter {
+  return {
+    async decide(request: BrainDecisionRequest): Promise<BrainDecision> {
+      const policyDecision = await opts.policy.decide(request);
+      if (policyDecision.type !== 'ask_human') return policyDecision;
+      const ceiling = opts.getMaxAutoRisk?.() ?? 'medium';
+      if (!opts.autonomous || ceiling === 'off') return policyDecision;
+      const ceilingLevel = ceiling === 'all' ? 3 : (RISK_LEVELS[ceiling] ?? 1);
+      const requestLevel = RISK_LEVELS[request.risk] ?? 2;
+      if (requestLevel > ceilingLevel) return policyDecision;
+      try {
+        const llmDecision = await opts.autonomous.decide(request);
+        if (llmDecision.type === 'answer') return llmDecision;
+      } catch {
+        // LLM layer is best-effort — fall through to the human.
+      }
+      return policyDecision;
+    },
+  };
+}
+
 /**
  * Create a self-driving brain that makes autonomous decisions.
  * Never asks the human — within its risk boundary it answers, above it denies.
