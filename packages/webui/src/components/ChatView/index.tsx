@@ -12,14 +12,10 @@ import {
   Bot,
   ChevronDown,
   Clock,
-  Command,
   Cpu,
-  FolderOpen,
   History,
   PanelLeftOpen,
   Pencil,
-  Settings,
-  Shrink,
   Terminal,
   Zap,
 } from 'lucide-react';
@@ -27,7 +23,6 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { AutonomyPicker } from '../AutonomyPicker';
 import { ChatInput } from '../ChatInput';
 import { CheckpointTimeline } from '../CheckpointTimeline';
-import { ConnectionChip } from '../ConnectionChip';
 import { ContextModePicker } from '../ContextModePicker';
 import { ContextFillBar } from '../ContextBar';
 import { ContextBreakdownModal } from '../ContextBreakdownModal';
@@ -36,23 +31,18 @@ import { MessageBubble } from '../MessageBubble';
 import { ModePicker } from '../ModePicker';
 import { ProcessMonitor } from '../ProcessMonitor';
 import { SearchOverlay } from '../SearchOverlay';
-import { ThemeToggle } from '../ThemeToggle';
 import { ToolGroup } from '../ToolGroup';
 import { WelcomeScreen } from '../WelcomeScreen';
-import { WorkingDirChip } from '../WorkingDirChip';
 import { Button } from '../ui/button';
 import { ScrollArea } from '../ui/scroll-area';
 import { fmtTok } from './utils.js';
 import { ThinkingBubble } from './ThinkingBubble.js';
 export function ChatView() {
   const { messages, isLoading } = useChatStore();
-  const setPaletteOpen = useUIStore((s) => s.setPaletteOpen);
-  const setShortcutsOpen = useUIStore((s) => s.setShortcutsOpen);
   const sidebarOpen = useUIStore((s) => s.sidebarOpen);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const compactMode = useUIStore((s) => s.compactMode);
-  const { totalTokens, startTime, lastInputTokens, maxContext, projectName, cwd, iteration, todos, mode } =
-    useSessionStore();
+  const { totalTokens, startTime, lastInputTokens, maxContext, iteration } = useSessionStore();
   const session = useSessionStore((s) => s.session);
   const sessionId = session?.id;
   const nickname = useUIStore((s) => (sessionId ? s.sessionNicknames[sessionId] : undefined));
@@ -76,8 +66,7 @@ export function ChatView() {
     return () => { document.removeEventListener('mousedown', onClick); document.removeEventListener('keydown', onKey); };
   }, [switcherOpen]);
 
-  const { wsConnected, wsStatus, provider, model } = useConfigStore();
-  const { setCurrentView } = useUIStore();
+  const { provider, model } = useConfigStore();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Autonomy mode — read from the shared local-prefs store (seeded from the
