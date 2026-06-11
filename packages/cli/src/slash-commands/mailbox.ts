@@ -57,23 +57,96 @@ function leaderId(opts: SlashCommandContext): { id: string; base: string } {
   return { id: `leader@${mailboxSessionTag('default')}`, base: 'leader' };
 }
 
-function fmtAgent(a: MailboxAgentStatus, selfId: string): string {
-  const ageMs = Date.now() - new Date(a.lastSeenAt).getTime();
-  const age = ageMs < 60_000 ? `${Math.round(ageMs / 1000)}s` : `${Math.round(ageMs / 60_000)}m`;
-  const live = ageMs <= 60_000;
-  const dot = live ? color.green('●') : color.dim('○');
-  const self = a.agentId === selfId ? color.cyan(' (you)') : '';
-  const src = a.source ? color.dim(` [${a.source}]`) : '';
-  return `  ${dot} ${color.bold(a.agentId)}${self}${src}  ${color.dim(`${a.name} · ${age} ago · session ${a.sessionId}`)}`;
+function fmtAge(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return `${Math.max(0, Math.round(ms / 1000))}s ago`;
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m ago`;
+  return `${Math.round(ms / 3_600_000)}h ago`;
 }
 
-function fmtMessage(m: MailboxMessage, selfId: string): string {
-  const from = m.from === selfId ? color.cyan('you') : color.bold(m.from);
-  const to = m.to === '*' ? color.magenta('all') : m.to === selfId ? color.cyan('you') : m.to;
+const STATUS_COLOR: Record<MailboxAgentStatus['status'], (s: string) => string> = {
+  running: color.green,
+  streaming: color.green,
+  idle: color.cyan,
+  waiting_user: color.yellow,
+  error: color.red,
+  offline: color.dim,
+};
+
+/** Collapse newlines/runs of whitespace so list rows stay single-line. */
+function oneLine(s: string, max: number): string {
+  const flat = s.replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+/**
+ * One agent per row, id column padded so the metadata lines up:
+ *   ● leader@a1b2c3d4 (you)   cli · running · 12 iter · 34 tools · 5s ago
+ *       ↳ implementing the auth refactor
+ * Padding is computed on the RAW label (before ANSI) so alignment survives
+ * coloring.
+ */
+function fmtAgent(a: MailboxAgentStatus, selfId: string, idWidth: number): string[] {
+  const isSelf = a.agentId === selfId;
+  const rawLabel = a.agentId + (isSelf ? ' (you)' : '');
+  const pad = ' '.repeat(Math.max(0, idWidth - rawLabel.length));
+  const dot = a.online ? color.green('●') : color.dim('○');
+  const label = color.bold(a.agentId) + (isSelf ? color.cyan(' (you)') : '');
+  const statusColor = STATUS_COLOR[a.status] ?? color.dim;
+  const meta = [
+    a.source ? color.dim(a.source) : undefined,
+    statusColor(a.status),
+    a.iterations > 0 ? color.dim(`${a.iterations} iter`) : undefined,
+    a.toolCalls > 0 ? color.dim(`${a.toolCalls} tools`) : undefined,
+    color.dim(fmtAge(a.lastSeenAt)),
+  ]
+    .filter((p): p is string => Boolean(p))
+    .join(color.dim(' · '));
+  const lines = [`  ${dot} ${label}${pad}  ${meta}`];
+  if (a.currentTask) lines.push(color.dim(`      ↳ ${oneLine(a.currentTask, 80)}`));
+  return lines;
+}
+
+/**
+ * One message per row with aligned from → to columns:
+ *   14:30:22  worker@b2c3d4e5 → you   [steer] adjust your approach…
+ * Subject is only shown when it adds information (it is usually just the
+ * first 60 chars of the body — repeating that reads as a glitch).
+ */
+function fmtMessage(
+  m: MailboxMessage,
+  selfId: string,
+  fromWidth: number,
+  toWidth: number,
+): string {
+  const rawFrom = m.from === selfId ? 'you' : m.from;
+  const rawTo = m.to === '*' ? 'all' : m.to === selfId ? 'you' : m.to;
+  const fromPad = ' '.repeat(Math.max(0, fromWidth - rawFrom.length));
+  const toPad = ' '.repeat(Math.max(0, toWidth - rawTo.length));
+  const from = m.from === selfId ? color.cyan(rawFrom) : color.bold(rawFrom);
+  const to = m.to === '*' ? color.magenta(rawTo) : m.to === selfId ? color.cyan(rawTo) : rawTo;
   const t = color.dim(new Date(m.timestamp).toISOString().slice(11, 19));
-  const body = m.body.length > 160 ? `${m.body.slice(0, 159)}…` : m.body;
-  const subject = m.subject && m.subject !== m.body ? `${color.bold(m.subject)} — ` : '';
-  return `  ${t} ${from} → ${to}: ${subject}${body}`;
+  const tag = m.type !== 'note' ? `${color.magenta(`[${m.type}]`)} ` : '';
+  const body = oneLine(m.body, 120);
+  const flatSubject = m.subject ? oneLine(m.subject, 60) : '';
+  const subject =
+    flatSubject && flatSubject !== body && !body.startsWith(flatSubject.replace(/…$/, ''))
+      ? `${color.bold(flatSubject)} — `
+      : '';
+  return `  ${t}  ${from}${fromPad} → ${to}${toPad}  ${tag}${subject}${body}`;
+}
+
+/** Column widths from raw (uncolored) labels, shared by inbox + history. */
+function messageWidths(messages: MailboxMessage[], selfId: string): { from: number; to: number } {
+  let from = 0;
+  let to = 0;
+  for (const m of messages) {
+    const rawFrom = m.from === selfId ? 'you' : m.from;
+    const rawTo = m.to === '*' ? 'all' : m.to === selfId ? 'you' : m.to;
+    if (rawFrom.length > from) from = rawFrom.length;
+    if (rawTo.length > to) to = rawTo.length;
+  }
+  return { from, to };
 }
 
 export function buildMailboxCommand(opts: SlashCommandContext): SlashCommand {
@@ -118,9 +191,12 @@ export function buildMailboxCommand(opts: SlashCommandContext): SlashCommand {
             ),
           };
         }
+        const idWidth = Math.max(
+          ...agents.map((a) => a.agentId.length + (a.agentId === self.id ? 6 : 0)),
+        );
         const lines = [
           color.bold(`${agents.length} ${sub === 'online' ? 'online ' : ''}agent(s) on this project`),
-          ...agents.map((a) => fmtAgent(a, self.id)),
+          ...agents.flatMap((a) => fmtAgent(a, self.id, idWidth)),
           '',
           color.dim(`Mailbox: ${mb.messagePath}`),
         ];
@@ -162,10 +238,11 @@ export function buildMailboxCommand(opts: SlashCommandContext): SlashCommand {
         const n = Number.parseInt(parts[1] ?? '20', 10) || 20;
         const messages = await mb.query({ limit: n });
         if (messages.length === 0) return { message: color.dim('No messages yet.') };
+        const w = messageWidths(messages, self.id);
         const lines = [
           color.bold(`Last ${messages.length} message(s)`),
           // query returns newest-first; show oldest-first for reading flow.
-          ...messages.reverse().map((m) => fmtMessage(m, self.id)),
+          ...messages.reverse().map((m) => fmtMessage(m, self.id, w.from, w.to)),
         ];
         return { message: lines.join('\n') };
       }
@@ -195,9 +272,10 @@ export function buildMailboxCommand(opts: SlashCommandContext): SlashCommand {
             mb.ack({ messageId: m.id, readerId: self.id, read: true }).catch(() => null),
           ),
         );
+        const w = messageWidths(unread, self.id);
         const lines = [
           color.bold(`${unread.length} unread message(s) for ${self.id}`),
-          ...unread.reverse().map((m) => fmtMessage(m, self.id)),
+          ...unread.reverse().map((m) => fmtMessage(m, self.id, w.from, w.to)),
         ];
         return { message: lines.join('\n') };
       }

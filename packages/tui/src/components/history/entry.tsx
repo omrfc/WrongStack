@@ -228,8 +228,16 @@ export const Entry = React.memo(function Entry({
         </Box>
       );
     }
-    case 'info':
-      return <Text dimColor>{entry.text}</Text>;
+    case 'info': {
+      // Slash commands style their own output with raw ANSI (bold, colors,
+      // dim sections). Wrapping that in dimColor breaks mid-string: the
+      // first \x1b[22m close inside the text cancels the outer dim, leaving
+      // the rest of the entry patchy half-dim/half-bright. Only dim plain,
+      // unstyled lines.
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI detection
+      const hasAnsi = /\x1b\[/.test(entry.text);
+      return <Text dimColor={!hasAnsi}>{entry.text}</Text>;
+    }
     case 'warn':
       return (
         <Box
