@@ -10,6 +10,7 @@
  * @module mailbox-tool
  */
 
+import { createHash } from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { EventBus } from '../kernel/events.js';

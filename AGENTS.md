@@ -169,13 +169,13 @@ one coordination plane under `~/.wrongstack/projects/<slug>/`:
   `cli/slash-commands/project-utils.ts`, standalone WebUI via its local
   equivalent. Entries: name/root/slug/createdAt/lastSeen/lastWorkingDir.
 - **GlobalMailbox** (`_mailbox.jsonl` + `_mailbox.registry.json`): agents
-  register under a **process-unique identity** `<base>#<pid>` (set by
+  register under a **session-unique identity** `<base>@<session-tag>` (set by
   `attachMailboxChecker` into `ctx.meta['globalAgentId']`) with 30s
   heartbeats (stale after 60s). The bare base id (`leader`) is an alias:
   the loop checker, the `mailbox` tool, and `/mailbox` query unique id +
   alias + `*` and dedupe by message id; read receipts always go under the
   unique id. "to leader" fans out to every live leader process; "to
-  leader#4242" is exact. send() and ack() share one file lock (an unlocked
+  leader@a1b2c3d4" is exact. send() and ack() share one file lock (an unlocked
   append racing ack's rewrite is silently erased).
 - **SessionRegistry** (cross-process): both the CLI and the standalone
   WebUI register their sessions and run `AgentStatusTracker`, so

@@ -6,13 +6,13 @@
  * agents USE the mailbox autonomously — a model reaches for `mail_send`
  * mid-task far more readily than for `mailbox action=send ...`.
  *
- *   mail_send  — message one agent (`to: "leader#4242"`), every leader
+ *   mail_send  — message one agent (`to: "leader@a1b2c3d4"`), every leader
  *                (`to: "leader"`), or everyone (`to: "*"`)
  *   mail_inbox — read unread mail (unique id + base alias + broadcasts),
  *                marking it read so it isn't re-injected next iteration
  *
  * Both share the identity convention with the agent-loop checker
- * (`<base>#<pid>`, see mailbox-attach) via `resolveMailboxIdentity`.
+ * (`<base>@<sessionTag>`, see mailbox-attach) via `resolveMailboxIdentity`.
  *
  * @module mail-tools
  */
@@ -71,7 +71,7 @@ export function makeMailSendTool(opts: MailToolsOptions = {}): Tool {
       'Send a mail to other agents working on this project (other terminals, TUIs, WebUIs). ' +
       'Use it to hand off work ("can you review src/auth.ts?"), ask questions, or announce ' +
       'what you just did. to="*" broadcasts to everyone; to="leader" reaches every leader ' +
-      'process; an exact id like "leader#4242" reaches one agent. Recipients see your mail ' +
+      'process; an exact id like "leader@a1b2c3d4" reaches one agent. Recipients see your mail ' +
       'automatically before their next step.',
     usageHint: 'mail_send to="*" subject="auth refactor done" body="touched src/auth/*, please review"',
     category: 'coordination',
@@ -82,7 +82,7 @@ export function makeMailSendTool(opts: MailToolsOptions = {}): Tool {
       properties: {
         to: {
           type: 'string',
-          description: 'Recipient: exact agent id ("leader#4242"), base alias ("leader"), or "*" for everyone.',
+          description: 'Recipient: exact agent id ("leader@a1b2c3d4"), base alias ("leader"), or "*" for everyone.',
         },
         subject: { type: 'string', description: 'Short subject line.' },
         body: { type: 'string', description: 'The message.' },

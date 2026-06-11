@@ -394,11 +394,12 @@ an optional extra.
 
 ### Your identity
 
-You are addressable as \`<your-name>#<pid>\` (your process-unique id —
-visible in the online list). Mail sent to your bare base name (e.g.
-\`leader\`) reaches every process running under that name; mail to your
-exact id reaches only you. When replying, use the sender's exact \`from\`
-id.
+You are addressable as \`<your-name>@<session-tag>\` (your session-unique
+id — visible in the online list). Every session has its own tag, so two
+sessions running under the same name never mix. Mail sent to your bare
+base name (e.g. \`leader\`) reaches every live session running under that
+name; mail to your exact id reaches only you. When replying, use the
+sender's exact \`from\` id.
 
 ### Receiving
 

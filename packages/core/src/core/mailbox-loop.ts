@@ -15,15 +15,17 @@ import type { Mailbox, MailboxMessage } from '../coordination/mailbox-types.js';
 export interface MailboxLoopOptions {
   mailbox: Mailbox;
   /**
-   * The agent's globally unique mailbox identity (e.g. `leader#1234`).
-   * Read receipts are recorded under this id, so two processes whose
-   * leaders share a base name never consume each other's receipts.
+   * The agent's globally unique mailbox identity (e.g. `leader@a1b2c3d4`,
+   * session-bound). Read receipts are recorded under this id, so two
+   * sessions whose leaders share a base name never consume each other's
+   * receipts. Pass a GETTER when the identity can change at runtime (an
+   * in-process session swap moves the leader onto a new session tag).
    */
-  agentId: string;
+  agentId: string | (() => string);
   /**
    * Additional addresses this agent also answers to — typically the bare
    * base id (`leader`). Lets other agents (and humans) address "leader"
-   * without knowing the pid suffix; every live leader process receives it.
+   * without knowing the session tag; every live leader session receives it.
    */
   aliases?: string[] | undefined;
 }
@@ -31,13 +33,18 @@ export interface MailboxLoopOptions {
 export function createMailboxChecker(
   opts: MailboxLoopOptions,
 ): () => Promise<MailboxMessage[]> {
-  const { mailbox, agentId } = opts;
-  const targets = [agentId, ...(opts.aliases ?? []).filter((al) => al && al !== agentId)];
+  const { mailbox } = opts;
+  const currentId = typeof opts.agentId === 'function' ? opts.agentId : () => opts.agentId as string;
 
   const injectedIds = new Set<string>();
 
   return async (): Promise<MailboxMessage[]> => {
     try {
+      const agentId = currentId();
+      const targets = [
+        agentId,
+        ...(opts.aliases ?? []).filter((al) => al && al !== agentId),
+      ];
       // Query ALL unread messages across every address this agent answers
       // to (unique id, base-id aliases; '*' broadcasts match each query and
       // are deduped below). Receipts always use the unique id.

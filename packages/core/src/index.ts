@@ -351,7 +351,7 @@ export {
 // ── Mailbox — inter-agent messaging ──────────────────────────────────────
 export { DefaultMailbox } from './coordination/mailbox.js';
 export { GlobalMailbox, resolveProjectDir } from './coordination/global-mailbox.js';
-export { makeMailboxTool, resolveMailboxIdentity, type MailboxToolOptions, type MailboxResolver } from './coordination/mailbox-tool.js';
+export { makeMailboxTool, resolveMailboxIdentity, mailboxSessionTag, type MailboxToolOptions, type MailboxResolver } from './coordination/mailbox-tool.js';
 export { makeMailSendTool, makeMailInboxTool, type MailToolsOptions } from './coordination/mail-tools.js';
 export type {
   Mailbox,

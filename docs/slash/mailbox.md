@@ -9,9 +9,9 @@ can write via the `mailbox` tool. `/mailbox` gives **you** the same powers.
 ## Identity model
 
 Every process registers its agents under a **process-unique id**:
-`<base>#<pid>` (e.g. `leader#4242`). The bare base id (`leader`) stays
+`<base>@<session-tag>` (e.g. `leader@a1b2c3d4`). The bare base id (`leader`) stays
 addressable as an **alias** — a message sent to `leader` is received by
-*every* live leader process on the project, while `leader#4242` reaches
+*every* live leader session on the project, while `leader@a1b2c3d4` reaches
 exactly one. Broadcasts (`*`) reach everyone. Read receipts are recorded
 per unique id, so two terminals never consume each other's unread state.
 
@@ -36,7 +36,7 @@ Alias: `/mb`.
 
 ```
 /mailbox broadcast pausing deploys, hold off on main
-/mailbox send leader#4242 can you take the auth refactor?
+/mailbox send leader@a1b2c3d4 can you take the auth refactor?
 /mailbox agents
 ```
 

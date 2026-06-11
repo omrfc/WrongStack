@@ -9,7 +9,7 @@ import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DefaultMailbox } from '../../src/coordination/mailbox.js';
 import { GlobalMailbox } from '../../src/coordination/global-mailbox.js';
-import { makeMailboxTool } from '../../src/coordination/mailbox-tool.js';
+import { makeMailboxTool , mailboxSessionTag } from '../../src/coordination/mailbox-tool.js';
 import { makeDependencyWatcherConfig } from '../../src/coordination/dep-watcher.js';
 
 describe('mailbox end-to-end smoke test', () => {
@@ -164,7 +164,7 @@ describe('mailbox end-to-end smoke test', () => {
     const msg = checkB.messages[0];
     // Sends carry the process-unique identity (`<base>#<pid>`) so replies
     // route back to the exact process; the bare base id remains an alias.
-    expect(msg.from).toBe(`leader-sessA#${process.pid}`);
+    expect(msg.from).toBe(`leader-sessA@${mailboxSessionTag('sess-A')}`);
     expect(msg.readByMe).toBe(true); // auto-read on check
 
     // Session B replies
@@ -184,8 +184,8 @@ describe('mailbox end-to-end smoke test', () => {
     expect(statusA.ok).toBe(true);
     const agentIds = statusA.agents.map((a: { agentId: string }) => a.agentId);
     // Agents register under their process-unique identity.
-    expect(agentIds).toContain(`leader-sessA#${process.pid}`);
-    expect(agentIds).toContain(`leader-sessB#${process.pid}`);
+    expect(agentIds).toContain(`leader-sessA@${mailboxSessionTag('sess-A')}`);
+    expect(agentIds).toContain(`leader-sessB@${mailboxSessionTag('sess-B')}`);
 
     // Unread count for session A
     const unreadA = await toolA.execute({ action: 'unread' }, ctxA as any);

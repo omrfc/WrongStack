@@ -10,7 +10,7 @@
  * or broadcast to everyone.
  *
  * The command acts under THIS process's leader identity
- * (`leader#<pid>`, set by attachMailboxChecker), so messages you send
+ * (`leader@<sessionTag>`, session-bound), so messages you send
  * here are attributed to the same agent your conversation runs as, and
  * replies addressed to it land in your agent's next iteration.
  *
@@ -28,6 +28,8 @@ import * as path from 'node:path';
 import {
   GlobalMailbox,
   resolveProjectDir,
+  resolveMailboxIdentity,
+  mailboxSessionTag,
   color,
   type MailboxAgentStatus,
   type MailboxMessage,
@@ -46,12 +48,13 @@ function buildMailbox(opts: SlashCommandContext): GlobalMailbox | null {
   }
 }
 
-/** The identity this process's conversation runs as (`leader#<pid>`). */
+/** The identity this session's conversation runs as (`leader@<sessionTag>`). */
 function leaderId(opts: SlashCommandContext): { id: string; base: string } {
-  const base = (opts.context?.meta['agentId'] as string | undefined) ?? 'leader';
-  const id =
-    (opts.context?.meta['globalAgentId'] as string | undefined) ?? `${base}#${process.pid}`;
-  return { id, base };
+  if (opts.context) {
+    const identity = resolveMailboxIdentity(opts.context);
+    return { id: identity.callerId, base: identity.baseId };
+  }
+  return { id: `leader@${mailboxSessionTag('default')}`, base: 'leader' };
 }
 
 function fmtAgent(a: MailboxAgentStatus, selfId: string): string {
@@ -95,7 +98,7 @@ export function buildMailboxCommand(opts: SlashCommandContext): SlashCommand {
       '',
       'Examples:',
       '  /mailbox broadcast pausing deploys, hold off on main',
-      '  /mailbox send leader#4242 can you take the auth refactor?',
+      '  /mailbox send leader@a1b2c3d4 can you take the auth refactor?',
     ].join('\n'),
     async run(args) {
       const mb = buildMailbox(opts);

@@ -87,10 +87,10 @@ Bridge contract:
 
 Inter-agent mailbox (if you have the \`mail_send\`/\`mail_inbox\`/\`mailbox\` tools):
   - You are part of a project-wide fleet that may span other terminals and
-    WebUIs. Your mailbox identity is \`<your-name>#<pid>\`; mail addressed to
-    you, to your bare name, or broadcast to \`*\` is injected into your
-    conversation automatically before each step — read it once, it is
-    marked read.
+    WebUIs. Your mailbox identity is \`<your-name>@<session-tag>\` (unique
+    per session); mail addressed to you, to your bare name, or broadcast
+    to \`*\` is injected into your conversation automatically before each
+    step — read it once, it is marked read.
   - Broadcast milestones: when you complete a significant piece of work,
     \`mail_send to="*"\` a one-line summary so parallel agents don't collide
     with or duplicate it.

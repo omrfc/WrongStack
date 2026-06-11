@@ -8,7 +8,7 @@ import type {
   MailboxMessage,
   MailboxSendInput,
 } from '../../src/coordination/mailbox-types.js';
-import { makeMailboxTool } from '../../src/coordination/mailbox-tool.js';
+import { makeMailboxTool, mailboxSessionTag } from '../../src/coordination/mailbox-tool.js';
 import {
   createMailboxChecker,
   buildMailboxBlock,
@@ -306,7 +306,7 @@ describe('makeMailboxTool', () => {
     // check auto-acks. Read receipts are recorded under the PROCESS-UNIQUE
     // identity (`agent-b#<pid>`) so multiple processes sharing a base id
     // never consume each other's read state.
-    const uniqueId = `agent-b#${process.pid}`;
+    const uniqueId = `agent-b@${mailboxSessionTag('default')}`;
     const remaining = await mailbox.query({ to: 'agent-b', unreadBy: uniqueId });
     expect(remaining.length).toBe(0);
   });
@@ -335,7 +335,7 @@ describe('makeMailboxTool', () => {
     expect(msgs[0]!.subject).toBe('Question');
     // Sends are attributed to the process-unique identity so replies route
     // back to the exact process that asked.
-    expect(msgs[0]!.from).toBe(`sender#${process.pid}`);
+    expect(msgs[0]!.from).toBe(`sender@${mailboxSessionTag('default')}`);
   });
 
   it('send validates required fields', async () => {
@@ -732,13 +732,13 @@ describe('mail_send + mail_inbox tools', () => {
       ctxA as never,
     );
     expect(sent.ok).toBe(true);
-    expect(sent.from).toBe(`coder#${process.pid}`);
+    expect(sent.from).toBe(`coder@${mailboxSessionTag('default')}`);
 
     const got = await inbox.execute({}, ctxB as never);
     expect(got.ok).toBe(true);
     expect(got.count).toBe(1);
     expect(got.messages[0]).toMatchObject({
-      from: `coder#${process.pid}`,
+      from: `coder@${mailboxSessionTag('default')}`,
       to: '*',
       type: 'broadcast',
       subject: 'auth done',
@@ -761,7 +761,7 @@ describe('mail_send + mail_inbox tools', () => {
     const inbox = makeMailInboxTool({ resolveMailbox: () => mailbox });
     const ctxA = mockCtx({ meta: { agentId: 'coder' } });
     const ctxB = mockCtx({ meta: { agentId: 'leader' } });
-    const uniqueB = `leader#${process.pid}`;
+    const uniqueB = `leader@${mailboxSessionTag('default')}`;
 
     await send.execute({ to: uniqueB, subject: 'direct', body: 'd' }, ctxA as never);
     await send.execute({ to: 'leader', subject: 'alias', body: 'a' }, ctxA as never);
@@ -783,7 +783,7 @@ describe('mail_send + mail_inbox tools', () => {
     const ctxA = mockCtx({ meta: { agentId: 'a' } });
     const ctxB = mockCtx({ meta: { agentId: 'b' } });
 
-    await send.execute({ to: `b#${process.pid}`, subject: 's', body: 'x' }, ctxA as never);
+    await send.execute({ to: `b@${mailboxSessionTag('default')}`, subject: 's', body: 'x' }, ctxA as never);
     const peek = await inbox.execute({ markRead: false }, ctxB as never);
     expect(peek.count).toBe(1);
     const second = await inbox.execute({}, ctxB as never);
