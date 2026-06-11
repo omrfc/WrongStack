@@ -154,6 +154,38 @@ User/plugin-defined hooks that **steer** (not just observe — the EventBus can'
 
 For director-driven evolution, see `docs/director-architecture.md`.
 
+### Cross-surface coordination (multi-terminal / multi-WebUI)
+
+Any number of terminals, TUIs and WebUIs working on the same project share
+one coordination plane under `~/.wrongstack/projects/<slug>/`:
+
+- **One canonical project dir.** Every surface derives `<slug>` via
+  `projectSlug()` (`core/utils/wstack-paths.ts`). `resolveProjectDir`
+  (GlobalMailbox) and the WebUI's `generateProjectSlug` DELEGATE to it —
+  never reintroduce an inline slug copy (a divergent copy once split agents
+  on edge-named projects into two mailboxes).
+- **projects.json** (`~/.wrongstack/projects.json`) is auto-touched on every
+  boot — CLI/TUI via `touchProjectInManifest()` (file-locked) in
+  `cli/slash-commands/project-utils.ts`, standalone WebUI via its local
+  equivalent. Entries: name/root/slug/createdAt/lastSeen/lastWorkingDir.
+- **GlobalMailbox** (`_mailbox.jsonl` + `_mailbox.registry.json`): agents
+  register under a **process-unique identity** `<base>#<pid>` (set by
+  `attachMailboxChecker` into `ctx.meta['globalAgentId']`) with 30s
+  heartbeats (stale after 60s). The bare base id (`leader`) is an alias:
+  the loop checker, the `mailbox` tool, and `/mailbox` query unique id +
+  alias + `*` and dedupe by message id; read receipts always go under the
+  unique id. "to leader" fans out to every live leader process; "to
+  leader#4242" is exact. send() and ack() share one file lock (an unlocked
+  append racing ack's rewrite is silently erased).
+- **SessionRegistry** (cross-process): both the CLI and the standalone
+  WebUI register their sessions and run `AgentStatusTracker`, so
+  `/sessions status` lists every surface's live sessions.
+- **Surfaces.** Agents read incoming mail automatically each iteration
+  (`mailbox-loop` folds steer/btw inline) and write via the `mailbox` tool
+  (registered in CLI and WebUI). Humans use `/mailbox` (inbox / agents /
+  send / broadcast / history); the TUI and both WebUI servers forward
+  `mailbox.received` / `mailbox.agent_registered` live.
+
 ### Collab Debug Session
 
 A **CollabSession** (triggered by `/collab <paths>` or `collab_debug` tool) runs a three-agent parallel pipeline: `bug-hunter` → `refactor-planner` → `critic`. Each agent emits structured events via `fleet_emit` tool, which the Director routes to the `FleetBus`. Downstream agents consume events in real time (not just at task completion).
