@@ -10,7 +10,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollArea } from '../ui/scroll-area';
 
 interface SessionListProps {
@@ -61,6 +61,25 @@ export function SessionList({
   const setSessionNickname = useUIStore((s) => s.setSessionNickname);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
+
+  // Resume-in-flight feedback: mark the clicked row until the server's
+  // session.start lands (the refreshed list flips isCurrent) and block
+  // double-resumes meanwhile. A failed resume only toasts, so a timeout
+  // releases the lock.
+  const [resumingId, setResumingId] = useState<string | null>(null);
+  useEffect(() => {
+    if (resumingId && historyEntries.some((e) => e.id === resumingId && e.isCurrent)) {
+      setResumingId(null);
+    }
+  }, [resumingId, historyEntries]);
+  const handleResume = useCallback(
+    (id: string) => {
+      setResumingId(id);
+      resumeSession(id);
+      setTimeout(() => setResumingId((cur) => (cur === id ? null : cur)), 10_000);
+    },
+    [resumeSession],
+  );
 
   const emptySessionIds = useMemo(
     () => getEmptySessionIds(historyEntries),
@@ -192,8 +211,8 @@ export function SessionList({
                   <div key={entry.id} className={cn('group relative rounded-md border text-sm transition-colors', entry.isCurrent ? 'bg-primary/5 border-primary/40' : 'bg-card border-border/60 hover:bg-muted/40 hover:border-primary/40')}>
                     <button
                       type="button"
-                      disabled={entry.isCurrent || renamingId === entry.id}
-                      onClick={() => resumeSession(entry.id)}
+                      disabled={entry.isCurrent || renamingId === entry.id || resumingId !== null}
+                      onClick={() => handleResume(entry.id)}
                       onDoubleClick={(e) => { e.stopPropagation(); setRenamingId(entry.id); setRenameDraft(sessionNicknames[entry.id] ?? entry.title ?? ''); }}
                       className="block w-full rounded-md px-3 py-2 pr-16 text-left disabled:cursor-default focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
@@ -215,7 +234,14 @@ export function SessionList({
                         )}
                         <div className="text-[10px] text-muted-foreground font-mono truncate mt-0.5">{entry.provider}/{entry.model}</div>
                         <div className="flex items-center gap-2 text-[10px] text-muted-foreground/80 mt-0.5">
-                          <span>{formatRelative(entry.startedAt)}</span>
+                          {resumingId === entry.id ? (
+                            <span className="flex items-center gap-1 text-primary font-medium">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              resuming…
+                            </span>
+                          ) : (
+                            <span>{formatRelative(entry.startedAt)}</span>
+                          )}
                           {entry.tokenTotal > 0 && <><span>·</span><span className="tabular-nums">{entry.tokenTotal.toLocaleString()} tok</span></>}
                           {entry.isCurrent && <><span>·</span><span className="text-primary font-medium">active</span></>}
                         </div>

@@ -190,6 +190,7 @@ function AppInner() {
         } else if (e.key.toLowerCase() === 'n') {
           e.preventDefault();
           getWSClient(useConfigStore.getState().wsUrl)?.newSession?.();
+          useUIStore.getState().setCurrentView('chat');
         } else if (e.key.toLowerCase() === 'e') {
           e.preventDefault();
           downloadChatAsMarkdown();

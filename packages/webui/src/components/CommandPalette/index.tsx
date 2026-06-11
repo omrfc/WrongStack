@@ -123,7 +123,10 @@ export function CommandPalette() {
         id: 'new', category: 'Session', label: 'New session',
         hint: 'Brand-new on disk + memory',
         icon: RotateCcw, keywords: ['new', 'fresh', 'session'],
-        run: () => ws.client?.newSession?.(),
+        run: () => {
+          ws.client?.newSession?.();
+          setCurrentView('chat');
+        },
       },
       {
         id: 'compact', category: 'Session', label: 'Compact context',

@@ -189,6 +189,11 @@ export function handleSessionStart(msg: WSServerMessage) {
     if (useUIStore.getState().currentView !== 'chat') {
       useUIStore.getState().setCurrentView('chat');
     }
+    // On narrow viewports the side panel covers most of the chat — close it
+    // so the resumed conversation is actually visible.
+    if (typeof window !== 'undefined' && window.matchMedia?.('(max-width: 768px)').matches) {
+      useUIStore.getState().setSidebarOpen(false);
+    }
   }
 }
 

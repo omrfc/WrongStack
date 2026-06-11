@@ -247,7 +247,11 @@ export function SessionPanel() {
             icon={<Plus className="h-3 w-3" />}
             label="New session"
             tone="primary"
-            onClick={() => client?.newSession?.()}
+            onClick={() => {
+              client?.newSession?.();
+              // Starting a conversation is a chat-surface action — bring it up.
+              useUIStore.getState().setCurrentView('chat');
+            }}
             disabled={!wsConnected}
             title="Start a new session (Ctrl+N)"
           />

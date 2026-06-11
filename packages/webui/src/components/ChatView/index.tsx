@@ -172,6 +172,18 @@ export function ChatView() {
     }
   }, [messages, pinnedToBottom, getViewport]);
 
+  // A session switch (resume / new) repopulates the transcript wholesale —
+  // open it pinned to the end even if the user had scrolled up in the
+  // previous session, so the replayed history starts at its latest turn.
+  useEffect(() => {
+    const viewport = getViewport();
+    if (!viewport) return;
+    viewport.scrollTop = viewport.scrollHeight;
+    setPinnedToBottom(true);
+    setUnreadCount(0);
+    lastSeenCount.current = useChatStore.getState().messages.length;
+  }, [sessionId, getViewport]);
+
   const scrollToBottom = useCallback(() => {
     const viewport = getViewport();
     if (!viewport) return;
