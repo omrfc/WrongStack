@@ -37,6 +37,7 @@ export * from './spec.js';
 export * from './task-graph.js';
 export * from '../execution/tool-executor.js';
 export * from './slash-command.js';
+export * from '../core/context.js';
 export * from './observability.js';
 export * from './system-prompt-contributor.js';
 export * from '../storage/session-reader.js';
