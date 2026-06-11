@@ -604,7 +604,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             setSuggestions(parsed ?? []);
           },
           // Retrieve current suggestions for next-steps auto-submit countdown.
-          getSuggestions: () => getSuggestions(),
+          getSuggestions: () => getSuggestions?.() ?? [],
           getEternalEngine,
           subscribeEternalIteration,
           subscribeEternalStage: subscribeEternalStage as never,
@@ -650,7 +650,10 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
               configScope: cfg.configScope ?? 'global',
               enhanceDelayMs: (cfg.autonomy as Record<string, unknown> | undefined)?.enhanceDelayMs as number ?? 60_000,
               enhanceEnabled: (cfg.autonomy as Record<string, unknown> | undefined)?.enhance as boolean ?? true,
-              enhanceLanguage: ((cfg.autonomy as Record<string, unknown> | undefined)?.enhanceLanguage as string) ?? 'original',
+              enhanceLanguage:
+                (cfg.autonomy as Record<string, unknown> | undefined)?.enhanceLanguage === 'english'
+                  ? ('english' as const)
+                  : ('original' as const),
               mouseMode: (autonomy?.mouseMode as boolean) ?? false,
             };
           },
