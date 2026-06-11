@@ -2,6 +2,7 @@ import { expectDefined } from '@wrongstack/core';
 import { cn } from '@/lib/utils';
 import { getWSClient } from '@/lib/ws-client';
 import { useChatStore, useFleetStore, useGoalStore, useHistoryStore, useSessionStore, useUIStore, useWorktreeStore } from '@/stores';
+import { useLocalPrefs } from '@/stores/local-prefs';
 import type { ChatMessage } from '@/stores';
 import { useConfigStore } from '@/stores';
 import {
@@ -99,11 +100,13 @@ export function ChatView() {
   const inProgressCount = todos.filter((t) => t.status === 'in_progress').length;
   const completedCount = todos.filter((t) => t.status === 'completed').length;
 
-  // Autonomy mode
-  const [autonomy, setAutonomy] = useState<'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-parallel'>('off');
+  // Autonomy mode — read from the shared local-prefs store (seeded from the
+  // server's config-backed snapshot on connect), NOT component-local state.
+  // A local useState here always rendered "off" regardless of the real mode.
+  const autonomy = useLocalPrefs((s) => s.autonomy);
 
   const handleAutonomyChange = useCallback((mode: 'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-parallel') => {
-    setAutonomy(mode);
+    useLocalPrefs.getState().set({ autonomy: mode });
     const ws = getWSClient();
     ws?.send?.({ type: 'autonomy.switch', payload: { mode } });
   }, []);

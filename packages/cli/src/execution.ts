@@ -1260,6 +1260,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
               );
             }
           },
+          // `wrongstack quick` sets flags.quick — open the F3 agents monitor by default.
+          initialAgentsMonitorOpen: !!flags.quick,
         });
       } finally {
         renderer.setSilent(false);
@@ -1302,6 +1304,16 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         modeStore,
         modeId,
         needsSetup,
+        // Make autonomy.switch from the browser flip the CLI's real
+        // autonomy mode — context.meta alone never reaches the run loop.
+        onAutonomySwitch: (mode: string) => {
+          if (
+            mode === 'off' || mode === 'suggest' || mode === 'auto' ||
+            mode === 'eternal' || mode === 'eternal-parallel'
+          ) {
+            onAutonomy?.(mode);
+          }
+        },
       });
       // In --webui mode, skip the full REPL — just keep the process alive
       // until the WebUI server shuts down. The WebUI WS handler listens for

@@ -30,8 +30,8 @@ import {
   setPlanItemStatus,
 } from '@wrongstack/core';
 import { DefaultSessionStore } from '@wrongstack/core/storage';
-import { DefaultSecretVault } from '@wrongstack/core/security';
-import { TOKENS, repairToolUseAdjacency, listContextWindowModes, resolveContextWindowPolicy, DEFAULT_CONTEXT_WINDOW_MODE_ID, GlobalMailbox } from '@wrongstack/core';
+import { DefaultSecretVault, decryptConfigSecrets, encryptConfigSecrets } from '@wrongstack/core/security';
+import { TOKENS, atomicWrite, repairToolUseAdjacency, listContextWindowModes, resolveContextWindowPolicy, DEFAULT_CONTEXT_WINDOW_MODE_ID, GlobalMailbox } from '@wrongstack/core';
 import { WebSocket, WebSocketServer } from 'ws';
 import { expectDefined, loadConfigProviders, maskedKey, mutateConfigProviders, normalizeKeys, nowIso, writeKeysBack } from './provider-config-utils.js';
 
@@ -220,6 +220,12 @@ interface WebUIOptions {
   modeId?: string | undefined;
   /** When true, the frontend shows a provider/model setup screen instead of the chat. */
   needsSetup?: boolean | undefined;
+  /**
+   * Forward `autonomy.switch` to the CLI's real autonomy state (the same
+   * setter the TUI/REPL use). Without it the switch only lands in
+   * context.meta and the running loop never changes mode.
+   */
+  onAutonomySwitch?: ((mode: string) => void) | undefined;
 }
 
 interface ConnectedClient {
@@ -269,6 +275,166 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
     opts.events,
     opts.projectRoot,
   );
+
+  // ── Settings parity with the TUI ─────────────────────────────────────
+  // The browser settings panel reads prefs via `prefs.get` → context.meta.
+  // Seed the meta from config.json so the panel shows the REAL persisted
+  // values (otherwise every browser shows its localStorage defaults —
+  // autonomy "off" etc.), and persist pref changes back to config.json with
+  // the same key mapping the TUI settings picker writes.
+  const PREF_KEYS = [
+    'autonomy', 'autonomyDelayMs', 'autoProceedMaxIterations', 'yolo', 'maxIterations',
+    'chime', 'confirmExit', 'streamFleet', 'nextPrediction',
+    'enhanceEnabled', 'enhanceDelayMs', 'enhanceLanguage',
+    'featureMcp', 'featurePlugins', 'featureMemory', 'featureSkills',
+    'featureModelsRegistry', 'indexOnStart',
+    'contextAutoCompact', 'contextStrategy', 'logLevel', 'auditLevel',
+  ] as const;
+
+  const prefSnapshot = (): Record<string, unknown> => {
+    const snapshot: Record<string, unknown> = {};
+    for (const k of PREF_KEYS) {
+      if (k in opts.agent.ctx.meta) snapshot[k] = opts.agent.ctx.meta[k];
+    }
+    return snapshot;
+  };
+
+  if (opts.globalConfigPath) {
+    try {
+      const raw = await fs.readFile(opts.globalConfigPath, 'utf8');
+      const cfg = JSON.parse(raw) as Record<string, unknown>;
+      const autonomyCfg = (cfg.autonomy as Record<string, unknown>) ?? {};
+      const features = (cfg.features as Record<string, unknown>) ?? {};
+      const meta = opts.agent.ctx.meta;
+      const rawMode = autonomyCfg['defaultMode'];
+      meta['autonomy'] = rawMode === 'suggest' || rawMode === 'auto' ? rawMode : 'off';
+      meta['autonomyDelayMs'] = (autonomyCfg['autoProceedDelayMs'] as number) ?? 45_000;
+      meta['autoProceedMaxIterations'] = (autonomyCfg['autoProceedMaxIterations'] as number) ?? 50;
+      meta['yolo'] = (autonomyCfg['yolo'] as boolean) ?? (cfg.yolo as boolean) ?? false;
+      meta['chime'] = (autonomyCfg['chime'] as boolean) ?? false;
+      meta['confirmExit'] = autonomyCfg['confirmExit'] !== false;
+      meta['streamFleet'] = autonomyCfg['streamFleet'] !== false;
+      meta['enhanceEnabled'] = (autonomyCfg['enhance'] as boolean) ?? true;
+      meta['enhanceDelayMs'] = (autonomyCfg['enhanceDelayMs'] as number) ?? 60_000;
+      meta['enhanceLanguage'] = (autonomyCfg['enhanceLanguage'] as string) ?? 'original';
+      meta['nextPrediction'] = (cfg.nextPrediction as boolean) ?? false;
+      meta['featureMcp'] = features['mcp'] !== false;
+      meta['featurePlugins'] = features['plugins'] !== false;
+      meta['featureMemory'] = features['memory'] !== false;
+      meta['featureSkills'] = features['skills'] !== false;
+      meta['featureModelsRegistry'] = features['modelsRegistry'] !== false;
+      meta['indexOnStart'] = ((cfg.indexing as Record<string, unknown>) ?? {})['onSessionStart'] !== false;
+      meta['contextAutoCompact'] = ((cfg.context as Record<string, unknown>) ?? {})['autoCompact'] !== false;
+      meta['contextStrategy'] = ((cfg.context as Record<string, unknown>) ?? {})['strategy'] ?? 'hybrid';
+      meta['logLevel'] = ((cfg.log as Record<string, unknown>) ?? {})['level'] ?? 'info';
+      meta['auditLevel'] = ((cfg.session as Record<string, unknown>) ?? {})['auditLevel'] ?? 'standard';
+      meta['maxIterations'] = ((cfg.tools as Record<string, unknown>) ?? {})['maxIterations'] ?? 500;
+    } catch {
+      // best-effort — missing/corrupt config just leaves prefs unseeded
+    }
+  }
+
+  let prefWriteLock: Promise<void> = Promise.resolve();
+  const persistPrefsToConfig = async (payload: Record<string, unknown>): Promise<void> => {
+    const configPath = opts.globalConfigPath;
+    if (!configPath) return;
+    const write = async (): Promise<void> => {
+      let raw: string;
+      try {
+        raw = await fs.readFile(configPath, 'utf8');
+      } catch {
+        raw = '{}';
+      }
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        return; // refuse to overwrite a corrupt-but-existing config
+      }
+      const vault = new DefaultSecretVault({ keyFile: path.join(path.dirname(configPath), '.key') });
+      const decrypted = decryptConfigSecrets(parsed, vault) as Record<string, unknown>;
+
+      const autonomyCfg = (decrypted.autonomy as Record<string, unknown>) ?? {};
+      let autonomyTouched = false;
+      const setAutonomy = (key: string, val: unknown): void => {
+        autonomyCfg[key] = val;
+        autonomyTouched = true;
+      };
+      if (typeof payload['autonomy'] === 'string' && ['off', 'suggest', 'auto'].includes(payload['autonomy'])) {
+        setAutonomy('defaultMode', payload['autonomy']);
+      }
+      if (typeof payload['autonomyDelayMs'] === 'number') setAutonomy('autoProceedDelayMs', payload['autonomyDelayMs']);
+      if (typeof payload['autoProceedMaxIterations'] === 'number') setAutonomy('autoProceedMaxIterations', payload['autoProceedMaxIterations']);
+      if (typeof payload['yolo'] === 'boolean') setAutonomy('yolo', payload['yolo']);
+      if (typeof payload['chime'] === 'boolean') setAutonomy('chime', payload['chime']);
+      if (typeof payload['confirmExit'] === 'boolean') setAutonomy('confirmExit', payload['confirmExit']);
+      if (typeof payload['streamFleet'] === 'boolean') setAutonomy('streamFleet', payload['streamFleet']);
+      if (typeof payload['enhanceEnabled'] === 'boolean') setAutonomy('enhance', payload['enhanceEnabled']);
+      if (typeof payload['enhanceDelayMs'] === 'number') setAutonomy('enhanceDelayMs', payload['enhanceDelayMs']);
+      if (typeof payload['enhanceLanguage'] === 'string') setAutonomy('enhanceLanguage', payload['enhanceLanguage']);
+      if (autonomyTouched) decrypted.autonomy = autonomyCfg;
+
+      if (typeof payload['nextPrediction'] === 'boolean') decrypted.nextPrediction = payload['nextPrediction'];
+      const FEATURE_MAP: Record<string, string> = {
+        featureMcp: 'mcp',
+        featurePlugins: 'plugins',
+        featureMemory: 'memory',
+        featureSkills: 'skills',
+        featureModelsRegistry: 'modelsRegistry',
+      };
+      for (const [prefKey, cfgKey] of Object.entries(FEATURE_MAP)) {
+        if (typeof payload[prefKey] === 'boolean') {
+          const feats = (decrypted.features as Record<string, unknown>) ?? {};
+          feats[cfgKey] = payload[prefKey];
+          decrypted.features = feats;
+        }
+      }
+      if (typeof payload['contextAutoCompact'] === 'boolean' || typeof payload['contextStrategy'] === 'string') {
+        const ctxCfg = (decrypted.context as Record<string, unknown>) ?? {};
+        if (typeof payload['contextAutoCompact'] === 'boolean') ctxCfg.autoCompact = payload['contextAutoCompact'];
+        if (typeof payload['contextStrategy'] === 'string') ctxCfg.strategy = payload['contextStrategy'];
+        decrypted.context = ctxCfg;
+      }
+      if (typeof payload['logLevel'] === 'string') {
+        const logCfg = (decrypted.log as Record<string, unknown>) ?? {};
+        logCfg.level = payload['logLevel'];
+        decrypted.log = logCfg;
+      }
+      if (typeof payload['auditLevel'] === 'string') {
+        const sessionCfg = (decrypted.session as Record<string, unknown>) ?? {};
+        sessionCfg.auditLevel = payload['auditLevel'];
+        decrypted.session = sessionCfg;
+      }
+      if (typeof payload['indexOnStart'] === 'boolean') {
+        const indexingCfg = (decrypted.indexing as Record<string, unknown>) ?? {};
+        indexingCfg.onSessionStart = payload['indexOnStart'];
+        decrypted.indexing = indexingCfg;
+      }
+      if (typeof payload['maxIterations'] === 'number') {
+        const toolsCfg = (decrypted.tools as Record<string, unknown>) ?? {};
+        toolsCfg.maxIterations = payload['maxIterations'];
+        decrypted.tools = toolsCfg;
+      }
+
+      const encrypted = encryptConfigSecrets(decrypted, vault);
+      await atomicWrite(configPath, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
+    };
+    const next = prefWriteLock.then(write);
+    prefWriteLock = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    try {
+      await next;
+    } catch (err) {
+      console.error(JSON.stringify({
+        level: 'warn',
+        event: 'webui.prefs.persist_failed',
+        message: err instanceof Error ? err.message : String(err),
+        timestamp: new Date().toISOString(),
+      }));
+    }
+  };
 
   // Generate a random auth token to prevent unauthorized local connections.
   // The WebUI frontend reads this from the session.start payload and uses it
@@ -1243,7 +1409,12 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
       case 'autonomy.switch': {
         const { mode } = (msg as { payload: { mode: string } }).payload;
         opts.agent.ctx.meta['autonomy'] = mode;
+        // Flip the CLI's REAL autonomy state (same setter the TUI uses) —
+        // meta alone is advisory and the running loop never reads it.
+        opts.onAutonomySwitch?.(mode);
         sendResult(ws, true, `Autonomy mode set to "${mode}"`);
+        broadcast({ type: 'prefs.updated', payload: { autonomy: mode } });
+        void persistPrefsToConfig({ autonomy: mode });
         break;
       }
 
@@ -1798,44 +1969,22 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
       case 'prefs.get': {
         // Return the current pref snapshot from context.meta so the
         // frontend can seed its local-prefs store from the server's truth.
-        const prefKeys = [
-          'autonomy', 'autonomyDelayMs', 'yolo', 'maxIterations',
-          'confirmExit', 'streamFleet', 'nextPrediction',
-          'featureMcp', 'featurePlugins', 'featureMemory', 'featureSkills',
-          'featureModelsRegistry', 'indexOnStart',
-          'contextAutoCompact', 'contextStrategy', 'logLevel', 'auditLevel',
-        ];
-        const snapshot: Record<string, unknown> = {};
-        for (const k of prefKeys) {
-          if (k in opts.agent.ctx.meta) snapshot[k] = opts.agent.ctx.meta[k];
-        }
-        send(ws, { type: 'prefs.updated', payload: snapshot });
+        send(ws, { type: 'prefs.updated', payload: prefSnapshot() });
         break;
       }
 
       case 'prefs.update': {
         // Batch preference update. Merges arbitrary key/value pairs into
-        // context.meta so the runtime can read them immediately, and
-        // broadcasts the full pref snapshot to every connected client so
-        // all browser tabs stay in sync.
+        // context.meta so the runtime can read them immediately, broadcasts
+        // the full pref snapshot to every connected client so all browser
+        // tabs stay in sync, and persists the durable keys to config.json
+        // (same key mapping the TUI settings picker writes).
         const payload = (msg as { payload: Record<string, unknown> }).payload;
         for (const [key, val] of Object.entries(payload)) {
           opts.agent.ctx.meta[key] = val;
         }
-
-        // Broadcast the current snapshot.
-        const prefKeys = [
-          'autonomy', 'autonomyDelayMs', 'yolo', 'maxIterations',
-          'confirmExit', 'streamFleet', 'nextPrediction',
-          'featureMcp', 'featurePlugins', 'featureMemory', 'featureSkills',
-          'featureModelsRegistry', 'indexOnStart',
-          'contextAutoCompact', 'contextStrategy', 'logLevel', 'auditLevel',
-        ];
-        const snapshot: Record<string, unknown> = {};
-        for (const k of prefKeys) {
-          if (k in opts.agent.ctx.meta) snapshot[k] = opts.agent.ctx.meta[k];
-        }
-        broadcast({ type: 'prefs.updated', payload: snapshot });
+        void persistPrefsToConfig(payload);
+        broadcast({ type: 'prefs.updated', payload: prefSnapshot() });
         break;
       }
 

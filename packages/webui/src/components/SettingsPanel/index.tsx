@@ -434,6 +434,15 @@ export function SettingsPanel() {
                   step={10}
                   onChange={(v) => syncPref('maxIterations', v)}
                 />
+                <PreferenceSlider
+                  label="Auto-proceed max iterations"
+                  hint="Stop auto-proceed after N iterations. 0 = unlimited."
+                  value={localPrefs.autoProceedMaxIterations}
+                  min={0}
+                  max={250}
+                  step={5}
+                  onChange={(v) => syncPref('autoProceedMaxIterations', v)}
+                />
                 <PreferenceToggle
                   label="Confirm before exit"
                   hint="First Ctrl+C aborts work, second confirms exit."
@@ -536,14 +545,13 @@ export function SettingsPanel() {
                   onChange={() => syncPref('contextAutoCompact', !localPrefs.contextAutoCompact)}
                 />
                 <PreferenceSelect
-                  label="Context strategy"
-                  hint="How aggressively the context window is managed."
+                  label="Compactor strategy"
+                  hint="How the context is compacted when it grows too large."
                   value={localPrefs.contextStrategy}
                   options={[
-                    { value: 'frugal' as const, label: 'Frugal — tight budget, compact early' },
-                    { value: 'balanced' as const, label: 'Balanced — moderate trimming' },
-                    { value: 'deep' as const, label: 'Deep — keep more history' },
-                    { value: 'archival' as const, label: 'Archival — maximum context retention' },
+                    { value: 'hybrid' as const, label: 'Hybrid — fast rules (default)' },
+                    { value: 'intelligent' as const, label: 'Intelligent — LLM summarization' },
+                    { value: 'selective' as const, label: 'Selective — LLM-driven selection' },
                   ]}
                   onChange={(v) => syncPref('contextStrategy', v)}
                 />
@@ -566,7 +574,7 @@ export function SettingsPanel() {
                   options={[
                     { value: 'minimal' as const, label: 'Minimal — errors only' },
                     { value: 'standard' as const, label: 'Standard — tool calls + errors' },
-                    { value: 'verbose' as const, label: 'Verbose — every event' },
+                    { value: 'full' as const, label: 'Full — every event (large logs)' },
                   ]}
                   onChange={(v) => syncPref('auditLevel', v)}
                 />

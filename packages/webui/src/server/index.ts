@@ -517,6 +517,165 @@ export async function startWebUI(
   context.meta['contextWindowMode'] = initialContextPolicy.id;
   context.meta['contextWindowPolicy'] = initialContextPolicy;
 
+  // ── Seed runtime prefs from config ──────────────────────────────────────
+  // The settings panel reads prefs via `prefs.get` → context.meta. Without
+  // this seed the snapshot is empty and every browser shows localStorage
+  // defaults (autonomy "off", etc.) regardless of what config.json says.
+  // Mirrors the CLI's getSettings() mapping so TUI and WebUI agree.
+  {
+    const autonomyCfg = (config.autonomy ?? {}) as Record<string, unknown>;
+    const rawMode = autonomyCfg['defaultMode'];
+    context.meta['autonomy'] =
+      rawMode === 'suggest' || rawMode === 'auto' ? rawMode : 'off';
+    context.meta['autonomyDelayMs'] = (autonomyCfg['autoProceedDelayMs'] as number) ?? 45_000;
+    context.meta['autoProceedMaxIterations'] =
+      (autonomyCfg['autoProceedMaxIterations'] as number) ?? 50;
+    context.meta['yolo'] = (autonomyCfg['yolo'] as boolean) ?? config.yolo ?? false;
+    context.meta['chime'] = (autonomyCfg['chime'] as boolean) ?? false;
+    context.meta['confirmExit'] = autonomyCfg['confirmExit'] !== false;
+    context.meta['streamFleet'] = autonomyCfg['streamFleet'] !== false;
+    context.meta['enhanceEnabled'] = (autonomyCfg['enhance'] as boolean) ?? true;
+    context.meta['enhanceDelayMs'] = (autonomyCfg['enhanceDelayMs'] as number) ?? 60_000;
+    context.meta['enhanceLanguage'] = (autonomyCfg['enhanceLanguage'] as string) ?? 'original';
+    context.meta['nextPrediction'] = config.nextPrediction ?? false;
+    context.meta['featureMcp'] = config.features.mcp !== false;
+    context.meta['featurePlugins'] = config.features.plugins !== false;
+    context.meta['featureMemory'] = config.features.memory !== false;
+    context.meta['featureSkills'] = config.features.skills !== false;
+    context.meta['featureModelsRegistry'] = config.features.modelsRegistry !== false;
+    context.meta['indexOnStart'] = config.indexing?.onSessionStart !== false;
+    context.meta['contextAutoCompact'] = config.context?.autoCompact !== false;
+    context.meta['contextStrategy'] = config.context?.strategy ?? 'hybrid';
+    context.meta['logLevel'] = config.log?.level ?? 'info';
+    context.meta['auditLevel'] = config.session?.auditLevel ?? 'standard';
+    context.meta['maxIterations'] = config.tools?.maxIterations ?? 500;
+  }
+
+  /** Pref keys exposed to the settings panel via prefs.get / prefs.updated. */
+  const PREF_KEYS = [
+    'autonomy', 'autonomyDelayMs', 'autoProceedMaxIterations', 'yolo', 'maxIterations',
+    'chime', 'confirmExit', 'streamFleet', 'nextPrediction',
+    'enhanceEnabled', 'enhanceDelayMs', 'enhanceLanguage',
+    'featureMcp', 'featurePlugins', 'featureMemory', 'featureSkills',
+    'featureModelsRegistry', 'indexOnStart',
+    'contextAutoCompact', 'contextStrategy', 'logLevel', 'auditLevel',
+  ] as const;
+
+  const prefSnapshot = (): Record<string, unknown> => {
+    const snapshot: Record<string, unknown> = {};
+    for (const k of PREF_KEYS) {
+      if (k in context.meta) snapshot[k] = context.meta[k];
+    }
+    return snapshot;
+  };
+
+  /**
+   * Persist pref changes into the global config.json — the SAME keys the
+   * TUI settings picker writes — so a toggle made in the browser survives
+   * restarts and is visible to the CLI/TUI (and vice versa on next boot).
+   * Best-effort and serialized behind configWriteLock (shared with the
+   * provider/key handlers); failures log but never break the WS reply.
+   */
+  const persistPrefsToConfig = async (payload: Record<string, unknown>): Promise<void> => {
+    const write = async (): Promise<void> => {
+      let raw: string;
+      try {
+        raw = await fs.readFile(globalConfigPath, 'utf8');
+      } catch {
+        raw = '{}';
+      }
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        // Refuse to overwrite a corrupt-but-existing config.
+        logger.warn(`prefs: refusing to overwrite corrupt config at ${globalConfigPath}`);
+        return;
+      }
+      const decrypted = decryptConfigSecrets(parsed, vault) as Record<string, unknown>;
+
+      const autonomyCfg = (decrypted.autonomy as Record<string, unknown>) ?? {};
+      let autonomyTouched = false;
+      const setAutonomy = (key: string, val: unknown): void => {
+        autonomyCfg[key] = val;
+        autonomyTouched = true;
+      };
+      if (
+        typeof payload['autonomy'] === 'string' &&
+        ['off', 'suggest', 'auto'].includes(payload['autonomy'])
+      ) {
+        setAutonomy('defaultMode', payload['autonomy']);
+      }
+      if (typeof payload['autonomyDelayMs'] === 'number') setAutonomy('autoProceedDelayMs', payload['autonomyDelayMs']);
+      if (typeof payload['autoProceedMaxIterations'] === 'number') setAutonomy('autoProceedMaxIterations', payload['autoProceedMaxIterations']);
+      if (typeof payload['yolo'] === 'boolean') setAutonomy('yolo', payload['yolo']);
+      if (typeof payload['chime'] === 'boolean') setAutonomy('chime', payload['chime']);
+      if (typeof payload['confirmExit'] === 'boolean') setAutonomy('confirmExit', payload['confirmExit']);
+      if (typeof payload['streamFleet'] === 'boolean') setAutonomy('streamFleet', payload['streamFleet']);
+      if (typeof payload['enhanceEnabled'] === 'boolean') setAutonomy('enhance', payload['enhanceEnabled']);
+      if (typeof payload['enhanceDelayMs'] === 'number') setAutonomy('enhanceDelayMs', payload['enhanceDelayMs']);
+      if (typeof payload['enhanceLanguage'] === 'string') setAutonomy('enhanceLanguage', payload['enhanceLanguage']);
+      if (autonomyTouched) decrypted.autonomy = autonomyCfg;
+
+      if (typeof payload['nextPrediction'] === 'boolean') decrypted.nextPrediction = payload['nextPrediction'];
+
+      const FEATURE_MAP: Record<string, string> = {
+        featureMcp: 'mcp',
+        featurePlugins: 'plugins',
+        featureMemory: 'memory',
+        featureSkills: 'skills',
+        featureModelsRegistry: 'modelsRegistry',
+      };
+      for (const [prefKey, cfgKey] of Object.entries(FEATURE_MAP)) {
+        if (typeof payload[prefKey] === 'boolean') {
+          const feats = (decrypted.features as Record<string, unknown>) ?? {};
+          feats[cfgKey] = payload[prefKey];
+          decrypted.features = feats;
+        }
+      }
+
+      if (typeof payload['contextAutoCompact'] === 'boolean' || typeof payload['contextStrategy'] === 'string') {
+        const ctxCfg = (decrypted.context as Record<string, unknown>) ?? {};
+        if (typeof payload['contextAutoCompact'] === 'boolean') ctxCfg.autoCompact = payload['contextAutoCompact'];
+        if (typeof payload['contextStrategy'] === 'string') ctxCfg.strategy = payload['contextStrategy'];
+        decrypted.context = ctxCfg;
+      }
+      if (typeof payload['logLevel'] === 'string') {
+        const logCfg = (decrypted.log as Record<string, unknown>) ?? {};
+        logCfg.level = payload['logLevel'];
+        decrypted.log = logCfg;
+      }
+      if (typeof payload['auditLevel'] === 'string') {
+        const sessionCfg = (decrypted.session as Record<string, unknown>) ?? {};
+        sessionCfg.auditLevel = payload['auditLevel'];
+        decrypted.session = sessionCfg;
+      }
+      if (typeof payload['indexOnStart'] === 'boolean') {
+        const indexingCfg = (decrypted.indexing as Record<string, unknown>) ?? {};
+        indexingCfg.onSessionStart = payload['indexOnStart'];
+        decrypted.indexing = indexingCfg;
+      }
+      if (typeof payload['maxIterations'] === 'number') {
+        const toolsCfg = (decrypted.tools as Record<string, unknown>) ?? {};
+        toolsCfg.maxIterations = payload['maxIterations'];
+        decrypted.tools = toolsCfg;
+      }
+
+      const encrypted = encryptConfigSecrets(decrypted, vault);
+      await atomicWrite(globalConfigPath, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
+    };
+    const next = configWriteLock.then(write);
+    configWriteLock = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    try {
+      await next;
+    } catch (err) {
+      logger.warn(`prefs: failed to persist to config: ${errMessage(err)}`);
+    }
+  };
+
   // Pipelines
   const pipelines = createDefaultPipelines();
   // Collaboration bus — process-singleton pause/resume signal. The
@@ -2243,19 +2402,25 @@ export async function startWebUI(
         const { mode } = (msg as { payload: { mode: string } }).payload;
         context.meta['autonomy'] = mode;
         sendResult(ws, true, `Autonomy mode set to "${mode}"`);
+        // Keep every browser tab + the settings panel in sync, and persist
+        // the durable modes (eternal/eternal-parallel are session-level).
+        broadcast(clients, { type: 'prefs.updated', payload: { autonomy: mode } });
+        void persistPrefsToConfig({ autonomy: mode });
         break;
       }
 
       case 'prefs.update': {
         // Batch preference update from the webui. Merges arbitrary key/value
         // pairs into context.meta so the runtime can read them immediately,
-        // and broadcasts the full pref snapshot to every connected client so
-        // all browser tabs stay in sync.
+        // broadcasts the full pref snapshot to every connected client so all
+        // browser tabs stay in sync, and persists the durable keys to
+        // config.json (same keys the TUI settings picker writes).
         const payload = (msg as { payload: Record<string, unknown> }).payload;
         // Write each pref into context.meta
         for (const [key, val] of Object.entries(payload)) {
           context.meta[key] = val;
         }
+        void persistPrefsToConfig(payload);
         // YOLO mode: toggle the permission policy so tool confirmations
         // are auto-approved instead of prompting the user. Uses the live
         // reference resolved from the container at startup.
@@ -2305,37 +2470,14 @@ export async function startWebUI(
         // Consumed by the session audit log system at session-close time.
 
         // Broadcast the full current prefs snapshot to ALL clients.
-        // Build the snapshot from context.meta (only the pref keys we care about).
-        const prefKeys = [
-          'autonomy', 'autonomyDelayMs', 'yolo', 'maxIterations',
-          'confirmExit', 'streamFleet', 'nextPrediction',
-          'featureMcp', 'featurePlugins', 'featureMemory', 'featureSkills',
-          'featureModelsRegistry', 'indexOnStart',
-          'contextAutoCompact', 'contextStrategy', 'logLevel', 'auditLevel',
-        ];
-        const snapshot: Record<string, unknown> = {};
-        for (const k of prefKeys) {
-          if (k in context.meta) snapshot[k] = context.meta[k];
-        }
-        broadcast(clients, { type: 'prefs.updated', payload: snapshot });
+        broadcast(clients, { type: 'prefs.updated', payload: prefSnapshot() });
         break;
       }
 
       case 'prefs.get': {
         // Return the current pref snapshot so a freshly-connected client
         // can seed its local-prefs store from the server's truth.
-        const prefKeys = [
-          'autonomy', 'autonomyDelayMs', 'yolo', 'maxIterations',
-          'confirmExit', 'streamFleet', 'nextPrediction',
-          'featureMcp', 'featurePlugins', 'featureMemory', 'featureSkills',
-          'featureModelsRegistry', 'indexOnStart',
-          'contextAutoCompact', 'contextStrategy', 'logLevel', 'auditLevel',
-        ];
-        const snapshot: Record<string, unknown> = {};
-        for (const k of prefKeys) {
-          if (k in context.meta) snapshot[k] = context.meta[k];
-        }
-        send(ws, { type: 'prefs.updated', payload: snapshot });
+        send(ws, { type: 'prefs.updated', payload: prefSnapshot() });
         break;
       }
 
