@@ -542,13 +542,11 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
      */
     const requestExit = (code: number) => {
       onExit(code);
-      // Trigger Ink's unmount via the instance's exit() method. This restores
-      // terminal state (raw mode off, cursor shown). A bare process.exit() would
-      // skip this and leave the terminal in a broken state.
+      // Trigger Ink's unmount — it restores terminal state (raw mode off,
+      // cursor shown) and resolves waitUntilExit(). A bare process.exit()
+      // would skip this and leave the terminal in a broken state.
       // Fall back to hard exit if Ink hangs.
-      if (instance?.exit) {
-        instance.exit();
-      }
+      instance?.unmount();
       setTimeout(() => process.exit(code), 400).unref();
     };
 
