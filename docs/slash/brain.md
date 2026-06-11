@@ -81,6 +81,14 @@ without interfering.
 
 `/brain status` shows the last 20 of these for the session.
 
+## WebUI
+
+`/brain` works in the WebUI chat too (same subcommands), implemented over
+WebSocket messages (`brain.status` / `brain.risk` / `brain.ask`). The
+standalone WebUI server runs its own Brain instance — policy → LLM only;
+without a human-escalation prompt, `ask_human` decisions surface as
+`brain.event` messages and the caller's fallback applies.
+
 ## Related
 
 - `/autonomy` — the eternal engine consults the Brain instead of

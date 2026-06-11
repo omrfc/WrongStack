@@ -30,6 +30,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: '/skill', category: 'Inspect', aliases: ['/skills'], description: 'List active skills' },
   { name: '/diag', category: 'Inspect', description: 'Runtime diagnostics (provider, tools, mode, usage)' },
   { name: '/agents', category: 'Inspect', description: 'Show status of spawned subagents' },
+  { name: '/brain', category: 'Inspect', description: 'Brain status, risk ceiling (risk <level>), or decision support (ask <question>)' },
   { name: '/plan', category: 'Inspect', description: 'Strategic plan board: show, add, start, done, promote, clear' },
   { name: '/suggest', category: 'Inspect', aliases: ['/next-steps'], description: 'Ask the agent for concrete next steps' },
   { name: '/next', category: 'Inspect', description: 'Show or run numbered next-step suggestions' },

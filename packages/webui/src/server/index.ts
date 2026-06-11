@@ -1,5 +1,14 @@
 import { expectDefined, GlobalMailbox, projectSlug, getSessionRegistry, AgentStatusTracker } from '@wrongstack/core';
-import { makeMailboxTool, makeMailSendTool, makeMailInboxTool } from '@wrongstack/core';
+import { makeMailboxTool, makeMailSendTool, makeMailInboxTool, mailboxSessionTag } from '@wrongstack/core';
+import {
+  BrainMonitor,
+  DefaultBrainArbiter,
+  ObservableBrainArbiter,
+  createAutonomyBrain,
+  createTieredBrainArbiter,
+  type BrainArbiter,
+  type BrainAutoRisk,
+} from '@wrongstack/core';
 import * as fs from 'node:fs/promises';
 import * as http from 'node:http';
 import * as path from 'node:path';
@@ -634,6 +643,89 @@ export async function startWebUI(
     toolExecutor,
   });
   console.log('[WebUI] Agent initialized');
+
+  // ── Brain — policy → LLM tiered decision layer ─────────────────────────
+  // Same positioning as the CLI: one Brain per process at
+  // TOKENS.BrainArbiter. The WebUI has no human-escalation prompt yet, so
+  // the chain stops at the LLM tier — `ask_human` decisions surface to the
+  // browser as `brain.event` WS messages and the caller's fallback applies.
+  const brainSettings: { maxAutoRisk: BrainAutoRisk } = { maxAutoRisk: 'medium' };
+  // Lazy wrapper so the LLM tier always sees the LIVE provider/model —
+  // both are swapped at runtime via the settings panel.
+  const autonomousBrain: BrainArbiter = {
+    decide: (request) =>
+      createAutonomyBrain({
+        provider,
+        model: context.model,
+        maxAutoRisk: 'all', // the tiered ceiling gates risk — keep inner permissive
+      }).decide(request),
+  };
+  const brain = new ObservableBrainArbiter(
+    createTieredBrainArbiter({
+      policy: new DefaultBrainArbiter(),
+      autonomous: autonomousBrain,
+      getMaxAutoRisk: () => brainSettings.maxAutoRisk,
+    }),
+    events,
+  );
+  container.bind(TOKENS.BrainArbiter, () => brain);
+
+  // Self-activation: watch for tool-failure streaks / error storms and
+  // steer this session's leader via the shared project mailbox. `session`
+  // is mutable (swapped on /new and resume) — read it at send time so the
+  // steer always targets the LIVE session's leader identity.
+  const brainMailbox = new GlobalMailbox(wpaths.projectDir, events);
+  const brainMonitor = new BrainMonitor({
+    events,
+    brain,
+    intervene: async ({ subject, body }) => {
+      const tag = mailboxSessionTag(session.id);
+      await brainMailbox.send({
+        from: `brain@${tag}`,
+        to: `leader@${tag}`,
+        type: 'steer',
+        subject,
+        body,
+        priority: 'high',
+      });
+    },
+  });
+  brainMonitor.start();
+  console.log('[WebUI] Brain initialized (tiered policy → LLM, monitor active)');
+
+  // Decision log for the /brain command — last 20 decisions, newest last.
+  const brainLog: Array<{ at: number; kind: string; question: string; outcome: string }> = [];
+  const pushBrainLog = (entry: (typeof brainLog)[number]) => {
+    brainLog.push(entry);
+    if (brainLog.length > 20) brainLog.shift();
+  };
+  events.on('brain.decision_answered', (e) =>
+    pushBrainLog({
+      at: e.at,
+      kind: 'answered',
+      question: e.request.question,
+      outcome: e.decision.type === 'answer' ? (e.decision.optionId ?? e.decision.text) : '',
+    }),
+  );
+  events.on('brain.decision_ask_human', (e) =>
+    pushBrainLog({ at: e.at, kind: 'ask_human', question: e.request.question, outcome: 'needs human judgement' }),
+  );
+  events.on('brain.decision_denied', (e) =>
+    pushBrainLog({
+      at: e.at,
+      kind: 'denied',
+      question: e.request.question,
+      outcome: e.decision.type === 'deny' ? e.decision.reason : '',
+    }),
+  );
+  events.on('brain.intervention', (e) =>
+    pushBrainLog({
+      at: e.at,
+      kind: 'intervention',
+      question: e.request.question,
+      outcome: e.intervened ? 'steered the agent' : 'observed (no action)',
+    }),
+  );
 
   // AutoPhase handler — manages AutoPhaseRunner lifecycle via WS messages.
   // Stored under the per-project autophase dir (not the shared SDD task-graphs).
@@ -2607,6 +2699,48 @@ export async function startWebUI(
           (msg as { payload?: { onlineOnly?: boolean } }).payload,
         );
 
+      // ── Brain — status, autonomy ceiling, direct decision support ───
+      case 'brain.status':
+        send(ws, {
+          type: 'brain.status',
+          payload: { maxAutoRisk: brainSettings.maxAutoRisk, log: brainLog },
+        });
+        break;
+      case 'brain.risk': {
+        const level = (msg as { payload?: { level?: string } }).payload?.level ?? '';
+        const valid = ['off', 'low', 'medium', 'high', 'all'];
+        if (!valid.includes(level)) {
+          sendResult(ws, false, `Unknown risk level "${level}". Use: ${valid.join(', ')}.`);
+          break;
+        }
+        brainSettings.maxAutoRisk = level as BrainAutoRisk;
+        send(ws, {
+          type: 'brain.status',
+          payload: { maxAutoRisk: brainSettings.maxAutoRisk, log: brainLog },
+        });
+        break;
+      }
+      case 'brain.ask': {
+        const question = (msg as { payload?: { question?: string } }).payload?.question?.trim();
+        if (!question) {
+          sendResult(ws, false, 'Usage: /brain ask <question>');
+          break;
+        }
+        try {
+          const decision = await brain.decide({
+            id: `brain-ask-${Date.now().toString(36)}`,
+            source: 'user',
+            question,
+            risk: 'medium',
+            fallback: 'ask_human',
+          });
+          send(ws, { type: 'brain.answer', payload: { question, decision } });
+        } catch (err) {
+          sendResult(ws, false, `Brain consultation failed: ${errMessage(err)}`);
+        }
+        break;
+      }
+
       default:
         if (msg.type.startsWith('autophase.')) {
           // Delegate all AutoPhase lifecycle messages to the handler
@@ -2688,6 +2822,9 @@ export async function startWebUI(
     servers: [httpServer, wssPrimary, wssSecondary],
     // Drop this instance from the registry on a clean exit so the file reflects
     // reality. Crash exits are healed by the next register()/list() prune pass.
-    onShutdown: () => unregisterInstance(process.pid, registryBaseDir),
+    onShutdown: () => {
+      brainMonitor.stop();
+      return unregisterInstance(process.pid, registryBaseDir);
+    },
   });
 }

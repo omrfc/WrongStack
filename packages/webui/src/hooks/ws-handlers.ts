@@ -611,6 +611,48 @@ export const WS_HANDLERS: Record<string, (msg: WSServerMessage) => void> = {
       useVizStore.getState().setActive(true);
     }
   },
+  'brain.status': (msg: WSServerMessage) => {
+    const p = msg.payload as {
+      maxAutoRisk: string;
+      log: Array<{ at: number; kind: string; question: string; outcome: string }>;
+    };
+    const lines = [
+      '🧠 **Brain** — policy → LLM decision chain',
+      '',
+      `Autonomy ceiling: \`${p.maxAutoRisk}\` _(change with \`/brain risk <off|low|medium|high|all>\`)_`,
+    ];
+    if (p.log.length === 0) {
+      lines.push('', '_No decisions recorded yet this session._');
+    } else {
+      lines.push('', `Recent decisions (${p.log.length}):`);
+      for (const entry of p.log.slice(-10)) {
+        const ago = Math.max(0, Math.round((Date.now() - entry.at) / 1000));
+        const age = ago < 60 ? `${ago}s` : ago < 3600 ? `${Math.round(ago / 60)}m` : `${Math.round(ago / 3600)}h`;
+        const q = entry.question.length > 70 ? `${entry.question.slice(0, 67)}…` : entry.question;
+        lines.push(`- \`${age} ago\` **${entry.kind}** — ${q}${entry.outcome ? ` → _${entry.outcome}_` : ''}`);
+      }
+    }
+    useChatStore.getState().addMessage({ role: 'assistant', content: lines.join('\n') });
+  },
+  'brain.answer': (msg: WSServerMessage) => {
+    const p = msg.payload as {
+      question: string;
+      decision: { type: string; text?: string; rationale?: string; reason?: string };
+    };
+    let content: string;
+    if (p.decision.type === 'answer') {
+      const rationale =
+        p.decision.rationale && p.decision.rationale !== p.decision.text
+          ? `\n\n_${p.decision.rationale}_`
+          : '';
+      content = `🧠 ${p.decision.text ?? ''}${rationale}`;
+    } else if (p.decision.type === 'deny') {
+      content = `🧠 Denied: ${p.decision.reason ?? ''}`;
+    } else {
+      content = '🧠 The Brain escalated this question back to you — it needs human judgement.';
+    }
+    useChatStore.getState().addMessage({ role: 'assistant', content });
+  },
   'brain.event': (msg: WSServerMessage) => {
     const p = msg.payload as {
       event: string;

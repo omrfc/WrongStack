@@ -189,7 +189,10 @@ observe-only. `/brain` shows status + the last 20 decisions.
 the ask-human overlay, and `brain.intervention` as a ⚡ intervention
 entry (`use-brain-events.ts`). Both WebUI servers broadcast `brain.*` as
 `{type: 'brain.event'}` WS messages; the frontend (`ws-handlers.ts`)
-surfaces interventions as chat notices + toasts.
+surfaces interventions as chat notices + toasts. The standalone WebUI
+server wires its own Brain (policy → LLM, no human tier yet — `ask_human`
+falls back) + BrainMonitor, and serves the `/brain` command over WS
+(`brain.status` / `brain.risk` / `brain.ask` messages).
 
 ### Cross-surface coordination (multi-terminal / multi-WebUI)
 

@@ -552,6 +552,9 @@ export type WSClientMessage =
   | WSCollabInjectTool
   | { type: 'mailbox.messages'; payload: { limit?: number | undefined; agentId?: string | undefined; unreadOnly?: boolean | undefined } }
   | { type: 'mailbox.agents'; payload: { onlineOnly?: boolean | undefined } | Record<string, never> }
+  | { type: 'brain.status' }
+  | { type: 'brain.risk'; payload: { level: string } }
+  | { type: 'brain.ask'; payload: { question: string } }
   | { type: 'model.refine'; payload: { text: string } };
 
 export type WSServerMessage =
@@ -612,6 +615,9 @@ export type WSServerMessage =
   | { type: 'projects.added'; payload: { name: string; root: string; slug: string; message: string } }
   | { type: 'projects.selected'; payload: { root: string; name: string; message: string } }
   | { type: 'working_dir.changed'; payload: { cwd: string; projectRoot: string } }
+  | { type: 'brain.status'; payload: { maxAutoRisk: string; log: Array<{ at: number; kind: string; question: string; outcome: string }> } }
+  | { type: 'brain.answer'; payload: { question: string; decision: { type: string; optionId?: string | undefined; text?: string | undefined; rationale?: string | undefined; reason?: string | undefined; prompt?: string | undefined } } }
+  | { type: 'brain.event'; payload: Record<string, unknown> & { event: string } }
   | { type: 'model.refine_result'; payload: { refined: string; english: string; error?: string | undefined } };
 
 // Helper to broadcast to all clients

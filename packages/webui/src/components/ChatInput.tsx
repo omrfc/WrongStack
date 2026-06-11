@@ -142,6 +142,24 @@ export function ChatInput({
         case '/agents':
           setCurrentView('agents');
           return true;
+        case '/brain': {
+          // Mirrors the CLI's /brain: status (default), risk <level>, ask <question>.
+          const [sub, ...rest] = args.split(/\s+/).filter(Boolean);
+          const subcmd = (sub ?? '').toLowerCase();
+          if (subcmd === 'risk') {
+            client?.send?.({ type: 'brain.risk', payload: { level: (rest[0] ?? '').toLowerCase() } });
+          } else if (subcmd === 'ask') {
+            const question = rest.join(' ').trim();
+            if (!question) {
+              addMessage({ role: 'assistant', content: 'Usage: `/brain ask <question>`' });
+            } else {
+              client?.send?.({ type: 'brain.ask', payload: { question } });
+            }
+          } else {
+            client?.send?.({ type: 'brain.status' });
+          }
+          return true;
+        }
         case '/plan':
           ws.getPlan();
           useUIStore.getState().selectActivity('chat');
