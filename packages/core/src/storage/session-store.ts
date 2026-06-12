@@ -514,7 +514,7 @@ export class DefaultSessionStore implements SessionStore {
     }
     if (deleted > 0) {
       // Compact the index to remove tombstones for deleted sessions.
-      await this.compactIndex().catch(() => undefined);
+      await this.compactIndex().catch(() => undefined); /* best-effort */
     }
     // Clean up empty date-shard directories left behind after pruning.
     for (const entry of entries) {

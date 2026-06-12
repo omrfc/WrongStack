@@ -1479,7 +1479,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     });
     events.emit('session.ended', { id: activeSession.id, usage: tokenCounter.total() });
     await activeSession.close();
-    await recoveryLock.clear().catch(() => undefined);
+    await recoveryLock.clear().catch(() => undefined); /* best-effort: stale lock will be recovered on next startup */
     await reader.close();
   }
   return code;

@@ -2056,7 +2056,7 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
           aggressiveOn: 'soft',
           targetLoad: 0.65,
         });
-        if (result.ok) await modeStore.save().catch(() => undefined);
+        if (result.ok) await modeStore.save().catch(() => undefined); /* best-effort: user preferences */
         sendResult(ws, result.ok, result.error ?? `Mode "${payload.id}" created`);
         break;
       }
@@ -2081,7 +2081,7 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
           ...(payload.preserveK !== undefined ? { preserveK: payload.preserveK } : {}),
           ...(payload.eliseThreshold !== undefined ? { eliseThreshold: payload.eliseThreshold } : {}),
         });
-        if (result.ok) await modeStore.save().catch(() => undefined);
+        if (result.ok) await modeStore.save().catch(() => undefined); /* best-effort: user preferences */
         sendResult(ws, result.ok, result.error ?? `Mode "${payload.id}" updated`);
         break;
       }
@@ -2096,7 +2096,7 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
         }
         const modeStore = await getCustomModeStore();
         const result = modeStore.remove(id);
-        if (result.ok) await modeStore.save().catch(() => undefined);
+        if (result.ok) await modeStore.save().catch(() => undefined); /* best-effort: user preferences */
         sendResult(ws, result.ok, result.error ?? `Mode "${id}" deleted`);
         break;
       }

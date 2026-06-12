@@ -89,11 +89,11 @@ export async function setupSession(params: {
       const choice = await onRecovery(abandoned, !!flags['recover']);
       if (choice === 'resume') resumeId = abandoned.sessionId;
       else if (choice === 'delete') {
-        await sessionStore.delete(abandoned.sessionId).catch(() => undefined);
+        await sessionStore.delete(abandoned.sessionId).catch(() => undefined); /* best-effort: orphaned session will be cleaned by pruning */
         await recoveryLock.clear();
       } else await recoveryLock.clear();
     } else if (abandoned) {
-      await sessionStore.delete(abandoned.sessionId).catch(() => undefined);
+      await sessionStore.delete(abandoned.sessionId).catch(() => undefined); /* best-effort: orphaned session will be cleaned by pruning */
       await recoveryLock.clear();
     }
   }
@@ -127,7 +127,9 @@ export async function setupSession(params: {
   }
 
   const sessionRef: { current?: SessionWriter | undefined } = { current: session };
-  await recoveryLock.write(session?.id).catch(() => undefined);
+  await recoveryLock.write(session?.id).catch((err) => {
+    console.error(JSON.stringify({ level: 'error', event: 'recovery_lock_write_failed', error: String(err), sessionId: session?.id }));
+  });
 
   const attachments = new DefaultAttachmentStore({
     spoolDir: path.join(wpaths.projectSessions, session?.id, 'attachments'),

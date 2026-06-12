@@ -55,7 +55,7 @@ export async function runProviderWithRetry(opts: RunProviderOptions): Promise<Re
       span?.setAttribute('provider.usage_in', res.usage.input);
       span?.setAttribute('provider.usage_out', res.usage.output);
       span?.end();
-      logger.info('Provider call succeeded', {
+      logger.debug('Provider call succeeded', {
         ...providerLogCtx(provider, request),
         stopReason: res.stopReason,
         usageInput: res.usage.input,
