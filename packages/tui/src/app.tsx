@@ -313,6 +313,12 @@ export interface AppProps {
    */
   getSuggestions?: (() => string[]) | undefined;
   /**
+   * Store suggestions in the shared suggestion store. Used by the Entry
+   * component after parsing "💡 Next steps" from assistant output so the
+   * /next command and auto-submit countdown can access them.
+   */
+  setSuggestions?: ((steps: string[]) => void) | undefined;
+  /**
    * SDD session context getter. When an SDD session is active, returns
    * the AI prompt context to inject into user messages so the model
    * knows it's in a spec-building conversation.
@@ -578,6 +584,7 @@ export function App({
   predictNext,
   onSuggestionsParsed,
   getSuggestions,
+  setSuggestions,
   switchAutonomy,
   effectiveMaxContext,
   onExit,
@@ -5179,6 +5186,7 @@ export function App({
             viewportRows={state.viewportRows}
             totalLines={state.totalLines}
             onMeasure={(totalLines) => dispatch({ type: 'setMeasuredLines', totalLines })}
+            setSuggestions={setSuggestions}
           />
         ) : (
           <History
@@ -5186,6 +5194,7 @@ export function App({
             generation={state.historyGen}
             streamingText={state.streamingText}
             toolStream={state.toolStream}
+            setSuggestions={setSuggestions}
           />
         )}
         <Box flexDirection="column" flexShrink={0} ref={bottomRegionRef}>

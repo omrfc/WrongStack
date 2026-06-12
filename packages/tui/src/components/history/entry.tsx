@@ -94,14 +94,15 @@ export const Entry = React.memo(function Entry({
   }, [entry.kind, (entry as { text?: string }).text]);
 
   // Store parsed next steps in the shared suggestion store (for /next and
-  // auto-submit countdown). Depend on entry.text (stable per-entry) rather
-  // than nextSteps.steps (fresh [] object every call when no match) to avoid
-  // unnecessary setSuggestions calls.
+  // auto-submit countdown). Depend on entry.text (stable per-entry) to ensure
+  // the effect re-fires after useMemo has computed nextSteps for the new entry.
   useEffect(() => {
     if (!setSuggestions) return;
-    const stepTexts = nextSteps.steps.map((s) => s.text);
+    const { steps } = parseNextSteps(entry.text);
+    const stepTexts = steps.map((s) => s.text);
     if (stepTexts.length > 0) setSuggestions(stepTexts);
-  }, [entry.kind, (entry as { text?: string }).text, setSuggestions, nextSteps.steps]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entry.kind, (entry as { text?: string }).text, setSuggestions]);
 
   switch (entry.kind) {
     case 'user':
