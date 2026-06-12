@@ -117,7 +117,7 @@ export const grepTool: Tool<GrepInput, GrepOutput> = {
 async function detectRg(signal: AbortSignal): Promise<boolean> {
   return new Promise((resolve) => {
     try {
-      const p = spawn('rg', ['--version'], { env: buildChildEnv(), stdio: 'ignore', signal });
+      const p = spawn('rg', ['--version'], { env: buildChildEnv(), stdio: 'ignore', signal, windowsHide: true });
       p.on('error', () => resolve(false));
       p.on('close', (code) => resolve(code === 0));
     } catch {
@@ -160,7 +160,7 @@ async function* runRgStream(
   const MAX_BUF_BYTES = 1_000_000;
   let bufOverflow = false;
 
-  const child = spawn('rg', args, { signal, env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn('rg', args, { signal, env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
 
   type Chunk = { kind: 'out' | 'close' | 'error'; data: string };
   const queue: Chunk[] = [];

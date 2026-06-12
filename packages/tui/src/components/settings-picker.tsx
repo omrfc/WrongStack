@@ -96,7 +96,7 @@ export interface SettingsPickerProps {
 }
 
 /** Total number of settings rows (used for wrap-around navigation). */
-export const SETTINGS_FIELD_COUNT = 24;
+export const SETTINGS_FIELD_COUNT = 25;
 
 export const CONFIG_SCOPES = ['global', 'project'] as const;
 export type ConfigScope = (typeof CONFIG_SCOPES)[number];
@@ -293,7 +293,7 @@ export function SettingsPicker({
   // we show at most VISIBLE_FIELDS around the current selection so every
   // field stays reachable.
   const VISIBLE_FIELDS = 8;
-  const totalFields = fieldRowIndex.length; // = SETTINGS_FIELD_COUNT = 19
+  const totalFields = fieldRowIndex.length; // = SETTINGS_FIELD_COUNT = 25
   const windowStart =
     totalFields <= VISIBLE_FIELDS
       ? 0

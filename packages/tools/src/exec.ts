@@ -285,6 +285,7 @@ function runCommand(
       cwd,
       env: buildChildEnv(sessionId),
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
       ...(isWin ? {} : { signal }),
       ...(needsShell ? { shell: true, windowsVerbatimArguments: true } : {}),
     });

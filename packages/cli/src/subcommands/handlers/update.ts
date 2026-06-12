@@ -35,6 +35,7 @@ export const updateCmd: SubcommandHandler = async (args, deps) => {
         cwd,
         stdio: 'pipe',
         signal: AbortSignal.timeout(120_000),
+        windowsHide: true,
       });
       let _stderr = '';
       child.stderr?.on('data', (d) => { _stderr += d; });

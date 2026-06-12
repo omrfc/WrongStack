@@ -86,7 +86,7 @@ function runOutdated(
 
     const resolved = resolveWin32Command(manager);
     const needsShell = process.platform === 'win32' && (resolved.endsWith('.cmd') || resolved.endsWith('.bat'));
-    const child = spawn(resolved, args, { cwd, signal, env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'], ...(needsShell ? { shell: true, windowsVerbatimArguments: true } : {}) });
+    const child = spawn(resolved, args, { cwd, signal, env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, ...(needsShell ? { shell: true, windowsVerbatimArguments: true } : {}) });
     child.stdout?.on('data', (c) => {
       if (stdout.length < MAX) stdout += c.toString();
     });

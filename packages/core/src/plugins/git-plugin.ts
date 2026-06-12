@@ -49,7 +49,7 @@ async function runGit(
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   try {
     return await new Promise((resolve, reject) => {
-      const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], signal: AbortSignal.timeout(30_000) });
+      const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], signal: AbortSignal.timeout(30_000), windowsHide: true });
       let stdout = '';
       let stderr = '';
       child.stdout?.on('data', (d) => {

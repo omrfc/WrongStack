@@ -48,6 +48,7 @@ export async function* spawnStream(
     signal: opts.signal,
     env: buildChildEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
     ...(needsShell ? { shell: true, windowsVerbatimArguments: true } : {}),
   });
 

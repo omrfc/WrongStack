@@ -525,7 +525,7 @@ describe('settings picker reducer', () => {
   });
 
   it('field move wraps between fields', () => {
-    // SETTINGS_FIELD_COUNT = 19; wrap back to 0 after the last field.
+    // SETTINGS_FIELD_COUNT = 25; wrap back to 0 after the last field.
     let s = reducer(base({ open: true, field: 0 }), { type: 'settingsFieldMove', delta: 1 });
     expect(s.settingsPicker.field).toBe(1);
     // Move forward enough to wrap around

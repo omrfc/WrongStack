@@ -34,7 +34,7 @@ function runShellCheck(
   if (!existsSync('shellcheck')) {
     // Try to find shellcheck in PATH
     try {
-      execSync('shellcheck --version', { encoding: 'utf-8', stdio: 'ignore' });
+      execSync('shellcheck --version', { encoding: 'utf-8', stdio: 'ignore', windowsHide: true });
     } catch {
       throw new Error('shellcheck is not installed. Install via: apt install shellcheck / brew install shellcheck');
     }
@@ -62,6 +62,7 @@ function runShellCheck(
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 60_000,
+      windowsHide: true,
     });
   } catch (err: unknown) {
     // shellcheck returns non-zero when issues are found, which is not an error

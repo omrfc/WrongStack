@@ -241,7 +241,7 @@ async function globFiles(
 function checkRg(): Promise<boolean> {
   return new Promise((resolve) => {
     try {
-      const p = spawn('rg', ['--version'], { env: buildChildEnv(), stdio: 'ignore' });
+      const p = spawn('rg', ['--version'], { env: buildChildEnv(), stdio: 'ignore', windowsHide: true });
       p.on('error', () => resolve(false));
       p.on('close', (code) => resolve(code === 0));
     } catch {
@@ -258,6 +258,7 @@ function spawnRgFind(pattern: string, base: string): { promise: Promise<string[]
     signal: AbortSignal.timeout(30_000),
     env: buildChildEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   });
   let buf = '';
   child.stdout?.on('data', (chunk: Buffer) => {

@@ -37,7 +37,7 @@ export { detectLang } from './ts-parser.js';
 
 function checkNativeParser(): boolean {
   try {
-    execFileSync('rustc', ['--version'], { stdio: 'pipe' });
+    execFileSync('rustc', ['--version'], { stdio: 'pipe', windowsHide: true });
     // Check if our syn-parser crate is available. argv-array form (no shell)
     // so a cwd path containing spaces or shell metacharacters can't break out.
     const toolsDir = path.join(process.cwd(), 'tools');
@@ -52,7 +52,7 @@ function checkNativeParser(): boolean {
           '--manifest-path',
           path.join(toolsDir, 'Cargo.toml'),
         ],
-        { stdio: 'pipe' },
+        { stdio: 'pipe', windowsHide: true },
       );
       return true;
     } catch {
@@ -80,6 +80,7 @@ function tryNativeParse(file: string, content: string): FileSymbols | null {
         encoding: 'utf8',
         timeout: 15000,
         stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
       },
     );
 

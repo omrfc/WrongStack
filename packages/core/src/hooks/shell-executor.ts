@@ -101,6 +101,7 @@ export async function runShellHook(
         env: buildChildEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: true,
+        windowsHide: true,
       });
     } catch (err) {
       logger?.warn?.(`hook spawn failed: ${err instanceof Error ? err.message : String(err)}`);

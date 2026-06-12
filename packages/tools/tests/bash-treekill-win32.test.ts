@@ -25,7 +25,7 @@ function findNodeProcessesWithMarker(marker: string): string[] {
       '-Command',
       `Get-CimInstance Win32_Process -Filter "name='node.exe'" | Select-Object -ExpandProperty CommandLine`,
     ],
-    { encoding: 'utf8' },
+    { encoding: 'utf8', windowsHide: true },
   );
   return (ps.stdout ?? '').split('\n').filter((l) => l.includes(marker));
 }
@@ -38,7 +38,7 @@ function killMarkedProcesses(marker: string): void {
       '-Command',
       `Get-CimInstance Win32_Process -Filter "name='node.exe'" | Where-Object { $_.CommandLine -like '*${marker}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`,
     ],
-    { encoding: 'utf8' },
+    { encoding: 'utf8', windowsHide: true },
   );
 }
 

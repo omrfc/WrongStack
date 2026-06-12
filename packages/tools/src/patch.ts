@@ -151,7 +151,7 @@ function runPatch(
     // localized GNU patch output (fr/de/es etc.). Use buildChildEnv to
     // strip API keys and other secrets from the parent environment.
     const env = { ...buildChildEnv(), LANG: 'C', LC_ALL: 'C' };
-    const child = spawn('patch', args, { cwd, signal, env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn('patch', args, { cwd, signal, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     child.stdout?.on('data', (c) => {
       stdout += c.toString();
     });

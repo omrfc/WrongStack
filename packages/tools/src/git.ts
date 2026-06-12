@@ -337,6 +337,7 @@ function runGit(args: string[], cwd: string, signal: AbortSignal): Promise<GitOu
       signal,
       env: buildChildEnv(),
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
     });
 
     child.stdout?.on('data', (chunk: Buffer) => {

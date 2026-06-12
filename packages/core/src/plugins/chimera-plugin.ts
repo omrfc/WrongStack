@@ -111,6 +111,7 @@ async function runGit(
         cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
         signal: AbortSignal.timeout(15_000),
+        windowsHide: true,
       });
     } catch (err) {
       // `spawn` throws synchronously when the binary is not found (e.g.,

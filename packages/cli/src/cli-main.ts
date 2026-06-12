@@ -453,6 +453,7 @@ export async function main(argv: string[]): Promise<number> {
         cwd: projectRoot,
         timeout: 3000,
         stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
       }).toString().trim();
       if (gitBranch === 'HEAD') gitBranch = undefined; // detached HEAD
     } catch {
@@ -2013,6 +2014,7 @@ export async function main(argv: string[]): Promise<number> {
             cwd,
             stdio: ['ignore', 'pipe', 'pipe'],
             signal: AbortSignal.timeout(5000),
+            windowsHide: true,
           });
           let stdout = '';
           child.stdout?.on('data', (d) => {

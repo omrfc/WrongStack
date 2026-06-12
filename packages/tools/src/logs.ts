@@ -153,7 +153,7 @@ async function dockerLogs(
       resolve(result);
     };
 
-    const child = spawn('docker', args, { cwd, signal, env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('docker', args, { cwd, signal, env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
 
     // `docker logs --tail N` reads recent lines and exits — fast when the
     // daemon is up. But if the daemon is unreachable (common on CI runners

@@ -13,7 +13,7 @@ import type { Agent, Context, EventBus, Logger } from '@wrongstack/core';
 
 function isGitRepo(cwd: string): boolean {
   try {
-    const r = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd, encoding: 'utf8' });
+    const r = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd, encoding: 'utf8', windowsHide: true });
     return r.status === 0 && r.stdout.trim() === 'true';
   } catch {
     return false;

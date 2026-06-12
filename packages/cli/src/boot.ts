@@ -551,6 +551,7 @@ async function checkGitInCwd(opts: {
           const child = spawn('git', ['init'], {
             cwd,
             signal: AbortSignal.timeout(10_000),
+            windowsHide: true,
           });
           child.on('error', reject);
           child.on('close', (code) =>

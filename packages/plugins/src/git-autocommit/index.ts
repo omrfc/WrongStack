@@ -26,6 +26,7 @@ function runGit(args: string[], cwd?: string): string {
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 30_000,
       maxBuffer: 10 * 1024 * 1024,
+      windowsHide: true,
     }).trim();
   } catch (err: unknown) {
     const e = err as { message?: string | undefined; stderr?: string | undefined };

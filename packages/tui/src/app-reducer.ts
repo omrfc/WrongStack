@@ -660,23 +660,23 @@ export function reducer(state: State, action: Action): State {
         const enext = (ebase + action.delta + ENHANCE_DELAY_PRESETS.length) % ENHANCE_DELAY_PRESETS.length;
         return { ...state, settingsPicker: { ...sp, enhanceDelayMs: expectDefined(ENHANCE_DELAY_PRESETS[enext]), hint: undefined } };
       }
-      // Field 20: debug stream (boolean toggle)
-      if (f === 20) return { ...state, settingsPicker: { ...sp, debugStream: !sp.debugStream, hint: undefined } };
-      // Field 21: config scope (cycle global/project)
-      if (f === 21) {
-        const i = CONFIG_SCOPES.indexOf(sp.configScope);
-        const base = i < 0 ? 0 : i;
-        const next = (base + action.delta + CONFIG_SCOPES.length) % CONFIG_SCOPES.length;
-        return { ...state, settingsPicker: { ...sp, configScope: expectDefined(CONFIG_SCOPES[next]), hint: undefined } };
-      }
-      // Field 22: enhance enabled (boolean toggle)
-      if (f === 22) return { ...state, settingsPicker: { ...sp, enhanceEnabled: !sp.enhanceEnabled, hint: undefined } };
-      // Field 23: enhance language (cycle original/english)
-      if (f === 23) {
+      // Field 21: enhance enabled (boolean toggle)
+      if (f === 21) return { ...state, settingsPicker: { ...sp, enhanceEnabled: !sp.enhanceEnabled, hint: undefined } };
+      // Field 22: enhance language (cycle original/english)
+      if (f === 22) {
         const i = ENHANCE_LANGUAGES.indexOf(sp.enhanceLanguage);
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + ENHANCE_LANGUAGES.length) % ENHANCE_LANGUAGES.length;
         return { ...state, settingsPicker: { ...sp, enhanceLanguage: expectDefined(ENHANCE_LANGUAGES[next]), hint: undefined } };
+      }
+      // Field 23: debug stream (boolean toggle)
+      if (f === 23) return { ...state, settingsPicker: { ...sp, debugStream: !sp.debugStream, hint: undefined } };
+      // Field 24: config scope (cycle global/project)
+      if (f === 24) {
+        const i = CONFIG_SCOPES.indexOf(sp.configScope);
+        const base = i < 0 ? 0 : i;
+        const next = (base + action.delta + CONFIG_SCOPES.length) % CONFIG_SCOPES.length;
+        return { ...state, settingsPicker: { ...sp, configScope: expectDefined(CONFIG_SCOPES[next]), hint: undefined } };
       }
       return state;
     }

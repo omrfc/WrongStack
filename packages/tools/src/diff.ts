@@ -157,6 +157,7 @@ function runGit(
       signal,
       env: buildChildEnv(),
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
     });
     child.stdout?.on('data', (c) => {
       stdout += c.toString();

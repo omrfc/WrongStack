@@ -29,7 +29,7 @@ export function browserOpenCommand(
 export function openBrowser(url: string, platform: NodeJS.Platform = process.platform): void {
   try {
     const { command, args } = browserOpenCommand(url, platform);
-    const child = spawn(command, args, { stdio: 'ignore', detached: true });
+    const child = spawn(command, args, { stdio: 'ignore', detached: true, windowsHide: true });
     // A missing opener (e.g. xdg-open absent on a headless box) surfaces as an
     // async 'error' event — swallow it so it doesn't crash the process.
     child.on('error', () => {});

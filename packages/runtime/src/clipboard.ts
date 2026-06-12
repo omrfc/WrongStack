@@ -102,7 +102,7 @@ const CLIPBOARD_CMD_TIMEOUT_MS = 5_000;
 
 function runCmd(cmd: string, args: string[]): Promise<string | null> {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, { env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let out = '';
     let settled = false;
     const finish = (value: string | null) => {
@@ -125,7 +125,7 @@ function runCmd(cmd: string, args: string[]): Promise<string | null> {
 
 function runCmdToFile(cmd: string, args: string[], outPath: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, { env: buildChildEnv(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     const chunks: Buffer[] = [];
     let settled = false;
     const finish = (value: boolean) => {

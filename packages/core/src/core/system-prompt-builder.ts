@@ -635,6 +635,7 @@ summarize it, and let the tool result hold only the summary.`);
           cwd: root,
           env: buildChildEnv(),
           stdio: ['ignore', 'pipe', 'ignore'],
+          windowsHide: true,
         });
         let buf = '';
         proc.stdout?.on('data', (c) => {

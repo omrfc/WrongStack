@@ -2491,7 +2491,9 @@ export async function runWebUI(opts: WebUIOptions): Promise<void> {
           const { spawn } = await import('node:child_process');
           const platform = process.platform;
           const launch = (cmd: string, args: string[], onError?: () => void) => {
-            const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+            // windowsHide hides the LAUNCHER's console only — a terminal
+            // opened via `start cmd /k` still gets its own visible window.
+            const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true });
             child.on('error', () => onError?.());
             child.unref();
           };

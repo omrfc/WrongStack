@@ -183,6 +183,10 @@ export const bashTool: Tool<BashInput, BashOutput> = {
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true,
+        // Detached console children on Windows allocate their own VISIBLE
+        // console window (one per background command — test suites flash
+        // dozens). CREATE_NO_WINDOW suppresses it; no-op elsewhere.
+        windowsHide: true,
         signal: opts.signal,
       });
       const pid = child.pid;
@@ -246,6 +250,7 @@ export const bashTool: Tool<BashInput, BashOutput> = {
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached,
+      windowsHide: true,
       ...(isWin ? {} : { signal: opts.signal }),
     });
 

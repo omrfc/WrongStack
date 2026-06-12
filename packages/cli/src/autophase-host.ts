@@ -48,6 +48,7 @@ function gitText(args: string[], cwd: string): Promise<{ code: number; out: stri
         env: buildChildEnv(),
         stdio: ['ignore', 'pipe', 'pipe'],
         signal: AbortSignal.timeout(10_000),
+        windowsHide: true,
       });
     } catch (err) {
       // spawn throws synchronously when git is not installed.
@@ -131,6 +132,7 @@ function runCmd(
         // so the caller's shell preference is authoritative.
         shell,
         signal: AbortSignal.timeout(30_000),
+        windowsHide: true,
       });
     } catch (err) {
       reject(err);

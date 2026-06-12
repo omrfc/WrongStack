@@ -182,8 +182,11 @@ export class MCPClient {
           env: spawnEnv,
           stdio,
           shell: true,
+          // Without this every MCP server spawned from a console-less host
+          // (WebUI server, scheduled runs) opens a visible console window.
+          windowsHide: true,
         })
-      : spawn(this.opts.command, rawArgs, { env: spawnEnv, stdio });
+      : spawn(this.opts.command, rawArgs, { env: spawnEnv, stdio, windowsHide: true });
     this.child = child;
 
     child.stdout?.on('data', (chunk: Buffer) => this.onData(chunk.toString()));

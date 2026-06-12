@@ -7,7 +7,7 @@ import type { SlashCommandContext } from './index.js';
 // ── Git helpers (minimal copy — same logic as chimera-plugin) ────────────
 async function runGit(args: string[], cwd: string): Promise<{ stdout: string; code: number }> {
   return new Promise((resolve) => {
-    const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], signal: AbortSignal.timeout(10_000) });
+    const child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], signal: AbortSignal.timeout(10_000), windowsHide: true });
     let stdout = '';
     child.stdout?.on('data', (d) => { stdout += d; });
     child.on('error', () => resolve({ stdout, code: 1 }));
