@@ -1,10 +1,21 @@
 import { expectDefined } from '@wrongstack/core';
+import { LockError } from './circuit-breaker.js';
 /**
  * SQLite storage layer for the codebase index.
  *
  * Uses `node:sqlite` (synchronous API — DatabaseSync class).
  * Database file: ~/.wrongstack/projects/<hash>/codebase-index/index.db — kept
  * out of the repo so it never clutters the working tree or needs gitignoring.
+ *
+ * ### Multi-process safety
+ *
+ * Several wstack surfaces (TUI, WebUI, parallel terminals) share this per-project
+ * database. WAL mode allows concurrent reads alongside a writer, and
+ * `busy_timeout` bounds how long a write operation waits for the lock. When
+ * the timeout expires and SQLite returns SQLITE_BUSY, the store retries with
+ * exponential backoff (up to 3 attempts) before letting the error propagate.
+ * If all retries are exhausted, a {@link LockError} is thrown — the circuit
+ * breaker treats this as a transient condition and does NOT count it as a failure.
  */
 
 import { createRequire } from 'node:module';
@@ -80,6 +91,62 @@ function loadDatabaseSync(): typeof DatabaseSync {
   return DatabaseSyncCtor;
 }
 
+// ─── SQLite lock-error retry ───────────────────────────────────────────────────
+
+/** Maximum retry attempts for a lock-conflict error. */
+const MAX_LOCK_RETRIES = 3;
+/**
+ * Base delay (ms) before the first retry after a lock error. Each subsequent
+ * retry doubles this (exponential backoff). Combined with the 5-second
+ * busy_timeout pragma, this means: 5s (pragma) + 50ms + 100ms + 200ms per
+ * attempt — enough to wait out most cross-process writer conflicts.
+ */
+const LOCK_RETRY_BASE_DELAY_MS = 50;
+/** Cap on the per-retry delay so we never sleep for more than this. */
+const LOCK_RETRY_MAX_DELAY_MS = 500;
+
+/**
+ * Returns true when `err` represents a SQLite lock conflict (SQLITE_BUSY or
+ * SQLITE_LOCKED).  These are transient — another process holds the write lock
+ * and will release it shortly.  Retry instead of failing.
+ *
+ * node:sqlite surfaces these as plain Error instances with `code` set to
+ * 'SQLITE_BUSY' or 'SQLITE_LOCKED', or with a message that contains the
+ * error name. Defensive: anything we can't classify as safe is NOT treated
+ * as a lock error so real failures are not retried indefinitely.
+ */
+function isLockError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const e = err as { code?: unknown; sqliteCode?: unknown };
+  const code = e.code ?? e.sqliteCode;
+  if (typeof code === 'string' && /SQLITE_(BUSY|LOCKED)/.test(code)) return true;
+  if (typeof code === 'number' && (code === 5 || code === 6)) return true; // SQLITE_BUSY=5, SQLITE_LOCKED=6
+  // node:sqlite sometimes surfaces the numeric code as a string in the message
+  if (/SQLITE_(BUSY|LOCKED)/.test(err.message)) return true;
+  return false;
+}
+
+/**
+ * Synchronous sleep via Atomics.wait on a zero-length SharedArrayBuffer.
+ * This is the only way to synchronously block in a Worker thread without
+ * busy-waiting.  The main thread (where DatabaseSync is never used) is
+ * unaffected.
+ *
+ * The call is wrapped in try/catch because Atomics.wait throws in browsers
+ * and other environments where SharedArrayBuffer is not available.
+ */
+function sleepSync(ms: number): void {
+  try {
+    const sab = new SharedArrayBuffer(4);
+    const view = new Int32Array(sab);
+    Atomics.wait(view, 0, 0, ms);
+  } catch {
+    // Atomics.wait not available (browser, unknown runtime) — fall through.
+    // The retry still happens but without sleeping, which is acceptable because
+    // busy_timeout already handled the bulk of the wait.
+  }
+}
+
 export class IndexStore {
   private db: DatabaseSync;
   /** Absolute path to this project's index directory. */
@@ -90,6 +157,44 @@ export class IndexStore {
    */
   private ftsAvailable = false;
 
+  /**
+   * Execute a SQLite write operation with automatic retry on lock conflicts.
+   *
+   * When another wstack process is holding the write lock the statement first
+   * waits up to `busy_timeout` ms, then throws SQLITE_BUSY.  This wrapper catches
+   * that error and retries (up to MAX_LOCK_RETRIES) with exponential backoff,
+   * giving the competing writer time to finish and release the lock.
+   *
+   * @param fn  The write operation to execute. Can return a value which is
+   *            returned to the caller on success.
+   * @throws   {@link LockError} when all retries are exhausted on a lock conflict
+   *            (non-lock errors always propagate on the first attempt).
+   */
+  runWithRetry<T>(fn: () => T): T {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= MAX_LOCK_RETRIES; attempt++) {
+      try {
+        return fn();
+      } catch (err) {
+        lastError = err;
+        if (!isLockError(err)) throw err;
+        if (attempt === MAX_LOCK_RETRIES) {
+          // All retries exhausted — wrap in LockError so the circuit breaker
+          // knows this is a transient lock conflict, not a real failure.
+          const msg = lastError instanceof Error ? lastError.message : String(lastError);
+          throw new LockError(`SQLite lock conflict after ${MAX_LOCK_RETRIES} retries: ${msg}`);
+        }
+        // Exponential backoff: 50ms → 100ms → 200ms, capped at 500ms.
+        const delay = Math.min(
+          LOCK_RETRY_BASE_DELAY_MS * Math.pow(2, attempt),
+          LOCK_RETRY_MAX_DELAY_MS,
+        );
+        sleepSync(delay);
+      }
+    }
+    throw lastError; // unreachable — satisfies TypeScript
+  }
+
   constructor(projectRoot: string, opts: { indexDir?: string | undefined } = {}) {
     this.indexDir = resolveIndexDir(projectRoot, opts.indexDir);
     fs.mkdirSync(this.indexDir, { recursive: true });
@@ -97,14 +202,13 @@ export class IndexStore {
     this.db = new Database(path.join(this.indexDir, DB_FILE));
     // Multi-process safety: several wstack surfaces (TUI, WebUI, parallel
     // terminals) share this per-project db. WAL lets readers coexist with the
-    // writer, and busy_timeout bounds lock waits to a short, finite block —
-    // DatabaseSync is synchronous, so an unbounded wait here would freeze the
-    // whole event loop (and with it the terminal UI). Past the timeout the
-    // statement throws SQLITE_BUSY, which the indexing circuit breaker counts
-    // as a failure instead of wedging.
+    // writer, and busy_timeout gives SQLite a head start waiting for the lock.
+    // When the timeout expires the statement throws SQLITE_BUSY; the
+    // runWithRetry() wrapper then retries with exponential backoff so most
+    // lock-conflict errors are resolved without a circuit-breaker failure.
     try {
       this.db.exec('PRAGMA journal_mode = WAL');
-      this.db.exec('PRAGMA busy_timeout = 1500');
+      this.db.exec('PRAGMA busy_timeout = 5000');
     } catch {
       /* pragmas are best-effort — an old SQLite build without WAL still works */
     }
@@ -197,45 +301,49 @@ export class IndexStore {
   // ─── Symbol CRUD ─────────────────────────────────────────────────────────────
 
   insertSymbols(symbols: IndexSymbol[], nextId: number): number {
-    const stmt = this.db.prepare(
-      `INSERT INTO symbols(id, lang, kind, name, file, line, col, signature, doc_comment, scope, text, file_fk)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    const ftsStmt = this.ftsAvailable
-      ? this.db.prepare('INSERT INTO symbols_fts(rowid, text) VALUES (?, ?)')
-      : null;
-
-    let id = nextId;
-    for (const s of symbols) {
-      stmt.run(
-        id,
-        s.lang,
-        s.kind,
-        s.name,
-        s.file,
-        s.line,
-        s.col,
-        s.signature,
-        s.docComment,
-        s.scope,
-        s.text,
-        s.file,
+    return this.runWithRetry(() => {
+      const stmt = this.db.prepare(
+        `INSERT INTO symbols(id, lang, kind, name, file, line, col, signature, doc_comment, scope, text, file_fk)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
-      // The FTS row indexes the camelCase-split text so a query for "complex"
-      // matches "complexOperation" — same recall the JS BM25 path provided.
-      ftsStmt?.run(id, buildIndexableText(s.name, s.signature, s.docComment));
-      id++;
-    }
-    return id;
+      const ftsStmt = this.ftsAvailable
+        ? this.db.prepare('INSERT INTO symbols_fts(rowid, text) VALUES (?, ?)')
+        : null;
+
+      let id = nextId;
+      for (const s of symbols) {
+        stmt.run(
+          id,
+          s.lang,
+          s.kind,
+          s.name,
+          s.file,
+          s.line,
+          s.col,
+          s.signature,
+          s.docComment,
+          s.scope,
+          s.text,
+          s.file,
+        );
+        // The FTS row indexes the camelCase-split text so a query for "complex"
+        // matches "complexOperation" — same recall the JS BM25 path provided.
+        ftsStmt?.run(id, buildIndexableText(s.name, s.signature, s.docComment));
+        id++;
+      }
+      return id;
+    });
   }
 
   deleteSymbolsForFile(file: string): void {
-    if (this.ftsAvailable) {
-      this.db
-        .prepare('DELETE FROM symbols_fts WHERE rowid IN (SELECT id FROM symbols WHERE file_fk = ?)')
-        .run(file);
-    }
-    this.db.prepare('DELETE FROM symbols WHERE file_fk = ?').run(file);
+    this.runWithRetry(() => {
+      if (this.ftsAvailable) {
+        this.db
+          .prepare('DELETE FROM symbols_fts WHERE rowid IN (SELECT id FROM symbols WHERE file_fk = ?)')
+          .run(file);
+      }
+      this.db.prepare('DELETE FROM symbols WHERE file_fk = ?').run(file);
+    });
   }
 
   /**
@@ -244,23 +352,27 @@ export class IndexStore {
    * dropped the `files` row, leaving its symbols orphaned but still searchable.
    */
   deleteFile(file: string): void {
-    this.deleteRefsForFile(file);
-    this.deleteSymbolsForFile(file);
-    this.db.prepare('DELETE FROM files WHERE file = ?').run(file);
+    this.runWithRetry(() => {
+      this.deleteRefsForFile(file);
+      this.deleteSymbolsForFile(file);
+      this.db.prepare('DELETE FROM files WHERE file = ?').run(file);
+    });
   }
 
   // ─── File metadata ──────────────────────────────────────────────────────────
 
   upsertFile(meta: FileMeta): void {
-    this.db.prepare(
-      `INSERT INTO files(file, lang, mtime_ms, symbol_count, last_indexed)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(file) DO UPDATE SET
-         lang = excluded.lang,
-         mtime_ms = excluded.mtime_ms,
-         symbol_count = excluded.symbol_count,
-         last_indexed = excluded.last_indexed`,
-    ).run(meta.file, meta.lang, meta.mtimeMs, meta.symbolCount, meta.lastIndexed);
+    this.runWithRetry(() => {
+      this.db.prepare(
+        `INSERT INTO files(file, lang, mtime_ms, symbol_count, last_indexed)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(file) DO UPDATE SET
+           lang = excluded.lang,
+           mtime_ms = excluded.mtime_ms,
+           symbol_count = excluded.symbol_count,
+           last_indexed = excluded.last_indexed`,
+      ).run(meta.file, meta.lang, meta.mtimeMs, meta.symbolCount, meta.lastIndexed);
+    });
   }
 
   getFileMeta(file: string): FileMeta | null {
@@ -524,16 +636,20 @@ export class IndexStore {
   }
 
   setLastIndexed(ts: number): void {
-    this.db.prepare(
-      "INSERT OR REPLACE INTO metadata(key, value) VALUES('last_indexed', ?)",
-    ).run(String(ts));
+    this.runWithRetry(() => {
+      this.db.prepare(
+        "INSERT OR REPLACE INTO metadata(key, value) VALUES('last_indexed', ?)",
+      ).run(String(ts));
+    });
   }
 
   clearAll(): void {
-    this.db.exec('DELETE FROM symbols');
-    this.db.exec('DELETE FROM files');
-    this.db.exec('DELETE FROM refs');
-    if (this.ftsAvailable) this.db.exec('DELETE FROM symbols_fts');
+    this.runWithRetry(() => {
+      this.db.exec('DELETE FROM symbols');
+      this.db.exec('DELETE FROM files');
+      this.db.exec('DELETE FROM refs');
+      if (this.ftsAvailable) this.db.exec('DELETE FROM symbols_fts');
+    });
   }
 
   // ─── Ref CRUD ────────────────────────────────────────────────────────────────
@@ -543,17 +659,19 @@ export class IndexStore {
    * Replaces any existing refs from the same source (idempotent on re-index).
    */
   insertRefs(fromId: number, refs: Ref[]): void {
-    // Delete old refs from this symbol (handles re-index)
-    this.db.prepare('DELETE FROM refs WHERE from_id = ?').run(fromId);
-    if (refs.length === 0) return;
+    this.runWithRetry(() => {
+      // Delete old refs from this symbol (handles re-index)
+      this.db.prepare('DELETE FROM refs WHERE from_id = ?').run(fromId);
+      if (refs.length === 0) return;
 
-    const stmt = this.db.prepare(
-      `INSERT INTO refs(from_id, to_name, to_id, call_type, line)
-       VALUES (?, ?, ?, ?, ?)`,
-    );
-    for (const ref of refs) {
-      stmt.run(fromId, ref.toName, ref.toId ?? null, ref.callType, ref.line);
-    }
+      const stmt = this.db.prepare(
+        `INSERT INTO refs(from_id, to_name, to_id, call_type, line)
+         VALUES (?, ?, ?, ?, ?)`,
+      );
+      for (const ref of refs) {
+        stmt.run(fromId, ref.toName, ref.toId ?? null, ref.callType, ref.line);
+      }
+    });
   }
 
   /**
@@ -561,12 +679,14 @@ export class IndexStore {
    * Used when re-indexing a file to clear stale refs.
    */
   deleteRefsForFile(file: string): void {
-    const ids = this.db.prepare(
-      'SELECT id FROM symbols WHERE file = ?',
-    ).all(file) as { id: number }[];
-    if (!ids.length) return;
-    const placeholders = ids.map(() => '?').join(',');
-    this.db.prepare(`DELETE FROM refs WHERE from_id IN (${placeholders})`).run(...ids.map((r) => r.id));
+    this.runWithRetry(() => {
+      const ids = this.db.prepare(
+        'SELECT id FROM symbols WHERE file = ?',
+      ).all(file) as { id: number }[];
+      if (!ids.length) return;
+      const placeholders = ids.map(() => '?').join(',');
+      this.db.prepare(`DELETE FROM refs WHERE from_id IN (${placeholders})`).run(...ids.map((r) => r.id));
+    });
   }
 
   /**
@@ -574,20 +694,22 @@ export class IndexStore {
    * Call this after all symbols have been inserted to fill in cross-references.
    */
   resolveRefs(): number {
-    const unresolved = this.db.prepare(
-      'SELECT id, to_name FROM refs WHERE to_id IS NULL AND to_name IS NOT NULL',
-    ).all() as { id: number; to_name: string }[];
+    return this.runWithRetry(() => {
+      const unresolved = this.db.prepare(
+        'SELECT id, to_name FROM refs WHERE to_id IS NULL AND to_name IS NOT NULL',
+      ).all() as { id: number; to_name: string }[];
 
-    let resolved = 0;
-    for (const row of unresolved) {
-      const target = this.db.prepare('SELECT id FROM symbols WHERE name = ? LIMIT 1').all(row.to_name) as { id: number }[];
-      const first = target[0];
-      if (first) {
-        this.db.prepare('UPDATE refs SET to_id = ? WHERE id = ?').run(first.id, row.id);
-        resolved++;
+      let resolved = 0;
+      for (const row of unresolved) {
+        const target = this.db.prepare('SELECT id FROM symbols WHERE name = ? LIMIT 1').all(row.to_name) as { id: number }[];
+        const first = target[0];
+        if (first) {
+          this.db.prepare('UPDATE refs SET to_id = ? WHERE id = ?').run(first.id, row.id);
+          resolved++;
+        }
       }
-    }
-    return resolved;
+      return resolved;
+    });
   }
 
   /**

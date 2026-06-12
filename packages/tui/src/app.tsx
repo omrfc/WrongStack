@@ -3425,7 +3425,7 @@ export function App({
         // we request a clean TUI exit with code 42. The host CLI spawns wstack
         // in the new project after runTui returns.
         if (item.kind === 'project') {
-          onProjectSelect?.(item.key, item.kind);
+          await onProjectSelect?.(item.key, item.kind);
           dispatch({ type: 'projectPickerClose' });
           requestExit?.(42);
           return;
@@ -3437,7 +3437,7 @@ export function App({
         // else handled them.
         dispatch({ type: 'projectPickerClose' });
         if (item.key === 'new-session') {
-          onProjectSelect?.(item.key, item.kind);
+          await onProjectSelect?.(item.key, item.kind);
           requestExit?.(42);
         } else if (item.key === 'prev-sessions') {
           void submit('/resume');

@@ -6,6 +6,7 @@ import { truncateForTelegram } from './bot.js';
 import { PLUGIN_NAME, readTelegramConfig, telegramConfigSchema } from './config.js';
 import { formatDelegateCompleted, formatSessionEnded, formatToolExecuted } from './format.js';
 import type { SessionEndedLike, ToolExecutedLike } from './format.js';
+import { PollLock, lockPathForToken } from './poll-lock.js';
 import { registerSlashCommands } from './slash-commands/index.js';
 import { makeTelegramReadTool } from './tools/telegram-read.js';
 import { makeTelegramSendTool } from './tools/telegram-send.js';
@@ -49,6 +50,13 @@ const plugin: Plugin = {
     log.info('Starting Telegram plugin...');
 
     // ---- Bot ----
+    // Telegram allows one getUpdates consumer per token: elect a single
+    // poller across wstack instances so concurrent TUI/WebUI/projects don't
+    // fight over the token (HTTP 409 on every poll).
+    const lock =
+      cfg.singleInstanceLock === false
+        ? undefined
+        : new PollLock(lockPathForToken(cfg.botToken), { log });
     const bot = new TelegramBot({
       token: cfg.botToken,
       pollIntervalSec: cfg.pollIntervalSec ?? 2,
@@ -57,6 +65,7 @@ const plugin: Plugin = {
       bufferSize: 50,
       log,
       offsetStoragePath: cfg.offsetStoragePath,
+      lock,
       onMessage(msg: TelegramIncomingMessage) {
         // Emit custom event so other plugins or the host can react.
         // The TUI can subscribe and surface it (future hook).

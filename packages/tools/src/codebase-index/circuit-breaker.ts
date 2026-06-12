@@ -19,6 +19,11 @@
  * Watchdog timeouts ({@link IndexTimeoutError}) count as failures;
  * caller-initiated aborts (session teardown) do not — the background indexer
  * makes that distinction before recording.
+ *
+ * Lock conflicts ({@link LockError}) do NOT count as failures — they are expected
+ * transient conditions when multiple wstack surfaces share the same `index.db`.
+ * The index store retries automatically; a LockError only reaches the circuit
+ * breaker when all retries are exhausted.
  */
 
 export type CircuitState = 'closed' | 'open' | 'half-open';
@@ -39,6 +44,18 @@ export class CircuitOpenError extends Error {
 /** Thrown by the background indexer's watchdog when a run exceeds its timeout. */
 export class IndexTimeoutError extends Error {
   override readonly name = 'IndexTimeoutError';
+}
+
+/**
+ * Thrown when an SQLite operation fails with a lock conflict (SQLITE_BUSY or
+ * SQLITE_LOCKED) even after all retry attempts are exhausted.
+ *
+ * The circuit breaker does **not** count `LockError` as a failure — a lock
+ * conflict means another writer is active, not that this indexer is broken.
+ * The caller should treat it as a transient failure and retry later.
+ */
+export class LockError extends Error {
+  override readonly name = 'LockError';
 }
 
 export interface CircuitBreakerOptions {
@@ -94,6 +111,13 @@ export class IndexCircuitBreaker {
   }
 
   recordFailure(err: unknown): void {
+    // LockError means "another process is writing — try again later", not a
+    // broken indexer. Do not count it against the failure threshold.
+    if (err instanceof LockError) {
+      this.lastFailure = `[transient/lock] ${err.message}`;
+      this.probeInFlight = false;
+      return;
+    }
     this.lastFailure = err instanceof Error ? err.message : String(err);
     this.probeInFlight = false;
     this.consecutiveFailures++;

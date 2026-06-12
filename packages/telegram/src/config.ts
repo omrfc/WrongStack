@@ -37,6 +37,14 @@ export interface TelegramPluginConfig {
    * The directory must already exist and be writable.
    */
   offsetStoragePath?: string | undefined;
+  /**
+   * Elect a single poller per bot token across wstack instances (default:
+   * true). Telegram allows one `getUpdates` consumer per token; without this,
+   * two instances sharing a token fight and get HTTP 409 on every poll.
+   * Extra instances stand by and take over when the active poller stops.
+   * Set false only if this is guaranteed to be the sole consumer.
+   */
+  singleInstanceLock?: boolean | undefined;
 }
 
 export const DEFAULT_CONFIG: Required<Omit<TelegramPluginConfig, 'botToken' | 'notifyChatId' | 'offsetStoragePath'>> = {
@@ -47,6 +55,7 @@ export const DEFAULT_CONFIG: Required<Omit<TelegramPluginConfig, 'botToken' | 'n
   longToolThresholdMs: 30_000,
   notifyOnDelegate: true,
   maxMessageLength: 4000,
+  singleInstanceLock: true,
 };
 
 export const telegramConfigSchema = {
@@ -77,6 +86,10 @@ export const telegramConfigSchema = {
     longToolThresholdMs: { type: 'integer', minimum: 0 },
     notifyOnDelegate: { type: 'boolean' },
     maxMessageLength: { type: 'integer', minimum: 100, maximum: 4096 },
+    singleInstanceLock: {
+      type: 'boolean',
+      description: 'Elect a single getUpdates poller per bot token across wstack instances (default true)',
+    },
   },
   required: ['botToken'],
 };

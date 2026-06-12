@@ -1,7 +1,11 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Logger } from '@wrongstack/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TelegramBot, escapeHtml, truncateForTelegram } from '../../src/bot.js';
 import type { TelegramIncomingMessage } from '../../src/bot.js';
+import { PollLock } from '../../src/poll-lock.js';
 
 const log: Logger = {
   level: 'debug',
@@ -386,6 +390,102 @@ describe('TelegramBot poll errors', () => {
       expect.stringContaining('ETIMEDOUT'),
     );
 
+    bot.stop();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Single-poller lock — standby and takeover
+// ---------------------------------------------------------------------------
+
+describe('TelegramBot poll lock', () => {
+  let dir: string;
+  let _originalFetch: typeof globalThis.fetch;
+  const polledUrls: string[] = [];
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'wstack-bot-lock-'));
+    polledUrls.length = 0;
+    _originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      polledUrls.push(String(url));
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ok: true, result: [] }),
+      });
+    }) as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = _originalFetch;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function makeLockedBot(token: string, opts?: { standbyRetryMs?: number }) {
+    return new TelegramBot({
+      token,
+      pollIntervalSec: 0,
+      allowedUsers: new Set<string>(),
+      allowedChats: new Set<string>(),
+      bufferSize: 10,
+      log,
+      onMessage: vi.fn(),
+      lock: new PollLock(join(dir, 'poll.lock')),
+      standbyRetryMs: opts?.standbyRetryMs ?? 30,
+    });
+  }
+
+  it('second instance stands by instead of polling', async () => {
+    const first = makeLockedBot('test:token-one');
+    const second = makeLockedBot('test:token-two');
+
+    first.start();
+    second.start();
+    await new Promise((r) => setTimeout(r, 60));
+
+    expect(first.standby).toBe(false);
+    expect(second.standby).toBe(true);
+    expect(polledUrls.some((u) => u.includes('token-one'))).toBe(true);
+    expect(polledUrls.some((u) => u.includes('token-two'))).toBe(false);
+
+    first.stop();
+    second.stop();
+  });
+
+  it('standby instance takes over after the holder stops', async () => {
+    const first = makeLockedBot('test:token-one');
+    const second = makeLockedBot('test:token-two', { standbyRetryMs: 20 });
+
+    first.start();
+    second.start();
+    await new Promise((r) => setTimeout(r, 40));
+    expect(second.standby).toBe(true);
+
+    first.stop();
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(second.standby).toBe(false);
+    expect(polledUrls.some((u) => u.includes('token-two'))).toBe(true);
+
+    second.stop();
+  });
+
+  it('stop releases the lock so a fresh instance can poll immediately', async () => {
+    const first = makeLockedBot('test:token-one');
+    first.start();
+    await new Promise((r) => setTimeout(r, 20));
+    first.stop();
+
+    const second = makeLockedBot('test:token-two');
+    second.start();
+    expect(second.standby).toBe(false);
+    second.stop();
+  });
+
+  it('bot without a lock polls unconditionally (standby is false)', () => {
+    const bot = makeBot();
+    bot.start();
+    expect(bot.standby).toBe(false);
     bot.stop();
   });
 });

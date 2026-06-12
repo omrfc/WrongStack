@@ -1,5 +1,6 @@
 import type { Logger } from '@wrongstack/core';
 import { sleep } from '@wrongstack/core/utils';
+import type { PollLock } from './poll-lock.js';
 
 // ---------------------------------------------------------------------------
 // Redaction helpers
@@ -82,6 +83,15 @@ export interface TelegramBotOptions {
    * preventing message replay after crashes or restarts.
    */
   offsetStoragePath?: string | undefined;
+  /**
+   * Optional cross-process single-poller lock. Telegram allows one
+   * `getUpdates` consumer per token; when another wstack instance holds the
+   * lock, this bot stands by (no polling) and takes over once the holder
+   * stops or its heartbeat goes stale.
+   */
+  lock?: PollLock | undefined;
+  /** How often a standby instance retries acquiring the lock. Default: 15s. */
+  standbyRetryMs?: number | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +124,11 @@ export class TelegramBot {
   private _startedAt: number | null = null;
   /** If set, the offset is persisted here after each successful poll. */
   private readonly offsetStoragePath?: string | undefined;
+  /** Single-poller election across wstack instances sharing this token. */
+  private readonly lock?: PollLock | undefined;
+  private readonly standbyRetryMs: number;
+  private standbyTimer: ReturnType<typeof setTimeout> | null = null;
+  private standbyAnnounced = false;
 
   // Circular buffer for incoming messages
   private readonly bufferMax: number;
@@ -129,6 +144,11 @@ export class TelegramBot {
     this.log = opts.log;
     this.onMessage = opts.onMessage;
     this.offsetStoragePath = opts.offsetStoragePath;
+    this.lock = opts.lock;
+    this.standbyRetryMs = opts.standbyRetryMs ?? 15_000;
+    if (this.lock) {
+      this.lock.onLost = () => this.handleLockLost();
+    }
 
     // Restore persisted offset so a crash/restart doesn't cause message replay.
     if (this.offsetStoragePath) {
@@ -145,8 +165,7 @@ export class TelegramBot {
     if (this.pollActive) return;
     this.pollActive = true;
     this._startedAt = Date.now();
-    this.log.info(`Telegram bot polling started (${this.safeBaseUrl})`);
-    this.schedulePoll();
+    this.acquireAndPoll();
   }
 
   /** Stop polling and cancel all in-flight requests. */
@@ -157,7 +176,56 @@ export class TelegramBot {
       clearTimeout(this.pollTimer);
       this.pollTimer = null;
     }
+    if (this.standbyTimer) {
+      clearTimeout(this.standbyTimer);
+      this.standbyTimer = null;
+    }
+    this.lock?.release();
     this.log.info('Telegram bot stopped');
+  }
+
+  /** True when the bot is started but waiting for the poll lock. */
+  get standby(): boolean {
+    return this.pollActive && this.lock !== undefined && !this.lock.held;
+  }
+
+  /**
+   * Acquire the poll lock (when configured) and start the poll loop, or
+   * stand by and retry until the current holder releases it.
+   */
+  private acquireAndPoll(): void {
+    if (!this.pollActive) return;
+    if (this.lock && !this.lock.tryAcquire()) {
+      if (!this.standbyAnnounced) {
+        this.standbyAnnounced = true;
+        this.log.info(
+          'Telegram: another wstack instance is already polling this bot token — standing by; will take over when it stops.',
+        );
+      }
+      this.standbyTimer = setTimeout(() => this.acquireAndPoll(), this.standbyRetryMs);
+      this.standbyTimer.unref?.();
+      return;
+    }
+    if (this.standbyAnnounced) {
+      this.standbyAnnounced = false;
+      this.log.info('Telegram: poll lock acquired — taking over polling.');
+    } else {
+      this.log.info(`Telegram bot polling started (${this.safeBaseUrl})`);
+    }
+    this.schedulePoll();
+  }
+
+  /** The lock was stolen while we held it — pause polling and stand by. */
+  private handleLockLost(): void {
+    if (!this.pollActive) return;
+    if (this.pollTimer) {
+      clearTimeout(this.pollTimer);
+      this.pollTimer = null;
+    }
+    this.log.warn('Telegram: poll lock lost to another instance — pausing polling and standing by.');
+    this.standbyAnnounced = true; // acquireAndPoll already announced via this warn
+    this.standbyTimer = setTimeout(() => this.acquireAndPoll(), this.standbyRetryMs);
+    this.standbyTimer.unref?.();
   }
 
   get startedAt(): number | null {
@@ -264,6 +332,8 @@ export class TelegramBot {
 
   private schedulePoll(): void {
     if (!this.pollActive) return;
+    // Lost the poll lock mid-flight — the standby retry loop owns recovery.
+    if (this.lock && !this.lock.held) return;
     const delay =
       this.conflictStreak >= TelegramBot.CONFLICT_BACKOFF_AFTER
         ? TelegramBot.CONFLICT_POLL_MS
@@ -284,7 +354,9 @@ export class TelegramBot {
           this.conflictStreak++;
           if (this.conflictStreak === TelegramBot.CONFLICT_BACKOFF_AFTER) {
             this.log.warn(
-              'Telegram: another instance is polling this bot token (HTTP 409) — backing off to 60s polls until it stops.',
+              this.lock
+                ? 'Telegram: another consumer outside this machine is polling this bot token (HTTP 409) — backing off to 60s polls. Check other machines/bots using this token, or a registered webhook (deleteWebhook).'
+                : 'Telegram: another instance is polling this bot token (HTTP 409) — backing off to 60s polls until it stops.',
             );
           }
         }
