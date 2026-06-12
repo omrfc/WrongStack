@@ -9,7 +9,8 @@ import { expectDefined } from '@wrongstack/core';
  */
 import type { Plugin } from '@wrongstack/core';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, existsSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 const API_VERSION = '^0.1.10';
 
 type BumpType = 'major' | 'minor' | 'patch' | 'auto';
@@ -48,10 +49,31 @@ function getPackageJson(cwd?: string): { version: string } | null {
   }
 }
 
+/**
+ * Every package.json that must share the repo version: the root manifest plus
+ * workspace packages under packages/* and apps/* (mirrors
+ * scripts/bump-version.mjs). Single-package repos degrade to just the root.
+ */
+function collectManifests(root: string): string[] {
+  const paths: string[] = [];
+  const rootPkg = join(root, 'package.json');
+  if (existsSync(rootPkg)) paths.push(rootPkg);
+  for (const group of ['packages', 'apps']) {
+    const groupDir = join(root, group);
+    if (!existsSync(groupDir)) continue;
+    for (const entry of readdirSync(groupDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const candidate = join(groupDir, entry.name, 'package.json');
+      if (existsSync(candidate)) paths.push(candidate);
+    }
+  }
+  return paths;
+}
+
 function parseVersion(v: string): [number, number, number] {
   const m = v.match(/^v?(\d+)\.(\d+)\.(\d+)/);
   if (!m) return [0, 0, 0];
-  return [Number.parseInt(expectDefined(m[1])), Number.parseInt(expectDefined(m[2])), Number.parseInt(expectDefined(m[3]))];
+  return [Number.parseInt(expectDefined(m[1]), 10), Number.parseInt(expectDefined(m[2]), 10), Number.parseInt(expectDefined(m[3]), 10)];
 }
 
 function bumpVersion(version: string, part: BumpType): string {
@@ -73,6 +95,18 @@ function bumpVersion(version: string, part: BumpType): string {
   return `${major}.${minor}.${patch}`;
 }
 
+/** Parse a conventional-commit subject line. Accepts the breaking `!` both
+ * before and after the scope (`feat!: x`, `feat(api)!: x`). */
+export function parseConventional(subject: string): Omit<ConventionalCommit, 'hash'> {
+  const m = subject.match(/^(\w+)(!)?(?:\(([^)]+)\))?(!)?:\s+(.+)/);
+  return {
+    type: m?.[1] ?? 'chore',
+    breaking: !!(m?.[2] ?? m?.[4]),
+    scope: m?.[3],
+    message: m?.[5] ?? subject,
+  };
+}
+
 function getRecentCommits(sinceTag?: string, cwd?: string): ConventionalCommit[] {
   const range = sinceTag ? `${sinceTag}..HEAD` : '-30';
   const output = runGit(['log', range, '--format=%H %s'], cwd);
@@ -83,29 +117,13 @@ function getRecentCommits(sinceTag?: string, cwd?: string): ConventionalCommit[]
     const spaceIdx = line.indexOf(' ');
     const hash = line.slice(0, spaceIdx);
     const message = line.slice(spaceIdx + 1);
-
-    // Parse conventional commit
-    const m = message.match(/^(\w+)(!)?(?:\(([^)]+)\))?:\s(.+)/);
-    const type = m?.[1] ?? 'chore';
-    const breaking = !!(m?.[2]);
-    const scope = m?.[2];
-    const msg = m?.[3] ?? message;
-
-    return { hash, type, scope, message: msg, breaking };
+    return { hash, ...parseConventional(message) };
   });
 }
 
-function determineBump(commits: ConventionalCommit[]): BumpType {
-  for (const c of commits) {
-    if (c.breaking || c.type === 'feat!:' || c.type === 'fix!') {
-      return 'major';
-    }
-  }
-  for (const c of commits) {
-    if (c.type === 'feat' || c.type === 'refactor' && c.scope) {
-      return 'minor';
-    }
-  }
+export function determineBump(commits: ConventionalCommit[]): BumpType {
+  if (commits.some((c) => c.breaking)) return 'major';
+  if (commits.some((c) => c.type === 'feat')) return 'minor';
   return 'patch';
 }
 
@@ -179,12 +197,13 @@ const plugin: Plugin = {
   version: '0.1.0',
   description: 'Conventional-commit-driven semver version bumps with changelog generation',
   apiVersion: API_VERSION,
-  capabilities: { tools: true },
+  capabilities: { tools: true, slashCommands: true },
   defaultConfig: {
     tagPrefix: 'v',
     changelogFile: 'CHANGELOG.md',
     autoTag: true,
     tagMessage: 'Release {{version}}',
+    defaultPart: 'patch',
   },
   configSchema: {
     type: 'object',
@@ -193,6 +212,7 @@ const plugin: Plugin = {
       changelogFile: { type: 'string', default: 'CHANGELOG.md' },
       autoTag: { type: 'boolean', default: true },
       tagMessage: { type: 'string', default: 'Release {{version}}' },
+      defaultPart: { type: 'string', enum: ['major', 'minor', 'patch', 'auto'], default: 'patch' },
     },
   },
 
@@ -200,25 +220,19 @@ const plugin: Plugin = {
     const tagPrefix = (api.config.extensions?.['semver-bump'] as Record<string, unknown>)?.['tagPrefix'] as string ?? 'v';
     const autoTag = (api.config.extensions?.['semver-bump'] as Record<string, unknown>)?.['autoTag'] as boolean ?? true;
 
-    // --- semver_bump ---
-    api.tools.register({
-      name: 'semver_bump',
-      description: 'Determine the next version bump from conventional commits since the last tag, or force a specific bump. Creates a git tag.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          cwd: { type: 'string', description: 'Working directory (defaults to project root)' },
-          dryRun: { type: 'boolean', default: false },
-          part: { type: 'string', enum: ['major', 'minor', 'patch', 'auto'], default: 'patch', description: 'Version part to bump (defaults to patch; use auto to infer from commits)' },
-        },
-      },
-      permission: 'confirm',
-      mutating: true,
-      async execute(input: Record<string, unknown>) {
-        const cwd = input['cwd'] as string | undefined;
-        const dryRun = (input['dryRun'] as boolean | undefined) ?? false;
-        const part = (input['part'] as BumpType) ?? 'auto';
+    const VALID_PARTS: readonly BumpType[] = ['major', 'minor', 'patch', 'auto'];
+    function readDefaultPart(cfg: typeof api.config): BumpType {
+      const raw = (cfg.extensions?.['semver-bump'] as Record<string, unknown> | undefined)?.['defaultPart'];
+      return VALID_PARTS.includes(raw as BumpType) ? (raw as BumpType) : 'patch';
+    }
+    // Tracked live so `/settings semver-part` applies without a restart.
+    let defaultPart: BumpType = readDefaultPart(api.config);
+    api.onConfigChange?.((next) => {
+      defaultPart = readDefaultPart(next as typeof api.config);
+    });
 
+    /** Shared by the semver_bump tool and the /semver slash command. */
+    async function performBump(part: BumpType, dryRun: boolean, cwd?: string): Promise<Record<string, unknown>> {
         // Get current version
         const pkg = getPackageJson(cwd);
         if (!pkg) {
@@ -267,16 +281,40 @@ const plugin: Plugin = {
         }
 
         // Actually apply the bump
-        // 1. Update package.json version
-        const fs = await import('node:fs');
-        const pkgPath = cwd ? `${cwd}/package.json` : 'package.json';
-        const pkgData = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-        pkgData.version = newVersion;
-        fs.writeFileSync(pkgPath, JSON.stringify(pkgData, null, 2) + '\n', 'utf-8');
+        // 1. Update every manifest that shares the repo version. If the repo
+        //    has its own lockstep script (the single bump entry point — it
+        //    also covers files outside the workspace, e.g. website/), delegate
+        //    to it so the plugin can never drift from the repo's convention.
+        const root = cwd ?? process.cwd();
+        const bumpScript = join(root, 'scripts', 'bump-version.mjs');
+        const changed: string[] = collectManifests(root);
+        if (existsSync(bumpScript)) {
+          try {
+            execFileSync(process.execPath, [bumpScript, 'set', newVersion], {
+              cwd: root,
+              stdio: ['pipe', 'pipe', 'pipe'],
+              timeout: 30_000,
+              windowsHide: true,
+            });
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return { ok: false, error: `bump script failed: ${msg}` };
+          }
+          for (const rel of ['package.json', 'package-lock.json', 'src/lib/utils.ts', 'index.html']) {
+            const p = join(root, 'website', rel);
+            if (existsSync(p)) changed.push(p);
+          }
+        } else {
+          for (const manifest of changed) {
+            const pkgData = JSON.parse(readFileSync(manifest, 'utf-8'));
+            pkgData.version = newVersion;
+            writeFileSync(manifest, JSON.stringify(pkgData, null, 2) + '\n', 'utf-8');
+          }
+        }
 
-        // 2. Git commit the version bump
+        // 2. Git commit the version bump (stage only the files we touched)
         try {
-          runGit(['add', 'package.json'], cwd);
+          runGit(['add', '--', ...changed], cwd);
           runGit(['commit', '-m', `chore: bump version to ${newVersion}`], cwd);
         } catch {
           // commit might fail if nothing changed, that's OK
@@ -310,6 +348,88 @@ const plugin: Plugin = {
           tag: `${tagPrefix}${newVersion}`,
           message: `Bumped ${currentVersion} → ${newVersion} (${bumpPart})`,
         };
+    }
+
+    // --- semver_bump ---
+    api.tools.register({
+      name: 'semver_bump',
+      description: 'Determine the next version bump from conventional commits since the last tag, or force a specific bump. Creates a git tag.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          cwd: { type: 'string', description: 'Working directory (defaults to project root)' },
+          dryRun: { type: 'boolean', default: false },
+          part: { type: 'string', enum: ['major', 'minor', 'patch', 'auto'], default: defaultPart, description: 'Version part to bump. Omitted → the configured default (/settings semver-part, factory default: patch). Use auto to infer from commits.' },
+        },
+      },
+      permission: 'confirm',
+      mutating: true,
+      async execute(input: Record<string, unknown>) {
+        const cwd = input['cwd'] as string | undefined;
+        const dryRun = (input['dryRun'] as boolean | undefined) ?? false;
+        const part = (input['part'] as BumpType) ?? defaultPart;
+        return performBump(part, dryRun, cwd);
+      },
+    });
+
+    // --- /semver slash command — lets the user pick the bump mode directly ---
+    api.slashCommands.register({
+      name: 'semver',
+      description: 'Show the current version or bump it (patch/minor/major/auto)',
+      category: 'Run',
+      argsHint: '[status|patch|minor|major|auto] [--dry]',
+      help: [
+        '/semver               Show current version, latest tag and the suggested bump',
+        '/semver status        Same as bare /semver',
+        '/semver patch         Bump the patch version (commit + tag)',
+        '/semver minor         Bump the minor version (commit + tag)',
+        '/semver major         Bump the major version (commit + tag)',
+        '/semver auto          Infer the bump from conventional commits since the last tag',
+        '/semver <part> --dry  Preview without writing anything',
+      ].join('\n'),
+      async run(args, ctx) {
+        const tokens = args.trim().split(/\s+/).filter(Boolean);
+        const dry = tokens.includes('--dry') || tokens.includes('--dry-run');
+        const mode = tokens.find((t) => !t.startsWith('--')) ?? 'status';
+        const cwd = ctx?.cwd;
+
+        if (mode === 'status') {
+          const pkg = getPackageJson(cwd);
+          if (!pkg) return { message: 'No package.json found' };
+          let lastTag: string | undefined;
+          try {
+            lastTag = runGit(['describe', '--tags', '--abbrev=0'], cwd) || undefined;
+          } catch {
+            // not a git repo or no tags yet
+          }
+          let suggestion: BumpType = 'patch';
+          let commitCount = 0;
+          try {
+            const commits = getRecentCommits(lastTag, cwd);
+            commitCount = commits.length;
+            suggestion = determineBump(commits);
+          } catch {
+            // git unavailable — keep the patch default
+          }
+          return {
+            message: [
+              `Current version: ${pkg.version}`,
+              `Latest tag:      ${lastTag ?? '(none)'}`,
+              `Commits since:   ${commitCount}`,
+              `Suggested bump:  ${suggestion} → ${bumpVersion(pkg.version, suggestion)}`,
+              `Default part:    ${defaultPart} (change: /settings semver-part)`,
+              '',
+              'Run /semver patch|minor|major|auto to apply (add --dry to preview).',
+            ].join('\n'),
+          };
+        }
+
+        if (mode !== 'patch' && mode !== 'minor' && mode !== 'major' && mode !== 'auto') {
+          return { message: `Unknown mode "${mode}". Use status, patch, minor, major or auto.` };
+        }
+
+        const result = await performBump(mode, dry, cwd);
+        return { message: String(result['message'] ?? result['error'] ?? JSON.stringify(result)) };
       },
     });
 
@@ -339,7 +459,7 @@ const plugin: Plugin = {
 
           if (latestTag) {
             const countOutput = runGit(['rev-list', '--count', `${latestTag}..HEAD`], cwd);
-            commitsSinceTag = Number.parseInt(countOutput) || 0;
+            commitsSinceTag = Number.parseInt(countOutput, 10) || 0;
           }
         } catch {
           latestTag = null;
@@ -385,15 +505,7 @@ const plugin: Plugin = {
             const spaceIdx = line.indexOf(' ');
             const hash = line.slice(0, spaceIdx);
             const message = line.slice(spaceIdx + 1);
-            const m = message.match(/^(\w+)(!)?(?:\(([^)]+)\))?:\s(.+)/);
-            const type = m?.[1] ?? 'chore';
-            return {
-              hash,
-              type,
-              scope: m?.[2],
-              message: m?.[3] ?? message,
-              breaking: !!(m?.[2]),
-            };
+            return { hash, ...parseConventional(message) };
           });
         } catch (err: unknown) {
           return { ok: false, error: `Failed to get git log: ${err}` };

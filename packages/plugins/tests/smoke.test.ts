@@ -50,6 +50,12 @@ interface FakePluginAPI {
     get(name: string): FakeTool | undefined;
     list(): FakeTool[];
   };
+  slashCommands: {
+    register(cmd: unknown): void;
+    unregister(name: string): boolean;
+    get(name: string): unknown;
+    list(): unknown[];
+  };
   pipelines: Record<string, { use: (h: unknown) => void; get: (n: string) => unknown }>;
   config: { extensions?: Record<string, unknown> };
   log: { info: (msg: string, meta?: unknown) => void; warn: (msg: string, meta?: unknown) => void; error: (msg: string, meta?: unknown) => void };
@@ -69,6 +75,7 @@ interface FakePluginAPI {
 
 function createMockAPI(): FakePluginAPI {
   const tools: FakeTool[] = [];
+  const commands: unknown[] = [];
 
   return {
     tools: {
@@ -77,6 +84,12 @@ function createMockAPI(): FakePluginAPI {
       wrap(_n: string, _w: unknown) {},
       get(n: string) { return tools.find((t) => t.name === n); },
       list() { return [...tools]; },
+    },
+    slashCommands: {
+      register(cmd: unknown) { commands.push(cmd); },
+      unregister(_n: string) { return false; },
+      get(_n: string) { return undefined; },
+      list() { return [...commands]; },
     },
     pipelines: {
       request:   { use: vi.fn(), get: vi.fn() } as never,
@@ -182,9 +195,12 @@ describe('@wrongstack/plugins — smoke tests', () => {
         plugin.setup(api as never);
 
         for (const tool of api.tools.list()) {
-          // Call execute with an empty input — tools should return cleanly
-          // even if input is invalid (error responses are valid results)
-          await expect(tool.execute({}, { log: api.log })).resolves.toBeDefined();
+          // Never execute mutating tools against the live repo: semver_bump
+          // used to create a real version-bump commit + tag and git_autocommit
+          // a real "feat: update code" commit on every `pnpm test` run (even
+          // its dryRun stages files). Smoke-execute read-only tools only.
+          if (tool.mutating) continue;
+          await expect(tool.execute({ dryRun: true }, { log: api.log })).resolves.toBeDefined();
         }
       });
     });

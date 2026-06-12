@@ -25,6 +25,7 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
     '  /settings refine on|off       Enable/disable prompt refinement',
     '  /settings refine-delay <seconds>   Countdown duration for refine preview',
     '  /settings refine-language original|english   Default language for refinement',
+    '  /settings semver-part patch|minor|major|auto   Default part for /semver and the semver_bump tool',
     '  /settings defaults            Show built-in default values',
     '',
     'Settings are persisted to ~/.wrongstack/config.json.',
@@ -42,6 +43,7 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
     const enhanceEnabled = autonomy?.enhance ?? true;
     const enhanceDelay = autonomy?.enhanceDelayMs ?? 60_000;
     const enhanceLanguage = (autonomy?.enhanceLanguage as string) ?? 'original';
+    const semverPart = ((opts.configStore.get().extensions?.['semver-bump'] as Record<string, unknown> | undefined)?.['defaultPart'] as string) ?? 'patch';
     return [
       `${color.bold('WrongStack')} ${color.dim('— Settings')}`,
       '',
@@ -53,6 +55,7 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
       `  refine:              ${enhanceEnabled ? color.cyan('on') : color.dim('off')}   ${color.dim('change: /settings refine on|off')}`,
       `  refine-delay:        ${color.cyan(formatDelay(enhanceDelay))}   ${color.dim('change: /settings refine-delay <seconds>')}`,
       `  refine-language:     ${color.cyan(enhanceLanguage)}   ${color.dim('change: /settings refine-language original|english')}`,
+      `  semver default part: ${color.cyan(semverPart)}   ${color.dim('change: /settings semver-part patch|minor|major|auto')}`,
       '',
       color.dim('  Persisted to ~/.wrongstack/config.json · /settings help for more'),
     ].join('\n');
@@ -91,6 +94,7 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
             `  iteration timeout:     ${color.cyan('5 min')}`,
             `  session timeout:       ${color.cyan('30 min')}`,
             `  max iterations:        ${color.cyan('100')}`,
+            `  semver default part:   ${color.cyan('patch')}`,
           ].join('\n'),
         };
       }
@@ -220,8 +224,27 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
           return { message: `${color.green('✓')} refine-language → ${label}` };
         }
 
+        if (sub === 'semver-part') {
+          const raw = (rest[0] ?? '').toLowerCase();
+          const parts = ['patch', 'minor', 'major', 'auto'];
+          if (!parts.includes(raw)) {
+            return { message: `${color.amber('Usage:')} /settings semver-part patch|minor|major|auto` };
+          }
+          // Plugin options live under extensions.<plugin-name> — the same key
+          // the semver-bump plugin's configSchema validates at load time.
+          // extensions is not in PROJECT_SAFE_FIELDS (plugin options may carry
+          // secrets), so force the global config regardless of configScope —
+          // otherwise filterSafeForProject would silently drop the write.
+          await persistConfigSetting({ ...persistDeps, inProjectConfigPath: undefined }, (cfg) => {
+            const ext = (cfg.extensions as Record<string, Record<string, unknown>> | undefined) ?? {};
+            ext['semver-bump'] = { ...ext['semver-bump'], defaultPart: raw };
+            cfg.extensions = ext;
+          });
+          return { message: `${color.green('✓')} semver default part → ${color.bold(raw)}   ${color.dim('saved to global config; used when /semver or semver_bump gets no explicit part')}` };
+        }
+
         return {
-          message: `${color.red('Unknown setting')} "${sub}". ${unknownSubcommand(sub, ['delay', 'mode', 'hints', 'debug-stream', 'config-scope', 'refine', 'refine-delay', 'refine-language', 'defaults'], 'settings')}`,
+          message: `${color.red('Unknown setting')} "${sub}". ${unknownSubcommand(sub, ['delay', 'mode', 'hints', 'debug-stream', 'config-scope', 'refine', 'refine-delay', 'refine-language', 'semver-part', 'defaults'], 'settings')}`,
         };
       } catch (err) {
         return {
