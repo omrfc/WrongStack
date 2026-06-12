@@ -2,6 +2,7 @@ import { color } from '@wrongstack/core';
 import type { Context, SlashCommand } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
 import { execFileSync } from 'node:child_process';
+import { parseNextSteps } from '@wrongstack/tui';
 import { setSuggestions } from './suggestion-store.js';
 
 /**
@@ -140,30 +141,15 @@ export function buildSuggestCommand(opts: SlashCommandContext): SlashCommand {
 
 /**
  * Parse subagent output into suggestion lines.
- * Handles various output formats:
- *   "1. Suggestion text"
- *   "- Suggestion text"
- *   "1) Suggestion text"
+ * Delegated to parseNextSteps (raw mode — no heading required).
  */
 function parseSuggestions(raw: string): string[] {
-  const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
-
-  // Try numbered format first: "1. text" or "1) text"
-  const numbered = lines
-    .filter((l) => /^\d+[.)]\s/.test(l))
-    .map((l) => l.replace(/^\d+[.)]\s*/, '').trim());
-
-  if (numbered.length > 0) return numbered.slice(0, 5);
-
-  // Try bullet format: "- text" or "* text"
-  const bullets = lines
-    .filter((l) => /^[-*•]\s/.test(l))
-    .map((l) => l.replace(/^[-*•]\s*/, '').trim());
-
-  if (bullets.length > 0) return bullets.slice(0, 5);
+  const { texts } = parseNextSteps(raw, false, false); // permissive, no heading required
+  if (texts.length > 0) return texts;
 
   // Fallback: take the first 5 non-empty lines that look like suggestions
-  return lines
+  return raw.split('\n')
+    .map((l) => l.trim())
     .filter((l) => l.length > 10 && !l.startsWith('#') && !l.startsWith('```'))
     .slice(0, 5);
 }

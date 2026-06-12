@@ -273,6 +273,12 @@ export interface RunTuiOptions {
    */
   getSuggestions?: (() => string[]) | undefined;
   /**
+   * Write parsed next steps into the shared suggestion store.
+   * Called by the Entry component after parsing each assistant message
+   * so /next 1 and the auto-submit countdown can access them.
+   */
+  setSuggestions?: ((steps: string[]) => void) | undefined;
+  /**
    * Messages restored from a previous session. When provided (non-empty),
    * the TUI renders the prior conversation as history entries so a resumed
    * session shows its full chat context, not just the LLM's internal state.

@@ -13,6 +13,7 @@ import {
   routeImagesForModel,
   type VisionAdapters,
 } from '@wrongstack/runtime';
+import { parseNextSteps } from '@wrongstack/tui';
 import { contextOverflowHint } from './context-overflow-diagnostic.js';
 import type { ReadlineInputReader } from './input-reader.js';
 import { predictNextTasks, type PredictLLMProvider } from './next-task-predictor.js';
@@ -24,7 +25,7 @@ import { CLI_VERSION } from './version.js';
 
 /**
  * Extract "💡 Next steps" suggestions from the agent's final output.
- * Looks for numbered lines under a "Next steps" or "💡 Next steps" heading.
+ * Delegated to parseNextSteps (permissive mode — accepts 💡, ##, plain headings).
  * Returns null when no suggestions are found.
  */
 /**
@@ -37,25 +38,8 @@ import { CLI_VERSION } from './version.js';
 const DEFAULT_MAX_CONSECUTIVE_AUTO_PROCEED = 50;
 
 export function parseSuggestionsFromOutput(finalText: string): string[] | null {
-  // Find the "Next steps" section — look for heading patterns
-  const patterns = [
-    /💡\s*Next\s+steps?\s*\n((?:\d+\.\s+.+\n?)+)/i,
-    /##?\s*Next\s+steps?\s*\n((?:\d+\.\s+.+\n?)+)/i,
-    /Next\s+steps?\s*\n((?:\d+\.\s+.+\n?)+)/i,
-  ];
-
-  for (const pat of patterns) {
-    const m = pat.exec(finalText);
-    if (m?.[1]) {
-      const block = m[1].trim();
-      const lines = block.split('\n').filter(Boolean);
-      const suggestions = lines
-        .map((l) => l.replace(/^\d+\.\s*/, '').trim())
-        .filter((s) => s.length > 3);
-      if (suggestions.length > 0) return suggestions.slice(0, 5);
-    }
-  }
-  return null;
+  const { texts } = parseNextSteps(finalText, false); // permissive: accept all heading variants
+  return texts.length > 0 ? texts : null;
 }
 
 export interface ReplOptions {

@@ -3,6 +3,8 @@ import React, { useEffect, useMemo } from 'react';
 import { theme } from '../../theme.js';
 import { Banner } from './banner.js';
 import { DiffBlock, extractDiffPreview } from './code-block.js';
+import { parseNextSteps } from '../suggestions.js';
+import type { ParsedNextStep } from '../suggestions.js';
 import type { HistoryEntry } from './types.js';
 import { MESSAGE_PANEL_MARGIN, AssistantBody, assistantContentWidth } from './assistant.js';
 import {
@@ -12,34 +14,6 @@ import {
   formatToolArgs,
   formatToolOutput,
 } from './utils.js';
-
-// ── Next steps parsing ─────────────────────────────────────────────────
-
-/** Regex that matches "💡 Next steps" heading + numbered items. */
-const NEXT_STEPS_RE = /💡\s*Next steps?\s*\n+((?:\d+\.\s+.+\n?)+)/i;
-
-interface ParsedNextStep {
-  index: number;
-  text: string;
-}
-
-function parseNextSteps(content: string): { steps: ParsedNextStep[]; stripped: string } {
-  const match = NEXT_STEPS_RE.exec(content);
-  if (!match?.[1]) return { steps: [], stripped: content };
-
-  const block = match[1];
-  const steps: ParsedNextStep[] = [];
-  const lines = block.split('\n').filter(Boolean);
-  for (const line of lines) {
-    const m = /^(\d+)\.\s+(.+)$/.exec(line.trim());
-    if (m) steps.push({ index: Number.parseInt(m[1]!, 10), text: m[2]!.trim() });
-  }
-
-  // Strip the entire "💡 Next steps" block from content
-  const stripped = content.replace(NEXT_STEPS_RE, '').replace(/\n{3,}/g, '\n\n').trim();
-
-  return { steps: steps.slice(0, 6), stripped };
-}
 
 // ── Internal helpers ──
 
@@ -90,19 +64,20 @@ export const Entry = React.memo(function Entry({
   // the assistant case. Must live at the top level (hooks rules).
   const nextSteps = useMemo(() => {
     if (entry.kind !== 'assistant') return { steps: [] as ParsedNextStep[], stripped: '' };
-    return parseNextSteps(entry.text);
-  }, [entry.kind, (entry as { text?: string }).text]);
+    // strict=true: only 💡 emoji heading — consistent with what we show in the body
+    return parseNextSteps(entry.text, true);
+  }, [entry.kind, (entry as unknown as { text?: string }).text]);
 
   // Store parsed next steps in the shared suggestion store (for /next and
-  // auto-submit countdown). Depend on entry.text (stable per-entry) to ensure
-  // the effect re-fires after useMemo has computed nextSteps for the new entry.
+  // auto-submit countdown). Strict=true ensures only 💡 headings are matched
+  // (consistent with what the TUI renders in the message body).
   useEffect(() => {
     if (!setSuggestions) return;
-    const { steps } = parseNextSteps(entry.text);
-    const stepTexts = steps.map((s) => s.text);
-    if (stepTexts.length > 0) setSuggestions(stepTexts);
+    const text = (entry as unknown as { text?: string }).text ?? '';
+    const { texts } = parseNextSteps(text, true);
+    if (texts.length > 0) setSuggestions(texts);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entry.kind, (entry as { text?: string }).text, setSuggestions]);
+  }, [entry.kind, (entry as unknown as { text?: string }).text, setSuggestions]);
 
   switch (entry.kind) {
     case 'user':
