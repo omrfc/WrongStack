@@ -79,7 +79,7 @@ export function PhasePanel({
   className,
 }: PhasePanelProps): React.ReactElement {
   return (
-    <div className={cn('flex flex-col h-full w-72 border-r border-border bg-card', className)}>
+    <div className={cn('flex flex-col h-full border-r border-border bg-card', className)}>
       {/* Header */}
       <div className="p-4 border-b border-border">
         <div className="flex items-center justify-between mb-3">
@@ -93,9 +93,9 @@ export function PhasePanel({
                 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300'
                 : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
             )}
-            title={autonomous ? 'Autonomous mode active — pause' : 'Autonomous mode inactive — start'}
+            title={autonomous ? 'Autonomous mode active — click to pause' : 'Manual mode — click to enable autonomous'}
           >
-            {autonomous ? '● Auto' : '○ Manual'}
+            {autonomous ? '● Autonomous' : '○ Manual'}
           </button>
         </div>
 

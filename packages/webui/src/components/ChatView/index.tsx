@@ -389,11 +389,11 @@ export function ChatView() {
         {hasStatusContent && (
           <div className="flex items-center justify-between gap-3 px-3 py-1 border-t bg-muted/20 text-[11px] text-muted-foreground">
             <div className="flex items-center gap-3 min-w-0 flex-1 tabular-nums">
-              {maxContext > 0 && lastInputTokens > 0 && (
+              {lastInputTokens > 0 && (
                 <ContextFillBar
                   pct={ctxPct}
                   tokens={lastInputTokens}
-                  maxTokens={maxContext}
+                  maxTokens={maxContext > 0 ? maxContext : undefined}
                   onClick={() => setBreakdownOpen(true)}
                 />
               )}

@@ -390,6 +390,15 @@ export function isIndexableFile(filePath: string): boolean {
  * Sets the global `_ready` flag on completion so downstream tools know the
  * index is usable.
  */
+/** Pattern matching the SQLite UNIQUE constraint failure message. */
+function isUniqueConstraintError(err: unknown): boolean {
+  if (err instanceof Error) {
+    const msg = err.message.toLowerCase();
+    return msg.includes('unique constraint') || msg.includes('UNIQUE constraint');
+  }
+  return false;
+}
+
 export async function runStartupIndex(opts: {
   projectRoot: string;
   indexDir?: string | undefined;
@@ -434,6 +443,20 @@ export async function runStartupIndex(opts: {
     return result;
   } catch (err) {
     _lastError = err instanceof Error ? err.message : String(err);
+
+    // Auto-recovery: UNIQUE constraint failures indicate database corruption
+    // from a previous interrupted write (e.g., process killed mid-insert).
+    // Retry with force=true to wipe and rebuild from source.
+    if (isUniqueConstraintError(err) && !opts.force) {
+      _lastError = null;
+      const rebuildResult = await runStartupIndex({
+        ...opts,
+        force: true,
+      });
+      _ready = true;
+      return rebuildResult;
+    }
+
     _ready = true; // index is "ready" in the sense that we won't try again; downstream tools will see lastError
     // Caller-initiated aborts (session teardown, Ctrl+C) are not indexer
     // failures — only genuine errors and watchdog timeouts trip the breaker.

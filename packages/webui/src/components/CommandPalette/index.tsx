@@ -2,6 +2,7 @@ import { useWebSocket } from '@/hooks/useWebSocket';
 import { playCompletionChime } from '@/lib/chime';
 import { cn } from '@/lib/utils';
 import {
+  useAutoPhaseStore,
   useChatStore,
   useConfigStore,
   useHistoryStore,
@@ -20,10 +21,14 @@ import {
   Maximize2,
   Monitor,
   Moon,
+  Pause,
+  Play,
   RotateCcw,
+  Rocket,
   Search,
   Settings as SettingsIcon,
   Sparkles,
+  Square,
   Stethoscope,
   Sun,
   Trash2,
@@ -186,6 +191,28 @@ export function CommandPalette() {
           useConfigStore.getState().setSoundOnComplete(next);
           if (next) playCompletionChime();
         },
+      },
+      // AutoPhase commands
+      {
+        id: 'autophase-open', category: 'Command', label: 'Open AutoPhase view',
+        icon: Rocket, keywords: ['autophase', 'autonomous', 'phases', 'rocket'],
+        run: () => setCurrentView('autophase'),
+      },
+      {
+        id: 'autophase-toggle', category: 'Command',
+        label: useAutoPhaseStore.getState().autonomous ? 'Autonomous mode: ON — disable' : 'Autonomous mode: OFF — enable',
+        icon: useAutoPhaseStore.getState().autonomous ? Pause : Play,
+        hint: 'Toggle autonomous phase execution',
+        keywords: ['autonomous', 'autophase', 'auto', 'pause', 'resume'],
+        run: () => {
+          const next = !useAutoPhaseStore.getState().autonomous;
+          ws.toggleAutoPhaseAutonomous(next);
+        },
+      },
+      {
+        id: 'autophase-stop', category: 'Command', label: 'Stop AutoPhase',
+        icon: Square, keywords: ['autophase', 'stop', 'autonomous', 'end'],
+        run: () => ws.stopAutoPhase(),
       },
     ];
 

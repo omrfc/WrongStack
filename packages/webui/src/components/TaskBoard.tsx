@@ -21,8 +21,6 @@ export interface TaskBoardProps {
   phaseName: string;
   phaseStatus: string;
   tasks: TaskItem[];
-  /** Called when a task is clicked */
-  onTaskClick?: ((taskId: string) => void) | undefined;
   /** Change task status */
   onTaskStatusChange?: (taskId: string, status: TaskItem['status']) => void;
   className?: string | undefined;
@@ -78,7 +76,6 @@ export function TaskBoard({
   phaseName,
   phaseStatus,
   tasks,
-  onTaskClick,
   onTaskStatusChange,
   className,
 }: TaskBoardProps): React.ReactElement {
@@ -147,7 +144,6 @@ export function TaskBoard({
                     <button
                       type="button"
                       key={task.id}
-                      onClick={() => onTaskClick?.(task.id)}
                       className={cn(
                         'w-full text-left rounded-lg border p-3 transition-all hover:shadow-sm hover:border-primary/40 cursor-pointer',
                         task.status === 'in_progress'

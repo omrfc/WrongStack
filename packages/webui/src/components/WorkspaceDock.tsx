@@ -12,8 +12,9 @@
  */
 
 import { Bot, GitBranch, ListTodo, Maximize2, Rocket, Target, Users } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
+import { useWebSocket } from '@/hooks/useWebSocket';
 import {
   useAutoPhaseStore,
   useFleetStore,
@@ -99,6 +100,8 @@ function DockChip({
 // ── Dock ──────────────────────────────────────────────────────────────
 
 export function WorkspaceDock({ sessionId }: { sessionId: string }) {
+  const { selectAutoPhase, toggleAutoPhaseAutonomous } = useWebSocket();
+
   const dockSection = useUIStore((s) => s.dockSection);
   const toggleDockSection = useUIStore((s) => s.toggleDockSection);
   const setCurrentView = useUIStore((s) => s.setCurrentView);
@@ -109,6 +112,16 @@ export function WorkspaceDock({ sessionId }: { sessionId: string }) {
   const baseBranch = useWorktreeStore((s) => s.baseBranch);
   const todos = useSessionStore((s) => s.todos);
   const fleetAgents = useFleetStore((s) => s.agents);
+
+  // Handlers for PhasePanel
+  const handlePhaseClick = useCallback(
+    (phaseId: string) => selectAutoPhase(phaseId),
+    [selectAutoPhase],
+  );
+  const handleToggleAutonomous = useCallback(
+    () => toggleAutoPhaseAutonomous(!autoPhase.autonomous),
+    [toggleAutoPhaseAutonomous, autoPhase.autonomous],
+  );
 
   const [worktreeView, setWorktreeView] = useState<'graph' | 'lanes'>('graph');
 
@@ -231,6 +244,9 @@ export function WorkspaceDock({ sessionId }: { sessionId: string }) {
             activePhaseId={autoPhase.activePhaseId ?? undefined}
             overallPercent={autoPhase.overallPercent}
             autonomous={autoPhase.autonomous}
+            onPhaseClick={handlePhaseClick}
+            onToggleAutonomous={handleToggleAutonomous}
+            className="w-72 shrink-0"
           />
         </div>
       )}

@@ -298,15 +298,22 @@ export function SessionPanel() {
       {/* ── Context window ── */}
       {maxContext > 0 && (
         <div className="px-4 py-2.5 border-b space-y-1.5">
-          <SectionHeading
-            icon={null}
-            label="Context"
-            right={
-              <span className="text-[10px] text-muted-foreground tabular-nums font-mono">
-                {fmtTok(lastInputTokens)}/{fmtTok(maxContext)} · {ctxPct}%
-              </span>
-            }
-          />
+          <button
+            type="button"
+            onClick={() => setBreakdownOpen(true)}
+            className="w-full block text-left"
+            title="Click for a context breakdown"
+          >
+            <SectionHeading
+              icon={null}
+              label="Context"
+              right={
+                <span className="text-[10px] text-muted-foreground tabular-nums font-mono">
+                  {fmtTok(lastInputTokens)}/{fmtTok(maxContext)} · {ctxPct}%
+                </span>
+              }
+            />
+          </button>
           <button
             type="button"
             onClick={() => setBreakdownOpen(true)}
@@ -317,7 +324,7 @@ export function SessionPanel() {
               pct={ctxPct}
               tokens={lastInputTokens}
               maxTokens={maxContext}
-              showTokens={false}
+              showTokens={true}
             />
           </button>
         </div>
