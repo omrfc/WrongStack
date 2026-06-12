@@ -2046,6 +2046,13 @@ export async function main(argv: string[]): Promise<number> {
         // stdout may be closed during shutdown — ignore.
       }
     },
+    onNewSession: async () => {
+      // TUI-only: signal the TUI to wipe its history entries and reset
+      // cumulative fleet/leader stats. This is called from /clear after
+      // the session has been cleared on disk so the UI state matches.
+      // The TUI runs its own event-listener that dispatches the
+      // 'clearHistory' + 'resetContextChip' actions in response.
+    },
     onDiag: () => {
       const u = tokenCounter.total();
       const cost = tokenCounter.estimateCost();
