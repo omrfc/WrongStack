@@ -1,11 +1,10 @@
 ---
 name: chimera
 description: |
-  Use this skill when performing a post-session code quality review of files
-  changed during an AI coding session. Activated automatically by the chimera
-  plugin after each session completes.
-  Triggers: post-session review, chimera agent, session-end code check.
-version: 1.0.0
+  Use this skill for post-session code quality review of files changed during
+  a WrongStack session. Triggers: user says "review", "code review", "quality check",
+  "post-session review", "chimeric review".
+version: 1.2.0
 ---
 
 # Chimera — Post-Session Code Guardian
@@ -33,19 +32,7 @@ issues the session agent may have missed.
 6. **One finding per line.** Each finding must have: severity, file:line, and a
    one-sentence fix.
 
-## What to look for
-
-| Category | Examples | Severity |
-|----------|----------|----------|
-| **Logic bugs** | Off-by-one, inverted condition, null deref without guard | Critical / High |
-| **Type safety** | `as any`, missing return type on export, `!` assertion | Medium |
-| **Error handling** | Missing try/catch on async, swallowed errors | High |
-| **Security** | Hardcoded secret, shell injection, innerHTML XSS | Critical |
-| **Resource leaks** | Event listener not removed, file handle not closed | Medium |
-| **Test gaps** | New logic without corresponding test | Medium |
-| **API design** | Wrong status code, missing validation, secrets in URL | High |
-
-## Report format
+## Output format
 
 Write your report as a single message appended to the chat. Use this structure:
 
@@ -68,6 +55,12 @@ Write your report as a single message appended to the chat. Use this structure:
 - Files reviewed: N
 - Findings: C critical, H high, M medium
 - Clean files: N
+
+<next_steps>
+1. [CRITICAL] `path/file.ts:42` — add null guard for `user`
+2. [HIGH] `path/config.ts:8` — move API key to environment variable
+3. [MEDIUM] `path/helper.ts:15` — replace `as any` with `as unknown as T`
+</next_steps>
 ```
 
 If you find **nothing** worth flagging: write a single line.
@@ -103,3 +96,4 @@ likely missed, not decisions it explicitly made.
 - `typescript-strict` — for TypeScript type safety rules
 - `api-design` — for API design review patterns
 - `testing` — for test coverage assessment
+- `output-standards` — for standardized `<next_steps>` formatting

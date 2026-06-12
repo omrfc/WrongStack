@@ -4,7 +4,7 @@ description: |
   Use this skill when scanning source code for bugs, anti-patterns, code smells,
   or quality issues in a WrongStack project. Triggers: user says "bug", "bug hunt",
   "scan for issues", "find problems", "anti-pattern", "code smell", "static analysis".
-version: 1.1.0
+version: 1.2.0
 ---
 
 # Bug Hunter — WrongStack
@@ -125,10 +125,18 @@ const data: any = response.json();
 | Low      | 3 |
 
 Total: 16 findings in 12 files
+
+<next_steps>
+1. [SHELL-INJ] `tools/shell.ts:42` — replace exec() with execFile()
+2. [SECRET] `lib/config.ts:8` — move API key to environment variable
+3. [MEMORY] `tools/pool.ts:89` — add cleanup in component unmount
+4. [TYPE] `core/agent.ts:103` — replace `as any` with proper type
+</next_steps>
 ```
 
 ## Skills in scope
 
 - `security-scanner` — for hardcoded secrets and injection vectors
 - `refactor-planner` — for fixing findings across multiple files
-- `typescript-strict` — for type-safety related findings
+- `typescript-strict` — for TypeScript type safety rules
+- `output-standards` — for standardized `<next_steps>` formatting

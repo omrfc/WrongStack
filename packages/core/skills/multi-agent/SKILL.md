@@ -4,7 +4,7 @@ description: |
   Use this skill when a task would benefit from parallel execution across
   multiple AI agents, or when orchestrating leader/worker patterns in WrongStack.
   Triggers: user says "fan out", "parallel", "delegate", "subagent", "fleet", "coordinator".
-version: 1.1.0
+version: 1.2.0
 ---
 
 # Multi-Agent Coordination — WrongStack
@@ -113,6 +113,26 @@ For each worker result:
   - Present as unified report
 ```
 
+## Leader output format
+
+When a leader synthesizes results from subagents:
+
+```
+## Synthesis Report — <task>
+
+### Summary
+[Unified summary of all findings]
+
+### Unified Next Steps
+[Deduplicated and prioritized action items]
+
+<next_steps>
+1. [Priority] Action item 1 — file:line reference
+2. [Priority] Action item 2 — file:line reference
+3. [Priority] Action item 3 — file:line reference
+</next_steps>
+```
+
 ## Anti-patterns
 
 - **Over-delegation**: Firing 50 subagents in one turn — model context explodes, nothing gets done
@@ -131,6 +151,7 @@ Subagents share **nothing** — no memory, no session state, no variable scope. 
 - `security-scanner` — parallel security scans
 - `refactor-planner` — parallel module analysis
 - `audit-log` — aggregating multiple session analyses
+- `output-standards` — for standardized `<next_steps>` formatting
 
 ---
 

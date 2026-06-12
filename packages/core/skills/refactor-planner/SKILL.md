@@ -4,7 +4,7 @@ description: |
   Use this skill when planning a multi-file refactor, code modernization,
   or technical debt resolution in WrongStack. Triggers: user says "refactor",
   "technical debt", "modernize", "clean up", "restructure", "decompose".
-version: 1.1.0
+version: 1.2.0
 ---
 
 # Refactor Planner — WrongStack
@@ -155,6 +155,12 @@ config.ts → logger.ts → path-resolver.ts
 - [ ] All Phase 1 tasks pass `pnpm test`
 - [ ] No circular deps in `src/core`
 - [ ] `Context` interface < 20 methods
+
+<next_steps>
+1. [Phase 1] Extract `ToolExecutor` interface in core/tool-executor.ts
+2. [Phase 1] Decouple `SessionStore` from Agent in core/session-store.ts
+3. [Phase 2] Break circular dep: Config ↔ Logger in core/config.ts
+</next_steps>
 ```
 
 ## Anti-patterns
@@ -170,3 +176,4 @@ config.ts → logger.ts → path-resolver.ts
 - `bug-hunter` — for finding bugs exposed by the refactor
 - `git-flow` — for committing each phase properly
 - `multi-agent` — for parallel analysis of multiple modules
+- `output-standards` — for standardized `<next_steps>` formatting

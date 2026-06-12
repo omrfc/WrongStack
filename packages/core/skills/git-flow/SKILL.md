@@ -4,7 +4,7 @@ description: |
   Use this skill when proposing, reviewing, or troubleshooting git commits,
   branches, pull requests, or merge strategies in a WrongStack project session.
   Triggers: user mentions "commit", "branch", "PR", "merge", "rebase", "stash", "diff".
-version: 1.1.0
+version: 1.2.0
 ---
 
 # Git Workflow — WrongStack
@@ -132,8 +132,29 @@ git rebase main && git merge --ff-only feature
 - **Committing lockfile with logic changes**: Keep them separate for easier rollbacks
 - **Branching from branches**: Always branch from `main` or a stable release tag
 
+## Output format
+
+```
+## Git Workflow Report — <task>
+
+### Changes Summary
+[What files changed, how many commits, what the impact is]
+
+### Recommended Actions
+1. Create branch `feature-name` from `main`
+2. Commit changes with conventional commit format
+3. Open PR with description linking to issue
+
+<next_steps>
+1. `git checkout -b fix/session-leak` from `main`
+2. Commit with: `fix: correct race condition in token refresh`
+3. Open PR with description linking to issue #123
+</next_steps>
+```
+
 ## Skills in scope
 
 - `refactor-planner` — when a refactor involves multiple git-managed changes
 - `multi-agent` — for fleet-wide version audits across packages
 - `bug-hunter` — for spotting bugs at commit time before they reach main
+- `output-standards` — for standardized `<next_steps>` formatting

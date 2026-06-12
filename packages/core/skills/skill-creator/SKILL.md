@@ -126,3 +126,4 @@ Before writing the file, verify:
 
 - `prompt-engineering` — for crafting the skill description and prompt text
 - `git-flow` — for committing the new skill file
+- `output-standards` — for standardized `<next_steps>` formatting

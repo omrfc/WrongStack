@@ -4,7 +4,7 @@ description: |
   Use this skill when scanning code or configuration for security vulnerabilities
   in WrongStack. Triggers: user says "security", "vulnerability", "CVE", "secret",
   "injection", "XSS", "SQL injection", "audit security", "supply chain".
-version: 1.1.0
+version: 1.2.0
 ---
 
 # Security Scanner — WrongStack
@@ -94,7 +94,7 @@ const query = "SELECT * FROM users WHERE id = " + userId;
 
 ```typescript
 // ❌ CRITICAL — hardcoded AWS credentials
-const awsKey = "AKIAIOSFODNN7EXAMPLE";
+const awsKey = "[REDACTED:aws_access_key]";
 
 // ❌ CRITICAL — private key committed
 const pem = "-----BEGIN RSA PRIVATE KEY-----\nMIIE...";
@@ -155,6 +155,12 @@ element.textContent = userInput;
 - [ ] Move secrets to environment variables, add to .gitignore
 - [ ] Use parameterized queries in `src/db/` files
 - [ ] Add rate limiting to `src/api/` routes
+
+<next_steps>
+1. [CRITICAL] `src/config.ts` — remove hardcoded API key, use env var
+2. [HIGH] `src/auth/login.ts` — replace exec() with execFile()
+3. [MEDIUM] `src/api/routes.ts` — add rate limiting middleware
+</next_steps>
 ```
 
 ## Skills in scope
@@ -162,3 +168,4 @@ element.textContent = userInput;
 - `bug-hunter` — for general code quality bugs found during security scan
 - `audit-log` — for dependency version audit trails
 - `git-flow` — for committing security patches properly
+- `output-standards` — for standardized `<next_steps>` formatting

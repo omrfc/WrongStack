@@ -340,3 +340,4 @@ Agent: web_search("TypeScript null check best practices") // NO
 - `security-scanner` — for CVE and vulnerability research
 - `prompt-engineering` — for crafting effective search queries
 - `multi-agent` — for fanning out research to subagents
+- `output-standards` — for standardized `<next_steps>` formatting

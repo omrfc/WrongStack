@@ -4,7 +4,7 @@ description: |
   Use this skill when analyzing WrongStack session logs, event streams, or
   system traces to surface patterns, anomalies, or operational insights.
   Triggers: user says "audit", "session analysis", "log analysis", "usage patterns".
-version: 1.1.0
+version: 1.2.0
 ---
 
 # Audit Log Agent — WrongStack
@@ -152,6 +152,12 @@ When reading a session file:
 ### Cost Trend
 - Iteration 1-10: avg $0.04/iteration
 - Iteration 11-20: avg $0.11/iteration (context growth)
+
+<next_steps>
+1. Investigate bash failures — command timeout pattern in iterations 14-20
+2. Review tool call count in iteration 14 — 50+ tool calls suggests loop
+3. Run `pnpm test` to verify fixes for identified issues
+</next_steps>
 ```
 
 ## Anti-patterns
@@ -167,3 +173,4 @@ When reading a session file:
 - `bug-hunter` — for turning audit findings into concrete bugs to fix
 - `refactor-planner` — for addressing systemic issues found in logs
 - `security-scanner` — for security-adjacent findings (leaked keys, injection patterns in logs)
+- `output-standards` — for standardized `<next_steps>` formatting

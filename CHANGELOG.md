@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.254.0] — 2026-06-12
+
+> Release preparation. Version consolidation and housekeeping: cleaned
+> temporary/debug files from the repo root, aligned all workspace
+> packages and the marketing site to the same version, and updated
+> dependencies across the monorepo.
+
+### Changed
+
+- **Version alignment.** All 16 workspace packages and the marketing site
+  (`website/`) aligned to `0.254.0` in lockstep.
+
+### Removed
+
+- **Temporary debug files.** Removed `check-deps.cjs`, `find_broadcast.js`,
+  `find-vite.cjs`, `find-vite.js`, `ideas.md`, `refactor_plan.md`,
+  `report.md`, and `llms.txt` from the repository root.
+
 ## [0.250.0] — 2026-06-12
 
 > The hot-path performance release. Seven targeted optimizations eliminate
