@@ -627,6 +627,9 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           },
           // Retrieve current suggestions for next-steps auto-submit countdown.
           getSuggestions: () => getSuggestions?.() ?? [],
+          // Store parsed next steps so the /next command and auto-submit countdown
+          // can access them (entry.tsx parses from rendered messages).
+          setSuggestions,
           getEternalEngine,
           subscribeEternalIteration,
           subscribeEternalStage: subscribeEternalStage as never,
