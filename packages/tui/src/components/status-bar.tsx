@@ -214,7 +214,14 @@ export interface StatusBarProps {
    */
   autoProceedCountdown?: number | null | undefined;
   /** Codebase indexing state — rendered as a chip on line 1 when indexing. */
-  indexState?: { ready: boolean; indexing: boolean; currentFile: number; totalFiles: number };
+  indexState?: {
+    ready: boolean;
+    indexing: boolean;
+    currentFile: number;
+    totalFiles: number;
+    /** Circuit-breaker snapshot — 'open' means indexing is paused after repeated failures. */
+    circuit?: { state: 'closed' | 'open' | 'half-open'; cooldownRemainingMs: number };
+  };
   /** Active agent mode label with icon (e.g. "🧑‍🏫 teach", "⚡ brief"). Rendered on line 2. */
   modeLabel?: string | undefined;
   /**
@@ -491,6 +498,11 @@ export function StatusBar({
                 <Text color="yellow">
                   ⚙ indexing {indexState.currentFile}/{indexState.totalFiles}
                 </Text>
+              </>
+            ) : indexState?.circuit?.state === 'open' ? (
+              <>
+                <Text dimColor>│</Text>
+                <Text color="red">⚙ index paused (/reindex)</Text>
               </>
             ) : null}
           </>

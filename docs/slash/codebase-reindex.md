@@ -41,3 +41,10 @@ updates.
 - Disabling automatic indexing (`WRONGSTACK_INDEX_ON_START=0`, or
   `indexing.onSessionStart: false` in config) does not affect this command — it
   always runs on demand.
+- Every index run is guarded by a watchdog timeout (default 120s full / 30s
+  per-file incremental, configurable via `indexing.indexTimeoutMs`) and a
+  circuit breaker: after 3 consecutive failures or timeouts, indexing pauses
+  for 60s and background reindexes are dropped instead of queuing — so a
+  wedged index can never lock the terminal. The status bar shows
+  `⚙ index paused` while the circuit is open. Running this command resets the
+  breaker and retries immediately.

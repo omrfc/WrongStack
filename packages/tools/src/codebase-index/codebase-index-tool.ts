@@ -1,8 +1,8 @@
 
 import type { Tool } from '@wrongstack/core';
-import { runIndexer } from './indexer.js';
 import { codebaseIndexDirOverride } from './writer.js';
-import { isIndexing, setIndexReady } from './background-indexer.js';
+import { isIndexing, runStartupIndex } from './background-indexer.js';
+import { indexCircuitBreaker } from './circuit-breaker.js';
 
 export const codebaseIndexTool: Tool<CodebaseIndexInput, CodebaseIndexOutput> = {
   name: 'codebase-index',
@@ -48,17 +48,33 @@ export const codebaseIndexTool: Tool<CodebaseIndexInput, CodebaseIndexOutput> = 
       };
     }
 
-    const result = await runIndexer(ctx, {
+    // Circuit breaker: after repeated failures/timeouts indexing is paused.
+    // Report instead of erroring so the agent can carry on without the index.
+    const circuit = indexCircuitBreaker.snapshot();
+    if (circuit.state === 'open' && circuit.cooldownRemainingMs > 0) {
+      return {
+        filesIndexed: 0,
+        symbolsIndexed: 0,
+        langStats: {},
+        durationMs: 0,
+        errors: [],
+        note:
+          `Codebase indexing is paused after repeated failures (last: ${circuit.lastFailure ?? 'unknown'}). ` +
+          `Auto-retry possible in ${Math.ceil(circuit.cooldownRemainingMs / 1000)}s; the user can run /codebase-reindex to retry immediately.`,
+      };
+    }
+
+    // Route through the background coordinator so the run shares the
+    // process-wide mutex, the watchdog timeout, and breaker accounting with
+    // the startup scan and live reindexes (a direct runIndexer call here used
+    // to race them on the same SQLite file).
+    return await runStartupIndex({
       projectRoot: ctx.projectRoot,
       force: input.force ?? false,
       langs: input.langs,
       indexDir: codebaseIndexDirOverride(ctx),
       signal: execOpts?.signal,
     });
-    // Mark ready so downstream tools (search, stats) don't gate on a
-    // missing startup index when runIndexer was called directly.
-    setIndexReady();
-    return result;
   },
 };
 

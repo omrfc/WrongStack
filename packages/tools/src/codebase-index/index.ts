@@ -31,6 +31,17 @@ export {
   onIndexStateChange,
 } from './background-indexer.js';
 
+// Circuit breaker guarding every index run (startup, incremental, manual).
+// `resetIndexCircuitBreaker` is the manual-recovery hook for /codebase-reindex.
+export {
+  IndexCircuitBreaker,
+  indexCircuitBreaker,
+  resetIndexCircuitBreaker,
+  CircuitOpenError,
+  IndexTimeoutError,
+} from './circuit-breaker.js';
+export type { CircuitState, CircuitSnapshot } from './circuit-breaker.js';
+
 // Re-export shared internal helpers so external consumers (e.g. plug-lsp)
 // can use them without importing from implementation detail files.
 export { IndexStore, resolveIndexDir, codebaseIndexDirOverride } from './writer.js';

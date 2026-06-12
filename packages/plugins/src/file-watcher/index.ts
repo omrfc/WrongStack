@@ -146,25 +146,21 @@ const plugin: Plugin = {
             if (autoIndex && isIndexableFile(fullPath)) {
               debounceEvent(`index:${fullPath}`, async () => {
                 try {
+                  // Route through the background coordinator (mutex + watchdog +
+                  // circuit breaker) — a direct runIndexer call here used to race
+                  // the startup scan and per-edit reindexes on the same SQLite file.
                   // @ts-expect-error — @wrongstack/tools/codebase-index is not an exported subpath;
                   // the dynamic import resolves at runtime but has no type declaration visible here.
-                  const { runIndexer } = await import('@wrongstack/tools/codebase-index/index.js');
+                  const { enqueueReindex } = await import('@wrongstack/tools/codebase-index/index.js');
                   const root = indexProjectRoot || dirPath;
-                  const fakeAppend = async () => { /* noop */ };
-                  const fakeClose = async () => { /* noop */ };
-                  const fakeRecordFileChange = () => { /* noop */ };
-                  const ctx = {
+                  enqueueReindex({
                     projectRoot: root,
-                    cwd: root,
-                    messages: [],
-                    todos: [],
-                    readFiles: new Set(),
-                    fileMtimes: new Map(),
-                    session: { id: 'fw', append: fakeAppend, close: fakeClose, recordFileChange: fakeRecordFileChange },
-                  } as unknown as Parameters<typeof runIndexer>[0];
-                  await runIndexer(ctx, { projectRoot: root, files: [fullPath] });
+                    files: [fullPath],
+                    onError: (err: unknown) =>
+                      api.log.warn(`file-watcher: auto-index failed for ${fullPath}: ${err}`),
+                  });
                   api.metrics.counter('index_file', 1);
-                  api.log.debug(`file-watcher: auto-index triggered for ${fullPath}`);
+                  api.log.debug(`file-watcher: auto-index scheduled for ${fullPath}`);
                 } catch (err) {
                   api.log.warn(`file-watcher: auto-index failed for ${fullPath}: ${err}`);
                 }

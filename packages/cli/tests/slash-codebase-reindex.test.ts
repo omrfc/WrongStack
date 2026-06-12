@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Spy on the shared background indexer the command drives.
-const { runStartupIndexMock } = vi.hoisted(() => ({
+const { runStartupIndexMock, resetIndexCircuitBreakerMock } = vi.hoisted(() => ({
   runStartupIndexMock: vi.fn(async () => ({
     filesIndexed: 12,
     symbolsIndexed: 345,
@@ -9,8 +9,12 @@ const { runStartupIndexMock } = vi.hoisted(() => ({
     durationMs: 7,
     errors: [],
   })),
+  resetIndexCircuitBreakerMock: vi.fn(),
 }));
-vi.mock('@wrongstack/tools', () => ({ runStartupIndex: runStartupIndexMock }));
+vi.mock('@wrongstack/tools', () => ({
+  runStartupIndex: runStartupIndexMock,
+  resetIndexCircuitBreaker: resetIndexCircuitBreakerMock,
+}));
 
 const { buildCodebaseReindexCommand } = await import('../src/slash-commands/codebase-reindex.js');
 
@@ -26,6 +30,7 @@ const ctx = {} as never;
 describe('buildCodebaseReindexCommand', () => {
   beforeEach(() => {
     runStartupIndexMock.mockClear();
+    resetIndexCircuitBreakerMock.mockClear();
   });
 
   it('registers under codebase-reindex with a reindex alias', () => {
@@ -40,6 +45,15 @@ describe('buildCodebaseReindexCommand', () => {
     expect(runStartupIndexMock).toHaveBeenCalledWith({ projectRoot: '/proj', force: false });
     expect(res?.message).toContain('updated');
     expect(res?.message).toContain('345 symbols');
+  });
+
+  it('resets the indexing circuit breaker before running (manual override)', async () => {
+    const cmd = build();
+    await cmd.run('', ctx);
+    expect(resetIndexCircuitBreakerMock).toHaveBeenCalledTimes(1);
+    expect(resetIndexCircuitBreakerMock.mock.invocationCallOrder[0]).toBeLessThan(
+      runStartupIndexMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
   });
 
   it('forces a full rebuild when "force" is passed', async () => {

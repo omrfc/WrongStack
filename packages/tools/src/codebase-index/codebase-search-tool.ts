@@ -89,11 +89,16 @@ export const codebaseSearchTool: Tool<CodebaseSearchInput, CodebaseSearchOutput>
       };
     }
     if (state.lastError) {
+      const circuit = state.circuit;
+      const retryHint =
+        circuit.state === 'open'
+          ? `Indexing is paused (circuit open, retry in ${Math.ceil(circuit.cooldownRemainingMs / 1000)}s); the user can run /codebase-reindex to retry now.`
+          : 'Try /codebase-reindex.';
       return {
         results: [],
         total: 0,
         query: input.query,
-        indexStatus: `Index build failed: ${state.lastError}. Try /codebase-reindex.`,
+        indexStatus: `Index build failed: ${state.lastError}. ${retryHint}`,
       };
     }
 

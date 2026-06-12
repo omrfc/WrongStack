@@ -1,6 +1,6 @@
 import { color } from '@wrongstack/core';
 import type { Context, SlashCommand } from '@wrongstack/core';
-import { runStartupIndex } from '@wrongstack/tools';
+import { resetIndexCircuitBreaker, runStartupIndex } from '@wrongstack/tools';
 import type { SlashCommandContext } from './index.js';
 
 /**
@@ -32,6 +32,10 @@ export function buildCodebaseReindexCommand(opts: SlashCommandContext): SlashCom
       opts.renderer.write(color.dim(`${force ? 'Rebuilding' : 'Reindexing'} codebase index…\n`));
 
       try {
+        // A manual reindex is an explicit user override — close the circuit
+        // breaker (it opens after repeated index failures/timeouts) so this
+        // run is admitted instead of failing fast.
+        resetIndexCircuitBreaker();
         const r = await runStartupIndex({ projectRoot: opts.projectRoot, force });
         const summary =
           `${color.green('✓')} codebase index ${force ? 'rebuilt' : 'updated'} ` +

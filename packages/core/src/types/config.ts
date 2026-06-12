@@ -183,6 +183,12 @@ export interface IndexingConfig {
   watchExternal: boolean;
   /** Debounce window (ms) coalescing rapid edits to the same file. Default: 400. */
   debounceMs: number;
+  /**
+   * Watchdog timeout (ms) for a full index run. A run exceeding this is
+   * aborted (so it can never wedge the indexing mutex or freeze the terminal)
+   * and counts toward the indexing circuit breaker. Default: 120000.
+   */
+  indexTimeoutMs?: number | undefined;
 }
 
 /**

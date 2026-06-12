@@ -64,6 +64,7 @@ export const codebaseStatsTool: Tool<Record<string, never>, CodebaseStatsOutput>
     const store = new IndexStore(ctx.projectRoot, { indexDir: codebaseIndexDirOverride(ctx) });
     try {
       const stats = store.getStats();
+      const circuit = idxState.circuit;
       return {
         totalSymbols: stats.totalSymbols,
         totalFiles: stats.totalFiles,
@@ -73,6 +74,13 @@ export const codebaseStatsTool: Tool<Record<string, never>, CodebaseStatsOutput>
         sizeBytes: stats.sizeBytes,
         indexPath: stats.indexPath,
         version: stats.version,
+        ...(circuit.state === 'open'
+          ? {
+              indexStatus:
+                `Indexing is paused after repeated failures (last: ${circuit.lastFailure ?? 'unknown'}); ` +
+                `auto-retry in ${Math.ceil(circuit.cooldownRemainingMs / 1000)}s, or run /codebase-reindex. Stats reflect the last successful build.`,
+            }
+          : {}),
       };
     } finally {
       store.close();

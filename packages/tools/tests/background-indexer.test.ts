@@ -22,12 +22,21 @@ import {
   cancelPendingReindexes,
   enqueueReindex,
   isIndexableFile,
+  isIndexing,
   runStartupIndex,
 } from '../src/codebase-index/background-indexer.js';
+import {
+  CircuitOpenError,
+  IndexTimeoutError,
+  indexCircuitBreaker,
+  resetIndexCircuitBreaker,
+} from '../src/codebase-index/circuit-breaker.js';
 
 beforeEach(() => {
   runIndexerMock.mockReset();
   runIndexerMock.mockResolvedValue(OK_RESULT);
+  // The breaker is process-wide module state — start every test closed.
+  resetIndexCircuitBreaker();
 });
 
 afterEach(() => {
@@ -113,6 +122,89 @@ describe('mutex serialization', () => {
     // The next run still proceeds.
     await expect(runStartupIndex({ projectRoot: '/proj' })).resolves.toMatchObject({
       filesIndexed: 1,
+    });
+  });
+});
+
+describe('watchdog timeout', () => {
+  it('a hung index run times out and does not wedge the mutex chain', async () => {
+    // Never settles — simulates a wedged FS / cross-process SQLite lock.
+    runIndexerMock.mockImplementationOnce(() => new Promise(() => {}));
+    await expect(runStartupIndex({ projectRoot: '/proj', timeoutMs: 30 })).rejects.toThrow(
+      IndexTimeoutError,
+    );
+    // The indexing flag is released and the next run proceeds normally.
+    expect(isIndexing()).toBe(false);
+    await expect(runStartupIndex({ projectRoot: '/proj' })).resolves.toMatchObject({
+      filesIndexed: 1,
+    });
+  });
+
+  it('aborts the run signal when the watchdog fires', async () => {
+    let seenSignal: AbortSignal | undefined;
+    runIndexerMock.mockImplementationOnce((_ctx: unknown, opts: { signal?: AbortSignal }) => {
+      seenSignal = opts.signal;
+      return new Promise(() => {});
+    });
+    await expect(runStartupIndex({ projectRoot: '/proj', timeoutMs: 30 })).rejects.toThrow(
+      IndexTimeoutError,
+    );
+    expect(seenSignal?.aborted).toBe(true);
+  });
+});
+
+describe('circuit breaker integration', () => {
+  it('opens after repeated failures and then fails fast without running the indexer', async () => {
+    runIndexerMock.mockRejectedValue(new Error('boom'));
+    for (let i = 0; i < 3; i++) {
+      await expect(runStartupIndex({ projectRoot: '/proj' })).rejects.toThrow('boom');
+    }
+    runIndexerMock.mockClear();
+    await expect(runStartupIndex({ projectRoot: '/proj' })).rejects.toThrow(CircuitOpenError);
+    expect(runIndexerMock).not.toHaveBeenCalled();
+  });
+
+  it('drops debounced reindexes while the circuit is open', async () => {
+    vi.useFakeTimers();
+    for (let i = 0; i < 3; i++) indexCircuitBreaker.recordFailure(new Error('boom'));
+    const onError = vi.fn();
+    enqueueReindex({ projectRoot: '/proj', files: ['/proj/a.ts'], debounceMs: 10, onError });
+    await vi.advanceTimersByTimeAsync(20);
+    expect(runIndexerMock).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0]?.[0]).toBeInstanceOf(CircuitOpenError);
+  });
+
+  it('caller-initiated aborts do not count toward the breaker', async () => {
+    const ac = new AbortController();
+    runIndexerMock.mockImplementationOnce(
+      (_ctx: unknown, opts: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          const s = opts.signal;
+          // The abort may land before the mutex even starts this job — honor
+          // an already-aborted signal, like the real runIndexer's yield points.
+          if (s?.aborted) {
+            reject(s.reason);
+            return;
+          }
+          s?.addEventListener('abort', () => reject(s.reason), { once: true });
+        }),
+    );
+    const run = runStartupIndex({ projectRoot: '/proj', signal: ac.signal });
+    ac.abort(new Error('session teardown'));
+    await expect(run).rejects.toThrow('session teardown');
+    expect(indexCircuitBreaker.snapshot().consecutiveFailures).toBe(0);
+  });
+
+  it('a successful run closes a tripped (cooled-down) circuit again', async () => {
+    runIndexerMock.mockRejectedValueOnce(new Error('one-off'));
+    await expect(runStartupIndex({ projectRoot: '/proj' })).rejects.toThrow('one-off');
+    await expect(runStartupIndex({ projectRoot: '/proj' })).resolves.toMatchObject({
+      filesIndexed: 1,
+    });
+    expect(indexCircuitBreaker.snapshot()).toMatchObject({
+      state: 'closed',
+      consecutiveFailures: 0,
     });
   });
 });

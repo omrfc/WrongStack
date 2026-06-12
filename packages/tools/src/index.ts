@@ -45,7 +45,13 @@ export {
   isIndexing,
   getIndexState,
   onIndexStateChange,
+  IndexCircuitBreaker,
+  indexCircuitBreaker,
+  resetIndexCircuitBreaker,
+  CircuitOpenError,
+  IndexTimeoutError,
 } from './codebase-index/index.js';
+export type { CircuitState, CircuitSnapshot } from './codebase-index/index.js';
 
 // builtinTools moved to './builtin.ts' so consumers that only need a subset of
 // tools don't transitively import all 30. Use `@wrongstack/tools/builtin`.

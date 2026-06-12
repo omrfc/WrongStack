@@ -25,6 +25,24 @@
 import { runIndexer } from './indexer.js';
 import type { IndexResult } from './schema.js';
 import { detectLang } from './ts-parser.js';
+import {
+  CircuitOpenError,
+  IndexTimeoutError,
+  indexCircuitBreaker,
+  type CircuitSnapshot,
+} from './circuit-breaker.js';
+
+// ─── Watchdog timeouts ───────────────────────────────────────────────────────
+// Every index run is raced against a watchdog so a wedged run (hung FS,
+// parser pathology, cross-process SQLite contention) can never hold the
+// process-wide mutex forever — that was the failure mode that froze
+// terminals: `_indexing` stuck true, every queued reindex piling up, and
+// `/codebase-reindex` awaiting a promise that never settles.
+
+/** Watchdog timeout for a full (startup / manual) index run. */
+const DEFAULT_FULL_INDEX_TIMEOUT_MS = 120_000;
+/** Watchdog timeout for a single-file incremental reindex. */
+const DEFAULT_INCREMENTAL_TIMEOUT_MS = 30_000;
 
 // ─── Indexing lifecycle state ─────────────────────────────────────────────────
 // Process-wide counters so codebase-search / codebase-stats can gate on
@@ -55,13 +73,15 @@ export function isIndexing(): boolean {
   return _indexing;
 }
 
-/** Current indexing progress: { currentFile, totalFiles, ready, indexing }. */
+/** Current indexing progress: { currentFile, totalFiles, ready, indexing, circuit }. */
 export function getIndexState(): {
   ready: boolean;
   indexing: boolean;
   currentFile: number;
   totalFiles: number;
   lastError: string | null;
+  /** Circuit-breaker state — `open` means indexing is paused after repeated failures. */
+  circuit: CircuitSnapshot;
 } {
   return {
     ready: _ready,
@@ -69,6 +89,7 @@ export function getIndexState(): {
     currentFile: _currentFile,
     totalFiles: _totalFiles,
     lastError: _lastError,
+    circuit: indexCircuitBreaker.snapshot(),
   };
 }
 
@@ -127,6 +148,56 @@ function withMutex<T>(job: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/**
+ * Run an index job under a watchdog. The timer starts when the job actually
+ * begins (i.e. inside the mutex, not while queued behind it). On timeout it
+ * both aborts the job's signal — `runIndexer` polls it at yield points and
+ * releases its SQLite handle — and rejects the returned promise, so the mutex
+ * chain always advances even if the underlying run is wedged on something
+ * uninterruptible. A wedged run that later resumes finds its signal aborted
+ * and bails at the next yield.
+ */
+async function runGuarded<T>(
+  timeoutMs: number,
+  outerSignal: AbortSignal | undefined,
+  job: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const ac = new AbortController();
+  const onOuterAbort = () => ac.abort(outerSignal?.reason ?? new Error('Indexing cancelled'));
+  if (outerSignal?.aborted) onOuterAbort();
+  else outerSignal?.addEventListener('abort', onOuterAbort, { once: true });
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const watchdog = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new IndexTimeoutError(`Index run exceeded its ${timeoutMs}ms watchdog timeout`);
+      ac.abort(err);
+      reject(err);
+    }, timeoutMs);
+    timer.unref?.();
+  });
+
+  try {
+    return await Promise.race([job(ac.signal), watchdog]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    outerSignal?.removeEventListener('abort', onOuterAbort);
+  }
+}
+
+/** Build the fail-fast error thrown while the circuit is open. */
+function circuitOpenError(): CircuitOpenError {
+  const c = indexCircuitBreaker.snapshot();
+  return new CircuitOpenError(
+    'Codebase indexing is temporarily paused after repeated failures' +
+      (c.lastFailure ? ` (last: ${c.lastFailure})` : '') +
+      (c.cooldownRemainingMs > 0
+        ? `; auto-retry in ${Math.ceil(c.cooldownRemainingMs / 1000)}s`
+        : '') +
+      '. Use /codebase-reindex to retry now.',
+  );
+}
+
 // ─── Debounce ────────────────────────────────────────────────────────────────
 const DEFAULT_DEBOUNCE_MS = 400;
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -154,32 +225,46 @@ export async function runStartupIndex(opts: {
   projectRoot: string;
   indexDir?: string | undefined;
   force?: boolean | undefined;
+  langs?: string[] | undefined;
   signal?: AbortSignal | undefined;
+  /** Watchdog timeout for the whole run. Default: 120s. */
+  timeoutMs?: number | undefined;
 }): Promise<IndexResult> {
+  // Circuit breaker: after repeated failures/timeouts, fail fast instead of
+  // queuing yet another run behind a possibly-wedged mutex.
+  if (!indexCircuitBreaker.allowRequest()) throw circuitOpenError();
+
   _indexing = true;
   emitState();
 
   try {
-    const result = await withMutex(() => {
-      // Reset counters inside the mutex — if runStartupIndex is called
-      // twice concurrently, the second caller must not clobber a running
-      // index's progress counters. The mutex serializes `runIndexer`, so
-      // the second call waits for the first to finish before resetting.
-      _currentFile = 0;
-      _totalFiles = 0;
-      _lastError = null;
-      return runIndexer(stubCtx(opts.projectRoot), {
-        projectRoot: opts.projectRoot,
-        indexDir: opts.indexDir,
-        force: opts.force,
-        signal: opts.signal,
-      });
-    });
+    const result = await withMutex(() =>
+      runGuarded(opts.timeoutMs ?? DEFAULT_FULL_INDEX_TIMEOUT_MS, opts.signal, (signal) => {
+        // Reset counters inside the mutex — if runStartupIndex is called
+        // twice concurrently, the second caller must not clobber a running
+        // index's progress counters. The mutex serializes `runIndexer`, so
+        // the second call waits for the first to finish before resetting.
+        _currentFile = 0;
+        _totalFiles = 0;
+        _lastError = null;
+        return runIndexer(stubCtx(opts.projectRoot), {
+          projectRoot: opts.projectRoot,
+          indexDir: opts.indexDir,
+          force: opts.force,
+          langs: opts.langs,
+          signal,
+        });
+      }),
+    );
     _ready = true;
+    indexCircuitBreaker.recordSuccess();
     return result;
   } catch (err) {
     _lastError = err instanceof Error ? err.message : String(err);
     _ready = true; // index is "ready" in the sense that we won't try again; downstream tools will see lastError
+    // Caller-initiated aborts (session teardown, Ctrl+C) are not indexer
+    // failures — only genuine errors and watchdog timeouts trip the breaker.
+    if (!opts.signal?.aborted) indexCircuitBreaker.recordFailure(err);
     throw err;
   } finally {
     _indexing = false;
@@ -198,6 +283,8 @@ export function enqueueReindex(opts: {
   files: string[];
   indexDir?: string | undefined;
   debounceMs?: number | undefined;
+  /** Watchdog timeout per file. Default: 30s. */
+  timeoutMs?: number | undefined;
   onError?: ((err: unknown) => void) | undefined;
 }): void {
   const files = opts.files.filter(isIndexableFile);
@@ -210,13 +297,28 @@ export function enqueueReindex(opts: {
     if (existing) clearTimeout(existing);
     const timer = setTimeout(() => {
       debounceTimers.delete(key);
+      // Checked at fire time (not enqueue time) so an edit made while the
+      // circuit is open is dropped instead of queuing behind a wedged mutex.
+      if (!indexCircuitBreaker.allowRequest()) {
+        opts.onError?.(circuitOpenError());
+        return;
+      }
       void withMutex(() =>
-        runIndexer(stubCtx(opts.projectRoot), {
-          projectRoot: opts.projectRoot,
-          files: [file],
-          indexDir: opts.indexDir,
-        }),
-      ).catch((err) => opts.onError?.(err));
+        runGuarded(opts.timeoutMs ?? DEFAULT_INCREMENTAL_TIMEOUT_MS, undefined, (signal) =>
+          runIndexer(stubCtx(opts.projectRoot), {
+            projectRoot: opts.projectRoot,
+            files: [file],
+            indexDir: opts.indexDir,
+            signal,
+          }),
+        ),
+      ).then(
+        () => indexCircuitBreaker.recordSuccess(),
+        (err) => {
+          indexCircuitBreaker.recordFailure(err);
+          opts.onError?.(err);
+        },
+      );
     }, ms);
     // Don't keep the event loop alive solely for a pending reindex.
     timer.unref?.();

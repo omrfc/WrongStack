@@ -89,6 +89,19 @@ export class IndexStore {
     fs.mkdirSync(this.indexDir, { recursive: true });
     const Database = loadDatabaseSync();
     this.db = new Database(path.join(this.indexDir, DB_FILE));
+    // Multi-process safety: several wstack surfaces (TUI, WebUI, parallel
+    // terminals) share this per-project db. WAL lets readers coexist with the
+    // writer, and busy_timeout bounds lock waits to a short, finite block —
+    // DatabaseSync is synchronous, so an unbounded wait here would freeze the
+    // whole event loop (and with it the terminal UI). Past the timeout the
+    // statement throws SQLITE_BUSY, which the indexing circuit breaker counts
+    // as a failure instead of wedging.
+    try {
+      this.db.exec('PRAGMA journal_mode = WAL');
+      this.db.exec('PRAGMA busy_timeout = 1500');
+    } catch {
+      /* pragmas are best-effort — an old SQLite build without WAL still works */
+    }
     this.initSchema();
   }
 

@@ -81,7 +81,7 @@ export async function setupCodebaseIndexing(deps: CodebaseIndexingDeps): Promise
   //    We must NOT write directly to stderr here because it bypasses Ink's
   //    rendering and pushes the input area into native scrollback history.
   if (idx.onSessionStart) {
-    void runStartupIndex({ projectRoot, signal: context.signal })
+    void runStartupIndex({ projectRoot, signal: context.signal, timeoutMs: idx.indexTimeoutMs })
       .then((r) => {
         logger.info(
           `codebase index ready: ${r.symbolsIndexed} symbols · ${r.filesIndexed} files · ${r.durationMs}ms`,
