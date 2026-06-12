@@ -1315,16 +1315,20 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           const spawnArgs = [cliPath, '--no-interactive'];
           if (resumeSessionId) spawnArgs.push('--resume', resumeSessionId);
           // No abort signal here: the spawned wstack OUTLIVES this process
-          // (we exit right after; it inherits the terminal). A previous
-          // AbortSignal.timeout(30_000) on this spawn killed the successor
-          // 30 seconds in whenever the parent lingered.
+          // (we exit right after). A previous AbortSignal.timeout(30_000)
+          // on this spawn killed the successor 30 seconds in whenever the
+          // parent lingered.
+          // Use stdio: 'ignore' + detached: true so the child truly outlives
+          // the parent — stdio: 'inherit' would pipe the child's stdin to
+          // the parent's, and when the parent exits the pipes close, crashing
+          // a child that is still initializing (module load, provider connect).
           spawn(nodeExe, spawnArgs, {
             cwd: root,
-            stdio: 'inherit',
-            detached: false,
+            stdio: 'ignore',
+            detached: true,
           }).on('error', (err: Error) => {
             console.error(color.red(`Failed to spawn wstack: ${err.message}`));
-          }).unref();
+          });
 
           console.log([
             '',
