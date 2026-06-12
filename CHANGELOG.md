@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — 2026-06-09
+## [0.250.0] — 2026-06-12
 
 > The hot-path performance release. Seven targeted optimizations eliminate
 > redundant CPU work, allocations, and TUI re-renders in the agent loop,
