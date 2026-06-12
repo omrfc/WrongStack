@@ -11,6 +11,11 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './packages/webui/src'),
+      // Force @wrongstack/core to resolve from source (packages/core/src) instead
+      // of going through the package's "exports" field which points to dist/.
+      // The dist/ output is only needed for published consumers; local vitest
+      // workers (fork pool) need to import from source directly.
+      '@wrongstack/core': path.resolve(__dirname, './packages/core/src'),
     },
   },
   test: {
