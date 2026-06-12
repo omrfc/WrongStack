@@ -1,53 +1,66 @@
 /**
- * Background indexing coordinator.
+ * Index host — the main-thread coordinator for all codebase-index operations.
  *
- * Wraps {@link runIndexer} with two concerns the agent loop and the CLI wiring
- * both need but neither should own:
+ * Production mode runs every operation (full scans, per-file reindexes,
+ * searches, stats) in a dedicated worker thread (`worker.ts`), so the
+ * synchronous `node:sqlite` calls and the TypeScript parser can never block
+ * the main event loop — the failure mode that used to freeze terminals is
+ * structurally impossible. When the built worker file is not present (tests
+ * run from source, exotic runtimes) or `WRONGSTACK_INDEX_INLINE=1` is set,
+ * operations fall back to running inline through the same service layer.
  *
- * 1. **Serialization** — every reindex (startup full scan, per-edit incremental,
- *    external file-watch) goes through one process-wide promise-chain mutex.
- *    `writer.ts` opens a synchronous `node:sqlite` `DatabaseSync` connection per
- *    `IndexStore`; two concurrent `runIndexer` runs on the same `index.db` would
- *    race the writer and risk `SQLITE_BUSY`. The mutex makes them queue instead.
+ * Concerns owned here, in front of either execution mode:
  *
- * 2. **Debounce** — rapid successive edits to the same file (editor autosave,
- *    multi-edit) coalesce into a single reindex, keyed per `(indexDir, file)`.
- *
- * 3. **State tracking** — exposes whether the initial index has completed (`ready`)
- *    and whether a build is in progress (`indexing`), so downstream tools
- *    (codebase-search, codebase-stats) can gate on it and UIs can show progress.
- *
- * `runIndexer` only reads `opts` (and ignores its `_ctx` parameter), so callers
- * outside the agent loop pass a minimal stub cast to the expected shape — no
- * live agent `Context` is required.
+ * 1. **Serialization** — every write run (startup scan, per-edit incremental,
+ *    external file-watch, manual reindex) goes through one process-wide
+ *    promise-chain mutex so two runs never race the same `index.db` writer.
+ * 2. **Debounce** — rapid successive edits to the same file coalesce into a
+ *    single reindex, keyed per `(indexDir, file)`.
+ * 3. **Watchdog** — every operation is raced against a timeout. In worker
+ *    mode a timeout hard-terminates the worker (it respawns lazily on the
+ *    next request); inline it aborts the run's signal. Either way the mutex
+ *    chain always advances and the promise always settles.
+ * 4. **Circuit breaker** — repeated failures/timeouts pause indexing instead
+ *    of queuing more work behind a wedged pipeline. See circuit-breaker.ts.
+ * 5. **State tracking** — ready/indexing/progress flags + change listeners
+ *    for the TUI status chip and the search/stats tools' gating.
  */
 
-import { runIndexer } from './indexer.js';
-import type { IndexResult } from './schema.js';
-import { detectLang } from './ts-parser.js';
+import * as fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { Worker } from 'node:worker_threads';
 import {
   CircuitOpenError,
+  type CircuitSnapshot,
   IndexTimeoutError,
   indexCircuitBreaker,
-  type CircuitSnapshot,
 } from './circuit-breaker.js';
+import { indexService, searchService, statsService } from './index-service.js';
+import type { IndexResult, IndexStats } from './schema.js';
+import { detectLang } from './ts-parser.js';
+import type {
+  HostToWorker,
+  IndexOpArgs,
+  OpName,
+  OpShapes,
+  SearchOpArgs,
+  SearchOpResult,
+  StatsOpArgs,
+  WorkerToHost,
+} from './worker-protocol.js';
 
 // ─── Watchdog timeouts ───────────────────────────────────────────────────────
-// Every index run is raced against a watchdog so a wedged run (hung FS,
-// parser pathology, cross-process SQLite contention) can never hold the
-// process-wide mutex forever — that was the failure mode that froze
-// terminals: `_indexing` stuck true, every queued reindex piling up, and
-// `/codebase-reindex` awaiting a promise that never settles.
 
 /** Watchdog timeout for a full (startup / manual) index run. */
 const DEFAULT_FULL_INDEX_TIMEOUT_MS = 120_000;
 /** Watchdog timeout for a single-file incremental reindex. */
 const DEFAULT_INCREMENTAL_TIMEOUT_MS = 30_000;
+/** Watchdog timeout for read operations (search / stats). */
+const DEFAULT_QUERY_TIMEOUT_MS = 8_000;
 
 // ─── Indexing lifecycle state ─────────────────────────────────────────────────
 // Process-wide counters so codebase-search / codebase-stats can gate on
-// readiness and UIs can show an indexing indicator. Updated inside the
-// mutex so reads from the tools are consistent with the actual build.
+// readiness and UIs can show an indexing indicator.
 let _ready = false;
 let _indexing = false;
 let _currentFile = 0;
@@ -61,8 +74,7 @@ export function isIndexReady(): boolean {
 
 /**
  * Mark the index as ready so downstream tools (codebase-search, codebase-stats)
- * don't gate on a startup index that never ran (e.g. when runIndexer is called
- * directly via the codebase-index tool rather than through runStartupIndex).
+ * don't gate on a startup index that never ran.
  */
 export function setIndexReady(): void {
   _ready = true;
@@ -113,29 +125,223 @@ function emitState() {
   for (const l of _listeners) l(state);
 }
 
-// Track progress during an index run. Called from runIndexer's inner loop.
-export function _setIndexProgress(current: number, total: number) {
+function setIndexProgress(current: number, total: number) {
   _currentFile = current;
   _totalFiles = total;
   emitState();
 }
 
-/** A reindex run with no live agent Context — `runIndexer` only reads `opts`. */
-type IndexerCtx = Parameters<typeof runIndexer>[0];
-function stubCtx(projectRoot: string): IndexerCtx {
-  return {
-    projectRoot,
-    cwd: projectRoot,
-    messages: [],
-    todos: [],
-    readFiles: new Set<string>(),
-    fileMtimes: new Map<string, number>(),
-  } as unknown as IndexerCtx;
+// ─── Worker management ───────────────────────────────────────────────────────
+
+interface PendingRpc {
+  resolve: (value: unknown) => void;
+  reject: (err: unknown) => void;
+  onProgress?: ((current: number, total: number) => void) | undefined;
 }
 
-// ─── Process-wide mutex ──────────────────────────────────────────────────────
+let worker: Worker | null = null;
+let workerUnavailable = false;
+let nextRpcId = 1;
+const pending = new Map<number, PendingRpc>();
+
+/**
+ * Locate the built worker file. The host is bundled into several entry points
+ * (`dist/index.js`, `dist/builtin.js`, `dist/codebase-index/index.js`), so the
+ * worker is probed at both relative locations. From source (vitest) neither
+ * `.js` exists → inline mode, which keeps tests hermetic and mockable.
+ */
+function resolveWorkerUrl(): URL | null {
+  if (process.env['WRONGSTACK_INDEX_INLINE']) return null;
+  for (const rel of ['./worker.js', './codebase-index/worker.js']) {
+    try {
+      const url = new URL(rel, import.meta.url);
+      if (url.protocol === 'file:' && fs.existsSync(fileURLToPath(url))) return url;
+    } catch {
+      /* try the next candidate */
+    }
+  }
+  return null;
+}
+
+function failAllPending(err: unknown): void {
+  const entries = [...pending.values()];
+  pending.clear();
+  for (const p of entries) p.reject(err);
+}
+
+function ensureWorker(): Worker | null {
+  if (worker) return worker;
+  if (workerUnavailable) return null;
+  const url = resolveWorkerUrl();
+  if (!url) {
+    workerUnavailable = true;
+    return null;
+  }
+  try {
+    const w = new Worker(url, { name: 'wstack-codebase-index' });
+    // The worker must never keep the process alive on its own.
+    w.unref();
+    w.on('message', (msg: WorkerToHost) => {
+      if (msg.type === 'progress') {
+        pending.get(msg.id)?.onProgress?.(msg.current, msg.total);
+        return;
+      }
+      const entry = pending.get(msg.id);
+      if (!entry) return; // already timed out / cancelled
+      pending.delete(msg.id);
+      if (msg.ok) entry.resolve(msg.result);
+      else entry.reject(new Error(msg.error));
+    });
+    w.on('error', (err) => {
+      worker = null;
+      failAllPending(err);
+    });
+    w.on('exit', () => {
+      if (worker === w) worker = null;
+      failAllPending(new Error('codebase-index worker exited'));
+    });
+    worker = w;
+    return w;
+  } catch {
+    // Spawn failed (no worker_threads, sandbox, …) — fall back to inline for
+    // the rest of the process lifetime.
+    workerUnavailable = true;
+    return null;
+  }
+}
+
+/** Hard-kill a wedged worker. It respawns lazily on the next operation. */
+function terminateWorker(reason: unknown): void {
+  const w = worker;
+  worker = null;
+  failAllPending(reason);
+  if (w) void w.terminate().catch(() => {});
+}
+
+/**
+ * Tear down the index host (worker + pending debounces). Call on process
+ * shutdown; safe to call when nothing is running.
+ */
+export function shutdownCodebaseIndexHost(): void {
+  cancelPendingReindexes();
+  terminateWorker(new Error('codebase-index host shut down'));
+  workerUnavailable = false; // a future call may spawn a fresh worker
+}
+
+interface CallOpts {
+  timeoutMs: number;
+  signal?: AbortSignal | undefined;
+  onProgress?: ((current: number, total: number) => void) | undefined;
+}
+
+/**
+ * Run one operation, in the worker when available, inline otherwise. Both
+ * paths share the watchdog: the returned promise ALWAYS settles within
+ * `timeoutMs`, and a timeout in worker mode terminates the (possibly wedged
+ * in synchronous code) worker — something an in-process watchdog can never do.
+ */
+function callIndexOp<O extends OpName>(
+  op: O,
+  args: OpShapes[O]['args'],
+  opts: CallOpts,
+): Promise<OpShapes[O]['result']> {
+  const w = ensureWorker();
+  if (!w) return callInline(op, args, opts);
+
+  return new Promise<OpShapes[O]['result']>((resolve, reject) => {
+    const id = nextRpcId++;
+
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      const err = new IndexTimeoutError(
+        `Index ${op} exceeded its ${opts.timeoutMs}ms watchdog timeout`,
+      );
+      // A wedged worker (synchronous sqlite wait, pathological parse) cannot
+      // be cooperatively cancelled — kill it; it respawns on the next call.
+      terminateWorker(err);
+      reject(err);
+    }, opts.timeoutMs);
+    timer.unref?.();
+
+    const onAbort = () => {
+      // Cooperative cancel; the worker aborts the op's signal and responds
+      // with an error. The watchdog stays armed as the backstop.
+      w.postMessage({ type: 'cancel', id } satisfies HostToWorker);
+    };
+    if (opts.signal?.aborted) onAbort();
+    else opts.signal?.addEventListener('abort', onAbort, { once: true });
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      opts.signal?.removeEventListener('abort', onAbort);
+    };
+    pending.set(id, {
+      resolve: (v) => {
+        cleanup();
+        resolve(v as OpShapes[O]['result']);
+      },
+      reject: (e) => {
+        cleanup();
+        reject(e);
+      },
+      onProgress: opts.onProgress,
+    });
+
+    w.postMessage({ type: 'request', id, op, args } satisfies HostToWorker);
+  });
+}
+
+/** Inline fallback: same service code, raced against the same watchdog. */
+async function callInline<O extends OpName>(
+  op: O,
+  args: OpShapes[O]['args'],
+  opts: CallOpts,
+): Promise<OpShapes[O]['result']> {
+  const ac = new AbortController();
+  const onOuterAbort = () => ac.abort(opts.signal?.reason ?? new Error('Indexing cancelled'));
+  if (opts.signal?.aborted) onOuterAbort();
+  else opts.signal?.addEventListener('abort', onOuterAbort, { once: true });
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const watchdog = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new IndexTimeoutError(
+        `Index ${op} exceeded its ${opts.timeoutMs}ms watchdog timeout`,
+      );
+      ac.abort(err);
+      reject(err);
+    }, opts.timeoutMs);
+    timer.unref?.();
+  });
+
+  const job = async (): Promise<OpShapes[O]['result']> => {
+    switch (op) {
+      case 'index':
+        return (await indexService(args as IndexOpArgs, {
+          signal: ac.signal,
+          onProgress: opts.onProgress,
+        })) as OpShapes[O]['result'];
+      case 'search':
+        return searchService(args as SearchOpArgs) as OpShapes[O]['result'];
+      case 'stats':
+        return statsService(args as StatsOpArgs) as OpShapes[O]['result'];
+      default:
+        throw new Error(`unknown index op: ${String(op)}`);
+    }
+  };
+
+  try {
+    return await Promise.race([job(), watchdog]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    opts.signal?.removeEventListener('abort', onOuterAbort);
+  }
+}
+
+// ─── Process-wide write mutex ────────────────────────────────────────────────
 // A single promise chain. Each enqueued job awaits the previous one's settle
 // (success OR failure) before running, so a thrown job never wedges the chain.
+// Only write runs (index) take the mutex; searches/stats are WAL reads.
 let chain: Promise<unknown> = Promise.resolve();
 
 function withMutex<T>(job: () => Promise<T>): Promise<T> {
@@ -146,43 +352,6 @@ function withMutex<T>(job: () => Promise<T>): Promise<T> {
     () => undefined,
   );
   return run;
-}
-
-/**
- * Run an index job under a watchdog. The timer starts when the job actually
- * begins (i.e. inside the mutex, not while queued behind it). On timeout it
- * both aborts the job's signal — `runIndexer` polls it at yield points and
- * releases its SQLite handle — and rejects the returned promise, so the mutex
- * chain always advances even if the underlying run is wedged on something
- * uninterruptible. A wedged run that later resumes finds its signal aborted
- * and bails at the next yield.
- */
-async function runGuarded<T>(
-  timeoutMs: number,
-  outerSignal: AbortSignal | undefined,
-  job: (signal: AbortSignal) => Promise<T>,
-): Promise<T> {
-  const ac = new AbortController();
-  const onOuterAbort = () => ac.abort(outerSignal?.reason ?? new Error('Indexing cancelled'));
-  if (outerSignal?.aborted) onOuterAbort();
-  else outerSignal?.addEventListener('abort', onOuterAbort, { once: true });
-
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const watchdog = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      const err = new IndexTimeoutError(`Index run exceeded its ${timeoutMs}ms watchdog timeout`);
-      ac.abort(err);
-      reject(err);
-    }, timeoutMs);
-    timer.unref?.();
-  });
-
-  try {
-    return await Promise.race([job(ac.signal), watchdog]);
-  } finally {
-    if (timer) clearTimeout(timer);
-    outerSignal?.removeEventListener('abort', onOuterAbort);
-  }
 }
 
 /** Build the fail-fast error thrown while the circuit is open. */
@@ -231,31 +400,35 @@ export async function runStartupIndex(opts: {
   timeoutMs?: number | undefined;
 }): Promise<IndexResult> {
   // Circuit breaker: after repeated failures/timeouts, fail fast instead of
-  // queuing yet another run behind a possibly-wedged mutex.
+  // queuing yet another run behind a possibly-wedged pipeline.
   if (!indexCircuitBreaker.allowRequest()) throw circuitOpenError();
 
   _indexing = true;
   emitState();
 
   try {
-    const result = await withMutex(() =>
-      runGuarded(opts.timeoutMs ?? DEFAULT_FULL_INDEX_TIMEOUT_MS, opts.signal, (signal) => {
-        // Reset counters inside the mutex — if runStartupIndex is called
-        // twice concurrently, the second caller must not clobber a running
-        // index's progress counters. The mutex serializes `runIndexer`, so
-        // the second call waits for the first to finish before resetting.
-        _currentFile = 0;
-        _totalFiles = 0;
-        _lastError = null;
-        return runIndexer(stubCtx(opts.projectRoot), {
+    const result = await withMutex(() => {
+      // Reset counters inside the mutex — if runStartupIndex is called twice
+      // concurrently, the second caller must not clobber a running index's
+      // progress counters.
+      _currentFile = 0;
+      _totalFiles = 0;
+      _lastError = null;
+      return callIndexOp(
+        'index',
+        {
           projectRoot: opts.projectRoot,
           indexDir: opts.indexDir,
           force: opts.force,
           langs: opts.langs,
-          signal,
-        });
-      }),
-    );
+        },
+        {
+          timeoutMs: opts.timeoutMs ?? DEFAULT_FULL_INDEX_TIMEOUT_MS,
+          signal: opts.signal,
+          onProgress: setIndexProgress,
+        },
+      );
+    });
     _ready = true;
     indexCircuitBreaker.recordSuccess();
     return result;
@@ -304,13 +477,10 @@ export function enqueueReindex(opts: {
         return;
       }
       void withMutex(() =>
-        runGuarded(opts.timeoutMs ?? DEFAULT_INCREMENTAL_TIMEOUT_MS, undefined, (signal) =>
-          runIndexer(stubCtx(opts.projectRoot), {
-            projectRoot: opts.projectRoot,
-            files: [file],
-            indexDir: opts.indexDir,
-            signal,
-          }),
+        callIndexOp(
+          'index',
+          { projectRoot: opts.projectRoot, files: [file], indexDir: opts.indexDir },
+          { timeoutMs: opts.timeoutMs ?? DEFAULT_INCREMENTAL_TIMEOUT_MS },
         ),
       ).then(
         () => indexCircuitBreaker.recordSuccess(),
@@ -330,4 +500,32 @@ export function enqueueReindex(opts: {
 export function cancelPendingReindexes(): void {
   for (const t of debounceTimers.values()) clearTimeout(t);
   debounceTimers.clear();
+}
+
+/**
+ * Ranked symbol search against the index. The query runs in the index worker
+ * (or inline in fallback mode) — the main thread never opens SQLite. Reads
+ * don't take the write mutex (WAL readers don't block the writer) and don't
+ * feed the circuit breaker; a wedged read still trips the watchdog, which
+ * recycles the worker.
+ */
+export async function searchCodebaseIndex(
+  args: SearchOpArgs,
+  opts: { timeoutMs?: number | undefined; signal?: AbortSignal | undefined } = {},
+): Promise<SearchOpResult> {
+  return callIndexOp('search', args, {
+    timeoutMs: opts.timeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS,
+    signal: opts.signal,
+  });
+}
+
+/** Index health/statistics, fetched off the main thread like searches. */
+export async function codebaseIndexStats(
+  args: StatsOpArgs,
+  opts: { timeoutMs?: number | undefined; signal?: AbortSignal | undefined } = {},
+): Promise<IndexStats> {
+  return callIndexOp('stats', args, {
+    timeoutMs: opts.timeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS,
+    signal: opts.signal,
+  });
 }

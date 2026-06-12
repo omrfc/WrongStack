@@ -1,29 +1,27 @@
-import { expectDefined } from '@wrongstack/core';
 /**
  * `codebase-lsp-search` — index-first, LSP-fallback symbol search.
  *
  * Architecture:
- *  1. Query the SQLite+BM25 codebase index (fast)
+ *  1. Query the codebase index through its host (FTS5 in the index worker —
+ *     this process's main thread never opens SQLite)
  *  2. If index has 0 results OR preferLsp=true, fall back to live LSP workspaceSymbol queries
  *  3. Deduplicate results present in both sources
  */
 
 import type { Tool } from '@wrongstack/core';
-import type { SymbolInformation } from 'vscode-languageserver-protocol';
 import {
-  IndexStore,
-  buildBm25Index,
-  buildIndexableText,
-  tokenise,
+  codebaseIndexDirOverride,
   internalKindToLspKind,
   lspKindToInternalKind,
-  codebaseIndexDirOverride,
+  searchCodebaseIndex,
 } from '@wrongstack/tools/codebase-index/index';
+import type { SymbolInformation } from 'vscode-languageserver-protocol';
 
 import { LSP_CONSTANTS } from '../constants.js';
 import { formatCodebaseLspResults } from '../formatters/symbols.js';
 import { supportsWorkspaceSymbol } from '../server/capabilities.js';
-import { type ToolDeps, stringifyToolError } from './shared.js';
+import { stringifyToolError, type ToolDeps } from './shared.js';
+
 // ─── Input / Output types ───────────────────────────────────────────────────────
 
 interface CodebaseLspSearchInput {
@@ -149,47 +147,23 @@ async function searchIndex(
   limit: number,
   indexDir?: string | undefined,
 ): Promise<{ results: CodebaseLspResult[]; total: number }> {
-  const store = new IndexStore(projectRoot, { indexDir });
-  try {
-    const candidates = store.search(query);
+  // Ranked FTS5 query via the index host — runs in the index worker thread
+  // when available, so a contended index can never block this process.
+  const { results, total } = await searchCodebaseIndex({ projectRoot, indexDir, query, limit });
 
-    if (candidates.length === 0) {
-      return { results: [], total: 0 };
-    }
-
-    // Build BM25 index over candidates
-    const indexable = candidates.map((c) => ({
-      id: c.id,
-      text: buildIndexableText(c.name, c.signature, c.docComment),
-    }));
-    const bm25 = buildBm25Index(indexable);
-
-    // Score and rank
-    const scored = bm25.score(query, (id) => candidates.some((c) => c.id === id));
-    scored.sort((a, b) => b.score - a.score);
-    const top = scored.slice(0, limit);
-    const qTokens = tokenise(query);
-
-    const results: CodebaseLspResult[] = top.map(({ id, score }) => {
-      const c = expectDefined(candidates.find((c) => c.id === id));
-      const lspKind = internalKindToLspKind(c.kind) ?? 0;
-      const snippet = bm25.extractSnippet(id, qTokens);
-      return {
-        name: c.name,
-        kind: c.kind,
-        lspKind,
-        file: c.file,
-        line: c.line,
-        source: 'index' as const,
-        score,
-        snippet,
-      };
-    });
-
-    return { results, total: candidates.length };
-  } finally {
-    store.close();
-  }
+  return {
+    results: results.map((c) => ({
+      name: c.name,
+      kind: c.kind,
+      lspKind: internalKindToLspKind(c.kind) ?? 0,
+      file: c.file,
+      line: c.line,
+      source: 'index' as const,
+      score: c.score,
+      snippet: c.snippet,
+    })),
+    total,
+  };
 }
 
 // ─── LSP search ───────────────────────────────────────────────────────────────
@@ -323,9 +297,7 @@ function mergeResults(
   return merged.slice(0, limit);
 }
 
-function deduplicateByKey<T extends { name: string; file: string; line: number }>(
-  items: T[],
-): T[] {
+function deduplicateByKey<T extends { name: string; file: string; line: number }>(items: T[]): T[] {
   const seen = new Set<string>();
   return items.filter((item) => {
     const key = `${item.file}:${item.line}:${item.name}`;

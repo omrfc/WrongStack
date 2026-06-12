@@ -30,6 +30,7 @@ import {
   enqueueReindex,
   isIndexableFile,
   runStartupIndex,
+  shutdownCodebaseIndexHost,
 } from '@wrongstack/tools';
 
 /** Mutating builtin tools whose input carries a single `file_path`. */
@@ -158,5 +159,8 @@ export async function setupCodebaseIndexing(deps: CodebaseIndexingDeps): Promise
       /* ignore */
     }
     cancelPendingReindexes();
+    // Stops the index worker thread too (it is unref'd, but an explicit stop
+    // keeps teardown deterministic).
+    shutdownCodebaseIndexHost();
   };
 }

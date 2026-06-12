@@ -29,6 +29,9 @@ export {
   isIndexing,
   getIndexState,
   onIndexStateChange,
+  searchCodebaseIndex,
+  codebaseIndexStats,
+  shutdownCodebaseIndexHost,
 } from './background-indexer.js';
 
 // Circuit breaker guarding every index run (startup, incremental, manual).

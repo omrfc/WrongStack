@@ -1,4 +1,3 @@
-import { expectDefined } from '@wrongstack/core';
 /**
  * `codebase-search` tool — search the symbol index with BM25 ranking.
  *
@@ -11,13 +10,16 @@ import { expectDefined } from '@wrongstack/core';
  * })
  *
  * Returns: [{ name, kind, lang, file, line, signature, snippet, score }, ...]
+ *
+ * The query executes in the index worker via FTS5 (`MATCH` + native `bm25()`)
+ * — the main thread never opens SQLite, so a contended or wedged index can
+ * slow this tool down but can never freeze the terminal.
  */
 
 import type { Tool } from '@wrongstack/core';
-import { IndexStore, codebaseIndexDirOverride } from './writer.js';
-import { buildBm25Index, buildIndexableText, tokenise } from './bm25.js';
-import type { SearchResult, SymbolKind, SymbolLang } from './schema.js';
-import { getIndexState } from './background-indexer.js';
+import { getIndexState, searchCodebaseIndex } from './background-indexer.js';
+import type { SearchResult } from './schema.js';
+import { codebaseIndexDirOverride } from './writer.js';
 export const codebaseSearchTool: Tool<CodebaseSearchInput, CodebaseSearchOutput> = {
   name: 'codebase-search',
   category: 'Project',
@@ -43,7 +45,8 @@ export const codebaseSearchTool: Tool<CodebaseSearchInput, CodebaseSearchOutput>
       },
       kind: {
         type: 'string',
-        description: 'Filter by symbol kind: class, function, interface, method, const, let, var, property, type, enum',
+        description:
+          'Filter by symbol kind: class, function, interface, method, const, let, var, property, type, enum',
       },
       lang: {
         type: 'string',
@@ -51,7 +54,8 @@ export const codebaseSearchTool: Tool<CodebaseSearchInput, CodebaseSearchOutput>
       },
       lspKind: {
         type: 'integer',
-        description: 'Filter by LSP SymbolKind number (e.g. 5=Class, 12=Function, 11=Interface, 10=Enum)',
+        description:
+          'Filter by LSP SymbolKind number (e.g. 5=Class, 12=Function, 11=Interface, 10=Enum)',
       },
       file: {
         type: 'string',
@@ -66,7 +70,7 @@ export const codebaseSearchTool: Tool<CodebaseSearchInput, CodebaseSearchOutput>
     },
     required: ['query'],
   },
-  async execute(input, ctx) {
+  async execute(input, ctx, execOpts) {
     // Gate: if the index is still building or hasn't been built yet, return a
     // clear status instead of querying partial/inconsistent data.
     const state = getIndexState();
@@ -102,58 +106,21 @@ export const codebaseSearchTool: Tool<CodebaseSearchInput, CodebaseSearchOutput>
       };
     }
 
-    const store = new IndexStore(ctx.projectRoot, { indexDir: codebaseIndexDirOverride(ctx) });
-    try {
-      const limit = Math.min(input.limit ?? 20, 100);
-
-      // 1. Get initial candidates from SQLite (broad filter)
-      const candidates = store.search(input.query, {
-        kind: input.kind as SymbolKind | undefined,
-        lang: input.lang as SymbolLang | undefined,
+    const limit = Math.min(input.limit ?? 20, 100);
+    const { results, total } = await searchCodebaseIndex(
+      {
+        projectRoot: ctx.projectRoot,
+        indexDir: codebaseIndexDirOverride(ctx),
+        query: input.query,
+        kind: input.kind,
+        lang: input.lang,
         file: input.file,
         lspKind: input.lspKind,
-      });
-
-      if (candidates.length === 0) {
-        return { results: [], total: 0, query: input.query };
-      }
-
-      // 2. Build BM25 index over candidates
-      // Use buildIndexableText to split camelCase names so queries like
-      // "complex" match "complexOperation" (split → "complex Operation")
-      const indexable = candidates.map((c) => ({
-        id: c.id,
-        text: buildIndexableText(c.name, c.signature, c.docComment),
-      }));
-      const bm25 = buildBm25Index(indexable);
-
-      // 3. Score and rank
-      const scored = bm25.score(input.query, (id) => candidates.some((c) => c.id === id));
-
-      // 4. Sort descending by score and take top N
-      scored.sort((a, b) => b.score - a.score);
-      const top = scored.slice(0, limit);
-
-      const qTokens = tokenise(input.query);
-
-      const results: SearchResult[] = top.map(({ id, score }) => {
-        const c = expectDefined(candidates.find((c) => c.id === id));
-        const snippet = bm25.extractSnippet(id, qTokens);
-        return {
-          ...c,
-          score,
-          snippet,
-        };
-      });
-
-      return {
-        results,
-        total: candidates.length,
-        query: input.query,
-      };
-    } finally {
-      store.close();
-    }
+        limit,
+      },
+      { signal: execOpts?.signal },
+    );
+    return { results, total, query: input.query };
   },
 };
 
@@ -170,7 +137,7 @@ interface CodebaseSearchInput {
 
 interface CodebaseSearchOutput {
   results: SearchResult[];
-  total: number;  // total candidates before limit
+  total: number; // total candidates before limit
   query: string;
   /** Non-empty when the index blocked the search (not ready, indexing, failed). */
   indexStatus?: string | undefined;

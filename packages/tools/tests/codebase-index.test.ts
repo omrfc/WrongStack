@@ -24,6 +24,7 @@ import {
 import { detectLang, parseSymbols } from '../src/codebase-index/ts-parser.js';
 import { IndexStore } from '../src/codebase-index/writer.js';
 import { runIndexer } from '../src/codebase-index/indexer.js';
+import { SCHEMA_VERSION } from '../src/codebase-index/schema.js';
 
 // ─── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -492,6 +493,114 @@ describe('IndexStore', () => {
   });
 });
 
+// ─── Ranked search (FTS5) ──────────────────────────────────────────────────────
+
+describe('IndexStore.searchRanked', () => {
+  let store: IndexStore;
+  let tmpDir: string;
+
+  function sym(id: number, name: string, kind: 'class' | 'function', signature: string): Parameters<IndexStore['insertSymbols']>[0][number] {
+    return { id, lang: 'ts', kind, name, file: `/p/${name}.ts`, line: 1, col: 0, signature, docComment: '', scope: '', text: `${name} ${signature}` };
+  }
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-fts-'));
+    store = new IndexStore(tmpDir, { indexDir: path.join(tmpDir, '.codebase-index') });
+  });
+
+  afterEach(async () => {
+    store.close();
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('matches camelCase parts of a symbol name with score and snippet', () => {
+    store.insertSymbols(
+      [sym(0, 'complexOperation', 'function', 'function complexOperation(): Promise<void>'), sym(0, 'TreeNode', 'class', 'class TreeNode')],
+      1,
+    );
+    const { results, total } = store.searchRanked('complex', undefined, 20);
+    expect(total).toBe(1);
+    expect(results[0]?.name).toBe('complexOperation');
+    expect(results[0]?.score).toBeGreaterThan(0);
+    expect(results[0]?.snippet.length).toBeGreaterThan(0);
+  });
+
+  it('matches prefixes (old LIKE recall: "user" finds "users")', () => {
+    store.insertSymbols([sym(0, 'users', 'function', 'function users(): User[]')], 1);
+    const { results } = store.searchRanked('user', undefined, 20);
+    expect(results.some((r) => r.name === 'users')).toBe(true);
+  });
+
+  it('applies kind/lang filters on top of the match', () => {
+    store.insertSymbols(
+      [sym(0, 'fooHandler', 'function', 'function fooHandler()'), sym(0, 'FooHandler', 'class', 'class FooHandler')],
+      1,
+    );
+    const { results } = store.searchRanked('handler', { kind: 'class' }, 20);
+    expect(results.length).toBe(1);
+    expect(results[0]?.kind).toBe('class');
+  });
+
+  it('empty query lists by filter only (legacy search("") semantics)', () => {
+    store.insertSymbols([sym(0, 'A', 'class', 'class A'), sym(0, 'b', 'function', 'function b()')], 1);
+    const { results, total } = store.searchRanked('', { kind: 'class' }, 20);
+    expect(total).toBe(1);
+    expect(results[0]?.name).toBe('A');
+  });
+
+  it('respects the limit while reporting the full total', () => {
+    store.insertSymbols(
+      Array.from({ length: 10 }, (_, i) => sym(0, `widget${i}`, 'function', `function widget${i}()`)),
+      1,
+    );
+    const { results, total } = store.searchRanked('widget', undefined, 3);
+    expect(results.length).toBe(3);
+    expect(total).toBe(10);
+  });
+
+  it('FTS rows follow symbol deletion', () => {
+    store.insertSymbols([sym(0, 'Gone', 'class', 'class Gone')], 1);
+    store.deleteSymbolsForFile('/p/Gone.ts');
+    const { total } = store.searchRanked('gone', undefined, 20);
+    expect(total).toBe(0);
+  });
+
+  it('FTS query syntax in input is neutralised, not executed', () => {
+    store.insertSymbols([sym(0, 'Safe', 'class', 'class Safe')], 1);
+    // NEAR/AND/parens/quotes must not produce an FTS syntax error.
+    expect(() => store.searchRanked('safe" OR (NEAR "x', undefined, 20)).not.toThrow();
+  });
+});
+
+describe('schema migration', () => {
+  it('drops and rebuilds the index when the stored version mismatches', async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-mig-'));
+    const indexDir = path.join(tmpDir, '.codebase-index');
+    try {
+      const store = new IndexStore(tmpDir, { indexDir });
+      store.insertSymbols(
+        [{ id: 0, lang: 'ts', kind: 'class', name: 'Old', file: '/p/Old.ts', line: 1, col: 0, signature: 'class Old', docComment: '', scope: '', text: 'class Old' }],
+        1,
+      );
+      // Simulate a database written by an older schema.
+      (store as unknown as { db: { prepare(sql: string): { run(...a: unknown[]): unknown } } }).db
+        .prepare('UPDATE metadata SET value = ? WHERE key = ?')
+        .run('1', 'version');
+      store.close();
+
+      const reopened = new IndexStore(tmpDir, { indexDir });
+      try {
+        expect(reopened.getStats().totalSymbols).toBe(0);
+        expect(reopened.getStats().version).toBe(SCHEMA_VERSION);
+      } finally {
+        reopened.close();
+      }
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ─── Tool Integration Tests ────────────────────────────────────────────────────
 
 describe('codebase-index tool', () => {
@@ -625,7 +734,7 @@ describe('codebase-stats tool', () => {
   it('returns zero stats when no index exists', async () => {
     const stats = await codebaseStatsTool.execute({}, ctx, { signal: newSignal() });
     expect(stats.totalSymbols).toBe(0);
-    expect(stats.version).toBe(1);
+    expect(stats.version).toBe(SCHEMA_VERSION);
   });
 
   it('reflects indexed symbols', async () => {

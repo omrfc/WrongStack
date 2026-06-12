@@ -18,6 +18,7 @@ vi.mock('@wrongstack/tools', () => ({
   runStartupIndex: runStartupIndexMock,
   enqueueReindex: enqueueReindexMock,
   cancelPendingReindexes: cancelPendingReindexesMock,
+  shutdownCodebaseIndexHost: vi.fn(),
   isIndexableFile: (p: string) => /\.(ts|tsx|js|jsx|go|py|rs)$/.test(p),
 }));
 

@@ -46,6 +46,9 @@ export default defineConfig({
     'src/circuit-breaker.ts',
     // Codebase index tools
     'src/codebase-index/index.ts',
+    // Index worker thread — must be its own emitted file: the host spawns it
+    // via `new Worker(new URL('./worker.js', import.meta.url))` at runtime.
+    'src/codebase-index/worker.ts',
   ],
   format: ['esm'],
   dts: true,

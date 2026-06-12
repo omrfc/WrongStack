@@ -7,14 +7,15 @@
  */
 
 import type { Tool } from '@wrongstack/core';
-import { IndexStore, codebaseIndexDirOverride } from './writer.js';
-import { getIndexState } from './background-indexer.js';
+import { codebaseIndexStats, getIndexState } from './background-indexer.js';
 import { SCHEMA_VERSION } from './schema.js';
+import { codebaseIndexDirOverride } from './writer.js';
 
 export const codebaseStatsTool: Tool<Record<string, never>, CodebaseStatsOutput> = {
   name: 'codebase-stats',
   category: 'Project',
-  description: 'Return health and statistics about the current symbol index (total symbols, files, language/kind breakdown, size, last update). Useful to decide whether to re-index.',
+  description:
+    'Return health and statistics about the current symbol index (total symbols, files, language/kind breakdown, size, last update). Useful to decide whether to re-index.',
   usageHint:
     'CALL BEFORE HEAVY CODEBASE-SEARCH WORK:\n\n' +
     '- Use to see if the index is up-to-date or needs a refresh.\n' +
@@ -30,7 +31,7 @@ export const codebaseStatsTool: Tool<Record<string, never>, CodebaseStatsOutput>
     properties: {},
     additionalProperties: false,
   },
-  async execute(_input, ctx) {
+  async execute(_input, ctx, execOpts) {
     const idxState = getIndexState();
     if (!idxState.ready) {
       return {
@@ -47,44 +48,39 @@ export const codebaseStatsTool: Tool<Record<string, never>, CodebaseStatsOutput>
           : 'Index not yet built.',
       };
     }
+
+    // Fetched via the index host (worker thread when available) — the main
+    // thread never opens SQLite here.
+    const stats = await codebaseIndexStats(
+      { projectRoot: ctx.projectRoot, indexDir: codebaseIndexDirOverride(ctx) },
+      { signal: execOpts?.signal },
+    );
+
     if (idxState.indexing) {
-      // Still serve real stats but note they may be incomplete.
-      const store = new IndexStore(ctx.projectRoot, { indexDir: codebaseIndexDirOverride(ctx) });
-      try {
-        const stats = store.getStats();
-        return {
-          ...stats,
-          indexStatus: `Index refresh in progress (${idxState.currentFile}/${idxState.totalFiles} files). Stats may be incomplete.`,
-        };
-      } finally {
-        store.close();
-      }
+      return {
+        ...stats,
+        indexStatus: `Index refresh in progress (${idxState.currentFile}/${idxState.totalFiles} files). Stats may be incomplete.`,
+      };
     }
 
-    const store = new IndexStore(ctx.projectRoot, { indexDir: codebaseIndexDirOverride(ctx) });
-    try {
-      const stats = store.getStats();
-      const circuit = idxState.circuit;
-      return {
-        totalSymbols: stats.totalSymbols,
-        totalFiles: stats.totalFiles,
-        byLang: stats.byLang,
-        byKind: stats.byKind,
-        lastIndexed: stats.lastIndexed,
-        sizeBytes: stats.sizeBytes,
-        indexPath: stats.indexPath,
-        version: stats.version,
-        ...(circuit.state === 'open'
-          ? {
-              indexStatus:
-                `Indexing is paused after repeated failures (last: ${circuit.lastFailure ?? 'unknown'}); ` +
-                `auto-retry in ${Math.ceil(circuit.cooldownRemainingMs / 1000)}s, or run /codebase-reindex. Stats reflect the last successful build.`,
-            }
-          : {}),
-      };
-    } finally {
-      store.close();
-    }
+    const circuit = idxState.circuit;
+    return {
+      totalSymbols: stats.totalSymbols,
+      totalFiles: stats.totalFiles,
+      byLang: stats.byLang,
+      byKind: stats.byKind,
+      lastIndexed: stats.lastIndexed,
+      sizeBytes: stats.sizeBytes,
+      indexPath: stats.indexPath,
+      version: stats.version,
+      ...(circuit.state === 'open'
+        ? {
+            indexStatus:
+              `Indexing is paused after repeated failures (last: ${circuit.lastFailure ?? 'unknown'}); ` +
+              `auto-retry in ${Math.ceil(circuit.cooldownRemainingMs / 1000)}s, or run /codebase-reindex. Stats reflect the last successful build.`,
+          }
+        : {}),
+    };
   },
 };
 
