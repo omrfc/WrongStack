@@ -43,8 +43,8 @@ import { fmtTok } from './utils.js';
 import { CLI_VERSION } from './version.js';
 
 /**
- * Extract "💡 Next steps" suggestions from the agent's final output.
- * Delegated to parseNextSteps (permissive mode — accepts 💡, ##, plain headings).
+ * Extract "<next_steps>" or "💡 Next steps" suggestions from the agent's final output.
+ * Delegated to parseNextSteps (permissive mode — accepts 💡, ##, plain, and <next_steps> headings).
  * Returns null when no suggestions are found.
  */
 /**

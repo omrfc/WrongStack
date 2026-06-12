@@ -33,7 +33,7 @@ export interface ParseNextStepsResult {
   /** Flat string array — what gets stored in the suggestion store. */
   texts: string[];
   /**
-   * Content with the entire "💡 Next steps" block removed.
+   * Content with the entire "💡 Next steps" or "<next_steps>" block removed.
    * Used by entry.tsx to strip suggestions from the rendered message body.
    */
   stripped: string;
@@ -60,10 +60,10 @@ const MAX_STEPS = 6;
 // ── Core parser ─────────────────────────────────────────────────────────────
 
 /**
- * Parse "💡 Next steps" blocks from assistant output (or raw numbered lines).
+ * Parse "<next_steps>" or "💡 Next steps" blocks from assistant output (or raw numbered lines).
  *
  * @param content        — raw assistant message text or subagent output
- * @param strict        — when true, only the 💡 emoji heading is accepted (TUI rendering).
+ * @param strict        — when true, accepts 💡 emoji heading OR <next_steps> XML tag (TUI rendering).
  *                        when false, also accepts ## / plain "Next steps" headings (REPL store).
  * @param requireHeading — when true, a heading must precede the item list.
  *                        when false, numbered/bullet items are parsed from anywhere in text

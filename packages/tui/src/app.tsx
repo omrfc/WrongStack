@@ -303,7 +303,7 @@ export interface AppProps {
   }) => Promise<string[]>) | undefined;
   /**
    * Called after each agent turn with the assistant's final output text.
-   * The host parses "💡 Next steps" suggestions from the text and stores
+   * The host parses "<next_steps>" or "💡 Next steps" suggestions from the text and stores
    * them in the shared suggestion store so `/next 1`, `/next 1 2 3` work.
    */
   onSuggestionsParsed?: ((finalText: string) => void) | undefined;
@@ -314,7 +314,7 @@ export interface AppProps {
   getSuggestions?: (() => string[]) | undefined;
   /**
    * Store suggestions in the shared suggestion store. Used by the Entry
-   * component after parsing "💡 Next steps" from assistant output so the
+   * component after parsing "<next_steps>" or "💡 Next steps" from assistant output so the
    * /next command and auto-submit countdown can access them.
    */
   setSuggestions?: ((steps: string[]) => void) | undefined;

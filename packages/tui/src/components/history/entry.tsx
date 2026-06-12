@@ -64,12 +64,12 @@ export const Entry = React.memo(function Entry({
   // the assistant case. Must live at the top level (hooks rules).
   const nextSteps = useMemo(() => {
     if (entry.kind !== 'assistant') return { steps: [] as ParsedNextStep[], stripped: '' };
-    // strict=true: only 💡 emoji heading — consistent with what we show in the body
+    // strict=true: accepts 💡 emoji heading OR <next_steps> XML tag
     return parseNextSteps(entry.text, true);
   }, [entry.kind, (entry as unknown as { text?: string }).text]);
 
   // Store parsed next steps in the shared suggestion store (for /next and
-  // auto-submit countdown). Strict=true ensures only 💡 headings are matched
+  // auto-submit countdown). Strict=true accepts 💡 headings or <next_steps> XML tags
   // (consistent with what the TUI renders in the message body).
   useEffect(() => {
     if (!setSuggestions) return;
