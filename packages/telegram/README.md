@@ -94,6 +94,7 @@ the Telegram options.
 | `notifyOnSessionEnd` | `boolean` | no | `false` | Send token usage summary when a session ends |
 | `longToolThresholdMs` | `number` | no | `30000` | Notify when a tool runs longer than this (ms). `0` = off |
 | `maxMessageLength` | `number` | no | `4000` | Max chars per outgoing message (Telegram limit: 4096) |
+| `singleInstanceLock` | `boolean` | no | `true` | Elect a single poller per bot token across wstack instances. Extra instances stand by and take over when the active one stops (prevents HTTP 409 conflicts) |
 
 ## Tools
 
