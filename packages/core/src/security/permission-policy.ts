@@ -76,6 +76,21 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
   private promptDelegate?: PermissionPolicyOptions['promptDelegate'] | undefined;
   /** Pre-compiled wildcard patterns — rebuilt on reload for O(1) lookup. */
   private wildcardEntries: { pattern: string; value: TrustPolicy[string] }[] = [];
+  /**
+   * Evaluate-result cache. Keyed by `tool.name::subject` so repeated calls
+   * with the same tool+input skip namespace matching, subject computation,
+   * pattern matching (matchAny), and YOLO destructive gating.
+   *
+   * Cleared on any state change (reload, trust, deny, yolo toggle) because
+   * the result depends on the full policy state. The write-tool smart-bypass
+   * (step 7 in `evaluate()`) is not cached since `ctx.hasRead()` changes
+   * dynamically within a session.
+   *
+   * LRU eviction is not needed — the cache is cleared on state changes
+   * that are rare (trust file ops, user confirm) and the number of unique
+   * tool+subject pairs per iteration is small (<50).
+   */
+  private _evalCache = new Map<string, PermissionDecision>();
 
   constructor(opts: PermissionPolicyOptions) {
     this.trustFile = opts.trustFile;
@@ -97,6 +112,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
 
   /** Toggle YOLO (auto-approve) mode at runtime. */
   setYolo(enabled: boolean): void {
+    if (this.yolo !== enabled) this._evalCache.clear();
     this.yolo = enabled;
   }
 
@@ -107,6 +123,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
 
   /** Toggle the destructive YOLO override at runtime. */
   setYoloDestructive(enabled: boolean): void {
+    if (this.yoloDestructive !== enabled) this._evalCache.clear();
     this.yoloDestructive = enabled;
   }
 
@@ -117,6 +134,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
 
   /** Toggle destructive confirmation gate (only meaningful when yolo is active). */
   setConfirmDestructive(enabled: boolean): void {
+    if (this.confirmDestructive !== enabled) this._evalCache.clear();
     this.confirmDestructive = enabled;
   }
 
@@ -141,6 +159,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     // Clear session-scoped soft deny/allow — reload = fresh trust file snapshot
     this.sessionDenied.clear();
     this.sessionAllowed.clear();
+    this._evalCache.clear();
     this.loaded = true;
   }
 
@@ -155,39 +174,60 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
 
     // 3. Compute subject (the thing being matched)
     const subject = this.subjectFor(tool.name, input, tool.subjectKey);
-    const subjectKey = `${tool.name}::${subject ?? tool.name}`;
+    const cacheKey = `${tool.name}::${subject ?? tool.name}`;
+
+    // S1. Cache check — skip namespace/subject/pattern re-evaluation when the
+    //     same tool+subject was already decided. The write-tool smart bypass
+    //     (step 7) is NOT cached because `ctx.hasRead()` changes dynamically
+    //     within a session — we let it fall through below.
+    if (tool.name !== 'write') {
+      const cached = this._evalCache.get(cacheKey);
+      if (cached !== undefined) return cached;
+    }
 
     // 3a. Session soft deny — 'n' blocks this tool+pattern for the rest of
     //     this session without writing to the trust file. Prevents LLM retry
     //     from re-triggering the confirm prompt.
-    if (this.sessionDenied.has(subjectKey)) {
-      return { permission: 'deny', source: 'deny', reason: 'session soft deny (user pressed no)' };
+    if (this.sessionDenied.has(cacheKey)) {
+      const decision: PermissionDecision = { permission: 'deny', source: 'deny', reason: 'session soft deny (user pressed no)' };
+      this._evalCache.set(cacheKey, decision);
+      return decision;
     }
 
     // 3b. Session soft allow — 'y' auto-approves this tool+pattern for the
     //     rest of this session without writing to the trust file.
-    if (this.sessionAllowed.has(subjectKey)) {
-      return {
+    if (this.sessionAllowed.has(cacheKey)) {
+      const decision: PermissionDecision = {
         permission: 'auto',
         source: 'trust',
         reason: 'session soft allow (user pressed yes)',
       };
+      this._evalCache.set(cacheKey, decision);
+      return decision;
     }
 
     // 4. Deny — absolute
     if (entry?.deny && subject && matchAny(entry.deny, subject)) {
-      return { permission: 'deny', source: 'deny', reason: 'matched deny pattern' };
+      const decision: PermissionDecision = { permission: 'deny', source: 'deny', reason: 'matched deny pattern' };
+      this._evalCache.set(cacheKey, decision);
+      return decision;
     }
     if (tool.permission === 'deny') {
-      return { permission: 'deny', source: 'default', reason: 'tool default deny' };
+      const decision: PermissionDecision = { permission: 'deny', source: 'default', reason: 'tool default deny' };
+      this._evalCache.set(cacheKey, decision);
+      return decision;
     }
 
     // 5. Allow (trust file)
     if (entry?.allow && subject && matchAny(entry.allow, subject)) {
-      return { permission: 'auto', source: 'trust', reason: 'matched allow pattern' };
+      const decision: PermissionDecision = { permission: 'auto', source: 'trust', reason: 'matched allow pattern' };
+      this._evalCache.set(cacheKey, decision);
+      return decision;
     }
     if (entry?.auto) {
-      return { permission: 'auto', source: 'trust' };
+      const decision: PermissionDecision = { permission: 'auto', source: 'trust' };
+      this._evalCache.set(cacheKey, decision);
+      return decision;
     }
 
     // 6. YOLO — auto-approve everything. Destructive operations are
@@ -216,11 +256,14 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
           };
         }
       }
-      return { permission: 'auto', source: 'yolo' };
+      const decision: PermissionDecision = { permission: 'auto', source: 'yolo' };
+      this._evalCache.set(cacheKey, decision);
+      return decision;
     }
 
     // 7. Smart bypass: write tool — if the file was already read in this
     // session, the user has already seen the content. No confirm needed.
+    // NOTE: deliberately NOT cached because ctx.hasRead() changes dynamically.
     if (tool.name === 'write' && subject) {
       if (ctx.hasRead(subject)) {
         return {
@@ -237,7 +280,9 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     // tool.confirm_needed prompt). Non-mutating auto tools (read-only
     // heuristics, schema checks) are still safe to shortcut.
     if (tool.permission === 'auto' && !tool.mutating) {
-      return { permission: 'auto', source: 'default' };
+      const decision: PermissionDecision = { permission: 'auto', source: 'default' };
+      this._evalCache.set(cacheKey, decision);
+      return decision;
     }
 
     // 9. Confirm — delegate to prompt
@@ -276,6 +321,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     const entry = this.policy[rule.tool] ?? {};
     entry.allow = Array.from(new Set([...(entry.allow ?? []), rule.pattern]));
     this.policy[rule.tool] = entry;
+    this._evalCache.clear();
     try {
       await atomicWrite(this.trustFile, JSON.stringify(this.policy, null, 2));
     } catch (err) {
@@ -295,6 +341,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     const entry = this.policy[rule.tool] ?? {};
     entry.deny = Array.from(new Set([...(entry.deny ?? []), rule.pattern]));
     this.policy[rule.tool] = entry;
+    this._evalCache.clear();
     try {
       await atomicWrite(this.trustFile, JSON.stringify(this.policy, null, 2));
     } catch (err) {
@@ -311,11 +358,13 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
   /** Block this tool+pattern for the rest of this session (no trust file). */
   denyOnce(rule: { tool: string; pattern: string }): void {
     this.sessionDenied.set(`${rule.tool}::${rule.pattern}`, true);
+    this._evalCache.clear();
   }
 
   /** Auto-approve this tool+pattern for the rest of this session (no trust file). */
   allowOnce(rule: { tool: string; pattern: string }): void {
     this.sessionAllowed.set(`${rule.tool}::${rule.pattern}`, true);
+    this._evalCache.clear();
   }
 
   private subjectFor(toolName: string, input: unknown, subjectKey?: string): string | undefined {
