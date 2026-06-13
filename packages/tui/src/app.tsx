@@ -463,6 +463,17 @@ export interface AppProps {
     setEnabled: (enabled: boolean) => void;
   } | undefined;
   /**
+   * Shared controller for the `/interrupt` slash command. The App installs the
+   * real `abortLeader` on mount so the command can abort the in-flight leader
+   * run (slash commands don't get the RunController). The fleet teardown is the
+   * command's own `onFleetKill`.
+   */
+  interruptController?:
+    | {
+        abortLeader: () => boolean;
+      }
+    | undefined;
+  /**
    * Controller for status bar hidden items. App installs a dispatch-backed
    * setter on mount so the /statusline slash command can update the TUI's
    * visible bar without a round-trip. The initial value is loaded from
@@ -595,6 +606,7 @@ export function App({
   listSessions,
   onResumeSession,
   fleetStreamController,
+  interruptController,
   statuslineHiddenItems,
   setStatuslineHiddenItems,
   agentsMonitorController,
@@ -2833,6 +2845,22 @@ export function App({
     enhanceController,
     agentsMonitorController,
   });
+
+  // Install the leader-abort handler for the /interrupt slash command. Slash
+  // commands don't get the RunController, so the command can't stop the current
+  // iteration on its own — it calls this. The fleet teardown is /interrupt's
+  // own onFleetKill, so this only aborts the leader + flips the status. Because
+  // slash commands dispatch even mid-run in the TUI, /interrupt stops a run
+  // that is wedged retrying a 429.
+  useEffect(() => {
+    if (!interruptController) return;
+    interruptController.abortLeader = () => {
+      if (stateRef.current.status === 'idle') return false;
+      activeCtrlRef.current?.abort('user interrupt (/interrupt)');
+      dispatch({ type: 'status', status: 'aborting' });
+      return true;
+    };
+  }, [interruptController, dispatch, stateRef]);
 
   // Track double-Esc for input buffer clearing.
   const lastEscAtRef = useRef(0);

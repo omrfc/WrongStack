@@ -1346,6 +1346,14 @@ export async function main(argv: string[]): Promise<number> {
     },
   };
 
+  // Shared controller for the `/interrupt` slash command. The surface (TUI)
+  // rebinds `abortLeader` on mount to abort its in-flight RunController; the
+  // default no-op returns false (nothing to abort). The REPL installs its own
+  // below. `/interrupt` pairs this with `onFleetKill` to stop everything.
+  const interruptController = {
+    abortLeader: (): boolean => false,
+  };
+
   // Shared controller for the `/enhance on|off` prompt-refinement toggle.
   // Same pattern as `fleetStreamController`: the TUI rebinds `setEnabled` to a
   // dispatch-backed setter on mount. Seeded from persisted config (default on).
@@ -1428,6 +1436,7 @@ export async function main(argv: string[]): Promise<number> {
     planPath,
     modeStore,
     fleetStreamController,
+    interruptController,
     enhanceController,
     llmProvider: provider,
     llmModel: config.model,
@@ -2311,6 +2320,7 @@ export async function main(argv: string[]): Promise<number> {
     director: director ?? null,
     fleetRoster: FLEET_ROSTER as Record<string, { name: string }>,
     fleetStreamController,
+    interruptController,
     enhanceController,
     statuslineHiddenItems,
     setStatuslineHiddenItems,
