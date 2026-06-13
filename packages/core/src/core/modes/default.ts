@@ -71,4 +71,4 @@ route follow-on work. Use:
 \`mailbox action=send to=* type=status subject="<one-line task summary>" body="<brief outcome>"\`
 
 The user can execute via \`/next 1\`, view via \`/next list\`, or generate
-fresh suggestions via \`/suggest\`.``;
+fresh suggestions via \`/suggest\`.`;
