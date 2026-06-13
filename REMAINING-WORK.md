@@ -55,6 +55,7 @@ Goal: split `packages/cli/src/webui-server.ts` (3,407 lines, 2nd largest file in
 | # | Module | Risk | Effort | Dependencies |
 |---|---|---|---|---|
 | **P1-1** | **PR 5 — `ws-handlers/` directory** | **HIGH** | 2-3 days | None (all preceding PRs merged) |
+| **P1-1a** | Extract remaining inline handlers: sessions, context, process, goal, projects, working_dir, shell, mailbox | High | 1-2 days | Test-first extraction needed for state-coupled handlers |
 | **P1-2** | **PR 6 — Open PR for `static-serve.ts`** | Low | 30 min | Unit tests for `startStaticServe` |
 | **P1-3** | **PR 7 — `lifecycle.ts`** | Low | 1-2 h | PR 6 merge (httpServer type change) |
 | **P1-4** | **PR 8 — Final pass** | Low | 1 h | All PRs 1-7 complete |
@@ -62,17 +63,31 @@ Goal: split `packages/cli/src/webui-server.ts` (3,407 lines, 2nd largest file in
 
 ### PR 5 — ws-handlers/ extraction (HIGH PRIORITY)
 
-The 25+ inline `handleXxx` WebSocket handlers move into topic-split files:
+**Status:** Partially complete. The following handlers have been extracted:
 
-```
-webui-server/ws-handlers/
-  providers.ts   — handleProviderAdd, handleProviderKeyAdd, … (~400 lines)
-  sessions.ts    — handleSessionList, handleSessionGet, …      (~300 lines)
-  mailbox.ts     — handleMailboxSend, handleMailboxRead, …     (~200 lines)
-  worktree.ts    — handleWorktreeList, handleWorktreeCreate, … (~200 lines)
-  memory.ts      — handleMemoryList, handleMemoryRemember, …   (~200 lines)
-  index.ts       — barrel: registerAllHandlers(wsServer, ctx)  (~50 lines)
-```
+| File | Handlers | Status |
+|---|---|---|
+| `providers.ts` | handleProviderAdd, handleProviderModels, handleProvidersSaved, handleKeyUpsert, handleKeyDelete, handleKeySetActive, handleProviderRemove, handleProvidersList | ✅ Extracted |
+| `brain.ts` | handleBrainStatus, handleBrainRisk, handleBrainAsk | ✅ Extracted |
+| `introspection.ts` | handleDiagGet, handleStatsGet, handleToolsList, handleSkillsList | ✅ Extracted |
+| `worklist.ts` | handleTodosGet, handleTodosClear, handleTodosRemove, handleTodoUpdate, handlePlanGet, handlePlanTemplateUse, handlePlanItemUpdate, handleTasksGet, handleTaskUpdate | ✅ Extracted |
+| `agent-config.ts` | handleModeSwitch, handleModesList, handleModelSwitch, handleModelRefine, handleAutonomySwitch | ✅ Extracted |
+| `prefs.ts` | handlePrefsGet, handlePrefsUpdate | ✅ Extracted |
+
+**Remaining inline handlers** (still in `webui-server.ts` `handleMessage` switch):
+
+| Category | Cases | Blocker |
+|---|---|---|
+| Sessions | sessions.list, session.new, session.delete, session.save, session.resume, session.checkpoints, session.rewind | Coupled to `opts.sessionStore`, `opts.agent.ctx.session`, `opts.onSessionSwapped` |
+| Context | context.clear, context.debug, context.compact, context.repair, context.modes.list, context.mode.switch, context.mode.create, context.mode.update, context.mode.delete | Coupled to `opts.agent.ctx`, `getCustomModeStore`, `TOKENS.Compactor` |
+| Process | process.list, process.kill, process.killAll | Coupled to `getProcessRegistry()` |
+| Goal | goal.get | Simple read from disk |
+| Projects | projects.list, projects.select, projects.add | Coupled to `opts.globalConfigPath`, `opts.projectRoot`, `opts.agent.ctx`, project switch logic |
+| Working dir | working_dir.set | Coupled to `opts.agent.ctx.cwd` |
+| Shell | shell.open | Delegated to shared handler |
+| Mailbox | mailbox.messages, mailbox.agents, mailbox.clear | Coupled to `opts.projectRoot`, `opts.globalConfigPath` |
+| Shutdown | webui.shutdown | Simple — calls `shutdown()` |
+| Collaboration | collab.join, collab.leave, collab.annotate, collab.resolve | No-op (ignored) |
 
 **Key design decision:** Create a `WsHandlerContext` interface to thread shared state (providers, vault, wpaths, eventBridge, broadcast) explicitly — no closure captures allowed. Each file exports a `register*` function. `webui-server.ts` calls `registerAllHandlers(wss, ctx)` after PR 8.
 
