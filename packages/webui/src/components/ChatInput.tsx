@@ -140,7 +140,7 @@ export function ChatInput({
           setCurrentView('sessions');
           return true;
         case '/agents':
-          setCurrentView('agents');
+          useUIStore.getState().setAgentsMonitorOpen(true);
           return true;
         case '/brain': {
           // Mirrors the CLI's /brain: status (default), risk <level>, ask <question>.
