@@ -1,6 +1,45 @@
+/**
+ * CLI embedded WebUI server — the backend behind `wrongstack --webui`.
+ *
+ * `runWebUI(opts)` boots a WebSocket bridge (and, when the webui package
+ * is built, the static HTTP frontend) over the *same* agent/events/
+ * session instances the REPL and eternal-autonomy loop use, then routes
+ * browser messages through a `handleMessage` switch.
+ *
+ * Issue #30 (the webui-server N-PR refactor) pulled the self-contained
+ * concerns out of this file into focused `webui-server/*` modules. Where
+ * each concern now lives:
+ *
+ *   webui-server/logger-shim.ts        — console→Logger adapter (PR 1)
+ *   webui-server/cost-helpers.ts       — token/usage cost math (PR 2)
+ *   webui-server/context-breakdown.ts  — context-window estimation (PR 3)
+ *   webui-server/provider-config.ts    — provider-config IO + the
+ *                                        ProviderConfigStore facade
+ *                                        (PR 4 + follow-up)
+ *   webui-server/static-serve.ts       — dist discovery + HTTP bring-up (PR 6)
+ *   webui-server/lifecycle.ts          — instance registry, ready banner +
+ *                                        open-browser, SIGINT/SIGTERM
+ *                                        graceful shutdown (PR 7)
+ *   webui-server/ws-handlers/          — every `handleMessage` case, one
+ *                                        topic file per group, each threaded
+ *                                        through a per-group context that
+ *                                        extends the small `WsCommon` base
+ *                                        (PR 5 + 5b–5k):
+ *       providers · brain · introspection · worklist · agent-config ·
+ *       prefs · projects · context · process · sessions · connection
+ *
+ * `handleMessage` now only routes: each case unpacks the payload and calls
+ * the matching `handleXxx(ctx, …)`. The per-group contexts are all built
+ * once (before the WS connection handler is wired, so a fast client message
+ * can't reach a handler before its context initializes). The file/memory/
+ * mailbox/shell cases delegate to the shared `@wrongstack/webui/server`
+ * handlers.
+ *
+ * Public surface: `runWebUI` plus the `WSServerMessage` / `WSClientMessage`
+ * message shapes. Everything else is internal to the run.
+ */
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type {
@@ -20,18 +59,8 @@ import {
   atomicWrite,
   DEFAULT_CONTEXT_WINDOW_MODE_ID,
   DefaultSecretScrubber,
-  DefaultSystemPromptBuilder,
-  enhanceUserPrompt,
   GlobalMailbox,
-  mutatePlan,
-  mutateTasks,
-  type ProviderConfig,
-  projectSlug,
-  recentTextTurns,
-  repairToolUseAdjacency,
-  resolveContextWindowPolicy,
   resolveProjectDir,
-  setPlanItemStatus,
   TOKENS,
   type TodoItem,
   wstackGlobalRoot,
@@ -41,13 +70,11 @@ import {
   decryptConfigSecrets,
   encryptConfigSecrets,
 } from '@wrongstack/core/security';
-import { DefaultSessionStore } from '@wrongstack/core/storage';
 import {
   AutoPhaseWebSocketHandler,
   type CustomModeStore,
   createCustomModeStore,
   createEternalSubscription,
-  createHttpServer,
   findFreePort,
   handleFilesList,
   handleFilesRead,
@@ -57,22 +84,88 @@ import {
   handleMemoryList,
   handleMemoryRemember,
   handleShellOpen,
-  openBrowser,
-  registerInstance,
-  unregisterInstance,
 } from '@wrongstack/webui/server';
 import {
-  loadSavedProviders,
-  saveProviders,
-} from './webui-server/provider-config.js';
-import { WebSocket, WebSocketServer } from 'ws';
+  announceWebuiReady,
+  createWebuiShutdown,
+  registerWebuiInstance,
+  registerWebuiSignalHandlers,
+} from './webui-server/lifecycle.js';
+import { createProviderConfigStore } from './webui-server/provider-config.js';
+import { startStaticServe } from './webui-server/static-serve.js';
 import {
-  expectDefined,
-  maskedKey,
-  normalizeKeys,
-  nowIso,
-  writeKeysBack,
-} from './provider-config-utils.js';
+  type AgentConfigContext,
+  type BrainHandlerContext,
+  type ConnectionContext,
+  type ContextHandlerContext,
+  type IntrospectionContext,
+  type PrefsContext,
+  type ProjectsContext,
+  type SessionsContext,
+  type WorklistContext,
+  type WsCommon,
+  type WsHandlerContext,
+  handleAbort,
+  handleAutonomySwitch,
+  handleBrainAsk,
+  handleBrainRisk,
+  handleBrainStatus,
+  handlePing,
+  handleToolConfirmResult,
+  handleUserMessage,
+  handleContextClear,
+  handleContextCompact,
+  handleContextDebug,
+  handleContextModeCreate,
+  handleContextModeDelete,
+  handleContextModeSwitch,
+  handleContextModeUpdate,
+  handleContextModesList,
+  handleContextRepair,
+  handleDiagGet,
+  handlePrefsGet,
+  handlePrefsUpdate,
+  handleKeyDelete,
+  handleKeySetActive,
+  handleKeyUpsert,
+  handleModeSwitch,
+  handleModelRefine,
+  handleModelSwitch,
+  handleModesList,
+  handlePlanGet,
+  handlePlanItemUpdate,
+  handlePlanTemplateUse,
+  handleProjectsAdd,
+  handleProjectsList,
+  handleProjectsSelect,
+  handleProviderAdd,
+  handleProviderModels,
+  handleProviderRemove,
+  handleProvidersList,
+  handleProvidersSaved,
+  handleSkillsList,
+  handleStatsGet,
+  handleTaskUpdate,
+  handleTasksGet,
+  handleProcessKill,
+  handleProcessKillAll,
+  handleProcessList,
+  handleGoalGet,
+  handleSessionCheckpoints,
+  handleSessionDelete,
+  handleSessionNew,
+  handleSessionResume,
+  handleSessionRewind,
+  handleSessionSave,
+  handleSessionsList,
+  handleTodoUpdate,
+  handleTodosClear,
+  handleTodosGet,
+  handleTodosRemove,
+  handleToolsList,
+  handleWorkingDirSet,
+} from './webui-server/ws-handlers/index.js';
+import { WebSocket, WebSocketServer } from 'ws';
 
 // ── Console logger adapter for AutoPhaseWebSocketHandler ──────────────────────
 // AutoPhaseWebSocketHandler requires a Logger. The CLI uses console.log/error
@@ -80,15 +173,9 @@ import {
 // PR 1 of Issue #30: extracted to `./webui-server/logger-shim.js`.
 import { consoleLogger } from './webui-server/logger-shim.js';
 
-// PR 3 of Issue #30: extracted to `./webui-server/context-breakdown.js`.
-import { estimateContextBreakdown } from './webui-server/context-breakdown.js';
-type PromptBlock = import('./webui-server/context-breakdown.js').PromptBlock;
-type ToolLike = import('./webui-server/context-breakdown.js').ToolLike;
-type MessageLike = import('./webui-server/context-breakdown.js').MessageLike;
-
 // ── Cost computation helpers (inlined from @wrongstack/webui/server/usage-cost.ts) ──
 // PR 2 of Issue #30: extracted to `./webui-server/cost-helpers.js`.
-import { getCostRates, computeUsageCost } from './webui-server/cost-helpers.js';
+import { getCostRates } from './webui-server/cost-helpers.js';
 
 // Re-export types from webui for type checking
 // At runtime, the actual types are resolved via workspace resolution
@@ -575,33 +662,30 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
   console.log(`[WebUI] WebSocket server starting on ws://${host}:${port}`);
 
   // Serve the React frontend over HTTP so `wrongstack --webui` is a one-command
-  // launch (open the printed URL) instead of only a WS bridge. The static
-  // serve + WS-port injection live in @wrongstack/webui; we resolve its built
-  // dist via the package entry. If the webui package isn't built, we degrade
+  // launch (open the printed URL) instead of only a WS bridge. The dist
+  // discovery + HTTP server bring-up live in
+  // `webui-server/static-serve.ts`; we just hand it the options and
+  // wire the open-browser callback on top. If the webui package
+  // isn't built, `startStaticServe` returns null and we degrade
   // gracefully to WS-only (the original behavior).
-  let httpServer: import('node:http').Server | null = null;
-  try {
-    const requireFromHere = createRequire(import.meta.url);
-    const serverEntry = requireFromHere.resolve('@wrongstack/webui/server');
-    const distDir = path.resolve(path.dirname(serverEntry), '..'); // .../dist
-    httpServer = createHttpServer({
+  const httpServer = startStaticServe({
+    host,
+    httpPort,
+    wsPort,
+    globalRoot: path.dirname(opts.globalConfigPath ?? ''),
+  });
+  if (httpServer) {
+    announceWebuiReady({
+      server: httpServer.server,
       host,
-      distDir,
+      httpPort,
       wsPort,
-      globalRoot: path.dirname(opts.globalConfigPath ?? ''),
+      open: !!opts.open,
     });
-    const openUrl = `http://${host}:${httpPort}`;
-    httpServer?.listen(httpPort, host, () => {
-      console.log(
-        `\n  ▸ WebUI ready — open \x1b[1m${openUrl}\x1b[0m in your browser` +
-          `\n    (same agent as this terminal · ws:${wsPort})\n`,
-      );
-      if (opts.open) openBrowser(openUrl);
-    });
-  } catch (err) {
+  } else {
     console.warn(
-      `[WebUI] Frontend not served (run \`pnpm --filter @wrongstack/webui build\`): ` +
-        `${err instanceof Error ? err.message : String(err)}. WS bridge still active on ws://${host}:${wsPort}.`,
+      `[WebUI] Frontend not served (run \`pnpm --filter @wrongstack/webui build\`). ` +
+        `WS bridge still active on ws://${host}:${wsPort}.`,
     );
   }
 
@@ -609,19 +693,15 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
   // ~/.wrongstack/webui-instances.json alongside standalone instances.
   const registryBaseDir = opts.globalConfigPath ? path.dirname(opts.globalConfigPath) : undefined;
   if (opts.projectRoot) {
-    void registerInstance(
-      {
-        pid: process.pid,
-        httpPort,
-        wsPort,
-        host,
-        projectRoot: opts.projectRoot,
-        projectName: path.basename(opts.projectRoot) || opts.projectRoot,
-        startedAt: new Date().toISOString(),
-        url: `http://${host}:${httpPort}`,
-      },
+    registerWebuiInstance({
+      pid: process.pid,
+      host,
+      httpPort,
+      wsPort,
+      projectRoot: opts.projectRoot,
+      startedAt: new Date().toISOString(),
       registryBaseDir,
-    ).catch(() => {});
+    });
   }
   // Auth token is sent to clients via the session.start payload — do NOT log it.
 
@@ -951,6 +1031,122 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     );
   }
 
+  // Shared state for the extracted ws-handler groups (PR 5 of #30).
+  // `send`/`broadcast` are hoisted function declarations, so capturing
+  // them here is safe even though they're defined further down.
+  const wsHandlerCtx: WsHandlerContext = {
+    providerStore: createProviderConfigStore(opts.globalConfigPath),
+    modelsRegistry: opts.modelsRegistry,
+    send,
+    broadcast,
+    log: (m) => console.log(m),
+  };
+
+  const brainCtx: BrainHandlerContext = {
+    brainSettings: opts.brainSettings,
+    getBrainLog: opts.getBrainLog,
+    // Prefer the host-supplied arbiter; otherwise resolve the one bound
+    // in the agent container (if any). Mirrors the former inline lookup.
+    resolveArbiter: () =>
+      opts.brain ??
+      (opts.agent.container.has(TOKENS.BrainArbiter)
+        ? opts.agent.container.resolve(TOKENS.BrainArbiter)
+        : undefined),
+    send,
+    broadcast,
+    log: (m) => console.log(m),
+  };
+
+  const introspectionCtx: IntrospectionContext = {
+    agent: opts.agent,
+    skillLoader: opts.skillLoader,
+    modelsRegistry: opts.modelsRegistry,
+    projectRoot: opts.projectRoot,
+    sessionId: opts.session.id,
+    sessionStartedAt,
+    send,
+    broadcast,
+    log: (m) => console.log(m),
+  };
+
+  const worklistCtx: WorklistContext = {
+    agent: opts.agent,
+    sessionId: opts.session.id,
+    send,
+    broadcast,
+    log: (m) => console.log(m),
+  };
+
+  const agentConfigCtx: AgentConfigContext = {
+    agent: opts.agent,
+    modeStore: opts.modeStore,
+    globalConfigPath: opts.globalConfigPath,
+    buildSessionStart: (overrides) => buildSessionStartPayload(overrides),
+    send,
+    broadcast,
+    log: (m) => console.log(m),
+  };
+
+  const prefsCtx: PrefsContext = {
+    agent: opts.agent,
+    prefSnapshot,
+    persistPrefs: persistPrefsToConfig,
+    onAutonomySwitch: opts.onAutonomySwitch,
+    send,
+    broadcast,
+    log: (m) => console.log(m),
+  };
+
+  // projects.select re-roots the run in place, so `opts` is passed by
+  // reference (the handlers mutate opts.projectRoot / opts.sessionStore).
+  const projectsCtx: ProjectsContext = {
+    opts,
+    abortControllers,
+    abortLegacyRun: () => {
+      if (abortController) {
+        abortController.abort();
+        abortController = null;
+      }
+    },
+    buildSessionStart: (overrides) => buildSessionStartPayload(overrides),
+    send,
+    broadcast,
+    log: (m) => console.log(m),
+  };
+
+  const contextHandlerCtx: ContextHandlerContext = {
+    agent: opts.agent,
+    buildSessionStart: (overrides) => buildSessionStartPayload(overrides),
+    getCustomModeStore,
+    send,
+    broadcast,
+    log: (m) => console.log(m),
+  };
+
+  // Bare messaging surface for handler groups that need no run-loop state.
+  const wsCommon: WsCommon = { send, broadcast, log: (m) => console.log(m) };
+
+  // `opts` is passed by reference so the session handlers read live
+  // agent.ctx.session / opts.sessionStore at call time.
+  const sessionsCtx: SessionsContext = {
+    opts,
+    buildSessionStart: (overrides) => buildSessionStartPayload(overrides),
+    send,
+    broadcast,
+    log: (m) => console.log(m),
+  };
+
+  // Connection-level cases (user_message/abort/ping/tool.confirm_result).
+  // `opts` is by reference so `user_message` runs the live agent; the two
+  // maps are the SAME instances the connection/close handlers mutate.
+  const connectionCtx: ConnectionContext = {
+    opts,
+    abortControllers,
+    pendingConfirms,
+    send,
+    broadcast,
+    log: (m) => console.log(m),
+  };
   return new Promise<void>((resolve) => {
     wss.on('listening', () => {
       console.log(`[WebUI] WebSocket server running on ws://${host}:${port}`);
@@ -1157,133 +1353,106 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       );
     });
 
-    // Graceful shutdown. Idempotent: every runWebUI call registers its own
-    // SIGINT/SIGTERM handlers, so a signal after this server already stopped
-    // (multiple servers per process — tests, /webui restarts) must not
-    // re-run teardown or fire a second unregister against a gone registry.
-    let shutdownStarted = false;
-    function shutdown() {
-      if (shutdownStarted) return;
-      shutdownStarted = true;
-      process.off('SIGINT', shutdown);
-      process.off('SIGTERM', shutdown);
-      console.log('[WebUI] Shutting down...');
-      // Abort every in-flight run before closing clients. Without this, a run
-      // mid-iteration at SIGINT/SIGTERM continues to completion on a now-dead
-      // webui (wasted provider spend; the eventual `run.result` is sent to
-      // nobody because clients are about to close). Both the legacy single
-      // slot (project-switch path) and every per-socket controller must be
-      // aborted — they are independent.
-      if (abortController) {
-        abortController.abort();
-        abortController = null;
-      }
-      for (const c of abortControllers.values()) {
-        c.abort();
-      }
-      abortControllers.clear();
-      for (const unsub of eventUnsubscribers) unsub();
-      for (const [ws] of clients) {
-        ws.close();
-      }
-      clients.clear();
-      // Drop ourselves from the running-instance registry; the run promise
-      // resolves only after the write settles so callers can safely remove
-      // the registry directory once runWebUI's promise resolves.
-      const unregistered = unregisterInstance(process.pid, registryBaseDir).catch((err: unknown) =>
-        console.debug(`[webui-server] unregister failed: ${err}`),
-      );
-      httpServer?.close();
-      wss.close(() => {
-        void unregistered.then(() => {
-          console.log('[WebUI] Server stopped');
-          resolve();
-        });
-      });
-    }
+    // Graceful shutdown (extracted to webui-server/lifecycle.ts, PR 7 of
+    // #30). Idempotent: every runWebUI call registers its own SIGINT/SIGTERM
+    // handlers, so a signal after this server already stopped (multiple
+    // servers per process — tests, /webui restarts) must not re-run teardown
+    // or fire a second unregister against a gone registry. The teardown
+    // sequence (abort in-flight runs → unsubscribe events → close clients →
+    // unregister → close HTTP/WS → resolve) lives in lifecycle.ts; the
+    // run-loop state stays here and is threaded in as callbacks.
+    const signalShutdown = createWebuiShutdown({
+      abortInFlight: () => {
+        // Both the legacy single slot (project-switch path) and every
+        // per-socket controller must be aborted — they are independent.
+        if (abortController) {
+          abortController.abort();
+          abortController = null;
+        }
+        for (const c of abortControllers.values()) c.abort();
+        abortControllers.clear();
+      },
+      unsubscribeEvents: () => {
+        for (const unsub of eventUnsubscribers) unsub();
+      },
+      closeClients: () => {
+        for (const [ws] of clients) ws.close();
+        clients.clear();
+      },
+      closeHttpServer: () => {
+        httpServer?.server.close();
+      },
+      wss,
+      pid: process.pid,
+      registryBaseDir,
+      onStopped: resolve,
+    });
 
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
+    registerWebuiSignalHandlers(signalShutdown);
   });
 
   async function handleMessage(
     ws: WebSocket,
-    client: ConnectedClient,
+    _client: ConnectedClient,
     msg: WSClientMessage,
   ): Promise<void> {
     switch (msg.type) {
       case 'user_message':
         await handleUserMessage(
+          connectionCtx,
           ws,
-          client,
           (msg as { payload: { content: string } }).payload.content,
         );
         break;
 
       case 'abort':
-        // Scope the abort to the requesting socket. The legacy module-scope
-        // `abortController` (project-switch path) is left alone — a
-        // `case 'abort'` from one client should not interfere with another
-        // client's in-flight run. The error message is sent only to the
-        // requesting socket (was `broadcast({...})` previously), which is
-        // correct: other clients have no idea what just happened.
-        {
-          const wsController = abortControllers.get(ws);
-          wsController?.abort();
-        }
-        send(ws, {
-          type: 'error',
-          payload: { phase: 'abort', message: 'User aborted' },
-        });
+        handleAbort(connectionCtx, ws);
         break;
 
       case 'ping':
-        send(ws, { type: 'pong', payload: {} });
+        handlePing(connectionCtx, ws);
         break;
 
       case 'tool.confirm_result': {
         const { id, decision } = (
           msg as { payload: { id: string; decision: 'yes' | 'no' | 'always' | 'deny' } }
         ).payload;
-        const resolve = pendingConfirms.get(id);
-        if (resolve) {
-          pendingConfirms.delete(id);
-          resolve(decision);
-        }
+        handleToolConfirmResult(connectionCtx, id, decision);
         break;
       }
 
       case 'providers.list':
-        await handleProvidersList(ws);
+        await handleProvidersList(wsHandlerCtx, ws);
         break;
 
       case 'provider.models':
         await handleProviderModels(
+          wsHandlerCtx,
           ws,
           (msg as { payload: { providerId: string } }).payload.providerId,
         );
         break;
 
       case 'providers.saved':
-        await handleProvidersSaved(ws);
+        await handleProvidersSaved(wsHandlerCtx, ws);
         break;
 
       case 'key.add':
       case 'key.update': {
         const m = msg as { payload: { providerId: string; label: string; apiKey: string } };
-        await handleKeyUpsert(ws, m.payload.providerId, m.payload.label, m.payload.apiKey);
+        await handleKeyUpsert(wsHandlerCtx, ws, m.payload.providerId, m.payload.label, m.payload.apiKey);
         break;
       }
 
       case 'key.delete': {
         const m = msg as { payload: { providerId: string; label: string } };
-        await handleKeyDelete(ws, m.payload.providerId, m.payload.label);
+        await handleKeyDelete(wsHandlerCtx, ws, m.payload.providerId, m.payload.label);
         break;
       }
 
       case 'key.set_active': {
         const m = msg as { payload: { providerId: string; label: string } };
-        await handleKeySetActive(ws, m.payload.providerId, m.payload.label);
+        await handleKeySetActive(wsHandlerCtx, ws, m.payload.providerId, m.payload.label);
         break;
       }
 
@@ -1296,394 +1465,118 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
             apiKey?: string | undefined;
           };
         };
-        await handleProviderAdd(ws, m.payload);
+        await handleProviderAdd(wsHandlerCtx, ws, m.payload);
         break;
       }
 
       case 'provider.remove': {
         const m = msg as { payload: { providerId: string } };
-        await handleProviderRemove(ws, m.payload.providerId);
+        await handleProviderRemove(wsHandlerCtx, ws, m.payload.providerId);
         break;
       }
 
       case 'todos.get': {
-        // On-demand snapshot — sends the live todo list from agent ctx.
-        // Mirrors the standalone server's handler.
-        send(ws, {
-          type: 'todos.updated',
-          payload: { todos: [...opts.agent.ctx.todos] },
-        });
+        handleTodosGet(worklistCtx, ws);
         break;
       }
 
       case 'goal.get': {
-        // Read goal.json from disk and broadcast to all connected clients.
-        // The frontend polls this periodically; we serve the latest snapshot.
-        const projectRoot = opts.projectRoot ?? opts.agent.ctx.projectRoot;
-        try {
-          const goalPath = path.join(projectRoot, '.wrongstack', 'goal.json');
-          const raw = await fs.readFile(goalPath, 'utf8');
-          const goal = JSON.parse(raw);
-          broadcast({ type: 'goal.updated', payload: goal });
-        } catch {
-          broadcast({ type: 'goal.updated', payload: null });
-        }
+        await handleGoalGet(sessionsCtx, ws);
         break;
       }
 
       case 'sessions.list': {
-        // Prefer the wired SessionStore (the real ~/.wrongstack/projects/<hash>/
-        // sessions location). The transient store at <projectRoot>/.wrongstack/
-        // sessions is a legacy fallback only — real sessions never live there.
-        const limit = (msg as { payload?: { limit?: number | undefined } }).payload?.limit ?? 50;
-        try {
-          const store =
-            opts.sessionStore ??
-            new DefaultSessionStore({
-              dir: path.join(
-                opts.projectRoot ?? opts.agent.ctx.projectRoot,
-                '.wrongstack',
-                'sessions',
-              ),
-            });
-          const list = await store.list(limit);
-          const currentId = opts.agent.ctx.session?.id ?? opts.session.id;
-          send(ws, {
-            type: 'sessions.list',
-            payload: {
-              sessions: list.map((s) => ({
-                id: s.id,
-                title: s.title,
-                startedAt: s.startedAt,
-                model: s.model,
-                provider: s.provider,
-                tokenTotal: s.tokenTotal,
-                isCurrent: s.id === currentId,
-              })),
-            },
-          });
-        } catch (err) {
-          send(ws, {
-            type: 'sessions.list',
-            payload: { sessions: [], error: err instanceof Error ? err.message : String(err) },
-          });
-        }
+        await handleSessionsList(
+          sessionsCtx,
+          ws,
+          (msg as { payload?: { limit?: number | undefined } }).payload?.limit ?? 50,
+        );
         break;
       }
 
       case 'session.new': {
-        // Full new session when the SessionStore is wired (the normal case):
-        // finalize the current writer (session_end + close → summary sidecar)
-        // and swap in a fresh on-disk session, exactly like the standalone
-        // server. Previously this only wiped in-memory state — the "new"
-        // conversation kept appending to the OLD session's JSONL.
-        const ctx = opts.agent.ctx;
-        const oldId = ctx.session?.id ?? opts.session.id;
-        if (opts.sessionStore) {
-          try {
-            const oldWriter = ctx.session;
-            const oldUsage = ctx.tokenCounter.total();
-            if (oldWriter) {
-              void (async () => {
-                await oldWriter
-                  .append({ type: 'session_end', ts: new Date().toISOString(), usage: oldUsage })
-                  .catch(() => undefined);
-                await oldWriter.close().catch(() => undefined);
-              })();
-            }
-            const fresh = await opts.sessionStore.create({
-              id: '',
-              title: '',
-              model: ctx.model,
-              provider: (ctx.provider as { id?: string }).id ?? '',
-            });
-            ctx.session = fresh;
-            opts.onSessionSwapped?.(fresh.id);
-            ctx.tokenCounter.reset();
-          } catch (err) {
-            // Store failure degrades to the in-memory reset below.
-            console.warn(
-              JSON.stringify({
-                level: 'warn',
-                event: 'webui.session_new_store_failed',
-                message: err instanceof Error ? err.message : String(err),
-                timestamp: new Date().toISOString(),
-              }),
-            );
-          }
-        }
-        ctx.state.replaceMessages([]);
-        ctx.state.replaceTodos([]);
-        ctx.readFiles.clear();
-        ctx.fileMtimes.clear();
-        const sessNewP = await buildSessionStartPayload({ reset: true, clearedSessionId: oldId });
-        broadcast({ type: 'session.start', payload: sessNewP });
+        await handleSessionNew(sessionsCtx, ws);
         break;
       }
 
       case 'todos.clear': {
-        // Manual override — clear the todo list without losing context.
-        opts.agent.ctx.state.replaceTodos([]);
-        sendResult(ws, true, 'Todos cleared');
-        broadcast({ type: 'todos.updated', payload: { todos: [] } });
+        handleTodosClear(worklistCtx, ws);
         break;
       }
 
       case 'todos.remove': {
-        const payload = msg.payload as
-          | { id?: string | undefined; index?: number | undefined }
-          | undefined;
-        if (!payload) {
-          sendResult(ws, false, 'Missing id or index');
-          break;
-        }
-        const { id, index } = payload;
-        const todos = opts.agent.ctx.todos;
-        let targetIdx = -1;
-        if (typeof id === 'string') {
-          targetIdx = todos.findIndex((t) => t.id === id);
-        } else if (typeof index === 'number' && index > 0) {
-          targetIdx = index - 1;
-        }
-        if (targetIdx < 0 || !todos[targetIdx]) {
-          sendResult(ws, false, 'Todo not found');
-          break;
-        }
-        const removed = expectDefined(todos[targetIdx]);
-        const next = [...todos.slice(0, targetIdx), ...todos.slice(targetIdx + 1)];
-        opts.agent.ctx.state.replaceTodos(next);
-        sendResult(ws, true, `Removed: ${removed.content}`);
-        broadcast({ type: 'todos.updated', payload: { todos: next } });
+        handleTodosRemove(
+          worklistCtx,
+          ws,
+          msg.payload as { id?: string | undefined; index?: number | undefined } | undefined,
+        );
         break;
       }
 
       case 'todo.update': {
-        // Update a todo's status and/or activeForm in agent context.
-        const payload = msg.payload as {
-          id: string;
-          status?: TodoItem['status'] | undefined;
-          activeForm?: string | undefined;
-        };
-        const todos = opts.agent.ctx.todos;
-        const idx = todos.findIndex((t) => t.id === payload.id);
-        if (idx === -1) {
-          sendResult(ws, false, 'Todo not found');
-          break;
-        }
-        const next = [...todos];
-        const existing = expectDefined(next[idx]);
-        next[idx] = {
-          ...existing,
-          status: payload.status ?? existing.status,
-          activeForm: payload.activeForm !== undefined ? payload.activeForm : existing.activeForm,
-        };
-        opts.agent.ctx.state.replaceTodos(next);
-        sendResult(ws, true, `Todo "${existing.content}" updated`);
-        broadcast({ type: 'todos.updated', payload: { todos: next } });
+        handleTodoUpdate(
+          worklistCtx,
+          ws,
+          msg.payload as {
+            id: string;
+            status?: TodoItem['status'] | undefined;
+            activeForm?: string | undefined;
+          },
+        );
         break;
       }
 
       case 'context.clear': {
-        // In-memory wipe — same as session.new but reuses the current session.
-        const ctx = opts.agent.ctx;
-        ctx.state.replaceMessages([]);
-        ctx.state.replaceTodos([]);
-        ctx.readFiles.clear();
-        ctx.fileMtimes.clear();
-        sendResult(ws, true, 'Context cleared');
-        const ctxClearP = await buildSessionStartPayload({ reset: true });
-        broadcast({ type: 'session.start', payload: ctxClearP });
+        await handleContextClear(contextHandlerCtx, ws);
         break;
       }
 
       case 'process.list': {
-        try {
-          const { getProcessRegistry } = await import('@wrongstack/tools');
-          const procs = getProcessRegistry().list();
-          send(ws, {
-            type: 'process.list',
-            payload: {
-              processes: procs.map((p) => ({
-                pid: p.pid,
-                command: p.command,
-                tool: p.name,
-                startedAt: p.startedAt,
-                status: p.killed ? ('killed' as const) : ('running' as const),
-                protected: p.protected,
-              })),
-            },
-          });
-        } catch {
-          send(ws, { type: 'process.list', payload: { processes: [] } });
-        }
+        handleProcessList(wsCommon, ws);
         break;
       }
 
       case 'process.kill': {
-        const { pid } = (msg as { payload: { pid: number } }).payload;
-        try {
-          const { getProcessRegistry } = await import('@wrongstack/tools');
-          const proc = getProcessRegistry().get(pid);
-          if (proc?.protected) {
-            sendResult(ws, false, `Cannot kill protected process (PID ${pid})`);
-            break;
-          }
-          getProcessRegistry().kill(pid);
-          sendResult(ws, true, `Killed PID ${pid}`);
-        } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
-        }
+        handleProcessKill(wsCommon, ws, (msg as { payload: { pid: number } }).payload.pid);
         break;
       }
 
       case 'process.killAll': {
-        try {
-          const { getProcessRegistry } = await import('@wrongstack/tools');
-          getProcessRegistry().killAll();
-          sendResult(ws, true, 'All processes killed');
-        } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
-        }
+        handleProcessKillAll(wsCommon, ws);
         break;
       }
 
       case 'diag.get': {
-        // Snapshot of key metrics — mirrors the standalone server's handler
-        // and the CLI /diag output. Uses the agent context for live state.
-        const ctx = opts.agent.ctx;
-        const tools = opts.agent.tools.list();
-        send(ws, {
-          type: 'diag.get',
-          payload: {
-            provider: (ctx.provider as { id: string }).id,
-            model: ctx.model,
-            cwd: opts.projectRoot ?? ctx.projectRoot,
-            sessionId: opts.session.id,
-            tools: {
-              count: tools.length,
-              names: tools.map((t) => t.name),
-            },
-            features: {},
-            mode: 'default',
-            usage: ctx.tokenCounter.total(),
-            messages: ctx.messages.length,
-            todos: ctx.todos.length,
-          },
-        });
+        handleDiagGet(introspectionCtx, ws);
         break;
       }
 
       case 'stats.get': {
-        // Detailed session usage stats, mirroring the CLI /stats.
-        const ctx = opts.agent.ctx;
-        const usage = ctx.tokenCounter.total();
-        const cacheStats = ctx.tokenCounter.cacheStats();
-        let cost: number | null = null;
-        try {
-          if (opts.modelsRegistry) {
-            const model = await opts.modelsRegistry.getModel(
-              (ctx.provider as { id: string }).id,
-              ctx.model,
-            );
-            const rates = getCostRates(model);
-            cost = computeUsageCost(
-              { input: usage.input, output: usage.output, cacheRead: cacheStats.readTokens },
-              rates,
-            );
-          }
-        } catch {
-          /* cost stays null */
-        }
-        send(ws, {
-          type: 'stats.get',
-          payload: {
-            sessionId: opts.session.id,
-            provider: (ctx.provider as { id: string }).id,
-            model: ctx.model,
-            usage,
-            cache: cacheStats,
-            cost,
-            messages: ctx.messages.length,
-            readFiles: ctx.readFiles.size,
-            tools: opts.agent.tools.list().length,
-            elapsedMs: Date.now() - sessionStartedAt,
-          },
-        });
+        await handleStatsGet(introspectionCtx, ws);
         break;
       }
 
       case 'autonomy.switch': {
-        const { mode } = (msg as { payload: { mode: string } }).payload;
-        opts.agent.ctx.meta['autonomy'] = mode;
-        // Flip the CLI's REAL autonomy state (same setter the TUI uses) —
-        // meta alone is advisory and the running loop never reads it.
-        opts.onAutonomySwitch?.(mode);
-        sendResult(ws, true, `Autonomy mode set to "${mode}"`);
-        broadcast({ type: 'prefs.updated', payload: { autonomy: mode } });
-        void persistPrefsToConfig({ autonomy: mode });
+        handleAutonomySwitch(prefsCtx, ws, (msg as { payload: { mode: string } }).payload.mode);
         break;
       }
 
       case 'tools.list': {
-        const list = opts.agent.tools.list().map((t) => {
-          const schema =
-            (t as { inputSchema?: { properties?: Record<string, unknown> } }).inputSchema ?? {};
-          const params = schema.properties ? Object.keys(schema.properties) : [];
-          return {
-            name: t.name,
-            description: (t as { description?: string | undefined }).description ?? '',
-            params,
-          };
-        });
-        send(ws, { type: 'tools.list', payload: { tools: list } });
+        handleToolsList(introspectionCtx, ws);
         break;
       }
 
       case 'session.checkpoints': {
-        const projectRoot = opts.projectRoot ?? opts.agent.ctx.projectRoot;
-        try {
-          const { DefaultSessionRewinder } = await import('@wrongstack/core');
-          const rewinder = new DefaultSessionRewinder(
-            opts.sessionsDir ?? path.join(projectRoot, '.wrongstack', 'sessions'),
-            projectRoot,
-          );
-          // Use the LIVE writer's id — after an in-app resume the active
-          // session is agent.ctx.session, not the startup one.
-          const liveId = opts.agent.ctx.session?.id ?? opts.session.id;
-          const checkpoints = await rewinder.listCheckpoints(liveId);
-          send(ws, {
-            type: 'session.checkpoints',
-            payload: { checkpoints },
-          });
-        } catch {
-          send(ws, {
-            type: 'session.checkpoints',
-            payload: { checkpoints: [] },
-          });
-        }
+        await handleSessionCheckpoints(sessionsCtx, ws);
         break;
       }
 
       case 'session.rewind': {
-        const { checkpointIndex } = (msg as { payload: { checkpointIndex: number } }).payload;
-        const projectRoot = opts.projectRoot ?? opts.agent.ctx.projectRoot;
-        try {
-          const { DefaultSessionRewinder } = await import('@wrongstack/core');
-          const rewinder = new DefaultSessionRewinder(
-            opts.sessionsDir ?? path.join(projectRoot, '.wrongstack', 'sessions'),
-            projectRoot,
-          );
-          // Rewind the LIVE session — both the file reverts (rewinder) and
-          // the JSONL truncation (writer) must target the same session.
-          const liveSession = opts.agent.ctx.session ?? opts.session;
-          await rewinder.rewindToCheckpoint(liveSession.id, checkpointIndex);
-          await liveSession.truncateToCheckpoint(checkpointIndex);
-          sendResult(ws, true, `Rewound to checkpoint ${checkpointIndex}`);
-          const rewindP = await buildSessionStartPayload({ reset: true });
-          broadcast({ type: 'session.start', payload: rewindP });
-        } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
-        }
+        await handleSessionRewind(
+          sessionsCtx,
+          ws,
+          (msg as { payload: { checkpointIndex: number } }).payload.checkpointIndex,
+        );
         break;
       }
 
@@ -1709,139 +1602,34 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       }
 
       case 'session.delete': {
-        const { id } = (msg as { payload: { id: string } }).payload;
-        // Guard against the CURRENT writer — after an in-app resume the
-        // active session is agent.ctx.session, not the startup one.
-        if (id === (opts.agent.ctx.session?.id ?? opts.session.id)) {
-          sendResult(ws, false, 'Cannot delete the active session');
-          break;
-        }
-        try {
-          // Prefer the wired SessionStore (real sessions location); the
-          // transient <projectRoot>/.wrongstack/sessions store is legacy-only.
-          const store =
-            opts.sessionStore ??
-            new DefaultSessionStore({
-              dir: path.join(
-                opts.projectRoot ?? opts.agent.ctx.projectRoot,
-                '.wrongstack',
-                'sessions',
-              ),
-            });
-          await store.delete(id);
-          sendResult(ws, true, `Session ${id} deleted`);
-        } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
-        }
+        await handleSessionDelete(sessionsCtx, ws, (msg as { payload: { id: string } }).payload.id);
         break;
       }
 
       case 'session.save':
-        // SessionWriter auto-flushes — confirm for UI habit parity.
-        sendResult(ws, true, `Session ${opts.session.id} is auto-saved`);
+        handleSessionSave(sessionsCtx, ws);
         break;
 
       case 'plan.get': {
-        // On-demand plan snapshot from context.meta.
-        const planPath = (opts.agent.ctx.meta as Record<string, unknown>)['plan.path'];
-        if (typeof planPath === 'string' && planPath) {
-          try {
-            const { loadPlan } = await import('@wrongstack/core');
-            const plan = await loadPlan(planPath);
-            send(ws, {
-              type: 'plan.updated',
-              payload: {
-                plan: plan ?? {
-                  version: 1,
-                  sessionId: opts.session.id,
-                  updatedAt: new Date().toISOString(),
-                  items: [],
-                },
-              },
-            });
-          } catch {
-            send(ws, {
-              type: 'plan.updated',
-              payload: {
-                plan: {
-                  version: 1,
-                  sessionId: opts.session.id,
-                  updatedAt: new Date().toISOString(),
-                  items: [],
-                },
-              },
-            });
-          }
-        } else {
-          send(ws, {
-            type: 'plan.updated',
-            payload: { plan: null, error: 'Plan storage is not configured for this session.' },
-          });
-        }
+        await handlePlanGet(worklistCtx, ws);
         break;
       }
 
       case 'plan.template_use': {
-        const { template } = (msg as { payload: { template: string } }).payload;
-        const planPath = (opts.agent.ctx.meta as Record<string, unknown>)['plan.path'];
-        if (typeof planPath !== 'string' || !planPath) {
-          sendResult(ws, false, 'Plan storage is not configured for this session.');
-          break;
-        }
-        try {
-          const { getPlanTemplate, loadPlan, savePlan, emptyPlan, addPlanItem } = await import(
-            '@wrongstack/core'
-          );
-          const tpl = getPlanTemplate(template);
-          if (!tpl) {
-            sendResult(ws, false, `Unknown template "${template}".`);
-            break;
-          }
-          let plan = (await loadPlan(planPath)) ?? emptyPlan(opts.session.id);
-          for (const item of tpl.items) {
-            ({ plan } = addPlanItem(plan, item.title, item.details));
-          }
-          await savePlan(planPath, plan);
-          sendResult(ws, true, `Applied template "${tpl.name}" — ${tpl.items.length} items added.`);
-          broadcast({
-            type: 'plan.updated',
-            payload: { plan },
-          });
-        } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
-        }
+        await handlePlanTemplateUse(
+          worklistCtx,
+          ws,
+          (msg as { payload: { template: string } }).payload.template,
+        );
         break;
       }
 
       case 'plan.item.update': {
-        // Update a single plan item's status and broadcast.
-        const planPath = (opts.agent.ctx.meta as Record<string, unknown>)['plan.path'];
-        if (typeof planPath !== 'string' || !planPath) {
-          sendResult(ws, false, 'Plan storage is not configured for this session.');
-          break;
-        }
-        const payload = msg.payload as {
-          target: string;
-          status: 'open' | 'in_progress' | 'done';
-        };
-        try {
-          const sessionId = opts.session.id;
-          let changed = false;
-          const plan = await mutatePlan(planPath, sessionId, async (p) => {
-            const before = p.updatedAt;
-            const next = setPlanItemStatus(p, payload.target, payload.status);
-            changed = next.updatedAt !== before;
-            return next;
-          });
-          if (!changed) {
-            sendResult(ws, false, `No plan item matched "${payload.target}".`);
-            break;
-          }
-          sendResult(ws, true, `Plan item status updated to "${payload.status}".`);
-          broadcast({ type: 'plan.updated', payload: { plan } });
-        } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
-        }
+        await handlePlanItemUpdate(
+          worklistCtx,
+          ws,
+          msg.payload as { target: string; status: 'open' | 'in_progress' | 'done' },
+        );
         break;
       }
 
@@ -1872,420 +1660,115 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       }
 
       case 'skills.list': {
-        if (!opts.skillLoader) {
-          send(ws, { type: 'skills.list', payload: { skills: [], enabled: false } });
-          break;
-        }
-        try {
-          const manifests = await opts.skillLoader.list();
-          const entries = await opts.skillLoader.listEntries();
-          const byName = new Map(entries.map((e) => [e.name, e]));
-          send(ws, {
-            type: 'skills.list',
-            payload: {
-              enabled: true,
-              skills: manifests.map((m) => ({
-                name: m.name,
-                description: m.description,
-                version: m.version ?? '',
-                source: m.source,
-                path: m.path,
-                trigger: byName.get(m.name)?.trigger ?? '',
-                scope: byName.get(m.name)?.scope ?? [],
-              })),
-            },
-          });
-        } catch (err) {
-          send(ws, {
-            type: 'skills.list',
-            payload: {
-              skills: [],
-              enabled: true,
-              error: err instanceof Error ? err.message : String(err),
-            },
-          });
-        }
+        await handleSkillsList(introspectionCtx, ws);
         break;
       }
 
       case 'modes.list': {
-        if (!opts.modeStore) {
-          send(ws, {
-            type: 'modes.list',
-            payload: { modes: [], activeId: 'default', error: 'Mode store not available' },
-          });
-          break;
-        }
-        try {
-          const modes = await opts.modeStore.listModes();
-          const active = await opts.modeStore.getActiveMode();
-          send(ws, {
-            type: 'modes.list',
-            payload: {
-              modes: modes.map((m) => ({
-                id: m.id,
-                name: m.name,
-                description: m.description,
-                isActive: m.id === (active?.id ?? 'default'),
-              })),
-              activeId: active?.id ?? 'default',
-            },
-          });
-        } catch (err) {
-          send(ws, {
-            type: 'modes.list',
-            payload: {
-              modes: [],
-              activeId: 'default',
-              error: err instanceof Error ? err.message : String(err),
-            },
-          });
-        }
+        await handleModesList(agentConfigCtx, ws);
         break;
       }
 
       case 'mode.switch': {
-        if (!opts.modeStore) {
-          sendResult(ws, false, 'Mode store not available');
-          break;
-        }
-        const { id } = (msg as { payload: { id: string } }).payload;
-        try {
-          if (id === 'default') {
-            await opts.modeStore.setActiveMode(null);
-          } else {
-            const found = await opts.modeStore.getMode(id);
-            if (!found) throw new Error(`Unknown mode "${id}"`);
-            await opts.modeStore.setActiveMode(id);
-          }
-          // Store the mode in context.meta so the agent sees it on the next turn.
-          opts.agent.ctx.meta['mode'] = id;
-          sendResult(ws, true, `Switched to mode "${id}"`);
-          const modeSwP = await buildSessionStartPayload({ mode: id });
-          broadcast({ type: 'session.start', payload: modeSwP });
-        } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
-        }
+        await handleModeSwitch(agentConfigCtx, ws, (msg as { payload: { id: string } }).payload.id);
         break;
       }
 
       case 'model.switch': {
-        const { provider: newProvider, model: newModel } = (
-          msg as { payload: { provider: string; model: string } }
-        ).payload;
-        try {
-          // Update context
-          const ctx = opts.agent.ctx;
-          ctx.model = newModel;
-
-          // Create a new provider instance from the saved config
-          const { makeProviderFromConfig } = await import('@wrongstack/providers');
-          const { loadSavedProviders } = await import('./webui-server/provider-config.js');
-          const saved = await loadSavedProviders(opts.globalConfigPath);
-          const providerCfg = saved[newProvider] ?? { type: newProvider };
-          const newProv = makeProviderFromConfig(newProvider, providerCfg);
-          ctx.provider = newProv;
-
-          send(ws, {
-            type: 'key.operation_result',
-            payload: { success: true, message: `Switched to ${newProvider} / ${newModel}` },
-          });
-          const modelSwP = await buildSessionStartPayload();
-          broadcast({ type: 'session.start', payload: modelSwP });
-        } catch (err) {
-          send(ws, {
-            type: 'key.operation_result',
-            payload: {
-              success: false,
-              message: `Switch failed: ${err instanceof Error ? err.message : String(err)}`,
-            },
-          });
-        }
+        await handleModelSwitch(
+          agentConfigCtx,
+          ws,
+          (msg as { payload: { provider: string; model: string } }).payload,
+        );
         break;
       }
 
       case 'session.resume': {
-        if (!opts.sessionStore) {
-          sendResult(ws, false, 'Session store not available');
-          break;
-        }
-        const { id } = (msg as { payload: { id: string } }).payload;
-        try {
-          // Compare against the CURRENT writer — after a prior in-app resume
-          // the active session is agent.ctx.session, not the startup one.
-          const ctx = opts.agent.ctx;
-          if (id === (ctx.session?.id ?? opts.session.id)) {
-            sendResult(ws, false, 'Session is already active');
-            break;
-          }
-          const resumed = await opts.sessionStore.resume(id);
-          // Finalize the writer we are leaving (session_end + flush + summary
-          // sidecar), then swap the context to the resumed writer so all new
-          // events land in the resumed session's JSONL. Without the swap,
-          // the conversation kept recording into the old session's log and
-          // the resumed writer leaked an open file handle.
-          const oldWriter = ctx.session;
-          if (oldWriter && oldWriter !== resumed.writer) {
-            const oldUsage = ctx.tokenCounter.total();
-            void (async () => {
-              await oldWriter
-                .append({
-                  type: 'session_end',
-                  ts: new Date().toISOString(),
-                  usage: oldUsage,
-                })
-                .catch(() => undefined);
-              await oldWriter.close().catch(() => undefined);
-            })();
-          }
-          ctx.session = resumed.writer;
-          // Let the host re-point crash-recovery state (active.json) at the
-          // session that is now actually being written.
-          opts.onSessionSwapped?.(resumed.writer.id);
-          // Hydrate the context with the old session's messages.
-          ctx.state.replaceMessages(resumed.data.messages);
-          ctx.state.replaceTodos([]);
-          ctx.readFiles.clear();
-          ctx.fileMtimes.clear();
-          ctx.tokenCounter.reset();
-          // Replay usage so the topbar shows accurate totals.
-          ctx.tokenCounter.account(resumed.data.usage, ctx.model);
-          const resumeP = await buildSessionStartPayload({
-            reset: true,
-            replayMessages: resumed.data.messages,
-            replayUsage: resumed.data.usage,
-          });
-          broadcast({ type: 'session.start', payload: resumeP });
-          sendResult(ws, true, `Resumed session ${id}`);
-        } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
-        }
+        await handleSessionResume(sessionsCtx, ws, (msg as { payload: { id: string } }).payload.id);
         break;
       }
 
       case 'context.debug': {
-        // Per-section token estimate so users can see what's eating the context window.
-        const ctx = opts.agent.ctx;
-        const breakdown = estimateContextBreakdown({
-          systemPrompt: ctx.systemPrompt as ReadonlyArray<PromptBlock>,
-          tools: opts.agent.tools.list() as ReadonlyArray<ToolLike>,
-          messages: ctx.messages as ReadonlyArray<MessageLike>,
-        });
-        send(ws, {
-          type: 'context.debug',
-          payload: {
-            ...breakdown,
-            mode: (ctx.meta['contextWindowMode'] as string) ?? DEFAULT_CONTEXT_WINDOW_MODE_ID,
-            policy: ctx.meta['contextWindowPolicy'] ?? null,
-          },
-        });
+        handleContextDebug(contextHandlerCtx, ws);
         break;
       }
 
       case 'context.compact': {
-        const aggressive = !!(msg as { payload?: { aggressive?: boolean | undefined } }).payload
-          ?.aggressive;
-        try {
-          const compactor = opts.agent.container.resolve(TOKENS.Compactor);
-          if (!compactor) {
-            sendResult(ws, false, 'Compactor not available');
-            break;
-          }
-          const before = opts.agent.ctx.tokenCounter.total();
-          const report = await compactor.compact(opts.agent.ctx, { aggressive });
-          const after = opts.agent.ctx.tokenCounter.total();
-          send(ws, {
-            type: 'context.compacted',
-            payload: {
-              before: before.input + before.output,
-              after: after.input + after.output,
-              saved: Math.max(0, before.input + before.output - after.input - after.output),
-              reductions: report.reductions ?? [],
-              repaired: report.repaired ?? false,
-            },
-          });
-          sendResult(
-            ws,
-            true,
-            `Compacted: ${before.input + before.output} → ${after.input + after.output} tokens`,
-          );
-        } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
-        }
+        await handleContextCompact(
+          contextHandlerCtx,
+          ws,
+          !!(msg as { payload?: { aggressive?: boolean | undefined } }).payload?.aggressive,
+        );
         break;
       }
 
       case 'context.repair': {
-        const ctx = opts.agent.ctx;
-        const beforeMessages = ctx.messages.length;
-        const repaired = repairToolUseAdjacency(ctx.messages);
-        if (repaired.report.changed) {
-          ctx.state.replaceMessages(repaired.messages);
-        }
-        const payload = {
-          removedToolUses: repaired.report.removedToolUses,
-          removedToolResults: repaired.report.removedToolResults,
-          removedMessages: repaired.report.removedMessages,
-          beforeMessages,
-          afterMessages: ctx.messages.length,
-        };
-        broadcast({ type: 'context.repaired', payload });
-        const removed =
-          payload.removedToolUses.length +
-          payload.removedToolResults.length +
-          payload.removedMessages;
-        sendResult(
-          ws,
-          true,
-          removed > 0
-            ? `Context repaired: removed ${removed} orphan protocol item(s)`
-            : 'Context repair found no orphan protocol blocks',
-        );
+        handleContextRepair(contextHandlerCtx, ws);
         break;
       }
 
       case 'context.modes.list': {
-        // Built-ins + file-backed custom modes (store.list() merges both),
-        // matching the standalone server.
-        const active = String(
-          opts.agent.ctx.meta['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID,
-        );
-        const modeStore = await getCustomModeStore();
-        send(ws, {
-          type: 'context.modes.list',
-          payload: {
-            activeId: active,
-            modes: modeStore.list().map((m) => ({
-              id: m.id,
-              name: m.name,
-              description: m.description,
-              isActive: m.id === active,
-              thresholds: m.thresholds,
-              preserveK: m.preserveK,
-              eliseThreshold: m.eliseThreshold,
-              custom: m.custom === true,
-            })),
-          },
-        });
+        await handleContextModesList(contextHandlerCtx, ws);
         break;
       }
 
       case 'context.mode.switch': {
-        const { id } = (msg as { payload: { id: string } }).payload;
-        // Built-in first, then custom (parity with the standalone server —
-        // custom modes were previously unswitchable here).
-        let policy = resolveContextWindowPolicy({}, id);
-        if (policy.id !== id) {
-          const modeStore = await getCustomModeStore();
-          const custom = modeStore.list().find((m) => m.custom === true && m.id === id);
-          if (!custom) {
-            sendResult(ws, false, `Unknown context mode "${id}"`);
-            break;
-          }
-          policy = custom as unknown as typeof policy;
-        }
-        opts.agent.ctx.meta['contextWindowMode'] = policy.id;
-        opts.agent.ctx.meta['contextWindowPolicy'] = policy;
-        sendResult(ws, true, `Context mode switched to ${policy.id}`);
-        broadcast({
-          type: 'context.mode.changed',
-          payload: { id: policy.id, name: policy.name, policy },
-        });
+        await handleContextModeSwitch(
+          contextHandlerCtx,
+          ws,
+          (msg as { payload: { id: string } }).payload.id,
+        );
         break;
       }
 
       case 'context.mode.create': {
-        const payload = (
-          msg as {
-            payload: {
-              id: string;
-              name: string;
-              description: string;
-              thresholds: { warn: number; soft: number; hard: number };
-              preserveK: number;
-              eliseThreshold: number;
-            };
-          }
-        ).payload;
-        const modeStore = await getCustomModeStore();
-        const result = modeStore.create({
-          id: payload.id,
-          name: payload.name,
-          description: payload.description,
-          thresholds: payload.thresholds,
-          preserveK: payload.preserveK,
-          eliseThreshold: payload.eliseThreshold,
-          custom: true,
-          aggressiveOn: 'soft',
-          targetLoad: 0.65,
-        });
-        if (result.ok)
-          await modeStore.save().catch(() => undefined); /* best-effort: user preferences */
-        sendResult(ws, result.ok, result.error ?? `Mode "${payload.id}" created`);
+        await handleContextModeCreate(
+          contextHandlerCtx,
+          ws,
+          (
+            msg as {
+              payload: {
+                id: string;
+                name: string;
+                description: string;
+                thresholds: { warn: number; soft: number; hard: number };
+                preserveK: number;
+                eliseThreshold: number;
+              };
+            }
+          ).payload,
+        );
         break;
       }
 
       case 'context.mode.update': {
-        const payload = (
-          msg as {
-            payload: {
-              id: string;
-              name?: string | undefined;
-              description?: string | undefined;
-              thresholds?:
-                | {
-                    warn?: number | undefined;
-                    soft?: number | undefined;
-                    hard?: number | undefined;
-                  }
-                | undefined;
-              preserveK?: number | undefined;
-              eliseThreshold?: number | undefined;
-            };
-          }
-        ).payload;
-        const modeStore = await getCustomModeStore();
-        // Build the patch without explicit-undefined keys
-        // (exactOptionalPropertyTypes).
-        const result = modeStore.update(payload.id, {
-          ...(payload.name !== undefined ? { name: payload.name } : {}),
-          ...(payload.description !== undefined ? { description: payload.description } : {}),
-          ...(payload.thresholds
-            ? {
-                thresholds: {
-                  warn: payload.thresholds.warn ?? 0.6,
-                  soft: payload.thresholds.soft ?? 0.75,
-                  hard: payload.thresholds.hard ?? 0.9,
-                },
-              }
-            : {}),
-          ...(payload.preserveK !== undefined ? { preserveK: payload.preserveK } : {}),
-          ...(payload.eliseThreshold !== undefined
-            ? { eliseThreshold: payload.eliseThreshold }
-            : {}),
-        });
-        if (result.ok)
-          await modeStore.save().catch(() => undefined); /* best-effort: user preferences */
-        sendResult(ws, result.ok, result.error ?? `Mode "${payload.id}" updated`);
+        await handleContextModeUpdate(
+          contextHandlerCtx,
+          ws,
+          (
+            msg as {
+              payload: {
+                id: string;
+                name?: string | undefined;
+                description?: string | undefined;
+                thresholds?:
+                  | { warn?: number | undefined; soft?: number | undefined; hard?: number | undefined }
+                  | undefined;
+                preserveK?: number | undefined;
+                eliseThreshold?: number | undefined;
+              };
+            }
+          ).payload,
+        );
         break;
       }
 
       case 'context.mode.delete': {
-        const { id } = (msg as { payload: { id: string } }).payload;
-        const ctx = opts.agent.ctx;
-        // If the active mode is being deleted, fall back to the default.
-        if (String(ctx.meta['contextWindowMode'] ?? '') === id) {
-          ctx.meta['contextWindowMode'] = DEFAULT_CONTEXT_WINDOW_MODE_ID;
-          ctx.meta['contextWindowPolicy'] = resolveContextWindowPolicy(
-            {},
-            DEFAULT_CONTEXT_WINDOW_MODE_ID,
-          );
-        }
-        const modeStore = await getCustomModeStore();
-        const result = modeStore.remove(id);
-        if (result.ok)
-          await modeStore.save().catch(() => undefined); /* best-effort: user preferences */
-        sendResult(ws, result.ok, result.error ?? `Mode "${id}" deleted`);
+        await handleContextModeDelete(
+          contextHandlerCtx,
+          ws,
+          (msg as { payload: { id: string } }).payload.id,
+        );
         break;
       }
 
@@ -2295,146 +1778,50 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       // terminal and the WebUI never diverge. These used to be unknown
       // message types on the embedded server.
       case 'brain.status': {
-        send(ws, {
-          type: 'brain.status',
-          payload: {
-            maxAutoRisk: opts.brainSettings?.maxAutoRisk ?? 'medium',
-            log: opts.getBrainLog?.() ?? [],
-          },
-        });
+        handleBrainStatus(brainCtx, ws);
         break;
       }
 
       case 'brain.risk': {
         const level = (msg as { payload?: { level?: string } }).payload?.level ?? '';
-        const valid = ['off', 'low', 'medium', 'high', 'all'];
-        if (!valid.includes(level)) {
-          sendResult(ws, false, `Unknown risk level "${level}". Use: ${valid.join(', ')}.`);
-          break;
-        }
-        if (!opts.brainSettings) {
-          sendResult(ws, false, 'Brain settings are not wired into this server.');
-          break;
-        }
-        opts.brainSettings.maxAutoRisk = level as BrainAutoRisk;
-        send(ws, {
-          type: 'brain.status',
-          payload: { maxAutoRisk: opts.brainSettings.maxAutoRisk, log: opts.getBrainLog?.() ?? [] },
-        });
+        handleBrainRisk(brainCtx, ws, level);
         break;
       }
 
       case 'brain.ask': {
-        const question = (msg as { payload?: { question?: string } }).payload?.question?.trim();
-        if (!question) {
-          sendResult(ws, false, 'Usage: /brain ask <question>');
-          break;
-        }
-        const arbiter =
-          opts.brain ??
-          (opts.agent.container.has(TOKENS.BrainArbiter)
-            ? opts.agent.container.resolve(TOKENS.BrainArbiter)
-            : undefined);
-        if (!arbiter) {
-          sendResult(ws, false, 'No Brain is wired into this server.');
-          break;
-        }
-        try {
-          const decision = await arbiter.decide({
-            id: `brain-ask-${Date.now().toString(36)}`,
-            source: 'user',
-            question,
-            risk: 'medium',
-            fallback: 'ask_human',
-          });
-          send(ws, { type: 'brain.answer', payload: { question, decision } });
-        } catch (err) {
-          sendResult(
-            ws,
-            false,
-            `Brain consultation failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
+        const question = (msg as { payload?: { question?: string } }).payload?.question;
+        await handleBrainAsk(brainCtx, ws, question);
         break;
       }
 
       // ── Preferences ──────────────────────────────────────────
 
       case 'prefs.get': {
-        // Return the current pref snapshot from context.meta so the
-        // frontend can seed its local-prefs store from the server's truth.
-        send(ws, { type: 'prefs.updated', payload: prefSnapshot() });
+        handlePrefsGet(prefsCtx, ws);
         break;
       }
 
       case 'prefs.update': {
-        // Batch preference update. Merges arbitrary key/value pairs into
-        // context.meta so the runtime can read them immediately, broadcasts
-        // the full pref snapshot to every connected client so all browser
-        // tabs stay in sync, and persists the durable keys to config.json
-        // (same key mapping the TUI settings picker writes).
-        const payload = (msg as { payload: Record<string, unknown> }).payload;
-        for (const [key, val] of Object.entries(payload)) {
-          opts.agent.ctx.meta[key] = val;
-        }
-        void persistPrefsToConfig(payload);
-        broadcast({ type: 'prefs.updated', payload: prefSnapshot() });
+        handlePrefsUpdate(prefsCtx, ws, (msg as { payload: Record<string, unknown> }).payload);
         break;
       }
 
       // ── Tasks ───────────────────────────────────────────────
 
       case 'tasks.get': {
-        // On-demand task snapshot — loads from <sessionId>.tasks.json
-        const taskPath = (opts.agent.ctx.meta as Record<string, unknown>)['task.path'];
-        if (typeof taskPath === 'string' && taskPath) {
-          try {
-            const { loadTasks } = await import('@wrongstack/core');
-            const file = await loadTasks(taskPath);
-            send(ws, {
-              type: 'tasks.updated',
-              payload: { tasks: file?.tasks ?? [] },
-            });
-          } catch {
-            send(ws, { type: 'tasks.updated', payload: { tasks: [] } });
-          }
-        } else {
-          send(ws, {
-            type: 'tasks.updated',
-            payload: { tasks: [], error: 'Task storage not configured.' },
-          });
-        }
+        await handleTasksGet(worklistCtx, ws);
         break;
       }
 
       case 'task.update': {
-        // Update a task's status in the task file and broadcast.
-        const taskPath = (opts.agent.ctx.meta as Record<string, unknown>)['task.path'];
-        if (typeof taskPath !== 'string' || !taskPath) {
-          sendResult(ws, false, 'Task storage not configured.');
-          break;
-        }
-        const payload = msg.payload as {
-          id: string;
-          status: 'pending' | 'in_progress' | 'blocked' | 'failed' | 'review' | 'completed';
-        };
-        try {
-          const sessionId = opts.session.id;
-          const file = await mutateTasks(taskPath, sessionId, async (f) => {
-            const task = f.tasks.find((t) => t.id === payload.id);
-            if (!task) return f;
-            task.status = payload.status;
-            task.updatedAt = new Date().toISOString();
-            return f;
-          });
-          sendResult(ws, true, `Task status updated to "${payload.status}".`);
-          broadcast({
-            type: 'tasks.updated',
-            payload: { tasks: file.tasks },
-          });
-        } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
-        }
+        await handleTaskUpdate(
+          worklistCtx,
+          ws,
+          msg.payload as {
+            id: string;
+            status: 'pending' | 'in_progress' | 'blocked' | 'failed' | 'review' | 'completed';
+          },
+        );
         break;
       }
 
@@ -2447,258 +1834,34 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
         break;
 
       case 'projects.list': {
-        // Read the project manifest from ~/.wrongstack/projects.json
-        const projectsBase = opts.globalConfigPath
-          ? path.resolve(path.dirname(opts.globalConfigPath))
-          : wstackGlobalRoot();
-        const manifestPath = path.join(projectsBase, 'projects.json');
-        try {
-          const raw = await fs.readFile(manifestPath, 'utf8');
-          const manifest = JSON.parse(raw) as {
-            projects: Array<{ name: string; root: string; slug: string; lastSeen?: string }>;
-          };
-          send(ws, {
-            type: 'projects.list',
-            payload: { projects: manifest.projects ?? [] },
-          });
-        } catch {
-          send(ws, { type: 'projects.list', payload: { projects: [] } });
-        }
+        await handleProjectsList(projectsCtx, ws);
         break;
       }
 
       case 'projects.select': {
-        // In-process project switch — mirrors the standalone server's handler:
-        // re-root everything the handlers read at call time (opts.projectRoot,
-        // agent ctx, session store), finalize the old session writer, start a
-        // fresh session in the new project, and broadcast a reset
-        // session.start so every client re-renders (sessions, file manager,
-        // mailbox, context bar).
-        //
-        // An older version spawned a NEW interactive wstack with
-        // stdio:'inherit' into the host's terminal and changed nothing in the
-        // browser — the WebUI stayed on the old project.
-        const { root, name: projectName } = (
-          msg as { payload: { root: string; name?: string | undefined } }
-        ).payload;
-        try {
-          const resolved = path.resolve(root);
-          const stat = await fs.stat(resolved).catch(() => null);
-          if (!stat?.isDirectory()) {
-            send(ws, {
-              type: 'projects.selected',
-              payload: {
-                root,
-                name: projectName ?? path.basename(root),
-                message: `Cannot switch: not a directory: ${resolved}`,
-              },
-            });
-            break;
-          }
-
-          // Manifest: bump lastSeen, or auto-register an unknown root.
-          const { loadManifest, saveManifest } = await import('./slash-commands/project-utils.js');
-          const manifest = await loadManifest(opts.globalConfigPath);
-          const entry = manifest.projects.find((p) => path.resolve(p.root) === resolved);
-          const displayName = projectName?.trim() || entry?.name || path.basename(resolved);
-          if (entry) {
-            entry.lastSeen = new Date().toISOString();
-          } else {
-            manifest.projects.push({
-              name: displayName,
-              root: resolved,
-              slug: projectSlug(resolved),
-              lastSeen: new Date().toISOString(),
-              createdAt: new Date().toISOString(),
-            });
-          }
-          await saveManifest(manifest, opts.globalConfigPath);
-
-          // Abort any in-flight run — its context is about to be re-rooted.
-          if (abortController) {
-            abortController.abort();
-            abortController = null;
-          }
-          // Also clear the per-socket controller for this switching client
-          // so a subsequent `case 'abort'` from a reconnected socket starts
-          // clean. We do NOT iterate other sockets' controllers — a project
-          // switch is a server-wide state change and other sockets should see
-          // it via the projects.list broadcast below, not be aborted.
-          abortControllers.delete(ws);
-
-          const ctx = opts.agent.ctx;
-          const oldSessionId = ctx.session?.id ?? opts.session.id;
-
-          // Finalize the writer we are leaving. Usage captured before the
-          // counter reset below (the closure runs after it).
-          const oldWriter = ctx.session;
-          const oldUsage = ctx.tokenCounter.total();
-          if (oldWriter) {
-            void (async () => {
-              await oldWriter
-                .append({ type: 'session_end', ts: new Date().toISOString(), usage: oldUsage })
-                .catch(() => undefined);
-              await oldWriter.close().catch(() => undefined);
-            })();
-          }
-
-          // Re-root: every handler resolves opts.projectRoot / ctx at call
-          // time (files.*, mailbox.*, goal, …), so mutating these re-roots
-          // them all without further plumbing.
-          opts.projectRoot = resolved;
-          ctx.cwd = resolved;
-          ctx.projectRoot = resolved;
-
-          // Rebuild the system prompt for the NEW project. The environment
-          // block (project root, git status, languages) is baked into the
-          // prompt at boot; without this rebuild the agent keeps the
-          // launch-directory environment and tries to operate in the old
-          // folder until tool errors correct it. Best-effort — a failure here
-          // leaves the prior prompt rather than breaking the switch.
-          try {
-            const switchMode =
-              opts.modeId && opts.modeId !== 'default' && opts.modeStore
-                ? await opts.modeStore.getMode(opts.modeId)
-                : undefined;
-            const switchBuilder = new DefaultSystemPromptBuilder({
-              memoryStore: opts.memoryStore,
-              skillLoader: opts.skillLoader,
-              modeStore: opts.modeStore,
-              modeId: opts.modeId ?? 'default',
-              modePrompt: switchMode?.prompt ?? '',
-            });
-            ctx.systemPrompt = await switchBuilder.build({
-              cwd: resolved,
-              projectRoot: resolved,
-              tools: opts.agent.tools.list(),
-              provider: (ctx.provider as { id?: string }).id,
-              model: ctx.model,
-            });
-          } catch {
-            /* best-effort — keep the prior system prompt if rebuild fails */
-          }
-
-          // Fresh per-project session store + session.
-          const globalRoot = opts.globalConfigPath
-            ? path.dirname(opts.globalConfigPath)
-            : wstackGlobalRoot();
-          const newSessionsDir = path.join(resolveProjectDir(resolved, globalRoot), 'sessions');
-          await fs.mkdir(newSessionsDir, { recursive: true });
-          const newStore = new DefaultSessionStore({ dir: newSessionsDir });
-          opts.sessionStore = newStore;
-          const newWriter = await newStore.create({
-            id: '',
-            title: '',
-            model: ctx.model,
-            provider: (ctx.provider as { id?: string }).id ?? '',
-          });
-          ctx.session = newWriter;
-          opts.onSessionSwapped?.(newWriter.id);
-          ctx.state.replaceMessages([]);
-          ctx.state.replaceTodos([]);
-          ctx.readFiles.clear();
-          ctx.fileMtimes.clear();
-          ctx.tokenCounter.reset();
-
-          send(ws, {
-            type: 'projects.selected',
-            payload: {
-              root: resolved,
-              name: displayName,
-              message: `Switched to ${displayName}`,
-            },
-          });
-          // Full-state broadcast so ALL clients re-root their panels.
-          const switchedP = await buildSessionStartPayload({
-            reset: true,
-            clearedSessionId: oldSessionId,
-          });
-          broadcast({ type: 'session.start', payload: switchedP });
-        } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
-        }
+        await handleProjectsSelect(
+          projectsCtx,
+          ws,
+          (msg as { payload: { root: string; name?: string | undefined } }).payload,
+        );
         break;
       }
 
       case 'projects.add': {
-        // Register a folder in the project manifest (Projects panel "Add").
-        // Ported from the standalone server — this message used to fall
-        // through to "Unknown message type" here, so adding a project from
-        // the WebUI silently did nothing on the embedded server.
-        const { root: addRoot, name: addName } = (
-          msg as { payload: { root: string; name?: string | undefined } }
-        ).payload;
-        try {
-          const resolved = path.resolve(addRoot);
-          const stat = await fs.stat(resolved).catch(() => null);
-          if (!stat?.isDirectory()) throw new Error(`Not a directory: ${resolved}`);
-
-          const { loadManifest, saveManifest, ensureProjectDataDir } = await import(
-            './slash-commands/project-utils.js'
-          );
-          const manifest = await loadManifest(opts.globalConfigPath);
-          const existing = manifest.projects.find((p) => path.resolve(p.root) === resolved);
-          if (existing) {
-            send(ws, {
-              type: 'projects.added',
-              payload: {
-                name: existing.name,
-                root: existing.root,
-                slug: existing.slug,
-                message: `Already registered as "${existing.name}"`,
-              },
-            });
-            break;
-          }
-          const name = addName?.trim() || path.basename(resolved);
-          const slug = projectSlug(resolved);
-          await ensureProjectDataDir(slug, opts.globalConfigPath);
-          const now = new Date().toISOString();
-          manifest.projects.push({ name, root: resolved, slug, lastSeen: now, createdAt: now });
-          await saveManifest(manifest, opts.globalConfigPath);
-          send(ws, {
-            type: 'projects.added',
-            payload: { name, root: resolved, slug, message: `Registered project "${name}"` },
-          });
-        } catch (err) {
-          send(ws, {
-            type: 'projects.added',
-            payload: {
-              name: path.basename(addRoot),
-              root: addRoot,
-              slug: '',
-              message: err instanceof Error ? err.message : String(err),
-            },
-          });
-        }
+        await handleProjectsAdd(
+          projectsCtx,
+          ws,
+          (msg as { payload: { root: string; name?: string | undefined } }).payload,
+        );
         break;
       }
 
       case 'working_dir.set': {
-        // FileExplorer breadcrumb navigation. Ported from the standalone
-        // server (used to be an unknown message here).
-        const { path: newPath } = (msg as { payload: { path: string } }).payload;
-        try {
-          const wdRoot = opts.projectRoot ?? opts.agent.ctx.projectRoot;
-          const resolved = path.resolve(wdRoot, newPath);
-          if (!resolved.startsWith(wdRoot + path.sep) && resolved !== wdRoot) {
-            sendResult(ws, false, `Path must stay inside the project root: ${wdRoot}`);
-            break;
-          }
-          const stat = await fs.stat(resolved).catch(() => null);
-          if (!stat?.isDirectory()) {
-            sendResult(ws, false, `Directory not found or not accessible: ${resolved}`);
-            break;
-          }
-          opts.agent.ctx.cwd = resolved;
-          broadcast({
-            type: 'working_dir.changed',
-            payload: { cwd: resolved, projectRoot: wdRoot },
-          });
-          sendResult(ws, true, `Working directory set to ${resolved}`);
-        } catch (err) {
-          sendResult(ws, false, err instanceof Error ? err.message : String(err));
-        }
+        await handleWorkingDirSet(
+          projectsCtx,
+          ws,
+          (msg as { payload: { path: string } }).payload.path,
+        );
         break;
       }
 
@@ -2719,55 +1882,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       }
 
       case 'model.refine': {
-        const { text } = (msg as { payload: { text: string } }).payload;
-        if (!text?.trim()) {
-          send(ws, {
-            type: 'model.refine_result',
-            payload: { refined: '', english: '', error: 'Empty text' },
-          });
-          break;
-        }
-        try {
-          const ctx = opts.agent.ctx;
-          const history = recentTextTurns(ctx.messages);
-          const result = await enhanceUserPrompt({
-            provider: ctx.provider,
-            model: ctx.model,
-            text,
-            history,
-            timeoutMs: 90000,
-            onError: (reason) => {
-              console.warn(
-                JSON.stringify({
-                  level: 'warn',
-                  event: 'model.refine_failed',
-                  reason,
-                  timestamp: new Date().toISOString(),
-                }),
-              );
-            },
-          });
-          if (result) {
-            send(ws, {
-              type: 'model.refine_result',
-              payload: { refined: result.refined, english: result.english },
-            });
-          } else {
-            send(ws, {
-              type: 'model.refine_result',
-              payload: { refined: text, english: text, error: 'Refinement returned no result' },
-            });
-          }
-        } catch (err) {
-          send(ws, {
-            type: 'model.refine_result',
-            payload: {
-              refined: text,
-              english: text,
-              error: err instanceof Error ? err.message : String(err),
-            },
-          });
-        }
+        await handleModelRefine(agentConfigCtx, ws, (msg as { payload: { text: string } }).payload.text);
         break;
       }
 
@@ -2922,64 +2037,6 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     }
   }
 
-  async function handleUserMessage(
-    ws: WebSocket,
-    _client: ConnectedClient,
-    content: string,
-  ): Promise<void> {
-    // Guard against overlapping runs on the same Agent instance. Two
-    // rapid user messages would otherwise start a second agent.run()
-    // before the first one's cleanup settles, corrupting context state.
-    // Scoped to the requesting socket via `abortControllers` — a second
-    // tab's `user_message` is allowed to start its own run; only an
-    // overlapping message from the SAME tab is rejected.
-    if (abortControllers.has(ws)) {
-      send(ws, {
-        type: 'error',
-        payload: { phase: 'agent.run', message: 'A run is already in progress. Abort it first.' },
-      });
-      return;
-    }
-
-    // Abort any existing run (safety net; the guard above makes this
-    // unreachable in the overlapping case, but direct abort requests
-    // from the client still need the controller reference).
-    const wsAbort = new AbortController();
-    abortControllers.set(ws, wsAbort);
-
-    try {
-      const result = await opts.agent.run(content, {
-        signal: wsAbort.signal,
-      });
-
-      send(ws, {
-        type: 'run.result',
-        payload: {
-          status: result.status,
-          iterations: result.iterations,
-          finalText: result.finalText,
-          error: result.error
-            ? {
-                code: result.error.code,
-                message: result.error.message,
-                recoverable: result.error.recoverable,
-              }
-            : undefined,
-        },
-      });
-    } catch (err) {
-      send(ws, {
-        type: 'error',
-        payload: {
-          phase: 'agent.run',
-          message: err instanceof Error ? err.message : String(err),
-        },
-      });
-    } finally {
-      abortControllers.delete(ws);
-    }
-  }
-
   function send(ws: WebSocket, msg: WSServerMessage): void {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(msg));
@@ -2989,7 +2046,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
   function shutdown(): void {
     console.log('[WebUI] Shutting down...');
     unregisterWebuiClient();
-    httpServer?.close();
+    httpServer?.server.close();
     opts.onExit?.();
   }
 
@@ -3004,238 +2061,6 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
           // — let the 'close' handler remove it from the map naturally.
         }
       }
-    }
-  }
-
-  // ---- Provider/Model/Key management handlers ----
-
-  async function handleProvidersList(ws: WebSocket): Promise<void> {
-    if (!opts.modelsRegistry) {
-      sendResult(ws, false, 'Models registry not available');
-      return;
-    }
-    try {
-      const providers = await opts.modelsRegistry.listProviders();
-      const savedProviders = await loadSavedProviders(opts.globalConfigPath);
-      const savedIds = new Set(Object.keys(savedProviders));
-
-      send(ws, {
-        type: 'provider.catalog',
-        payload: {
-          providers: providers.map((p) => ({
-            id: p.id,
-            name: p.name,
-            family: p.family,
-            apiBase: p.apiBase,
-            envVars: p.envVars,
-            modelCount: p.models.length,
-            hasApiKey: savedIds.has(p.id) || p.envVars.some((v) => !!process.env[v]),
-          })),
-        },
-      });
-    } catch (err) {
-      sendResult(ws, false, err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  async function handleProviderModels(ws: WebSocket, providerId: string): Promise<void> {
-    if (!opts.modelsRegistry) {
-      sendResult(ws, false, 'Models registry not available');
-      return;
-    }
-    try {
-      const provider = await opts.modelsRegistry.getProvider(providerId);
-      if (!provider) {
-        sendResult(ws, false, `Provider "${providerId}" not found in catalog`);
-        return;
-      }
-      send(ws, {
-        type: 'provider.models',
-        payload: {
-          provider: providerId,
-          models: provider.models.map((m) => ({
-            id: m.id,
-            name: m.name,
-            releaseDate: m.release_date,
-            contextWindow: m.limit?.context,
-            inputCost: m.cost?.input,
-            outputCost: m.cost?.output,
-            capabilities: [
-              ...(m.tool_call ? ['tools'] : []),
-              ...(m.reasoning ? ['reasoning'] : []),
-              ...(m.modalities?.input?.includes('image') ? ['vision'] : []),
-              ...(m.open_weights ? ['open_weights'] : []),
-            ],
-          })),
-        },
-      });
-    } catch (err) {
-      sendResult(ws, false, err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  async function handleProvidersSaved(ws: WebSocket): Promise<void> {
-    try {
-      const providers = await loadSavedProviders(opts.globalConfigPath);
-      send(ws, {
-        type: 'providers.saved',
-        payload: {
-          providers: Object.entries(providers).map(([id, cfg]) => ({
-            id,
-            family: cfg.family,
-            baseUrl: cfg.baseUrl,
-            apiKeys: normalizeKeys(cfg).map((k) => ({
-              label: k.label,
-              maskedKey: maskedKey(k.apiKey),
-              isActive: k.label === cfg.activeKey,
-              createdAt: k.createdAt,
-            })),
-          })),
-        },
-      });
-    } catch (err) {
-      sendResult(ws, false, err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  async function handleKeyUpsert(
-    ws: WebSocket,
-    providerId: string,
-    label: string,
-    apiKey: string,
-  ): Promise<void> {
-    try {
-      const providers = await loadSavedProviders(opts.globalConfigPath);
-      const existing = providers[providerId] ?? { type: providerId };
-      const keys = normalizeKeys(existing);
-
-      // Check if label exists
-      const existingIdx = keys.findIndex((k) => k.label === label);
-      if (existingIdx >= 0) {
-        keys[existingIdx] = { ...expectDefined(keys[existingIdx]), apiKey, createdAt: nowIso() };
-      } else {
-        keys.push({ label, apiKey, createdAt: nowIso() });
-      }
-
-      writeKeysBack(existing, keys);
-      if (!existing.activeKey) existing.activeKey = label;
-      providers[providerId] = existing;
-
-      await saveProviders(opts.globalConfigPath, providers);
-      sendResult(ws, true, `Key "${label}" saved for ${providerId}`);
-    } catch (err) {
-      sendResult(ws, false, err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  async function handleKeyDelete(ws: WebSocket, providerId: string, label: string): Promise<void> {
-    try {
-      const providers = await loadSavedProviders(opts.globalConfigPath);
-      const existing = providers[providerId];
-      if (!existing) {
-        sendResult(ws, false, `Provider "${providerId}" not found`);
-        return;
-      }
-      const keys = normalizeKeys(existing).filter((k) => k.label !== label);
-      if (keys.length === 0) {
-        delete providers[providerId];
-      } else {
-        writeKeysBack(existing, keys);
-        if (existing.activeKey === label) {
-          existing.activeKey = keys[0]?.label;
-        }
-        providers[providerId] = existing;
-      }
-      await saveProviders(opts.globalConfigPath, providers);
-      sendResult(ws, true, `Key "${label}" deleted from ${providerId}`);
-    } catch (err) {
-      sendResult(ws, false, err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  async function handleKeySetActive(
-    ws: WebSocket,
-    providerId: string,
-    label: string,
-  ): Promise<void> {
-    try {
-      const providers = await loadSavedProviders(opts.globalConfigPath);
-      const existing = providers[providerId];
-      if (!existing) {
-        sendResult(ws, false, `Provider "${providerId}" not found`);
-        return;
-      }
-      existing.activeKey = label;
-      writeKeysBack(existing, normalizeKeys(existing));
-      providers[providerId] = existing;
-      await saveProviders(opts.globalConfigPath, providers);
-      sendResult(ws, true, `Active key for ${providerId} set to "${label}"`);
-    } catch (err) {
-      sendResult(ws, false, err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  async function handleProviderAdd(
-    ws: WebSocket,
-    payload: {
-      id: string;
-      family: string;
-      baseUrl?: string | undefined;
-      apiKey?: string | undefined;
-    },
-  ): Promise<void> {
-    try {
-      const providers = await loadSavedProviders(opts.globalConfigPath);
-      if (providers[payload.id]) {
-        sendResult(ws, false, `Provider "${payload.id}" already exists. Use key.add to add a key.`);
-        return;
-      }
-      const newProv: ProviderConfig = {
-        type: payload.id,
-        family: payload.family as ProviderConfig['family'],
-        baseUrl: payload.baseUrl,
-      };
-      if (payload.apiKey) {
-        newProv.apiKeys = [{ label: 'default', apiKey: payload.apiKey, createdAt: nowIso() }];
-        newProv.activeKey = 'default';
-      }
-      providers[payload.id] = newProv;
-      await saveProviders(opts.globalConfigPath, providers);
-      sendResult(ws, true, `Provider "${payload.id}" added`);
-      console.log(`[WebUI] Provider "${payload.id}" added via provider.add`);
-      broadcast({
-        type: 'providers.saved',
-        payload: {
-          providers: Object.entries(providers).map(([id, cfg]) => ({
-            id,
-            family: cfg.family,
-            baseUrl: cfg.baseUrl,
-            apiKeys: normalizeKeys(cfg).map((k) => ({
-              label: k.label,
-              maskedKey: maskedKey(k.apiKey),
-              isActive: k.label === cfg.activeKey,
-              createdAt: k.createdAt,
-            })),
-          })),
-        },
-      });
-    } catch (err) {
-      sendResult(ws, false, err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  async function handleProviderRemove(ws: WebSocket, providerId: string): Promise<void> {
-    try {
-      const providers = await loadSavedProviders(opts.globalConfigPath);
-      if (!providers[providerId]) {
-        sendResult(ws, false, `Provider "${providerId}" not found`);
-        return;
-      }
-      delete providers[providerId];
-      await saveProviders(opts.globalConfigPath, providers);
-      sendResult(ws, true, `Provider "${providerId}" removed`);
-    } catch (err) {
-      sendResult(ws, false, err instanceof Error ? err.message : String(err));
     }
   }
 

@@ -202,8 +202,10 @@ export function ChatInput({
           downloadChatAsMarkdown();
           addMessage({ role: 'assistant', content: '📥 Chat exported to your downloads folder.' });
           return true;
+        case '/interrupt':
         case '/abort':
         case '/stop':
+        case '/int':
           sendAbort();
           setLoading(false);
           return true;

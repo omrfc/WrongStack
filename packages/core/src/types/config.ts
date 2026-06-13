@@ -312,6 +312,13 @@ export interface Config {
    */
   fallbackModels?: string[] | undefined;
   /**
+   * When `true` (the default) and `fallbackModels` is empty, a fallback chain
+   * is derived automatically from the other keyed providers/models so 429s
+   * recover out of the box. Set `false` to disable the smart default and only
+   * use an explicit `fallbackModels` list. Toggle via `/fallback auto on|off`.
+   */
+  fallbackAuto?: boolean | undefined;
+  /**
    * Lifecycle shell hooks, keyed by event. Each command receives the hook
    * `HookInput` JSON on stdin; a JSON `HookOutcome` on stdout (and exit code 2
    * = block) steers the agent. In-process hooks are registered separately via

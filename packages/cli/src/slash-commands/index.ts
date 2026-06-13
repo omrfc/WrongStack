@@ -101,6 +101,17 @@ export interface SlashCommandContext {
    */
   onFleetKill?: (() => number) | undefined;
   /**
+   * Abort the in-flight leader run. Installed by the surface (REPL/TUI) on
+   * startup so `/interrupt` can stop the current iteration — slash commands
+   * don't get the RunController directly. The default no-op returns false;
+   * a real handler returns true when it actually aborted a run.
+   */
+  interruptController?:
+    | {
+        abortLeader: () => boolean;
+      }
+    | undefined;
+  /**
    * Terminate a specific subagent by id. Returns true if terminated.
    */
   onFleetTerminate?: ((subagentId: string) => boolean) | undefined;
@@ -334,11 +345,13 @@ import { buildDevCommand } from './dev.js';
 import { buildDiagCommand, buildStatsCommand } from './diag-stats.js';
 import { buildDoctorCommand } from './doctor.js';
 import { buildEnhanceCommand } from './enhance.js';
+import { buildFallbackCommand } from './fallback.js';
 import { buildFixCommand } from './fix.js';
 import { buildFleetCommand } from './fleet.js';
 import { buildGoalCommand } from './goal.js';
 import { buildHelpCommand } from './help.js';
 import { buildInitCommand } from './init.js';
+import { buildInterruptCommand } from './interrupt.js';
 import { buildMailboxCommand } from './mailbox.js';
 import { buildMailboxDemoCommand } from './mailbox-demo.js';
 import { buildMcpSlashCommand } from './mcp.js';
@@ -376,6 +389,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildHelpCommand(opts),
     buildInitCommand(opts),
     buildClearCommand(opts),
+    buildInterruptCommand(opts),
     buildCompactCommand(opts),
     buildContextCommand(opts),
     buildDelegateCommand(opts),
@@ -419,6 +433,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildSettingsCommand(opts),
     buildTelegramSetupCommand(opts),
     buildSetModelCommand(opts),
+    buildFallbackCommand(opts),
     buildModelCapsCommand(opts),
     buildModelsCommand(opts),
     buildCollabCommand(opts),

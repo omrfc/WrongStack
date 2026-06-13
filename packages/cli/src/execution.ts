@@ -94,6 +94,11 @@ export interface ExecutionDeps {
     enabled: boolean;
     setEnabled: (enabled: boolean) => void;
   };
+  /** Shared controller for the `/interrupt` slash command (leader abort). The
+   *  TUI rebinds `abortLeader` on mount; the REPL installs its own. */
+  interruptController?: {
+    abortLeader: () => boolean;
+  };
   /** Shared controller for the `/enhance on|off` prompt-refinement toggle. */
   enhanceController?: {
     enabled: boolean;
@@ -243,6 +248,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     director,
     fleetRoster,
     fleetStreamController,
+    interruptController,
     enhanceController,
     statuslineHiddenItems,
     setStatuslineHiddenItems,
@@ -994,6 +1000,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             dispatch({ type: 'resetContextChip' });
           },
           fleetStreamController,
+          interruptController,
           enhanceController,
           statuslineHiddenItems,
           setStatuslineHiddenItems,
@@ -1551,6 +1558,25 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         skillLoader,
         agentsMonitorController,
         fleetStreamController,
+        interruptController,
+        onInterruptFleet: director
+          ? () => {
+              // Mirror the slash /fleet kill path: remove (not just terminate)
+              // every running/idle subagent so a Ctrl+C stops the whole fleet.
+              let killed = 0;
+              for (const sa of director.status().subagents) {
+                if (sa.status === 'running' || sa.status === 'idle') {
+                  try {
+                    director.remove(sa.id);
+                    killed++;
+                  } catch {
+                    /* best-effort */
+                  }
+                }
+              }
+              return killed;
+            }
+          : undefined,
         onAgentIterationComplete: director
           ? (tokens) => director.setLeaderContextPressure(tokens)
           : undefined,

@@ -173,6 +173,15 @@ export interface RunTuiOptions {
     setEnabled: (enabled: boolean) => void;
   } | undefined;
   /**
+   * Controller for the `/interrupt` slash command. The App installs the real
+   * `abortLeader` on mount so the command can abort the in-flight leader run.
+   */
+  interruptController?:
+    | {
+        abortLeader: () => boolean;
+      }
+    | undefined;
+  /**
    * Controller for the `/enhance on|off` prompt-refinement toggle. The App
    * installs a dispatch-backed `setEnabled` here on mount so the slash command
    * (run in the CLI process) flips the TUI's reducer flag. Mirrors
@@ -188,9 +197,13 @@ export interface RunTuiOptions {
    * visible bar without a round-trip. The initial value is loaded from
    * the config file before App mounts.
    */
-  statuslineHiddenItems: Array<'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>;
+  statuslineHiddenItems: Array<
+    'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
+  >;
   setStatuslineHiddenItems: (
-    items: Array<'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>,
+    items: Array<
+      'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
+    >,
   ) => void;
   /**
    * Controller for the agents monitor overlay. App installs a dispatch-backed
@@ -686,6 +699,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
             ? (dispatch) => opts.onClearHistory?.(dispatch)
             : undefined,
           fleetStreamController: opts.fleetStreamController,
+          interruptController: opts.interruptController,
           enhanceController: opts.enhanceController,
           enhanceEnabled: opts.enhanceController?.enabled ?? true,
           statuslineHiddenItems: opts.statuslineHiddenItems,

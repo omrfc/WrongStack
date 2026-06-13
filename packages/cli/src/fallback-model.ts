@@ -4,6 +4,7 @@ import {
   type EventBus,
   type Logger,
   type Provider,
+  type ProviderConfig,
   ProviderError,
   StreamHangError,
 } from '@wrongstack/core';
@@ -14,9 +15,10 @@ export interface FallbackModelDeps {
   /**
    * Builds a credential-resolved Provider for a provider id (alias-resolved),
    * WITHOUT persisting anything to config/configStore. Supplied by the CLI boot
-   * path, which shares this with the `/model` switch logic.
+   * path, which shares this with the `/model` switch logic. May be async — the
+   * subagent host resolves a provider's real context window asynchronously.
    */
-  buildProvider: (providerId: string) => Provider;
+  buildProvider: (providerId: string) => Provider | Promise<Provider>;
   /**
    * Called after the active model changes (a fallback hop or the primary
    * restore) so the host can refresh the auto-compaction / context-window
@@ -24,7 +26,8 @@ export interface FallbackModelDeps {
    */
   onModelSwitch?: (providerId: string, modelId: string) => void;
   events: EventBus;
-  logger: Logger;
+  /** Optional — warnings about un-buildable fallback providers. */
+  logger?: Logger | undefined;
 }
 
 interface ModelRef {
@@ -77,9 +80,74 @@ function shouldFallback(err: unknown): number | null {
   return null;
 }
 
+/** A provider is usable as a fallback target when it has a stored key, a key
+ *  list, or a populated env var. Mirrors `setmodel.providerHasKey`. */
+function providerHasKey(entry: ProviderConfig | undefined): boolean {
+  if (!entry) return false;
+  if (typeof entry.apiKey === 'string' && entry.apiKey.length > 0) return true;
+  if (Array.isArray(entry.apiKeys) && entry.apiKeys.some((k) => k?.apiKey)) return true;
+  if (Array.isArray(entry.envVars) && entry.envVars.some((v) => !!process.env[v])) return true;
+  return false;
+}
+
+/** Hard ceiling on the auto-derived chain so we don't burn through a dozen
+ *  models on a transient blip. */
+const SMART_DEFAULT_MAX = 4;
+
 /**
- * Build the cross-provider fallback extension. Returns `null` when no
- * `fallbackModels` are configured, so the caller can skip registration.
+ * Derive a fallback chain from the configured providers when the user has not
+ * set an explicit `fallbackModels` list. Picks declared models from every
+ * keyed provider — same-provider alternatives first (same key, cheapest
+ * failover), then cross-provider — excluding the active leader model. Returns
+ * `[]` when nothing usable is configured (e.g. providers with no `models`
+ * list), in which case the extension is a no-op.
+ */
+export function smartDefaultFallbackChain(config: Config): string[] {
+  const leaderProvider = config.provider;
+  const leaderModel = config.model;
+  const providers = config.providers ?? {};
+  const seen = new Set<string>();
+  const sameProvider: string[] = [];
+  const crossProvider: string[] = [];
+
+  // Leader provider first so its other models lead the chain.
+  const ids = Object.keys(providers).sort((a, b) =>
+    a === leaderProvider ? -1 : b === leaderProvider ? 1 : a.localeCompare(b),
+  );
+
+  for (const id of ids) {
+    const entry = providers[id];
+    if (!providerHasKey(entry)) continue;
+    const models = entry?.models ?? [];
+    for (const model of models) {
+      if (id === leaderProvider && model === leaderModel) continue;
+      const ref = `${id}/${model}`;
+      if (seen.has(ref)) continue;
+      seen.add(ref);
+      (id === leaderProvider ? sameProvider : crossProvider).push(ref);
+    }
+  }
+  return [...sameProvider, ...crossProvider].slice(0, SMART_DEFAULT_MAX);
+}
+
+/**
+ * The effective fallback chain for a turn: the explicit `fallbackModels` list
+ * when non-empty, otherwise the smart default (unless `fallbackAuto` is off).
+ */
+export function effectiveFallbackChain(config: Config): string[] {
+  const explicit = config.fallbackModels ?? [];
+  if (explicit.length > 0) return explicit;
+  if (config.fallbackAuto === false) return [];
+  return smartDefaultFallbackChain(config);
+}
+
+/**
+ * Build the cross-provider fallback extension. Always returns an extension —
+ * the effective chain (`effectiveFallbackChain`) is recomputed every turn from
+ * the live config, so a chain that is empty at boot but populated later (via
+ * `/fallback add` or the smart default kicking in once a key is added) takes
+ * effect WITHOUT a restart. An empty chain makes the wrapper a no-op (it just
+ * rethrows the original error).
  *
  * Mechanism (see plan): wraps the provider runner. The inner runner already
  * applies the per-model retry policy (backoff, up to 5 tries for 429), so the
@@ -89,25 +157,22 @@ function shouldFallback(err: unknown): number | null {
  * entries work. `beforeRun` restores the configured primary at the start of
  * every turn, giving Claude's "retry the primary each user turn" semantics.
  */
-export function createFallbackModelExtension(deps: FallbackModelDeps): AgentExtension | null {
-  const initial = deps.getConfig().fallbackModels ?? [];
-  if (initial.length === 0) return null;
-
+export function createFallbackModelExtension(deps: FallbackModelDeps): AgentExtension {
   // True when a prior turn left the live context on a fallback model.
   let dirty = false;
 
   return {
     name: 'fallback-model',
 
-    beforeRun: (ctx) => {
+    beforeRun: async (ctx) => {
       if (!dirty) return;
       const cfg = deps.getConfig();
       try {
-        ctx.provider = deps.buildProvider(cfg.provider);
+        ctx.provider = await deps.buildProvider(cfg.provider);
         ctx.model = cfg.model;
         deps.onModelSwitch?.(cfg.provider, cfg.model);
       } catch (err) {
-        deps.logger.warn(
+        deps.logger?.warn(
           `fallback-model: could not restore primary "${cfg.provider}/${cfg.model}": ${
             err instanceof Error ? err.message : String(err)
           }`,
@@ -122,7 +187,7 @@ export function createFallbackModelExtension(deps: FallbackModelDeps): AgentExte
       } catch (firstErr) {
         let lastErr: unknown = firstErr;
         const cfg = deps.getConfig();
-        const chain = cfg.fallbackModels ?? [];
+        const chain = effectiveFallbackChain(cfg);
 
         for (const ref of chain) {
           const status = shouldFallback(lastErr);
@@ -136,9 +201,9 @@ export function createFallbackModelExtension(deps: FallbackModelDeps): AgentExte
 
           let nextProvider: Provider;
           try {
-            nextProvider = deps.buildProvider(targetProviderId);
+            nextProvider = await deps.buildProvider(targetProviderId);
           } catch (err) {
-            deps.logger.warn(
+            deps.logger?.warn(
               `fallback-model: skipping "${ref}" — cannot build provider "${targetProviderId}": ${
                 err instanceof Error ? err.message : String(err)
               }`,

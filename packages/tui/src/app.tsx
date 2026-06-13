@@ -463,14 +463,29 @@ export interface AppProps {
     setEnabled: (enabled: boolean) => void;
   } | undefined;
   /**
+   * Shared controller for the `/interrupt` slash command. The App installs the
+   * real `abortLeader` on mount so the command can abort the in-flight leader
+   * run (slash commands don't get the RunController). The fleet teardown is the
+   * command's own `onFleetKill`.
+   */
+  interruptController?:
+    | {
+        abortLeader: () => boolean;
+      }
+    | undefined;
+  /**
    * Controller for status bar hidden items. App installs a dispatch-backed
    * setter on mount so the /statusline slash command can update the TUI's
    * visible bar without a round-trip. The initial value is loaded from
    * the config file before App mounts.
    */
-  statuslineHiddenItems: Array<'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>;
+  statuslineHiddenItems: Array<
+    'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
+  >;
   setStatuslineHiddenItems: (
-    items: Array<'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost'>,
+    items: Array<
+      'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir'
+    >,
   ) => void;
   /**
    * Controller for the agents monitor overlay. App installs a dispatch-backed
@@ -595,6 +610,7 @@ export function App({
   listSessions,
   onResumeSession,
   fleetStreamController,
+  interruptController,
   statuslineHiddenItems,
   setStatuslineHiddenItems,
   agentsMonitorController,
@@ -2643,6 +2659,17 @@ export function App({
         entry: { kind: 'error', text: e.description },
       });
     });
+    // Fallback hop — the chain rotated to a working model after the primary's
+    // retries were exhausted. Surface which model is now answering.
+    const offFallback = events.on('provider.fallback', (e) => {
+      dispatch({
+        type: 'addEntry',
+        entry: {
+          kind: 'warn',
+          text: `↻ rate-limited (${e.status}) — switched to ${e.to.providerId}/${e.to.model}`,
+        },
+      });
+    });
     // Per-iteration text flush. Without this, the entire run buffers all text
     // deltas in the live tail box and dumps them into history as ONE assistant
     // entry only after `agent.run()` returns. Tool results, in contrast, land
@@ -2735,6 +2762,7 @@ export function App({
       offTool();
       offRetry();
       offProvErr();
+      offFallback();
       offProvResp();
       offConfirmNeeded();
       offTrustPersisted();
@@ -2821,6 +2849,22 @@ export function App({
     enhanceController,
     agentsMonitorController,
   });
+
+  // Install the leader-abort handler for the /interrupt slash command. Slash
+  // commands don't get the RunController, so the command can't stop the current
+  // iteration on its own — it calls this. The fleet teardown is /interrupt's
+  // own onFleetKill, so this only aborts the leader + flips the status. Because
+  // slash commands dispatch even mid-run in the TUI, /interrupt stops a run
+  // that is wedged retrying a 429.
+  useEffect(() => {
+    if (!interruptController) return;
+    interruptController.abortLeader = () => {
+      if (stateRef.current.status === 'idle') return false;
+      activeCtrlRef.current?.abort('user interrupt (/interrupt)');
+      dispatch({ type: 'status', status: 'aborting' });
+      return true;
+    };
+  }, [interruptController, dispatch, stateRef]);
 
   // Track double-Esc for input buffer clearing.
   const lastEscAtRef = useRef(0);

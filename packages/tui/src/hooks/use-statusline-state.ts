@@ -18,6 +18,22 @@ import { useState } from 'react';
 
 export type AutonomyStage = 'off' | 'suggest' | 'auto' | 'eternal' | 'eternal-parallel';
 
+/**
+ * A statusline chip the user can hide. The canonical set — `StatusBar` and the
+ * `/statusline` slash command both key off these names (including `working_dir`,
+ * which some of the older inline unions had drifted out of sync on).
+ */
+export type StatuslineHiddenItem =
+  | 'todos'
+  | 'plan'
+  | 'tasks'
+  | 'fleet'
+  | 'git'
+  | 'elapsed'
+  | 'context'
+  | 'cost'
+  | 'working_dir';
+
 export interface UseStatuslineStateOptions {
   model: string;
   provider: string | undefined;
@@ -49,8 +65,8 @@ export interface UseStatuslineState {
   setAutonomyLive: (v: AutonomyStage) => void;
   liveModeLabel: string;
   setLiveModeLabel: (v: string) => void;
-  hiddenItems: string[];
-  setHiddenItems: (v: string[]) => void;
+  hiddenItems: StatuslineHiddenItem[];
+  setHiddenItems: (v: StatuslineHiddenItem[]) => void;
   sessionCount: number;
   setSessionCount: (v: number) => void;
 }
@@ -71,10 +87,10 @@ export function useStatuslineState(opts: UseStatuslineStateOptions): UseStatusli
   // Reactive mirror of the active agent mode so the status bar chip
   // updates after /mode <id> without remounting the App.
   const [liveModeLabel, setLiveModeLabel] = useState<string>(opts.modeLabel ?? '');
-  const [hiddenItems, setHiddenItems] = useState<string[]>(
-    Array.isArray(opts.statuslineHiddenItems)
+  const [hiddenItems, setHiddenItems] = useState<StatuslineHiddenItem[]>(
+    (Array.isArray(opts.statuslineHiddenItems)
       ? [...opts.statuslineHiddenItems]
-      : [...(opts.statuslineHiddenItems as readonly string[])],
+      : [...(opts.statuslineHiddenItems as readonly string[])]) as StatuslineHiddenItem[],
   );
   const [sessionCount, setSessionCount] = useState<number>(0);
 

@@ -149,6 +149,23 @@ export interface ReplOptions {
       }
     | undefined;
   /**
+   * Shared controller for the `/interrupt` slash command. The REPL installs
+   * `abortLeader` here so the command can abort the active turn. Note: the REPL
+   * prompt is blocked during a run, so `/interrupt` is only dispatched at the
+   * prompt (where nothing is in flight) — Ctrl+C is the mid-run path.
+   */
+  interruptController?:
+    | {
+        abortLeader: () => boolean;
+      }
+    | undefined;
+  /**
+   * Stop every running subagent. Wired to the director so the first Ctrl+C (and
+   * `/interrupt`) stops the fleet too, not just the leader. Returns the count
+   * stopped. Undefined when no fleet/director is active.
+   */
+  onInterruptFleet?: (() => number) | undefined;
+  /**
    * Called after each agent.run() iteration completes so the host can
    * report context pressure to the Director (for spawn pre-checks) or
    * other systems that track token usage across the session.
@@ -175,6 +192,20 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
   // before each agent.run so the SIGINT handler can target it.
   let activeCtrl: AbortController | undefined;
   let interrupts = 0;
+  // Install the leader-abort handler for the `/interrupt` slash command. The
+  // closure reads the live `activeCtrl` each call. In the REPL a slash command
+  // only dispatches at the prompt (input is blocked during a run), so this is
+  // usually a no-op there — Ctrl+C is the mid-run path. Still wired for
+  // completeness and parity with the other surfaces.
+  if (opts.interruptController) {
+    opts.interruptController.abortLeader = () => {
+      if (activeCtrl) {
+        activeCtrl.abort();
+        return true;
+      }
+      return false;
+    };
+  }
   // Consecutive auto-proceed turns since the last manual input. Auto mode
   // feeds suggestion #1 back into the agent after every turn — a model that
   // emits "Next steps" on every reply would otherwise loop forever (and the
@@ -203,7 +234,15 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
     }
     if (activeCtrl) {
       activeCtrl.abort();
-      opts.renderer.writeWarning('Iteration cancelled. Press Ctrl+C again to exit.');
+      // Stop subagents too — "interrupt" means stop everything, not just the
+      // leader. Without this the fleet keeps running on the old direction and
+      // finishes minutes later. Matches the TUI's ESC-interrupt behavior.
+      const killed = opts.onInterruptFleet?.() ?? 0;
+      opts.renderer.writeWarning(
+        killed > 0
+          ? `Iteration cancelled · stopped ${killed} subagent${killed === 1 ? '' : 's'}. Press Ctrl+C again to exit.`
+          : 'Iteration cancelled. Press Ctrl+C again to exit.',
+      );
     } else {
       opts.renderer.writeWarning('Press Ctrl+C again to exit.');
     }

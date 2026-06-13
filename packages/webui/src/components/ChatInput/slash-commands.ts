@@ -38,14 +38,14 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   // Config
   { name: '/settings', category: 'Config', aliases: ['/model'], description: 'Open settings (provider/model/keys)' },
   { name: '/enhance', category: 'Config', description: 'Toggle prompt refinement before sending' },
-  { name: '/abort', category: 'Config', aliases: ['/stop'], description: 'Abort the current run' },
+  { name: '/interrupt', category: 'Run', aliases: ['/abort', '/stop', '/int'], description: 'Stop the current run (abort the in-flight request)' },
 
   // App
   { name: '/help', category: 'App', description: 'Show every slash command and what it does' },
   { name: '/exit', category: 'App', description: 'Exit the session and close WebUI' },
 ];
 
-export const SLASH_CATEGORY_ORDER: SlashCategory[] = ['Session', 'Inspect', 'Config', 'App'];
+export const SLASH_CATEGORY_ORDER: SlashCategory[] = ['Run', 'Session', 'Inspect', 'Config', 'App'];
 
 export function matchSlash(query: string): SlashCommandDef[] {
   const q = query.toLowerCase();

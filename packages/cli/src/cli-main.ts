@@ -401,6 +401,19 @@ export async function main(argv: string[]): Promise<number> {
     writeErr(color.yellow(`  ⟳ retry ${p.attempt} in ${secs}s — ${p.description}\n`));
     spinner.start(color.dim(`${config.provider}/${config.model} thinking…`));
   });
+  // Fallback hop — the primary exhausted its retries and we rotated to the next
+  // model in the chain. Tell the user which model is now answering.
+  evOn('provider.fallback', (p) => {
+    spinner.stop();
+    if (streamingActive) {
+      renderer.write('\n');
+      streamingActive = false;
+    }
+    writeErr(
+      color.yellow(`  ↻ rate-limited (${p.status}) — switched to ${p.to.providerId}/${p.to.model}\n`),
+    );
+    spinner.start(color.dim(`${p.to.providerId}/${p.to.model} thinking…`));
+  });
   evOn('provider.error', (p) => {
     spinner.stop();
     if (streamingActive) {
@@ -887,15 +900,19 @@ export async function main(argv: string[]): Promise<number> {
   };
 
   // Cross-provider fallback: switch to the next configured model when the
-  // primary is overloaded. No-op (null) when `fallbackModels` is empty.
-  const fallbackExtension = createFallbackModelExtension({
-    getConfig: () => config,
-    buildProvider: buildProviderForId,
-    onModelSwitch: refreshMaxContextFor,
-    events,
-    logger,
-  });
-  if (fallbackExtension) agent.extensions.register(fallbackExtension);
+  // primary is overloaded (429/529/5xx). Registered unconditionally — the
+  // effective chain (explicit `fallbackModels` or the smart default) is
+  // recomputed every turn, so a chain populated at runtime via `/fallback`
+  // takes effect without a restart. An empty chain makes it a no-op.
+  agent.extensions.register(
+    createFallbackModelExtension({
+      getConfig: () => config,
+      buildProvider: buildProviderForId,
+      onModelSwitch: refreshMaxContextFor,
+      events,
+      logger,
+    }),
+  );
 
   // Session-end memory consolidation — extracts key learnings from the
   // completed session and persists them as memory entries.
@@ -1329,6 +1346,14 @@ export async function main(argv: string[]): Promise<number> {
     },
   };
 
+  // Shared controller for the `/interrupt` slash command. The surface (TUI)
+  // rebinds `abortLeader` on mount to abort its in-flight RunController; the
+  // default no-op returns false (nothing to abort). The REPL installs its own
+  // below. `/interrupt` pairs this with `onFleetKill` to stop everything.
+  const interruptController = {
+    abortLeader: (): boolean => false,
+  };
+
   // Shared controller for the `/enhance on|off` prompt-refinement toggle.
   // Same pattern as `fleetStreamController`: the TUI rebinds `setEnabled` to a
   // dispatch-backed setter on mount. Seeded from persisted config (default on).
@@ -1411,6 +1436,7 @@ export async function main(argv: string[]): Promise<number> {
     planPath,
     modeStore,
     fleetStreamController,
+    interruptController,
     enhanceController,
     llmProvider: provider,
     llmModel: config.model,
@@ -2294,6 +2320,7 @@ export async function main(argv: string[]): Promise<number> {
     director: director ?? null,
     fleetRoster: FLEET_ROSTER as Record<string, { name: string }>,
     fleetStreamController,
+    interruptController,
     enhanceController,
     statuslineHiddenItems,
     setStatuslineHiddenItems,
