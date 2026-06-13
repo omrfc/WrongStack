@@ -27,6 +27,11 @@ export type ToolWrapper = (tool: Tool) => Tool;
 
 export class ToolRegistry {
   private readonly tools = new Map<string, { tool: Tool; owner: string }>();
+  /** Monotonic version bumped on every registry mutation. */
+  private _version = 0;
+  /** Cached `list()` result, frozen after build. Invalidated on _version change. */
+  private _listSnapshot: readonly Tool[] | undefined;
+  private _listSnapshotVersion = -1;
 
   /** Pre-compute tool definition token estimate once at registration time. */
   private _stampDefTokens(tool: Tool): void {
@@ -58,6 +63,7 @@ export class ToolRegistry {
 
     this._stampDefTokens(tool);
     this.tools.set(tool.name, { tool, owner });
+    this._version++;
   }
 
   /**
@@ -74,6 +80,7 @@ export class ToolRegistry {
 
     this._stampDefTokens(tool);
     this.tools.set(tool.name, { tool, owner });
+    this._version++;
     return true;
   }
 
@@ -152,6 +159,7 @@ export class ToolRegistry {
     wrapped._estDefTokens = undefined;
     this._stampDefTokens(wrapped);
     this.tools.set(name, { tool: wrapped, owner: `${entry.owner}+${owner}` });
+    this._version++;
   }
 
   get(name: string): Tool | undefined {
@@ -163,7 +171,13 @@ export class ToolRegistry {
   }
 
   list(): Tool[] {
-    return Array.from(this.tools.values()).map((e) => e.tool);
+    if (this._listSnapshot && this._version === this._listSnapshotVersion) {
+      return this._listSnapshot as Tool[];
+    }
+    const arr = Array.from(this.tools.values()).map((e) => e.tool);
+    this._listSnapshot = arr;
+    this._listSnapshotVersion = this._version;
+    return arr;
   }
 
   /**
