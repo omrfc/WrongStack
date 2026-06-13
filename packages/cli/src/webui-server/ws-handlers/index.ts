@@ -97,3 +97,9 @@ export {
   handleTodoUpdate,
   type WorklistContext,
 } from './worklist.js';
+export {
+  handleProcessKill,
+  handleProcessKillAll,
+  handleProcessList,
+  type ProcessContext,
+} from './process.js';
