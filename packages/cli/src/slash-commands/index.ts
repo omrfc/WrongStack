@@ -101,6 +101,17 @@ export interface SlashCommandContext {
    */
   onFleetKill?: (() => number) | undefined;
   /**
+   * Abort the in-flight leader run. Installed by the surface (REPL/TUI) on
+   * startup so `/interrupt` can stop the current iteration — slash commands
+   * don't get the RunController directly. The default no-op returns false;
+   * a real handler returns true when it actually aborted a run.
+   */
+  interruptController?:
+    | {
+        abortLeader: () => boolean;
+      }
+    | undefined;
+  /**
    * Terminate a specific subagent by id. Returns true if terminated.
    */
   onFleetTerminate?: ((subagentId: string) => boolean) | undefined;
@@ -350,6 +361,7 @@ import { buildNextCommand } from './next.js';
 import { buildPluginCommand } from './plugin.js';
 import { buildPruneCommand } from './prune.js';
 import { buildFallbackCommand } from './fallback.js';
+import { buildInterruptCommand } from './interrupt.js';
 import { buildSddCommand } from './sdd.js';
 import { buildExitCommand, buildLoadCommand, buildSaveCommand } from './session.js';
 import { buildSetModelCommand } from './setmodel.js';
@@ -377,6 +389,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildHelpCommand(opts),
     buildInitCommand(opts),
     buildClearCommand(opts),
+    buildInterruptCommand(opts),
     buildCompactCommand(opts),
     buildContextCommand(opts),
     buildDelegateCommand(opts),
