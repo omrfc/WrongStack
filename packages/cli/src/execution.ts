@@ -1381,6 +1381,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           },
           // `wrongstack quick` sets flags.quick — open the F3 agents monitor by default.
           initialAgentsMonitorOpen: !!flags.quick,
+          tokenSavingMode: config.features.tokenSavingMode,
+          toolCount: agent.tools.list().length,
         });
 
         // After TUI exits with PROJECT_SWITCH_EXIT_CODE, spawn wstack in the new project.

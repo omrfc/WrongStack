@@ -213,6 +213,13 @@ export interface AppProps {
   /** When true, the first Ctrl+C aborts work and shows "confirm exit" rather than "exit". */
   confirmExit?: boolean | undefined;
   /**
+   * Token-saving mode indicator. When true, the status bar shows a "💾 save"
+   * chip and the tool count reflects registered (non-omitted) tools.
+   */
+  tokenSavingMode?: boolean | undefined;
+  /** Number of registered tools, displayed on the status bar line 2. */
+  toolCount?: number | undefined;
+  /**
    * Global mouse tracking. When true, SGR mouse reporting stays on for the
    * whole session. When false (default), the App still enables it *only* while
    * a selectable overlay (model/autonomy/settings/slash/@ picker) is open, so
@@ -593,6 +600,8 @@ export function App({
   provider,
   family,
   keyTail,
+  tokenSavingMode,
+  toolCount,
   getPickableProviders,
   switchProviderAndModel,
   getSettings,
@@ -5553,6 +5562,8 @@ export function App({
             autoProceedCountdown={state.countdown?.remainingSeconds ?? null}
             sessionCount={sessionCount}
             mailbox={mailboxStatus}
+            tokenSavingMode={tokenSavingMode}
+            toolCount={toolCount}
           />
           </Box>
           {/* Mailbox panel — toggled via /mailbox slash command */}

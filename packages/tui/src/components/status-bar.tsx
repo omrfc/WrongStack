@@ -259,6 +259,17 @@ export interface StatusBarProps {
   sessionCount?: number | undefined;
   /** Mailbox activity — unread count, online agents, latest message. */
   mailbox?: MailboxStatus | undefined;
+  /**
+   * Token-saving mode indicator. When true, renders a "💾 save" chip on
+   * line 2 to remind the user that non-essential tools are omitted and
+   * system prompt sections are trimmed.
+   */
+  tokenSavingMode?: boolean | undefined;
+  /**
+   * Number of registered tools. Rendered as a chip on line 2 so the user
+   * can see how many tools are available (lower count in token-saving mode).
+   */
+  toolCount?: number | undefined;
 }
 
 /**
@@ -370,7 +381,9 @@ export function StatusBar({
     (workingDir !== undefined && workingDir.length > 0) ||
     (goalSummary !== null && goalSummary !== undefined) ||
     !!modeLabel ||
-    hasAutoProceed;
+    hasAutoProceed ||
+    tokenSavingMode ||
+    (typeof toolCount === 'number' && toolCount > 0);
 
   // Line 3 is *active work* — the dynamic chips that mutate as the
   // agent / subagents make progress. Hidden when nothing is in flight
@@ -638,6 +651,18 @@ export function StatusBar({
             <>
               {yolo || startedAt != null || projectName || workingDir || git ? <Text dimColor>│</Text> : null}
               <Text color="cyan">⧉ {sessionCount} session{sessionCount === 1 ? '' : 's'}</Text>
+            </>
+          ) : null}
+          {toolCount != null ? (
+            <>
+              {yolo || startedAt != null || projectName || workingDir || git || sessionCount ? <Text dimColor>│</Text> : null}
+              <Text color="cyan">🔧 {toolCount} tool{toolCount === 1 ? '' : 's'}</Text>
+            </>
+          ) : null}
+          {tokenSavingMode ? (
+            <>
+              {yolo || startedAt != null || projectName || workingDir || git || sessionCount || toolCount ? <Text dimColor>│</Text> : null}
+              <Text color="yellow" bold>💾 save</Text>
             </>
           ) : null}
         </Box>

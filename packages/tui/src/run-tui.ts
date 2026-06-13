@@ -120,6 +120,10 @@ export interface RunTuiOptions {
   confirmExit?: boolean | undefined;
   /** Active agent mode label shown in the status bar (e.g. "teach", "brief"). */
   modeLabel?: string | undefined;
+  /** Token-saving mode indicator — shown in the TUI status bar. */
+  tokenSavingMode?: boolean | undefined;
+  /** Number of registered tools — shown on the status bar line 2. */
+  toolCount?: number | undefined;
   /** Live getter for the agent mode label so the status bar updates after /mode. */
   getModeLabel?: (() => string) | undefined;
   /**
@@ -719,6 +723,8 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           confirmExit: opts.confirmExit,
           mouse: mouseEnabled,
           modeLabel: opts.modeLabel,
+          tokenSavingMode: opts.tokenSavingMode,
+          toolCount: opts.toolCount,
           getModeLabel: opts.getModeLabel,
           registerDebugStreamCallback: opts.registerDebugStreamCallback,
           restoreDebugStreamCallback: opts.restoreDebugStreamCallback,
