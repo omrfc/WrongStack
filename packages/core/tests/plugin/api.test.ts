@@ -370,6 +370,132 @@ describe('DefaultPluginAPI', () => {
     await expect(api.session.append({ type: 'event' } as never)).resolves.toBeUndefined();
   });
 
+  // ── capability-based tool mutation (P4-6) ──────────────────────────────────
+
+  const toolWithCaps = (name: string, caps: string[]): Tool => ({
+    name,
+    description: '',
+    inputSchema: { type: 'object' },
+    permission: 'auto',
+    mutating: false,
+    capabilities: caps,
+    async execute() {
+      return '';
+    },
+  });
+
+  it('allows non-official plugin to wrap tool with matching toolMutateCapabilities', () => {
+    const tr = new ToolRegistry();
+    tr.register(toolWithCaps('read', ['fs.read']), 'core');
+    const api = new DefaultPluginAPI({
+      ownerName: 'plugin-x',
+      container: new Container(),
+      events: new EventBus(),
+      pipelines: {} as never,
+      toolRegistry: tr,
+      providerRegistry: new ProviderRegistry(),
+      config: baseConfig,
+      log: new DefaultLogger({ level: 'error' }),
+      capabilities: { toolMutateCapabilities: ['fs.read'] },
+    });
+    expect(() =>
+      api.tools.wrap('read', (t) => ({ ...t, description: 'wrapped' })),
+    ).not.toThrow();
+  });
+
+  it('denies non-official plugin to wrap tool without matching toolMutateCapabilities', () => {
+    const tr = new ToolRegistry();
+    tr.register(toolWithCaps('write', ['fs.write']), 'core');
+    const api = new DefaultPluginAPI({
+      ownerName: 'plugin-x',
+      container: new Container(),
+      events: new EventBus(),
+      pipelines: {} as never,
+      toolRegistry: tr,
+      providerRegistry: new ProviderRegistry(),
+      config: baseConfig,
+      log: new DefaultLogger({ level: 'error' }),
+      capabilities: { toolMutateCapabilities: ['fs.read'] },
+    });
+    expect(() =>
+      api.tools.wrap('write', (t) => ({ ...t, description: 'wrapped' })),
+    ).toThrow('Missing required capability');
+  });
+
+  it('denies non-official plugin to wrap tool with no capabilities declared', () => {
+    const tr = new ToolRegistry();
+    tr.register(tool('legacy'), 'core');
+    const api = new DefaultPluginAPI({
+      ownerName: 'plugin-x',
+      container: new Container(),
+      events: new EventBus(),
+      pipelines: {} as never,
+      toolRegistry: tr,
+      providerRegistry: new ProviderRegistry(),
+      config: baseConfig,
+      log: new DefaultLogger({ level: 'error' }),
+      capabilities: { toolMutateCapabilities: ['fs.read'] },
+    });
+    expect(() =>
+      api.tools.wrap('legacy', (t) => ({ ...t, description: 'wrapped' })),
+    ).toThrow('Missing required capability');
+  });
+
+  it('allows official plugin to wrap any tool regardless of capabilities', () => {
+    const tr = new ToolRegistry();
+    tr.register(toolWithCaps('write', ['fs.write']), 'core');
+    const api = new DefaultPluginAPI({
+      ownerName: 'official-plugin',
+      container: new Container(),
+      events: new EventBus(),
+      pipelines: {} as never,
+      toolRegistry: tr,
+      providerRegistry: new ProviderRegistry(),
+      config: baseConfig,
+      log: new DefaultLogger({ level: 'error' }),
+      official: true,
+    });
+    expect(() =>
+      api.tools.wrap('write', (t) => ({ ...t, description: 'wrapped' })),
+    ).not.toThrow();
+  });
+
+  it('allows plugin to wrap its own tool regardless of capabilities', () => {
+    const tr = new ToolRegistry();
+    tr.register(toolWithCaps('my-tool', ['fs.write']), 'plugin-x');
+    const api = new DefaultPluginAPI({
+      ownerName: 'plugin-x',
+      container: new Container(),
+      events: new EventBus(),
+      pipelines: {} as never,
+      toolRegistry: tr,
+      providerRegistry: new ProviderRegistry(),
+      config: baseConfig,
+      log: new DefaultLogger({ level: 'error' }),
+      capabilities: { toolMutateCapabilities: ['fs.read'] },
+    });
+    expect(() =>
+      api.tools.wrap('my-tool', (t) => ({ ...t, description: 'wrapped' })),
+    ).not.toThrow();
+  });
+
+  it('denies non-official plugin to unregister tool without matching capability', () => {
+    const tr = new ToolRegistry();
+    tr.register(toolWithCaps('write', ['fs.write']), 'core');
+    const api = new DefaultPluginAPI({
+      ownerName: 'plugin-x',
+      container: new Container(),
+      events: new EventBus(),
+      pipelines: {} as never,
+      toolRegistry: tr,
+      providerRegistry: new ProviderRegistry(),
+      config: baseConfig,
+      log: new DefaultLogger({ level: 'error' }),
+      capabilities: { toolMutateCapabilities: ['fs.read'] },
+    });
+    expect(() => api.tools.unregister('write')).toThrow('Missing required capability');
+  });
+
   // ── pipelines ──────────────────────────────────────────────────────────────
 
   it('exposes pipelines as readonly views (asReadonly is called for each)', async () => {

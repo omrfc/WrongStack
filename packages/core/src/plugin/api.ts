@@ -13,6 +13,7 @@ import type {
   MCPRegistryView,
   MetricsSinkView,
   PluginAPI,
+  PluginCapabilities,
   PluginPipelines,
   ProviderFactory,
   ProviderRegistryView,
@@ -74,6 +75,11 @@ export interface PluginAPIInit {
    * Defaults to false.
    */
   official?: boolean | undefined;
+  /**
+   * Declared capabilities of the plugin. Used for capability-based
+   * authorization checks (e.g. tool mutation permissions).
+   */
+  capabilities?: PluginCapabilities | undefined;
 }
 
 export class DefaultPluginAPI implements PluginAPI {
@@ -119,6 +125,7 @@ export class DefaultPluginAPI implements PluginAPI {
 
     const tr = init.toolRegistry;
     const isOfficial = init.official === true;
+    const capabilities = init.capabilities;
     // Trust tiers for the tool registry, mirroring the slash-command registry:
     // only first-party ("official") plugins (and core) may mutate a tool they
     // do not own. An external plugin can register, wrap, and unregister its OWN
@@ -137,10 +144,21 @@ export class DefaultPluginAPI implements PluginAPI {
       // The plugin owns the tool only if EVERY segment is itself — so a core
       // tool ("core") or one another plugin touched ("core+plugin") is denied.
       const ownedSolelyByMe = currentOwner.split('+').every((seg) => seg === owner);
-      if (!ownedSolelyByMe) {
+      if (ownedSolelyByMe) return;
+
+      // 2026-06-13: Capability-based mutation check for non-official plugins
+      // that don't own the tool. If the plugin declares toolMutateCapabilities
+      // matching the tool's capabilities, allow the mutation.
+      const toolCaps = tr.get(name)?.capabilities ?? [];
+      const pluginMutateCaps = capabilities?.toolMutateCapabilities ?? [];
+      const hasRequiredCap = toolCaps.some((c) => pluginMutateCaps.includes(c));
+
+      if (!hasRequiredCap) {
         throw new Error(
           `Plugin "${owner}" may not ${op} tool "${name}" — it is owned by "${currentOwner}". ` +
-            `Only official (first-party) plugins may modify tools they do not own.`,
+            `Tool capabilities: [${toolCaps.join(', ') || 'none'}]. ` +
+            `Plugin toolMutateCapabilities: [${pluginMutateCaps.join(', ') || 'none'}]. ` +
+            `Missing required capability to mutate this tool.`,
         );
       }
     };

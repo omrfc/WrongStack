@@ -138,7 +138,7 @@ The session-long audit (2026-06-13) concluded: do NOT refactor app.tsx without f
 
 | # | Task | Effort | Status |
 |---|---|---|---|
-| **P4-6** | Add `capabilities` requirement for plugins mutating tools they don't own | 1-2 h | 🔴 **Open** |
+| **P4-6** | Add `capabilities` requirement for plugins mutating tools they don't own | 1-2 h | ✅ Fixed (2026-06-13) | `PluginCapabilities.toolMutateCapabilities` added; `DefaultPluginAPI` checks tool capabilities against plugin-declared mutate caps; 6 tests added |
 
 ### Phase 1.3 — Documentation & Migration
 

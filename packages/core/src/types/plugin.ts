@@ -171,6 +171,15 @@ export interface PluginCapabilities {
   slashCommands?: boolean | undefined;
   /** Will start MCP servers via `api.mcp.start()`. */
   mcp?: boolean | undefined;
+  /**
+   * Capabilities required to mutate (wrap, unregister, override) tools
+   * the plugin does not own. If empty or omitted, the plugin may only
+   * mutate its own tools. Official plugins bypass this check.
+   *
+   * Example: `['fs.read', 'net.outbound']` allows the plugin to wrap
+   * read-only tools, but not `fs.write` or `shell.arbitrary` tools.
+   */
+  toolMutateCapabilities?: string[] | undefined;
 }
 
 /**
