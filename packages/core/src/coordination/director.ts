@@ -439,6 +439,17 @@ export class Director implements ICoordinator {
   private taskCompletedListener:
     | ((payload: { task: TaskSpec; result: TaskResult }) => void)
     | null = null;
+  /**
+   * Unsub handles for the two `FleetBus.filter()` calls installed in the
+   * constructor for timeout-heartbeat tracking. Without capturing these
+   * and calling them in `shutdown()`, repeated Director construction
+   * (tests, hot reloads, `--director` restarts) accumulates 2 dangling
+   * listeners per Director on the FleetBus, slowly drifting the
+   * EventEmitter past its default cap. Mirrors the rationale on
+   * `taskCompletedListener` above.
+   */
+  private toolExecFilter: (() => void) | null = null;
+  private budgetFilter: (() => void) | null = null;
   /** Optional LLM classifier for smart dispatch. Passed from options. */
   readonly dispatchClassifier?:
     | import('../coordination/dispatcher.js').DispatchClassifier
@@ -635,10 +646,10 @@ export class Director implements ICoordinator {
     // "stuck" signal — tool activity is.
     const progressBySubagent = new Map<string, number>();
     const lastTimeoutProgress = new Map<string, number>();
-    this.fleet.filter('tool.executed', (e) => {
+    this.toolExecFilter = this.fleet.filter('tool.executed', (e) => {
       progressBySubagent.set(e.subagentId, (progressBySubagent.get(e.subagentId) ?? 0) + 1);
     });
-    this.fleet.filter('budget.threshold_reached', (e) => {
+    this.budgetFilter = this.fleet.filter('budget.threshold_reached', (e) => {
       const payload = e.payload as {
         kind: 'timeout' | 'idle_timeout' | 'iterations' | 'tool_calls' | 'tokens' | 'cost';
         used: number;
@@ -1289,6 +1300,19 @@ export class Director implements ICoordinator {
     if (this.taskCompletedListener) {
       this.coordinator.off('task.completed', this.taskCompletedListener);
       this.taskCompletedListener = null;
+    }
+    // Detach the FleetBus filters installed in the constructor. Same
+    // rationale as the coordinator listener above — repeated Director
+    // construction without these unsubs accumulates listeners on the
+    // shared FleetBus and eventually trips the EventEmitter max-listener
+    // warning.
+    if (this.toolExecFilter) {
+      this.toolExecFilter();
+      this.toolExecFilter = null;
+    }
+    if (this.budgetFilter) {
+      this.budgetFilter();
+      this.budgetFilter = null;
     }
     await this.coordinator.stopAll();
     for (const b of this.subagentBridges.values()) {

@@ -1219,4 +1219,45 @@ describe('Director orchestration', () => {
     expect(status.subagents.map((s) => s.id)).toContain(id);
     await d.shutdown();
   });
+
+  // ── Listener-leak regression ───────────────────────────────────────────────
+  // The Director constructor installs two `FleetBus.filter()` calls
+  // (`tool.executed` and `budget.threshold_reached`) for the
+  // timeout-heartbeat logic. If the unsubs aren't called in
+  // `shutdown()`, repeated Director construction (tests, hot reloads,
+  // `--director` restarts) accumulates 2 dangling listeners per
+  // Director on the shared FleetBus, slowly drifting the EventEmitter
+  // past its default max-listener warning. This test constructs and
+  // shuts down N directors in a row and verifies the listener count
+  // returns to its baseline.
+
+  it('shutdown() detaches FleetBus filters so listeners do not leak across constructions', async () => {
+    // Build one director, get a reference to its FleetBus so we can
+    // measure listener counts before/after.
+    const { director: d0 } = buildDirector();
+    const bus = d0.fleet;
+    await d0.shutdown();
+
+    const countListeners = (type: string): number => {
+      // `byType` is a private Map<string, Set<handler>> on FleetBus;
+      // we reach in via a typed cast because the regression test is
+      // explicitly white-box — the alternative is to expose a public
+      // listener-count getter for a single test, which is worse.
+      const internal = bus as unknown as { byType: Map<string, Set<unknown>> };
+      return internal.byType.get(type)?.size ?? 0;
+    };
+    const toolBefore = countListeners('tool.executed');
+    const budgetBefore = countListeners('budget.threshold_reached');
+
+    // Build and shut down 10 more directors. Without the fix, each
+    // adds 1 listener to each of the two event types, so the
+    // counts grow by 10.
+    for (let i = 0; i < 10; i++) {
+      const d = buildDirector();
+      await d.director.shutdown();
+    }
+
+    expect(countListeners('tool.executed')).toBe(toolBefore);
+    expect(countListeners('budget.threshold_reached')).toBe(budgetBefore);
+  });
 });
