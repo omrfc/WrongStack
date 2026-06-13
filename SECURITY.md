@@ -131,6 +131,10 @@ when permission prompts are approved out of habit.
   policy heuristic could mismatch across tools — an HTTP tool whose
   `path` means request-path would have been checked against filesystem
   trust rules.
+- **Capability-based gating** (2026-06-13): tools declare `capabilities`
+  (e.g. `['fs.write']`, `['net.outbound']`). The `AutoApprovePermissionPolicy`
+  uses these to allowlist by *what a tool can do* rather than by *what it is
+  called*. This prevents a renamed tool from bypassing trust rules.
 
 ### Provider boundary
 
@@ -151,6 +155,24 @@ when permission prompts are approved out of habit.
 - **Slot-scoped disconnect listeners** — fixes a Set-keyed-by-arrow-fn
   bug that accumulated listeners across reconnect cycles.
 - **HTTP error bodies capped** at 1 KB in error messages.
+
+### Plugin tool mutation boundary
+
+[packages/core/src/plugin/api.ts](packages/core/src/plugin/api.ts)
+
+- **Capability-based mutation authorization** (2026-06-13): plugins can only
+  wrap or unregister tools they don't own if they declare matching capabilities
+  in `toolMutateCapabilities`.
+- **Official plugins bypass** — first-party plugins bundled with WrongStack are
+  trusted and can mutate any tool.
+- **Tool owners bypass** — a plugin can always mutate its own registered tools.
+- **External plugins are restricted** — if a tool declares `capabilities:
+  ['fs.write']`, an external plugin must list `'fs.write'` in its
+  `toolMutateCapabilities` to wrap or unregister it. No overlap = mutation
+  denied with a clear error message.
+- **No-capability tools are immutable** — tools without a `capabilities`
+  array cannot be mutated by external plugins at all. This is a safe default:
+  legacy tools are protected until explicitly tagged.
 
 ## Known limitations / deliberate non-goals
 
@@ -191,7 +213,8 @@ audits and explicitly accepted as non-blocking:
   - Listed as "maintainer call / won't fix" in both audits. Changing it would harm contributor experience with no meaningful security gain for end users.
 
 - **Some remaining name-string + denylist authorization checks** (e.g. `AutoApprovePermissionPolicy.DENY` and parts of plugin tool mutation rules):
-  - These are pragmatic and currently effective, but recognized as a medium-term evolution target toward explicit capability allowlists (see `docs/plans/security-hardening-2026-06.md` P1).
+  - These were pragmatic and effective, but have now been superseded by explicit capability allowlists (see **Capability-based gating** above and `docs/plans/security-hardening-2026-06.md` P1).
+  - The old denylist checks remain as defense-in-depth but are no longer the primary control.
 
 - **`onlyBuiltDependencies` allowlist maintenance**:
   - The current small allowlist (`@biomejs/biome`, `better-sqlite3`, `esbuild`) is intentionally strict. Any addition requires security review. This is tracked as an ongoing discipline item rather than a vulnerability.

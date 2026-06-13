@@ -144,8 +144,8 @@ The session-long audit (2026-06-13) concluded: do NOT refactor app.tsx without f
 
 | # | Task | Effort | Status |
 |---|---|---|---|
-| **P4-7** | Document capability model in `docs/tool-author-guide.md` | 1 h | 🔴 **Open** |
-| **P4-8** | Update `SECURITY.md` with capability model | 30 min | 🔴 **Open** |
+| **P4-7** | Document capability model in `docs/tool-author-guide.md` | 1 h | ✅ Fixed (2026-06-13) | Added Capability Model section with canonical names, declaration examples, and plugin mutation rules |
+| **P4-8** | Update `SECURITY.md` with capability model | 30 min | ✅ Fixed (2026-06-13) | Added capability-based gating to Permission policy section; added Plugin tool mutation boundary section; updated accepted risks note |
 
 ---
 

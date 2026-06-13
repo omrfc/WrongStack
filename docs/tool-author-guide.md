@@ -62,6 +62,7 @@ interface Tool<I, O> {
 | `permission` | `auto` runs without prompting. `confirm` prompts the user. `deny` rejects calls without prompting (useful for read-only modes). |
 | `mutating` | UI hint that this tool may change the workspace. Doesn't enforce anything — `permission` is the real gate. |
 | `riskTier` | Optional risk classification: `safe`, `standard`, or `destructive`. YOLO auto-approves normal project work; clearly destructive calls still prompt unless `--yolo-destructive` is active. |
+| `capabilities` | Optional capability tags (e.g. `['fs.read']`, `['net.outbound']`). Used by the permission policy and plugin mutation rules to decide who can invoke or modify the tool. See **Capability Model** below. |
 | `maxOutputBytes` | Hard cap. The executor truncates and emits a warning. |
 | `timeoutMs` | Hard cap. After this, the executor aborts via the run's `AbortController`. |
 
@@ -82,6 +83,74 @@ The CLI also has a per-project trust file
 (`~/.wrongstack/projects/<hash>/trust.json`) where users can set `auto` for a
 specific tool+pattern combination after confirming it once. You don't need to
 think about that as a tool author — just set the right `permission` default.
+
+---
+
+## Capability Model
+
+Tools can declare **capability tags** in the `capabilities` array. These tags
+are used by two subsystems:
+
+1. **Permission policy** — the `AutoApprovePermissionPolicy` can allowlist or
+denylist by capability rather than by individual tool name.
+2. **Plugin mutation rules** — a plugin can only wrap or unregister a tool it
+doesn't own if the plugin declares a matching `toolMutateCapabilities` entry.
+
+### Canonical capability names
+
+| Capability | Meaning | Example tools |
+|---|---|---|
+| `fs.read` | Reads files or directories | `read`, `glob`, `grep`, `tree`, `diff` |
+| `fs.write` | Writes or modifies files | `write`, `edit`, `replace`, `patch`, `plan` |
+| `fs.write.outside-project` | Writes outside `projectRoot` | `scaffold` (templates), `codebase-index` |
+| `shell.arbitrary` | Runs arbitrary shell commands | `bash` |
+| `shell.restricted` | Runs allowlisted commands | `exec`, `git`, `audit`, `lint`, `typecheck`, `test` |
+| `shell.exec` | Runs a specific formatter | `format` |
+| `net.outbound` | Makes outbound network requests | `fetch`, `search` |
+| `network` | Checks for outdated packages | `outdated` |
+| `memory.read` | Reads from agent memory | `memory` (read/search), `search_memory`, `find_related_memories` |
+| `memory.write` | Writes to agent memory | `memory` (write), `remember` |
+| `memory.delete` | Deletes from agent memory | `memory` (delete), `forget` |
+| `session.todo` | Manages session todos | `todo` |
+| `session.mode` | Changes agent mode | `mode` |
+| `tool.meta` | Queries tool metadata | `tool-help`, `tool-search` |
+| `tool.mutate.any` | Can mutate any tool (broad power) | `tool-use`, `batch-tool-use` |
+| `package.install` | Installs packages | `install` |
+| `mcp.proxy` | Proxies to an MCP server | *(reserved for MCP tools)* |
+| `subagent.spawn` | Spawns subagents | *(reserved for subagent tools)* |
+
+### Declaring capabilities on a tool
+
+```ts
+export const myTool: Tool<{ path: string }, { content: string }> = {
+  name: 'my-reader',
+  description: 'Reads a file.',
+  inputSchema: { ... },
+  permission: 'auto',
+  mutating: false,
+  capabilities: ['fs.read'],   // ← declare what this tool can do
+  async execute(input) { ... },
+};
+```
+
+### Plugin mutation rules
+
+When a plugin wants to **wrap** or **unregister** a tool it doesn't own, it must
+declare the matching capability in its `PluginCapabilities`:
+
+```ts
+// plugin manifest or init
+const capabilities: PluginCapabilities = {
+  toolMutateCapabilities: ['fs.read', 'fs.write'],
+};
+```
+
+Rules:
+- **Official plugins** (bundled with WrongStack) can mutate any tool.
+- **Tool owners** can always mutate their own tools.
+- **External plugins** can only mutate tools whose `capabilities` array
+  overlaps with the plugin's `toolMutateCapabilities`.
+- If a tool has **no capabilities declared**, external plugins cannot mutate it.
 
 ---
 
