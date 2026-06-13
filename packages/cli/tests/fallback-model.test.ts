@@ -1,6 +1,11 @@
 import { type Config, EventBus, type Provider, ProviderError } from '@wrongstack/core';
 import { describe, expect, it, vi } from 'vitest';
-import { createFallbackModelExtension, parseModelRef } from '../src/fallback-model.js';
+import {
+  createFallbackModelExtension,
+  effectiveFallbackChain,
+  parseModelRef,
+  smartDefaultFallbackChain,
+} from '../src/fallback-model.js';
 
 const logger = { warn: vi.fn(), info: vi.fn(), debug: vi.fn(), error: vi.fn() } as never;
 
@@ -33,14 +38,26 @@ describe('parseModelRef', () => {
 });
 
 describe('createFallbackModelExtension', () => {
-  it('returns null when no fallbackModels configured', () => {
+  it('always returns an extension; an empty chain is a no-op (rethrows)', async () => {
     const ext = createFallbackModelExtension({
       getConfig: () => cfg({ fallbackModels: [] }),
       buildProvider: fakeProvider,
       events: new EventBus(),
       logger,
     });
-    expect(ext).toBeNull();
+    expect(ext).not.toBeNull();
+    // No explicit chain and no smart-default-eligible providers → the wrapper
+    // rethrows the original error without switching models.
+    const ctx = makeCtx('anthropic', 'opus');
+    const err = overload('anthropic');
+    const inner = vi.fn(async () => {
+      throw err;
+    });
+    await expect(
+      // biome-ignore lint/style/noNonNullAssertion: wrapProviderRunner is defined here
+      ext.wrapProviderRunner!(ctx as never, { model: 'opus' } as never, inner as never),
+    ).rejects.toBe(err);
+    expect(inner).toHaveBeenCalledTimes(1);
   });
 
   it('walks the chain on overload and succeeds on a fallback (same provider)', async () => {
@@ -183,5 +200,68 @@ describe('createFallbackModelExtension', () => {
     await ext.beforeRun!(ctx, {} as never);
     expect(ctx.model).toBe('opus');
     expect(ctx.provider.id).toBe('anthropic');
+  });
+});
+
+describe('smartDefaultFallbackChain', () => {
+  it('derives a same-provider-first chain from keyed providers, excluding the leader model', () => {
+    const config = cfg({
+      provider: 'anthropic',
+      model: 'opus',
+      providers: {
+        anthropic: { type: 'anthropic', apiKey: 'k', models: ['opus', 'sonnet', 'haiku'] },
+        openai: { type: 'openai', apiKey: 'k', models: ['gpt-4o'] },
+      },
+    } as never);
+    expect(smartDefaultFallbackChain(config)).toEqual([
+      'anthropic/sonnet',
+      'anthropic/haiku',
+      'openai/gpt-4o',
+    ]);
+  });
+
+  it('skips providers without a key and returns [] when nothing usable', () => {
+    expect(smartDefaultFallbackChain(cfg({ providers: {} } as never))).toEqual([]);
+    const noKey = cfg({
+      providers: { openai: { type: 'openai', models: ['gpt-4o'] } },
+    } as never);
+    expect(smartDefaultFallbackChain(noKey)).toEqual([]);
+  });
+
+  it('caps the derived chain at 4 entries', () => {
+    const config = cfg({
+      providers: {
+        anthropic: {
+          type: 'anthropic',
+          apiKey: 'k',
+          models: ['opus', 'm1', 'm2', 'm3', 'm4', 'm5'],
+        },
+      },
+    } as never);
+    expect(smartDefaultFallbackChain(config)).toHaveLength(4);
+  });
+});
+
+describe('effectiveFallbackChain', () => {
+  const providers = {
+    anthropic: { type: 'anthropic', apiKey: 'k', models: ['opus', 'sonnet'] },
+  };
+
+  it('prefers an explicit list over the smart default', () => {
+    expect(effectiveFallbackChain(cfg({ fallbackModels: ['x/y'], providers } as never))).toEqual([
+      'x/y',
+    ]);
+  });
+
+  it('uses the smart default when the explicit list is empty and auto is on', () => {
+    expect(effectiveFallbackChain(cfg({ fallbackModels: [], providers } as never))).toEqual([
+      'anthropic/sonnet',
+    ]);
+  });
+
+  it('returns [] when the explicit list is empty and auto is off', () => {
+    expect(
+      effectiveFallbackChain(cfg({ fallbackModels: [], fallbackAuto: false, providers } as never)),
+    ).toEqual([]);
   });
 });

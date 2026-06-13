@@ -349,6 +349,7 @@ import { buildModelsCommand } from './models.js';
 import { buildNextCommand } from './next.js';
 import { buildPluginCommand } from './plugin.js';
 import { buildPruneCommand } from './prune.js';
+import { buildFallbackCommand } from './fallback.js';
 import { buildSddCommand } from './sdd.js';
 import { buildExitCommand, buildLoadCommand, buildSaveCommand } from './session.js';
 import { buildSetModelCommand } from './setmodel.js';
@@ -419,6 +420,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildSettingsCommand(opts),
     buildTelegramSetupCommand(opts),
     buildSetModelCommand(opts),
+    buildFallbackCommand(opts),
     buildModelCapsCommand(opts),
     buildModelsCommand(opts),
     buildCollabCommand(opts),
