@@ -2643,6 +2643,17 @@ export function App({
         entry: { kind: 'error', text: e.description },
       });
     });
+    // Fallback hop — the chain rotated to a working model after the primary's
+    // retries were exhausted. Surface which model is now answering.
+    const offFallback = events.on('provider.fallback', (e) => {
+      dispatch({
+        type: 'addEntry',
+        entry: {
+          kind: 'warn',
+          text: `↻ rate-limited (${e.status}) — switched to ${e.to.providerId}/${e.to.model}`,
+        },
+      });
+    });
     // Per-iteration text flush. Without this, the entire run buffers all text
     // deltas in the live tail box and dumps them into history as ONE assistant
     // entry only after `agent.run()` returns. Tool results, in contrast, land
@@ -2735,6 +2746,7 @@ export function App({
       offTool();
       offRetry();
       offProvErr();
+      offFallback();
       offProvResp();
       offConfirmNeeded();
       offTrustPersisted();

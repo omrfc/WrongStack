@@ -401,6 +401,19 @@ export async function main(argv: string[]): Promise<number> {
     writeErr(color.yellow(`  ⟳ retry ${p.attempt} in ${secs}s — ${p.description}\n`));
     spinner.start(color.dim(`${config.provider}/${config.model} thinking…`));
   });
+  // Fallback hop — the primary exhausted its retries and we rotated to the next
+  // model in the chain. Tell the user which model is now answering.
+  evOn('provider.fallback', (p) => {
+    spinner.stop();
+    if (streamingActive) {
+      renderer.write('\n');
+      streamingActive = false;
+    }
+    writeErr(
+      color.yellow(`  ↻ rate-limited (${p.status}) — switched to ${p.to.providerId}/${p.to.model}\n`),
+    );
+    spinner.start(color.dim(`${p.to.providerId}/${p.to.model} thinking…`));
+  });
   evOn('provider.error', (p) => {
     spinner.stop();
     if (streamingActive) {
