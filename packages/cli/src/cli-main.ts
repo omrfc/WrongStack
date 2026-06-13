@@ -887,15 +887,19 @@ export async function main(argv: string[]): Promise<number> {
   };
 
   // Cross-provider fallback: switch to the next configured model when the
-  // primary is overloaded. No-op (null) when `fallbackModels` is empty.
-  const fallbackExtension = createFallbackModelExtension({
-    getConfig: () => config,
-    buildProvider: buildProviderForId,
-    onModelSwitch: refreshMaxContextFor,
-    events,
-    logger,
-  });
-  if (fallbackExtension) agent.extensions.register(fallbackExtension);
+  // primary is overloaded (429/529/5xx). Registered unconditionally — the
+  // effective chain (explicit `fallbackModels` or the smart default) is
+  // recomputed every turn, so a chain populated at runtime via `/fallback`
+  // takes effect without a restart. An empty chain makes it a no-op.
+  agent.extensions.register(
+    createFallbackModelExtension({
+      getConfig: () => config,
+      buildProvider: buildProviderForId,
+      onModelSwitch: refreshMaxContextFor,
+      events,
+      logger,
+    }),
+  );
 
   // Session-end memory consolidation — extracts key learnings from the
   // completed session and persists them as memory entries.
