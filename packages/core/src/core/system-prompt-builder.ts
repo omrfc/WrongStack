@@ -69,6 +69,8 @@ export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
   private _lastBuildTools?: Tool[] | undefined;
   /** Cached rendered online agents string, keyed by array reference. */
   private _lastOnlineAgents?: { ref: readonly MailboxAgentStatus[]; text: string } | undefined;
+  /** Cached full buildToolUsage output — keyed by tools array + online agents refs. */
+  private _toolsUsageCache?: { toolsRef: readonly Tool[]; agentsRef: readonly MailboxAgentStatus[] | undefined; text: string } | undefined;
   constructor(private readonly opts: DefaultSystemPromptBuilderOptions = {}) {}
 
   async build(ctx: BuildContext): Promise<TextBlock[]> {
@@ -241,6 +243,17 @@ export class DefaultSystemPromptBuilder implements SystemPromptBuilder {
 
   private buildToolUsage(tools: Tool[], ctx: BuildContext): string {
     if (tools.length === 0) return '## Tool usage\n\nNo tools registered.';
+
+    // Cache: tools array is stable (same reference) until a registry mutation
+    // thanks to B2 (ToolRegistry snapshot). Online agents are cached by reference
+    // in renderOnlineAgents(). When both references match the previous build,
+    // the full output is identical — return the cached string.
+    if (
+      this._toolsUsageCache?.toolsRef === tools &&
+      this._toolsUsageCache?.agentsRef === ctx.onlineAgents
+    ) {
+      return this._toolsUsageCache.text;
+    }
 
     // Group tools by category for a cleaner listing when categories are used.
     const byCat = new Map<string, Tool[]>();
@@ -465,7 +478,11 @@ use the context_manager tool proactively — do NOT wait to be told:
 summarize it, and let the tool result hold only the summary.`);
     }
 
-    return lines.join('\n');
+    // Store cache — keyed by reference so it auto-invalidates when tools
+    // array changes (B2 snapshot) or online agents join/leave.
+    const text = lines.join('\n');
+    this._toolsUsageCache = { toolsRef: tools, agentsRef: ctx.onlineAgents, text };
+    return text;
   }
 
   /**
