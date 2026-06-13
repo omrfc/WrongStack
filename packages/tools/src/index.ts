@@ -58,5 +58,5 @@ export type { CircuitState, CircuitSnapshot } from './codebase-index/index.js';
 
 // builtinTools moved to './builtin.ts' so consumers that only need a subset of
 // tools don't transitively import all 30. Use `@wrongstack/tools/builtin`.
-export { builtinTools } from './builtin.js';
+export { builtinTools, OPTIONAL_TOOLS } from './builtin.js';
 export { builtinToolsPack } from './pack.js';
