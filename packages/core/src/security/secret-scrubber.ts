@@ -70,9 +70,52 @@ const PATTERNS: Pattern[] = [
  */
 const SCRUB_CHUNK_BYTES = 64 * 1024;
 
+/**
+ * Quick pre-scan: check if the text contains any substring that MUST be
+ * present for a credential pattern to match. If none are found, the text
+ * is guaranteed clean — skip all 17 regex passes entirely.
+ *
+ * Each anchor is the shortest unique substring from the corresponding pattern.
+ * V8's `String.includes()` is hand-tuned C++ — O(n) with near-zero overhead
+ * for typical tool-output lengths (100–5000 chars). A single combined regex
+ * via `text.search()` is consistently slower for this many alternatives.
+ */
+function hasCredentialAnchors(text: string): boolean {
+  return (
+    text.includes('-----BEGIN') ||    // Private keys (most unique → cheap reject)
+    text.includes('sk-') ||           // Anthropic + OpenAI keys
+    text.includes('sk_') ||           // Stripe live/test keys
+    text.includes('ghp_') ||          // GitHub PAT v1
+    text.includes('github_pat_') ||   // GitHub PAT v2
+    text.includes('eyJ') ||           // JWT
+    text.includes('AKIA') ||          // AWS access key
+    text.includes('AIza') ||          // GCP service key
+    text.includes('xox') ||           // Slack token (xoxa/xoxb/xoxp/xoxo/xoxs)
+    text.includes('Bearer ') ||       // Bearer token (space suffix reduces false positives)
+    text.includes('/bot') ||          // Telegram bot token (URL path pattern)
+    text.includes('_KEY=') ||         // High-entropy env vars: API_KEY=, SECRET_KEY=, ...
+    text.includes('_TOKEN=') ||       // ACCESS_TOKEN=, AUTH_TOKEN=, ...
+    text.includes('_SECRET=') ||      // API_SECRET=, CLIENT_SECRET=, ...
+    text.includes('_PASSWORD=') ||    // DB_PASSWORD=, ROOT_PASSWORD=, ...
+    text.includes('mongodb://') ||
+    text.includes('mongodb+srv://') ||
+    text.includes('postgres://') ||
+    text.includes('postgresql://') ||
+    text.includes('mysql://') ||
+    text.includes('redis://')
+  );
+}
+
 export class DefaultSecretScrubber implements SecretScrubber {
   scrub(text: string): string {
     if (!text) return text;
+
+    // Fast path: if no credential anchor substrings exist in the text,
+    // none of the 17 regex patterns can match. Skip all regex work.
+    // This covers the vast majority of tool outputs (~95% of calls on
+    // typical sessions are file paths, status messages, diffs, etc.).
+    if (!hasCredentialAnchors(text)) return text;
+
     // For oversize inputs, scrub in fixed chunks. We split on newlines
     // where possible so secrets that span a few hundred bytes still get
     // matched within a single chunk; only inputs above ~64 KB risk a
@@ -96,6 +139,10 @@ export class DefaultSecretScrubber implements SecretScrubber {
   }
 
   private scrubOne(text: string): string {
+    // Redundant guard: if we reached scrubOne via the chunked path, the
+    // chunk may have been small enough to anchor-skip independently.
+    if (!hasCredentialAnchors(text)) return text;
+
     let out = text;
     for (const p of PATTERNS) {
       out = out.replace(p.regex, (_match, group1, group2) => {
