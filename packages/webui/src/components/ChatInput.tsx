@@ -100,6 +100,14 @@ export function ChatInput({
         case '/new':
           client?.newSession?.();
           return true;
+        case '/interrupt':
+        case '/stop':
+        case '/int':
+          // The webui runs a single leader agent (no separate fleet), so
+          // aborting the in-flight run stops everything.
+          sendAbort();
+          addMessage({ role: 'assistant', content: '↯ Interrupted the current run.' });
+          return true;
         case '/exit':
           client?.send?.({ type: 'webui.shutdown' as never, payload: {} });
           addMessage({ role: 'assistant', content: '👋 Shutting down WebUI server…' });

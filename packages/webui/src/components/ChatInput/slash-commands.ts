@@ -11,6 +11,9 @@ export interface SlashCommandDef {
 }
 
 export const SLASH_COMMANDS: SlashCommandDef[] = [
+  // Run
+  { name: '/interrupt', category: 'Run', aliases: ['/stop', '/int'], description: 'Stop the current run (abort the in-flight request)' },
+
   // Session
   { name: '/new', category: 'Session', description: 'Start a brand-new session (fresh on disk and in memory)' },
   { name: '/clear', category: 'Session', description: 'Wipe current context (keeps session id, disk record stays)' },
@@ -45,7 +48,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: '/exit', category: 'App', description: 'Exit the session and close WebUI' },
 ];
 
-export const SLASH_CATEGORY_ORDER: SlashCategory[] = ['Session', 'Inspect', 'Config', 'App'];
+export const SLASH_CATEGORY_ORDER: SlashCategory[] = ['Run', 'Session', 'Inspect', 'Config', 'App'];
 
 export function matchSlash(query: string): SlashCommandDef[] {
   const q = query.toLowerCase();
