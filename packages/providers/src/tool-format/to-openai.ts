@@ -33,7 +33,7 @@ export function toolsToOpenAI(tools: Tool[]): OpenAIToolSchema[] {
 
 export interface OpenAIMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content?: string | OpenAIContent[] | undefined;
+  content?: string | OpenAIContent[] | null | undefined;
   tool_calls?: OpenAIToolCall[] | undefined;
   tool_call_id?: string | undefined;
   name?: string | undefined;
