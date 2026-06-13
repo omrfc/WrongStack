@@ -3,7 +3,7 @@ import type { Context } from '../core/context.js';
 import type { InputReader } from '../types/input-reader.js';
 import type { PermissionDecision, PermissionPolicy, TrustPolicy } from '../types/permission.js';
 import type { Tool } from '../types/tool.js';
-import { hasCapability, ToolCapabilities } from './capabilities.js';
+import { ToolCapabilities } from './capabilities.js';
 import { atomicWrite } from '../utils/atomic-write.js';
 import { matchAny, matchGlob } from '../utils/glob-match.js';
 import { safeParse } from '../utils/safe-json.js';
