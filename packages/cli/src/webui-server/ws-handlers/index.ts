@@ -98,6 +98,10 @@ export {
   type WorklistContext,
 } from './worklist.js';
 export {
+  handleGoalGet,
+  type GoalContext,
+} from './goal.js';
+export {
   handleProcessKill,
   handleProcessKillAll,
   handleProcessList,
