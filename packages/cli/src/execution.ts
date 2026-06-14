@@ -1284,10 +1284,26 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
               // Re-point crash recovery (active.json) at the resumed session —
               // otherwise a crash after this resume would offer recovery for
               // the OLD (cleanly finalized) session and miss the live one.
-              void recoveryLock
-                .clear()
-                .then(() => recoveryLock.write(resumed.writer.id))
-                .catch((err) =>
+              // Fire-and-forget: do not block resume on recovery lock errors.
+              void (async () => {
+                // clear() failure is logged but write() still runs — recovery
+                // lock pointing to the old session is worse than pointing to the
+                // new one (which may not yet be fully initialized).
+                try {
+                  await recoveryLock.clear();
+                } catch (err) {
+                  console.error(
+                    JSON.stringify({
+                      level: 'warn',
+                      event: 'execution.recovery_lock_clear_failed',
+                      message: err instanceof Error ? err.message : String(err),
+                      timestamp: new Date().toISOString(),
+                    }),
+                  );
+                }
+                try {
+                  await recoveryLock.write(resumed.writer.id);
+                } catch (err) {
                   console.error(
                     JSON.stringify({
                       level: 'error',
@@ -1295,8 +1311,9 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                       message: err instanceof Error ? err.message : String(err),
                       timestamp: new Date().toISOString(),
                     }),
-                  ),
-                );
+                  );
+                }
+              })();
 
               // Replay the JSONL events as TUI history entries.
               const { replaySessionEvents } = await import('@wrongstack/tui');
