@@ -1122,37 +1122,39 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             const metaMode = context.meta?.['mode'];
             return typeof metaMode === 'string' ? metaMode : (modeId ?? 'default');
           },
-          registerDebugStreamCallback: (cb) => {
+          registerDebugStreamCallback: async (cb) => {
             // Swap the debug-stream callback from stderr → TUI reducer.
             // Restored on TUI unmount via the cleanup in app.tsx.
-            void import('@wrongstack/providers')
-              .then(({ setDebugStreamCallback }) => setDebugStreamCallback(cb))
-              .catch((err) =>
-                console.error(
-                  JSON.stringify({
-                    level: 'error',
-                    event: 'execution.debug_stream_register_failed',
-                    message: err instanceof Error ? err.message : String(err),
-                    timestamp: new Date().toISOString(),
-                  }),
-                ),
+            try {
+              const { setDebugStreamCallback } = await import('@wrongstack/providers');
+              setDebugStreamCallback(cb);
+            } catch (err) {
+              console.error(
+                JSON.stringify({
+                  level: 'error',
+                  event: 'execution.debug_stream_register_failed',
+                  message: err instanceof Error ? err.message : String(err),
+                  timestamp: new Date().toISOString(),
+                }),
               );
+            }
           },
-          restoreDebugStreamCallback: () => {
-            void import('@wrongstack/providers')
-              .then(({ setDebugStreamCallback, defaultDebugStreamCallback }) =>
-                setDebugStreamCallback(defaultDebugStreamCallback),
-              )
-              .catch((err) =>
-                console.error(
-                  JSON.stringify({
-                    level: 'error',
-                    event: 'execution.debug_stream_restore_failed',
-                    message: err instanceof Error ? err.message : String(err),
-                    timestamp: new Date().toISOString(),
-                  }),
-                ),
+          restoreDebugStreamCallback: async () => {
+            try {
+              const { setDebugStreamCallback, defaultDebugStreamCallback } = await import(
+                '@wrongstack/providers'
               );
+              setDebugStreamCallback(defaultDebugStreamCallback);
+            } catch (err) {
+              console.error(
+                JSON.stringify({
+                  level: 'error',
+                  event: 'execution.debug_stream_restore_failed',
+                  message: err instanceof Error ? err.message : String(err),
+                  timestamp: new Date().toISOString(),
+                }),
+              );
+            }
           },
           restoredMessages,
           restoredToolCalls,
