@@ -67,6 +67,10 @@ interface UIState {
   fleetMonitorOpen: boolean;
   /** Full-screen Agents Monitor overlay. */
   agentsMonitorOpen: boolean;
+  /** Bottom drawer Fleet Monitor. */
+  fleetDrawerOpen: boolean;
+  /** Bottom drawer Agents Monitor. */
+  agentsDrawerOpen: boolean;
 
   /** Active prompt-refinement panel. Set while RefinePanel is shown. Null when no refinement is pending. */
   refinePanel: {
@@ -105,6 +109,8 @@ interface UIState {
   toggleDockSection: (section: DockSection) => void;
   setFleetMonitorOpen: (open: boolean) => void;
   setAgentsMonitorOpen: (open: boolean) => void;
+  setFleetDrawerOpen: (open: boolean) => void;
+  setAgentsDrawerOpen: (open: boolean) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -134,6 +140,8 @@ export const useUIStore = create<UIState>()(
       dockSection: null,
       fleetMonitorOpen: false,
       agentsMonitorOpen: false,
+      fleetDrawerOpen: false,
+      agentsDrawerOpen: false,
 
       selectActivity: (activity) => set({ activeActivity: activity }),
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
@@ -191,8 +199,10 @@ export const useUIStore = create<UIState>()(
       setDockSection: (section) => set({ dockSection: section }),
       toggleDockSection: (section) =>
         set((s) => ({ dockSection: s.dockSection === section ? null : section })),
-      setFleetMonitorOpen: (open) => set({ fleetMonitorOpen: open }),
-      setAgentsMonitorOpen: (open) => set({ agentsMonitorOpen: open }),
+      setFleetMonitorOpen: (open: boolean) => set({ fleetMonitorOpen: open }),
+      setAgentsMonitorOpen: (open: boolean) => set({ agentsMonitorOpen: open }),
+      setFleetDrawerOpen: (open: boolean) => set({ fleetDrawerOpen: open }),
+      setAgentsDrawerOpen: (open: boolean) => set({ agentsDrawerOpen: open }),
     }),
     {
       name: 'wrongstack-ui',
@@ -219,6 +229,8 @@ export const useUIStore = create<UIState>()(
         sessionNicknames: s.sessionNicknames,
         fileExplorerWidth: s.fileExplorerWidth,
         refineEnabled: s.refineEnabled,
+        fleetDrawerOpen: s.fleetDrawerOpen,
+        agentsDrawerOpen: s.agentsDrawerOpen,
       }),
     },
   ),

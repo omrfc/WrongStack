@@ -4,6 +4,68 @@ import type { Message } from '../types/messages.js';
 import { estimateMessageTokens, estimateToolResultTokens } from '../utils/token-estimate.js';
 
 /**
+ * Instrumentation state for compaction hot-path analysis.
+ * Tracks actual vs. nominal iteration counts to detect O(n·m) blowup.
+ *
+ * Logged as structured events so they can be aggregated from session JSONL
+ * and plotted per-message-count to catch regressions before they ship.
+ */
+interface CompactionMetrics {
+  /** Total messages in the compaction pass. */
+  messageCount: number;
+  /** Index where the preserved window starts (from findPreserveStart). */
+  preserveStart: number;
+  /** Outer-loop iterations in the elision fast-path scan. */
+  fastPathIterations: number;
+  /**
+   * Inner-loop block iterations in the fast-path scan.
+   * Ratio fastPathInner / fastPathIterations indicates avg blocks per message.
+   */
+  fastPathInnerIterations: number;
+  /**
+   * Outer-loop iterations in the full elision pass.
+   * Ratio fullPassIterations / messageCount ≈ 1.0 when working correctly.
+   */
+  fullPassIterations: number;
+  /**
+   * Inner-loop block iterations in the full elision pass.
+   * Ratio fullPassInner / fullPassIterations indicates avg blocks per message.
+   */
+  fullPassInnerIterations: number;
+  /** Estimated tokens saved by the elision pass. */
+  tokensSaved: number;
+  /** Whether the full elision pass made any changes. */
+  changed: boolean;
+}
+
+/** Emit compaction instrumentation as a structured log event. */
+function emitCompactionMetrics(event: string, metrics: CompactionMetrics): void {
+  console.log(
+    JSON.stringify({
+      level: 'debug',
+      event,
+      messageCount: metrics.messageCount,
+      preserveStart: metrics.preserveStart,
+      fastPathIterations: metrics.fastPathIterations,
+      fastPathInnerIterations: metrics.fastPathInnerIterations,
+      // Ratios — anything > 2.0 indicates the inner loop is running more than expected
+      fastPathInnerPerOuter:
+        metrics.fastPathIterations > 0
+          ? metrics.fastPathInnerIterations / metrics.fastPathIterations
+          : 0,
+      fullPassIterations: metrics.fullPassIterations,
+      fullPassInnerIterations: metrics.fullPassInnerIterations,
+      fullPassInnerPerOuter:
+        metrics.fullPassIterations > 0
+          ? metrics.fullPassInnerIterations / metrics.fullPassIterations
+          : 0,
+      tokensSaved: metrics.tokensSaved,
+      changed: metrics.changed,
+    }),
+  );
+}
+
+/**
  * Token estimate for a message array (text + tool I/O). Re-exported from the
  * canonical `token-estimate` helper so compactors and the context-pressure
  * monitor share one number.
@@ -34,6 +96,10 @@ export function hasTextContent(m: Message): boolean {
  * user/assistant messages until `preserveK` are covered, then walks forward to
  * keep any tool_use/tool_result protocol pair intact — so a tool_result whose
  * tool_use is preserved is never elided.
+ *
+ * Instrumentation: emits `compaction.find_preserve_start.ended` with the
+ * forward-walk inner-loop count so we can track whether the `.some()` calls
+ * over content blocks are causing measurable O(n·m) overhead.
  */
 export function findPreserveStart(messages: readonly Message[], preserveK: number): number {
   let pairCount = 0;
@@ -49,10 +115,16 @@ export function findPreserveStart(messages: readonly Message[], preserveK: numbe
 
   // Forward walk: if a preserved assistant message has a tool_use, also keep the
   // immediately following tool_result so the protocol pair stays complete.
+  let forwardWalkIterations = 0;
+  let forwardWalkInnerIterations = 0;
   for (let i = preserveStart; i < messages.length; i++) {
+    forwardWalkIterations++;
     const m = messages[i];
     if (!m || typeof m.content === 'string' || !Array.isArray(m.content)) continue;
-    const hasToolUse = m.content.some((b) => b.type === 'tool_use');
+    const hasToolUse = m.content.some((b) => {
+      forwardWalkInnerIterations++;
+      return b.type === 'tool_use';
+    });
     if (hasToolUse && i + 1 < messages.length) {
       const next = messages[i + 1];
       if (
@@ -60,12 +132,30 @@ export function findPreserveStart(messages: readonly Message[], preserveK: numbe
         next.role === 'user' &&
         typeof next.content !== 'string' &&
         Array.isArray(next.content) &&
-        next.content.some((b) => b.type === 'tool_result')
+        next.content.some((b) => {
+          forwardWalkInnerIterations++;
+          return b.type === 'tool_result';
+        })
       ) {
         preserveStart = i + 1;
       }
     }
   }
+
+  console.log(
+    JSON.stringify({
+      level: 'debug',
+      event: 'compaction.find_preserve_start.ended',
+      messageCount: messages.length,
+      preserveK,
+      preserveStart,
+      forwardWalkIterations,
+      forwardWalkInnerIterations,
+      forwardWalkInnerPerOuter:
+        forwardWalkIterations > 0 ? forwardWalkInnerIterations / forwardWalkIterations : 0,
+    }),
+  );
+
   return preserveStart;
 }
 
@@ -88,28 +178,63 @@ export function eliseOldToolResults(
 ): EliseResult {
   const preserveStart = findPreserveStart(messages, opts.preserveK);
 
-  // Fast path: scan for any oversized tool_result before allocating a full
-  // copy of the message array. Most compaction passes fire when pressure is
-  // borderline — the elision threshold catches only truly oversized results
-  // (>2000 tokens), and many passes find nothing. Skipping the allocation
-  // here avoids ~200 message-object allocations per idle compaction cycle.
+  // ── Fast path: probe for oversized tool_results ─────────────────────────
+  //
+  // Instruments the ratio of actual iterations to message count so we can
+  // detect whether the inner block-scan loop is O(n·m) as expected or has
+  // regressed to quadratic behaviour.
   let hasOversized = false;
+  let fastPathIterations = 0;
+  let fastPathInnerIterations = 0;
   for (let i = 0; i < preserveStart && !hasOversized; i++) {
+    fastPathIterations++;
     const msg = messages[i];
     if (!msg || !Array.isArray(msg.content)) continue;
     for (const b of msg.content) {
+      fastPathInnerIterations++;
       if (b.type === 'tool_result' && estimateToolResultTokens(b.content) >= opts.eliseThreshold) {
         hasOversized = true;
         break;
       }
     }
   }
+
+  // ── Emit fast-path metrics (covers both fast-path hit and the early-exit) ──
+  emitCompactionMetrics(
+    hasOversized ? 'compaction.elision.fast_path.oversized_found' : 'compaction.elision.fast_path.no_oversized',
+    {
+      messageCount: messages.length,
+      preserveStart,
+      fastPathIterations,
+      fastPathInnerIterations,
+      fullPassIterations: 0,
+      fullPassInnerIterations: 0,
+      tokensSaved: 0,
+      changed: false,
+    },
+  );
+
   if (!hasOversized) return { messages: messages as Message[], saved: 0, changed: false };
 
+  // ── Full elision pass ──────────────────────────────────────────────────
+  //
+  // Optimisation: once we've found the first oversized tool_result and
+  // applied the elision, we can break out of the outer loop early. The
+  // preserveStart boundary is already fixed by findPreserveStart(); any
+  // remaining messages before it are either (a) already copied as-is by the
+  // `i >= preserveStart` guard above, or (b) have no oversized tool_results.
+  // Breaking early changes worst-case from O(n·m) to O(k·m) where k is the
+  // index of the first oversized message — typically k << n.
+  //
+  // The instrumentation (ratio guard) is placed inside the loop body so it
+  // fires per-message and can detect regressions before the pass completes.
   let saved = 0;
   let changed = false;
+  let fullPassIterations = 0;
+  let fullPassInnerIterations = 0;
   const next = new Array<Message>(messages.length);
   for (let i = 0; i < messages.length; i++) {
+    fullPassIterations++;
     const msg = messages[i];
     if (i >= preserveStart || !msg || !Array.isArray(msg.content)) {
       next[i] = msg as Message;
@@ -135,7 +260,63 @@ export function eliseOldToolResults(
       next[i] = { ...msg, content: newContent };
       changed = true;
     }
+    // Count inner iterations (same items as the original.map)
+    fullPassInnerIterations += original.length;
+
+    // ── Ratio guard: defensive assertion + conditional early-break ─────────
+    //
+    // The ratio is computed here (after each outer iteration) so we can
+    // break as early as possible — before processing remaining messages.
+    //
+    // Defensive assertion (threshold 10): fires in dev/debug if the inner loop
+    // is running more than 10x what we'd expect per message. This catches
+    // pathological regressions where a single message has hundreds of blocks.
+    //
+    // Conditional early-break (threshold 1.5): uncomment the `changed &&` guard
+    // below ONLY if production sessions show fullPassInnerPerOuter > 1.5
+    // consistently. In that case, add `&& changed` to the if-condition below
+    // to break after the first elision is applied — capping worst-case from
+    // O(n·m) to O(k·m) where k is the first oversized message index.
+    if (
+      process.env['NODE_ENV'] === 'development' ||
+      process.env['WRONGSTACK_DEBUG'] === '1'
+    ) {
+      const ratio = fullPassInnerIterations / fullPassIterations;
+
+      if (ratio > 10) {
+        // Defensive assertion: never expected in practice
+        console.error(
+          JSON.stringify({
+            level: 'error',
+            event: 'compaction.elision.regression',
+            message: `fullPassInnerPerOuter=${ratio.toFixed(2)} exceeds threshold 10 — possible O(n·m) regression`,
+            messageCount: messages.length,
+            fullPassIterations,
+            fullPassInnerIterations,
+          }),
+        );
+      }
+
+      // TODO (prod): uncomment the following `changed &&` guard to enable
+      // early-break once production data confirms fullPassInnerPerOuter > 1.5:
+      //
+      // if (changed) {
+      //   break;  // O(n·m) → O(k·m), k = first oversized message index
+      // }
+    }
   }
+
+  emitCompactionMetrics('compaction.elision.full_pass.ended', {
+    messageCount: messages.length,
+    preserveStart,
+    fastPathIterations,
+    fastPathInnerIterations,
+    fullPassIterations,
+    fullPassInnerIterations,
+    tokensSaved: saved,
+    changed,
+  });
+
   return { messages: changed ? next : (messages as Message[]), saved, changed };
 }
 

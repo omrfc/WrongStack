@@ -398,7 +398,7 @@ function FleetAgentDetailPanel({
 
 // ── Agent Row ─────────────────────────────────────────────────────────
 
-function FleetAgentRow({
+export function FleetAgentRow({
   agent,
   isSelected,
   isLeader,

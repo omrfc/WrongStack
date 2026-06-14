@@ -37,7 +37,7 @@ export function parseNextSteps(content: string): NextStep[] {
  * Fill the chat input textarea with the given text.
  * Uses the native setter to trigger React's onChange.
  */
-function fillInput(text: string): void {
+export function fillInput(text: string): void {
   const ta = document.querySelector('textarea');
   if (!ta) return;
   const setter = Object.getOwnPropertyDescriptor(

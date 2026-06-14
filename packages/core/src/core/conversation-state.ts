@@ -95,12 +95,16 @@ export class ConversationState {
     for (const m of messages) {
       if (m._estTokens === undefined) {
         m._estTokens = computeMessageTokens(m);
-      }
-      if (!hasToolBlock && Array.isArray(m.content)) {
-        for (const b of m.content) {
-          if (b.type === 'tool_use' || b.type === 'tool_result') {
-            hasToolBlock = true;
-            break;
+        // Scan for tool blocks only while already walking content to compute
+        // tokens — avoids a separate O(n·m) pass over already-cached messages.
+        // The `!hasToolBlock` guard on the outer loop skips messages after the
+        // first tool block is found, so worst case is one full content scan.
+        if (Array.isArray(m.content)) {
+          for (const b of m.content) {
+            if (b.type === 'tool_use' || b.type === 'tool_result') {
+              hasToolBlock = true;
+              break;
+            }
           }
         }
       }

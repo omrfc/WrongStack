@@ -40,6 +40,43 @@ function fakeContext(messages: Message[]): Context {
 const MEDIUM = buildMessages(500); // 1000 messages total (user + assistant)
 const LARGE = buildMessages(2500); // 5000 messages total
 
+/** Forces the elision full-pass by including oversized tool_result blocks. */
+function buildMessagesWithOversizedToolResults(n: number): Message[] {
+  const out: Message[] = [];
+  for (let i = 0; i < n; i++) {
+    out.push({ role: 'user', content: `user message ${i}` });
+    out.push({
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool_use',
+          id: `tu_${i}`,
+          name: 'bash',
+          input: { command: `echo ${i}` },
+        },
+      ],
+    });
+    // Each tool_result block must exceed the eliseThreshold (2000 tokens ≈ 7000 chars).
+    // RoughTokenEstimate divides by 3.5, so 7000 chars ≈ 2000 tokens.
+    out.push({
+      role: 'tool',
+      tool_call_id: `tu_${i}`,
+      content: [
+        {
+          type: 'tool_result',
+          content: `output ${i} ${'x'.repeat(7000)}`, // ≈ 2001 tokens > 2000 threshold
+        },
+      ],
+    });
+  }
+  return out;
+}
+
+// Use 2000 exchanges so preserve window (≈10 messages) is tiny relative to total.
+// Oversized tool results in the first 1990 exchanges are all OUTSIDE the preserve
+// window, forcing the full pass to run.
+const WITH_OVERSIZED_TOOL_RESULTS = buildMessagesWithOversizedToolResults(2000);
+
 describe('HybridCompactor', () => {
   bench('aggressive over 1000 messages', async () => {
     await new HybridCompactor({ preserveK: 5 }).compact(fakeContext([...MEDIUM]), {
@@ -50,6 +87,13 @@ describe('HybridCompactor', () => {
     await new HybridCompactor({ preserveK: 5 }).compact(fakeContext([...LARGE]), {
       aggressive: true,
     });
+  });
+  bench('full-pass elision with oversized tool_results', async () => {
+    // Every tool_result exceeds eliseThreshold → full pass must run
+    await new HybridCompactor({ preserveK: 5 }).compact(
+      fakeContext([...WITH_OVERSIZED_TOOL_RESULTS]),
+      { aggressive: true },
+    );
   });
 });
 

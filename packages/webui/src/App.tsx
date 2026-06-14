@@ -26,9 +26,16 @@ import { SidePanel } from './components/SidePanel';
 import { WorkspaceDock } from './components/WorkspaceDock';
 import { AgentsMonitor } from './components/AgentsMonitor';
 import { FleetMonitor } from './components/FleetMonitor';
+import { AgentsDrawer } from './components/AgentsDrawer';
+import { FleetDrawer } from './components/FleetDrawer';
+import { BottomDock } from './components/BottomDock';
 function AppInner() {
   const { theme } = useTheme();
-  const { currentView, sidebarOpen, toggleSidebar, setSearchOpen, setSidebarOpen, setCurrentView, fleetMonitorOpen, agentsMonitorOpen, setFleetMonitorOpen, setAgentsMonitorOpen } = useUIStore();
+  const {
+    currentView, sidebarOpen, toggleSidebar, setSearchOpen, setSidebarOpen, setCurrentView,
+    fleetMonitorOpen, agentsMonitorOpen, setFleetMonitorOpen, setAgentsMonitorOpen,
+    fleetDrawerOpen, agentsDrawerOpen, setFleetDrawerOpen, setAgentsDrawerOpen,
+  } = useUIStore();
   const isLoading = useChatStore((s) => s.isLoading);
   const iteration = useSessionStore((s) => s.iteration);
   const projectName = useSessionStore((s) => s.projectName);
@@ -178,15 +185,15 @@ function AppInner() {
         e.preventDefault();
         useUIStore.getState().toggleCompactMode();
       }
-      // Ctrl+Shift+M — Fleet Monitor overlay  (Ctrl+Shift+F is browser Find)
+      // Ctrl+Shift+M — Fleet Monitor drawer
       if (mod && e.shiftKey && e.key.toLowerCase() === 'm') {
         e.preventDefault();
-        useUIStore.getState().setFleetMonitorOpen(!useUIStore.getState().fleetMonitorOpen);
+        useUIStore.getState().setFleetDrawerOpen(!useUIStore.getState().fleetDrawerOpen);
       }
-      // Ctrl+Shift+A — Agents Monitor overlay  (Ctrl+Shift+G is browser Find Next)
+      // Ctrl+Shift+A — Agents Monitor drawer
       if (mod && e.shiftKey && e.key.toLowerCase() === 'a') {
         e.preventDefault();
-        useUIStore.getState().setAgentsMonitorOpen(!useUIStore.getState().agentsMonitorOpen);
+        useUIStore.getState().setAgentsDrawerOpen(!useUIStore.getState().agentsDrawerOpen);
       }
       // Vim-style chat navigation: j/k step between bubbles, g goes to the
       // first message and G to the last. Skipped while typing so j/k inside
@@ -310,23 +317,25 @@ function AppInner() {
         {currentView === 'files' && <CodeEditor />}
       </main>
 
-      {/* Fleet Monitor overlay — only when not already on fleet page */}
-      {fleetMonitorOpen && currentView !== 'fleet' && (
-        <FleetMonitor
-          isOverlay={true}
-          onClose={() => setFleetMonitorOpen(false)}
+      {/* Fleet Monitor drawer */}
+      {fleetDrawerOpen && (
+        <FleetDrawer
+          onClose={() => setFleetDrawerOpen(false)}
           onSelectAgent={(agent) => {
-            // Open agent detail — close fleet monitor and open the agent
-            setFleetMonitorOpen(false);
-            setAgentsMonitorOpen(true);
+            // Open agent detail — close fleet drawer and open agents drawer
+            setFleetDrawerOpen(false);
+            setAgentsDrawerOpen(true);
           }}
         />
       )}
 
-      {/* Agents Monitor overlay */}
-      {agentsMonitorOpen && (
-        <AgentsMonitor onClose={() => setAgentsMonitorOpen(false)} />
+      {/* Agents Monitor drawer */}
+      {agentsDrawerOpen && (
+        <AgentsDrawer onClose={() => setAgentsDrawerOpen(false)} />
       )}
+
+      {/* Bottom dock — persistent menu items */}
+      <BottomDock />
 
       {/* Global overlays */}
       <ConfirmDialog />

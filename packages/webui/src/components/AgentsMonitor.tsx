@@ -51,7 +51,7 @@ const STATUS_META: Record<SubagentView['status'], { led: string; label: string; 
   stopped: { led: 'bg-muted-foreground', label: 'stopped', pulse: false, badge: 'bg-muted text-muted-foreground' },
 };
 
-function AgentCard({ agent, isLeader }: { agent: SubagentView; isLeader: boolean }) {
+export function AgentCard({ agent, isLeader }: { agent: SubagentView; isLeader: boolean }) {
   const meta = STATUS_META[agent.status];
   const active = agent.status === 'running';
   const elapsed = Date.now() - agent.startedAt;
