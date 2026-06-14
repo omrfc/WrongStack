@@ -49,3 +49,5 @@ export {
 } from './json-repair.js';
 export { mergeModelsPayload } from './merge-models-payload.js';
 export { mergeCustomModelDefs } from './merge-custom-models.js';
+export { isPrivateIPv4, isPrivateIPv6, expandIPv6, assertNotPrivateHost } from './ip-guard.js';
+export type { HttpDispatcher, HttpsAgentAsDispatcher } from './dispatcher-types.js';
