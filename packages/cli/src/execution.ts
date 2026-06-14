@@ -537,6 +537,11 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         (resolvedProvider?.envVars ?? savedProviderCfg?.envVars ?? [])
           .map((v) => process.env[v])
           .find((v): v is string => !!v);
+      // Last 3 chars of the active API key — shown in the TUI startup banner
+      // so the operator can visually confirm which key is being used (e.g. "...abc").
+      // Only 3 chars are shown: meaningful for key-pick verification, meaningless
+      // for an attacker without the full key. The full key is never displayed or logged.
+      // This is low risk but intentionally documented here so the design is clear.
       const banneredKeyTail =
         banneredKey && banneredKey.length >= 3 ? banneredKey.slice(-3) : undefined;
 
