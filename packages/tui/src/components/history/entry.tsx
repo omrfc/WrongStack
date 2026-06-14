@@ -55,6 +55,7 @@ export const Entry = React.memo(function Entry({
   termWidth,
   setSuggestions,
   autonomyMode,
+  autoSubmitCountdown,
 }: {
   entry: HistoryEntry;
   termWidth: number;
@@ -62,6 +63,8 @@ export const Entry = React.memo(function Entry({
   setSuggestions?: ((steps: string[]) => void) | undefined;
   /** Current autonomy mode — when 'auto', first step shows an auto marker. */
   autonomyMode?: string | undefined;
+  /** Seconds remaining in the auto-submit countdown — shown as a live badge. */
+  autoSubmitCountdown?: number | null | undefined;
 }): React.ReactElement {
   // Parse next steps from assistant text — computed once, used only in
   // the assistant case. Must live at the top level (hooks rules).
@@ -166,7 +169,11 @@ export const Entry = React.memo(function Entry({
                       <Text color="cyan" dimColor>  auto</Text>
                     ) : null}
                     {autonomyMode === 'auto' && i === 0 ? (
-                      <Text color="cyan">{'  ⏩'}</Text>
+                      autoSubmitCountdown != null && autoSubmitCountdown > 0 ? (
+                        <Text color="cyan">{`  auto in ${autoSubmitCountdown}s`}</Text>
+                      ) : (
+                        <Text color="cyan">{'  ⏩'}</Text>
+                      )
                     ) : null}
                   </Text>
                 </Box>

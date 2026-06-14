@@ -5328,6 +5328,7 @@ export function App({
             onMeasure={(totalLines) => dispatch({ type: 'setMeasuredLines', totalLines })}
             setSuggestions={setSuggestions}
             autonomyMode={autonomyLive}
+            autoSubmitCountdown={nextStepsAutoSubmitCountdown}
           />
         ) : (
           <History
@@ -5337,6 +5338,7 @@ export function App({
             toolStream={state.toolStream}
             setSuggestions={setSuggestions}
             autonomyMode={autonomyLive}
+            autoSubmitCountdown={nextStepsAutoSubmitCountdown}
           />
         )}
         <Box flexDirection="column" flexShrink={0} ref={bottomRegionRef}>

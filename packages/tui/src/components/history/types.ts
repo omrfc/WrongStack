@@ -75,6 +75,12 @@ export interface HistoryProps {
    */
   autonomyMode?: string | undefined;
   /**
+   * Seconds remaining in the next-steps auto-submit countdown.
+   * When set and autonomy is 'auto', the countdown replaces the static ⏩
+   * marker next to the first step with a live countdown badge.
+   */
+  autoSubmitCountdown?: number | null | undefined;
+  /**
    * Generation counter for wholesale history replacements (session resume).
    * Keys the internal <Static> so a replacement remounts it — Ink's Static
    * tracks written items by index and would otherwise skip replayed entries

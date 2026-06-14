@@ -43,7 +43,7 @@ export {
  * History component — renders committed entries via <Static> so they
  * flow into terminal scrollback, plus a live streaming assistant tail.
  */
-export function History({ entries, generation, streamingText, toolStream, setSuggestions, autonomyMode }: HistoryProps): React.ReactElement {
+export function History({ entries, generation, streamingText, toolStream, setSuggestions, autonomyMode, autoSubmitCountdown }: HistoryProps): React.ReactElement {
   const { stdout } = useStdout();
   const [termSize, setTermSize] = useState({
     columns: stdout?.columns ?? 80,
@@ -78,7 +78,7 @@ export function History({ entries, generation, streamingText, toolStream, setSug
       <Static key={generation ?? 0} items={entries}>
         {(entry) => (
           <Box key={entry.id} marginBottom={entry.kind === 'turn-summary' ? 1 : 0}>
-            <Entry entry={entry} termWidth={termWidth} setSuggestions={setSuggestions} autonomyMode={autonomyMode} />
+            <Entry entry={entry} termWidth={termWidth} setSuggestions={setSuggestions} autonomyMode={autonomyMode} autoSubmitCountdown={autoSubmitCountdown} />
           </Box>
         )}
       </Static>

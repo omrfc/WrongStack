@@ -123,6 +123,7 @@ export function ScrollableHistory({
   maxWidth,
   setSuggestions,
   autonomyMode,
+  autoSubmitCountdown,
 }: ScrollableHistoryProps): React.ReactElement {
   const { stdout } = useStdout();
   const rawWidth = stdout?.columns ?? 80;
@@ -184,7 +185,7 @@ export function ScrollableHistory({
           ) : null}
           {shown.map((entry) => (
             <Box key={entry.id} marginBottom={entry.kind === 'turn-summary' ? 1 : 0} flexShrink={0}>
-              <Entry entry={entry} termWidth={termWidth} setSuggestions={setSuggestions} autonomyMode={autonomyMode} />
+              <Entry entry={entry} termWidth={termWidth} setSuggestions={setSuggestions} autonomyMode={autonomyMode} autoSubmitCountdown={autoSubmitCountdown} />
             </Box>
           ))}
           {tail ? <AssistantTail text={tail} termWidth={termWidth} /> : null}
