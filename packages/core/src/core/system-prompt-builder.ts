@@ -637,7 +637,9 @@ summarize it, and let the tool result hold only the summary.`);
         '## Skills in scope for this session',
         this.skillCache,
         '',
-        'Full skill instructions are injected in the Active Skills block below.',
+        this.opts.tokenSavingMode
+          ? 'Compact skill instructions are injected in the Active Skills block below (Overview + Rules only).'
+          : 'Full skill instructions are injected in the Active Skills block below.',
       );
     }
     const text = lines.join('\n');
@@ -683,41 +685,82 @@ summarize it, and let the tool result hold only the summary.`);
     // Skills are listed by name+trigger in buildEnvironment (envCache);
     // here we inject the full body content so the model has the actual
     // domain instructions, not just a trigger hint.
-    // In token-saving mode, skill bodies are omitted entirely to save
-    // thousands of tokens per iteration since skill text can exceed 10K tokens.
-    if (this.opts.skillLoader && this.skillBodyCache === undefined && !this.opts.tokenSavingMode) {
-      try {
-        const skills = await this.opts.skillLoader.list();
-        if (skills.length > 0) {
-          const bodies: string[] = [];
-          for (const s of skills) {
-            try {
-              const raw = await this.opts.skillLoader.readBody(s.name);
-              // Strip YAML frontmatter — keep only the markdown body.
-              const body = stripFrontmatter(raw);
-              if (body.trim()) {
-                bodies.push(`## Skill: ${s.name}\n\n${body.trim()}`);
-              }
-            } catch {
-              // skip unreadable skill
-            }
-          }
-          if (bodies.length > 0) {
-            this.skillBodyCache = bodies.join('\n\n---\n\n');
-          } else {
-            this.skillBodyCache = ''; // mark as resolved to avoid retrying
-          }
-        } else {
-          this.skillBodyCache = '';
+    // In token-saving mode, skill bodies are compacted to save tokens:
+    // only the Overview and Rules sections (~400 chars max per skill).
+    if (this.opts.skillLoader) {
+      if (this.opts.tokenSavingMode) {
+        // Compact mode — build once, cache
+        if (this.skillBodyCache === undefined) {
+          await this.buildCompactSkillBodies();
         }
-      } catch {
-        this.skillBodyCache = '';
+      } else {
+        // Full mode — build once, cache
+        if (this.skillBodyCache === undefined) {
+          await this.buildFullSkillBodies();
+        }
       }
     }
     if (this.skillBodyCache) {
       parts.push(`# Active Skills\n\n${this.skillBodyCache}`);
     }
     return parts.join('\n\n');
+  }
+
+  /** Build full skill bodies (token-saving OFF). */
+  private async buildFullSkillBodies(): Promise<void> {
+    try {
+      const skills = await this.opts.skillLoader!.list();
+      if (skills.length > 0) {
+        const bodies: string[] = [];
+        for (const s of skills) {
+          try {
+            const raw = await this.opts.skillLoader!.readBody(s.name);
+            const body = stripFrontmatter(raw);
+            if (body.trim()) {
+              bodies.push(`## Skill: ${s.name}\n\n${body.trim()}`);
+            }
+          } catch {
+            // skip unreadable skill
+          }
+        }
+        this.skillBodyCache = bodies.length > 0 ? bodies.join('\n\n---\n\n') : '';
+      } else {
+        this.skillBodyCache = '';
+      }
+    } catch {
+      this.skillBodyCache = '';
+    }
+  }
+
+  /**
+   * Build compact skill bodies for token-saving mode.
+   * Keeps only the Overview + Rules sections, trimmed to ~400 chars max.
+   */
+  private async buildCompactSkillBodies(): Promise<void> {
+    try {
+      const skills = await this.opts.skillLoader!.list();
+      if (skills.length > 0) {
+        const bodies: string[] = [];
+        for (const s of skills) {
+          try {
+            const raw = await this.opts.skillLoader!.readBody(s.name);
+            const body = stripFrontmatter(raw);
+            if (!body.trim()) continue;
+            const compact = compactSkillBody(body);
+            if (compact) {
+              bodies.push(`## Skill: ${s.name}\n\n${compact}`);
+            }
+          } catch {
+            // skip unreadable skill
+          }
+        }
+        this.skillBodyCache = bodies.length > 0 ? bodies.join('\n\n---\n\n') : '';
+      } else {
+        this.skillBodyCache = '';
+      }
+    } catch {
+      this.skillBodyCache = '';
+    }
   }
 
   private async buildMode(): Promise<string> {
@@ -847,4 +890,43 @@ function compactTrigger(trigger: string): string {
     s = cut > 50 ? s.slice(0, cut) + '…' : s.slice(0, 68) + '…';
   }
   return s;
+}
+
+/**
+ * Compact a full skill body for token-saving mode.
+ * Extracts the Overview and Rules sections, trims to ~400 chars max.
+ * Returns empty string if nothing usable is found.
+ */
+function compactSkillBody(body: string): string {
+  const sections: string[] = [];
+
+  // Extract Overview section (between ## Overview and next ##)
+  const overviewMatch = body.match(/##\s*Overview\s*\n([\s\S]*?)(?=\n##|\n$|$)/i);
+  if (overviewMatch && overviewMatch[1].trim()) {
+    sections.push(overviewMatch[1].trim().slice(0, 200));
+  }
+
+  // Extract Rules section (between ## Rules and next ##)
+  const rulesMatch = body.match(/##\s*Rules\s*\n([\s\S]*?)(?=\n##|\n$|$)/i);
+  if (rulesMatch && rulesMatch[1].trim()) {
+    const rules = rulesMatch[1].trim().slice(0, 350);
+    // Keep only rule lines (starting with - or numbered)
+    const ruleLines = rules
+      .split('\n')
+      .filter((l) => /^\s*[-*]\s/.test(l) || /^\s*\d+[.)]\s/.test(l))
+      .slice(0, 6) // max 6 rules
+      .join('\n');
+    if (ruleLines) {
+      sections.push(ruleLines);
+    }
+  }
+
+  // Fallback: if neither section found, take first 200 chars
+  if (sections.length === 0) {
+    const first = body.trim().slice(0, 200);
+    if (first) sections.push(first);
+  }
+
+  const result = sections.join('\n\n');
+  return result.length > 450 ? result.slice(0, 447) + '…' : result;
 }
