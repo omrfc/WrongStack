@@ -177,7 +177,7 @@ export function MarkdownView({
       // panel background. Render them in a transparent box so they are not
       // affected by the parent entry's backgroundColor.
       rows.push(
-        <Box key={`t${key++}`} backgroundColor="transparent">
+        <Box key={`t${key++}`} width={tableBudget} backgroundColor="transparent">
           <Text>{renderTable(lines.slice(i, tableEnd), tableBudget)}</Text>
         </Box>,
       );
@@ -203,7 +203,9 @@ export function MarkdownView({
         <Box key={`q${key++}`} flexDirection="row">
           <Text dimColor>{'  '}</Text>
           {/[\u2500-\u257F]/.test(qContent) ? (
-            <Box flexDirection="row">
+            // Box-drawing characters inside blockquotes also need transparent
+            // background to avoid inheriting the message panel background.
+            <Box flexDirection="row" backgroundColor="transparent">
               {[...qContent].slice(0, (contentWidth ?? termWidth) - 2).map((ch, ci) => (
                 /* biome-ignore lint/suspicious/noArrayIndexKey: characters are not reorderable */
                 <Text key={ci} dimColor>{ch}</Text>
@@ -244,8 +246,11 @@ export function MarkdownView({
     if (/[\u2500-\u257F]/.test(line)) {
       const maxW = contentWidth ?? termWidth;
       const chars = [...line].slice(0, maxW);
+      // Box-drawing characters (U+2500-U+257F) inherit the message panel
+      // background, making them visually unclear. Wrap in a transparent box
+      // so they render on the terminal default background, matching tables.
       rows.push(
-        <Box key={`bx${key++}`} flexDirection="row">
+        <Box key={`bx${key++}`} width={maxW} backgroundColor="transparent" flexDirection="row">
           {chars.map((ch, ci) => (
             /* biome-ignore lint/suspicious/noArrayIndexKey: characters are not reorderable */
             <Text key={ci}>{ch}</Text>
