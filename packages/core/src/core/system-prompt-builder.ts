@@ -483,6 +483,53 @@ inline, the rest as a summary. To catch up explicitly:
       }
     }
 
+    // MCP lazy-loading guidance — in token-saving mode, MCP tools are not
+    // registered at startup. The model uses mcp_use or mcp_control activate/deactivate
+    // to temporarily enable specific servers' tools when needed.
+    const hasMcpControl = tools.some((t) => t.name === 'mcp_control');
+    const hasMcpUse = tools.some((t) => t.name === 'mcp_use');
+    if (hasMcpControl && this.opts.tokenSavingMode) {
+      if (hasMcpUse) {
+        // `mcp_use` is the preferred one-shot meta-tool
+        lines.push(`
+## MCP tools (lazy-loaded)
+
+MCP server tools are NOT registered by default in token-saving mode to keep
+the prompt compact. Each server\'s process is running in the background; only
+tool registration is deferred.
+
+**Preferred approach** — one-shot meta-tool:
+\`mcp_use({ server: "<name>", tool: "<bare-tool>", input: { ... } })\`
+This activates the server, calls the tool, returns the result, and
+deactivates — all in one call. No need to track activate/deactivate state.
+
+**Manual approach** (for exploration):
+1. \`mcp_control({ action: "list" })\` — see which servers are connected
+2. \`mcp_control({ action: "activate", server: "<name>" })\` — register tools
+3. Use the tools normally
+4. \`mcp_control({ action: "deactivate", server: "<name>" })\` — clean up
+
+Activation/deactivation is ephemeral (no config writes) and does NOT affect
+the server connection — only tool visibility changes.`);
+      } else {
+        lines.push(`
+## MCP tools (lazy-loaded)
+
+MCP server tools are NOT registered by default in token-saving mode to keep
+the prompt compact. Each server\'s process is running in the background; only
+tool registration is deferred.
+
+When you need a specific MCP server\'s tools:
+1. \`mcp_control({ action: "list" })\` — see which servers are connected
+2. \`mcp_control({ action: "activate", server: "<name>" })\` — register its tools
+3. Use the tools as needed
+4. \`mcp_control({ action: "deactivate", server: "<name>" })\` — unregister when done
+
+Activation/deactivation is ephemeral (no config writes) and does NOT affect
+the server connection — only tool visibility changes.`);
+      }
+    }
+
     // Context management guidance — included when context_manager is present.
     // This layer teaches the model WHEN and HOW to use it proactively.
     // Skipped in token-saving mode — the model is already instructed to

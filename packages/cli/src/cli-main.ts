@@ -799,8 +799,13 @@ export async function main(argv: string[]): Promise<number> {
     agent.extensions.register(createLifecycleHooksExtension(hookRunner));
   }
 
-  // MCP servers
-  const mcpRegistry = new MCPRegistry({ toolRegistry, events, log: logger });
+  // MCP servers — lazy mode in token-saving mode (connect but don't register tools)
+  const mcpRegistry = new MCPRegistry({
+    toolRegistry,
+    events,
+    log: logger,
+    lazyMode: config.features.tokenSavingMode,
+  });
   if (config.features.mcp) {
     for (const cfg of Object.values(config.mcpServers ?? {})) {
       try {
@@ -1219,6 +1224,21 @@ export async function main(argv: string[]): Promise<number> {
       registry: mcpRegistry,
     }),
   );
+
+  // `mcp_use` — meta-tool for calling MCP tools in token-saving mode.
+  // Registers only when lazy mode is active so the model has a single
+  // call to invoke any MCP tool without the manual activate→use→deactivate
+  // dance. When lazy mode is off, MCP tools are always registered and
+  // the meta-tool is unnecessary.
+  if (config.features.tokenSavingMode) {
+    const { createMcpUseTool } = await import('@wrongstack/core');
+    toolRegistry.register(
+      createMcpUseTool({
+        registry: mcpRegistry,
+        toolRegistry,
+      }),
+    );
+  }
 
   // ── Tech-stack mailbox consumer: auto-spawn agent on dep-watcher messages ──
   // When dep-watcher posts assign messages to the mailbox, this consumer

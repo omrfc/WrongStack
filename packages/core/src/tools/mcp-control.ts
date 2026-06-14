@@ -21,6 +21,22 @@ export interface MCPRegistryHandle {
   restart(name: string): Promise<void>;
   describe(): { name: string; state: string; toolCount: number; enabled: boolean }[];
   list(): { name: string; state: string; toolCount: number }[];
+  /**
+   * Register all cached tools for a server without restarting it.
+   * No-op if the server is not connected or tools are already active.
+   * Used in token-saving mode to temporarily expose MCP tools.
+   */
+  activateServer?(name: string): void;
+  /**
+   * Unregister all tools for a server without disconnecting it.
+   * Returns the number of tools that were deactivated.
+   * Used in token-saving mode to hide MCP tools after use.
+   */
+  deactivateServer?(name: string): number;
+  /**
+   * Check whether a server's tools are currently registered.
+   */
+  isActivated?(name: string): boolean;
 }
 
 export interface CreateMcpControlToolOptions {
@@ -48,15 +64,15 @@ export function createMcpControlTool(opts: CreateMcpControlToolOptions): Tool {
     properties: {
       action: {
         type: 'string',
-        enum: ['list', 'search', 'enable', 'disable', 'restart'],
-        description: 'The management action to perform.',
+        enum: ['list', 'search', 'enable', 'disable', 'restart', 'activate', 'deactivate'],
+        description: 'The management action to perform. activate/deactivate toggle tool registration ephemerally without disconnecting.',
       },
       /** Filter for `search`. Matches server name or description case-insensitively. */
       query: {
         type: 'string',
         description: 'Search term for `search` action. Matches server name or description.',
       },
-      /** Target server name for `enable`, `disable`, `restart`. */
+      /** Target server name for `enable`, `disable`, `restart`, `activate`, `deactivate`. */
       server: {
         type: 'string',
         description: 'Server name (e.g. "github", "filesystem", "brave-search").',
@@ -68,7 +84,7 @@ export function createMcpControlTool(opts: CreateMcpControlToolOptions): Tool {
   return {
     name: 'mcp_control',
     description:
-      'Manage MCP server lifecycle: list available servers, search by name or capability, enable or disable servers at runtime, restart running servers.',
+      'Manage MCP server lifecycle: list available servers, search by name or capability, enable or disable servers at runtime, restart running servers. Use activate/deactivate to ephemerally toggle tool registration without disconnecting — ideal for token-saving mode where MCP tools are lazy-loaded on demand.',
     category: 'mcp',
     permission: 'auto',
     mutating: true,
@@ -95,8 +111,10 @@ async function mcpControlDispatch(
     case 'enable': return server ? runEnable(server, deps) : '`server` is required for enable.';
     case 'disable': return server ? runDisable(server, deps) : '`server` is required for disable.';
     case 'restart': return server ? runRestart(server, deps) : '`server` is required for restart.';
+    case 'activate': return server ? runActivate(server, deps) : '`server` is required for activate.';
+    case 'deactivate': return server ? runDeactivate(server, deps) : '`server` is required for deactivate.';
     default:
-      return `Unknown action "${action}". Use one of: list, search, enable, disable, restart.`;
+      return `Unknown action "${action}". Use one of: list, search, enable, disable, restart, activate, deactivate.`;
   }
 }
 
@@ -274,6 +292,54 @@ async function runRestart(
   } catch (err) {
     return `${red('✗ Restart failed')} for "${name}": ${err instanceof Error ? err.message : String(err)}`;
   }
+}
+
+/**
+ * Ephemerally activate a server's tools without writing to config or
+ * restarting the connection. The server must already be connected (lazy mode).
+ * Calls `registry.activateServer()` when available; falls back to a message
+ * if the registry doesn't support ephemeral activation.
+ */
+async function runActivate(
+  name: string | undefined,
+  deps: { registry: MCPRegistryHandle },
+): Promise<string> {
+  if (!name) return '`server` is required for activate.';
+  if (!deps.registry.activateServer) {
+    return `Registry does not support ephemeral activation. Use \`enable\` to start "${name}" instead.`;
+  }
+  const live = deps.registry.describe().find((s) => s.name === name);
+  if (!live) {
+    return `Server "${name}" is not registered. Use \`mcp_control({ action: "enable", server: "${name}" })\` first.`;
+  }
+  if (live.state !== 'connected') {
+    return `Server "${name}" is not connected (state: ${live.state}). Use \`enable\` to start it first.`;
+  }
+  if (deps.registry.isActivated?.(name)) {
+    return `${green('●')} Server "${name}" tools are already active. Use \`deactivate\` to hide them.`;
+  }
+  deps.registry.activateServer(name);
+  const updated = deps.registry.describe().find((s) => s.name === name);
+  return `${green('✓ Activated')} "${name}" — ${updated?.toolCount ?? 0} tool(s) now registered. Use \`mcp_control({ action: "deactivate", server: "${name}" })\` to hide them when done.`;
+}
+
+/**
+ * Ephemerally deactivate a server's tools without disconnecting.
+ * Calls `registry.deactivateServer()` when available.
+ */
+async function runDeactivate(
+  name: string | undefined,
+  deps: { registry: MCPRegistryHandle },
+): Promise<string> {
+  if (!name) return '`server` is required for deactivate.';
+  if (!deps.registry.deactivateServer) {
+    return `Registry does not support ephemeral deactivation. Use \`disable\` to stop "${name}" instead.`;
+  }
+  if (!deps.registry.isActivated?.(name)) {
+    return `Server "${name}" tools are not currently active.`;
+  }
+  const count = deps.registry.deactivateServer(name);
+  return `${yellow('○ Deactivated')} "${name}" — ${count} tool(s) unregistered. Server stays connected.`;
 }
 
 // ── Config helpers ──────────────────────────────────────────────────────────────
