@@ -1,8 +1,31 @@
 import * as dns from 'node:dns/promises';
 import * as net from 'node:net';
 import type { Tool, ToolStreamEvent } from '@wrongstack/core';
+import { isPrivateIPv4, isPrivateIPv6 } from '@wrongstack/core';
 import { Agent } from 'undici';
+import TurndownService from 'turndown';
 import { truncateMiddle } from './_util.js';
+
+/**
+ * Singleton Turndown instance for HTML→Markdown conversion.
+ * Pre-configured with sensible defaults; code blocks are handled via the
+ * default fenced code rule. Reused across all fetch calls.
+ */
+const TD = new TurndownService({
+  // Use `# Title` for headings, not setext underline style (`Title\n=====`).
+  headingStyle: 'atx',
+  // Don't wrap code blocks in <pre> — render them as triple-backtick blocks.
+  codeBlockStyle: 'fenced',
+});
+
+// Strip <script>/<style>/<noscript> before turndown sees them. The old
+// hand-rolled converter did this via regex; turndown's DOM-based approach
+// may keep their text content unless we remove the elements first.
+// Using turndown's own addRule mechanism keeps the logic co-located.
+TD.addRule('stripDangerousElements', {
+  filter: ['script', 'style', 'noscript'],
+  replacement: () => '',
+});
 
 interface FetchInput {
   url: string;
@@ -288,7 +311,7 @@ export const fetchTool: Tool<FetchInput, FetchOutput> = {
       const format = input.format ?? (ct.includes('text/html') ? 'markdown' : 'text');
       let content: string;
       if (format === 'raw') content = text;
-      else if (format === 'markdown' && ct.includes('text/html')) content = htmlToMarkdown(text);
+      else if (format === 'markdown' && ct.includes('text/html')) content = TD.turndown(text);
       else if (ct.includes('application/json')) content = prettyJson(text);
       else content = text;
 
@@ -334,6 +357,7 @@ async function assertNotPrivate(hostname: string): Promise<void> {
     // resolution the connection actually uses, so there is no TOCTOU between
     // this check and the connect. Each redirect target is re-checked too.
     try {
+      // Use dns.lookup for async hostname resolution (matches guardedLookup below).
       const records = await dns.lookup(host, { all: true });
       for (const r of records) {
         const bad = r.family === 4 ? isPrivateIPv4(r.address) : isPrivateIPv6(r.address);
@@ -348,91 +372,6 @@ async function assertNotPrivate(hostname: string): Promise<void> {
   }
 }
 
-function isPrivateIPv4(addr: string): boolean {
-  // net.isIP rejects octal/hex/decimal forms, so when isIP(addr) === 4 we
-  // know it's canonical dotted-quad and safe to parse this way.
-  const parts = addr.split('.').map((p) => Number.parseInt(p, 10));
-  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n) || n < 0 || n > 255)) {
-    return true; // defensive
-  }
-  const [a, b, c] = parts as [number, number, number, number];
-  if (a === 0) return true; // 0.0.0.0/8
-  if (a === 10) return true; // 10.0.0.0/8
-  if (a === 127) return true; // 127.0.0.0/8 loopback
-  if (a === 169 && b === 254) return true; // 169.254.0.0/16 link-local + AWS/GCE/Azure IMDS
-  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
-  if (a === 192 && b === 168) return true; // 192.168.0.0/16
-  if (a === 192 && b === 0 && c === 0) return true; // 192.0.0.0/24 reserved
-  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 CGNAT
-  if (a >= 224) return true; // 224.0.0.0/4 multicast + 240.0.0.0/4 reserved
-  return false;
-}
-
-function isPrivateIPv6(addr: string): boolean {
-  const lower = addr.toLowerCase();
-  if (lower === '::' || lower === '::1') return true;
-  // Convert to 8-group canonical form (16 hex words) so range checks
-  // don't have to handle every shortening notation. Returns null on
-  // anything we can't normalize; we conservatively return true in that
-  // case so a parser surprise blocks rather than leaks.
-  const groups = expandIPv6(lower);
-  if (!groups) return true;
-  // IPv4-mapped: ::ffff:0:0/96 → groups[0..5] all 0, groups[6..7] hold the
-  // embedded IPv4 as two 16-bit words. Node URL normalizes the dotted form
-  // to this representation (e.g. ::ffff:127.0.0.1 → ::ffff:7f00:1).
-  if (
-    groups[0] === 0 &&
-    groups[1] === 0 &&
-    groups[2] === 0 &&
-    groups[3] === 0 &&
-    groups[4] === 0 &&
-    groups[5] === 0xffff
-  ) {
-    const a = (groups[6] ?? 0) >> 8;
-    const b = (groups[6] ?? 0) & 0xff;
-    const c = (groups[7] ?? 0) >> 8;
-    const d = (groups[7] ?? 0) & 0xff;
-    return isPrivateIPv4(`${a}.${b}.${c}.${d}`);
-  }
-  const high = groups[0] ?? 0;
-  if ((high & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local (fc..fd)
-  if ((high & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
-  if ((high & 0xff00) === 0xff00) return true; // ff00::/8 multicast
-  return false;
-}
-
-/**
- * Expand an IPv6 string into exactly 8 16-bit numbers. Handles `::`
- * compression. Returns null on malformed input — caller should treat that
- * as "block".
- */
-function expandIPv6(addr: string): number[] | null {
-  const parts = addr.split('::');
-  if (parts.length > 2) return null;
-  const parseGroups = (s: string): number[] | null => {
-    if (s === '') return [];
-    const out: number[] = [];
-    for (const g of s.split(':')) {
-      if (g.length === 0 || g.length > 4) return null;
-      const n = Number.parseInt(g, 16);
-      if (Number.isNaN(n) || n < 0 || n > 0xffff) return null;
-      out.push(n);
-    }
-    return out;
-  };
-  if (parts.length === 1) {
-    const groups = parseGroups(parts[0] ?? '');
-    if (!groups || groups.length !== 8) return null;
-    return groups;
-  }
-  const head = parseGroups(parts[0] ?? '');
-  const tail = parseGroups(parts[1] ?? '');
-  if (!head || !tail) return null;
-  const fill = 8 - head.length - tail.length;
-  if (fill < 0) return null;
-  return [...head, ...new Array<number>(fill).fill(0), ...tail];
-}
-
 function prettyJson(s: string): string {
   try {
     return JSON.stringify(JSON.parse(s), null, 2);
@@ -441,58 +380,3 @@ function prettyJson(s: string): string {
   }
 }
 
-/**
- * Simplified regex-based HTML-to-Markdown converter. Handles the common
- * case (headings, bold/italic, links, code blocks, lists) adequately for
- * LLM context consumption. Known limitations: nested tags, attributes
- * containing `>`, malformed HTML, or unusual markup may produce incorrect
- * output. This is acceptable — the result is fed to LLM context, not
- * rendered in a browser. For strict correctness, replace with a dedicated
- * converter library (e.g. turndown, marked).
- */
-function htmlToMarkdown(html: string): string {
-  let s = html;
-  // Strip scripts/styles
-  s = s.replace(/<script[\s\S]*?<\/script>/gi, '');
-  s = s.replace(/<style[\s\S]*?<\/style>/gi, '');
-  s = s.replace(/<noscript[\s\S]*?<\/noscript>/gi, '');
-  // Headings
-  s = s.replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_m, n, c) => {
-    return '\n' + '#'.repeat(Number(n)) + ' ' + stripTags(c).trim() + '\n';
-  });
-  // Bold / italic
-  s = s.replace(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/gi, '**$2**');
-  s = s.replace(/<(em|i)[^>]*>([\s\S]*?)<\/\1>/gi, '*$2*');
-  // Links — only emit markdown links for safe protocols
-  // Explicitly reject dangerous schemes (javascript:, data:, vbscript:) to prevent XSS
-  s = s.replace(/<a [^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, (_m, href, text) => {
-    const safe =
-      /^(https?|ftps?):\/\//i.test(href) &&
-      !/^(javascript|data|vbscript):/i.test(href);
-    return safe ? `[${text}](${href})` : text;
-  });
-  // Code
-  s = s.replace(/<pre[^>]*>([\s\S]*?)<\/pre>/gi, (_m, c) => '\n```\n' + stripTags(c) + '\n```\n');
-  s = s.replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, '`$1`');
-  // Lists
-  s = s.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, '- $1\n');
-  // Breaks / paragraphs
-  s = s.replace(/<br\s*\/?>/gi, '\n');
-  s = s.replace(/<\/p>/gi, '\n\n');
-  // Strip remaining tags
-  s = stripTags(s);
-  // Decode common entities
-  s = s
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, ' ');
-  // Collapse whitespace
-  return s.replace(/\n{3,}/g, '\n\n').trim();
-}
-
-function stripTags(s: string): string {
-  return s.replace(/<[^>]+>/g, '');
-}

@@ -2372,7 +2372,10 @@ export function App({
           // Trigger submit
           void (async () => {
             const trimmed = suggestion.trim();
-            if (!trimmed) return;
+            if (!trimmed) {
+              clearDraft();
+              return;
+            }
             // Build blocks for the suggestion
             const blocks: ContentBlock[] = [{ type: 'text', text: trimmed }];
             dispatch({ type: 'addEntry', entry: { kind: 'user', text: trimmed } });
@@ -2380,9 +2383,12 @@ export function App({
             // in this effect's deps array evaluates it at render time and
             // throws a TDZ ReferenceError. The ref is only dereferenced when
             // the countdown fires, long after mount.
-            await runBlocksRef.current(blocks);
-            // Clear the input field after auto-submit, matching normal submit behavior.
-            clearDraft();
+            try {
+              await runBlocksRef.current(blocks);
+            } finally {
+              // Always clear the input field after submit, even on error.
+              clearDraft();
+            }
           })();
         }
       } else {
@@ -4999,10 +5005,14 @@ export function App({
               await new Promise((r) => setTimeout(r, 25));
             }
             // Show the suggestion in the input field (matching auto-submit behavior),
-            // then clear it after runBlocks completes.
+            // then clear it after runBlocks completes. Use try/finally to ensure
+            // the input is always cleared even if runBlocks throws.
             setDraft(res.runText, res.runText.length);
-            await runBlocks(blocks);
-            clearDraft();
+            try {
+              await runBlocks(blocks);
+            } finally {
+              clearDraft();
+            }
           }
         }
         // Only fire onClearHistory for `/clear` — without this gate every

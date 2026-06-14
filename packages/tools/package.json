@@ -179,6 +179,7 @@
   },
   "dependencies": {
     "@wrongstack/core": "workspace:*",
+    "turndown": "^7.2.0",
     "typescript": "^6.0.3",
     "undici": "^8.4.1"
   },

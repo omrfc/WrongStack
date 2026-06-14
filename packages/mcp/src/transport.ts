@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import * as https from 'node:https';
 import * as net from 'node:net';
-import type { Dispatcher } from 'undici';
+import type { HttpDispatcher } from '@wrongstack/core';
 import type { ConnectionState, JsonRpcResponse, MCPTool, ToolCallResult } from './client.js';
 import { MCP_CONSTANTS } from './constants.js';
 import { normalizeMCPTools } from './tool-schema.js';
@@ -334,30 +334,54 @@ function assertMatchingJsonRpcResult(
   return data;
 }
 
-/**
- * SSE transport for MCP over HTTP.
- *
- * Uses native fetch API with ReadableStream to consume SSE events.
- * HTTP POST is used to send JSON-RPC requests.
- */
-export class SSETransport {
-  private state: ConnectionState = 'idle';
-  private url: string;
-  private headers: Record<string, string>;
-  private timeout: number;
-  private requestTimeout: number;
-  /** Per-request TLS agent — created once from HttpTransportOptions.tls */
-  private tlsAgent?: https.Agent | undefined;
-  private nextId = 1;
-  private tools: MCPTool[] = [];
-  private abortController?: AbortController | undefined;
-  private reader?: globalThis.ReadableStreamDefaultReader<string> | undefined;
-  private readerDone = false;
-  private disconnectHandlers: Array<() => void> = [];
-  private readLoopAbort?: AbortController | undefined;
-  private readonly toolsChangedListeners = new Set<(tools: MCPTool[]) => void>();
+function createTimeoutSignal(
+  parent: AbortSignal | undefined,
+  timeoutMs: number,
+): { signal: AbortSignal; dispose: () => void } {
+  const ctrl = new AbortController();
+  const onAbort = () => ctrl.abort(parent?.reason);
+  if (parent?.aborted) {
+    ctrl.abort(parent.reason);
+  } else {
+    parent?.addEventListener('abort', onAbort, { once: true });
+  }
+  const timer = setTimeout(
+    () => ctrl.abort(new Error(`MCP HTTP request timed out after ${timeoutMs}ms`)),
+    timeoutMs,
+  );
+  return {
+    signal: ctrl.signal,
+    dispose: () => {
+      clearTimeout(timer);
+      parent?.removeEventListener('abort', onAbort);
+    },
+  };
+}
 
-  constructor(opts: HttpTransportOptions) {
+// ---------------------------------------------------------------------------
+// Shared base class — consolidates all duplicated fields, constructor logic,
+// and private helpers that are identical between SSETransport and
+// StreamableHTTPTransport.
+// ---------------------------------------------------------------------------
+
+/**
+ * Fields and methods shared by all HTTP-based MCP transports.
+ * Subclasses override `connect()`, `close()`, `callTool()`, `request()`.
+ */
+export abstract class BaseHTTPTransport {
+  protected state: ConnectionState = 'idle';
+  protected readonly url: string;
+  protected readonly headers: Record<string, string>;
+  protected readonly timeout: number;
+  protected readonly requestTimeout: number;
+  /** Per-request TLS agent — created once from HttpTransportOptions.tls */
+  protected readonly tlsAgent?: https.Agent | undefined;
+  protected readonly tools: MCPTool[] = [];
+  protected abortController?: AbortController | undefined;
+  protected readonly disconnectHandlers: Array<() => void> = [];
+  protected readonly toolsChangedListeners = new Set<(tools: MCPTool[]) => void>();
+
+  constructor(opts: HttpTransportOptions, transportName: string) {
     validateTransportUrl(opts.url);
     this.url = opts.url;
     this.headers = { ...opts.headers };
@@ -367,12 +391,12 @@ export class SSETransport {
       if (opts.tls.rejectUnauthorized === false) {
         if (!isTlsUnsafeAllowed()) {
           throw new Error(
-            `[mcp:SSETransport] TLS verification disabled — set WRONGSTACK_UNSAFE_MCP_TLS=1 ` +
+            `[mcp:${transportName}] TLS verification disabled — set WRONGSTACK_UNSAFE_MCP_TLS=1 ` +
             `or CI=true to allow. Rejecting insecure configuration for ${this.url}.`,
           );
         }
         console.error(
-          `[mcp:SSETransport] ⚠️ TLS verification DISABLED for ${this.url}. ` +
+          `[mcp:${transportName}] ⚠️ TLS verification DISABLED for ${this.url}. ` +
           `Network attacks are possible — only use on localhost.`,
         );
       }
@@ -406,12 +430,74 @@ export class SSETransport {
     };
   }
 
+  /**
+   * Fire all disconnect handlers. Subclasses call this when the connection
+   * drops so the registry can schedule reconnects.
+   */
+  protected notifyDisconnect(): void {
+    for (const cb of this.disconnectHandlers) {
+      try {
+        cb();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  /**
+   * Apply the pinned TLS agent (if configured) to a `RequestInit` object.
+   * Uses `HttpDispatcher` from `@wrongstack/core`'s dispatcher-types shim,
+   * which declares `https.Agent` compatible with `RequestInit.dispatcher`.
+   * Verified safe: https.Agent implements the `dispatch(req, opts)` method
+   * that fetch requires at runtime.
+   */
+  protected applyTlsAgent(fetchOpts: RequestInit): void {
+    if (this.tlsAgent) {
+      // The global `RequestInit.dispatcher` type now accepts `HttpDispatcher`
+      // (see dispatcher-types.d.ts). The cast through `unknown` is the standard
+      // pattern for "I know this is compatible at runtime."
+      fetchOpts.dispatcher = this.tlsAgent as unknown as HttpDispatcher;
+    }
+  }
+
+  /** Generate the next JSON-RPC request id. Subclasses provide the counter. */
+  protected abstract genId(): number;
+}
+
+// ---------------------------------------------------------------------------
+// SSE Transport
+// ---------------------------------------------------------------------------
+
+/**
+ * SSE transport for MCP over HTTP.
+ *
+ * Uses native fetch API with ReadableStream to consume SSE events.
+ * HTTP POST is used to send JSON-RPC requests.
+ */
+export class SSETransport extends BaseHTTPTransport {
+  private _nextId = 1;
+  private readerDone = false;
+  private readLoopAbort?: AbortController | undefined;
+  private reader?: globalThis.ReadableStreamDefaultReader<string> | undefined;
+
+  constructor(opts: HttpTransportOptions) {
+    super(opts, 'SSETransport');
+  }
+
+  protected override genId(): number {
+    return this._nextId++;
+  }
+
   /** Refresh tool list when server sends notifications/tools/list_changed. */
   private async handleToolsListChanged(): Promise<void> {
     try {
       const res = await this.httpPost('tools/list', {});
       if (!res.error) {
-        this.tools = normalizeMCPTools((res.result as { tools?: unknown | undefined } | undefined)?.tools);
+        this.tools.splice(
+          0,
+          this.tools.length,
+          ...normalizeMCPTools((res.result as { tools?: unknown | undefined } | undefined)?.tools),
+        );
         for (const cb of this.toolsChangedListeners) {
           try {
             cb([...this.tools]);
@@ -437,8 +523,7 @@ export class SSETransport {
         headers: this.headers,
         signal,
       };
-      // @ts-expect-error — https.Agent is compatible at runtime; type mismatch is from undici@7 bundling types vs @types/node transitively pulling undici-types@6
-      if (this.tlsAgent) fetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
+      this.applyTlsAgent(fetchOpts);
       const response = await fetch(sseUrl, fetchOpts);
 
       if (!response.ok) {
@@ -454,9 +539,6 @@ export class SSETransport {
       this.readLoopAbort = new AbortController();
 
       sseReader.onMessage((msg) => {
-        // Future: if the spec evolves to send JSON-RPC responses over SSE
-        // (rather than as HTTP POST replies), wire id-correlation here via
-        // `_reservedPending`. Today httpPost owns response routing.
         // Server-initiated notifications (no id). Handle list_changed for L2-C.
         if (msg.method && !msg.id) {
           if (msg.method === 'notifications/tools/list_changed') {
@@ -491,10 +573,14 @@ export class SSETransport {
 
       const toolsRes = await this.httpPost('tools/list', {});
       if (toolsRes.error) {
-        this.tools = [];
+        this.tools.splice(0, this.tools.length);
       } else {
         const result = toolsRes.result as { tools?: unknown | undefined } | undefined;
-        this.tools = normalizeMCPTools(result?.tools);
+        this.tools.splice(
+          0,
+          this.tools.length,
+          ...normalizeMCPTools(result?.tools),
+        );
       }
 
       this.state = 'connected';
@@ -525,13 +611,7 @@ export class SSETransport {
       // disconnect handlers so the registry can schedule a reconnect.
       if (this.state !== 'disconnected' && this.state !== 'failed') {
         this.state = 'disconnected';
-        for (const cb of this.disconnectHandlers) {
-          try {
-            cb();
-          } catch {
-            /* ignore */
-          }
-        }
+        this.notifyDisconnect();
       }
     }
   }
@@ -550,7 +630,7 @@ export class SSETransport {
   }
 
   private async httpPost(method: string, params: unknown): Promise<JsonRpcResult> {
-    const id = this.nextId++;
+    const id = this.genId();
     const body = JSON.stringify({ jsonrpc: '2.0', id, method, params });
 
     const timeoutSignal = createTimeoutSignal(this.abortController?.signal, this.requestTimeout);
@@ -563,8 +643,7 @@ export class SSETransport {
       body,
       signal: timeoutSignal.signal,
     };
-    // @ts-expect-error — https.Agent is compatible at runtime; type mismatch is from undici@7 bundling types vs @types/node transitively pulling undici-types@6
-    if (this.tlsAgent) fetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
+    this.applyTlsAgent(fetchOpts);
     const res = await fetch(this.url, fetchOpts);
 
     try {
@@ -610,7 +689,7 @@ export class SSETransport {
 
   /** Generic JSON-RPC request — used by MCPClient.request() for SSE transports. */
   async request(method: string, params: unknown, timeoutMs?: number): Promise<JsonRpcResponse> {
-    const id = this.nextId++;
+    const id = this.genId();
     const body = JSON.stringify({ jsonrpc: '2.0', id, method, params });
 
     const timeoutSignal = createTimeoutSignal(
@@ -626,8 +705,7 @@ export class SSETransport {
       body,
       signal: timeoutSignal.signal,
     };
-    // @ts-expect-error — https.Agent is compatible at runtime; type mismatch is from undici@7 bundling types vs @types/node transitively pulling undici-types@6
-    if (this.tlsAgent) fetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
+    this.applyTlsAgent(fetchOpts);
     const res = await fetch(this.url, fetchOpts);
 
     if (!res.ok) {
@@ -664,78 +742,30 @@ export class SSETransport {
       /* ignore */
     }
     this.abortController?.abort();
-    this.disconnectHandlers = [];
+    this.disconnectHandlers.splice(0, this.disconnectHandlers.length);
     this.state = 'disconnected';
   }
 }
+
+// ---------------------------------------------------------------------------
+// Streamable HTTP Transport
+// ---------------------------------------------------------------------------
 
 /**
  * Streamable HTTP transport for MCP.
  *
  * Uses session-based HTTP with NDJSON responses.
  */
-export class StreamableHTTPTransport {
-  private state: ConnectionState = 'idle';
-  private url: string;
-  private headers: Record<string, string>;
-  private timeout: number;
-  private requestTimeout: number;
-  /** Per-request TLS agent — created once from HttpTransportOptions.tls */
-  private tlsAgent?: https.Agent | undefined;
-  private nextId = 1;
-  private tools: MCPTool[] = [];
-  private abortController?: AbortController | undefined;
+export class StreamableHTTPTransport extends BaseHTTPTransport {
+  private _nextId = 1;
   private sessionId?: string | undefined;
-  private disconnectHandlers: Array<() => void> = [];
-  private readonly toolsChangedListeners = new Set<(tools: MCPTool[]) => void>();
 
   constructor(opts: HttpTransportOptions) {
-    validateTransportUrl(opts.url);
-    this.url = opts.url;
-    this.headers = { ...opts.headers };
-    this.timeout = opts.startupTimeoutMs ?? 10_000;
-    this.requestTimeout = opts.requestTimeoutMs ?? 60_000;
-    if (opts.tls) {
-      if (opts.tls.rejectUnauthorized === false) {
-        if (!isTlsUnsafeAllowed()) {
-          throw new Error(
-            `[mcp:StreamableHTTP] TLS verification disabled — set WRONGSTACK_UNSAFE_MCP_TLS=1 ` +
-            `or CI=true to allow. Rejecting insecure configuration for ${this.url}.`,
-          );
-        }
-        console.error(
-          `[mcp:StreamableHTTP] ⚠️ TLS verification DISABLED for ${this.url}. ` +
-          `Network attacks are possible — only use on localhost.`,
-        );
-      }
-      this.tlsAgent = new https.Agent({
-        ca: opts.tls.ca,
-        rejectUnauthorized: opts.tls.rejectUnauthorized,
-      });
-    }
+    super(opts, 'StreamableHTTP');
   }
 
-  getState(): ConnectionState {
-    return this.state;
-  }
-
-  listTools(): MCPTool[] {
-    return [...this.tools];
-  }
-
-  onDisconnect(cb: () => void): () => void {
-    this.disconnectHandlers.push(cb);
-    return () => {
-      const idx = this.disconnectHandlers.indexOf(cb);
-      if (idx >= 0) this.disconnectHandlers.splice(idx, 1);
-    };
-  }
-
-  onToolsChanged(cb: (tools: MCPTool[]) => void): () => void {
-    this.toolsChangedListeners.add(cb);
-    return () => {
-      this.toolsChangedListeners.delete(cb);
-    };
+  protected override genId(): number {
+    return this._nextId++;
   }
 
   async connect(): Promise<void> {
@@ -754,7 +784,7 @@ export class StreamableHTTPTransport {
         },
         body: JSON.stringify({
           jsonrpc: '2.0',
-          id: this.nextId++,
+          id: this.genId(),
           method: 'initialize',
           params: {
             protocolVersion: MCP_CONSTANTS.PROTOCOL_VERSION,
@@ -764,8 +794,7 @@ export class StreamableHTTPTransport {
         }),
         signal,
       };
-      // @ts-expect-error — https.Agent is compatible at runtime; type mismatch is from undici@7 bundling types vs @types/node transitively pulling undici-types@6
-      if (this.tlsAgent) initFetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
+      this.applyTlsAgent(initFetchOpts);
       const initRes = await fetch(this.url, initFetchOpts);
 
       if (!initRes.ok) {
@@ -786,7 +815,7 @@ export class StreamableHTTPTransport {
       if (!data) {
         throw new Error('Could not parse initialize response');
       }
-      data = assertMatchingJsonRpcResult(data, this.nextId - 1, 'initialize');
+      data = assertMatchingJsonRpcResult(data, this._nextId - 1, 'initialize');
 
       if (data.error) {
         throw new Error(`initialize failed: ${data.error.message}`);
@@ -800,10 +829,10 @@ export class StreamableHTTPTransport {
 
       const toolsRes = await this.postRaw('tools/list', {});
       if (toolsRes.error) {
-        this.tools = [];
+        this.tools.splice(0, this.tools.length);
       } else {
         const result = toolsRes.result as { tools?: unknown | undefined } | undefined;
-        this.tools = normalizeMCPTools(result?.tools);
+        this.tools.splice(0, this.tools.length, ...normalizeMCPTools(result?.tools));
       }
 
       this.state = 'connected';
@@ -817,7 +846,7 @@ export class StreamableHTTPTransport {
   }
 
   private async postRaw(method: string, params: unknown): Promise<JsonRpcResult> {
-    const id = this.nextId++;
+    const id = this.genId();
     const body = JSON.stringify({ jsonrpc: '2.0', id, method, params });
 
     const timeoutSignal = createTimeoutSignal(this.abortController?.signal, this.requestTimeout);
@@ -832,8 +861,7 @@ export class StreamableHTTPTransport {
       body,
       signal: timeoutSignal.signal,
     };
-    // @ts-expect-error — https.Agent is compatible at runtime; type mismatch is from undici@7 bundling types vs @types/node transitively pulling undici-types@6
-    if (this.tlsAgent) fetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
+    this.applyTlsAgent(fetchOpts);
     const res = await fetch(this.url, fetchOpts);
 
     try {
@@ -859,7 +887,7 @@ export class StreamableHTTPTransport {
 
   /** Generic JSON-RPC request — used by MCPClient.request() for SSE/streamable-http transports. */
   async request(method: string, params: unknown, timeoutMs?: number): Promise<JsonRpcResponse> {
-    const id = this.nextId++;
+    const id = this.genId();
     const body = JSON.stringify({ jsonrpc: '2.0', id, method, params });
 
     const timeoutSignal = createTimeoutSignal(
@@ -877,8 +905,7 @@ export class StreamableHTTPTransport {
       body,
       signal: timeoutSignal.signal,
     };
-    // @ts-expect-error — https.Agent is compatible at runtime; type mismatch is from undici@7 bundling types vs @types/node transitively pulling undici-types@6
-    if (this.tlsAgent) fetchOpts.dispatcher = this.tlsAgent as unknown as Dispatcher;
+    this.applyTlsAgent(fetchOpts);
     const res = await fetch(this.url, fetchOpts);
 
     try {
@@ -928,30 +955,6 @@ export class StreamableHTTPTransport {
     this.abortController?.abort();
     // Intentionally do NOT fire disconnect handlers — those trigger
     // reconnection in the registry, which would fight an explicit close().
-    this.disconnectHandlers = [];
+    this.disconnectHandlers.splice(0, this.disconnectHandlers.length);
   }
-}
-
-function createTimeoutSignal(
-  parent: AbortSignal | undefined,
-  timeoutMs: number,
-): { signal: AbortSignal; dispose: () => void } {
-  const ctrl = new AbortController();
-  const onAbort = () => ctrl.abort(parent?.reason);
-  if (parent?.aborted) {
-    ctrl.abort(parent.reason);
-  } else {
-    parent?.addEventListener('abort', onAbort, { once: true });
-  }
-  const timer = setTimeout(
-    () => ctrl.abort(new Error(`MCP HTTP request timed out after ${timeoutMs}ms`)),
-    timeoutMs,
-  );
-  return {
-    signal: ctrl.signal,
-    dispose: () => {
-      clearTimeout(timer);
-      parent?.removeEventListener('abort', onAbort);
-    },
-  };
 }

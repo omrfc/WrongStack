@@ -8,6 +8,7 @@
 import { lookup } from 'node:dns/promises';
 import { isIPv4, isIPv6 } from 'node:net';
 import type { Plugin } from '@wrongstack/core';
+import { isPrivateIPv4, isPrivateIPv6 } from '@wrongstack/core';
 
 const API_VERSION = '^0.1.10';
 
@@ -64,36 +65,6 @@ async function duckduckgoSearch(query: string, numResults: number): Promise<Sear
   }
 
   return results;
-}
-
-/** True if an IPv4 literal is in a private / loopback / link-local / reserved range. */
-function isPrivateIPv4(host: string): boolean {
-  const parts = host.split('.').map(Number);
-  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
-  const [a, b] = parts as [number, number, number, number];
-  return (
-    a === 0 || // 0.0.0.0/8 "this host"
-    a === 10 || // private
-    a === 127 || // loopback
-    (a === 100 && b >= 64 && b <= 127) || // CGNAT 100.64/10
-    (a === 169 && b === 254) || // link-local incl. 169.254.169.254 (cloud IMDS)
-    (a === 172 && b >= 16 && b <= 31) || // private
-    (a === 192 && b === 168) || // private
-    a >= 224 // multicast / reserved
-  );
-}
-
-/** True if an IPv6 literal is loopback / unique-local / link-local / unspecified / mapped-private. */
-function isPrivateIPv6(raw: string): boolean {
-  const host = raw.toLowerCase();
-  if (host === '::1' || host === '::') return true; // loopback / unspecified
-  // IPv4-mapped (::ffff:a.b.c.d) and IPv4-compatible — check the embedded v4.
-  const mapped = host.match(/(?:::ffff:)?(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped?.[1]) return isPrivateIPv4(mapped[1]);
-  if (host.startsWith('fc') || host.startsWith('fd')) return true; // fc00::/7 ULA
-  if (host.startsWith('fe8') || host.startsWith('fe9') || host.startsWith('fea') || host.startsWith('feb'))
-    return true; // fe80::/10 link-local
-  return false;
 }
 
 function assertSafeIp(ip: string): void {

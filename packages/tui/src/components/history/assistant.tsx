@@ -100,7 +100,7 @@ export function AssistantBody({
             key={i}
             text={seg.text}
             termWidth={inner}
-            tableWidth={termWidth - MESSAGE_PANEL_BORDER_WIDTH}
+            tableWidth={termWidth - MESSAGE_PANEL_CHROME_WIDTH}
           />
         ),
       )}
