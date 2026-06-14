@@ -64,6 +64,32 @@ const PATTERNS: Pattern[] = [
 ];
 
 /**
+ * `high_entropy_env` is the one pattern that needs special replacement logic
+ * (it preserves the key name), so it runs in its own pass. Every other pattern
+ * is folded into a single combined regex. Derive the split by type rather than
+ * by hard-coded indices so adding/removing a pattern can't silently drop one.
+ */
+const SIMPLE_PATTERNS = PATTERNS.filter((p) => p.type !== 'high_entropy_env');
+
+/**
+ * Combined single-pass regex for all simple patterns. Each alternative is a
+ * capturing group so the callback can determine which original pattern fired
+ * (only one group is non-undefined at match time). Order matches SIMPLE_PATTERNS
+ * (longer/more-specific prefixes first). Relies on each simple pattern source
+ * containing no internal capturing groups — only `(?:...)` and lookarounds.
+ */
+const COMBINED_REGEX = new RegExp(SIMPLE_PATTERNS.map((p) => `(${p.regex.source})`).join('|'), 'g');
+
+/** Separate pattern for high_entropy_env (different replacement logic). */
+const HIGH_ENTROPY_REGEX = PATTERNS.find((p) => p.type === 'high_entropy_env')!.regex;
+
+/**
+ * Replacements for the combined patterns, parallel to SIMPLE_PATTERNS. The
+ * combined-regex callback indexes into this with the matched group's position.
+ */
+const COMBINED_REPLACEMENTS = SIMPLE_PATTERNS.map((p) => `[REDACTED:${p.type}]`);
+
+/**
  * Per-chunk cap. Splits long inputs into 64 KB chunks to keep scrub() memory
  * bounded. Real scrub() inputs (LLM responses, tool outputs) are typically
  * much smaller; this cap handles edge cases without impacting normal usage.
@@ -73,7 +99,7 @@ const SCRUB_CHUNK_BYTES = 64 * 1024;
 /**
  * Quick pre-scan: check if the text contains any substring that MUST be
  * present for a credential pattern to match. If none are found, the text
- * is guaranteed clean — skip all 17 regex passes entirely.
+ * is guaranteed clean — skip all regex passes (2 total: 16-pattern combined + high_entropy_env).
  *
  * Each anchor is the shortest unique substring from the corresponding pattern.
  * V8's `String.includes()` is hand-tuned C++ — O(n) with near-zero overhead
@@ -143,32 +169,36 @@ export class DefaultSecretScrubber implements SecretScrubber {
     // chunk may have been small enough to anchor-skip independently.
     if (!hasCredentialAnchors(text)) return text;
 
-    let out = text;
-    for (const p of PATTERNS) {
-      out = out.replace(p.regex, (_match, group1, group2) => {
-        if (p.type === 'high_entropy_env' && group1 && group2) {
-          return `${group1}=[REDACTED:${p.type}]`;
-        }
-        return `[REDACTED:${p.type}]`;
-      });
-    }
+    // Pass 1: combined single-pass regex for all simple patterns. Each
+    // alternative is a capturing group; only the group that matched is
+    // non-undefined. The trailing offset/string args replace() appends are
+    // always defined, so the matched group (which precedes them) is found first.
+    let out = text.replace(
+      COMBINED_REGEX,
+      (match, ...groups) => {
+        // groups[i] corresponds to SIMPLE_PATTERNS[i]; find which one fired.
+        const idx = groups.findIndex((g) => g !== undefined);
+        if (idx < 0) return match;
+        const replacement = COMBINED_REPLACEMENTS[idx];
+        return replacement !== undefined ? replacement : match;
+      },
+    );
+
+    // Pass 2: high_entropy_env needs special handling — preserve the key name.
+    out = out.replace(HIGH_ENTROPY_REGEX, (_match, group1, _group2) => {
+      return `${group1}=[REDACTED:high_entropy_env]`;
+    });
+
     return out;
   }
 
   /**
-   * Fields that may contain tool output, user input, or secrets.
-   * Only these fields (plus any unrecognized keys whose name contains a
-   * credential anchor) are recursively scrubbed. Tool names, descriptions,
-   * parameter names, metadata keys, and provider fields are skipped.
+   * Recursively scrub every string value in an object/array graph. Secrets can
+   * appear under any key — a URL query param, an `authorization` header, an
+   * arbitrarily-named nested field — so we don't gate recursion on key names.
+   * The per-string `scrub()` fast-path (anchor pre-scan) keeps this cheap: any
+   * value without a credential anchor returns immediately without regex work.
    */
-  private static readonly SCRUB_KEYS = new Set(['content', 'input', 'message', 'body', 'data', 'payload', 'text']);
-
-  /**
-   * Keys whose names contain a credential anchor — also recursively scrubbed.
-   * Covers dynamic cases like `{ db_password: "..." }` or `{ AUTH_TOKEN: "..." }`.
-   */
-  private static readonly CRED_ANCHOR_SUBSTRINGS = ['key', 'token', 'secret', 'password', 'pwd', 'credential'] as const;
-
   scrubObject<T>(obj: T): T {
     const seen = new WeakSet();
     const visit = (v: unknown): unknown => {
@@ -179,17 +209,7 @@ export class DefaultSecretScrubber implements SecretScrubber {
       if (Array.isArray(v)) return v.map(visit);
       const out: Record<string, unknown> = {};
       for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
-        // Recursively scrub known high-risk fields or keys whose name suggests
-        // they hold sensitive values. Skip tool names, descriptions, metadata
-        // keys, provider fields, and other structural properties.
-        if (
-          DefaultSecretScrubber.SCRUB_KEYS.has(k) ||
-          DefaultSecretScrubber.CRED_ANCHOR_SUBSTRINGS.some((s) => k.toLowerCase().includes(s))
-        ) {
-          out[k] = visit(val);
-        } else {
-          out[k] = val;
-        }
+        out[k] = visit(val);
       }
       return out;
     };
