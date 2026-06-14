@@ -104,7 +104,7 @@ export const markdownComponents = {
     const codeText = String(children ?? '').replace(/\n$/, '');
     if (inline || !match) {
       return (
-        <code className={cn('rounded bg-muted/60 px-1.5 py-0.5 text-[0.85em] font-mono', className)} {...props}>
+        <code className={cn('rounded border border-border/60 px-1.5 py-0.5 text-[0.85em] font-mono', className)} {...props}>
           {children}
         </code>
       );
@@ -112,9 +112,9 @@ export const markdownComponents = {
     const lines = useMemo(() => codeText.split('\n'), [codeText]);
     const hasLineNumbers = lines.length > 1;
     return (
-      <div className="not-prose relative my-3 rounded-lg border bg-muted/30 overflow-hidden group/codeblock">
+      <div className="not-prose relative my-3 rounded-lg border border-border overflow-hidden group/codeblock">
         {/* Header: language badge + copy button */}
-        <div className="flex items-center justify-between px-3 py-1 border-b bg-muted/40 text-xs">
+        <div className="flex items-center justify-between px-3 py-1 border-b border-border text-xs">
           <div className="flex items-center gap-2">
             <FileCode2 className="h-3 w-3 text-muted-foreground" />
             <span className="font-mono text-muted-foreground font-medium">{match[1]}</span>
@@ -132,7 +132,7 @@ export const markdownComponents = {
             {/* Line number gutter */}
             <pre
               aria-hidden
-              className="text-xs font-mono leading-[1.55] py-3 pl-3 pr-2 text-muted-foreground/40 select-none border-r border-border/30 bg-muted/10 tabular-nums text-right shrink-0"
+              className="text-xs font-mono leading-[1.55] py-3 pl-3 pr-2 text-muted-foreground/40 select-none border-r border-border/30 tabular-nums text-right shrink-0"
             >
               {lines.map((_, i) => (
                 <div key={i}>{i + 1}</div>
@@ -153,7 +153,7 @@ export const markdownComponents = {
           </pre>
         )}
         {/* Fade-out gradient at bottom when scrollable — only visible on hover */}
-        <div className="pointer-events-none absolute bottom-8 left-0 right-0 h-8 bg-gradient-to-t from-muted/30 to-transparent opacity-0 group-hover/codeblock:opacity-100 transition-opacity" />
+        <div className="pointer-events-none absolute bottom-8 left-0 right-0 h-8 bg-gradient-to-t from-black/10 to-transparent opacity-0 group-hover/codeblock:opacity-100 transition-opacity" />
       </div>
     );
   },

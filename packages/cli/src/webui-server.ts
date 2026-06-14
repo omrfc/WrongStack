@@ -569,11 +569,10 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     try {
       if (opts.modelsRegistry) {
         const m = await opts.modelsRegistry.getModel(
-          (opts.agent.ctx.provider as { id: string }).id,
+          opts.agent.ctx.provider.id,
           opts.agent.ctx.model,
         );
-        const registryMax = (m as { capabilities?: { maxContext?: number } } | null)?.capabilities
-          ?.maxContext;
+        const registryMax = m?.capabilities.maxContext;
         // Fall back to the live provider's capabilities if the registry has no override.
         // The provider is the authoritative source for the model's default context window.
         maxContext = registryMax ?? opts.agent.ctx.provider.capabilities?.maxContext ?? 0;
@@ -591,7 +590,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     return {
       sessionId: opts.session.id,
       model: opts.agent.ctx.model,
-      provider: (opts.agent.ctx.provider as { id: string }).id,
+      provider: opts.agent.ctx.provider.id,
       mode: opts.modeId ?? 'default',
       projectName: opts.projectRoot ? path.basename(opts.projectRoot) : undefined,
       // Frontend reads `projectRoot` from session.start (ws-handlers setEnv) —

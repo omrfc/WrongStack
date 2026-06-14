@@ -1,4 +1,4 @@
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import type { Context, SlashCommand } from '@wrongstack/core';
 import { color } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
@@ -12,23 +12,32 @@ function runCommand(
   timeout: number,
 ): Promise<{ stdout: string; stderr: string; exitCode: number; killed: boolean }> {
   return new Promise((resolve) => {
-    exec(
-      cmd,
-      {
-        cwd,
-        timeout,
-        maxBuffer: 2 * 1024 * 1024, // 2 MB
-        windowsHide: true,
-      },
-      (error, stdout, stderr) => {
-        resolve({
-          stdout,
-          stderr,
-          exitCode: error?.code ?? 0,
-          killed: error?.killed ?? false,
-        });
-      },
-    );
+    // exec() always spawns a shell on both POSIX and Windows, interpreting
+    // metacharacters (& | ; $ ( ) etc.) as shell code — a injection vector
+    // when user input reaches the command string.
+    //
+    // execFile() with shell:false bypasses the shell on POSIX: the command
+    // string is passed as a single argv[] element, so metacharacters are
+    // passed literally and not interpreted.
+    // On Windows execFile doesn't support shell:false; shell:true uses cmd.exe
+    // which correctly quotes the combined string argument.
+    const opts = {
+      cwd,
+      timeout,
+      maxBuffer: 2 * 1024 * 1024, // 2 MB
+      windowsHide: true,
+      // On POSIX: no shell → command string is a literal argument.
+      // On Windows: shell:true → cmd.exe /c "..." handles quoting.
+      shell: process.platform === 'win32' ? true : false,
+    };
+    execFile(cmd, [], opts, (error, stdout, stderr) => {
+      resolve({
+        stdout,
+        stderr,
+        exitCode: (typeof error?.code === 'number' ? error.code : 0),
+        killed: error?.killed ?? false,
+      });
+    });
   });
 }
 
