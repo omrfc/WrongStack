@@ -11,7 +11,7 @@ export function cn(...inputs: ClassValue[]) {
    ========================================================================= */
 
 export const META = {
-  version: '0.256.1',
+  version: '0.257.0',
   repo: 'https://github.com/WrongStack/WrongStack',
   npm: 'wrongstack',
   node: '22',
@@ -123,6 +123,7 @@ export const slashCommands = [
   '/diag',
   '/director',
   '/enhance',
+  '/fallback',
   '/fix',
   '/fleet',
   '/goal',
@@ -131,6 +132,7 @@ export const slashCommands = [
   '/help',
   '/image',
   '/init',
+  '/interrupt',
   '/mcp',
   '/memory',
   '/metrics',
@@ -219,10 +221,26 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '0.257.0',
+    date: '2026-06-14',
+    consolidated: true,
+    latest: true,
+    tagline: 'Token-saving mode & resilience',
+    highlights: [
+      'Token-saving mode (--token-saving-mode) — 10 Tier-1 tools, compact skills, lazy MCP, ~4–6K fewer prompt tokens',
+      'mcp_use meta-tool — reach any MCP tool on demand instead of expanding every server into the tool list',
+      'Automatic model rotation on rate limits (429/529/5xx) with a /fallback chain and visible ↻ switched-to hop line',
+      '/interrupt command (aliases /stop, /int) — stops the leader run AND the whole fleet across CLI/TUI/WebUI',
+      'Capability-based plugin tool-mutation authorization + fail-closed AutoApprovePermissionPolicy allowlist',
+      'Compaction throughput pass with token pre-compute + a WebUI sliding compaction drawer',
+      'Five new hot-path caches: permission evaluate(), ToolRegistry.list(), buildToolUsage, online agents, scrubber pre-scan',
+      'Fixes: secret scrubber bearer/high-entropy redaction, OpenAI null message content, full-width TUI chat + table rendering',
+    ],
+  },
+  {
     version: '0.156.1',
     date: '2026-06-09',
     consolidated: true,
-    latest: true,
     tagline: 'WebUI fleet, delegate command & slash command polish',
     highlights: [
       '/delegate slash command — hand a discrete piece of work to a specialized subagent',

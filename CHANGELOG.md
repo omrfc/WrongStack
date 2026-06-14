@@ -5,6 +5,132 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.257.0] — 2026-06-14
+
+> The token-saving & resilience release. Consolidates the `0.255`–`0.257` line
+> into a single documented entry. Four headlines: a new **token-saving mode**
+> (`--token-saving-mode`) that trims the tool belt to 10 Tier-1 tools, compacts
+> skill bodies, and lazy-loads MCP behind an `mcp_use` meta-tool to save
+> ~4–6K prompt tokens; **automatic model rotation on rate limits** (429/529/5xx)
+> with a `/fallback` command and a visible `↻ switched to …` hop line; a new
+> **`/interrupt`** command (aliases `/stop`, `/int`) that stops the leader run
+> **and** the whole fleet across CLI/TUI/WebUI; and **capability-based plugin
+> tool-mutation authorization** with a fail-closed allowlist default. Plus a
+> compaction-throughput pass, five new hot-path caches, and a batch of TUI /
+> provider / secret-scrubber fixes. Additive only; no breaking changes.
+
+### Added
+
+- **Token-saving mode (`--token-saving-mode` / `features.tokenSavingMode`).** An
+  opt-in lean mode that materially shrinks the per-request prompt:
+  - **Tier-1 tool belt.** `TIER1_TOOLS` (`@wrongstack/tools`) exposes only the 10
+    essential tools — `read`, `write`, `edit`, `bash`, `grep`, `glob`, `diff`,
+    `patch`, `json`, `search` — omitting 90+ tools and saving ~4000–6000 tokens
+    of tool-definition overhead. `OPTIONAL_TOOLS` is exported alongside for
+    callers that want to opt tools back in.
+  - **Compact skill bodies.** In token-saving mode the system-prompt builder
+    renders only each skill's *Overview + Rules* sections, and skills may ship a
+    dedicated `SKILL.save.md` variant that is preferred when the mode is active.
+  - **Lazy MCP + `mcp_use` meta-tool.** MCP server tools are no longer expanded
+    into the tool list at startup; the model reaches any MCP tool on demand via
+    `mcp_use({ server, tool, input })`, keeping the registered tool surface
+    bounded regardless of how many MCP servers are connected.
+  - **TUI surfacing.** A token-saving toggle in the settings panel, plus a live
+    status-bar indicator and registered-tool count that update the moment the
+    mode is flipped. (`packages/core/src/boot.ts`,
+    `packages/core/src/core/system-prompt-builder.ts`,
+    `packages/core/src/tools/mcp-use.ts`, `packages/tools/src/builtin.ts`,
+    `packages/tui/src/app.tsx`)
+
+- **Automatic model rotation on rate limits + `/fallback`.** When the primary
+  model exhausts its retries on a `429` / `529` / `5xx`, the agent now rotates to
+  the next model in a fallback chain instead of failing the turn. The chain is
+  always-on with a smart default, inherited by subagents, and configurable via
+  the new `/fallback` slash command. A `provider.fallback` event surfaces each
+  hop to the user in both the REPL and TUI —
+  `↻ rate-limited (429) — switched to <provider/model>` — so the silent switch
+  is visible. (`packages/cli/src/fallback-model.ts`,
+  `packages/cli/src/slash-commands/fallback.ts`, `docs/slash/fallback.md`)
+
+- **`/interrupt` command (aliases `/stop`, `/int`).** A slash command that aborts
+  the in-flight leader run *and* terminates the whole fleet — useful when `Esc`
+  is swallowed by a terminal multiplexer or when driving the agent from the
+  WebUI. Backed by a new `SlashCommandContext.interruptController.abortLeader`
+  channel (slash commands don't hold the `RunController`). Wired across TUI,
+  plain REPL, and WebUI; the REPL `Ctrl+C` now also stops running subagents, not
+  just the leader. (`packages/cli/src/slash-commands/interrupt.ts`,
+  `docs/slash/interrupt.md`)
+
+- **Capability-based plugin tool-mutation authorization.** Plugin `wrap` /
+  `override` / `unregister` calls are now gated on declared capabilities in
+  addition to the existing officiality trust tier, so a plugin can only mutate
+  tools it is actually authorized for. The capability model is documented in
+  `docs/tool-author-guide.md` and `SECURITY.md`.
+  (`packages/core` plugin/tool-registry, P4-6/P4-7/P4-8)
+
+### Changed
+
+- **Compaction throughput optimization.** Compaction now reuses a pre-computed
+  per-message token estimate instead of re-walking content blocks, cutting the
+  per-cycle cost of the `contextWindow` pipeline. The WebUI pairs this with a new
+  **sliding compaction drawer** that surfaces compaction activity without
+  stealing chat space. (`feat(core,webui)` — `305a8d07`)
+
+- **`AutoApprovePermissionPolicy` is allowlist-by-default (fail-closed).** The
+  non-interactive subagent policy now approves only an explicit allowlist rather
+  than denying a denylist, so newly-added mutating tools are denied to
+  prompt-injected subagents by default instead of slipping through.
+
+- **Build hygiene.** The `esbuild` override moved to the workspace root and the
+  stale Biome overrides were cleaned up, so the dependency graph and lint config
+  are consistent across packages.
+
+### Performance
+
+- **Five new hot-path caches** eliminate repeated work per agent iteration:
+  - `DefaultPermissionPolicy.evaluate()` memoizes its verdict per
+    (tool, signature) so repeated permission checks are O(1).
+  - `ToolRegistry.list()` returns a version-counter snapshot instead of
+    rebuilding the array when nothing changed.
+  - `buildToolUsage()` output is cached by reference between unchanged builds.
+  - The online-agents list in the system-prompt builder is cached by array
+    reference so an unchanged roster doesn't re-serialize.
+  - The secret scrubber's quick anchor pre-scan short-circuits the regex passes
+    when no credential substring is present (the vast majority of tool outputs).
+- **Four additional agent-loop / provider bottlenecks** removed in the same
+  sweep (`perf(core,providers)` — `a008c66f`).
+
+### Fixed
+
+- **Secret scrubber dropped `bearer_token` and `high_entropy_env`.** The
+  combined-regex refactor miscounted patterns (`slice(0,16)` / `PATTERNS[15]`),
+  silently skipping bearer-token and high-entropy-env redaction and pointing the
+  high-entropy pass at the redis-URI regex. The split is now derived by pattern
+  *type* (`filter`/`find`) so a pattern can't be dropped by an off-by-one, and
+  `scrubObject` recurses into **all** values — secrets under arbitrary keys
+  (`url`, `authorization`, nested objects) were previously broadcast unscrubbed.
+  (`packages/core/src/security/secret-scrubber.ts`)
+
+- **OpenAI-compatible providers: allow `null` message content.** `OpenAIMessage`
+  now accepts `content: null` (via `emptyToolCallContent: 'null'`), matching the
+  providers that send a null content field alongside `tool_calls` instead of an
+  empty string. (`packages/providers`)
+
+- **TUI rendering.** Chat messages render full-width instead of leaving a ragged
+  right margin; markdown tables and box-drawing characters now render against a
+  transparent background instead of carrying the message-panel fill color; and
+  the statusline `working_dir` hidden-item unions were made consistent (which
+  also unblocked the `tui` DTS build and `cli` typecheck).
+
+### Changed — versions
+
+- **All workspace packages aligned to 0.257.0**: `wrongstack`,
+  `@wrongstack/cli`, `@wrongstack/core`, `@wrongstack/mcp`,
+  `@wrongstack/plug-lsp`, `@wrongstack/plugins`, `@wrongstack/providers`,
+  `@wrongstack/runtime`, `@wrongstack/skills`, `@wrongstack/telegram`,
+  `@wrongstack/tools`, `@wrongstack/tui`, `@wrongstack/webui`, and
+  `@wrongstack/acp`. The marketing site (`website/`) is aligned in lockstep.
+
 ## [0.254.0] — 2026-06-12
 
 > Release preparation. Version consolidation and housekeeping: cleaned

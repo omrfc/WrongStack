@@ -327,17 +327,36 @@ Four-layer observability:
 - **`WRONGSTACK_FETCH_ALLOW_PRIVATE=1`**: enables localhost/private IPs in the `fetch` tool
 - **AES-256-GCM** encryption for all secrets at rest
 - **SSRF guard everywhere**: the `fetch` tool and the builtin `search` tool resolve + re-validate every redirect hop against private/IMDS ranges; MCP transport URL validation blocks IPv4 **and** IPv6 IMDS (`fd00:ec2::254`, link-local `fe80::/10`)
-- **Fail-closed subagent guard**: non-interactive subagents deny `bash`/`write`/`edit`/`replace`/`exec`/`patch`/`install`/`scaffold` and all `mcp__*` tools — prompt-injected delegates can't mutate files the user never confirmed
+- **Fail-closed subagent guard**: the non-interactive `AutoApprovePermissionPolicy` is **allowlist-by-default** — it approves only an explicit set of safe tools, so newly-added mutating tools (and all `mcp__*` tools) are denied to prompt-injected delegates by default instead of slipping through a denylist gap
 - **Session-log scrubbing**: user- and model-turn text is scrubbed before it hits the `0o600` JSONL (and before it rides along in cloud sync), not just tool output
 - **WebUI broadcast redaction**: `tool.started` and `tool.executed` payloads are scrubbed before WebSocket broadcast, so API keys and bearer tokens don't leak to connected tabs
 - **Cloud-sync path containment**: pulled remote entries are rejected if they traverse outside their category root; file-backed categories reject nested paths
 - **Symlink containment**: `read`/`edit`/`write` resolve symlinks and re-check the target is inside the project root
-- **Plugin trust tiers**: only first-party (`official`) plugins may register bare slash-command names, override builtins, or `wrap`/`unregister` tools they don't own
+- **Plugin trust tiers + capability gating**: only first-party (`official`) plugins may register bare slash-command names; tool `wrap`/`override`/`unregister` is gated on **declared capabilities** in addition to the officiality tier, so a plugin can only mutate tools it is actually authorized for
 - Threat model and adversary trust assumptions in [`SECURITY.md`](SECURITY.md); audit findings and verification in [`security-report/`](security-report/)
 
 ### Bundled skills (17)
 
 `api-design`, `audit-log`, `bug-hunter`, `docker-deploy`, `git-flow`, `multi-agent`, `node-modern`, `observability`, `prompt-engineering`, `react-modern`, `refactor-planner`, `sdd`, `security-scanner`, `skill-creator`, `tech-stack`, `testing`, `typescript-strict` — all following one structure (Overview → Rules → Patterns → Skills in scope). Discovered in order: project → user → bundled, with first-seen winning on name collisions.
+
+### Token-saving mode (`--token-saving-mode`)
+
+A lean operating mode that shrinks the per-request prompt without going fully
+offline. Three levers compound:
+
+- **Tier-1 tool belt** — the 90+ built-in tools collapse to **10 essentials**
+  (`read`, `write`, `edit`, `bash`, `grep`, `glob`, `diff`, `patch`, `json`,
+  `search`), trimming ~4000–6000 tokens of tool-definition overhead.
+- **Compact skills** — each in-scope skill renders only its *Overview + Rules*
+  sections (or a dedicated `SKILL.save.md` variant when the skill ships one).
+- **Lazy MCP** — MCP server tools are no longer expanded into the tool list at
+  startup; the model reaches any of them on demand through the `mcp_use({ server,
+  tool, input })` meta-tool, so the registered surface stays bounded no matter
+  how many MCP servers are connected.
+
+Toggle it at launch with `--token-saving-mode` (or `features.tokenSavingMode` in
+config), or live from the TUI settings panel — the status bar shows a token-
+saving indicator and the current registered-tool count.
 
 ### `--no-features` minimal kernel
 
@@ -347,13 +366,18 @@ Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. Wha
 
 ## Recent changes
 
-**Current release: 0.250.0.** The hot-path performance release — seven
-targeted optimizations eliminate redundant CPU work, allocations, and TUI re-renders
-in the agent loop, token estimation, compaction, and markdown rendering paths.
-Token estimation is 59.5× faster @ 400 messages; `parseInline()` is 15.3×
-faster on cache-warm TUI re-renders. No breaking changes; additive barrel
-exports only. All 15 workspace packages and the marketing site are aligned to
-0.250.0 in lockstep.
+**Current release: 0.257.0.** The token-saving & resilience release. A new
+**token-saving mode** (`--token-saving-mode`) trims the tool belt to 10 Tier-1
+tools, compacts skill bodies, and lazy-loads MCP behind an `mcp_use` meta-tool
+to save ~4–6K prompt tokens per request. **Automatic model rotation** on rate
+limits (429/529/5xx) rotates through a fallback chain — with a `/fallback`
+command and a visible `↻ switched to …` hop line — instead of failing the turn.
+A new **`/interrupt`** command (aliases `/stop`, `/int`) stops the leader run
+**and** the whole fleet across CLI/TUI/WebUI, and **capability-based plugin
+authorization** plus a fail-closed subagent allowlist tighten the tool-mutation
+surface. Plus a compaction-throughput pass, five new hot-path caches, and TUI /
+provider / secret-scrubber fixes. No breaking changes. All 15 workspace packages
+and the marketing site are aligned to 0.257.0 in lockstep.
 
 See **[CHANGELOG.md](CHANGELOG.md)** for the full, versioned history.
 
@@ -418,6 +442,7 @@ wrongstack --provider openrouter --model anthropic/claude-opus-4-7
 --no-banner          Suppress the startup banner
 --no-features        Minimal kernel — no MCP, plugins, memory, models.dev, skills
 --no-models-refresh  Skip the boot-time models.dev catalog refresh (offline/CI)
+--token-saving-mode  Lean prompt: 10 Tier-1 tools, compact skills, lazy MCP (mcp_use)
 --yolo               Auto-allow all tool calls (don't ask for confirmation)
 --director           Enable Director-based fleet orchestration (LLM-driven subagent planning)
 --goal "<task>"      Boot directly into goal mode — GOAL preamble injected, TUI auto-enabled
@@ -430,11 +455,11 @@ wrongstack --provider openrouter --model anthropic/claude-opus-4-7
 
 ## Slash commands
 
-**Core** (both the plain REPL and the TUI): `/init` `/help` `/clear` `/compact` `/context` `/codebase-reindex` `/dev` `/diag` `/stats` `/tools` `/plugin` `/mcp` `/auth` `/memory` `/todos` `/tasks` `/mode` `/yolo` `/autonomy` `/btw` `/next` `/enhance` `/fix` `/autophase` `/worktree` `/settings` `/sdd` `/save` `/load` `/prune` `/exit`
+**Core** (both the plain REPL and the TUI): `/init` `/help` `/clear` `/compact` `/context` `/codebase-reindex` `/dev` `/diag` `/stats` `/tools` `/plugin` `/mcp` `/auth` `/memory` `/todos` `/tasks` `/mode` `/yolo` `/autonomy` `/interrupt` `/btw` `/next` `/enhance` `/fix` `/autophase` `/worktree` `/settings` `/sdd` `/save` `/load` `/prune` `/exit`
 
 Every built-in command is tagged with a category (`Run` · `Session` · `Inspect` · `Agent` · `Config` · `App`); the TUI slash picker groups matches under category headers, and the WebUI surfaces 55 commands in its slash list.
 
-**Multi-agent:** `/spawn` `/fleet` `/agents` `/goal` `/director` `/collab` `/setmodel` `/models`
+**Multi-agent:** `/spawn` `/fleet` `/agents` `/goal` `/director` `/collab` `/setmodel` `/models` `/fallback`
 
 **TUI-only** (need `--tui`): `/model` (provider → model picker) · `/steer` (mid-flight redirect — the plain REPL uses **Esc** instead) · `/queue`
 
@@ -457,9 +482,11 @@ Every built-in command is tagged with a category (`Run` · `Session` · `Inspect
 | `/plan show\|add\|start\|done\|remove\|clear` | Per-session plan JSON. Mirrored to disk; surfaces `📋 ⌛N ☐N ✓N` chip in TUI status bar |
 | `/autonomy off\|suggest\|on\|eternal\|parallel\|stop\|toggle` | Self-driving mode. `suggest` shows next steps without executing; `on` auto-continues; `eternal` runs goal-driven loop; `parallel` fans out 4-8 subagents per tick. TUI shows `∞ AUTO` / `∞ SUGGEST` / `ETERNAL` / `⟳ PARALLEL` chip |
 | `/yolo on\|off\|toggle` | Flip YOLO mode (auto-approve all tool calls). `/yolo` alone shows status. TUI shows `⚠ YOLO` chip |
+| `/interrupt` (aliases `/stop`, `/int`) | Stop the in-flight leader run **and** terminate the whole fleet — for when `Esc` is eaten by tmux or you're driving from the WebUI. REPL `Ctrl+C` now also stops subagents |
 | `/mode` | Switch persona: `default`, `code-reviewer`, `code-auditor`, `architect`, `debugger`, `tester`, `devops`, `refactorer`. Custom modes in `~/.wrongstack/modes/` |
 | `/model` | _(TUI)_ Two-step provider → model picker. In the plain REPL, relaunch with `--provider` / `--model` |
 | `/setmodel <key> <provider/model>` | Set per-role or per-phase model in the model matrix (e.g. `/setmodel security-scanner openai/gpt-4o`). Also supports `resolve <role>` and `doctor` for matrix diagnostics |
+| `/fallback` | View or edit the rate-limit fallback chain. On a `429`/`529`/`5xx` after retries, the agent rotates to the next model in the chain instead of failing; each hop prints `↻ switched to <provider/model>` |
 | `/auth [status <provider>\|open\|help]` | In-session credential dashboard. Shows saved provider/key status without blocking the REPL/TUI; run `wstack auth` for the full interactive key manager |
 | `/image` or `/paste-image` | Attach clipboard PNG. TUI also `Alt+V` |
 | `/context mode <policy>` | Switch context-window mode: `balanced`, `frugal`, `deep`, `archival`. `repair` fixes damaged tool-call adjacency |
@@ -600,7 +627,7 @@ For the full walk-through — including the L1-A reactive `ConversationState`, h
 
 ## Status
 
-- **5800+ tests passing** across 300+ test files in the 0.250.0 release gate
+- **6700+ tests passing** across 500+ test files in the 0.257.0 release gate
 - Coverage thresholds: ≥85 % lines / ≥85 % functions / ≥70 % branches / ≥82 % statements
 - All workspace packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles
