@@ -173,8 +173,13 @@ export function MarkdownView({
     // GitHub table block → existing renderer.
     const tableEnd = detectTable(lines, i);
     if (tableEnd > i) {
+      // Tables render box-drawing characters that conflict with the message
+      // panel background. Render them in a transparent box so they are not
+      // affected by the parent entry's backgroundColor.
       rows.push(
-        <Text key={`t${key++}`}>{renderTable(lines.slice(i, tableEnd), tableBudget)}</Text>,
+        <Box key={`t${key++}`} backgroundColor="transparent">
+          <Text>{renderTable(lines.slice(i, tableEnd), tableBudget)}</Text>
+        </Box>,
       );
       i = tableEnd;
       continue;
