@@ -22,13 +22,15 @@ function stripFrontmatter(raw: string): string {
 function compactSkillBody(body: string): string {
   const sections: string[] = [];
   const overviewMatch = body.match(/##\s*Overview\s*\n([\s\S]*?)(?=\n##|\n$|$)/i);
-  if (overviewMatch && overviewMatch[1].trim()) {
-    sections.push(overviewMatch[1].trim().slice(0, 200));
+  const overview = overviewMatch?.[1];
+  if (overview?.trim()) {
+    sections.push(overview.trim().slice(0, 200));
   }
   const rulesMatch = body.match(/##\s*Rules\s*\n([\s\S]*?)(?=\n##|\n$|$)/i);
-  if (rulesMatch && rulesMatch[1].trim()) {
-    const rules = rulesMatch[1].trim().slice(0, 350);
-    const ruleLines = rules
+  const rules = rulesMatch?.[1];
+  if (rules?.trim()) {
+    const trimmed = rules.trim().slice(0, 350);
+    const ruleLines = trimmed
       .split('\n')
       .filter((l) => /^\s*[-*]\s/.test(l) || /^\s*\d+[.)]\s/.test(l))
       .slice(0, 6)

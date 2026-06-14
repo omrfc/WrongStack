@@ -891,5 +891,3 @@ function compactTrigger(trigger: string): string {
   }
   return s;
 }
-
-/**

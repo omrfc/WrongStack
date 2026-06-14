@@ -25,7 +25,6 @@ export {
 } from './coordination/fleet-manager.js';
 export { createMcpControlTool, type MCPRegistryHandle } from './tools/mcp-control.js';
 export { createMcpUseTool } from './tools/mcp-use.js';
-export { ToolRegistry } from './registry/tool-registry.js';
 // Re-export safeParse explicitly at the top-level export for consumers
 // who import from '@wrongstack/core' directly (e.g. providers package).
 export { safeParse, safeStringify, sanitizeJsonString } from './utils/safe-json.js';
