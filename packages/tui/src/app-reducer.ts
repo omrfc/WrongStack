@@ -552,6 +552,7 @@ export function reducer(state: State, action: Action): State {
           featureMemory: action.featureMemory,
           featureSkills: action.featureSkills,
           featureModelsRegistry: action.featureModelsRegistry,
+          featureTokenSaving: action.featureTokenSaving,
           contextAutoCompact: action.contextAutoCompact,
           contextStrategy: action.contextStrategy,
           logLevel: action.logLevel,

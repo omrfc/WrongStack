@@ -313,6 +313,8 @@ export function StatusBar({
   autoProceedCountdown,
   sessionCount,
   mailbox,
+  tokenSavingMode,
+  toolCount,
 }: StatusBarProps): React.ReactElement {
   // Track terminal width so we can adapt layout on narrow terminals.
   // We snapshot into state so that renders are stable — we don't want

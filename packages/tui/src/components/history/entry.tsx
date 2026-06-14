@@ -89,6 +89,7 @@ export const Entry = React.memo(function Entry({
           borderRight={false}
           borderBottom={false}
           borderColor={theme.user}
+          backgroundColor="#1e1e2e"
           paddingLeft={1}
         >
           <Text>
@@ -122,8 +123,9 @@ export const Entry = React.memo(function Entry({
             borderStyle="single"
             borderTop={false}
             borderRight={false}
-            borderBottom={hasNext ? false : undefined}
+            borderBottom={false}
             borderColor={theme.assistant}
+            backgroundColor="#1e1e2e"
             paddingLeft={1}
           >
             <Box flexDirection="row">

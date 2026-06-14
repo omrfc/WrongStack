@@ -43,12 +43,12 @@
 
 import type { EventBus, MemoryStore, ToolRegistry, WstackPaths } from '@wrongstack/core';
 import { createContextManagerTool, makeMailboxTool, makeMailInboxTool, makeMailSendTool } from '@wrongstack/core';
-import { builtinToolsPack, forgetTool, relatedMemoryTool, rememberTool, searchMemoryTool } from '@wrongstack/tools';
+import { builtinToolsPack, forgetTool, relatedMemoryTool, rememberTool, searchMemoryTool, TIER1_TOOLS } from '@wrongstack/tools';
 
 export interface RegisterBuiltinToolsDeps {
   toolRegistry: ToolRegistry;
   compactor: unknown;
-  config: { features: { memory: boolean } };
+  config: { features: { memory: boolean; tokenSavingMode?: boolean | undefined } };
   memoryStore: MemoryStore | null | undefined;
   events: EventBus;
   wpaths: Pick<WstackPaths, 'projectDir'>;
@@ -62,13 +62,15 @@ export interface RegisterBuiltinToolsDeps {
  * memory feature flag.
  */
 export function registerBuiltinTools(deps: RegisterBuiltinToolsDeps): void {
-  // Bulk register the builtin tool pack. The
-  // `registerAllOrThrow` call is intentional: a malformed
-  // pack is a boot-time failure, not a runtime one.
-  deps.toolRegistry.registerAllOrThrow(
-    [...(builtinToolsPack.tools ?? [])],
-    builtinToolsPack.name,
-  );
+  // Bulk register the builtin tool pack. When token-saving mode is
+  // enabled (Tier 1), register only the 10 minimal tools (read, write,
+  // edit, bash, grep, glob, diff, patch, json, search) to save ~4-6K
+  // tokens per request. In full mode (Tier 2), register all tools.
+  const allTools = builtinToolsPack.tools ?? [];
+  const toolsToRegister = deps.config.features.tokenSavingMode
+    ? TIER1_TOOLS
+    : allTools;
+  deps.toolRegistry.registerAllOrThrow([...toolsToRegister], builtinToolsPack.name);
 
   // Context manager tool: the model uses this to
   // prune/compact its own context window when full. The
