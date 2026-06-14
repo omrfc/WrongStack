@@ -852,8 +852,11 @@ export class MultiAgentHost {
     },
   ): Promise<TaskResult> {
     const { taskId } = await this.spawn(description, opts);
-    if (!this.director) throw new Error('Director is not initialized');
-    const results = await this.director.awaitTasks([taskId]);
+    // Capture director reference before await to avoid TOCTOU race with
+    // concurrent stopAll() — this.director is a shared mutable field.
+    const director = this.director;
+    if (!director) throw new Error('Director is not initialized');
+    const results = await director.awaitTasks([taskId]);
     const result = results[0];
     if (!result) throw new Error(`Task ${taskId} completed but no result returned`);
     return result;
