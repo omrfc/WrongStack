@@ -6,21 +6,34 @@ import type { SlashCommandContext } from './index.js';
 const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_OUTPUT_LINES = 500;
 
+// Dangerous metacharacters that cmd.exe interprets as shell operators.
+// On POSIX we use shell:false so these are harmless literals; on Windows
+// with shell:true they are interpreted by cmd.exe — reject them.
+const WINDOWS_CMD_METACHARACTERS = /[;&|<>^$,(){}[\]!#%'"\\/`]/;
+
+function validateCommand(cmd: string): void {
+  if (process.platform !== 'win32') return;
+  if (WINDOWS_CMD_METACHARACTERS.test(cmd)) {
+    throw new Error(
+      `Command contains disallowed metacharacters for Windows: ${cmd.match(WINDOWS_CMD_METACHARACTERS)?.[0] ?? '?'}\n` +
+        'The following characters are not allowed: ; & | < > ^ $ , ( ) { } [ ] ! # % \' " \\ / ` * ?',
+    );
+  }
+}
+
 function runCommand(
   cmd: string,
   cwd: string,
   timeout: number,
 ): Promise<{ stdout: string; stderr: string; exitCode: number; killed: boolean }> {
   return new Promise((resolve) => {
-    // exec() always spawns a shell on both POSIX and Windows, interpreting
-    // metacharacters (& | ; $ ( ) etc.) as shell code — a injection vector
-    // when user input reaches the command string.
-    //
-    // execFile() with shell:false bypasses the shell on POSIX: the command
-    // string is passed as a single argv[] element, so metacharacters are
-    // passed literally and not interpreted.
-    // On Windows execFile doesn't support shell:false; shell:true uses cmd.exe
-    // which correctly quotes the combined string argument.
+    // On POSIX: execFile with shell:false passes the command string as a
+    // single argv[] element — metacharacters are literal, safe.
+    // On Windows: execFile doesn't support shell:false; shell:true uses
+    // cmd.exe which interprets metacharacters. We validate the command
+    // upfront (validateCommand) to reject dangerous characters before
+    // they reach cmd.exe.
+    validateCommand(cmd); // defensive — caller also validates
     const opts = {
       cwd,
       timeout,
@@ -117,6 +130,9 @@ export function buildDevCommand(opts: SlashCommandContext): SlashCommand {
           message: `${color.yellow('Usage:')} /dev <shell command>\n\nExamples:\n  /dev pnpm release:check\n  /dev git diff --stat`,
         };
       }
+
+      // Reject commands with Windows cmd.exe metacharacters before execution.
+      validateCommand(cmd);
 
       const cwd = opts.cwd;
       const startedAt = Date.now();
