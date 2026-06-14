@@ -1,4 +1,4 @@
-import { EventBus, type Logger, type MCPServerConfig, ToolRegistry } from '@wrongstack/core';
+import { EventBus, type Logger, type MCPServerConfig, type Tool, ToolRegistry } from '@wrongstack/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MCPRegistry } from '../src/registry.js';
 
@@ -368,6 +368,7 @@ describe('MCPRegistry', () => {
         cfg: stdioCfg('inactive', { enabled: false }),
         state: 'idle' as const,
         toolNames: [] as string[],
+        lazyTools: [] as Tool[],
         attempts: 0,
         reconnectPending: false,
         reconnectCycles: 0,
@@ -384,6 +385,7 @@ describe('MCPRegistry', () => {
         cfg: stdioCfg('active', { enabled: true }),
         state: 'connected' as const,
         toolNames: [] as string[],
+        lazyTools: [] as Tool[],
         attempts: 1,
         reconnectPending: false,
         reconnectCycles: 0,
@@ -416,6 +418,7 @@ describe('MCPRegistry', () => {
         cfg: stdioCfg('replace-test', { permission: 'confirm' }),
         state: 'connected' as const,
         toolNames: [] as string[],
+        lazyTools: [] as Tool[],
         attempts: 1,
         reconnectPending: false,
         reconnectCycles: 0,
@@ -442,6 +445,7 @@ describe('MCPRegistry', () => {
         cfg: stdioCfg('same-client', { permission: 'confirm' }),
         state: 'connected' as const,
         toolNames: [] as string[],
+        lazyTools: [] as Tool[],
         attempts: 1,
         reconnectPending: false,
         reconnectCycles: 0,
