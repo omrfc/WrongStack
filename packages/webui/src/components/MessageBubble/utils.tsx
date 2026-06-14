@@ -3,7 +3,7 @@ import { Check, Copy, FileCode2 } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useMemo, useState } from 'react';
 import rehypeHighlight from 'rehype-highlight';
-import { fillInput, parseNextSteps } from '../NextStepsBar';
+import { fillInput, NextStepsBar, parseNextSteps } from '../NextStepsBar';
 
 export { copyToClipboard };
 
@@ -93,51 +93,28 @@ function CodeCopyButton({ text }: { text: string }) {
 
 export const markdownComponents = {
   next_steps({ children }: { children?: React.ReactNode }) {
-    // children contains the raw text inside <next_steps>...</next_steps>
-    const rawText = typeof children === 'string' ? children : '';
+    // Parse step text from children — works for both:
+    //   <next_steps>1. Do this auto="true"</next_steps>  (non-self-closing)
+    //   <next_steps/>                                   (self-closing — children empty, renders nothing)
+    // The step text format is parsed by ITEM_RE: "1. Do this auto="true""
+    const rawText = typeof children === 'string' ? children.trim() : '';
+    if (!rawText) return null;
     const steps = parseNextSteps(rawText);
     if (steps.length === 0) return null;
 
     return (
-      <div className="mt-4 rounded-xl border border-primary/20 bg-primary/[0.03] overflow-hidden animate-message">
-        {/* ── Header ── */}
-        <div className="flex items-center gap-2 px-3.5 py-2 border-b border-primary/10 bg-primary/[0.04]">
-          <span className="flex items-center justify-center w-5 h-5 rounded-md bg-primary/15 text-primary text-xs">
-            💡
-          </span>
-          <span className="text-xs font-semibold text-foreground/90">Next steps</span>
-          <span className="text-[10px] text-muted-foreground ml-auto">click to fill input</span>
-        </div>
-        {/* ── Steps ── */}
-        <div className="flex flex-col p-2 gap-1">
-          {steps.map((s) => (
-            <button
-              key={s.index}
-              type="button"
-              onClick={() => fillInput(s.text)}
-              className="group flex items-center gap-2.5 w-full text-left px-3 py-2 rounded-lg transition-all
-                         hover:bg-primary/[0.08] hover:shadow-sm
-                         border border-transparent hover:border-primary/20 cursor-pointer"
-              title={`Click to fill: ${s.text}`}
-            >
-              <span className="flex items-center justify-center w-5 h-5 rounded-md bg-muted/80 group-hover:bg-primary/20
-                               text-[11px] font-mono font-semibold tabular-nums shrink-0
-                               text-muted-foreground group-hover:text-primary transition-colors">
-                {s.index}
-              </span>
-              <span className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-primary group-hover:translate-x-0.5 transition-all shrink-0 text-xs">
-                →
-              </span>
-              <span className="text-sm leading-snug text-foreground/80 group-hover:text-foreground transition-colors flex-1 min-w-0">
-                {s.text}
-              </span>
-              <span className="opacity-0 group-hover:opacity-100 text-primary/60 transition-all shrink-0 text-xs">
-                ↗
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
+      <NextStepsBar
+        steps={steps}
+        onAutoSubmit={(text) => {
+          // auto-submit in markdown context: fill input and dispatch a native
+          // submit on the ChatInput form so the full submission flow runs.
+          fillInput(text);
+          const form = document.querySelector('form[class*="flex items-end gap-2"]');
+          if (form) {
+            form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+          }
+        }}
+      />
     );
   },
 

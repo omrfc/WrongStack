@@ -143,7 +143,12 @@ export interface RunTuiOptions {
   restoreDebugStreamCallback?: (() => void) | undefined;
   /** Called from /clear so the TUI can wipe its history entries while agent.ctx + memory are cleared separately. */
   onClearHistory?: ((
-    dispatch: React.Dispatch<{ type: 'clearHistory' } | { type: 'resetContextChip' }>,
+    dispatch: React.Dispatch<
+      | { type: 'clearHistory' }
+      | { type: 'resetContextChip' }
+      | { type: 'streamReset' }
+      | { type: 'toolStreamClear' }
+    >,
   ) => void) | undefined;
 
   // --- Fleet surface (director mode) ---
@@ -290,6 +295,15 @@ export interface RunTuiOptions {
    * Used by the TUI to display and auto-submit next steps in 'auto' mode.
    */
   getSuggestions?: (() => string[]) | undefined;
+  /**
+   * Retrieve current auto suggestions (items with auto="true" attribute).
+   * Used by YOLO+auto mode for automatic next-step submission.
+   */
+  getAutoSuggestions?: (() => string[]) | undefined;
+  /**
+   * Autonomy next prompt template for YOLO+auto mode. Contains {{suggestion}} placeholder.
+   */
+  autonomyNextPrompt?: string | undefined;
   /**
    * Write parsed next steps into the shared suggestion store.
    * Called by the Entry component after parsing each assistant message
@@ -719,6 +733,10 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           saveSettings: opts.saveSettings,
           predictNext: opts.predictNext,
           onSuggestionsParsed: opts.onSuggestionsParsed,
+          getSuggestions: opts.getSuggestions,
+          getAutoSuggestions: opts.getAutoSuggestions,
+          autonomyNextPrompt: opts.autonomyNextPrompt,
+          setSuggestions: opts.setSuggestions,
           chime: opts.chime,
           confirmExit: opts.confirmExit,
           mouse: mouseEnabled,

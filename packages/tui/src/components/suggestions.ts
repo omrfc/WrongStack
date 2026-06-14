@@ -25,6 +25,8 @@
 export interface ParsedNextStep {
   index: number;
   text: string;
+  /** Whether this item has auto="true" attribute for YOLO+auto autonomy mode. */
+  auto?: boolean;
 }
 
 export interface ParseNextStepsResult {
@@ -37,6 +39,8 @@ export interface ParseNextStepsResult {
    * Used by entry.tsx to strip suggestions from the rendered message body.
    */
   stripped: string;
+  /** Flat string array — texts of items with auto="true" attribute only. */
+  autoTexts: string[];
 }
 
 // ── Patterns ───────────────────────────────────────────────────────────────
@@ -53,7 +57,8 @@ const PERMISSIVE_HEADING_PATTERNS: Array<{ re: RegExp; label: string }> = [
 ];
 
 /** Matches an item line: "1. text", "1) text", "- text", "* text". */
-const ITEM_RE = /^(?:(\d+)[.)]\s*|[-*•]\s*)(.+)$/;
+/** Also captures optional auto="true" attribute at the end. */
+const ITEM_RE = /^(?:(\d+)[.)]\s*|[-*•]\s*)(.+?)(\s+auto="true")?$/;
 
 const MAX_STEPS = 6;
 
@@ -95,6 +100,7 @@ function parseRawNumbered(content: string): ParseNextStepsResult {
 
     const numPart = m[1];
     let text = m[2]!.trim();
+    const hasAuto = !!m[3]; // auto="true" captured in group 3
     let index: number;
 
     if (numPart !== undefined) {
@@ -106,12 +112,17 @@ function parseRawNumbered(content: string): ParseNextStepsResult {
     if (seenNumbers.has(index)) continue;
     if (text.length < 3) continue;
     seenNumbers.add(index);
-    steps.push({ index, text });
+    steps.push({ index, text, auto: hasAuto });
 
     if (steps.length >= MAX_STEPS) break;
   }
 
-  return { steps, texts: steps.map((s) => s.text), stripped: content };
+  return {
+    steps,
+    texts: steps.map((s) => s.text),
+    stripped: content,
+    autoTexts: steps.filter((s) => s.auto).map((s) => s.text),
+  };
 }
 
 /** Parse a heading + item block (the main assistant-message path). */
@@ -120,7 +131,7 @@ function parseWithHeading(content: string, strict: boolean): ParseNextStepsResul
   const headingMatch = headingRe.exec(content);
 
   if (!headingMatch) {
-    return { steps: [], texts: [], stripped: content };
+    return { steps: [], texts: [], stripped: content, autoTexts: [] };
   }
 
   const headingEnd = headingMatch.index + headingMatch[0]!.length;
@@ -138,6 +149,7 @@ function parseWithHeading(content: string, strict: boolean): ParseNextStepsResul
 
     const numPart = m[1];
     let text = m[2]!.trim();
+    const hasAuto = !!m[3]; // auto="true" captured in group 3
     let index: number;
 
     if (numPart !== undefined) {
@@ -149,16 +161,17 @@ function parseWithHeading(content: string, strict: boolean): ParseNextStepsResul
     if (seenNumbers.has(index)) continue;
     if (text.length < 3) continue;
     seenNumbers.add(index);
-    steps.push({ index, text });
+    steps.push({ index, text, auto: hasAuto });
 
     if (steps.length >= MAX_STEPS) break;
   }
 
   if (steps.length === 0) {
-    return { steps: [], texts: [], stripped: content };
+    return { steps: [], texts: [], stripped: content, autoTexts: [] };
   }
 
   const texts = steps.map((s) => s.text);
+  const autoTexts = steps.filter((s) => s.auto).map((s) => s.text);
 
   // Strip the entire heading + block from the content
   const blockStart = headingMatch.index;
@@ -168,7 +181,7 @@ function parseWithHeading(content: string, strict: boolean): ParseNextStepsResul
       .replace(/\n{3,}/g, '\n\n')
       .trim();
 
-  return { steps, texts, stripped };
+  return { steps, texts, stripped, autoTexts };
 }
 
 function buildPermissiveHeadingRe(): RegExp {

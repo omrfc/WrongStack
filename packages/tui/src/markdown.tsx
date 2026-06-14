@@ -150,16 +150,28 @@ const QUOTE_RE = /^>\s?(.*)$/;
  * are sized against it so they don't overflow the panel; otherwise we fall
  * back to `termWidth`, which is correct for callers without a bordered
  * container. Non-table prose is unaffected — Ink handles its soft wrap.
+ *
+ * `tableWidth` is the width available for tables. When provided, tables are
+ * sized to this value; otherwise falls back to `contentWidth ?? termWidth`.
+ * This allows precise control over table sizing independent of prose width.
+ *
+ * `panelBackground` is the background color of the surrounding panel. When
+ * provided, table rows are padded with trailing spaces colored with this
+ * background so any empty space on the right of a narrow table is filled
+ * with the panel background rather than showing the terminal background.
  */
 export function MarkdownView({
   text,
   termWidth,
   contentWidth,
+  tableWidth,
 }: {
   text: string;
   termWidth: number;
   /** Real inner width of the surrounding panel. Defaults to `termWidth`. */
   contentWidth?: number | undefined;
+  /** Width available for tables. Defaults to `contentWidth ?? termWidth`. */
+  tableWidth?: number | undefined;
 }): React.ReactElement {
   const lines = text.split('\n');
   const rows: React.ReactNode[] = [];
@@ -168,17 +180,17 @@ export function MarkdownView({
   // Tables are the only width-sensitive path here; size them to the real
   // content area so a 2-col-chrome border (assistant panel) doesn't push
   // the last cell off the right edge and force an Ink wrap.
-  const tableBudget = Math.max(20, contentWidth ?? termWidth);
+  const tableBudget = Math.max(20, tableWidth ?? contentWidth ?? termWidth);
   while (i < lines.length) {
     // GitHub table block → existing renderer.
     const tableEnd = detectTable(lines, i);
     if (tableEnd > i) {
-      // Tables render box-drawing characters that conflict with the message
-      // panel background. Render them in a transparent box so they are not
-      // affected by the parent entry's backgroundColor.
+      // Tables use box-drawing characters rendered on the terminal background
+      // (no panel background since assistant entries are now transparent).
+      const tableText = renderTable(lines.slice(i, tableEnd), tableBudget);
       rows.push(
         <Box key={`t${key++}`} width={tableBudget} backgroundColor="transparent">
-          <Text>{renderTable(lines.slice(i, tableEnd), tableBudget)}</Text>
+          <Text>{tableText}</Text>
         </Box>,
       );
       i = tableEnd;
@@ -262,5 +274,8 @@ export function MarkdownView({
 
     rows.push(<InlineLine key={`p${key++}`} tokens={parseInline(line)} />);
   }
-  return <Box flexDirection="column">{rows}</Box>;
+  // Constrain prose to contentWidth so Ink wraps at the correct boundary,
+  // not at the full terminal width. Tables already get an explicit width via
+  // the <Box width={tableBudget}> wrapper around each row.
+  return <Box flexDirection="column" width={Math.max(20, tableBudget)}>{rows}</Box>;
 }

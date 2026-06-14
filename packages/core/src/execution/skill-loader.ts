@@ -60,6 +60,8 @@ export interface SkillLoaderOptions {
 export class DefaultSkillLoader implements SkillLoader {
   private readonly dirs: { dir: string; source: SkillManifest['source'] }[];
   private cache?: SkillManifest[] | undefined;
+  private entriesCache?: SkillEntry[] | undefined;
+  private readonly bodyCache = new Map<string, string>();
 
   constructor(opts: SkillLoaderOptions) {
     this.dirs = [
@@ -125,6 +127,7 @@ export class DefaultSkillLoader implements SkillLoader {
   }
 
   async listEntries(): Promise<SkillEntry[]> {
+    if (this.entriesCache) return this.entriesCache;
     const skills = await this.list();
     const entries: SkillEntry[] = [];
     for (const s of skills) {
@@ -136,37 +139,51 @@ export class DefaultSkillLoader implements SkillLoader {
         // skip
       }
     }
+    this.entriesCache = entries;
     return entries;
   }
 
   invalidateCache(): void {
     this.cache = undefined;
+    this.entriesCache = undefined;
+    this.bodyCache.clear();
   }
 
   async readBody(name: string): Promise<string> {
+    const cached = this.bodyCache.get(name);
+    if (cached !== undefined) return cached;
     const m = await this.find(name);
     if (!m) throw new Error(`Skill "${name}" not found`);
-    return fs.readFile(m.path, 'utf8');
+    const body = await fs.readFile(m.path, 'utf8');
+    this.bodyCache.set(name, body);
+    return body;
   }
 
   async readSaveBody(name: string): Promise<string> {
+    const key = `save:${name}`;
+    const cached = this.bodyCache.get(key);
+    if (cached !== undefined) return cached;
     const m = await this.find(name);
     if (!m) throw new Error(`Skill "${name}" not found`);
     // Try SKILL.save.md in the same directory as SKILL.md
     const savePath = path.join(path.dirname(m.path), 'SKILL.save.md');
+    let result: string;
     try {
-      return await fs.readFile(savePath, 'utf8');
+      result = await fs.readFile(savePath, 'utf8');
     } catch {
       // No hand-crafted save variant — auto-compact the full body
       const full = await fs.readFile(m.path, 'utf8');
       const body = stripFrontmatter(full);
       const compact = compactSkillBody(body);
       if (compact) {
-        return `## Overview\n\n${compact}`;
+        result = `## Overview\n\n${compact}`;
+      } else {
+        // Fallback: return first 300 chars of full body
+        result = body.trim().slice(0, 300);
       }
-      // Fallback: return first 300 chars of full body
-      return body.trim().slice(0, 300);
     }
+    this.bodyCache.set(key, result);
+    return result;
   }
 }
 

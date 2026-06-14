@@ -3,6 +3,16 @@ import { useChatStore, useUIStore } from '@/stores';
 import { ArrowDown, ArrowUp, Search, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+/** CSS rules for ::highlight() pseudo-elements (CSS Custom Highlights API).
+ *  Injected via JavaScript to avoid lightningcss warnings — the pseudo-element
+ *  is valid CSS (Chrome 105+, Firefox 123+) but lightningcss doesn't recognize it.
+ *  Guarded with `CSS.highlights` feature detection so it is a no-op on
+ *  unsupported browsers (Safari). */
+const HIGHLIGHT_STYLES = `
+::highlight(chat-search) { background-color: hsl(var(--primary) / 0.3); color: inherit; }
+::highlight(chat-search-active) { background-color: hsl(var(--primary) / 0.85); color: hsl(var(--primary-foreground)); }
+`;
+
 /**
  * Ctrl+F overlay that searches the current chat transcript. Hits are
  * counted as the user types; ↑/↓ step between hits and Enter scrolls the
@@ -28,6 +38,20 @@ export function SearchOverlay() {
   useEffect(() => {
     if (open) requestAnimationFrame(() => inputRef.current?.focus());
   }, [open]);
+
+  // Inject ::highlight() CSS rules once on mount. lightningcss warns about
+  // ::highlight() being an unrecognized pseudo-element, so we bypass it
+  // entirely by injecting via JavaScript. The rules are inert on browsers
+  // without CSS Custom Highlights API support (Safari) — the JS side already
+  // guards with `CSS.highlights` feature detection.
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = HIGHLIGHT_STYLES;
+    document.head.appendChild(style);
+    return () => {
+      document.head.removeChild(style);
+    };
+  }, []);
 
   const hits = useMemo(() => {
     const q = query.trim().toLowerCase();

@@ -5,7 +5,10 @@ import { useBrainEvents } from './use-brain-events.js';
 import { useSubagentEvents } from './use-subagent-events.js';
 
 type ClearHistoryDispatch = React.Dispatch<
-  { type: 'clearHistory' } | { type: 'resetContextChip' }
+  | { type: 'clearHistory' }
+  | { type: 'resetContextChip' }
+  | { type: 'streamReset' }
+  | { type: 'toolStreamClear' }
 >;
 
 export interface UseTuiEventBridgeOptions {

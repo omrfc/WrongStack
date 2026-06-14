@@ -329,10 +329,6 @@
   @apply bg-transparent;
 }
 
-/* — Search highlight (CSS Custom Highlights API) — */
-::highlight(chat-search) { background-color: hsl(var(--primary) / 0.3); color: inherit; }
-::highlight(chat-search-active) { background-color: hsl(var(--primary) / 0.85); color: hsl(var(--primary-foreground)); }
-
 /* — Vim-style chat focus marker — */
 [data-message-id][data-focused="true"] {
   position: relative;

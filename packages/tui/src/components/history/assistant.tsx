@@ -7,6 +7,12 @@ import { CodeBlock } from './code-block.js';
 import type { BodySegment } from './types.js';
 
 /**
+ * Width of the left border glyph in a single-border panel. Used to adjust
+ * content width calculations where the border is a separate UI element.
+ */
+export const MESSAGE_PANEL_BORDER_WIDTH = 1;
+
+/**
  * Horizontal columns consumed by every bordered message panel
  * (border glyph + paddingLeft). Exported so tests can assert consistency.
  */
@@ -90,7 +96,12 @@ export function AssistantBody({
           <CodeBlock key={i} code={seg.text} lang={seg.lang ?? 'plain'} contentWidth={inner} />
         ) : (
           // biome-ignore lint/suspicious/noArrayIndexKey: segment order is stable
-          <MarkdownView key={i} text={seg.text} termWidth={inner} />
+          <MarkdownView
+            key={i}
+            text={seg.text}
+            termWidth={inner}
+            tableWidth={termWidth - MESSAGE_PANEL_BORDER_WIDTH}
+          />
         ),
       )}
     </Box>

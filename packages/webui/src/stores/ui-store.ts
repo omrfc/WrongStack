@@ -67,10 +67,10 @@ interface UIState {
   fleetMonitorOpen: boolean;
   /** Full-screen Agents Monitor overlay. */
   agentsMonitorOpen: boolean;
-  /** Bottom drawer Fleet Monitor. */
-  fleetDrawerOpen: boolean;
-  /** Bottom drawer Agents Monitor. */
-  agentsDrawerOpen: boolean;
+  /** Bottom inspector panel open (DevTools-style docked panel). */
+  inspectorOpen: boolean;
+  /** Active tab inside the bottom inspector panel. */
+  inspectorTab: 'fleet' | 'agents';
 
   /** Active prompt-refinement panel. Set while RefinePanel is shown. Null when no refinement is pending. */
   refinePanel: {
@@ -109,8 +109,9 @@ interface UIState {
   toggleDockSection: (section: DockSection) => void;
   setFleetMonitorOpen: (open: boolean) => void;
   setAgentsMonitorOpen: (open: boolean) => void;
-  setFleetDrawerOpen: (open: boolean) => void;
-  setAgentsDrawerOpen: (open: boolean) => void;
+  setInspectorOpen: (open: boolean) => void;
+  setInspectorTab: (tab: 'fleet' | 'agents') => void;
+  toggleInspector: () => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -140,8 +141,8 @@ export const useUIStore = create<UIState>()(
       dockSection: null,
       fleetMonitorOpen: false,
       agentsMonitorOpen: false,
-      fleetDrawerOpen: false,
-      agentsDrawerOpen: false,
+      inspectorOpen: false,
+      inspectorTab: 'fleet',
 
       selectActivity: (activity) => set({ activeActivity: activity }),
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
@@ -201,20 +202,28 @@ export const useUIStore = create<UIState>()(
         set((s) => ({ dockSection: s.dockSection === section ? null : section })),
       setFleetMonitorOpen: (open: boolean) => set({ fleetMonitorOpen: open }),
       setAgentsMonitorOpen: (open: boolean) => set({ agentsMonitorOpen: open }),
-      setFleetDrawerOpen: (open: boolean) => set({ fleetDrawerOpen: open }),
-      setAgentsDrawerOpen: (open: boolean) => set({ agentsDrawerOpen: open }),
+      setInspectorOpen: (open: boolean) => set({ inspectorOpen: open }),
+      setInspectorTab: (tab: 'fleet' | 'agents') => set({ inspectorTab: tab }),
+      toggleInspector: () => set((s) => ({ inspectorOpen: !s.inspectorOpen })),
     }),
     {
       name: 'wrongstack-ui',
-      version: 1,
+      version: 2,
       // v0 → v1: 'context'/'sessions' activities were removed and the
       // sidebar width bounds changed — coerce persisted values so a stale
       // localStorage entry can't select a panel that no longer exists.
-      migrate: (persisted) => {
+      // v1 → v2: the modal FleetDrawer/AgentsDrawer were replaced by a
+      // single docked InspectorPanel; drop the stale drawer booleans so
+      // they can't force the (removed) fields back into state.
+      migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Record<string, unknown>;
         p.activeActivity = coerceActivity(p.activeActivity);
         if (typeof p.sidebarWidth === 'number') {
           p.sidebarWidth = Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, p.sidebarWidth));
+        }
+        if (version < 2) {
+          delete p.fleetDrawerOpen;
+          delete p.agentsDrawerOpen;
         }
         return p as unknown as UIState;
       },
@@ -229,8 +238,8 @@ export const useUIStore = create<UIState>()(
         sessionNicknames: s.sessionNicknames,
         fileExplorerWidth: s.fileExplorerWidth,
         refineEnabled: s.refineEnabled,
-        fleetDrawerOpen: s.fleetDrawerOpen,
-        agentsDrawerOpen: s.agentsDrawerOpen,
+        inspectorOpen: s.inspectorOpen,
+        inspectorTab: s.inspectorTab,
       }),
     },
   ),

@@ -49,11 +49,14 @@ export async function runSettingsMenu(deps: SettingsMenuDeps): Promise<number> {
       case '2':
         await editDefaultAutonomy(deps);
         break;
+      case '3':
+        await editAutonomyNextPrompt(deps);
+        break;
       case 'd':
         await showDefaults(deps);
         break;
       default:
-        deps.renderer.writeError(`Unknown selection: "${choice}". Try 1, 2, or q to quit.`);
+        deps.renderer.writeError(`Unknown selection: "${choice}". Try 1, 2, 3, or q to quit.`);
     }
   }
 }
@@ -62,20 +65,23 @@ function renderSettingsTopMenu(
   renderer: TerminalRenderer,
   config: {
     autonomy?:
-      | { autoProceedDelayMs?: number | undefined; defaultMode?: string | undefined }
+      | { autoProceedDelayMs?: number | undefined; defaultMode?: string | undefined; autonomyNextPrompt?: string | undefined }
       | undefined;
   },
 ): void {
   const delay = config.autonomy?.autoProceedDelayMs ?? 45_000;
   const defMode = config.autonomy?.defaultMode ?? 'off';
+  const nextPrompt = config.autonomy?.autonomyNextPrompt ?? 'auto {{suggestion}}';
   renderer.write(`\n${color.bold('WrongStack')} ${color.dim('— Settings')}\n\n`);
   renderer.write(
     `  ${color.bold('1.')} auto-proceed delay:    ${color.cyan(formatDelay(delay))} (in auto mode, wait before continuing)\n`,
   );
   renderer.write(`  ${color.bold('2.')} default autonomy mode: ${color.cyan(defMode)}\n`);
+  renderer.write(`  ${color.bold('3.')} autonomy next prompt: ${color.cyan(nextPrompt)}\n`);
   renderer.write(`\n  ${color.dim('Actions:')}\n`);
   renderer.write(`    ${color.bold('1')}       Edit auto-proceed delay\n`);
   renderer.write(`    ${color.bold('2')}       Edit default autonomy mode\n`);
+  renderer.write(`    ${color.bold('3')}       Edit autonomy next prompt\n`);
   renderer.write(`    ${color.bold('d')}       Show all defaults\n`);
   renderer.write(`    ${color.bold('q')}       Quit\n`);
 }
@@ -139,6 +145,42 @@ async function editDefaultAutonomy(deps: SettingsMenuDeps): Promise<void> {
     autonomy.defaultMode = selected as 'off' | 'suggest' | 'auto';
   });
   deps.renderer.write(`  ${color.green('✓')} default autonomy → ${color.bold(selected)}\n`);
+}
+
+async function editAutonomyNextPrompt(deps: SettingsMenuDeps): Promise<void> {
+  deps.renderer.write(
+    `\n${color.bold('Autonomy next prompt')} ${color.dim('— template for auto-submitting next steps in YOLO+auto mode')}\n`,
+  );
+  const autonomy = deps.configStore.get().autonomy as Record<string, unknown> | undefined;
+  const current = (autonomy?.autonomyNextPrompt as string | undefined) ?? 'auto {{suggestion}}';
+  deps.renderer.write(
+    color.dim(`  Current: ${current}\n`),
+  );
+  deps.renderer.write(
+    color.dim(`  Template uses {{suggestion}} placeholder for the next step text.\n`),
+  );
+  deps.renderer.write(
+    color.dim(`  Examples:\n`),
+  );
+  deps.renderer.write(
+    color.dim(`    auto {{suggestion}}         (default - prepends "auto")\n`),
+  );
+  deps.renderer.write(
+    color.dim(`    proceed with: {{suggestion}}  (prepends "proceed with:")\n`),
+  );
+
+  const raw = (await deps.reader.readLine(`  ${color.amber('?')} Prompt template: `)).trim();
+  if (!raw || raw === 'q') return;
+
+  if (!raw.includes('{{suggestion}}')) {
+    deps.renderer.writeError(`Template must include {{suggestion}} placeholder.`);
+    return;
+  }
+
+  await mutateAutonomyConfig(deps, (autonomy) => {
+    (autonomy as Record<string, unknown>)['autonomyNextPrompt'] = raw;
+  });
+  deps.renderer.write(`  ${color.green('✓')} autonomy next prompt → ${color.bold(raw)}\n`);
 }
 
 async function showDefaults(deps: SettingsMenuDeps): Promise<void> {
@@ -446,6 +488,7 @@ function mutateAutonomyConfig(
     enhance?: boolean | undefined;
     enhanceDelayMs?: number | undefined;
     enhanceLanguage?: string | undefined;
+    autonomyNextPrompt?: string | undefined;
   }) => void,
 ): Promise<void> {
   return persistAutonomySetting(deps, mutator);

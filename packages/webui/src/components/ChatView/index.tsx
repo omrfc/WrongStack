@@ -222,6 +222,15 @@ export function ChatView() {
     setScrolledDeep(h.scrollOffset > h.viewportSize && h.scrollSize > h.viewportSize * 2.5);
   }, []);
 
+  const handleHistorySelect = useCallback(
+    (sessionId: string) => {
+      const ws = getWSClient();
+      ws?.resumeSession?.(sessionId);
+      setSwitcherOpen(false);
+    },
+    [],
+  );
+
   // Follow new content while pinned; otherwise accumulate the unread count.
   useEffect(() => {
     const h = vlistRef.current;
@@ -272,6 +281,45 @@ export function ChatView() {
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [nowTick, setNowTick] = useState<number>(() => Date.now());
   const streamAnchor = useRef<{ id: string; at: number; len: number } | null>(null);
+
+  // Memoize the running status bubble content to avoid recomputing on every render.
+  // Must be after streamAnchor declaration (ref is accessed inside).
+  const runningStatus = useMemo(() => {
+    const last = messages[messages.length - 1];
+    const runningTools = messages.filter((m) => m.role === 'tool' && m.toolResult === undefined);
+    let label = 'Thinking…';
+    if (runningTools.length > 0) {
+      const names = Array.from(new Set(runningTools.map((t) => t.toolName).filter(Boolean) as string[]));
+      const preview = names.slice(0, 2).join(', ');
+      const more = names.length > 2 ? ` +${names.length - 2}` : '';
+      label = runningTools.length === 1 ? `Running ${preview || 'tool'}…` : `Running ${runningTools.length} tools (${preview}${more})…`;
+    } else if (last?.role === 'assistant' && last.content) {
+      label = 'Writing reply…';
+    } else if (last?.role === 'tool' && last.toolResult !== undefined) {
+      label = 'Thinking about the next step…';
+    }
+    const elapsedSec = runStartedAt ? Math.max(0, Math.floor((nowTick - runStartedAt) / 1000)) : 0;
+    const elapsed = elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
+    let speedLabel = '';
+    const streamingBubble = last?.role === 'assistant' && last.streaming && last.content ? last : null;
+    if (streamingBubble) {
+      const anchor = streamAnchor.current;
+      if (!anchor || anchor.id !== streamingBubble.id) {
+        streamAnchor.current = { id: streamingBubble.id, at: Date.now(), len: streamingBubble.content.length };
+      } else {
+        const dt = Math.max(1, nowTick - anchor.at);
+        const dl = Math.max(0, streamingBubble.content.length - anchor.len);
+        if (dt > 500 && dl > 0) {
+          const cps = (dl * 1000) / dt;
+          speedLabel = cps >= 1000 ? `${(cps / 1000).toFixed(1)}k ch/s` : `${Math.round(cps)} ch/s`;
+        }
+      }
+    } else if (streamAnchor.current) {
+      streamAnchor.current = null;
+    }
+    return { label, elapsed, speedLabel };
+  }, [messages, nowTick, runStartedAt]);
+
   useEffect(() => {
     if (isLoading && runStartedAt === null) setRunStartedAt(Date.now());
     if (!isLoading && runStartedAt !== null) setRunStartedAt(null);
@@ -401,11 +449,7 @@ export function ChatView() {
                       <button
                         key={e.id}
                         type="button"
-                        onClick={() => {
-                          const ws = getWSClient();
-                          ws?.resumeSession?.(e.id);
-                          setSwitcherOpen(false);
-                        }}
+                        onClick={() => handleHistorySelect(e.id)}
                         className={cn(
                           'w-full text-left px-2 py-1.5 rounded text-xs hover:bg-accent transition-colors',
                           e.isCurrent && 'bg-primary/10',
@@ -602,61 +646,7 @@ export function ChatView() {
               <ThinkingBubble />
 
               {/* Running status bubble */}
-              {isLoading &&
-                (() => {
-                const last = messages[messages.length - 1];
-                const runningTools = messages.filter(
-                  (m) => m.role === 'tool' && m.toolResult === undefined,
-                );
-                let label = 'Thinking…';
-                if (runningTools.length > 0) {
-                  const names = Array.from(
-                    new Set(runningTools.map((t) => t.toolName).filter(Boolean) as string[]),
-                  );
-                  const preview = names.slice(0, 2).join(', ');
-                  const more = names.length > 2 ? ` +${names.length - 2}` : '';
-                  label =
-                    runningTools.length === 1
-                      ? `Running ${preview || 'tool'}…`
-                      : `Running ${runningTools.length} tools (${preview}${more})…`;
-                } else if (last?.role === 'assistant' && last.content) {
-                  label = 'Writing reply…';
-                } else if (last?.role === 'tool' && last.toolResult !== undefined) {
-                  label = 'Thinking about the next step…';
-                }
-                const elapsedSec = runStartedAt
-                  ? Math.max(0, Math.floor((nowTick - runStartedAt) / 1000))
-                  : 0;
-                const elapsed =
-                  elapsedSec < 60
-                    ? `${elapsedSec}s`
-                    : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
-                let speedLabel = '';
-                const streamingBubble =
-                  last?.role === 'assistant' && last.streaming && last.content ? last : null;
-                if (streamingBubble) {
-                  const anchor = streamAnchor.current;
-                  if (!anchor || anchor.id !== streamingBubble.id) {
-                    streamAnchor.current = {
-                      id: streamingBubble.id,
-                      at: Date.now(),
-                      len: streamingBubble.content.length,
-                    };
-                  } else {
-                    const dt = Math.max(1, nowTick - anchor.at);
-                    const dl = Math.max(0, streamingBubble.content.length - anchor.len);
-                    if (dt > 500 && dl > 0) {
-                      const cps = (dl * 1000) / dt;
-                      speedLabel =
-                        cps >= 1000
-                          ? `${(cps / 1000).toFixed(1)}k ch/s`
-                          : `${Math.round(cps)} ch/s`;
-                    }
-                  }
-                } else if (streamAnchor.current) {
-                  streamAnchor.current = null;
-                }
-                return (
+              {isLoading && (
                   <div className="flex gap-3 animate-message">
                     <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-accent text-accent-foreground ring-2 ring-offset-2 ring-offset-background ring-accent/20">
                       <Bot className="h-4 w-4" />
@@ -669,9 +659,9 @@ export function ChatView() {
                             <span className="h-1.5 w-1.5 rounded-full bg-primary/70 animate-bounce [animation-delay:-0.15s]" />
                             <span className="h-1.5 w-1.5 rounded-full bg-primary/70 animate-bounce" />
                           </span>
-                          <span className="text-foreground/90">{label}</span>
+                          <span className="text-foreground/90">{runningStatus.label}</span>
                           <span className="text-xs text-muted-foreground tabular-nums">
-                            {elapsed}
+                            {runningStatus.elapsed}
                           </span>
                           {iteration && (
                             <span className="text-xs text-muted-foreground tabular-nums">
@@ -679,17 +669,16 @@ export function ChatView() {
                               {iteration.max > 0 ? `/${iteration.max}` : ''}
                             </span>
                           )}
-                          {speedLabel && (
+                          {runningStatus.speedLabel && (
                             <span className="text-xs text-muted-foreground/80 tabular-nums">
-                              · {speedLabel}
+                              · {runningStatus.speedLabel}
                             </span>
                           )}
                         </div>
                       </div>
                     </div>
                   </div>
-                );
-              })()}
+              )}
             </div>
           </VList>
         )}

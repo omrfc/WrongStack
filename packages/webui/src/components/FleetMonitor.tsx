@@ -542,6 +542,11 @@ export function FleetMonitor({
   const runningCount = fleetList.filter((a) => a.status === 'running').length;
   const selectedAgent = selectedIdx !== null ? fleetList[selectedIdx] : null;
 
+  const handleAgentClick = useCallback(
+    (i: number) => setSelectedIdx((prev) => (prev === i ? null : i)),
+    [],
+  );
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -671,7 +676,7 @@ export function FleetMonitor({
                     agent={agent}
                     isSelected={i === selectedIdx}
                     isLeader={agent.id === leaderId}
-                    onClick={() => setSelectedIdx(i === selectedIdx ? null : i)}
+                    onClick={() => handleAgentClick(i)}
                   />
                 ))}
               </div>

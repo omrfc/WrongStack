@@ -321,6 +321,15 @@ export interface AppProps {
    */
   getSuggestions?: (() => string[]) | undefined;
   /**
+   * Retrieve current auto suggestions (items with auto="true" attribute).
+   * Used by YOLO+auto mode for automatic next-step submission.
+   */
+  getAutoSuggestions?: (() => string[]) | undefined;
+  /**
+   * Autonomy next prompt template for YOLO+auto mode. Contains {{suggestion}} placeholder.
+   */
+  autonomyNextPrompt?: string | undefined;
+  /**
    * Store suggestions in the shared suggestion store. Used by the Entry
    * component after parsing "<next_steps>" or "💡 Next steps" from assistant output so the
    * /next command and auto-submit countdown can access them.
@@ -379,7 +388,12 @@ export interface AppProps {
   onExit: (code: number) => void;
   /** Called when /clear is dispatched — the TUI should wipe its history entries (but keep the banner). */
   onClearHistory?: ((
-    dispatch: React.Dispatch<{ type: 'clearHistory' } | { type: 'resetContextChip' }>,
+    dispatch: React.Dispatch<
+      | { type: 'clearHistory' }
+      | { type: 'resetContextChip' }
+      | { type: 'streamReset' }
+      | { type: 'toolStreamClear' }
+    >,
   ) => void) | undefined;
 
   /**
@@ -609,6 +623,8 @@ export function App({
   predictNext,
   onSuggestionsParsed,
   getSuggestions,
+  getAutoSuggestions,
+  autonomyNextPrompt,
   setSuggestions,
   switchAutonomy,
   effectiveMaxContext,
@@ -2321,12 +2337,24 @@ export function App({
 
     // Use the same delay as auto-proceed countdown
     const delay = cfg?.delayMs ?? 45_000;
-    const top = suggestions[0];
+
+    // YOLO+auto mode: prefer auto suggestions (items with auto="true" attribute)
+    const isYolo = getYolo?.() ?? false;
+    const autoSuggestions = isYolo ? (getAutoSuggestions?.() ?? []) : [];
+    const useAutoSuggestions = isYolo && autoSuggestions.length > 0;
+    const top = useAutoSuggestions ? autoSuggestions[0] : suggestions[0];
     if (!top) return;
 
-    nextStepsAutoSubmitSuggestionRef.current = top;
+    // For YOLO+auto, apply the autonomy_next prompt template
+    let promptToSubmit = top;
+    if (useAutoSuggestions && autonomyNextPrompt) {
+      promptToSubmit = autonomyNextPrompt.replace('{{suggestion}}', top);
+    }
+
+    nextStepsAutoSubmitSuggestionRef.current = promptToSubmit;
     const start = Date.now();
     setNextStepsAutoSubmitCountdown(Math.ceil(delay / 1000));
+    setNextStepsAutoSubmitLabel(promptToSubmit);
 
     nextStepsAutoSubmitTimerRef.current = setInterval(() => {
       const remaining = Math.max(0, Math.ceil((delay - (Date.now() - start)) / 1000));
@@ -2334,6 +2362,7 @@ export function App({
         clearInterval(nextStepsAutoSubmitTimerRef.current);
         nextStepsAutoSubmitTimerRef.current = undefined;
         setNextStepsAutoSubmitCountdown(null);
+        setNextStepsAutoSubmitLabel(null);
         // Auto-submit the suggestion
         const suggestion = nextStepsAutoSubmitSuggestionRef.current;
         nextStepsAutoSubmitSuggestionRef.current = null;
@@ -2352,6 +2381,8 @@ export function App({
             // throws a TDZ ReferenceError. The ref is only dereferenced when
             // the countdown fires, long after mount.
             await runBlocksRef.current(blocks);
+            // Clear the input field after auto-submit, matching normal submit behavior.
+            clearDraft();
           })();
         }
       } else {
@@ -2362,6 +2393,8 @@ export function App({
     return () => {
       clearInterval(nextStepsAutoSubmitTimerRef.current);
       nextStepsAutoSubmitTimerRef.current = undefined;
+      setNextStepsAutoSubmitCountdown(null);
+      setNextStepsAutoSubmitLabel(null);
     };
   }, [state.status, autonomyLive, state.enhance, state.enhanceBusy, nextStepsRecheck, getSettings, getSuggestions, dispatch]);
 
@@ -2840,6 +2873,7 @@ export function App({
   // Next-steps auto-submit countdown state: seconds remaining and the suggestion text.
   // When autonomy is 'auto' and suggestions exist, this countdown auto-submits the first suggestion.
   const [nextStepsAutoSubmitCountdown, setNextStepsAutoSubmitCountdown] = useState<number | null>(null);
+  const [nextStepsAutoSubmitLabel, setNextStepsAutoSubmitLabel] = useState<string | null>(null);
   const nextStepsAutoSubmitSuggestionRef = useRef<string | null>(null);
   const nextStepsAutoSubmitTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
@@ -4183,6 +4217,7 @@ export function App({
         clearInterval(nextStepsAutoSubmitTimerRef.current);
         nextStepsAutoSubmitTimerRef.current = undefined;
         setNextStepsAutoSubmitCountdown(null);
+        setNextStepsAutoSubmitLabel(null);
         nextStepsAutoSubmitSuggestionRef.current = null;
       }
       setDraft(next, cursor - 1);
@@ -4216,6 +4251,7 @@ export function App({
         clearInterval(nextStepsAutoSubmitTimerRef.current);
         nextStepsAutoSubmitTimerRef.current = undefined;
         setNextStepsAutoSubmitCountdown(null);
+        setNextStepsAutoSubmitLabel(null);
         nextStepsAutoSubmitSuggestionRef.current = null;
       }
       setDraft(next, cursor);
@@ -4400,6 +4436,7 @@ export function App({
         clearInterval(nextStepsAutoSubmitTimerRef.current);
         nextStepsAutoSubmitTimerRef.current = undefined;
         setNextStepsAutoSubmitCountdown(null);
+        setNextStepsAutoSubmitLabel(null);
         nextStepsAutoSubmitSuggestionRef.current = null;
       }
       setDraft('', 0);
@@ -4418,6 +4455,7 @@ export function App({
         clearInterval(nextStepsAutoSubmitTimerRef.current);
         nextStepsAutoSubmitTimerRef.current = undefined;
         setNextStepsAutoSubmitCountdown(null);
+        setNextStepsAutoSubmitLabel(null);
         nextStepsAutoSubmitSuggestionRef.current = null;
       }
       setDraft(next, cursor);
@@ -4433,6 +4471,7 @@ export function App({
         clearInterval(nextStepsAutoSubmitTimerRef.current);
         nextStepsAutoSubmitTimerRef.current = undefined;
         setNextStepsAutoSubmitCountdown(null);
+        setNextStepsAutoSubmitLabel(null);
         nextStepsAutoSubmitSuggestionRef.current = null;
       }
       setDraft(next, cursor);
@@ -4476,6 +4515,7 @@ export function App({
       clearInterval(nextStepsAutoSubmitTimerRef.current);
       nextStepsAutoSubmitTimerRef.current = undefined;
       setNextStepsAutoSubmitCountdown(null);
+      setNextStepsAutoSubmitLabel(null);
       nextStepsAutoSubmitSuggestionRef.current = null;
     }
 
@@ -4958,7 +4998,11 @@ export function App({
             while (stateRef.current.status !== 'idle' && Date.now() - start < 1500) {
               await new Promise((r) => setTimeout(r, 25));
             }
+            // Show the suggestion in the input field (matching auto-submit behavior),
+            // then clear it after runBlocks completes.
+            setDraft(res.runText, res.runText.length);
             await runBlocks(blocks);
+            clearDraft();
           }
         }
         // Only fire onClearHistory for `/clear` — without this gate every
@@ -5564,6 +5608,7 @@ export function App({
             debugStreamStats={state.debugStreamStats}
             enhanceCountdown={enhanceCountdown}
             nextStepsAutoSubmitCountdown={nextStepsAutoSubmitCountdown}
+            nextStepsAutoSubmitLabel={nextStepsAutoSubmitLabel}
             autoProceedCountdown={state.countdown?.remainingSeconds ?? null}
             sessionCount={sessionCount}
             mailbox={mailboxStatus}

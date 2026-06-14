@@ -186,14 +186,30 @@ export function ActivityBar() {
         <ActivityIcon
           icon={<LayoutGrid size={16} />}
           label="Fleet Monitor (Ctrl+Shift+M)"
-          active={useUIStore.getState().fleetMonitorOpen}
-          onClick={() => useUIStore.getState().setFleetMonitorOpen(!useUIStore.getState().fleetMonitorOpen)}
+          active={useUIStore.getState().inspectorOpen && useUIStore.getState().inspectorTab === 'fleet'}
+          onClick={() => {
+            const ui = useUIStore.getState();
+            if (ui.inspectorOpen && ui.inspectorTab === 'fleet') {
+              ui.setInspectorOpen(false);
+            } else {
+              ui.setInspectorTab('fleet');
+              ui.setInspectorOpen(true);
+            }
+          }}
         />
         <ActivityIcon
           icon={<ActivityIconSvg size={16} />}
           label="Agents Monitor (Ctrl+Shift+A)"
-          active={useUIStore.getState().agentsMonitorOpen}
-          onClick={() => useUIStore.getState().setAgentsMonitorOpen(!useUIStore.getState().agentsMonitorOpen)}
+          active={useUIStore.getState().inspectorOpen && useUIStore.getState().inspectorTab === 'agents'}
+          onClick={() => {
+            const ui = useUIStore.getState();
+            if (ui.inspectorOpen && ui.inspectorTab === 'agents') {
+              ui.setInspectorOpen(false);
+            } else {
+              ui.setInspectorTab('agents');
+              ui.setInspectorOpen(true);
+            }
+          }}
         />
       </div>
 

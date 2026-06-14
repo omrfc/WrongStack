@@ -1,4 +1,4 @@
-import { expectDefined } from '@wrongstack/core';
+import { expectDefined, truncate } from '@wrongstack/core';
 import type { EventBus, TokenCounter, AutonomyStage } from '@wrongstack/core';
 import { Box, Text, useStdout } from '../ink.js';
 import type React from 'react';
@@ -26,6 +26,13 @@ function modeIcon(label?: string): string {
   if (!label) return '';
   const icon = MODE_ICONS[label] ?? '▪';
   return `${icon} ${label}`;
+}
+
+/** Truncate a suggestion label to a maximum character width for display. */
+function truncateLabel(label: string, maxWidth: number): string {
+  // Strip /next N prefix like "/next 1" or "/next 1 2" before truncating
+  const stripped = label.replace(/^\/next\s+[\d\s]+\s*/, '');
+  return truncate(stripped, maxWidth);
 }
 
 /** Minimum terminal width before we switch to ultra-compact mode. Exported so
@@ -255,6 +262,11 @@ export interface StatusBarProps {
    * that auto-submits the suggested next step when the countdown reaches 0.
    */
   nextStepsAutoSubmitCountdown?: number | null | undefined;
+  /**
+   * Label of the step that will be auto-submitted (the suggestion text).
+   * When provided alongside countdown, renders as `⏳ step text in 3s`.
+   */
+  nextStepsAutoSubmitLabel?: string | null | undefined;
   /** Number of live sessions across processes (from SessionRegistry). */
   sessionCount?: number | undefined;
   /** Mailbox activity — unread count, online agents, latest message. */
@@ -310,6 +322,7 @@ export function StatusBar({
   debugStreamStats,
   enhanceCountdown,
   nextStepsAutoSubmitCountdown,
+  nextStepsAutoSubmitLabel,
   autoProceedCountdown,
   sessionCount,
   mailbox,
@@ -800,7 +813,11 @@ export function StatusBar({
                 <Text dimColor>│</Text>
               ) : null}
               <Text color={nextStepsAutoSubmitCountdown <= 3 ? 'yellow' : 'cyan'}>
-                ⏳ next step in {nextStepsAutoSubmitCountdown}s
+                ⏳ {nextStepsAutoSubmitLabel
+                  ? truncateLabel(nextStepsAutoSubmitLabel, 30)
+                  : 'next step'}
+                {' in '}
+                {nextStepsAutoSubmitCountdown}s
               </Text>
             </>
           ) : null}

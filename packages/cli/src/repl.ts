@@ -41,6 +41,7 @@ import {
 import { theme } from './theme.js';
 import { fmtTok } from './utils.js';
 import { CLI_VERSION } from './version.js';
+import { setAutoSuggestions } from './slash-commands/suggestion-store.js';
 
 /**
  * Extract "<next_steps>" or "💡 Next steps" suggestions from the agent's final output.
@@ -57,8 +58,21 @@ import { CLI_VERSION } from './version.js';
 const DEFAULT_MAX_CONSECUTIVE_AUTO_PROCEED = 50;
 
 export function parseSuggestionsFromOutput(finalText: string): string[] | null {
-  const { texts } = parseNextSteps(finalText, false); // permissive: accept all heading variants
+  const { texts, autoTexts } = parseNextSteps(finalText, false); // permissive: accept all heading variants
+  // Store auto suggestions in the shared store for YOLO+auto autonomy mode
+  if (autoTexts.length > 0) {
+    setAutoSuggestions(autoTexts);
+  }
   return texts.length > 0 ? texts : null;
+}
+
+/**
+ * Extract only the auto="true" items from next_steps output.
+ * Used by YOLO+auto autonomy mode.
+ */
+export function parseAutoSuggestionsFromOutput(finalText: string): string[] | null {
+  const { autoTexts } = parseNextSteps(finalText, false); // permissive: accept all heading variants
+  return autoTexts.length > 0 ? autoTexts : null;
 }
 
 export interface ReplOptions {
@@ -92,6 +106,20 @@ export interface ReplOptions {
    * check whether there are suggestions to feed when autonomy is 'auto'.
    */
   getSuggestions?: (() => string[]) | undefined;
+  /**
+   * Read the current auto suggestion list (items with auto="true" attribute).
+   * Used by YOLO+auto autonomy mode.
+   */
+  getAutoSuggestions?: (() => string[]) | undefined;
+  /**
+   * YOLO mode getter. When true, auto="true" suggestions trigger auto-proceed.
+   */
+  getYolo?: (() => boolean) | undefined;
+  /**
+   * Autonomy next prompt template. Used to construct the prompt when auto-submitting
+   * a next_steps item in YOLO+auto mode. Contains {{suggestion}} placeholder.
+   */
+  autonomyNextPrompt?: string | undefined;
   /**
    * Delay in milliseconds before auto-proceeding with the top suggestion
    * when autonomy mode is 'auto'. Default 45 seconds.
@@ -499,13 +527,23 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
             }
             // Fall through to the input read below instead of looping.
           } else {
-            const top = suggestions[0] ?? '';
+            // YOLO+auto mode: use auto suggestions (items with auto="true" attribute)
+            // and apply the autonomy_next prompt template
+            const isYolo = opts.getYolo?.() ?? false;
+            const autoSuggestions = opts.getAutoSuggestions?.() ?? [];
+            const useAutoSuggestions = isYolo && autoSuggestions.length > 0;
+
+            const top = useAutoSuggestions ? autoSuggestions[0] ?? '' : suggestions[0] ?? '';
             const delay = opts.autoProceedDelayMs ?? 1_000;
             const ctrl = new AbortController();
             activeCtrl = ctrl;
             try {
               autoIterCount++;
-              await runAutoProceed(opts, top, delay, ctrl);
+              // For YOLO+auto, apply the autonomy_next prompt template
+              const promptToFeed = useAutoSuggestions && opts.autonomyNextPrompt
+                ? opts.autonomyNextPrompt.replace('{{suggestion}}', top)
+                : top;
+              await runAutoProceed(opts, promptToFeed, delay, ctrl);
             } finally {
               activeCtrl = undefined;
             }

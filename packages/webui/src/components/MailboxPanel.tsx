@@ -57,7 +57,10 @@ export function MailboxPanel({ className }: { className?: string }) {
   // Track the socket lifecycle so the initial queries fire once the
   // connection is actually open (client.send drops messages otherwise).
   const [ready, setReady] = useState(client.status.state === 'open');
-  useEffect(() => client.onStatus((s) => setReady(s.state === 'open')), [client]);
+  useEffect(() => {
+    const off = client.onStatus((s) => setReady(s.state === 'open'));
+    return () => off();
+  }, [client]);
 
   // Query mailbox on mount and when WS becomes ready
   useEffect(() => {

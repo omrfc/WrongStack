@@ -64,15 +64,14 @@ function gitText(args: string[], cwd: string): Promise<{ code: number; out: stri
       reject(err);
       return;
     }
-    let out = '';
-    child.stdout?.on('data', (c: Buffer) => {
-      if (out.length < MAX_CMD_OUTPUT) out += c.toString();
-    });
-    child.stderr?.on('data', (c: Buffer) => {
-      if (out.length < MAX_CMD_OUTPUT) out += c.toString();
-    });
-    child.on('error', () => resolve({ code: 1, out }));
-    child.on('close', (code) => resolve({ code: code ?? 1, out: out.trim() }));
+    const chunks: string[] = [];
+    const emit = (c: Buffer) => {
+      if (chunks.join('').length < MAX_CMD_OUTPUT) chunks.push(c.toString());
+    };
+    child.stdout?.on('data', emit);
+    child.stderr?.on('data', emit);
+    child.on('error', () => resolve({ code: 1, out: chunks.join('') }));
+    child.on('close', (code) => resolve({ code: code ?? 1, out: chunks.join('').trim() }));
   });
 }
 
@@ -129,7 +128,7 @@ function runCmd(
   }
 
   return new Promise((resolve, reject) => {
-    let out = '';
+    const chunks: string[] = [];
     let child;
     try {
       child = spawn(cmd, args, {
@@ -149,13 +148,16 @@ function runCmd(
     // Tail-keep: a failing `pnpm test` prints its summary at the end, which
     // is what the verify failure message feeds back to the agent.
     const append = (c: Buffer) => {
-      out += c.toString();
-      if (out.length > MAX_CMD_OUTPUT) out = out.slice(-MAX_CMD_OUTPUT);
+      chunks.push(c.toString());
     };
     child.stdout?.on('data', append);
     child.stderr?.on('data', append);
-    child.on('error', (e) => resolve({ code: 1, out: `${out}${String(e)}` }));
-    child.on('close', (code) => resolve({ code: code ?? 1, out: out.trim() }));
+    child.on('error', (e) => resolve({ code: 1, out: `${chunks.join('')}${String(e)}` }));
+    child.on('close', (code) => {
+      let out = chunks.join('');
+      if (out.length > MAX_CMD_OUTPUT) out = out.slice(-MAX_CMD_OUTPUT);
+      resolve({ code: code ?? 1, out: out.trim() });
+    });
   });
 }
 

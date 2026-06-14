@@ -89,17 +89,19 @@ export function scoreAgents(
   task: string,
   catalog: Record<string, AgentDefinition> = AGENT_CATALOG,
 ): DispatchCandidate[] {
-  const hay = normalize(task);
+  // Tokenize once — O(task words) — then do O(1) set lookups per keyword
+  const haySet = new Set(normalize(task).split(/\s+/).filter(Boolean));
   const out: DispatchCandidate[] = [];
   for (const def of Object.values(catalog)) {
     if (!def?.config?.role) continue;
     let score = 0;
     const matched: string[] = [];
     for (const kw of def.capability.keywords) {
-      const needle = normalize(kw);
-      if (hay.includes(needle.trimEnd() + ' ') || hay.includes(' ' + needle.trimStart())) {
-        const words = kw.trim().split(/\s+/).length;
-        score += words;
+      const needleWords = normalize(kw).split(/\s+/).filter(Boolean);
+      // Check if all words in the keyword phrase are present in the task
+      const allPresent = needleWords.every((w) => haySet.has(w));
+      if (allPresent) {
+        score += needleWords.length;
         matched.push(kw);
       }
     }

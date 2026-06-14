@@ -5,6 +5,7 @@ import { getWSClient } from '@/lib/ws-client';
 import type { ChatMessage } from '@/stores';
 import { useChatStore, useSessionStore, useUIStore } from '@/stores';
 import { useConfigStore } from '@/stores';
+import { useLocalPrefs } from '@/stores/local-prefs';
 import {
   Bot,
   CheckCircle2,
@@ -26,7 +27,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { DiffView, diffFromToolInput } from '../DiffView';
 import { ToolResult } from '../ToolResult';
-import { NextStepsBar, parseNextSteps } from '../NextStepsBar';
+import { NextStepsBar, fillInput, parseNextSteps } from '../NextStepsBar';
 import { CopyButton } from './CopyButton.js';
 import { ErrorBodyWithStack } from './ErrorBody.js';
 import { ToolInputView } from './ToolInputView.js';
@@ -62,6 +63,19 @@ export const MessageBubble = memo(function MessageBubble({
   const inputCost = useSessionStore((s) => s.inputCost);
   const outputCost = useSessionStore((s) => s.outputCost);
   const cacheReadCost = useSessionStore((s) => s.cacheReadCost);
+  const localPrefs = useLocalPrefs();
+  const { autonomy, yolo } = localPrefs;
+
+  /** Auto-submit callback for YOLO+auto mode countdown completion */
+  const handleAutoSubmit = (text: string) => {
+    addMessage({ role: 'user', content: text });
+    setLoading(true);
+    const client = getWSClient(wsUrl);
+    client.sendMessage(text);
+    // Clear the input field after auto-submitting, matching the behaviour
+    // of the normal form submission path in ChatInput.
+    fillInput('');
+  };
 
   const isLatestAssistant = (() => {
     if (message.role !== 'assistant' || isLoading) return false;
@@ -241,7 +255,15 @@ export const MessageBubble = memo(function MessageBubble({
         {isLatestAssistant && message.content && (() => {
           const steps = parseNextSteps(message.content);
           if (steps.length === 0) return null;
-          return <NextStepsBar steps={steps} />;
+          return (
+            <NextStepsBar
+              steps={steps}
+              yoloMode={yolo}
+              autoMode={autonomy === 'auto'}
+              autoDelayMs={localPrefs.autonomyDelayMs}
+              onAutoSubmit={handleAutoSubmit}
+            />
+          );
         })()}
 
         <div className={cn('flex items-center gap-2 px-1', isUser ? 'flex-row-reverse' : 'flex-row')}>

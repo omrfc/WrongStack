@@ -26,15 +26,12 @@ import { SidePanel } from './components/SidePanel';
 import { WorkspaceDock } from './components/WorkspaceDock';
 import { AgentsMonitor } from './components/AgentsMonitor';
 import { FleetMonitor } from './components/FleetMonitor';
-import { AgentsDrawer } from './components/AgentsDrawer';
-import { FleetDrawer } from './components/FleetDrawer';
-import { BottomDock } from './components/BottomDock';
+import { InspectorPanel } from './components/InspectorPanel';
 function AppInner() {
   const { theme } = useTheme();
   const {
     currentView, sidebarOpen, toggleSidebar, setSearchOpen, setSidebarOpen, setCurrentView,
-    fleetMonitorOpen, agentsMonitorOpen, setFleetMonitorOpen, setAgentsMonitorOpen,
-    fleetDrawerOpen, agentsDrawerOpen, setFleetDrawerOpen, setAgentsDrawerOpen,
+    setInspectorTab, toggleInspector,
   } = useUIStore();
   const isLoading = useChatStore((s) => s.isLoading);
   const iteration = useSessionStore((s) => s.iteration);
@@ -185,15 +182,33 @@ function AppInner() {
         e.preventDefault();
         useUIStore.getState().toggleCompactMode();
       }
-      // Ctrl+Shift+M — Fleet Monitor drawer
+      // Ctrl+Shift+M — open inspector on Fleet tab (or toggle if already open)
       if (mod && e.shiftKey && e.key.toLowerCase() === 'm') {
         e.preventDefault();
-        useUIStore.getState().setFleetDrawerOpen(!useUIStore.getState().fleetDrawerOpen);
+        const s = useUIStore.getState();
+        if (s.inspectorOpen && s.inspectorTab === 'fleet') {
+          toggleInspector();
+        } else {
+          setInspectorTab('fleet');
+          if (!s.inspectorOpen) toggleInspector();
+        }
       }
-      // Ctrl+Shift+A — Agents Monitor drawer
+      // Ctrl+Shift+A — open inspector on Agents tab (or toggle if already open)
       if (mod && e.shiftKey && e.key.toLowerCase() === 'a') {
         e.preventDefault();
-        useUIStore.getState().setAgentsDrawerOpen(!useUIStore.getState().agentsDrawerOpen);
+        const s = useUIStore.getState();
+        if (s.inspectorOpen && s.inspectorTab === 'agents') {
+          toggleInspector();
+        } else {
+          setInspectorTab('agents');
+          if (!s.inspectorOpen) toggleInspector();
+        }
+      }
+      // Escape — collapse the inspector panel when it's open (DevTools
+      // habit). Runs only when the inspector is visible so it doesn't steal
+      // Esc from search / palette / bubble-focus dismissal.
+      if (e.key === 'Escape' && !mod && useUIStore.getState().inspectorOpen) {
+        useUIStore.getState().setInspectorOpen(false);
       }
       // Vim-style chat navigation: j/k step between bubbles, g goes to the
       // first message and G to the last. Skipped while typing so j/k inside
@@ -286,6 +301,11 @@ function AppInner() {
               </div>
             )}
             <ChatView />
+            {/* Bottom inspector panel — DevTools-style dock that slides
+                up/down. Replaces the fixed BottomDock (which blocked the
+                chat input) and the modal Fleet/Agents drawers. Lives in
+                the chat view so it doesn't clutter settings/sessions. */}
+            <InspectorPanel />
           </>
         )}
         {currentView === 'settings' && <SettingsPanel />}
@@ -316,26 +336,6 @@ function AppInner() {
         {/* ── IDE Code Editor (only in Files view) ── */}
         {currentView === 'files' && <CodeEditor />}
       </main>
-
-      {/* Fleet Monitor drawer */}
-      {fleetDrawerOpen && (
-        <FleetDrawer
-          onClose={() => setFleetDrawerOpen(false)}
-          onSelectAgent={(agent) => {
-            // Open agent detail — close fleet drawer and open agents drawer
-            setFleetDrawerOpen(false);
-            setAgentsDrawerOpen(true);
-          }}
-        />
-      )}
-
-      {/* Agents Monitor drawer */}
-      {agentsDrawerOpen && (
-        <AgentsDrawer onClose={() => setAgentsDrawerOpen(false)} />
-      )}
-
-      {/* Bottom dock — persistent menu items */}
-      <BottomDock />
 
       {/* Global overlays */}
       <ConfirmDialog />
