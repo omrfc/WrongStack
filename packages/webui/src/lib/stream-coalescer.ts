@@ -24,14 +24,18 @@ interface Pending {
   flush: FlushFn;
 }
 
-const raf: (cb: () => void) => void =
-  typeof requestAnimationFrame === 'function'
-    ? (cb) => {
-        requestAnimationFrame(cb);
-      }
-    : (cb) => {
-        queueMicrotask(cb);
-      };
+/**
+ * Dynamic rAF dispatch — checks `requestAnimationFrame` at schedule time
+ * (not at module load) so `vi.stubGlobal('requestAnimationFrame', ...)` in
+ * vitest tests works correctly.
+ */
+function scheduleRaf(cb: () => void): void {
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(cb);
+  } else {
+    queueMicrotask(cb);
+  }
+}
 
 export class StreamCoalescer {
   private pending = new Map<string, Pending>();
@@ -57,7 +61,7 @@ export class StreamCoalescer {
   private schedule(): void {
     if (this.scheduled) return;
     this.scheduled = true;
-    raf(() => {
+    scheduleRaf(() => {
       this.scheduled = false;
       this.drain();
     });
