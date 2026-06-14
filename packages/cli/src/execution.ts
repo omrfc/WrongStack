@@ -735,6 +735,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             featureMemory?: boolean | undefined;
             featureSkills?: boolean | undefined;
             featureModelsRegistry?: boolean | undefined;
+            featureTokenSaving?: boolean | undefined;
             contextAutoCompact?: boolean | undefined;
             contextStrategy?: string | undefined;
             logLevel?: string | undefined;

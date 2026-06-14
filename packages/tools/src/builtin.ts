@@ -62,6 +62,30 @@ export const OPTIONAL_TOOLS: Tool[] = [
   setWorkingDirTool,
 ];
 
+/**
+ * Tier 1 (Token Saving) tool set — the absolute minimum for useful work.
+ * ~10 tools covering core file ops, shell, search, and utilities.
+ * Saves ~4000-6000 tokens vs full mode by omitting 90+ tools.
+ *
+ * Tier 1 tools:
+ *   read, write, edit    — file operations
+ *   bash, grep, glob     — shell + search
+ *   diff, patch, json    — utility
+ *   search              — web research
+ */
+export const TIER1_TOOLS: Tool[] = [
+  readTool,
+  writeTool,
+  editTool,
+  bashTool,
+  grepTool,
+  globTool,
+  diffTool,
+  patchTool,
+  jsonTool,
+  searchTool,
+];
+
 export const builtinTools: Tool[] = [
   readTool,
   writeTool,

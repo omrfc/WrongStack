@@ -17,10 +17,10 @@ import {
 import {
   builtinToolsPack,
   forgetTool,
-  OPTIONAL_TOOLS,
   relatedMemoryTool,
   rememberTool,
   searchMemoryTool,
+  TIER1_TOOLS,
 } from '@wrongstack/tools';
 import { resolveBundledSkillsDir } from '../cli-bundled-skills.js';
 
@@ -48,11 +48,11 @@ export async function setupTools(params: ToolsWiringDeps): Promise<ToolsWiringRe
   const { config, toolRegistry, modelsRegistry, memoryStore, wpaths, container, projectRoot, cwd } =
     params;
 
-  // Tool registry — already created by caller, just configure it here
+  // Tool registry — already created by caller, just configure it here.
+  // Token-saving mode (Tier 1): register only the 10 minimal tools.
+  // Full mode (Tier 2): register all tools.
   const allTools = builtinToolsPack.tools ?? [];
-  const toolsToRegister = config.features.tokenSavingMode
-    ? allTools.filter((t) => !OPTIONAL_TOOLS.includes(t))
-    : allTools;
+  const toolsToRegister = config.features.tokenSavingMode ? TIER1_TOOLS : allTools;
   toolRegistry.registerAllOrThrow([...toolsToRegister], builtinToolsPack.name);
   toolRegistry.registerDefault(
     createContextManagerTool({ compactor: container.resolve(TOKENS.Compactor) }),
