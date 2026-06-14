@@ -1,4 +1,5 @@
 import * as fsp from 'node:fs/promises';
+import type { EventBus } from '../kernel/events.js';
 import { atomicWrite, withFileLock } from '../utils/atomic-write.js';
 import type { TaskItem } from '../utils/task-format.js';
 
@@ -28,18 +29,62 @@ export function emptyTaskFile(sessionId: string): TaskFile {
 }
 
 /** Read the task file. Returns null when the file doesn't exist. */
-export async function loadTasks(filePath: string): Promise<TaskFile | null> {
+export async function loadTasks(
+  filePath: string,
+  events?: EventBus,
+  traceId?: string,
+): Promise<TaskFile | null> {
+  const t0 = Date.now();
   let raw: string;
   try {
     raw = await fsp.readFile(filePath, 'utf8');
-  } catch {
+  } catch (err) {
+    events?.emit('storage.error', {
+      sessionId: traceId ?? '~boot~',
+      store: 'tasks',
+      filePath,
+      operation: 'load',
+      error: err instanceof Error ? err.message : String(err),
+      recoverable: true,
+    });
     return null;
   }
   try {
     const parsed = JSON.parse(raw) as TaskFile;
-    if (parsed?.version !== 1 || !Array.isArray(parsed.tasks)) return null;
+    if (parsed?.version !== 1 || !Array.isArray(parsed.tasks)) {
+      events?.emit('storage.read', {
+        sessionId: traceId ?? '~boot~',
+        store: 'tasks',
+        filePath,
+        operation: 'load',
+        outcome: 'failure',
+        durationMs: Date.now() - t0,
+        error: 'invalid_schema',
+        ...(traceId !== undefined && { traceId }),
+      });
+      return null;
+    }
+    events?.emit('storage.read', {
+      sessionId: traceId ?? '~boot~',
+      store: 'tasks',
+      filePath,
+      operation: 'load',
+      outcome: 'success',
+      durationMs: Date.now() - t0,
+      ...(traceId !== undefined && { traceId }),
+    });
     return parsed;
   } catch {
+    events?.emit('storage.read', {
+      sessionId: traceId ?? '~boot~',
+      store: 'tasks',
+      filePath,
+      operation: 'load',
+      outcome: 'failure',
+      durationMs: Date.now() - t0,
+      error: 'parse_failed',
+      ...(traceId !== undefined && { traceId }),
+    });
     return null;
   }
 }
@@ -48,11 +93,35 @@ export async function loadTasks(filePath: string): Promise<TaskFile | null> {
  * Write the task file atomically. Prefer `mutateTasks` for read-modify-write
  * cycles — this low-level function does NOT acquire a lock.
  */
-export async function saveTasks(filePath: string, tasks: TaskFile): Promise<void> {
+export async function saveTasks(
+  filePath: string,
+  tasks: TaskFile,
+  events?: EventBus,
+  traceId?: string,
+): Promise<void> {
+  const t0 = Date.now();
   try {
     tasks.updatedAt = new Date().toISOString();
     await atomicWrite(filePath, JSON.stringify(tasks, null, 2), { mode: 0o600 });
+    events?.emit('storage.write', {
+      sessionId: traceId ?? '~boot~',
+      store: 'tasks',
+      filePath,
+      operation: 'save',
+      outcome: 'success',
+      durationMs: Date.now() - t0,
+      ...(traceId !== undefined && { traceId }),
+    });
   } catch (err) {
+    events?.emit('storage.error', {
+      sessionId: traceId ?? '~boot~',
+      store: 'tasks',
+      filePath,
+      operation: 'save',
+      error: err instanceof Error ? err.message : String(err),
+      recoverable: false,
+      ...(traceId !== undefined && { traceId }),
+    });
     console.warn(
       '[task-store] save failed:',
       err instanceof Error ? err.message : String(err),
@@ -73,11 +142,13 @@ export async function mutateTasks(
   filePath: string,
   sessionId: string,
   fn: (file: TaskFile) => TaskFile | Promise<TaskFile>,
+  events?: EventBus,
+  traceId?: string,
 ): Promise<TaskFile> {
   return withFileLock(filePath, async () => {
-    const file = (await loadTasks(filePath)) ?? emptyTaskFile(sessionId);
+    const file = (await loadTasks(filePath, events, traceId)) ?? emptyTaskFile(sessionId);
     const updated = await fn(file);
-    await saveTasks(filePath, updated);
+    await saveTasks(filePath, updated, events, traceId);
     return updated;
   });
 }

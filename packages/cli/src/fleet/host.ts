@@ -171,6 +171,11 @@ export interface MultiAgentHostOptions {
    * JSONL. Optional — when omitted, those events stay in-memory.
    */
   sessionWriter?: import('@wrongstack/core').SessionWriter | undefined;
+  /**
+   * Root session trace ID for correlating subagent storage events with
+   * the parent session's trace in observability pipelines.
+   */
+  traceId?: string | undefined;
 }
 
 /**
@@ -280,6 +285,7 @@ export class MultiAgentHost {
       this.sessionFactory = makeDirectorSessionFactory({
         sessionsRoot: this.opts.sessionsRoot,
         directorRunId: this.opts.directorRunId,
+        traceId: this.opts.traceId,
       });
     }
 

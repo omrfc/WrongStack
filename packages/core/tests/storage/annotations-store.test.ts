@@ -1,7 +1,8 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { EventBus } from '../../src/kernel/events.js';
 import { AnnotationsStore } from '../../src/storage/annotations-store.js';
 
 let dir: string;
@@ -144,4 +145,260 @@ describe('AnnotationsStore', () => {
     // 1000 sequential disk writes is legitimately slow on CI's slower I/O —
     // give it generous headroom past the 5s default so it isn't a flaky timeout.
   }, 20_000);
+
+  it('emits storage.read with outcome success when list() finds existing annotations', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+
+    // Pre-create an annotation file on disk so list() has something to read.
+    await fs.mkdir(path.join(dir, '2026-06-11'), { recursive: true });
+    await fs.writeFile(
+      path.join(dir, '2026-06-11', 's1.annotations.json'),
+      JSON.stringify({
+        version: 1,
+        annotations: [
+          {
+            id: 'a1',
+            sessionId: '2026-06-11/s1',
+            atEventIndex: 3,
+            authorId: 'user1',
+            authorRole: 'annotator',
+            text: 'found me',
+            createdAt: '2026-06-11T10:00:00.000Z',
+            resolved: false,
+          },
+        ],
+      }),
+      'utf8',
+    );
+
+    const loggedStore = new AnnotationsStore({ dir, events });
+    const list = await loggedStore.list('2026-06-11/s1');
+
+    expect(list).toHaveLength(1);
+    expect(list[0]!.text).toBe('found me');
+    expect(emitSpy).toHaveBeenCalledWith(
+      'storage.read',
+      expect.objectContaining({
+        store: 'annotations',
+        operation: 'list',
+        outcome: 'success',
+        sessionId: '2026-06-11/s1',
+      }),
+    );
+  });
+
+  it('emits storage.read with outcome success when list() finds no file (returns [])', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+
+    const loggedStore = new AnnotationsStore({ dir, events });
+    const list = await loggedStore.list('brand-new-session');
+
+    expect(list).toEqual([]);
+    expect(emitSpy).toHaveBeenCalledWith(
+      'storage.read',
+      expect.objectContaining({
+        store: 'annotations',
+        operation: 'list',
+        outcome: 'success',
+        sessionId: 'brand-new-session',
+      }),
+    );
+  });
+
+  it('emits storage.read with outcome failure when list() encounters a disk I/O error', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const loggedStore = new AnnotationsStore({ dir, events });
+
+    const fp = path.join(dir, 'io-error.annotations.json');
+    // Write the file using real fs (bypass the mock just for setup).
+    await fs.writeFile(fp, JSON.stringify({ version: 1, annotations: [] }), 'utf8');
+
+    // Mock fs.readFile to throw a persistent I/O error for our file.
+    const { realReadFile } = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    vi.spyOn(fs, 'readFile').mockImplementation(async (p: string | Buffer | URL) => {
+      if (String(p).endsWith('io-error.annotations.json')) {
+        const err = new Error('EACCES: permission denied');
+        (err as NodeJS.ErrnoException).code = 'EACCES';
+        throw err;
+      }
+      return realReadFile(p, 'utf8');
+    });
+
+    try {
+      const list = await loggedStore.list('io-error');
+      // The store catches the error and returns [] — but the event is still emitted.
+      expect(list).toEqual([]);
+      expect(emitSpy).toHaveBeenCalledWith(
+        'storage.read',
+        expect.objectContaining({
+          store: 'annotations',
+          operation: 'list',
+          outcome: 'failure',
+          sessionId: 'io-error',
+          error: expect.stringContaining('EACCES'),
+        }),
+      );
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('emits storage.write with operation add on successful add()', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const loggedStore = new AnnotationsStore({ dir, events });
+
+    const annotation = await loggedStore.add({
+      sessionId: 's1',
+      atEventIndex: 1,
+      authorId: 'alice',
+      text: 'needs review',
+    });
+
+    expect(annotation.id).toBeDefined();
+    expect(emitSpy).toHaveBeenCalledWith(
+      'storage.write',
+      expect.objectContaining({
+        store: 'annotations',
+        operation: 'add',
+        outcome: 'success',
+        sessionId: 's1',
+      }),
+    );
+  });
+
+  it('emits storage.write with operation evict when add() exceeds MAX_ANNOTATIONS', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const loggedStore = new AnnotationsStore({ dir, events });
+
+    // Fill up to the cap (1000) + 1 — the 1001st add triggers eviction.
+    for (let i = 0; i < 1001; i++) {
+      await loggedStore.add({ sessionId: 's1', atEventIndex: i, authorId: 'alice', text: `t${i}` });
+    }
+
+    // The last add emits an evict event (oldest entry removed).
+    const evictCalls = emitSpy.mock.calls.filter(
+      (call) =>
+        call[0] === 'storage.write' &&
+        (call[1] as Record<string, unknown>).operation === 'evict',
+    );
+    expect(evictCalls).toHaveLength(1);
+    expect(evictCalls[0]![1]).toMatchObject({
+      store: 'annotations',
+      operation: 'evict',
+      outcome: 'success',
+      sessionId: 's1',
+    });
+  }, 20_000);
+
+  it('emits storage.write with operation resolve on successful resolve()', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const loggedStore = new AnnotationsStore({ dir, events });
+
+    const added = await loggedStore.add({
+      sessionId: 's1',
+      atEventIndex: 1,
+      authorId: 'alice',
+      text: 'fix this',
+    });
+    const resolved = await loggedStore.resolve({
+      sessionId: 's1',
+      annotationId: added.id,
+      resolvedBy: 'bob',
+    });
+
+    expect(resolved).not.toBeNull();
+    expect(resolved!.resolved).toBe(true);
+    expect(emitSpy).toHaveBeenCalledWith(
+      'storage.write',
+      expect.objectContaining({
+        store: 'annotations',
+        operation: 'resolve',
+        outcome: 'success',
+        sessionId: 's1',
+      }),
+    );
+  });
+
+  it('emits storage.error when add() encounters a write failure', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const loggedStore = new AnnotationsStore({ dir, events });
+
+    // Intercept writeFile to throw a persistent I/O error for 's1'.
+    const { realWriteFile } = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    vi.spyOn(fs, 'writeFile').mockImplementation(async (p: string | Buffer | URL) => {
+      if (String(p).endsWith('s1.annotations.json')) {
+        const err = new Error('ENOSPC: no space left on device');
+        (err as NodeJS.ErrnoException).code = 'ENOSPC';
+        throw err;
+      }
+      return realWriteFile(p, 'utf8');
+    });
+
+    try {
+      await expect(
+        loggedStore.add({ sessionId: 's1', atEventIndex: 1, authorId: 'alice', text: 'test' }),
+      ).rejects.toThrow();
+      expect(emitSpy).toHaveBeenCalledWith(
+        'storage.error',
+        expect.objectContaining({
+          store: 'annotations',
+          operation: 'add',
+          outcome: 'failure',
+          sessionId: 's1',
+          error: expect.stringContaining('ENOSPC'),
+        }),
+      );
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('emits storage.error when resolve() encounters a write failure', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const loggedStore = new AnnotationsStore({ dir, events });
+
+    const added = await loggedStore.add({
+      sessionId: 's1',
+      atEventIndex: 1,
+      authorId: 'alice',
+      text: 'fix this',
+    });
+
+    // Intercept writeFile to throw for 's1'.
+    const { realWriteFile } = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    vi.spyOn(fs, 'writeFile').mockImplementation(async (p: string | Buffer | URL) => {
+      if (String(p).endsWith('s1.annotations.json')) {
+        const err = new Error('ENOSPC: no space left on device');
+        (err as NodeJS.ErrnoException).code = 'ENOSPC';
+        throw err;
+      }
+      return realWriteFile(p, 'utf8');
+    });
+
+    try {
+      await expect(
+        loggedStore.resolve({ sessionId: 's1', annotationId: added.id, resolvedBy: 'bob' }),
+      ).rejects.toThrow();
+      expect(emitSpy).toHaveBeenCalledWith(
+        'storage.error',
+        expect.objectContaining({
+          store: 'annotations',
+          operation: 'resolve',
+          outcome: 'failure',
+          sessionId: 's1',
+          error: expect.stringContaining('ENOSPC'),
+        }),
+      );
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
 });

@@ -71,7 +71,7 @@ export function buildGoalCommand(opts: SlashCommandContext): SlashCommand {
         case '':
         case 'show':
         case 'status': {
-          const current = await loadGoal(goalPath);
+          const current = await loadGoal(goalPath, opts.events);
           if (!current) {
             const msg = 'No goal set. Use `/goal set <mission text>` to create one.';
             opts.renderer.write(msg);
@@ -100,7 +100,7 @@ export function buildGoalCommand(opts: SlashCommandContext): SlashCommand {
             refined = refineGoalHeuristic(setText);
           }
 
-          const existing = await loadGoal(goalPath);
+          const existing = await loadGoal(goalPath, opts.events);
           const now = new Date().toISOString();
           const next: GoalFile = existing
             ? {
@@ -119,7 +119,7 @@ export function buildGoalCommand(opts: SlashCommandContext): SlashCommand {
                 deliverables: refined.deliverables,
               };
 
-          await saveGoal(goalPath, next);
+          await saveGoal(goalPath, next, opts.events);
 
           // Show summary
           const lines: string[] = [];
@@ -150,7 +150,7 @@ export function buildGoalCommand(opts: SlashCommandContext): SlashCommand {
         }
 
         case 'refine': {
-          const current = await loadGoal(goalPath);
+          const current = await loadGoal(goalPath, opts.events);
           if (!current) {
             const msg = 'No goal set to refine. Use /goal set <text> first.';
             opts.renderer.writeWarning(msg);
@@ -171,7 +171,7 @@ export function buildGoalCommand(opts: SlashCommandContext): SlashCommand {
             refinedGoal: refined.refinedGoal,
             deliverables: refined.deliverables,
           };
-          await saveGoal(goalPath, updated);
+          await saveGoal(goalPath, updated, opts.events);
 
           const msg = `${color.green('✓')} Goal re-refined with ${refined.deliverables.length} deliverables.`;
           opts.renderer.write(msg);
@@ -180,14 +180,14 @@ export function buildGoalCommand(opts: SlashCommandContext): SlashCommand {
 
         case 'clear':
         case 'reset': {
-          const current = await loadGoal(goalPath);
+          const current = await loadGoal(goalPath, opts.events);
           if (!current) {
             const msg = 'No goal to clear.';
             opts.renderer.write(msg);
             return { message: msg };
           }
           const abandoned: GoalFile = { ...current, goalState: 'abandoned' };
-          await saveGoal(goalPath, abandoned);
+          await saveGoal(goalPath, abandoned, opts.events);
           const { unlink } = await import('node:fs/promises');
           try {
             await unlink(goalPath);
@@ -206,7 +206,7 @@ export function buildGoalCommand(opts: SlashCommandContext): SlashCommand {
 
         case 'journal':
         case 'log': {
-          const current = await loadGoal(goalPath);
+          const current = await loadGoal(goalPath, opts.events);
           if (!current) {
             const msg = 'No goal set.';
             opts.renderer.write(msg);
@@ -238,7 +238,7 @@ export function buildGoalCommand(opts: SlashCommandContext): SlashCommand {
         }
 
         case 'pause': {
-          const current = await loadGoal(goalPath);
+          const current = await loadGoal(goalPath, opts.events);
           if (!current) {
             const msg = 'No goal set — nothing to pause.';
             opts.renderer.writeWarning(msg);
@@ -250,14 +250,14 @@ export function buildGoalCommand(opts: SlashCommandContext): SlashCommand {
             return { message: msg };
           }
           const paused: GoalFile = { ...current, goalState: 'paused' };
-          await saveGoal(goalPath, paused);
+          await saveGoal(goalPath, paused, opts.events);
           const msg = `${color.cyan('Goal paused.')} Current iteration will finish, then the loop stops. Use /goal resume to continue.`;
           opts.renderer.write(msg);
           return { message: msg };
         }
 
         case 'resume': {
-          const current = await loadGoal(goalPath);
+          const current = await loadGoal(goalPath, opts.events);
           if (!current) {
             const msg = 'No goal set — cannot resume.';
             opts.renderer.writeWarning(msg);
@@ -269,7 +269,7 @@ export function buildGoalCommand(opts: SlashCommandContext): SlashCommand {
             return { message: msg };
           }
           const resumed: GoalFile = { ...current, goalState: 'active' };
-          await saveGoal(goalPath, resumed);
+          await saveGoal(goalPath, resumed, opts.events);
           const msg = `${color.green('Goal resumed.')} Loop will continue from the next iteration.`;
           opts.renderer.write(msg);
           return { message: msg };

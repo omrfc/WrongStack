@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Context } from '../../src/core/context.js';
+import type { EventBus } from '../../src/kernel/events.js';
 import type { SessionWriter } from '../../src/types/session.js';
 import {
   attachTodosCheckpoint,
@@ -112,6 +113,104 @@ describe('todos-checkpoint', () => {
         { id: 'c', content: 'gamma', status: 'pending' },
       ]);
     } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ── storage.* event tests ─────────────────────────────────────────────────
+
+  it('emits storage.read with outcome success when loadTodosCheckpoint finds a valid file', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-todos-'));
+    const file = path.join(dir, 'sess.todos.json');
+    const events: EventBus = { emit: vi.fn() } as never;
+    try {
+      await fs.writeFile(file, JSON.stringify({ version: 1, sessionId: 'sess', updatedAt: new Date().toISOString(), todos: [{ id: 't1', content: 'first', status: 'pending' }] }));
+      await loadTodosCheckpoint(file, events);
+      expect(events.emit).toHaveBeenCalledWith('storage.read', expect.objectContaining({
+        store: 'todos',
+        operation: 'load',
+        outcome: 'success',
+        sessionId: '~boot~',
+      }));
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('emits storage.read with outcome failure when loadTodosCheckpoint finds invalid schema', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-todos-'));
+    const file = path.join(dir, 'bad.todos.json');
+    const events: EventBus = { emit: vi.fn() } as never;
+    try {
+      // version 999 is not valid — filter rejects it
+      await fs.writeFile(file, JSON.stringify({ version: 999, sessionId: 'sess', updatedAt: new Date().toISOString(), todos: [] }));
+      await loadTodosCheckpoint(file, events);
+      expect(events.emit).toHaveBeenCalledWith('storage.read', expect.objectContaining({
+        store: 'todos',
+        operation: 'load',
+        outcome: 'failure',
+        error: 'invalid_schema',
+      }));
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('emits storage.error when loadTodosCheckpoint encounters a disk I/O error', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-todos-'));
+    const file = path.join(dir, 'io-error.todos.json');
+    const events: EventBus = { emit: vi.fn() } as never;
+    const spy = vi.spyOn(fs, 'readFile');
+    spy.mockRejectedValueOnce(Object.assign(new Error('EACCES permission denied'), { code: 'EACCES' }));
+    try {
+      const result = await loadTodosCheckpoint(file, events);
+      expect(result).toBeNull();
+      expect(events.emit).toHaveBeenCalledWith('storage.error', expect.objectContaining({
+        store: 'todos',
+        operation: 'load',
+        outcome: 'failure',
+        error: expect.stringContaining('EACCES'),
+      }));
+    } finally {
+      spy.mockRestore();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('emits storage.write with outcome success when saveTodosCheckpoint succeeds', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-todos-'));
+    const file = path.join(dir, 'sess.todos.json');
+    const events: EventBus = { emit: vi.fn() } as never;
+    try {
+      await saveTodosCheckpoint(file, 'sess', [{ id: 't1', content: 'first', status: 'pending' }], events);
+      expect(events.emit).toHaveBeenCalledWith('storage.write', expect.objectContaining({
+        store: 'todos',
+        operation: 'save',
+        outcome: 'success',
+        sessionId: 'sess',
+      }));
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('emits storage.error when saveTodosCheckpoint encounters a write failure', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-todos-'));
+    const file = path.join(dir, 'io-error.todos.json');
+    const events: EventBus = { emit: vi.fn() } as never;
+    const spy = vi.spyOn(fs, 'writeFile');
+    // atomicWrite uses writeFile then rename — mock at the writeFile level
+    spy.mockRejectedValueOnce(Object.assign(new Error('ENOSPC no space left'), { code: 'ENOSPC' }));
+    try {
+      await saveTodosCheckpoint(file, 'sess', [{ id: 't1', content: 'first', status: 'pending' }], events);
+      expect(events.emit).toHaveBeenCalledWith('storage.error', expect.objectContaining({
+        store: 'todos',
+        operation: 'save',
+        outcome: 'failure',
+        error: expect.stringContaining('ENOSPC'),
+      }));
+    } finally {
+      spy.mockRestore();
       await fs.rm(dir, { recursive: true, force: true });
     }
   });

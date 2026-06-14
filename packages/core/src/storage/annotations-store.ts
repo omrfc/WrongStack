@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import { sessionScopedPath } from '../utils/session-scoped-path.js';
 import { atomicWrite, withFileLock } from '../utils/atomic-write.js';
 import { WrongStackError, ERROR_CODES } from '../types/errors.js';
+import type { EventBus } from '../kernel/events.js';
 /**
  * L2-B: AnnotationsStore — sidecar storage for collaboration annotations
  * (Phase 2 of idea #13 from IDEAS.md).
@@ -71,15 +72,21 @@ const MAX_ANNOTATIONS = 1000;
 export interface AnnotationsStoreOptions {
   /** Directory where `<sessionId>.annotations.json` files live. */
   dir: string;
+  events?: EventBus;
+  traceId?: string;
 }
 
 export class AnnotationsStore {
   private readonly dir: string;
+  private readonly events: EventBus | undefined;
+  private readonly traceId: string | undefined;
   /** Per-session write queue. Created lazily on first add. */
   private readonly writeChains = new Map<string, Promise<void>>();
 
   constructor(opts: AnnotationsStoreOptions) {
     this.dir = opts.dir;
+    this.events = opts.events;
+    this.traceId = opts.traceId;
   }
 
   // ── Reads ──────────────────────────────────────────────────────────────
@@ -90,8 +97,34 @@ export class AnnotationsStore {
    * yet (the normal case for a fresh session).
    */
   async list(sessionId: string): Promise<Annotation[]> {
-    const file = await this.readFile(sessionId);
-    return file ? file.annotations : [];
+    const t0 = Date.now();
+    const fp = this.filePath(sessionId);
+    try {
+      const file = await this.readFile(sessionId);
+      const durationMs = Date.now() - t0;
+      this.events?.emit('storage.read', {
+        sessionId,
+        store: 'annotations',
+        filePath: fp,
+        operation: 'list',
+        outcome: 'success',
+        durationMs,
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
+      return file ? file.annotations : [];
+    } catch (err) {
+      this.events?.emit('storage.read', {
+        sessionId,
+        store: 'annotations',
+        filePath: fp,
+        operation: 'list',
+        outcome: 'failure',
+        durationMs: Date.now() - t0,
+        error: err instanceof Error ? err.message : String(err),
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
+      throw err;
+    }
   }
 
   /**
@@ -151,29 +184,65 @@ export class AnnotationsStore {
       createdAt: new Date().toISOString(),
       resolved: false,
     };
-    await this.enqueue(input.sessionId, async () => {
-      await withFileLock(this.filePath(input.sessionId), async () => {
-        const all = await this.list(input.sessionId);
-        all.push(annotation);
-        // Evict oldest if we crossed the cap. Resolved first, then oldest.
-        if (all.length > MAX_ANNOTATIONS) {
-          const sorted = all
-            .map((a, i) => ({ a, i }))
-            .sort((x, y) => {
-              // resolved=false wins (keep unresolved); among same resolved state, oldest first.
-              if (x.a.resolved !== y.a.resolved) return x.a.resolved ? 1 : -1;
-              return x.a.createdAt.localeCompare(y.a.createdAt);
+    const fp = this.filePath(input.sessionId);
+    const t0 = Date.now();
+    try {
+      await this.enqueue(input.sessionId, async () => {
+        await withFileLock(fp, async () => {
+          const all = await this.list(input.sessionId);
+          all.push(annotation);
+          // Evict oldest if we crossed the cap. Resolved first, then oldest.
+          if (all.length > MAX_ANNOTATIONS) {
+            const sorted = all
+              .map((a, i) => ({ a, i }))
+              .sort((x, y) => {
+                // resolved=false wins (keep unresolved); among same resolved state, oldest first.
+                if (x.a.resolved !== y.a.resolved) return x.a.resolved ? 1 : -1;
+                return x.a.createdAt.localeCompare(y.a.createdAt);
+              });
+            const evictCount = all.length - MAX_ANNOTATIONS;
+            const toEvict = new Set(sorted.slice(0, evictCount).map((s) => s.a.id));
+            const kept = all.filter((a) => !toEvict.has(a.id));
+            await this.writeFile(input.sessionId, { version: FILE_VERSION, annotations: kept });
+            const durationMs = Date.now() - t0;
+            this.events?.emit('storage.write', {
+              sessionId: input.sessionId,
+              store: 'annotations',
+              filePath: fp,
+              operation: 'evict',
+              outcome: 'success',
+              durationMs,
+              ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
             });
-          const evictCount = all.length - MAX_ANNOTATIONS;
-          const toEvict = new Set(sorted.slice(0, evictCount).map((s) => s.a.id));
-          const kept = all.filter((a) => !toEvict.has(a.id));
-          await this.writeFile(input.sessionId, { version: FILE_VERSION, annotations: kept });
-        } else {
-          await this.writeFile(input.sessionId, { version: FILE_VERSION, annotations: all });
-        }
+          } else {
+            await this.writeFile(input.sessionId, { version: FILE_VERSION, annotations: all });
+            const durationMs = Date.now() - t0;
+            this.events?.emit('storage.write', {
+              sessionId: input.sessionId,
+              store: 'annotations',
+              filePath: fp,
+              operation: 'add',
+              outcome: 'success',
+              durationMs,
+              ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+            });
+          }
+        });
       });
-    });
-    return annotation;
+      return annotation;
+    } catch (err) {
+      this.events?.emit('storage.error', {
+        sessionId: input.sessionId,
+        store: 'annotations',
+        filePath: fp,
+        operation: 'add',
+        error: err instanceof Error ? err.message : String(err),
+        recoverable: false,
+        durationMs: Date.now() - t0,
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
+      throw err;
+    }
   }
 
   /**
@@ -188,26 +257,52 @@ export class AnnotationsStore {
     resolvedBy: string;
   }): Promise<Annotation | null> {
     let updated: Annotation | null = null;
-    await this.enqueue(input.sessionId, async () => {
-      await withFileLock(this.filePath(input.sessionId), async () => {
-        const all = await this.list(input.sessionId);
-        const idx = all.findIndex((a) => a.id === input.annotationId);
-        if (idx === -1) {
-          updated = null;
-          return;
-        }
-        const next: Annotation = {
-          ...expectDefined(all[idx]),
-          resolved: true,
-          resolvedAt: new Date().toISOString(),
-          resolvedBy: input.resolvedBy,
-        };
-        all[idx] = next;
-        await this.writeFile(input.sessionId, { version: FILE_VERSION, annotations: all });
-        updated = next;
+    const fp = this.filePath(input.sessionId);
+    const t0 = Date.now();
+    try {
+      await this.enqueue(input.sessionId, async () => {
+        await withFileLock(fp, async () => {
+          const all = await this.list(input.sessionId);
+          const idx = all.findIndex((a) => a.id === input.annotationId);
+          if (idx === -1) {
+            updated = null;
+            return;
+          }
+          const next: Annotation = {
+            ...expectDefined(all[idx]),
+            resolved: true,
+            resolvedAt: new Date().toISOString(),
+            resolvedBy: input.resolvedBy,
+          };
+          all[idx] = next;
+          await this.writeFile(input.sessionId, { version: FILE_VERSION, annotations: all });
+          updated = next;
+          const durationMs = Date.now() - t0;
+          this.events?.emit('storage.write', {
+            sessionId: input.sessionId,
+            store: 'annotations',
+            filePath: fp,
+            operation: 'resolve',
+            outcome: 'success',
+            durationMs,
+            ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+          });
+        });
       });
-    });
-    return updated;
+      return updated;
+    } catch (err) {
+      this.events?.emit('storage.error', {
+        sessionId: input.sessionId,
+        store: 'annotations',
+        filePath: fp,
+        operation: 'resolve',
+        error: err instanceof Error ? err.message : String(err),
+        recoverable: false,
+        durationMs: Date.now() - t0,
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
+      throw err;
+    }
   }
 
   // ── Internals ──────────────────────────────────────────────────────────

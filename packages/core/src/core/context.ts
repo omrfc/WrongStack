@@ -49,6 +49,14 @@ export interface ContextInit {
   agentId?: string | undefined;
   /** Human-readable agent name. */
   agentName?: string | undefined;
+  /**
+   * Session-level trace ID for correlating storage events with agent
+   * iterations in observability pipelines. Stored on the SessionWriter
+   * so that storage operations can emit it in `storage.*` events.
+   * When set, the Context constructor propagates it to
+   * `session.traceId` automatically.
+   */
+  traceId?: string | undefined;
 }
 
 /**
@@ -89,6 +97,12 @@ export class Context implements RunEnv {
   agentId: string;
   /** Human-readable agent name. */
   agentName: string;
+  /**
+   * Session-level trace ID for correlating storage events with agent
+   * iterations. Stored here and also propagated to `session.traceId`
+   * so storage operations can include it in `storage.*` events.
+   */
+  traceId: string | undefined;
 
   /** Callbacks fired when `setWorkingDir()` changes the working directory. */
   private _onWorkingDirChanged: Array<(newDir: string, oldDir: string) => void> = [];
@@ -128,6 +142,10 @@ export class Context implements RunEnv {
     this.tools = init.tools ?? [];
     this.agentId = init.agentId ?? 'unknown';
     this.agentName = init.agentName ?? 'Unknown Agent';
+    this.traceId = init.traceId;
+    // Propagate traceId to the SessionWriter so storage operations
+    // can read it without needing a direct handle on the Context.
+    this.session.traceId = init.traceId;
   }
 
   /**

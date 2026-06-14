@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DefaultConfigLoader } from '../../src/storage/config-loader.js';
 import { resolveWstackPaths } from '../../src/utils/wstack-paths.js';
+import { EventBus } from '../../src/kernel/events.js';
 
 describe('DefaultConfigLoader', () => {
   let projectRoot: string;
@@ -20,9 +21,9 @@ describe('DefaultConfigLoader', () => {
     delete process.env['WRONGSTACK_MODEL'];
   });
 
-  function loader() {
+  function loader(opts?: { events?: EventBus; traceId?: string }) {
     const paths = resolveWstackPaths({ projectRoot, userHome });
-    return { loader: new DefaultConfigLoader({ paths }), paths };
+    return { loader: new DefaultConfigLoader({ paths, ...opts }), paths };
   }
 
   it('returns behavior defaults with no files (no hardcoded provider/model)', async () => {
@@ -363,5 +364,98 @@ describe('DefaultConfigLoader', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  // ── storage.* event emissions ─────────────────────────────────────────────
+
+  it('emits storage.write with outcome success on persistSyncConfig()', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const { loader: l } = loader({ events });
+    await l.persistSyncConfig({});
+    expect(emitSpy).toHaveBeenCalledWith('storage.write', expect.objectContaining({
+      store: 'config',
+      operation: 'persist_sync',
+      outcome: 'success',
+    }));
+  });
+
+  it('emits storage.error when persistSyncConfig() encounters a write failure', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const { loader: l, paths } = loader({ events });
+    await fs.mkdir(path.dirname(paths.syncConfig), { recursive: true });
+    // Make the directory read-only so atomicWrite fails with EACCES
+    vi.spyOn(fs, 'writeFile').mockRejectedValueOnce(
+      Object.assign(new Error('Permission denied'), { code: 'EACCES' }),
+    );
+    try {
+      await expect(l.persistSyncConfig({})).rejects.toThrow('Permission denied');
+      expect(emitSpy).toHaveBeenCalledWith('storage.error', expect.objectContaining({
+        store: 'config',
+        operation: 'persist_sync',
+        outcome: 'failure',
+        error: expect.stringContaining('EACCES'),
+      }));
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('emits storage.read with outcome success when loadSyncConfig() finds sync.json', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const { loader: l, paths } = loader({ events });
+    await fs.mkdir(path.dirname(paths.syncConfig), { recursive: true });
+    await fs.writeFile(paths.syncConfig, JSON.stringify({ githubToken: 'ghp_abc123' }));
+    const result = await l.loadSyncConfig();
+    expect(result).not.toBeNull();
+    expect(result!.githubToken).toBe('ghp_abc123');
+    expect(emitSpy).toHaveBeenCalledWith('storage.read', expect.objectContaining({
+      store: 'config',
+      operation: 'load_sync',
+      outcome: 'success',
+    }));
+  });
+
+  it('emits storage.read with outcome failure when loadSyncConfig() encounters EACCES', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const { loader: l, paths } = loader({ events });
+    await fs.mkdir(path.dirname(paths.syncConfig), { recursive: true });
+    // Write a valid file so the path resolves, then make it unreadable
+    await fs.writeFile(paths.syncConfig, JSON.stringify({ githubToken: 'ghp_abc' }));
+    vi.spyOn(fs, 'readFile').mockRejectedValueOnce(
+      Object.assign(new Error('Permission denied'), { code: 'EACCES' }),
+    );
+    try {
+      const result = await l.loadSyncConfig();
+      // EACCES → returns null, not a thrown error
+      expect(result).toBeNull();
+      expect(emitSpy).toHaveBeenCalledWith('storage.read', expect.objectContaining({
+        store: 'config',
+        operation: 'load_sync',
+        outcome: 'failure',
+        error: expect.stringContaining('EACCES'),
+      }));
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('emits storage.read with outcome failure when loadSyncConfig() finds corrupt JSON', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const { loader: l, paths } = loader({ events });
+    await fs.mkdir(path.dirname(paths.syncConfig), { recursive: true });
+    await fs.writeFile(paths.syncConfig, 'not-json{');
+    const result = await l.loadSyncConfig();
+    expect(result).toBeNull();
+    expect(emitSpy).toHaveBeenCalledWith('storage.read', expect.objectContaining({
+      store: 'config',
+      operation: 'load_sync',
+      outcome: 'failure',
+      error: 'parse error or empty file',
+    }));
   });
 });

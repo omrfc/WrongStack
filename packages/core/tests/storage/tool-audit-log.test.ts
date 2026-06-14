@@ -1,7 +1,8 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { EventBus } from '../../src/kernel/events.js';
 import { ToolAuditLog } from '../../src/storage/tool-audit-log.js';
 
 let dir: string;
@@ -236,5 +237,234 @@ describe('ToolAuditLog', () => {
     await expect(
       fs.access(path.join(dir, '2026-06-11', '12-00-00Z_model_ab12.audit.jsonl')),
     ).resolves.toBeUndefined();
+  });
+
+  it('emits storage.read with outcome failure when verify finds a broken chain', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const loggedLog = new ToolAuditLog({ dir, events });
+
+    // Record a few entries.
+    await loggedLog.record({
+      sessionId: 's1',
+      toolName: 'read',
+      toolUseId: 'tu-1',
+      input: {},
+      output: 'ok',
+      isError: false,
+    });
+
+    // Tamper with the audit file — rewrite an entry's output to break the hash chain.
+    const fp = path.join(dir, 's1.audit.jsonl');
+    const raw = await fs.readFile(fp, 'utf8');
+    const lines = raw.split('\n').filter(Boolean);
+    const first = JSON.parse(lines[0]!);
+    first.output = 'TAMPERED';
+    lines[0] = JSON.stringify(first);
+    await fs.writeFile(fp, lines.join('\n') + '\n', 'utf8');
+
+    // Create a fresh instance (clears in-memory cache) and verify.
+    const fresh = new ToolAuditLog({ dir, events });
+    const result = await fresh.verify('s1');
+
+    // verify() must detect the broken chain.
+    expect(result.ok).toBe(false);
+
+    // A storage.read event must have been emitted with outcome=failure.
+    expect(emitSpy).toHaveBeenCalledWith(
+      'storage.read',
+      expect.objectContaining({
+        store: 'audit',
+        operation: 'verify',
+        outcome: 'failure',
+        sessionId: 's1',
+      }),
+    );
+  });
+
+  it('emits storage.read with outcome success when verify passes on a clean chain', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const loggedLog = new ToolAuditLog({ dir, events });
+
+    await loggedLog.record({
+      sessionId: 's1',
+      toolName: 'read',
+      toolUseId: 'tu-1',
+      input: {},
+      output: 'ok',
+      isError: false,
+    });
+
+    const fresh = new ToolAuditLog({ dir, events });
+    const result = await fresh.verify('s1');
+
+    expect(result.ok).toBe(true);
+    expect(emitSpy).toHaveBeenCalledWith(
+      'storage.read',
+      expect.objectContaining({
+        store: 'audit',
+        operation: 'verify',
+        outcome: 'success',
+        sessionId: 's1',
+      }),
+    );
+  });
+
+  it('emits storage.read with outcome failure when verify() encounters an unreadable file', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const loggedLog = new ToolAuditLog({ dir, events });
+
+    // Write a real audit file so readAll's fs.readFile finds it,
+    // then make it unreadable by mocking fs.readFile to throw EACCES.
+    await loggedLog.record({
+      sessionId: 's1',
+      toolName: 'read',
+      toolUseId: 'tu-1',
+      input: {},
+      output: 'x',
+      isError: false,
+    });
+
+    const { realReadFile } = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    vi.spyOn(fs, 'readFile').mockImplementation(async (p: string | Buffer | URL) => {
+      if (String(p).endsWith('s1.audit.jsonl')) {
+        const err = new Error('EACCES: permission denied');
+        (err as NodeJS.ErrnoException).code = 'EACCES';
+        throw err;
+      }
+      return realReadFile(p, 'utf8');
+    });
+
+    try {
+      const result = await loggedLog.verify('s1');
+      // verify() catches the error and returns { ok: true, entries: 0 }.
+      expect(result).toEqual({ ok: true, entries: 0 });
+      // But the storage.read event reports the failure.
+      expect(emitSpy).toHaveBeenCalledWith(
+        'storage.read',
+        expect.objectContaining({
+          store: 'audit',
+          operation: 'verify',
+          outcome: 'failure',
+          sessionId: 's1',
+          error: expect.stringContaining('EACCES'),
+        }),
+      );
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('emits storage.read with outcome failure when load() encounters an unreadable file', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const loggedLog = new ToolAuditLog({ dir, events });
+
+    // Write a real audit file so the path is valid, then make it unreadable.
+    await loggedLog.record({
+      sessionId: 's1',
+      toolName: 'read',
+      toolUseId: 'tu-1',
+      input: {},
+      output: 'x',
+      isError: false,
+    });
+
+    const { realReadFile } = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    vi.spyOn(fs, 'readFile').mockImplementation(async (p: string | Buffer | URL) => {
+      if (String(p).endsWith('s1.audit.jsonl')) {
+        const err = new Error('EACCES: permission denied');
+        (err as NodeJS.ErrnoException).code = 'EACCES';
+        throw err;
+      }
+      return realReadFile(p, 'utf8');
+    });
+
+    try {
+      await expect(loggedLog.load('s1')).rejects.toThrow('EACCES');
+      expect(emitSpy).toHaveBeenCalledWith(
+        'storage.read',
+        expect.objectContaining({
+          store: 'audit',
+          operation: 'load',
+          outcome: 'failure',
+          sessionId: 's1',
+          error: expect.stringContaining('EACCES'),
+        }),
+      );
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('emits storage.write with operation record on successful record()', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const loggedLog = new ToolAuditLog({ dir, events });
+
+    const entry = await loggedLog.record({
+      sessionId: 's1',
+      toolName: 'read',
+      toolUseId: 'tu-1',
+      input: { path: '/a' },
+      output: 'result',
+      isError: false,
+    });
+
+    expect(entry.id).toBeDefined();
+    expect(entry.hash).toHaveLength(64);
+    expect(emitSpy).toHaveBeenCalledWith(
+      'storage.write',
+      expect.objectContaining({
+        store: 'audit',
+        operation: 'record',
+        outcome: 'success',
+        sessionId: 's1',
+      }),
+    );
+  });
+
+  it('emits storage.error when record() encounters a write failure', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const loggedLog = new ToolAuditLog({ dir, events });
+
+    // Intercept fs.writeFile to throw a persistent I/O error for 's1'.
+    const { realWriteFile } = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    vi.spyOn(fs, 'writeFile').mockImplementation(async (p: string | Buffer | URL) => {
+      if (String(p).endsWith('s1.audit.jsonl') || String(p).includes('s1.audit.jsonl')) {
+        const err = new Error('ENOSPC: no space left on device');
+        (err as NodeJS.ErrnoException).code = 'ENOSPC';
+        throw err;
+      }
+      return realWriteFile(p, 'utf8');
+    });
+
+    try {
+      await expect(
+        loggedLog.record({
+          sessionId: 's1',
+          toolName: 'read',
+          toolUseId: 'tu-1',
+          input: {},
+          output: 'x',
+          isError: false,
+        }),
+      ).rejects.toThrow();
+      expect(emitSpy).toHaveBeenCalledWith(
+        'storage.error',
+        expect.objectContaining({
+          store: 'audit',
+          operation: 'record',
+          outcome: 'failure',
+          sessionId: 's1',
+          error: expect.stringContaining('ENOSPC'),
+        }),
+      );
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });

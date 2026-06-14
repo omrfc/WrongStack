@@ -76,7 +76,7 @@ export function buildAutonomyCommand(opts: SlashCommandContext): SlashCommand {
         const current = opts.onAutonomy();
         const lines: string[] = [`Autonomy mode: ${MODE_LABELS[current] ?? current}`];
         try {
-          const goal = await loadGoal(goalFilePath(opts.projectRoot));
+          const goal = await loadGoal(goalFilePath(opts.projectRoot), opts.events);
           if (goal) {
             const u = summarizeUsage(goal);
             lines.push(
@@ -126,7 +126,7 @@ export function buildAutonomyCommand(opts: SlashCommandContext): SlashCommand {
         opts.onAutonomy('off');
         let summaryLine = '';
         try {
-          const goal = await loadGoal(goalFilePath(opts.projectRoot));
+          const goal = await loadGoal(goalFilePath(opts.projectRoot), opts.events);
           if (goal) {
             const u = summarizeUsage(goal);
             if (u.iterationsWithUsage > 0) {
@@ -181,7 +181,7 @@ export function buildAutonomyCommand(opts: SlashCommandContext): SlashCommand {
         const wantKeep = modifiers.includes('--keep') || modifiers.includes('keep');
         const wantNew = modifiers.includes('--new') || modifiers.includes('new');
 
-        const goal = await loadGoal(goalFilePath(opts.projectRoot));
+        const goal = await loadGoal(goalFilePath(opts.projectRoot), opts.events);
         if (!goal) {
           const msg = `${color.red('Eternal/parallel mode requires a goal.')} Run \`/goal set <mission>\` first.`;
           opts.renderer.writeWarning(msg);

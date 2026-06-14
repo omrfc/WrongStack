@@ -39,6 +39,7 @@ export interface MemoryStoreOptions {
 export class DefaultMemoryStore implements MemoryStore {
   private readonly files: Record<MemoryScope, string>;
   private readonly events?: EventBus | undefined;
+  private traceId?: string | undefined;
   private readonly backend: MemoryBackend;
 
   /**
@@ -118,14 +119,69 @@ export class DefaultMemoryStore implements MemoryStore {
       if (writeErr) {
         parts.push(`> ⚠️ Memory write error (${labelOf(scope)}): ${writeErr.message}`);
       }
-      const body = await this.backend.readAll(scope, this.files[scope]);
-      if (body.trim()) parts.push(`## ${labelOf(scope)}\n\n${body.trim()}`);
+      const t0 = Date.now();
+      const filePath = this.files[scope];
+      try {
+        const body = await this.backend.readAll(scope, filePath);
+        const dur = Date.now() - t0;
+        this.events?.emit('storage.read', {
+          sessionId: '~memory~',
+          store: 'memory',
+          filePath,
+          operation: 'readAll',
+          outcome: 'success',
+          durationMs: dur,
+          ...(this.traceId !== undefined && { traceId: this.traceId }),
+        });
+        if (body.trim()) parts.push(`## ${labelOf(scope)}\n\n${body.trim()}`);
+      } catch (err) {
+        const dur = Date.now() - t0;
+        this.events?.emit('storage.read', {
+          sessionId: '~memory~',
+          store: 'memory',
+          filePath,
+          operation: 'readAll',
+          outcome: 'failure',
+          durationMs: dur,
+          error: err instanceof Error ? err.message : String(err),
+          ...(this.traceId !== undefined && { traceId: this.traceId }),
+        });
+        throw err;
+      }
     }
     return parts.join('\n\n');
   }
 
   async read(scope: MemoryScope): Promise<string> {
-    return this.backend.readAll(scope, this.files[scope]);
+    const t0 = Date.now();
+    const filePath = this.files[scope];
+    try {
+      const body = await this.backend.readAll(scope, filePath);
+      const dur = Date.now() - t0;
+      this.events?.emit('storage.read', {
+        sessionId: '~memory~',
+        store: 'memory',
+        filePath,
+        operation: 'read',
+        outcome: 'success',
+        durationMs: dur,
+        ...(this.traceId !== undefined && { traceId: this.traceId }),
+      });
+      return body;
+    } catch (err) {
+      const dur = Date.now() - t0;
+      this.events?.emit('storage.read', {
+        sessionId: '~memory~',
+        store: 'memory',
+        filePath,
+        operation: 'read',
+        outcome: 'failure',
+        durationMs: dur,
+        error: err instanceof Error ? err.message : String(err),
+        ...(this.traceId !== undefined && { traceId: this.traceId }),
+      });
+      throw err;
+    }
   }
 
   /**
@@ -159,7 +215,34 @@ export class DefaultMemoryStore implements MemoryStore {
     const ts = new Date().toISOString();
     return this.runSerialized(scope, async () => {
       const entry: MemoryEntry = { scope, text, ts, ...metadata };
-      await this.backend.remember(scope, entry, this.files[scope]);
+      const filePath = this.files[scope];
+      const t0 = Date.now();
+      try {
+        await this.backend.remember(scope, entry, filePath);
+        const dur = Date.now() - t0;
+        this.events?.emit('storage.write', {
+          sessionId: '~memory~',
+          store: 'memory',
+          filePath,
+          operation: 'remember',
+          outcome: 'success',
+          durationMs: dur,
+          ...(this.traceId !== undefined && { traceId: this.traceId }),
+        });
+      } catch (err) {
+        const dur = Date.now() - t0;
+        this.events?.emit('storage.write', {
+          sessionId: '~memory~',
+          store: 'memory',
+          filePath,
+          operation: 'remember',
+          outcome: 'failure',
+          durationMs: dur,
+          error: err instanceof Error ? err.message : String(err),
+          ...(this.traceId !== undefined && { traceId: this.traceId }),
+        });
+        throw err;
+      }
 
       // Size check — consolidate if the file exceeds the cap.
       const raw = await this.backend.readAll(scope, this.files[scope]);
@@ -295,7 +378,35 @@ export class DefaultMemoryStore implements MemoryStore {
 
   async forget(query: string, scope: MemoryScope = 'project-memory'): Promise<number> {
     return this.runSerialized(scope, async () => {
-      const removed = await this.backend.forget(scope, query, this.files[scope]);
+      const filePath = this.files[scope];
+      const t0 = Date.now();
+      let removed = 0;
+      try {
+        removed = await this.backend.forget(scope, query, filePath);
+        const dur = Date.now() - t0;
+        this.events?.emit('storage.write', {
+          sessionId: '~memory~',
+          store: 'memory',
+          filePath,
+          operation: 'forget',
+          outcome: 'success',
+          durationMs: dur,
+          ...(this.traceId !== undefined && { traceId: this.traceId }),
+        });
+      } catch (err) {
+        const dur = Date.now() - t0;
+        this.events?.emit('storage.write', {
+          sessionId: '~memory~',
+          store: 'memory',
+          filePath,
+          operation: 'forget',
+          outcome: 'failure',
+          durationMs: dur,
+          error: err instanceof Error ? err.message : String(err),
+          ...(this.traceId !== undefined && { traceId: this.traceId }),
+        });
+        throw err;
+      }
       if (removed > 0) {
         this.events?.emit('memory.forgotten', {
           scope,
@@ -310,7 +421,35 @@ export class DefaultMemoryStore implements MemoryStore {
 
   async consolidate(scope: MemoryScope): Promise<void> {
     return this.runSerialized(scope, async () => {
-      const removed = await this.backend.consolidate(scope, this.files[scope]);
+      const filePath = this.files[scope];
+      const t0 = Date.now();
+      let removed = 0;
+      try {
+        removed = await this.backend.consolidate(scope, filePath);
+        const dur = Date.now() - t0;
+        this.events?.emit('storage.write', {
+          sessionId: '~memory~',
+          store: 'memory',
+          filePath,
+          operation: 'consolidate',
+          outcome: 'success',
+          durationMs: dur,
+          ...(this.traceId !== undefined && { traceId: this.traceId }),
+        });
+      } catch (err) {
+        const dur = Date.now() - t0;
+        this.events?.emit('storage.write', {
+          sessionId: '~memory~',
+          store: 'memory',
+          filePath,
+          operation: 'consolidate',
+          outcome: 'failure',
+          durationMs: dur,
+          error: err instanceof Error ? err.message : String(err),
+          ...(this.traceId !== undefined && { traceId: this.traceId }),
+        });
+        throw err;
+      }
       if (removed > 0) {
         this.events?.emit('memory.consolidated', {
           scope,
@@ -324,16 +463,70 @@ export class DefaultMemoryStore implements MemoryStore {
   async clear(scope?: MemoryScope): Promise<void> {
     if (scope) {
       await this.runSerialized(scope, async () => {
-        await this.backend.clear(scope, this.files[scope]);
+        const filePath = this.files[scope];
+        const t0 = Date.now();
+        try {
+          await this.backend.clear(scope, filePath);
+          const dur = Date.now() - t0;
+          this.events?.emit('storage.write', {
+            sessionId: '~memory~',
+            store: 'memory',
+            filePath,
+            operation: 'clear',
+            outcome: 'success',
+            durationMs: dur,
+            ...(this.traceId !== undefined && { traceId: this.traceId }),
+          });
+        } catch (err) {
+          const dur = Date.now() - t0;
+          this.events?.emit('storage.write', {
+            sessionId: '~memory~',
+            store: 'memory',
+            filePath,
+            operation: 'clear',
+            outcome: 'failure',
+            durationMs: dur,
+            error: err instanceof Error ? err.message : String(err),
+            ...(this.traceId !== undefined && { traceId: this.traceId }),
+          });
+          throw err;
+        }
         this.events?.emit('memory.cleared', { scope } satisfies MemoryClearedPayload);
         await this.mirrorBackup(scope);
       });
       return;
     }
     await Promise.all(
-      (['project-agents', 'project-memory', 'user-memory'] as MemoryScope[]).map((s) =>
+      (['project-agents', 'project-memory', 'user-memory'] as MemoryScope[]).map(async (s) =>
         this.runSerialized(s, async () => {
-          await this.backend.clear(s, this.files[s]);
+          const filePath = this.files[s];
+          const t0 = Date.now();
+          try {
+            await this.backend.clear(s, filePath);
+            const dur = Date.now() - t0;
+            this.events?.emit('storage.write', {
+              sessionId: '~memory~',
+              store: 'memory',
+              filePath,
+              operation: 'clear',
+              outcome: 'success',
+              durationMs: dur,
+              ...(this.traceId !== undefined && { traceId: this.traceId }),
+            });
+          } catch (err) {
+            const dur = Date.now() - t0;
+            this.events?.emit('storage.write', {
+              sessionId: '~memory~',
+              store: 'memory',
+              filePath,
+              operation: 'clear',
+              outcome: 'failure',
+              durationMs: dur,
+              error: err instanceof Error ? err.message : String(err),
+              ...(this.traceId !== undefined && { traceId: this.traceId }),
+            });
+            throw err;
+          }
           this.events?.emit('memory.cleared', { scope: s } satisfies MemoryClearedPayload);
           await this.mirrorBackup(s);
         }),
@@ -341,7 +534,22 @@ export class DefaultMemoryStore implements MemoryStore {
     );
   }
 
-  /** Mirror current memory content to the persistent backup directory. */
+  /**
+   * Return a new MemoryStore proxy that carries `traceId` on every storage
+   * event. The original store is left unchanged — callers that need a
+   * trace-decorated view (e.g. session-run tools) receive the proxy while
+   * the singleton remains trace-free for boot-time use.
+   *
+   * The proxy implements the full `MemoryStore` interface; all other
+   * properties (backend, etc.) are delegated to the original store.
+   */
+  withTraceId(traceId: string): MemoryStore {
+    // Mutate the singleton's traceId so that all subsequent I/O (including
+    // calls from tools that captured the original store reference) emits
+    // storage events with the correct session trace ID.
+    this.traceId = traceId;
+    return this;
+  }
   private async mirrorBackup(scope: MemoryScope): Promise<void> {
     if (!this.persistBackup || scope === 'project-agents') return;
     try {

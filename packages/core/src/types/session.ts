@@ -263,6 +263,14 @@ export interface SessionStore {
 export interface SessionWriter {
   readonly id: string;
   /**
+   * Session-level trace ID for correlating storage events with agent
+   * iterations in observability pipelines. Generated once at Context
+   * creation time and stored here so storage operations can include it
+   * in `storage.*` events even though the store has no direct handle
+   * on the Context.
+   */
+  traceId?: string | undefined;
+  /**
    * Absolute path to the JSONL file this writer appends to, when one
    * exists. In-memory writers (tests, ephemeral sessions) leave it
    * undefined. Observability surfaces (`/fleet log`, FleetPanel) use

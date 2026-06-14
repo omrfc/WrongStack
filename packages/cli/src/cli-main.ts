@@ -459,6 +459,7 @@ export async function main(argv: string[]): Promise<number> {
     tokenCounter,
     renderer,
     flags,
+    events,
     onRecovery: (abandoned, autoRecover) =>
       promptRecovery(reader, renderer, abandoned, autoRecover),
   });
@@ -471,6 +472,14 @@ export async function main(argv: string[]): Promise<number> {
   const planPath = sessResult.planPath;
   const detachTodosCheckpoint = sessResult.detachTodosCheckpoint;
   const priorFleetState = sessResult.priorFleetState;
+
+  // ── Memory store trace ID ─────────────────────────────────────────
+  // Attach the session trace ID to the memory store so all `storage.*` events
+  // from `remember`/`forget`/`consolidate` calls during this session carry
+  // the root trace ID for observability correlation.  The store is a singleton;
+  // mutating it in-place means all consumers (tools, SessionMemoryConsolidator,
+  // slash commands) automatically get the decorated store without rebinding.
+  memoryStore.withTraceId(sessResult.traceId);
 
   // ── SessionRegistry + AgentStatusTracker ──────────────────────────
   // Register this session in the cross-process registry so /sessions status
@@ -1189,6 +1198,7 @@ export async function main(argv: string[]): Promise<number> {
       maxConcurrent,
       getLeaderMaxContext: () => effectiveMaxContext,
       brain,
+      traceId: sessResult.traceId,
     },
   );
   // ALWAYS register the `delegate` tool, even in non-director mode. It
@@ -2094,6 +2104,7 @@ export async function main(argv: string[]): Promise<number> {
             // isolated agent with the role's filtered tools + persona prompt
             // (instead of sharing the leader agent's Context).
             subagentFactory: multiAgentHost.makeSubagentFactory(config),
+            events,
           };
           parallelEngine = new ParallelEternalEngine(parallelOptions);
         }
@@ -2108,6 +2119,7 @@ export async function main(argv: string[]): Promise<number> {
             onIteration: broadcastEternalIteration,
             onStage: broadcastAutonomyStage,
             brain,
+            events,
           });
         }
         void eternalEngine.prime();

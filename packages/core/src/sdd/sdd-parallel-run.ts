@@ -23,7 +23,7 @@ import { randomUUID } from 'node:crypto';
 import type { Agent } from '../core/agent.js';
 import type { SubagentConfig, TaskResult, TaskSpec } from '../types/multi-agent.js';
 import type { AgentFactory } from '../coordination/agent-subagent-runner.js';
-import { makeAgentSubagentRunner } from '../coordination/agent-subagent-runner.js';
+import { makeAgentSubagentRunner, withDisabledToolFiltering } from '../coordination/agent-subagent-runner.js';
 import { DefaultMultiAgentCoordinator } from '../coordination/multi-agent-coordinator.js';
 import type { MultiAgentConfig } from '../types/multi-agent.js';
 import type { TaskGraph, TaskProgress } from '../types/task-graph.js';
@@ -175,7 +175,11 @@ export class SddParallelRun {
       doneCondition: { type: 'all_tasks_done' },
     };
     this.coordinator = new DefaultMultiAgentCoordinator(config);
-    const runner = makeAgentSubagentRunner({ factory: this.opts.subagentFactory ?? this.defaultFactory() });
+    // Wrap factory with disabled tool filtering to prevent subagents from
+    // using the delegate tool (or any other disabledTools in their config)
+    const baseFactory = this.opts.subagentFactory ?? this.defaultFactory();
+    const filteredFactory = withDisabledToolFiltering(baseFactory);
+    const runner = makeAgentSubagentRunner({ factory: filteredFactory });
     this.coordinator.setRunner?.(runner);
   }
 
@@ -228,6 +232,8 @@ export class SddParallelRun {
         name: subagentId,
         role: 'executor',
         timeoutMs: this.timeoutMs,
+        // Disable delegation — subagents are leaf workers, not orchestrators
+        disabledTools: ['delegate'],
       }),
     );
     const spawnResults = await Promise.all(spawns);

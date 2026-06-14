@@ -1,5 +1,5 @@
 import type { SlashCommand } from '@wrongstack/core';
-import { color, truncate } from '@wrongstack/core';
+import { AnnotationsStoreOptions, color, truncate } from '@wrongstack/core';
 import { parseSubcommand, unknownSubcommand } from './helpers.js';
 import type { SlashCommandContext } from './index.js';
 
@@ -167,7 +167,9 @@ async function annotationsCommand(
     };
   }
   void reader; // reader is reserved for future /collab history expansion
-  const annotations = new AnnotationsStore({ dir: storeDir });
+  const annotationsOpts: AnnotationsStoreOptions = { dir: storeDir, events: opts.events };
+  if (opts.context?.traceId !== undefined) annotationsOpts.traceId = opts.context.traceId;
+  const annotations = new AnnotationsStore(annotationsOpts);
   const open = await annotations.listOpen(sessionId);
   if (open.length === 0) {
     return {

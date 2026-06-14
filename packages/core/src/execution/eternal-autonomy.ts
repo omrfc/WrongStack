@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Agent } from '../core/agent.js';
 import type { TodoItem } from '../core/context.js';
+import type { EventBus } from '../kernel/events.js';
 import type { Compactor } from '../types/compactor.js';
 import type { BrainArbiter } from '../coordination/brain.js';
 import {
@@ -144,6 +145,8 @@ export interface EternalAutonomyOptions {
    * Without a brain, the engine uses its built-in heuristics.
    */
   brain?: BrainArbiter | undefined;
+  /** Optional EventBus for emitting storage.* observability events from goal I/O. */
+  events?: EventBus | undefined;
 }
 
 export type EternalEngineState = 'idle' | 'running' | 'stopped';
@@ -300,7 +303,7 @@ export class EternalAutonomyEngine {
       this.opts.onStage?.(stage);
     };
 
-    const goal = await loadGoal(this.goalPath);
+    const goal = await loadGoal(this.goalPath, this.opts.events);
     if (!goal) {
       // Goal file disappeared — treat as a graceful stop.
       emit({ phase: 'stopped' });
@@ -451,7 +454,7 @@ export class EternalAutonomyEngine {
     // approximation only as a last resort.
     let iterationIndex = 0;
     try {
-      const reloaded = await loadGoal(this.goalPath);
+      const reloaded = await loadGoal(this.goalPath, this.opts.events);
       iterationIndex = reloaded?.iterations ?? 0;
     } catch {
       // best-effort
@@ -838,13 +841,13 @@ export class EternalAutonomyEngine {
   }
 
   private async appendIterationEntry(entry: Omit<JournalEntry, 'iteration' | 'at'>): Promise<void> {
-    const current = await loadGoal(this.goalPath);
+    const current = await loadGoal(this.goalPath, this.opts.events);
     if (!current) {
       // Goal was cleared mid-iteration; nothing to write to.
       return;
     }
     const updated = appendJournal(current, entry);
-    await saveGoal(this.goalPath, updated);
+    await saveGoal(this.goalPath, updated, this.opts.events);
   }
 
   /**
@@ -854,11 +857,11 @@ export class EternalAutonomyEngine {
    * the counter to rotate past stuck todos once they cross `todoMaxAttempts`.
    */
   private async bumpTodoAttempt(todoId: string): Promise<void> {
-    const current = await loadGoal(this.goalPath);
+    const current = await loadGoal(this.goalPath, this.opts.events);
     if (!current) return;
     const attempts = { ...(current.todoAttempts ?? {}) };
     attempts[todoId] = (attempts[todoId] ?? 0) + 1;
-    await saveGoal(this.goalPath, { ...current, todoAttempts: attempts });
+    await saveGoal(this.goalPath, { ...current, todoAttempts: attempts }, this.opts.events);
   }
 
   /**
@@ -872,7 +875,7 @@ export class EternalAutonomyEngine {
     action: { source: JournalEntry['source']; task: string; directive: string },
     note: string,
   ): Promise<void> {
-    const current = await loadGoal(this.goalPath);
+    const current = await loadGoal(this.goalPath, this.opts.events);
     if (!current) return;
     if (current.goalState === 'completed') return;
     const withFlag: GoalFile = { ...current, goalState: 'completed' };
@@ -882,7 +885,7 @@ export class EternalAutonomyEngine {
       status: 'success',
       note: note.slice(0, 240),
     });
-    await saveGoal(this.goalPath, withEntry);
+    await saveGoal(this.goalPath, withEntry, this.opts.events);
     // Fire stop callbacks so the REPL knows to exit eternal mode
     // and show a goal-completion banner. Without this the engine
     // stops internally but the REPL keeps spinning in the eternal loop.
@@ -895,10 +898,10 @@ export class EternalAutonomyEngine {
    * `onEternalStop` so the REPL returns to normal mode.
    */
   private async clearGoalManually(note: string): Promise<void> {
-    const current = await loadGoal(this.goalPath);
+    const current = await loadGoal(this.goalPath, this.opts.events);
     if (current) {
       const abandoned: GoalFile = { ...current, goalState: 'abandoned' };
-      await saveGoal(this.goalPath, abandoned);
+      await saveGoal(this.goalPath, abandoned, this.opts.events);
     }
     try {
       const { unlink } = await import('node:fs/promises');
@@ -982,16 +985,16 @@ export class EternalAutonomyEngine {
    * Persist a progress update from the agent's [PROGRESS: N%] output.
    */
   private async updateProgress(progress: number, note?: string): Promise<void> {
-    const current = await loadGoal(this.goalPath);
+    const current = await loadGoal(this.goalPath, this.opts.events);
     if (!current) return;
     const updated = recordProgress(current, progress, note);
-    await saveGoal(this.goalPath, updated);
+    await saveGoal(this.goalPath, updated, this.opts.events);
   }
 
   private async persistEngineState(state: GoalFile['engineState']): Promise<void> {
-    const current = await loadGoal(this.goalPath);
+    const current = await loadGoal(this.goalPath, this.opts.events);
     if (!current) return;
     if (current.engineState === state) return;
-    await saveGoal(this.goalPath, { ...current, engineState: state });
+    await saveGoal(this.goalPath, { ...current, engineState: state }, this.opts.events);
   }
 }

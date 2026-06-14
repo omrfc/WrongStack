@@ -5,6 +5,7 @@ import { sessionScopedPath } from '../utils/session-scoped-path.js';
 import { hashRequest } from '../replay/hash.js';
 import type { Request, Response } from '../types/provider.js';
 import { safeParse } from '../utils/safe-json.js';
+import type { EventBus } from '../kernel/events.js';
 
 /**
  * ReplayLogStore — sidecar store for deterministic-replay support
@@ -54,10 +55,14 @@ export interface ReplayLogStoreOptions {
    * session which is a reasonable upper bound.
    */
   maxEntries?: number | undefined;
+  events?: EventBus;
+  traceId?: string;
 }
 
 export class ReplayLogStore {
   private readonly dir: string;
+  private readonly events: EventBus | undefined;
+  private readonly traceId: string | undefined;
   private readonly writeChains = new Map<string, Promise<void>>();
   /** Per-session hash → entry index, kept in memory after the first load. */
   private readonly cache = new Map<string, Map<string, ReplayEntry>>();
@@ -67,6 +72,8 @@ export class ReplayLogStore {
 
   constructor(opts: ReplayLogStoreOptions) {
     this.dir = opts.dir;
+    this.events = opts.events;
+    this.traceId = opts.traceId;
     this.maxEntries = opts.maxEntries ?? DEFAULT_MAX_ENTRIES;
   }
 
@@ -83,42 +90,44 @@ export class ReplayLogStore {
     response: Response;
   }): Promise<string> {
     const hash = hashRequest(input.request);
-    await this.enqueue(input.sessionId, async () => {
-      await withFileLock(this.filePath(input.sessionId), async () => {
-        const entries = await this.readAll(input.sessionId);
-        if (entries.some((entry) => entry.hash === hash)) return; // already recorded
-        const entry: ReplayEntry = {
-          hash,
-          ts: new Date().toISOString(),
-          request: input.request,
-          response: input.response,
-        };
-        // True append — O(1) per write. Only compact (full rewrite) when
-        // we exceed maxEntries and need to evict oldest entries.
-        entries.push(entry);
-        const keep = entries.slice(-this.maxEntries);
-        const cache = new Map<string, ReplayEntry>();
-        for (const e of keep) cache.set(e.hash, e);
-        this.cache.set(input.sessionId, cache);
-        await this.rewriteCache(input.sessionId, cache);
+    const fp = this.filePath(input.sessionId);
+    const t0 = Date.now();
+    try {
+      await this.enqueue(input.sessionId, async () => {
+        await withFileLock(this.filePath(input.sessionId), async () => {
+          const entries = await this.readAll(input.sessionId);
+          if (entries.some((entry) => entry.hash === hash)) return; // already recorded
+          const entry: ReplayEntry = {
+            hash,
+            ts: new Date().toISOString(),
+            request: input.request,
+            response: input.response,
+          };
+          // True append — O(1) per write. Only compact (full rewrite) when
+          // we exceed maxEntries and need to evict oldest entries.
+          entries.push(entry);
+          const keep = entries.slice(-this.maxEntries);
+          const didEvict = keep.length < entries.length;
+          const cache = new Map<string, ReplayEntry>();
+          for (const e of keep) cache.set(e.hash, e);
+          this.cache.set(input.sessionId, cache);
+          await this.writeAll(input.sessionId, keep, didEvict ? 'compact' : 'record');
+        });
       });
-    });
-    return hash;
-  }
-
-  /**
-   * Compact the replay log to keep only the most recent maxEntries.
-   * Called when entry count exceeds the cap. Rewrites the entire file
-   * but only happens O(n / maxEntries) times per session.
-   */
-  private async rewriteCache(sessionId: string, cache: Map<string, ReplayEntry>): Promise<void> {
-    // Map.values() preserves insertion order — take the last maxEntries.
-    const all = [...cache.values()];
-    const keep = all.slice(-this.maxEntries);
-    await this.writeAll(sessionId, keep);
-    cache.clear();
-    for (const e of keep) cache.set(e.hash, e);
-    this.diskCount.set(sessionId, keep.length);
+      return hash;
+    } catch (err) {
+      this.events?.emit('storage.error', {
+        sessionId: input.sessionId,
+        store: 'replay',
+        filePath: fp,
+        operation: 'record',
+        error: err instanceof Error ? err.message : String(err),
+        recoverable: false,
+        durationMs: Date.now() - t0,
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
+      throw err;
+    }
   }
 
   // ── Reads ───────────────────────────────────────────────────────────────
@@ -129,14 +138,66 @@ export class ReplayLogStore {
    * per session (in-memory cache).
    */
   async lookup(sessionId: string, hash: string): Promise<ReplayEntry | null> {
-    const cache = await this.ensureCache(sessionId);
-    return cache.get(hash) ?? null;
+    const fp = this.filePath(sessionId);
+    const t0 = Date.now();
+    try {
+      const cache = await this.ensureCache(sessionId);
+      this.events?.emit('storage.read', {
+        sessionId,
+        store: 'replay',
+        filePath: fp,
+        operation: 'lookup',
+        outcome: 'success',
+        durationMs: Date.now() - t0,
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
+      return cache.get(hash) ?? null;
+    } catch (err) {
+      this.events?.emit('storage.read', {
+        sessionId,
+        store: 'replay',
+        filePath: fp,
+        operation: 'lookup',
+        outcome: 'failure',
+        durationMs: Date.now() - t0,
+        error: err instanceof Error ? err.message : String(err),
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
+      throw err;
+    }
   }
 
   /** All recorded entries for a session, in insertion order. */
   async load(sessionId: string): Promise<ReplayEntry[]> {
-    const cache = await this.ensureCache(sessionId);
-    return [...cache.values()];
+    const fp = this.filePath(sessionId);
+    const t0 = Date.now();
+    try {
+      const cache = await this.ensureCache(sessionId);
+      const durationMs = Date.now() - t0;
+      this.events?.emit('storage.read', {
+        sessionId,
+        store: 'replay',
+        filePath: fp,
+        operation: 'load',
+        outcome: 'success',
+        durationMs,
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
+      return [...cache.values()];
+    } catch (err) {
+      const durationMs = Date.now() - t0;
+      this.events?.emit('storage.read', {
+        sessionId,
+        store: 'replay',
+        filePath: fp,
+        operation: 'load',
+        outcome: 'failure',
+        durationMs,
+        error: err instanceof Error ? err.message : String(err),
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
+      throw err;
+    }
   }
 
   /**
@@ -226,15 +287,31 @@ export class ReplayLogStore {
       return out;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
-      // Corrupt or unreadable: treat as empty.
-      return [];
+      // Non-ENOENT errors (EACCES, ENOSPC, etc.) are real I/O failures —
+      // re-throw so callers can emit storage.error.
+      throw err;
     }
   }
 
-  private async writeAll(sessionId: string, entries: ReplayEntry[]): Promise<void> {
+  private async writeAll(
+    sessionId: string,
+    entries: ReplayEntry[],
+    operation: 'record' | 'compact' = 'record',
+  ): Promise<void> {
     const fp = this.filePath(sessionId);
+    const t0 = Date.now();
     const body = entries.map((e) => JSON.stringify(e)).join('\n') + (entries.length ? '\n' : '');
     await atomicWrite(fp, body);
+    const durationMs = Date.now() - t0;
+    this.events?.emit('storage.write', {
+      sessionId,
+      store: 'replay',
+      filePath: fp,
+      operation,
+      outcome: 'success',
+      durationMs,
+      ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+    });
     // Drop the version-stamp comment at the top — v1 has no envelope,
     // but we keep a one-line marker for human readers / future tooling.
     // (The atomicWrite just wrote pure JSONL; that's correct for v1.)

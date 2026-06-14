@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import { atomicWrite, withFileLock } from '../utils/atomic-write.js';
 import { safeParse } from '../utils/safe-json.js';
 import { sessionScopedPath } from '../utils/session-scoped-path.js';
+import type { EventBus } from '../kernel/events.js';
 /**
  * ToolAuditLog — idea #9 from IDEAS.md.
  *
@@ -74,6 +75,8 @@ export interface ToolAuditLogOptions {
    * Set to `Infinity` to disable periodic fsync (fastest, but highest data-loss risk).
    */
   fsyncEvery?: number | undefined;
+  events?: EventBus;
+  traceId?: string;
 }
 
 /** Default number of writes between fsync calls. */
@@ -81,6 +84,8 @@ const DEFAULT_FSYNC_EVERY = 100;
 
 export class ToolAuditLog {
   private readonly dir: string;
+  private readonly events: EventBus | undefined;
+  private readonly traceId: string | undefined;
   /** In-memory cache of the last entry's hash (per session), to compute chains efficiently. */
   private readonly tailHash = new Map<string, string>();
   /** In-memory counter for entry indices — avoids re-reading the file on every write. */
@@ -92,6 +97,8 @@ export class ToolAuditLog {
 
   constructor(opts: ToolAuditLogOptions) {
     this.dir = opts.dir;
+    this.events = opts.events;
+    this.traceId = opts.traceId;
     this.fsyncEvery = opts.fsyncEvery ?? DEFAULT_FSYNC_EVERY;
   }
 
@@ -110,45 +117,71 @@ export class ToolAuditLog {
     isError: boolean;
   }): Promise<AuditEntry> {
     let entry!: AuditEntry; // assigned inside the enqueue callback
-    await this.enqueue(input.sessionId, async () => {
-      await withFileLock(this.filePath(input.sessionId), async () => {
-        const entries = await this.readAll(input.sessionId);
-        const prev = entries.at(-1);
-        const prevHash = prev?.hash ?? GENESIS_PREV;
-        const index = prev ? prev.index + 1 : 0;
-        const id = randomUUID();
-        const ts = new Date().toISOString();
-        const content = {
-          id,
-          ts,
-          prevHash,
-          toolName: input.toolName,
-          toolUseId: input.toolUseId,
-          input: input.input,
-          output: input.output,
-          isError: input.isError,
-          index,
-        };
-        const hash = createHash('sha256').update(stableStringify(content), 'utf8').digest('hex');
-        entry = {
-          id,
-          ts,
-          prevHash,
-          hash,
-          toolName: input.toolName,
-          toolUseId: input.toolUseId,
-          input: input.input,
-          output: input.output,
-          isError: input.isError,
-          index,
-        };
-        entries.push(entry);
-        await this.writeAll(input.sessionId, entries);
-        this.tailHash.set(input.sessionId, hash);
-        this.tailIndex.set(input.sessionId, index + 1);
+    const fp = this.filePath(input.sessionId);
+    const t0 = Date.now();
+    try {
+      await this.enqueue(input.sessionId, async () => {
+        await withFileLock(fp, async () => {
+          const entries = await this.readAll(input.sessionId);
+          const prev = entries.at(-1);
+          const prevHash = prev?.hash ?? GENESIS_PREV;
+          const index = prev ? prev.index + 1 : 0;
+          const id = randomUUID();
+          const ts = new Date().toISOString();
+          const content = {
+            id,
+            ts,
+            prevHash,
+            toolName: input.toolName,
+            toolUseId: input.toolUseId,
+            input: input.input,
+            output: input.output,
+            isError: input.isError,
+            index,
+          };
+          const hash = createHash('sha256').update(stableStringify(content), 'utf8').digest('hex');
+          entry = {
+            id,
+            ts,
+            prevHash,
+            hash,
+            toolName: input.toolName,
+            toolUseId: input.toolUseId,
+            input: input.input,
+            output: input.output,
+            isError: input.isError,
+            index,
+          };
+          entries.push(entry);
+          await this.writeAll(input.sessionId, entries);
+          this.tailHash.set(input.sessionId, hash);
+          this.tailIndex.set(input.sessionId, index + 1);
+          const durationMs = Date.now() - t0;
+          this.events?.emit('storage.write', {
+            sessionId: input.sessionId,
+            store: 'audit',
+            filePath: fp,
+            operation: 'record',
+            outcome: 'success',
+            durationMs,
+            ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+          });
+        });
       });
-    });
-    return entry;
+      return entry;
+    } catch (err) {
+      this.events?.emit('storage.error', {
+        sessionId: input.sessionId,
+        store: 'audit',
+        filePath: fp,
+        operation: 'record',
+        error: err instanceof Error ? err.message : String(err),
+        recoverable: false,
+        durationMs: Date.now() - t0,
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
+      throw err;
+    }
   }
 
   /**
@@ -156,57 +189,112 @@ export class ToolAuditLog {
    * Returns a structured verdict — never throws.
    */
   async verify(sessionId: string): Promise<VerifyResult> {
-    const entries = await this.readAll(sessionId);
-    if (entries.length === 0) return { ok: true, entries: 0 };
-    // The first entry's prevHash must be the all-zeros genesis marker.
-    if (entries[0]?.prevHash !== GENESIS_PREV) {
-      return {
-        ok: false,
-        brokenAt: 0,
-        reason: 'first entry is not the genesis (prevHash != 0…0)',
-      };
-    }
-    let prevHash = GENESIS_PREV;
-    for (let i = 0; i < entries.length; i++) {
-      const e = expectDefined(entries[i]);
-      if (e.prevHash !== prevHash) {
+    const fp = this.filePath(sessionId);
+    const t0 = Date.now();
+    try {
+      const entries = await this.readAll(sessionId);
+      const durationMs = Date.now() - t0;
+      this.events?.emit('storage.read', {
+        sessionId,
+        store: 'audit',
+        filePath: fp,
+        operation: 'verify',
+        outcome: 'success',
+        durationMs,
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
+      if (entries.length === 0) return { ok: true, entries: 0 };
+      // The first entry's prevHash must be the all-zeros genesis marker.
+      if (entries[0]?.prevHash !== GENESIS_PREV) {
         return {
           ok: false,
-          brokenAt: i,
-          reason: `prevHash mismatch at entry ${i} (expected ${prevHash.slice(0, 8)}…, got ${e.prevHash.slice(0, 8)}…)`,
+          brokenAt: 0,
+          reason: 'first entry is not the genesis (prevHash != 0…0)',
         };
       }
-      // Recompute the hash from the entry's content (without the
-      // `hash` field itself, which is what we are verifying).
-      const content = {
-        id: e.id,
-        ts: e.ts,
-        prevHash: e.prevHash,
-        toolName: e.toolName,
-        toolUseId: e.toolUseId,
-        input: e.input,
-        output: e.output,
-        isError: e.isError,
-        index: e.index,
-      };
-      const expectedHash = createHash('sha256')
-        .update(stableStringify(content), 'utf8')
-        .digest('hex');
-      if (expectedHash !== e.hash) {
-        return {
-          ok: false,
-          brokenAt: i,
-          reason: `hash mismatch at entry ${i} (entry content was modified)`,
+      let prevHash = GENESIS_PREV;
+      for (let i = 0; i < entries.length; i++) {
+        const e = expectDefined(entries[i]);
+        if (e.prevHash !== prevHash) {
+          return {
+            ok: false,
+            brokenAt: i,
+            reason: `prevHash mismatch at entry ${i} (expected ${prevHash.slice(0, 8)}…, got ${e.prevHash.slice(0, 8)}…)`,
+          };
+        }
+        // Recompute the hash from the entry's content (without the
+        // `hash` field itself, which is what we are verifying).
+        const content = {
+          id: e.id,
+          ts: e.ts,
+          prevHash: e.prevHash,
+          toolName: e.toolName,
+          toolUseId: e.toolUseId,
+          input: e.input,
+          output: e.output,
+          isError: e.isError,
+          index: e.index,
         };
+        const expectedHash = createHash('sha256')
+          .update(stableStringify(content), 'utf8')
+          .digest('hex');
+        if (expectedHash !== e.hash) {
+          return {
+            ok: false,
+            brokenAt: i,
+            reason: `hash mismatch at entry ${i} (entry content was modified)`,
+          };
+        }
+        prevHash = e.hash;
       }
-      prevHash = e.hash;
+      return { ok: true, entries: entries.length };
+    } catch (err) {
+      const durationMs = Date.now() - t0;
+      this.events?.emit('storage.read', {
+        sessionId,
+        store: 'audit',
+        filePath: fp,
+        operation: 'verify',
+        outcome: 'failure',
+        durationMs,
+        error: err instanceof Error ? err.message : String(err),
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
+      throw err;
     }
-    return { ok: true, entries: entries.length };
   }
 
   /** All entries for a session, in insertion order. */
   async load(sessionId: string): Promise<AuditEntry[]> {
-    return this.readAll(sessionId);
+    const fp = this.filePath(sessionId);
+    const t0 = Date.now();
+    try {
+      const entries = await this.readAll(sessionId);
+      const durationMs = Date.now() - t0;
+      this.events?.emit('storage.read', {
+        sessionId,
+        store: 'audit',
+        filePath: fp,
+        operation: 'load',
+        outcome: 'success',
+        durationMs,
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
+      return entries;
+    } catch (err) {
+      const durationMs = Date.now() - t0;
+      this.events?.emit('storage.read', {
+        sessionId,
+        store: 'audit',
+        filePath: fp,
+        operation: 'load',
+        outcome: 'failure',
+        durationMs,
+        error: err instanceof Error ? err.message : String(err),
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
+      throw err;
+    }
   }
 
   // ── Internals ────────────────────────────────────────────────────────────
@@ -235,7 +323,9 @@ export class ToolAuditLog {
       return out;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
-      return [];
+      // Non-ENOENT errors (EACCES, ENOSPC, etc.) are real I/O failures —
+      // re-throw so callers (verify, load) can emit storage.error.
+      throw err;
     }
   }
 

@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import {
   // createSessionEventBridge,
   // resolveAuditLevel,
@@ -20,6 +21,8 @@ import {
 export interface SessionResult {
   session: SessionWriter;
   sessionRef: { current?: SessionWriter | undefined };
+  /** 32-char hex trace ID for correlating storage events with agent iterations. */
+  traceId: string;
   context: Context;
   restoredMessages: import('@wrongstack/core').Message[];
   attachments: DefaultAttachmentStore;
@@ -56,6 +59,8 @@ export async function setupSession(params: {
     abandoned: AbandonedSession,
     autoRecover: boolean,
   ) => Promise<'resume' | 'delete' | 'skip'>;
+  /** Optional EventBus for emitting storage.* events from todo/queue/task stores. */
+  events?: import('@wrongstack/core').EventBus;
 }): Promise<SessionResult> {
   const {
     config,
@@ -69,6 +74,8 @@ export async function setupSession(params: {
     renderer,
     flags,
     onRecovery,
+    // Optional EventBus for storage observability
+    events: eventsBus,
   } = params;
 
   // Prune sessions older than the shared retention window on every interactive start.
@@ -145,9 +152,11 @@ export async function setupSession(params: {
   const attachments = new DefaultAttachmentStore({
     spoolDir: path.join(wpaths.projectSessions, session?.id, 'attachments'),
   });
-  const queueStore = new QueueStore({ dir: path.join(wpaths.projectSessions, session?.id) });
 
   const ctxSignal = new AbortController().signal;
+  // Generate a session-level trace ID for correlating storage events (flush,
+  // close, index writes) with agent iterations in observability pipelines.
+  const traceId = randomBytes(16).toString('hex');
   const context = new Context({
     systemPrompt,
     provider,
@@ -159,6 +168,7 @@ export async function setupSession(params: {
     model: config.model,
     agentId: 'leader',
     agentName: 'Leader Agent',
+    traceId,
   });
   // Inject package-author-tracker options so the install tool can record authorship.
   context.meta['packageTrackerOpts'] = {
@@ -167,10 +177,20 @@ export async function setupSession(params: {
   };
   if (restoredMessages.length > 0) context.state.replaceMessages(restoredMessages);
 
+  const queueStore = new QueueStore({
+    dir: path.join(wpaths.projectSessions, session?.id),
+    ...(eventsBus ? { events: eventsBus } : {}),
+    ...(traceId ? { traceId } : {}),
+  });
+
   const todosCheckpointPath = path.join(wpaths.projectSessions, `${session?.id}.todos.json`);
   if (resumeId) {
     try {
-      const restoredTodos = await loadTodosCheckpoint(todosCheckpointPath);
+      const restoredTodos = await loadTodosCheckpoint(
+        todosCheckpointPath,
+        eventsBus,
+        traceId,
+      );
       if (restoredTodos && restoredTodos.length > 0) {
         context.state.replaceTodos(restoredTodos);
         renderer.writeInfo(
@@ -185,6 +205,8 @@ export async function setupSession(params: {
     context.state,
     todosCheckpointPath,
     session?.id,
+    eventsBus,
+    traceId,
   );
 
   const planPath = path.join(wpaths.projectSessions, `${session?.id}.plan.json`);
@@ -228,6 +250,7 @@ export async function setupSession(params: {
   return {
     session: expectDefined(session),
     sessionRef,
+    traceId,
     context,
     restoredMessages,
     attachments,

@@ -546,6 +546,57 @@ export interface EventMap {
   'memory.forgotten': MemoryForgottenPayload;
   'memory.cleared': MemoryClearedPayload;
   'memory.consolidated': MemoryConsolidatedPayload;
+  // ── Storage events — emitted by DefaultSessionStore, FileSessionWriter, goal-store, plan-store, boot, todos-checkpoint, queue-store, task-store ──
+  /**
+   * Fired when a store completes a read operation. Carries the session ID
+   * and file path so dashboards can correlate storage I/O with agent
+   * iterations via the session ID.
+   */
+  'storage.read': {
+    sessionId: string;
+    /** Which store was read. */
+    store: 'session' | 'goal' | 'plan' | 'project' | 'todos' | 'queue' | 'tasks' | 'memory' | 'annotations' | 'audit' | 'replay' | 'config';
+    filePath: string;
+    /** Session store: load|list|summary|index_read. Goal store: load. Plan store: load. Memory store: readAll. Annotations: list. Audit: verify|load. Replay: load|lookup. Config: read_json|load_sync. */
+    operation: string;
+    outcome: 'success' | 'failure';
+    durationMs: number;
+    error?: string;
+    traceId?: string;
+  };
+  /**
+   * Fired when a store completes a write operation. Covers both individual
+   * event appends and batch flushes — check `eventCount` to distinguish.
+   */
+  'storage.write': {
+    sessionId: string;
+    store: 'session' | 'goal' | 'plan' | 'project' | 'todos' | 'queue' | 'tasks' | 'memory' | 'annotations' | 'audit' | 'replay' | 'config';
+    filePath: string;
+    /** Session store: create|resume|append|flush|close|index_append|compact|checkpoint.
+     * Goal store: save|update|delete. Plan store: save. Project manifest: manifest_write.
+     * Todos: save. Queue: write|clear. Tasks: save. Memory: remember|forget|clear|consolidate.
+     * Annotations: add|resolve|evict. Audit: record. Replay: record|compact. Config: persist_sync. */
+    operation: string;
+    outcome: 'success' | 'failure';
+    durationMs: number;
+    eventCount?: number;
+    error?: string;
+    traceId?: string;
+  };
+  /**
+   * Fired when a store operation fails after best-effort retries.
+   * Use this for alert-worthy persistent failures (disk full, permissions).
+   */
+  'storage.error': {
+    sessionId: string;
+    store: 'session' | 'goal' | 'plan' | 'project' | 'todos' | 'queue' | 'tasks' | 'memory' | 'annotations' | 'audit' | 'replay' | 'config';
+    filePath: string;
+    operation: string;
+    error: string;
+    recoverable: boolean;
+    durationMs?: number;
+    traceId?: string;
+  };
   error: { err: Error; phase: string; _original?: Error | undefined };
 }
 

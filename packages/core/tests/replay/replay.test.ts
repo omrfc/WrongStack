@@ -7,6 +7,7 @@ import { ReplayLogStore } from '../../src/storage/replay-log-store.js';
 import { ReplayProviderRunner } from '../../src/replay/replay-provider-runner.js';
 import type { ProviderRunner, RunProviderOptions } from '../../src/types/provider-runner.js';
 import type { Request, Response } from '../../src/types/provider.js';
+import { EventBus } from '../../src/kernel/events.js';
 
 function makeRequest(overrides: Partial<Request> = {}): Request {
   return {
@@ -244,6 +245,141 @@ describe('ReplayLogStore', () => {
     expect(entries).toHaveLength(3);
     expect(entries[0]!.request.messages[0]!.content).toMatchObject([{ type: 'text', text: 'm2' }]);
     expect(entries[2]!.request.messages[0]!.content).toMatchObject([{ type: 'text', text: 'm4' }]);
+  });
+
+  // ── storage.* event emissions ───────────────────────────────────────────
+
+  it('emits storage.write with operation record on successful record()', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const loggedStore = new ReplayLogStore({ dir, events });
+    const req = makeRequest();
+    const res = makeResponse();
+    const hash = await loggedStore.record({ sessionId: 's1', request: req, response: res });
+    expect(hash).toMatch(/^sha256:/);
+    expect(emitSpy).toHaveBeenCalledWith('storage.write', expect.objectContaining({
+      store: 'replay',
+      operation: 'record',
+      outcome: 'success',
+      sessionId: 's1',
+    }));
+  });
+
+  it('emits storage.read with outcome failure when load() encounters an unreadable file', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const loggedStore = new ReplayLogStore({ dir, events });
+    // Record one entry so the file exists on disk, then make it unreadable
+    await loggedStore.record({ sessionId: 's1', request: makeRequest(), response: makeResponse() });
+    // Mock fs.readFile to throw EACCES for the session's replay file
+    vi.spyOn(fs, 'readFile').mockRejectedValueOnce(
+      Object.assign(new Error('Permission denied'), { code: 'EACCES' }),
+    );
+    try {
+      await expect(loggedStore.load('s1')).rejects.toThrow('Permission denied');
+      expect(emitSpy).toHaveBeenCalledWith('storage.read', expect.objectContaining({
+        store: 'replay',
+        operation: 'load',
+        outcome: 'failure',
+        sessionId: 's1',
+        error: expect.stringContaining('EACCES'),
+      }));
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('emits storage.write with operation compact when record() evicts oldest entries', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const smallStore = new ReplayLogStore({ dir, maxEntries: 3, events });
+    // Record 5 unique entries — maxEntries=3 means 2 evictions trigger one compact
+    for (let i = 0; i < 5; i++) {
+      await smallStore.record({
+        sessionId: 's1',
+        request: makeRequest({ messages: [{ role: 'user', content: [{ type: 'text', text: `m${i}` }] }] }),
+        response: makeResponse(),
+      });
+    }
+    // The compact write (eviction) should have been emitted
+    const compactCalls = emitSpy.mock.calls.filter(
+      ([event, payload]) =>
+        event === 'storage.write'
+        && (payload as { operation: string }).operation === 'compact'
+        && (payload as { sessionId: string }).sessionId === 's1',
+    );
+    expect(compactCalls.length).toBeGreaterThanOrEqual(1);
+    expect(compactCalls[0]![1]).toMatchObject({
+      store: 'replay',
+      operation: 'compact',
+      outcome: 'success',
+    });
+  });
+
+  it('emits storage.error when record() encounters a write failure', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const loggedStore = new ReplayLogStore({ dir, events });
+    // Mock atomicWrite to throw ENOSPC for the session's replay file
+    vi.spyOn(fs, 'writeFile').mockRejectedValueOnce(
+      Object.assign(new Error('No space left on device'), { code: 'ENOSPC' }),
+    );
+    try {
+      await expect(
+        loggedStore.record({ sessionId: 's1', request: makeRequest(), response: makeResponse() }),
+      ).rejects.toThrow('No space left on device');
+      expect(emitSpy).toHaveBeenCalledWith('storage.error', expect.objectContaining({
+        store: 'replay',
+        operation: 'record',
+        outcome: 'failure',
+        sessionId: 's1',
+        error: expect.stringContaining('ENOSPC'),
+      }));
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('emits storage.read with outcome success when lookup() finds a matching entry', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const loggedStore = new ReplayLogStore({ dir, events });
+    const req = makeRequest();
+    const res = makeResponse();
+    const hash = await loggedStore.record({ sessionId: 's1', request: req, response: res });
+    emitSpy.mockClear(); // clear the record() emissions
+    const found = await loggedStore.lookup('s1', hash);
+    expect(found).not.toBeNull();
+    expect(found!.hash).toBe(hash);
+    expect(emitSpy).toHaveBeenCalledWith('storage.read', expect.objectContaining({
+      store: 'replay',
+      operation: 'lookup',
+      outcome: 'success',
+      sessionId: 's1',
+    }));
+  });
+
+  it('emits storage.read with outcome failure when lookup() encounters an unreadable file', async () => {
+    const events = new EventBus();
+    const emitSpy = vi.spyOn(events, 'emit');
+    const loggedStore = new ReplayLogStore({ dir, events });
+    // Record one entry so the file exists on disk, then make it unreadable
+    await loggedStore.record({ sessionId: 's1', request: makeRequest(), response: makeResponse() });
+    vi.spyOn(fs, 'readFile').mockRejectedValueOnce(
+      Object.assign(new Error('Permission denied'), { code: 'EACCES' }),
+    );
+    try {
+      await expect(loggedStore.lookup('s1', 'any-hash')).rejects.toThrow('Permission denied');
+      expect(emitSpy).toHaveBeenCalledWith('storage.read', expect.objectContaining({
+        store: 'replay',
+        operation: 'lookup',
+        outcome: 'failure',
+        sessionId: 's1',
+        error: expect.stringContaining('EACCES'),
+      }));
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });
 

@@ -76,6 +76,65 @@ export class DefaultSessionStore implements SessionStore {
     this.secretScrubber = opts.secretScrubber;
   }
 
+  // ── Storage event helpers ───────────────────────────────────────────────────
+
+  private emitRead(
+    sessionId: string,
+    filePath: string,
+    operation: 'load' | 'list' | 'summary' | 'index_read',
+    outcome: 'success' | 'failure',
+    durationMs: number,
+    error?: string,
+  ): void {
+    this.events?.emit('storage.read', {
+      sessionId,
+      store: 'session',
+      filePath,
+      operation,
+      outcome,
+      durationMs,
+      ...(error !== undefined ? { error } : {}),
+    });
+  }
+
+  private emitWrite(
+    sessionId: string,
+    filePath: string,
+    operation: 'create' | 'resume' | 'append' | 'flush' | 'close' | 'index_append' | 'compact' | 'checkpoint',
+    outcome: 'success' | 'failure',
+    durationMs: number,
+    eventCount?: number,
+    error?: string,
+  ): void {
+    this.events?.emit('storage.write', {
+      sessionId,
+      store: 'session',
+      filePath,
+      operation,
+      outcome,
+      durationMs,
+      ...(eventCount !== undefined ? { eventCount } : {}),
+      ...(error !== undefined ? { error } : {}),
+    });
+  }
+
+  private emitError(
+    sessionId: string,
+    filePath: string,
+    operation: string,
+    error: string,
+    recoverable: boolean,
+  ): void {
+    this.events?.emit('storage.error', {
+      sessionId,
+      store: 'session',
+      filePath,
+      operation,
+      error,
+      recoverable,
+    });
+  }
+
   /** Absolute path to the session index file. */
   private get indexFile(): string {
     return path.join(this.dir, '_index.jsonl');
@@ -105,22 +164,26 @@ export class DefaultSessionStore implements SessionStore {
         : generateSessionId(startedAt, meta.model ?? meta.provider);
     const shardDir = await this.ensureShardDir(id);
     const file = path.join(shardDir, `${path.basename(id)}.jsonl`);
+    const t0 = Date.now();
     let handle: fsp.FileHandle;
     try {
       handle = await fsp.open(file, 'a', 0o600);
     } catch (err) {
+      this.emitError(id, file, 'create', err instanceof Error ? err.message : String(err), false);
       throw new Error(
         `Failed to open session file: ${err instanceof Error ? err.message : String(err)}`,
         { cause: err },
       );
     }
     try {
-      return new FileSessionWriter(id, handle, startedAt, meta, this.events, {
+      const writer = new FileSessionWriter(id, handle, startedAt, meta, this.events, {
         dir: shardDir,
         filePath: file,
         secretScrubber: this.secretScrubber,
         onClose: (s) => this.appendToIndex(s),
       });
+      this.emitWrite(id, file, 'create', 'success', Date.now() - t0);
+      return writer;
     } catch (err) {
       await handle.close().catch((e) => console.warn(JSON.stringify({
         level: 'warn',
@@ -128,17 +191,20 @@ export class DefaultSessionStore implements SessionStore {
         message: e instanceof Error ? e.message : String(e),
         timestamp: new Date().toISOString(),
       })));
+      this.emitError(id, file, 'create', err instanceof Error ? err.message : String(err), true);
       throw err;
     }
   }
 
   async resume(id: string): Promise<ResumedSession> {
     const file = this.sessionPath(id, '.jsonl');
+    const t0 = Date.now();
     const data = await this.load(id);
     let handle: fsp.FileHandle;
     try {
       handle = await fsp.open(file, 'a', 0o600);
     } catch (err) {
+      this.emitError(id, file, 'resume', err instanceof Error ? err.message : String(err), false);
       throw new Error(
         `Failed to open session "${id}" for append: ${err instanceof Error ? err.message : String(err)}`,
         { cause: err },
@@ -166,6 +232,7 @@ export class DefaultSessionStore implements SessionStore {
           onClose: (s) => this.appendToIndex(s),
         },
       );
+      this.emitWrite(id, file, 'resume', 'success', Date.now() - t0);
       return { writer, data };
     } catch (err) {
       await handle.close().catch((e) => console.warn(JSON.stringify({
@@ -174,35 +241,47 @@ export class DefaultSessionStore implements SessionStore {
         message: e instanceof Error ? e.message : String(e),
         timestamp: new Date().toISOString(),
       })));
+      this.emitError(id, file, 'resume', err instanceof Error ? err.message : String(err), true);
       throw err;
     }
   }
 
   async load(id: string): Promise<SessionData> {
     const file = this.sessionPath(id, '.jsonl');
-    const raw = await fsp.readFile(file, 'utf8');
-    const lines = raw.split('\n').filter((l) => l.trim());
-    const events: SessionEvent[] = [];
-    for (const line of lines) {
-      try {
-        const parsed: unknown = JSON.parse(line);
-        if (
-          parsed !== null &&
-          typeof parsed === 'object' &&
-          typeof (parsed as { type?: unknown | undefined }).type === 'string' &&
-          typeof (parsed as { ts?: unknown | undefined }).ts === 'string'
-        ) {
-          events.push(parsed as SessionEvent);
+    const t0 = Date.now();
+    let outcome: 'success' | 'failure' = 'success';
+    let errorMsg: string | undefined;
+    try {
+      const raw = await fsp.readFile(file, 'utf8');
+      const lines = raw.split('\n').filter((l) => l.trim());
+      const events: SessionEvent[] = [];
+      for (const line of lines) {
+        try {
+          const parsed: unknown = JSON.parse(line);
+          if (
+            parsed !== null &&
+            typeof parsed === 'object' &&
+            typeof (parsed as { type?: unknown | undefined }).type === 'string' &&
+            typeof (parsed as { ts?: unknown | undefined }).ts === 'string'
+          ) {
+            events.push(parsed as SessionEvent);
+          }
+        } catch {
+          // skip malformed JSON
         }
-      } catch {
-        // skip malformed JSON
       }
+      const meta = this.metaFromEvents(id, events);
+      const { messages, usage } = this.replay(events, id);
+      // Extract tool_call_end events for TUI tool entry rendering on resume.
+      const toolCallEnds = extractToolCallEnds(events);
+      return { metadata: meta, events, messages, usage, toolCallEnds };
+    } catch (err) {
+      outcome = 'failure';
+      errorMsg = err instanceof Error ? err.message : String(err);
+      throw err;
+    } finally {
+      this.emitRead(id, file, 'load', outcome, Date.now() - t0, errorMsg);
     }
-    const meta = this.metaFromEvents(id, events);
-    const { messages, usage } = this.replay(events, id);
-    // Extract tool_call_end events for TUI tool entry rendering on resume.
-    const toolCallEnds = extractToolCallEnds(events);
-    return { metadata: meta, events, messages, usage, toolCallEnds };
   }
 
   async list(limit = 20): Promise<SessionSummary[]> {
@@ -249,6 +328,8 @@ export class DefaultSessionStore implements SessionStore {
 
   /** Append a session summary to the index. */
   private async appendToIndex(summary: SessionSummary): Promise<void> {
+    // Note: storage.write for this operation is emitted by FileSessionWriter.doClose()
+    // so it can include the traceId. Do NOT emit here to avoid duplicates.
     try {
       await ensureDir(this.dir);
       const line = JSON.stringify(summary) + '\n';
@@ -260,7 +341,7 @@ export class DefaultSessionStore implements SessionStore {
         this.indexAppendCount = 0;
       }
     } catch {
-      // best-effort
+      // best-effort — error surfaced via the storage.write event in doClose()
     }
   }
 
@@ -281,12 +362,23 @@ export class DefaultSessionStore implements SessionStore {
    * (keep latest per session), and rewrite. Atomic via temp+rename.
    */
   private async compactIndex(): Promise<void> {
-    const entries = await this.readIndex();
-    if (entries.length === 0) return;
-    const tmp = `${this.indexFile}.compact.tmp`;
-    const lines = entries.map((s) => JSON.stringify(s)).join('\n') + '\n';
-    await fsp.writeFile(tmp, lines, 'utf8');
-    await fsp.rename(tmp, this.indexFile);
+    const t0 = Date.now();
+    let outcome: 'success' | 'failure' = 'success';
+    let errorMsg: string | undefined;
+    try {
+      const entries = await this.readIndex();
+      if (entries.length === 0) return;
+      const tmp = `${this.indexFile}.compact.tmp`;
+      const lines = entries.map((s) => JSON.stringify(s)).join('\n') + '\n';
+      await fsp.writeFile(tmp, lines, 'utf8');
+      await fsp.rename(tmp, this.indexFile);
+    } catch (err) {
+      outcome = 'failure';
+      errorMsg = err instanceof Error ? err.message : String(err);
+    } finally {
+      // Compact is internal — use 'session' as the session ID placeholder.
+      this.emitWrite('~compact~', this.indexFile, 'compact', outcome, Date.now() - t0, undefined, errorMsg);
+    }
   }
 
   /**
@@ -379,22 +471,31 @@ export class DefaultSessionStore implements SessionStore {
 
   private async summaryFor(id: string): Promise<SessionSummary> {
     const manifest = this.sessionPath(id, '.summary.json');
+    const t0 = Date.now();
+    let outcome: 'success' | 'failure' = 'success';
+    let errorMsg: string | undefined;
     try {
       const raw = await fsp.readFile(manifest, 'utf8');
+      this.emitRead(id, manifest, 'summary', 'success', Date.now() - t0);
       return JSON.parse(raw) as SessionSummary;
     } catch {
       const full = this.sessionPath(id, '.jsonl');
       const stat = await fsp.stat(full);
       const summary = await this.summarize(id, stat.mtime.toISOString());
       await atomicWrite(manifest, JSON.stringify(summary), { mode: 0o600 }).catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.emitError(id, manifest, 'summary_fallback', msg, true);
         console.warn(JSON.stringify({
           level: 'warn',
           event: 'session_store.manifest_write_failed',
           sessionId: id,
-          message: err instanceof Error ? err.message : String(err),
+          message: msg,
           timestamp: new Date().toISOString(),
         }));
       });
+      outcome = 'failure';
+      errorMsg = 'summary fallback — manifest rebuilt';
+      this.emitRead(id, manifest, 'summary', outcome, Date.now() - t0, errorMsg);
       return summary;
     }
   }
@@ -751,6 +852,8 @@ class FileSessionWriter implements SessionWriter {
   private lastAppendWarnAt = 0;
   private readonly secretScrubber?: SecretScrubber | undefined;
   private readonly onCloseCb?: (((summary: SessionSummary) => void | Promise<void>)) | undefined;
+  /** Implements SessionWriter.traceId — propagated from ContextInit.traceId. */
+  traceId: string | undefined;
 
   // ── Write buffer — batches events to reduce per-event disk I/O ─────────
   //
@@ -849,6 +952,7 @@ class FileSessionWriter implements SessionWriter {
       /** Called on close() with the finalized summary for index/sidecar writes. */
       onClose?: (((summary: SessionSummary) => void | Promise<void>)) | undefined;
     } = {},
+    traceId?: string | undefined,
   ) {
     this.resumed = opts.resumed ?? false;
     // id already contains a date-prefix shard (e.g. "2026-06-06/17-46-57Z_…").
@@ -866,6 +970,10 @@ class FileSessionWriter implements SessionWriter {
       provider: meta.provider ?? 'unknown',
       tokenTotal: 0,
     };
+    // Propagated from ContextInit.traceId via SessionWriter.traceId so that
+    // storage events carry the run-level trace ID without needing a Context
+    // handle in every storage operation.
+    this.traceId = traceId;
   }
 
   get pendingToolUses(): string[] {
@@ -979,9 +1087,14 @@ class FileSessionWriter implements SessionWriter {
     const eventCount = this.writeBuffer.length;
     const batch = this.writeBuffer.map((e) => JSON.stringify(e)).join('\n') + '\n';
     this.writeBuffer = [];
+    const t0 = Date.now();
+    let outcome: 'success' | 'failure' = 'success';
+    let errorMsg: string | undefined;
     try {
       await this.enqueueWrite(batch);
     } catch (err) {
+      outcome = 'failure';
+      errorMsg = err instanceof Error ? err.message : String(err);
       this.appendFailCount += eventCount;
       const now = Date.now();
       if (now - this.lastAppendWarnAt > 5000) {
@@ -995,6 +1108,18 @@ class FileSessionWriter implements SessionWriter {
         this.lastAppendWarnAt = now;
         this.appendFailCount = 0;
       }
+    } finally {
+      this.events?.emit('storage.write', {
+        sessionId: this.id,
+        store: 'session',
+        filePath: this.filePath,
+        operation: 'flush',
+        outcome,
+        durationMs: Date.now() - t0,
+        ...(errorMsg !== undefined ? { error: errorMsg } : {}),
+        ...(eventCount !== undefined ? { eventCount } : {}),
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
     }
   }
 
@@ -1078,21 +1203,56 @@ class FileSessionWriter implements SessionWriter {
         { ...this.toolBreakdown },
       outcome: this.outcome ?? 'completed',
     };
+    // Emit storage.write for the manifest sidecar.
     if (this.manifestFile) {
+      const t0 = Date.now();
+      let outcome: 'success' | 'failure' = 'success';
+      let errorMsg: string | undefined;
       try {
         await atomicWrite(this.manifestFile, JSON.stringify(this.summary), { mode: 0o600 });
-      } catch {
+      } catch (err) {
+        outcome = 'failure';
+        errorMsg = err instanceof Error ? err.message : String(err);
         // manifest write is best-effort
+      } finally {
+        this.events?.emit('storage.write', {
+          sessionId: this.id,
+          store: 'session',
+          filePath: this.manifestFile,
+          operation: 'close',
+          outcome,
+          durationMs: Date.now() - t0,
+          ...(errorMsg !== undefined ? { error: errorMsg } : {}),
+          ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+        });
       }
     }
     // Notify the store so it can update the session index. Await so the
     // index write completes before close() resolves — otherwise the
     // fire-and-forget _index.jsonl append races callers that tear down the
     // session directory right after close() (e.g. ENOTEMPTY on Windows).
+    // Emit storage.write here so it carries this.traceId; the actual I/O
+    // is delegated to onCloseCb (appendToIndex) which no longer emits.
+    const idxT0 = Date.now();
+    let idxOutcome: 'success' | 'failure' = 'success';
+    let idxError: string | undefined;
     try {
       await this.onCloseCb?.(this.summary);
-    } catch {
+    } catch (err) {
+      idxOutcome = 'failure';
+      idxError = err instanceof Error ? err.message : String(err);
       // best-effort
+    } finally {
+      this.events?.emit('storage.write', {
+        sessionId: this.summary.id,
+        store: 'session',
+        filePath: this.filePath,
+        operation: 'index_append',
+        outcome: idxOutcome,
+        durationMs: Date.now() - idxT0,
+        ...(idxError !== undefined ? { error: idxError } : {}),
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
     }
     try {
       await this.handle.close();

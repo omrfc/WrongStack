@@ -105,4 +105,10 @@ export interface MemoryStore {
    * Returns only entries that meet a relevance threshold.
    */
   scoreRelevant?(ctx: MemoryRelevanceContext, scope?: MemoryScope, limit?: number): Promise<ScoredEntry[]>;
+  /**
+   * Attach a trace ID to this store so that all subsequent `storage.*`
+   * events include it for observability correlation. Mutates the store
+   * in place and returns the same instance (convenience chaining).
+   */
+  withTraceId(traceId: string): MemoryStore;
 }

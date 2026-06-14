@@ -17,6 +17,7 @@ import {
   DEFAULT_CONTEXT_CONFIG,
   DEFAULT_SESSION_LOGGING_CONFIG,
 } from '../types/default-config.js';
+import type { EventBus } from '../kernel/events.js';
 
 /**
  * Defaults express *behavior*, not identity. Provider and model are NOT
@@ -169,6 +170,8 @@ export interface ConfigLoaderOptions {
   vault?: SecretVault | undefined;
   /** Extra sources merged after the built-in layers. */
   sources?: ConfigSource[] | undefined;
+  events?: EventBus;
+  traceId?: string;
 }
 
 export class DefaultConfigLoader implements ConfigLoader {
@@ -176,12 +179,16 @@ export class DefaultConfigLoader implements ConfigLoader {
   private readonly strict: boolean;
   private readonly vault: SecretVault | undefined;
   private readonly extraSources: ConfigSource[];
+  private readonly events: EventBus | undefined;
+  private readonly traceId: string | undefined;
 
   constructor(opts: ConfigLoaderOptions) {
     this.paths = opts.paths;
     this.strict = opts.strict ?? false;
     this.vault = opts.vault;
     this.extraSources = opts.sources ?? [];
+    this.events = opts.events;
+    this.traceId = opts.traceId;
   }
 
   async load(
@@ -300,7 +307,32 @@ export class DefaultConfigLoader implements ConfigLoader {
       // rather than direct /sync enable call). Idempotent for already-encrypted.
       toWrite = { ...toWrite, githubToken: this.vault.encrypt(toWrite.githubToken) };
     }
-    await atomicWrite(this.paths.syncConfig, JSON.stringify(toWrite, null, 2), { mode: 0o600 });
+    const fp = this.paths.syncConfig;
+    const t0 = Date.now();
+    try {
+      await atomicWrite(fp, JSON.stringify(toWrite, null, 2), { mode: 0o600 });
+      this.events?.emit('storage.write', {
+        sessionId: '~config~',
+        store: 'config',
+        filePath: fp,
+        operation: 'persist_sync',
+        outcome: 'success',
+        durationMs: Date.now() - t0,
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
+    } catch (err) {
+      this.events?.emit('storage.error', {
+        sessionId: '~config~',
+        store: 'config',
+        filePath: fp,
+        operation: 'persist_sync',
+        error: err instanceof Error ? err.message : String(err),
+        recoverable: false,
+        durationMs: Date.now() - t0,
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
+      throw err;
+    }
   }
 
   /**
@@ -310,19 +342,63 @@ export class DefaultConfigLoader implements ConfigLoader {
    * isolated — it should never be part of project-local or env-driven config.
    */
   async loadSyncConfig(): Promise<SyncConfig | null> {
+    const fp = this.paths.syncConfig;
+    const t0 = Date.now();
     try {
-      const raw = await fs.readFile(this.paths.syncConfig, 'utf8');
+      const raw = await fs.readFile(fp, 'utf8');
       const parsed = safeParse<SyncConfig>(raw);
-      if (!parsed.ok || !parsed.value) return null;
+      if (!parsed.ok || !parsed.value) {
+        this.events?.emit('storage.read', {
+          sessionId: '~config~',
+          store: 'config',
+          filePath: fp,
+          operation: 'load_sync',
+          outcome: 'failure',
+          durationMs: Date.now() - t0,
+          error: 'parse error or empty file',
+          ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+        });
+        return null;
+      }
 
       // Decrypt the token if vault is available (field name matches secret pattern)
       if (this.vault) {
         const decrypted = decryptConfigSecrets({ sync: parsed.value } as PartialConfig, this.vault);
-        return (decrypted as { sync: SyncConfig }).sync ?? null;
+        const result = (decrypted as { sync: SyncConfig }).sync ?? null;
+        this.events?.emit('storage.read', {
+          sessionId: '~config~',
+          store: 'config',
+          filePath: fp,
+          operation: 'load_sync',
+          outcome: 'success',
+          durationMs: Date.now() - t0,
+          ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+        });
+        return result;
       }
+      this.events?.emit('storage.read', {
+        sessionId: '~config~',
+        store: 'config',
+        filePath: fp,
+        operation: 'load_sync',
+        outcome: 'success',
+        durationMs: Date.now() - t0,
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
       return parsed.value;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      // Non-ENOENT failures (EACCES, ENOSPC, etc.) — emit storage.read failure, then return null
+      this.events?.emit('storage.read', {
+        sessionId: '~config~',
+        store: 'config',
+        filePath: fp,
+        operation: 'load_sync',
+        outcome: 'failure',
+        durationMs: Date.now() - t0,
+        error: err instanceof Error ? err.message : String(err),
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
       console.warn(JSON.stringify({
         level: 'warn',
         event: 'config.sync_load_failed',
@@ -335,6 +411,7 @@ export class DefaultConfigLoader implements ConfigLoader {
 
   private async readJson(file: string): Promise<PartialConfig> {
     let raw: string;
+    const t0 = Date.now();
     try {
       raw = await fs.readFile(file, 'utf8');
     } catch (err) {
@@ -342,6 +419,16 @@ export class DefaultConfigLoader implements ConfigLoader {
       // exists at start). Surface anything else (EACCES, EISDIR) so a
       // mis-permissioned config doesn't silently fall back to defaults.
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        this.events?.emit('storage.read', {
+          sessionId: '~config~',
+          store: 'config',
+          filePath: file,
+          operation: 'read_json',
+          outcome: 'failure',
+          durationMs: Date.now() - t0,
+          error: err instanceof Error ? err.message : String(err),
+          ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+        });
         console.warn(JSON.stringify({
           level: 'warn',
           event: 'config.read_failed',
@@ -357,6 +444,16 @@ export class DefaultConfigLoader implements ConfigLoader {
       // The file exists but isn't valid JSON. Don't silently reset to
       // defaults — that's hours of debug timesink for users who'd typo'd
       // their config. Warn loudly and keep the in-memory defaults.
+      this.events?.emit('storage.read', {
+        sessionId: '~config~',
+        store: 'config',
+        filePath: file,
+        operation: 'read_json',
+        outcome: 'failure',
+        durationMs: Date.now() - t0,
+        error: 'parse error or empty file',
+        ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+      });
       console.warn(JSON.stringify({
         level: 'warn',
         event: 'config.parse_failed',

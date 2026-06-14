@@ -411,7 +411,7 @@ export async function startWebUI(
   // Annotations store — sidecar files for collaboration notes (Phase 2
   // of idea #13). Living under `projectSessions` so all per-session
   // data is colocated and travels with the project.
-  const annotationsStore = new AnnotationsStore({ dir: wpaths.projectSessions });
+  const annotationsStore = new AnnotationsStore({ dir: wpaths.projectSessions, events });
   let session = await sessionStore.create({
     id: '',
     title: '',

@@ -2,9 +2,10 @@ import { expectDefined } from '../utils/expect-defined.js';
 import { randomUUID } from 'node:crypto';
 import type { Agent } from '../core/agent.js';
 import type { AgentFactory } from '../coordination/agent-subagent-runner.js';
-import { makeAgentSubagentRunner } from '../coordination/agent-subagent-runner.js';
+import { makeAgentSubagentRunner, withDisabledToolFiltering } from '../coordination/agent-subagent-runner.js';
 import { dispatchAgent } from '../coordination/dispatcher.js';
 import type { DispatchClassifier, DispatchResult } from '../coordination/dispatcher.js';
+import type { EventBus } from '../kernel/events.js';
 import type { SubagentConfig, TaskResult } from '../types/multi-agent.js';
 import type { JournalEntry, GoalFile } from '../storage/goal-store.js';
 import { loadGoal, saveGoal, appendJournal, goalFilePath } from '../storage/goal-store.js';
@@ -78,6 +79,8 @@ export interface ParallelEternalOptions {
    * provider call — preferred for a continuously-ticking autonomous loop).
    */
   dispatchClassifier?: DispatchClassifier | undefined;
+  /** Optional EventBus for emitting storage.* observability events from goal I/O. */
+  events?: EventBus | undefined;
 }
 
 const GOAL_COMPLETE_MARKER = /^\s*\[goal[_\s-]?complete\]\s*$/im;
@@ -167,7 +170,10 @@ export class ParallelEternalEngine {
       doneCondition: { type: 'all_tasks_done' },
     };
     this.coordinator = new DefaultMultiAgentCoordinator(config);
-    const runner = makeAgentSubagentRunner({ factory: this.agentFactory });
+    // Wrap factory with disabled tool filtering to prevent subagents from
+    // using the delegate tool (or any other disabledTools in their config)
+    const filteredFactory = withDisabledToolFiltering(this.agentFactory);
+    const runner = makeAgentSubagentRunner({ factory: filteredFactory });
     this.coordinator.setRunner?.(runner);
 
     try {
@@ -205,7 +211,7 @@ export class ParallelEternalEngine {
 
     this.iterations++;
 
-    const goal = await loadGoal(this.goalPath);
+    const goal = await loadGoal(this.goalPath, this.opts.events);
     if (!goal) {
       this.stopRequested = true;
       emit({ phase: 'stopped' });
@@ -225,7 +231,10 @@ export class ParallelEternalEngine {
         doneCondition: { type: 'all_tasks_done' },
       };
       this.coordinator = new DefaultMultiAgentCoordinator(config);
-      const runner = makeAgentSubagentRunner({ factory: this.agentFactory });
+      // Wrap factory with disabled tool filtering to prevent subagents from
+      // using the delegate tool (or any other disabledTools in their config)
+      const filteredFactory = withDisabledToolFiltering(this.agentFactory);
+      const runner = makeAgentSubagentRunner({ factory: filteredFactory });
       this.coordinator.setRunner?.(runner);
     }
 
@@ -390,6 +399,8 @@ export class ParallelEternalEngine {
                     tools: route.definition.config.tools,
                     systemPromptOverride: route.definition.config.prompt,
                     timeoutMs: this.timeoutMs,
+                    // Disable delegation — subagents are leaf workers, not orchestrators
+                    disabledTools: ['delegate'],
                   }
                 : {
                     id: subagentId,
@@ -397,6 +408,8 @@ export class ParallelEternalEngine {
                     // Let the coordinator apply its default budget (roster or generic).
                     // Hardcoding low limits here defeats the x10 budget improvement.
                     timeoutMs: this.timeoutMs,
+                    // Disable delegation — subagents are leaf workers, not orchestrators
+                    disabledTools: ['delegate'],
                   },
             );
             subagentIds.push(subagentId);
@@ -588,10 +601,10 @@ export class ParallelEternalEngine {
   // -------------------------------------------------------------------------
 
   private async appendIterationEntry(entry: Omit<JournalEntry, 'iteration' | 'at'>): Promise<void> {
-    const current = await loadGoal(this.goalPath);
+    const current = await loadGoal(this.goalPath, this.opts.events);
     if (!current) return;
     const updated = appendJournal(current, entry);
-    await saveGoal(this.goalPath, updated);
+    await saveGoal(this.goalPath, updated, this.opts.events);
     const entryWithMeta: JournalEntry = {
       at: (this.opts.now?.() ?? new Date()).toISOString(),
       iteration: updated.iterations,
@@ -605,9 +618,9 @@ export class ParallelEternalEngine {
   }
 
   private async persistState(state: GoalFile['engineState']): Promise<void> {
-    const current = await loadGoal(this.goalPath);
+    const current = await loadGoal(this.goalPath, this.opts.events);
     if (!current) return;
     if (current.engineState === state) return;
-    await saveGoal(this.goalPath, { ...current, engineState: state });
+    await saveGoal(this.goalPath, { ...current, engineState: state }, this.opts.events);
   }
 }

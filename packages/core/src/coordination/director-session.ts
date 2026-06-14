@@ -38,6 +38,11 @@ export interface DirectorSessionFactoryOptions {
    * prior fleet manifest.
    */
   directorRunId?: string | undefined;
+  /**
+   * Session-level trace ID for correlating subagent storage events with
+   * the parent session's trace in observability pipelines.
+   */
+  traceId?: string | undefined;
 }
 
 export interface DirectorSessionFactory {
@@ -68,6 +73,7 @@ export function makeDirectorSessionFactory(
   opts: DirectorSessionFactoryOptions,
 ): DirectorSessionFactory {
   const runId = opts.directorRunId ?? `${new Date().toISOString().replace(/[:.]/g, '-')}-director`;
+  const { traceId } = opts;
 
   let store: SessionStore;
   let dir: string;
@@ -92,12 +98,18 @@ export function makeDirectorSessionFactory(
       // Per-subagent JSONL — DefaultSessionStore generates the file name
       // from the metadata `id`, so we pass `subagentId` directly to
       // keep disk artifacts human-readable.
-      return store.create({
+      const writer = await store.create({
         id: subagentId,
         title: title ?? subagentId,
         provider: provider ?? 'unknown',
         model: model ?? 'unknown',
       });
+      // Propagate the root trace ID so subagent storage events are
+      // correlatable with the parent session in observability pipelines.
+      if (traceId !== undefined) {
+        writer.traceId = traceId;
+      }
+      return writer;
     },
   };
 }

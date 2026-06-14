@@ -2,6 +2,7 @@ import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { EventBus } from '../../src/kernel/events.js';
 import { QueueStore } from '../../src/storage/queue-store.js';
 
 async function mktmp(): Promise<string> {
@@ -91,5 +92,111 @@ describe('QueueStore', () => {
     const out = await store.read();
     expect(out).toHaveLength(1);
     expect(out[0]?.displayText).toBe('only');
+  });
+
+  // ── storage.* event tests ─────────────────────────────────────────────────
+
+  it('emits storage.read with outcome success when read() finds no file (ENOENT)', async () => {
+    const events: EventBus = { emit: vi.fn() } as never;
+    const store = new QueueStore({ dir, events });
+    const out = await store.read();
+    expect(out).toEqual([]);
+    expect(events.emit).toHaveBeenCalledWith('storage.read', expect.objectContaining({
+      store: 'queue',
+      operation: 'read',
+      outcome: 'success',
+    }));
+  });
+
+  it('emits storage.read with outcome failure when read() finds malformed JSON', async () => {
+    await fsp.mkdir(dir, { recursive: true });
+    await fsp.writeFile(path.join(dir, 'queue.json'), '{not json');
+    const events: EventBus = { emit: vi.fn() } as never;
+    const store = new QueueStore({ dir, events });
+    const out = await store.read();
+    expect(out).toEqual([]);
+    expect(events.emit).toHaveBeenCalledWith('storage.read', expect.objectContaining({
+      store: 'queue',
+      operation: 'read',
+      outcome: 'failure',
+      error: 'parse_failed',
+    }));
+  });
+
+  it('emits storage.read with outcome failure when read() finds non-array root', async () => {
+    await fsp.mkdir(dir, { recursive: true });
+    await fsp.writeFile(path.join(dir, 'queue.json'), '{"queue": []}');
+    const events: EventBus = { emit: vi.fn() } as never;
+    const store = new QueueStore({ dir, events });
+    const out = await store.read();
+    expect(out).toEqual([]);
+    expect(events.emit).toHaveBeenCalledWith('storage.read', expect.objectContaining({
+      store: 'queue',
+      operation: 'read',
+      outcome: 'failure',
+      error: 'invalid_schema',
+    }));
+  });
+
+  it('emits storage.error when read() encounters a disk I/O error', async () => {
+    const events: EventBus = { emit: vi.fn() } as never;
+    const store = new QueueStore({ dir, events });
+    const spy = vi.spyOn(fsp, 'readFile');
+    spy.mockRejectedValueOnce(Object.assign(new Error('EACCES permission denied'), { code: 'EACCES' }));
+    try {
+      const out = await store.read();
+      expect(out).toEqual([]);
+      expect(events.emit).toHaveBeenCalledWith('storage.error', expect.objectContaining({
+        store: 'queue',
+        operation: 'read',
+        outcome: 'failure',
+        error: expect.stringContaining('EACCES'),
+      }));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('emits storage.write with outcome success when write() succeeds', async () => {
+    const events: EventBus = { emit: vi.fn() } as never;
+    const store = new QueueStore({ dir, events });
+    await store.write([{ displayText: 'hello', blocks: [{ type: 'text', text: 'hello' }] }]);
+    expect(events.emit).toHaveBeenCalledWith('storage.write', expect.objectContaining({
+      store: 'queue',
+      operation: 'write',
+      outcome: 'success',
+    }));
+  });
+
+  it('emits storage.error when write() encounters a disk I/O error', async () => {
+    const events: EventBus = { emit: vi.fn() } as never;
+    const store = new QueueStore({ dir, events });
+    const spy = vi.spyOn(fsp, 'writeFile');
+    spy.mockRejectedValueOnce(Object.assign(new Error('ENOSPC no space left'), { code: 'ENOSPC' }));
+    try {
+      await store.write([{ displayText: 'hello', blocks: [{ type: 'text', text: 'hello' }] }]);
+      expect(events.emit).toHaveBeenCalledWith('storage.error', expect.objectContaining({
+        store: 'queue',
+        operation: 'write',
+        outcome: 'failure',
+        error: expect.stringContaining('ENOSPC'),
+      }));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('emits storage.write with outcome success when clear() succeeds', async () => {
+    // clear() is only emitted when the file exists — write then clear
+    const events: EventBus = { emit: vi.fn() } as never;
+    const store = new QueueStore({ dir, events });
+    await store.write([{ displayText: 'x', blocks: [{ type: 'text', text: 'x' }] }]);
+    events.emit = vi.fn(); // reset after write's emission
+    await store.clear();
+    expect(events.emit).toHaveBeenCalledWith('storage.write', expect.objectContaining({
+      store: 'queue',
+      operation: 'clear',
+      outcome: 'success',
+    }));
   });
 });

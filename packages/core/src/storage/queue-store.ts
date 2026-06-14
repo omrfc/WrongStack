@@ -1,5 +1,6 @@
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
+import type { EventBus } from '../kernel/events.js';
 import type { ContentBlock } from '../types/blocks.js';
 import { atomicWrite } from '../utils/atomic-write.js';
 
@@ -27,28 +28,84 @@ export interface PersistedQueueItem {
  */
 export class QueueStore {
   private readonly file: string;
+  // Use `| undefined` (not `?`) so exactOptionalPropertyTypes doesn't
+  // reject assigning an optional constructor parameter to these fields.
+  private readonly events: EventBus | undefined;
+  private readonly traceId: string | undefined;
 
-  constructor(opts: { dir: string }) {
+  constructor(opts: { dir: string; events?: EventBus; traceId?: string }) {
     this.file = path.join(opts.dir, 'queue.json');
+    this.events = opts.events;
+    this.traceId = opts.traceId;
   }
 
   async write(items: PersistedQueueItem[]): Promise<void> {
+    const t0 = Date.now();
     if (items.length === 0) {
       // Empty queue → remove the file rather than write `[]`. Keeps
       // a clean idle state on disk and makes `read()` cheaper.
       await this.clear();
       return;
     }
-    await atomicWrite(this.file, JSON.stringify(items), { mode: 0o600 });
+    try {
+      await atomicWrite(this.file, JSON.stringify(items), { mode: 0o600 });
+      this.events?.emit('storage.write', {
+        sessionId: this.traceId ?? '~boot~',
+        store: 'queue',
+        filePath: this.file,
+        operation: 'write',
+        outcome: 'success',
+        durationMs: Date.now() - t0,
+        ...(this.traceId !== undefined && { traceId: this.traceId }),
+      });
+    } catch (err) {
+      this.events?.emit('storage.error', {
+        sessionId: this.traceId ?? '~boot~',
+        store: 'queue',
+        filePath: this.file,
+        operation: 'write',
+        error: err instanceof Error ? err.message : String(err),
+        recoverable: false,
+        ...(this.traceId !== undefined && { traceId: this.traceId }),
+      });
+      console.warn(JSON.stringify({
+        level: 'warn',
+        event: 'queue_store.write_failed',
+        path: this.file,
+        message: err instanceof Error ? err.message : String(err),
+        timestamp: new Date().toISOString(),
+      }));
+    }
   }
 
   async read(): Promise<PersistedQueueItem[]> {
+    const t0 = Date.now();
     let raw: string;
     try {
       raw = await fsp.readFile(this.file, 'utf8');
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') return [];
+      if (code === 'ENOENT') {
+        this.events?.emit('storage.read', {
+          sessionId: this.traceId ?? '~boot~',
+          store: 'queue',
+          filePath: this.file,
+          operation: 'read',
+          outcome: 'success',
+          durationMs: Date.now() - t0,
+          ...(this.traceId !== undefined && { traceId: this.traceId }),
+        });
+        return [];
+      }
+      this.events?.emit('storage.error', {
+        sessionId: this.traceId ?? '~boot~',
+        store: 'queue',
+        filePath: this.file,
+        operation: 'read',
+        error: err instanceof Error ? err.message : String(err),
+        recoverable: true,
+        ...(this.traceId !== undefined && { traceId: this.traceId }),
+      });
       console.warn(JSON.stringify({
         level: 'warn',
         event: 'queue_store.read_failed',
@@ -62,9 +119,40 @@ export class QueueStore {
     try {
       parsed = JSON.parse(raw);
     } catch {
+      this.events?.emit('storage.read', {
+        sessionId: this.traceId ?? '~boot~',
+        store: 'queue',
+        filePath: this.file,
+        operation: 'read',
+        outcome: 'failure',
+        durationMs: Date.now() - t0,
+        error: 'parse_failed',
+        ...(this.traceId !== undefined && { traceId: this.traceId }),
+      });
       return [];
     }
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed)) {
+      this.events?.emit('storage.read', {
+        sessionId: this.traceId ?? '~boot~',
+        store: 'queue',
+        filePath: this.file,
+        operation: 'read',
+        outcome: 'failure',
+        durationMs: Date.now() - t0,
+        error: 'invalid_schema',
+        ...(this.traceId !== undefined && { traceId: this.traceId }),
+      });
+      return [];
+    }
+    this.events?.emit('storage.read', {
+      sessionId: this.traceId ?? '~boot~',
+      store: 'queue',
+      filePath: this.file,
+      operation: 'read',
+      outcome: 'success',
+      durationMs: Date.now() - t0,
+      ...(this.traceId !== undefined && { traceId: this.traceId }),
+    });
     const out: PersistedQueueItem[] = [];
     for (const v of parsed) {
       if (isPersistedQueueItem(v)) out.push(v);
@@ -73,11 +161,30 @@ export class QueueStore {
   }
 
   async clear(): Promise<void> {
+    const t0 = Date.now();
     try {
       await fsp.unlink(this.file);
+      this.events?.emit('storage.write', {
+        sessionId: this.traceId ?? '~boot~',
+        store: 'queue',
+        filePath: this.file,
+        operation: 'clear',
+        outcome: 'success',
+        durationMs: Date.now() - t0,
+        ...(this.traceId !== undefined && { traceId: this.traceId }),
+      });
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === 'ENOENT') return;
+      this.events?.emit('storage.error', {
+        sessionId: this.traceId ?? '~boot~',
+        store: 'queue',
+        filePath: this.file,
+        operation: 'clear',
+        error: err instanceof Error ? err.message : String(err),
+        recoverable: true,
+        ...(this.traceId !== undefined && { traceId: this.traceId }),
+      });
       // Best-effort: a permission/lock error during clear is rare and
       // the queue slash command is non-critical. Warn so it's observable
       // but don't throw so the slash command doesn't crash.

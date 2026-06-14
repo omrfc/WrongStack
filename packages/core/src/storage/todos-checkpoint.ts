@@ -1,4 +1,5 @@
 import * as fsp from 'node:fs/promises';
+import type { EventBus } from '../kernel/events.js';
 import type { TodoItem } from '../core/context.js';
 import type { ConversationState } from '../core/conversation-state.js';
 import { atomicWrite } from '../utils/atomic-write.js';
@@ -25,16 +26,50 @@ export type TodosCheckpointDetach = () => Promise<void>;
 /** Read a checkpoint from disk. Returns null when the file doesn't
  *  exist or is corrupt — callers treat both cases as "no prior state".
  */
-export async function loadTodosCheckpoint(filePath: string): Promise<TodoItem[] | null> {
+export async function loadTodosCheckpoint(
+  filePath: string,
+  events?: EventBus,
+  traceId?: string,
+): Promise<TodoItem[] | null> {
+  const t0 = Date.now();
   let raw: string;
   try {
     raw = await fsp.readFile(filePath, 'utf8');
-  } catch {
+  } catch (err) {
+    events?.emit('storage.error', {
+      sessionId: traceId ?? '~boot~',
+      store: 'todos',
+      filePath,
+      operation: 'load',
+      error: err instanceof Error ? err.message : String(err),
+      recoverable: true,
+    });
     return null;
   }
   try {
     const parsed = JSON.parse(raw) as TodosCheckpointFile;
-    if (parsed?.version !== 1 || !Array.isArray(parsed.todos)) return null;
+    if (parsed?.version !== 1 || !Array.isArray(parsed.todos)) {
+      events?.emit('storage.read', {
+        sessionId: traceId ?? '~boot~',
+        store: 'todos',
+        filePath,
+        operation: 'load',
+        outcome: 'failure',
+        durationMs: Date.now() - t0,
+        error: 'invalid_schema',
+        ...(traceId !== undefined && { traceId }),
+      });
+      return null;
+    }
+    events?.emit('storage.read', {
+      sessionId: traceId ?? '~boot~',
+      store: 'todos',
+      filePath,
+      operation: 'load',
+      outcome: 'success',
+      durationMs: Date.now() - t0,
+      ...(traceId !== undefined && { traceId }),
+    });
     return parsed.todos.filter(
       (t): t is TodoItem =>
         !!t &&
@@ -44,6 +79,16 @@ export async function loadTodosCheckpoint(filePath: string): Promise<TodoItem[] 
         (t.activeForm === undefined || typeof t.activeForm === 'string'),
     );
   } catch {
+    events?.emit('storage.read', {
+      sessionId: traceId ?? '~boot~',
+      store: 'todos',
+      filePath,
+      operation: 'load',
+      outcome: 'failure',
+      durationMs: Date.now() - t0,
+      error: 'parse_failed',
+      ...(traceId !== undefined && { traceId }),
+    });
     return null;
   }
 }
@@ -56,7 +101,10 @@ export async function saveTodosCheckpoint(
   filePath: string,
   sessionId: string,
   todos: readonly TodoItem[],
+  events?: EventBus,
+  traceId?: string,
 ): Promise<void> {
+  const t0 = Date.now();
   const payload: TodosCheckpointFile = {
     version: 1,
     sessionId,
@@ -65,7 +113,24 @@ export async function saveTodosCheckpoint(
   };
   try {
     await atomicWrite(filePath, JSON.stringify(payload, null, 2), { mode: 0o600 });
+    events?.emit('storage.write', {
+      sessionId: traceId ?? sessionId,
+      store: 'todos',
+      filePath,
+      operation: 'save',
+      outcome: 'success',
+      durationMs: Date.now() - t0,
+      ...(traceId !== undefined && { traceId }),
+    });
   } catch (err) {
+    events?.emit('storage.error', {
+      sessionId: traceId ?? sessionId,
+      store: 'todos',
+      filePath,
+      operation: 'save',
+      error: err instanceof Error ? err.message : String(err),
+      recoverable: false,
+    });
     console.warn(JSON.stringify({
       level: 'warn',
       event: 'todos_checkpoint.save_failed',
@@ -87,6 +152,8 @@ export function attachTodosCheckpoint(
   state: ConversationState,
   filePath: string,
   sessionId: string,
+  events?: EventBus,
+  traceId?: string,
 ): TodosCheckpointDetach {
   let timer: NodeJS.Timeout | null = null;
   let pending: readonly TodoItem[] | null = null;
@@ -94,7 +161,7 @@ export function attachTodosCheckpoint(
 
   const enqueueWrite = (todos: readonly TodoItem[]) => {
     writeChain = writeChain
-      .then(() => saveTodosCheckpoint(filePath, sessionId, todos))
+      .then(() => saveTodosCheckpoint(filePath, sessionId, todos, events, traceId))
       .catch((err) => {
         // Log and keep the chain alive — a failed write must not
         // poison the chain and silently stop all subsequent writes.

@@ -285,6 +285,32 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     needsSetup,
   } = deps;
 
+  // ── Storage observability: relay storage.* events to stdout as structured JSON ──
+  // The root traceId from the Context is the primary correlation ID. Storage
+  // events emitted by FileSessionWriter (flush, close) carry their own traceId
+  // (propagated from ContextInit) which we also included; events from the
+  // DefaultSessionStore level (load, summary, compact) inherit it from context.
+  const rootTraceId = context.traceId;
+  const storageLog = (event: string, payload: Record<string, unknown>) => {
+    // Merge: prefer the storage-event-level traceId (from FileSessionWriter) over
+    // the root traceId when both are present, so Fleet/spans are precisely keyed.
+    const traceId = (payload.traceId as string | undefined) ?? rootTraceId;
+    // eslint-disable-next-line no-console
+    console.warn(JSON.stringify({
+      level: 'info',
+      event,
+      timestamp: new Date().toISOString(),
+      traceId,
+      ...payload,
+    }));
+  };
+  const onStorageRead = (...args: unknown[]) => storageLog('storage.read', args[0] as Record<string, unknown>);
+  const onStorageWrite = (...args: unknown[]) => storageLog('storage.write', args[0] as Record<string, unknown>);
+  const onStorageError = (...args: unknown[]) => storageLog('storage.error', args[0] as Record<string, unknown>);
+  events.on('storage.read', onStorageRead);
+  events.on('storage.write', onStorageWrite);
+  events.on('storage.error', onStorageError);
+
   // Tracks the in-flight chimera subagent so finally can await it before session.close().
   // Without this, the fire-and-forget IIFE appends to a session whose handle is already closed.
   let pendingChimeraWork: Promise<void> | undefined;

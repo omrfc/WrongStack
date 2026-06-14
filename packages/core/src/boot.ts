@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import type { EventBus } from './kernel/events.js';
 import { DefaultLogger, noOpLogger } from './infrastructure/logger.js';
 import { DefaultPathResolver } from './infrastructure/path-resolver.js';
 import { DefaultSecretVault, migratePlaintextSecrets } from './security/secret-vault.js';
@@ -213,9 +214,43 @@ async function writeProjectMeta(paths: WstackPaths, projectRoot: string): Promis
  * Register or update the current project in ~/.wrongstack/projects.json.
  * This is the central manifest that the /project command uses.
  */
-async function registerProjectInManifest(paths: WstackPaths, projectRoot: string): Promise<void> {
+async function registerProjectInManifest(
+  paths: WstackPaths,
+  projectRoot: string,
+  events?: EventBus,
+): Promise<void> {
+  const manifestPath = path.join(paths.globalRoot, 'projects.json');
+
+  // Read existing manifest (best-effort — missing or malformed file is treated as empty)
   try {
-    const manifestPath = path.join(paths.globalRoot, 'projects.json');
+    const t0 = Date.now();
+    const raw = await fs.readFile(manifestPath, 'utf8');
+    events?.emit('storage.read', {
+      sessionId: '~boot~',
+      store: 'project',
+      filePath: manifestPath,
+      operation: 'manifest_read',
+      outcome: 'success',
+      durationMs: Date.now() - t0,
+    });
+    try {
+      JSON.parse(raw); // validate
+    } catch {
+      // treat malformed JSON as empty manifest — will be overwritten
+    }
+  } catch (err) {
+    events?.emit('storage.error', {
+      sessionId: '~boot~',
+      store: 'project',
+      filePath: manifestPath,
+      operation: 'manifest_read',
+      error: err instanceof Error ? err.message : String(err),
+      recoverable: true,
+    });
+  }
+
+  // Write updated manifest
+  try {
     let manifest: { projects: Array<{ name: string; root: string; slug: string; lastSeen?: string; createdAt?: string }> };
     try {
       const raw = await fs.readFile(manifestPath, 'utf8');
@@ -234,8 +269,25 @@ async function registerProjectInManifest(paths: WstackPaths, projectRoot: string
       manifest.projects.push({ name, root: projectRoot, slug, lastSeen: now, createdAt: now });
     }
 
+    const writeT0 = Date.now();
     await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
-  } catch {
+    events?.emit('storage.write', {
+      sessionId: '~boot~',
+      store: 'project',
+      filePath: manifestPath,
+      operation: 'manifest_write',
+      outcome: 'success',
+      durationMs: Date.now() - writeT0,
+    });
+  } catch (err) {
+    events?.emit('storage.error', {
+      sessionId: '~boot~',
+      store: 'project',
+      filePath: manifestPath,
+      operation: 'manifest_write',
+      error: err instanceof Error ? err.message : String(err),
+      recoverable: false,
+    });
     // best-effort — never blocks boot
   }
 }

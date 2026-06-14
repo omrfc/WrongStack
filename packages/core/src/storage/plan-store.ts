@@ -1,5 +1,6 @@
 import * as fsp from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import type { EventBus } from '../kernel/events.js';
 import type { ConversationState } from '../core/conversation-state.js';
 import { atomicWrite, withFileLock } from '../utils/atomic-write.js';
 
@@ -31,26 +32,80 @@ export interface PlanFile {
   items: PlanItem[];
 }
 
-export async function loadPlan(filePath: string): Promise<PlanFile | null> {
+export async function loadPlan(filePath: string, events?: EventBus): Promise<PlanFile | null> {
+  const t0 = Date.now();
   let raw: string;
   try {
     raw = await fsp.readFile(filePath, 'utf8');
-  } catch {
+  } catch (err) {
+    events?.emit('storage.error', {
+      sessionId: '~boot~',
+      store: 'plan',
+      filePath,
+      operation: 'load',
+      error: err instanceof Error ? err.message : String(err),
+      recoverable: true,
+    });
     return null;
   }
   try {
     const parsed = JSON.parse(raw) as PlanFile;
-    if (parsed?.version !== 1 || !Array.isArray(parsed.items)) return null;
+    if (parsed?.version !== 1 || !Array.isArray(parsed.items)) {
+      events?.emit('storage.read', {
+        sessionId: '~boot~',
+        store: 'plan',
+        filePath,
+        operation: 'load',
+        outcome: 'failure',
+        durationMs: Date.now() - t0,
+        error: 'invalid_schema',
+      });
+      return null;
+    }
+    events?.emit('storage.read', {
+      sessionId: '~boot~',
+      store: 'plan',
+      filePath,
+      operation: 'load',
+      outcome: 'success',
+      durationMs: Date.now() - t0,
+    });
     return parsed;
   } catch {
+    events?.emit('storage.read', {
+      sessionId: '~boot~',
+      store: 'plan',
+      filePath,
+      operation: 'load',
+      outcome: 'failure',
+      durationMs: Date.now() - t0,
+      error: 'parse_failed',
+    });
     return null;
   }
 }
 
-export async function savePlan(filePath: string, plan: PlanFile): Promise<void> {
+export async function savePlan(filePath: string, plan: PlanFile, events?: EventBus): Promise<void> {
+  const t0 = Date.now();
   try {
     await atomicWrite(filePath, JSON.stringify(plan, null, 2), { mode: 0o600 });
+    events?.emit('storage.write', {
+      sessionId: '~boot~',
+      store: 'plan',
+      filePath,
+      operation: 'save',
+      outcome: 'success',
+      durationMs: Date.now() - t0,
+    });
   } catch (err) {
+    events?.emit('storage.error', {
+      sessionId: '~boot~',
+      store: 'plan',
+      filePath,
+      operation: 'save',
+      error: err instanceof Error ? err.message : String(err),
+      recoverable: false,
+    });
     console.warn(
       '[plan-store] save failed:',
       err instanceof Error ? err.message : String(err),

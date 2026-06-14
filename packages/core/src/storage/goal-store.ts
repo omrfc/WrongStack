@@ -1,4 +1,5 @@
 import * as fsp from 'node:fs/promises';
+import type { EventBus } from '../kernel/events.js';
 import { atomicWrite, withFileLock } from '../utils/atomic-write.js';
 import { color } from '../utils/color.js';
 import { resolveWstackPaths } from '../utils/wstack-paths.js';
@@ -104,13 +105,32 @@ export function goalFilePath(projectRoot: string): string {
   return resolveWstackPaths({ projectRoot }).projectGoal;
 }
 
-export async function loadGoal(filePath: string): Promise<GoalFile | null> {
+export async function loadGoal(filePath: string, events?: EventBus): Promise<GoalFile | null> {
+  const t0 = Date.now();
   let raw: string;
   try {
     raw = await fsp.readFile(filePath, 'utf8');
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') return null; // file doesn't exist — not an error
+    if (code === 'ENOENT') {
+      events?.emit('storage.read', {
+        sessionId: '~boot~',
+        store: 'goal',
+        filePath,
+        operation: 'load',
+        outcome: 'success',
+        durationMs: Date.now() - t0,
+      });
+      return null; // file doesn't exist — not an error
+    }
+    events?.emit('storage.error', {
+      sessionId: '~boot~',
+      store: 'goal',
+      filePath,
+      operation: 'load',
+      error: err instanceof Error ? err.message : String(err),
+      recoverable: false,
+    });
     throw err; // permission errors etc. should surface
   }
   try {
@@ -123,8 +143,25 @@ export async function loadGoal(filePath: string): Promise<GoalFile | null> {
         message: 'invalid schema — consider deleting and re-creating',
         timestamp: new Date().toISOString(),
       }));
+      events?.emit('storage.read', {
+        sessionId: '~boot~',
+        store: 'goal',
+        filePath,
+        operation: 'load',
+        outcome: 'failure',
+        durationMs: Date.now() - t0,
+        error: 'invalid_schema',
+      });
       return null;
     }
+    events?.emit('storage.read', {
+      sessionId: '~boot~',
+      store: 'goal',
+      filePath,
+      operation: 'load',
+      outcome: 'success',
+      durationMs: Date.now() - t0,
+    });
     return parsed;
   } catch {
     console.warn(JSON.stringify({
@@ -134,14 +171,40 @@ export async function loadGoal(filePath: string): Promise<GoalFile | null> {
       message: 'JSON parse failed — consider deleting and re-creating',
       timestamp: new Date().toISOString(),
     }));
+    events?.emit('storage.read', {
+      sessionId: '~boot~',
+      store: 'goal',
+      filePath,
+      operation: 'load',
+      outcome: 'failure',
+      durationMs: Date.now() - t0,
+      error: 'parse_failed',
+    });
     return null;
   }
 }
 
-export async function saveGoal(filePath: string, goal: GoalFile): Promise<void> {
+export async function saveGoal(filePath: string, goal: GoalFile, events?: EventBus): Promise<void> {
+  const t0 = Date.now();
   try {
     await atomicWrite(filePath, JSON.stringify(goal, null, 2), { mode: 0o600 });
+    events?.emit('storage.write', {
+      sessionId: '~boot~',
+      store: 'goal',
+      filePath,
+      operation: 'save',
+      outcome: 'success',
+      durationMs: Date.now() - t0,
+    });
   } catch (err) {
+    events?.emit('storage.error', {
+      sessionId: '~boot~',
+      store: 'goal',
+      filePath,
+      operation: 'save',
+      error: err instanceof Error ? err.message : String(err),
+      recoverable: false,
+    });
     throw new FsError({
       message: err instanceof Error ? err.message : String(err),
       code: ERROR_CODES.FS_ATOMIC_WRITE_FAILED,
@@ -162,19 +225,45 @@ export async function saveGoal(filePath: string, goal: GoalFile): Promise<void> 
 export async function updateGoal(
   filePath: string,
   fn: (current: GoalFile | null) => GoalFile | null,
+  events?: EventBus,
 ): Promise<void> {
+  const t0 = Date.now();
   await withFileLock(filePath, async () => {
-    const current = await loadGoal(filePath);
+    const current = await loadGoal(filePath, events);
     const next = fn(current);
     if (next) {
-      await saveGoal(filePath, next);
+      await saveGoal(filePath, next, events);
     } else {
       try {
         await fsp.unlink(filePath);
-      } catch {
+        events?.emit('storage.write', {
+          sessionId: '~boot~',
+          store: 'goal',
+          filePath,
+          operation: 'delete',
+          outcome: 'success',
+          durationMs: Date.now() - t0,
+        });
+      } catch (err) {
+        events?.emit('storage.error', {
+          sessionId: '~boot~',
+          store: 'goal',
+          filePath,
+          operation: 'delete',
+          error: err instanceof Error ? err.message : String(err),
+          recoverable: true,
+        });
         // best-effort — file may not exist
       }
     }
+    events?.emit('storage.write', {
+      sessionId: '~boot~',
+      store: 'goal',
+      filePath,
+      operation: 'update',
+      outcome: 'success',
+      durationMs: Date.now() - t0,
+    });
   });
 }
 

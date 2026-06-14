@@ -20,6 +20,13 @@ export interface SubagentConfig {
    */
   idleTimeoutMs?: number | undefined;
   tools?: string[] | undefined;
+  /**
+   * Tools to explicitly disable for this subagent. These tools will be
+   * removed from the subagent's tool list even if they are normally available.
+   * Use this to enforce constraints that the baseline prompt alone cannot
+   * fully enforce (e.g., preventing delegation by removing the delegate tool).
+   */
+  disabledTools?: string[] | undefined;
   model?: string | undefined;
   priority?: number | undefined;
 
