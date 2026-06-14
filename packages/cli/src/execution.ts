@@ -130,6 +130,10 @@ export interface ExecutionDeps {
   onSuggestionsParsed?: ((suggestions: string[] | null) => void) | undefined;
   /** Read current suggestions (for auto-proceed in 'auto' autonomy mode). */
   getSuggestions?: (() => string[]) | undefined;
+  /** Read current auto suggestions (items with auto="true" attribute). Used by YOLO+auto autonomy. */
+  getAutoSuggestions?: (() => string[]) | undefined;
+  /** Autonomy next prompt template for YOLO+auto mode. Contains {{suggestion}} placeholder. */
+  autonomyNextPrompt?: string | undefined;
   /** Delay before auto-proceeding with a suggestion in 'auto' mode (ms). */
   autoProceedDelayMs?: number | undefined;
   /** Maximum auto-proceed iterations before stopping. Default 50. 0 = unlimited. */
@@ -259,6 +263,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     getNextPredict,
     onSuggestionsParsed,
     getSuggestions,
+    getAutoSuggestions,
+    autonomyNextPrompt,
     autoProceedDelayMs,
     autoProceedMaxIterations,
     brain,
@@ -665,7 +671,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           setSuggestions,
           getEternalEngine,
           subscribeEternalIteration,
-          subscribeEternalStage: subscribeEternalStage as never,
+          subscribeEternalStage,
           subscribeAutoPhase,
           appVersion: CLI_VERSION,
           provider: config.provider,
@@ -719,6 +725,9 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                   ? ('english' as const)
                   : ('original' as const),
               mouseMode: (autonomy?.mouseMode as boolean) ?? false,
+              autonomyNextPrompt:
+                ((cfg.autonomy as Record<string, unknown> | undefined)
+                  ?.autonomyNextPrompt as string | undefined) ?? 'auto {{suggestion}}',
             };
           },
           async saveSettings(s: {
@@ -749,6 +758,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             enhanceEnabled?: boolean | undefined;
             enhanceLanguage?: string | undefined;
             mouseMode?: boolean | undefined;
+            autonomyNextPrompt?: string | undefined;
           }) {
             try {
               // Persist autonomy section (existing behaviour).
@@ -774,6 +784,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                   if (s.mouseMode !== undefined) a['mouseMode'] = s.mouseMode;
                   if (s.enhanceEnabled !== undefined) a['enhance'] = s.enhanceEnabled;
                   if (s.enhanceLanguage !== undefined) a['enhanceLanguage'] = s.enhanceLanguage;
+                  if (s.autonomyNextPrompt !== undefined) a['autonomyNextPrompt'] = s.autonomyNextPrompt;
                 },
               );
 
@@ -999,10 +1010,18 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           // AND bump the context chip version — so the display reflects a
           // completely fresh session after the backend has been cleared.
           onClearHistory: (
-            dispatch: (action: { type: 'clearHistory' } | { type: 'resetContextChip' }) => void,
+            dispatch: (
+              action:
+                | { type: 'clearHistory' }
+                | { type: 'resetContextChip' }
+                | { type: 'streamReset' }
+                | { type: 'toolStreamClear' },
+            ) => void,
           ) => {
             dispatch({ type: 'clearHistory' });
             dispatch({ type: 'resetContextChip' });
+            dispatch({ type: 'streamReset' });
+            dispatch({ type: 'toolStreamClear' });
           },
           fleetStreamController,
           interruptController,
@@ -1557,6 +1576,9 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         getNextPredict,
         onSuggestionsParsed,
         getSuggestions,
+        getAutoSuggestions,
+        getYolo,
+        autonomyNextPrompt,
         autoProceedDelayMs,
         onValidateAutoProceed,
         autoProceedMaxIterations,
