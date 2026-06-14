@@ -1236,12 +1236,14 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                 // runs after that reset.
                 const endedUsage = tokenCounter.total();
                 void (async () => {
+                  let appendOk = false;
                   try {
                     await oldWriter.append({
                       type: 'session_end',
                       ts: new Date().toISOString(),
                       usage: endedUsage,
                     });
+                    appendOk = true;
                   } catch (err) {
                     console.error(
                       JSON.stringify({
@@ -1252,17 +1254,21 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                       }),
                     );
                   }
-                  try {
-                    await oldWriter.close();
-                  } catch (err) {
-                    console.error(
-                      JSON.stringify({
-                        level: 'error',
-                        event: 'execution.session_close_failed',
-                        message: err instanceof Error ? err.message : String(err),
-                        timestamp: new Date().toISOString(),
-                      }),
-                    );
+                  // Only close if session_end was successfully appended — closing
+                  // a partially-written session file corrupts recovery/summaries.
+                  if (appendOk) {
+                    try {
+                      await oldWriter.close();
+                    } catch (err) {
+                      console.error(
+                        JSON.stringify({
+                          level: 'error',
+                          event: 'execution.session_close_failed',
+                          message: err instanceof Error ? err.message : String(err),
+                          timestamp: new Date().toISOString(),
+                        }),
+                      );
+                    }
                   }
                 })();
               }
