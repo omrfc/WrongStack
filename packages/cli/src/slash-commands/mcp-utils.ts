@@ -180,9 +180,20 @@ async function runRemove(
   mcpRegistry: MCPRegistry,
 ): Promise<string> {
   if (!configured[name]) return `Server "${name}" is not in config.`;
-  await mcpRegistry.stop(name).catch(() => {
-    /* ignore */
-  });
+  try {
+    await mcpRegistry.stop(name);
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        level: 'warn',
+        event: 'mcp.stop_failed_on_remove',
+        server: name,
+        message: err instanceof Error ? err.message : String(err),
+        note: 'config entry removed but server may still be running',
+        timestamp: new Date().toISOString(),
+      }),
+    );
+  }
   const full = await readConfig(configPath);
   const mcpServers: Record<string, MCPServerConfig> = {
     ...((full.mcpServers as Record<string, MCPServerConfig> | undefined) ?? {}),
@@ -234,9 +245,20 @@ async function runDisable(
 ): Promise<string> {
   const cfg = configured[name];
   if (!cfg) return `Server "${name}" is not in config.`;
-  await mcpRegistry.stop(name).catch(() => {
-    /* ignore */
-  });
+  try {
+    await mcpRegistry.stop(name);
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        level: 'warn',
+        event: 'mcp.stop_failed_on_disable',
+        server: name,
+        message: err instanceof Error ? err.message : String(err),
+        note: 'config marked disabled but server may still be running',
+        timestamp: new Date().toISOString(),
+      }),
+    );
+  }
   const full = await readConfig(configPath);
   const mcpServers: Record<string, MCPServerConfig> = {
     ...((full.mcpServers as Record<string, MCPServerConfig> | undefined) ?? {}),
