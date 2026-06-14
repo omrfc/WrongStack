@@ -29,10 +29,11 @@ packages/telegram/    — Telegram bridge plugin
 packages/webui/       — Vite+React web UI: standalone `webui` binary + CLI `--webui` (see docs/webui.md)
 packages/plugins/     — Built-in plugin host: cron, file-watcher, session-tracker, subagent
 packages/skills/      — Bundled skill registry (16 SKILL.md files shipped in core/skills/)
+packages/bench/       — Model-independent benchmark harness (Aider polyglot + SWE-bench Verified); see docs/subcommands/bench.md
 apps/wrongstack/      — bin entry (wrongstack / wstack)
 ```
 
-**Dependency direction:** `core` → nothing WrongStack-internal. `providers/tools/mcp/plug-lsp/acp/runtime/telegram/plugins/skills` → `core`. `cli/tui` → everything beneath. Never reverse these layers.
+**Dependency direction:** `core` → nothing WrongStack-internal. `providers/tools/mcp/plug-lsp/acp/runtime/telegram/plugins/skills/bench` → `core`. `cli/tui` → everything beneath. Never reverse these layers.
 
 ## Key architectural concepts
 

@@ -1,5 +1,8 @@
 /**
- * FleetMonitor — full-screen fleet dashboard page.
+ * FleetMonitor — right-side sliding sidebar fleet dashboard.
+ *
+ * Slides in from the right as a non-intrusive overlay panel, preserving
+ * the main chat interface underneath. Dismisses on Escape / backdrop click.
  *
  * Displays:
  * - Fleet header with concurrency gauge and fleet-wide stats
@@ -7,10 +10,6 @@
  * - Per-agent detailed view with sparklines, budget warnings, failure reasons
  * - Event timeline (last 20 events)
  * - Keyboard navigation hints
- *
- * This component can work as:
- * - A full page view (when used as FleetPage)
- * - An overlay with close handler (when used as FleetMonitor overlay)
  */
 
 import {
@@ -39,11 +38,9 @@ import type { SubagentView } from '@/stores';
 import { useFleetStore } from '@/stores';
 
 export interface FleetMonitorProps {
-  onClose?: () => void;
+  onClose: () => void;
   /** Optional: open agent detail for a specific agent */
   onSelectAgent?: (agent: SubagentView) => void;
-  /** If true, render as overlay with close button; if false, render as page */
-  isOverlay?: boolean;
 }
 
 function fmtCost(v: number): string {
@@ -500,7 +497,6 @@ export function FleetAgentRow({
 export function FleetMonitor({
   onClose,
   onSelectAgent,
-  isOverlay = false,
 }: FleetMonitorProps) {
   const fleetAgents = useFleetStore((s) => s.agents);
   const leaderId = useFleetStore((s) => s.leaderId);
@@ -576,56 +572,58 @@ export function FleetMonitor({
 
   useEffect(() => {
     const handleGlobal = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && onClose) onClose();
+      if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleGlobal);
     return () => window.removeEventListener('keydown', handleGlobal);
   }, [onClose]);
 
-  const containerClass = isOverlay
-    ? 'fixed inset-0 z-50 flex flex-col bg-background/95 backdrop-blur-md'
-    : 'flex flex-col h-full';
-
   return (
-    <div
-      className={containerClass}
-      onKeyDown={handleKeyDown}
-      tabIndex={-1}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b bg-card/80 backdrop-blur shrink-0">
-        <div className="flex items-center gap-3">
-          <Bot className="h-5 w-5 text-primary" />
-          <h2 className="text-sm font-semibold flex items-center gap-2">
-            FLEET MONITOR
-            {runningCount > 0 && (
-              <span className="flex items-center gap-1 text-[11px] text-emerald-500 font-normal">
-                <span className="led led-pulse bg-emerald-500" />
-                {runningCount} running
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 z-40 bg-black/10 backdrop-blur-[1px]"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <div
+        className="fixed right-0 top-0 h-full z-50 w-[720px] max-w-[95vw] flex flex-col bg-background border-l shadow-2xl animate-slide-in-right"
+        onKeyDown={handleKeyDown}
+        tabIndex={-1}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b bg-card/80 backdrop-blur shrink-0">
+          <div className="flex items-center gap-3">
+            <Bot className="h-5 w-5 text-primary" />
+            <h2 className="text-sm font-semibold flex items-center gap-2">
+              FLEET MONITOR
+              {runningCount > 0 && (
+                <span className="flex items-center gap-1 text-[11px] text-emerald-500 font-normal">
+                  <span className="led led-pulse bg-emerald-500" />
+                  {runningCount} running
+                </span>
+              )}
+            </h2>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>
+                {fleetList.length} total agents
               </span>
-            )}
-          </h2>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span>
-              {fleetList.length} total agents
-            </span>
-            <ConcurrencyGauge
-              current={fleetConcurrency}
-              max={fleetConcurrencyMax}
-              showLabel
-            />
+              <ConcurrencyGauge
+                current={fleetConcurrency}
+                max={fleetConcurrencyMax}
+                showLabel
+              />
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-muted-foreground tabular-nums font-mono">
-            ↓{fmtTok(fleetTokensIn)} ↑{fmtTok(fleetTokensOut)} · {fmtCost(totalCost)}
-          </span>
-          <span className="text-xs text-muted-foreground tabular-nums font-mono">
-            {leaderId
-              ? `👑 ${fleetAgents.get(leaderId)?.name ?? leaderId}`
-              : 'no leader'}
-          </span>
-          {isOverlay && onClose && (
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-muted-foreground tabular-nums font-mono">
+              ↓{fmtTok(fleetTokensIn)} ↑{fmtTok(fleetTokensOut)} · {fmtCost(totalCost)}
+            </span>
+            <span className="text-xs text-muted-foreground tabular-nums font-mono">
+              {leaderId
+                ? `👑 ${fleetAgents.get(leaderId)?.name ?? leaderId}`
+                : 'no leader'}
+            </span>
             <button
               type="button"
               onClick={onClose}
@@ -634,9 +632,8 @@ export function FleetMonitor({
             >
               <XCircle className="h-4 w-4" />
             </button>
-          )}
+          </div>
         </div>
-      </div>
 
       {/* Main content: two-column layout when agent selected */}
       <div className="flex-1 flex overflow-hidden">
@@ -758,6 +755,7 @@ export function FleetMonitor({
           </div>
         )}
       </div>
-    </div>
+      </div>
+    </>
   );
 }

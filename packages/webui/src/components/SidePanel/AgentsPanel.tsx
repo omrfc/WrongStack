@@ -121,7 +121,7 @@ export function AgentsPanel() {
       <div className="border-t px-3 py-2 shrink-0">
         <button
           type="button"
-          onClick={() => setCurrentView('agents')}
+          onClick={() => useUIStore.getState().setAgentsMonitorOpen(true)}
           className="w-full flex items-center justify-center gap-1.5 h-7 rounded-md border border-border text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
         >
           <LayoutGrid className="h-3 w-3" />

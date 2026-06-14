@@ -1,13 +1,16 @@
 /**
- * AgentsMonitor — detailed per-agent monitoring overlay.
+ * AgentsMonitor — right-side sliding sidebar per-agent monitor.
  *
- * Shows every agent in a full-page card view with:
+ * Shows every agent in a card view with:
  * - Activity sparkline
  * - Context fill bar with token count
  * - Budget warning indicators
  * - Failure reasons
  * - Streaming output tail (partialText)
  * - Tool execution log
+ *
+ * Slides in from the right as a non-intrusive overlay, preserving the
+ * main chat interface underneath. Dismisses on Escape / backdrop click.
  *
  * Keyboard: ↑↓ navigate agents, ←→ flip pages per agent, Esc close.
  */
@@ -255,96 +258,104 @@ export function AgentsMonitor({ onClose }: AgentsMonitorProps) {
   const selectedAgent = fleetList[selectedIdx] ?? null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex flex-col bg-background/95 backdrop-blur-md"
-      onKeyDown={handleKeyDown}
-      tabIndex={-1}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b bg-card/80 backdrop-blur shrink-0">
-        <div className="flex items-center gap-3">
-          <Bot className="h-5 w-5 text-primary" />
-          <h2 className="text-sm font-semibold">Agents Monitor</h2>
-          <span className="text-xs text-muted-foreground">
-            {fleetList.length} total
-          </span>
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 z-40 bg-black/10 backdrop-blur-[1px]"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <div
+        className="fixed right-0 top-0 h-full z-50 w-[600px] max-w-[90vw] flex flex-col bg-background border-l shadow-2xl animate-slide-in-right"
+        onKeyDown={handleKeyDown}
+        tabIndex={-1}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b bg-card/80 backdrop-blur shrink-0">
+          <div className="flex items-center gap-3">
+            <Bot className="h-5 w-5 text-primary" />
+            <h2 className="text-sm font-semibold">Agents Monitor</h2>
+            <span className="text-xs text-muted-foreground">
+              {fleetList.length} total
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedIdx((i) => Math.max(i - 1, 0))}
+              className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-30"
+              disabled={selectedIdx === 0}
+              aria-label="Previous agent"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span className="text-xs tabular-nums text-muted-foreground font-mono">
+              {fleetList.length > 0 ? `${selectedIdx + 1}/${fleetList.length}` : '0/0'}
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectedIdx((i) => Math.min(i + 1, fleetList.length - 1))}
+              className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-30"
+              disabled={selectedIdx >= fleetList.length - 1}
+              aria-label="Next agent"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 rounded-md hover:bg-muted transition-colors ml-2"
+              aria-label="Close agents monitor"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setSelectedIdx((i) => Math.max(i - 1, 0))}
-            className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-30"
-            disabled={selectedIdx === 0}
-            aria-label="Previous agent"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <span className="text-xs tabular-nums text-muted-foreground font-mono">
-            {fleetList.length > 0 ? `${selectedIdx + 1}/${fleetList.length}` : '0/0'}
-          </span>
-          <button
-            type="button"
-            onClick={() => setSelectedIdx((i) => Math.min(i + 1, fleetList.length - 1))}
-            className="p-1.5 rounded-md hover:bg-muted transition-colors disabled:opacity-30"
-            disabled={selectedIdx >= fleetList.length - 1}
-            aria-label="Next agent"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-md hover:bg-muted transition-colors ml-2"
-            aria-label="Close agents monitor"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
 
-      {/* Main content */}
-      <div className="flex-1 overflow-y-auto p-4">
-        {fleetList.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-            <Bot className="h-12 w-12 mb-3 opacity-20" />
-            <p className="text-sm font-medium">No agents active</p>
-          </div>
-        ) : selectedAgent ? (
-          <div className="max-w-2xl mx-auto">
-            <AgentCard agent={selectedAgent} isLeader={selectedAgent.id === leaderId} />
-          </div>
-        ) : null}
-      </div>
-
-      {/* Agent selector strip */}
-      {fleetList.length > 0 && (
-        <div className="border-t bg-card/80 backdrop-blur shrink-0">
-          <div className="px-4 py-2 flex items-center gap-2 overflow-x-auto">
-            {fleetList.map((agent, i) => (
-              <button
-                key={agent.id}
-                type="button"
-                onClick={() => setSelectedIdx(i)}
-                className={cn(
-                  'shrink-0 flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] transition-colors',
-                  i === selectedIdx
-                    ? 'bg-primary/15 text-primary ring-1 ring-primary/40'
-                    : 'hover:bg-accent text-muted-foreground',
-                )}
-              >
-                <span className={cn('led', STATUS_META[agent.status].led, STATUS_META[agent.status].pulse && 'led-pulse', 'shrink-0')} />
-                <span>{agent.name}</span>
-                {agent.id === leaderId && <Crown className="h-2.5 w-2.5 text-amber-500 shrink-0" />}
-              </button>
-            ))}
-          </div>
-          <div className="px-4 py-1.5 border-t text-[10px] text-muted-foreground flex items-center gap-4">
-            <span>←→ page</span>
-            <span>↑↓ navigate list</span>
-            <span>Esc close</span>
-          </div>
+        {/* Main content */}
+        <div className="flex-1 overflow-y-auto p-4">
+          {fleetList.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+              <Bot className="h-12 w-12 mb-3 opacity-20" />
+              <p className="text-sm font-medium">No agents active</p>
+            </div>
+          ) : selectedAgent ? (
+            <div className="max-w-2xl mx-auto">
+              <AgentCard agent={selectedAgent} isLeader={selectedAgent.id === leaderId} />
+            </div>
+          ) : null}
         </div>
-      )}
-    </div>
+
+        {/* Agent selector strip */}
+        {fleetList.length > 0 && (
+          <div className="border-t bg-card/80 backdrop-blur shrink-0">
+            <div className="px-4 py-2 flex items-center gap-2 overflow-x-auto">
+              {fleetList.map((agent, i) => (
+                <button
+                  key={agent.id}
+                  type="button"
+                  onClick={() => setSelectedIdx(i)}
+                  className={cn(
+                    'shrink-0 flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] transition-colors',
+                    i === selectedIdx
+                      ? 'bg-primary/15 text-primary ring-1 ring-primary/40'
+                      : 'hover:bg-accent text-muted-foreground',
+                  )}
+                >
+                  <span className={cn('led', STATUS_META[agent.status].led, STATUS_META[agent.status].pulse && 'led-pulse', 'shrink-0')} />
+                  <span>{agent.name}</span>
+                  {agent.id === leaderId && <Crown className="h-2.5 w-2.5 text-amber-500 shrink-0" />}
+                </button>
+              ))}
+            </div>
+            <div className="px-4 py-1.5 border-t text-[10px] text-muted-foreground flex items-center gap-4">
+              <span>←→ page</span>
+              <span>↑↓ navigate list</span>
+              <span>Esc close</span>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   );
 }

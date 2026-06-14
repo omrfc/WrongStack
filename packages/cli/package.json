@@ -46,6 +46,7 @@
   },
   "dependencies": {
     "@wrongstack/acp": "workspace:*",
+    "@wrongstack/bench": "workspace:*",
     "@wrongstack/core": "workspace:*",
     "@wrongstack/mcp": "workspace:*",
     "@wrongstack/plug-lsp": "workspace:*",

@@ -274,6 +274,13 @@
   to { transform: translateY(0); opacity: 1; }
 }
 
+/* Sidebar panel slide-in from the right edge. */
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+.animate-slide-in-right { animation: slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
+
 /* Indeterminate progress sweep for "working" bars. */
 .bar-sweep { position: relative; overflow: hidden; }
 .bar-sweep::after {

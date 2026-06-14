@@ -1,0 +1,107 @@
+# @wrongstack/bench
+
+Model-independent agentic benchmark harness for WrongStack.
+
+## What it measures
+
+WrongStack is the **harness** — system prompt, tool set, agent loop, scaffolding.
+The model is the only swappable variable. Each (task × model) cell runs the real
+`wstack` binary in single-shot mode (`--output-json`) inside an isolated workdir;
+the result is graded by the **suite's own tests** — never an LLM. This is the
+difference from `wstack modeldiag eval`, which ranks free-form answers with an
+LLM judge (model-dependent).
+
+Two invariants keep the report objective:
+
+1. **Deterministic grading.** Polyglot runs the exercise's hidden tests;
+   SWE-bench runs `FAIL_TO_PASS` / `PASS_TO_PASS`. Exit code decides pass/fail.
+2. **Harness fingerprint.** Every report is stamped with
+   `sha256(cliVersion, toolNames, maxIterations, yolo, subsetId)`. Rows compare
+   only when the fingerprint matches; change the prompt/tools/version and old
+   numbers are marked stale.
+
+## Suites
+
+| Suite | Standard | Grader | Status |
+|---|---|---|---|
+| `polyglot` | Aider polyglot (225 Exercism exercises, 6 languages) | run hidden tests in workdir | ✅ Docker-free, graded inline |
+| `swebench` | SWE-bench Verified (fixed subset) | export predictions → official harness (inline Docker grading via injectable hook) | ✅ runs + exports; ⚙️ inline grading pluggable |
+
+For SWE-bench the bench runs the agent on each materialized instance and extracts a
+conformant model patch (`git diff`, with held-out test files and harness bookkeeping —
+`.gitignore` / `.wrongstack/` — stripped), then writes a `predictions-<cell>.jsonl` in the
+official format. Grading itself is delegated to the canonical
+`princeton-nlp/SWE-bench` harness (deterministic, version-sensitive) rather than
+re-implemented — or plugged in inline via a `SwebenchExternalGrade` hook when Docker is
+available. Exported-but-ungraded rows show `—` in the report's Pass@1 column so they never
+masquerade as failures.
+
+## Requirements
+
+- **API keys in env** — providers read keys from the environment (e.g.
+  `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`). The isolated
+  `WRONGSTACK_HOME` carries no secrets.
+- **Polyglot:** a local checkout of the polyglot-benchmark repo plus the
+  language toolchains you want to grade (Python+pytest, Node+npm, Go, Rust,
+  …). Languages whose toolchain is missing are simply skipped at grade time.
+- **SWE-bench (Phase 2):** Docker + a prepared dataset directory.
+
+## Usage
+
+```bash
+# 1. Get the exercises
+git clone https://github.com/Aider-AI/polyglot-benchmark /path/to/polyglot
+
+# 2. Define the model matrix (bench.config.json)
+cat > bench.config.json <<'JSON'
+{
+  "maxIterations": 40,
+  "concurrency": 4,
+  "timeoutMs": 600000,
+  "cells": [
+    { "label": "opus-4.8", "provider": "anthropic", "model": "claude-opus-4-8" },
+    { "label": "gpt-5.4",  "provider": "openai",    "model": "gpt-5.4" }
+  ]
+}
+JSON
+
+# 3. Run (start small with --limit)
+wstack bench run --suite polyglot --polyglot-dir /path/to/polyglot \
+  --models bench.config.json --limit 5 --out ./bench-results
+
+# 4. Re-render the markdown report from a finished run
+wstack bench report ./bench-results/<timestamp>
+
+# List available suites + configured cells
+wstack bench list --models bench.config.json
+```
+
+Artifacts per run (`bench-results/<timestamp>/`):
+
+- `results.jsonl` — one row per (task × cell)
+- `summary.json` — fingerprint + folded cell results
+- `report.md` — the leaderboard (sorted by pass@1)
+
+## SWE-bench dataset layout
+
+`--dataset-dir <path>` must contain one directory per pinned instance id:
+
+```
+<datasetDir>/<instance_id>/
+  repo/           git checkout at base_commit
+  instance.json   { problem_statement, test_patch, FAIL_TO_PASS, PASS_TO_PASS, image }
+```
+
+```bash
+# Run the agents and export predictions (no Docker needed):
+wstack bench run --suite swebench --dataset-dir ./swe-data --models bench.config.json --limit 5
+
+# Then grade with the official harness:
+python -m swebench.harness.run_evaluation \
+  --predictions_path ./bench-results/<ts>/predictions-<cell>.jsonl --run_id my-run
+```
+
+The pinned subset lives in `subsets/swe-bench-verified-50.json` — replace the
+starter list with your chosen N instance ids from the official
+`princeton-nlp/SWE-bench_Verified` dataset and never change it afterwards
+(changing the subset changes the fingerprint).

@@ -1,0 +1,45 @@
+{
+  "name": "@wrongstack/bench",
+  "version": "0.255.0",
+  "license": "MIT",
+  "description": "Model-independent agentic benchmark harness for WrongStack (Aider polyglot + SWE-bench Verified) with deterministic graders and harness fingerprinting.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WrongStack/WrongStack.git",
+    "directory": "packages/bench"
+  },
+  "homepage": "https://github.com/WrongStack/WrongStack#readme",
+  "bugs": "https://github.com/WrongStack/WrongStack/issues",
+  "author": "ECOSTACK TECHNOLOGY OU",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "subsets",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "@wrongstack/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

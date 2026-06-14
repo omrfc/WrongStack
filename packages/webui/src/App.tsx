@@ -5,7 +5,6 @@ import { getWSClient } from '@/lib/ws-client';
 import { useChatStore, useConfigStore, useFileStore, useSessionStore, useUIStore } from '@/stores';
 import { useEffect } from 'react';
 import { ActivityBar, openPanel, PANEL_ORDER } from './components/ActivityBar';
-import { AgentsPage } from './components/AgentsPage';
 import { AutoPhaseView } from './components/AutoPhaseView';
 import { ChatView } from './components/ChatView';
 import { CodeEditor } from './components/CodeEditor';
@@ -32,6 +31,7 @@ function AppInner() {
   const {
     currentView, sidebarOpen, toggleSidebar, setSearchOpen, setSidebarOpen, setCurrentView,
     setInspectorTab, toggleInspector,
+    fleetMonitorOpen, agentsMonitorOpen, setFleetMonitorOpen, setAgentsMonitorOpen,
   } = useUIStore();
   const isLoading = useChatStore((s) => s.isLoading);
   const iteration = useSessionStore((s) => s.iteration);
@@ -313,19 +313,9 @@ function AppInner() {
         {currentView === 'autophase' && (
           <AutoPhaseView onClose={() => setCurrentView('chat')} />
         )}
-        {currentView === 'agents' && (
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <AgentsPage />
-          </div>
-        )}
         {currentView === 'agentflow' && (
           <div className="flex-1 flex flex-col overflow-hidden">
             <AgentFlowGraph />
-          </div>
-        )}
-        {currentView === 'fleet' && (
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <FleetMonitor isOverlay={false} />
           </div>
         )}
         {currentView === 'sessions' && (
@@ -336,6 +326,14 @@ function AppInner() {
         {/* ── IDE Code Editor (only in Files view) ── */}
         {currentView === 'files' && <CodeEditor />}
       </main>
+
+      {/* Fleet Monitor sidebar overlay */}
+      {fleetMonitorOpen && <FleetMonitor onClose={() => setFleetMonitorOpen(false)} />}
+
+      {/* Agents Monitor sidebar overlay */}
+      {agentsMonitorOpen && (
+        <AgentsMonitor onClose={() => setAgentsMonitorOpen(false)} />
+      )}
 
       {/* Global overlays */}
       <ConfirmDialog />

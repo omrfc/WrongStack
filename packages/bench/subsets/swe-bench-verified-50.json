@@ -1,0 +1,22 @@
+{
+  "_comment": [
+    "Fixed SWE-bench Verified subset for reproducible cross-model comparison.",
+    "PROVENANCE: instance_ids must come from the official `princeton-nlp/SWE-bench_Verified`",
+    "dataset (HuggingFace). Pin a fixed set ONCE and never change it — changing the subset",
+    "changes the harness fingerprint and invalidates comparison with prior runs.",
+    "The list below is a small, well-known STARTER set; before publishing numbers, expand",
+    "it to your chosen N (e.g. 50) by selecting instance_ids from the official dataset and",
+    "verifying each exists. The bench treats whatever is in `instances` as the canonical subset."
+  ],
+  "name": "swe-bench-verified-starter",
+  "instances": [
+    "astropy__astropy-12907",
+    "django__django-11099",
+    "django__django-11133",
+    "matplotlib__matplotlib-23913",
+    "pytest-dev__pytest-7373",
+    "scikit-learn__scikit-learn-13142",
+    "sphinx-doc__sphinx-8273",
+    "sympy__sympy-20212"
+  ]
+}

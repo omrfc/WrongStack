@@ -60,11 +60,30 @@ importers:
         specifier: ^4.1.8
         version: 4.1.8(@types/node@25.9.3)(@vitest/coverage-v8@4.1.8)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(jiti@2.7.0))
 
+  packages/bench:
+    dependencies:
+      '@wrongstack/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: ^25.9.3
+        version: 25.9.3
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(jiti@2.7.0)(postcss@8.5.15)(typescript@6.0.3)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
   packages/cli:
     dependencies:
       '@wrongstack/acp':
         specifier: workspace:*
         version: link:../acp
+      '@wrongstack/bench':
+        specifier: workspace:*
+        version: link:../bench
       '@wrongstack/core':
         specifier: workspace:*
         version: link:../core

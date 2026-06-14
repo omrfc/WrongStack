@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`@wrongstack/bench` — model-independent agentic benchmark harness.** New
+  package + `wstack bench` subcommand that hold the harness fixed (system prompt,
+  tools, agent loop) and swap only the model, grading with each suite's own tests
+  (never an LLM judge) and stamping every report with a harness fingerprint so
+  leaderboard rows stay comparable.
+  - **Aider polyglot** suite — runs the agent on Exercism exercises in isolated
+    workdirs and grades by the exercise's hidden tests (edit-accuracy standard).
+  - **SWE-bench Verified** suite — runs the agent on materialized instances,
+    extracts a conformant model patch (`git diff`, with held-out tests and harness
+    bookkeeping stripped), and exports official-format `predictions.jsonl` for the
+    canonical `princeton-nlp/SWE-bench` harness; inline Docker grading is pluggable
+    via the `SwebenchExternalGrade` hook.
+  - Each `(task × model)` cell runs the real `wstack` binary as a subprocess in an
+    isolated `WRONGSTACK_HOME` for true end-to-end harness measurement and crash
+    isolation. Reports (`report.md` / `summary.json` / `results.jsonl`) cover
+    pass@1, edit-apply %, cost, tokens, p50 iterations/wall, timeout %, and 429s.
+  - Docs: [docs/subcommands/bench.md](docs/subcommands/bench.md),
+    [packages/bench/README.md](packages/bench/README.md).
+
 ## [0.257.0] — 2026-06-14
 
 > The token-saving & resilience release. Consolidates the `0.255`–`0.257` line

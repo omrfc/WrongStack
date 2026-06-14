@@ -36,6 +36,7 @@ export interface SubcommandDeps {
 import { acpCmd } from './handlers/acp.js';
 import { auditCmd } from './handlers/audit.js';
 import { authCmd } from './handlers/auth.js';
+import { benchCmd } from './handlers/bench.js';
 import { diagCmd, doctorCmd } from './handlers/diag-doctor.js';
 import { exportCmd } from './handlers/export.js';
 import { initCmd } from './handlers/init.js';
@@ -78,4 +79,5 @@ export const subcommands: Record<string, SubcommandHandler> = {
   projects: projectsCmd,
   modeldiag: modeldiagCmd,
   quick: quickCmd,
+  bench: benchCmd,
 };

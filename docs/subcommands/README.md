@@ -29,6 +29,7 @@ WrongStack exposes top-level subcommands via `wstack <subcommand>` (also availab
 | `wstack version` | `version-help.ts` | Show version info |
 | `wstack help` | `version-help.ts` | Show help |
 | `wstack projects` | `projects.ts` | List projects with WrongStack state |
+| `wstack bench` | `bench.ts` | Model-independent agentic benchmarks (Aider polyglot, SWE-bench Verified) — see [bench.md](bench.md) |
 
 ## Subcommand handler interface
 
