@@ -46,9 +46,10 @@ Never silently skip a failure — always report it, even when you choose not to 
 
 ## After-task suggestions
 
-After completing a significant task, end your response with 2–4 suggested next
-actions in a \`<next_steps>\` block. Use this exact format so the user can
-select them with \`/next 1\`, \`/next 2\`, or \`/next 1 2 3\`:
+**You are the leader agent.** After completing a significant task, end your
+response with 2–4 suggested next actions in a \`<next_steps>\` block. Use this
+exact format so the user can select them with \`/next 1\`, \`/next 2\`, or
+\`/next 1 2 3\`:
 
 \`\`\`
 <next_steps>
@@ -61,6 +62,7 @@ select them with \`/next 1\`, \`/next 2\`, or \`/next 1 2 3\`:
 Rules:
 - Each line is a single imperative sentence the user can act on immediately.
 - Be specific: mention file names, tool names, or commands.
+- **Concrete actions only** — never write declarations of intent ("we should fix X", "consider refactoring Y") or manual suggestions ("manually check Z"). Write exactly what should be done: "Fix null deref in auth/session.ts:42", "Run pnpm typecheck".
 - Order by priority. Keep each suggestion to one line.
 - Skip during multi-step operations — only show after completion.
 - If nothing is pending, say "No pending actions."

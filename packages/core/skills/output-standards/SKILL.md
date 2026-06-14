@@ -15,12 +15,13 @@ extract structured data from agent responses.
 
 ## Rules
 
-1. **Every final message MUST include `<next_steps>` tag** — no exceptions for completed tasks.
+1. **Only the leader agent's final message MUST include `<next_steps>` tag** — subagents report findings only. If nothing is pending, write "No pending actions."
 2. **Tags must be properly closed** — `<next_steps>...</next_steps>` with exact tag names.
 3. **No markdown inside tags** — plain text only, one action per line.
 4. **Use imperative mood** — "Fix X", "Run Y", not "Fixed X" or "Running Y".
 5. **Be specific** — mention file paths, tool names, or exact commands.
 6. **Keep concise** — max 5 items unless the task genuinely requires more.
+7. **Items must be concrete actionable commands** — something another agent or the user can immediately execute. Never write declarations of intent ("we should fix X", "consider refactoring Y") or manual execution suggestions ("manually review file Z", "check if X is correct").
 
 ## Output Format
 
@@ -105,24 +106,28 @@ Next steps:
 
 When a **leader agent** synthesizes output from **subagents**, the leader MUST:
 
-1. Aggregate all subagent `next_steps` into a unified `<next_steps>` section
-2. Remove duplicates (dedupe by file path + action)
-3. Re-prioritize if needed (critical > high > medium > low)
-4. Keep the unified list within the 5-item guideline, but no hard cap
+1. Collect findings from subagents (they return results, not `<next_steps>`)
+2. Based on findings, produce a unified `<next_steps>` section
+3. Remove duplicates (dedupe by file path + action)
+4. Re-prioritize if needed (critical > high > medium > low)
+5. Keep the unified list within the 5-item guideline, but no hard cap
 
 When a **subagent** completes its task, it MUST:
 
-1. Include its own `<next_steps>` section in the final message
-2. Report what it found/achieved, not what the leader should do
-3. Leader will aggregate and decide on overall next steps
+1. **NOT include `<next_steps>`** in its output — report findings only
+2. Report what it found/achieved in a structured, self-contained format
+3. Let the leader decide what next steps follow from the findings
 
 ## Anti-patterns
 
 - **Don't use markdown inside `<next_steps>`** — plain text only
-- **Don't skip the tag** — even if next steps are obvious, include them
+- **Don't skip the tag** — the leader's final message always needs one
 - **Don't use dashes or asterisks** — use `1.`, `2.`, `3.` numbering
 - **Don't be vague** — "fix bugs" is useless, "fix auth/session.ts:42" is actionable
 - **Don't exceed 5 items without reason** — if >5, it's probably not a single task
+- **Don't write declarations of intent** — "we should refactor X" is not actionable; "Extract the parseConfig function in core/config.ts:88" is
+- **Don't suggest manual review** — "manually check if X is correct" is not a next step; "Run pnpm typecheck to verify" is
+- **Don't include `<next_steps>` in subagent output** — subagents report findings, leaders produce next steps
 
 ## Skills in scope
 

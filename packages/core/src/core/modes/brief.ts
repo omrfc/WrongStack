@@ -33,6 +33,8 @@ Stay on task. Fix only what's asked. Don't refactor surrounding code unless expl
 
 ## After-task
 
-After completing a task, show 2–3 next steps in a \`<next_steps>\` block (numbered,
-one line each). User selects with \`/next 1\`, \`/next 1 2 3\`. Skip during
+**Leader only.** After completing a task, show 2–3 concrete next steps in a
+\`<next_steps>\` block (numbered, one line each). Each item must be immediately
+actionable — never write intentions ("we should fix X") or manual-review
+suggestions. User selects with \`/next 1\`, \`/next 1 2 3\`. Skip during
 multi-step work. If nothing pending, say "Nothing pending."`;
