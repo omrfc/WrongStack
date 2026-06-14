@@ -89,7 +89,6 @@ export const Entry = React.memo(function Entry({
           borderRight={false}
           borderBottom={false}
           borderColor={theme.user}
-          backgroundColor="#1e1e2e"
           paddingLeft={1}
         >
           <Text>
@@ -125,7 +124,6 @@ export const Entry = React.memo(function Entry({
             borderRight={false}
             borderBottom={false}
             borderColor={theme.assistant}
-            backgroundColor="#1e1e2e"
             paddingLeft={1}
           >
             <Box flexDirection="row">
@@ -158,6 +156,9 @@ export const Entry = React.memo(function Entry({
                   <Text>
                     <Text bold color={theme.accent}>{`  ${s.index}. `}</Text>
                     <Text>{s.text}</Text>
+                    {s.auto ? (
+                      <Text color="cyan" dimColor>  auto</Text>
+                    ) : null}
                   </Text>
                 </Box>
               ))}
