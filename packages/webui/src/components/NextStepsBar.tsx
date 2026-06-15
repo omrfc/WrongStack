@@ -38,8 +38,11 @@ function parseStepLines(block: string): NextStep[] {
   for (const line of lines) {
     const m = ITEM_RE.exec(line.trim());
     if (m) {
-      const text = m[2]!.trim();
-      const hasAuto = line.trim().endsWith('auto="true"');
+      // Strip the optional trailing " auto=\"true\"" from the captured text
+      // so it doesn't leak into the step text shown to the user.
+      const raw = m[2]!;
+      const hasAuto = raw.endsWith('auto="true"');
+      const text = hasAuto ? raw.slice(0, -'auto="true"'.length).trim() : raw.trim();
       steps.push({ index: Number.parseInt(m[1]!, 10), text, auto: hasAuto });
     }
   }
@@ -204,10 +207,14 @@ export function NextStepsBar({
               >
                 {s.text}
               </span>
-              {/* Auto indicator */}
+              {/* Auto indicator — show countdown, ⏩ marker, or nothing */}
               {s.auto && (
                 <span className="flex items-center gap-1 text-[10px] text-primary/70">
-                  <Timer className="h-3 w-3" />
+                  {autoMode && s.index === 1 && !showAutoCountdown ? (
+                    <span title="Will auto-submit after countdown">⏩</span>
+                  ) : (
+                    <Timer className="h-3 w-3" />
+                  )}
                   auto
                 </span>
               )}
