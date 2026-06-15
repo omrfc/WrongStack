@@ -71,6 +71,12 @@ interface UIState {
   inspectorOpen: boolean;
   /** Active tab inside the bottom inspector panel. */
   inspectorTab: 'fleet' | 'agents';
+  /** Process Monitor overlay — triggered by /kill slash command. */
+  processMonitorOpen: boolean;
+  /** Queue Panel overlay — triggered by /queue slash command. */
+  queuePanelOpen: boolean;
+  setProcessMonitorOpen: (open: boolean) => void;
+  setQueuePanelOpen: (open: boolean) => void;
 
   /** Active prompt-refinement panel. Set while RefinePanel is shown. Null when no refinement is pending. */
   refinePanel: {
@@ -143,6 +149,8 @@ export const useUIStore = create<UIState>()(
       agentsMonitorOpen: false,
       inspectorOpen: false,
       inspectorTab: 'fleet',
+      processMonitorOpen: false,
+      queuePanelOpen: false,
 
       selectActivity: (activity) => set({ activeActivity: activity }),
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
@@ -205,6 +213,8 @@ export const useUIStore = create<UIState>()(
       setInspectorOpen: (open: boolean) => set({ inspectorOpen: open }),
       setInspectorTab: (tab: 'fleet' | 'agents') => set({ inspectorTab: tab }),
       toggleInspector: () => set((s) => ({ inspectorOpen: !s.inspectorOpen })),
+      setProcessMonitorOpen: (open: boolean) => set({ processMonitorOpen: open }),
+      setQueuePanelOpen: (open: boolean) => set({ queuePanelOpen: open }),
     }),
     {
       name: 'wrongstack-ui',

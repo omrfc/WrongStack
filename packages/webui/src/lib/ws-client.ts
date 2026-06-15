@@ -381,7 +381,7 @@ export class WrongStackWebSocketClient {
     this.handlers.get(eventType)?.delete(handler);
   }
 
-  sendMessage(content: string): string {
+  sendMessage(content: string, imageBase64?: string): string {
     const id = `msg_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
     this.send({
       type: 'user_message',
@@ -389,6 +389,7 @@ export class WrongStackWebSocketClient {
         id,
         content,
         timestamp: Date.now(),
+        ...(imageBase64 ? { imageBase64 } : {}),
       },
     });
     return id;
@@ -399,6 +400,10 @@ export class WrongStackWebSocketClient {
       type: 'abort',
       payload: {},
     });
+  }
+
+  getGitInfo() {
+    this.send({ type: 'git.info' });
   }
 
   sendConfirm(id: string, decision: 'yes' | 'no' | 'always' | 'deny') {

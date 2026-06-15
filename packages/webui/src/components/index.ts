@@ -28,3 +28,4 @@ export { ContextBreakdownModal } from './ContextBreakdownModal';
 export { AgentsPage } from './AgentsPage';
 export { SetupScreen } from './SetupScreen';
 export { RefinePanel } from './RefinePanel';
+export { QueuePanel } from './QueuePanel';

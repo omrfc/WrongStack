@@ -15,6 +15,7 @@ import { Bot, GitBranch, ListTodo, Maximize2, Rocket, Target, Users } from 'luci
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { useGitInfo } from '@/hooks/useGitInfo';
 import {
   useAutoPhaseStore,
   useFleetStore,
@@ -112,6 +113,8 @@ export function WorkspaceDock({ sessionId }: { sessionId: string }) {
   const baseBranch = useWorktreeStore((s) => s.baseBranch);
   const todos = useSessionStore((s) => s.todos);
   const fleetAgents = useFleetStore((s) => s.agents);
+
+  const gitInfo = useGitInfo();
 
   // Handlers for PhasePanel
   const handlePhaseClick = useCallback(
@@ -215,6 +218,46 @@ export function WorkspaceDock({ sessionId }: { sessionId: string }) {
             active={open === 'worktrees'}
             onClick={() => toggleDockSection('worktrees')}
           />
+        )}
+        {/* Git info chip — shows branch, changes, and sync status.
+         * Mirrors the TUI's git-info bar in the status line. */}
+        {gitInfo && (
+          <button
+            type="button"
+            onClick={() => {
+              // Toggle dock section to git if implemented; for now just
+              // show the branch name and stats as a static info chip.
+            }}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono border border-transparent hover:border-border transition-colors"
+          >
+            <GitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <span className="font-semibold text-foreground">{gitInfo.branch}</span>
+            {gitInfo.ahead > 0 && (
+              <span className="text-emerald-600 dark:text-emerald-400" title={`${gitInfo.ahead} ahead`}>
+                ↑{gitInfo.ahead}
+              </span>
+            )}
+            {gitInfo.behind > 0 && (
+              <span className="text-amber-600 dark:text-amber-400" title={`${gitInfo.behind} behind`}>
+                ↓{gitInfo.behind}
+              </span>
+            )}
+            {gitInfo.added > 0 && (
+              <span className="text-emerald-600 dark:text-emerald-400" title={`${gitInfo.added} lines added`}>
+                +{gitInfo.added}
+              </span>
+            )}
+            {gitInfo.deleted > 0 && (
+              <span className="text-red-600 dark:text-red-400" title={`${gitInfo.deleted} lines deleted`}>
+                -{gitInfo.deleted}
+              </span>
+            )}
+            {gitInfo.untracked > 0 && (
+              <span className="text-muted-foreground" title={`${gitInfo.untracked} untracked files`}>
+                {gitInfo.untracked}?
+              </span>
+            )}
+          </button>
         )}
         <DockChip
           section="collab"

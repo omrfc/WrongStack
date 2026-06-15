@@ -32,6 +32,8 @@ export function ChatInput({
   const refinePanel = useUIStore((s) => s.refinePanel);
   const toggleRefineEnabled = useUIStore((s) => s.toggleRefineEnabled);
   const setRefinePanel = useUIStore((s) => s.setRefinePanel);
+  const setProcessMonitorOpen = useUIStore((s) => s.setProcessMonitorOpen);
+  const setQueuePanelOpen = useUIStore((s) => s.setQueuePanelOpen);
   /** Live context-budget signals — drive the token-estimate chip beside
    *  the character counter. The estimate uses the universal 4-char-per-token
    *  heuristic which is wrong by ±25% for natural prose but accurate enough
@@ -227,6 +229,37 @@ export function ChatInput({
           // Ask the agent to suggest next steps
           sendMsg('What are the next steps I should take? Be specific and actionable.');
           return true;
+        case '/kill':
+        case '/ps': {
+          // /kill — open the Process Monitor overlay
+          // /ps  — open it too (read-only view is the same component)
+          setProcessMonitorOpen(true);
+          return true;
+        }
+        case '/queue': {
+          // Show queue state: count + items preview
+          const q = queue;
+          if (q.length === 0) {
+            addMessage({
+              role: 'assistant',
+              content:
+                '📋 **Message Queue** — empty.\n\nType while the agent is running to queue messages; they are sent automatically when the agent finishes.',
+            });
+          } else {
+            const lines = [`📋 **Message Queue** (${q.length} queued)`, ''];
+            q.forEach((item, i) => {
+              const preview = item.length > 80 ? `${item.slice(0, 77)}…` : item;
+              lines.push(`${i + 1}. ${preview}`);
+            });
+            lines.push('', '_Use `/queue open` to manage, or `/queue clear` to wipe._');
+            addMessage({ role: 'assistant', content: lines.join('\n') });
+          }
+          // /queue open — show the overlay panel
+          if (args.toLowerCase() === 'open') {
+            setQueuePanelOpen(true);
+          }
+          return true;
+        }
         case '/next': {
           const narg = args.trim().toLowerCase();
           if (!narg || narg === 'list' || narg === 'ls' || narg === 'show') return handleNextList();
@@ -244,10 +277,13 @@ export function ChatInput({
       addMessage,
       clearMessages,
       client,
+      queue,
       sendAbort,
       setLoading,
       setCurrentView,
       toggleRefineEnabled,
+      setProcessMonitorOpen,
+      setQueuePanelOpen,
       ws,
       onOpenBreakdown,
     ],
@@ -361,7 +397,11 @@ export function ChatInput({
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!input.trim()) return;
+      if (!input.trim() && !pendingImageRef.current) return;
+
+      // Drain and clear the pending clipboard image (if any)
+      const pendingImage = pendingImageRef.current;
+      pendingImageRef.current = null;
 
       const content = input.trim();
 
@@ -384,7 +424,12 @@ export function ChatInput({
       // queue one message at a time. We also enable the textarea while
       // running so this code path is reachable.
       if (isLoading) {
-        enqueue(content);
+        // Append the pending image to the queued text so both arrive together
+        // when the queue drains.
+        const queued = pendingImage
+          ? `![pasted image](${pendingImage})\n\n${content}`
+          : content;
+        enqueue(queued);
         return;
       }
 
@@ -405,9 +450,14 @@ export function ChatInput({
             // Send the text to the backend for refinement
             refineModel(content);
           } else {
-            addMessage({ role: 'user', content });
+            // Build the full content: prepend the pasted image as a markdown
+            // image link so both the chat view and the agent receive it.
+            const fullContent = pendingImage
+              ? `![pasted image](${pendingImage})\n\n${content}`
+              : content;
+            addMessage({ role: 'user', content: fullContent });
             setLoading(true);
-            sendMessage(content);
+            sendMessage(content, pendingImage ?? undefined);
           }
         } else {
           console.warn(JSON.stringify({ level: 'warn', event: 'ws_send_failed', reason: 'not_connected', timestamp: new Date().toISOString() }));
@@ -565,6 +615,45 @@ export function ChatInput({
     },
     [slashSuggestions, slashIndex, atMention, promptHistory, historyIdx, input, runSlashCommand, handleSubmit],
   );
+
+  /** Accumulates base64 image data pasted while the input is focused.
+   *  Cleared after each submit so images aren't re-sent accidentally. */
+  const pendingImageRef = useRef<string | null>(null);
+
+  /** Intercept pastes on the textarea to detect and accumulate clipboard images.
+   *  Mirrors the TUI's `readClipboardImage` behaviour (paste image → attach to
+   *  next message) but uses the browser's Async Clipboard API instead of
+   *  Node.js subprocesses. */
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+
+    const onPaste = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          try {
+            const blob = item.getAsFile();
+            if (!blob) continue;
+            const reader = new FileReader();
+            reader.onload = () => {
+              pendingImageRef.current = reader.result as string;
+            };
+            reader.readAsDataURL(blob);
+          } catch {
+            // Clipboard access requires permission in some browsers; silently skip.
+          }
+          return;
+        }
+      }
+    };
+
+    ta.addEventListener('paste', onPaste);
+    return () => ta.removeEventListener('paste', onPaste);
+  }, []);
 
   const adjustTextareaHeight = () => {
     const textarea = textareaRef.current;

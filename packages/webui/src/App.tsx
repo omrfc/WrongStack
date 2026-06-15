@@ -26,12 +26,15 @@ import { WorkspaceDock } from './components/WorkspaceDock';
 import { AgentsMonitor } from './components/AgentsMonitor';
 import { FleetMonitor } from './components/FleetMonitor';
 import { InspectorPanel } from './components/InspectorPanel';
+import { ProcessMonitor } from './components/ProcessMonitor';
+import { QueuePanel } from './components/QueuePanel';
 function AppInner() {
   const { theme } = useTheme();
   const {
     currentView, sidebarOpen, toggleSidebar, setSearchOpen, setSidebarOpen, setCurrentView,
     setInspectorTab, toggleInspector,
     fleetMonitorOpen, agentsMonitorOpen, setFleetMonitorOpen, setAgentsMonitorOpen,
+    processMonitorOpen, setProcessMonitorOpen, queuePanelOpen, setQueuePanelOpen,
   } = useUIStore();
   const isLoading = useChatStore((s) => s.isLoading);
   const iteration = useSessionStore((s) => s.iteration);
@@ -333,6 +336,16 @@ function AppInner() {
       {/* Agents Monitor sidebar overlay */}
       {agentsMonitorOpen && (
         <AgentsMonitor onClose={() => setAgentsMonitorOpen(false)} />
+      )}
+
+      {/* Process Monitor overlay — triggered by /kill */}
+      {processMonitorOpen && (
+        <ProcessMonitor open={processMonitorOpen} onClose={() => setProcessMonitorOpen(false)} />
+      )}
+
+      {/* Queue Panel overlay — triggered by /queue */}
+      {queuePanelOpen && (
+        <QueuePanel open={queuePanelOpen} onClose={() => setQueuePanelOpen(false)} />
       )}
 
       {/* Global overlays */}
