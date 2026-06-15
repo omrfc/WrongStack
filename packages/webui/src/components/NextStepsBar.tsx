@@ -122,6 +122,7 @@ export function NextStepsBar({
   autoMode = false,
   autoDelayMs = 30_000,
   onAutoSubmit,
+  canAutoSubmit: canAutoSubmitProp = true,
 }: {
   steps: NextStep[];
   /** Whether YOLO mode is active */
@@ -132,10 +133,13 @@ export function NextStepsBar({
   autoDelayMs?: number;
   /** Callback when auto countdown completes */
   onAutoSubmit?: (text: string) => void;
+  /** Whether auto-submit is currently allowed (cap not reached). */
+  canAutoSubmit?: boolean;
 }): React.ReactElement | null {
   if (steps.length === 0) return null;
 
-  const showAutoCountdown = yoloMode && autoMode;
+  // Don't show countdown if the consecutive auto-submit cap has been reached
+  const showAutoCountdown = yoloMode && autoMode && canAutoSubmitProp;
   const autoStep = showAutoCountdown ? steps.find((s) => s.auto) : undefined;
 
   return (

@@ -6,6 +6,7 @@ import type { ChatMessage } from '@/stores';
 import { useChatStore, useSessionStore, useUIStore } from '@/stores';
 import { useConfigStore } from '@/stores';
 import { useLocalPrefs } from '@/stores/local-prefs';
+import { useAutoSubmitStreak } from '@/stores/auto-submit-streak.js';
 import {
   Bot,
   CheckCircle2,
@@ -66,8 +67,24 @@ export const MessageBubble = memo(function MessageBubble({
   const localPrefs = useLocalPrefs();
   const { autonomy, yolo } = localPrefs;
 
+  const { canAutoSubmit, recordAutoSubmit, capWarned } = useAutoSubmitStreak();
+  const autoProceedMaxIterations = localPrefs.autoProceedMaxIterations;
+  const canAutoSubmitNow = autoProceedMaxIterations <= 0 || canAutoSubmit();
+
   /** Auto-submit callback for YOLO+auto mode countdown completion */
   const handleAutoSubmit = (text: string) => {
+    if (!canAutoSubmit()) {
+      // Cap already hit — show a one-time warning and stop.
+      if (!capWarned) {
+        addMessage({
+          role: 'assistant',
+          content:
+            '⚠️ _Auto-proceed paused — maximum consecutive automatic turns reached. Type anything to continue (autonomy stays on)._',
+        });
+      }
+      return;
+    }
+    recordAutoSubmit();
     addMessage({ role: 'user', content: text });
     setLoading(true);
     const client = getWSClient(wsUrl);
@@ -262,6 +279,7 @@ export const MessageBubble = memo(function MessageBubble({
               autoMode={autonomy === 'auto'}
               autoDelayMs={localPrefs.autonomyDelayMs}
               onAutoSubmit={handleAutoSubmit}
+              canAutoSubmit={canAutoSubmitNow}
             />
           );
         })()}

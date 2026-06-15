@@ -2,6 +2,7 @@ import { expectDefined } from '@wrongstack/core';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
 import { useChatStore, useSessionStore, useUIStore } from '@/stores';
+import { useAutoSubmitStreak } from '@/stores/auto-submit-streak.js';
 import { Pencil, Send, Square, Sparkles } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -34,6 +35,8 @@ export function ChatInput({
   const setRefinePanel = useUIStore((s) => s.setRefinePanel);
   const setProcessMonitorOpen = useUIStore((s) => s.setProcessMonitorOpen);
   const setQueuePanelOpen = useUIStore((s) => s.setQueuePanelOpen);
+  /** Auto-submit streak reset — called on every manual submit to re-arm the cap. */
+  const { reset: resetAutoSubmitStreak } = useAutoSubmitStreak();
   /** Live context-budget signals — drive the token-estimate chip beside
    *  the character counter. The estimate uses the universal 4-char-per-token
    *  heuristic which is wrong by ±25% for natural prose but accurate enough
@@ -397,6 +400,8 @@ export function ChatInput({
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
+      // Manual submit re-arms the auto-proceed consecutive cap.
+      resetAutoSubmitStreak();
       if (!input.trim() && !pendingImageRef.current) return;
 
       // Drain and clear the pending clipboard image (if any)
@@ -481,6 +486,7 @@ export function ChatInput({
       runSlashCommand,
       pushPrompt,
       _clearTextarea,
+      resetAutoSubmitStreak,
     ],
   );
 
