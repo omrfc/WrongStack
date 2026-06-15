@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { SlashCommand } from '@wrongstack/core';
 import {
   addPlanItem,
@@ -146,7 +147,7 @@ export function buildTasksCommand(_opts: SlashCommandContext): SlashCommand {
             const priority = validatePriority(parts[2] ?? '') ?? 'medium';
             const now = new Date().toISOString();
             file.tasks.push({
-              id: `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+              id: `task_${randomUUID()}`,
               title,
               type,
               priority,
@@ -269,7 +270,7 @@ export function buildTasksCommand(_opts: SlashCommandContext): SlashCommand {
             ];
             if (found.item.description) {
               todos.push({
-                id: `todo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                id: `todo_${randomUUID()}`,
                 content: found.item.description.slice(0, 200),
                 status: 'pending',
                 promotedFromTask: found.item.id,

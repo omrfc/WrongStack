@@ -16,6 +16,7 @@ import {
   saveTasks,
   formatTaskList,
 } from '@wrongstack/core';
+import { randomUUID } from 'node:crypto';
 import type { Tool } from '@wrongstack/core';
 
 /**
@@ -289,7 +290,7 @@ export const planTool: Tool<PlanInput, PlanOutput> = {
       const taskFile: TaskFile = (await loadTasks(taskPath)) ?? emptyTaskFile(sessionId);
       const now = new Date().toISOString();
       taskFile.tasks.push({
-        id: `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        id: `task_${randomUUID()}`,
         title: taskifyMeta.title,
         description: taskifyMeta.details || undefined,
         type: 'feature',
