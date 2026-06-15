@@ -170,11 +170,13 @@ const plugin: Plugin = {
         }
 
         let result: string;
+        /* v8 ignore start -- the render pipeline (regex replaces) does not throw; this guard is defensive. */
         try {
           result = raw ? renderTemplateRaw(template, variables) : renderTemplate(template, variables);
         } catch (err: unknown) {
           return { ok: false, error: String(err) };
         }
+        /* v8 ignore stop */
 
         if (outputPath) {
           // Path traversal guard: reject absolute paths and path components
@@ -244,11 +246,13 @@ const plugin: Plugin = {
         }
 
         let result: string;
+        /* v8 ignore start -- the render pipeline (regex replaces) does not throw; this guard is defensive. */
         try {
           result = raw ? renderTemplateRaw(content, variables) : renderTemplate(content, variables);
         } catch (err: unknown) {
           return { ok: false, error: `Template rendering failed: ${err}` };
         }
+        /* v8 ignore stop */
 
         if (outputPath) {
           if (isAbsolute(outputPath) || outputPath.includes('..')) {

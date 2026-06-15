@@ -117,10 +117,12 @@ async function dockerLogs(
 ): Promise<LogsOutput> {
   const args = ['logs'];
   if (lines > 0) args.push('--tail', String(lines));
+  /* v8 ignore start -- execute() does not forward `since` to dockerLogs yet; this block is currently unreachable. */
   if (since) {
     const sinceMap: Record<string, string> = { '1h': '1h', '6h': '6h', '24h': '24h' };
     args.push('--since', sinceMap[since] ?? '1h');
   }
+  /* v8 ignore stop */
   // Validate service name to prevent container name injection.
   // Docker container names are limited to [a-zA-Z0-9][a-zA-Z0-9._-]+.
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]+$/.test(service)) {

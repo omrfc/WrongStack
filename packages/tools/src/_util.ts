@@ -166,6 +166,7 @@ export function collapseConsecutiveDuplicates(text: string, minRun = REPEAT_RUN_
 /** Largest prefix of `s` whose UTF-8 byte length is <= `maxBytes`. */
 function takeHeadBytes(s: string, maxBytes: number): string {
   if (maxBytes <= 0) return '';
+  /* v8 ignore next -- only caller (truncateHeadTail) passes a budget smaller than s; defensive. */
   if (Buffer.byteLength(s, 'utf8') <= maxBytes) return s;
   let lo = 0;
   let hi = s.length;
@@ -180,6 +181,7 @@ function takeHeadBytes(s: string, maxBytes: number): string {
 /** Largest suffix of `s` whose UTF-8 byte length is <= `maxBytes`. */
 function takeTailBytes(s: string, maxBytes: number): string {
   if (maxBytes <= 0) return '';
+  /* v8 ignore next -- only caller (truncateHeadTail) passes a budget smaller than s; defensive. */
   if (Buffer.byteLength(s, 'utf8') <= maxBytes) return s;
   let lo = 0;
   let hi = s.length;

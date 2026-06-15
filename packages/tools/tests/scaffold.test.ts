@@ -101,4 +101,12 @@ describe('scaffoldTool', () => {
     );
     expect(result.files_created).toBeGreaterThan(0);
   });
+
+  it('rejects a name that escapes the project root via path traversal', async () => {
+    const ctx = makeCtx();
+    // react-component uses `{{name}}.tsx` as a filename, so a "../" name escapes.
+    await expect(
+      scaffoldTool.execute({ template: 'react-component', name: '../../evil' }, ctx),
+    ).rejects.toThrow(/escape project root/);
+  });
 });

@@ -65,6 +65,7 @@ export const lintTool: Tool<LintInput, LintOutput> = {
     const linter = input.linter ?? 'auto';
 
     const detected = linter === 'auto' ? await detectLinter(cwd) : linter;
+    /* v8 ignore start -- detectLinter always falls back to 'biome' (never null) and explicit linters are truthy; this is defensive. */
     if (!detected) {
       yield {
         type: 'final',
@@ -80,6 +81,7 @@ export const lintTool: Tool<LintInput, LintOutput> = {
       };
       return;
     }
+    /* v8 ignore stop */
 
     yield { type: 'log', text: `Running ${detected}…`, data: { linter: detected } };
 

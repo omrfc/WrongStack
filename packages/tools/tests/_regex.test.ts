@@ -8,6 +8,12 @@ describe('compileUserRegex (ReDoS guard for grep/replace/logs)', () => {
     if (r.ok) expect(r.regex.test('foobar')).toBe(true);
   });
 
+  it('rejects a non-string pattern', () => {
+    const r = compileUserRegex(123 as unknown as string, '');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/must be a string/);
+  });
+
   it('rejects empty patterns', () => {
     const r = compileUserRegex('', '');
     expect(r.ok).toBe(false);

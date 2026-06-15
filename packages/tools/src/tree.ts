@@ -222,6 +222,7 @@ async function walkDir(dir: string, depth: number, opts: WalkOptions): Promise<v
 
   for (let i = 0; i < items.length; i++) {
     const entry = items[i];
+    /* v8 ignore next -- i is bounded by items.length, so entry is always defined; defensive. */
     if (!entry) continue;
     const isLast = i === items.length - 1;
     const connector = opts.isLast ? '    ' : '│   ';

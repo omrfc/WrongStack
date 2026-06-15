@@ -28,7 +28,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { readClipboardImage } from './clipboard.js';
+import { readClipboardImage, readClipboardText } from './clipboard.js';
 import { AgentsMonitor } from './components/agents-monitor.js';
 import { AUTONOMY_OPTIONS, AutonomyPicker } from './components/autonomy-picker.js';
 import { BrainDecisionPrompt } from './components/brain-decision-prompt.js';
@@ -1894,6 +1894,33 @@ export function App({
     }
   };
 
+  // Ctrl+V → read text from the system clipboard and insert it. In raw mode the
+  // terminal hands Ctrl+V to us as a control byte instead of doing a native
+  // paste, and we never enable bracketed-paste mode, so without this nothing
+  // happens. Route through commitPaste so long/multi-line content collapses to a
+  // [pasted #N] chip exactly like a bracketed paste would.
+  const pasteClipboardText = async (): Promise<void> => {
+    try {
+      const text = await readClipboardText();
+      if (!text) {
+        dispatch({
+          type: 'addEntry',
+          entry: { kind: 'info', text: 'No text on the clipboard.' },
+        });
+        return;
+      }
+      await commitPaste(text);
+    } catch (err) {
+      dispatch({
+        type: 'addEntry',
+        entry: {
+          kind: 'error',
+          text: `Clipboard error: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      });
+    }
+  };
+
   const acceptPickerSelection = async (): Promise<void> => {
     const { open, matches, selected } = state.picker;
     if (!open || matches.length === 0) return;
@@ -2204,7 +2231,13 @@ export function App({
     dispatch({ type: 'projectPickerOpen', items });
   }, [getProjectPickerItems]);
   const loadLiveSessions = React.useCallback(async () => {
-    if (!getLiveSessions) return;
+    if (!getLiveSessions) {
+      // No-op: show empty state (busy stays false from initial state).
+      // Do NOT dispatch busy:true — that would leave the panel stuck in
+      // "Loading..." forever with no way for the user to dismiss it.
+      dispatch({ type: 'sessionsPanelSet', sessions: [] });
+      return;
+    }
     dispatch({ type: 'sessionsPanelBusy', on: true });
     try {
       const sessions = await getLiveSessions();
@@ -4081,56 +4114,12 @@ export function App({
       }
       return;
     }
-    // Esc closes whichever overlay/panel is open.
-    if (key.escape) {
-      if (state.agentsMonitorOpen) {
-        dispatch({ type: 'toggleAgentsMonitor' });
-        return;
-      }
-      if (state.monitorOpen) {
-        dispatch({ type: 'toggleMonitor' });
-        return;
-      }
-      // worktreeMonitor and the autoPhase PhaseMonitor are intentionally NOT
-      // handled here: each owns its own Esc close via its own useInput. Because
-      // the Input stays mounted alongside them, dispatching the toggle here too
-      // would fire it twice in one keypress and the panel would re-open.
-      if (state.todosMonitorOpen) {
-        dispatch({ type: 'toggleTodosMonitor' });
-        return;
-      }
-      if (state.settingsPicker.open) {
-        dispatch({ type: 'settingsClose' });
-        return;
-      }
-      if (state.projectPicker.open) {
-        dispatch({ type: 'projectPickerClose' });
-        return;
-      }
-      if (state.queuePanelOpen) {
-        dispatch({ type: 'toggleQueuePanel' });
-        return;
-      }
-      if (state.processListOpen) {
-        dispatch({ type: 'toggleProcessList' });
-        return;
-      }
-      if (state.goalPanelOpen) {
-        dispatch({ type: 'toggleGoalPanel' });
-        return;
-      }
-      if (state.sessionsPanelOpen) {
-        dispatch({ type: 'toggleSessionsPanel' });
-        return;
-      }
-    }
-
     // ── Hidden-input guard (process list only) ────────────────────────
     // The process list is the one monitor that keeps the Input hidden (its
     // single-key kill actions own the keyboard). The overlay-control keys above
-    // (F8 toggle + Esc close) have already had their turn; swallow every
-    // remaining key so nothing types into the hidden buffer and so the panel's
-    // own ↑↓/Enter/Del/a/A/r shortcuts aren't echoed as text. ProcessList reads
+    // (F8 toggle) have already had their turn; swallow every remaining key so
+    // nothing types into the hidden buffer and so the panel's own
+    // ↑↓/Enter/Del/a/A/r shortcuts aren't echoed as text. ProcessList reads
     // these keys through its OWN useInput, which is unaffected by this return.
     // The other monitor panels deliberately fall through so the live chat input
     // below them keeps receiving text.
@@ -4482,6 +4471,15 @@ export function App({
         nextStepsAutoSubmitSuggestionRef.current = null;
       }
       setDraft(next, cursor);
+      return;
+    }
+
+    // Ctrl+V → paste text from the system clipboard. Raw mode delivers Ctrl+V as
+    // a control byte (no native paste) and we don't enable bracketed-paste mode,
+    // so we read the clipboard ourselves. Must run before the `key.ctrl` bail
+    // below, which would otherwise swallow it.
+    if (key.ctrl && input === 'v') {
+      await pasteClipboardText();
       return;
     }
 
@@ -5609,6 +5607,7 @@ export function App({
             fleet={fleetCounts}
             git={gitInfo}
             context={contextWindow}
+            contextStrategy={getSettings ? getSettings().contextStrategy : undefined}
             brain={state.brain}
             projectName={projectName}
             workingDir={workingDirChip}
@@ -5662,7 +5661,6 @@ export function App({
               runningPhaseIds={state.autoPhase.runningPhaseIds}
               elapsedMs={state.autoPhase.elapsedMs}
               nowTick={nowTick}
-              onClose={() => dispatch({ type: 'autoPhaseMonitorToggle' })}
             />
           ) : state.worktreeMonitorOpen ? (
             <WorktreeMonitor

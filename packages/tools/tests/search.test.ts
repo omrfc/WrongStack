@@ -126,6 +126,90 @@ describe('searchTool', () => {
     const result = await searchTool.execute({ query: 'test' }, ctx, makeOpts());
     expect(Array.isArray(result.results)).toBe(true);
   });
+
+  it('throws when executeStream is unavailable', async () => {
+    const original = searchTool.executeStream;
+    searchTool.executeStream = undefined;
+    try {
+      await expect(searchTool.execute({ query: 'x' }, {} as any, makeOpts())).rejects.toThrow(
+        /stream execution unavailable/,
+      );
+    } finally {
+      searchTool.executeStream = original;
+    }
+  });
+
+  it('throws when the stream ends without a final event', async () => {
+    const original = searchTool.executeStream!;
+    searchTool.executeStream = async function* () {
+      yield { type: 'log', text: 'no final' } as never;
+    };
+    try {
+      await expect(searchTool.execute({ query: 'x' }, {} as any, makeOpts())).rejects.toThrow(
+        /without final event/,
+      );
+    } finally {
+      searchTool.executeStream = original;
+    }
+  });
+});
+
+describe('search engine parsers (realistic fixtures)', () => {
+  let originalFetch: typeof globalThis.fetch;
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('parses Google results when the markup matches the parser regexes', async () => {
+    const html = `
+      <h3 class="DKV84">Result Title</h3>
+      <cite>https://example.com/page</cite>
+      <span class="aXCZ0b">The result snippet text</span>
+    `;
+    globalThis.fetch = mockFetch(() => html) as unknown as typeof globalThis.fetch;
+    const result = await searchTool.execute(
+      { query: 'q', source: 'google' },
+      {} as any,
+      makeOpts(),
+    );
+    expect(result.results.length).toBeGreaterThan(0);
+    expect(result.results[0]?.title).toBe('Result Title');
+    expect(result.results[0]?.url).toBe('https://example.com/page');
+    expect(result.results[0]?.snippet).toBe('The result snippet text');
+  });
+
+  it('parses Bing results when the markup matches the parser regexes', async () => {
+    const html = `
+      <h2><a href="https://example.com/b">Bing Title</a></h2>
+      <p class="b_paractl">Bing snippet text</p>
+    `;
+    globalThis.fetch = mockFetch(() => html) as unknown as typeof globalThis.fetch;
+    const result = await searchTool.execute({ query: 'q', source: 'bing' }, {} as any, makeOpts());
+    expect(result.results.length).toBeGreaterThan(0);
+    expect(result.results[0]?.title).toBe('Bing Title');
+    expect(result.results[0]?.url).toBe('https://example.com/b');
+  });
+
+  it('returns empty results when Google fetch fails', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error('net down');
+    }) as unknown as typeof globalThis.fetch;
+    const result = await searchTool.execute({ query: 'q', source: 'google' }, {} as any, makeOpts());
+    expect(result.source).toBe('google');
+    expect(result.results).toEqual([]);
+  });
+
+  it('returns empty results when Bing fetch fails', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error('net down');
+    }) as unknown as typeof globalThis.fetch;
+    const result = await searchTool.execute({ query: 'q', source: 'bing' }, {} as any, makeOpts());
+    expect(result.source).toBe('bing');
+    expect(result.results).toEqual([]);
+  });
 });
 
 describe('fetchWithTimeout error path', () => {

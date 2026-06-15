@@ -90,7 +90,7 @@ export function SessionsPanel({
           ⧉ Sessions
         </Text>
         <Text dimColor>
-          · F10 or Esc to close
+          · F10 to close
         </Text>
         {busy && <Text dimColor>· loading…</Text>}
       </Box>

@@ -44,7 +44,7 @@ export function QueuePanel({ items }: { items: QueueItem[] }): React.ReactElemen
           {overflow > 0 ? (
             <Text color="cyan">+{overflow}</Text>
           ) : null}
-          <Text dimColor>│ F7 / Esc to close</Text>
+          <Text dimColor>│ F7 to close</Text>
         </Box>
       </Box>
 

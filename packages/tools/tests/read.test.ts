@@ -34,6 +34,27 @@ describe('read tool', () => {
     expect(out.text).not.toContain('15→');
   });
 
+  it('requires a path', async () => {
+    await expect(
+      readTool.execute({ path: '' }, sb.ctx, { signal: newSignal() }),
+    ).rejects.toThrow(/path is required/);
+  });
+
+  it('rejects a directory (not a regular file)', async () => {
+    await fs.mkdir(path.join(sb.dir, 'adir'));
+    await expect(
+      readTool.execute({ path: 'adir' }, sb.ctx, { signal: newSignal() }),
+    ).rejects.toThrow(/not a regular file/);
+  });
+
+  it('rejects files larger than the 5MB cap', async () => {
+    const file = path.join(sb.dir, 'big.txt');
+    await fs.writeFile(file, Buffer.alloc(5 * 1024 * 1024 + 1, 0x61)); // 5MB+1 of 'a'
+    await expect(
+      readTool.execute({ path: 'big.txt' }, sb.ctx, { signal: newSignal() }),
+    ).rejects.toThrow(/file too large/);
+  });
+
   it('rejects binary files', async () => {
     const file = path.join(sb.dir, 'bin.bin');
     await fs.writeFile(file, Buffer.from([0, 1, 2, 3, 0, 5]));

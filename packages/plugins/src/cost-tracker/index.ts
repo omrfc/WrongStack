@@ -229,11 +229,13 @@ const plugin: Plugin = {
           const header = includeModel
             ? 'model,timestamp,prompt_tokens,completion_tokens,total_tokens,cost_usd'
             : 'timestamp,prompt_tokens,completion_tokens,total_tokens,cost_usd';
-          const rows = sessionCost.requests.map((r) =>
-            includeModel
-              ? `${r.model},${r.timestamp},${r.promptTokens},${r.completionTokens},${r.totalTokens},${r.costUsd ?? 0}`
-              : `${r.timestamp},${r.promptTokens},${r.completionTokens},${r.totalTokens},${r.costUsd ?? 0}`,
-          );
+          const rows = sessionCost.requests.map((r) => {
+            /* v8 ignore next -- costUsd is always set by estimateCost; the ?? 0 fallback is defensive. */
+            const cost = r.costUsd ?? 0;
+            return includeModel
+              ? `${r.model},${r.timestamp},${r.promptTokens},${r.completionTokens},${r.totalTokens},${cost}`
+              : `${r.timestamp},${r.promptTokens},${r.completionTokens},${r.totalTokens},${cost}`;
+          });
           return {
             ok: true,
             format: 'csv',

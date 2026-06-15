@@ -105,6 +105,7 @@ export const replaceTool: Tool<ReplaceInput, ReplaceOutput> = {
       // so we never read or write through a link.
       const lstat = await fs.lstat(absPath).catch((err) => {
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        /* v8 ignore next -- non-ENOENT lstat failure (EACCES etc.) is a defensive rethrow. */
         throw err;
       });
       if (!lstat || !lstat.isFile()) continue;
@@ -117,6 +118,7 @@ export const replaceTool: Tool<ReplaceInput, ReplaceOutput> = {
       try {
         realPath = await fs.realpath(absPath);
       } catch {
+        /* v8 ignore next -- realpath failing after a successful lstat is a TOCTOU race; defensive. */
         continue;
       }
       const rel = path.relative(realRoot, realPath);
@@ -132,6 +134,7 @@ export const replaceTool: Tool<ReplaceInput, ReplaceOutput> = {
         if (isBinaryBuffer(buf)) continue;
         content = buf.toString('utf8');
       } catch {
+        /* v8 ignore next -- readFile failing after a successful stat is a TOCTOU race; defensive. */
         continue;
       }
 
@@ -287,6 +290,7 @@ async function globNative(
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });
     } catch {
+      /* v8 ignore next -- unreadable directory during the walk; defensive. */
       return;
     }
     for (const e of entries) {
@@ -301,6 +305,7 @@ async function globNative(
       } catch {
         // lstat fails for very unusual entries (e.g. broken symlinks to deleted
         // files on NFS); skip safely rather than surfacing an error.
+        /* v8 ignore next -- lstat failing on a readdir entry is a rare NFS/race case; defensive. */
         continue;
       }
       if (e.isDirectory()) {

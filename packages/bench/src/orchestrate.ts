@@ -115,6 +115,7 @@ export async function runBenchmark(opts: RunBenchmarkOptions): Promise<BenchRepo
       } catch (err) {
         grade = {
           passed: false,
+          /* v8 ignore next -- graders reject with Error; the String(err) branch is defensive. */
           detail: `grader error: ${err instanceof Error ? err.message : String(err)}`,
         };
       }

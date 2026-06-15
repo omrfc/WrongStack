@@ -127,6 +127,23 @@ describe('ACPProtocolHandler', () => {
       expect(response.result?.content).toEqual([{ type: 'text', text: 'boom' }]);
     });
 
+    it('stringifies a non-Error thrown by the tool', async () => {
+      const transport = fakeTransport();
+      const registry = fakeRegistry();
+      registry.has.mockReturnValue(true);
+      registry.execute.mockRejectedValue('plain string failure');
+
+      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
+      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
+
+      transport.sent.length = 0;
+      await handler.handleMessage({ id: 2, method: 'tools/call', params: { name: 'odd', arguments: {} } });
+
+      const response = transport.sent[0] as { result?: { content: { text: string }[]; isError: boolean } };
+      expect(response.result?.isError).toBe(true);
+      expect(response.result?.content[0]?.text).toBe('plain string failure');
+    });
+
     it('returns isError=true for unknown tool', async () => {
       const transport = fakeTransport();
       const registry = fakeRegistry();
@@ -243,6 +260,21 @@ describe('ACPProtocolHandler', () => {
       transport.sent.length = 0;
       await handler.handleMessage({ id: 99, method: 'cancel' });
 
+      const response = transport.sent[0] as { result?: { ok: boolean } };
+      expect(response.result).toEqual({ ok: true });
+    });
+  });
+
+  describe('sessionInfoUpdate', () => {
+    it('acknowledges with ok:true', async () => {
+      const transport = fakeTransport();
+      const registry = fakeRegistry();
+      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
+      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
+
+      transport.sent.length = 0;
+      const terminal = await handler.handleMessage({ id: 2, method: 'sessionInfoUpdate' });
+      expect(terminal).toBe(false);
       const response = transport.sent[0] as { result?: { ok: boolean } };
       expect(response.result).toEqual({ ok: true });
     });

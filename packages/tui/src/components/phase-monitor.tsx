@@ -1,4 +1,4 @@
-import { Box, Text, useInput } from '../ink.js';
+import { Box, Text } from '../ink.js';
 import type React from 'react';
 
 const fmtElapsed = (ms: number): string => {
@@ -28,7 +28,6 @@ export interface PhaseMonitorProps {
   elapsedMs: number;
   /** nowTick for elapsed time calculation. */
   nowTick: number;
-  onClose: () => void;
 }
 
 const PHASE_STATUS: Record<string, { icon: string; color: string; label: string }> = {
@@ -59,11 +58,8 @@ export function PhaseMonitor({
   runningPhaseIds,
   elapsedMs,
   nowTick,
-  onClose,
 }: PhaseMonitorProps): React.ReactElement {
-  useInput((_, key) => {
-    if (key.escape) onClose();
-  });
+
 
   const phaseList = Object.values(phases);
   const running = phaseList.filter((p) =>
@@ -91,7 +87,7 @@ export function PhaseMonitor({
             <Text color="red">✗{failed.length}</Text>
           </>
         ) : null}
-        <Text dimColor>│ Ctrl+P / Esc to close</Text>
+        <Text dimColor>│ Ctrl+P to close</Text>
       </Box>
 
       {phaseList.length === 0 ? (
@@ -134,7 +130,7 @@ export function PhaseMonitor({
 
       {/* Keyboard hints */}
       <Box marginTop={1}>
-        <Text dimColor>↑/↓ navigate phases · Esc close</Text>
+        <Text dimColor>↑/↓ navigate phases</Text>
       </Box>
     </Box>
   );

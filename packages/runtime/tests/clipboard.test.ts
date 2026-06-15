@@ -14,7 +14,7 @@ vi.mock('node:child_process', async (orig) => {
   };
 });
 
-import { readClipboardImage } from '../src/clipboard.js';
+import { readClipboardImage, readClipboardText } from '../src/clipboard.js';
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -248,6 +248,81 @@ describe('readClipboardImage', () => {
         return mkChildSavingFile(() => filePath, Buffer.alloc(0), 0, 'OK');
       });
       expect(await readClipboardImage()).toBeNull();
+    });
+  });
+});
+
+describe('readClipboardText', () => {
+  it('returns null on unsupported platforms', async () => {
+    setPlatform('freebsd');
+    expect(await readClipboardText()).toBeNull();
+    expect(spawnMock.spawn).not.toHaveBeenCalled();
+  });
+
+  describe('windows', () => {
+    beforeEach(() => setPlatform('win32'));
+
+    it('reads clipboard text and strips the trailing newline PowerShell adds', async () => {
+      spawnMock.spawn.mockReturnValue(mkChildEmittingStdout('hello world\r\n'));
+      expect(await readClipboardText()).toBe('hello world');
+    });
+
+    it('preserves embedded newlines', async () => {
+      spawnMock.spawn.mockReturnValue(mkChildEmittingStdout('line1\r\nline2\r\n'));
+      expect(await readClipboardText()).toBe('line1\r\nline2');
+    });
+
+    it('returns null for an empty clipboard', async () => {
+      spawnMock.spawn.mockReturnValue(mkChildEmittingStdout('\r\n'));
+      expect(await readClipboardText()).toBeNull();
+    });
+
+    it('returns null when the child exits non-zero', async () => {
+      spawnMock.spawn.mockReturnValue(mkChildEmittingStdout('junk', 1));
+      expect(await readClipboardText()).toBeNull();
+    });
+
+    it('returns null when spawn errors', async () => {
+      spawnMock.spawn.mockReturnValue(mkErrorChild());
+      expect(await readClipboardText()).toBeNull();
+    });
+  });
+
+  describe('darwin', () => {
+    beforeEach(() => setPlatform('darwin'));
+
+    it('returns pbpaste output verbatim', async () => {
+      spawnMock.spawn.mockReturnValue(mkChildEmittingStdout('mac clip'));
+      expect(await readClipboardText()).toBe('mac clip');
+    });
+
+    it('returns null for empty pbpaste output', async () => {
+      spawnMock.spawn.mockReturnValue(mkChildEmittingStdout(''));
+      expect(await readClipboardText()).toBeNull();
+    });
+  });
+
+  describe('linux', () => {
+    beforeEach(() => setPlatform('linux'));
+
+    it('reads via wl-paste', async () => {
+      spawnMock.spawn.mockImplementation((cmd: string) =>
+        cmd === 'wl-paste' ? mkChildEmittingStdout('wayland clip') : mkChildEmittingStdout('', 1),
+      );
+      expect(await readClipboardText()).toBe('wayland clip');
+    });
+
+    it('falls back to xclip when wl-paste yields nothing', async () => {
+      spawnMock.spawn.mockImplementation((cmd: string) =>
+        cmd === 'xclip' ? mkChildEmittingStdout('x clip') : mkChildEmittingStdout('', 1),
+      );
+      expect(await readClipboardText()).toBe('x clip');
+      expect(spawnMock.spawn).toHaveBeenCalledTimes(2);
+    });
+
+    it('returns null when neither tool yields text', async () => {
+      spawnMock.spawn.mockImplementation(() => mkChildEmittingStdout('', 1));
+      expect(await readClipboardText()).toBeNull();
     });
   });
 });

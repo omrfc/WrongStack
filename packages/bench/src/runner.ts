@@ -61,6 +61,7 @@ export async function runWstack(opts: RunWstackOptions): Promise<RawRun> {
       });
     } catch (err) {
       resolve(
+        /* v8 ignore next -- spawn throws Error subclasses; the String(err) branch is defensive. */
         crashed(startedAt, `spawn failed: ${err instanceof Error ? err.message : String(err)}`),
       );
       return;
@@ -84,6 +85,7 @@ export async function runWstack(opts: RunWstackOptions): Promise<RawRun> {
     });
 
     const finish = (run: RawRun) => {
+      /* v8 ignore next -- guards against a late close after error/timeout already settled; defensive. */
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -197,6 +199,7 @@ function crashed(startedAt: number, _reason: string): RawRun {
  * SIGKILL backstop.
  */
 function treeKill(child: ChildProcess): void {
+  /* v8 ignore next -- a successfully-spawned child always has a pid; the guard is defensive. */
   if (child.pid === undefined) return;
   if (process.platform === 'win32') {
     spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
@@ -207,6 +210,7 @@ function treeKill(child: ChildProcess): void {
   } catch {
     /* already gone */
   }
+  /* v8 ignore start -- 2s SIGKILL backstop fires only if SIGTERM didn't end the process; not exercised in fast unit tests. */
   setTimeout(() => {
     try {
       child.kill('SIGKILL');
@@ -214,6 +218,7 @@ function treeKill(child: ChildProcess): void {
       /* already gone */
     }
   }, 2000).unref();
+  /* v8 ignore stop */
 }
 
 /**

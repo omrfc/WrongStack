@@ -35,6 +35,7 @@ function runGit(args: string[], cwd?: string): string {
   } catch (err: unknown) {
     const e = err as { message?: string | undefined; stderr?: string | undefined; status?: number | undefined };
     if (e.status === 128) throw new Error('Not a git repository');
+    /* v8 ignore next -- execFileSync errors always carry .message; the stderr/String fallbacks are defensive. */
     throw new Error(`git failed: ${e.message ?? e.stderr ?? String(err)}`);
   }
 }
@@ -89,6 +90,7 @@ function bumpVersion(version: string, part: BumpType): string {
   } else if (part === 'patch') {
     patch++;
   } else {
+    /* v8 ignore next -- callers resolve 'auto' to a concrete part before calling bumpVersion; this return is defensive. */
     return version; // auto requires commit analysis
   }
 
@@ -258,6 +260,7 @@ const plugin: Plugin = {
           try {
             commits = getRecentCommits(lastTag, cwd);
           } catch (err: unknown) {
+            /* v8 ignore next -- getRecentCommits only throws Error; the String(err) branch is defensive. */
             const msg = err instanceof Error ? err.message : String(err);
             return { ok: false, error: `Git error: ${msg}`, bumpPart: 'patch' };
           }
@@ -297,6 +300,7 @@ const plugin: Plugin = {
               windowsHide: true,
             });
           } catch (err: unknown) {
+            /* v8 ignore next -- execFileSync only throws Error; the String(err) branch is defensive. */
             const msg = err instanceof Error ? err.message : String(err);
             return { ok: false, error: `bump script failed: ${msg}` };
           }
@@ -429,6 +433,7 @@ const plugin: Plugin = {
         }
 
         const result = await performBump(mode, dry, cwd);
+        /* v8 ignore next -- performBump always returns a message or an error; the JSON.stringify fallback is defensive. */
         return { message: String(result['message'] ?? result['error'] ?? JSON.stringify(result)) };
       },
     });

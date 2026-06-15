@@ -104,6 +104,7 @@ export class WrongStackACPServer {
  * In practice the CLI will instantiate and run WrongStackACPServer directly,
  * passing `api.tools.list()` as the tool set.
  */
+/* v8 ignore start -- process entrypoint: bootstrap + auto-start only run when launched as `node wrongstack-acp-agent.js`, never on import (which the CLI does to reuse the class). */
 async function main(): Promise<void> {
   const server = new WrongStackACPServer({ tools: [] });
   await server.start();
@@ -121,3 +122,4 @@ if (isEntrypoint) {
     process.exit(1);
   });
 }
+/* v8 ignore stop */

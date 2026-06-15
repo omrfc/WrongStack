@@ -60,6 +60,7 @@ export class ACPProtocolHandler {
 
   private async handleRequest(req: ACPRequest): Promise<boolean> {
     if (req.method !== 'initialize' && !this.initialized) {
+      /* v8 ignore next -- req.id is always defined here (handleMessage only routes id-bearing messages to handleRequest); the ?? null fallback is defensive. */
       await this.sendError(req.id ?? null, -32000, 'Not initialized');
       return false;
     }
@@ -190,6 +191,7 @@ export class ACPProtocolHandler {
   }
 
   private async sendError(id: string | number | null, code: number, message: string): Promise<void> {
+    /* v8 ignore next -- defensive: every caller passes a defined id (handleRequest only runs for messages with an id). */
     if (id === null) return;
     await this.transport.send({id, method: '', error: {code, message}});
   }

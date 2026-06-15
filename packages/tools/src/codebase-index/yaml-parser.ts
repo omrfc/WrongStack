@@ -12,6 +12,7 @@ export function parseSymbols(opts: {
   try {
     return regexParse({ file, content, lang });
   } catch {
+    /* v8 ignore next -- regexParse is pure regex/string work; the catch is a defensive fallback. */
     return { file, lang, symbols: [], mtimeMs: Date.now() };
   }
 }
@@ -91,6 +92,7 @@ function regexParse(opts: { file: string; content: string; lang: SymbolLang }): 
   for (let match = kvRegex.exec(content); match !== null; match = kvRegex.exec(content)) {
     const indent = match[1]?.length ?? 0;
     const key = match[2];
+    /* v8 ignore next -- the capture group always matches ≥1 char, so key is never empty; defensive. */
     if (!key) continue;
     const offset = (match.index ?? 0);
     const line = lineFromOffset(offset);

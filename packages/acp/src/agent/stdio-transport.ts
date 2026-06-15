@@ -76,6 +76,7 @@ export class StdioTransport implements AgentServerTransport {
   private onData(chunk: string): void {
     this.buffer += chunk;
     const lines = this.buffer.split('\n');
+    /* v8 ignore next -- split() always yields ≥1 element, so pop() is never undefined; the ?? '' is defensive. */
     this.buffer = lines.pop() ?? '';
 
     for (const raw of lines) {
@@ -176,11 +177,13 @@ export class ClientTransport {
           stdio: ['pipe', 'pipe', 'pipe'],
           windowsHide: true,
         }) as unknown as ACPChildProcess;
+        /* v8 ignore start -- spawn() throwing synchronously is a defensive guard (e.g. argv0 type errors); the realistic async failure path is the child 'error' event, covered by tests. */
       } catch (err) {
         clearTimeout(timeout);
         reject(err);
         return;
       }
+      /* v8 ignore stop */
 
       const child = this.child;
 
@@ -250,6 +253,7 @@ export class ClientTransport {
   private onChildData(chunk: string): void {
     this.buffer += chunk;
     const lines = this.buffer.split('\n');
+    /* v8 ignore next -- split() always yields ≥1 element, so pop() is never undefined; the ?? '' is defensive. */
     this.buffer = lines.pop() ?? '';
 
     for (const raw of lines) {

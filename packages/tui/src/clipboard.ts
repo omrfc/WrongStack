@@ -1,1 +1,5 @@
-export { readClipboardImage, type ClipboardImage } from '@wrongstack/runtime/clipboard';
+export {
+  readClipboardImage,
+  readClipboardText,
+  type ClipboardImage,
+} from '@wrongstack/runtime/clipboard';

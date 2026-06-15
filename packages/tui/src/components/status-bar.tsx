@@ -193,6 +193,12 @@ export interface StatusBarProps {
   subagentCount?: number | undefined;
   /** Renders the "ctx ████░░ 42%" chip on line 1 when present. */
   context?: ContextWindow | undefined;
+  /**
+   * Context compaction strategy. When provided alongside `context`, renders
+   * the strategy label (e.g. "hybrid", "intelligent", "selective") next to
+   * the context chip on line 1.
+   */
+  contextStrategy?: 'hybrid' | 'intelligent' | 'selective' | undefined;
   /** Live Brain arbiter state, shown as a compact work chip when active/recent. */
   brain?: BrainStatusChip | undefined;
   /**
@@ -323,6 +329,7 @@ export function StatusBar({
   workingDir,
   processCount,
   context,
+  contextStrategy,
   hiddenItems,
   events,
   eternalStage,
@@ -500,6 +507,9 @@ export function StatusBar({
                   return (
                     <Text color={clampedRatio < 0.6 ? 'green' : clampedRatio < 0.75 ? 'yellow' : 'red'}>
                       ctx {renderMeter(clampedRatio, 8)} {pctText}
+                      {contextStrategy ? (
+                        <Text dimColor> [{contextStrategy}]</Text>
+                      ) : null}
                     </Text>
                   );
                 })()}

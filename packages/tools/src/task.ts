@@ -296,6 +296,7 @@ export const taskTool: Tool<TaskInput, TaskOutput> = {
             return f;
           }
           const match = f.tasks[idx];
+          /* v8 ignore next 4 -- findTaskIndex returned a valid in-range idx, so match is always defined; defensive. */
           if (!match) {
             early = { ok: false, message: `No task matched "${target}".`, count: 0, completed: 0, inProgress: 0 };
             return f;
@@ -356,6 +357,7 @@ export const taskTool: Tool<TaskInput, TaskOutput> = {
             return f;
           }
           const match = f.tasks[idx];
+          /* v8 ignore next 4 -- findTaskIndex returned a valid in-range idx, so match is always defined; defensive. */
           if (!match) {
             early = { ok: false, message: `No task matched "${target}".`, count: 0, completed: 0, inProgress: 0 };
             return f;

@@ -57,6 +57,7 @@ export function execCommand(opts: {
       resolve({
         exitCode: null,
         stdout: '',
+        /* v8 ignore next -- spawn throws Error subclasses; the String(err) branch is defensive. */
         stderr: err instanceof Error ? err.message : String(err),
         timedOut: false,
       });

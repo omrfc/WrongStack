@@ -1,0 +1,99 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ACPMessage } from '../src/types/acp-messages.js';
+
+// Mock the transport (so no process.stdin is touched) and the protocol handler
+// (so we fully control the server's read→dispatch loop).
+const h = vi.hoisted(() => ({
+  transports: [] as MockTransport[],
+  handlers: [] as MockHandler[],
+}));
+
+interface MockTransport {
+  sendStartupMarker: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+  read: ReturnType<typeof vi.fn>;
+}
+interface MockHandler {
+  handleMessage: ReturnType<typeof vi.fn>;
+}
+
+vi.mock('../src/agent/stdio-transport.js', () => {
+  class StdioTransport {
+    sendStartupMarker = vi.fn();
+    close = vi.fn();
+    read = vi.fn(async () => null);
+    constructor() {
+      h.transports.push(this as unknown as MockTransport);
+    }
+  }
+  return { StdioTransport };
+});
+
+vi.mock('../src/agent/protocol-handler.js', () => {
+  class ACPProtocolHandler {
+    handleMessage = vi.fn(async () => false);
+    constructor() {
+      h.handlers.push(this as unknown as MockHandler);
+    }
+  }
+  return { ACPProtocolHandler };
+});
+
+import { WrongStackACPServer } from '../src/agent/wrongstack-acp-agent.js';
+
+const lastTransport = () => h.transports[h.transports.length - 1]!;
+const lastHandler = () => h.handlers[h.handlers.length - 1]!;
+
+beforeEach(() => {
+  h.transports.length = 0;
+  h.handlers.length = 0;
+});
+
+describe('WrongStackACPServer', () => {
+  it('constructs a transport and a protocol handler', () => {
+    new WrongStackACPServer({ tools: [] });
+    expect(h.transports).toHaveLength(1);
+    expect(h.handlers).toHaveLength(1);
+  });
+
+  it('accepts a custom owner without error', () => {
+    expect(() => new WrongStackACPServer({ tools: [], owner: 'acme' })).not.toThrow();
+  });
+
+  it('start sends the marker, dispatches messages, and stops at EOF', async () => {
+    const server = new WrongStackACPServer({ tools: [] });
+    const t = lastTransport();
+    const handler = lastHandler();
+    t.read
+      .mockResolvedValueOnce({ method: 'initialize', id: 1 } as ACPMessage)
+      .mockResolvedValueOnce({ method: 'ping', id: 2 } as ACPMessage)
+      .mockResolvedValueOnce(null);
+
+    await server.start();
+
+    expect(t.sendStartupMarker).toHaveBeenCalledTimes(1);
+    expect(handler.handleMessage).toHaveBeenCalledTimes(2);
+    expect(t.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('start stops when the handler reports a terminal message', async () => {
+    const server = new WrongStackACPServer({ tools: [] });
+    const t = lastTransport();
+    const handler = lastHandler();
+    // read always yields a message; only the terminal handler result breaks the loop.
+    t.read.mockResolvedValue({ method: 'bye', id: 1 } as ACPMessage);
+    handler.handleMessage.mockResolvedValueOnce(true);
+
+    await server.start();
+
+    expect(handler.handleMessage).toHaveBeenCalledTimes(1);
+    expect(t.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('stop closes the transport', () => {
+    const server = new WrongStackACPServer({ tools: [] });
+    const t = lastTransport();
+    server.stop();
+    expect(t.close).toHaveBeenCalled();
+  });
+});

@@ -212,15 +212,21 @@ describe('DefaultMultiAgentCoordinator with runner', () => {
   it('idle-timeout does NOT reap an actively-working subagent', async () => {
     // The runner keeps marking activity faster than the idle window, so the
     // watchdog must re-arm forever and let it finish on its own.
+    // Activity interval (50ms) is 5× smaller than the idle window (250ms), so a
+    // single CPU-starved sleep would have to stretch 5× before the watchdog
+    // could spuriously reap. Total work (8 × 50ms = 400ms) still exceeds the
+    // idle window, so the markActivity re-arming is genuinely necessary to
+    // survive — without it the agent would time out. The old 20ms-vs-40ms (2×)
+    // margin flaked under full-suite load.
     const runner: SubagentRunner = async (_task, ctx) => {
-      for (let i = 0; i < 6; i++) {
-        await new Promise((r) => setTimeout(r, 20));
+      for (let i = 0; i < 8; i++) {
+        await new Promise((r) => setTimeout(r, 50));
         ctx.budget.markActivity(); // simulate a tool call / streamed progress
       }
-      return { result: 'finished', iterations: 1, toolCalls: 6 };
+      return { result: 'finished', iterations: 1, toolCalls: 8 };
     };
     const coord = new DefaultMultiAgentCoordinator(makeConfig(), { runner });
-    await coord.spawn({ id: 'a1', name: 'A1', idleTimeoutMs: 40 });
+    await coord.spawn({ id: 'a1', name: 'A1', idleTimeoutMs: 250 });
     const donePromise = waitForDone(coord);
     await coord.assign({ id: 't1', description: 'busy but slow' });
     const [result] = await donePromise;

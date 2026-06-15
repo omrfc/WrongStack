@@ -21,6 +21,7 @@ export function parseSymbols(opts: { file: string; content: string; lang: Symbol
   try {
     return syncPyParse(file, lang);
   } catch {
+    /* v8 ignore next -- syncPyParse has its own catch; this outer guard is defensive. */
     return { file, lang, symbols: [], mtimeMs: Date.now() };
   }
 }

@@ -78,6 +78,7 @@ export const jsonTool: Tool<JsonInput, JsonOutput> = {
         data: null,
         formatted: '',
         type: 'unknown',
+        /* v8 ignore next -- JSON.parse only throws SyntaxError (an Error); the String(e) side is defensive. */
         error: `Parse failed: ${e instanceof Error ? e.message : String(e)}`,
       };
     }
@@ -143,6 +144,7 @@ function formatOutput(data: unknown, format: string): string {
 
 function toYaml(data: unknown, indent = 0): string {
   if (data === null) return 'null\n';
+  /* v8 ignore next -- parsed JSON never contains `undefined`; defensive for recursive calls. */
   if (data === undefined) return '';
   if (typeof data === 'boolean') return String(data) + '\n';
   if (typeof data === 'number') return String(data) + '\n';
@@ -162,5 +164,6 @@ function toYaml(data: unknown, indent = 0): string {
     const entries = Object.entries(data as Record<string, unknown>);
     return entries.map(([k, v]) => `${prefix}${k}: ${toYaml(v, indent + 1)}`).join('');
   }
+  /* v8 ignore next -- JSON.parse only yields null/bool/number/string/array/object; this fallback is defensive. */
   return String(data) + '\n';
 }

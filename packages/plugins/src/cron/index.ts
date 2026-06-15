@@ -45,6 +45,7 @@ const state: CronState = {
 };
 
 function formatNextRun(intervalMs: number): string {
+  /* v8 ignore next -- callers always pass a clamped interval (>=1000); the NaN/<=0 → 60_000 fallback is defensive. */
   const ms = Number.isNaN(intervalMs) || intervalMs <= 0 ? 60_000 : intervalMs;
   return new Date(Date.now() + ms).toISOString();
 }
@@ -134,6 +135,7 @@ const plugin: Plugin = {
 
         for (const [name, job] of state.jobs) {
           if (!job.enabled) continue;
+          /* v8 ignore next -- jobs.size is capped at maxConcurrent on schedule, so this break is unreachable via the public API; kept as a safety bound. */
           if (activeJobs >= maxConcurrent) break;
 
           if (new Date(job.nextRun).getTime() <= now) {

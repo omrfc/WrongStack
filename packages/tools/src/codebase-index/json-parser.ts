@@ -26,6 +26,7 @@ export function parseSymbols(opts: {
   try {
     return regexParse({ file, content, lang });
   } catch {
+    /* v8 ignore next -- regexParse is pure regex/string work; the catch is a defensive fallback. */
     return { file, lang, symbols: [], mtimeMs: Date.now() };
   }
 }

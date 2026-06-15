@@ -141,15 +141,19 @@ function processFile(
   target: string,
 ): DocumentedItem[] {
   const results: DocumentedItem[] = [];
-  const functionRegex = /(?:async\s+)?function\s+(\w+)\s*\(([^)]*)\)/;
-  const arrowRegex = /(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\(([^)]*)\)\s*=>/;
-  const classRegex = /class\s+(\w+)/;
-  const typeRegex = /(?:type|interface)\s+(\w+)\s*[=<]/;
+  // These must be global — `String.prototype.matchAll` throws on a non-global
+  // RegExp, which previously made processFile throw and report every file as an
+  // error instead of returning documentation candidates.
+  const functionRegex = /(?:async\s+)?function\s+(\w+)\s*\(([^)]*)\)/g;
+  const arrowRegex = /(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\(([^)]*)\)\s*=>/g;
+  const classRegex = /class\s+(\w+)/g;
+  const typeRegex = /(?:type|interface)\s+(\w+)\s*[=<]/g;
 
   const allMatches: { name: string; sig: string; type: string; line: number }[] = [];
 
   if (target === 'all' || target === 'function') {
     for (const m of content.matchAll(functionRegex)) {
+      /* v8 ignore next -- capture group (\w+) is mandatory, so m[1] is always defined; defensive. */
       if (!m[1]) continue;
       allMatches.push({
         name: m[1],
@@ -159,6 +163,7 @@ function processFile(
       });
     }
     for (const m of content.matchAll(arrowRegex)) {
+      /* v8 ignore next -- capture group (\w+) is mandatory, so m[1] is always defined; defensive. */
       if (!m[1]) continue;
       allMatches.push({
         name: m[1],
@@ -171,6 +176,7 @@ function processFile(
 
   if (target === 'all' || target === 'class') {
     for (const m of content.matchAll(classRegex)) {
+      /* v8 ignore next -- capture group (\w+) is mandatory, so m[1] is always defined; defensive. */
       if (!m[1]) continue;
       allMatches.push({
         name: m[1],
@@ -183,6 +189,7 @@ function processFile(
 
   if (target === 'all' || target === 'type') {
     for (const m of content.matchAll(typeRegex)) {
+      /* v8 ignore next -- capture group (\w+) is mandatory, so m[1] is always defined; defensive. */
       if (!m[1]) continue;
       allMatches.push({
         name: m[1],

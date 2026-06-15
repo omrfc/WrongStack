@@ -338,7 +338,7 @@ export function SettingsPicker({
       <Text color="cyan" bold>
         ━━ Settings ━━
       </Text>
-      <Text dimColor>↑/↓ field · ←/→ change (instant save) · Esc / F5 close</Text>
+      <Text dimColor>↑/↓ field · ←/→ change (instant save) · F5 to close</Text>
       {hasAbove ? (
         <Text dimColor>{`  ↑ ${windowStart} field${windowStart === 1 ? '' : 's'} above`}</Text>
       ) : null}

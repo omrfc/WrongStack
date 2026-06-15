@@ -77,7 +77,10 @@ function getSignature(node: ts.Declaration, sourceFile: ts.SourceFile): string {
  */
 function getJsDoc(node: ts.Node, sourceFile: ts.SourceFile): string {
   const fullText = sourceFile.getFullText();
-  const nodePos = node.getFullWidth();
+  // getLeadingCommentRanges wants the position where the node's leading trivia
+  // begins (getFullStart), not the node's width — passing getFullWidth() looked
+  // past the comment and silently returned no JSDoc for every symbol.
+  const nodePos = node.getFullStart();
   const comments = ts.getLeadingCommentRanges(fullText, nodePos);
   if (!comments) return '';
 
@@ -146,6 +149,7 @@ export function parseSymbols(opts: ParseOptions): FileSymbols {
   try {
     sourceFile = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true);
   } catch {
+    /* v8 ignore next -- createSourceFile tolerates malformed input and does not throw; defensive. */
     return { file, lang, symbols: [], mtimeMs: Date.now() };
   }
 
@@ -235,6 +239,7 @@ function extractRefs(sourceFile: ts.SourceFile): Ref[] {
 function getTypeName(name: ts.EntityName): string {
   if (ts.isIdentifier(name)) return name.text;
   if (ts.isQualifiedName(name)) return `${getTypeName(name.left)}.${name.right.text}`;
+  /* v8 ignore next -- an EntityName is always an Identifier or QualifiedName; defensive. */
   return '';
 }
 
@@ -242,6 +247,7 @@ function getTypeName(name: ts.EntityName): string {
 function getModuleName(node: ts.ImportDeclaration): string {
   const moduleSpecifier = node.moduleSpecifier;
   if (ts.isStringLiteral(moduleSpecifier)) return moduleSpecifier.text;
+  /* v8 ignore next -- an import declaration's module specifier is always a string literal; defensive. */
   return '';
 }
 

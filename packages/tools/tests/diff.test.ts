@@ -171,6 +171,38 @@ describe('diffTool', () => {
     expect(result).toHaveProperty('diff');
   });
 
+  it('gitDiff appends a files filter after the -- separator (a + files)', async () => {
+    const gitCtx = { cwd: process.cwd(), tools: [], projectRoot: process.cwd() } as any;
+    const result = await diffTool.execute({ a: 'HEAD', files: ['README.md'] }, gitCtx, makeOpts());
+    expect(result).toHaveProperty('diff');
+    expect(result.mode).toBe('unified');
+  });
+
+  it('gitDiff appends a comma-separated files filter (a + files string)', async () => {
+    const gitCtx = { cwd: process.cwd(), tools: [], projectRoot: process.cwd() } as any;
+    const result = await diffTool.execute({ a: 'HEAD', files: 'README.md' }, gitCtx, makeOpts());
+    expect(result).toHaveProperty('diff');
+  });
+
+  it('gitDiff works with only b set (a undefined)', async () => {
+    const gitCtx = { cwd: process.cwd(), tools: [], projectRoot: process.cwd() } as any;
+    const result = await diffTool.execute({ b: 'HEAD' }, gitCtx, makeOpts());
+    expect(result).toHaveProperty('diff');
+  });
+
+  it('gitDiff adds --staged when staged is set alongside a ref', async () => {
+    const gitCtx = { cwd: process.cwd(), tools: [], projectRoot: process.cwd() } as any;
+    const result = await diffTool.execute({ a: 'HEAD', staged: true }, gitCtx, makeOpts());
+    expect(result).toHaveProperty('diff');
+  });
+
+  it('gitDiff resolves (capturing git stderr) on an invalid ref', async () => {
+    const gitCtx = { cwd: process.cwd(), tools: [], projectRoot: process.cwd() } as any;
+    // A bogus revision makes git write to stderr (exercises the stderr handler).
+    const result = await diffTool.execute({ a: 'HEAD~99999999', b: 'HEAD' }, gitCtx, makeOpts());
+    expect(result).toHaveProperty('diff');
+  });
+
   it('findGitDir returns null when no git repo exists up the tree', async () => {
     // Create a temp dir with no parent git repo
     const isolatedDir = await fs.mkdtemp(path.join(os.tmpdir(), 'no-git-'));

@@ -81,6 +81,7 @@ export async function prepareWorkdir(
 
 /** Remove the whole sandbox tree. Best-effort. */
 export async function cleanupSandbox(sandbox: Sandbox): Promise<void> {
+  /* v8 ignore next -- fs.rm with force:true does not reject for a missing tree; the catch is a best-effort guard. */
   await fs.rm(sandbox.root, { recursive: true, force: true }).catch(() => undefined);
 }
 

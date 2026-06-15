@@ -96,4 +96,31 @@ describe('jsonTool', () => {
     const result = await jsonTool.execute({ data: '[1,2,3]', format: 'yaml' });
     expect(result.formatted).toContain('- 1');
   });
+
+  it('returns undefined when a query descends into a scalar', async () => {
+    // `a` is a number, so `a.b` tries to index a scalar → undefined (else branch).
+    const result = await jsonTool.execute({ data: '{"a":1}', query: 'a.b' });
+    expect(result.query_result).toBeUndefined();
+  });
+
+  it('quotes yaml string values that contain special characters', async () => {
+    const result = await jsonTool.execute({ data: '{"a":"x:y"}', format: 'yaml' });
+    expect(result.formatted).toContain('"x:y"'); // colon forces quoting
+  });
+
+  it('emits plain yaml string values without quoting', async () => {
+    const result = await jsonTool.execute({ data: '{"a":"plain"}', format: 'yaml' });
+    expect(result.formatted).toContain('a: plain');
+  });
+
+  it('renders an empty array in yaml', async () => {
+    const result = await jsonTool.execute({ data: '[]', format: 'yaml' });
+    expect(result.formatted).toContain('[]');
+  });
+
+  it('renders null and boolean values in yaml', async () => {
+    const result = await jsonTool.execute({ data: '{"n":null,"b":true}', format: 'yaml' });
+    expect(result.formatted).toContain('n: null');
+    expect(result.formatted).toContain('b: true');
+  });
 });

@@ -24,7 +24,7 @@ export function GoalPanel({ goal }: GoalPanelProps): React.ReactElement {
           <Text dimColor> to create one.</Text>
         </Box>
         <Box marginTop={1}>
-          <Text dimColor>Press F9 or Esc to close.</Text>
+          <Text dimColor>Press F9 to close.</Text>
         </Box>
       </Box>
     );
@@ -114,7 +114,7 @@ export function GoalPanel({ goal }: GoalPanelProps): React.ReactElement {
           </Box>
         )}
         <Box marginTop={1}>
-          <Text dimColor>Press F9 or Esc to close.</Text>
+          <Text dimColor>Press F9 to close.</Text>
         </Box>
       </Box>
     </Box>

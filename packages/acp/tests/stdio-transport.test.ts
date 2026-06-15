@@ -1,0 +1,355 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
+import type { ACPMessage } from '../src/types/acp-messages.js';
+
+// ── spawn mock for ClientTransport ──────────────────────────────────────────
+const spawnMock = vi.hoisted(() => ({ fn: vi.fn() }));
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return { ...actual, spawn: (...a: unknown[]) => spawnMock.fn(...a) };
+});
+
+import { ClientTransport, StdioTransport } from '../src/agent/stdio-transport.js';
+
+// ── fakes ───────────────────────────────────────────────────────────────────
+class FakeStdin extends EventEmitter {
+  resume = vi.fn();
+  pause = vi.fn();
+  setEncoding = vi.fn();
+}
+class FakeWritable {
+  written: string[] = [];
+  failNext = false;
+  write(data: string, _enc?: unknown, cb?: (err?: Error) => void): boolean {
+    this.written.push(data);
+    const callback = typeof _enc === 'function' ? (_enc as (e?: Error) => void) : cb;
+    callback?.(this.failNext ? new Error('write failed') : undefined);
+    return true;
+  }
+}
+
+describe('StdioTransport', () => {
+  let stdin: FakeStdin;
+  let stdout: FakeWritable;
+  let stderr: FakeWritable;
+  const originals = {
+    stdin: process.stdin,
+    stdout: process.stdout,
+    stderr: process.stderr,
+  };
+
+  beforeEach(() => {
+    stdin = new FakeStdin();
+    stdout = new FakeWritable();
+    stderr = new FakeWritable();
+    Object.defineProperty(process, 'stdin', { value: stdin, configurable: true });
+    Object.defineProperty(process, 'stdout', { value: stdout, configurable: true });
+    Object.defineProperty(process, 'stderr', { value: stderr, configurable: true });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, 'stdin', { value: originals.stdin, configurable: true });
+    Object.defineProperty(process, 'stdout', { value: originals.stdout, configurable: true });
+    Object.defineProperty(process, 'stderr', { value: originals.stderr, configurable: true });
+  });
+
+  it('constructor resumes stdin and sets utf8 encoding', () => {
+    // eslint-disable-next-line no-new
+    new StdioTransport();
+    expect(stdin.resume).toHaveBeenCalled();
+    expect(stdin.setEncoding).toHaveBeenCalledWith('utf8');
+  });
+
+  it('sendStartupMarker writes the marker', () => {
+    const t = new StdioTransport();
+    t.sendStartupMarker();
+    expect(stdout.written).toContain('[wstack-acp]\n');
+  });
+
+  it('send writes JSON + newline and resolves', async () => {
+    const t = new StdioTransport();
+    await t.send({ method: 'x', id: 1 });
+    expect(stdout.written).toEqual([JSON.stringify({ method: 'x', id: 1 }) + '\n']);
+  });
+
+  it('send after close resolves without writing', async () => {
+    const t = new StdioTransport();
+    t.close();
+    await t.send({ method: 'x' });
+    expect(stdout.written).toEqual([]);
+  });
+
+  it('sendRaw writes the chunk verbatim', () => {
+    const t = new StdioTransport();
+    t.sendRaw('raw-bytes');
+    expect(stdout.written).toContain('raw-bytes');
+  });
+
+  it('read resolves a pending promise when a message arrives', async () => {
+    const t = new StdioTransport();
+    const p = t.read();
+    stdin.emit('data', JSON.stringify({ method: 'a', id: 1 }) + '\n');
+    expect(await p).toEqual({ method: 'a', id: 1 });
+  });
+
+  it('read returns a previously queued message synchronously', async () => {
+    const t = new StdioTransport();
+    stdin.emit('data', JSON.stringify({ method: 'queued' }) + '\n');
+    expect(await t.read()).toEqual({ method: 'queued' });
+  });
+
+  it('read returns null after close', async () => {
+    const t = new StdioTransport();
+    t.close();
+    expect(await t.read()).toBeNull();
+  });
+
+  it('buffers partial lines across data events', async () => {
+    const t = new StdioTransport();
+    const p = t.read();
+    stdin.emit('data', '{"method":"split"');
+    stdin.emit('data', ',"id":7}\n');
+    expect(await p).toEqual({ method: 'split', id: 7 });
+  });
+
+  it('writes a parse error to stderr for malformed JSON', () => {
+    const t = new StdioTransport();
+    void t;
+    stdin.emit('data', 'not-json\n');
+    expect(stderr.written.some((s) => s.includes('parse error'))).toBe(true);
+  });
+
+  it('skips blank lines', async () => {
+    const t = new StdioTransport();
+    const p = t.read();
+    stdin.emit('data', '\n   \n' + JSON.stringify({ method: 'real' }) + '\n');
+    expect(await p).toEqual({ method: 'real' });
+  });
+
+  it('onMessage delivers to handlers and unsubscribe stops delivery', () => {
+    const t = new StdioTransport();
+    const seen: ACPMessage[] = [];
+    const off = t.onMessage((m) => seen.push(m));
+    stdin.emit('data', JSON.stringify({ method: 'one' }) + '\n');
+    off();
+    stdin.emit('data', JSON.stringify({ method: 'two' }) + '\n');
+    expect(seen).toEqual([{ method: 'one' }]);
+  });
+
+  it('isolates a throwing handler and logs to stderr', () => {
+    const t = new StdioTransport();
+    t.onMessage(() => { throw new Error('handler boom'); });
+    expect(() => stdin.emit('data', JSON.stringify({ method: 'x' }) + '\n')).not.toThrow();
+    expect(stderr.written.some((s) => s.includes('handler error'))).toBe(true);
+  });
+
+  it('close resolves an outstanding read with null', async () => {
+    const t = new StdioTransport();
+    const p = t.read();
+    t.close();
+    expect(await p).toBeNull();
+  });
+
+  it('stdin "end" closes the transport (EOF → read null)', async () => {
+    const t = new StdioTransport();
+    const p = t.read();
+    stdin.emit('end');
+    expect(await p).toBeNull();
+  });
+
+  it('stdin "error" logs and closes', async () => {
+    const t = new StdioTransport();
+    const p = t.read();
+    stdin.emit('error', new Error('pipe broke'));
+    expect(await p).toBeNull();
+    expect(stderr.written.some((s) => s.includes('stdin error'))).toBe(true);
+  });
+});
+
+// ── ClientTransport ──────────────────────────────────────────────────────────
+class FakeChildStream extends EventEmitter {
+  setEncoding = vi.fn();
+  written: string[] = [];
+  failNext = false;
+  write(data: string, _enc?: unknown, cb?: (err?: Error) => void): boolean {
+    this.written.push(data);
+    const callback = typeof _enc === 'function' ? (_enc as (e?: Error) => void) : cb;
+    callback?.(this.failNext ? new Error('stdin write failed') : undefined);
+    return true;
+  }
+}
+class FakeChild extends EventEmitter {
+  stdout = new FakeChildStream();
+  stdin = new FakeChildStream();
+  stderr = new FakeChildStream();
+  pid = 4321;
+  kill = vi.fn();
+}
+
+async function startedTransport(): Promise<{ transport: ClientTransport; child: FakeChild }> {
+  const child = new FakeChild();
+  spawnMock.fn.mockReturnValue(child);
+  const transport = new ClientTransport({ command: 'agent', args: ['--x'], env: { K: 'v' }, cwd: '/w' });
+  const p = transport.start();
+  await vi.waitFor(() => expect(spawnMock.fn).toHaveBeenCalled());
+  child.stdout.emit('data', '[wstack-acp]\n');
+  await p;
+  return { transport, child };
+}
+
+describe('ClientTransport', () => {
+  beforeEach(() => spawnMock.fn.mockReset());
+
+  it('start spawns the child with merged env, cwd and windowsHide, resolving on the marker', async () => {
+    const { child } = await startedTransport();
+    expect(spawnMock.fn).toHaveBeenCalledTimes(1);
+    const [cmd, args, opts] = spawnMock.fn.mock.calls[0] as [string, string[], Record<string, unknown>];
+    expect(cmd).toBe('agent');
+    expect(args).toEqual(['--x']);
+    expect(opts.cwd).toBe('/w');
+    expect(opts.windowsHide).toBe(true);
+    expect((opts.env as Record<string, string>).K).toBe('v');
+    expect(child.stdout.setEncoding).toHaveBeenCalledWith('utf8');
+  });
+
+  it('waits across chunks when the marker is not in the first data event', async () => {
+    const child = new FakeChild();
+    spawnMock.fn.mockReturnValue(child);
+    const transport = new ClientTransport({ command: 'agent' });
+    const p = transport.start();
+    await vi.waitFor(() => expect(spawnMock.fn).toHaveBeenCalled());
+    child.stdout.emit('data', 'preamble without marker');
+    child.stdout.emit('data', '[wstack-acp]\n');
+    await expect(p).resolves.toBeUndefined();
+  });
+
+  it('start is idempotent once a child exists', async () => {
+    const { transport } = await startedTransport();
+    await transport.start(); // should return immediately, no second spawn
+    expect(spawnMock.fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('start rejects when the child stdout emits an error before the marker', async () => {
+    const child = new FakeChild();
+    spawnMock.fn.mockReturnValue(child);
+    const transport = new ClientTransport({ command: 'agent' });
+    const p = transport.start();
+    await vi.waitFor(() => expect(spawnMock.fn).toHaveBeenCalled());
+    child.stdout.emit('error', new Error('stdout broke'));
+    await expect(p).rejects.toThrow('stdout broke');
+  });
+
+  it('start rejects when the child emits an error before the marker', async () => {
+    const child = new FakeChild();
+    spawnMock.fn.mockReturnValue(child);
+    const transport = new ClientTransport({ command: 'agent' });
+    const p = transport.start();
+    await vi.waitFor(() => expect(spawnMock.fn).toHaveBeenCalled());
+    child.emit('error', new Error('spawn died'));
+    await expect(p).rejects.toThrow('spawn died');
+  });
+
+  it('start rejects on handshake timeout when no marker arrives', async () => {
+    const child = new FakeChild();
+    spawnMock.fn.mockReturnValue(child);
+    const transport = new ClientTransport({ command: 'agent', handshakeTimeoutMs: 30 });
+    await expect(transport.start()).rejects.toThrow(/failed to start within 30ms/);
+  });
+
+  it('send before start rejects', async () => {
+    const transport = new ClientTransport({ command: 'agent' });
+    await expect(transport.send({ method: 'x' })).rejects.toThrow('not started');
+  });
+
+  it('send writes a JSON line to child stdin', async () => {
+    const { transport, child } = await startedTransport();
+    await transport.send({ method: 'go', id: 1 });
+    expect(child.stdin.written).toContain(JSON.stringify({ method: 'go', id: 1 }) + '\n');
+  });
+
+  it('send rejects when the stdin write errors', async () => {
+    const { transport, child } = await startedTransport();
+    child.stdin.failNext = true;
+    await expect(transport.send({ method: 'bad' })).rejects.toThrow('stdin write failed');
+  });
+
+  it('dispatches child stdout messages to read() and onMessage', async () => {
+    const { transport, child } = await startedTransport();
+    const seen: ACPMessage[] = [];
+    transport.onMessage((m) => seen.push(m));
+    const p = transport.read();
+    child.stdout.emit('data', JSON.stringify({ method: 'reply', id: 9 }) + '\n');
+    expect(await p).toEqual({ method: 'reply', id: 9 });
+    expect(seen).toEqual([{ method: 'reply', id: 9 }]);
+  });
+
+  it('onMessage unsubscribe stops delivery', async () => {
+    const { transport, child } = await startedTransport();
+    const seen: ACPMessage[] = [];
+    const off = transport.onMessage((m) => seen.push(m));
+    child.stdout.emit('data', JSON.stringify({ method: 'first' }) + '\n');
+    off();
+    child.stdout.emit('data', JSON.stringify({ method: 'second' }) + '\n');
+    expect(seen).toEqual([{ method: 'first' }]);
+  });
+
+  it('queues child messages with no pending read', async () => {
+    const { transport, child } = await startedTransport();
+    child.stdout.emit('data', JSON.stringify({ method: 'q' }) + '\n');
+    expect(await transport.read()).toEqual({ method: 'q' });
+  });
+
+  it('skips blank lines in child stdout', async () => {
+    const { transport, child } = await startedTransport();
+    child.stdout.emit('data', '\n  \n' + JSON.stringify({ method: 'real' }) + '\n');
+    expect(await transport.read()).toEqual({ method: 'real' });
+  });
+
+  it('skips malformed child stdout lines silently', async () => {
+    const { transport, child } = await startedTransport();
+    const seen: ACPMessage[] = [];
+    transport.onMessage((m) => seen.push(m));
+    child.stdout.emit('data', 'garbage{\n' + JSON.stringify({ method: 'ok' }) + '\n');
+    expect(seen).toEqual([{ method: 'ok' }]);
+  });
+
+  it('isolates a throwing onMessage handler', async () => {
+    const { transport, child } = await startedTransport();
+    transport.onMessage(() => { throw new Error('boom'); });
+    expect(() => child.stdout.emit('data', JSON.stringify({ method: 'x' }) + '\n')).not.toThrow();
+  });
+
+  it('child stderr data does not throw', async () => {
+    const { child } = await startedTransport();
+    expect(() => child.stderr.emit('data', 'some log line')).not.toThrow();
+  });
+
+  it('child close with non-zero code closes the transport', async () => {
+    const { transport, child } = await startedTransport();
+    child.emit('close', 1);
+    expect(await transport.read()).toBeNull();
+  });
+
+  it('child close with code 0 closes cleanly', async () => {
+    const { transport, child } = await startedTransport();
+    child.emit('close', 0);
+    expect(await transport.read()).toBeNull();
+  });
+
+  it('stop kills the child', async () => {
+    const { transport, child } = await startedTransport();
+    transport.stop();
+    expect(child.kill).toHaveBeenCalled();
+  });
+
+  it('stop before start is a no-op', () => {
+    const transport = new ClientTransport({ command: 'agent' });
+    expect(() => transport.stop()).not.toThrow();
+  });
+
+  it('stop swallows a throwing kill', async () => {
+    const { transport, child } = await startedTransport();
+    child.kill.mockImplementation(() => { throw new Error('already dead'); });
+    expect(() => transport.stop()).not.toThrow();
+  });
+});

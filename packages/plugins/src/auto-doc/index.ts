@@ -119,6 +119,7 @@ function needsDocComment(content: string, entity: ParsedEntity): boolean {
   const lines = content.split('\n');
   const lineIdx = entity.startLine - 1;
   if (lineIdx < 1) return true;
+  /* v8 ignore next -- lineIdx >= 1 here, so lines[lineIdx - 1] is always defined; the ?? '' is defensive. */
   const prevLine = lines[lineIdx - 1] ?? '';
   return !/^\s*\/\*\*\s*$/.test(prevLine.trim());
 }
@@ -126,7 +127,9 @@ function needsDocComment(content: string, entity: ParsedEntity): boolean {
 function injectDocComment(content: string, entity: ParsedEntity, doc: string): string {
   const lines = content.split('\n');
   const idx = entity.startLine - 1;
+  /* v8 ignore next -- idx is a valid line index for a parsed entity; the ?? '' fallback is defensive. */
   const codeLine = lines[idx] ?? '';
+  /* v8 ignore next -- /^(\s*)/ always matches; the ?.[1] ?? '' fallback is defensive. */
   const indent = codeLine.match(/^(\s*)/)?.[1] ?? '';
   lines.splice(idx, 0, `${indent}${doc} ${codeLine.trim()}`);
   return lines.join('\n');

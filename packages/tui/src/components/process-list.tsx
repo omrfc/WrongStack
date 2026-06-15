@@ -74,7 +74,7 @@ export function ProcessListMonitor(): React.ReactElement {
           breaker {breakerState}
           {b.state !== 'closed' ? ` fail=${b.consecutiveFailures}/5 slow=${b.slowCallsInWindow}/3` : ''}
         </Text>
-        <Text dimColor>│ F8 / Esc close</Text>
+        <Text dimColor>│ F8 to close</Text>
       </Box>
 
       {all.length === 0 ? (

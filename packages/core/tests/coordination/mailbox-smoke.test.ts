@@ -51,8 +51,14 @@ describe('mailbox end-to-end smoke test', () => {
       timestamp: new Date().toISOString(),
     });
 
-    // Wait for debounce
-    await new Promise((r) => setTimeout(r, 60));
+    // The watcher writes after a 10ms debounce. A fixed sleep flakes under
+    // full-suite load (the debounce timer is delayed past the wait), so poll
+    // the read-only query until the assign message lands instead.
+    await expect
+      .poll(async () => (await mailbox.query({ to: 'tech-stack', type: 'assign' })).length, {
+        timeout: 5000,
+      })
+      .toBeGreaterThanOrEqual(1);
 
     // ── Step 2: Tech-stack agent checks mailbox ────────────────────────
     const techStackTool = makeMailboxTool({
@@ -240,8 +246,12 @@ describe('mailbox end-to-end smoke test', () => {
       timestamp: new Date().toISOString(),
     });
 
-    // Wait for debounce
-    await new Promise((r) => setTimeout(r, 60));
+    // Poll past the 10ms debounce rather than a fixed sleep (load-tolerant).
+    await expect
+      .poll(async () => (await mailbox.query({ to: 'tech-stack', type: 'assign' })).length, {
+        timeout: 5000,
+      })
+      .toBe(1);
 
     // Verify the mailbox received the assign message
     const msgs = await mailbox.query({ to: 'tech-stack', type: 'assign' });

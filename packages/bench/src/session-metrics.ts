@@ -45,6 +45,7 @@ export async function readToolMetrics(opts: {
     }).projectSessions;
     jsonlPath = await newestJsonl(sessionsDir);
   } catch {
+    /* v8 ignore next -- resolveWstackPaths is pure and newestJsonl swallows its own fs errors; this outer catch is defensive. */
     return empty;
   }
   if (!jsonlPath) return empty;

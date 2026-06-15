@@ -61,6 +61,7 @@ export async function loadBenchConfig(path: string): Promise<BenchConfig> {
   try {
     raw = await fs.readFile(path, 'utf8');
   } catch (err) {
+    /* v8 ignore next 2 -- readFile rejects with an Error; the String(err) branch is defensive. */
     throw new Error(
       `cannot read bench config at ${path}: ${err instanceof Error ? err.message : String(err)}`,
     );
@@ -69,6 +70,7 @@ export async function loadBenchConfig(path: string): Promise<BenchConfig> {
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
+    /* v8 ignore next 2 -- JSON.parse throws a SyntaxError; the String(err) branch is defensive. */
     throw new Error(
       `bench config at ${path} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
     );

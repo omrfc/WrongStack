@@ -81,6 +81,7 @@ function jmespathSearch(data: unknown, query: string): unknown {
         case '<': return Number(itemVal) < Number(cmpVal);
         case '>=': return Number(itemVal) >= Number(cmpVal);
         case '<=': return Number(itemVal) <= Number(cmpVal);
+        /* v8 ignore next -- op is constrained to the six operators by the filter regex; default is unreachable. */
         default: return true;
       }
     });
@@ -108,6 +109,7 @@ function jmespathSearch(data: unknown, query: string): unknown {
         if (data === null) return 'null';
         if (Array.isArray(data)) return 'array';
         return typeof data;
+      /* v8 ignore next 2 -- fn is constrained to the four names by the function regex; default is unreachable. */
       default:
         return null;
     }

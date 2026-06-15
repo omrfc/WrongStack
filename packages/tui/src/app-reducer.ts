@@ -1460,9 +1460,10 @@ export function reducer(state: State, action: Action): State {
       return { ...state, sessionsPanelOpen: !state.sessionsPanelOpen };
     }
     case 'sessionsPanelSet': {
+      const sessions = Array.isArray(action.sessions) ? action.sessions : [];
       return {
         ...state,
-        sessionsPanel: { sessions: action.sessions, busy: false, selected: action.sessions.length > 0 ? 0 : -1 },
+        sessionsPanel: { sessions, busy: false, selected: sessions.length > 0 ? 0 : -1 },
       };
     }
     case 'sessionsPanelMove': {

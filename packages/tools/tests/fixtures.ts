@@ -29,6 +29,7 @@ export async function mkSandbox(): Promise<Sandbox> {
       this.fileMtimes.set(p, m);
     },
     todos,
+    meta: {},
     session: {
       id: 'test',
       append: async () => undefined,

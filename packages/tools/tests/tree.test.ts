@@ -55,6 +55,27 @@ describe('treeTool', () => {
     expect(result).toHaveProperty('tree');
   });
 
+  it('skips directories when show_dirs=false (with a real subdir present)', async () => {
+    await fs.mkdir(path.join(tmpDir, 'adir'));
+    await fs.writeFile(path.join(tmpDir, 'keep.txt'), '');
+    const ctx = makeCtx();
+    const result = await treeTool.execute({ show_dirs: false }, ctx);
+    expect(result.tree).not.toContain('adir/');
+    expect(result.tree).toContain('keep.txt');
+  });
+
+  it('walks a deep nested tree (drives the queue-drain poll loop)', async () => {
+    let dir = tmpDir;
+    for (let i = 0; i < 8; i++) {
+      dir = path.join(dir, `level${i}`);
+      await fs.mkdir(dir);
+      await fs.writeFile(path.join(dir, `f${i}.txt`), '');
+    }
+    const ctx = makeCtx();
+    const result = await treeTool.execute({ path: tmpDir, depth: 20 }, ctx);
+    expect(result.total_dirs).toBeGreaterThanOrEqual(6);
+  });
+
   it('respects show_hidden=true', async () => {
     const ctx = makeCtx();
     const result = await treeTool.execute({ show_hidden: true }, ctx);
@@ -71,5 +92,55 @@ describe('treeTool', () => {
     const ctx = makeCtx();
     const result = await treeTool.execute({ glob: '*.ts' }, ctx);
     expect(result).toHaveProperty('tree');
+  });
+
+  it('emits progress metric events past the flush threshold (>200 entries)', async () => {
+    const sub = path.join(tmpDir, 'many');
+    await fs.mkdir(sub);
+    await Promise.all(
+      Array.from({ length: 250 }, (_, i) => fs.writeFile(path.join(sub, `f${i}.txt`), '')),
+    );
+    const ctx = makeCtx();
+    const events: string[] = [];
+    let final: unknown;
+    for await (const ev of treeTool.executeStream!({ path: tmpDir }, ctx, {
+      signal: new AbortController().signal,
+    })) {
+      events.push(ev.type);
+      if (ev.type === 'final') final = ev.output;
+    }
+    expect(events).toContain('metric'); // flush path (tickProgress + queue drain)
+    expect(final).toBeDefined();
+  });
+
+  it('throws when executeStream is unavailable', async () => {
+    const original = treeTool.executeStream;
+    treeTool.executeStream = undefined;
+    try {
+      await expect(treeTool.execute({}, makeCtx())).rejects.toThrow(/stream execution unavailable/);
+    } finally {
+      treeTool.executeStream = original;
+    }
+  });
+
+  it('throws when the stream ends without a final event', async () => {
+    const original = treeTool.executeStream!;
+    treeTool.executeStream = async function* () {
+      yield { type: 'log', text: 'no final' } as never;
+    };
+    try {
+      await expect(treeTool.execute({}, makeCtx())).rejects.toThrow(/without final event/);
+    } finally {
+      treeTool.executeStream = original;
+    }
+  });
+
+  it('handles a base path that is not a directory (readdir error → empty)', async () => {
+    const file = path.join(tmpDir, 'afile.txt');
+    await fs.writeFile(file, 'hi');
+    const ctx = makeCtx();
+    const result = await treeTool.execute({ path: 'afile.txt' }, ctx);
+    expect(result.total_files).toBe(0);
+    expect(result.total_dirs).toBe(0);
   });
 });

@@ -166,6 +166,7 @@ function runGit(
       stderr += c.toString();
     });
     child.on('close', (code) => resolve({ stdout, stderr, exitCode: code ?? 0 }));
+    /* v8 ignore next -- spawn 'error' only fires when the git binary is missing; defensive. */
     child.on('error', (e) => resolve({ stdout: '', stderr: e.message, exitCode: 1 }));
   });
 }

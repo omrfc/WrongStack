@@ -95,4 +95,67 @@ describe('documentTool', () => {
     expect(result.items_documented).toBe(0); // still skipped, just detected
     expect(result.results.length).toBeGreaterThan(0);
   });
+
+  it('detects functions and arrow functions (target: function)', async () => {
+    const filePath = path.join(tmpDir, 'fns.ts');
+    await fs.writeFile(
+      filePath,
+      ['function plain(a) {}', 'const arrow = (b) => b', 'class NotIncluded {}'].join('\n'),
+      'utf8',
+    );
+    const ctx = makeCtx();
+    const result = await documentTool.execute({ target: 'function', files: 'fns.ts' }, ctx);
+    const names = result.results.map((r) => r.name);
+    expect(names).toEqual(expect.arrayContaining(['plain', 'arrow']));
+    expect(names).not.toContain('NotIncluded'); // class excluded under target=function
+    expect(result.results.every((r) => r.status === 'skipped')).toBe(true);
+    expect(result.results[0]?.docstring).toMatch(/documented at line/);
+  });
+
+  it('detects classes (target: class)', async () => {
+    const filePath = path.join(tmpDir, 'cls.ts');
+    await fs.writeFile(filePath, 'class Alpha {}\nclass Beta {}', 'utf8');
+    const ctx = makeCtx();
+    const result = await documentTool.execute({ target: 'class', files: 'cls.ts' }, ctx);
+    expect(result.results.map((r) => r.name)).toEqual(expect.arrayContaining(['Alpha', 'Beta']));
+  });
+
+  it('detects types and interfaces (target: type)', async () => {
+    const filePath = path.join(tmpDir, 'types.ts');
+    // The detector requires `=` or `<` after the name, so the interface is generic.
+    await fs.writeFile(filePath, 'type Foo = number;\ninterface Bar<T> {}', 'utf8');
+    const ctx = makeCtx();
+    const result = await documentTool.execute({ target: 'type', files: 'types.ts' }, ctx);
+    expect(result.results.map((r) => r.name)).toEqual(expect.arrayContaining(['Foo', 'Bar']));
+  });
+
+  it('detects everything under target: all', async () => {
+    const filePath = path.join(tmpDir, 'mixed.ts');
+    await fs.writeFile(filePath, 'function f() {}\nclass C {}\ntype T = string;', 'utf8');
+    const ctx = makeCtx();
+    const result = await documentTool.execute({ target: 'all', files: 'mixed.ts' }, ctx);
+    const names = result.results.map((r) => r.name);
+    expect(names).toEqual(expect.arrayContaining(['f', 'C', 'T']));
+  });
+
+  it('resolves a comma-separated file list and skips directories', async () => {
+    await fs.writeFile(path.join(tmpDir, 'a.ts'), 'function a() {}', 'utf8');
+    await fs.writeFile(path.join(tmpDir, 'b.ts'), 'function b() {}', 'utf8');
+    await fs.mkdir(path.join(tmpDir, 'adir'));
+    const ctx = makeCtx();
+    const result = await documentTool.execute(
+      { target: 'function', files: 'a.ts, b.ts, adir, missing.ts' },
+      ctx,
+    );
+    // a.ts + b.ts processed; the directory and the missing file are skipped.
+    expect(result.files_processed).toBe(2);
+  });
+
+  it('accepts files passed as an array', async () => {
+    await fs.writeFile(path.join(tmpDir, 'arr.ts'), 'function z() {}', 'utf8');
+    const ctx = makeCtx();
+    const result = await documentTool.execute({ target: 'function', files: ['arr.ts'] }, ctx);
+    expect(result.files_processed).toBe(1);
+    expect(result.results.map((r) => r.name)).toContain('z');
+  });
 });

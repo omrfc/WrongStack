@@ -3,7 +3,7 @@ import { Box, Text, useStdout } from '../ink.js';
 import type React from 'react';
 
 /**
- * Full-screen Todos monitor overlay (F6 to open, F6/Esc to close).
+ * Full-screen Todos monitor overlay (F6 to open, F6 to close).
  * Surfaces the live agent.ctx.todos board — compact status-bar chips
  * aren't enough when the board has 10+ items. Mirrors the bordered-
  * panel look of the fleet/agents/worktree monitors so it sits naturally
@@ -95,7 +95,7 @@ export function TodosMonitor({ todos }: { todos: TodoItem[] }): React.ReactEleme
             <Text color="green">✓{done}</Text>
           </>
         ) : null}
-        <Text dimColor>│ F6 / Esc to close</Text>
+        <Text dimColor>│ F6 to close</Text>
       </Box>
 
       {todos.length === 0 ? (

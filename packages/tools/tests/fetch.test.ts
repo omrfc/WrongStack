@@ -333,6 +333,66 @@ describe('fetchTool', () => {
       }
     });
 
+    it('rejects a redirect to an unsupported protocol', async () => {
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const u = typeof input === 'string' ? input : (input as URL).toString();
+        return {
+          status: 302,
+          ok: false,
+          url: u,
+          headers: new Headers({ location: 'ftp://files.example/x' }),
+          body: null,
+        } as unknown as Response;
+      }) as unknown as typeof fetch;
+      const sb = await mkSandbox();
+      try {
+        await expect(
+          fetchTool.execute({ url: 'https://good.example/' }, sb.ctx, { signal: newSignal() }),
+        ).rejects.toThrow(/unsupported protocol/);
+      } finally {
+        await sb.cleanup();
+      }
+    });
+
+    it('rejects a redirect with no location header', async () => {
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const u = typeof input === 'string' ? input : (input as URL).toString();
+        return {
+          status: 302,
+          ok: false,
+          url: u,
+          headers: new Headers({}), // no location
+          body: null,
+        } as unknown as Response;
+      }) as unknown as typeof fetch;
+      const sb = await mkSandbox();
+      try {
+        await expect(
+          fetchTool.execute({ url: 'https://good.example/' }, sb.ctx, { signal: newSignal() }),
+        ).rejects.toThrow(/no location header/);
+      } finally {
+        await sb.cleanup();
+      }
+    });
+
+    it('streams a large body (flushes partial output and caps at MAX_BYTES)', async () => {
+      const big = 'x'.repeat(200 * 1024); // > MAX_BYTES (128 KB) and > FLUSH_AT
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const u = typeof input === 'string' ? input : (input as URL).toString();
+        return mkResponse({ body: big, contentType: 'text/plain', url: u });
+      }) as unknown as typeof fetch;
+      const sb = await mkSandbox();
+      try {
+        const out = await fetchTool.execute({ url: 'https://big.example/' }, sb.ctx, {
+          signal: newSignal(),
+        });
+        expect(out.status).toBe(200);
+        expect(out.content.length).toBeGreaterThan(0);
+      } finally {
+        await sb.cleanup();
+      }
+    });
+
     it('passes redirects to non-private targets through', async () => {
       let hop = 0;
       globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {

@@ -103,6 +103,37 @@ describe('detectLinter config detection', () => {
     expect(result.linter).toBe('eslint');
   });
 
+  it('resolves an explicit cwd', async () => {
+    const result = await lintTool.execute({ linter: 'biome', cwd: '.' }, makeCtx(tmpDir), makeOpts());
+    expect(result).toHaveProperty('linter');
+  });
+
+  it('throws when executeStream is unavailable', async () => {
+    const original = lintTool.executeStream;
+    lintTool.executeStream = undefined;
+    try {
+      await expect(lintTool.execute({}, makeCtx(tmpDir), makeOpts())).rejects.toThrow(
+        /stream execution unavailable/,
+      );
+    } finally {
+      lintTool.executeStream = original;
+    }
+  });
+
+  it('throws when the stream ends without a final event', async () => {
+    const original = lintTool.executeStream!;
+    lintTool.executeStream = async function* () {
+      yield { type: 'log', text: 'no final' } as never;
+    };
+    try {
+      await expect(lintTool.execute({}, makeCtx(tmpDir), makeOpts())).rejects.toThrow(
+        /without final event/,
+      );
+    } finally {
+      lintTool.executeStream = original;
+    }
+  });
+
   it('detects tslint from tsconfig.json (biome priority over tsconfig)', async () => {
     // biome.json is checked first, so if both exist biome wins
     await fs.writeFile(path.join(tmpDir, 'tsconfig.json'), '{}');

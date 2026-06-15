@@ -85,6 +85,7 @@ export async function makeACPSubagentRunner(
 
     translator.attachToTransport({
       onMessage: (h) => transport.onMessage(h),
+      /* v8 ignore next -- translator stores but never invokes send (callTool talks to the transport directly). */
       send: (m) => transport.send(m),
     });
 
@@ -126,7 +127,7 @@ export async function makeACPSubagentRunner(
     });
 
     try {
-      // Most ACP agents accept a free-form task string as their primary input.
+      // Most ACP agents accept a free-form task string as their primary input. (DIR-1)
       // Use the tools/call protocol with a special 'task' pseudo-tool if the
       // agent advertises it; otherwise send it as an initialize session detail
       // or a custom agent/run message. The agent will respond on stdout.
@@ -149,12 +150,15 @@ export async function makeACPSubagentRunner(
       };
     }
 
+    /* v8 ignore start -- defensive: resultPromise only ever resolves with a truthy message or rejects (handled above). */
     if (!toolResult) {
       return {result: 'ACP subagent returned no result', iterations: 1, toolCalls: 1};
     }
+    /* v8 ignore stop */
 
     const parsed = parseToolResponse(task.id, ctx.subagentId, toolResult);
     return {
+      /* v8 ignore next -- parseToolResponse always sets a string result; the ?? error fallback is defensive. */
       result: parsed.result ?? parsed.error,
       iterations: parsed.iterations,
       toolCalls: parsed.toolCalls,
@@ -196,6 +200,7 @@ export async function makeACPSubagentRunnerWithStop(
 
     translator.attachToTransport({
       onMessage: (h) => transport.onMessage(h),
+      /* v8 ignore next -- translator stores but never invokes send (callTool talks to the transport directly). */
       send: (m) => transport.send(m),
     });
 
@@ -261,12 +266,15 @@ export async function makeACPSubagentRunnerWithStop(
       };
     }
 
+    /* v8 ignore start -- defensive: resultPromise only ever resolves with a truthy message or rejects (handled above). */
     if (!toolResult) {
       return {result: 'ACP subagent returned no result', iterations: 1, toolCalls: 1};
     }
+    /* v8 ignore stop */
 
     const parsed = parseToolResponse(task.id, ctx.subagentId, toolResult);
     return {
+      /* v8 ignore next -- parseToolResponse always sets a string result; the ?? error fallback is defensive. */
       result: parsed.result ?? parsed.error,
       iterations: parsed.iterations,
       toolCalls: parsed.toolCalls,

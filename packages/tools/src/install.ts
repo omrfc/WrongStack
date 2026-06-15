@@ -183,6 +183,7 @@ function resolveManifestPath(cwd: string, pkgManager: string): string {
     case 'yarn':
     case 'npm':
       return join(cwd, 'package.json');
+    /* v8 ignore next 2 -- pkgManager is always pnpm/yarn/npm; the default is defensive. */
     default:
       return join(cwd, 'package.json');
   }

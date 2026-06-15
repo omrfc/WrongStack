@@ -96,4 +96,47 @@ describe('logsTool', () => {
     const result = await logsTool.execute({ path: 'app.log' }, ctx, makeOpts());
     expect(result.entries.length).toBeGreaterThan(0);
   });
+
+  it('parses ISO-timestamped, level-prefixed, and plain lines', async () => {
+    const filePath = path.join(tmpDir, 'mixed.log');
+    await fs.writeFile(
+      filePath,
+      [
+        '2024-01-01T10:00:00Z [WARN] disk almost full', // timestamped branch
+        'ERROR something broke', // level-prefixed branch
+        'a plain line with no markers', // fallback branch
+      ].join('\n'),
+      'utf8',
+    );
+    const ctx = makeCtx();
+    const result = await logsTool.execute({ path: 'mixed.log' }, ctx, makeOpts());
+    const levels = result.entries.map((e) => e.level);
+    expect(levels).toContain('warn');
+    expect(levels).toContain('error');
+    expect(levels).toContain('info'); // plain fallback defaults to info
+    expect(result.entries.find((e) => e.level === 'warn')?.timestamp).toContain('2024-01-01T10');
+  });
+
+  it('truncates to the tail window and reports truncated=true', async () => {
+    const filePath = path.join(tmpDir, 'big.log');
+    await fs.writeFile(filePath, ['line1', 'line2', 'line3', 'line4'].join('\n'), 'utf8');
+    const ctx = makeCtx();
+    const result = await logsTool.execute({ path: 'big.log', lines: 2 }, ctx, makeOpts());
+    expect(result.truncated).toBe(true);
+    expect(result.entries.length).toBeLessThanOrEqual(2);
+  });
+
+  it('returns empty for an invalid docker service name', async () => {
+    const ctx = makeCtx();
+    const result = await logsTool.execute({ service: 'bad;name|rm' }, ctx, makeOpts());
+    expect(result.source).toBe('docker:bad;name|rm');
+    expect(result.entries).toEqual([]);
+  });
+
+  it('rejects an unsafe filter regex', async () => {
+    const ctx = makeCtx();
+    await expect(
+      logsTool.execute({ path: 'x.log', filter: '(a+)+' }, ctx, makeOpts()),
+    ).rejects.toThrow(/logs:/);
+  });
 });

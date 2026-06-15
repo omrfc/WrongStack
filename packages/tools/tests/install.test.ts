@@ -1,3 +1,6 @@
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { installTool } from '../src/install.js';
 import * as Core from '@wrongstack/core';
@@ -159,6 +162,77 @@ describe('installTool', () => {
     });
     await installTool.execute({ packages: 'vitest', dry_run: true }, ctx, makeOpts());
     expect(Core.recordPackageAction).not.toHaveBeenCalled();
+  });
+
+  it('resolves an explicit cwd', async () => {
+    const result = await installTool.execute({ packages: 'foo', cwd: '.' }, makeCtx(), makeOpts());
+    expect(result).toHaveProperty('exit_code');
+  });
+
+  it('throws when executeStream is unavailable', async () => {
+    const original = installTool.executeStream;
+    installTool.executeStream = undefined;
+    try {
+      await expect(installTool.execute({}, makeCtx(), makeOpts())).rejects.toThrow(
+        /stream execution unavailable/,
+      );
+    } finally {
+      installTool.executeStream = original;
+    }
+  });
+
+  it('throws when the stream ends without a final event', async () => {
+    const original = installTool.executeStream!;
+    installTool.executeStream = async function* () {
+      yield { type: 'log', text: 'no final' } as never;
+    };
+    try {
+      await expect(installTool.execute({}, makeCtx(), makeOpts())).rejects.toThrow(
+        /without final event/,
+      );
+    } finally {
+      installTool.executeStream = original;
+    }
+  });
+
+  it('rejects an invalid package name (flag injection guard)', async () => {
+    const ctx = makeCtx();
+    const result = await installTool.execute({ packages: '--ignore-scripts' }, ctx, makeOpts());
+    expect(result.exit_code).toBe(1);
+    expect(result.output).toContain('Invalid package name');
+  });
+
+  it('builds pnpm add args with a save flag', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'inst-pnpm-'));
+    try {
+      await fs.writeFile(path.join(dir, 'pnpm-lock.yaml'), '');
+      const ctx = makeCtx({ cwd: dir, projectRoot: dir });
+      const result = await installTool.execute({ packages: 'foo', save: 'dev' }, ctx, makeOpts());
+      expect(result).toHaveProperty('exit_code');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('passes save=optional flag', async () => {
+    const result = await installTool.execute(
+      { packages: 'foo', save: 'optional' },
+      makeCtx(),
+      makeOpts(),
+    );
+    expect(result).toHaveProperty('exit_code');
+  });
+
+  it('builds yarn add args', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'inst-yarn-'));
+    try {
+      await fs.writeFile(path.join(dir, 'yarn.lock'), '');
+      const ctx = makeCtx({ cwd: dir, projectRoot: dir });
+      const result = await installTool.execute({ packages: 'foo' }, ctx, makeOpts());
+      expect(result).toHaveProperty('exit_code');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('does NOT throw when recordPackageAction fails (best-effort)', async () => {

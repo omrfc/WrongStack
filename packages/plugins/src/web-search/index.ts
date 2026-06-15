@@ -51,8 +51,11 @@ async function duckduckgoSearch(query: string, numResults: number): Promise<Sear
   // biome-ignore lint/suspicious/noAssignInExpressions: while-loop condition requires assignment
   while ((m = resultRe.exec(html)) !== null && results.length < numResults) {
     const url = m[1];
+    /* v8 ignore next -- regex capture group 1 ([^"]+) is always non-empty when matched; defensive. */
     if (!url) continue;
+    /* v8 ignore next -- group 2 is always defined on a match; the ?? '' fallback is defensive. */
     const title = (m[2] ?? '').replace(/<[^>]+>/g, '').trim();
+    /* v8 ignore next -- group 3 is always defined on a match; the ?? '' fallback is defensive. */
     const snippet = (m[3] ?? '').replace(/<[^>]+>/g, '').trim();
     results.push({
       url,
@@ -135,6 +138,7 @@ async function fetchUrl(url: string, format: 'markdown' | 'text'): Promise<strin
     }
     break;
   }
+  /* v8 ignore next -- the loop runs at least once and always assigns resp; defensive guard. */
   if (!resp) throw new Error(`Failed to fetch ${url}`);
 
   if (!resp.ok) throw new Error(`Failed to fetch ${url}: ${resp.status} ${resp.statusText}`);
@@ -256,6 +260,7 @@ const plugin: Plugin = {
         try {
           rawResults = await duckduckgoSearch(query, numResults * 2);
         } catch (err: unknown) {
+          /* v8 ignore next -- duckduckgoSearch only throws Error; the String(err) branch is defensive. */
           const msg = err instanceof Error ? err.message : String(err);
           return { ok: false, error: `Search failed: ${msg}`, results: [] };
         }
@@ -263,7 +268,10 @@ const plugin: Plugin = {
         // Deduplicate by URL
         const deduplicated: SearchResult[] = [];
         for (const r of rawResults) {
-          const normalized = (r.url.split('?')[0] ?? r.url).split('#')[0] ?? r.url;
+          /* v8 ignore next -- split() always yields ≥1 element; the ?? r.url fallback is defensive. */
+          const noQuery = r.url.split('?')[0] ?? r.url;
+          /* v8 ignore next -- split() always yields ≥1 element; the ?? r.url fallback is defensive. */
+          const normalized = noQuery.split('#')[0] ?? r.url;
           if (!seenUrls.has(normalized) && r.url.startsWith('http')) {
             seenUrls.add(normalized);
             deduplicated.push(r);
@@ -322,6 +330,7 @@ const plugin: Plugin = {
         try {
           content = await fetchUrl(url, format);
         } catch (err: unknown) {
+          /* v8 ignore next -- fetchUrl only throws Error; the String(err) branch is defensive. */
           const msg = err instanceof Error ? err.message : String(err);
           return { ok: false, error: msg };
         }

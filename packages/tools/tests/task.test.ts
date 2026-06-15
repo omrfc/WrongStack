@@ -346,4 +346,120 @@ describe('taskTool', () => {
     const out = await taskTool.execute({ action: 'bogus' as 'show' }, sb.ctx, { signal: newSignal() });
     expect(out.ok).toBe(false);
   });
+
+  // -------------------------------------------------------------------
+  // additional branch coverage
+  // -------------------------------------------------------------------
+  it('replace rejects dependsOn referencing IDs outside the new batch', async () => {
+    const out = await taskTool.execute(
+      {
+        action: 'replace',
+        tasks: [
+          { id: 't1', title: 'A', type: 'feature', priority: 'high', status: 'pending', dependsOn: ['nope'] },
+        ],
+      },
+      sb.ctx,
+      { signal: newSignal() },
+    );
+    expect(out.ok).toBe(false);
+    expect(out.message).toMatch(/dependsOn validation failed/);
+  });
+
+  it('promote includes the description as a second todo and matches by index/substring', async () => {
+    (sb.ctx as unknown as { state: { replaceTodos: (t: unknown[]) => void } }).state = {
+      replaceTodos() {},
+    };
+    await taskTool.execute(
+      {
+        action: 'replace',
+        tasks: [
+          { id: 't1', title: 'Build login', description: 'OAuth + sessions', type: 'feature', priority: 'high', status: 'pending' },
+        ],
+      },
+      sb.ctx,
+      { signal: newSignal() },
+    );
+    // Match by 1-based index → exercises the numeric branch of findTaskIndex.
+    const byIndex = await taskTool.execute({ action: 'promote', target: '1' }, sb.ctx, {
+      signal: newSignal(),
+    });
+    expect(byIndex.ok).toBe(true);
+    // The description becomes an extra todo (count includes title + description).
+    expect(byIndex.message).toMatch(/2 todo\(s\)/);
+
+    // Match by title substring → exercises the substring branch.
+    const bySubstring = await taskTool.execute({ action: 'promote', target: 'login' }, sb.ctx, {
+      signal: newSignal(),
+    });
+    expect(bySubstring.ok).toBe(true);
+  });
+
+  it('promote without a target returns ok=false', async () => {
+    const out = await taskTool.execute({ action: 'promote' }, sb.ctx, { signal: newSignal() });
+    expect(out.ok).toBe(false);
+    expect(out.message).toMatch(/requires `target`/);
+  });
+
+  it('promote with a non-matching target returns ok=false', async () => {
+    const out = await taskTool.execute({ action: 'promote', target: 'no-such-task' }, sb.ctx, {
+      signal: newSignal(),
+    });
+    expect(out.ok).toBe(false);
+    expect(out.message).toMatch(/No task matched/);
+  });
+
+  it('planify with a non-matching target returns ok=false', async () => {
+    await taskTool.execute(
+      {
+        action: 'replace',
+        tasks: [{ id: 't1', title: 'X', type: 'feature', priority: 'low', status: 'pending' }],
+      },
+      sb.ctx,
+      { signal: newSignal() },
+    );
+    const out = await taskTool.execute({ action: 'planify', target: 'ghost' }, sb.ctx, {
+      signal: newSignal(),
+    });
+    expect(out.ok).toBe(false);
+    expect(out.message).toMatch(/No task matched/);
+  });
+
+  it('planify returns ok=false when no plan path is configured', async () => {
+    const noPlanCtx = {
+      cwd: sb.dir,
+      projectRoot: sb.dir,
+      session: { id: 'sess2', append: async () => undefined, close: async () => undefined },
+      meta: { 'task.path': path.join(sb.dir, 'sess2.tasks.json') }, // no plan.path
+    } as unknown as Context;
+    await taskTool.execute(
+      {
+        action: 'replace',
+        tasks: [{ id: 't1', title: 'Y', type: 'feature', priority: 'low', status: 'pending' }],
+      },
+      noPlanCtx,
+      { signal: newSignal() },
+    );
+    const out = await taskTool.execute({ action: 'planify', target: 't1' }, noPlanCtx, {
+      signal: newSignal(),
+    });
+    expect(out.ok).toBe(false);
+    expect(out.message).toMatch(/Plan storage path not configured/);
+  });
+
+  it('promote leaves a completed task status unchanged', async () => {
+    (sb.ctx as unknown as { state: { replaceTodos: (t: unknown[]) => void } }).state = {
+      replaceTodos() {},
+    };
+    await taskTool.execute(
+      {
+        action: 'replace',
+        tasks: [{ id: 't1', title: 'Done task', type: 'feature', priority: 'low', status: 'completed' }],
+      },
+      sb.ctx,
+      { signal: newSignal() },
+    );
+    await taskTool.execute({ action: 'promote', target: 't1' }, sb.ctx, { signal: newSignal() });
+    const onDisk = await readTasksOnDisk(sb.taskPath);
+    expect(onDisk[0]?.status).toBe('completed'); // not flipped to in_progress
+  });
 });

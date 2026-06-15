@@ -150,6 +150,23 @@ describe('formatTool', () => {
     expect(result.output).toBe('permission denied');
   });
 
+  it('throws when executeStream is unavailable', async () => {
+    const original = formatTool.executeStream;
+    formatTool.executeStream = undefined;
+    try {
+      await expect(formatTool.execute({}, makeCtx(), makeOpts())).rejects.toThrow(
+        /stream execution unavailable/,
+      );
+    } finally {
+      formatTool.executeStream = original;
+    }
+  });
+
+  it('resolves an explicit cwd', async () => {
+    const result = await formatTool.execute({ fixer: 'biome', cwd: '.' }, makeCtx(), makeOpts());
+    expect(result).toHaveProperty('fixer');
+  });
+
   it('execute throws when stream ends without a final event', async () => {
     const original = formatTool.executeStream!;
     formatTool.executeStream = async function* () {

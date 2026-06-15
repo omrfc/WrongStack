@@ -62,10 +62,12 @@ export const globTool: Tool<GlobInput, GlobOutput> = {
     const results: { rel: string; mtime: number }[] = [];
     let truncated = false;
     const walk = async (dir: string, relPrefix: string): Promise<void> => {
+      /* v8 ignore start -- the inner limit guards (file push + post-recursion return) always stop first; this re-entry guard is defensive. */
       if (results.length >= limit) {
         truncated = true;
         return;
       }
+      /* v8 ignore stop */
       let entries: import('node:fs').Dirent[];
       try {
         entries = await fs.readdir(dir, { withFileTypes: true });

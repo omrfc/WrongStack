@@ -57,7 +57,12 @@ describe('findFreePort', () => {
     const addr = srv.address();
     if (!addr || typeof addr === 'string') throw new Error('bad address');
     const taken = addr.port;
-    const found = await findFreePort(HOST, taken);
+    // Start at an OS-assigned ephemeral port. Under full-suite + coverage load,
+    // many parallel workers hold ephemeral sockets, so the default 200-port scan
+    // window above `taken` can be entirely occupied and throw. A generous
+    // maxTries makes exhaustion effectively impossible while still proving the
+    // skip-occupied-port behaviour (the call returns on the first free port).
+    const found = await findFreePort(HOST, taken, { maxTries: 2000 });
     expect(found).toBeGreaterThan(taken);
     expect(await isPortFree(HOST, found)).toBe(true);
   });

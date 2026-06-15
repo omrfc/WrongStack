@@ -47,11 +47,9 @@ function runShellCheck(
     style: 'style',
   };
 
-  const args = [
-    '-f', 'json',
-    '-S', levelMap[severity] ?? 'warning',
-    ...files,
-  ];
+  /* v8 ignore next -- severity is constrained to levelMap keys by the schema enum; the ?? fallback is defensive. */
+  const severityFlag = levelMap[severity] ?? 'warning';
+  const args = ['-f', 'json', '-S', severityFlag, ...files];
 
   let raw: string;
   try {
@@ -181,6 +179,7 @@ const plugin: Plugin = {
         try {
           issues = runShellCheck(files, severity);
         } catch (err: unknown) {
+          /* v8 ignore next -- runShellCheck only throws Error; the String(err) branch is defensive. */
           const msg = err instanceof Error ? err.message : String(err);
           return { ok: false, error: msg, issues: [] };
         }
@@ -262,6 +261,7 @@ const plugin: Plugin = {
         try {
           issues = runShellCheck(files, severity);
         } catch (err: unknown) {
+          /* v8 ignore next -- runShellCheck only throws Error; the String(err) branch is defensive. */
           const msg = err instanceof Error ? err.message : String(err);
           return { ok: false, error: msg, issues: [], filesScanned: 0 };
         }

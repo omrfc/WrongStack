@@ -157,6 +157,30 @@ describe('auditTool', () => {
     expect(result.summary).toContain('0 high');
   });
 
+  it('resolves an explicit cwd', async () => {
+    const result = await auditTool.execute({ cwd: '.' }, makeCtx(), makeOpts());
+    expect(result).toHaveProperty('summary');
+  });
+
+  it('reports no vulnerabilities for valid JSON without an advisories key', async () => {
+    spawnStreamMocks.spawnStream.mockImplementation(fakeSpawnStream('{}', 0));
+    const result = await auditTool.execute({}, makeCtx(), makeOpts());
+    expect(result.total).toBe(0);
+    expect(result.summary).toBe('No vulnerabilities found');
+  });
+
+  it('throws when executeStream is unavailable', async () => {
+    const original = auditTool.executeStream;
+    auditTool.executeStream = undefined;
+    try {
+      await expect(auditTool.execute({}, makeCtx(), makeOpts())).rejects.toThrow(
+        /stream execution unavailable/,
+      );
+    } finally {
+      auditTool.executeStream = original;
+    }
+  });
+
   it('execute throws if executeStream emits no final event', async () => {
     // spawnStream returns empty output — but we make executeStream skip the final yield
     // by replacing it on the tool directly. Easier: stream that throws.

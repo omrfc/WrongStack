@@ -14,6 +14,39 @@ describe('edit tool', () => {
     await sb.cleanup();
   });
 
+  it('validates required inputs', async () => {
+    const sig = { signal: newSignal() };
+    await expect(
+      editTool.execute({ path: '', old_string: 'a', new_string: 'b' }, sb.ctx, sig),
+    ).rejects.toThrow(/path is required/);
+    await expect(
+      editTool.execute(
+        { path: 'a.txt', old_string: undefined as never, new_string: 'b' },
+        sb.ctx,
+        sig,
+      ),
+    ).rejects.toThrow(/old_string is required/);
+    await expect(
+      editTool.execute(
+        { path: 'a.txt', old_string: 'a', new_string: undefined as never },
+        sb.ctx,
+        sig,
+      ),
+    ).rejects.toThrow(/new_string is required/);
+    await expect(
+      editTool.execute({ path: 'a.txt', old_string: '', new_string: 'b' }, sb.ctx, sig),
+    ).rejects.toThrow(/cannot be empty/);
+  });
+
+  it('rejects a directory (not a regular file)', async () => {
+    await fs.mkdir(path.join(sb.dir, 'adir'));
+    await expect(
+      editTool.execute({ path: 'adir', old_string: 'a', new_string: 'b' }, sb.ctx, {
+        signal: newSignal(),
+      }),
+    ).rejects.toThrow(/not a regular file/);
+  });
+
   it('requires prior read', async () => {
     await fs.writeFile(path.join(sb.dir, 'a.txt'), 'hello world');
     await expect(
@@ -181,6 +214,21 @@ describe('edit tool', () => {
           signal: newSignal(),
         }),
       ).rejects.toThrow(/Nearest match near line/);
+    });
+
+    it('reports the correct line when the near match is on a later line', async () => {
+      // A newline precedes the probe match, so findSimilarity counts past it.
+      const file = path.join(sb.dir, 'multi.txt');
+      const probeLine = 'Hello world testingzzz different suffix here is the rest';
+      await fs.writeFile(file, `first line\nsecond line\n${probeLine}`);
+      const needle = 'Hello world testingzzz different suffix here is NOT present';
+      await readTool.execute({ path: 'multi.txt' }, sb.ctx, { signal: newSignal() });
+
+      await expect(
+        editTool.execute({ path: 'multi.txt', old_string: needle, new_string: 'x' }, sb.ctx, {
+          signal: newSignal(),
+        }),
+      ).rejects.toThrow(/Nearest match near line 3/);
     });
 
     it('findSimilarity returns undefined when needle >= 20 chars with no near match in file', async () => {

@@ -62,7 +62,7 @@ async function resolveDefaultSubset(): Promise<string> {
       // try next
     }
   }
-  // Fall back to the first candidate so the error message points somewhere real.
+  /* v8 ignore next -- one candidate always resolves in a real checkout (the subset is committed); this fallback only fires if the artifact is missing. */
   return candidates[0] as string;
 }
 

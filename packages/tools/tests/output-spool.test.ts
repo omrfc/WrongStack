@@ -1,4 +1,5 @@
 import * as fsp from 'node:fs/promises';
+import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   _resetOutputSpoolForTests,
@@ -57,6 +58,47 @@ describe('createOutputSpool', () => {
     expect(note).toContain('C:/tmp/x.log');
     expect(note).toContain('12345');
     expect(note).not.toContain('dropped');
+  });
+
+  it('spoolNote reports dropped bytes when backpressure occurred', () => {
+    const note = spoolNote({ path: '/x.log', bytes: 100, droppedBytes: 42 });
+    expect(note).toContain('42 bytes dropped under backpressure');
+  });
+
+  it('sweeps spool files older than the retention window on first open', async () => {
+    const dir = toolOutputDir();
+    await fsp.mkdir(dir, { recursive: true });
+    const oldLog = path.join(dir, 'old.log');
+    const freshLog = path.join(dir, 'fresh.log');
+    const notALog = path.join(dir, 'keep.txt');
+    await fsp.writeFile(oldLog, 'old');
+    await fsp.writeFile(freshLog, 'fresh');
+    await fsp.writeFile(notALog, 'keep');
+    // Backdate the old log well past the 7-day retention window.
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+    await fsp.utimes(oldLog, eightDaysAgo, eightDaysAgo);
+
+    _resetOutputSpoolForTests(); // allow the once-per-process sweep to run again
+    const spool = createOutputSpool({ tool: 'sweep', thresholdBytes: 10 });
+    spool.write('z'.repeat(50)); // crosses threshold → open() → triggers the sweep
+    spool.finalize();
+
+    await expect.poll(async () => (await fsp.stat(oldLog).catch(() => null)) === null).toBe(true);
+    // The fresh .log and the non-.log file are left untouched.
+    expect(await fsp.stat(freshLog).then(() => true)).toBe(true);
+    expect(await fsp.stat(notALog).then(() => true)).toBe(true);
+  });
+
+  it('drops chunks under disk backpressure instead of buffering them on the heap', () => {
+    const spool = createOutputSpool({ tool: 'bp', thresholdBytes: 10 });
+    spool.write('a'.repeat(20)); // crosses threshold → opens the file
+    // A burst far larger than the 4 MB writable high-water mark, written
+    // synchronously so the stream can't drain between writes.
+    spool.write('b'.repeat(5 * 1024 * 1024));
+    spool.write('c'.repeat(1000)); // arrives while writableLength > HWM → dropped
+    const info = spool.finalize();
+    expect(info).not.toBeNull();
+    expect(info!.droppedBytes).toBeGreaterThan(0);
   });
 });
 

@@ -14,6 +14,20 @@ describe('write tool', () => {
     await sb.cleanup();
   });
 
+  it('requires a path', async () => {
+    await expect(
+      writeTool.execute({ path: '', content: 'x' }, sb.ctx, { signal: newSignal() }),
+    ).rejects.toThrow(/path is required/);
+  });
+
+  it('requires content', async () => {
+    await expect(
+      writeTool.execute({ path: 'a.txt', content: undefined as never }, sb.ctx, {
+        signal: newSignal(),
+      }),
+    ).rejects.toThrow(/content is required/);
+  });
+
   it('creates a new file', async () => {
     const out = await writeTool.execute({ path: 'new.txt', content: 'hello' }, sb.ctx, {
       signal: newSignal(),

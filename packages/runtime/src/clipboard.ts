@@ -20,6 +20,43 @@ export async function readClipboardImage(): Promise<ClipboardImage | null> {
   return null;
 }
 
+/**
+ * Read plain text from the system clipboard. Returns `null` when the clipboard
+ * holds no text (or only an image), the read failed, or the platform is
+ * unsupported. Used by the TUI's Ctrl+V handler: terminals in raw mode deliver
+ * Ctrl+V to the app as a control byte rather than performing a native paste, so
+ * we read the clipboard ourselves.
+ */
+export async function readClipboardText(): Promise<string | null> {
+  const platform = process.platform;
+  if (platform === 'win32') {
+    // -Raw preserves embedded newlines; force UTF-8 so non-ASCII survives the
+    // pipe. PowerShell appends one trailing newline to stdout — strip it.
+    const ps =
+      '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard -Raw';
+    const out = await runCmd('powershell', ['-NoProfile', '-Command', ps]);
+    if (out == null) return null;
+    const text = out.replace(/\r?\n$/, '');
+    return text.length > 0 ? text : null;
+  }
+  if (platform === 'darwin') {
+    const out = await runCmd('pbpaste', []);
+    return out && out.length > 0 ? out : null;
+  }
+  if (platform === 'linux') {
+    const tries: Array<[string, string[]]> = [
+      ['wl-paste', ['--no-newline']],
+      ['xclip', ['-selection', 'clipboard', '-o']],
+    ];
+    for (const [cmd, args] of tries) {
+      const out = await runCmd(cmd, args);
+      if (out && out.length > 0) return out;
+    }
+    return null;
+  }
+  return null;
+}
+
 async function readWindows(): Promise<ClipboardImage | null> {
   const tmp = path.join(os.tmpdir(), `wstack-clip-${Date.now()}.png`);
   const ps = [

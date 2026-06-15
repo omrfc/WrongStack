@@ -202,6 +202,13 @@ describe('truncateHeadTail', () => {
     const out = truncateHeadTail('x'.repeat(1000), 200);
     expect(out).toMatch(/truncated \d+ bytes/);
   });
+
+  it('handles a cap smaller than the marker reserve (zero head/tail budget)', () => {
+    // cap < MARKER_RESERVE (64) → avail clamps to 0 → takeHead/TailBytes return ''.
+    const out = truncateHeadTail('y'.repeat(500), 50);
+    expect(out).toContain('truncated');
+    expect(out).not.toContain('yyyyy'); // none of the original run survives
+  });
 });
 
 describe('normalizeCommandOutput', () => {

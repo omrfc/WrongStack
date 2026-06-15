@@ -64,6 +64,7 @@ export const formatTool: Tool<FormatInput, FormatOutput> = {
     const fixer = input.fixer ?? 'auto';
 
     const detected = fixer === 'auto' ? await detectFixer(cwd) : fixer;
+    /* v8 ignore start -- detectFixer always falls back to 'biome' (never null) and explicit fixers are truthy; this is defensive. */
     if (!detected) {
       yield {
         type: 'final',
@@ -77,6 +78,7 @@ export const formatTool: Tool<FormatInput, FormatOutput> = {
       };
       return;
     }
+    /* v8 ignore stop */
 
     yield {
       type: 'log',

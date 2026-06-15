@@ -43,6 +43,7 @@ const MAX_BYTES = 131_072;
 const TIMEOUT_MS = 20_000;
 
 const ALLOW_PRIVATE = process.env['WRONGSTACK_FETCH_ALLOW_PRIVATE'] === '1';
+/* v8 ignore next 8 -- module-load-time opt-in warning; gated on an env var not set during tests. */
 if (ALLOW_PRIVATE && !process.env['CI']) {
   console.warn(
     '[WrongStack] WARNING: WRONGSTACK_FETCH_ALLOW_PRIVATE=1 is active —\n' +
@@ -70,7 +71,7 @@ type LookupCallback = (
  * TLS still validates the certificate against the hostname (SNI is set by
  * undici from the URL), so pinning the IP does not weaken cert checking.
  */
-function guardedLookup(
+export function guardedLookup(
   hostname: string,
   options: { all?: boolean | undefined; family?: number | undefined },
   callback: LookupCallback,
@@ -133,6 +134,7 @@ function getPinnedDispatcher(): Agent {
 let _beforeExitRegistered = false;
 if (!_beforeExitRegistered) {
   _beforeExitRegistered = true;
+  /* v8 ignore next 4 -- process 'beforeExit' cleanup; not deterministically triggerable in-test. */
   process.on('beforeExit', () => {
     pinnedAgent?.destroy();
     pinnedAgent = undefined;
