@@ -1,5 +1,6 @@
 import { expectDefined, GlobalMailbox, projectSlug, getSessionRegistry, AgentStatusTracker } from '@wrongstack/core';
 import { makeMailboxTool, makeMailSendTool, makeMailInboxTool, mailboxSessionTag } from '@wrongstack/core';
+import { toErrorMessage } from '@wrongstack/core/utils';
 import {
   BrainMonitor,
   DefaultBrainArbiter,
@@ -344,7 +345,7 @@ export async function startWebUI(
     console.warn(JSON.stringify({
       level: 'warn',
       event: 'webui.provider_registry_load_failed',
-      message: err instanceof Error ? err.message : String(err),
+      message: toErrorMessage(err),
       timestamp: new Date().toISOString(),
     }));
   }
@@ -540,7 +541,7 @@ export async function startWebUI(
       console.error(JSON.stringify({
         level: 'error',
         event: 'webui.provider_create_failed',
-        message: err instanceof Error ? err.message : String(err),
+        message: toErrorMessage(err),
         timestamp: new Date().toISOString(),
       }));
       throw err;
@@ -565,7 +566,7 @@ export async function startWebUI(
         console.error(JSON.stringify({
           level: 'error',
           event: 'webui.provider_stub_create_failed',
-          message: err instanceof Error ? err.message : String(err),
+          message: toErrorMessage(err),
           timestamp: new Date().toISOString(),
         }));
         throw err;
@@ -1211,7 +1212,7 @@ export async function startWebUI(
         console.warn(JSON.stringify({
           level: 'warn',
           event: 'webui.session_start_payload_failed',
-          message: err instanceof Error ? err.message : String(err),
+          message: toErrorMessage(err),
           timestamp: new Date().toISOString(),
         }));
       });
@@ -1260,7 +1261,7 @@ export async function startWebUI(
         console.error(JSON.stringify({
           level: 'error',
           event: 'webui.ws_message_parse_failed',
-          message: err instanceof Error ? err.message : String(err),
+          message: toErrorMessage(err),
           timestamp: new Date().toISOString(),
         }));
       }
@@ -1319,7 +1320,7 @@ export async function startWebUI(
       level: 'error',
       event: 'webui.ws_server_error',
       host: wsHost,
-      message: err instanceof Error ? err.message : String(err),
+      message: toErrorMessage(err),
       timestamp: new Date().toISOString(),
     }));
   });
@@ -1862,7 +1863,7 @@ export async function startWebUI(
             console.warn(JSON.stringify({
               level: 'warn',
               event: 'webui.config_save_failed',
-              message: err instanceof Error ? err.message : String(err),
+              message: toErrorMessage(err),
               timestamp: new Date().toISOString(),
             }));
           }

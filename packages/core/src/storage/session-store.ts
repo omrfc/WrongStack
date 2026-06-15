@@ -18,6 +18,7 @@ import type {
 } from '../types/session.js';
 import { atomicWrite, ensureDir } from '../utils/atomic-write.js';
 import { repairToolUseAdjacency } from '../utils/message-invariants.js';
+import { toErrorMessage } from '../utils/index.js';
 // ─── Session ID naming ───────────────────────────────────────────────────────
 
 /** Sanitize a model name for use in filenames: alphanumeric + dash + underscore. */
@@ -169,9 +170,9 @@ export class DefaultSessionStore implements SessionStore {
     try {
       handle = await fsp.open(file, 'a', 0o600);
     } catch (err) {
-      this.emitError(id, file, 'create', err instanceof Error ? err.message : String(err), false);
+      this.emitError(id, file, 'create', toErrorMessage(err), false);
       throw new Error(
-        `Failed to open session file: ${err instanceof Error ? err.message : String(err)}`,
+        `Failed to open session file: ${toErrorMessage(err)}`,
         { cause: err },
       );
     }
@@ -191,7 +192,7 @@ export class DefaultSessionStore implements SessionStore {
         message: e instanceof Error ? e.message : String(e),
         timestamp: new Date().toISOString(),
       })));
-      this.emitError(id, file, 'create', err instanceof Error ? err.message : String(err), true);
+      this.emitError(id, file, 'create', toErrorMessage(err), true);
       throw err;
     }
   }
@@ -204,9 +205,9 @@ export class DefaultSessionStore implements SessionStore {
     try {
       handle = await fsp.open(file, 'a', 0o600);
     } catch (err) {
-      this.emitError(id, file, 'resume', err instanceof Error ? err.message : String(err), false);
+      this.emitError(id, file, 'resume', toErrorMessage(err), false);
       throw new Error(
-        `Failed to open session "${id}" for append: ${err instanceof Error ? err.message : String(err)}`,
+        `Failed to open session "${id}" for append: ${toErrorMessage(err)}`,
         { cause: err },
       );
     }
@@ -241,7 +242,7 @@ export class DefaultSessionStore implements SessionStore {
         message: e instanceof Error ? e.message : String(e),
         timestamp: new Date().toISOString(),
       })));
-      this.emitError(id, file, 'resume', err instanceof Error ? err.message : String(err), true);
+      this.emitError(id, file, 'resume', toErrorMessage(err), true);
       throw err;
     }
   }
@@ -277,7 +278,7 @@ export class DefaultSessionStore implements SessionStore {
       return { metadata: meta, events, messages, usage, toolCallEnds };
     } catch (err) {
       outcome = 'failure';
-      errorMsg = err instanceof Error ? err.message : String(err);
+      errorMsg = toErrorMessage(err);
       throw err;
     } finally {
       this.emitRead(id, file, 'load', outcome, Date.now() - t0, errorMsg);
@@ -374,7 +375,7 @@ export class DefaultSessionStore implements SessionStore {
       await fsp.rename(tmp, this.indexFile);
     } catch (err) {
       outcome = 'failure';
-      errorMsg = err instanceof Error ? err.message : String(err);
+      errorMsg = toErrorMessage(err);
     } finally {
       // Compact is internal — use 'session' as the session ID placeholder.
       this.emitWrite('~compact~', this.indexFile, 'compact', outcome, Date.now() - t0, undefined, errorMsg);
@@ -483,7 +484,7 @@ export class DefaultSessionStore implements SessionStore {
       const stat = await fsp.stat(full);
       const summary = await this.summarize(id, stat.mtime.toISOString());
       await atomicWrite(manifest, JSON.stringify(summary), { mode: 0o600 }).catch((err) => {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = toErrorMessage(err);
         this.emitError(id, manifest, 'summary_fallback', msg, true);
         console.warn(JSON.stringify({
           level: 'warn',
@@ -546,7 +547,7 @@ export class DefaultSessionStore implements SessionStore {
         level: 'warn',
         event: 'session_store.rmdir_failed',
         sessionId: id,
-        message: err instanceof Error ? err.message : String(err),
+        message: toErrorMessage(err),
         timestamp: new Date().toISOString(),
       }));
     });
@@ -1094,7 +1095,7 @@ class FileSessionWriter implements SessionWriter {
       await this.enqueueWrite(batch);
     } catch (err) {
       outcome = 'failure';
-      errorMsg = err instanceof Error ? err.message : String(err);
+      errorMsg = toErrorMessage(err);
       this.appendFailCount += eventCount;
       const now = Date.now();
       if (now - this.lastAppendWarnAt > 5000) {
@@ -1102,7 +1103,7 @@ class FileSessionWriter implements SessionWriter {
         const tail = suppressed > 0 ? ` (+${suppressed} suppressed)` : '';
         console.warn(
           '[session] flush failed:',
-          err instanceof Error ? err.message : String(err),
+          toErrorMessage(err),
           tail,
         );
         this.lastAppendWarnAt = now;
@@ -1212,7 +1213,7 @@ class FileSessionWriter implements SessionWriter {
         await atomicWrite(this.manifestFile, JSON.stringify(this.summary), { mode: 0o600 });
       } catch (err) {
         outcome = 'failure';
-        errorMsg = err instanceof Error ? err.message : String(err);
+        errorMsg = toErrorMessage(err);
         // manifest write is best-effort
       } finally {
         this.events?.emit('storage.write', {
@@ -1240,7 +1241,7 @@ class FileSessionWriter implements SessionWriter {
       await this.onCloseCb?.(this.summary);
     } catch (err) {
       idxOutcome = 'failure';
-      idxError = err instanceof Error ? err.message : String(err);
+      idxError = toErrorMessage(err);
       // best-effort
     } finally {
       this.events?.emit('storage.write', {

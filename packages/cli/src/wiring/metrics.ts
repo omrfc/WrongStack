@@ -1,6 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { toErrorMessage } from '@wrongstack/core/utils';
 import {
   DefaultHealthRegistry,
   type EventBus,
@@ -100,7 +101,7 @@ export function setupMetrics(params: MetricsWiringDeps): MetricsWiringResult {
       });
     } catch (err) {
       logger.warn(
-        `metrics endpoint failed to start: ${err instanceof Error ? err.message : String(err)}`,
+        `metrics endpoint failed to start: ${toErrorMessage(err)}`,
       );
     }
   }

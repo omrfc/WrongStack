@@ -1,6 +1,7 @@
 import type { SlashCommand } from '@wrongstack/core';
 import { parseSpawnFlags } from '../arg-parser.js';
 import type { SlashCommandContext } from './index.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 export function buildSpawnCommand(opts: SlashCommandContext): SlashCommand {
   return {
@@ -42,7 +43,7 @@ export function buildSpawnCommand(opts: SlashCommandContext): SlashCommand {
             : await opts.onSpawn(description);
         return { message: summary };
       } catch (err) {
-        return { message: `Spawn failed: ${err instanceof Error ? err.message : String(err)}` };
+        return { message: `Spawn failed: ${toErrorMessage(err)}` };
       }
     },
   };

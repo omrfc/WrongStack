@@ -13,6 +13,7 @@ export * from './child-env.js';
 export * from './sleep.js';
 export * from './expect-defined.js';
 export * from './assert-never.js';
+export { toErrorMessage } from './error.js';
 export { deepMerge, FORBIDDEN_PROTO_KEYS, isPrimitiveArray, type DeepMergeOptions } from './deep-merge.js';
 export {
   createToolOutputSerializer,

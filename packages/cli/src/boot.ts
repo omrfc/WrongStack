@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 /**
  * Boot phase — everything before the DI container wiring.
@@ -120,7 +121,7 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
   try {
     bootResult = await bootConfig(flags);
   } catch (err) {
-    writeErr(`Config error: ${err instanceof Error ? err.message : String(err)}\n`);
+    writeErr(`Config error: ${toErrorMessage(err)}\n`);
     return 2;
   }
   const { paths, config: _config, vault } = bootResult;
@@ -187,7 +188,7 @@ export async function boot(argv: string[]): Promise<BootContext | number> {
       await modelsRegistry.refresh();
       logger.info('models.dev catalog refreshed');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = toErrorMessage(err);
       logger.warn(`models.dev refresh failed (${msg}); using cached catalog`);
     }
   }
@@ -568,7 +569,7 @@ async function checkGitInCwd(opts: {
         hasCwdGit = true;
       } catch (err) {
         renderer.writeError(
-          `git init failed: ${err instanceof Error ? err.message : String(err)}\n`,
+          `git init failed: ${toErrorMessage(err)}\n`,
         );
       }
     }

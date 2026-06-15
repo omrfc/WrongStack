@@ -1,6 +1,7 @@
 import type { SessionRegistry, SlashCommand } from '@wrongstack/core';
 import { color, SessionRecovery } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 // ── Live session helpers (SessionRegistry) ──────────────────────────────
 
@@ -506,7 +507,7 @@ async function killSession(sessionId: string): Promise<{ message: string }> {
   } catch (err) {
     return {
       message: color.red(
-        `Failed to kill session: ${err instanceof Error ? err.message : String(err)}`,
+        `Failed to kill session: ${toErrorMessage(err)}`,
       ),
     };
   }

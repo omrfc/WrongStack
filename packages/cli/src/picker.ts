@@ -5,6 +5,7 @@ import { appendHistory, backupCurrent } from './config-history.js';
 import type { ReadlineInputReader } from './input-reader.js';
 import { hasApiKey } from './provider-helpers.js';
 import type { TerminalRenderer } from './renderer.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 // Simple theme alias (avoids importing the full theme module just for one color)
 const theme = { primary: color.amber };
@@ -44,7 +45,7 @@ export async function saveToGlobalConfig(
         JSON.stringify({
           level: 'warn',
           event: 'picker.backup_failed',
-          message: err instanceof Error ? err.message : String(err),
+          message: toErrorMessage(err),
           timestamp: new Date().toISOString(),
         }),
       );
@@ -70,7 +71,7 @@ export async function saveToGlobalConfig(
       JSON.stringify({
         level: 'warn',
         event: 'picker.save_failed',
-        message: err instanceof Error ? err.message : String(err),
+        message: toErrorMessage(err),
         timestamp: new Date().toISOString(),
       }),
     );

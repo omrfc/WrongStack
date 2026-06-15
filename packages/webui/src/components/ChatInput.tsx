@@ -13,6 +13,7 @@ import { Button } from './ui/button';
 import { type SlashCommandDef, SLASH_COMMANDS, SLASH_CATEGORY_ORDER, matchSlash, detectAtMention } from './ChatInput/slash-commands.js';
 import { autoFenceCode } from './ChatInput/code-detect.js';
 import { RefinePanel } from './RefinePanel.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 export function ChatInput({
   onOpenBreakdown,
@@ -468,7 +469,7 @@ export function ChatInput({
           console.warn(JSON.stringify({ level: 'warn', event: 'ws_send_failed', reason: 'not_connected', timestamp: new Date().toISOString() }));
         }
       } catch (err) {
-        console.warn(JSON.stringify({ level: 'warn', event: 'ws_send_error', error: err instanceof Error ? err.message : String(err), timestamp: new Date().toISOString() }));
+        console.warn(JSON.stringify({ level: 'warn', event: 'ws_send_error', error: toErrorMessage(err), timestamp: new Date().toISOString() }));
         setLoading(false);
       }
     },

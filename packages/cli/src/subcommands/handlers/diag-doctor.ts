@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { color } from '@wrongstack/core';
 import { API_VERSION } from '../../version.js';
 import type { SubcommandHandler } from '../index.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 export const diagCmd: SubcommandHandler = async (_args, deps) => {
   const cfg = deps.config;
@@ -89,7 +90,7 @@ export const doctorCmd: SubcommandHandler = async (_args, deps) => {
     checks.push({
       name: 'models cache',
       status: 'warn',
-      detail: `read failed: ${err instanceof Error ? err.message : String(err)}`,
+      detail: `read failed: ${toErrorMessage(err)}`,
     });
   }
   try {
@@ -112,7 +113,7 @@ export const doctorCmd: SubcommandHandler = async (_args, deps) => {
     checks.push({
       name: 'sessions writable',
       status: 'fail',
-      detail: `cannot write to ${deps.paths.projectSessions}: ${err instanceof Error ? err.message : String(err)}`,
+      detail: `cannot write to ${deps.paths.projectSessions}: ${toErrorMessage(err)}`,
     });
   }
   const mcpEntries = Object.entries(cfg.mcpServers ?? {}) as [

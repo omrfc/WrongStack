@@ -7,6 +7,7 @@ import { appendHistory } from '../config-history.js';
 import { filterSafeForProject } from '../settings-menu.js';
 import { parseSubcommand } from './helpers.js';
 import type { SlashCommandContext } from './index.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 /**
  * `/doctor` — diagnose and auto-repair the persisted config files.
@@ -153,7 +154,7 @@ export function buildDoctorCommand(opts: SlashCommandContext): SlashCommand {
           parsed = JSON.parse(raw) as Record<string, unknown>;
         } catch (err) {
           errorCount++;
-          const msg = err instanceof Error ? err.message : String(err);
+          const msg = toErrorMessage(err);
           lines.push(`  ${color.red('✗')} invalid JSON — ${msg}`);
           if (!applyFixes) {
             fixableCount++;

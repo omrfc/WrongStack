@@ -1,5 +1,6 @@
 import type { ProviderConfig } from '@wrongstack/core';
 import type { WebSocket } from 'ws';
+import { toErrorMessage } from '@wrongstack/core/utils';
 import {
   expectDefined,
   maskedKey,
@@ -53,7 +54,7 @@ export async function handleProvidersList(ctx: WsHandlerContext, ws: WebSocket):
       },
     });
   } catch (err) {
-    sendResult(ctx, ws, false, err instanceof Error ? err.message : String(err));
+    sendResult(ctx, ws, false, toErrorMessage(err));
   }
 }
 
@@ -93,7 +94,7 @@ export async function handleProviderModels(
       },
     });
   } catch (err) {
-    sendResult(ctx, ws, false, err instanceof Error ? err.message : String(err));
+    sendResult(ctx, ws, false, toErrorMessage(err));
   }
 }
 
@@ -117,7 +118,7 @@ export async function handleProvidersSaved(ctx: WsHandlerContext, ws: WebSocket)
       },
     });
   } catch (err) {
-    sendResult(ctx, ws, false, err instanceof Error ? err.message : String(err));
+    sendResult(ctx, ws, false, toErrorMessage(err));
   }
 }
 
@@ -148,7 +149,7 @@ export async function handleKeyUpsert(
     await ctx.providerStore.save(providers);
     sendResult(ctx, ws, true, `Key "${label}" saved for ${providerId}`);
   } catch (err) {
-    sendResult(ctx, ws, false, err instanceof Error ? err.message : String(err));
+    sendResult(ctx, ws, false, toErrorMessage(err));
   }
 }
 
@@ -178,7 +179,7 @@ export async function handleKeyDelete(
     await ctx.providerStore.save(providers);
     sendResult(ctx, ws, true, `Key "${label}" deleted from ${providerId}`);
   } catch (err) {
-    sendResult(ctx, ws, false, err instanceof Error ? err.message : String(err));
+    sendResult(ctx, ws, false, toErrorMessage(err));
   }
 }
 
@@ -201,7 +202,7 @@ export async function handleKeySetActive(
     await ctx.providerStore.save(providers);
     sendResult(ctx, ws, true, `Active key for ${providerId} set to "${label}"`);
   } catch (err) {
-    sendResult(ctx, ws, false, err instanceof Error ? err.message : String(err));
+    sendResult(ctx, ws, false, toErrorMessage(err));
   }
 }
 
@@ -256,7 +257,7 @@ export async function handleProviderAdd(
       },
     });
   } catch (err) {
-    sendResult(ctx, ws, false, err instanceof Error ? err.message : String(err));
+    sendResult(ctx, ws, false, toErrorMessage(err));
   }
 }
 
@@ -275,6 +276,6 @@ export async function handleProviderRemove(
     await ctx.providerStore.save(providers);
     sendResult(ctx, ws, true, `Provider "${providerId}" removed`);
   } catch (err) {
-    sendResult(ctx, ws, false, err instanceof Error ? err.message : String(err));
+    sendResult(ctx, ws, false, toErrorMessage(err));
   }
 }

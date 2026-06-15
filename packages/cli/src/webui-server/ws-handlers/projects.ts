@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { toErrorMessage } from '@wrongstack/core/utils';
 import {
   type Agent,
   DefaultSystemPromptBuilder,
@@ -207,7 +208,7 @@ export async function handleProjectsSelect(
     const switchedP = await ctx.buildSessionStart({ reset: true, clearedSessionId: oldSessionId });
     ctx.broadcast({ type: 'session.start', payload: switchedP });
   } catch (err) {
-    sendResult(ctx, ws, false, err instanceof Error ? err.message : String(err));
+    sendResult(ctx, ws, false, toErrorMessage(err));
   }
 }
 
@@ -253,7 +254,7 @@ export async function handleProjectsAdd(
         name: path.basename(addRoot),
         root: addRoot,
         slug: '',
-        message: err instanceof Error ? err.message : String(err),
+        message: toErrorMessage(err),
       },
     });
   }
@@ -280,6 +281,6 @@ export async function handleWorkingDirSet(
     ctx.broadcast({ type: 'working_dir.changed', payload: { cwd: resolved, projectRoot: wdRoot } });
     sendResult(ctx, ws, true, `Working directory set to ${resolved}`);
   } catch (err) {
-    sendResult(ctx, ws, false, err instanceof Error ? err.message : String(err));
+    sendResult(ctx, ws, false, toErrorMessage(err));
   }
 }

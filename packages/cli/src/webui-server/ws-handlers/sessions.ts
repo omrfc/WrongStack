@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { toErrorMessage } from '@wrongstack/core/utils';
 import {
   type Agent,
   DefaultSessionRewinder,
@@ -89,7 +90,7 @@ export async function handleSessionsList(
   } catch (err) {
     ctx.send(ws, {
       type: 'sessions.list',
-      payload: { sessions: [], error: err instanceof Error ? err.message : String(err) },
+      payload: { sessions: [], error: toErrorMessage(err) },
     });
   }
 }
@@ -125,7 +126,7 @@ export async function handleSessionNew(ctx: SessionsContext, _ws: WebSocket): Pr
         JSON.stringify({
           level: 'warn',
           event: 'webui.session_new_store_failed',
-          message: err instanceof Error ? err.message : String(err),
+          message: toErrorMessage(err),
           timestamp: new Date().toISOString(),
         }),
       );
@@ -176,7 +177,7 @@ export async function handleSessionRewind(
     const payload = await ctx.buildSessionStart({ reset: true });
     ctx.broadcast({ type: 'session.start', payload });
   } catch (err) {
-    sendResult(ctx, ws, false, err instanceof Error ? err.message : String(err));
+    sendResult(ctx, ws, false, toErrorMessage(err));
   }
 }
 
@@ -195,7 +196,7 @@ export async function handleSessionDelete(
     await storeFor(ctx.opts).delete(id);
     sendResult(ctx, ws, true, `Session ${id} deleted`);
   } catch (err) {
-    sendResult(ctx, ws, false, err instanceof Error ? err.message : String(err));
+    sendResult(ctx, ws, false, toErrorMessage(err));
   }
 }
 
@@ -251,6 +252,6 @@ export async function handleSessionResume(
     ctx.broadcast({ type: 'session.start', payload });
     sendResult(ctx, ws, true, `Resumed session ${id}`);
   } catch (err) {
-    sendResult(ctx, ws, false, err instanceof Error ? err.message : String(err));
+    sendResult(ctx, ws, false, toErrorMessage(err));
   }
 }

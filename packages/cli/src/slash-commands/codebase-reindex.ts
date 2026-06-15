@@ -2,6 +2,7 @@ import type { Context, SlashCommand } from '@wrongstack/core';
 import { color } from '@wrongstack/core';
 import { resetIndexCircuitBreaker, runStartupIndex } from '@wrongstack/tools';
 import type { SlashCommandContext } from './index.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 /**
  * `/codebase-reindex` — manually refresh the `codebase-search` symbol index.
@@ -43,7 +44,7 @@ export function buildCodebaseReindexCommand(opts: SlashCommandContext): SlashCom
           (r.errors.length ? `\n${color.yellow(`  ${r.errors.length} file(s) had errors`)}` : '');
         return { message: summary };
       } catch (err) {
-        const msg = `${color.red('Codebase reindex failed:')} ${err instanceof Error ? err.message : String(err)}`;
+        const msg = `${color.red('Codebase reindex failed:')} ${toErrorMessage(err)}`;
         return { message: msg };
       }
     },

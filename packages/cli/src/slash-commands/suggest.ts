@@ -4,6 +4,7 @@ import { color } from '@wrongstack/core';
 import { parseNextSteps } from '@wrongstack/tui';
 import type { SlashCommandContext } from './index.js';
 import { setSuggestions } from './suggestion-store.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 /**
  * Collect project context for the suggestion subagent.
@@ -133,7 +134,7 @@ export function buildSuggestCommand(opts: SlashCommandContext): SlashCommand {
         opts.onSuggestions?.(suggestions);
         return { message: formatSuggestions(suggestions) };
       } catch (err) {
-        const msg = `Suggestion generation failed: ${err instanceof Error ? err.message : String(err)}`;
+        const msg = `Suggestion generation failed: ${toErrorMessage(err)}`;
         opts.renderer.writeWarning(msg);
         return { message: msg };
       }

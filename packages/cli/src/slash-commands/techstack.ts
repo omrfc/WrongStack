@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import type { Context, SlashCommand } from '@wrongstack/core';
 import { color } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 /**
  * Discover all `package.json` files in the project (root + workspace packages).
@@ -203,7 +204,7 @@ export function buildTechStackCommand(opts: SlashCommandContext): SlashCommand {
         }
       } catch (err) {
         discoveryNote = color.red(
-          `Could not scan for package files: ${err instanceof Error ? err.message : String(err)}`,
+          `Could not scan for package files: ${toErrorMessage(err)}`,
         );
       }
 
@@ -236,7 +237,7 @@ export function buildTechStackCommand(opts: SlashCommandContext): SlashCommand {
         const summary = await opts.onSpawnAndWait(task, { name });
         return { message: summary };
       } catch (err) {
-        const msg = `Tech stack scan failed: ${err instanceof Error ? err.message : String(err)}`;
+        const msg = `Tech stack scan failed: ${toErrorMessage(err)}`;
         opts.renderer.writeWarning(msg);
         return { message: msg };
       }

@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import type { Tool } from '@wrongstack/core';
 import { isBinaryBuffer, safeResolveReal } from './_util.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 interface ReadInput {
   path: string;
@@ -64,7 +65,7 @@ export const readTool: Tool<ReadInput, ReadOutput> = {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === 'ENOENT') throw new Error(`read: file not found "${input.path}"`);
       throw new Error(
-        `read: failed to stat "${input.path}": ${err instanceof Error ? err.message : String(err)}`,
+        `read: failed to stat "${input.path}": ${toErrorMessage(err)}`,
       );
     }
     if (!stat.isFile()) throw new Error(`read: "${input.path}" is not a regular file`);

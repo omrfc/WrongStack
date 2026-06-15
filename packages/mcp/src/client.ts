@@ -3,6 +3,7 @@ import { buildChildEnv } from '@wrongstack/core';
 import { MCP_CONSTANTS } from './constants.js';
 import { normalizeMCPTools } from './tool-schema.js';
 import { type HttpTransportOptions, SSETransport, StreamableHTTPTransport } from './transport.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 export type Transport = 'stdio' | 'sse' | 'streamable-http';
 
@@ -233,7 +234,7 @@ export class MCPClient {
         '[MCP] notify("notifications/initialized") failed for "' +
           this.opts.name +
           '": ' +
-          (err instanceof Error ? err.message : String(err)),
+          (toErrorMessage(err)),
       );
     }
     const toolsRes = await this.request('tools/list', {});
@@ -531,7 +532,7 @@ export class MCPClient {
       }
     } catch (err) {
       throw new Error(
-        `[MCP] notify("${method}") failed: ${err instanceof Error ? err.message : String(err)}`,
+        `[MCP] notify("${method}") failed: ${toErrorMessage(err)}`,
       );
     }
   }

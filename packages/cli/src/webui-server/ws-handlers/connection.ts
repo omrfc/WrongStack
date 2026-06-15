@@ -1,6 +1,7 @@
 import type { Agent } from '@wrongstack/core';
 import type { WebSocket } from 'ws';
 import type { WsCommon } from './index.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 /**
  * PR 5k of Issue #30: the connection-level WebSocket handlers —
@@ -86,7 +87,7 @@ export async function handleUserMessage(
       type: 'error',
       payload: {
         phase: 'agent.run',
-        message: err instanceof Error ? err.message : String(err),
+        message: toErrorMessage(err),
       },
     });
   } finally {

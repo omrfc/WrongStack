@@ -1,6 +1,7 @@
 import type { WebSocket } from 'ws';
 import type { ProviderConfig } from '@wrongstack/core';
 import { loadSavedProviders, saveProviders } from './provider-config-io.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 import {
   upsertKey as upsertKeyRecord,
   deleteKey as deleteKeyRecord,
@@ -37,7 +38,7 @@ export function createProviderHandlers(deps: ProviderHandlerDeps) {
     const next = configWriteLock
       .then(() => saveProviders(globalConfigPath, vault, providers))
       .catch((err) => {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = toErrorMessage(err);
         console.error(JSON.stringify({
           level: 'error',
           event: 'webui.provider_save_failed',

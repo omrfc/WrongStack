@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import type { WebSocket } from 'ws';
+import { toErrorMessage } from '@wrongstack/core/utils';
 import {
   AutoPhasePlanner,
   PhaseGraphBuilder,
@@ -235,7 +236,7 @@ export class AutoPhaseWebSocketHandler {
         this.broadcastState();
       })
       .catch((err: unknown) => {
-        this.logger.error(`[AutoPhase] Aborted: ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.error(`[AutoPhase] Aborted: ${toErrorMessage(err)}`);
         this.stopBroadcast();
         this.broadcast({ type: 'autophase.failed', payload: { title, error: String(err) } });
       });
@@ -273,7 +274,7 @@ export class AutoPhaseWebSocketHandler {
       }
       this.logger.info(`[AutoPhase] Planner produced no phases; using defaults for: ${goal}`);
     } catch (err) {
-      this.logger.error(`[AutoPhase] Planning failed, using defaults: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.error(`[AutoPhase] Planning failed, using defaults: ${toErrorMessage(err)}`);
     }
     return this.defaultPhases();
   }

@@ -1,3 +1,5 @@
+import { toErrorMessage } from '../utils/index.js';
+
 /**
  * WrongStack error hierarchy.
  *
@@ -272,7 +274,7 @@ export function toWrongStackError(
   code: Extract<ErrorCode, 'AGENT_RUN_FAILED' | 'AGENT_ABORTED' | 'UNKNOWN'> = ERROR_CODES.AGENT_RUN_FAILED,
 ): WrongStackError {
   if (err instanceof WrongStackError) return err;
-  const message = err instanceof Error ? err.message : String(err);
+  const message = toErrorMessage(err);
   return new AgentError({
     message,
     code: code === 'UNKNOWN' ? ERROR_CODES.AGENT_RUN_FAILED : code,

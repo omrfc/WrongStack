@@ -1,6 +1,7 @@
 import type { SlashCommand } from '@wrongstack/core';
 import { parseSubcommand, unknownSubcommand } from './helpers.js';
 import type { SlashCommandContext } from './index.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 export function buildMemoryCommand(opts: SlashCommandContext): SlashCommand {
   return {
@@ -210,7 +211,7 @@ async function runCompact(opts: SlashCommandContext): Promise<{ message: string 
       .trim();
   } catch (err) {
     return {
-      message: `LLM call failed: ${err instanceof Error ? err.message : String(err)}`,
+      message: `LLM call failed: ${toErrorMessage(err)}`,
     };
   }
 
@@ -228,7 +229,7 @@ async function runCompact(opts: SlashCommandContext): Promise<{ message: string 
     parsed = JSON.parse(jsonMatch[0]);
   } catch (err) {
     return {
-      message: `Failed to parse LLM response: ${err instanceof Error ? err.message : String(err)}\n\nRaw response:\n${responseText.slice(0, 500)}`,
+      message: `Failed to parse LLM response: ${toErrorMessage(err)}\n\nRaw response:\n${responseText.slice(0, 500)}`,
     };
   }
 
@@ -289,7 +290,7 @@ async function runCompact(opts: SlashCommandContext): Promise<{ message: string 
       }
     } catch (err) {
       errors.push(
-        `${op.action} failed for ${op.targets.join(', ')}: ${err instanceof Error ? err.message : String(err)}`,
+        `${op.action} failed for ${op.targets.join(', ')}: ${toErrorMessage(err)}`,
       );
     }
   }

@@ -2,6 +2,7 @@ import type { SlashCommand } from '@wrongstack/core';
 import { AnnotationsStoreOptions, color, truncate } from '@wrongstack/core';
 import { parseSubcommand, unknownSubcommand } from './helpers.js';
 import type { SlashCommandContext } from './index.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 /**
  * /collab — operator-side controls for the live-collaboration feature
@@ -115,7 +116,7 @@ async function historyCommand(
   } catch (err) {
     return {
       message: color.yellow(
-        `Failed to read session: ${err instanceof Error ? err.message : String(err)}`,
+        `Failed to read session: ${toErrorMessage(err)}`,
       ),
     };
   }

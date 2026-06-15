@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { color, type SlashCommand } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 /**
  * Register the `/working_dir` slash command (aliases: `/wd`, `/cd`).
@@ -82,7 +83,7 @@ export function buildWorkingDirCommand(_opts: SlashCommandContext): SlashCommand
         ctx.setWorkingDir(resolved);
       } catch (err) {
         return {
-          message: color.red(err instanceof Error ? err.message : String(err)),
+          message: color.red(toErrorMessage(err)),
         };
       }
 

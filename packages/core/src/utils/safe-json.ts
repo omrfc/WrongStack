@@ -1,3 +1,5 @@
+import { toErrorMessage } from './error.js';
+
 export interface SafeParseResult<T> {
   ok: boolean;
   value?: T | undefined;
@@ -13,7 +15,7 @@ export function safeParse<T = unknown>(input: string, maxBytes = 5_000_000): Saf
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : String(err),
+      error: toErrorMessage(err),
     };
   }
 }
@@ -35,7 +37,7 @@ export function safeStringify(value: unknown, pretty = false): string {
     return JSON.stringify(value, replacer, pretty ? 2 : undefined) ?? 'null';
   } catch (err) {
     return JSON.stringify({
-      __serialization_error: err instanceof Error ? err.message : String(err),
+      __serialization_error: toErrorMessage(err),
     });
   }
 }

@@ -1,5 +1,6 @@
 import { expectDefined } from '@wrongstack/core';
 import { LockError } from './circuit-breaker.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 /**
  * SQLite storage layer for the codebase index.
  *
@@ -85,7 +86,7 @@ function loadDatabaseSync(): typeof DatabaseSync {
   } catch (err) {
     throw new Error(
       "The codebase index needs Node's built-in SQLite (node:sqlite), available since Node 22.5. " +
-        `This runtime doesn't provide it: ${err instanceof Error ? err.message : String(err)}`,
+        `This runtime doesn't provide it: ${toErrorMessage(err)}`,
     );
   }
   return DatabaseSyncCtor;

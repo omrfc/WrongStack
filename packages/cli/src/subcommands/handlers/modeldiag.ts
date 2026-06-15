@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import { color, type ModelMatrixEntry, type ProviderConfig } from '@wrongstack/core';
 import { makeProviderFromConfig } from '@wrongstack/providers';
 import type { SubcommandHandler } from '../index.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 /**
  * `wrongstack modeldiag` — read-only diagnostics: key check, capability scan,
@@ -826,7 +827,7 @@ export const modeldiagCmd: SubcommandHandler = async (args, deps) => {
           `  ${label} ${provColor(modelKey.padEnd(50))} ${scoreBar(c.score, 110).slice(0, 11)}  ${color.amber(fmtMs(latency).padEnd(8))} ${color.dim(`in${usage?.input ?? '?'}/out${usage?.output ?? '?'}`.padEnd(12))} ${firstLineClean}`,
         );
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
+        const errMsg = toErrorMessage(err);
         writeLine(
           `  ${label} ${color.red(modelKey.padEnd(50))} ${scoreBar(c.score, 110).slice(0, 11)}  ${color.red('FAILED')}    ${color.dim(errMsg.slice(0, 40))}`,
         );

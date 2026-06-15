@@ -1,6 +1,7 @@
 import type { AgentPhase, SlashCommand } from '@wrongstack/core';
 import { AGENT_CATALOG, AGENTS_BY_PHASE, color, dispatchAgent } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 /**
  * /delegate — user-facing counterpart to the AI's `delegate` tool.
@@ -162,7 +163,7 @@ async function spawnAgent(
     opts.renderer.write(msg);
     return { message: msg };
   } catch (err) {
-    const msg = `${color.red('✗ Spawn failed')}: ${err instanceof Error ? err.message : String(err)}`;
+    const msg = `${color.red('✗ Spawn failed')}: ${toErrorMessage(err)}`;
     opts.renderer.writeWarning(msg);
     return { message: msg };
   }

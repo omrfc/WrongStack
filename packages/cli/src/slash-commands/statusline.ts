@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { atomicWrite, ERROR_CODES, FsError, type SlashCommand } from '@wrongstack/core';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 const CONFIG_ENV = 'WRONGSTACK_STATUSLINE_CONFIG';
 
@@ -53,7 +54,7 @@ export async function saveStatuslineConfig(cfg: StatuslineConfig): Promise<void>
     await atomicWrite(p, JSON.stringify(cfg, null, 2));
   } catch (err) {
     throw new FsError({
-      message: err instanceof Error ? err.message : String(err),
+      message: toErrorMessage(err),
       code:
         err instanceof Error && err.message.includes('mkdir')
           ? ERROR_CODES.FS_MKDIR_FAILED

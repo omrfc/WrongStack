@@ -1,6 +1,7 @@
 import { expectDefined } from '@wrongstack/core';
 import type { Tool, ToolStreamEvent } from '@wrongstack/core';
 import { guardedFetch } from './fetch.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 interface SearchInput {
   query: string;
   num_results?: number | undefined;
@@ -115,7 +116,7 @@ async function duckduckgoSearch(
       truncated: results.length >= num,
     };
   } catch (err) {
-    console.log(JSON.stringify({ level: 'debug', event: 'search_failed', query, error: err instanceof Error ? err.message : String(err) }));
+    console.log(JSON.stringify({ level: 'debug', event: 'search_failed', query, error: toErrorMessage(err) }));
     return {
       query,
       results: [{ title: 'Search unavailable', url: '', snippet: 'Could not reach DuckDuckGo' }],

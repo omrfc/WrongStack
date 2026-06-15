@@ -1,6 +1,7 @@
 import { expectDefined } from '@wrongstack/core';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { toErrorMessage } from '@wrongstack/core/utils';
 import type {
   Agent,
   AttachmentStore,
@@ -1888,7 +1889,7 @@ export function App({
         type: 'addEntry',
         entry: {
           kind: 'error',
-          text: `Clipboard image error: ${err instanceof Error ? err.message : String(err)}`,
+          text: `Clipboard image error: ${toErrorMessage(err)}`,
         },
       });
     }
@@ -1915,7 +1916,7 @@ export function App({
         type: 'addEntry',
         entry: {
           kind: 'error',
-          text: `Clipboard error: ${err instanceof Error ? err.message : String(err)}`,
+          text: `Clipboard error: ${toErrorMessage(err)}`,
         },
       });
     }
@@ -1962,7 +1963,7 @@ export function App({
         type: 'addEntry',
         entry: {
           kind: 'error',
-          text: `Attach failed: ${err instanceof Error ? err.message : String(err)}`,
+          text: `Attach failed: ${toErrorMessage(err)}`,
         },
       });
       dispatch({ type: 'pickerClose' });
@@ -2622,7 +2623,7 @@ export function App({
           dispatch({ type: 'resumePickerOpen', sessions });
         } catch (err) {
           return {
-            message: err instanceof Error ? err.message : String(err),
+            message: toErrorMessage(err),
           };
         }
         return { message: undefined };
@@ -3499,7 +3500,7 @@ export function App({
         }).catch((err) => {
           dispatch({
             type: 'resumePickerError',
-            text: err instanceof Error ? err.message : String(err),
+            text: toErrorMessage(err),
           });
         });
         return;
@@ -4725,7 +4726,7 @@ export function App({
     } catch (err) {
       dispatch({
         type: 'addEntry',
-        entry: { kind: 'error', text: err instanceof Error ? err.message : String(err) },
+        entry: { kind: 'error', text: toErrorMessage(err) },
       });
     } finally {
       activeCtrlRef.current = null;
@@ -4789,7 +4790,7 @@ export function App({
             type: 'addEntry',
             entry: {
               kind: 'error',
-              text: `[eternal] ${err instanceof Error ? err.message : String(err)}`,
+              text: `[eternal] ${toErrorMessage(err)}`,
             },
           });
         }
@@ -4834,7 +4835,7 @@ export function App({
             type: 'addEntry',
             entry: {
               kind: 'error',
-              text: `[parallel] ${err instanceof Error ? err.message : String(err)}`,
+              text: `[parallel] ${toErrorMessage(err)}`,
             },
           });
         }
@@ -5078,7 +5079,7 @@ export function App({
       } catch (err) {
         dispatch({
           type: 'addEntry',
-          entry: { kind: 'error', text: err instanceof Error ? err.message : String(err) },
+          entry: { kind: 'error', text: toErrorMessage(err) },
         });
       }
       return;

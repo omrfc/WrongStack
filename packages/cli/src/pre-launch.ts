@@ -5,6 +5,7 @@ import { atomicWrite, color } from '@wrongstack/core';
 import type { ReadlineInputReader } from './input-reader.js';
 import type { TerminalRenderer } from './renderer.js';
 import { detectProjectFacts, renderAgentsTemplate } from './slash-commands/index.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 export type ProjectKind =
   /** `.wrongstack/AGENTS.md` exists — fully set up. */
@@ -100,7 +101,7 @@ export async function runProjectCheck(opts: {
         renderer.write(`  ${color.green('✓')} Wrote ${color.dim(file)}\n`);
       } catch (err) {
         renderer.writeError(
-          `Failed to scaffold AGENTS.md: ${err instanceof Error ? err.message : String(err)}`,
+          `Failed to scaffold AGENTS.md: ${toErrorMessage(err)}`,
         );
       }
     }
@@ -149,7 +150,7 @@ export async function runProjectCheck(opts: {
         renderer.write(`  ${color.green('✓')} Git repository initialized\n`);
       } catch (err) {
         renderer.writeError(
-          `git init failed: ${err instanceof Error ? err.message : String(err)}\n`,
+          `git init failed: ${toErrorMessage(err)}\n`,
         );
       }
     }

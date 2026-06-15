@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises';
+import { toErrorMessage } from '@wrongstack/core/utils';
 import {
   AGENT_CATALOG,
   AGENTS_BY_PHASE,
@@ -480,7 +481,7 @@ export function buildSetModelCommand(opts: SlashCommandContext): SlashCommand {
         };
       } catch (err) {
         return {
-          message: `${color.red('setmodel error')}: ${err instanceof Error ? err.message : String(err)}`,
+          message: `${color.red('setmodel error')}: ${toErrorMessage(err)}`,
         };
       }
     },

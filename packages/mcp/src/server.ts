@@ -1,6 +1,7 @@
 import { expectDefined } from '@wrongstack/core';
 import { type IncomingMessage, type ServerResponse, createServer } from 'node:http';
 import { MCP_CONSTANTS } from './constants.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 /**
  * Server-side MCP. The mirror image of `MCPClient`: instead of consuming a
  * remote MCP server, this lets WrongStack *be* an MCP server — exposing its
@@ -111,7 +112,7 @@ export class MCPServer {
       }
       return JSON.stringify({ jsonrpc: '2.0', id: msg.id, result });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = toErrorMessage(err);
       this.logger?.warn?.(`MCP server: method "${msg.method}" threw: ${message}`);
       return this.encodeError(expectDefined(msg.id), INTERNAL_ERROR, message);
     }
@@ -213,7 +214,7 @@ export function serveStdio(server: MCPServer, opts: ServeStdioOptions = {}): Ser
           }),
       )
       .catch((err) => {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = toErrorMessage(err);
         console.error(JSON.stringify({
           level: 'error',
           event: 'mcp_server.stdout_write_failed',
@@ -242,7 +243,7 @@ export function serveStdio(server: MCPServer, opts: ServeStdioOptions = {}): Ser
           console.error(JSON.stringify({
             level: 'error',
             event: 'mcp_server.handle_message_failed',
-            message: err instanceof Error ? err.message : String(err),
+            message: toErrorMessage(err),
             timestamp: new Date().toISOString(),
           }));
         });
@@ -404,7 +405,7 @@ async function handleHttpRequest(
         return send(200, out);
       })
       .catch((err) => {
-        log?.warn?.(`MCP http handler error: ${err instanceof Error ? err.message : String(err)}`);
+        log?.warn?.(`MCP http handler error: ${toErrorMessage(err)}`);
         send(500, JSON.stringify({ error: 'internal error' }));
       });
   });

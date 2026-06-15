@@ -1,6 +1,7 @@
 import type { AgentPhase, SlashCommand } from '@wrongstack/core';
 import { AGENTS_BY_PHASE, color, dispatchAgent } from '@wrongstack/core';
 import type { SlashCommandContext } from './index.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 const PHASE_ORDER: { phase: AgentPhase; label: string }[] = [
   { phase: 'discovery', label: '1 · Discovery' },
@@ -343,7 +344,7 @@ async function handleSpawn(
       const id = await opts.onFleetSpawn(role);
       spawned.push(id);
     } catch (err) {
-      const warnMsg = `${color.red('✗ Spawn failed')} for slot ${i + 1}: ${err instanceof Error ? err.message : String(err)}`;
+      const warnMsg = `${color.red('✗ Spawn failed')} for slot ${i + 1}: ${toErrorMessage(err)}`;
       opts.renderer.writeWarning(warnMsg);
     }
   }
@@ -405,7 +406,7 @@ async function handleDispatch(
       lines.push(`  ${color.green('✓ spawned')} ${color.bold(decision.role)} as ${color.dim(id)}`);
     } catch (err) {
       lines.push(
-        `  ${color.amber('⚠ spawn failed:')} ${err instanceof Error ? err.message : String(err)}`,
+        `  ${color.amber('⚠ spawn failed:')} ${toErrorMessage(err)}`,
       );
     }
   } else {

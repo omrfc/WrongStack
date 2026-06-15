@@ -2,6 +2,7 @@ import type { Agent, ModelsRegistry, SkillLoader } from '@wrongstack/core';
 import type { WebSocket } from 'ws';
 import { computeUsageCost, getCostRates } from '../cost-helpers.js';
 import type { WsCommon } from './index.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 /**
  * PR 5c of Issue #30: read-only introspection WebSocket handlers
@@ -58,7 +59,7 @@ export async function handleSkillsList(ctx: IntrospectionContext, ws: WebSocket)
       payload: {
         skills: [],
         enabled: true,
-        error: err instanceof Error ? err.message : String(err),
+        error: toErrorMessage(err),
       },
     });
   }

@@ -4,6 +4,7 @@ import { persistAutonomySetting, persistConfigSetting } from '../settings-menu.j
 import { formatDelay } from '../utils/delay-format.js';
 import { parseSubcommand, unknownSubcommand } from './helpers.js';
 import type { SlashCommandContext } from './index.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 /**
  * `/settings` — view or change persisted settings.
@@ -275,7 +276,7 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
         };
       } catch (err) {
         return {
-          message: `${color.red('Settings error')}: ${err instanceof Error ? err.message : String(err)}`,
+          message: `${color.red('Settings error')}: ${toErrorMessage(err)}`,
         };
       }
     },

@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { DefaultSessionReader, expectDefined } from '@wrongstack/core';
 import type { SubcommandHandler } from '../index.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 export const exportCmd: SubcommandHandler = async (args, deps) => {
   if (!deps.sessionStore) {
     deps.renderer.writeError('No session store configured.');
@@ -40,7 +41,7 @@ export const exportCmd: SubcommandHandler = async (args, deps) => {
   try {
     rendered = await reader.export(sessionId, { format, includeTools, includeDiagnostics });
   } catch (err) {
-    deps.renderer.writeError(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
+    deps.renderer.writeError(`Export failed: ${toErrorMessage(err)}`);
     return 1;
   }
   if (output) {

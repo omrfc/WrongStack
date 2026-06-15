@@ -1,4 +1,5 @@
 import { expectDefined } from '@wrongstack/core';
+import { toErrorMessage } from '@wrongstack/core/utils';
 /**
  * semver-bump plugin — Conventional-commit-driven semver version bumps.
  *
@@ -261,7 +262,7 @@ const plugin: Plugin = {
             commits = getRecentCommits(lastTag, cwd);
           } catch (err: unknown) {
             /* v8 ignore next -- getRecentCommits only throws Error; the String(err) branch is defensive. */
-            const msg = err instanceof Error ? err.message : String(err);
+            const msg = toErrorMessage(err);
             return { ok: false, error: `Git error: ${msg}`, bumpPart: 'patch' };
           }
           bumpPart = determineBump(commits);
@@ -301,7 +302,7 @@ const plugin: Plugin = {
             });
           } catch (err: unknown) {
             /* v8 ignore next -- execFileSync only throws Error; the String(err) branch is defensive. */
-            const msg = err instanceof Error ? err.message : String(err);
+            const msg = toErrorMessage(err);
             return { ok: false, error: `bump script failed: ${msg}` };
           }
           for (const rel of ['package.json', 'package-lock.json', 'src/lib/utils.ts', 'index.html']) {

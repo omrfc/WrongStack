@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises';
+import { toErrorMessage } from '@wrongstack/core/utils';
 import {
   atomicWrite,
   type CustomModelDefinition,
@@ -278,7 +279,7 @@ export function buildModelsCommand(opts: SlashCommandContext): SlashCommand {
         };
       } catch (err) {
         return {
-          message: `${color.red('models error')}: ${err instanceof Error ? err.message : String(err)}`,
+          message: `${color.red('models error')}: ${toErrorMessage(err)}`,
         };
       }
     },

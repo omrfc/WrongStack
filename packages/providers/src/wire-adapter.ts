@@ -3,6 +3,7 @@ import { ProviderError, StreamHangError } from '@wrongstack/core';
 import { parseProviderHttpError } from './error-parse.js';
 import { isDebugStreamEnabled, pushDebugChunkStats } from './stream-debug-state.js';
 import { Readable } from 'node:stream';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 type Response2 = {
   ok: boolean;
@@ -126,9 +127,9 @@ export abstract class WireAdapter implements Provider {
       httpRes = raw as Response2;
     } catch (err) {
       if (opts.signal.aborted) throw err;
-      throw new ProviderError(err instanceof Error ? err.message : String(err), 0, true, this.id, {
+      throw new ProviderError(toErrorMessage(err), 0, true, this.id, {
         cause: err,
-        body: { message: err instanceof Error ? err.message : String(err) },
+        body: { message: toErrorMessage(err) },
       });
     }
 

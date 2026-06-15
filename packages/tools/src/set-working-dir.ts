@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises';
 import type { Context, Tool } from '@wrongstack/core';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -64,7 +65,7 @@ export const setWorkingDirTool: Tool<SetWorkingDirInput, SetWorkingDirOutput> = 
     } catch (err) {
       return {
         current: ctx.workingDir,
-        error: err instanceof Error ? err.message : String(err),
+        error: toErrorMessage(err),
       };
     }
 

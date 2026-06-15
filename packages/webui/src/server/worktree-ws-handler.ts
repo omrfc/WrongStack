@@ -1,6 +1,7 @@
 import type { WebSocket } from 'ws';
 import type { EventBus, Logger } from '@wrongstack/core';
 import type { WorktreeHandleView, WSServerMessage } from '../types.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 const MAX_ACTIVITY = 6;
 
@@ -151,7 +152,7 @@ export class WorktreeWebSocketHandler {
       try {
         if (ws.readyState === 1) ws.send(data);
       } catch (err) {
-        this.logger.debug?.(`worktree broadcast failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.debug?.(`worktree broadcast failed: ${toErrorMessage(err)}`);
       }
     }
   }

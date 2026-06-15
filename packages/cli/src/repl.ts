@@ -1,5 +1,6 @@
 import * as crypto from 'node:crypto';
 import * as path from 'node:path';
+import { toErrorMessage } from '@wrongstack/core/utils';
 import type {
   Agent,
   AttachmentStore,
@@ -387,7 +388,7 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
             }
           } catch (err) {
             opts.renderer.writeError(
-              `[eternal] ${err instanceof Error ? err.message : String(err)}`,
+              `[eternal] ${toErrorMessage(err)}`,
             );
           }
           // Yield to the event loop so a SIGINT delivered during this
@@ -481,7 +482,7 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
             }
           } catch (err) {
             opts.renderer.writeError(
-              `[parallel] ${err instanceof Error ? err.message : String(err)}`,
+              `[parallel] ${toErrorMessage(err)}`,
             );
           }
           await new Promise((resolve) => setTimeout(resolve, 250));
@@ -581,7 +582,7 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
           const res = await opts.slashRegistry.dispatch(`/working_dir ${args}`, opts.agent.ctx);
           if (res?.message) opts.renderer.write(`${res.message}\n`);
         } catch (err) {
-          opts.renderer.writeError(err instanceof Error ? err.message : String(err));
+          opts.renderer.writeError(toErrorMessage(err));
         }
         continue;
       }
@@ -675,7 +676,7 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
             }
           }
         } catch (err) {
-          opts.renderer.writeError(err instanceof Error ? err.message : String(err));
+          opts.renderer.writeError(toErrorMessage(err));
         }
         continue;
       }
@@ -891,7 +892,7 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
               }
             } catch (err) {
               opts.renderer.writeError(
-                `[autonomy] ${err instanceof Error ? err.message : String(err)}`,
+                `[autonomy] ${toErrorMessage(err)}`,
               );
             } finally {
               activeCtrl = undefined;
@@ -971,7 +972,7 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
           }
         }
       } catch (err) {
-        opts.renderer.writeError(err instanceof Error ? err.message : String(err));
+        opts.renderer.writeError(toErrorMessage(err));
       } finally {
         activeCtrl = undefined;
       }
@@ -1006,7 +1007,7 @@ async function pasteClipboardImage(builder: InputBuilder, opts: ReplOptions): Pr
     opts.renderer.write(color.dim(`  ↳ ${placeholder} (PNG ${kb}KB)\n`));
   } catch (err) {
     opts.renderer.writeError(
-      `Clipboard image error: ${err instanceof Error ? err.message : String(err)}`,
+      `Clipboard image error: ${toErrorMessage(err)}`,
     );
   }
 }
@@ -1092,7 +1093,7 @@ async function renderGoalBanner(opts: ReplOptions): Promise<void> {
           await opts.slashRegistry.dispatch('/autonomy eternal', opts.agent.ctx);
         } catch (err) {
           opts.renderer.writeError(
-            `Auto-resume failed: ${err instanceof Error ? err.message : String(err)}`,
+            `Auto-resume failed: ${toErrorMessage(err)}`,
           );
         }
       } else {

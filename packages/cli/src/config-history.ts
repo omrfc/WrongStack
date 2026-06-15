@@ -3,6 +3,7 @@ import os from 'node:os';
 import * as path from 'node:path';
 import { atomicWrite, ERROR_CODES, FsError, writeErr } from '@wrongstack/core';
 import { isSecretField } from '@wrongstack/core/security';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 // ── UID ownership ──────────────────────────────────────────────────────────
 
@@ -196,7 +197,7 @@ async function ensureHistoryDir(homeFn: HomeDirFn = defaultHomeDir): Promise<voi
     await fs.mkdir(historyDir(homeFn), { recursive: true });
   } catch (err) {
     throw new FsError({
-      message: err instanceof Error ? err.message : String(err),
+      message: toErrorMessage(err),
       code: ERROR_CODES.FS_MKDIR_FAILED,
       path: historyDir(homeFn),
       cause: err,
@@ -221,7 +222,7 @@ async function writeIndex(idx: HistoryIndex, homeFn: HomeDirFn = defaultHomeDir)
     await atomicWrite(historyIndexPath(homeFn), JSON.stringify(idx, null, 2));
   } catch (err) {
     throw new FsError({
-      message: err instanceof Error ? err.message : String(err),
+      message: toErrorMessage(err),
       code: ERROR_CODES.FS_ATOMIC_WRITE_FAILED,
       path: historyIndexPath(homeFn),
       cause: err,
@@ -254,7 +255,7 @@ export async function backupCurrent(homeFn: HomeDirFn = defaultHomeDir): Promise
       await atomicWrite(last, content);
     } catch (err) {
       writeErr(
-        `[config-history] .last backup failed: ${err instanceof Error ? err.message : String(err)}`,
+        `[config-history] .last backup failed: ${toErrorMessage(err)}`,
       );
     }
   }
@@ -266,7 +267,7 @@ export async function backupCurrent(homeFn: HomeDirFn = defaultHomeDir): Promise
       await atomicWrite(bakPath, content);
     } catch (err) {
       writeErr(
-        `[config-history] timestamped backup failed: ${err instanceof Error ? err.message : String(err)}`,
+        `[config-history] timestamped backup failed: ${toErrorMessage(err)}`,
       );
     }
   }
@@ -284,7 +285,7 @@ export async function backupCurrent(homeFn: HomeDirFn = defaultHomeDir): Promise
     }
   } catch (err) {
     writeErr(
-      `[config-history] backup prune failed: ${err instanceof Error ? err.message : String(err)}`,
+      `[config-history] backup prune failed: ${toErrorMessage(err)}`,
     );
   }
 }
@@ -319,7 +320,7 @@ export async function appendHistory(
     );
   } catch (err) {
     throw new FsError({
-      message: err instanceof Error ? err.message : String(err),
+      message: toErrorMessage(err),
       code: ERROR_CODES.FS_WRITE_FAILED,
       path: path.join(historyDir(homeFn), `${id}.json`),
       cause: err,

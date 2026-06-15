@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { WebSocket } from 'ws';
 import type { CollaborationBus, EventBus, Logger } from '@wrongstack/core';
 import type { AnnotationsStore, SessionReader } from '@wrongstack/core/storage';
+import { toErrorMessage } from '@wrongstack/core/utils';
 import type {
   CollabRole,
   WSCollabParticipantJoined,
@@ -212,7 +213,7 @@ export class CollaborationWebSocketHandler {
       this.replayHistory(ws, sessionId).catch((err) => {
         this.logger.debug?.(
           `collab: replay failed for ${sessionId}: ${
-            err instanceof Error ? err.message : String(err)
+            toErrorMessage(err)
           }`,
         );
       });
@@ -349,7 +350,7 @@ export class CollaborationWebSocketHandler {
         ws,
         this.errorMessage(
           `annotation rejected: ${
-            err instanceof Error ? err.message : String(err)
+            toErrorMessage(err)
           }`,
         ),
       );
@@ -421,7 +422,7 @@ export class CollaborationWebSocketHandler {
         ws,
         this.errorMessage(
           `resolve failed: ${
-            err instanceof Error ? err.message : String(err)
+            toErrorMessage(err)
           }`,
         ),
       );
@@ -489,7 +490,7 @@ export class CollaborationWebSocketHandler {
         } catch (err) {
           this.logger.debug?.(
             `collab broadcast failed: ${
-              err instanceof Error ? err.message : String(err)
+              toErrorMessage(err)
             }`,
           );
         }
@@ -519,7 +520,7 @@ export class CollaborationWebSocketHandler {
     } catch (err) {
       this.logger.debug?.(
         `collab: session reader rejected ${sessionId}: ${
-          err instanceof Error ? err.message : String(err)
+          toErrorMessage(err)
         }`,
       );
       return;
@@ -610,7 +611,7 @@ export class CollaborationWebSocketHandler {
       } catch (err) {
         this.logger.debug?.(
           `collab broadcast failed: ${
-            err instanceof Error ? err.message : String(err)
+            toErrorMessage(err)
           }`,
         );
       }

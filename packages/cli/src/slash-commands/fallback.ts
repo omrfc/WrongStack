@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises';
+import { toErrorMessage } from '@wrongstack/core/utils';
 import {
   atomicWrite,
   color,
@@ -219,7 +220,7 @@ export function buildFallbackCommand(opts: SlashCommandContext): SlashCommand {
         };
       } catch (err) {
         return {
-          message: `${color.red('fallback error')}: ${err instanceof Error ? err.message : String(err)}`,
+          message: `${color.red('fallback error')}: ${toErrorMessage(err)}`,
         };
       }
     },

@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { toErrorMessage } from '@wrongstack/core/utils';
 import {
   // createSessionEventBridge,
   // resolveAuditLevel,
@@ -125,7 +126,7 @@ export async function setupSession(params: {
         `Resumed session ${resumed.data.metadata.id} — ${restoredMessages.length} messages, ${restoredToolCalls.length} tool executions, ${resumed.data.usage.input + resumed.data.usage.output} tokens used previously.`,
       );
     } catch (err) {
-      renderer.writeError(`Resume failed: ${err instanceof Error ? err.message : String(err)}`);
+      renderer.writeError(`Resume failed: ${toErrorMessage(err)}`);
       throw Object.assign(new Error('RESUME_FAILED'), { exitCode: 2 });
     }
   } else {

@@ -1,6 +1,7 @@
 import type { BrainArbiter, BrainAutoRisk } from '@wrongstack/core';
 import type { WebSocket } from 'ws';
 import type { WsCommon } from './index.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 /**
  * PR 5b of Issue #30: Brain WebSocket handlers (`brain.status` /
@@ -90,7 +91,7 @@ export async function handleBrainAsk(
       ctx,
       ws,
       false,
-      `Brain consultation failed: ${err instanceof Error ? err.message : String(err)}`,
+      `Brain consultation failed: ${toErrorMessage(err)}`,
     );
   }
 }

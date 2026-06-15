@@ -3,6 +3,7 @@ import { makeProviderFromConfig } from '@wrongstack/providers';
 import type { WebSocket } from 'ws';
 import { loadSavedProviders } from '../provider-config.js';
 import type { WsCommon } from './index.js';
+import { toErrorMessage } from '@wrongstack/core/utils';
 
 /**
  * PR 5e of Issue #30: agent-configuration WebSocket handlers —
@@ -61,7 +62,7 @@ export async function handleModesList(ctx: AgentConfigContext, ws: WebSocket): P
       payload: {
         modes: [],
         activeId: 'default',
-        error: err instanceof Error ? err.message : String(err),
+        error: toErrorMessage(err),
       },
     });
   }
@@ -90,7 +91,7 @@ export async function handleModeSwitch(
     const payload = await ctx.buildSessionStart({ mode: id });
     ctx.broadcast({ type: 'session.start', payload });
   } catch (err) {
-    sendResult(ctx, ws, false, err instanceof Error ? err.message : String(err));
+    sendResult(ctx, ws, false, toErrorMessage(err));
   }
 }
 
@@ -117,7 +118,7 @@ export async function handleModelSwitch(
       ctx,
       ws,
       false,
-      `Switch failed: ${err instanceof Error ? err.message : String(err)}`,
+      `Switch failed: ${toErrorMessage(err)}`,
     );
   }
 }
@@ -171,7 +172,7 @@ export async function handleModelRefine(
       payload: {
         refined: text,
         english: text,
-        error: err instanceof Error ? err.message : String(err),
+        error: toErrorMessage(err),
       },
     });
   }

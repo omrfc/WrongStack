@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
+import { toErrorMessage } from '@wrongstack/core/utils';
 import {
   type BenchReport,
   collectCellPredictions,
@@ -101,7 +102,7 @@ async function benchRun(_args: string[], deps: SubcommandDeps): Promise<number> 
   try {
     config = await loadBenchConfig(path.resolve(deps.cwd, modelsPath));
   } catch (err) {
-    deps.renderer.writeError(err instanceof Error ? err.message : String(err));
+    deps.renderer.writeError(toErrorMessage(err));
     return 1;
   }
   const concurrencyRaw = flagStr(deps, 'concurrency');
@@ -175,7 +176,7 @@ async function benchRun(_args: string[], deps: SubcommandDeps): Promise<number> 
       onProgress: (msg) => deps.renderer.write(color.dim(msg) + '\n'),
     });
   } catch (err) {
-    deps.renderer.writeError(err instanceof Error ? err.message : String(err));
+    deps.renderer.writeError(toErrorMessage(err));
     return 1;
   }
 
@@ -216,7 +217,7 @@ async function benchReport(args: string[], deps: SubcommandDeps): Promise<number
     summary = await readSummary(outDir);
   } catch (err) {
     deps.renderer.writeError(
-      `cannot read summary.json in ${outDir}: ${err instanceof Error ? err.message : String(err)}`,
+      `cannot read summary.json in ${outDir}: ${toErrorMessage(err)}`,
     );
     return 1;
   }
@@ -255,7 +256,7 @@ async function benchList(_args: string[], deps: SubcommandDeps): Promise<number>
       });
       deps.renderer.write('\n' + color.dim(`Harness: ${fp}`) + '\n');
     } catch (err) {
-      deps.renderer.writeError(err instanceof Error ? err.message : String(err));
+      deps.renderer.writeError(toErrorMessage(err));
       return 1;
     }
   }

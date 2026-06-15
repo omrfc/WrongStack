@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import { toErrorMessage } from '@wrongstack/core/utils';
 import {
   color,
   DefaultSessionRewinder,
@@ -166,7 +167,7 @@ export const rewindCmd: SubcommandHandler = async (args, deps) => {
     }
     return 0;
   } catch (err) {
-    deps.renderer.writeError(err instanceof Error ? err.message : String(err));
+    deps.renderer.writeError(toErrorMessage(err));
     return 1;
   }
 };
