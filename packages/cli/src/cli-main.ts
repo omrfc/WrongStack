@@ -350,8 +350,10 @@ export async function main(argv: string[]): Promise<number> {
       ...args: any
     ) => void,
   ) => {
+    // biome-ignore lint/suspicious/noExplicitAny: dynamic event dispatcher signature
     (events.on as (e: string, h: (...args: any) => void) => void)(event, handler);
     teardownHandlers.push(() =>
+      // biome-ignore lint/suspicious/noExplicitAny: dynamic event dispatcher signature
       (events.off as (e: string, h: (...args: any) => void) => void)(event, handler),
     );
   };
@@ -2460,7 +2462,9 @@ export async function main(argv: string[]): Promise<number> {
     getBrainLog: () => brainLog,
     // Clean up SessionStats event listeners and all EventBus handlers when the REPL exits.
     onDestroy: () => {
-      teardownHandlers.forEach((fn) => fn());
+      teardownHandlers.forEach((fn) => {
+        fn();
+      });
       stats.destroy(events);
     },
   });

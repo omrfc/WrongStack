@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execSync, execFileSync } from 'node:child_process';
-const MAX_FILES = Number.parseInt(process.env.GUARD_MAX_FILES ?? '', 120) || 150;
+const MAX_FILES = Number.parseInt(process.env.GUARD_MAX_FILES ?? '', 10) || 150;
 const FORCE_FLAG = process.argv.includes('--force');
 const VERBOSE = process.argv.includes('--verbose') || process.argv.includes('-v');
 const CORRUPTION_FRAGMENT = "{ type: 'worktreeMonitorToggle' }";
