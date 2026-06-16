@@ -62,6 +62,7 @@ import {
   resolveContextWindowPolicy,
   enhanceUserPrompt,
   recentTextTurns,
+  type TodoItem,
 } from '@wrongstack/core';
 import { ToolExecutor } from '@wrongstack/core/execution';
 import { decryptConfigSecrets, encryptConfigSecrets } from '@wrongstack/core/security';
@@ -1440,7 +1441,9 @@ export async function startWebUI(
       case 'collab.join':
       case 'collab.leave':
       case 'collab.annotate':
-      case 'collab.resolve': {
+      case 'collab.resolve':
+      case 'collab.request_pause':
+      case 'collab.resume': {
         collabHandler.handleMessage(ws, msg as { type: string; payload?: unknown | undefined });
         return;
       }
@@ -2355,6 +2358,100 @@ export async function startWebUI(
             type: 'plan.updated',
             payload: { plan },
           });
+        } catch (err) {
+          sendResult(ws, false, errMessage(err));
+        }
+        break;
+      }
+
+      case 'todo.update': {
+        // Update a single todo's status / activeForm in the live agent ctx.
+        // Mirrors the CLI webui-server's worklist handler so both surfaces
+        // can drive the todo list from the UI, not just read it.
+        const payload = (
+          msg as {
+            payload: {
+              id: string;
+              status?: TodoItem['status'] | undefined;
+              activeForm?: string | undefined;
+            };
+          }
+        ).payload;
+        const idx = context.todos.findIndex((t) => t.id === payload.id);
+        if (idx === -1) {
+          sendResult(ws, false, 'Todo not found');
+          break;
+        }
+        const next = [...context.todos];
+        const existing = expectDefined(next[idx]);
+        next[idx] = {
+          ...existing,
+          status: payload.status ?? existing.status,
+          activeForm: payload.activeForm !== undefined ? payload.activeForm : existing.activeForm,
+        };
+        context.state.replaceTodos(next);
+        sendResult(ws, true, `Todo "${existing.content}" updated`);
+        broadcast(clients, { type: 'todos.updated', payload: { todos: next } });
+        break;
+      }
+
+      case 'task.update': {
+        // Mutate the persisted task file at ctx.meta['task.path'].
+        const payload = (
+          msg as {
+            payload: {
+              id: string;
+              status: 'pending' | 'in_progress' | 'blocked' | 'failed' | 'review' | 'completed';
+            };
+          }
+        ).payload;
+        const taskPath = (context.meta as Record<string, unknown>)['task.path'];
+        if (typeof taskPath !== 'string' || !taskPath) {
+          sendResult(ws, false, 'Task storage not configured.');
+          break;
+        }
+        try {
+          const { mutateTasks } = await import('@wrongstack/core');
+          const file = await mutateTasks(taskPath, session.id, async (f) => {
+            const task = f.tasks.find((t) => t.id === payload.id);
+            if (!task) return f;
+            task.status = payload.status;
+            task.updatedAt = new Date().toISOString();
+            return f;
+          });
+          sendResult(ws, true, `Task status updated to "${payload.status}".`);
+          broadcast(clients, { type: 'tasks.updated', payload: { tasks: file.tasks } });
+        } catch (err) {
+          sendResult(ws, false, errMessage(err));
+        }
+        break;
+      }
+
+      case 'plan.item.update': {
+        // Mutate the persisted plan file at ctx.meta['plan.path'].
+        const payload = (
+          msg as { payload: { target: string; status: 'open' | 'in_progress' | 'done' } }
+        ).payload;
+        const planPath = (context.meta as Record<string, unknown>)['plan.path'];
+        if (typeof planPath !== 'string' || !planPath) {
+          sendResult(ws, false, 'Plan storage is not configured for this session.');
+          break;
+        }
+        try {
+          const { mutatePlan, setPlanItemStatus } = await import('@wrongstack/core');
+          let changed = false;
+          const plan = await mutatePlan(planPath, session.id, async (p) => {
+            const before = p.updatedAt;
+            const updated = setPlanItemStatus(p, payload.target, payload.status);
+            changed = updated.updatedAt !== before;
+            return updated;
+          });
+          if (!changed) {
+            sendResult(ws, false, `No plan item matched "${payload.target}".`);
+            break;
+          }
+          sendResult(ws, true, `Plan item status updated to "${payload.status}".`);
+          broadcast(clients, { type: 'plan.updated', payload: { plan } });
         } catch (err) {
           sendResult(ws, false, errMessage(err));
         }

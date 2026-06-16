@@ -8,6 +8,7 @@ export default defineConfig({
     'src/defaults/index.ts',
     'src/utils/index.ts',
     'src/utils/expect-defined.ts',
+    'src/utils/error.ts',
     'src/execution/prompt-enhancer.ts',
     // Domain entry points (new as of 0.2.0)
     'src/execution/index.ts',

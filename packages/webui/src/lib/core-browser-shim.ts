@@ -17,3 +17,4 @@
  */
 export { expectDefined } from '@wrongstack/core/utils/expect-defined';
 export { normalizedEqual } from '@wrongstack/core/execution/prompt-enhancer';
+export { toErrorMessage } from '@wrongstack/core/utils/error';

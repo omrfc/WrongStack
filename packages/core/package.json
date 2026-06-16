@@ -40,6 +40,10 @@
       "types": "./dist/utils/expect-defined.d.ts",
       "import": "./dist/utils/expect-defined.js"
     },
+    "./utils/error": {
+      "types": "./dist/utils/error.d.ts",
+      "import": "./dist/utils/error.js"
+    },
     "./execution": {
       "types": "./dist/execution/index.d.ts",
       "import": "./dist/execution/index.js"

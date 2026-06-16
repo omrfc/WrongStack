@@ -16,7 +16,11 @@ import {
   handleKeySetActive,
   handleKeyUpsert,
   handleProviderAdd,
+  handleProviderClearModels,
+  handleProviderProbe,
   handleProviderRemove,
+  handleProviderUndoClear,
+  handleProviderUpdate,
   handleProvidersList,
   handleProvidersSaved,
 } from '../../src/webui-server/ws-handlers/index.js';
@@ -178,5 +182,78 @@ describe('ws-handlers/providers (PR 5 of #30)', () => {
     await handleProviderRemove(ctx, FAKE_WS, 'nope');
     expect(lastResult(cap).success).toBe(false);
     expect(lastResult(cap).message).toContain('not found');
+  });
+
+  it('update → clear_models → undo_clear: model allowlist round-trips on disk', async () => {
+    const seed = makeCtx(configPath);
+    await handleProviderAdd(seed.ctx, FAKE_WS, {
+      id: 'acme',
+      family: 'openai-compatible',
+      baseUrl: 'https://a/v1',
+    });
+
+    // Update sets a new baseUrl + model allowlist.
+    const upd = makeCtx(configPath);
+    await handleProviderUpdate(upd.ctx, FAKE_WS, {
+      id: 'acme',
+      baseUrl: 'https://b/v1',
+      models: ['m1', 'm2'],
+    });
+    expect(lastResult(upd.cap).success).toBe(true);
+    expect(upd.cap.broadcasts.some((m) => m.type === 'providers.saved')).toBe(true);
+    let saved = await loadSavedProviders(configPath);
+    expect(saved.acme?.baseUrl).toBe('https://b/v1');
+    expect(saved.acme?.models).toEqual(['m1', 'm2']);
+
+    // Clear drops the allowlist.
+    const clr = makeCtx(configPath);
+    await handleProviderClearModels(clr.ctx, FAKE_WS, 'acme');
+    expect(lastResult(clr.cap).success).toBe(true);
+    saved = await loadSavedProviders(configPath);
+    expect(saved.acme?.models).toBeUndefined();
+
+    // Undo restores it.
+    const undo = makeCtx(configPath);
+    await handleProviderUndoClear(undo.ctx, FAKE_WS, 'acme', ['m1', 'm2']);
+    expect(lastResult(undo.cap).success).toBe(true);
+    saved = await loadSavedProviders(configPath);
+    expect(saved.acme?.models).toEqual(['m1', 'm2']);
+  });
+
+  it('update / clear / undo: error on unknown provider', async () => {
+    const u = makeCtx(configPath);
+    await handleProviderUpdate(u.ctx, FAKE_WS, { id: 'nope', models: [] });
+    expect(lastResult(u.cap).success).toBe(false);
+
+    const c = makeCtx(configPath);
+    await handleProviderClearModels(c.ctx, FAKE_WS, 'nope');
+    expect(lastResult(c.cap).success).toBe(false);
+
+    const un = makeCtx(configPath);
+    await handleProviderUndoClear(un.ctx, FAKE_WS, 'nope', []);
+    expect(lastResult(un.cap).success).toBe(false);
+  });
+
+  it('handleProviderProbe: reports no_provider / no_base_url without a network call', async () => {
+    // Unknown provider — short-circuits before any fetch.
+    const np = makeCtx(configPath);
+    await handleProviderProbe(np.ctx, FAKE_WS, 'ghost');
+    const r1 = np.cap.sent.find((m) => m.type === 'provider.probe')?.payload as {
+      ok: boolean;
+      status: string;
+      providerId: string;
+    };
+    expect(r1).toMatchObject({ ok: false, status: 'no_provider', providerId: 'ghost' });
+
+    // Provider exists but has no baseUrl — also short-circuits.
+    const seed = makeCtx(configPath);
+    await handleProviderAdd(seed.ctx, FAKE_WS, { id: 'nobase', family: 'openai-compatible' });
+    const nb = makeCtx(configPath);
+    await handleProviderProbe(nb.ctx, FAKE_WS, 'nobase');
+    const r2 = nb.cap.sent.find((m) => m.type === 'provider.probe')?.payload as {
+      ok: boolean;
+      status: string;
+    };
+    expect(r2).toMatchObject({ ok: false, status: 'no_base_url' });
   });
 });

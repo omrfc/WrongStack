@@ -141,6 +141,10 @@ import {
   handleProviderAdd,
   handleProviderModels,
   handleProviderRemove,
+  handleProviderClearModels,
+  handleProviderUndoClear,
+  handleProviderUpdate,
+  handleProviderProbe,
   handleProvidersList,
   handleProvidersSaved,
   handleSkillsList,
@@ -1474,6 +1478,43 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
         break;
       }
 
+      case 'provider.clear_models': {
+        const m = msg as { payload: { providerId: string } };
+        await handleProviderClearModels(wsHandlerCtx, ws, m.payload.providerId);
+        break;
+      }
+
+      case 'provider.undo_clear': {
+        const m = msg as { payload: { providerId: string; previousModels: string[] } };
+        await handleProviderUndoClear(
+          wsHandlerCtx,
+          ws,
+          m.payload.providerId,
+          m.payload.previousModels,
+        );
+        break;
+      }
+
+      case 'provider.update': {
+        const m = msg as {
+          payload: {
+            id: string;
+            family?: string | undefined;
+            baseUrl?: string | undefined;
+            envVars?: string[] | undefined;
+            models?: string[] | undefined;
+          };
+        };
+        await handleProviderUpdate(wsHandlerCtx, ws, m.payload);
+        break;
+      }
+
+      case 'provider.probe': {
+        const m = msg as { payload: { providerId: string; timeoutMs?: number | undefined } };
+        await handleProviderProbe(wsHandlerCtx, ws, m.payload.providerId, m.payload.timeoutMs);
+        break;
+      }
+
       case 'todos.get': {
         handleTodosGet(worklistCtx, ws);
         break;
@@ -1825,11 +1866,16 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       }
 
       // Collaboration messages — the CLI webui-server doesn't run a
-      // full collab hub; silently acknowledge and ignore.
+      // full collab hub; silently acknowledge and ignore. request_pause /
+      // resume are included so the CollabPanel's pause/resume buttons don't
+      // trip the "Unhandled message type" warning (the standalone webui
+      // server is the one that wires the real CollaborationWebSocketHandler).
       case 'collab.join':
       case 'collab.leave':
       case 'collab.annotate':
       case 'collab.resolve':
+      case 'collab.request_pause':
+      case 'collab.resume':
         break;
 
       case 'projects.list': {
@@ -2039,6 +2085,52 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
             payload: { error: err instanceof Error ? err.message : String(err) },
           });
         }
+        break;
+      }
+
+      case 'git.info': {
+        // Read git branch, change stats, and sync status from the working
+        // directory. Mirrors the standalone webui server's handler so the
+        // status-bar git widget works under the CLI-hosted webui too.
+        const projectRoot =
+          opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '';
+        const cwd = projectRoot || undefined;
+        const { execFile: ef } = await import('node:child_process');
+        const git = (args: string[]): Promise<string> =>
+          new Promise((resolve) => {
+            ef('git', args, { cwd, timeout: 3000 }, (err: Error | null, stdout: string) => {
+              resolve(err ? '' : stdout.trim());
+            });
+          });
+
+        const [branchRaw, diffRaw, statusRaw, upstreamRaw] = await Promise.all([
+          git(['branch', '--show-current']),
+          git(['diff', '--stat']),
+          git(['status', '--porcelain']),
+          git(['rev-list', '--left-right', '--count', '@{upstream}...HEAD']),
+        ]);
+
+        const branch = branchRaw || '(detached)';
+
+        // `git diff --stat` summary line: "N files changed, X insertions(+), Y deletions(-)"
+        const addMatch = /(\d+)\s+insertion/i.exec(diffRaw);
+        const delMatch = /(\d+)\s+deletion/i.exec(diffRaw);
+        const added = addMatch ? Number(addMatch[1]) : 0;
+        const deleted = delMatch ? Number(delMatch[1]) : 0;
+
+        // Untracked files from `git status --porcelain` (lines starting with "??")
+        const untracked = statusRaw.split('\n').filter((l) => l.startsWith('??')).length;
+
+        // `--left-right --count @{upstream}...HEAD` prints "<behind>\t<ahead>":
+        // left side = commits in upstream not in HEAD (behind), right = ahead.
+        const [behindRaw, aheadRaw] = (upstreamRaw || '0\t0').split('\t');
+        const behind = Number(behindRaw) || 0;
+        const ahead = Number(aheadRaw) || 0;
+
+        send(ws, {
+          type: 'git.info',
+          payload: { branch, added, deleted, untracked, ahead, behind },
+        });
         break;
       }
 

@@ -1,4 +1,6 @@
 import type { ProviderConfig } from '@wrongstack/core';
+import { DefaultSecretScrubber } from '@wrongstack/core';
+import { probeLocalLlm } from '@wrongstack/runtime/probe';
 import type { WebSocket } from 'ws';
 import { toErrorMessage } from '@wrongstack/core/utils';
 import {
@@ -27,6 +29,33 @@ import type { WsHandlerContext } from './index.js';
  */
 function sendResult(ctx: WsHandlerContext, ws: WebSocket, success: boolean, message: string): void {
   ctx.send(ws, { type: 'key.operation_result', payload: { success, message } });
+}
+
+/** Shared scrubber for provider health probes — redacts secrets from probe detail. */
+const probeScrubber = new DefaultSecretScrubber();
+
+/**
+ * Re-broadcast the saved-providers projection to every client. Shared by the
+ * mutating provider handlers (add / update / clear / undo) so all surfaces
+ * re-render the same masked snapshot after a change.
+ */
+function broadcastSaved(ctx: WsHandlerContext, providers: Record<string, ProviderConfig>): void {
+  ctx.broadcast({
+    type: 'providers.saved',
+    payload: {
+      providers: Object.entries(providers).map(([id, cfg]) => ({
+        id,
+        family: cfg.family,
+        baseUrl: cfg.baseUrl,
+        apiKeys: normalizeKeys(cfg).map((k) => ({
+          label: k.label,
+          maskedKey: maskedKey(k.apiKey),
+          isActive: k.label === cfg.activeKey,
+          createdAt: k.createdAt,
+        })),
+      })),
+    },
+  });
 }
 
 export async function handleProvidersList(ctx: WsHandlerContext, ws: WebSocket): Promise<void> {
@@ -277,5 +306,120 @@ export async function handleProviderRemove(
     sendResult(ctx, ws, true, `Provider "${providerId}" removed`);
   } catch (err) {
     sendResult(ctx, ws, false, toErrorMessage(err));
+  }
+}
+
+/** Drop a provider's model allowlist (so the full catalog is offered again). */
+export async function handleProviderClearModels(
+  ctx: WsHandlerContext,
+  ws: WebSocket,
+  providerId: string,
+): Promise<void> {
+  try {
+    const providers = await ctx.providerStore.load();
+    const cfg = providers[providerId];
+    if (!cfg) {
+      sendResult(ctx, ws, false, `Unknown provider "${providerId}"`);
+      return;
+    }
+    delete cfg.models;
+    await ctx.providerStore.save(providers);
+    sendResult(ctx, ws, true, `Cleared model allowlist for ${providerId}`);
+    broadcastSaved(ctx, providers);
+  } catch (err) {
+    sendResult(ctx, ws, false, toErrorMessage(err));
+  }
+}
+
+/** Restore a previously-cleared model allowlist (pairs with clear). */
+export async function handleProviderUndoClear(
+  ctx: WsHandlerContext,
+  ws: WebSocket,
+  providerId: string,
+  previousModels: string[],
+): Promise<void> {
+  try {
+    const providers = await ctx.providerStore.load();
+    const cfg = providers[providerId];
+    if (!cfg) {
+      sendResult(ctx, ws, false, `Unknown provider "${providerId}"`);
+      return;
+    }
+    cfg.models = [...previousModels];
+    await ctx.providerStore.save(providers);
+    sendResult(ctx, ws, true, `Restored ${previousModels.length} model(s) for ${providerId}`);
+    broadcastSaved(ctx, providers);
+  } catch (err) {
+    sendResult(ctx, ws, false, toErrorMessage(err));
+  }
+}
+
+/** Update a saved provider's wire config (family / baseUrl / envVars / models). */
+export async function handleProviderUpdate(
+  ctx: WsHandlerContext,
+  ws: WebSocket,
+  payload: {
+    id: string;
+    family?: string | undefined;
+    baseUrl?: string | undefined;
+    envVars?: string[] | undefined;
+    models?: string[] | undefined;
+  },
+): Promise<void> {
+  try {
+    const providers = await ctx.providerStore.load();
+    const cfg = providers[payload.id];
+    if (!cfg) {
+      sendResult(ctx, ws, false, `Unknown provider "${payload.id}"`);
+      return;
+    }
+    if (payload.family !== undefined) cfg.family = payload.family as ProviderConfig['family'];
+    if (payload.baseUrl !== undefined) cfg.baseUrl = payload.baseUrl;
+    if (payload.envVars !== undefined) cfg.envVars = payload.envVars;
+    if (payload.models !== undefined) cfg.models = payload.models;
+    await ctx.providerStore.save(providers);
+    sendResult(ctx, ws, true, `Updated ${payload.id}`);
+    broadcastSaved(ctx, providers);
+  } catch (err) {
+    sendResult(ctx, ws, false, toErrorMessage(err));
+  }
+}
+
+/**
+ * Run a health probe against a saved provider's `/v1/models` and reply with a
+ * `provider.probe` message. Never throws — the probe result carries the
+ * failure mode in its `status`.
+ */
+export async function handleProviderProbe(
+  ctx: WsHandlerContext,
+  ws: WebSocket,
+  providerId: string,
+  timeoutMs?: number,
+): Promise<void> {
+  const reply = (payload: Record<string, unknown>): void =>
+    ctx.send(ws, { type: 'provider.probe', payload: { providerId, ...payload } });
+  try {
+    const providers = await ctx.providerStore.load();
+    const cfg = providers[providerId];
+    if (!cfg) {
+      reply({ ok: false, status: 'no_provider' });
+      return;
+    }
+    if (!cfg.baseUrl) {
+      reply({ ok: false, status: 'no_base_url' });
+      return;
+    }
+    const keys = normalizeKeys(cfg);
+    const active = keys.find((k) => k.label === cfg.activeKey) ?? keys[0];
+    const result = await probeLocalLlm({
+      baseUrl: cfg.baseUrl,
+      apiKey: active?.apiKey,
+      noAuth: false,
+      scrubber: probeScrubber,
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    });
+    reply(result as unknown as Record<string, unknown>);
+  } catch (err) {
+    reply({ ok: false, status: 'unreachable', detail: toErrorMessage(err) });
   }
 }

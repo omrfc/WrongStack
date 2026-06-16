@@ -1,4 +1,4 @@
-import { expectDefined } from '@wrongstack/core';
+import { expectDefined, toErrorMessage } from '@wrongstack/core';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
 import { useChatStore, useSessionStore, useUIStore } from '@/stores';
@@ -13,7 +13,6 @@ import { Button } from './ui/button';
 import { type SlashCommandDef, SLASH_COMMANDS, SLASH_CATEGORY_ORDER, matchSlash, detectAtMention } from './ChatInput/slash-commands.js';
 import { autoFenceCode } from './ChatInput/code-detect.js';
 import { RefinePanel } from './RefinePanel.js';
-import { toErrorMessage } from '@wrongstack/core/utils';
 
 export function ChatInput({
   onOpenBreakdown,

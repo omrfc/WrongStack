@@ -112,6 +112,10 @@ export {
   handleProviderAdd,
   handleProviderModels,
   handleProviderRemove,
+  handleProviderClearModels,
+  handleProviderUndoClear,
+  handleProviderUpdate,
+  handleProviderProbe,
   handleProvidersList,
   handleProvidersSaved,
 } from './providers.js';
