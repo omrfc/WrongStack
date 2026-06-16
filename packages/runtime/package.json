@@ -1,6 +1,6 @@
 {
   "name": "@wrongstack/runtime",
-  "version": "0.260.0",
+  "version": "0.263.0",
   "license": "MIT",
   "description": "WrongStack default runtime implementations and host-level composition helpers built on @wrongstack/core.",
   "repository": {
@@ -35,6 +35,10 @@
     "./clipboard": {
       "types": "./dist/clipboard.d.ts",
       "import": "./dist/clipboard.js"
+    },
+    "./probe": {
+      "types": "./dist/probe.d.ts",
+      "import": "./dist/probe.js"
     },
     "./package.json": "./package.json"
   },

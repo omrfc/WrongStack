@@ -1984,6 +1984,44 @@ export async function startWebUI(
         break;
       }
 
+      case 'provider.clear_models': {
+        const { providerId } = (msg as { payload: { providerId: string } }).payload;
+        await providerHandlers.handleProviderClearModels(ws, providerId);
+        break;
+      }
+
+      case 'provider.undo_clear': {
+        const { providerId, previousModels } = (
+          msg as { payload: { providerId: string; previousModels: string[] } }
+        ).payload;
+        await providerHandlers.handleProviderUndoClear(ws, providerId, previousModels);
+        break;
+      }
+
+      case 'provider.update': {
+        const p = (
+          msg as {
+            payload: {
+              id: string;
+              family?: string | undefined;
+              baseUrl?: string | undefined;
+              envVars?: string[] | undefined;
+              models?: string[] | undefined;
+            };
+          }
+        ).payload;
+        await providerHandlers.handleProviderUpdate(ws, p);
+        break;
+      }
+
+      case 'provider.probe': {
+        const { providerId, timeoutMs } = (
+          msg as { payload: { providerId: string; timeoutMs?: number | undefined } }
+        ).payload;
+        await providerHandlers.handleProviderProbe(ws, providerId, timeoutMs);
+        break;
+      }
+
       case 'sessions.list': {
         // Per-project history. Sessions live under .wrongstack/sessions/ for
         // this project; we never enumerate cross-project state.

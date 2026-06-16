@@ -1,7 +1,14 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/pack.ts', 'src/host.ts', 'src/vision.ts', 'src/clipboard.ts'],
+  entry: {
+    index: 'src/index.ts',
+    pack: 'src/pack.ts',
+    host: 'src/host.ts',
+    vision: 'src/vision.ts',
+    clipboard: 'src/clipboard.ts',
+    probe: 'src/local-llm-probe.ts',
+  },
   format: ['esm'],
   dts: true,
   sourcemap: true,

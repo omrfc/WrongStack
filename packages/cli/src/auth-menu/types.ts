@@ -1,4 +1,4 @@
-import type { ModelsRegistry, SecretVault } from '@wrongstack/core';
+import type { ModelsRegistry, SecretScrubber, SecretVault } from '@wrongstack/core';
 import type { ReadlineInputReader } from '../input-reader.js';
 import type { TerminalRenderer } from '../renderer.js';
 
@@ -12,4 +12,10 @@ export interface AuthMenuDeps {
   modelsRegistry: ModelsRegistry;
   vault: SecretVault;
   globalConfigPath: string;
+  /**
+   * Optional scrubber used by `wstack auth local` to redact Bearer
+   * tokens from probe logs before they reach the renderer. Falls back
+   * to a fresh {@link DefaultSecretScrubber} when not supplied.
+   */
+  secretScrubber?: SecretScrubber | undefined;
 }

@@ -14,12 +14,26 @@ import { create } from 'zustand';
 
 export type ToastVariant = 'success' | 'error' | 'warn' | 'info';
 
-interface ToastEntry {
+/**
+ * Optional action button rendered inline on a toast. Used by the
+ * "undo" pattern — clicking runs `onClick` and dismisses the toast.
+ */
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
+export interface ToastEntry {
   id: string;
   message: string;
   variant: ToastVariant;
   ttl: number;
+  /** Optional inline action button (e.g. "Undo"). */
+  action?: ToastAction | undefined;
 }
+
+/** Default TTL for action toasts — kept in sync with `toaster-helpers.ts`. */
+const ACTION_TTL_MS = 8_000;
 
 interface ToastState {
   toasts: ToastEntry[];
@@ -47,6 +61,15 @@ export const toast = {
     useToastStore.getState().push({ message: msg, variant: 'warn', ttl }),
   info: (msg: string, ttl = 3500) =>
     useToastStore.getState().push({ message: msg, variant: 'info', ttl }),
+  /**
+   * Fire a toast carrying an "Undo" action button. The toast lingers
+   * for {@link ACTION_TTL_MS} so the user has time to react; letting it
+   * expire is the same as not undoing.
+   */
+  undoable: (msg: string, onUndo: () => void, label = 'Undo', ttl = ACTION_TTL_MS) =>
+    useToastStore
+      .getState()
+      .push({ message: msg, variant: 'info', ttl, action: { label, onClick: onUndo } }),
   dismiss: (id: string) => useToastStore.getState().dismiss(id),
 };
 
@@ -77,6 +100,18 @@ function ToastItem({ entry }: { entry: ToastEntry }) {
       <div className="flex-1 min-w-0 whitespace-pre-wrap break-words leading-snug">
         {entry.message}
       </div>
+      {entry.action && (
+        <button
+          type="button"
+          onClick={() => {
+            entry.action?.onClick();
+            dismiss(entry.id);
+          }}
+          className="shrink-0 font-medium text-primary hover:underline"
+        >
+          {entry.action.label}
+        </button>
+      )}
       <button
         type="button"
         onClick={() => dismiss(entry.id)}

@@ -1,4 +1,9 @@
 import type { WSClientMessage, WSServerMessage } from '../types';
+import {
+  buildClearModelsMessage,
+  buildProviderUpdateMessage,
+  buildUndoClearMessage,
+} from './ws-client-helpers';
 
 type EventHandler = (msg: WSServerMessage) => void;
 
@@ -465,6 +470,35 @@ export class WrongStackWebSocketClient {
 
   removeProvider(providerId: string) {
     this.send({ type: 'provider.remove', payload: { providerId } });
+  }
+
+  /** Run a health probe against a saved provider's `/v1/models`. */
+  probeProvider(providerId: string, timeoutMs?: number) {
+    this.send({
+      type: 'provider.probe',
+      payload: timeoutMs !== undefined ? { providerId, timeoutMs } : { providerId },
+    });
+  }
+
+  /** Remove the saved model allowlist for a provider. */
+  clearProviderModels(providerId: string) {
+    this.send(buildClearModelsMessage(providerId));
+  }
+
+  /** Restore a previously-cleared model allowlist (pairs with clear). */
+  undoProviderClear(providerId: string, previousModels: string[]) {
+    this.send(buildUndoClearMessage(providerId, previousModels));
+  }
+
+  /** Update a saved provider's wire config (family / baseUrl / envVars / models). */
+  updateProvider(payload: {
+    id: string;
+    family?: string | undefined;
+    baseUrl?: string | undefined;
+    envVars?: string[] | undefined;
+    models?: string[] | undefined;
+  }) {
+    this.send(buildProviderUpdateMessage(payload));
   }
 
   clearContext() {

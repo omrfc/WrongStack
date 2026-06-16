@@ -1,5 +1,7 @@
 import type { WebSocket } from 'ws';
 import type { ProviderConfig } from '@wrongstack/core';
+import { DefaultSecretScrubber } from '@wrongstack/core';
+import { probeLocalLlm } from '@wrongstack/runtime/probe';
 import { loadSavedProviders, saveProviders } from './provider-config-io.js';
 import { toErrorMessage } from '@wrongstack/core/utils';
 import {
@@ -12,7 +14,64 @@ import {
   normalizeKeys,
 } from './provider-keys.js';
 import type { ConnectedClient, WSServerMessage } from './types.js';
-import { sendResult, errMessage } from './ws-utils.js';
+import { send, sendResult, errMessage } from './ws-utils.js';
+
+/**
+ * Wire shape of one saved provider as broadcast over `providers.saved`.
+ * The WebUI's `<ProviderModelsPanel>` consumes this — when
+ * `pickedModelId` / `models` is missing, the panel renders the empty
+ * state.
+ */
+export interface SavedProviderView {
+  id: string;
+  family?: string | undefined;
+  baseUrl?: string | undefined;
+  /** Saved model allowlist, verbatim (undefined / [] both possible). */
+  models?: string[] | undefined;
+  /** First entry of `models`, or undefined when the list is empty/unset. */
+  pickedModelId?: string | undefined;
+  apiKeys: Array<{
+    label: string;
+    maskedKey: string;
+    isActive: boolean;
+    createdAt: string;
+  }>;
+}
+
+/**
+ * Canonical projection from in-memory `ProviderConfig` to the
+ * `providers.saved` wire shape. Pure (no I/O) so it's unit-tested in
+ * isolation — see `tests/server/provider-handlers-projection.test.ts`.
+ *
+ * Secrets never leave: every key is run through `maskedKey` before it
+ * reaches the wire.
+ */
+export function projectSavedProviders(
+  providers: Record<string, ProviderConfig>,
+): SavedProviderView[] {
+  return Object.entries(providers).map(([id, cfg]) => {
+    const keys = normalizeKeys(cfg);
+    const models = cfg.models;
+    const view: SavedProviderView = {
+      id,
+      family: cfg.family ?? id,
+      baseUrl: cfg.baseUrl,
+      models,
+      apiKeys: keys.map((k) => ({
+        label: k.label,
+        maskedKey: maskedKey(k.apiKey),
+        isActive: k.label === cfg.activeKey,
+        createdAt: k.createdAt,
+      })),
+    };
+    const picked = models && models.length > 0 ? models[0] : undefined;
+    if (picked !== undefined) view.pickedModelId = picked;
+    return view;
+  });
+}
+
+/** Shared scrubber for probe error/body redaction. */
+const probeScrubber = new DefaultSecretScrubber();
 
 export interface ProviderHandlerDeps {
   globalConfigPath: string;
@@ -92,25 +151,7 @@ export function createProviderHandlers(deps: ProviderHandlerDeps) {
       sendResult(ws, result.ok, result.message);
       if (result.ok) {
         console.log(`[WebUI] Provider "${payload.id}" added via provider.add`);
-        broadcast(clients, {
-          type: 'providers.saved',
-          payload: {
-            providers: Object.entries(providers).map(([id, cfg]) => {
-              const keys = normalizeKeys(cfg);
-              return {
-                id,
-                family: cfg.family ?? id,
-                baseUrl: cfg.baseUrl,
-                apiKeys: keys.map((k) => ({
-                  label: k.label,
-                  maskedKey: maskedKey(k.apiKey),
-                  isActive: k.label === cfg.activeKey,
-                  createdAt: k.createdAt,
-                })),
-              };
-            }),
-          },
-        });
+        broadcastSaved(providers);
       }
     } catch (err) {
       sendResult(ws, false, errMessage(err));
@@ -128,5 +169,132 @@ export function createProviderHandlers(deps: ProviderHandlerDeps) {
     }
   }
 
-  return { handleKeyUpsert, handleKeyDelete, handleKeySetActive, handleProviderAdd, handleProviderRemove, loadConfigProviders };
+  /** Broadcast the current saved-provider list to every connected client. */
+  function broadcastSaved(providers: Record<string, ProviderConfig>): void {
+    broadcast(clients, {
+      type: 'providers.saved',
+      payload: { providers: projectSavedProviders(providers) },
+    });
+  }
+
+  /** Remove the saved model allowlist for a provider. */
+  async function handleProviderClearModels(ws: WebSocket, providerId: string): Promise<void> {
+    try {
+      const providers = await loadConfigProviders();
+      const cfg = providers[providerId];
+      if (!cfg) {
+        sendResult(ws, false, `Unknown provider "${providerId}"`);
+        return;
+      }
+      delete cfg.models;
+      await saveConfigProviders(providers);
+      sendResult(ws, true, `Cleared model allowlist for ${providerId}`);
+      broadcastSaved(providers);
+    } catch (err) {
+      sendResult(ws, false, errMessage(err));
+    }
+  }
+
+  /** Restore a previously-cleared model allowlist (pairs with clear). */
+  async function handleProviderUndoClear(
+    ws: WebSocket,
+    providerId: string,
+    previousModels: string[],
+  ): Promise<void> {
+    try {
+      const providers = await loadConfigProviders();
+      const cfg = providers[providerId];
+      if (!cfg) {
+        sendResult(ws, false, `Unknown provider "${providerId}"`);
+        return;
+      }
+      cfg.models = [...previousModels];
+      await saveConfigProviders(providers);
+      sendResult(ws, true, `Restored ${previousModels.length} model(s) for ${providerId}`);
+      broadcastSaved(providers);
+    } catch (err) {
+      sendResult(ws, false, errMessage(err));
+    }
+  }
+
+  /** Update a saved provider's wire config (family / baseUrl / envVars / models). */
+  async function handleProviderUpdate(
+    ws: WebSocket,
+    payload: {
+      id: string;
+      family?: string | undefined;
+      baseUrl?: string | undefined;
+      envVars?: string[] | undefined;
+      models?: string[] | undefined;
+    },
+  ): Promise<void> {
+    try {
+      const providers = await loadConfigProviders();
+      const cfg = providers[payload.id];
+      if (!cfg) {
+        sendResult(ws, false, `Unknown provider "${payload.id}"`);
+        return;
+      }
+      if (payload.family !== undefined) cfg.family = payload.family as ProviderConfig['family'];
+      if (payload.baseUrl !== undefined) cfg.baseUrl = payload.baseUrl;
+      if (payload.envVars !== undefined) cfg.envVars = payload.envVars;
+      if (payload.models !== undefined) cfg.models = payload.models;
+      await saveConfigProviders(providers);
+      sendResult(ws, true, `Updated ${payload.id}`);
+      broadcastSaved(providers);
+    } catch (err) {
+      sendResult(ws, false, errMessage(err));
+    }
+  }
+
+  /**
+   * Run a health probe against a saved provider's `/v1/models` and
+   * reply with a `provider.probe` message. Never throws — the
+   * `ProbeResult` carries the failure mode in its `status`.
+   */
+  async function handleProviderProbe(
+    ws: WebSocket,
+    providerId: string,
+    timeoutMs?: number,
+  ): Promise<void> {
+    const reply = (payload: Record<string, unknown>): void =>
+      send(ws, { type: 'provider.probe', payload: { providerId, ...payload } });
+    try {
+      const providers = await loadConfigProviders();
+      const cfg = providers[providerId];
+      if (!cfg) {
+        reply({ ok: false, status: 'no_provider' });
+        return;
+      }
+      if (!cfg.baseUrl) {
+        reply({ ok: false, status: 'no_base_url' });
+        return;
+      }
+      const keys = normalizeKeys(cfg);
+      const active = keys.find((k) => k.label === cfg.activeKey) ?? keys[0];
+      const result = await probeLocalLlm({
+        baseUrl: cfg.baseUrl,
+        apiKey: active?.apiKey,
+        noAuth: false,
+        scrubber: probeScrubber,
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      });
+      reply(result as unknown as Record<string, unknown>);
+    } catch (err) {
+      reply({ ok: false, status: 'unreachable', detail: errMessage(err) });
+    }
+  }
+
+  return {
+    handleKeyUpsert,
+    handleKeyDelete,
+    handleKeySetActive,
+    handleProviderAdd,
+    handleProviderRemove,
+    handleProviderClearModels,
+    handleProviderUndoClear,
+    handleProviderUpdate,
+    handleProviderProbe,
+    loadConfigProviders,
+  };
 }

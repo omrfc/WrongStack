@@ -29,6 +29,10 @@ export interface SavedProvider {
   id: string;
   family?: string | undefined;
   baseUrl?: string | undefined;
+  /** Saved model allowlist, in the order the user pinned them. */
+  models?: string[] | undefined;
+  /** First entry of `models`, surfaced for the panel's "Using" line. */
+  pickedModelId?: string | undefined;
   apiKeys: Array<{
     label: string;
     maskedKey: string;

@@ -378,6 +378,10 @@ export interface WSSavedProviders {
       id: string;
       family?: string | undefined;
       baseUrl?: string | undefined;
+      /** Saved model allowlist, in the order the user pinned them. */
+      models?: string[] | undefined;
+      /** First entry of `models`, surfaced for the panel's "Using" line. */
+      pickedModelId?: string | undefined;
       apiKeys: Array<{
         label: string;
         maskedKey: string;
@@ -385,6 +389,26 @@ export interface WSSavedProviders {
         createdAt: string;
       }>;
     }>;
+  };
+}
+
+/**
+ * Health-probe result for a single provider, broadcast in reply to a
+ * `provider.probe` client message. Mirrors the `ProbeResult` shape
+ * from `@wrongstack/runtime/probe`, plus the `providerId` so panels
+ * can route the reply to the right card.
+ */
+export interface WSProviderProbe {
+  type: 'provider.probe';
+  payload: {
+    providerId: string;
+    ok: boolean;
+    status: string;
+    httpStatus?: number | undefined;
+    elapsedMs?: number | undefined;
+    modelCount?: number | undefined;
+    modelIds?: string[] | undefined;
+    detail?: string | undefined;
   };
 }
 
@@ -507,6 +531,19 @@ export type WSClientMessage =
       payload: { id: string; family: string; baseUrl?: string | undefined; apiKey?: string | undefined };
     }
   | { type: 'provider.remove'; payload: { providerId: string } }
+  | { type: 'provider.clear_models'; payload: { providerId: string } }
+  | { type: 'provider.undo_clear'; payload: { providerId: string; previousModels: string[] } }
+  | {
+      type: 'provider.update';
+      payload: {
+        id: string;
+        family?: string | undefined;
+        baseUrl?: string | undefined;
+        envVars?: string[] | undefined;
+        models?: string[] | undefined;
+      };
+    }
+  | { type: 'provider.probe'; payload: { providerId: string; timeoutMs?: number | undefined } }
   | { type: 'tools.list' }
   | { type: 'memory.list' }
   | { type: 'memory.remember'; payload: { text: string; scope?: MemoryScope | undefined } }
@@ -591,6 +628,7 @@ export type WSServerMessage =
   | WSProviderCatalog
   | WSProviderModels
   | WSSavedProviders
+  | WSProviderProbe
   | WSKeyOperationResult
   | WSFilesList
   | { type: 'files.tree'; payload: { root: string; tree: unknown[]; error?: string | undefined } }
