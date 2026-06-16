@@ -84,15 +84,29 @@ function topoSort(metas) {
 }
 
 function runBuild(pkgDir, script) {
-  const shell = process.env.ComSpec || 'cmd.exe';
+  // Cross-platform shell selection:
+  //   - Windows: use the actual `cmd.exe` (ComSpec), because pnpm 11
+  //     wraps scripts with a `; echo "EXIT=$?"` continuation that
+  //     sh/bash don't understand, and pnpm 11.5.2+ has no clean way
+  //     to override `script-shell` for `pnpm exec`.
+  //   - POSIX: invoke `sh` directly. Using the literal string
+  //     `'cmd.exe'` as a fallback (the previous default) silently
+  //     produced `exit null` on ubuntu-latest runners — `cmd.exe`
+  //     doesn't exist there, `spawnSync` returned ENOENT, and the
+  //     `> packages/core > tsup` line in the workflow logs is the
+  //     only visible artifact, making the segfault look like a
+  //     memory fault when it's really "shell not found".
+  const isWindows = process.platform === 'win32';
+  const shell = isWindows ? (process.env.ComSpec || 'cmd.exe') : 'sh';
+  const shellArgs = isWindows ? ['/c', script] : ['-c', script];
   console.log(`\n> ${pkgDir} > ${script}`);
   // node_modules/.bin must be on PATH so tsup, tsc, etc. resolve when
-  // spawned via cmd.exe — the Node process inherits npm's path resolution
-  // but cmd.exe /c does not. Prepend both the root bin dir and the
-  // package-local bin dir (pnpm isolates bins per-package) to be safe.
+  // spawned via cmd.exe / sh — the Node process inherits npm's path
+  // resolution but the child shell does not. Prepend both the root bin
+  // dir and the package-local bin dir (pnpm isolates bins per-package).
   const rootBin = join(root, 'node_modules', '.bin');
   const pkgBin = join(root, pkgDir, 'node_modules', '.bin');
-  const pathSep = process.platform === 'win32' ? ';' : ':';
+  const pathSep = isWindows ? ';' : ':';
   const envPath = [rootBin, pkgBin, process.env.PATH || process.env.Path || ''].join(pathSep);
   const env = {
     ...process.env,
@@ -116,7 +130,7 @@ function runBuild(pkgDir, script) {
   // (tsc --noEmit in worker_threads) inherit this env, including
   // NODE_OPTIONS — that's how the 8 GB ceiling reaches the tsc
   // worker that was OOM-killing at 1–2 GB.
-  const result = spawnSync(shell, ['/c', script], {
+  const result = spawnSync(shell, shellArgs, {
     cwd: join(root, pkgDir),
     stdio: 'inherit',
     env,
