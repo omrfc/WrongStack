@@ -11,6 +11,15 @@
  * Or via the CLI:
  *   wstack acp-server
  *
+ * Wiring a real agent: this class is the surface; the bootstrap
+ * binary uses a no-op echo by default so the binary is a useful
+ * connectivity smoke test. For a real server, instantiate
+ * `WrongStackACPServer` programmatically and pass a `runTurn`
+ * produced by `makeACPServerAgentTurn({ agentFor: ... })` from
+ * `./server-agent-turn.js`. The factory is responsible for building
+ * a real core `Agent` (with the right provider, model, system prompt,
+ * etc.) per session.
+ *
  * Startup: prints the legacy `[wstack-acp]\n` marker (kept for backward
  * compatibility with the old `StdioTransport` handshake) so the client
  * knows the protocol boundary. v1 initialize is then sent by the client
@@ -28,8 +37,10 @@ import { StdioTransport } from './stdio-transport.js';
 export interface WrongStackACPServerOptions {
   /**
    * Per-turn implementation. If omitted, the server runs a no-op turn
-   * that just resolves with `end_turn`. The real bootstrap that wires
-   * a core `Agent` lives in a follow-up PR.
+   * that just resolves with `end_turn`. The real production usage
+   * passes the result of `makeACPServerAgentTurn({ agentFor: ... })`
+   * from `./server-agent-turn.js` so each session gets a real
+   * `Agent` instance.
    */
   runTurn?: RunTurn | undefined;
   /** Default cwd for new sessions. Defaults to the current process cwd. */
