@@ -3,7 +3,6 @@ import { Check, Copy, FileCode2 } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useMemo, useState } from 'react';
 import rehypeHighlight from 'rehype-highlight';
-import { fillInput, NextStepsBar, parseNextSteps } from '../NextStepsBar';
 
 export { copyToClipboard };
 
@@ -92,31 +91,17 @@ function CodeCopyButton({ text }: { text: string }) {
 
 
 export const markdownComponents = {
-  next_steps({ children }: { children?: React.ReactNode }) {
-    // Parse step text from children — works for both:
-    //   <next_steps>1. Do this auto="true"</next_steps>  (non-self-closing)
-    //   <next_steps/>                                   (self-closing — children empty, renders nothing)
-    // The step text format is parsed by ITEM_RE: "1. Do this auto="true""
-    const rawText = typeof children === 'string' ? children.trim() : '';
-    if (!rawText) return null;
-    const steps = parseNextSteps(rawText);
-    if (steps.length === 0) return null;
-
-    return (
-      <NextStepsBar
-        steps={steps}
-        onAutoSubmit={(text) => {
-          // auto-submit in markdown context: fill input and dispatch a native
-          // submit on the ChatInput form so the full submission flow runs.
-          fillInput(text);
-          const form = document.querySelector('form[class*="flex items-end gap-2"]');
-          if (form) {
-            form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-          }
-        }}
-      />
-    );
-  },
+  // NOTE: <next_steps> is parsed and rendered in MessageBubble/index.tsx
+  // (post-render, via parseNextSteps + NextStepsBar). We do NOT register a
+  // custom component here for two reasons:
+  //   1. react-markdown v10's micromark parser doesn't actually dispatch
+  //      <next_steps> (or any underscored tag) to the components map — they
+  //      fall through as raw HTML, which is exactly what the previous code
+  //      was trying (and failing) to catch.
+  //   2. The MessageBubble path strips the block before passing content to
+  //      react-markdown, so this handler is unreachable in practice.
+  // Leaving the comment here so future contributors know this was a
+  // deliberate decision, not an oversight.
 
   code({
     inline,

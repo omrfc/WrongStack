@@ -23,7 +23,7 @@ import {
   User,
   XCircle,
 } from 'lucide-react';
-import { memo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { DiffView, diffFromToolInput } from '../DiffView';
@@ -103,6 +103,18 @@ export const MessageBubble = memo(function MessageBubble({
     }
     return false;
   })();
+
+  /**
+   * Parse the assistant output once and cache the result for both:
+   *   - the stripped content fed to react-markdown (so raw <next_steps> tags
+   *     never leak into the rendered DOM)
+   *   - the steps array fed to the <NextStepsBar> below.
+   * Recomputes only when message.content changes.
+   */
+  const nextStepsResult = useMemo(
+    () => (isLatestAssistant && message.content ? parseNextSteps(message.content) : null),
+    [isLatestAssistant, message.content],
+  );
 
   const regenerate = () => {
     const all = useChatStore.getState().messages;
@@ -251,38 +263,41 @@ export const MessageBubble = memo(function MessageBubble({
                 </div>
               </div>
             </div>
-          ) : (
-            <div className={cn('text-sm leading-relaxed markdown-content', message.streaming && 'streaming-cursor')}>
-              {message.content ? (showRaw && message.role === 'assistant' ? (
-                <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground/90 max-h-[40rem] overflow-auto">{message.content}</pre>
-              ) : message.role === 'assistant' && message.isError ? (
-                <ErrorBodyWithStack text={message.content} />
-              ) : (
-                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>{message.content}</ReactMarkdown>
-              )) : message.streaming ? (
-                <span className="inline-block animate-pulse text-muted-foreground">Typing...</span>
-              ) : (
-                <span className="text-muted-foreground italic">No content</span>
-              )}
-            </div>
-          )}
+          ) : (() => {
+            // For assistant output, strip the <next_steps>/"💡 Next steps" block
+            // before passing to react-markdown — otherwise the raw tags leak
+            // through as literal text. The parsed steps render as a separate
+            // <NextStepsBar> below the bubble.
+            const renderedContent = nextStepsResult ? nextStepsResult.stripped : message.content;
+            return (
+              <div className={cn('text-sm leading-relaxed markdown-content', message.streaming && 'streaming-cursor')}>
+                {renderedContent ? (showRaw && message.role === 'assistant' ? (
+                  <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground/90 max-h-[40rem] overflow-auto">{message.content}</pre>
+                ) : message.role === 'assistant' && message.isError ? (
+                  <ErrorBodyWithStack text={message.content} />
+                ) : (
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>{renderedContent}</ReactMarkdown>
+                )) : message.streaming ? (
+                  <span className="inline-block animate-pulse text-muted-foreground">Typing...</span>
+                ) : (
+                  <span className="text-muted-foreground italic">No content</span>
+                )}
+              </div>
+            );
+          })()}
         </div>
 
-        {/* Next steps — parse 💡 Next steps from assistant output */}
-        {isLatestAssistant && message.content && (() => {
-          const steps = parseNextSteps(message.content);
-          if (steps.length === 0) return null;
-          return (
-            <NextStepsBar
-              steps={steps}
-              yoloMode={yolo}
-              autoMode={autonomy === 'auto'}
-              autoDelayMs={localPrefs.autonomyDelayMs}
-              onAutoSubmit={handleAutoSubmit}
-              canAutoSubmit={canAutoSubmitNow}
-            />
-          );
-        })()}
+        {/* Next steps — parse <next_steps> / "💡 Next steps" from assistant output */}
+        {nextStepsResult && nextStepsResult.steps.length > 0 && (
+          <NextStepsBar
+            steps={nextStepsResult.steps}
+            yoloMode={yolo}
+            autoMode={autonomy === 'auto'}
+            autoDelayMs={localPrefs.autonomyDelayMs}
+            onAutoSubmit={handleAutoSubmit}
+            canAutoSubmit={canAutoSubmitNow}
+          />
+        )}
 
         <div className={cn('flex items-center gap-2 px-1', isUser ? 'flex-row-reverse' : 'flex-row')}>
           <span className="text-xs text-muted-foreground/50">{new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>

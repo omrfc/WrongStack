@@ -33,14 +33,14 @@
     "postinstall": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.16",
+    "@biomejs/biome": "^2.5.0",
     "@types/node": "^25.9.3",
-    "@vitest/coverage-v8": "^4.1.8",
+    "@vitest/coverage-v8": "^4.1.9",
     "cross-env": "^10.1.0",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
     "undici-types": "^8.4.1",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.9"
   },
   "overrides": {
     "dompurify": ">=3.4.0",

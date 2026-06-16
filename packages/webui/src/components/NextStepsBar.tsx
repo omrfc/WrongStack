@@ -10,43 +10,141 @@ export interface NextStep {
   auto?: boolean;
 }
 
-/** Regex that matches "💡 Next steps" heading + numbered items up to a blank line. */
-/** Also captures optional auto="true" attribute at the end. */
-const NEXT_STEPS_RE = /💡\s*Next steps?\s*\n+((?:\d+\.\s+.+(?:\s+auto="true")?\n?)+)/i;
-const ITEM_RE = /^(\d+)\.\s+(.+?)(?:\s+auto="true")?$/;
-
-/**
- * Parse `💡 Next steps` from a markdown string.
- * Returns an array of { index, text, auto? } — index is 1-based.
- */
-export function parseNextSteps(content: string): NextStep[] {
-  const match = NEXT_STEPS_RE.exec(content);
-  if (match?.[1]) {
-    // Standard format: "💡 Next steps\n1. Step one\n2. Step two"
-    const block = match[1];
-    return parseStepLines(block);
-  }
-  // Fallback: raw step lines without the heading, e.g.
-  // "1. Do this auto=\"true\"\n2. Do that"  (used by markdown <next_steps> children)
-  return parseStepLines(content);
+/** Result of parsing a next-steps block from assistant output. */
+export interface ParseNextStepsResult {
+  /** Matched steps with their original index and stripped text. */
+  steps: NextStep[];
+  /**
+   * The input content with the entire "💡 Next steps" / "<next_steps>" block
+   * removed. Used by MessageBubble to feed react-markdown content that
+   * contains no raw suggestion tags.
+   */
+  stripped: string;
 }
 
-/** Parse numbered step lines into NextStep[] — used by both parsers. */
-function parseStepLines(block: string): NextStep[] {
-  const lines = block.split('\n').filter(Boolean);
-  const steps: NextStep[] = [];
-  for (const line of lines) {
-    const m = ITEM_RE.exec(line.trim());
-    if (m) {
-      // Strip the optional trailing " auto=\"true\"" from the captured text
-      // so it doesn't leak into the step text shown to the user.
-      const raw = m[2]!;
-      const hasAuto = raw.endsWith('auto="true"');
-      const text = hasAuto ? raw.slice(0, -'auto="true"'.length).trim() : raw.trim();
-      steps.push({ index: Number.parseInt(m[1]!, 10), text, auto: hasAuto });
-    }
+// ── Patterns ───────────────────────────────────────────────────────────────
+
+/** Matches the 💡 emoji heading OR <next_steps> opening tag. */
+const STRICT_HEADING_RE = /(?:💡\s*Next steps?|<next_steps>)\s*\n+/i;
+
+/** Matches an item line: "1. text", "1) text", "- text", "* text". */
+/** Also captures optional auto="true" attribute at the end. */
+const ITEM_RE = /^(?:(\d+)[.)]\s*|[-*•]\s*)(.+?)(\s+auto="true")?$/;
+
+const MAX_STEPS = 6;
+
+// ── Core parser ────────────────────────────────────────────────────────────
+
+/**
+ * Parse a "<next_steps>" or "💡 Next steps" block from assistant output.
+ *
+ * Returns the parsed steps AND the content with the entire block stripped,
+ * so the caller can render the body without leaking raw XML tags.
+ *
+ * @param content — raw assistant message text.
+ * @param strict  — when true (default), only accept 💡 emoji heading or
+ *                  <next_steps> XML tag. When false, also accept
+ *                  "## Next steps" / "Next steps" plain headings.
+ */
+export function parseNextSteps(
+  content: string,
+  strict = true,
+): ParseNextStepsResult {
+  const headingMatch = strict
+    ? STRICT_HEADING_RE.exec(content)
+    : buildPermissiveHeadingRe().exec(content);
+
+  if (!headingMatch) {
+    return { steps: [], stripped: content };
   }
-  return steps.slice(0, 6); // cap at 6
+
+  const headingEnd = headingMatch.index + headingMatch[0]!.length;
+  const afterHeading = content.slice(headingEnd);
+  const lines = afterHeading.split('\n');
+  const steps: NextStep[] = [];
+  const seenNumbers = new Set<number>();
+  let consumed = 0;
+  let found = 0;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    // XML closing tag — consume it and end the block.
+    if (line === '</next_steps>') {
+      consumed += rawLine.length + 1;
+      break;
+    }
+
+    if (!line) {
+      consumed += rawLine.length + 1;
+      continue;
+    }
+
+    const m = ITEM_RE.exec(line);
+    if (!m) break; // non-item line — block ends
+
+    const numPart = m[1];
+    const text = m[2]!.trim();
+    const hasAuto = !!m[3];
+    const index =
+      numPart !== undefined
+        ? Number.parseInt(numPart, 10)
+        : steps.length + 1;
+
+    // Skip duplicates. (We don't filter by minimum text length — the
+    // ITEM_RE regex already requires 1+ characters of text, and the agent
+    // is free to emit short but valid steps like "1. OK".)
+    if (seenNumbers.has(index)) {
+      consumed += rawLine.length + 1;
+      continue;
+    }
+    seenNumbers.add(index);
+    // Only set the `auto` field when truthy — keeps step objects clean and
+    // makes toEqual() comparisons stable in tests.
+    steps.push(hasAuto ? { index, text, auto: true } : { index, text });
+
+    consumed += rawLine.length + 1;
+    found++;
+    if (found >= MAX_STEPS) break;
+  }
+
+  if (steps.length === 0) {
+    return { steps: [], stripped: content };
+  }
+
+  // When the heading was an XML `<next_steps>` tag, require a matching
+  // closing tag — the agent should always emit a balanced block, and we
+  // don't want to consume half of a malformed block that may belong to
+  // user prose. The legacy `💡 Next steps` heading has no closing tag, so
+  // we don't apply the guard there.
+  if (strict && /<next_steps>/i.test(headingMatch[0]!) && !afterHeading.includes('</next_steps>')) {
+    return { steps: [], stripped: content };
+  }
+
+  const blockStart = headingMatch.index;
+  // blockEnd is the absolute position in `content` where the block ends
+  // (heading + body + closing tag + trailing newlines). The slice call
+  // below uses it directly, not as an offset from blockStart.
+  const blockEnd = headingEnd + consumed;
+  const stripped = (content.slice(0, blockStart) + content.slice(blockEnd))
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  return { steps, stripped };
+}
+
+const PERMISSIVE_HEADING_PATTERNS: Array<{ re: RegExp; label: string }> = [
+  { re: /💡\s*Next steps?\s*\n+/i, label: 'emoji' },
+  { re: /##?\s*Next steps?\s*\n+/i, label: 'markdown' },
+  { re: /\n{1,2}Next steps?\s*\n+/i, label: 'plain' },
+  { re: /<next_steps>\s*\n+/i, label: 'xml-tag' },
+];
+
+function buildPermissiveHeadingRe(): RegExp {
+  const variants = PERMISSIVE_HEADING_PATTERNS.map(
+    ({ re }) => `(?:${re.source})`,
+  ).join('|');
+  return new RegExp(variants, 'i');
 }
 
 /**
@@ -233,9 +331,10 @@ export function NextStepsBar({
 }
 
 /**
- * Hook-friendly version: takes raw markdown content and returns parsed steps.
+ * Hook-friendly version: takes raw markdown content and returns the parse
+ * result, including the steps array and the content with the block stripped.
  */
-export function useNextSteps(content: string): NextStep[] {
+export function useNextSteps(content: string): ParseNextStepsResult {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   return parseNextSteps(content);
 }
