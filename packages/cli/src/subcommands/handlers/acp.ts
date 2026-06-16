@@ -16,6 +16,7 @@ import {
   EnsembleRegistry,
   findAgentDescriptor,
   makeACPSubagentRunnerWithStop,
+  runEnsemble,
 } from '@wrongstack/acp';
 import { WrongStackACPServer } from '@wrongstack/acp/agent';
 import type { SubagentRunContext } from '@wrongstack/core';
@@ -165,7 +166,7 @@ async function spawnACPAgent(args: string[], deps: SubcommandDeps): Promise<numb
     return 1;
   }
 
-  const cmd = ACP_AGENT_COMMANDS[subagentId];
+  const cmd = ACP_AGENT_COMMANDS[subagentId] ?? resolveCmdFromCatalog(subagentId);
   if (!cmd) {
     deps.renderer.writeError(`Unknown ACP agent: ${subagentId}\n`);
     deps.renderer.write('Run `wstack acp list` to see available agents.\n');
@@ -242,84 +243,6 @@ async function spawnACPAgent(args: string[], deps: SubcommandDeps): Promise<numb
   }
 }
 
-/**
- * One-shot runner for a single agent — used by both `spawn` and `parallel`.
- * Returns a structured outcome that the caller can render however it wants.
- * Throws only on programmer errors (missing id, missing task); all agent
- * failures are reported as `{status: 'failed', error}`.
- */
-async function runOneACP(
-  subagentId: string,
-  task: string,
-  deps: SubcommandDeps,
-  renderInPlace: boolean,
-): Promise<
-  | { status: 'success'; result: unknown; iterations: number; toolCalls: number; durationMs: number }
-  | { status: 'failed'; error: { kind: string; message: string }; durationMs: number }
-> {
-  const cmd = ACP_AGENT_COMMANDS[subagentId] ?? resolveCmdFromCatalog(subagentId);
-  if (!cmd) {
-    return {
-      status: 'failed',
-      error: { kind: 'unknown_agent', message: `Unknown ACP agent: ${subagentId}` },
-      durationMs: 0,
-    };
-  }
-
-  const startedAt = Date.now();
-  const { runner, stop } = await makeACPSubagentRunnerWithStop(cmd);
-
-  try {
-    const taskId = `acp-${crypto.randomUUID()}`;
-    const budget = new SubagentBudget({
-      timeoutMs: 5 * 60 * 1000,
-      maxIterations: 2000,
-      maxToolCalls: 5000,
-    });
-    const ctx: SubagentRunContext = {
-      subagentId,
-      config: {
-        id: subagentId,
-        name: cmd.role ?? subagentId,
-        role: subagentId,
-        provider: 'acp',
-        prompt: '',
-      },
-      budget,
-      signal: new AbortController().signal,
-      bridge: null,
-    };
-    budget.start();
-    if (renderInPlace) {
-      deps.renderer.writeInfo(`Running task on ${subagentId}…\n`);
-    }
-    const result = await runner({ id: taskId, description: task }, ctx);
-    return {
-      status: 'success',
-      result: result.result,
-      iterations: result.iterations,
-      toolCalls: result.toolCalls,
-      durationMs: Date.now() - startedAt,
-    };
-  } catch (err) {
-    const e = err as { kind?: string; message?: string };
-    return {
-      status: 'failed',
-      error: {
-        kind: e.kind ?? 'unknown',
-        message: e.message ?? (err instanceof Error ? err.message : String(err)),
-      },
-      durationMs: Date.now() - startedAt,
-    };
-  } finally {
-    try {
-      stop();
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
 async function parallelACPAgents(
   args: string[],
   deps: SubcommandDeps,
@@ -337,102 +260,79 @@ async function parallelACPAgents(
     return 1;
   }
 
-  // Dedup, preserve order, drop empty entries.
-  const seen = new Set<string>();
-  const ids: string[] = [];
-  for (const raw of csv.split(',')) {
-    const id = raw.trim();
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    ids.push(id);
-  }
-  if (ids.length === 0) {
-    deps.renderer.writeError('No agent ids provided.\n');
-    return 1;
-  }
-
-  // Probe the registry to surface install issues up-front.
-  const registry = new EnsembleRegistry();
-  const detected = await registry.list();
-  const detectedById = new Map(detected.map((a) => [a.id, a]));
-  const available: string[] = [];
-  const skipped: { id: string; reason: string }[] = [];
-  for (const id of ids) {
-    const d = detectedById.get(id);
-    if (d && d.installed) {
-      available.push(id);
-    } else {
-      skipped.push({ id, reason: d?.reason ?? 'not in catalog' });
-    }
-  }
-
-  if (skipped.length > 0) {
-    deps.renderer.writeWarning(
-      `Skipping ${skipped.length} agent(s) not installed: ${skipped.map((s) => `${s.id} (${s.reason})`).join(', ')}\n`,
-    );
-  }
-  if (available.length === 0) {
-    deps.renderer.writeError('No installed agents to run.\n');
-    deps.renderer.write('Run `wstack acp list` to see what is available.\n');
-    return 1;
-  }
-
-  deps.renderer.writeInfo(
-    `Fanning out to ${available.length} agent(s): ${available.join(', ')}\n`,
-  );
-  deps.renderer.writeInfo(`Task: ${task}\n\n`);
-
-  // Stop everything on signal. Track each runner's stop function.
-  const onSignal = () => {
-    // The runner's stop is called in runOneACP's finally; SIGINT will be
-    // handled by each child process terminating naturally. The
-    // Promise.allSettled resolves once all children have exited.
-  };
+  // Forward SIGINT to abort the run. Each child process tears down in
+  // its own finally; the AbortController propagates into the agent.
+  const ac = new AbortController();
+  const onSignal = () => ac.abort();
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
 
-  const settled = await Promise.allSettled(
-    available.map((id) => runOneACP(id, task, deps, true)),
-  );
+  try {
+    const result = await runEnsemble({
+      agentIds: csv,
+      task,
+      resolveCmd: resolveCmdFromCatalog,
+      signal: ac.signal,
+    });
 
-  // Render each result under a clear header, in input order.
-  let successCount = 0;
-  let failCount = 0;
-  for (let i = 0; i < available.length; i++) {
-    const id = available[i]!;
-    const s = settled[i]!;
-    deps.renderer.write(`\n=== ${id} ===\n`);
-    if (s.status === 'rejected') {
-      failCount++;
-      const reason = s.reason instanceof Error ? s.reason.message : String(s.reason);
-      deps.renderer.writeError(`Crashed: ${reason}\n`);
-      continue;
-    }
-    const r = s.value;
-    if (r.status === 'success') {
-      successCount++;
-      deps.renderer.write(String(r.result ?? '(no result)'));
-      deps.renderer.write(
-        `\n[${id}] success  ${r.durationMs}ms  iterations=${r.iterations} toolCalls=${r.toolCalls}\n`,
-      );
-    } else {
-      failCount++;
-      deps.renderer.writeError(
-        `[${r.error.kind}] ${r.error.message}\n`,
-      );
-      deps.renderer.write(
-        `[${id}] failed  ${r.durationMs}ms\n`,
+    // Surface skipped agents up-front, before the per-agent output.
+    const skipped = result.results.filter((r) => r.status === 'skipped');
+    if (skipped.length > 0) {
+      deps.renderer.writeWarning(
+        `Skipping ${skipped.length} agent(s) not installed: ${skipped.map((s) => `${s.agentId} (${s.reason ?? 'not installed'})`).join(', ')}\n`,
       );
     }
+    if (result.summary.succeeded + result.summary.failed + result.summary.cancelled === 0) {
+      deps.renderer.writeError('No installed agents to run.\n');
+      deps.renderer.write('Run `wstack acp list` to see what is available.\n');
+      return 1;
+    }
+
+    const fannedOut = result.results
+      .filter((r) => r.status !== 'skipped')
+      .map((r) => r.agentId)
+      .join(', ');
+    deps.renderer.writeInfo(
+      `Fanning out to ${result.summary.succeeded + result.summary.failed + result.summary.cancelled} agent(s): ${fannedOut}\n`,
+    );
+    deps.renderer.writeInfo(`Task: ${result.task}\n\n`);
+
+    // Render each result under a clear header, in input order.
+    for (const r of result.results) {
+      if (r.status === 'skipped') continue;
+      deps.renderer.write(`\n=== ${r.agentId} ===\n`);
+      if (r.status === 'success') {
+        deps.renderer.write(r.result && r.result.length > 0 ? r.result : '(no result)');
+        deps.renderer.write(
+          `\n[${r.agentId}] success  ${r.durationMs}ms  iterations=${r.iterations} toolCalls=${r.toolCalls}\n`,
+        );
+      } else if (r.status === 'failed') {
+        deps.renderer.writeError(
+          `[${r.error?.kind ?? 'unknown'}] ${r.error?.message ?? 'failed'}\n`,
+        );
+        deps.renderer.write(
+          `[${r.agentId}] failed  ${r.durationMs}ms\n`,
+        );
+      } else {
+        // cancelled
+        deps.renderer.writeError(
+          `[${r.error?.kind ?? 'aborted'}] ${r.error?.message ?? 'cancelled'}\n`,
+        );
+        deps.renderer.write(
+          `[${r.agentId}] cancelled  ${r.durationMs}ms\n`,
+        );
+      }
+    }
+
+    const { succeeded, failed, cancelled, skipped: skip } = result.summary;
+    deps.renderer.write(
+      `\nParallel summary: ${succeeded} succeeded, ${failed} failed, ${cancelled} cancelled, ${skip} skipped.\n`,
+    );
+
+    // 0 if at least one agent succeeded, 1 otherwise.
+    return succeeded > 0 ? 0 : 1;
+  } finally {
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
   }
-
-  deps.renderer.write(
-    `\nParallel summary: ${successCount} succeeded, ${failCount} failed, ${skipped.length} skipped.\n`,
-  );
-
-  process.off('SIGINT', onSignal);
-  process.off('SIGTERM', onSignal);
-
-  // 0 if at least one agent succeeded, 1 if all failed.
-  return successCount > 0 ? 0 : 1;
 }

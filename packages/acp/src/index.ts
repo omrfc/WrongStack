@@ -50,5 +50,16 @@ export type {TerminalServerOptions} from './client/terminal-server.js';
 export {defaultPermissionPolicy} from './client/permission.js';
 export type {PermissionPolicy, PermissionRequest} from './client/permission.js';
 
+// Ensemble runner — fan a single task out to multiple ACP agents.
+export {
+  defaultEnsembleCmdResolver,
+  renderEnsembleText,
+  runEnsemble,
+  type EnsembleAgentResult,
+  type EnsembleCmdResolver,
+  type EnsembleResult,
+  type EnsembleRunnerOptions,
+} from './integration/ensemble-runner.js';
+
 // Types
 export * from './types/acp-messages.js';
