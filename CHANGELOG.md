@@ -11,6 +11,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 *(none yet)*
 
+## [0.262.0] — 2026-06-16
+
+> Patch release consolidating the biome 2.5 lint gate, the missing
+> `@wrongstack/core/tools` and `@wrongstack/webui/types` subpath
+> exports, and the corresponding lint cleanups. The `0.260.0` →
+> `0.262.0` window is a long-overdue catch-up; the cumulative change
+> set is small (3 commits, ~80 lines of diff) and additive — no
+> breaking changes. The `0.251.0` → `0.260.0` window is intentionally
+> not back-filled in this entry: the 12 intermediate version bumps
+> in that range were routine refactors, lint cleanups, and dependency
+> updates that are already on `main`; consult the git log between
+> `v0.250.1..ff8f06ac` if you need them.
+
+### Added
+
+- **PR #79 — Publish missing package entrypoints.** `@wrongstack/core`
+  declares `./tools` and `@wrongstack/webui` declares `./types` in
+  their published `exports` map, but the matching `dist/tools/index.{js,d.ts}`
+  and `dist/types.{js,d.ts}` files were not emitted by the build.
+  Consumers resolving these subpaths hit `ERR_MODULE_NOT_FOUND` (or
+  the TypeScript equivalent) when they tried to import them. The fix
+  adds the entries to the corresponding `tsup` entry lists so the
+  tarball actually contains what the `exports` map promises. This
+  affected `@wrongstack/core@0.256.1` and `@wrongstack/webui@0.256.1`
+  on npm, so any consumer that pinned to those versions and tried
+  to use these subpaths will need to upgrade.
+
+### Fixed
+
+- **Biome 2.5 migration.** `biome.json` was pinned to the `2.4.16`
+  schema URL with the deprecated `recommended: true` syntax and a
+  trailing comma after the last `overrides` entry. Biome `2.5.0`
+  (the installed version) refused to load the config, which made
+  `pnpm lint` exit `1` and broke the release gate in
+  `.github/workflows/ci.yml`. The fix:
+  - Bumps `$schema` to `2.5.0`.
+  - Drops `recommended: true` (deprecated in 2.5; rule set is
+    unchanged by name).
+  - Removes the trailing comma.
+  - Adds `css.parser.tailwindDirectives: true` so
+    `website/src/index.css` parses `@theme inline` (Tailwind v4)
+    without errors.
+  - Excludes `**/*.html` from the lint scope (HTML inline scripts
+    can't be silenced with `biome-ignore` because Biome treats
+    the comment as a regular HTML comment).
+  - Relaxes `style.noNonNullAssertion` to `off` (the rule is a
+    code-style preference, not a correctness issue; `tsc` strict
+    mode plus the `typescript-strict` skill's "use `?.` instead
+    of `!`" rule already cover the safety case, and the test-file
+    override was already turning it off in `*.test.ts*`).
+  - Sets `suspicious.noControlCharactersInRegex` to `off` (needed
+    for the ANSI-stripping regexes in `cli`, `tools`, and `core`).
+  - Sets `suspicious.noArrayIndexKey` to `off` (the TUI codebase
+    intentionally uses positional keys for fixed-height slots and
+    strict-per-render lists where there is no semantic identity).
+  - Adds `noNonNullAssertedOptionalChain: off` to the test-file
+    override (test fixtures commonly use `x!` on values that flow
+    through `?.`).
+  - Fixes eight `×` errors that Biome 2.5 surfaces on a clean tree
+    (3 × `useIterableCallbackReturn` rewritten as `for` loops, 4 ×
+    `useNodejsImportProtocol` (`require('fs')` → `require('node:fs')`)
+    in the dev analysis scripts, 2 × `useImportType` either marked
+    inline with `type` or removed where the import was unused).
+
+### Known issues
+
+- `packages/tools/tests/fetch-lookup.test.ts > guardedLookup >
+  forwards a DNS resolution failure` fails on Windows because
+  Node's Windows DNS backend wraps the underlying error message
+  differently. The test is correct on macOS and Linux (the
+  relevant CI runners). The fix is platform-specific regex
+  branching; tracked outside this release.
+
 ## [0.260.0] — 2026-06-14
 
 > The benchmark, observability & capability-authorization release. Consolidates
