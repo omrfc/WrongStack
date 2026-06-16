@@ -25,5 +25,30 @@ export {makeACPSubagentRunner, makeACPSubagentRunnerWithStop} from './integratio
 export type {ACPSubagentRunnerOptions} from './integration/acp-subagent-runner.js';
 export {ACP_AGENT_COMMANDS} from './integration/acp-subagent-runner.js';
 
+// Discovery — the catalog + registry (added in feat/acp-ensemble).
+export {AGENTS_CATALOG, findAgentDescriptor} from './registry/agents.catalog.js';
+export {EnsembleRegistry} from './registry/ensemble-registry.js';
+export type {
+  ACPAgentDescriptor,
+  ACPAgentVendor,
+  ACPIntegration,
+  DetectedAgent,
+  EnsembleRegistryOptions,
+} from './registry/ensemble-registry.js';
+
+// Client session — the v1-correct ACP client (added in feat/acp-ensemble).
+export {ACPSession, ACPSessionError} from './client/acp-session.js';
+export type {
+  ACPSessionOptions,
+  ACPSessionRunResult,
+  ACPSessionErrorKind,
+} from './client/acp-session.js';
+export {FileServer, FsError} from './client/file-server.js';
+export type {FileServerOptions, ReadFileParams, WriteFileParams, FsErrorCode} from './client/file-server.js';
+export {TerminalServer} from './client/terminal-server.js';
+export type {TerminalServerOptions} from './client/terminal-server.js';
+export {defaultPermissionPolicy} from './client/permission.js';
+export type {PermissionPolicy, PermissionRequest} from './client/permission.js';
+
 // Types
 export * from './types/acp-messages.js';

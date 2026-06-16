@@ -10,10 +10,14 @@
  * This is the correct CLI entry point to test DIR-2 against a real ACP client.
  */
 
-import { ACP_AGENT_COMMANDS, makeACPSubagentRunnerWithStop } from '@wrongstack/acp';
+import {
+  ACP_AGENT_COMMANDS,
+  EnsembleRegistry,
+  makeACPSubagentRunnerWithStop,
+} from '@wrongstack/acp';
 import { WrongStackACPServer } from '@wrongstack/acp/agent';
 import type { SubagentRunContext } from '@wrongstack/core';
-import { ACP_AGENTS, SubagentBudget } from '@wrongstack/core/coordination';
+import { SubagentBudget } from '@wrongstack/core/coordination';
 import type { SubcommandDeps, SubcommandHandler } from '../index.js';
 
 export const acpCmd: SubcommandHandler = async (args, deps) => {
@@ -93,15 +97,22 @@ async function runACPServer(deps: SubcommandDeps): Promise<number> {
   return 0;
 }
 
-function listACPAgents(deps: SubcommandDeps): number {
-  deps.renderer.write('Available ACP agents:\n\n');
-  for (const a of ACP_AGENTS) {
-    const id = (a.id ?? a.role) as string;
-    const name = a.name ?? a.role ?? '';
-    const desc = a.prompt?.slice(0, 50) ?? '';
-    deps.renderer.write(`  ${id.padEnd(16)} ${name.padEnd(20)} ${desc}…\n`);
+async function listACPAgents(deps: SubcommandDeps): Promise<number> {
+  const registry = new EnsembleRegistry();
+  const detected = await registry.list();
+  deps.renderer.write('Detected ACP agents:\n\n');
+  // Print installed first, then not-installed with a "not installed" note.
+  const installed = detected.filter((a) => a.installed);
+  const missing = detected.filter((a) => !a.installed);
+  for (const a of installed) {
+    const ver = a.version ? `  (${a.version.split('\n')[0]})` : '';
+    deps.renderer.write(`  ✓ ${a.id.padEnd(16)} ${a.displayName}${ver}\n`);
   }
-  deps.renderer.write('\nUse `wstack acp spawn <agent> <task>` to delegate a task.\n');
+  for (const a of missing) {
+    deps.renderer.write(`  ✗ ${a.id.padEnd(16)} ${a.displayName}  (${a.reason ?? 'not installed'})\n`);
+  }
+  deps.renderer.write(`\n${installed.length} of ${detected.length} agents available.\n`);
+  deps.renderer.write('Use `wstack acp spawn <agent-id> <task>` to delegate a task.\n');
   return 0;
 }
 
@@ -183,9 +194,12 @@ async function spawnACPAgent(args: string[], deps: SubcommandDeps): Promise<numb
     );
     return 0;
   } catch (err) {
-    deps.renderer.writeError(
-      `ACP agent error: ${err instanceof Error ? err.message : String(err)}\n`,
-    );
+    // The runner throws structured SubagentError shapes; surface the
+    // `kind` for clarity (e.g. aborted_by_parent, bridge_failed).
+    const e = err as { kind?: string; message?: string };
+    const detail = e.kind ? `[${e.kind}] ` : '';
+    const message = e.message ?? (err instanceof Error ? err.message : String(err));
+    deps.renderer.writeError(`ACP agent error: ${detail}${message}\n`);
     return 1;
   } finally {
     cleanup();
