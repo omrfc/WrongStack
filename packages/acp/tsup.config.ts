@@ -5,6 +5,11 @@ export default defineConfig({
     index: 'src/index.ts',
     client: 'src/client/index.ts',
     agent: 'src/agent/index.ts',
+    // Standalone bootstrap entry: `node dist/agent/wrongstack-acp-agent.js`.
+    // Built as a separate file so the CLI can also use the
+    // `WrongStackACPServer` class (entry: agent) without pulling the
+    // bootstrap's auto-start side effect.
+    'wrongstack-acp-agent': 'src/agent/wrongstack-acp-agent.ts',
   },
   format: ['esm'],
   dts: true,

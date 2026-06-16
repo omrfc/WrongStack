@@ -25,6 +25,7 @@ security, persistence, multi-agent coordination, autonomy, and user interfaces.
 15. [TUI Architecture](#15-tui-architecture)
 16. [WebUI Architecture](#16-webui-architecture)
 17. [End-to-End Data Flow](#17-end-to-end-data-flow)
+18. [ACP Ensemble Integration](#18-acp-ensemble-integration)
 
 ---
 
@@ -1739,6 +1740,121 @@ PERSISTENCE:     SessionStore (JSONL + index), GoalStore (goal.json),
 EXTENSIBILITY:   Plugins, Pipelines (6), Hooks, Skills,
                  Modes, SystemPromptContributors
 ```
+
+---
+
+## 18. ACP Ensemble Integration
+
+WrongStack is a first-class peer in the [Agent Client Protocol v1](https://agentclientprotocol.com/get-started/introduction) — both as a client (drives external agents like Claude Code, Gemini CLI, Codex CLI, OpenCode, Cline) and as a server (external editors like Zed, JetBrains Junie, VS Code ACP can drive WrongStack). The "ensemble" feature fans a single task out to multiple agents in parallel and aggregates the results.
+
+### Where it lives
+
+```
+packages/acp/                    v1 client + server + ensemble
+  types/acp-v1.ts                v1 type definitions, discriminated SessionUpdate
+  registry/
+    agents.catalog.ts            12-entry static catalog
+    ensemble-registry.ts         $PATH probe, 5s cache
+  client/                        v1 client (WrongStack → external agents)
+    acp-session.ts               state machine (initialize → session/new → session/prompt)
+    file-server.ts               sandboxed fs/* methods
+    terminal-server.ts           sandboxed terminal/* methods
+    permission.ts                permission UX
+  agent/                         v1 server (external editor → WrongStack)
+    protocol-handler.ts          v1 method set
+    wrongstack-acp-agent.ts      bootstrap binary (no-op echo by default)
+    server-agent-turn.ts         real Agent → server adapter
+    stdio-transport.ts           JSON-RPC 2.0 over stdio
+  integration/
+    acp-subagent-runner.ts       single-agent runner
+    ensemble-runner.ts           multi-agent orchestrator
+```
+
+### Two roles, one protocol
+
+```
+                        ┌──────────────────────────────────┐
+                        │       WrongStack CLI / TUI       │
+                        │  /spawn claude-code "refactor"   │
+                        │  /ensemble claude-code,gemini-cli│
+                        │  wstack acp parallel <csv> <task>│
+                        └──────────┬───────────────────────┘
+                                   │ SubagentRunner
+                                   ▼
+                        ┌──────────────────────────────────┐
+                        │  packages/acp                    │
+                        │  ┌──────────────────────────┐    │
+                        │  │  EnsembleRegistry        │    │
+                        │  │  ── $PATH probe, 5s cache│    │
+                        │  └──────────────────────────┘    │
+                        │  ┌──────────────────────────┐    │
+                        │  │  ACPSession (per agent)  │    │
+                        │  │  ── v1 state machine     │    │
+                        │  │  ── stream → bridge      │    │
+                        │  │  ── session/cancel on    │    │
+                        │  │     AbortSignal          │    │
+                        │  └──────────────────────────┘    │
+                        │  ┌──────────────────────────┐    │
+                        │  │  runEnsemble()           │    │
+                        │  │  ── Promise.allSettled   │    │
+                        │  │  ── skip / fail / cancel │    │
+                        │  └──────────────────────────┘    │
+                        └──┬──────┬──────┬────────────────┘
+                           │stdio │stdio │stdio
+                           ▼      ▼      ▼
+                        claude  gemini  codex
+```
+
+### User-facing surfaces (three entry points to the same `runEnsemble`)
+
+| Surface | Command | Renderer |
+|---|---|---|
+| CLI | `wstack acp parallel <csv> <task>` | Formatted text block |
+| TUI/REPL | `/ensemble <csv> <task>` | Same text block in chat history |
+| Programmatic | `import { runEnsemble } from '@wrongstack/acp'` | Caller's choice |
+
+### v1 wire format (key methods)
+
+| Method | Direction | Triggered by |
+|---|---|---|
+| `initialize` | request → result | First message on the wire; negotiates `protocolVersion: 1` |
+| `session/new` | request → result | Client opens a new conversation |
+| `session/prompt` | request → result | Client sends the user's text |
+| `session/cancel` | notification | Client aborts (Ctrl-C / AbortSignal) |
+| `session/update` | notification | Agent streams chunks, tool calls, plan entries, usage |
+| `fs/read_text_file`, `fs/write_text_file` | request → result | Agent asks to read/write a project file |
+| `terminal/create`, `terminal/output`, `terminal/kill`, … | request → result | Agent wants to run a shell command |
+| `session/request_permission` | request → result | Agent asks the user before a risky action |
+
+### Live catalog on this host (8 of 12 detected)
+
+```
+✓ claude-code    2.1.178   ✓ gemini-cli     0.45.1
+✓ codex-cli      0.139.0   ✓ copilot        github
+✓ cline          11.11.0   ✓ qwen-code      0.16.0
+✓ kiro-cli       0.12.224  ✓ opencode       1.15.5
+— goose          (not installed)
+— openhands      (not installed)
+— mistral-vibe   (not installed)
+— cursor         (not installed)
+```
+
+### Verified
+
+- 14 test files / 153 tests pass + 1 skipped (live probe)
+- All 16 packages typecheck clean
+- End-to-end smoke test (`pnpm --filter @wrongstack/acp smoke`) walks a full v1 session and exits 0
+- `wstack acp list`, `wstack acp spawn`, `wstack acp parallel` all functional
+- `/ensemble` slash command wired into the REPL
+
+### See also
+
+- [`docs/acp-ensemble.md`](acp-ensemble.md) — full design doc (375 LoC)
+- [`docs/subcommands/acp.md`](subcommands/acp.md) — CLI surface
+- [`docs/slash/ensemble.md`](slash/ensemble.md) — `/ensemble` slash command
+- [ACP v1 spec](https://agentclientprotocol.com/get-started/introduction)
+
+---
 
 ### Key Numbers
 

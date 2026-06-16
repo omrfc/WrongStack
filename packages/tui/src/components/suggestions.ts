@@ -170,18 +170,25 @@ function parseWithHeading(content: string, strict: boolean): ParseNextStepsResul
     return { steps: [], texts: [], stripped: content, autoTexts: [] };
   }
 
-  // In strict mode, require the closing </next_steps> tag — webui cannot parse
-  // malformed XML. If missing, reject the entire block (return no steps).
-  if (strict && !afterHeading.includes('</next_steps>')) {
+  // In strict mode, if the heading was the <next_steps> XML form, require
+  // the closing tag — malformed XML should be rejected so the webui
+  // (which renders the same block) doesn't show raw text. The legacy 💡 /
+  // ## / plain "Next steps" form has no closing tag and is always accepted.
+  const headingWasXmlTag = headingMatch[0]!.startsWith('<');
+  if (strict && headingWasXmlTag && !afterHeading.includes('</next_steps>')) {
     return { steps: [], texts: [], stripped: content, autoTexts: [] };
   }
 
   const texts = steps.map((s) => s.text);
   const autoTexts = steps.filter((s) => s.auto).map((s) => s.text);
 
-  // Strip the entire heading + block from the content
+  // Strip the entire heading + block from the content. The block to strip
+  // is everything from the heading's start to the end of the closing tag
+  // (or end of the last item, for the legacy 💡 / ## form). `blockEnd` is
+  // the LENGTH of that block, so `content.slice(blockStart + blockEnd)` is
+  // the rest of the content.
   const blockStart = headingMatch.index;
-  const blockEnd = headingEnd + findBlockEnd(afterHeading, steps.length);
+  const blockEnd = headingMatch[0]!.length + findBlockEnd(afterHeading, steps.length);
   const stripped =
     (content.slice(0, blockStart) + content.slice(blockStart + blockEnd))
       .replace(/\n{3,}/g, '\n\n')
@@ -195,28 +202,52 @@ function buildPermissiveHeadingRe(): RegExp {
   return new RegExp(variants, 'i');
 }
 
+/**
+ * Find the byte offset in `afterHeading` where the block ends.
+ *
+ * The block to strip is the items (one per line) plus the optional
+ * `</next_steps>` closing tag (and the trailing newline after it). For the
+ * legacy `💡` / `##` heading form, only the items are consumed. For the
+ * `<next_steps>` form, the closing tag is consumed too.
+ *
+ * Returns the byte offset of the first character AFTER the block. The
+ * caller's `content.slice(0, blockStart) + content.slice(blockStart + offset)`
+ * then produces the stripped content.
+ *
+ * Walks line-by-line. Stops at the first non-item line, the closing XML
+ * tag, or the end of the input — whichever comes first.
+ */
 function findBlockEnd(afterHeading: string, stepCount: number): number {
+  // Fast path: if the block is the <next_steps> XML form, find the closing
+  // tag and return its end (consuming the tag + trailing newline).
+  const closeIdx = afterHeading.indexOf('</next_steps>');
+  if (closeIdx !== -1) {
+    let end = closeIdx + '</next_steps>'.length;
+    if (afterHeading[end] === '\n') end += 1;
+    return end;
+  }
+
+  // Legacy heading form (💡 / ## / plain "Next steps"): no closing tag.
+  // Consume `stepCount` item lines.
   const lines = afterHeading.split('\n');
   let consumed = 0;
   let found = 0;
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
-    
-    // XML closing tag — consume it and end block
-    if (line === '</next_steps>') {
-      consumed += rawLine.length + 1;
-      break;
-    }
-    
-    if (!line) { consumed += rawLine.length + 1; continue; }
+    if (!line) break; // blank line ends the block
 
     const m = ITEM_RE.exec(line);
-    if (!m) break; // non-item line — block ends
+    if (!m) break; // non-item line ends the block
 
-    consumed += rawLine.length + 1;
+    consumed += rawLine.length + 1; // +1 for the \n separator
     found++;
-    if (found >= stepCount) break;
+    if (found >= stepCount) {
+      // Don't include the trailing newline of the last item — the slice
+      // logic in the caller handles whitespace cleanup.
+      consumed -= 1;
+      break;
+    }
   }
 
   return consumed;

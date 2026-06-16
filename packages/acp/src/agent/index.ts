@@ -3,4 +3,6 @@ export {ACPToolsRegistry} from './tools-registry.js';
 export {ACPProtocolHandler} from './protocol-handler.js';
 export {WrongStackACPServer} from './wrongstack-acp-agent.js';
 export type {WrongStackACPServerOptions} from './wrongstack-acp-agent.js';
+export {makeACPServerAgentTurn} from './server-agent-turn.js';
+export type {ACPServerAgentTurnOptions} from './server-agent-turn.js';
 export type {AgentServerTransport} from './stdio-transport.js';

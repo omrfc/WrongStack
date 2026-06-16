@@ -1,0 +1,373 @@
+/**
+ * Tests for ACPSession.
+ *
+ * Strategy: vi.mock the stdio transport with a controllable fake. The
+ * fake records sent messages, lets tests emit canned responses, and
+ * supports `emit(msg)` to fire inbound messages as if they came from
+ * the child process.
+ *
+ * Tested scenarios mirror the design doc's test strategy section.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fsp from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+
+import type { ACPMessage } from '../src/types/acp-messages.js';
+import { ACPSession, ACPSessionError } from '../src/client/acp-session.js';
+
+const hoisted = vi.hoisted(() => ({ instances: [] as FakeTransport[] }));
+
+interface FakeTransport {
+  sent: ACPMessage[];
+  handlers: Array<(m: ACPMessage) => void>;
+  start: ReturnType<typeof vi.fn>;
+  stop: ReturnType<typeof vi.fn>;
+  send: ReturnType<typeof vi.fn>;
+  onMessage: (h: (m: ACPMessage) => void) => () => void;
+  emit: (m: ACPMessage) => void;
+  /** Direct call: send a response to a specific request id. */
+  respond: (id: number | string, method: string, result: unknown) => void;
+  /** Direct call: send an error response. */
+  respondError: (id: number | string, method: string, error: { code: number; message: string }) => void;
+}
+
+vi.mock('../src/agent/stdio-transport.js', () => {
+  class ClientTransport {
+    sent: ACPMessage[] = [];
+    handlers: Array<(m: ACPMessage) => void> = [];
+    start = vi.fn(async () => {});
+    stop = vi.fn();
+    send = vi.fn(async (m: ACPMessage) => {
+      this.sent.push(m);
+    });
+    constructor() {
+      hoisted.instances.push(this as unknown as FakeTransport);
+    }
+    onMessage(h: (m: ACPMessage) => void): () => void {
+      this.handlers.push(h);
+      return () => {};
+    }
+    emit(m: ACPMessage): void {
+      for (const h of [...this.handlers]) h(m);
+    }
+    respond(id: number | string, method: string, result: unknown): void {
+      this.emit({ jsonrpc: '2.0', id, method, result } as unknown as ACPMessage);
+    }
+    respondError(id: number | string, method: string, error: { code: number; message: string }): void {
+      this.emit({ jsonrpc: '2.0', id, method, error } as unknown as ACPMessage);
+    }
+  }
+  return { ClientTransport, StdioTransport: class {} };
+});
+
+const PROJECT_ROOT = path.resolve(os.tmpdir(), 'wstack-acp-test-' + process.pid);
+
+function lastTransport(): FakeTransport {
+  const t = hoisted.instances[hoisted.instances.length - 1];
+  if (!t) throw new Error('no transport was constructed');
+  return t;
+}
+
+beforeEach(async () => {
+  hoisted.instances.length = 0;
+  await fsp.mkdir(PROJECT_ROOT, { recursive: true });
+});
+
+afterEach(async () => {
+  hoisted.instances.length = 0;
+  // Best-effort retry: on Windows the rmdir occasionally fails with
+  // EBUSY when the prior test's session still has a file handle open
+  // for a few extra milliseconds.
+  for (let i = 0; i < 3; i++) {
+    try {
+      await fsp.rm(PROJECT_ROOT, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code !== 'EBUSY' && code !== 'ENOTEMPTY') throw err;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+});
+
+async function startSession(
+  initResult: Record<string, unknown> = {
+    protocolVersion: 1,
+    agentCapabilities: { loadSession: true, promptCapabilities: { image: true } },
+    agentInfo: { name: 'fake-agent', title: 'Fake', version: '0.0.1' },
+  },
+): Promise<ACPSession> {
+  // Don't await start() yet — we need to read the initialize message
+  // and respond to it first, otherwise start() deadlocks waiting for
+  // the initialize response that we can't send until start() returns.
+  const p = ACPSession.start({ command: 'fake', projectRoot: PROJECT_ROOT });
+  const t = lastTransport();
+  // Give the microtask queue a tick so the initialize message is sent
+  // before we try to find it.
+  await new Promise((r) => setImmediate(r));
+  const init = t.sent.find((m) => m.method === 'initialize');
+  expect(init).toBeDefined();
+  t.respond(init!.id!, 'initialize', initResult);
+  return p;
+}
+
+describe('ACPSession', () => {
+  it('runs a happy-path prompt turn and concatenates text', async () => {
+    const session = await startSession();
+    const t = lastTransport();
+
+    // Kick off the prompt (don't await yet)
+    const promptP = session.prompt('hello', new AbortController().signal);
+
+    // Drain session/new response
+    await new Promise((r) => setImmediate(r));
+    const newMsg = t.sent.find((m) => m.method === 'session/new');
+    t.respond(newMsg!.id!, 'session/new', { sessionId: 'sess_abc' });
+
+    // Drain session/prompt
+    await new Promise((r) => setImmediate(r));
+    const promptMsg = t.sent.find((m) => m.method === 'session/prompt');
+    expect(promptMsg).toBeDefined();
+    // Stream a few agent_message_chunk updates
+    t.emit({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: {
+        sessionId: 'sess_abc',
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hel' } },
+      },
+    } as unknown as ACPMessage);
+    t.emit({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: {
+        sessionId: 'sess_abc',
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'lo' } },
+      },
+    } as unknown as ACPMessage);
+    // Now return the stopReason
+    t.respond(promptMsg!.id!, 'session/prompt', { stopReason: 'end_turn' });
+
+    const result = await promptP;
+    expect(result.text).toBe('hello');
+    expect(result.stopReason).toBe('end_turn');
+    expect(result.hasText).toBe(true);
+
+    await session.close();
+  });
+
+  it('returns stopReason=cancelled and a session/cancel notification when aborted', async () => {
+    const session = await startSession();
+    const t = lastTransport();
+    const ac = new AbortController();
+    const promptP = session.prompt('hello', ac.signal);
+
+    await new Promise((r) => setImmediate(r));
+    const newMsg = t.sent.find((m) => m.method === 'session/new');
+    t.respond(newMsg!.id!, 'session/new', { sessionId: 'sess_abc' });
+    await new Promise((r) => setImmediate(r));
+    const promptMsg = t.sent.find((m) => m.method === 'session/prompt');
+
+    // Abort mid-turn
+    ac.abort();
+    // Let the abort handler fire
+    await new Promise((r) => setImmediate(r));
+    // The session should have sent a session/cancel notification
+    const cancel = t.sent.find((m) => m.method === 'session/cancel');
+    expect(cancel).toBeDefined();
+    // The agent eventually responds with stopReason=cancelled
+    t.respond(promptMsg!.id!, 'session/prompt', { stopReason: 'cancelled' });
+
+    const result = await promptP;
+    expect(result.stopReason).toBe('cancelled');
+
+    await session.close();
+  });
+
+  it('returns stopReason=cancelled when the signal is pre-aborted (no wire activity)', async () => {
+    const session = await startSession();
+    const ac = new AbortController();
+    ac.abort();
+    const result = await session.prompt('x', ac.signal);
+    // A pre-aborted prompt is a normal cancelled outcome per spec;
+    // session/cancel is only sent for in-flight prompts.
+    expect(result.stopReason).toBe('cancelled');
+    expect(result.text).toBe('');
+    expect(result.hasText).toBe(false);
+    await session.close();
+  });
+
+  it('throws ACPSessionError(init_failed) when the agent speaks a different version', async () => {
+    hoisted.instances.length = 0;
+    const p = ACPSession.start({ command: 'fake', projectRoot: PROJECT_ROOT });
+    const t = lastTransport();
+    // Tick to let start() send the initialize message
+    await new Promise((r) => setImmediate(r));
+    const init = t.sent.find((m) => m.method === 'initialize')!;
+    t.respond(init.id!, 'initialize', { protocolVersion: 99 });
+    await expect(p).rejects.toBeInstanceOf(ACPSessionError);
+    await expect(p).rejects.toMatchObject({ kind: 'unsupported_capability' });
+  });
+
+  it('answers fs/read_text_file from the file server', async () => {
+    const session = await startSession();
+    const t = lastTransport();
+
+    // Skip session/new (not needed for fs); the request comes from the
+    // agent mid-prompt, we just route it through handleFsRequest.
+    const filePath = path.join(PROJECT_ROOT, 'greeting.txt');
+    await (await import('node:fs/promises')).writeFile(filePath, 'hi from file', 'utf8');
+
+    const id = 42;
+    t.emit({
+      jsonrpc: '2.0',
+      id,
+      method: 'fs/read_text_file',
+      params: { sessionId: 'sess_abc', path: filePath },
+    } as unknown as ACPMessage);
+
+    // Wait for the async handler to read the file and send the response.
+    // The handler awaits fileServer.readTextFile (which is a real fs
+    // call) then awaits transport.send. Give it a real timer tick.
+    await new Promise((r) => setTimeout(r, 50));
+    const response = t.sent.find(
+      (m) => m.id === id && m.method === 'fs/read_text_file',
+    );
+    expect(response).toBeDefined();
+    expect((response!.result as { content: string }).content).toBe('hi from file');
+
+    await session.close();
+  });
+
+  it('rejects fs/read_text_file for paths outside projectRoot', async () => {
+    const session = await startSession();
+    const t = lastTransport();
+
+    const id = 43;
+    t.emit({
+      jsonrpc: '2.0',
+      id,
+      method: 'fs/read_text_file',
+      params: { sessionId: 'sess_abc', path: '/etc/passwd' },
+    } as unknown as ACPMessage);
+
+    await new Promise((r) => setImmediate(r));
+    const response = t.sent.find(
+      (m) => m.id === id && m.method === 'fs/read_text_file',
+    );
+    expect(response).toBeDefined();
+    expect(response!.error).toBeDefined();
+    expect(response!.error!.code).toBe(-32602);
+
+    await session.close();
+  });
+
+  it('runs a terminal end-to-end (create → output → wait_for_exit)', async () => {
+    const session = await startSession();
+    const t = lastTransport();
+
+    const createId = 100;
+    t.emit({
+      jsonrpc: '2.0',
+      id: createId,
+      method: 'terminal/create',
+      params: {
+        sessionId: 'sess_abc',
+        command: 'node',
+        args: ['-e', "console.log('hi from terminal')"],
+        cwd: PROJECT_ROOT,
+      },
+    } as unknown as ACPMessage);
+    await new Promise((r) => setImmediate(r));
+
+    const createResp = t.sent.find((m) => m.id === createId);
+    expect(createResp).toBeDefined();
+    const terminalId = (createResp!.result as { terminalId: string }).terminalId;
+    expect(terminalId).toMatch(/^term_/);
+
+    // Wait for the process to exit
+    const waitId = 101;
+    t.emit({
+      jsonrpc: '2.0',
+      id: waitId,
+      method: 'terminal/wait_for_exit',
+      params: { sessionId: 'sess_abc', terminalId },
+    } as unknown as ACPMessage);
+    // Give the process time to actually run and exit
+    await new Promise((r) => setTimeout(r, 500));
+    const waitResp = t.sent.find((m) => m.id === waitId);
+    expect(waitResp).toBeDefined();
+    expect((waitResp!.result as { exitCode: number | null }).exitCode).toBe(0);
+
+    // Now ask for output
+    const outputId = 102;
+    t.emit({
+      jsonrpc: '2.0',
+      id: outputId,
+      method: 'terminal/output',
+      params: { sessionId: 'sess_abc', terminalId },
+    } as unknown as ACPMessage);
+    await new Promise((r) => setImmediate(r));
+    const outputResp = t.sent.find((m) => m.id === outputId);
+    expect((outputResp!.result as { output: string }).output).toContain('hi from terminal');
+
+    await session.close();
+  });
+
+  it('captures plan and usage updates from session/update', async () => {
+    const session = await startSession();
+    const t = lastTransport();
+
+    const promptP = session.prompt('plan please', new AbortController().signal);
+    await new Promise((r) => setImmediate(r));
+    const newMsg = t.sent.find((m) => m.method === 'session/new')!;
+    t.respond(newMsg.id!, 'session/new', { sessionId: 'sess_abc' });
+    await new Promise((r) => setImmediate(r));
+    const promptMsg = t.sent.find((m) => m.method === 'session/prompt')!;
+
+    // Send a plan
+    t.emit({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: {
+        sessionId: 'sess_abc',
+        update: {
+          sessionUpdate: 'plan',
+          entries: [
+            { content: 'first', priority: 'high', status: 'in_progress' },
+            { content: 'second', priority: 'low', status: 'pending' },
+          ],
+        },
+      },
+    } as unknown as ACPMessage);
+    // Send a usage update
+    t.emit({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: {
+        sessionId: 'sess_abc',
+        update: { sessionUpdate: 'usage_update', used: 1200, size: 200_000, cost: { amount: 0.01, currency: 'USD' } },
+      },
+    } as unknown as ACPMessage);
+    // And the agent's text
+    t.emit({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: {
+        sessionId: 'sess_abc',
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ok' } },
+      },
+    } as unknown as ACPMessage);
+    t.respond(promptMsg.id!, 'session/prompt', { stopReason: 'end_turn' });
+
+    const result = await promptP;
+    expect(result.text).toBe('ok');
+    expect(result.plan).toHaveLength(2);
+    expect(result.plan?.[0]?.content).toBe('first');
+    expect(result.usage?.used).toBe(1200);
+    expect(result.usage?.cost?.amount).toBe(0.01);
+
+    await session.close();
+  });
+});

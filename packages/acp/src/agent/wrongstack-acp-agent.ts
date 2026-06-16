@@ -1,9 +1,9 @@
 /**
- * WrongStackACPServer — ACP server-side entry point.
+ * WrongStackACPServer — ACP v1 server-side entry point.
  *
- * Exposes WrongStack as an ACP-compatible agent. ACP clients (Zed, JetBrains,
- * VS Code ACP extension) spawn this as a subprocess, send JSON-RPC messages
- * over stdio, and receive tool responses.
+ * Exposes WrongStack as an ACP-compatible agent. ACP clients (Zed, JetBrains
+ * Junie, VS Code ACP extension) spawn this as a subprocess, send JSON-RPC
+ * messages over stdio, and receive v1-protocol responses.
  *
  * Usage:
  *   node dist/agent/wrongstack-acp-agent.js
@@ -11,77 +11,76 @@
  * Or via the CLI:
  *   wstack acp-server
  *
- * Startup: sends `[wstack-acp]\n` to stdout so the client knows which process
- * is the ACP server before protocol messages begin.
+ * Wiring a real agent: this class is the surface; the bootstrap
+ * binary uses a no-op echo by default so the binary is a useful
+ * connectivity smoke test. For a real server, instantiate
+ * `WrongStackACPServer` programmatically and pass a `runTurn`
+ * produced by `makeACPServerAgentTurn({ agentFor: ... })` from
+ * `./server-agent-turn.js`. The factory is responsible for building
+ * a real core `Agent` (with the right provider, model, system prompt,
+ * etc.) per session.
+ *
+ * Startup: prints the legacy `[wstack-acp]\n` marker (kept for backward
+ * compatibility with the old `StdioTransport` handshake) so the client
+ * knows the protocol boundary. v1 initialize is then sent by the client
+ * and answered by `ACPProtocolHandler`.
  */
 import { fileURLToPath } from 'node:url';
 import { writeErr } from '@wrongstack/core';
-import type { Tool } from '@wrongstack/core';
-import { ACPProtocolHandler } from './protocol-handler.js';
+import {
+  ACPProtocolHandler,
+  type RunTurn,
+  type RunTurnResult,
+} from './protocol-handler.js';
 import { StdioTransport } from './stdio-transport.js';
-import { ACPToolsRegistry } from './tools-registry.js';
 
 export interface WrongStackACPServerOptions {
   /**
-   * Initial tool set. Typically loaded from the WrongStack tool registry
-   * via `api.tools.list()` so the ACP server exposes exactly the tools the
-   * CLI has configured.
+   * Per-turn implementation. If omitted, the server runs a no-op turn
+   * that just resolves with `end_turn`. The real production usage
+   * passes the result of `makeACPServerAgentTurn({ agentFor: ... })`
+   * from `./server-agent-turn.js` so each session gets a real
+   * `Agent` instance.
    */
-  tools: Tool[];
-  /**
-   * Owner label for tool metadata. Passed to ACPToolsRegistry.
-   * @default 'wrongstack'
-   */
-  owner?: string | undefined;
+  runTurn?: RunTurn | undefined;
+  /** Default cwd for new sessions. Defaults to the current process cwd. */
+  defaultCwd?: string | undefined;
+  /** Agent name advertised in initialize. */
+  agentName?: string | undefined;
 }
 
 export class WrongStackACPServer {
   private readonly transport: StdioTransport;
-  private readonly registry: ACPToolsRegistry;
   private readonly handler: ACPProtocolHandler;
   private running = false;
 
-  constructor(opts: WrongStackACPServerOptions) {
+  constructor(opts: WrongStackACPServerOptions = {}) {
     this.transport = new StdioTransport();
-    this.registry = new ACPToolsRegistry(opts.owner);
-    this.registry.register(opts.tools);
-    this.handler = new ACPProtocolHandler(
-      this.transport,
-      this.registry,
-      // Future: WrongStack session/memory context for tool execution.
-      // When wired, this would carry session state, memory entries, and
-      // project metadata so ACP tools can self-contextualise.
-      // Tracked in docs/notes/refactor-2026-06-05.md §5.1.
-      {},
-    );
+    const runTurn: RunTurn = opts.runTurn ?? defaultEchoRunTurn;
+    this.handler = new ACPProtocolHandler({
+      transport: this.transport,
+      defaultCwd: opts.defaultCwd ?? process.cwd(),
+      runTurn,
+      agentName: opts.agentName,
+    });
   }
 
   /**
    * Start the server. Blocks until the client disconnects.
    *
-   * 1. Send the startup marker `[wstack-acp]` so the client
-   *    knows which stdout line is the protocol boundary.
-   * 2. Loop: read messages, dispatch to handler, until EOF or error.
-   *
-   * Single dispatch path: every inbound message is read exactly once
-   * from the transport and passed to the protocol handler exactly once.
-   * An earlier version combined a `transport.onMessage` callback with
-   * this read loop, which caused every message to be processed twice
-   * (once by the callback, once by the loop) — duplicate tool calls
-   * and duplicate responses to the client. See the ACP double-dispatch
-   * fix in the security audit (P1-001).
+   * 1. Print the legacy `[wstack-acp]\n` marker so the client knows the
+   *    process is the ACP server (the old `StdioTransport` handshake).
+   * 2. Loop: read messages, dispatch to the handler, until EOF / error.
    */
   async start(): Promise<void> {
     this.transport.sendStartupMarker();
     this.running = true;
-
     while (this.running) {
       const msg = await this.transport.read();
       if (!msg) break; // EOF
       const terminal = await this.handler.handleMessage(msg);
       if (terminal) break;
     }
-
     this.transport.close();
   }
 
@@ -93,27 +92,30 @@ export class WrongStackACPServer {
 }
 
 /**
+ * Default per-turn implementation: a no-op that echoes nothing useful
+ * and returns `end_turn`. Lets the server boot end-to-end without
+ * needing the core Agent factory (which would couple this entrypoint
+ * to a long-lived model provider). The real implementation is
+ * `ACPServerAgentTurn` (follow-up PR) that wires a core `Agent`.
+ */
+const defaultEchoRunTurn: RunTurn = async (_input, _emit): Promise<RunTurnResult> => {
+  return { stopReason: 'end_turn' };
+};
+
+/**
  * Bootstrap function for `node dist/agent/wrongstack-acp-agent.js`.
- * Instantiates the server with the default tool set.
+ * Instantiates the server with the default (no-op) runTurn so the
+ * binary is useful as a connectivity smoke test.
  *
- * Tool loading: the ACP agent is a subprocess without the full CLI context,
- * so it needs to receive its tools from the parent via environment or a
- * pre-main bootstrap. For now, it uses an empty tool set unless tools are
- * explicitly passed via constructor options.
- *
- * In practice the CLI will instantiate and run WrongStackACPServer directly,
- * passing `api.tools.list()` as the tool set.
+ * In practice the CLI will instantiate and run `WrongStackACPServer`
+ * directly, passing a real `runTurn` wired to a core `Agent`.
  */
 /* v8 ignore start -- process entrypoint: bootstrap + auto-start only run when launched as `node wrongstack-acp-agent.js`, never on import (which the CLI does to reuse the class). */
 async function main(): Promise<void> {
-  const server = new WrongStackACPServer({ tools: [] });
+  const server = new WrongStackACPServer();
   await server.start();
 }
 
-// Only auto-start when this file is the process entrypoint (e.g.
-// `node dist/agent/wrongstack-acp-agent.js`). Importing the module — which the
-// CLI does to reuse `WrongStackACPServer` — must stay side-effect-free, or
-// every launch would start an ACP server and hijack stdin.
 const isEntrypoint =
   process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1];
 if (isEntrypoint) {

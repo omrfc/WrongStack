@@ -130,6 +130,13 @@ export interface ClientTransportOptions {
   env?: Record<string, string>;
   cwd?: string | undefined;
   handshakeTimeoutMs?: number | undefined;
+  /**
+   * Set to true when the child is an external ACP agent (Claude Code,
+   * Gemini CLI, Codex CLI, …) that does NOT emit a `[wstack-acp]\n`
+   * marker on startup. The v1 client (`ACPSession`) sets this; the
+   * server-side transport (the default) keeps the marker check.
+   */
+  skipHandshakeMarker?: boolean | undefined;
 }
 
 export interface ACPChildProcess extends EventEmitter {
@@ -176,6 +183,14 @@ export class ClientTransport {
           cwd: this.opts.cwd,
           stdio: ['pipe', 'pipe', 'pipe'],
           windowsHide: true,
+          // On Windows, most ACP-supporting tools (claude, gemini, codex,
+          // qwen, copilot) are installed as `.cmd` shims under
+          // AppData\Roaming\npm\. Node's spawn won't find them via
+          // `shell: false` because the .cmd extension is not in the
+          // default PATHEXT lookup. The argv here is always from our
+          // own static catalog or from a hardcoded spec, never from
+          // user input, so shell-expansion is bounded.
+          shell: process.platform === 'win32',
         }) as unknown as ACPChildProcess;
         /* v8 ignore start -- spawn() throwing synchronously is a defensive guard (e.g. argv0 type errors); the realistic async failure path is the child 'error' event, covered by tests. */
       } catch (err) {
@@ -189,17 +204,29 @@ export class ClientTransport {
 
       child.stdout.setEncoding('utf8');
 
+      const onReady = (): void => {
+        child.stdout.on('data', (c: string) => this.onChildData(c));
+        child.stderr.on('data', (c: string) => this.onChildError(c));
+        child.on('close', (code: number | null) => this.onChildClose(code));
+        clearTimeout(timeout);
+        resolve();
+      };
+
+      if (this.opts.skipHandshakeMarker) {
+        // External ACP agents don't emit a startup marker — they're
+        // ready to accept JSON-RPC immediately. Resolve as soon as
+        // the child process is spawned and stdout is flowing.
+        onReady();
+        return;
+      }
+
       const waitForMarker = (chunk: string) => {
         this.buffer += chunk;
         const idx = this.buffer.indexOf('[wstack-acp]\n');
         if (idx !== -1) {
           this.buffer = this.buffer.slice(idx + '[wstack-acp]\n'.length);
           child.stdout.removeListener('data', waitForMarker);
-          child.stdout.on('data', (c: string) => this.onChildData(c));
-          child.stderr.on('data', (c: string) => this.onChildError(c));
-          child.on('close', (code: number | null) => this.onChildClose(code));
-          clearTimeout(timeout);
-          resolve();
+          onReady();
         }
       };
 

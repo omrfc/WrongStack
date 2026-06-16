@@ -44,6 +44,7 @@ WrongStack's REPL supports core slash commands plus commands registered by built
 | `/next` | `packages/cli/src/slash-commands/next.ts` | Toggle next-task prediction |
 | `/suggest` | `packages/cli/src/slash-commands/suggest.ts` | Generate context-aware next-step suggestions; `/suggest --fast` for heuristics |
 | `/enhance` | `packages/cli/src/slash-commands/enhance.ts` | Toggle prompt refinement ("did you mean this?") before sending |
+| `/ensemble` | `packages/cli/src/slash-commands/ensemble.ts` | Fan a task out to multiple ACP-supporting agents in parallel (claude-code, gemini-cli, codex-cli, etc.) |
 | `/fix` | `packages/cli/src/slash-commands/fix.ts` | Classify and route a bug/error fix |
 | `/autophase` | `packages/cli/src/slash-commands/autophase.ts` | Autonomous phase-based workflow |
 | `/worktree` | `packages/cli/src/slash-commands/worktree.ts` | Inspect and manage worktrees used by AutoPhase |

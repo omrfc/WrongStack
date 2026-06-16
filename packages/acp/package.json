@@ -41,7 +41,8 @@
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
-    "test": "vitest run"
+    "test": "vitest run",
+    "smoke": "pnpm build && node --experimental-strip-types ../../scripts/acp-smoke-test.mts"
   },
   "dependencies": {
     "@wrongstack/core": "workspace:*"
