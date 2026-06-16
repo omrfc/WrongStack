@@ -48,7 +48,9 @@ export class Agent {
   readonly events: EventBus;
   readonly pipelines: AgentPipelines;
   readonly ctx: Context;
-  readonly maxIterations: number;
+  /** Max agent-loop iterations per run. Mutable so the TUI `/settings` picker
+   *  can apply a new value to the live session (takes effect next run). */
+  maxIterations: number;
   readonly executionStrategy: 'parallel' | 'sequential' | 'smart';
   readonly perIterationOutputCapBytes: number;
   private readonly plugins: { plugin: Plugin; api: PluginAPI }[] = [];

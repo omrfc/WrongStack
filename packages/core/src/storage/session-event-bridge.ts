@@ -39,8 +39,15 @@ export interface SessionEventBridge {
   /** Batch-append events allowed by the current audit level. */
   appendBatch(events: SessionEvent[]): Promise<void>;
 
-  /** Current audit level this bridge was created with. */
+  /** Current audit level. Reflects the latest {@link setAuditLevel} value. */
   readonly level: AuditLevel;
+
+  /**
+   * Change the audit level on a live bridge. Subsequent appends are filtered
+   * by the new level — used by the TUI `/settings` picker to apply an
+   * `auditLevel` change to the running session without a restart.
+   */
+  setAuditLevel(level: AuditLevel): void;
 
   /** Returns true if an event of this type should be written at the current level. */
   allows(type: SessionEvent['type']): boolean;
@@ -127,7 +134,8 @@ export function createSessionEventBridge(
   level: AuditLevel = 'standard',
   options: SessionEventBridgeOptions = {},
 ): SessionEventBridge {
-  const normalizedLevel: AuditLevel = level ?? 'standard';
+  // Mutable so setAuditLevel() can re-tune a live bridge in place.
+  let currentLevel: AuditLevel = level ?? 'standard';
 
   // Accept either a writer instance or a getter. A getter lets long-lived
   // hosts (CLI/TUI/WebUI) resolve the CURRENT writer on every append — when
@@ -172,16 +180,22 @@ export function createSessionEventBridge(
   }
 
   return {
-    level: normalizedLevel,
+    get level() {
+      return currentLevel;
+    },
+
+    setAuditLevel(next) {
+      currentLevel = next ?? 'standard';
+    },
 
     allows(type) {
-      return isAllowed(type, normalizedLevel);
+      return isAllowed(type, currentLevel);
     },
 
     async append(event) {
       const target = resolveWriter();
       if (!target) return;
-      if (!isAllowed(event.type, normalizedLevel)) return;
+      if (!isAllowed(event.type, currentLevel)) return;
 
       // Apply sampling for high-volume events (only at 'full' level)
       if (!shouldSample(event)) return;
@@ -200,7 +214,7 @@ export function createSessionEventBridge(
       const target = resolveWriter();
       if (!target || events.length === 0) return;
       const allowed = events.filter(
-        (e) => isAllowed(e.type, normalizedLevel) && shouldSample(e),
+        (e) => isAllowed(e.type, currentLevel) && shouldSample(e),
       );
       if (allowed.length === 0) return;
       try {

@@ -55,6 +55,12 @@ export class AutoCompactionMiddleware {
   private readonly hardThreshold: number;
   /** Writable so model-switch can update the denominator without re-registering the middleware. */
   private _maxContext: number;
+  /**
+   * Runtime on/off gate. The middleware is always installed in the pipeline so
+   * auto-compaction can be toggled live from the TUI `/settings` picker; when
+   * disabled the handler is a pass-through. Defaults to enabled.
+   */
+  private _enabled = true;
   private readonly aggressiveOn: ContextWindowAggressiveOn;
   private readonly events?: EventBus | undefined;
   private readonly failureMode: CompactionFailureMode;
@@ -128,8 +134,23 @@ export class AutoCompactionMiddleware {
     this._maxContext = maxContext;
   }
 
+  /** Whether auto-compaction is currently active. */
+  get enabled(): boolean {
+    return this._enabled;
+  }
+
+  /** Toggle auto-compaction on a live session (TUI `/settings`). When disabled
+   *  the middleware passes every iteration straight through without estimating
+   *  tokens or compacting. */
+  setEnabled(enabled: boolean): void {
+    this._enabled = enabled;
+  }
+
   handler(): MiddlewareHandler<Context> {
     return async (ctx, next) => {
+      // Runtime gate — when auto-compaction is turned off via /settings the
+      // middleware stays installed but does nothing.
+      if (!this._enabled) return next(ctx);
       // Reuse the last token estimate when the context hasn't grown since
       // the previous check — common in autonomous idle loops. The cached
       // value is invalidated whenever messages or tools change.
