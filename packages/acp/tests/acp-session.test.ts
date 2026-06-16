@@ -295,7 +295,7 @@ describe('ACPSession', () => {
       params: { sessionId: 'sess_abc', terminalId },
     } as unknown as ACPMessage);
     // Give the process time to actually run and exit
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 500));
     const waitResp = t.sent.find((m) => m.id === waitId);
     expect(waitResp).toBeDefined();
     expect((waitResp!.result as { exitCode: number | null }).exitCode).toBe(0);
