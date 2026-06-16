@@ -509,6 +509,23 @@ See `docs/skills.md` for the full authoring guide.
 - If adding a new kernel token, update `tokens.ts` and document in this file
 - If adding a new EventBus event type, add it to `events.ts` with doc comment
 
+## Pre-commit hook
+
+`.githooks/pre-commit` (installed via `pnpm run setup:hooks` / `git config core.hooksPath .githooks`) runs three gates:
+
+1. `guard-against-corruption` and `lint-console-logging` — pre-existing, unchanged.
+2. **Typecheck gate (added 2026-06-17, commit `c71d8237`)** — when any `packages/*/src/**/*.{ts,tsx}` is staged:
+   - Rebuilds `dist/` for each changed package (`pnpm run build` per package).
+   - Runs `pnpm -r typecheck` across the workspace.
+
+The typecheck gate exists because `dist/` is gitignored: a source edit that changes a public type (e.g. making a property mutable, adding a method) won't show up in `git status`, but the next consumer's `tsc --noEmit` will read the stale `dist/index.d.ts` and fail. Without this hook, the failure surfaces only after `pnpm -r build && pnpm typecheck` — usually in CI, blocking the PR.
+
+**Cost:** ~45s per source-touching commit (~5-15s rebuild per changed package + ~30s typecheck). Skipped entirely for docs/config-only commits. Multi-package edits scale linearly — a commit touching 3 packages costs ~75s.
+
+**Bypass:** `git commit --no-verify` skips all hooks. Use only for emergencies (broken WIP, hotfix); CI still runs the full `pnpm -r build && pnpm test` gate on every PR via `release:check`, so a stale dist cannot ship.
+
+**If the typecheck gate fails with stale-dist errors after pulling main:** run `pnpm -r build` to refresh everyone's local `dist/` before retrying.
+
 ## Useful pointers
 
 - **Architecture decisions:** `docs/adr/` — architectural decision records
