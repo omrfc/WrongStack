@@ -1,402 +1,310 @@
+/**
+ * Tests for the v1 ACPProtocolHandler.
+ *
+ * Uses a fake transport (records every `send`) and a fake `runTurn`
+ * (canned stopReason + optional stream of updates) so the handler can
+ * be exercised without spawning any real agent or subprocess.
+ */
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentServerTransport } from '../src/agent/stdio-transport.js';
-import type { ACPToolsRegistry } from '../src/agent/tools-registry.js';
-import { ACPProtocolHandler, WRONGSTACK_VERSION } from '../src/agent/protocol-handler.js';
+import {
+  ACPProtocolHandler,
+  WRONGSTACK_VERSION,
+  type RunTurn,
+  type RunTurnResult,
+} from '../src/agent/protocol-handler.js';
 
-function fakeTransport() {
+interface FakeTransport {
+  sent: unknown[];
+  send: ReturnType<typeof vi.fn>;
+  sendStartupMarker?: () => void;
+  read?: () => Promise<unknown>;
+  close?: () => void;
+}
+
+function fakeTransport(): FakeTransport {
   const sent: unknown[] = [];
   return {
     sent,
-    send: vi.fn<(msg: unknown) => Promise<void>>().mockImplementation(async (msg: unknown) => {
+    send: vi.fn(async (msg: unknown) => {
       sent.push(msg);
     }),
   };
 }
 
-function fakeRegistry() {
-  return {
-    has: vi.fn<(s: string) => boolean>(),
-    execute: vi.fn<(name: string, input: Record<string, unknown>, context: unknown, signal: AbortSignal) => Promise<unknown>>(),
-    buildToolList: vi.fn<() => { tools: unknown[] }>().mockReturnValue({ tools: [] }),
-  };
-}
+const PASSON_RUN_TURN: RunTurn = async (_input, _emit) => {
+  return { stopReason: 'end_turn' };
+};
 
-function fakeContext() {
-  return { cwd: '/test', projectRoot: '/test' };
+const ABORTING_RUN_TURN: RunTurn = async (input) => {
+  return new Promise<RunTurnResult>((resolve) => {
+    input.signal.addEventListener('abort', () => {
+      resolve({ stopReason: 'cancelled' });
+    });
+  });
+};
+
+function makeHandler(opts: {
+  runTurn?: RunTurn;
+  defaultCwd?: string;
+} = {}): { handler: ACPProtocolHandler; transport: FakeTransport } {
+  const transport = fakeTransport();
+  const handler = new ACPProtocolHandler({
+    transport: transport as unknown as AgentServerTransport,
+    defaultCwd: opts.defaultCwd ?? '/test',
+    runTurn: opts.runTurn ?? PASSON_RUN_TURN,
+  });
+  return { handler, transport };
 }
 
 describe('ACPProtocolHandler', () => {
   describe('initialization', () => {
-    it('initialize sets initialized=true and returns capabilities', async () => {
-      const transport = fakeTransport();
-      const registry = fakeRegistry();
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-
+    it('returns v1 capabilities and marks initialized', async () => {
+      const { handler, transport } = makeHandler();
       const terminal = await handler.handleMessage({
         id: 1,
         method: 'initialize',
-        params: { protocolVersion: '2024-11' },
+        params: { protocolVersion: 1 },
       });
-
       expect(terminal).toBe(false);
-      expect(transport.send).toHaveBeenCalledOnce();
-      const response = transport.sent[0] as { result?: Record<string, unknown> };
-      expect(response.result).toMatchObject({
-        protocolVersion: '2024-11',
-        agentVersion: WRONGSTACK_VERSION,
-        agentName: 'WrongStack',
-        capabilities: expect.arrayContaining(['code-generation', 'async-tools', 'streaming', 'progress']),
+      expect(transport.sent).toHaveLength(1);
+      const resp = transport.sent[0] as { result?: Record<string, unknown> };
+      expect(resp.result).toMatchObject({
+        protocolVersion: 1,
+        agentInfo: { name: 'wrongstack', title: 'WrongStack', version: WRONGSTACK_VERSION },
+        agentCapabilities: {
+          loadSession: true,
+          promptCapabilities: { image: false, audio: false, embeddedContext: true },
+        },
       });
     });
 
-    it('initialize uses default protocol version when not provided', async () => {
-      const transport = fakeTransport();
-      const registry = fakeRegistry();
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-
-      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
-
-      const response = transport.sent[0] as { result?: { protocolVersion: string } };
-      expect(response.result?.protocolVersion).toBe('2024-11');
+    it('rejects a non-v1 protocol version with -32000', async () => {
+      const { handler, transport } = makeHandler();
+      await handler.handleMessage({ id: 1, method: 'initialize', params: { protocolVersion: 99 } });
+      const resp = transport.sent[0] as { error?: { code: number; message: string } };
+      expect(resp.error?.code).toBe(-32000);
+      expect(resp.error?.message).toContain('protocolVersion=1');
     });
 
     it('rejects non-initialize requests before initialization', async () => {
-      const transport = fakeTransport();
-      const registry = fakeRegistry();
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-
-      await handler.handleMessage({ id: 1, method: 'tools/list' });
-
-      const response = transport.sent[0] as { error?: { code: number; message: string } };
-      expect(response.error?.code).toBe(-32000);
-      expect(response.error?.message).toBe('Not initialized');
+      const { handler, transport } = makeHandler();
+      await handler.handleMessage({ id: 1, method: 'session/new', params: { cwd: '/x' } });
+      const resp = transport.sent[0] as { error?: { code: number; message: string } };
+      expect(resp.error?.code).toBe(-32000);
+      expect(resp.error?.message).toBe('Not initialized');
     });
 
-    it('accepts initialize after a previous initialize (re-initialization)', async () => {
-      const transport = fakeTransport();
-      const registry = fakeRegistry();
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-
-      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
-      await handler.handleMessage({ id: 2, method: 'initialize', params: {} });
-
-      expect(transport.send).toHaveBeenCalledTimes(2);
+    it('accepts a second initialize (idempotent re-init)', async () => {
+      const { handler, transport } = makeHandler();
+      await handler.handleMessage({ id: 1, method: 'initialize', params: { protocolVersion: 1 } });
+      await handler.handleMessage({ id: 2, method: 'initialize', params: { protocolVersion: 1 } });
+      expect(transport.sent).toHaveLength(2);
     });
   });
 
-  describe('tools/call', () => {
-    it('executes a known tool and returns its result', async () => {
-      const transport = fakeTransport();
-      const registry = fakeRegistry();
-      registry.has.mockReturnValue(true);
-      registry.execute.mockResolvedValue({ content: [{ type: 'text', text: 'hello' }] });
-
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
-
-      transport.sent.length = 0;
-      await handler.handleMessage({
-        id: 2,
-        method: 'tools/call',
-        params: { name: 'echo', arguments: { msg: 'hi' } },
-      });
-
-      expect(registry.execute).toHaveBeenCalledWith('echo', { msg: 'hi' }, fakeContext(), expect.any(AbortSignal));
-      const response = transport.sent[0] as { result?: { content: unknown[] } };
-      expect(response.result).toEqual({ content: [{ type: 'text', text: 'hello' }] });
-    });
-
-    it('returns isError=true when tool throws', async () => {
-      const transport = fakeTransport();
-      const registry = fakeRegistry();
-      registry.has.mockReturnValue(true);
-      registry.execute.mockRejectedValue(new Error('boom'));
-
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
-
-      transport.sent.length = 0;
-      await handler.handleMessage({
-        id: 2,
-        method: 'tools/call',
-        params: { name: 'flaky', arguments: {} },
-      });
-
-      const response = transport.sent[0] as { result?: { content: unknown[]; isError: boolean } };
-      expect(response.result?.isError).toBe(true);
-      expect(response.result?.content).toEqual([{ type: 'text', text: 'boom' }]);
-    });
-
-    it('stringifies a non-Error thrown by the tool', async () => {
-      const transport = fakeTransport();
-      const registry = fakeRegistry();
-      registry.has.mockReturnValue(true);
-      registry.execute.mockRejectedValue('plain string failure');
-
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
-
-      transport.sent.length = 0;
-      await handler.handleMessage({ id: 2, method: 'tools/call', params: { name: 'odd', arguments: {} } });
-
-      const response = transport.sent[0] as { result?: { content: { text: string }[]; isError: boolean } };
-      expect(response.result?.isError).toBe(true);
-      expect(response.result?.content[0]?.text).toBe('plain string failure');
-    });
-
-    it('returns isError=true for unknown tool', async () => {
-      const transport = fakeTransport();
-      const registry = fakeRegistry();
-      registry.has.mockReturnValue(false);
-
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
-
-      transport.sent.length = 0;
-      await handler.handleMessage({
-        id: 2,
-        method: 'tools/call',
-        params: { name: 'nonexistent', arguments: {} },
-      });
-
-      const response = transport.sent[0] as { result?: { content: unknown[]; isError: boolean } };
-      expect(response.result?.isError).toBe(true);
-      expect(response.result?.content).toEqual([{ type: 'text', text: 'Tool not found: nonexistent' }]);
-      expect(registry.execute).not.toHaveBeenCalled();
-    });
-
-    it('returns null result as empty text', async () => {
-      const transport = fakeTransport();
-      const registry = fakeRegistry();
-      registry.has.mockReturnValue(true);
-      registry.execute.mockResolvedValue(null);
-
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
-
-      transport.sent.length = 0;
-      await handler.handleMessage({
-        id: 2,
-        method: 'tools/call',
-        params: { name: 'void-tool', arguments: {} },
-      });
-
-      const response = transport.sent[0] as { result?: { content: unknown[]; isError: boolean } };
-      expect(response.result?.content).toEqual([{ type: 'text', text: 'Tool returned null' }]);
-      expect(response.result?.isError).toBe(false);
+  describe('authenticate', () => {
+    it('returns the unauthenticated outcome', async () => {
+      const { handler, transport } = makeHandler();
+      await handler.handleMessage({ id: 1, method: 'initialize', params: { protocolVersion: 1 } });
+      transport.sent.length = 0; // clear the initialize response
+      await handler.handleMessage({ id: 2, method: 'authenticate', params: {} });
+      const resp = transport.sent[0] as { result?: { outcome: string } };
+      expect(resp.result).toEqual({ outcome: 'unauthenticated' });
     });
   });
 
-  describe('tools/list', () => {
-    it('returns the tool list from the registry', async () => {
-      const transport = fakeTransport();
-      const registry = fakeRegistry();
-      const fakeTools = { tools: [{ name: 'read', description: 'read file' }] };
-      registry.buildToolList.mockReturnValue(fakeTools);
-
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
-
+  describe('session/new', () => {
+    it('creates a session, emits current_mode_update, returns the id', async () => {
+      const { handler, transport } = makeHandler();
+      await handler.handleMessage({ id: 1, method: 'initialize', params: { protocolVersion: 1 } });
       transport.sent.length = 0;
-      await handler.handleMessage({ id: 2, method: 'tools/list' });
 
-      const response = transport.sent[0] as { result?: { tools: unknown[] } };
-      expect(response.result).toEqual(fakeTools);
-    });
-  });
+      await handler.handleMessage({ id: 2, method: 'session/new', params: { cwd: '/proj' } });
 
-  describe('ping', () => {
-    it('responds with pong:true', async () => {
-      const transport = fakeTransport();
-      const registry = fakeRegistry();
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
+      // Two new sends: notification + result
+      expect(transport.sent.length).toBe(2);
+      const note = transport.sent[0] as { method?: string; params?: { update?: { sessionUpdate?: string; modeId?: string } } };
+      expect(note.method).toBe('session/update');
+      expect(note.params?.update?.sessionUpdate).toBe('current_mode_update');
+      expect(note.params?.update?.modeId).toBe('code');
 
-      transport.sent.length = 0;
-      await handler.handleMessage({ id: 2, method: 'ping' });
-
-      const response = transport.sent[0] as { result?: { pong: boolean } };
-      expect(response.result).toEqual({ pong: true });
-    });
-  });
-
-  describe('cancel', () => {
-    it('deletes the pending call and responds ok:true', async () => {
-      const transport = fakeTransport();
-      const registry = fakeRegistry();
-      registry.has.mockReturnValue(true);
-      // Never resolve so the call stays pending
-      registry.execute.mockReturnValue(new Promise(() => {}));
-
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
-
-      // Start a long-running tool call
-      handler.handleMessage({
-        id: 2,
-        method: 'tools/call',
-        params: { name: 'sleep', arguments: {} },
-      });
-
-      // Give it a tick to register the pending call
-      await new Promise((r) => setTimeout(r, 10));
-
-      transport.sent.length = 0;
-      await handler.handleMessage({ id: 2, method: 'cancel' });
-
-      const response = transport.sent[0] as { result?: { ok: boolean } };
-      expect(response.result).toEqual({ ok: true });
-
-      // Clean up the hanging tool call
-      handler.handleMessage({ id: 99, method: 'cancel' }); // no-op after our cancel
-    });
-
-    it('returns ok:true even when no call is pending', async () => {
-      const transport = fakeTransport();
-      const registry = fakeRegistry();
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
-
-      transport.sent.length = 0;
-      await handler.handleMessage({ id: 99, method: 'cancel' });
-
-      const response = transport.sent[0] as { result?: { ok: boolean } };
-      expect(response.result).toEqual({ ok: true });
-    });
-  });
-
-  describe('sessionInfoUpdate', () => {
-    it('acknowledges with ok:true', async () => {
-      const transport = fakeTransport();
-      const registry = fakeRegistry();
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
-
-      transport.sent.length = 0;
-      const terminal = await handler.handleMessage({ id: 2, method: 'sessionInfoUpdate' });
-      expect(terminal).toBe(false);
-      const response = transport.sent[0] as { result?: { ok: boolean } };
-      expect(response.result).toEqual({ ok: true });
+      const resp = transport.sent[transport.sent.length - 1] as { result?: { sessionId?: string } };
+      expect(resp.result?.sessionId).toMatch(/^sess_/);
     });
   });
 
   describe('session/list', () => {
-    it('returns empty sessions array', async () => {
-      const transport = fakeTransport();
-      const registry = fakeRegistry();
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
+    it('returns an empty list initially, then includes created sessions', async () => {
+      const { handler, transport } = makeHandler();
+      await handler.handleMessage({ id: 1, method: 'initialize', params: { protocolVersion: 1 } });
+      await handler.handleMessage({ id: 2, method: 'session/list' });
+      const r1 = transport.sent[transport.sent.length - 1] as { result?: { sessions: unknown[] } };
+      expect(r1.result?.sessions).toEqual([]);
 
       transport.sent.length = 0;
-      await handler.handleMessage({ id: 2, method: 'session/list' });
+      await handler.handleMessage({ id: 3, method: 'session/new', params: { cwd: '/x' } });
+      const newResp = transport.sent[transport.sent.length - 1] as { result?: { sessionId?: string } };
+      const newId = newResp.result?.sessionId;
+      transport.sent.length = 0;
+      await handler.handleMessage({ id: 4, method: 'session/list' });
+      const r2 = transport.sent[0] as { result?: { sessions: { sessionId: string }[] } };
+      expect(r2.result?.sessions.map((s) => s.sessionId)).toEqual([newId]);
+    });
+  });
 
-      const response = transport.sent[0] as { result?: { sessions: unknown[] } };
-      expect(response.result).toEqual({ sessions: [] });
+  describe('session/prompt', () => {
+    it('runs the turn and returns the stopReason', async () => {
+      const { handler, transport } = makeHandler();
+      await handler.handleMessage({ id: 1, method: 'initialize', params: { protocolVersion: 1 } });
+      await handler.handleMessage({ id: 2, method: 'session/new', params: { cwd: '/x' } });
+      const sessionId = (transport.sent[transport.sent.length - 1] as { result?: { sessionId?: string } }).result?.sessionId!;
+      transport.sent.length = 0;
+
+      await handler.handleMessage({
+        id: 3,
+        method: 'session/prompt',
+        params: { sessionId, prompt: [{ type: 'text', text: 'hi' }] },
+      });
+      const resp = transport.sent[transport.sent.length - 1] as { result?: { stopReason?: string } };
+      expect(resp.result?.stopReason).toBe('end_turn');
+    });
+
+    it('streams session/update notifications emitted by runTurn', async () => {
+      const streamingRunTurn: RunTurn = async (_input, emit) => {
+        emit({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'hello ' },
+        });
+        emit({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'world' },
+        });
+        return { stopReason: 'end_turn' };
+      };
+      const { handler, transport } = makeHandler({ runTurn: streamingRunTurn });
+      await handler.handleMessage({ id: 1, method: 'initialize', params: { protocolVersion: 1 } });
+      await handler.handleMessage({ id: 2, method: 'session/new', params: { cwd: '/x' } });
+      const sessionId = (transport.sent[transport.sent.length - 1] as { result?: { sessionId?: string } }).result?.sessionId!;
+      transport.sent.length = 0;
+
+      await handler.handleMessage({
+        id: 3,
+        method: 'session/prompt',
+        params: { sessionId, prompt: [{ type: 'text', text: 'go' }] },
+      });
+
+      // Three sends: 2 chunk notifications + 1 prompt response
+      expect(transport.sent.length).toBe(3);
+      const note1 = transport.sent[0] as { params?: { update?: { sessionUpdate?: string } } };
+      expect(note1.params?.update?.sessionUpdate).toBe('agent_message_chunk');
+      const note2 = transport.sent[1] as { params?: { update?: { sessionUpdate?: string } } };
+      expect(note2.params?.update?.sessionUpdate).toBe('agent_message_chunk');
+      const resp = transport.sent[2] as { result?: { stopReason?: string } };
+      expect(resp.result?.stopReason).toBe('end_turn');
+    });
+
+    it('cancels the in-flight turn on session/cancel notification', async () => {
+      const { handler, transport } = makeHandler({ runTurn: ABORTING_RUN_TURN });
+      await handler.handleMessage({ id: 1, method: 'initialize', params: { protocolVersion: 1 } });
+      await handler.handleMessage({ id: 2, method: 'session/new', params: { cwd: '/x' } });
+      const sessionId = (transport.sent[transport.sent.length - 1] as { result?: { sessionId?: string } }).result?.sessionId!;
+      transport.sent.length = 0;
+
+      // Kick off a turn without awaiting
+      const turnDone = handler.handleMessage({
+        id: 3,
+        method: 'session/prompt',
+        params: { sessionId, prompt: [{ type: 'text', text: 'go' }] },
+      });
+      // Let the turn register its signal listener
+      await new Promise((r) => setImmediate(r));
+      // Send the cancel
+      await handler.handleMessage({ method: 'session/cancel', params: { sessionId } });
+      // Now wait for the turn to resolve
+      await turnDone;
+      const resp = transport.sent[transport.sent.length - 1] as { result?: { stopReason?: string } };
+      expect(resp.result?.stopReason).toBe('cancelled');
+    });
+
+    it('rejects a prompt with a missing sessionId', async () => {
+      const { handler, transport } = makeHandler();
+      await handler.handleMessage({ id: 1, method: 'initialize', params: { protocolVersion: 1 } });
+      transport.sent.length = 0;
+      await handler.handleMessage({
+        id: 2,
+        method: 'session/prompt',
+        params: { prompt: [{ type: 'text', text: 'hi' }] },
+      });
+      const resp = transport.sent[0] as { error?: { code: number; message: string } };
+      expect(resp.error?.code).toBe(-32000);
+    });
+  });
+
+  describe('session/set_mode', () => {
+    it('updates the mode and emits current_mode_update', async () => {
+      const { handler, transport } = makeHandler();
+      await handler.handleMessage({ id: 1, method: 'initialize', params: { protocolVersion: 1 } });
+      await handler.handleMessage({ id: 2, method: 'session/new', params: { cwd: '/x' } });
+      const sessionId = (transport.sent[transport.sent.length - 1] as { result?: { sessionId?: string } }).result?.sessionId!;
+      transport.sent.length = 0;
+
+      await handler.handleMessage({
+        id: 3,
+        method: 'session/set_mode',
+        params: { sessionId, modeId: 'code' },
+      });
+      expect(transport.sent.length).toBe(2); // notification + result
+      const note = transport.sent[0] as { params?: { update?: { modeId?: string } } };
+      expect(note.params?.update?.modeId).toBe('code');
+    });
+
+    it('rejects an unknown modeId', async () => {
+      const { handler, transport } = makeHandler();
+      await handler.handleMessage({ id: 1, method: 'initialize', params: { protocolVersion: 1 } });
+      await handler.handleMessage({ id: 2, method: 'session/new', params: { cwd: '/x' } });
+      const sessionId = (transport.sent[transport.sent.length - 1] as { result?: { sessionId?: string } }).result?.sessionId!;
+      transport.sent.length = 0;
+
+      await handler.handleMessage({
+        id: 3,
+        method: 'session/set_mode',
+        params: { sessionId, modeId: 'bogus' },
+      });
+      const resp = transport.sent[0] as { error?: { code: number } };
+      expect(resp.error?.code).toBe(-32602);
     });
   });
 
   describe('unknown method', () => {
-    it('returns error with code -32601', async () => {
-      const transport = fakeTransport();
-      const registry = fakeRegistry();
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
-
+    it('returns -32601', async () => {
+      const { handler, transport } = makeHandler();
+      await handler.handleMessage({ id: 1, method: 'initialize', params: { protocolVersion: 1 } });
       transport.sent.length = 0;
-      await handler.handleMessage({ id: 2, method: 'unknown/method' } as never);
-
-      const response = transport.sent[0] as { error?: { code: number; message: string } };
-      expect(response.error?.code).toBe(-32601);
-      expect(response.error?.message).toBe('Unknown method: unknown/method');
+      await handler.handleMessage({ id: 2, method: 'made_up_method' });
+      const resp = transport.sent[0] as { error?: { code: number } };
+      expect(resp.error?.code).toBe(-32601);
     });
   });
 
-  describe('wireAbortController', () => {
-    it('sends cancel for all pending calls when abort signal fires', async () => {
-      const transport = fakeTransport();
-      const registry = fakeRegistry();
-      registry.has.mockReturnValue(true);
-      // Never resolve — keeps the call pending
-      registry.execute.mockReturnValue(new Promise(() => {}));
-
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
-
-      // Start two pending tool calls
-      handler.handleMessage({ id: 2, method: 'tools/call', params: { name: 'a', arguments: {} } });
-      handler.handleMessage({ id: 3, method: 'tools/call', params: { name: 'b', arguments: {} } });
-
-      await new Promise((r) => setTimeout(r, 10)); // let calls register
-
+  describe('close', () => {
+    it('aborts active turns and clears session state', async () => {
+      const { handler, transport } = makeHandler({ runTurn: ABORTING_RUN_TURN });
+      await handler.handleMessage({ id: 1, method: 'initialize', params: { protocolVersion: 1 } });
+      await handler.handleMessage({ id: 2, method: 'session/new', params: { cwd: '/x' } });
+      const sessionId = (transport.sent[transport.sent.length - 1] as { result?: { sessionId?: string } }).result?.sessionId!;
       transport.sent.length = 0;
-      const abortController = new AbortController();
-      handler.wireAbortController(abortController);
-      abortController.abort();
 
-      await new Promise((r) => setTimeout(r, 10)); // let send() calls process
-
-      // Both pending calls should have received cancel messages
-      const cancels = transport.sent.filter(
-        (m) => (m as { method?: string }).method === 'cancel',
-      );
-      expect(cancels.length).toBeGreaterThanOrEqual(2);
-    });
-
-    it('does not throw when transport.send fails during abort', async () => {
-      const transport = fakeTransport();
-      // Reject only after initialize (track call count via mockImplementation)
-      let callCount = 0;
-      transport.send.mockImplementation(async () => {
-        callCount++;
-        if (callCount > 1) throw new Error('transport gone');
+      // Kick off a turn without awaiting
+      const turnDone = handler.handleMessage({
+        id: 3,
+        method: 'session/prompt',
+        params: { sessionId, prompt: [{ type: 'text', text: 'go' }] },
       });
-
-      const registry = fakeRegistry();
-      registry.has.mockReturnValue(true);
-      registry.execute.mockReturnValue(new Promise(() => {}));
-
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
-
-      handler.handleMessage({ id: 2, method: 'tools/call', params: { name: 'a', arguments: {} } });
-      await new Promise((r) => setTimeout(r, 10));
-
-      const abortController = new AbortController();
-      handler.wireAbortController(abortController);
-
-      // Should not throw — error is caught and logged at debug level
-      expect(() => abortController.abort()).not.toThrow();
-    });
-  });
-
-  describe('notifications (no id)', () => {
-    it('handleCancelNotification does not throw for cancel notification', async () => {
-      const transport = fakeTransport();
-      const registry = fakeRegistry();
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
-
-      // cancel notifications have no id — they return false (non-terminal)
-      const terminal = await handler.handleMessage({
-        method: 'cancel',
-        params: { reason: 'user-requested' },
-      });
-      expect(terminal).toBe(false);
-    });
-
-    it('any notification is non-terminal', async () => {
-      const transport = fakeTransport();
-      const registry = fakeRegistry();
-      const handler = new ACPProtocolHandler(transport as unknown as AgentServerTransport, registry as unknown as ACPToolsRegistry, fakeContext());
-      await handler.handleMessage({ id: 1, method: 'initialize', params: {} });
-
-      // Reset call count so we only check calls from the notification itself
-      transport.send.mockClear();
-      transport.sent.length = 0;
-      const terminal = await handler.handleMessage({ method: 'someNotification' } as never);
-      expect(terminal).toBe(false);
-      // No response sent for notifications
-      expect(transport.send).not.toHaveBeenCalled();
+      await new Promise((r) => setImmediate(r));
+      handler.close();
+      // The pending turn should resolve because the runTurn's signal fires.
+      await turnDone;
     });
   });
 });
