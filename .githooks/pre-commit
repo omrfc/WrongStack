@@ -3,4 +3,47 @@
 # Guards against known corruption patterns and suspicious mass-changes
 node scripts/guard-against-corruption.mjs --verbose
 node scripts/lint-console-logging.mjs --verbose
+
+# ── Typecheck gate ───────────────────────────────────────────────────
+# Catches stale `@wrongstack/*` dist/ before the commit lands.
+#
+# Each package's `tsc --noEmit` resolves `@wrongstack/<dep>` through
+# the package's `exports` field → `dist/index.d.ts`. If a package's
+# source changes (e.g. `Agent.maxIterations` becomes mutable) but
+# `dist/` is not rebuilt, every downstream consumer's typecheck breaks
+# — yet `git status` can't see the drift because `dist/` is gitignored.
+#
+# This hook rebuilds dist/ for any `@wrongstack/*` package whose source
+# is staged, then runs the workspace typecheck. Fails the commit if
+# anything no longer typechecks. Cost on a typical 1-2 file edit:
+# rebuild 1-2 packages (~5-15s each) + typecheck (~30s).
+#
+# Skipped for non-source commits (docs, config) — those can't break the
+# type graph.
+staged_ts=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^packages/[^/]+/src/.*\.(ts|tsx)$' || true)
+if [ -n "$staged_ts" ]; then
+  # Collect unique top-level packages whose source is staged.
+  changed_pkgs=$(echo "$staged_ts" | sed -E 's@^packages/([^/]+)/.*@\1@' | sort -u)
+  echo
+  echo "Pre-commit: refreshing dist/ for changed packages and typechecking…"
+  echo "  changed: $changed_pkgs"
+  echo
+  # Rebuild each changed package so downstream consumers see the new
+  # types. Sequential is fine — usually 1-2 packages per commit.
+  for pkg in $changed_pkgs; do
+    if [ -f "packages/$pkg/package.json" ] && grep -q '"build"' "packages/$pkg/package.json"; then
+      (cd "packages/$pkg" && pnpm run build) || {
+        echo "Pre-commit: build failed in packages/$pkg" >&2
+        exit 1
+      }
+    fi
+  done
+  # Full workspace typecheck — catches the failure mode this hook exists
+  # to prevent.
+  pnpm -r typecheck || {
+    echo "Pre-commit typecheck failed. If dist/ was the problem, try 'pnpm -r build'." >&2
+    exit 1
+  }
+fi
+
 exit $?
