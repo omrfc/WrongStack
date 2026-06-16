@@ -1,5 +1,5 @@
 import { expectDefined } from '@wrongstack/core';
-import type { Plugin } from '@wrongstack/core';
+import type { Config, Plugin } from '@wrongstack/core';
 import { TelegramBot } from './bot.js';
 import type { TelegramIncomingMessage } from './bot.js';
 import { truncateForTelegram } from './bot.js';
@@ -14,12 +14,44 @@ import { makeTelegramSendTool } from './tools/telegram-send.js';
 // Teardown state
 // ---------------------------------------------------------------------------
 
+/** Mutable runtime config — updated via api.onConfigChange so changes take
+ * effect without restarting the plugin. */
+interface RuntimeConfig {
+  notifyChatId: string | number | undefined;
+  notifyOnSessionEnd: boolean;
+  notifyOnDelegate: boolean;
+  longToolThresholdMs: number;
+  maxMessageLength: number;
+}
+
 let teardownState: {
   offs: Array<() => void>;
   toolNames: string[];
   commandNames: string[];
   bot: TelegramBot;
+  runtimeCfg: RuntimeConfig;
 } | null = null;
+
+/** Read the Telegram section from a full Config object. */
+function telegramFromConfig(cfg: Config): {
+  notifyChatId: string | number | undefined;
+  notifyOnSessionEnd: boolean;
+  notifyOnDelegate: boolean;
+  longToolThresholdMs: number;
+  maxMessageLength: number;
+} {
+  const ext = (cfg.extensions as Record<string, Record<string, unknown>> | undefined)?.[PLUGIN_NAME] ?? {};
+  return {
+    notifyChatId:
+      ext.notifyChatId !== undefined ? String(ext.notifyChatId) : undefined,
+    notifyOnSessionEnd: ext.notifyOnSessionEnd === true,
+    notifyOnDelegate: ext.notifyOnDelegate !== false, // default true
+    longToolThresholdMs:
+      typeof ext.longToolThresholdMs === 'number' ? ext.longToolThresholdMs : 30_000,
+    maxMessageLength:
+      typeof ext.maxMessageLength === 'number' ? ext.maxMessageLength : 4000,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Plugin
@@ -48,6 +80,15 @@ const plugin: Plugin = {
     const log = api.log;
 
     log.info('Starting Telegram plugin...');
+
+    // ---- Mutable runtime config (updated via onConfigChange) ----
+    const runtimeCfg: RuntimeConfig = {
+      notifyChatId: cfg.notifyChatId,
+      notifyOnSessionEnd: cfg.notifyOnSessionEnd ?? false,
+      notifyOnDelegate: cfg.notifyOnDelegate ?? true,
+      longToolThresholdMs: cfg.longToolThresholdMs ?? 30_000,
+      maxMessageLength: cfg.maxMessageLength ?? 4000,
+    };
 
     // ---- Bot ----
     // Telegram allows one getUpdates consumer per token: elect a single
@@ -80,8 +121,8 @@ const plugin: Plugin = {
     // ---- Register tools ----
     const sendTool = makeTelegramSendTool({
       bot,
-      defaultChatId: cfg.notifyChatId,
-      maxMessageLength: cfg.maxMessageLength ?? 4000,
+      getDefaultChatId: () => runtimeCfg.notifyChatId,
+      maxMessageLength: runtimeCfg.maxMessageLength,
       log,
     });
     const readTool = makeTelegramReadTool({ bot });
@@ -121,71 +162,97 @@ const plugin: Plugin = {
     // Register slash commands
     const commandNames = registerSlashCommands(api, bot, cfg);
 
-    // Notify on session end — humanized multi-line summary
-    if (cfg.notifyOnSessionEnd && cfg.notifyChatId) {
-      offs.push(
-        api.events.on('session.ended', (event) => {
-          const payload: SessionEndedLike = {
-            id: event.id,
-            inputTokens: event.usage.input,
-            outputTokens: event.usage.output,
-            cacheRead: event.usage.cacheRead,
-            cacheWrite: event.usage.cacheWrite,
-          };
-          const msg = truncateForTelegram(
-            formatSessionEnded(payload),
-            cfg.maxMessageLength,
-          );
-          void bot.sendMessage(expectDefined(cfg.notifyChatId), msg).catch((err) => {
-            log.debug(`Failed to send session end notification: ${(err as Error).message}`);
-          });
-        }),
-      );
-    }
+    // ---- Notification event handlers ----
+    // Always subscribed; guard at event time against runtime flags so changes
+    // take effect immediately without needing to restart the plugin.
 
-    // Notify for long-running tools — humanized output, not raw JSON
-    if (cfg.longToolThresholdMs && cfg.longToolThresholdMs > 0 && cfg.notifyChatId) {
-      offs.push(
-        api.events.on('tool.executed', (event) => {
-          if (event.durationMs < expectDefined(cfg.longToolThresholdMs)) return;
-          const payload: ToolExecutedLike = {
-            name: event.name,
-            ok: event.ok,
-            durationMs: event.durationMs,
-            output: event.output,
-          };
-          const msg = truncateForTelegram(
-            formatToolExecuted(payload),
-            cfg.maxMessageLength,
-          );
-          void bot.sendMessage(expectDefined(cfg.notifyChatId), msg).catch((err) => {
-            log.debug(`Failed to send tool notification: ${(err as Error).message}`);
-          });
-        }),
-      );
-    }
+    offs.push(
+      api.events.on('session.ended', (event) => {
+        if (!runtimeCfg.notifyOnSessionEnd || !runtimeCfg.notifyChatId) return;
+        const payload: SessionEndedLike = {
+          id: event.id,
+          inputTokens: event.usage.input,
+          outputTokens: event.usage.output,
+          cacheRead: event.usage.cacheRead,
+          cacheWrite: event.usage.cacheWrite,
+        };
+        const msg = truncateForTelegram(
+          formatSessionEnded(payload),
+          runtimeCfg.maxMessageLength,
+        );
+        void bot.sendMessage(expectDefined(runtimeCfg.notifyChatId), msg).catch((err) => {
+          log.debug(`Failed to send session end notification: ${(err as Error).message}`);
+        });
+      }),
+    );
 
-    // Notify (humanized) when a delegated subagent finishes. The generic
-    // `tool.executed` notifier would dump the delegate's truncated JSON
-    // result; `delegate.completed` carries readable fields instead.
-    if (cfg.notifyOnDelegate && cfg.notifyChatId) {
-      offs.push(
-        api.events.on('delegate.completed', (event) => {
-          const msg = truncateForTelegram(
-            formatDelegateCompleted(event),
-            cfg.maxMessageLength,
-          );
-          void bot.sendMessage(expectDefined(cfg.notifyChatId), msg).catch((err) => {
-            log.debug(`Failed to send delegate notification: ${(err as Error).message}`);
-          });
-        }),
-      );
-    }
+    offs.push(
+      api.events.on('tool.executed', (event) => {
+        if (
+          !runtimeCfg.notifyChatId ||
+          runtimeCfg.longToolThresholdMs <= 0 ||
+          event.durationMs < runtimeCfg.longToolThresholdMs
+        ) return;
+        const payload: ToolExecutedLike = {
+          name: event.name,
+          ok: event.ok,
+          durationMs: event.durationMs,
+          output: event.output,
+        };
+        const msg = truncateForTelegram(
+          formatToolExecuted(payload),
+          runtimeCfg.maxMessageLength,
+        );
+        void bot.sendMessage(expectDefined(runtimeCfg.notifyChatId), msg).catch((err) => {
+          log.debug(`Failed to send tool notification: ${(err as Error).message}`);
+        });
+      }),
+    );
+
+    offs.push(
+      api.events.on('delegate.completed', (event) => {
+        if (!runtimeCfg.notifyOnDelegate || !runtimeCfg.notifyChatId) return;
+        const msg = truncateForTelegram(
+          formatDelegateCompleted(event),
+          runtimeCfg.maxMessageLength,
+        );
+        void bot.sendMessage(expectDefined(runtimeCfg.notifyChatId), msg).catch((err) => {
+          log.debug(`Failed to send delegate notification: ${(err as Error).message}`);
+        });
+      }),
+    );
+
+    // ---- Live config updates ----
+    // api.config is frozen at setup, but onConfigChange fires whenever the
+    // ConfigStore is updated (from CLI /settings, WebUI prefSync, /telegram-settings).
+    // Update the mutable runtime refs so all handlers pick up the new values
+    // on the next event — no restart needed.
+    const unlistenConfig = api.onConfigChange((next, _prev) => {
+      const fresh = telegramFromConfig(next);
+      runtimeCfg.notifyChatId = fresh.notifyChatId;
+      runtimeCfg.notifyOnSessionEnd = fresh.notifyOnSessionEnd;
+      runtimeCfg.notifyOnDelegate = fresh.notifyOnDelegate;
+      runtimeCfg.longToolThresholdMs = fresh.longToolThresholdMs;
+      runtimeCfg.maxMessageLength = fresh.maxMessageLength;
+      log.debug('Telegram notification settings updated from config', {
+        notifyOnSessionEnd: runtimeCfg.notifyOnSessionEnd,
+        notifyOnDelegate: runtimeCfg.notifyOnDelegate,
+        longToolThresholdMs: runtimeCfg.longToolThresholdMs,
+        notifyChatId: runtimeCfg.notifyChatId ?? 'not set',
+      });
+    });
+    offs.push(unlistenConfig);
 
     // ---- Start polling ----
     bot.start();
 
-    teardownState = { offs, toolNames: [sendTool.name, readTool.name], commandNames, bot };
+    teardownState = {
+      offs,
+      toolNames: [sendTool.name, readTool.name],
+      commandNames,
+      bot,
+      runtimeCfg,
+    };
 
     log.info('Telegram plugin ready');
   },

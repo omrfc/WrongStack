@@ -12,7 +12,8 @@ interface TelegramSendInput {
 
 export function makeTelegramSendTool(opts: {
   bot: TelegramBot;
-  defaultChatId?: string | number | undefined;
+  /** Resolved at every execute() call so config changes take effect without restart. */
+  getDefaultChatId(): string | number | undefined;
   maxMessageLength: number;
   log: Logger;
 }): Tool<TelegramSendInput> {
@@ -41,7 +42,7 @@ export function makeTelegramSendTool(opts: {
     mutating: true,
     timeoutMs: 15_000,
     async execute(input, _ctx, _opts) {
-      const chatId = input.chat_id ?? opts.defaultChatId;
+      const chatId = input.chat_id ?? opts.getDefaultChatId();
       if (!chatId) {
         throw new Error(
           'No chat_id provided and no default notifyChatId configured. Set notifyChatId in plugin config or pass chat_id.',

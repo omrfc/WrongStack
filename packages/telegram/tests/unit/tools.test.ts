@@ -103,6 +103,7 @@ describe('telegram_send tool', () => {
     const bot = makeBot();
     const tool = makeTelegramSendTool({
       bot,
+      getDefaultChatId: () => undefined,
       maxMessageLength: 4000,
       log,
     });
@@ -123,7 +124,7 @@ describe('telegram_send tool', () => {
 
     const tool = makeTelegramSendTool({
       bot,
-      defaultChatId: '999',
+      getDefaultChatId: () => '999',
       maxMessageLength: 4000,
       log,
     });
@@ -147,7 +148,7 @@ describe('telegram_send tool', () => {
 
     const tool = makeTelegramSendTool({
       bot,
-      defaultChatId: '999',
+      getDefaultChatId: () => '999',
       maxMessageLength: 4000,
       log,
     });
@@ -165,7 +166,7 @@ describe('telegram_send tool', () => {
 
     const tool = makeTelegramSendTool({
       bot,
-      defaultChatId: '999',
+      getDefaultChatId: () => '999',
       maxMessageLength: 4000,
       log,
     });
