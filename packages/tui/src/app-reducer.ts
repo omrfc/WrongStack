@@ -588,6 +588,12 @@ export function reducer(state: State, action: Action): State {
     case 'settingsValueChange': {
       const sp = state.settingsPicker;
       const f = sp.field;
+      // Boot-only settings can't be applied to the running session — they are
+      // loaded at startup (feature toggles, index-on-start) or require
+      // rebinding subsystems (compactor strategy). Surface a hint when one of
+      // these is changed so the user knows a restart is needed; all other
+      // fields apply live (see cli-main applyLiveSettings + TUI live refs).
+      const bootHint = '↻ Takes effect next session';
       // Field 0: autonomy mode (cycle SETTINGS_MODES)
       if (f === 0) {
         const i = SETTINGS_MODES.indexOf(sp.mode);
@@ -610,13 +616,13 @@ export function reducer(state: State, action: Action): State {
       if (f === 6) return { ...state, settingsPicker: { ...sp, confirmExit: !sp.confirmExit, hint: undefined } };
       if (f === 7) return { ...state, settingsPicker: { ...sp, nextPrediction: !sp.nextPrediction, hint: undefined } };
       // Field 8–12: Features boolean toggles
-      if (f === 8) return { ...state, settingsPicker: { ...sp, featureMcp: !sp.featureMcp, hint: undefined } };
-      if (f === 9) return { ...state, settingsPicker: { ...sp, featurePlugins: !sp.featurePlugins, hint: undefined } };
-      if (f === 10) return { ...state, settingsPicker: { ...sp, featureMemory: !sp.featureMemory, hint: undefined } };
-      if (f === 11) return { ...state, settingsPicker: { ...sp, featureSkills: !sp.featureSkills, hint: undefined } };
-      if (f === 12) return { ...state, settingsPicker: { ...sp, featureModelsRegistry: !sp.featureModelsRegistry, hint: undefined } };
+      if (f === 8) return { ...state, settingsPicker: { ...sp, featureMcp: !sp.featureMcp, hint: bootHint } };
+      if (f === 9) return { ...state, settingsPicker: { ...sp, featurePlugins: !sp.featurePlugins, hint: bootHint } };
+      if (f === 10) return { ...state, settingsPicker: { ...sp, featureMemory: !sp.featureMemory, hint: bootHint } };
+      if (f === 11) return { ...state, settingsPicker: { ...sp, featureSkills: !sp.featureSkills, hint: bootHint } };
+      if (f === 12) return { ...state, settingsPicker: { ...sp, featureModelsRegistry: !sp.featureModelsRegistry, hint: bootHint } };
       // Field 13: Token-saving mode (boolean)
-      if (f === 13) return { ...state, settingsPicker: { ...sp, featureTokenSaving: !sp.featureTokenSaving, hint: undefined } };
+      if (f === 13) return { ...state, settingsPicker: { ...sp, featureTokenSaving: !sp.featureTokenSaving, hint: bootHint } };
       // Field 14: context auto-compact (boolean)
       if (f === 14) return { ...state, settingsPicker: { ...sp, contextAutoCompact: !sp.contextAutoCompact, hint: undefined } };
       // Field 15: compactor strategy (cycle)
@@ -624,7 +630,7 @@ export function reducer(state: State, action: Action): State {
         const i = COMPACTOR_STRATEGIES.indexOf(sp.contextStrategy);
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + COMPACTOR_STRATEGIES.length) % COMPACTOR_STRATEGIES.length;
-        return { ...state, settingsPicker: { ...sp, contextStrategy: expectDefined(COMPACTOR_STRATEGIES[next]), hint: undefined } };
+        return { ...state, settingsPicker: { ...sp, contextStrategy: expectDefined(COMPACTOR_STRATEGIES[next]), hint: bootHint } };
       }
       // Field 16: log level (cycle)
       if (f === 16) {
@@ -641,7 +647,7 @@ export function reducer(state: State, action: Action): State {
         return { ...state, settingsPicker: { ...sp, auditLevel: expectDefined(AUDIT_LEVELS[next]), hint: undefined } };
       }
       // Field 18: index on start (boolean)
-      if (f === 18) return { ...state, settingsPicker: { ...sp, indexOnStart: !sp.indexOnStart, hint: undefined } };
+      if (f === 18) return { ...state, settingsPicker: { ...sp, indexOnStart: !sp.indexOnStart, hint: bootHint } };
       // Field 19: max iterations (cycle presets)
       if (f === 19) {
         const j = MAX_ITERATIONS_PRESETS.indexOf(sp.maxIterations);

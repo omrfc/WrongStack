@@ -64,6 +64,32 @@ describe('AutoCompactionMiddleware', () => {
     expect(compactor.compactCalls).toHaveLength(0);
   });
 
+  it('is a pass-through when disabled via setEnabled(false), even above hard threshold', async () => {
+    const mw = new AutoCompactionMiddleware(compactor, 10000, simpleEstimator(9500), {
+      warn: 0.5,
+      soft: 0.75,
+      hard: 0.9,
+    });
+    expect(mw.enabled).toBe(true);
+    mw.setEnabled(false);
+    expect(mw.enabled).toBe(false);
+
+    const ctx = mockContext(0); // 95% load — would normally compact aggressively
+    let ran = false;
+    await mw.handler()(ctx, async (c) => {
+      ran = true;
+      return c;
+    });
+
+    expect(ran).toBe(true); // chain still advances
+    expect(compactor.compactCalls).toHaveLength(0); // but no compaction fired
+
+    // Re-enabling restores compaction on the next pass.
+    mw.setEnabled(true);
+    await mw.handler()(ctx, async (c) => c);
+    expect(compactor.compactCalls).toHaveLength(1);
+  });
+
   it('compacts non-aggressively at warn threshold', async () => {
     const mw = new AutoCompactionMiddleware(compactor, 10000, simpleEstimator(5500), {
       warn: 0.5,

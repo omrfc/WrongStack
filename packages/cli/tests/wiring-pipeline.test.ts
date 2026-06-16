@@ -244,7 +244,9 @@ describe('setupCompaction', () => {
     expect(capabilitiesFor).not.toHaveBeenCalled();
   });
 
-  it('skips auto-compaction when config.context.autoCompact is false', async () => {
+  it('installs auto-compaction but starts disabled when config.context.autoCompact is false', async () => {
+    // The middleware is always wired (when the window is known) so /settings can
+    // toggle it live; the autoCompact flag only sets the initial enabled state.
     capabilitiesFor.mockResolvedValue(undefined);
     const events = new EventBus();
     const pipelines = setupPipelines({ events, logger: new DefaultLogger({ level: 'error' }) });
@@ -259,7 +261,24 @@ describe('setupCompaction', () => {
       provider: fakeProvider(),
       pipelines,
     });
-    expect(result.autoCompactor).toBeUndefined();
+    expect(result.autoCompactor).toBeInstanceOf(AutoCompactionMiddleware);
+    expect(result.autoCompactor?.enabled).toBe(false);
+  });
+
+  it('starts auto-compaction enabled by default (autoCompact unset)', async () => {
+    capabilitiesFor.mockResolvedValue(undefined);
+    const events = new EventBus();
+    const pipelines = setupPipelines({ events, logger: new DefaultLogger({ level: 'error' }) });
+    const result = await setupCompaction({
+      compactor: { compact: vi.fn() } as never,
+      events,
+      modelsRegistry: fakeModelsRegistry(),
+      context: fakeContext(),
+      config: { context: { warnThreshold: 70, softThreshold: 85, hardThreshold: 95 } },
+      provider: fakeProvider(),
+      pipelines,
+    });
+    expect(result.autoCompactor?.enabled).toBe(true);
   });
 
   it('survives capabilitiesFor rejection (catches and uses provider caps)', async () => {

@@ -213,6 +213,9 @@ export interface AppProps {
   chime?: boolean | undefined;
   /** When true, the first Ctrl+C aborts work and shows "confirm exit" rather than "exit". */
   confirmExit?: boolean | undefined;
+  /** Live on/off control for the animated terminal title. Lets `/settings`
+   *  toggle the title animation within the running session. */
+  titleController?: { setEnabled: (on: boolean) => void } | undefined;
   /**
    * Token-saving mode indicator. When true, the status bar shows a "💾 save"
    * chip and the tool count reflects registered (non-omitted) tools.
@@ -598,6 +601,7 @@ export function App({
   yolo = false,
   chime = false,
   confirmExit = true,
+  titleController,
   mouse = false,
   enhanceEnabled = true,
   enhanceController,
@@ -939,10 +943,25 @@ export function App({
     });
   }, [agent.ctx, projectRoot]);
 
+  // chime/confirmExit must reflect LIVE `/settings` changes, not just the boot
+  // props. getSettings() reads the in-memory configStore, which saveSettings
+  // updates on every ←/→ change, so these refs stay current within the running
+  // session without a restart. Falls back to the boot prop when unavailable.
+  const liveSettings = getSettings?.();
   const chimeRef = useRef(chime);
-  chimeRef.current = chime;
+  chimeRef.current = liveSettings?.chime ?? chime;
   const confirmExitRef = useRef(confirmExit);
-  confirmExitRef.current = confirmExit;
+  confirmExitRef.current = liveSettings?.confirmExit ?? confirmExit;
+
+  // Apply a live `titleAnimation` change to the out-of-band terminal title
+  // controller (set up in run-tui). Reads the configStore-backed live value so
+  // it tracks ←/→ changes in `/settings`; the boolean primitive keeps the
+  // effect from re-firing on unrelated renders.
+  const liveTitleAnimation = liveSettings?.titleAnimation;
+  useEffect(() => {
+    if (!titleController) return;
+    titleController.setEnabled(liveTitleAnimation !== false);
+  }, [titleController, liveTitleAnimation]);
 
   // Source of truth for the streamed assistant text — kept here, not in
   // React state, because we need to read it synchronously when `agent.run`

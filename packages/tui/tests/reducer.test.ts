@@ -240,6 +240,71 @@ describe('TUI reducer', () => {
     expect(s.runningTools.size).toBe(1);
   });
 
+  // Open the settings picker with a full payload so settingsValueChange has a
+  // seeded settingsPicker to mutate.
+  function openSettings(s: ReturnType<typeof initial>) {
+    return reducer(s, {
+      type: 'settingsOpen',
+      mode: 'off',
+      delayMs: 45_000,
+      titleAnimation: true,
+      yolo: false,
+      streamFleet: true,
+      chime: false,
+      confirmExit: true,
+      nextPrediction: false,
+      featureMcp: true,
+      featurePlugins: true,
+      featureMemory: true,
+      featureSkills: true,
+      featureModelsRegistry: true,
+      featureTokenSaving: false,
+      contextAutoCompact: true,
+      contextStrategy: 'hybrid',
+      logLevel: 'info',
+      auditLevel: 'standard',
+      indexOnStart: true,
+      maxIterations: 500,
+      autoProceedMaxIterations: 50,
+      enhanceDelayMs: 60_000,
+      enhanceEnabled: true,
+      enhanceLanguage: 'original',
+      debugStream: false,
+      configScope: 'global',
+    } as never);
+  }
+
+  it('settingsValueChange flags a boot-only field (MCP) with a restart hint', () => {
+    let s = openSettings(initial());
+    s = reducer(s, { type: 'settingsFieldMove', delta: 8 }); // → field 8 = MCP servers
+    s = reducer(s, { type: 'settingsValueChange', delta: 1 } as never);
+    expect(s.settingsPicker.featureMcp).toBe(false); // toggled
+    expect(s.settingsPicker.hint).toBe('↻ Takes effect next session');
+  });
+
+  it('settingsValueChange clears the hint for a live-applicable field (YOLO)', () => {
+    let s = openSettings(initial());
+    s = reducer(s, { type: 'settingsFieldMove', delta: 3 }); // → field 3 = YOLO (live)
+    s = reducer(s, { type: 'settingsValueChange', delta: 1 } as never);
+    expect(s.settingsPicker.yolo).toBe(true); // toggled
+    expect(s.settingsPicker.hint).toBeUndefined();
+  });
+
+  it('settingsValueChange flags compactor strategy (boot-only) but not auto-compact toggle (live)', () => {
+    // Auto-compact on/off (field 14) applies live → no hint.
+    let live = openSettings(initial());
+    live = reducer(live, { type: 'settingsFieldMove', delta: 14 });
+    live = reducer(live, { type: 'settingsValueChange', delta: 1 } as never);
+    expect(live.settingsPicker.contextAutoCompact).toBe(false);
+    expect(live.settingsPicker.hint).toBeUndefined();
+
+    // Compactor strategy (field 15) needs a restart → hint.
+    let strat = openSettings(initial());
+    strat = reducer(strat, { type: 'settingsFieldMove', delta: 15 });
+    strat = reducer(strat, { type: 'settingsValueChange', delta: 1 } as never);
+    expect(strat.settingsPicker.hint).toBe('↻ Takes effect next session');
+  });
+
   it('fleetTool keeps only the last two compact tool summaries', () => {
     let s = initial();
     s = reducer(s, { type: 'fleetSpawn', id: 'agent-1', name: 'worker' });

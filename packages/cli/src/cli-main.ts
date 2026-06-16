@@ -35,6 +35,7 @@ import {
   type Config,
   color,
   createAutonomyBrain,
+  type AuditLevel,
   createDelegateTool,
   createMcpControlTool,
   createSessionEventBridge,
@@ -57,6 +58,7 @@ import {
   ParallelEternalEngine,
   recordFileAction,
   resolveSessionLoggingConfig,
+  type LogLevel,
   type SessionEventBridge,
   SessionMemoryConsolidator,
   SlashCommandRegistry,
@@ -2374,6 +2376,48 @@ export async function main(argv: string[]): Promise<number> {
       return autonomyMode;
     },
     getNextPredict: () => nextPredictEnabled,
+    applyLiveSettings: (s) => {
+      // Apply `/settings` changes to the RUNNING session. Persistence already
+      // happened in saveSettings; this only flips live runtime state via the
+      // same setters the dedicated slash commands use. Best-effort — a failed
+      // live-apply must not surface as a settings-save error.
+      //
+      // Intentionally NOT applied live:
+      //  - `mode` (default autonomy) → only sets the default for next sessions.
+      //  - boot-only features (MCP/plugins/memory/skills/modelsRegistry/
+      //    tokenSaving/indexOnStart) and `contextStrategy` → need a restart;
+      //    the TUI shows a "next session" hint for those instead.
+      try {
+        if (s.yolo !== undefined) {
+          container.resolve(TOKENS.PermissionPolicy).setYolo?.(s.yolo);
+          config = patchConfig(config, { yolo: s.yolo });
+        }
+        if (s.nextPrediction !== undefined) {
+          nextPredictEnabled = s.nextPrediction;
+          config = patchConfig(config, { nextPrediction: s.nextPrediction });
+        }
+        if (s.enhanceEnabled !== undefined) {
+          enhanceController?.setEnabled(s.enhanceEnabled);
+        }
+        if (s.maxIterations !== undefined) {
+          // Takes effect on the next agent.run (the loop reads this per run).
+          agent.maxIterations = s.maxIterations;
+        }
+        if (s.logLevel !== undefined) {
+          // Mutates the root logger; new child loggers pick this up. The agent's
+          // existing child logger keeps its boot level — acceptable trade-off.
+          container.resolve(TOKENS.Logger).level = s.logLevel as LogLevel;
+        }
+        if (s.auditLevel !== undefined) {
+          sessionBridge.setAuditLevel(s.auditLevel as AuditLevel);
+        }
+        if (s.contextAutoCompact !== undefined) {
+          autoCompactor?.setEnabled(s.contextAutoCompact);
+        }
+      } catch {
+        // Live-apply is best-effort; the persisted config is the source of truth.
+      }
+    },
     onSuggestionsParsed: (suggestions) => {
       // Always update — null means "no suggestions found", which must
       // clear the list so the auto-proceed loop doesn't get stuck

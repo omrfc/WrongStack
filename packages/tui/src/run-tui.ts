@@ -489,16 +489,36 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
   // Animated window/tab title: a braille spinner + live status (thinking /
   // running a tool) driven by the EventBus, scrolling the app name when idle.
   // Out-of-band OSC sequence, so it never touches Ink's render. Reset on
-  // cleanup(). Disabled when WRONGSTACK_NO_TITLE=1 or titleAnimation is false.
-  const stopTitle =
-    opts.titleAnimation !== false
-      ? startTerminalTitle({
-          stdout,
-          events: opts.events,
-          model: opts.model,
-          appName: opts.projectRoot ? path.basename(opts.projectRoot) : undefined,
-        })
-      : (() => {});
+  // cleanup(). Disabled when WRONGSTACK_NO_TITLE=1 (handled inside
+  // startTerminalTitle) or titleAnimation is false.
+  //
+  // Wrapped in a small start/stop controller (idempotent) so the TUI
+  // `/settings` picker can toggle the title animation live without a restart.
+  let titleStop: (() => void) | null = null;
+  const startTitle = () => {
+    if (titleStop) return; // already running
+    titleStop = startTerminalTitle({
+      stdout,
+      events: opts.events,
+      model: opts.model,
+      appName: opts.projectRoot ? path.basename(opts.projectRoot) : undefined,
+    });
+  };
+  const stopTitle = () => {
+    try {
+      titleStop?.();
+    } catch {
+      // title controller already torn down — ignore.
+    }
+    titleStop = null;
+  };
+  const titleController = {
+    setEnabled(on: boolean) {
+      if (on) startTitle();
+      else stopTitle();
+    },
+  };
+  if (opts.titleAnimation !== false) startTitle();
 
   // Take over EVERY keystroke. Raw mode (Ink turns this on when render
   // mounts) already disables ICANON/ECHO/ISIG/IXON on Linux+macOS, so
@@ -739,6 +759,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           setSuggestions: opts.setSuggestions,
           chime: opts.chime,
           confirmExit: opts.confirmExit,
+          titleController,
           mouse: mouseEnabled,
           modeLabel: opts.modeLabel,
           tokenSavingMode: opts.tokenSavingMode,

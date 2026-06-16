@@ -53,6 +53,42 @@ import { setSuggestions } from './slash-commands/suggestion-store.js';
 import { fmtTok } from './utils.js';
 import { CLI_VERSION } from './version.js';
 
+/**
+ * Settings payload shared by `saveSettings` (persist) and `applyLiveSettings`
+ * (apply to the running session). Mirrors the fields the TUI `/settings` picker
+ * cycles with ←/→.
+ */
+export interface LiveSettingsInput {
+  mode: 'off' | 'suggest' | 'auto';
+  delayMs: number;
+  titleAnimation?: boolean | undefined;
+  yolo?: boolean | undefined;
+  streamFleet?: boolean | undefined;
+  chime?: boolean | undefined;
+  confirmExit?: boolean | undefined;
+  nextPrediction?: boolean | undefined;
+  featureMcp?: boolean | undefined;
+  featurePlugins?: boolean | undefined;
+  featureMemory?: boolean | undefined;
+  featureSkills?: boolean | undefined;
+  featureModelsRegistry?: boolean | undefined;
+  featureTokenSaving?: boolean | undefined;
+  contextAutoCompact?: boolean | undefined;
+  contextStrategy?: string | undefined;
+  logLevel?: string | undefined;
+  auditLevel?: string | undefined;
+  indexOnStart?: boolean | undefined;
+  maxIterations?: number | undefined;
+  autoProceedMaxIterations?: number | undefined;
+  debugStream?: boolean | undefined;
+  configScope?: 'global' | 'project' | undefined;
+  enhanceDelayMs?: number | undefined;
+  enhanceEnabled?: boolean | undefined;
+  enhanceLanguage?: string | undefined;
+  mouseMode?: boolean | undefined;
+  autonomyNextPrompt?: string | undefined;
+}
+
 export interface ExecutionDeps {
   agent: Agent;
   events: EventBus;
@@ -126,6 +162,15 @@ export interface ExecutionDeps {
   onAutonomy?: ((mode: import('./slash-commands/autonomy.js').AutonomyMode) => void) | undefined;
   /** Whether next-task prediction is enabled (toggled via /next). */
   getNextPredict?: (() => boolean) | undefined;
+  /**
+   * Apply `/settings` changes to the RUNNING session (not just persist them).
+   * Called by `saveSettings` after the config is written. The host (cli-main)
+   * wires each field to its live runtime setter — policy.setYolo, onNextPredict,
+   * enhanceController, agent.maxIterations, the logger level, the session
+   * bridge's audit level, and the auto-compactor's on/off gate. Boot-only
+   * settings (MCP/plugins/skills/etc.) are intentionally not applied here.
+   */
+  applyLiveSettings?: ((s: LiveSettingsInput) => void) | undefined;
   /** Receive suggestions parsed from the assistant turn (null clears them). */
   onSuggestionsParsed?: ((suggestions: string[] | null) => void) | undefined;
   /** Read current suggestions (for auto-proceed in 'auto' autonomy mode). */
@@ -761,36 +806,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                   ?.autonomyNextPrompt as string | undefined) ?? 'auto {{suggestion}}',
             };
           },
-          async saveSettings(s: {
-            mode: 'off' | 'suggest' | 'auto';
-            delayMs: number;
-            titleAnimation?: boolean | undefined;
-            yolo?: boolean | undefined;
-            streamFleet?: boolean | undefined;
-            chime?: boolean | undefined;
-            confirmExit?: boolean | undefined;
-            nextPrediction?: boolean | undefined;
-            featureMcp?: boolean | undefined;
-            featurePlugins?: boolean | undefined;
-            featureMemory?: boolean | undefined;
-            featureSkills?: boolean | undefined;
-            featureModelsRegistry?: boolean | undefined;
-            featureTokenSaving?: boolean | undefined;
-            contextAutoCompact?: boolean | undefined;
-            contextStrategy?: string | undefined;
-            logLevel?: string | undefined;
-            auditLevel?: string | undefined;
-            indexOnStart?: boolean | undefined;
-            maxIterations?: number | undefined;
-            autoProceedMaxIterations?: number | undefined;
-            debugStream?: boolean | undefined;
-            configScope?: 'global' | 'project' | undefined;
-            enhanceDelayMs?: number | undefined;
-            enhanceEnabled?: boolean | undefined;
-            enhanceLanguage?: string | undefined;
-            mouseMode?: boolean | undefined;
-            autonomyNextPrompt?: string | undefined;
-          }) {
+          async saveSettings(s: LiveSettingsInput) {
             try {
               // Persist autonomy section (existing behaviour).
               await persistAutonomySetting(
@@ -816,6 +832,13 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                   if (s.enhanceEnabled !== undefined) a['enhance'] = s.enhanceEnabled;
                   if (s.enhanceLanguage !== undefined) a['enhanceLanguage'] = s.enhanceLanguage;
                   if (s.autonomyNextPrompt !== undefined) a['autonomyNextPrompt'] = s.autonomyNextPrompt;
+                  // Sync autoProceedMaxIterations through persistAutonomySetting so
+                  // it lands in the in-memory configStore (and on disk) atomically
+                  // with the other autonomy fields. getSettings() reads it live for
+                  // the TUI auto-proceed countdown; the later full-config block only
+                  // wrote it to disk, leaving configStore stale until restart.
+                  if (s.autoProceedMaxIterations !== undefined)
+                    a['autoProceedMaxIterations'] = s.autoProceedMaxIterations;
                 },
               );
 
@@ -1003,6 +1026,10 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
               if (s.streamFleet !== undefined) {
                 fleetStreamController?.setEnabled(s.streamFleet);
               }
+              // Apply the rest of the settings to the running session (yolo,
+              // nextPrediction, enhance, maxIterations, logLevel, auditLevel,
+              // auto-compact). The host wires each field to its live setter.
+              deps.applyLiveSettings?.(s);
               return null;
             } catch (err) {
               // The outer caller expects string | null (null = success, string = error message).

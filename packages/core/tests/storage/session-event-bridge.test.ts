@@ -168,4 +168,35 @@ describe('SessionEventBridge', () => {
       expect(full.allows('tool_progress')).toBe(true);
     });
   });
+
+  describe('setAuditLevel()', () => {
+    it('changes the live level so later appends use the new filter', async () => {
+      const append = vi.fn().mockResolvedValue(undefined);
+      const writer = { append } as never;
+      const bridge = createSessionEventBridge(writer, 'minimal');
+
+      // At 'minimal', a 'compaction' (standard-tier) event is dropped.
+      expect(bridge.level).toBe('minimal');
+      expect(bridge.allows('compaction')).toBe(false);
+
+      // Raise the level live — the same event type is now allowed.
+      bridge.setAuditLevel('standard');
+      expect(bridge.level).toBe('standard');
+      expect(bridge.allows('compaction')).toBe(true);
+
+      await bridge.append({ type: 'compaction', ts: new Date().toISOString() } as never);
+      expect(append).toHaveBeenCalledTimes(1);
+
+      // Lower it again — subsequent standard-tier events are dropped.
+      bridge.setAuditLevel('minimal');
+      await bridge.append({ type: 'compaction', ts: new Date().toISOString() } as never);
+      expect(append).toHaveBeenCalledTimes(1);
+    });
+
+    it('normalizes a nullish level to standard', () => {
+      const bridge = createSessionEventBridge(null, 'full');
+      bridge.setAuditLevel(undefined as never);
+      expect(bridge.level).toBe('standard');
+    });
+  });
 });

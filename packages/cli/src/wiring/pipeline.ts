@@ -89,7 +89,13 @@ export async function setupCompaction(params: {
   sessionWriter?: import('@wrongstack/core').SessionWriter | undefined;
   /** Pre-created SessionEventBridge (preferred for sharing across error + compaction + future events). */
   sessionBridge?: SessionEventBridge | undefined;
-}): Promise<{ effectiveMaxContext: number; autoCompactor: AutoCompactionMiddleware | undefined }> {
+}): Promise<{
+  effectiveMaxContext: number;
+  autoCompactor: AutoCompactionMiddleware | undefined;
+  /** The bridge the auto-compactor writes through. Surfaced so the host can
+   *  apply a live `auditLevel` change (TUI `/settings`) via setAuditLevel(). */
+  sessionBridge: SessionEventBridge | undefined;
+}> {
   const {
     compactor,
     events,
@@ -114,15 +120,22 @@ export async function setupCompaction(params: {
   context.meta['contextWindowMode'] = initialPolicy.id;
   context.meta['contextWindowPolicy'] = initialPolicy;
   let autoCompactor: AutoCompactionMiddleware | undefined;
+  let resolvedBridge: SessionEventBridge | undefined;
   // Skip auto-compaction when the context window is unknown (0).
   // Guessing would trigger premature compaction and degrade the session.
-  if (config.context.autoCompact !== false && effectiveMaxContext > 0) {
+  //
+  // The middleware is installed whenever the window is known, REGARDLESS of the
+  // autoCompact flag — the flag only sets the initial enabled state. This lets
+  // the TUI `/settings` picker flip auto-compaction on/off live (the handler is
+  // a pass-through while disabled) without re-registering middleware.
+  if (effectiveMaxContext > 0) {
     // Resolve audit level from fullConfig (preferred) or the config slice.
     const auditLevel = resolveAuditLevel(fullConfig ?? config);
 
     // Use pre-provided bridge if available (recommended, so errors + compaction share the same bridge).
     // Otherwise fall back to creating one from the writer.
     const sessionBridge = providedBridge ?? createSessionEventBridge(sessionWriter, auditLevel);
+    resolvedBridge = sessionBridge;
 
     autoCompactor = new AutoCompactionMiddleware(
       compactor,
@@ -153,9 +166,12 @@ export async function setupCompaction(params: {
         sessionBridge,
       },
     );
+    // The autoCompact flag becomes the initial on/off state; the middleware
+    // is always wired so /settings can toggle it live.
+    autoCompactor.setEnabled(config.context.autoCompact !== false);
     pipelines.contextWindow.use({ name: 'AutoCompaction', handler: autoCompactor.handler() });
   }
-  return { effectiveMaxContext, autoCompactor };
+  return { effectiveMaxContext, autoCompactor, sessionBridge: resolvedBridge };
 }
 
 export function createAgent(params: {
