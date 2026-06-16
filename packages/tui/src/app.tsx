@@ -4237,6 +4237,26 @@ export function App({
 
     const { buffer, cursor } = draftRef.current;
 
+    // Tab while the next-steps auto-submit countdown is running: "grab" the
+    // pending suggestion (the auto="true" step) into the input instead of
+    // letting it fire on its own. Pressing any key already stops the
+    // countdown; Tab additionally pre-fills the row with the suggestion text
+    // and parks the cursor at the very end, so the user can review/edit it and
+    // submit with Enter. Slash/other pickers are handled above and have
+    // already returned, so this only triggers on the bare idle prompt.
+    if (key.tab && nextStepsAutoSubmitTimerRef.current != null) {
+      const pending =
+        nextStepsAutoSubmitSuggestionRef.current ?? nextStepsAutoSubmitLabel ?? '';
+      clearInterval(nextStepsAutoSubmitTimerRef.current);
+      nextStepsAutoSubmitTimerRef.current = undefined;
+      setNextStepsAutoSubmitCountdown(null);
+      setNextStepsAutoSubmitLabel(null);
+      nextStepsAutoSubmitSuggestionRef.current = null;
+      const text = pending.trim();
+      if (text) setDraft(text, text.length);
+      return;
+    }
+
     if (key.backspace) {
       if (key.ctrl) {
         if (cursor === 0) return;

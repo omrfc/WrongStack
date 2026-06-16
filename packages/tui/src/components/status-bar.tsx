@@ -854,6 +854,7 @@ export function StatusBar({
                 {nextStepsAutoSubmitLabel
                   ? formatSuggestionLabel(nextStepsAutoSubmitLabel)
                   : ''}
+                {' · ⇥ edit'}
               </Text>
             </>
           ) : null}
