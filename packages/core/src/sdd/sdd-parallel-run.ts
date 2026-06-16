@@ -284,10 +284,15 @@ export class SddParallelRun {
     const successCount = results.filter((r) => r.status === 'success').length;
     const failCount = results.length - successCount;
 
-    // Phase 4: update tracker status for each result, with retry support
+    // Phase 4: update tracker status for each result, with retry support.
+    // The tracker is keyed by the *graph node id* (`tasks[i].id`), not the
+    // per-wave correlation id in `taskIds` (a fresh randomUUID each wave) —
+    // results come back index-aligned with the dispatched `tasks`, so the
+    // node id is recovered positionally. Using `taskIds[i]` here would throw
+    // "Node <uuid> not found" and break retry accounting across waves.
     for (let i = 0; i < results.length; i++) {
       const result = expectDefined(results[i]);
-      const taskId = expectDefined(taskIds[i]);
+      const taskId = expectDefined(tasks[i]).id;
       if (result.status === 'success') {
         this.opts.tracker.updateNodeStatus(taskId, 'completed');
         this.retryMap.delete(taskId);
