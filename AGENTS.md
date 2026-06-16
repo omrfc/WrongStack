@@ -518,15 +518,21 @@ See `docs/skills.md` for the full authoring guide.
    - Rebuilds `dist/` for each changed package (`pnpm run build` per package).
    - Runs `pnpm -r typecheck` across the workspace.
 
-The typecheck gate exists because `dist/` is gitignored: a source edit that changes a public type (e.g. making a property mutable, adding a method) won't show up in `git status`, but the next consumer's `tsc --noEmit` will read the stale `dist/index.d.ts` and fail. Without this hook, the failure surfaces only after `pnpm -r build && pnpm typecheck` — usually in CI, blocking the PR.
+The typecheck gate exists because `dist/` is gitignored: a source edit that changes a public type (e.g. making a property mutable, adding a method) won't show up in `git status`, but the next consumer's `tsc --noEmit` will read the stale `dist/index.d.ts` and fail. Without this hook, the failure surfaces only after `pnpm build && pnpm typecheck` — usually in CI, blocking the PR.
 
-**One-time setup after pulling this commit:** run `pnpm -r build` once to seed your local `dist/` directories. Without this, the first source-touching commit you make will rebuild every changed package from scratch (~5-15s each), making that commit noticeably slower than the steady-state ~45s the hook was sized for. Use `scripts/build.mjs` (topological order, used by `pnpm build`) — do not invoke `pnpm -r build` directly because it doesn't honor dependency order and may produce unloadable dist (ERR_MODULE_NOT_FOUND). 13 packages with `build` scripts; total ~60-90s on a warm cache.
+**One-time setup after pulling this commit:** run `pnpm build` once to seed your local `dist/` directories. Without this, the first source-touching commit you make will rebuild every changed package from scratch (~5-15s each), making that commit noticeably slower than the steady-state ~45s the hook was sized for. `pnpm build` routes through `scripts/build.mjs`, which topologically sorts packages by their `@wrongstack/*` dependencies and runs each package's `tsup` build in order. **Do not invoke `pnpm -r build` directly**: pnpm runs packages in alphabetical order (acp, bench, cli, core, mcp, …), which breaks tsup's DTS step that resolves `@wrongstack/*` from each dependency's *emitted* `dist/*.d.ts`. On a clean dist it fails outright; on a half-populated dist it silently produces unloadable runtime (`ERR_MODULE_NOT_FOUND`). 13 packages with `build` scripts; total ~60-90s on a warm cache.
+
+**Ack after seeding:** once you have run `pnpm build` on your machine, ack the correction broadcast so the team knows the seed has propagated:
+```
+mailbox action=ack messageId=09dd607d-4f5c-4e2d-a200-27e546847f38 completed=true outcome="pnpm build ran on <hostname> at <time>; 13 packages built fresh; ready for source commits"
+```
+Replace `<hostname>` and `<time>` with values from `hostname` and `date -Iseconds`. This keeps the broadcast's `completed: false` flag accurate — currently it stays open because no teammate has confirmed a seed run. (The original sender's local-machine seed run is NOT an ack — only the team-rolling-out signal is.)
 
 **Cost:** ~45s per source-touching commit (~5-15s rebuild per changed package + ~30s typecheck). Skipped entirely for docs/config-only commits. Multi-package edits scale linearly — a commit touching 3 packages costs ~75s.
 
-**Bypass:** `git commit --no-verify` skips all hooks. Use only for emergencies (broken WIP, hotfix); CI still runs the full `pnpm -r build && pnpm test` gate on every PR via `release:check`, so a stale dist cannot ship.
+**Bypass:** `git commit --no-verify` skips all hooks. Use only for emergencies (broken WIP, hotfix); CI still runs the full `pnpm typecheck && pnpm build && pnpm test` gate on every PR via `release:check` (see `package.json:29`), so a stale dist cannot ship.
 
-**If the typecheck gate fails with stale-dist errors after pulling main:** run `pnpm -r build` to refresh everyone's local `dist/` before retrying.
+**If the typecheck gate fails with stale-dist errors after pulling main:** run `pnpm build` to refresh your local `dist/` before retrying.
 
 ## Useful pointers
 
