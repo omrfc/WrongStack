@@ -250,7 +250,10 @@ function parseDescription(raw: string): { trigger: string; scope: string[] } {
   const scope: string[] = [];
   const coversMatch = /(?:covers|for|including)\s+([^.]+)/i.exec(desc);
   if (coversMatch) {
-    const items = coversMatch[1] ?? ''
+    // NB: parenthesize the `?? ''` — without it, `??` binds looser than the
+    // method chain, so `items` would be the raw match string and `...items`
+    // would spread it into individual characters.
+    const items = (coversMatch[1] ?? '')
       .replace(/[·•]/g, ',')
       .split(',')
       .map((s) => s.trim())
