@@ -14,6 +14,7 @@ import {
   Network,
   Palette,
   Puzzle,
+  Send,
   Shield,
   Sun,
   X,
@@ -470,6 +471,49 @@ export function SettingsPanel() {
                   value={localPrefs.nextPrediction}
                   onChange={() => syncPref('nextPrediction', !localPrefs.nextPrediction)}
                 />
+              </div>
+
+              {/* Telegram notifications — mirrors the CLI /telegram-settings
+                  toggles. Configured flag gates the whole section so users
+                  without a bot token aren't shown dead controls. */}
+              <div className="pt-2 border-t">
+                <h3 className="text-sm font-semibold mb-3 mt-3 flex items-center gap-2">
+                  <Send className="h-4 w-4 text-muted-foreground" />
+                  Telegram Notifications
+                </h3>
+                {localPrefs.tgConfigured ? (
+                  <>
+                    <PreferenceToggle
+                      label="Session end"
+                      hint="Send a summary when a session ends."
+                      value={localPrefs.tgSessionEnd}
+                      onChange={() => syncPref('tgSessionEnd', !localPrefs.tgSessionEnd)}
+                    />
+                    <PreferenceToggle
+                      label="Delegate finished"
+                      hint="Send a humanized note when a subagent completes."
+                      value={localPrefs.tgDelegate}
+                      onChange={() => syncPref('tgDelegate', !localPrefs.tgDelegate)}
+                    />
+                    <PreferenceToggle
+                      label="Long-running tools"
+                      hint={`Notify when a tool exceeds ${localPrefs.tgLongToolMs}ms. Set 0 to disable.`}
+                      value={localPrefs.tgLongToolMs > 0}
+                      onChange={() =>
+                        syncPref('tgLongToolMs', localPrefs.tgLongToolMs > 0 ? 0 : 30_000)
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Changes take effect after restarting WrongStack.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Telegram is not configured. Run{' '}
+                    <code className="bg-muted px-1 py-0.5 rounded">/telegram-setup</code> in the
+                    CLI to connect a bot first.
+                  </p>
+                )}
               </div>
 
             </TabsContent>

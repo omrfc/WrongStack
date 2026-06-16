@@ -48,6 +48,14 @@ export interface LocalPrefs {
   enhanceDelayMs: number;
   enhanceLanguage: 'original' | 'english';
 
+  // --- Telegram notifications ---
+  /** Plugin configured with a bot token (gates the whole section). */
+  tgConfigured: boolean;
+  tgSessionEnd: boolean;
+  tgDelegate: boolean;
+  /** Long-tool threshold in ms. 0 = disabled. */
+  tgLongToolMs: number;
+
   set: (patch: Partial<LocalPrefs>) => void;
   reset: () => void;
 }
@@ -75,6 +83,10 @@ const DEFAULTS: Omit<LocalPrefs, 'set' | 'reset'> = {
   enhanceEnabled: true,
   enhanceDelayMs: 60_000,
   enhanceLanguage: 'original',
+  tgConfigured: false,
+  tgSessionEnd: false,
+  tgDelegate: true,
+  tgLongToolMs: 30_000,
 };
 
 export const useLocalPrefs = create<LocalPrefs>()(
@@ -86,11 +98,17 @@ export const useLocalPrefs = create<LocalPrefs>()(
     }),
     {
       name: 'wrongstack-local-prefs',
-      version: 2,
+      version: 3,
       // v1 stored option values that don't exist in core's config schema —
       // contextStrategy frugal/balanced/deep/archival (context-window modes,
       // a different setting) and auditLevel 'verbose'. Map them onto the
       // canonical values so persisted stores don't resurrect invalid prefs.
+      //
+      // v2 added autoProceedMaxIterations.
+      //
+      // v3 added Telegram notification prefs (tgConfigured, tgSessionEnd,
+      // tgDelegate, tgLongToolMs). Older stores simply get the defaults via
+      // the spread of DEFAULTS; no explicit remap is needed.
       migrate: (persisted) => {
         const p = (persisted ?? {}) as Record<string, unknown>;
         const validStrategies = ['hybrid', 'intelligent', 'selective'];

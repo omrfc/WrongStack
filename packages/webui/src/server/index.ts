@@ -626,6 +626,17 @@ export async function startWebUI(
     context.meta['logLevel'] = config.log?.level ?? 'info';
     context.meta['auditLevel'] = config.session?.auditLevel ?? 'standard';
     context.meta['maxIterations'] = config.tools?.maxIterations ?? 500;
+
+    // Telegram plugin notification settings live under
+    // extensions.telegram — same path the CLI's /telegram-settings writes.
+    // Seed the meta so the SettingsPanel reflects the persisted config on
+    // first connect, before any prefs.update arrives.
+    const tgExt = (config.extensions as Record<string, Record<string, unknown>> | undefined)?.['telegram'];
+    context.meta['tgConfigured'] = typeof tgExt?.['botToken'] === 'string' && tgExt['botToken'].length > 0;
+    context.meta['tgSessionEnd'] = tgExt?.['notifyOnSessionEnd'] === true;
+    context.meta['tgDelegate'] = tgExt?.['notifyOnDelegate'] !== false; // default true
+    const tgMs = tgExt?.['longToolThresholdMs'];
+    context.meta['tgLongToolMs'] = typeof tgMs === 'number' ? tgMs : 30_000;
   }
 
   /** Pref keys exposed to the settings panel via prefs.get / prefs.updated. */
@@ -636,6 +647,7 @@ export async function startWebUI(
     'featureMcp', 'featurePlugins', 'featureMemory', 'featureSkills',
     'featureModelsRegistry', 'indexOnStart',
     'contextAutoCompact', 'contextStrategy', 'logLevel', 'auditLevel',
+    'tgConfigured', 'tgSessionEnd', 'tgDelegate', 'tgLongToolMs',
   ] as const;
 
   const prefSnapshot = (): Record<string, unknown> => {
@@ -736,6 +748,28 @@ export async function startWebUI(
         const toolsCfg = (decrypted.tools as Record<string, unknown>) ?? {};
         toolsCfg.maxIterations = payload['maxIterations'];
         decrypted.tools = toolsCfg;
+      }
+
+      // Telegram plugin notification settings → extensions.telegram
+      // (same path the CLI's /telegram-settings writes).
+      const tgTouched =
+        typeof payload['tgSessionEnd'] === 'boolean' ||
+        typeof payload['tgDelegate'] === 'boolean' ||
+        typeof payload['tgLongToolMs'] === 'number';
+      if (tgTouched) {
+        const ext = (decrypted.extensions as Record<string, Record<string, unknown>>) ?? {};
+        const tg = ext['telegram'] ?? {};
+        if (typeof payload['tgSessionEnd'] === 'boolean') {
+          tg['notifyOnSessionEnd'] = payload['tgSessionEnd'];
+        }
+        if (typeof payload['tgDelegate'] === 'boolean') {
+          tg['notifyOnDelegate'] = payload['tgDelegate'];
+        }
+        if (typeof payload['tgLongToolMs'] === 'number') {
+          tg['longToolThresholdMs'] = payload['tgLongToolMs'];
+        }
+        ext['telegram'] = tg;
+        decrypted.extensions = ext;
       }
 
       const encrypted = encryptConfigSecrets(decrypted, vault);

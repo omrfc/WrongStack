@@ -379,6 +379,7 @@ import { buildStatuslineCommand } from './statusline.js';
 import { buildTasksCommand } from './tasks.js';
 import { buildTechStackCommand } from './techstack.js';
 import { buildTelegramSetupCommand } from './telegram-setup.js';
+import { buildTelegramSettingsCommand } from './telegram-settings.js';
 import { buildTodosCommand } from './todos.js';
 import { buildToolsCommand } from './tools.js';
 import { buildWorkingDirCommand } from './working-dir.js';
@@ -434,6 +435,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildWorktreeCommand(opts),
     buildSettingsCommand(opts),
     buildTelegramSetupCommand(opts),
+    buildTelegramSettingsCommand(opts),
     buildSetModelCommand(opts),
     buildFallbackCommand(opts),
     buildModelCapsCommand(opts),
