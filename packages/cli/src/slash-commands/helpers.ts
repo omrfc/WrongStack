@@ -38,6 +38,13 @@ export interface ProjectFacts {
   lint?: string | undefined;
   run?: string | undefined;
   hints: string[];
+  /** Top languages by source-file count, e.g. `['Python (142)', 'Shell (8)']`.
+   *  Only populated by the source-tree scan fallback (no manifest matched). */
+  languages?: string[] | undefined;
+  /** Likely entry-point files discovered by the scan (relative paths). */
+  entryPoints?: string[] | undefined;
+  /** Non-ignored top-level directories discovered by the scan. */
+  topDirs?: string[] | undefined;
 }
 
 async function pathExists(file: string): Promise<boolean> {
@@ -47,6 +54,62 @@ async function pathExists(file: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** True if the root directory contains a file ending in any of `suffixes`
+ *  (case-insensitive). Used to detect glob-y manifests like `*.csproj`. */
+async function hasRootFileWithSuffix(root: string, suffixes: string[]): Promise<boolean> {
+  let names: string[];
+  try {
+    names = await fs.readdir(root);
+  } catch {
+    return false;
+  }
+  const lower = suffixes.map((s) => s.toLowerCase());
+  return names.some((n) => lower.some((s) => n.toLowerCase().endsWith(s)));
+}
+
+/**
+ * Pull literal shell commands out of a GitHub Actions workflow's `run:` steps,
+ * handling both inline (`run: pnpm test`) and block-scalar (`run: |` + indented
+ * lines) forms. No YAML dependency — line-based, matching the Makefile parser's
+ * pragmatism. Obvious non-build noise (cd/echo/export/comments) is dropped.
+ */
+function parseCiRunCommands(yaml: string): string[] {
+  const commands: string[] = [];
+  const lines = yaml.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? '';
+    const m = /^(\s*)(?:-\s+)?run:\s*(.*)$/.exec(line);
+    if (!m) continue;
+    const indent = (m[1] ?? '').length;
+    const inline = (m[2] ?? '').trim();
+    if (inline && inline !== '|' && inline !== '>' && !/^[|>][+-]?$/.test(inline)) {
+      commands.push(inline);
+      continue;
+    }
+    // Block scalar: collect following lines indented deeper than the `run:` key.
+    for (let j = i + 1; j < lines.length; j++) {
+      const body = lines[j] ?? '';
+      if (body.trim() === '') continue;
+      const bodyIndent = body.length - body.trimStart().length;
+      if (bodyIndent <= indent) break;
+      commands.push(body.trim());
+      i = j;
+    }
+  }
+  return commands.filter((c) => c !== '' && !/^(#|cd\s|echo\s|export\s|set\s|if\s)/.test(c));
+}
+
+/** Fill missing facts from CI command candidates, matching by keyword. CI is
+ *  strong evidence: these commands actually run on every push. */
+function applyCiCommands(facts: ProjectFacts, commands: string[]): void {
+  const find = (re: RegExp) => commands.find((c) => re.test(c));
+  facts.test ??= find(/\b(test|pytest|vitest|jest|go test|cargo test|mix test|rspec)\b/i);
+  facts.lint ??= find(/\b(lint|eslint|biome|clippy|ruff|flake8|golangci-lint|fmt --check)\b/i);
+  facts.build ??= find(
+    /\b(build|compile|tsc|cargo build|go build|mvn .*package|gradle .*build)\b/i,
+  );
 }
 
 async function detectPackageManager(root: string, declared?: string): Promise<string> {
@@ -76,6 +139,141 @@ function parseMakeTargets(makefile: string): Set<string> {
     if (match?.[1]) targets.add(match[1]);
   }
   return targets;
+}
+
+/** Source-file extension → human language label. Used by the scan fallback to
+ *  name a project's stack when no manifest (package.json, go.mod, …) matched. */
+const EXT_LANG: Record<string, string> = {
+  '.ts': 'TypeScript',
+  '.tsx': 'TypeScript',
+  '.mts': 'TypeScript',
+  '.cts': 'TypeScript',
+  '.js': 'JavaScript',
+  '.jsx': 'JavaScript',
+  '.mjs': 'JavaScript',
+  '.cjs': 'JavaScript',
+  '.py': 'Python',
+  '.rb': 'Ruby',
+  '.go': 'Go',
+  '.rs': 'Rust',
+  '.java': 'Java',
+  '.kt': 'Kotlin',
+  '.kts': 'Kotlin',
+  '.c': 'C',
+  '.h': 'C',
+  '.cpp': 'C++',
+  '.cc': 'C++',
+  '.cxx': 'C++',
+  '.hpp': 'C++',
+  '.cs': 'C#',
+  '.php': 'PHP',
+  '.swift': 'Swift',
+  '.scala': 'Scala',
+  '.clj': 'Clojure',
+  '.ex': 'Elixir',
+  '.exs': 'Elixir',
+  '.erl': 'Erlang',
+  '.hs': 'Haskell',
+  '.ml': 'OCaml',
+  '.dart': 'Dart',
+  '.lua': 'Lua',
+  '.jl': 'Julia',
+  '.sh': 'Shell',
+  '.bash': 'Shell',
+  '.ps1': 'PowerShell',
+  '.pl': 'Perl',
+  '.zig': 'Zig',
+  '.nim': 'Nim',
+  '.sql': 'SQL',
+  '.vue': 'Vue',
+  '.svelte': 'Svelte',
+};
+
+/** Directories the scan never descends into — VCS, deps, build output, caches. */
+const SCAN_IGNORE_DIRS = new Set([
+  '.git',
+  'node_modules',
+  'dist',
+  'build',
+  'out',
+  'target',
+  'vendor',
+  '.venv',
+  'venv',
+  'env',
+  '__pycache__',
+  '.next',
+  '.nuxt',
+  '.cache',
+  'coverage',
+  '.wrongstack',
+  '.idea',
+  '.vscode',
+  'obj',
+  '.gradle',
+  '.dart_tool',
+  'Pods',
+]);
+
+/** Basenames (sans extension) that usually mark a program entry point. */
+const ENTRY_BASENAMES = new Set(['main', 'index', 'app', 'cli', 'server', '__main__']);
+
+interface ScanResult {
+  languages: string[];
+  entryPoints: string[];
+  topDirs: string[];
+}
+
+/**
+ * Last-resort project fingerprint for repos that match no manifest: walk the
+ * source tree (bounded by depth + file count, skipping deps/build dirs) and
+ * report the dominant languages, likely entry points, and top-level layout.
+ * Never invents build/test commands — it only tells the agent what's there.
+ */
+async function scanSourceTree(root: string): Promise<ScanResult | undefined> {
+  const counts = new Map<string, number>();
+  const entryPoints: string[] = [];
+  const topDirs: string[] = [];
+  let fileCount = 0;
+  const MAX_FILES = 5000;
+  const MAX_DEPTH = 6;
+
+  async function walk(dir: string, depth: number, rel: string): Promise<void> {
+    if (fileCount >= MAX_FILES || depth > MAX_DEPTH) return;
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (fileCount >= MAX_FILES) return;
+      const name = e.name;
+      if (e.isDirectory()) {
+        if (SCAN_IGNORE_DIRS.has(name) || name.startsWith('.')) continue;
+        if (depth === 0) topDirs.push(name);
+        await walk(path.join(dir, name), depth + 1, rel ? `${rel}/${name}` : name);
+      } else if (e.isFile()) {
+        fileCount++;
+        const ext = path.extname(name).toLowerCase();
+        const lang = EXT_LANG[ext];
+        if (!lang) continue;
+        counts.set(lang, (counts.get(lang) ?? 0) + 1);
+        const base = name.slice(0, name.length - ext.length).toLowerCase();
+        if (entryPoints.length < 10 && ENTRY_BASENAMES.has(base)) {
+          entryPoints.push(rel ? `${rel}/${name}` : name);
+        }
+      }
+    }
+  }
+
+  await walk(root, 0, '');
+  if (counts.size === 0) return undefined;
+  const languages = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([lang, n]) => `${lang} (${n})`);
+  return { languages, entryPoints, topDirs: topDirs.sort() };
 }
 
 export async function detectProjectFacts(root: string): Promise<ProjectFacts> {
@@ -137,12 +335,184 @@ export async function detectProjectFacts(root: string): Promise<ProjectFacts> {
   } catch {
     /* no make */
   }
+  // PHP / Composer
+  try {
+    const composer = JSON.parse(await fs.readFile(path.join(root, 'composer.json'), 'utf8')) as {
+      scripts?: Record<string, unknown>;
+    };
+    const scripts = composer.scripts ?? {};
+    if ('test' in scripts) facts.test ??= 'composer test';
+    if ('lint' in scripts) facts.lint ??= 'composer lint';
+    facts.hints.push('composer.json');
+  } catch {
+    /* not php */
+  }
+  // Java — Maven
+  try {
+    if (!(await pathExists(path.join(root, 'pom.xml')))) throw new Error('not maven');
+    facts.build ??= 'mvn package';
+    facts.test ??= 'mvn test';
+    facts.hints.push('pom.xml');
+  } catch {
+    /* not maven */
+  }
+  // JVM — Gradle (prefer the wrapper when present)
+  try {
+    const hasGradle =
+      (await pathExists(path.join(root, 'build.gradle'))) ||
+      (await pathExists(path.join(root, 'build.gradle.kts')));
+    if (!hasGradle) throw new Error('not gradle');
+    const g = (await pathExists(path.join(root, 'gradlew'))) ? './gradlew' : 'gradle';
+    facts.build ??= `${g} build`;
+    facts.test ??= `${g} test`;
+    facts.hints.push('Gradle');
+  } catch {
+    /* not gradle */
+  }
+  // .NET
+  try {
+    const hasDotnet =
+      (await pathExists(path.join(root, 'global.json'))) ||
+      (await hasRootFileWithSuffix(root, ['.csproj', '.fsproj', '.sln']));
+    if (!hasDotnet) throw new Error('not dotnet');
+    facts.build ??= 'dotnet build';
+    facts.test ??= 'dotnet test';
+    facts.run ??= 'dotnet run';
+    facts.hints.push('.NET project');
+  } catch {
+    /* not dotnet */
+  }
+  // Elixir
+  try {
+    if (!(await pathExists(path.join(root, 'mix.exs')))) throw new Error('not elixir');
+    facts.build ??= 'mix compile';
+    facts.test ??= 'mix test';
+    facts.lint ??= 'mix format --check-formatted';
+    facts.run ??= 'mix run';
+    facts.hints.push('mix.exs');
+  } catch {
+    /* not elixir */
+  }
+  // Dart / Flutter
+  try {
+    if (!(await pathExists(path.join(root, 'pubspec.yaml')))) throw new Error('not dart');
+    facts.test ??= 'dart test';
+    facts.lint ??= 'dart analyze';
+    facts.hints.push('pubspec.yaml');
+  } catch {
+    /* not dart */
+  }
+  // Deno
+  try {
+    const hasDeno =
+      (await pathExists(path.join(root, 'deno.json'))) ||
+      (await pathExists(path.join(root, 'deno.jsonc')));
+    if (!hasDeno) throw new Error('not deno');
+    facts.test ??= 'deno test';
+    facts.lint ??= 'deno lint';
+    facts.hints.push('deno.json');
+  } catch {
+    /* not deno */
+  }
+  // Swift
+  try {
+    if (!(await pathExists(path.join(root, 'Package.swift')))) throw new Error('not swift');
+    facts.build ??= 'swift build';
+    facts.test ??= 'swift test';
+    facts.run ??= 'swift run';
+    facts.hints.push('Package.swift');
+  } catch {
+    /* not swift */
+  }
+  // Ruby
+  try {
+    if (!(await pathExists(path.join(root, 'Gemfile')))) throw new Error('not ruby');
+    if (await pathExists(path.join(root, 'Rakefile'))) facts.test ??= 'bundle exec rake test';
+    facts.hints.push('Gemfile');
+  } catch {
+    /* not ruby */
+  }
+  // C / C++ — CMake (standard out-of-source build)
+  try {
+    if (!(await pathExists(path.join(root, 'CMakeLists.txt')))) throw new Error('not cmake');
+    facts.build ??= 'cmake -B build && cmake --build build';
+    facts.test ??= 'ctest --test-dir build';
+    facts.hints.push('CMakeLists.txt');
+  } catch {
+    /* not cmake */
+  }
+  // Older / pip-style Python (no pyproject.toml)
+  try {
+    const hasPip =
+      (await pathExists(path.join(root, 'requirements.txt'))) ||
+      (await pathExists(path.join(root, 'setup.py'))) ||
+      (await pathExists(path.join(root, 'setup.cfg')));
+    if (!hasPip) throw new Error('not pip');
+    facts.test ??= 'pytest';
+    facts.hints.push('requirements.txt');
+  } catch {
+    /* not pip-python */
+  }
+  // CI workflows are the strongest evidence for projects with thin/odd manifests:
+  // these commands actually run on every push. Fills only gaps left above.
+  if (!facts.build || !facts.test || !facts.lint) {
+    try {
+      const wfDir = path.join(root, '.github', 'workflows');
+      const wfNames = (await fs.readdir(wfDir)).filter((n) => /\.ya?ml$/i.test(n));
+      const commands: string[] = [];
+      for (const n of wfNames) {
+        commands.push(...parseCiRunCommands(await fs.readFile(path.join(wfDir, n), 'utf8')));
+      }
+      if (commands.length > 0) {
+        const before = { build: facts.build, test: facts.test, lint: facts.lint };
+        applyCiCommands(facts, commands);
+        if (
+          facts.build !== before.build ||
+          facts.test !== before.test ||
+          facts.lint !== before.lint
+        ) {
+          facts.hints.push('.github/workflows');
+        }
+      }
+    } catch {
+      /* no CI workflows */
+    }
+  }
+  // No manifest produced runnable commands — fall back to scanning the source
+  // tree so AGENTS.md still names the language and layout (commands stay TODO).
+  if (!facts.build && !facts.test && !facts.run && !facts.lint) {
+    const scan = await scanSourceTree(root);
+    if (scan) {
+      facts.languages = scan.languages;
+      if (scan.entryPoints.length > 0) facts.entryPoints = scan.entryPoints;
+      if (scan.topDirs.length > 0) facts.topDirs = scan.topDirs;
+      facts.hints.push(`source scan: ${scan.languages.join(', ')}`);
+    }
+  }
   return facts;
 }
 
 export function renderAgentsTemplate(f: ProjectFacts): string {
   const cmd = (s?: string) => (s ? `\`${s}\`` : '_TODO_');
   const hints = f.hints.length > 0 ? `\n\n> Auto-detected: ${f.hints.join(', ')}` : '';
+  const runtime = f.languages?.length
+    ? `_CLI, server, browser, worker, library, package?_ — detected: ${f.languages.join(', ')}`
+    : '_CLI, server, browser, worker, library, package?_';
+
+  // When the source scan found real entry points / directories, render them as
+  // table rows; otherwise keep the generic placeholders.
+  const keyFileRows: string[] = [];
+  for (const ep of f.entryPoints ?? [])
+    keyFileRows.push(`| \`${ep}\` | _Likely entry point (detected)_ |`);
+  for (const dir of f.topDirs ?? [])
+    keyFileRows.push(`| \`${dir}/\` | _Top-level directory (detected)_ |`);
+  const keyFiles =
+    keyFileRows.length > 0
+      ? keyFileRows.join('\n')
+      : `| _src/_ | _Main source entry point(s)_ |
+| _tests/_ | _Test root or convention_ |
+| _docs/_ | _Architecture, runbooks, design notes_ |
+| _scripts/_ | _Automation scripts (CI, release, install, etc.)_ |`;
 
   return `# AGENTS.md
 
@@ -155,7 +525,7 @@ export function renderAgentsTemplate(f: ProjectFacts): string {
 
 - **Purpose:** _What does this project do and why does it exist?_
 - **Primary users:** _Who uses it: developers, operators, customers, internal systems?_
-- **Runtime / deployment:** _CLI, server, browser, worker, library, package?_${hints}
+- **Runtime / deployment:** ${runtime}${hints}
 
 ## How to work safely
 
@@ -177,10 +547,7 @@ export function renderAgentsTemplate(f: ProjectFacts): string {
 
 | File / directory | Role |
 |---|---|
-| _src/_ | _Main source entry point(s)_ |
-| _tests/_ | _Test root or convention_ |
-| _docs/_ | _Architecture, runbooks, design notes_ |
-| _scripts/_ | _Automation scripts (CI, release, install, etc.)_ |
+${keyFiles}
 
 ## Architecture notes
 

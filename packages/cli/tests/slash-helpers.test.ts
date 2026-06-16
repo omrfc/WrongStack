@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Context } from '@wrongstack/core';
@@ -176,6 +176,21 @@ describe('slash-commands/helpers — renderAgentsTemplate', () => {
     expect(out).toContain('| Lint | `pnpm run lint` |');
     expect(out).toContain('| Run locally | `pnpm run dev` |');
   });
+
+  it('renders detected languages and scan-derived key files', () => {
+    const out = renderAgentsTemplate({
+      hints: ['source scan: Python (12)'],
+      languages: ['Python (12)', 'Shell (3)'],
+      entryPoints: ['main.py'],
+      topDirs: ['src', 'scripts'],
+    });
+    expect(out).toContain('detected: Python (12), Shell (3)');
+    expect(out).toContain('| `main.py` | _Likely entry point (detected)_ |');
+    expect(out).toContain('| `src/` | _Top-level directory (detected)_ |');
+    expect(out).toContain('| `scripts/` | _Top-level directory (detected)_ |');
+    // Generic placeholders are replaced when real layout is known.
+    expect(out).not.toContain('| _src/_ | _Main source entry point(s)_ |');
+  });
 });
 
 describe('slash-commands/helpers — detectProjectFacts', () => {
@@ -290,5 +305,197 @@ describe('slash-commands/helpers — detectProjectFacts', () => {
     expect(facts.build).toBe('npm run build');
     expect(facts.test).toBe('npm test');
     expect(facts.hints).toContain('Makefile');
+  });
+});
+
+describe('slash-commands/helpers — detectProjectFacts source scan fallback', () => {
+  let tmp: string;
+
+  beforeEach(async () => {
+    tmp = await mkdtemp(path.join(os.tmpdir(), 'ws-scan-'));
+  });
+
+  afterEach(async () => {
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it('names the dominant language for a manifest-less project', async () => {
+    await mkdir(path.join(tmp, 'src'), { recursive: true });
+    await writeFile(path.join(tmp, 'src', 'core.py'), 'x = 1\n');
+    await writeFile(path.join(tmp, 'src', 'util.py'), 'y = 2\n');
+    await writeFile(path.join(tmp, 'helper.sh'), 'echo hi\n');
+    const facts = await detectProjectFacts(tmp);
+    expect(facts.languages).toEqual(['Python (2)', 'Shell (1)']);
+    expect(facts.hints).toContain('source scan: Python (2), Shell (1)');
+    // No manifest → commands stay undefined (never fabricated).
+    expect(facts.build).toBeUndefined();
+    expect(facts.test).toBeUndefined();
+  });
+
+  it('detects entry points and top-level directories', async () => {
+    await mkdir(path.join(tmp, 'cmd'), { recursive: true });
+    await writeFile(path.join(tmp, 'main.go'), 'package main\n');
+    await writeFile(path.join(tmp, 'cmd', 'index.rs'), 'fn main() {}\n');
+    const facts = await detectProjectFacts(tmp);
+    expect(facts.entryPoints).toContain('main.go');
+    expect(facts.entryPoints).toContain('cmd/index.rs');
+    expect(facts.topDirs).toContain('cmd');
+  });
+
+  it('ignores node_modules, .git and build output when scanning', async () => {
+    await mkdir(path.join(tmp, 'node_modules', 'dep'), { recursive: true });
+    await mkdir(path.join(tmp, '.git'), { recursive: true });
+    await writeFile(path.join(tmp, 'node_modules', 'dep', 'a.js'), '');
+    await writeFile(path.join(tmp, '.git', 'b.js'), '');
+    await writeFile(path.join(tmp, 'app.lua'), 'print(1)\n');
+    const facts = await detectProjectFacts(tmp);
+    expect(facts.languages).toEqual(['Lua (1)']);
+    expect(facts.topDirs ?? []).not.toContain('node_modules');
+  });
+
+  it('does not scan when a manifest already supplied commands', async () => {
+    await writeFile(path.join(tmp, 'go.mod'), 'module example.com/x\n');
+    await writeFile(path.join(tmp, 'extra.py'), 'x = 1\n');
+    const facts = await detectProjectFacts(tmp);
+    expect(facts.build).toBe('go build ./...');
+    expect(facts.languages).toBeUndefined();
+  });
+
+  it('returns no scan fields when no recognized source files exist', async () => {
+    await writeFile(path.join(tmp, 'notes.txt'), 'hello\n');
+    const facts = await detectProjectFacts(tmp);
+    expect(facts.languages).toBeUndefined();
+    expect(facts.entryPoints).toBeUndefined();
+  });
+});
+
+describe('slash-commands/helpers — detectProjectFacts extra manifests', () => {
+  let tmp: string;
+
+  beforeEach(async () => {
+    tmp = await mkdtemp(path.join(os.tmpdir(), 'ws-manifest-'));
+  });
+
+  afterEach(async () => {
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it('detects Maven pom.xml', async () => {
+    await writeFile(path.join(tmp, 'pom.xml'), '<project/>\n');
+    const facts = await detectProjectFacts(tmp);
+    expect(facts.build).toBe('mvn package');
+    expect(facts.test).toBe('mvn test');
+    expect(facts.hints).toContain('pom.xml');
+  });
+
+  it('detects Gradle and prefers the wrapper', async () => {
+    await writeFile(path.join(tmp, 'build.gradle.kts'), '');
+    await writeFile(path.join(tmp, 'gradlew'), '#!/bin/sh\n');
+    const facts = await detectProjectFacts(tmp);
+    expect(facts.build).toBe('./gradlew build');
+    expect(facts.test).toBe('./gradlew test');
+  });
+
+  it('falls back to bare gradle without a wrapper', async () => {
+    await writeFile(path.join(tmp, 'build.gradle'), '');
+    const facts = await detectProjectFacts(tmp);
+    expect(facts.build).toBe('gradle build');
+  });
+
+  it('detects a .NET project from a .csproj file', async () => {
+    await writeFile(path.join(tmp, 'App.csproj'), '<Project/>\n');
+    const facts = await detectProjectFacts(tmp);
+    expect(facts.build).toBe('dotnet build');
+    expect(facts.test).toBe('dotnet test');
+    expect(facts.run).toBe('dotnet run');
+    expect(facts.hints).toContain('.NET project');
+  });
+
+  it('detects Elixir mix.exs', async () => {
+    await writeFile(path.join(tmp, 'mix.exs'), 'defmodule X.MixProject do\nend\n');
+    const facts = await detectProjectFacts(tmp);
+    expect(facts.build).toBe('mix compile');
+    expect(facts.test).toBe('mix test');
+    expect(facts.lint).toBe('mix format --check-formatted');
+  });
+
+  it('detects Swift Package.swift', async () => {
+    await writeFile(path.join(tmp, 'Package.swift'), '// swift-tools-version:5.9\n');
+    const facts = await detectProjectFacts(tmp);
+    expect(facts.build).toBe('swift build');
+    expect(facts.test).toBe('swift test');
+  });
+
+  it('detects pip-style Python without pyproject.toml', async () => {
+    await writeFile(path.join(tmp, 'requirements.txt'), 'requests\n');
+    const facts = await detectProjectFacts(tmp);
+    expect(facts.test).toBe('pytest');
+    expect(facts.hints).toContain('requirements.txt');
+  });
+
+  it('detects composer scripts', async () => {
+    await writeFile(
+      path.join(tmp, 'composer.json'),
+      JSON.stringify({ scripts: { test: 'phpunit', lint: 'phpcs' } }),
+    );
+    const facts = await detectProjectFacts(tmp);
+    expect(facts.test).toBe('composer test');
+    expect(facts.lint).toBe('composer lint');
+  });
+});
+
+describe('slash-commands/helpers — detectProjectFacts CI workflow parser', () => {
+  let tmp: string;
+
+  beforeEach(async () => {
+    tmp = await mkdtemp(path.join(os.tmpdir(), 'ws-ci-'));
+  });
+
+  afterEach(async () => {
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  async function writeWorkflow(name: string, body: string): Promise<void> {
+    await mkdir(path.join(tmp, '.github', 'workflows'), { recursive: true });
+    await writeFile(path.join(tmp, '.github', 'workflows', name), body);
+  }
+
+  it('extracts commands from inline and block-scalar run steps', async () => {
+    await writeWorkflow(
+      'ci.yml',
+      [
+        'jobs:',
+        '  build:',
+        '    steps:',
+        '      - uses: actions/checkout@v4',
+        '      - run: bazel build //...',
+        '      - name: tests',
+        '        run: |',
+        '          echo "starting"',
+        '          bazel test //...',
+        '      - run: buf lint',
+      ].join('\n'),
+    );
+    const facts = await detectProjectFacts(tmp);
+    expect(facts.build).toBe('bazel build //...');
+    expect(facts.test).toBe('bazel test //...');
+    expect(facts.lint).toBe('buf lint');
+    expect(facts.hints).toContain('.github/workflows');
+  });
+
+  it('only fills gaps left by manifests, never overrides them', async () => {
+    await writeFile(path.join(tmp, 'go.mod'), 'module example.com/x\n');
+    await writeWorkflow('ci.yml', ['steps:', '  - run: golangci-lint run'].join('\n'));
+    const facts = await detectProjectFacts(tmp);
+    // go.mod set build/test/run; CI only adds the missing lint.
+    expect(facts.build).toBe('go build ./...');
+    expect(facts.test).toBe('go test ./...');
+    expect(facts.lint).toBe('golangci-lint run');
+  });
+
+  it('does not add the workflows hint when no command matched', async () => {
+    await writeWorkflow('ci.yml', ['steps:', '  - run: ./deploy.sh production'].join('\n'));
+    const facts = await detectProjectFacts(tmp);
+    expect(facts.hints).not.toContain('.github/workflows');
   });
 });

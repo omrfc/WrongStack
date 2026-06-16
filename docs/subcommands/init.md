@@ -51,7 +51,7 @@ Secrets are encrypted with `DefaultSecretVault` using `~/.wrongstack/.key` befor
 
 ## AGENTS.md generation
 
-Uses the same `detectProjectFacts()` + `renderAgentsTemplate()` from `slash-commands/helpers.ts` — identical to the `/init` slash command output. Only writes if the file doesn't already exist.
+Uses the same `detectProjectFacts()` + `renderAgentsTemplate()` from `slash-commands/helpers.ts` — identical to the `/init` slash command output. Detection runs three tiers (manifests → `.github/workflows` CI parse → source-tree scan); see [docs/slash/init.md](../slash/init.md#auto-detection) for the full matrix. Only writes if the file doesn't already exist.
 
 ## Exit codes
 
