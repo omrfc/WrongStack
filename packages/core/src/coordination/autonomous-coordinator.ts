@@ -139,6 +139,8 @@ export class AutonomousCoordinator {
 
   private running = false;
   private iterationCount = 0;
+  /** Tasks already handled by _onSubagentTerminated (to avoid double goal:failed on fleet event). */
+  private readonly _handledBySubagent = new Set<string>();
 
   constructor(opts: AutonomousCoordinatorOptions) {
     this.selfAgentId = opts.selfAgentId;
@@ -202,6 +204,16 @@ export class AutonomousCoordinator {
     // MultiAgentCoordinator when a subagent finishes with status).
     this.fleet?.filter('subagent.completed', (e: FleetEvent) => {
       this._onSubagentTerminated(e);
+    });
+
+    // Wire task:failed from auctioneer — emits goal:failed for orphan tasks
+    // (subagent terminations are handled separately in _onSubagentTerminated)
+    this.fleet?.filter('task:failed', (e: FleetEvent) => {
+      const payload = e.payload as { taskId: string; error: string } | undefined;
+      const taskId = payload?.taskId;
+      if (!taskId || this._handledBySubagent.has(taskId)) return;
+      this._handledBySubagent.add(taskId);
+      this._emit({ type: 'goal:failed', goalId: taskId, text: payload?.error ?? 'Task failed' });
     });
   }
 
@@ -540,6 +552,7 @@ export class AutonomousCoordinator {
     const tasks = this.auction.getTasksForAgent(subagentId);
 
     for (const task of tasks) {
+      this._handledBySubagent.add(task.id); // prevent double-emission when fleet fires task:failed
       if (stopReason === 'end_turn') {
         void this.auction.complete(task.id, 'Subagent completed successfully');
         this._emit({ type: 'task:completed', goalId: task.id, taskId: task.id, text: 'Subagent completed successfully' });

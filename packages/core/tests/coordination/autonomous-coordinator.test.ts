@@ -52,7 +52,11 @@ function createMockFleetBus(): FleetBus {
     off: vi.fn((type: string, handler: (payload: unknown) => void) => {
       listeners.get(type)?.delete(handler);
     }),
-    filter: vi.fn(() => vi.fn()),
+    filter: vi.fn((type: string, handler: (payload: unknown) => void) => {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type)!.add(handler);
+      return () => listeners.get(type)?.delete(handler);
+    }),
     subscribe: vi.fn(() => () => {}),
     unsubscribe: vi.fn(),
     dispose: vi.fn(),
@@ -573,6 +577,55 @@ describe('AutonomousCoordinator', () => {
       expect(node!.status).toBe('failed');
       // After fail(), the retry counter should be deleted (no more retries)
       // This is verified by the fact that the task is 'failed', not still 'pending'
+    });
+  });
+
+  describe('task:failed → goal:failed propagation', () => {
+    it('emits goal:failed to onCoordinatorEvent when auctioneer fires task:failed', async () => {
+      // This tests the critical path: when a task fails (e.g. orphan with no bids),
+      // the coordinator must emit goal:failed so the TUI shows the ❌ icon.
+      const fleet = createMockFleetBus();
+      const mailbox = createMockMailbox();
+      const graph = new KnowledgeGraph(tempDir);
+
+      const emittedEvents: CoordinatorEvent[] = [];
+      const coord = new AutonomousCoordinator({
+        sessionDir: tempDir,
+        selfAgentId: 'test-coord',
+        selfAgentName: 'TestCoord',
+        llmProvider: createMockLlmProvider(),
+        fleet,
+        mailbox,
+        onCoordinatorEvent: (e) => emittedEvents.push(e),
+      });
+
+      // Publish a task via the coordinator's own auction
+      const taskId = await coord.auction.publishTask({
+        title: 'Orphan test task',
+        description: 'Will fail with no bids',
+        priority: 'high',
+        tags: ['test'],
+      });
+
+      // Simulate task:failed event from auctioneer reaching the coordinator's fleet filter
+      // (This is what happens when an orphan task fails after max bid retries)
+      const filterCalls = (fleet.filter as ReturnType<typeof vi.fn>).mock.calls;
+      for (const [filterType, handler] of filterCalls) {
+        if (filterType === 'task:failed') {
+          // FleetEvent format expected by the coordinator's filter handler
+          (handler as (p: unknown) => void)({
+            subagentId: 'auctioneer',
+            ts: Date.now(),
+            type: 'task:failed',
+            payload: { taskId, error: 'No bids received after 3 attempts' },
+          });
+        }
+      }
+
+      // Verify goal:failed was emitted to the TUI callback
+      expect(emittedEvents.some(e => e.type === 'goal:failed' && e.goalId === taskId)).toBe(true);
+      const failedEvent = emittedEvents.find(e => e.type === 'goal:failed')!;
+      expect(failedEvent.text).toContain('No bids received');
     });
   });
 });
