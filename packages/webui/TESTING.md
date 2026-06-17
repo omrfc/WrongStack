@@ -15,27 +15,20 @@ ensures coverage keeps pace with new code.
 
 1. Run `pnpm --filter webui test -- --coverage` locally.
 2. Note the new aggregate values for `statements`, `branches`, `functions`, `lines`.
-3. Update `vitest.config.ts` thresholds:
-   ```ts
-   thresholds: {
-     statements: <new_stmts_value + 1>,
-     branches:   <new_branches_value + 1>,
-     functions:  <new_funcs_value + 1>,
-     lines:      <new_lines_value + 1>,
-   }
-   ```
-4. Update the "Current" comment block in `vitest.config.ts` with the new
-   measured values.
+3. Set each threshold to `Math.floor(measured_value)`. This is the floor — CI
+   will fail if coverage drops below this.
+4. If a new test lands and coverage improves past a whole number
+   (e.g. 19.2% → 20.1%), set the threshold to that whole number.
 5. Commit message: `test(webui): tighten coverage thresholds`
 
 ### Current measured coverage
 
 | Metric    | Measured | Threshold |
 |-----------|----------|-----------|
-| statements | 19.21%  | 20        |
-| branches  | 16.87%  | 17        |
-| functions | 17.81%  | 18        |
-| lines     | 19.83%  | 20        |
+| statements | 19.21%  | 19        |
+| branches  | 16.87%  | 16        |
+| functions | 17.81%  | 17        |
+| lines     | 19.83%  | 19        |
 
 ### What counts as a "store/utility test"
 
