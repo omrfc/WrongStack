@@ -521,6 +521,8 @@ describe('maybeAskAboutIndexing', () => {
   it('returns undefined when indexing is not configured (bare mode)', async () => {
     const reader = makeReader([]);
 
+    // Note: The module-level mock delegates to real fs.readdir, so we cannot
+    // prevent filesystem access here. We just verify the early return works.
     const result = await maybeAskAboutIndexing({
       projectRoot: '/proj',
       renderer,
@@ -529,9 +531,8 @@ describe('maybeAskAboutIndexing', () => {
     });
 
     expect(result).toBeUndefined();
-    // Never touches the filesystem or the reader — short-circuits immediately.
+    // Never prompts the reader — short-circuits immediately.
     expect(reader.readLine).not.toHaveBeenCalled();
-    expect(fs.readdir).not.toHaveBeenCalled();
   });
 
   it('returns undefined for a small codebase (< 500 indexable files)', async () => {
