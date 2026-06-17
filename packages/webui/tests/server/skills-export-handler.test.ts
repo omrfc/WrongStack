@@ -21,7 +21,11 @@ function generateSkillsZip(entries: Array<{ name: string; body: string }>): Prom
   for (const entry of entries) {
     try {
       const safeName = entry.name.replace(/\//g, '_');
-      zip.file(`${safeName}/SKILL.md`, entry.body);
+      // JSZip defers content validation to generateAsync(), so a try/catch
+      // around zip.file() alone won't catch bad bodies — validate the type
+      // up front and skip anything jszip can't serialize.
+      if (typeof entry.body !== 'string' && typeof entry.body !== 'number') continue;
+      zip.file(`${safeName}/SKILL.md`, String(entry.body));
     } catch {
       // Skip skills we can't add
     }

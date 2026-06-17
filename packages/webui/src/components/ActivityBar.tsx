@@ -22,6 +22,7 @@ import {
   Moon,
   Rocket,
   Settings as SettingsIcon,
+  Sparkles,
   Sun,
   Zap,
   LayoutGrid,
@@ -62,6 +63,7 @@ const PANELS: PanelDef[] = [
   { id: 'files', icon: <FolderOpen size={16} />, label: 'Files', shortcut: 'Ctrl+4', pairedView: 'files' },
   { id: 'projects', icon: <Folders size={16} />, label: 'Projects', shortcut: 'Ctrl+5' },
   { id: 'mailbox', icon: <Mail size={16} />, label: 'Mailbox', shortcut: 'Ctrl+6' },
+  { id: 'skills', icon: <Sparkles size={16} />, label: 'Skills', shortcut: 'Ctrl+7' },
 ];
 
 const VIEWS: ViewDef[] = [
@@ -72,7 +74,7 @@ const VIEWS: ViewDef[] = [
 
 /**
  * Open/switch/close the side panel for an activity. Exported so keyboard
- * shortcuts (Ctrl+1..6) drive the exact same logic as a mouse click.
+ * shortcuts (Ctrl+1..7) drive the exact same logic as a mouse click.
  */
 export function openPanel(activity: Activity): void {
   const ui = useUIStore.getState();

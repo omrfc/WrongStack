@@ -137,7 +137,7 @@ function AppInner() {
         toggleSidebar();
         return;
       }
-      // Ctrl+1..6 — jump straight to a side panel (same logic as clicking
+      // Ctrl+1..7 — jump straight to a side panel (same logic as clicking
       // its ActivityBar icon, including close-on-repeat).
       if (mod && !e.shiftKey && !e.altKey && e.key >= '1' && e.key <= String(PANEL_ORDER.length)) {
         const activity = PANEL_ORDER[Number(e.key) - 1];

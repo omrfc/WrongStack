@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 function toKebabCase(input: string): string {
   return input
     .toLowerCase()
+    .replace(/_/g, ' ')            // underscores → spaces (become hyphens next)
     .replace(/[^a-z0-9\s-]/g, '') // remove special chars
     .replace(/\s+/g, '-')         // spaces → hyphens
     .replace(/-+/g, '-')          // collapse multiple hyphens
@@ -144,7 +145,8 @@ function buildCreateSkillMessage(
 ): CreateSkillPayload {
   return {
     type: 'skills.create',
-    payload: { name, description, scope },
+    // The modal trims the name (kebab input) but leaves description as-typed.
+    payload: { name: name.trim(), description, scope },
   };
 }
 

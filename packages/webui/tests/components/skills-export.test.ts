@@ -193,17 +193,17 @@ describe('handleExportAll', () => {
     const exportAllSkills = vi.fn().mockResolvedValue(undefined);
     const client = { exportAllSkills };
 
-    // Simulate the handleExportAll behavior:
+    // Simulate the handleExportAll behavior: exportingAll is true for the
+    // duration of the call, then cleared in the WS 'skills.exported' handler.
     let exportingAll = false;
     const setExportingAll = (val: boolean) => { exportingAll = val; };
 
     setExportingAll(true);
-    const result = client.exportAllSkills();
-    setExportingAll(false);
+    // Still true while the request is in flight (before the response handler runs).
+    expect(exportingAll).toBe(true);
+    await client.exportAllSkills();
+    setExportingAll(false); // response handler clears it
 
-    await result;
-
-    expect(exportingAll).toBe(true); // Was true during the call
     expect(client.exportAllSkills).toHaveBeenCalled();
   });
 
@@ -222,8 +222,9 @@ describe('handleExportAll', () => {
   });
 
   it('base64-decodes the zip and triggers a download', async () => {
-    // Create a real JSZip zip with known content
-    const { default: JSZip } = await import('jszip');
+    // Create a real JSZip zip with known content. vi.importActual bypasses the
+    // file-level jszip mock so we get the real constructor for encoding.
+    const JSZip = (await vi.importActual<typeof import('jszip')>('jszip')).default;
     const zip = new JSZip();
     zip.file('api-design/SKILL.md', API_DESIGN_BODY);
     const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });

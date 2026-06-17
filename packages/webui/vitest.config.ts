@@ -12,8 +12,35 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
-      include: ['src/lib/**/*.ts'],
-      exclude: ['**/*.test.ts', '**/dist/**'],
+      // Enforce coverage across the whole WebUI source, not just src/lib.
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        '**/*.test.*',
+        '**/dist/**',
+        'src/env.d.ts',        // ambient type declarations only
+        'src/main.tsx',        // ReactDOM bootstrap entry — exercised by E2E
+        'src/lib/core-browser-shim.ts', // side-effect polyfill shim
+        'src/server/entry.ts', // process/bootstrap entry — exercised at runtime
+      ],
+      // ── Coverage gate (ratchet) ────────────────────────────────────────────
+      // Goal: 100% across the WebUI. Baseline measured 2026-06-17:
+      //   stmts 15.55% · branches 13.05% · funcs 11.75% · lines 16.21%.
+      // The thresholds below are set to that baseline (floored) so coverage
+      // can NEVER regress — `pnpm test:coverage` fails if any metric drops.
+      // Raise these four numbers as tests are added; set all to 100 to make
+      // this a hard 100% gate (it will fail until the gap closes).
+      // Biggest gaps: server/index.ts (3.6k LOC), SkillsPanel/ChatInput/
+      // AgentFlowCanvas (~1k LOC each, 0%), ws-client.ts (0.8%).
+      thresholds: {
+        statements: 15,
+        branches: 13,
+        functions: 11,
+        lines: 16,
+        // Don't fail the gate on a single untouched file — the aggregate
+        // ratchet above is what we enforce. Tighten per-file once each area
+        // is brought up.
+        perFile: false,
+      },
     },
   },
   resolve: {
