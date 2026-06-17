@@ -147,7 +147,7 @@ describe('ConsensusProtocol', () => {
 
       const result = protocol.castVote('change-1', 'voter-1', 'approve', 'Looks good');
 
-      expect(result.outcome).toBe('pending');
+      expect(result.outcome).toBe('quorum_not_met');
       expect(result.approveCount).toBe(1);
       expect(graph.update).toHaveBeenCalledWith(
         'change-1',
@@ -245,7 +245,7 @@ describe('ConsensusProtocol', () => {
       const result = protocol.castVote('change-1', 'voter-1', 'approve');
 
       // With quorumFraction=1, need all voters
-      expect(result.outcome).toBe('pending');
+      expect(result.outcome).toBe('quorum_not_met');
       expect(result.quorumMet).toBe(false);
     });
 
@@ -393,7 +393,7 @@ describe('ConsensusProtocol', () => {
       protocol.castVote('change-1', 'v1', 'approve');
       const result = protocol.castVote('change-1', 'v2', 'approve');
 
-      expect(result.outcome).toBe('pending');
+      expect(result.outcome).toBe('quorum_not_met');
       expect(result.quorumMet).toBe(false);
     });
   });

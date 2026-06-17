@@ -80,6 +80,12 @@ export interface TaskAuctionOptions {
   maxTasksPerAgent?: number | undefined;
   /** Minimum confidence threshold for dispatcher scoring. Default: 0.3 */
   minConfidence?: number | undefined;
+  /**
+   * Maximum times a task can be republished when no bids are received.
+   * After this, the task is marked as 'failed' with reason 'no_bids'.
+   * Default: 3.
+   */
+  maxBidRetries?: number | undefined;
 }
 
 // ── TaskAuctioneer ──────────────────────────────────────────────────────
@@ -92,12 +98,16 @@ export class TaskAuctioneer {
   private readonly bidWindowMs: number;
   private readonly maxTasksPerAgent: number;
   private readonly minConfidence: number; // minimum dispatcher confidence to accept a bid
+  private readonly maxBidRetries: number; // max republished attempts before marking task failed
 
   /** Pending bids keyed by taskId. */
   private readonly pendingBids = new Map<string, TaskBid[]>();
 
   /** Active bid windows keyed by taskId. */
   private readonly bidTimers = new Map<string, NodeJS.Timeout>();
+
+  /** How many times a task has been republished with no bids received. */
+  private readonly bidRetryCounts = new Map<string, number>();
 
   /** Agent → current task count (from graph + in-flight). */
   private readonly agentTaskCounts = new Map<string, number>();
@@ -110,6 +120,7 @@ export class TaskAuctioneer {
     this.bidWindowMs = opts.bidWindowMs ?? 30_000;
     this.maxTasksPerAgent = opts.maxTasksPerAgent ?? 3;
     this.minConfidence = opts.minConfidence ?? 0.3;
+    this.maxBidRetries = opts.maxBidRetries ?? 3;
 
     // Subscribe to fleet events for bid updates
     this.fleet?.filter('task:bid', (e) => this._onBidEvent(e));
@@ -313,6 +324,8 @@ export class TaskAuctioneer {
       updatedAt: new Date().toISOString(),
     });
 
+    this.bidRetryCounts.delete(taskId);
+
     // Unblock any dependent goals
     for (const childId of goal.children) {
       const child = this.graph.get(childId) as GoalNode | undefined;
@@ -355,6 +368,8 @@ export class TaskAuctioneer {
       updatedAt: new Date().toISOString(),
       result: error,
     });
+
+    this.bidRetryCounts.delete(taskId);
 
     this._emit('task:failed', { taskId, agentId, error });
     await this._mailboxPublish({
@@ -533,11 +548,21 @@ export class TaskAuctioneer {
   private async _evaluateBids(taskId: string): Promise<void> {
     const bids = this.pendingBids.get(taskId);
     if (!bids || bids.length === 0) {
-      // No bids — republish or escalate
+      // No bids received — check retry count
+      const retryCount = (this.bidRetryCounts.get(taskId) ?? 0) + 1;
+      this.bidRetryCounts.set(taskId, retryCount);
+
+      if (retryCount >= this.maxBidRetries) {
+        // Max retries exceeded — mark task as failed and give up
+        await this.fail(taskId, `No bids received after ${this.maxBidRetries} attempts`);
+        this.bidRetryCounts.delete(taskId);
+        return;
+      }
+
+      // Republish with the current retry count as a hint
       const goal = this.graph.get(taskId) as GoalNode | undefined;
       if (goal) {
         await this._broadcastTask(goal);
-        // Try again with a shorter window
         this._startBidWindow(taskId);
       }
       return;

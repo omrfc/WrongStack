@@ -30,7 +30,10 @@ export interface VoterConfig {
   weight: number;
   /** If true, a 'reject' vote from this role is a hard veto. Default: false. */
   veto?: boolean;
-  /** If true, this voter auto-approves low-risk changes. Default: true. */
+  /**
+   * @deprecated Not yet implemented. Auto-approve of low-risk changes is planned
+   * but not wired up in the vote resolution logic.
+   */
   autoApprovesLowRisk?: boolean;
 }
 
@@ -255,7 +258,7 @@ export class ConsensusProtocol {
     if (!quorumMet) {
       return {
         changeId,
-        outcome: 'pending',
+        outcome: 'quorum_not_met',
         votes,
         approveCount: approve.length,
         rejectCount: reject.length,

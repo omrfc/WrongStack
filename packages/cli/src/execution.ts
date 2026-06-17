@@ -276,6 +276,8 @@ export interface ExecutionDeps {
   needsSetup?: boolean | undefined;
   /** Called when the REPL shuts down — use to clean up event listeners etc. */
   onDestroy?: (() => void) | undefined;
+  /** Called in the execute() finally block to stop the AutonomousCoordinator cleanly. */
+  onCoordinatorStop?: (() => void) | undefined;
 }
 
 export async function execute(deps: ExecutionDeps): Promise<number> {
@@ -785,7 +787,13 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           selfAgentId: `leader@${context.session.id ?? 'unknown'}`,
           selfAgentName: 'Leader',
           llmProvider,
+          onCoordinatorEvent: (event) => {
+            coordinatorEvents.forEach((fn) => fn(event));
+          },
         });
+        // Wire the stop call so execute()'s finally block can cleanly shut down
+        // the coordinator when the TUI exits (Ctrl+C, /exit, or session end).
+        deps.onCoordinatorStop = () => autonomousCoordinator?.stop();
       };
 
       // Hook into Director lifecycle: Director is created lazily on first subagent.spawned.
@@ -1829,6 +1837,9 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     // Tear down the live fleet status line first so the scroll region is
     // restored before any end-of-session output prints.
     fleetStatusLine?.stop();
+    // Stop the AutonomousCoordinator so its while-loop exits cleanly.
+    // This sets running=false; the loop terminates at the next iteration check.
+    deps.onCoordinatorStop?.();
     // stats.render is synchronous but can throw — isolate it so cleanup
     // always runs regardless.
     try {

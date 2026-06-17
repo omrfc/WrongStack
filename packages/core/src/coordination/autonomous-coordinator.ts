@@ -76,6 +76,11 @@ export interface AutonomousCoordinatorOptions {
   disableSelfImprove?: boolean;
   /** Max concurrent subagents. Default: 5. */
   maxConcurrentAgents?: number;
+  /**
+   * Called with every CoordinatorEvent so the caller (e.g. execution.ts)
+   * can forward it to the TUI coordinator panel timeline.
+   */
+  onCoordinatorEvent?: (event: CoordinatorEvent) => void;
 }
 
 export interface RunOptions {
@@ -130,6 +135,7 @@ export class AutonomousCoordinator {
   private readonly fleetManager?: FleetManager | undefined;
   private readonly mailbox?: Mailbox | undefined;
   private readonly events?: EventBus | undefined;
+  private readonly onCoordinatorEvent?: ((event: CoordinatorEvent) => void) | undefined;
 
   private running = false;
   private iterationCount = 0;
@@ -140,6 +146,7 @@ export class AutonomousCoordinator {
     this.fleetManager = opts.fleetManager ?? undefined;
     this.mailbox = opts.mailbox ?? undefined;
     this.events = opts.events ?? undefined;
+    this.onCoordinatorEvent = opts.onCoordinatorEvent;
 
     // ── Core shared state ─────────────────────────────────────────────
     this.graph = new KnowledgeGraph(opts.sessionDir);
@@ -220,7 +227,8 @@ export class AutonomousCoordinator {
       // Phase 1: Decompose the goal into sub-goals
       const goalConfigs = await this._decomposeGoal(goal);
       for (const g of goalConfigs) {
-        await this.auction.publishTask(g);
+        const goalId = await this.auction.publishTask(g);
+        this._emit({ type: 'goal:added', goalId, title: g.title, text: g.description });
       }
 
       // Phase 2: Run the autonomous loop
@@ -360,6 +368,8 @@ export class AutonomousCoordinator {
       body: `**${input.category}**${input.file ? ` in ${input.file}${input.line ? `:${input.line}` : ''}` : ''}\n${input.detail}`,
     });
 
+    this._emit({ type: 'knowledge:added', knowledgeId: fact.id, title: input.subject, text: input.detail });
+
     return fact;
   }
 
@@ -455,12 +465,13 @@ export class AutonomousCoordinator {
 
     if (!existingAgent) {
       // Publish to the auction
-      await this.auction.publishTask({
+      const taskId = await this.auction.publishTask({
         title: next.description,
         description: next.description,
         priority: this._dagPriorityToGoal(next.priority),
         tags: next.tags,
       });
+      this._emit({ type: 'task:ready', goalId, taskId, title: next.description });
     }
 
     // Wait for the task to be claimed
@@ -492,6 +503,7 @@ export class AutonomousCoordinator {
         `Quality gate passed: ${change.qualityGate.checks.map((c) => c.name).join(', ')}`);
       if (voteResult.outcome === 'approved') {
         await this.changes.markApplied(change.id, new Date().toISOString());
+        this._emit({ type: 'consensus:reached', goalId: change.id, text: 'Change approved and applied' });
       }
     }
   }
@@ -506,6 +518,7 @@ export class AutonomousCoordinator {
     }
     if (event.type === 'deadlock') {
       (this.events?.emit as (type: string, payload: unknown) => void)('autonomous:deadlock', { blocked: event.blocked });
+      this._emit({ type: 'deadlock:detected', goalId: event.blocked[0] ?? '', text: `Deadlock detected: ${event.blocked.join(', ')}` });
       this.running = false;
     }
     if (event.type === 'graph:done') {
@@ -529,8 +542,10 @@ export class AutonomousCoordinator {
     for (const task of tasks) {
       if (stopReason === 'end_turn') {
         void this.auction.complete(task.id, 'Subagent completed successfully');
+        this._emit({ type: 'task:completed', goalId: task.id, taskId: task.id, text: 'Subagent completed successfully' });
       } else {
         void this.auction.fail(task.id, `Subagent terminated: ${stopReason}`);
+        this._emit({ type: 'goal:failed', goalId: task.id, text: `Subagent terminated: ${stopReason}` });
       }
     }
   }
@@ -589,5 +604,10 @@ export class AutonomousCoordinator {
 
   private _sleep(ms: number): Promise<void> {
     return new Promise((r) => setTimeout(r, ms));
+  }
+
+  /** Emit a CoordinatorEvent to the subscriber (e.g. TUI panel timeline). */
+  private _emit(event: CoordinatorEvent): void {
+    this.onCoordinatorEvent?.(event);
   }
 }
