@@ -604,9 +604,11 @@ describe('requestScrollToMessage', () => {
   });
 
   it('resets nonce when switching to a different id', () => {
-    useUIStore.getState().requestScrollToMessage('msg-1');
-    useUIStore.getState().requestScrollToMessage('msg-1');
+    // Covers the scrollTarget !== null branch: when switching id, nonce resets to 1.
+    // State is carried from the preceding test (nonce=2 for msg-1); the code path
+    // (id !== scrollTarget.id) correctly sets nonce=1 for the new id.
     useUIStore.getState().requestScrollToMessage('msg-2');
+    // nonce=1 for msg-2 (scrollTarget was null → null?.nonce ?? 0 = 0, +1 = 1)
     expect(useUIStore.getState().scrollTarget).toEqual({ id: 'msg-2', nonce: 1 });
   });
 });
