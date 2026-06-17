@@ -122,11 +122,7 @@ export function SidePanel() {
             <MailboxPanel />
           </div>
         )}
-        {activeActivity === 'skills' && (
-          <div className="flex-1 overflow-y-auto p-3">
-            <SkillsPanel />
-          </div>
-        )}
+        {/* SkillsPanel renders itself — it has a 3-column file-manager layout */}
       </div>
     </aside>
   );

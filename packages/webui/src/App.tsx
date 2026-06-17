@@ -28,10 +28,11 @@ import { FleetMonitor } from './components/FleetMonitor';
 import { InspectorPanel } from './components/InspectorPanel';
 import { ProcessMonitor } from './components/ProcessMonitor';
 import { QueuePanel } from './components/QueuePanel';
+import { SkillsPanel } from './components/SkillsPanel';
 function AppInner() {
   const { theme } = useTheme();
   const {
-    currentView, sidebarOpen, toggleSidebar, setSearchOpen, setSidebarOpen, setCurrentView,
+    currentView, activeActivity, sidebarOpen, toggleSidebar, setSearchOpen, setSidebarOpen, setCurrentView,
     setInspectorTab, toggleInspector,
     fleetMonitorOpen, agentsMonitorOpen, setFleetMonitorOpen, setAgentsMonitorOpen,
     processMonitorOpen, setProcessMonitorOpen, queuePanelOpen, setQueuePanelOpen,
@@ -328,6 +329,13 @@ function AppInner() {
         )}
         {/* ── IDE Code Editor (only in Files view) ── */}
         {currentView === 'files' && <CodeEditor />}
+
+        {/* ── Skills Panel — 3-column file-manager layout ── */}
+        {activeActivity === 'skills' && (
+          <div className="flex-1 overflow-hidden">
+            <SkillsPanel className="h-full" />
+          </div>
+        )}
       </main>
 
       {/* Fleet Monitor sidebar overlay */}

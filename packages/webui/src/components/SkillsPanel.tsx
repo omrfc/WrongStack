@@ -678,85 +678,86 @@ export function SkillsPanel({ className }: { className?: string }) {
 
   return (
     <div className={cn('flex h-full overflow-hidden', className)}>
-      {/* ── Skill list ── */}
-      <div className="w-56 shrink-0 border-r flex flex-col overflow-hidden">
+      {/* ── Icon Rail — skill-specific actions ── */}
+      <div className="w-12 shrink-0 border-r flex flex-col items-center py-2 gap-1">
+        <button
+          type="button"
+          onClick={() => {
+            setInstallRef('');
+            setInstallError(null);
+            setInstallSuccess(null);
+            setInstallGlobal(false);
+            setInstallModalOpen(true);
+          }}
+          className="flex items-center justify-center w-9 h-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          title="Install skill"
+        >
+          <Plus className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setCreateName('');
+            setCreateDescription('');
+            setCreateScope('project');
+            setCreateError(null);
+            setCreateSuccess(null);
+            setCreateModalOpen(true);
+          }}
+          className="flex items-center justify-center w-9 h-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          title={
+            selectedSkill
+              ? `Create similar skill (e.g. my-${selectedSkill.name.replace(/([A-Z])/g, '-$1').toLowerCase().replace(/^-/, '')})`
+              : 'Create skill'
+          }
+        >
+          <FileText className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={handleExportAll}
+          disabled={exportingAll || skills.length === 0}
+          className="flex items-center justify-center w-9 h-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-40"
+          title="Export all skills as .zip"
+        >
+          {exportingAll ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Download className="h-4 w-4" />
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={handleRefreshAll}
+          disabled={checkingForUpdates}
+          className="flex items-center justify-center w-9 h-9 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-40 relative"
+          title="Check for updates (all skills)"
+        >
+          {checkingForUpdates ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="h-4 w-4" />
+          )}
+          {/* Update available badge */}
+          {!checkingForUpdates && skillsState.updateAvailableCount > 0 && (
+            <span className="absolute top-0.5 right-0.5 h-2.5 w-2.5 rounded-full bg-primary text-[8px] font-bold text-primary-foreground flex items-center justify-center">
+              {skillsState.updateAvailableCount > 9 ? '9+' : skillsState.updateAvailableCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* ── Skill List — with filters ── */}
+      <div className="w-60 shrink-0 border-r flex flex-col overflow-hidden">
         {/* Search + filter */}
         <div className="p-2 space-y-2 border-b shrink-0">
-          <div className="flex items-center gap-1.5">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search skills…"
-              className="flex-1 px-2 py-1 text-xs rounded border border-border bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-            <button
-              type="button"
-              onClick={() => {
-                setInstallRef('');
-                setInstallError(null);
-                setInstallSuccess(null);
-                setInstallGlobal(false);
-                setInstallModalOpen(true);
-              }}
-              className="flex items-center gap-1 px-1.5 py-1 text-[10px] rounded bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
-              title="Install skill"
-            >
-              <Plus className="h-3 w-3" />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setCreateName('');
-                setCreateDescription('');
-                setCreateScope('project');
-                setCreateError(null);
-                setCreateSuccess(null);
-                setCreateModalOpen(true);
-              }}
-              className="flex items-center gap-1 px-1.5 py-1 text-[10px] rounded bg-muted text-muted-foreground hover:bg-accent hover:text-foreground shrink-0"
-              title={
-                selectedSkill
-                  ? `Create similar skill (e.g. my-${selectedSkill.name.replace(/([A-Z])/g, '-$1').toLowerCase().replace(/^-/, '')})`
-                  : 'Create skill'
-              }
-            >
-              <FileText className="h-3 w-3" />
-            </button>
-            {/* Export all skills as .zip */}
-            <button
-              type="button"
-              onClick={handleExportAll}
-              disabled={exportingAll || skills.length === 0}
-              className="flex items-center gap-1 px-1.5 py-1 text-[10px] rounded bg-muted text-muted-foreground hover:bg-accent hover:text-foreground shrink-0 disabled:opacity-50"
-              title="Export all skills as .zip"
-            >
-              {exportingAll ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <Download className="h-3 w-3" />
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={handleRefreshAll}
-              disabled={checkingForUpdates}
-              className="flex items-center gap-1 px-1.5 py-1 text-[10px] rounded bg-muted text-muted-foreground hover:bg-accent hover:text-foreground shrink-0 disabled:opacity-50 relative"
-              title="Check for updates (all skills)"
-            >
-              {checkingForUpdates ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3 w-3" />
-              )}
-              {/* Update available badge */}
-              {!checkingForUpdates && skillsState.updateAvailableCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-primary text-[8px] font-bold text-primary-foreground flex items-center justify-center">
-                  {skillsState.updateAvailableCount > 9 ? '9+' : skillsState.updateAvailableCount}
-                </span>
-              )}
-            </button>
-          </div>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search skills…"
+            className="w-full px-2 py-1.5 text-xs rounded border border-border bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+          />
           <div className="flex gap-1 flex-wrap">
             {(['all', 'project', 'user', 'bundled'] as ScopeFilter[]).map((scope) => {
               const count = scope === 'all' ? filteredSkills.length : filteredSkills.filter((s) => s.source === scope).length;
