@@ -83,12 +83,14 @@ export function SkillsPanel({ className }: { className?: string }) {
   // Breadcrumb navigation history — initialized from persisted store state
   const [navHistory, setNavHistory] = useState<SkillInfo[]>(skillsState.navHistory);
   const [historyIndex, setHistoryIndex] = useState(skillsState.historyIndex);
+  // Whether the detail pane is currently open — synced with store.detailOpen
+  const [detailOpen, setDetailOpen] = useState(skillsState.detailOpen);
   // Track if the current navigation was a "back" operation to avoid pushing duplicate entries
   const isNavigatingBack = useRef(false);
   // Whether we've restored from the store on mount (to avoid re-persisting the initial state)
   const didRestore = useRef(false);
 
-  // Query skills on mount; restore selected skill from store if present
+  // Query skills on mount; restore selected skill from store if detailOpen was true
   useEffect(() => {
     if (!client) return;
     setLoading(true);
@@ -98,10 +100,11 @@ export function SkillsPanel({ className }: { className?: string }) {
       if (m.payload.enabled && m.payload.skills) {
         setSkills(m.payload.skills);
 
-        // After skills list loads, restore from store if we haven't already
-        if (!didRestore.current && skillsState.selectedSkill) {
+        // Restore detail view from store ONLY when detailOpen is true (user had the detail open)
+        // and we haven't already restored. This fires on first mount with persisted detail state.
+        if (!didRestore.current && skillsState.selectedSkill && skillsState.detailOpen) {
           didRestore.current = true;
-          // Re-fetch content for the persisted selected skill
+          setDetailOpen(true);
           setSelectedSkill(skillsState.selectedSkill);
           setNavHistory(skillsState.navHistory);
           setHistoryIndex(skillsState.historyIndex);
@@ -138,10 +141,10 @@ export function SkillsPanel({ className }: { className?: string }) {
     return skills.find((s) => s.name.toLowerCase() === name.toLowerCase());
   }, [skills]);
 
-  // Sync the current navigation state to the persisted store
+  // Sync the current navigation state to the persisted store (including detailOpen)
   const syncToStore = useCallback(
-    (skill: SkillInfo, history: SkillInfo[], index: number) => {
-      setSkillsState({ selectedSkill: skill, navHistory: history, historyIndex: index });
+    (skill: SkillInfo, history: SkillInfo[], index: number, isDetailOpen: boolean) => {
+      setSkillsState({ selectedSkill: skill, navHistory: history, historyIndex: index, detailOpen: isDetailOpen });
     },
     [setSkillsState],
   );
@@ -152,6 +155,7 @@ export function SkillsPanel({ className }: { className?: string }) {
       setSelectedSkill(skill);
       setSkillContent(null);
       setContentLoading(true);
+      setDetailOpen(true);
       client.send({ type: 'skills.content', payload: { name: skill.name, source: skill.source } });
 
       if (fromRelated && !isNavigatingBack.current) {
@@ -159,7 +163,7 @@ export function SkillsPanel({ className }: { className?: string }) {
         newHistory.push(skill);
         setNavHistory(newHistory);
         setHistoryIndex(newHistory.length - 1);
-        syncToStore(skill, newHistory, newHistory.length - 1);
+        syncToStore(skill, newHistory, newHistory.length - 1, true);
       } else if (fromRelated && isNavigatingBack.current) {
         // Navigated back, then selected a new related skill — start fresh from here
         isNavigatingBack.current = false;
@@ -167,7 +171,7 @@ export function SkillsPanel({ className }: { className?: string }) {
         // Direct selection from the list — start a new breadcrumb with just this skill
         setNavHistory([skill]);
         setHistoryIndex(0);
-        syncToStore(skill, [skill], 0);
+        syncToStore(skill, [skill], 0, true);
       }
     },
     [client, historyIndex, navHistory, syncToStore],
@@ -195,7 +199,7 @@ export function SkillsPanel({ className }: { className?: string }) {
     setSkillContent(null);
     setContentLoading(true);
     client.send({ type: 'skills.content', payload: { name: skill.name, source: skill.source } });
-    syncToStore(skill, navHistory, newIndex);
+    syncToStore(skill, navHistory, newIndex, true);
   }, [historyIndex, navHistory, client, syncToStore]);
 
   // Go forward one step in breadcrumb history
@@ -209,16 +213,16 @@ export function SkillsPanel({ className }: { className?: string }) {
     setSkillContent(null);
     setContentLoading(true);
     client.send({ type: 'skills.content', payload: { name: skill.name, source: skill.source } });
-    syncToStore(skill, navHistory, newIndex);
+    syncToStore(skill, navHistory, newIndex, true);
   }, [historyIndex, navHistory, client, syncToStore]);
 
-  // Close detail view — keep the persisted state so it survives panel switches
+  // Close detail view — keep selectedSkill and breadcrumb in store so list stays highlighted
   const handleCloseDetail = useCallback(() => {
     setSelectedSkill(null);
     setSkillContent(null);
-    // Note: navHistory and historyIndex are intentionally NOT reset here so the
-    // breadcrumb is preserved when switching back to the Skills panel.
-  }, []);
+    // Sync detailOpen=false to store but keep selectedSkill + navHistory for the list highlight
+    setSkillsState({ ...skillsState, detailOpen: false });
+  }, [skillsState, setSkillsState]);
 
   const filteredSkills = useMemo(() => {
     let result = skills;

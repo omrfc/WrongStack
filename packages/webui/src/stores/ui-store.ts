@@ -86,6 +86,8 @@ interface UIState {
     navHistory: { name: string; description: string; version: string; source: string; path: string; trigger: string; scope: string[] }[];
     /** Current position in navHistory. */
     historyIndex: number;
+    /** Whether the detail pane is open (controls list highlight vs. detail view). */
+    detailOpen: boolean;
   };
   setSkillsState: (state: UIState['skillsState']) => void;
 
@@ -166,6 +168,7 @@ export const useUIStore = create<UIState>()(
         selectedSkill: null,
         navHistory: [],
         historyIndex: -1,
+        detailOpen: false,
       },
 
       selectActivity: (activity) => set({ activeActivity: activity }),
