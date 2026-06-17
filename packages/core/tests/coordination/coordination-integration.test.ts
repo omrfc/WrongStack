@@ -17,7 +17,16 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await fs.rm(tempDir, { recursive: true, force: true });
+  // Retry rm on Windows where locked files can cause ENOTEMPTY during parallel runs.
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      await fs.rm(tempDir, { recursive: true, force: true });
+      return;
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOTEMPTY') throw err;
+      await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+    }
+  }
 });
 
 // ── Integration: KnowledgeGraph + ConsensusProtocol ─────────────────────────
