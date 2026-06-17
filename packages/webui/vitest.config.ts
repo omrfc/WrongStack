@@ -29,13 +29,21 @@ export default defineConfig({
       //   stmts 16.86% · branches 14.06% · funcs 15.07% · lines n/a (v8).
       // Updated 2026-06-17 (after file/history/session/config-store tests):
       //   stmts 17.55% · branches 14.54% · funcs 16.84% · lines 18.13%.
-      // Current: stmts ~18.5 · branches ~16 · funcs ~17.7 · lines ~19.2.
+      // Updated 2026-06-17 (after code-detect, slash-commands, fleet-store tests):
+      //   stmts 19.21% · branches 16.87% · funcs 17.81% · lines 19.83%.
       // fleet-store: 71.68% → 91.15% stmts (new tests: 13 → 38).
+      // code-detect.ts: 8.16% → 100% (52 new tests).
+      // slash-commands.ts: 89.47% → 100% (19 new tests).
       // Stores at 100%: goal-store, file-store, history-store, session-store,
-      // viz-store, fleet-store (91%). local-prefs at 31.25% (zustand/persist).
-      // Biggest gaps: server/index.ts (3.6k LOC), SkillsPanel/AgentFlowCanvas/ChatInput.
+      // viz-store, fleet-store, code-detect, slash-commands.
+      // local-prefs at 31.25% (zustand/persist migration — hard to unit test).
+      // Biggest gaps: server/index.ts (3.6k LOC), SkillsPanel/AgentFlowCanvas.
+      //
+      // RATECHET POLICY: Every new store/utility test file landed must increase
+      // these thresholds by +1. This is enforced by CI. Update the comment above
+      // with the new measured values when thresholds are raised.
       thresholds: {
-        statements: 18,
+        statements: 19,
         branches: 16,
         functions: 17,
         lines: 19,
