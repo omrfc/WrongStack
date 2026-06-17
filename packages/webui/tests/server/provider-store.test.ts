@@ -8,9 +8,15 @@ const { mockReadFile, mockAtomicWrite } = vi.hoisted(() => ({
   mockAtomicWrite: vi.fn(),
 }));
 
-vi.mock('node:fs/promises', () => ({
-  readFile: (...args: unknown[]) => mockReadFile(...args),
-}));
+vi.mock('node:fs/promises', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const actual = require('node:fs/promises');
+  return {
+    ...actual,
+    default: actual,
+    readFile: (...args: unknown[]) => mockReadFile(...args),
+  };
+});
 
 vi.mock('@wrongstack/core', async (importOriginal) => {
   const actual = await importOriginal() as any;

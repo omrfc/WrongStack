@@ -189,7 +189,7 @@ export const useVizStore = create<VizState>()((set, get) => ({
   },
 
   pushEvent: (event) => set((state) => {
-    const events = [{ ...event, id: nextId(), timestamp: event.timestamp || Date.now() }, ...state.events];
+    const events = [{ ...event, id: event.id ?? nextId(), timestamp: event.timestamp || Date.now() }, ...state.events];
     if (events.length > state.maxEvents) events.length = state.maxEvents;
     return { events };
   }),
@@ -200,7 +200,7 @@ export const useVizStore = create<VizState>()((set, get) => ({
     nodes.set(partial.id, {
       ...existing,
       ...partial,
-      lastSeenAt: Date.now(),
+      lastSeenAt: partial.lastSeenAt !== undefined ? partial.lastSeenAt : Date.now(),
     } as VizNode);
     return { nodes };
   }),
@@ -221,7 +221,7 @@ export const useVizStore = create<VizState>()((set, get) => ({
     edges.set(partial.id, {
       ...existing,
       ...partial,
-      lastActiveAt: Date.now(),
+      lastActiveAt: partial.lastActiveAt !== undefined ? partial.lastActiveAt : Date.now(),
       intensity: partial.intensity ?? existing?.intensity ?? 0.5,
       color: partial.color ?? EDGE_COLORS[partial.kind] ?? EDGE_COLORS.default,
       totalMagnitude: (existing?.totalMagnitude ?? 0) + (partial.totalMagnitude ?? 0),
@@ -250,8 +250,9 @@ export const useVizStore = create<VizState>()((set, get) => ({
   decayActivity: () => set((state) => {
     const nodes = new Map(state.nodes);
     for (const [id, node] of nodes) {
-      if (node.activity > 0.01) {
-        nodes.set(id, { ...node, activity: node.activity * 0.92 });
+      if (node.activity >= 0.01) {
+        const decayed = node.activity * 0.92;
+        nodes.set(id, { ...node, activity: decayed < 0.01 ? 0 : decayed });
       }
     }
     return { nodes };
@@ -261,7 +262,7 @@ export const useVizStore = create<VizState>()((set, get) => ({
     const cutoff = Date.now() - olderThan;
     const nodes = new Map(state.nodes);
     for (const [id, node] of nodes) {
-      if (node.lastSeenAt < cutoff && node.status !== 'active') nodes.delete(id);
+      if (node.lastSeenAt < cutoff && node.status !== undefined && node.status !== 'active') nodes.delete(id);
     }
     const edges = new Map(state.edges);
     for (const [id, edge] of edges) {
@@ -297,7 +298,7 @@ export function wsToVizEvent(
       return {
         id: nextId(), kind: 'provider:response', timestamp: Date.now(),
         source: 'provider', target: 'leader',
-        label: `${(usage?.input ?? 0).toLocaleString()} in / ${(usage?.output ?? 0).toLocaleString()} out`,
+        label: `${(usage?.input ?? 0).toLocaleString('en-US')} in / ${(usage?.output ?? 0).toLocaleString('en-US')} out`,
         magnitude: total,
         data: payload as Record<string, unknown>,
         color: NODE_COLORS.provider,
@@ -445,7 +446,7 @@ export function wsToVizEvent(
       return {
         id: nextId(), kind: 'context:compacted', timestamp: Date.now(),
         source: 'system', target: 'session',
-        label: `Compacted: ${(payload.saved as number ?? 0).toLocaleString()} tokens`,
+        label: `Compacted: ${(payload.saved as number ?? 0).toLocaleString('en-US')} tokens`,
         magnitude: payload.saved as number ?? 0,
         data: payload as Record<string, unknown>,
         color: 'hsl(220, 60%, 50%)',

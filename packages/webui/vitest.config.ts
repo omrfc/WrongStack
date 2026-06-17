@@ -33,10 +33,10 @@ export default defineConfig({
       // Biggest gaps: server/index.ts (3.6k LOC), SkillsPanel/ChatInput/
       // AgentFlowCanvas (~1k LOC each), ws-client.ts (0.8%), viz-store.ts.
       thresholds: {
-        statements: 17,
-        branches: 14,
-        functions: 16,
-        lines: 18,
+        statements: 18,
+        branches: 15,
+        functions: 17,
+        lines: 19,
         // Don't fail the gate on a single untouched file — the aggregate
         // ratchet above is what we enforce. Tighten per-file once each area
         // is brought up.
@@ -47,6 +47,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // Force @wrongstack/core to resolve from source (packages/core/src) instead
+      // of going through the package's "exports" field which points to dist/.
+      '@wrongstack/core': path.resolve(__dirname, '../../packages/core/src'),
     },
   },
 });
