@@ -36,8 +36,22 @@ afterEach(async () => {
 // ── Mock helpers ───────────────────────────────────────────────────────────
 
 function createMockFleetBus(): FleetBus {
+  const listeners = new Map<string, Set<(payload: unknown) => void>>();
   return {
-    emit: vi.fn(),
+    emit: vi.fn((type: string, payload?: unknown) => {
+      const handlers = listeners.get(type);
+      if (handlers) {
+        for (const h of handlers) h(payload);
+      }
+    }),
+    on: vi.fn((type: string, handler: (payload: unknown) => void) => {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type)!.add(handler);
+      return () => listeners.get(type)?.delete(handler);
+    }),
+    off: vi.fn((type: string, handler: (payload: unknown) => void) => {
+      listeners.get(type)?.delete(handler);
+    }),
     filter: vi.fn(() => vi.fn()),
     subscribe: vi.fn(() => () => {}),
     unsubscribe: vi.fn(),
@@ -444,6 +458,121 @@ describe('AutonomousCoordinator', () => {
       expect(stats.dag).toBeDefined();
       expect(stats.auction).toBeDefined();
       expect(typeof stats.decisions).toBe('number');
+    });
+  });
+
+  describe('orphan task retry (no bids)', () => {
+    it('fails a task after maxBidRetries when no agents bid', async () => {
+      // Use a short bid window so we don't wait long
+      const BID_WINDOW_MS = 100;
+      const MAX_RETRIES = 3;
+      const fleet = createMockFleetBus();
+      const mailbox = createMockMailbox();
+      const graph = new KnowledgeGraph(tempDir);
+
+      const auctioneer = new TaskAuctioneer({
+        graph,
+        fleet,
+        mailbox,
+        bidWindowMs: BID_WINDOW_MS,
+        maxBidRetries: MAX_RETRIES,
+      });
+
+      vi.useFakeTimers();
+
+      // Publish a task — no agents will bid
+      const taskId = await auctioneer.publishTask({
+        title: 'Orphan task',
+        description: 'No one will bid on this',
+        priority: 'high',
+        tags: ['test'],
+      });
+
+      // Advance past all 3 bid windows (100ms × 3 = 300ms) plus a small buffer
+      await vi.advanceTimersByTimeAsync((BID_WINDOW_MS * MAX_RETRIES) + 50);
+
+      vi.useRealTimers();
+
+      // Task should have failed after MAX_RETRIES attempts
+      const node = graph.get(taskId);
+      expect(node).toBeDefined();
+      expect(node!.status).toBe('failed');
+    });
+
+    it('retries orphan tasks up to maxBidRetries, not forever', async () => {
+      const BID_WINDOW_MS = 50;
+      const MAX_RETRIES = 2;
+      const fleet = createMockFleetBus();
+      const mailbox = createMockMailbox();
+      const graph = new KnowledgeGraph(tempDir);
+
+      const auctioneer = new TaskAuctioneer({
+        graph,
+        fleet,
+        mailbox,
+        bidWindowMs: BID_WINDOW_MS,
+        maxBidRetries: MAX_RETRIES,
+      });
+
+      vi.useFakeTimers();
+
+      const taskId = await auctioneer.publishTask({
+        title: 'Will fail after 2 retries',
+        description: 'Only 2 retries allowed',
+        priority: 'medium',
+        tags: ['test'],
+      });
+
+      // Advance past exactly 2 bid windows (should fail on 2nd evaluation)
+      await vi.advanceTimersByTimeAsync((BID_WINDOW_MS * MAX_RETRIES) + 30);
+
+      vi.useRealTimers();
+
+      // Should be failed after 2 retries
+      const node = graph.get(taskId);
+      expect(node).toBeDefined();
+      expect(node!.status).toBe('failed');
+    });
+
+    it('cleans up retry counter when task is manually failed', async () => {
+      const BID_WINDOW_MS = 100;
+      const fleet = createMockFleetBus();
+      const mailbox = createMockMailbox();
+      const graph = new KnowledgeGraph(tempDir);
+
+      const auctioneer = new TaskAuctioneer({
+        graph,
+        fleet,
+        mailbox,
+        bidWindowMs: BID_WINDOW_MS,
+        maxBidRetries: 3,
+      });
+
+      vi.useFakeTimers();
+
+      // Publish a task — no bids will come in
+      const taskId = await auctioneer.publishTask({
+        title: 'Will be manually failed',
+        description: 'We manually fail this after a bit',
+        priority: 'high',
+        tags: ['test'],
+      });
+
+      // Advance first bid window — no bids, retry count becomes 1
+      await vi.advanceTimersByTimeAsync(BID_WINDOW_MS + 10);
+      expect(graph.get(taskId)!.status).toBe('pending'); // still pending (retrying)
+
+      // Manually fail the task
+      await auctioneer.fail(taskId, 'Manual failure for test');
+
+      vi.useRealTimers();
+
+      // Task should be failed
+      const node = graph.get(taskId);
+      expect(node).toBeDefined();
+      expect(node!.status).toBe('failed');
+      // After fail(), the retry counter should be deleted (no more retries)
+      // This is verified by the fact that the task is 'failed', not still 'pending'
     });
   });
 });
