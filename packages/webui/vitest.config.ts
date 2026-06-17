@@ -27,16 +27,16 @@ export default defineConfig({
       //   stmts 15.55% · branches 13.05% · funcs 11.75% · lines 16.21%.
       // Updated 2026-06-17 (after ui-store + chat-store 100%):
       //   stmts 16.86% · branches 14.06% · funcs 15.07% · lines n/a (v8).
-      // Functions tightened: 13 → 14 (actual 15.07%).
-      // NOTE: stmts cannot yet be raised to 17 (actual 16.86% < 17%).
-      // Raise thresholds as aggregate coverage grows. Set all to 100 for hard gate.
+      // Updated 2026-06-17 (after file/history/session/config-store tests):
+      //   stmts 17.55% · branches 14.54% · funcs 16.84% · lines 18.13%.
+      // Raised: stmts 16→17 · branches 13→14 · funcs 14→16 · lines 16→18.
       // Biggest gaps: server/index.ts (3.6k LOC), SkillsPanel/ChatInput/
-      // AgentFlowCanvas (~1k LOC each), ws-client.ts (0.8%).
+      // AgentFlowCanvas (~1k LOC each), ws-client.ts (0.8%), viz-store.ts.
       thresholds: {
-        statements: 16,
-        branches: 13,
-        functions: 14,
-        lines: 16,
+        statements: 17,
+        branches: 14,
+        functions: 16,
+        lines: 18,
         // Don't fail the gate on a single untouched file — the aggregate
         // ratchet above is what we enforce. Tighten per-file once each area
         // is brought up.
