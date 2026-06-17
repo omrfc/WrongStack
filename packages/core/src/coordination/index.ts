@@ -228,3 +228,87 @@ export {
   type PackageOutdatedWatcherOptions,
   type OutdatedNotifyMessage,
 } from './package-outdated-watcher.js';
+
+// ── Autonomous coordination layer ──────────────────────────────────────────
+
+/** Shared knowledge graph — facts, goals, decisions, changes */
+export { KnowledgeGraph } from './knowledge-graph.js';
+export type {
+  NodeType,
+  FactCategory,
+  FactNode,
+  GoalNode,
+  DecisionNode,
+  ChangeNode,
+  VoteNode,
+  VoteRecord,
+  QualityGateResult,
+  QualityCheck,
+  GraphSubscription,
+  NodeFilter,
+  GoalStatus,
+  GoalPriority,
+  ChangeStatus,
+  VoteValue,
+} from './knowledge-graph.js';
+
+/** Task DAG — dependency graph with fork/join semantics */
+export { TaskDAG } from './task-dag.js';
+export type {
+  DAGNode,
+  DAGNodeStatus,
+  DAGEdgeEvent,
+  DAGEdgeHandler,
+  RunnablesHandler,
+} from './task-dag.js';
+
+/** Consensus protocol — agent voting on proposed changes */
+export { ConsensusProtocol } from './consensus-protocol.js';
+export type {
+  VoterConfig,
+  QuorumRule,
+  ConsensusResult,
+  ConsensusOptions,
+} from './consensus-protocol.js';
+
+/** Change manager — autonomous code change lifecycle */
+export {
+  ChangeManager,
+  DEFAULT_QUALITY_CHECKS,
+  type ChangeManagerOptions,
+  type ChangeFile,
+  type ChangeProposal,
+  type ApplyResult,
+  type RollbackResult,
+  type QualityGateChecks,
+} from './change-manager.js';
+
+/** Autonomous brain — LLM-backed decision-making engine */
+export { AutonomousBrain } from './autonomous-brain.js';
+export type {
+  AutonomousBrainOptions,
+  LLMProvider,
+  DecisionPrompt,
+  AutonomousDecisionType,
+  AutonomousDecisionRequest,
+  SpawnDecision,
+  ApprovalDecision,
+  PrioritizationDecision,
+  EscalationDecision,
+} from './autonomous-brain.js';
+
+/** Task auctioneer — project-wide task marketplace */
+export { TaskAuctioneer } from './task-auctioneer.js';
+export type {
+  TaskBid,
+  TaskAuctionOptions,
+} from './task-auctioneer.js';
+
+/** Autonomous coordinator — wires all coordination components */
+export { AutonomousCoordinator } from './autonomous-coordinator.js';
+export type {
+  AutonomousCoordinatorOptions,
+  CoordinatorEvent,
+  RunOptions,
+  CoordinatorStats,
+} from './autonomous-coordinator.js';

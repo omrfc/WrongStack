@@ -1175,6 +1175,10 @@ export async function main(argv: string[]): Promise<number> {
   });
   brainMonitor.start();
 
+  // ── AutonomousCoordinator is initialized inside execution.ts ──
+  // The execution phase owns its lifecycle (it has access to the Director and
+  // the LLM provider). See execution.ts:onDirectorReady.
+
   const multiAgentHost = new MultiAgentHost(
     {
       container,
@@ -2337,6 +2341,10 @@ export async function main(argv: string[]): Promise<number> {
     tokenCounter,
     config,
     configStore,
+    // Project-scoped mailbox — the AutonomousCoordinator in execution.ts
+    // subscribes to it so goals/tasks/knowledge are shared with other
+    // terminals working on the same project.
+    mailbox: brainMailbox,
     renderer,
     reader,
     session,

@@ -23,6 +23,7 @@ export {
   FleetManager,
   type FleetManagerOptions,
 } from './coordination/fleet-manager.js';
+export * from './coordination/index.js';
 export { createMcpControlTool, type MCPRegistryHandle } from './tools/mcp-control.js';
 export { createMcpUseTool } from './tools/mcp-use.js';
 // Re-export safeParse explicitly at the top-level export for consumers

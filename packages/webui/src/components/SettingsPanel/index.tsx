@@ -504,7 +504,7 @@ export function SettingsPanel() {
                       }
                     />
                     <p className="text-xs text-muted-foreground mt-2">
-                      Changes take effect after restarting WrongStack.
+                      Changes apply immediately.
                     </p>
                   </>
                 ) : (

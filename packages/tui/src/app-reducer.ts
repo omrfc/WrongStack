@@ -1513,5 +1513,59 @@ export function reducer(state: State, action: Action): State {
       if (state.countdown === null) return state;
       return { ...state, countdown: null };
     }
+    // --- AutonomousCoordinator ---
+    case 'coordinatorEvent': {
+      const { event } = action;
+      const now = Date.now();
+      // Build timeline entry from raw event
+      let kind: State['coordinator']['timeline'][0]['kind'];
+      let icon: string;
+      switch (event.type) {
+        case 'goal:added':        kind = 'goal';      icon = '🎯'; break;
+        case 'goal:completed':     kind = 'goal';      icon = '✅'; break;
+        case 'goal:failed':       kind = 'goal';      icon = '❌'; break;
+        case 'task:ready':        kind = 'task';      icon = '⚡'; break;
+        case 'task:completed':     kind = 'task';      icon = '✓';  break;
+        case 'knowledge:added':    kind = 'knowledge'; icon = '💡'; break;
+        case 'consensus:reached': kind = 'consensus'; icon = '🤝'; break;
+        case 'deadlock:detected': kind = 'deadlock';  icon = '⚠️'; break;
+        default:                   kind = 'goal';      icon = '•';  break;
+      }
+      const timelineEntry = {
+        at: now,
+        kind,
+        icon,
+        text: event.text ?? event.type,
+      };
+      return {
+        ...state,
+        coordinator: {
+          ...state.coordinator,
+          healthy: true,
+          knowledgeCount:
+            event.type === 'knowledge:added'
+              ? state.coordinator.knowledgeCount + 1
+              : state.coordinator.knowledgeCount,
+          timeline: [timelineEntry, ...state.coordinator.timeline].slice(0, 50),
+        },
+      };
+    }
+    case 'toggleCoordinatorMonitor': {
+      const opening = !state.coordinator.monitorOpen;
+      return opening
+        ? {
+            ...state,
+            coordinator: { ...state.coordinator, monitorOpen: true },
+            // Close other monitors when opening coordinator
+            monitorOpen: false,
+            agentsMonitorOpen: false,
+            helpOpen: false,
+            todosMonitorOpen: false,
+            queuePanelOpen: false,
+            processListOpen: false,
+            goalPanelOpen: false,
+          }
+        : { ...state, coordinator: { ...state.coordinator, monitorOpen: false } };
+    }
   }
 }

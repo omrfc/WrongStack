@@ -1,6 +1,8 @@
 import type {
   Agent,
   AttachmentStore,
+  AutonomousCoordinator,
+  CoordinatorEvent,
   Director,
   EventBus,
   Message,
@@ -365,6 +367,28 @@ export interface RunTuiOptions {
    * Used by the `wrongstack quick` command to show agents panel immediately.
    */
   initialAgentsMonitorOpen?: boolean | undefined;
+
+  // --- AutonomousCoordinator (project-level multi-session coordination) ---
+
+  /**
+   * Access the project-level AutonomousCoordinator instance. When set, the TUI
+   * renders a coordination panel showing live goals, pending tasks, consensus
+   * decisions, and shared knowledge from all active sessions. The coordinator
+   * runs independently of the session — it coordinates multiple sessions.
+   */
+  getAutonomousCoordinator?: () => AutonomousCoordinator | null | undefined;
+  /**
+   * Subscribe to live events from the AutonomousCoordinator:
+   * - `goal:added` — new coordination goal received
+   * - `goal:completed` — goal finished successfully
+   * - `goal:failed` — goal failed after max attempts
+   * - `task:ready` — task's dependencies are satisfied, ready to execute
+   * - `task:completed` — task finished
+   * - `knowledge:added` — new shared fact published
+   * - `consensus:reached` — multi-session agreement reached
+   * Returns an unsubscribe function.
+   */
+  subscribeCoordinatorEvents?: (fn: (event: CoordinatorEvent) => void) => () => void;
 }
 
 // Bracketed paste mode wraps any pasted text with these markers, letting us
@@ -777,6 +801,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           getLiveSessions: opts.getLiveSessions,
           onSwitchToSession: opts.onSwitchToSession,
           initialAgentsMonitorOpen: opts.initialAgentsMonitorOpen,
+          subscribeCoordinatorEvents: opts.subscribeCoordinatorEvents,
         }),
         { exitOnCtrlC: false, stdin: inkStdin },
       );

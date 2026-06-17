@@ -13,8 +13,8 @@ import { toErrorMessage } from '@wrongstack/core/utils';
  * persisted to `extensions.telegram` in the global config via
  * `persistTelegramConfig`.
  *
- * The plugin reads these ONCE at `setup()` time, so a change takes effect
- * on the next restart — this is called out in every success message.
+ * Changes are reactive: the plugin listens to `api.onConfigChange` and picks up
+ * new values on the next event — no restart needed.
  */
 const HELP = [
   'Usage:',
@@ -27,7 +27,7 @@ const HELP = [
   '',
   'Aliases: /tg-settings',
   '',
-  'Settings take effect after restarting WrongStack (the plugin reads them at startup).',
+  'Settings apply immediately — no restart needed.',
 ].join('\n');
 
 export function buildTelegramSettingsCommand(opts: SlashCommandContext): SlashCommand {
@@ -57,7 +57,7 @@ export function buildTelegramSettingsCommand(opts: SlashCommandContext): SlashCo
       `  notify chat:     ${color.cyan(chat)}   ${color.dim('change: /telegram-settings chat <chatId>')}`,
       '',
       hasToken
-        ? color.dim('  Bot token configured. Restart to apply changes.')
+        ? color.dim('  Bot token configured. Changes apply immediately.')
         : `${color.amber('⚠')}  No bot token configured. Run: /telegram-setup <botToken> [chatId]`,
     ].join('\n');
   }
@@ -102,7 +102,7 @@ export function buildTelegramSettingsCommand(opts: SlashCommandContext): SlashCo
             tg.notifyOnSessionEnd = on;
           });
           return {
-            message: `${color.green('✓')} session-end → ${on ? color.cyan('on') : color.dim('off')}   ${color.dim('restart to apply')}`,
+            message: `${color.green('✓')} session-end → ${on ? color.cyan('on') : color.dim('off')}`,
           };
         }
 
@@ -116,7 +116,7 @@ export function buildTelegramSettingsCommand(opts: SlashCommandContext): SlashCo
             tg.notifyOnDelegate = on;
           });
           return {
-            message: `${color.green('✓')} delegate → ${on ? color.cyan('on') : color.dim('off')}   ${color.dim('restart to apply')}`,
+            message: `${color.green('✓')} delegate → ${on ? color.cyan('on') : color.dim('off')}`,
           };
         }
 
@@ -132,7 +132,7 @@ export function buildTelegramSettingsCommand(opts: SlashCommandContext): SlashCo
               tg.longToolThresholdMs = 0;
             });
             return {
-              message: `${color.green('✓')} long-tool → ${color.dim('off')}   ${color.dim('restart to apply')}`,
+              message: `${color.green('✓')} long-tool → ${color.dim('off')}`,
             };
           }
           const ms = Number.parseInt(raw, 10);
@@ -145,7 +145,7 @@ export function buildTelegramSettingsCommand(opts: SlashCommandContext): SlashCo
             tg.longToolThresholdMs = ms;
           });
           return {
-            message: `${color.green('✓')} long-tool → ${color.cyan(`${ms}ms`)}   ${color.dim('restart to apply')}`,
+            message: `${color.green('✓')} long-tool → ${color.cyan(`${ms}ms`)}`,
           };
         }
 
@@ -164,7 +164,7 @@ export function buildTelegramSettingsCommand(opts: SlashCommandContext): SlashCo
             tg.pollIntervalSec = sec;
           });
           return {
-            message: `${color.green('✓')} poll → ${color.cyan(`${sec}s`)}   ${color.dim('restart to apply')}`,
+            message: `${color.green('✓')} poll → ${color.cyan(`${sec}s`)}`,
           };
         }
 
@@ -178,7 +178,7 @@ export function buildTelegramSettingsCommand(opts: SlashCommandContext): SlashCo
             tg.notifyChatId = chatId;
           });
           return {
-            message: `${color.green('✓')} notify chat → ${color.cyan(raw)}   ${color.dim('restart to apply')}`,
+            message: `${color.green('✓')} notify chat → ${color.cyan(raw)}`,
           };
         }
 
