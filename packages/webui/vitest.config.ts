@@ -29,9 +29,11 @@ export default defineConfig({
       //   stmts 16.86% · branches 14.06% · funcs 15.07% · lines n/a (v8).
       // Updated 2026-06-17 (after file/history/session/config-store tests):
       //   stmts 17.55% · branches 14.54% · funcs 16.84% · lines 18.13%.
-      // Raised: stmts 16→17 · branches 13→14 · funcs 14→16 · lines 16→18.
+      // Current: stmts 18.43 · branches 15.81 · funcs 17.61 · lines 19.09.
+      // Stores at 100%: goal-store, file-store, history-store, session-store,
+      // viz-store. local-prefs at 31.25% (migration IIFE; zustand/persist internals).
       // Biggest gaps: server/index.ts (3.6k LOC), SkillsPanel/ChatInput/
-      // AgentFlowCanvas (~1k LOC each), ws-client.ts (0.8%), viz-store.ts.
+      // AgentFlowCanvas (~1k LOC each), ws-client.ts (0.8%).
       thresholds: {
         statements: 18,
         branches: 15,
