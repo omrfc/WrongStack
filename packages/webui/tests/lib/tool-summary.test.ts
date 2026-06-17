@@ -316,6 +316,14 @@ describe('tool-summary', () => {
       const result = summarizeToolInput('unknown', { weirdField: 'value' });
       expect(result).toBe('{"weirdField":"value"}');
     });
+
+    it('falls back to String when JSON.stringify throws (circular ref)', () => {
+      // Circular reference causes JSON.stringify to throw → safeJson catch fires
+      const circular: Record<string, unknown> = { self: null };
+      circular.self = circular;
+      const result = summarizeToolInput('unknown', circular);
+      expect(result).toBe('[object Object]'); // String(circular) = '[object Object]'
+    });
   });
 
   describe('edge cases', () => {

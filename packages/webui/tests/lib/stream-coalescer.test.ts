@@ -77,4 +77,14 @@ describe('StreamCoalescer', () => {
     tick();
     expect(flush).not.toHaveBeenCalled();
   });
+
+  it('flush on non-existent key is no-op', () => {
+    // Covers the `if (!p) return` guard at stream-coalescer.ts:91
+    const c = new StreamCoalescer();
+    const flush = vi.fn();
+    c.flush('does-not-exist');
+    expect(flush).not.toHaveBeenCalled();
+    tick();
+    expect(flush).not.toHaveBeenCalled();
+  });
 });

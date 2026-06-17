@@ -84,4 +84,24 @@ describe('chime helpers', () => {
 
     expect(oscillators.map((o) => o.frequency.value)).toEqual([523.25, 659.25, 783.99]);
   });
+
+  it('catches AudioContext constructor throw', async () => {
+    // Replace AudioContext with a class that throws on construction,
+    // covering the catch block at chime.ts:26
+    const OrigAudioContext = window.AudioContext;
+    Object.defineProperty(window, 'AudioContext', {
+      configurable: true,
+      value: class ThrowsAudioContext {
+        constructor() { throw new Error('AudioContext unavailable'); }
+      },
+    });
+    vi.resetModules();
+    const { playCompletionChime } = await import('@/lib/chime');
+    expect(() => playCompletionChime()).not.toThrow();
+    // Restore original so subsequent tests aren't affected
+    Object.defineProperty(window, 'AudioContext', {
+      configurable: true,
+      value: OrigAudioContext,
+    });
+  });
 });

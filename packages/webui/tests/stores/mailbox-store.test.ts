@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   type MailboxMessage,
   selectUnreadCount,
@@ -23,6 +23,11 @@ function makeMessage(overrides: Partial<MailboxMessage> = {}): MailboxMessage {
 }
 
 describe('mailbox store', () => {
+  afterEach(() => {
+    // Clean up persisted state between tests
+    useMailboxStore.setState({ messages: [], agents: [] });
+  });
+
   it('counts only unread, uncompleted messages', () => {
     useMailboxStore.getState().setMessages([
       makeMessage({ id: 'a' }), // unread
@@ -36,5 +41,17 @@ describe('mailbox store', () => {
   it('is zero when empty', () => {
     useMailboxStore.getState().setMessages([]);
     expect(selectUnreadCount(useMailboxStore.getState())).toBe(0);
+  });
+
+  it('setMessages updates the messages array', () => {
+    const msgs = [makeMessage({ id: 'x' }), makeMessage({ id: 'y' })];
+    useMailboxStore.getState().setMessages(msgs);
+    expect(useMailboxStore.getState().messages).toEqual(msgs);
+  });
+
+  it('setAgents updates the agents array', () => {
+    const agents = [{ id: 'agent-1', name: 'Alice' }, { id: 'agent-2', name: 'Bob' }];
+    useMailboxStore.getState().setAgents(agents as any);
+    expect(useMailboxStore.getState().agents).toEqual(agents);
   });
 });
