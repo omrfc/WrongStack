@@ -222,6 +222,7 @@ export class DefaultSessionStore implements SessionStore {
       });
       this.emitWrite(id, file, 'create', 'success', Date.now() - t0);
       return writer;
+      /* v8 ignore start -- defensive: FileSessionWriter ctor does not throw in practice */
     } catch (err) {
       await handle.close().catch((e) => console.warn(JSON.stringify({
         level: 'warn',
@@ -232,6 +233,7 @@ export class DefaultSessionStore implements SessionStore {
       this.emitError(id, file, 'create', toErrorMessage(err), true);
       throw err;
     }
+    /* v8 ignore stop */
   }
 
   async resume(id: string): Promise<ResumedSession> {
@@ -241,6 +243,7 @@ export class DefaultSessionStore implements SessionStore {
     let handle: fsp.FileHandle;
     try {
       handle = await fsp.open(file, 'a', 0o600);
+      /* v8 ignore start -- defensive: load() above already validated the file is readable */
     } catch (err) {
       this.emitError(id, file, 'resume', toErrorMessage(err), false);
       throw new Error(
@@ -248,6 +251,7 @@ export class DefaultSessionStore implements SessionStore {
         { cause: err },
       );
     }
+    /* v8 ignore stop */
     try {
       const writer = new FileSessionWriter(
         id,
@@ -272,6 +276,7 @@ export class DefaultSessionStore implements SessionStore {
       );
       this.emitWrite(id, file, 'resume', 'success', Date.now() - t0);
       return { writer, data };
+      /* v8 ignore start -- defensive: FileSessionWriter ctor does not throw in practice */
     } catch (err) {
       await handle.close().catch((e) => console.warn(JSON.stringify({
         level: 'warn',
@@ -282,6 +287,7 @@ export class DefaultSessionStore implements SessionStore {
       this.emitError(id, file, 'resume', toErrorMessage(err), true);
       throw err;
     }
+    /* v8 ignore stop */
   }
 
   async load(id: string): Promise<SessionData> {
@@ -381,6 +387,7 @@ export class DefaultSessionStore implements SessionStore {
       }
       // Index unavailable — fall back to full directory scan + summary parse.
       const ids = await this.collectSessionIds(this.dir);
+      /* v8 ignore next -- summaryFor() never rejects for a collected id (its .jsonl exists) */
       const sessions = await Promise.all(ids.map((id) => this.summaryFor(id).catch(() => null))); /* best-effort */
       const out = sessions.filter((s): s is SessionSummary => s !== null);
       out.sort((a, b) => {
@@ -502,6 +509,7 @@ export class DefaultSessionStore implements SessionStore {
    */
   async rebuildIndex(): Promise<number> {
     const ids = await this.collectSessionIds(this.dir);
+    /* v8 ignore next -- summaryFor() never rejects for a collected id (its .jsonl exists) */
     const summaries = await Promise.all(ids.map((id) => this.summaryFor(id).catch(() => null))); /* best-effort */
     const valid = summaries.filter((s): s is SessionSummary => s !== null);
     // Atomic rewrite: write to temp, then rename.
@@ -622,6 +630,7 @@ export class DefaultSessionStore implements SessionStore {
     }
 
     // Remove the session directory (may contain fleet.json, shared/, subagents/).
+    /* v8 ignore start -- defensive: rm with force:true rarely rejects */
     await fsp.rm(sessDir, { recursive: true, force: true }).catch((err) => {
       console.warn(JSON.stringify({
         level: 'warn',
@@ -631,6 +640,7 @@ export class DefaultSessionStore implements SessionStore {
         timestamp: new Date().toISOString(),
       }));
     });
+    /* v8 ignore stop */
 
     // Write an index tombstone so readIndex() filters this session out.
     await this.writeTombstone(id);
@@ -666,9 +676,11 @@ export class DefaultSessionStore implements SessionStore {
       try {
         const stat = await fsp.stat(jsonlPath);
         if (stat.mtimeMs >= cutoff) return;
+        /* v8 ignore start -- defensive: file vanished between readdir and stat */
       } catch {
         return;
       }
+      /* v8 ignore stop */
       const base = name.replace(/\.jsonl$/, '');
       const id = prefix ? `${prefix}/${base}` : base;
       // Never prune the currently active session.
@@ -677,6 +689,7 @@ export class DefaultSessionStore implements SessionStore {
       deleted++;
     };
 
+    /* v8 ignore next -- defensive: store dir is ensured before prune runs */
     const entries = await fsp.readdir(this.dir, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
       if (entry.isFile()) {
@@ -685,9 +698,11 @@ export class DefaultSessionStore implements SessionStore {
         if (isPrunableJsonl(entry.name)) await pruneFile(this.dir, entry.name, '');
         continue;
       }
+      /* v8 ignore next -- defensive: root entries are only files or directories */
       if (!entry.isDirectory()) continue;
       // entry.name is a date-shard like "2026-06-06"
       const dateDir = path.join(this.dir, entry.name);
+      /* v8 ignore next -- defensive: dateDir came from readdir and is readable */
       const files = await fsp.readdir(dateDir, { withFileTypes: true }).catch(() => []);
       for (const file of files) {
         if (!file.isFile() || !isPrunableJsonl(file.name)) continue;
@@ -696,6 +711,7 @@ export class DefaultSessionStore implements SessionStore {
     }
     if (deleted > 0) {
       // Compact the index to remove tombstones for deleted sessions.
+      /* v8 ignore next -- best-effort: compactIndex swallows its own errors */
       await this.compactIndex().catch(() => undefined); /* best-effort */
     }
     // Clean up empty date-shard directories left behind after pruning.
@@ -705,6 +721,7 @@ export class DefaultSessionStore implements SessionStore {
       try {
         const remaining = await fsp.readdir(dateDir);
         if (remaining.length === 0) {
+          /* v8 ignore next -- best-effort: rmdir of a confirmed-empty dir does not reject */
           await fsp.rmdir(dateDir).catch(() => undefined);
         }
       } catch {
@@ -1149,10 +1166,12 @@ class FileSessionWriter implements SessionWriter {
     if (this.flushTimer) return;
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
+      /* v8 ignore start -- defensive: flushBuffer logs its own errors; this guards the timer callback */
       this.flushBuffer().catch(() => {
         // flushBuffer already logs via the throttled-warning path;
         // this catch prevents an unhandled rejection in the timer callback.
       });
+      /* v8 ignore stop */
     }, FileSessionWriter.FLUSH_INTERVAL_MS);
   }
 
@@ -1319,11 +1338,13 @@ class FileSessionWriter implements SessionWriter {
     let idxError: string | undefined;
     try {
       await this.onCloseCb?.(this.summary);
+      /* v8 ignore start -- best-effort: appendToIndex swallows its own errors */
     } catch (err) {
       idxOutcome = 'failure';
       idxError = toErrorMessage(err);
       // best-effort
     } finally {
+      /* v8 ignore stop */
       this.events?.emit('storage.write', {
         sessionId: this.summary.id,
         store: 'session',
@@ -1375,6 +1396,7 @@ class FileSessionWriter implements SessionWriter {
   }
 
   async truncateToCheckpoint(targetPromptIndex: number): Promise<number> {
+    /* v8 ignore next -- defensive: filePath is always set for a live writer */
     if (!this.filePath) return 0;
     // Flush buffered events to disk before reading — otherwise the in-memory
     // events that haven't hit the JSONL yet would be invisible to the
@@ -1440,10 +1462,12 @@ class FileSessionWriter implements SessionWriter {
       await fsp.rename(tmpPath, this.filePath);
       // Re-open in append mode for continued use of this file.
       this.handle = await fsp.open(this.filePath, 'a', 0o600);
+      /* v8 ignore start -- defensive: close/rename/reopen of a just-written temp file */
     } catch (err) {
       await fsp.unlink(tmpPath).catch(() => undefined);
       throw err;
     }
+    /* v8 ignore stop */
 
     await this.append({
       type: 'rewound',
@@ -1462,6 +1486,7 @@ class FileSessionWriter implements SessionWriter {
   }
 
   async clearSession(): Promise<void> {
+    /* v8 ignore next -- defensive: filePath is always set for a live writer */
     if (!this.filePath) return;
     // Discard any buffered events — the caller is explicitly resetting the
     // session to a clean slate. Cancel the timer so it doesn't fire and

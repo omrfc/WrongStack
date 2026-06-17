@@ -477,6 +477,7 @@ function computeTrend(history: ProgressSnapshot[]): 'accelerating' | 'steady' | 
   for (let i = 1; i < recent.length; i++) {
     deltas.push((recent[i]?.progress ?? 0) - (recent[i - 1]?.progress ?? 0));
   }
+  /* v8 ignore next -- unreachable: history.length>=3 guard above guarantees >=2 deltas */
   if (deltas.length < 2) return undefined;
   const avgDelta = deltas.reduce((a, b) => a + b, 0) / deltas.length;
   if (avgDelta > 2) return 'accelerating';

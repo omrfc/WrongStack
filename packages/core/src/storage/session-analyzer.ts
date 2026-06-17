@@ -141,6 +141,7 @@ export class SessionAnalyzer {
     if (events.length < 2) return 0;
     const firstEvent = events[0];
     const lastEvent = events[events.length - 1];
+    /* v8 ignore next -- defensive: length>=2 guard above guarantees both ends exist */
     if (!firstEvent || !lastEvent) return 0;
     const first = new Date(firstEvent.ts).getTime();
     const last = new Date(lastEvent.ts).getTime();

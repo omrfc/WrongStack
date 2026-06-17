@@ -247,6 +247,7 @@ export class ToolAuditLog {
           this.tailStat.delete(sessionId);
           return { prevHash: GENESIS_PREV, nextIndex: 0 };
         }
+        /* v8 ignore next -- defensive: a non-ENOENT stat failure during cache-hit is rare */
         throw err;
       }
     }

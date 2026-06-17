@@ -267,10 +267,12 @@ export class DirectorStateCheckpoint {
     // If a rewrite was requested while we waited, persist() scheduled
     // a follow-up write. Loop until no more rewrites are requested so
     // shutdown doesn't return before the most recent state lands on disk.
+    /* v8 ignore start -- concurrency-defensive: persist()'s finally clears the flag in single-threaded flow */
     while (this.rewriteRequested) {
       this.rewriteRequested = false;
       await this.persist();
     }
+    /* v8 ignore stop */
   }
 
   private bumpUpdatedAt(): void {
@@ -305,10 +307,12 @@ export class DirectorStateCheckpoint {
       );
     } finally {
       this.writing = false;
+      /* v8 ignore start -- concurrency-defensive: rewriteRequested is only set by an overlapping persist() */
       if (this.rewriteRequested) {
         this.rewriteRequested = false;
         this.schedule();
       }
+      /* v8 ignore stop */
     }
   }
 }

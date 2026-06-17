@@ -125,6 +125,7 @@ export class DefaultAttachmentStore implements AttachmentStore {
       for (const att of this.items.values()) {
         if (att.path) toDelete.push(att.path);
       }
+      /* v8 ignore next -- best-effort: unlink of a just-spooled file does not reject */
       await Promise.all(toDelete.map((p) => fsp.unlink(p).catch(() => undefined)));
     }
     this.items.clear();

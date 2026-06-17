@@ -366,6 +366,7 @@ export class CloudSync {
       case 'prompts':  return this.paths.globalPrompts;
       case 'memory':   return this.paths.globalMemory;
       case 'history':  return this.paths.historyFile;
+      /* v8 ignore next -- unreachable: SyncCategory is exhaustively matched above */
       default:         return null;
     }
   }
@@ -417,6 +418,7 @@ function resolvePulledCategoryPath(
   const dest = path.resolve(localPath, normalizedRel);
   const root = path.resolve(localPath);
   const relative = path.relative(root, dest);
+  /* v8 ignore start -- unreachable: the normalizedRel '..' guard above already rejects traversal */
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new FsError({
       message: `Refusing CloudSync path outside category root: ${remotePath}`,
@@ -425,6 +427,7 @@ function resolvePulledCategoryPath(
       context: { reason: 'outside_category_root', category: cat },
     });
   }
+  /* v8 ignore stop */
   return dest;
 }
 

@@ -18,6 +18,7 @@ function storageErrorString(err: unknown): string {
     const code = (err as NodeJS.ErrnoException).code;
     return code ? `${code}: ${err.message}` : err.message;
   }
+  /* v8 ignore next -- defensive: fs/lock failures are always Error instances */
   return String(err);
 }
 

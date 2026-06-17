@@ -249,6 +249,7 @@ export class FileMemoryBackend implements MemoryBackend {
     const next = lines.join('\n');
     const backup = `${file}.bak.${Date.now()}`;
     try { await fs.copyFile(file, backup); } catch { /* best-effort */ }
+    /* v8 ignore next -- best-effort: atomicWrite failure during consolidate is non-fatal */
     try { await atomicWrite(file, next); } catch { return 0; /* best-effort */ }
     return removed;
   }

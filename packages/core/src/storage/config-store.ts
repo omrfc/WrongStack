@@ -101,8 +101,10 @@ export class DefaultConfigStore implements ConfigStore {
 const FROZEN_EMPTY: Readonly<Record<string, unknown>> = Object.freeze({});
 
 function deepFreeze<T>(obj: T): T {
+  /* v8 ignore start -- defensive: callers (and the recursion guard below) only pass unfrozen objects */
   if (obj === null || typeof obj !== 'object') return obj;
   if (Object.isFrozen(obj)) return obj;
+  /* v8 ignore stop */
   for (const key of Object.keys(obj as object)) {
     const v = (obj as Record<string, unknown>)[key];
     if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) {
