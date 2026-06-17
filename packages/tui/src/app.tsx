@@ -4621,7 +4621,7 @@ export function App({
     // a control byte (no native paste) and we don't enable bracketed-paste mode,
     // so we read the clipboard ourselves. Must run before the `key.ctrl` bail
     // below, which would otherwise swallow it.
-    if (key.ctrl && input === 'v') {
+    if (key.ctrl) {
       await pasteClipboardText();
       return;
     }

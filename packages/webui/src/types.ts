@@ -290,6 +290,43 @@ export interface WSSkillsList {
   };
 }
 
+export interface WSSkillContent {
+  type: 'skills.content';
+  payload: {
+    name: string;
+    body: string;
+    path: string;
+    source: string;
+    relatedFiles: string[];
+    references: string[];
+    error?: string | undefined;
+  };
+}
+
+export interface WSSkillsInstalled {
+  type: 'skills.installed';
+  payload: {
+    success: boolean;
+    error: string | null;
+    results?: Array<{
+      name: string;
+      path: string;
+      scope: 'project' | 'user';
+      source: string;
+      ref: string;
+      skillCount: number;
+    }>;
+  };
+}
+
+export interface WSSkillsUninstalled {
+  type: 'skills.uninstalled';
+  payload: {
+    success: boolean;
+    error: string | null;
+  };
+}
+
 export interface WSDiagGet {
   type: 'diag.get';
   payload: {
@@ -598,7 +635,11 @@ export type WSClientMessage =
   | { type: 'brain.status' }
   | { type: 'brain.risk'; payload: { level: string } }
   | { type: 'brain.ask'; payload: { question: string } }
-  | { type: 'model.refine'; payload: { text: string } };
+  | { type: 'model.refine'; payload: { text: string } }
+  | { type: 'skills.list' }
+  | { type: 'skills.content'; payload: { name: string; source: string } }
+  | { type: 'skills.install'; payload: { ref: string; global?: boolean } }
+  | { type: 'skills.uninstall'; payload: { name: string; global?: boolean } };
 
 export type WSServerMessage =
   | WSSessionStart
@@ -623,6 +664,9 @@ export type WSServerMessage =
   | WSToolsList
   | WSMemoryList
   | WSSkillsList
+  | WSSkillContent
+  | WSSkillsInstalled
+  | WSSkillsUninstalled
   | WSDiagGet
   | WSStatsGet
   | WSSessionsList

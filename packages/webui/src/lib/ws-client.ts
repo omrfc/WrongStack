@@ -573,6 +573,18 @@ export class WrongStackWebSocketClient {
     this.send({ type: 'skills.list' });
   }
 
+  getSkillContent(name: string, source: string) {
+    this.send({ type: 'skills.content', payload: { name, source } });
+  }
+
+  installSkill(ref: string, global?: boolean) {
+    this.send({ type: 'skills.install', payload: { ref, global } });
+  }
+
+  uninstallSkill(name: string, global?: boolean) {
+    this.send({ type: 'skills.uninstall', payload: { name, global } });
+  }
+
   getDiag() {
     this.send({ type: 'diag.get' });
   }

@@ -1,6 +1,7 @@
 import { expectDefined, GlobalMailbox, projectSlug, getSessionRegistry, AgentStatusTracker } from '@wrongstack/core';
 import { makeMailboxTool, makeMailSendTool, makeMailInboxTool, mailboxSessionTag } from '@wrongstack/core';
-import { toErrorMessage } from '@wrongstack/core/utils';
+import { toErrorMessage, wstackGlobalRoot, projectHash } from '@wrongstack/core/utils';
+import { SkillInstaller } from '@wrongstack/core/skills';
 import {
   BrainMonitor,
   DefaultBrainArbiter,
@@ -495,6 +496,15 @@ export async function startWebUI(
 
   const skillLoader = config.features.skills
     ? new DefaultSkillLoader({ paths: wpaths })
+    : undefined;
+  const skillInstaller = config.features.skills
+    ? new SkillInstaller({
+        manifestPath: path.join(wstackGlobalRoot(), 'installed-skills.json'),
+        projectSkillsDir: path.join(projectRoot, '.wrongstack', 'skills'),
+        globalSkillsDir: path.join(wstackGlobalRoot(), 'skills'),
+        projectHash: projectHash(projectRoot),
+        skillLoader,
+      })
     : undefined;
   const systemPromptBuilder = new DefaultSystemPromptBuilder({
     memoryStore,
@@ -2225,6 +2235,110 @@ export async function startWebUI(
         break;
       }
 
+      case 'skills.content': {
+        if (!skillLoader) {
+          send(ws, { type: 'skills.content', payload: { name: '', body: '', path: '', source: '', relatedFiles: [], references: [], error: 'Skills not enabled' } });
+          break;
+        }
+        const contentPayload = msg.payload as { name: string; source: string };
+        if (!contentPayload?.name) {
+          send(ws, { type: 'skills.content', payload: { name: '', body: '', path: '', source: '', relatedFiles: [], references: [], error: 'Skill name is required' } });
+          break;
+        }
+        try {
+          const { name, source } = contentPayload;
+          const entries = await skillLoader.listEntries();
+          const entry = entries.find((e) => e.name.toLowerCase() === name.toLowerCase());
+          if (!entry) {
+            send(ws, { type: 'skills.content', payload: { name, body: '', path: '', source, relatedFiles: [], references: [], error: `Skill "${name}" not found` } });
+            break;
+          }
+          const body = await skillLoader.readBody(name);
+          const skillDir = path.dirname(entry.path);
+
+          // Related files — other files in the same skill directory
+          let relatedFiles: string[] = [];
+          try {
+            const files = await fs.readdir(skillDir);
+            relatedFiles = files
+              .filter((f) => f !== path.basename(entry.path))
+              .map((f) => path.join(skillDir, f));
+          } catch {
+            // Non-fatal
+          }
+
+          // References — which other skills reference this one (by name)
+          const refs: string[] = [];
+          for (const e of entries) {
+            if (e.name.toLowerCase() === name.toLowerCase()) continue;
+            try {
+              const content = await skillLoader.readBody(e.name);
+              if (content.toLowerCase().includes(name.toLowerCase())) {
+                refs.push(e.name);
+              }
+            } catch {
+              // Non-fatal — skip skills we can't read
+            }
+          }
+
+          send(ws, { type: 'skills.content', payload: { name, body, path: entry.path, source, relatedFiles, references: refs } });
+        } catch (err) {
+          send(ws, { type: 'skills.content', payload: { name: contentPayload.name, body: '', path: '', source: contentPayload.source, relatedFiles: [], references: [], error: errMessage(err) } });
+        }
+        break;
+      }
+
+      case 'skills.install': {
+        if (!skillInstaller) {
+          send(ws, { type: 'skills.installed', payload: { success: false, error: 'Skills not enabled' } });
+          break;
+        }
+        const installPayload = msg.payload as { ref: string; global?: boolean };
+        if (!installPayload?.ref?.trim()) {
+          send(ws, { type: 'skills.installed', payload: { success: false, error: 'Skill reference is required (e.g. owner/repo or https://github.com/owner/repo)' } });
+          break;
+        }
+        try {
+          const results = await skillInstaller.install(installPayload.ref.trim(), { global: installPayload.global });
+          send(ws, {
+            type: 'skills.installed',
+            payload: {
+              success: true,
+              results,
+              error: null,
+            },
+          });
+        } catch (err) {
+          send(ws, {
+            type: 'skills.installed',
+            payload: {
+              success: false,
+              error: errMessage(err),
+            },
+          });
+        }
+        break;
+      }
+
+      case 'skills.uninstall': {
+        if (!skillInstaller) {
+          send(ws, { type: 'skills.uninstalled', payload: { success: false, error: 'Skills not enabled' } });
+          break;
+        }
+        const uninstallPayload = msg.payload as { name: string; global?: boolean };
+        if (!uninstallPayload?.name?.trim()) {
+          send(ws, { type: 'skills.uninstalled', payload: { success: false, error: 'Skill name is required' } });
+          break;
+        }
+        try {
+          await skillInstaller.uninstall(uninstallPayload.name.trim(), { global: uninstallPayload.global });
+          send(ws, { type: 'skills.uninstalled', payload: { success: true, error: null } });
+        } catch (err) {
+          send(ws, { type: 'skills.uninstalled', payload: { success: false, error: errMessage(err) } });
+        }
+        break;
+      }
+
       case 'diag.get': {
         // Snapshot of the moving parts so the user can debug "why is X
         // not working?" without diving into the server logs.
@@ -2659,44 +2773,52 @@ export async function startWebUI(
 
       case 'git.info': {
         // Read git branch, change stats, and sync status from the working directory.
-        const cwd = projectRoot;
-        const execFile = (cmd: string, args: string[]): Promise<string> =>
-          new Promise((resolve) => {
-            import('node:child_process').then(({ execFile: ef }) => {
-              ef(cmd, args, { cwd, timeout: 3000 }, (err: Error | null, stdout: string) => {
-                resolve(err ? '' : stdout.trim());
+        try {
+          const cwd = projectRoot;
+          const execFile = (cmd: string, args: string[]): Promise<string> =>
+            new Promise((resolve) => {
+              import('node:child_process').then(({ execFile: ef }) => {
+                ef(cmd, args, { cwd, timeout: 3000 }, (err: Error | null, stdout: string) => {
+                  resolve(err ? '' : stdout.trim());
+                });
               });
             });
+
+          const [branchRaw, diffRaw, statusRaw, upstreamRaw] = await Promise.all([
+            execFile('git', ['branch', '--show-current']),
+            execFile('git', ['diff', '--stat']),
+            execFile('git', ['status', '--porcelain']),
+            execFile('git', ['rev-list', '--left-right', '--count', '@{upstream}...HEAD']),
+          ]);
+
+          const branch = branchRaw || '(detached)';
+
+          // Parse `git diff --stat` output like "3 files changed, 10 insertions(+), 2 deletions(-)"
+          const diffMatch = /\+\s*(\d+)\s*deletion/i.exec(diffRaw);
+          const addMatch  = /(\d+)\s*insertion/i.exec(diffRaw)  ?? /(\d+)\s*addition/i.exec(diffRaw);
+          const delMatch  = /\+\s*(\d+)\s*deletion/i.exec(diffRaw);
+          const added    = addMatch  ? Number(addMatch[1])  : 0;
+          const deleted  = delMatch  ? Number(delMatch[1])  : 0;
+
+          // Count untracked files from `git status --porcelain`
+          const untracked = statusRaw.split('\n').filter((l) => l.startsWith('??')).length;
+
+          // Parse behind/ahead from `@{upstream}...HEAD`
+          const [aheadRaw, behindRaw] = (upstreamRaw || '0\t0').split('\t');
+          const ahead  = Number(aheadRaw) || 0;
+          const behind = Number(behindRaw) || 0;
+
+          send(ws, {
+            type: 'git.info',
+            payload: { branch, added, deleted, untracked, ahead, behind },
           });
-
-        const [branchRaw, diffRaw, statusRaw, upstreamRaw] = await Promise.all([
-          execFile('git', ['branch', '--show-current']),
-          execFile('git', ['diff', '--stat']),
-          execFile('git', ['status', '--porcelain']),
-          execFile('git', ['rev-list', '--left-right', '--count', '@{upstream}...HEAD']),
-        ]);
-
-        const branch = branchRaw || '(detached)';
-
-        // Parse `git diff --stat` output like "3 files changed, 10 insertions(+), 2 deletions(-)"
-        const diffMatch = /\+\s*(\d+)\s*deletion/i.exec(diffRaw);
-        const addMatch  = /(\d+)\s*insertion/i.exec(diffRaw)  ?? /(\d+)\s*addition/i.exec(diffRaw);
-        const delMatch  = /\+\s*(\d+)\s*deletion/i.exec(diffRaw);
-        const added    = addMatch  ? Number(addMatch[1])  : 0;
-        const deleted  = delMatch  ? Number(delMatch[1])  : 0;
-
-        // Count untracked files from `git status --porcelain`
-        const untracked = statusRaw.split('\n').filter((l) => l.startsWith('??')).length;
-
-        // Parse behind/ahead from `@{upstream}...HEAD`
-        const [aheadRaw, behindRaw] = (upstreamRaw || '0\t0').split('\t');
-        const ahead  = Number(aheadRaw) || 0;
-        const behind = Number(behindRaw) || 0;
-
-        send(ws, {
-          type: 'git.info',
-          payload: { branch, added, deleted, untracked, ahead, behind },
-        });
+        } catch {
+          // Git not available or directory not a git repo — send empty info silently
+          send(ws, {
+            type: 'git.info',
+            payload: { branch: '', added: 0, deleted: 0, untracked: 0, ahead: 0, behind: 0 },
+          });
+        }
         break;
       }
 

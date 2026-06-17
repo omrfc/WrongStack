@@ -5,7 +5,7 @@
  * view that displays the skill content plus references, scripts, and related files.
  */
 
-import { Sparkles, FileText, FolderOpen, X, ChevronRight, BookOpen, ArrowUpRight, ChevronLeft } from 'lucide-react';
+import { Sparkles, FileText, FolderOpen, X, ChevronRight, BookOpen, ArrowUpRight, ChevronLeft, Plus, Trash2, Download, Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
@@ -90,6 +90,75 @@ export function SkillsPanel({ className }: { className?: string }) {
   // Whether we've restored from the store on mount (to avoid re-persisting the initial state)
   const didRestore = useRef(false);
 
+  // Install modal state
+  const [installModalOpen, setInstallModalOpen] = useState(false);
+  const [installRef, setInstallRef] = useState('');
+  const [installGlobal, setInstallGlobal] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
+  const [installSuccess, setInstallSuccess] = useState<string | null>(null);
+
+  // Uninstall state
+  const [uninstallConfirmSkill, setUninstallConfirmSkill] = useState<SkillInfo | null>(null);
+  const [uninstalling, setUninstalling] = useState(false);
+
+  // Install a skill from a GitHub ref (owner/repo or URL)
+  const handleInstallSkill = useCallback(async () => {
+    if (!client || !installRef.trim()) return;
+    setInstalling(true);
+    setInstallError(null);
+    setInstallSuccess(null);
+
+    const handler = (msg: unknown) => {
+      const m = msg as { payload: { success: boolean; error: string | null; results?: Array<{ name: string }> } };
+      setInstalling(false);
+      if (m.payload.success) {
+        const names = m.payload.results?.map((r) => r.name).join(', ') ?? installRef;
+        setInstallSuccess(`Installed: ${names}`);
+        // Refresh the skills list
+        client.send({ type: 'skills.list' });
+      } else {
+        setInstallError(m.payload.error ?? 'Installation failed');
+      }
+      client.off('skills.installed', handler as (msg: unknown) => void);
+    };
+
+    client.on('skills.installed', handler as (msg: unknown) => void);
+    client.installSkill(installRef.trim(), installGlobal);
+  }, [client, installRef, installGlobal]);
+
+  // Uninstall the current or specified skill
+  const handleUninstallSkill = useCallback(
+    async (skill: SkillInfo) => {
+      if (!client) return;
+      setUninstalling(true);
+
+      const handler = (msg: unknown) => {
+        const m = msg as { payload: { success: boolean; error: string | null } };
+        setUninstalling(false);
+        if (m.payload.success) {
+          setUninstallConfirmSkill(null);
+          // Refresh skills list
+          client.send({ type: 'skills.list' });
+          // If we uninstalled the currently viewed skill, close the detail
+          if (selectedSkill?.name === skill.name) {
+            setSkillContent(null);
+            setDetailOpen(false);
+            setSelectedSkill(null);
+            setSkillsState({ ...skillsState, selectedSkill: null, detailOpen: false });
+          }
+        } else {
+          setInstallError(m.payload.error ?? 'Uninstall failed');
+        }
+        client.off('skills.uninstalled', handler as (msg: unknown) => void);
+      };
+
+      client.on('skills.uninstalled', handler as (msg: unknown) => void);
+      client.uninstallSkill(skill.name, skill.source === 'user');
+    },
+    [client, selectedSkill, skillsState, setSkillsState],
+  );
+
   // Query skills on mount; restore selected skill from store if detailOpen was true
   useEffect(() => {
     if (!client) return;
@@ -152,6 +221,13 @@ export function SkillsPanel({ className }: { className?: string }) {
   // Fetch skill content when selected; push to breadcrumb history when fromRelated=true
   const handleSelectSkill = useCallback(
     (skill: SkillInfo, fromRelated = false) => {
+      // If re-selecting the current skill (not via related), just re-open the detail
+      if (!fromRelated && selectedSkill?.name === skill.name) {
+        setDetailOpen(true);
+        setSkillsState({ ...skillsState, detailOpen: true });
+        return;
+      }
+
       setSelectedSkill(skill);
       setSkillContent(null);
       setContentLoading(true);
@@ -216,10 +292,10 @@ export function SkillsPanel({ className }: { className?: string }) {
     syncToStore(skill, navHistory, newIndex, true);
   }, [historyIndex, navHistory, client, syncToStore]);
 
-  // Close detail view — keep selectedSkill and breadcrumb in store so list stays highlighted
+  // Close detail view — keep selectedSkill and breadcrumb so list stays highlighted
   const handleCloseDetail = useCallback(() => {
-    setSelectedSkill(null);
     setSkillContent(null);
+    setDetailOpen(false);
     // Sync detailOpen=false to store but keep selectedSkill + navHistory for the list highlight
     setSkillsState({ ...skillsState, detailOpen: false });
   }, [skillsState, setSkillsState]);
@@ -267,29 +343,49 @@ export function SkillsPanel({ className }: { className?: string }) {
       <div className="w-56 shrink-0 border-r flex flex-col overflow-hidden">
         {/* Search + filter */}
         <div className="p-2 space-y-2 border-b shrink-0">
-          <input
+          <div className="flex items-center gap-1.5">
+            <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search skills…"
-            className="w-full px-2 py-1 text-xs rounded border border-border bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+            className="flex-1 px-2 py-1 text-xs rounded border border-border bg-background focus:outline-none focus:ring-1 focus:ring-ring"
           />
+            <button
+              type="button"
+              onClick={() => {
+                setInstallRef('');
+                setInstallError(null);
+                setInstallSuccess(null);
+                setInstallGlobal(false);
+                setInstallModalOpen(true);
+              }}
+              className="flex items-center gap-1 px-1.5 py-1 text-[10px] rounded bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
+              title="Install skill"
+            >
+              <Plus className="h-3 w-3" />
+            </button>
+          </div>
           <div className="flex gap-1 flex-wrap">
-            {(['all', 'project', 'user', 'bundled'] as ScopeFilter[]).map((scope) => (
-              <button
-                key={scope}
-                type="button"
-                onClick={() => setScopeFilter(scope)}
-                className={cn(
-                  'px-1.5 py-0.5 text-[10px] rounded transition-colors',
-                  scopeFilter === scope
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted text-muted-foreground hover:bg-accent',
-                )}
-              >
-                {scope === 'all' ? 'All' : SCOPE_LABELS[scope]}
-              </button>
-            ))}
+            {(['all', 'project', 'user', 'bundled'] as ScopeFilter[]).map((scope) => {
+              const count = scope === 'all' ? skills.length : skills.filter((s) => s.source === scope).length;
+              return (
+                <button
+                  key={scope}
+                  type="button"
+                  onClick={() => setScopeFilter(scope)}
+                  className={cn(
+                    'px-1.5 py-0.5 text-[10px] rounded transition-colors',
+                    scopeFilter === scope
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted text-muted-foreground hover:bg-accent',
+                  )}
+                >
+                  {scope === 'all' ? 'All' : SCOPE_LABELS[scope]}
+                  <span className={cn('ml-1', scopeFilter === scope ? 'opacity-80' : 'opacity-50')}>{count}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -340,7 +436,7 @@ export function SkillsPanel({ className }: { className?: string }) {
 
       {/* ── Skill detail ── */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {selectedSkill ? (
+        {detailOpen && selectedSkill ? (
           <>
             {/* Breadcrumb navigation bar */}
             {navHistory.length > 1 && (
@@ -397,6 +493,7 @@ export function SkillsPanel({ className }: { className?: string }) {
                               setSelectedSkill(skill);
                               setSkillContent(null);
                               setContentLoading(true);
+                              setDetailOpen(true);
                               client.send({ type: 'skills.content', payload: { name: skill.name, source: skill.source } });
                             }}
                             className="hover:text-primary text-muted-foreground cursor-pointer transition-colors"
@@ -431,14 +528,27 @@ export function SkillsPanel({ className }: { className?: string }) {
                     {selectedSkill.description || selectedSkill.trigger}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleCloseDetail}
-                  className="p-1 rounded hover:bg-accent text-muted-foreground cursor-pointer"
-                  title="Close"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-1 ml-auto">
+                  {/* Uninstall button — only for project/user scope, not bundled */}
+                  {selectedSkill.source !== 'bundled' && (
+                    <button
+                      type="button"
+                      onClick={() => setUninstallConfirmSkill(selectedSkill)}
+                      className="flex items-center gap-1 px-1.5 py-1 text-[10px] rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
+                      title="Uninstall skill"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleCloseDetail}
+                    className="p-1 rounded hover:bg-accent text-muted-foreground cursor-pointer"
+                    title="Close"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
 
               {/* Trigger keywords */}
