@@ -213,6 +213,7 @@ export function deriveTodosFromPlanItem(
   if (idx === -1) return null;
 
   const item = plan.items[idx];
+  /* v8 ignore next -- defensive: matchIndex returns a valid in-range index or -1 (handled above) */
   if (!item) return null;
 
   // Mark the plan item in_progress if it wasn't already done

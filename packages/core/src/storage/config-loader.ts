@@ -115,6 +115,7 @@ const ENV_MAP: Record<string, (cfg: PartialConfig, val: string) => void> = {
     c._envSource.add('baseUrl');
   },
   WRONGSTACK_LOG_LEVEL: (c, v) => {
+    /* v8 ignore next -- defensive: config defaults always seed c.log before env handlers run */
     if (!c.log) c.log = { level: 'info' };
     c.log.level = envLogLevel(v);
   },
@@ -484,11 +485,13 @@ export class DefaultConfigLoader implements ConfigLoader {
   }
 
   private validateBehavior(cfg: PartialConfig): void {
+    /* v8 ignore start -- defensive: config defaults always seed version:1 before validation */
     if (cfg.version === undefined) throw new ConfigError({
       message: 'Config: missing version field',
       code: ERROR_CODES.CONFIG_INVALID,
       context: { field: 'version' },
     });
+    /* v8 ignore stop */
     if (cfg.version !== 1) throw new ConfigError({
       message: `Config: unsupported version ${cfg.version}`,
       code: ERROR_CODES.CONFIG_INVALID,

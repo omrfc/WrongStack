@@ -181,6 +181,7 @@ export function startPackageOutdatedWatcher(
   };
 
   async function pollOnce(): Promise<void> {
+    /* v8 ignore next -- defensive: dispose() clears the interval, so pollOnce is never called after stop */
     if (!state.running) return;
 
     try {
