@@ -30,6 +30,7 @@ export function createModeTool(modeStore: ModeStore): Tool<ModeInput, ModeOutput
     mutating: true,
     timeoutMs: 5_000,
     capabilities: ['session.mode'],
+    icon: 'settings',
     inputSchema: {
       type: 'object',
       properties: {

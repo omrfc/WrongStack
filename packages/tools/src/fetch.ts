@@ -217,6 +217,7 @@ export const fetchTool: Tool<FetchInput, FetchOutput> = {
   permission: 'confirm',
   mutating: false,
   capabilities: ['net.outbound'],
+  icon: 'web',
   // Trust rules for fetch match on the literal URL — declare it explicitly
   // so a user can trust `https://api.example.com/*` without accidentally
   // matching that pattern on any other tool that happens to have a `url`

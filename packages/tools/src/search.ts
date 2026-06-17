@@ -32,6 +32,7 @@ export const searchTool: Tool<SearchInput, SearchOutput> = {
   permission: 'confirm',
   mutating: false,
   capabilities: ['net.outbound'],
+  icon: 'search',
   timeoutMs: TIMEOUT_MS,
   inputSchema: {
     type: 'object',

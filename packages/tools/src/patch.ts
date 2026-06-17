@@ -34,6 +34,7 @@ export const patchTool: Tool<PatchInput, PatchOutput> = {
   permission: 'confirm',
   mutating: true,
   capabilities: ['fs.write'],
+  icon: 'edit',
   timeoutMs: 30_000,
   inputSchema: {
     type: 'object',

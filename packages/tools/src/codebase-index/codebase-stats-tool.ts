@@ -14,6 +14,7 @@ import { codebaseIndexDirOverride } from './writer.js';
 export const codebaseStatsTool: Tool<Record<string, never>, CodebaseStatsOutput> = {
   name: 'codebase-stats',
   category: 'Project',
+  icon: 'index',
   description:
     'Return health and statistics about the current symbol index (total symbols, files, language/kind breakdown, size, last update). Useful to decide whether to re-index.',
   usageHint:

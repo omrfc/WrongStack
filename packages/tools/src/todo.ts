@@ -30,6 +30,7 @@ export const todoTool: Tool<TodoInput, TodoOutput> = {
   mutating: false, // mutates only conversation state (ctx.todos), not external state — no confirmation needed
   timeoutMs: 1_000,
   capabilities: ['session.todo'],
+  icon: 'todo',
   inputSchema: {
     type: 'object',
     properties: {

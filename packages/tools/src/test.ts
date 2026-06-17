@@ -37,6 +37,7 @@ export const testTool: Tool<TestInput, TestOutput> = {
     'Run tests frequently. A clean test run is usually required before the task can be considered complete.',
   permission: 'confirm',
   mutating: false,
+  icon: 'test',
   timeoutMs: 120_000,
   capabilities: ['shell.restricted'],
   inputSchema: {

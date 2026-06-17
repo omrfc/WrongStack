@@ -40,6 +40,7 @@ export const outdatedTool: Tool<OutdatedInput, OutdatedOutput> = {
     '- Hits the package registry over HTTP, so it is NOT purely local — flagged as mutating for the confirmation gate.\n' +
     'Use the output to decide on upgrades. Prefer this over manual shell commands for dependency hygiene.',
   permission: 'confirm',
+  icon: 'package',
   // Network side-effecting (registry HTTP). Pairs with `mutating: true`
   // so the H7 invariant test (`no auto-permission tool declares
   // mutating: true`) passes — a tool claiming `'auto'` must be purely

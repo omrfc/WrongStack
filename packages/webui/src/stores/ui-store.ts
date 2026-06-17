@@ -81,13 +81,17 @@ interface UIState {
   /** Skills panel breadcrumb state — persisted so history survives panel switches. */
   skillsState: {
     /** The skill currently shown in the detail pane. */
-    selectedSkill: { name: string; description: string; version: string; source: string; path: string; trigger: string; scope: string[] } | null;
+    selectedSkill: { name: string; description: string; version: string; source: string; sourceUrl: string; ref: string; path: string; trigger: string; scope: string[] } | null;
     /** Ordered history of skills navigated to via related links. */
-    navHistory: { name: string; description: string; version: string; source: string; path: string; trigger: string; scope: string[] }[];
+    navHistory: { name: string; description: string; version: string; source: string; sourceUrl: string; ref: string; path: string; trigger: string; scope: string[] }[];
     /** Current position in navHistory. */
     historyIndex: number;
     /** Whether the detail pane is open (controls list highlight vs. detail view). */
     detailOpen: boolean;
+    /** Last known commit refs per skill name — compared against live refs to detect updates. */
+    knownRefs: Record<string, string>;
+    /** Number of installed skills with a newer ref available than knownRefs. */
+    updateAvailableCount: number;
   };
   setSkillsState: (state: UIState['skillsState']) => void;
 
@@ -169,6 +173,8 @@ export const useUIStore = create<UIState>()(
         navHistory: [],
         historyIndex: -1,
         detailOpen: false,
+        knownRefs: {},
+        updateAvailableCount: 0,
       },
 
       selectActivity: (activity) => set({ activeActivity: activity }),
@@ -238,7 +244,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: 'wrongstack-ui',
-      version: 3,
+      version: 4,
       // v0 → v1: 'context'/'sessions' activities were removed and the
       // sidebar width bounds changed — coerce persisted values so a stale
       // localStorage entry can't select a panel that no longer exists.
@@ -246,6 +252,7 @@ export const useUIStore = create<UIState>()(
       // single docked InspectorPanel; drop the stale drawer booleans so
       // they can't force the (removed) fields back into state.
       // v2 → v3: added skillsState for Skills panel breadcrumb persistence.
+      // v3 → v4: added knownRefs and updateAvailableCount to skillsState.
       migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Record<string, unknown>;
         p.activeActivity = coerceActivity(p.activeActivity);

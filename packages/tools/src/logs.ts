@@ -44,6 +44,7 @@ export const logsTool: Tool<LogsInput, LogsOutput> = {
   mutating: false,
   timeoutMs: 30_000,
   capabilities: ['shell.restricted'],
+  icon: 'logs',
   inputSchema: {
     type: 'object',
     properties: {

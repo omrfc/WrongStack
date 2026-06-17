@@ -13,6 +13,35 @@ export type Permission = 'auto' | 'confirm' | 'deny';
  */
 export type RiskTier = 'safe' | 'standard' | 'destructive';
 
+/**
+ * Icon identifiers for tools — each UI (WebUI/TUI/REPL) maps these to its own icon library.
+ * Add the icon directly on each Tool so all UIs consume the same canonical value.
+ */
+export type ToolIconId =
+  | 'file'       // read, write — document operations
+  | 'edit'       // edit, patch — modifying files
+  | 'search'     // grep, search — searching content
+  | 'folder'     // glob — file discovery
+  | 'terminal'   // bash, exec — shell commands
+  | 'web'        // fetch — HTTP requests
+  | 'git'        // git — version control
+  | 'tree'       // tree — directory structure
+  | 'code'       // lint, format, typecheck — code quality
+  | 'test'       // test — testing
+  | 'package'     // install, audit, outdated — package management
+  | 'document'   // document — documentation
+  | 'scaffold'   // scaffold — project generation
+  | 'todo'       // todo — task tracking
+  | 'plan'       // plan — planning
+  | 'task'       // task — structured work items
+  | 'meta'       // tool-use, batch-tool-use, tool-search, tool-help — meta tools
+  | 'index'      // codebase-index, codebase-search, codebase-stats — code indexing
+  | 'json'       // json — JSON operations
+  | 'diff'       // diff — comparing changes
+  | 'logs'       // logs — log viewing
+  | 'settings'    // set-working-dir — configuration
+  | 'fallback';  // unknown tool — fallback icon
+
 export interface JSONSchema {
   type?: string | undefined;
   properties?: Record<string, JSONSchema>;
@@ -114,6 +143,12 @@ export interface Tool<I = unknown, O = unknown> {
    * treated conservatively by guards.
    */
   capabilities?: readonly string[] | undefined;
+  /**
+   * Icon identifier for this tool — consumed by all UIs (WebUI/TUI/REPL) to
+   * render a tool-specific icon instead of a generic fallback.
+   * Each UI maps this id to its own icon library.
+   */
+  icon?: ToolIconId | undefined;
   execute(input: I, ctx: Context, opts: { signal: AbortSignal }): Promise<O>;
   /**
    * Optional streaming variant. When defined, the executor prefers this

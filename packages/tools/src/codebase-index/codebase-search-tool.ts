@@ -23,6 +23,7 @@ import { codebaseIndexDirOverride } from './writer.js';
 export const codebaseSearchTool: Tool<CodebaseSearchInput, CodebaseSearchOutput> = {
   name: 'codebase-search',
   category: 'Project',
+  icon: 'index',
   description:
     'Semantic/keyword search over the indexed codebase symbols (functions, classes, interfaces, etc.). Uses BM25 ranking. ' +
     'Much more powerful and structured than raw `grep` for finding code by name or concept.',

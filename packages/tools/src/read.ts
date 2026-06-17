@@ -34,6 +34,7 @@ export const readTool: Tool<ReadInput, ReadOutput> = {
   permission: 'auto',
   mutating: false,
   capabilities: ['fs.read'],
+  icon: 'file',
   maxOutputBytes: 262_144,
   timeoutMs: 5_000,
   inputSchema: {

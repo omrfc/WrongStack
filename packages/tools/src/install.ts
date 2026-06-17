@@ -36,6 +36,7 @@ export const installTool: Tool<InstallInput, InstallOutput> = {
   permission: 'confirm',
   mutating: true,
   riskTier: 'standard',
+  icon: 'package',
   timeoutMs: 120_000,
   capabilities: ['package.install', 'shell.restricted'],
   inputSchema: {

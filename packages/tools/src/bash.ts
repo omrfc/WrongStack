@@ -66,6 +66,7 @@ export const bashTool: Tool<BashInput, BashOutput> = {
   permission: 'confirm',
   mutating: true,
   riskTier: 'destructive',
+  icon: 'terminal',
   // Trust rules match on the literal `command` string. Without subjectKey
   // the policy heuristic would have done the same here, but declaring it
   // explicitly removes the implicit cross-tool aliasing.

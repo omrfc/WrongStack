@@ -585,6 +585,18 @@ export class WrongStackWebSocketClient {
     this.send({ type: 'skills.uninstall', payload: { name, global } });
   }
 
+  checkForUpdates(name?: string, global?: boolean) {
+    this.send({ type: 'skills.update', payload: { name, global } });
+  }
+
+  createSkill(name: string, description: string, scope: 'project' | 'global') {
+    this.send({ type: 'skills.create', payload: { name, description, scope } });
+  }
+
+  editSkill(name: string, body: string) {
+    this.send({ type: 'skills.edit', payload: { name, body } });
+  }
+
   getDiag() {
     this.send({ type: 'diag.get' });
   }

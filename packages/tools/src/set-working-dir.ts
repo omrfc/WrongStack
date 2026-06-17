@@ -36,6 +36,7 @@ export const setWorkingDirTool: Tool<SetWorkingDirInput, SetWorkingDirOutput> = 
   permission: 'confirm',
   mutating: true,
   capabilities: ['fs.read'],
+  icon: 'settings',
   timeoutMs: 5_000,
   inputSchema: {
     type: 'object',

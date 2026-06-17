@@ -51,6 +51,7 @@ export function rememberTool(memory: MemoryStore): Tool<RememberInput, RememberO
     mutating: true,
     timeoutMs: 2_000,
     capabilities: ['memory.write'],
+    icon: 'settings',
     inputSchema: {
       type: 'object',
       properties: {

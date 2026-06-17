@@ -49,6 +49,7 @@ export const treeTool: Tool<TreeInput, TreeOutput> = {
   permission: 'auto',
   mutating: false,
   capabilities: ['fs.read'],
+  icon: 'tree',
   timeoutMs: 15_000,
   inputSchema: {
     type: 'object',

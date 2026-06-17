@@ -158,6 +158,7 @@ export const execTool: Tool<ExecInput, ExecOutput> = {
   riskTier: 'standard',
   timeoutMs: DEFAULT_TIMEOUT_MS,
   capabilities: ['shell.restricted'],
+  icon: 'terminal',
   inputSchema: {
     type: 'object',
     properties: {

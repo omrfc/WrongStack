@@ -36,6 +36,7 @@ export const typecheckTool: Tool<TypecheckInput, TypecheckOutput> = {
   mutating: false,
   timeoutMs: 120_000,
   capabilities: ['shell.restricted'],
+  icon: 'code',
   inputSchema: {
     type: 'object',
     properties: {

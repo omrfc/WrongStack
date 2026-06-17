@@ -32,6 +32,7 @@ export const writeTool: Tool<WriteInput, WriteOutput> = {
   mutating: true,
   timeoutMs: 5_000,
   capabilities: ['fs.write'],
+  icon: 'file',
   inputSchema: {
     type: 'object',
     properties: {

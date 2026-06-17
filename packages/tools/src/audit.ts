@@ -39,6 +39,7 @@ export const auditTool: Tool<AuditInput, AuditOutput> = {
   permission: 'confirm',
   mutating: false,
   capabilities: ['shell.restricted'],
+  icon: 'package',
   timeoutMs: 60_000,
   inputSchema: {
     type: 'object',

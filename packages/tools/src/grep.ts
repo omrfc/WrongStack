@@ -42,6 +42,7 @@ export const grepTool: Tool<GrepInput, GrepOutput> = {
   permission: 'auto',
   mutating: false,
   capabilities: ['fs.read'],
+  icon: 'search',
   maxOutputBytes: 131_072,
   timeoutMs: 10_000,
   inputSchema: {

@@ -69,6 +69,7 @@ export const gitTool: Tool<GitInput, GitOutput> = {
     '- Non-mutating commands (status, log, diff, branch, fetch) are still permission:confirm for safety.\n' +
     'Never pass raw git flags through `args` for dangerous operations — use the structured fields.',
   permission: 'confirm',
+  icon: 'git',
   // Conservative: any of these may mutate. The non-mutating commands
   // (status/log/diff/branch/fetch) are still gated on `permission: 'confirm'`
   // and `MUTATING_SUBCOMMANDS` is consulted at runtime for per-call checks.

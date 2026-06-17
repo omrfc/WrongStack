@@ -2207,6 +2207,22 @@ export async function startWebUI(
           const manifests = await skillLoader.list();
           const entries = await skillLoader.listEntries();
           const byName = new Map(entries.map((e) => [e.name, e]));
+
+          // Fetch source URLs and commit refs from the manifest (installed-skills.json)
+          const sourceUrlsByName = new Map<string, string>();
+          const refsByName = new Map<string, string>();
+          if (skillInstaller) {
+            try {
+              const installed = await skillInstaller.listInstalled();
+              for (const entry of installed) {
+                sourceUrlsByName.set(entry.name, entry.source);
+                refsByName.set(entry.name, entry.ref);
+              }
+            } catch {
+              // Non-fatal — source URLs just won't be shown
+            }
+          }
+
           send(ws, {
             type: 'skills.list',
             payload: {
@@ -2216,6 +2232,8 @@ export async function startWebUI(
                 description: m.description,
                 version: m.version ?? '',
                 source: m.source,
+                sourceUrl: sourceUrlsByName.get(m.name) ?? '',
+                ref: refsByName.get(m.name) ?? '',
                 path: m.path,
                 trigger: byName.get(m.name)?.trigger ?? '',
                 scope: byName.get(m.name)?.scope ?? [],
@@ -2335,6 +2353,158 @@ export async function startWebUI(
           send(ws, { type: 'skills.uninstalled', payload: { success: true, error: null } });
         } catch (err) {
           send(ws, { type: 'skills.uninstalled', payload: { success: false, error: errMessage(err) } });
+        }
+        break;
+      }
+
+      case 'skills.update': {
+        if (!skillInstaller) {
+          send(ws, { type: 'skills.updated', payload: { success: false, error: 'Skills not enabled' } });
+          break;
+        }
+        const updatePayload = msg.payload as { name?: string; global?: boolean } | undefined;
+        try {
+          const result = await skillInstaller.update(updatePayload?.name, { global: updatePayload?.global });
+          send(ws, {
+            type: 'skills.updated',
+            payload: {
+              success: true,
+              error: null,
+              updated: result.updated,
+              unchanged: result.unchanged,
+              errors: result.errors,
+            },
+          });
+        } catch (err) {
+          send(ws, { type: 'skills.updated', payload: { success: false, error: errMessage(err) } });
+        }
+        break;
+      }
+
+      case 'skills.create': {
+        const createPayload = msg.payload as { name: string; description: string; scope: 'project' | 'global' };
+        if (!createPayload?.name?.trim()) {
+          send(ws, { type: 'skills.created', payload: { success: false, error: 'Skill name is required' } });
+          break;
+        }
+        if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(createPayload.name.trim())) {
+          send(ws, { type: 'skills.created', payload: { success: false, error: 'Skill name must be kebab-case (e.g. my-new-skill)' } });
+          break;
+        }
+        if (!createPayload?.description?.trim()) {
+          send(ws, { type: 'skills.created', payload: { success: false, error: 'Description/trigger is required' } });
+          break;
+        }
+        try {
+          const targetDir =
+            createPayload.scope === 'global'
+              ? path.join(wstackGlobalRoot(), 'skills', createPayload.name.trim())
+              : path.join(projectRoot, '.wrongstack', 'skills', createPayload.name.trim());
+
+          // Check if directory already exists
+          try {
+            await fs.access(targetDir);
+            send(ws, { type: 'skills.created', payload: { success: false, error: `Skill "${createPayload.name}" already exists` } });
+            break;
+          } catch {
+            // Directory does not exist — good
+          }
+
+          await fs.mkdir(targetDir, { recursive: true });
+
+          // Parse description lines to build the skill content
+          const lines = createPayload.description.trim().split('\n');
+          const firstLine = lines[0].trim();
+          const bodyLines = lines.slice(1).map((l) => l.trim()).filter(Boolean);
+          const descriptionText = firstLine + (bodyLines.length > 0 ? `\n${bodyLines.join('\n')}` : '');
+          const trigger = bodyLines.find((l) => l.toLowerCase().startsWith('triggers:')) ?? '';
+
+          const skillContent = [
+            '---',
+            `name: ${createPayload.name.trim()}`,
+            'description: |',
+            `  ${descriptionText.replace(/\n/g, '\n  ')}`,
+            `version: 1.0.0`,
+            '---',
+            '',
+            `# ${createPayload.name.trim().split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}`,
+            '',
+            '## Overview',
+            '',
+            firstLine,
+            '',
+            ...(bodyLines.length > 0 ? bodyLines.filter((l) => !l.toLowerCase().startsWith('triggers:')) : []),
+            '',
+            '## Rules',
+            '- TODO: add your first rule',
+            '',
+            '## Patterns',
+            '### Do',
+            '```ts',
+            '// TODO: add a good example',
+            '```',
+            '',
+            '### Don\'t',
+            '```ts',
+            '// TODO: add a bad example',
+            '```',
+            '',
+            '## Workflow',
+            '1. TODO: describe step one',
+            '2. TODO: describe step two',
+            '',
+            trigger ? `\n${trigger}\n` : '',
+            '## Skills in scope',
+            '- `bug-hunter` — for systematic bug detection patterns',
+            '- `output-standards` — for standardized `<next_steps>` formatting',
+          ].join('\n');
+
+          await fs.writeFile(path.join(targetDir, 'SKILL.md'), skillContent, 'utf-8');
+
+          send(ws, {
+            type: 'skills.created',
+            payload: {
+              success: true,
+              error: null,
+              skill: { name: createPayload.name.trim(), path: path.join(targetDir, 'SKILL.md'), scope: createPayload.scope },
+            },
+          });
+        } catch (err) {
+          send(ws, { type: 'skills.created', payload: { success: false, error: errMessage(err) } });
+        }
+        break;
+      }
+
+      case 'skills.edit': {
+        if (!skillLoader) {
+          send(ws, { type: 'skills.edited', payload: { success: false, error: 'Skills not enabled' } });
+          break;
+        }
+        const editPayload = msg.payload as { name: string; body: string };
+        if (!editPayload?.name?.trim()) {
+          send(ws, { type: 'skills.edited', payload: { success: false, error: 'Skill name is required' } });
+          break;
+        }
+        if (!editPayload?.body) {
+          send(ws, { type: 'skills.edited', payload: { success: false, error: 'Skill body is required' } });
+          break;
+        }
+        try {
+          const entries = await skillLoader.listEntries();
+          const entry = entries.find((e) => e.name.toLowerCase() === editPayload.name.toLowerCase());
+          if (!entry) {
+            send(ws, { type: 'skills.edited', payload: { success: false, error: `Skill "${editPayload.name}" not found` } });
+            break;
+          }
+          // Only allow editing project/user skills (not bundled)
+          if (entry.scope.includes('bundled')) {
+            send(ws, { type: 'skills.edited', payload: { success: false, error: 'Bundled skills cannot be edited' } });
+            break;
+          }
+          await fs.writeFile(entry.path, editPayload.body, 'utf-8');
+          send(ws, { type: 'skills.edited', payload: { success: true, error: null } });
+        } catch (err) {
+          send(ws, { type: 'skills.edited', payload: { success: false, error: errMessage(err) } });
         }
         break;
       }

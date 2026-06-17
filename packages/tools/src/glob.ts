@@ -31,6 +31,7 @@ export const globTool: Tool<GlobInput, GlobOutput> = {
   permission: 'auto',
   mutating: false,
   capabilities: ['fs.read'],
+  icon: 'folder',
   maxOutputBytes: 65_536,
   timeoutMs: 5_000,
   inputSchema: {

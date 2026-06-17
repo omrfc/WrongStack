@@ -90,6 +90,7 @@ export const scaffoldTool: Tool<ScaffoldInput, ScaffoldOutput> = {
   permission: 'confirm',
   mutating: true,
   capabilities: ['fs.write.outside-project', 'fs.write'],
+  icon: 'scaffold',
   timeoutMs: 30_000,
   inputSchema: {
     type: 'object',

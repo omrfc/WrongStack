@@ -283,6 +283,8 @@ export interface WSSkillsList {
       description: string;
       version: string;
       source: string;
+      sourceUrl: string;
+      ref: string;
       path: string;
       trigger: string;
       scope: string[];
@@ -300,6 +302,7 @@ export interface WSSkillContent {
     relatedFiles: string[];
     references: string[];
     error?: string | undefined;
+    sourceUrl?: string;
   };
 }
 
@@ -321,6 +324,38 @@ export interface WSSkillsInstalled {
 
 export interface WSSkillsUninstalled {
   type: 'skills.uninstalled';
+  payload: {
+    success: boolean;
+    error: string | null;
+  };
+}
+
+export interface WSSkillsUpdated {
+  type: 'skills.updated';
+  payload: {
+    success: boolean;
+    error: string | null;
+    updated?: Array<{ name: string; oldRef: string; newRef: string }>;
+    unchanged?: string[];
+    errors?: Array<{ name: string; error: string }>;
+  };
+}
+
+export interface WSSkillsCreated {
+  type: 'skills.created';
+  payload: {
+    success: boolean;
+    error: string | null;
+    skill?: {
+      name: string;
+      path: string;
+      scope: 'project' | 'user';
+    };
+  };
+}
+
+export interface WSSkillsEdited {
+  type: 'skills.edited';
   payload: {
     success: boolean;
     error: string | null;
@@ -639,7 +674,10 @@ export type WSClientMessage =
   | { type: 'skills.list' }
   | { type: 'skills.content'; payload: { name: string; source: string } }
   | { type: 'skills.install'; payload: { ref: string; global?: boolean } }
-  | { type: 'skills.uninstall'; payload: { name: string; global?: boolean } };
+  | { type: 'skills.uninstall'; payload: { name: string; global?: boolean } }
+  | { type: 'skills.update'; payload: { name?: string; global?: boolean } }
+  | { type: 'skills.create'; payload: { name: string; description: string; scope: 'project' | 'global' } }
+  | { type: 'skills.edit'; payload: { name: string; body: string } };
 
 export type WSServerMessage =
   | WSSessionStart
@@ -667,6 +705,9 @@ export type WSServerMessage =
   | WSSkillContent
   | WSSkillsInstalled
   | WSSkillsUninstalled
+  | WSSkillsUpdated
+  | WSSkillsCreated
+  | WSSkillsEdited
   | WSDiagGet
   | WSStatsGet
   | WSSessionsList

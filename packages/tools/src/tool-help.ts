@@ -36,6 +36,7 @@ export const toolHelpTool: Tool<ToolHelpInput, ToolHelpOutput> = {
   mutating: false,
   timeoutMs: 5_000,
   capabilities: ['tool.meta'],
+  icon: 'meta',
   inputSchema: {
     type: 'object',
     properties: {

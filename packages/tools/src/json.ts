@@ -33,6 +33,7 @@ export const jsonTool: Tool<JsonInput, JsonOutput> = {
   mutating: false,
   timeoutMs: 5_000,
   capabilities: ['fs.read'],
+  icon: 'json',
   inputSchema: {
     type: 'object',
     properties: {

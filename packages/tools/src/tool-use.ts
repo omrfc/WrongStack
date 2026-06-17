@@ -29,6 +29,7 @@ export const toolUseTool: Tool<ToolUseInput, ToolUseOutput> = {
   mutating: true,
   timeoutMs: 60_000,
   capabilities: ['tool.mutate.any'],
+  icon: 'meta',
   inputSchema: {
     type: 'object',
     properties: {

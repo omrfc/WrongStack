@@ -42,6 +42,7 @@ export const diffTool: Tool<DiffInput, DiffOutput> = {
   permission: 'auto',
   mutating: false,
   capabilities: ['fs.read'],
+  icon: 'diff',
   timeoutMs: 10_000,
   inputSchema: {
     type: 'object',

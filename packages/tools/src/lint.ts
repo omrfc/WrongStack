@@ -33,6 +33,7 @@ export const lintTool: Tool<LintInput, LintOutput> = {
   mutating: false,
   timeoutMs: 60_000,
   capabilities: ['shell.restricted'],
+  icon: 'code',
   inputSchema: {
     type: 'object',
     properties: {

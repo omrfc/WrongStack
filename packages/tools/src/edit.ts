@@ -45,6 +45,7 @@ export const editTool: Tool<EditInput, EditOutput> = {
   permission: 'confirm',
   mutating: true,
   capabilities: ['fs.write'],
+  icon: 'edit',
   timeoutMs: 5_000,
   inputSchema: {
     type: 'object',

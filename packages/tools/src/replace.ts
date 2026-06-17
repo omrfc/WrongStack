@@ -48,6 +48,7 @@ export const replaceTool: Tool<ReplaceInput, ReplaceOutput> = {
   permission: 'confirm',
   mutating: true,
   capabilities: ['fs.write'],
+  icon: 'edit',
   timeoutMs: 30_000,
   inputSchema: {
     type: 'object',

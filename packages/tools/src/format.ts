@@ -29,6 +29,7 @@ export const formatTool: Tool<FormatInput, FormatOutput> = {
   permission: 'confirm',
   mutating: true,
   capabilities: ['fs.write', 'shell.exec'],
+  icon: 'code',
   timeoutMs: 60_000,
   inputSchema: {
     type: 'object',

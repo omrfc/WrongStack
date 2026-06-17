@@ -7,6 +7,7 @@ import { indexCircuitBreaker } from './circuit-breaker.js';
 export const codebaseIndexTool: Tool<CodebaseIndexInput, CodebaseIndexOutput> = {
   name: 'codebase-index',
   category: 'Project',
+  icon: 'index',
   description:
     'Build or incrementally update the project-wide symbol index. This powers fast codebase search and understanding. ' +
     'By default it only processes files that have changed since the last indexing run.',

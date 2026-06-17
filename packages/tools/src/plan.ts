@@ -85,6 +85,7 @@ export const planTool: Tool<PlanInput, PlanOutput> = {
   permission: 'confirm',
   mutating: true,
   capabilities: ['fs.write'],
+  icon: 'plan',
   timeoutMs: 2_000,
   inputSchema: {
     type: 'object',

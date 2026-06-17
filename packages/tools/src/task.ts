@@ -103,6 +103,7 @@ export const taskTool: Tool<TaskInput, TaskOutput> = {
   permission: 'confirm',
   mutating: true,
   capabilities: ['fs.write'],
+  icon: 'task',
   timeoutMs: 2_000,
   inputSchema: {
     type: 'object',
