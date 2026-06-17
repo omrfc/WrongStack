@@ -19,7 +19,8 @@ Tarih: 2026-06-17
 | 9 | TUI event chain testi — 🎯⚡💡 ikonları doğrulandı | — |
 | 10 | `#1` coordinator run() fix — `graph.load()` try içine alındı + `.catch()` | `31e0ee87` |
 | 11 | Temp test dosyaları temizlendi | — |
-| 12 | `#2` orphan retry TUI fix — `task:failed` fleet filter eklendi → `goal:failed` ❌ | — |
+| 12 | `#2` orphan retry TUI fix — `task:failed` fleet filter eklendi → `goal:failed` ❌ | `74572126` |
+| 13 | `#3` teardown — `stop()` log eklendi + unit test | `f99aae03` |
 
 ---
 
@@ -95,17 +96,22 @@ this.fleet?.filter('task:failed', (e: FleetEvent) => {
 
 ---
 
-### 3. 🟡 Teardown — Ctrl+C Sonrası `coordinator.stop()` Log Doğrulaması
+### 3. ✅ Teardown — `coordinator.stop()` Log Doğrulaması — DÜZELTİLDİ
 
-**Durum:** `execution.ts:1837`'de `finally` bloğuna `deps.onCoordinatorStop?.()` eklendi.
+**Durum:** `execution.ts:1837`'de `finally` bloğuna `deps.onCoordinatorStop?.()` ekli. `stop()` metoduna log eklendi.
 
-**Manual Doğrulama:**
-```bash
-node packages/cli/dist/index.js
-/coordinator start improve docs
-# Ctrl+C bas
-# Log'larda "AutonomousCoordinator stop signal sent" veya benzeri mesajı gör
+**Düzeltme:** `autonomous-coordinator.ts:311-314`:
+```typescript
+stop(): void {
+  if (!this.running) return;
+  this.running = false;
+  console.error(`[AutonomousCoordinator] stop signal received — shutting down (iteration ${this.iterationCount})`);
+}
 ```
+
+**Test:** `coordinator-stop.test.ts` — 2 unit test (log emission + idempotency). stderr'de `[AutonomousCoordinator] stop signal received` log'u görülüyor.
+
+**Kalan:** Ctrl+C sonrası manual doğrulama (PTY gerekiyor).
 
 ---
 
@@ -149,6 +155,8 @@ node packages/cli/dist/index.js
 ## Commit Ozeti (Bugün)
 
 ```
+f99aae03 feat(coordinator): add stop() log, task:failed fleet filter, and unit tests
+74572126 fix(coordinator): fix coordinator orphan retry: subscribe to task:failed fleet events
 31e0ee87 fix(coordinator): graph.load() inside try block + proper error handling
 01bb3518 feat(coordinator): event emission, orphan retry, teardown, dead code
 6e3d219d test(autonomous-coordinator): orphan retry tests with fake timers
