@@ -115,13 +115,18 @@ stop(): void {
 
 ---
 
-### 4. 🟢 `ask_human` Brain Kararı — Kullanılmıyor
+### 4. ✅ `ask_human` Brain Kararı — KASITLI TASARIM (kapatıldı)
 
-**Durum:** `BrainDecision` type'ında `ask_human` variant'ı var ama AutonomousBrain bunu hiç üretmiyor.
+**Durum:** `ask_human` type'ı AutonomousBrain tarafından üretilmez — bu **kasıtlıdır**.
 
-**Sorulacak:** Bu kasıtlı mı? Eğer kasıtlıysa type'dan kaldırılmalı. Eğer eksikse implementasyon eklenmeli.
+**Açıklama:**
+- `AutonomousBrain` → tamamen otonom çalışır, LLM `answer` veya `deny` döner
+- `BrainDecisionQueue` → insan kararı gerektiğinde `ask_human` üretir
+- `HumanEscalatingBrainArbiter` → inner brain `ask_human` döndüğünde kuyruğa yönlendirir
+- `AutonomousCoordinator` → `ask_human` alırsa `autonomous:ask_human` event'i emit eder (TUI'ye bildirim)
+- WebUI → `brain.decision_ask_human` event'ini dinler ve browser'a iletir
 
-**Mevcut Davranış:** Brain emin olamadığında `deny` döner veya `consensusRequired: true` flag'i ile çaırana bırakır.
+**Karar:** Type'dan kaldırmaya gerek yok — `ask_human` geçerli bir decision type, sadece AutonomousBrain değil `BrainDecisionQueue` üretiyor.
 
 ---
 
@@ -170,4 +175,4 @@ b0c3a076 test(tui): coordinator reducer tests for timeline mapping
 - TUI interaktif terminal gerektirdiği için bazı testler manual yapılmalı
 - Windows'da PTY olmadığından Blessed TUI stdout'a ansi escape sequence basıyor — bu yakalanabiliyor ama güvenilir değil
 - node-pty yüklü değil — yüklenirse interaktif test mümkün olur: `pnpm add -D node-pty`
-- CLI build hatası: `ink@7.0.6` top-level await CJS formatında desteklenmiyor — ESM build gerekebilir
+- CLI build: `pnpm --filter @wrongstack/cli build` başarıyla çalışıyor ✅
