@@ -391,6 +391,7 @@ export class KnowledgeGraph {
   }
 
   private async _append(node: GraphNode): Promise<void> {
+    await fsp.mkdir(this.filePath, { recursive: true });
     const line = JSON.stringify({ op: 'update', node }) + '\n';
     await withFileLock(this.graphFilePath, async () => {
       await fsp.appendFile(this.graphFilePath, line, 'utf8');

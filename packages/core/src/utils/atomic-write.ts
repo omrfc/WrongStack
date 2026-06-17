@@ -85,7 +85,14 @@ export async function withFileLock<T>(
       await handle.writeFile(`${process.pid}:${Date.now()}`);
       break;
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      const code = (err as NodeJS.ErrnoException).code;
+      // ENOENT means the directory was deleted (e.g. by concurrent cleanup).
+      // Recreate it and retry acquiring the lock.
+      if (code === 'ENOENT') {
+        await fs.mkdir(dir, { recursive: true });
+        continue;
+      }
+      if (code !== 'EEXIST') throw err;
       try {
         const stat = await fs.stat(lockPath);
         if (Date.now() - stat.mtimeMs > staleMs) {
