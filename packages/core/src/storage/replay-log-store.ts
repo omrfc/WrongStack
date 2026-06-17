@@ -108,24 +108,57 @@ export class ReplayLogStore {
     const t0 = Date.now();
     try {
       await this.enqueue(input.sessionId, async () => {
-        await withFileLock(this.filePath(input.sessionId), async () => {
-          const entries = await this.readAll(input.sessionId);
-          if (entries.some((entry) => entry.hash === hash)) return; // already recorded
+        await withFileLock(fp, async () => {
+          // Dedup via the in-memory hash map — O(1) instead of re-reading
+          // and re-parsing the whole JSONL just to run `entries.some(...)`.
+          // `ensureCache` populates both the cache and `diskCount` from a
+          // single read on first contact; subsequent records reuse it.
+          const cache = await this.ensureCache(input.sessionId);
+          if (cache.has(hash)) return; // already recorded
+
           const entry: ReplayEntry = {
             hash,
             ts: new Date().toISOString(),
             request: input.request,
             response: input.response,
           };
-          // True append — O(1) per write. Only compact (full rewrite) when
-          // we exceed maxEntries and need to evict oldest entries.
-          entries.push(entry);
-          const keep = entries.slice(-this.maxEntries);
-          const didEvict = keep.length < entries.length;
-          const cache = new Map<string, ReplayEntry>();
-          for (const e of keep) cache.set(e.hash, e);
-          this.cache.set(input.sessionId, cache);
-          await this.writeAll(input.sessionId, keep, didEvict ? 'compact' : 'record');
+
+          const currentCount = this.diskCount.get(input.sessionId) ?? 0;
+          const willEvict = currentCount + 1 > this.maxEntries;
+
+          if (!willEvict) {
+            // Common path (the first `maxEntries` writes per session, plus
+            // any session that never hits the cap): a single O(1) append.
+            // The previous implementation did a full readAll + full rewrite
+            // (atomicWrite of the entire file) on every single record, which
+            // was quadratic in session length — a 1000-call session rewrote
+            // a multi-MB file 1000 times.
+            await fs.appendFile(fp, JSON.stringify(entry) + '\n', 'utf8');
+            cache.set(hash, entry);
+            this.diskCount.set(input.sessionId, currentCount + 1);
+            this.events?.emit('storage.write', {
+              sessionId: input.sessionId,
+              store: 'replay',
+              filePath: fp,
+              operation: 'record',
+              outcome: 'success',
+              durationMs: Date.now() - t0,
+              ...(this.traceId !== undefined ? { traceId: this.traceId } : {}),
+            });
+            return;
+          }
+
+          // Eviction path: we're at capacity, drop the oldest entry to make
+          // room. This does require a full read + rewrite, but it fires at
+          // most once per `maxEntries` writes (default 1000), not per write.
+          const all = await this.readAll(input.sessionId);
+          all.push(entry);
+          const keep = all.slice(-this.maxEntries);
+          const refreshed = new Map<string, ReplayEntry>();
+          for (const e of keep) refreshed.set(e.hash, e);
+          this.cache.set(input.sessionId, refreshed);
+          this.diskCount.set(input.sessionId, keep.length);
+          await this.writeAll(input.sessionId, keep, 'compact');
         });
       });
       return hash;

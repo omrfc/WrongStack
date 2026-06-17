@@ -170,6 +170,12 @@ export interface FeaturesConfig {
    * `features.tokenSavingMode: true` in config.
    */
   tokenSavingMode?: boolean | undefined;
+  /**
+   * Allow tools to read/write paths outside the project root directory.
+   * When true (default), tools can access any path on the filesystem.
+   * When false, tools are restricted to the project root directory.
+   */
+  allowOutsideProjectRoot?: boolean | undefined;
 }
 
 export interface AutonomyConfig {

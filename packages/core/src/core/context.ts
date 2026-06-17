@@ -57,6 +57,12 @@ export interface ContextInit {
    * `session.traceId` automatically.
    */
   traceId?: string | undefined;
+  /**
+   * Allow tools to read/write paths outside the project root directory.
+   * When true, tools can access any path on the filesystem.
+   * When false or undefined, tools are restricted to the project root.
+   */
+  allowOutsideProjectRoot?: boolean | undefined;
 }
 
 /**
@@ -103,6 +109,11 @@ export class Context implements RunEnv {
    * so storage operations can include it in `storage.*` events.
    */
   traceId: string | undefined;
+  /**
+   * When true, tools can access any path on the filesystem.
+   * When false or undefined, tools are restricted to the project root.
+   */
+  allowOutsideProjectRoot: boolean;
 
   /** Callbacks fired when `setWorkingDir()` changes the working directory. */
   private _onWorkingDirChanged: Array<(newDir: string, oldDir: string) => void> = [];
@@ -143,6 +154,7 @@ export class Context implements RunEnv {
     this.agentId = init.agentId ?? 'unknown';
     this.agentName = init.agentName ?? 'Unknown Agent';
     this.traceId = init.traceId;
+    this.allowOutsideProjectRoot = init.allowOutsideProjectRoot ?? true;
     // Propagate traceId to the SessionWriter so storage operations
     // can read it without needing a direct handle on the Context.
     this.session.traceId = init.traceId;

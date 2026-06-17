@@ -366,18 +366,14 @@ Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. Wha
 
 ## Recent changes
 
-**Current release: 0.257.0.** The token-saving & resilience release. A new
-**token-saving mode** (`--token-saving-mode`) trims the tool belt to 10 Tier-1
-tools, compacts skill bodies, and lazy-loads MCP behind an `mcp_use` meta-tool
-to save ~4–6K prompt tokens per request. **Automatic model rotation** on rate
-limits (429/529/5xx) rotates through a fallback chain — with a `/fallback`
-command and a visible `↻ switched to …` hop line — instead of failing the turn.
-A new **`/interrupt`** command (aliases `/stop`, `/int`) stops the leader run
-**and** the whole fleet across CLI/TUI/WebUI, and **capability-based plugin
-authorization** plus a fail-closed subagent allowlist tighten the tool-mutation
-surface. Plus a compaction-throughput pass, five new hot-path caches, and TUI /
-provider / secret-scrubber fixes. No breaking changes. All 15 workspace packages
-and the marketing site are aligned to 0.257.0 in lockstep.
+**Current release: 0.264.0.** Performance release addressing session/mailbox
+file-size scaling on the per-iteration hot path. Key changes: **GlobalMailbox
+refactored** with in-memory ring buffer + ack sidecar + batched persistence
+(eliminates full-file rewrite per query/ack); **replay-log-store** now uses
+append-only writes with cached tail hash instead of full-file rewrites;
+**session flush de-awaited** from the inner loop so disk I/O no longer blocks
+iteration throughput; plus mailbox-loop, agent-loop, and agent-response
+tuning. Additive only — no breaking changes.
 
 See **[CHANGELOG.md](CHANGELOG.md)** for the full, versioned history.
 

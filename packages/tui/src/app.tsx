@@ -836,7 +836,7 @@ export function App({
     },
     autonomyPicker: { open: false, options: [], selected: 0 },
     resumePicker: { open: false, sessions: [], selected: 0, busy: false, hint: undefined, error: undefined },
-    settingsPicker: { open: false, field: 0, mode: 'off', delayMs: 0, titleAnimation: true, yolo: false, streamFleet: true, chime: false, confirmExit: true, nextPrediction: false, featureMcp: true, featurePlugins: true, featureMemory: true, featureSkills: true, featureModelsRegistry: true, featureTokenSaving: false, contextAutoCompact: true, contextStrategy: 'hybrid', logLevel: 'info', auditLevel: 'standard', indexOnStart: true, maxIterations: 500, autoProceedMaxIterations: 50, enhanceDelayMs: 60_000, enhanceEnabled: true, enhanceLanguage: 'original', debugStream: false, configScope: 'global' },
+    settingsPicker: { open: false, field: 0, mode: 'off', delayMs: 0, titleAnimation: true, yolo: false, streamFleet: true, chime: false, confirmExit: true, nextPrediction: false, featureMcp: true, featurePlugins: true, featureMemory: true, featureSkills: true, featureModelsRegistry: true, featureTokenSaving: false, allowOutsideProjectRoot: true, contextAutoCompact: true, contextStrategy: 'hybrid', logLevel: 'info', auditLevel: 'standard', indexOnStart: true, maxIterations: 500, autoProceedMaxIterations: 50, enhanceDelayMs: 60_000, enhanceEnabled: true, enhanceLanguage: 'original', debugStream: false, configScope: 'global' },
     projectPicker: { open: false, allItems: [], items: [], selected: 0, filter: '', hint: undefined },
     confirmQueue: [],
     enhance: null,
@@ -1783,6 +1783,7 @@ export function App({
             featureSkills: sp.featureSkills,
             featureModelsRegistry: sp.featureModelsRegistry,
             featureTokenSaving: sp.featureTokenSaving,
+            allowOutsideProjectRoot: sp.allowOutsideProjectRoot,
             contextAutoCompact: sp.contextAutoCompact,
             contextStrategy: sp.contextStrategy,
             logLevel: sp.logLevel,
@@ -2320,6 +2321,7 @@ export function App({
       featureSkills: s.featureSkills ?? true,
       featureModelsRegistry: s.featureModelsRegistry ?? true,
       featureTokenSaving: s.featureTokenSaving ?? false,
+      allowOutsideProjectRoot: s.allowOutsideProjectRoot ?? true,
       contextAutoCompact: s.contextAutoCompact ?? true,
       contextStrategy: s.contextStrategy ?? 'hybrid',
       logLevel: s.logLevel ?? 'info',
@@ -2527,6 +2529,7 @@ export function App({
       featureSkills: sp.featureSkills,
       featureModelsRegistry: sp.featureModelsRegistry,
       featureTokenSaving: sp.featureTokenSaving,
+      allowOutsideProjectRoot: sp.allowOutsideProjectRoot,
       contextAutoCompact: sp.contextAutoCompact,
       contextStrategy: sp.contextStrategy,
       logLevel: sp.logLevel,
@@ -2557,6 +2560,8 @@ export function App({
     state.settingsPicker.featureMemory,
     state.settingsPicker.featureSkills,
     state.settingsPicker.featureModelsRegistry,
+    state.settingsPicker.featureTokenSaving,
+    state.settingsPicker.allowOutsideProjectRoot,
     state.settingsPicker.contextAutoCompact,
     state.settingsPicker.contextStrategy,
     state.settingsPicker.logLevel,
@@ -2565,6 +2570,9 @@ export function App({
     state.settingsPicker.maxIterations,
     state.settingsPicker.autoProceedMaxIterations,
     state.settingsPicker.enhanceDelayMs,
+    state.settingsPicker.enhanceEnabled,
+    state.settingsPicker.enhanceLanguage,
+    state.settingsPicker.debugStream,
     saveSettings,
   ]);
 
@@ -4156,6 +4164,7 @@ export function App({
           featureSkills: cfg.featureSkills ?? true,
           featureModelsRegistry: cfg.featureModelsRegistry ?? true,
           featureTokenSaving: cfg.featureTokenSaving ?? false,
+          allowOutsideProjectRoot: cfg.allowOutsideProjectRoot ?? true,
           contextAutoCompact: cfg.contextAutoCompact ?? true,
           contextStrategy: cfg.contextStrategy ?? 'hybrid',
           logLevel: cfg.logLevel ?? 'info',
@@ -5563,6 +5572,7 @@ export function App({
               featureSkills={state.settingsPicker.featureSkills}
               featureModelsRegistry={state.settingsPicker.featureModelsRegistry}
               featureTokenSaving={state.settingsPicker.featureTokenSaving}
+              allowOutsideProjectRoot={state.settingsPicker.allowOutsideProjectRoot}
               contextAutoCompact={state.settingsPicker.contextAutoCompact}
               contextStrategy={state.settingsPicker.contextStrategy}
               logLevel={state.settingsPicker.logLevel}

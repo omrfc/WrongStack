@@ -29,6 +29,7 @@ import type {
   ClientRegistrationInput,
   ClientStatus,
   Mailbox,
+  MailboxAckBatchInput,
   MailboxAckInput,
   MailboxAgentStatus,
   MailboxMessage,
@@ -57,6 +58,13 @@ const HEARTBEAT_THROTTLE_MS = 5_000;
  */
 const REGISTRY_CACHE_TTL_MS = 2_000;
 const LINE_SEPARATOR = '\n';
+/**
+ * Soft cap on the in-memory message cache. The cache mirrors the JSONL
+ * message file; under normal load it stays well under this. If a pathological
+ * mailbox exceeds the cap we fall back to reading from disk rather than
+ * holding an unbounded buffer in memory.
+ */
+const MESSAGE_CACHE_MAX_ENTRIES = 10_000;
 
 /**
  * Derive the project-level mailbox directory path.
@@ -105,6 +113,20 @@ export class GlobalMailbox implements Mailbox {
   private _lastHeartbeat = new Map<string, number>();
   /** Last time each local client sent a heartbeat (throttle). */
   private _lastClientHeartbeat = new Map<string, number>();
+  /**
+   * In-memory mirror of the JSONL message file. The mailbox is shared
+   * ACROSS PROCESSES, so reads cannot trust the cache blindly — we pair it
+   * with an mtime check. The file lock serializes every write, so a
+   * changed mtimeMs is a definitive signal that another process (or this
+   * one) wrote; an unchanged mtimeMs guarantees no write happened and the
+   * cache is current. This collapses the per-iteration `query()` cost from
+   * O(file_size) disk + parse to O(messages) in memory.
+   */
+  private _messageCache: MailboxMessage[] | null = null;
+  /** mtimeMs of the file when `_messageCache` was populated. */
+  private _messageCacheMtime = -1;
+  /** Size of the file when `_messageCache` was populated (extra guard). */
+  private _messageCacheSize = -1;
 
   /**
    * @param projectDir — `~/.wrongstack/projects/<slug>/`
@@ -145,88 +167,128 @@ export class GlobalMailbox implements Mailbox {
     // lands. This file is shared ACROSS PROCESSES, so the window is real.
     await withFileLock(this.messagePath, async () => {
       await fsp.appendFile(this.messagePath, line, 'utf8');
+      // Refresh the in-memory cache from the message we just appended —
+      // cheaper than re-reading the whole file, and correct because we
+      // held the lock so nothing else changed underneath us.
+      this._pushToCache(msg);
     });
 
     return msg;
   }
 
   async query(q: MailboxQuery): Promise<MailboxMessage[]> {
-    const all = await this._readMessages();
+    const all = await this._readMessagesCached();
     const limit = q.limit ?? 50;
 
-    let filtered = all;
-
-    if (q.to !== undefined) {
-      filtered = filtered.filter((m) => m.to === q.to || m.to === '*');
-    }
-    if (q.from !== undefined) {
-      filtered = filtered.filter((m) => m.from === q.from);
-    }
-    if (q.unreadBy !== undefined) {
-      filtered = filtered.filter((m) => !(q.unreadBy! in m.readBy));
-    }
-    if (q.incompleteOnly) {
-      filtered = filtered.filter((m) => !m.completed);
-    }
-    if (q.type !== undefined) {
-      filtered = filtered.filter((m) => m.type === q.type);
-    }
-    if (q.minPriority !== undefined) {
-      const order = { low: 0, normal: 1, high: 2 } as const;
-      const min = order[q.minPriority];
-      filtered = filtered.filter((m) => (order[m.priority as keyof typeof order] ?? 1) >= min);
-    }
-    if (q.since !== undefined) {
-      const since = q.since;
-      filtered = filtered.filter((m) => m.timestamp > since);
+    // Single-pass filter — previously 7 chained .filter() allocations each
+    // producing a fresh array. Predicates are independent, so we can AND
+    // them in one walk and short-circuit per element.
+    const order = q.minPriority !== undefined
+      ? { low: 0, normal: 1, high: 2 } as const
+      : null;
+    const minPriorityRank = order && q.minPriority !== undefined ? order[q.minPriority] : 0;
+    const out: MailboxMessage[] = [];
+    for (let i = 0; i < all.length; i++) {
+      const m = all[i]!;
+      if (q.to !== undefined && m.to !== q.to && m.to !== '*') continue;
+      if (q.from !== undefined && m.from !== q.from) continue;
+      if (q.unreadBy !== undefined && q.unreadBy in m.readBy) continue;
+      if (q.incompleteOnly && m.completed) continue;
+      if (q.type !== undefined && m.type !== q.type) continue;
+      if (
+        order !== null &&
+        (order[m.priority as keyof typeof order] ?? 1) < minPriorityRank!
+      ) {
+        continue;
+      }
+      if (q.since !== undefined && m.timestamp <= q.since) continue;
+      out.push(m);
     }
 
-    filtered.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-    return filtered.slice(0, limit);
+    out.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    // Return defensive shallow copies so callers cannot mutate the shared
+    // cache entries. Only the returned slice is copied — O(limit), not O(N).
+    return out.slice(0, limit).map((m) => ({ ...m, readBy: { ...m.readBy } }));
   }
 
   async ack(input: MailboxAckInput): Promise<MailboxMessage | null> {
-    // Read-modify-write entirely under the lock. The file is shared across
-    // processes — reading before acquiring the lock lets two concurrent acks
-    // each start from a snapshot missing the other's receipt, so the last
-    // writer silently erases the first one's read/completed state.
-    let result: MailboxMessage | null = null;
+    const updated = await this.ackMany({ acks: [input] });
+    return updated.length > 0 ? updated[0]! : null;
+  }
+
+  async ackMany(input: MailboxAckBatchInput): Promise<MailboxMessage[]> {
+    // One lock acquisition + one file rewrite for the whole batch. The
+    // previous per-message ack() did a full read-modify-rewrite for every
+    // single ack — N fresh messages meant N full-file rewrites in a row.
+    if (input.acks.length === 0) return [];
+
+    const updated: MailboxMessage[] = [];
+    const byId = new Map<string, MailboxAckInput>();
+    for (const a of input.acks) {
+      // Last-write-wins within the batch for the same messageId — matches
+      // the prior sequential semantics where later acks overrode earlier.
+      byId.set(a.messageId, a);
+    }
+
+    let cacheSnapshot: MailboxMessage[] | null = null;
     await withFileLock(this.messagePath, async () => {
-      const all = await this._readMessages();
-      const idx = all.findIndex((m) => m.id === input.messageId);
-      if (idx === -1) return;
-
-      const msg = all[idx]!;
+      // Read fresh under the lock — the cache may be stale relative to
+      // other processes that wrote since our last read.
+      const all = await this._readMessagesFresh();
       const now = new Date().toISOString();
+      let changed = false;
 
-      if (input.read !== false) {
-        msg.readBy[input.readerId] = now;
-      }
-      if (input.completed) {
-        msg.completed = true;
-        msg.completedBy = input.readerId;
-        msg.completedAt = now;
-      }
-      if (input.outcome !== undefined) {
-        msg.outcome = input.outcome;
+      for (const msg of all) {
+        const a = byId.get(msg.id);
+        if (!a) continue;
+        // Preserve prior semantics: return the message as long as it was
+        // found, even if the ack was a no-op (e.g. already read).
+        updated.push(msg);
+        if (a.read !== false && !(a.readerId in msg.readBy)) {
+          msg.readBy[a.readerId] = now;
+          changed = true;
+        }
+        if (a.completed && !msg.completed) {
+          msg.completed = true;
+          msg.completedBy = a.readerId;
+          msg.completedAt = now;
+          changed = true;
+        }
+        if (a.outcome !== undefined && msg.outcome !== a.outcome) {
+          msg.outcome = a.outcome;
+          changed = true;
+        }
       }
 
-      const serialized = all.map((m) => JSON.stringify(m)).join(LINE_SEPARATOR) + LINE_SEPARATOR;
-      await fsp.writeFile(this.messagePath, serialized, 'utf8');
-      result = msg;
+      // Only rewrite the file if at least one ack actually mutated state —
+      // a re-ack of an already-read message is now a no-op on disk, where
+      // previously it was a full rewrite.
+      if (changed) {
+        const serialized =
+          all.map((m) => JSON.stringify(m)).join(LINE_SEPARATOR) + LINE_SEPARATOR;
+        await fsp.writeFile(this.messagePath, serialized, 'utf8');
+      }
+      // We always hold the authoritative post-read snapshot (we read fresh
+      // under the lock), so adopt it as the cache regardless of whether we
+      // wrote — future queries skip both the stat and the parse.
+      cacheSnapshot = all;
     });
 
-    return result;
+    // Promote the freshly-read array to the cache without re-reading.
+    if (cacheSnapshot) this._setMessageCache(cacheSnapshot);
+    return updated;
   }
 
   async unreadCount(forAgentId: string): Promise<number> {
-    const all = await this._readMessages();
-    return all.filter(
-      (m) =>
-        (m.to === forAgentId || m.to === '*') &&
-        !(forAgentId in m.readBy) &&
-        !m.completed,
-    ).length;
+    const all = await this._readMessagesCached();
+    let count = 0;
+    for (let i = 0; i < all.length; i++) {
+      const m = all[i]!;
+      if ((m.to === forAgentId || m.to === '*') && !(forAgentId in m.readBy) && !m.completed) {
+        count++;
+      }
+    }
+    return count;
   }
 
   // ── Agent registry ──────────────────────────────────────────────────────
@@ -429,9 +491,11 @@ export class GlobalMailbox implements Mailbox {
 
   async close(): Promise<void> {
     // JSONL append-only — no flush needed
-    // Cache is cleared on next read
     this._registryCache = null;
     this._clientRegistryCache = null;
+    this._messageCache = null;
+    this._messageCacheMtime = -1;
+    this._messageCacheSize = -1;
   }
 
   async clearAll(): Promise<void> {
@@ -439,6 +503,8 @@ export class GlobalMailbox implements Mailbox {
     await withFileLock(this.messagePath, async () => {
       await fsp.writeFile(this.messagePath, '', 'utf8');
     });
+    // Reflect the empty mailbox in the cache without a re-read.
+    this._setMessageCache([]);
   }
 
   async purgeStale(opts?: PurgeOptions): Promise<PurgeResult> {
@@ -447,10 +513,11 @@ export class GlobalMailbox implements Mailbox {
 
     let completedPurged = 0;
     let incompletePurged = 0;
+    let remaining = 0;
 
     // Read-modify-write under the lock — same pattern as ack().
     await withFileLock(this.messagePath, async () => {
-      const all = await this._readMessages();
+      const all = await this._readMessagesFresh();
       const now = Date.now();
       const cutoffCompleted = now - COMPLETED_MAX_AGE_MS;
       const cutoffIncomplete = now - INCOMPLETE_MAX_AGE_MS;
@@ -472,25 +539,34 @@ export class GlobalMailbox implements Mailbox {
 
         kept.push(msg);
       }
+      remaining = kept.length;
 
       // Rewrite only if something changed
       if (kept.length < all.length) {
         const content = kept.map((m) => JSON.stringify(m)).join(LINE_SEPARATOR) + LINE_SEPARATOR;
         await fsp.writeFile(this.messagePath, content, 'utf8');
       }
+      // Either way we just read fresh under the lock, so adopt the kept
+      // snapshot (== all when nothing was purged) as the cache.
+      this._setMessageCache(kept);
     });
 
-    const all = await this._readMessages();
     return {
       completedPurged,
       incompletePurged,
       totalPurged: completedPurged + incompletePurged,
-      remaining: all.length,
+      remaining,
     };
   }
 
   // ── Internal ────────────────────────────────────────────────────────────
 
+  /**
+   * Read all messages from the JSONL file. Always reads + parses the file.
+   * Callers that can tolerate a stale-by-mtime view should use
+   * {@link _readMessagesCached}; writers that need the post-lock truth
+   * should call this directly (it's what {@link _readMessagesFresh} aliases).
+   */
   private async _readMessages(): Promise<MailboxMessage[]> {
     try {
       const raw = await fsp.readFile(this.messagePath, 'utf8');
@@ -519,6 +595,116 @@ export class GlobalMailbox implements Mailbox {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
       throw err;
     }
+  }
+
+  /**
+   * Read messages, then adopt the result as the in-memory cache. Use this
+   * from writers that just took the file lock — the read reflects the
+   * authoritative post-lock state and should be served to subsequent
+   * queries without re-reading.
+   */
+  private async _readMessagesFresh(): Promise<MailboxMessage[]> {
+    const all = await this._readMessages();
+    this._setMessageCache(all);
+    return all;
+  }
+
+  /**
+   * Read messages, consulting the mtime-bounded in-memory cache first.
+   * The mailbox file is shared across processes; every `send`/`ack`/
+   * `clearAll`/`purgeStale` takes the file lock, so writes are serialized
+   * and a changed mtimeMs is a definitive freshness signal. When the
+   * stat matches the cached mtime+size we return the cached array — no
+   * file read and no JSON.parse — collapsing the per-iteration query
+   * cost on the mailbox-loop hot path.
+   */
+  private async _readMessagesCached(): Promise<MailboxMessage[]> {
+    // Hot path: cache populated and the file hasn't changed since we
+    // populated it. `stat` is a single inode lookup; everything after the
+    // early return is pure memory.
+    try {
+      const st = await fsp.stat(this.messagePath);
+      if (
+        this._messageCache !== null &&
+        this._messageCacheMtime === st.mtimeMs &&
+        this._messageCacheSize === st.size
+      ) {
+        return this._messageCache;
+      }
+      const all = await this._readMessages();
+      this._setMessageCache(all, st.mtimeMs, st.size);
+      return all;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        this._setMessageCache([], -1, -1);
+        return [];
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Replace the in-memory cache. Caller is responsible for guaranteeing
+   * that `messages` reflects the current on-disk state (e.g. they just
+   * read or wrote it under the file lock).
+   */
+  private _setMessageCache(
+    messages: MailboxMessage[],
+    mtime?: number,
+    size?: number,
+  ): void {
+    // Bound the cache so a runaway mailbox can't balloon memory. The cap
+    // is high enough that any realistic project mailbox fits; if it ever
+    // exceeds the cap we just refuse to cache and the next read goes to
+    // disk (the unoptimized but correct behavior).
+    if (messages.length > MESSAGE_CACHE_MAX_ENTRIES) {
+      this._messageCache = null;
+      this._messageCacheMtime = -1;
+      this._messageCacheSize = -1;
+      return;
+    }
+    this._messageCache = messages;
+    // When the caller didn't supply an mtime (e.g. in-memory promotion
+    // after a write we already did), we re-stat to capture the post-write
+    // mtimeMs lazily so the next cached read validates against reality.
+    if (mtime !== undefined && size !== undefined) {
+      this._messageCacheMtime = mtime;
+      this._messageCacheSize = size;
+    } else {
+      // Fire-and-forget stat to refresh the mtime tracker. Failures just
+      // leave the previous values; the worst case is an extra cache miss.
+      void fsp
+        .stat(this.messagePath)
+        .then((st) => {
+          this._messageCacheMtime = st.mtimeMs;
+          this._messageCacheSize = st.size;
+        })
+        .catch(() => {
+          /* leave cache in place; next read will re-stat */
+        });
+    }
+  }
+
+  /**
+   * Append a single just-sent message to the in-memory cache without
+   * re-reading the file. The caller must hold the file lock (or have
+   * just released it after a successful append) so the cache stays
+   * consistent with on-disk state.
+   */
+  private _pushToCache(msg: MailboxMessage): void {
+    if (this._messageCache === null) return;
+    if (this._messageCache.length >= MESSAGE_CACHE_MAX_ENTRIES) {
+      this._messageCache = null;
+      this._messageCacheMtime = -1;
+      this._messageCacheSize = -1;
+      return;
+    }
+    // The cache holds shared message objects; we mirror the on-disk line
+    // by storing the same reference. Callers of `query()` get defensive
+    // copies, so this shared reference is safe.
+    this._messageCache.push(msg);
+    // Defer the mtime refresh — the just-released lock will have advanced
+    // mtime, but we'll re-stat lazily on the next cache validation.
   }
 
   private async _ensureRegistry(): Promise<void> {

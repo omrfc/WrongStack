@@ -76,9 +76,20 @@ export function createMailboxChecker(
         injectedIds.add(m.id);
       }
 
-      // Auto-read all fresh messages (adds read receipt)
-      for (const m of fresh) {
-        void mailbox.ack({ messageId: m.id, readerId: agentId, read: true }).catch(() => {});
+      // Auto-read all fresh messages (adds read receipt) in a single batched
+      // call. The previous per-message ack() did a full read-modify-rewrite
+      // of the mailbox file for every fresh message — N fresh messages
+      // meant N full-file rewrites in a row on every iteration.
+      if (fresh.length > 0) {
+        void mailbox
+          .ackMany({
+            acks: fresh.map((m) => ({
+              messageId: m.id,
+              readerId: agentId,
+              read: true,
+            })),
+          })
+          .catch(() => {});
       }
 
       // GC

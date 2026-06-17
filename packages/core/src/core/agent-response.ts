@@ -82,12 +82,15 @@ export function createAgentResponseHandler(a: AgentInternals): AgentResponseHand
       stopReason: res.stopReason,
       usage: res.usage,
     });
-    // Flush the LLM response to disk before we begin tool execution.
-    // If the process is killed during a long-running tool, the response
-    // (with its tool_use blocks + any text) is already durable. Without
-    // this, a SIGKILL mid-tool leaves the session log with orphaned
-    // tool_call_end events and no corresponding user_input/llm_response.
-    await a.ctx.session.flush();
+    // Drain the LLM response to disk in the background. The write starts
+    // immediately so the durability window is only the disk round-trip —
+    // not the whole tool execution — but we don't block the next provider
+    // request on it. Awaited flushes at end-of-turn and checkpoint
+    // boundaries provide the synchronous durability for the SIGKILL-mid-tool
+    // case at the points that genuinely need it.
+    void a.ctx.session.flush().catch(() => {
+      /* best-effort — buffered write is retried at the next boundary flush */
+    });
 
     if (a.ctx.signal.aborted) {
       // M3: collect into an array and join at the end. `finalText += block.text`

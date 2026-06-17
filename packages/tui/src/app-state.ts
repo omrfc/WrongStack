@@ -271,6 +271,7 @@ export type State = {
     featureSkills: boolean;
     featureModelsRegistry: boolean;
     featureTokenSaving: boolean;
+    allowOutsideProjectRoot: boolean;
     // Context
     contextAutoCompact: boolean;
     contextStrategy: CompactorStrategy;
@@ -569,6 +570,8 @@ export type Settings = {
   featureModelsRegistry: boolean;
   /** Token-saving mode: omits non-essential tools and trims system prompt. */
   featureTokenSaving: boolean;
+  /** Allow tools to access paths outside the project root. Default: true (open). */
+  allowOutsideProjectRoot: boolean;
   contextAutoCompact: boolean;
   contextStrategy: 'hybrid' | 'intelligent' | 'selective';
   logLevel: 'error' | 'warn' | 'info' | 'debug' | 'trace';
@@ -670,6 +673,7 @@ export type Action =
       featureSkills: boolean;
       featureModelsRegistry: boolean;
       featureTokenSaving: boolean;
+      allowOutsideProjectRoot: boolean;
       contextAutoCompact: boolean;
       contextStrategy: CompactorStrategy;
       logLevel: LogLevel;

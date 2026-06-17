@@ -76,6 +76,7 @@ export interface LiveSettingsInput {
   featureSkills?: boolean | undefined;
   featureModelsRegistry?: boolean | undefined;
   featureTokenSaving?: boolean | undefined;
+  allowOutsideProjectRoot?: boolean | undefined;
   contextAutoCompact?: boolean | undefined;
   contextStrategy?: string | undefined;
   logLevel?: string | undefined;
@@ -719,7 +720,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         // to the global project dir when the writer is in-memory.
         const transcript = context.session.transcriptPath;
         const sessionDir = transcript
-          ? require('node:path').dirname(transcript)
+          ? path.dirname(transcript)
           : wpaths.projectDir;
         // Adapt Context.provider (Wire provider) to AutonomousBrain.LLMProvider
         // (one-method LLM call). The brain calls decide(prompt) → option+rationale.
@@ -878,6 +879,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
               featureSkills: cfg.features?.skills !== false,
               featureModelsRegistry: cfg.features?.modelsRegistry !== false,
               featureTokenSaving: cfg.features?.tokenSavingMode ?? false,
+              allowOutsideProjectRoot: cfg.features?.allowOutsideProjectRoot ?? true,
               contextAutoCompact: cfg.context?.autoCompact !== false,
               contextStrategy: cfg.context?.strategy ?? 'hybrid',
               logLevel: cfg.log?.level ?? 'info',
@@ -949,6 +951,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                 s.featureMemory !== undefined ||
                 s.featureSkills !== undefined ||
                 s.featureModelsRegistry !== undefined ||
+                s.featureTokenSaving !== undefined ||
+                s.allowOutsideProjectRoot !== undefined ||
                 s.contextAutoCompact !== undefined ||
                 s.contextStrategy !== undefined ||
                 s.logLevel !== undefined ||
@@ -993,7 +997,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                   s.featureMemory !== undefined ||
                   s.featureSkills !== undefined ||
                   s.featureModelsRegistry !== undefined ||
-                  s.featureTokenSaving !== undefined
+                  s.featureTokenSaving !== undefined ||
+                s.allowOutsideProjectRoot !== undefined
                 ) {
                   const feats = (decrypted.features as Record<string, unknown>) ?? {};
                   if (s.featureMcp !== undefined) feats.mcp = s.featureMcp;
@@ -1004,6 +1009,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
                     feats.modelsRegistry = s.featureModelsRegistry;
                   if (s.featureTokenSaving !== undefined)
                     feats.tokenSavingMode = s.featureTokenSaving;
+                  if (s.allowOutsideProjectRoot !== undefined)
+                    feats.allowOutsideProjectRoot = s.allowOutsideProjectRoot;
                   decrypted.features = feats;
                 }
                 if (s.contextAutoCompact !== undefined || s.contextStrategy !== undefined) {

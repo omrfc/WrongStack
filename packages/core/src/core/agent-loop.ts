@@ -352,7 +352,12 @@ export function createAgentLoopHandler(
         // (pre-flight, emitContextPct, AutoCompactionMiddleware), each
         // walking the same messages/system/tools arrays. Now the result
         // is stashed on ctx and the other two call sites consult it.
-        const preFlight = estimateRequestTokens(req.messages, req.system, req.tools ?? []);
+        const preFlight = estimateRequestTokens(
+          req.messages,
+          req.system,
+          req.tools ?? [],
+          calibrationKey(req.model),
+        );
 
         // Stash the uncalibrated total on ctx so the middleware and the
         // context bar (emitContextPct) can read it without re-walking the

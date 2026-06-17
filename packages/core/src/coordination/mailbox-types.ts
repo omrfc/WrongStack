@@ -230,6 +230,19 @@ export interface MailboxAckInput {
   outcome?: string | undefined;
 }
 
+/**
+ * Batch acknowledgment input — applies a batch of acks under a single file
+ * lock + single file rewrite. Each entry has the same shape as
+ * {@link MailboxAckInput} minus the per-batch defaults documented on
+ * `ackMany`. Use this when an agent is acking several fresh messages at
+ * once (the common case in the mailbox loop) — it collapses N full-file
+ * rewrites into one.
+ */
+export interface MailboxAckBatchInput {
+  /** Ack entries to apply. */
+  acks: MailboxAckInput[];
+}
+
 // ── Agent registration input ────────────────────────────────────────────
 
 export interface AgentRegistrationInput {
@@ -339,6 +352,18 @@ export interface Mailbox {
 
   /** Acknowledge a message (read/complete). Returns updated message. */
   ack(input: MailboxAckInput): Promise<MailboxMessage | null>;
+
+  /**
+   * Acknowledge many messages in one shot. Acquires the file lock once and
+   * rewrites the message file once, regardless of how many acks are in the
+   * batch. Returns the messages that were actually updated (messages whose
+   * ids are not in the file are skipped silently).
+   *
+   * This is the preferred path when an agent has multiple fresh messages
+   * to receipt at once — the per-message {@link ack} path does a full
+   * read-modify-rewrite of the mailbox file for every call.
+   */
+  ackMany(input: MailboxAckBatchInput): Promise<MailboxMessage[]>;
 
   /** Get a snapshot of online/offline agents and their current tasks. */
   getAgentStatuses(): Promise<MailboxAgentStatus[]>;

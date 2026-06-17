@@ -33,6 +33,8 @@ export function resolvePath(input: string, ctx: Context): string {
 }
 
 export function ensureInsideRoot(absPath: string, ctx: Context): string {
+  // If allowOutsideProjectRoot is true, skip the project-root restriction.
+  if (ctx.allowOutsideProjectRoot) return path.resolve(absPath);
   const root = path.resolve(ctx.projectRoot);
   const target = path.resolve(absPath);
   const rel = path.relative(root, target);
@@ -61,6 +63,8 @@ export function safeResolve(input: string, ctx: Context): string {
  * the caller named exactly one file.
  */
 export async function assertRealInsideRoot(absPath: string, ctx: Context): Promise<void> {
+  // If allowOutsideProjectRoot is true, skip the symlink-escape check.
+  if (ctx.allowOutsideProjectRoot) return;
   const realRoot = await fsp.realpath(ctx.projectRoot).catch(() => path.resolve(ctx.projectRoot));
   let probe = absPath;
   for (;;) {

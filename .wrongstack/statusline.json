@@ -1,9 +1,0 @@
-{
-  "todos": true,
-  "plan": true,
-  "fleet": true,
-  "git": true,
-  "elapsed": true,
-  "context": true,
-  "cost": true
-}

@@ -22,6 +22,7 @@ import type {
   ClientRegistrationInput,
   ClientStatus,
   Mailbox,
+  MailboxAckBatchInput,
   MailboxAckInput,
   MailboxAgentStatus,
   MailboxMessage,
@@ -113,33 +114,49 @@ export class DefaultMailbox implements Mailbox {
   // ── Ack ───────────────────────────────────────────────────────────────
 
   async ack(input: MailboxAckInput): Promise<MailboxMessage | null> {
-    // Read-modify-write must happen entirely under the lock: reading the
-    // file before acquiring it lets two concurrent acks each start from a
-    // snapshot missing the other's receipt — last writer wins and a read
-    // receipt is silently lost.
-    let result: MailboxMessage | null = null;
+    const updated = await this.ackMany({ acks: [input] });
+    return updated.length > 0 ? updated[0]! : null;
+  }
+
+  async ackMany(input: MailboxAckBatchInput): Promise<MailboxMessage[]> {
+    // Batched: one lock acquisition + one file rewrite for N acks. The
+    // per-message ack() did a full read-modify-rewrite for every single
+    // ack — N acks meant N full-file rewrites in a row.
+    if (input.acks.length === 0) return [];
+    const updated: MailboxMessage[] = [];
+    const byId = new Map<string, MailboxAckInput>();
+    for (const a of input.acks) byId.set(a.messageId, a);
+
     await withFileLock(this.filePath, async () => {
       const all = await this._readAll();
-      const idx = all.findIndex((m) => m.id === input.messageId);
-      if (idx === -1) return;
-      const msg = all[idx]!;
       const now = new Date().toISOString();
-      if (input.read !== false) {
-        msg.readBy[input.readerId] = now;
+      let changed = false;
+      for (const msg of all) {
+        const a = byId.get(msg.id);
+        if (!a) continue;
+        updated.push(msg);
+        if (a.read !== false && !(a.readerId in msg.readBy)) {
+          msg.readBy[a.readerId] = now;
+          changed = true;
+        }
+        if (a.completed && !msg.completed) {
+          msg.completed = true;
+          msg.completedBy = a.readerId;
+          msg.completedAt = now;
+          changed = true;
+        }
+        if (a.outcome !== undefined && msg.outcome !== a.outcome) {
+          msg.outcome = a.outcome;
+          changed = true;
+        }
       }
-      if (input.completed) {
-        msg.completed = true;
-        msg.completedBy = input.readerId;
-        msg.completedAt = now;
+      if (changed) {
+        const serialized =
+          all.map((m) => JSON.stringify(m)).join(LINE_SEPARATOR) + LINE_SEPARATOR;
+        await fsp.writeFile(this.filePath, serialized, 'utf8');
       }
-      if (input.outcome !== undefined) {
-        msg.outcome = input.outcome;
-      }
-      const serialized = all.map((m) => JSON.stringify(m)).join(LINE_SEPARATOR) + LINE_SEPARATOR;
-      await fsp.writeFile(this.filePath, serialized, 'utf8');
-      result = msg;
     });
-    return result;
+    return updated;
   }
 
   // ── Agent statuses ────────────────────────────────────────────────────

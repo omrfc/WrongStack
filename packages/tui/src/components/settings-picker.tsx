@@ -71,6 +71,8 @@ export interface SettingsPickerProps {
   featureModelsRegistry: boolean;
   /** Token-saving mode: omits non-essential tools and trims system prompt. */
   featureTokenSaving: boolean;
+  /** Allow tools to read/write paths outside the project root directory. Default: true. */
+  allowOutsideProjectRoot: boolean;
   // ── Context ──
   contextAutoCompact: boolean;
   contextStrategy: CompactorStrategy;
@@ -98,7 +100,7 @@ export interface SettingsPickerProps {
 }
 
 /** Total number of settings rows (used for wrap-around navigation). */
-export const SETTINGS_FIELD_COUNT = 26;
+export const SETTINGS_FIELD_COUNT = 27;
 
 export const CONFIG_SCOPES = ['global', 'project'] as const;
 export type ConfigScope = (typeof CONFIG_SCOPES)[number];
@@ -119,6 +121,7 @@ export function SettingsPicker({
   featureSkills,
   featureModelsRegistry,
   featureTokenSaving,
+  allowOutsideProjectRoot,
   contextAutoCompact,
   contextStrategy,
   logLevel,
@@ -214,6 +217,11 @@ export function SettingsPicker({
       label: 'Token-saving mode',
       value: boolVal(featureTokenSaving),
       detail: 'Omit non-essential tools and trim system prompt to save tokens',
+    },
+    {
+      label: 'Allow outside project',
+      value: boolVal(allowOutsideProjectRoot),
+      detail: 'Allow tools to access paths outside project root',
     },
     // ── Context ──
     { section: 'Context' },

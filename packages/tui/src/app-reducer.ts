@@ -559,6 +559,7 @@ export function reducer(state: State, action: Action): State {
           featureSkills: action.featureSkills,
           featureModelsRegistry: action.featureModelsRegistry,
           featureTokenSaving: action.featureTokenSaving,
+          allowOutsideProjectRoot: action.allowOutsideProjectRoot,
           contextAutoCompact: action.contextAutoCompact,
           contextStrategy: action.contextStrategy,
           logLevel: action.logLevel,
@@ -629,65 +630,67 @@ export function reducer(state: State, action: Action): State {
       if (f === 12) return { ...state, settingsPicker: { ...sp, featureModelsRegistry: !sp.featureModelsRegistry, hint: bootHint } };
       // Field 13: Token-saving mode (boolean)
       if (f === 13) return { ...state, settingsPicker: { ...sp, featureTokenSaving: !sp.featureTokenSaving, hint: bootHint } };
-      // Field 14: context auto-compact (boolean)
-      if (f === 14) return { ...state, settingsPicker: { ...sp, contextAutoCompact: !sp.contextAutoCompact, hint: undefined } };
-      // Field 15: compactor strategy (cycle)
-      if (f === 15) {
+      // Field 14: allow outside project root (boolean)
+      if (f === 14) return { ...state, settingsPicker: { ...sp, allowOutsideProjectRoot: !sp.allowOutsideProjectRoot, hint: undefined } };
+      // Field 15: context auto-compact (boolean)
+      if (f === 15) return { ...state, settingsPicker: { ...sp, contextAutoCompact: !sp.contextAutoCompact, hint: undefined } };
+      // Field 16: compactor strategy (cycle)
+      if (f === 16) {
         const i = COMPACTOR_STRATEGIES.indexOf(sp.contextStrategy);
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + COMPACTOR_STRATEGIES.length) % COMPACTOR_STRATEGIES.length;
         return { ...state, settingsPicker: { ...sp, contextStrategy: expectDefined(COMPACTOR_STRATEGIES[next]), hint: bootHint } };
       }
-      // Field 16: log level (cycle)
-      if (f === 16) {
+      // Field 17: log level (cycle)
+      if (f === 17) {
         const i = LOG_LEVELS.indexOf(sp.logLevel);
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + LOG_LEVELS.length) % LOG_LEVELS.length;
         return { ...state, settingsPicker: { ...sp, logLevel: expectDefined(LOG_LEVELS[next]), hint: undefined } };
       }
-      // Field 17: audit level (cycle)
-      if (f === 17) {
+      // Field 18: audit level (cycle)
+      if (f === 18) {
         const i = AUDIT_LEVELS.indexOf(sp.auditLevel);
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + AUDIT_LEVELS.length) % AUDIT_LEVELS.length;
         return { ...state, settingsPicker: { ...sp, auditLevel: expectDefined(AUDIT_LEVELS[next]), hint: undefined } };
       }
-      // Field 18: index on start (boolean)
-      if (f === 18) return { ...state, settingsPicker: { ...sp, indexOnStart: !sp.indexOnStart, hint: bootHint } };
-      // Field 19: max iterations (cycle presets)
-      if (f === 19) {
+      // Field 19: index on start (boolean)
+      if (f === 19) return { ...state, settingsPicker: { ...sp, indexOnStart: !sp.indexOnStart, hint: bootHint } };
+      // Field 20: max iterations (cycle presets)
+      if (f === 20) {
         const j = MAX_ITERATIONS_PRESETS.indexOf(sp.maxIterations);
         const base = j < 0 ? 0 : j;
         const next = (base + action.delta + MAX_ITERATIONS_PRESETS.length) % MAX_ITERATIONS_PRESETS.length;
         return { ...state, settingsPicker: { ...sp, maxIterations: expectDefined(MAX_ITERATIONS_PRESETS[next]), hint: undefined } };
       }
-      // Field 20: auto-proceed max iterations (cycle presets)
-      if (f === 20) {
+      // Field 21: auto-proceed max iterations (cycle presets)
+      if (f === 21) {
         const aj = AUTO_PROCEED_MAX_PRESETS.indexOf(sp.autoProceedMaxIterations);
         const abase = aj < 0 ? 0 : aj;
         const anext = (abase + action.delta + AUTO_PROCEED_MAX_PRESETS.length) % AUTO_PROCEED_MAX_PRESETS.length;
         return { ...state, settingsPicker: { ...sp, autoProceedMaxIterations: expectDefined(AUTO_PROCEED_MAX_PRESETS[anext]), hint: undefined } };
       }
-      // Field 21: enhance delay (cycle presets)
-      if (f === 21) {
+      // Field 22: enhance delay (cycle presets)
+      if (f === 22) {
         const ej = ENHANCE_DELAY_PRESETS.indexOf(sp.enhanceDelayMs);
         const ebase = ej < 0 ? 0 : ej;
         const enext = (ebase + action.delta + ENHANCE_DELAY_PRESETS.length) % ENHANCE_DELAY_PRESETS.length;
         return { ...state, settingsPicker: { ...sp, enhanceDelayMs: expectDefined(ENHANCE_DELAY_PRESETS[enext]), hint: undefined } };
       }
-      // Field 21: enhance enabled (boolean toggle)
-      if (f === 22) return { ...state, settingsPicker: { ...sp, enhanceEnabled: !sp.enhanceEnabled, hint: undefined } };
-      // Field 23: enhance language (cycle original/english)
-      if (f === 23) {
+      // Field 23: enhance enabled (boolean toggle)
+      if (f === 23) return { ...state, settingsPicker: { ...sp, enhanceEnabled: !sp.enhanceEnabled, hint: undefined } };
+      // Field 24: enhance language (cycle original/english)
+      if (f === 24) {
         const i = ENHANCE_LANGUAGES.indexOf(sp.enhanceLanguage);
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + ENHANCE_LANGUAGES.length) % ENHANCE_LANGUAGES.length;
         return { ...state, settingsPicker: { ...sp, enhanceLanguage: expectDefined(ENHANCE_LANGUAGES[next]), hint: undefined } };
       }
-      // Field 23: debug stream (boolean toggle)
-      if (f === 24) return { ...state, settingsPicker: { ...sp, debugStream: !sp.debugStream, hint: undefined } };
-      // Field 24: config scope (cycle global/project)
-      if (f === 25) {
+      // Field 25: debug stream (boolean toggle)
+      if (f === 25) return { ...state, settingsPicker: { ...sp, debugStream: !sp.debugStream, hint: undefined } };
+      // Field 26: config scope (cycle global/project)
+      if (f === 26) {
         const i = CONFIG_SCOPES.indexOf(sp.configScope);
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + CONFIG_SCOPES.length) % CONFIG_SCOPES.length;
