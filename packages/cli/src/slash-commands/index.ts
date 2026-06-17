@@ -376,6 +376,7 @@ import { buildSddCommand } from './sdd.js';
 import { buildExitCommand, buildLoadCommand, buildSaveCommand } from './session.js';
 import { buildSetModelCommand } from './setmodel.js';
 import { buildSuggestCommand } from './suggest.js';
+import { buildCoordinatorCommand } from './coordinator.js';
 
 // modeldiag is now a CLI subcommand (wstack modeldiag), not a slash command.
 
@@ -432,6 +433,7 @@ export function buildBuiltinSlashCommands(opts: SlashCommandContext): SlashComma
     buildMouseCommand(opts),
     buildAutonomyCommand(opts),
     buildGoalCommand(opts),
+    buildCoordinatorCommand(opts),
     buildBrainCommand(opts),
     buildBtwCommand(opts),
     buildNextCommand(opts),
