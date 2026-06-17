@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BrainArbiter, BrainDecision } from '../../src/coordination/brain.js';
+import { DefaultBrainArbiter } from '../../src/coordination/brain.js';
 import { type BrainInterventionInput, BrainMonitor } from '../../src/coordination/brain-monitor.js';
 import { EventBus, type EventMap } from '../../src/kernel/events.js';
+import { createTieredBrainArbiter } from '../../src/execution/autonomy-brain.js';
 
 const STEER: BrainDecision = {
   type: 'answer',
@@ -191,5 +193,42 @@ describe('BrainMonitor', () => {
     await settle();
 
     expect(interventions).toHaveLength(0);
+  });
+
+  it('with tiered brain: routes to LLM layer after 3 failures via ask_human fallback', async () => {
+    // Mock autonomous layer that returns a real steer (simulates createAutonomyBrain)
+    const LLM_STEER: BrainDecision = {
+      type: 'answer',
+      optionId: 'steer',
+      text: 'Steer the agent with corrective guidance',
+      rationale: 'The tool "edit" has failed 3 times — try a different approach.',
+    };
+    const mockAutonomous: BrainArbiter = { decide: vi.fn(async () => LLM_STEER) };
+
+    // TieredBrain: DefaultBrainArbiter (policy) + mock autonomous layer
+    const tieredBrain = createTieredBrainArbiter({
+      policy: new DefaultBrainArbiter(),
+      autonomous: mockAutonomous,
+      getMaxAutoRisk: () => 'all',
+    });
+
+    const emitted: EventMap['brain.intervention'][] = [];
+    events.on('brain.intervention', (e) => emitted.push(e));
+    const m = new BrainMonitor({ events, brain: tieredBrain, intervene });
+
+    m.start();
+    events.emit('tool.executed', failedTool('edit'));
+    events.emit('tool.executed', failedTool('edit'));
+    events.emit('tool.executed', failedTool('edit'));
+    await settle();
+
+    // Autonomous layer should have been consulted (DefaultBrain returned ask_human, tiered routed to LLM)
+    expect(mockAutonomous.decide).toHaveBeenCalledOnce();
+    // Intervention should be delivered
+    expect(interventions).toHaveLength(1);
+    expect(interventions[0]?.body).toContain('try a different approach');
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]?.intervened).toBe(true);
+    m.stop();
   });
 });

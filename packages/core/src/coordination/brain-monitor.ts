@@ -150,6 +150,7 @@ export class BrainMonitor {
             label: 'Steer the agent with corrective guidance',
             consequence: 'A steer message is injected before its next step.',
             risk: 'low',
+            recommended: true,
           },
           {
             id: 'continue',
@@ -158,9 +159,9 @@ export class BrainMonitor {
           },
         ],
         risk: 'medium',
-        // Without an LLM layer the policy brain resolves this fallback to
-        // "continue" — the monitor observes but never interferes.
-        fallback: 'continue',
+        // 'ask_human' routes to the LLM-backed autonomous layer via
+        // createTieredBrainArbiter before any human escalation.
+        fallback: 'ask_human',
       };
       const decision = await this.opts.brain.decide(request);
       const intervened = await this.maybeIntervene(kind, request, decision);
