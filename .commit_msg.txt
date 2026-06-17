@@ -1,0 +1,6 @@
+feat(tui): add Start/Stop Coordinator button to goal panel
+
+- GoalPanel now shows [C] Start Coordinator / [S] Stop Coordinator hints
+- Keyboard shortcuts C and S trigger coordinator start/stop
+- coordinatorRunning prop tracks healthy state from reducer
+- Wired through AppProps → GoalPanel for all TUI surfaces

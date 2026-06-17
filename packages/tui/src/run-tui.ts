@@ -810,6 +810,8 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           onSwitchToSession: opts.onSwitchToSession,
           initialAgentsMonitorOpen: opts.initialAgentsMonitorOpen,
           subscribeCoordinatorEvents: opts.subscribeCoordinatorEvents,
+          onCoordinatorStart: opts.onCoordinatorStart,
+          onCoordinatorStop: opts.onCoordinatorStop,
         }),
         { exitOnCtrlC: false, stdin: inkStdin },
       );

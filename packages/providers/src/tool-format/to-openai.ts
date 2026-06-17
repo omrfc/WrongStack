@@ -17,18 +17,32 @@ export interface OpenAIToolSchema {
   };
 }
 
+/**
+ * WeakMap cache keyed by the Tool[] array reference. The tool registry
+ * returns the same array reference within a session, so after the first
+ * call the serialized schemas are served from cache — no re-mapping or
+ * object allocation on subsequent LLM calls. When tools are added or
+ * removed the registry creates a new array, the old entry is GC'd by
+ * the WeakMap, and the next call recomputes.
+ */
+const _cache = new WeakMap<Tool[], OpenAIToolSchema[]>();
+
 export function toolsToOpenAI(tools: Tool[]): OpenAIToolSchema[] {
-  return tools.map((t) => ({
-    type: 'function',
+  const hit = _cache.get(tools);
+  if (hit) return hit;
+  const result = tools.map((t) => ({
+    type: 'function' as const,
     function: {
       name: t.name,
-      description: t.description,
+      description: t.description ?? '',
       parameters: (t.inputSchema as Record<string, unknown>) ?? {
-        type: 'object',
+        type: 'object' as const,
         properties: {},
       },
     },
   }));
+  _cache.set(tools, result);
+  return result;
 }
 
 export interface OpenAIMessage {

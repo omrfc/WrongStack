@@ -110,8 +110,16 @@ export interface EventMap {
    * tree counts, etc.) without the tool having to know about the UI.
    */
   'tool.progress': { name: string; id: string; event: ToolProgressEvent };
+  /** Cache hit on session store load — used by observability layers. */
+  'storage.cache_hit': {
+    sessionId: string;
+    store: string;
+    filePath: string;
+    operation: string;
+    durationMs: number;
+  };
   /**
-   * Fired when a tool call needs user confirmation and no confirmHandler
+   * Fired when a tool call needs confirmation
    * is registered on the executor. The TUI renders a confirmation dialog
    * from this event. Resolution is driven by calling the resolve function
    * passed in the payload with a decision string ('yes' | 'no' | 'always' | 'deny').

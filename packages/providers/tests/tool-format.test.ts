@@ -629,4 +629,79 @@ describe('tool-format conversions', () => {
     expect(content).toHaveLength(1);
     expect(content[0]).toEqual({ type: 'text', text: '   \n  ' });
   });
+
+  // ── WeakMap memoization ──────────────────────────────────────────────
+  //
+  // Both toolsToAnthropic and toolsToOpenAI cache their output keyed by
+  // the Tool[] array reference. Within a session the tool registry returns
+  // the same array, so subsequent calls return the cached result (same
+  // object identity) without re-mapping. When the array reference changes
+  // (tools added/removed), the cache misses and recomputes.
+
+  describe('toolsToAnthropic memoization', () => {
+    it('returns the same array reference on repeated calls with the same Tool[] input', () => {
+      const t: Tool = {
+        name: 'read',
+        description: 'read a file',
+        inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
+        permission: 'auto',
+        mutating: false,
+        async execute() { return ''; },
+      };
+      const tools = [t];
+      const first = toolsToAnthropic(tools);
+      const second = toolsToAnthropic(tools);
+      // Same reference — no re-allocation on cache hit
+      expect(first).toBe(second);
+    });
+
+    it('recomputes when a different Tool[] array is passed', () => {
+      const t: Tool = {
+        name: 'grep',
+        description: 'search files',
+        inputSchema: { type: 'object', properties: { pattern: { type: 'string' } } },
+        permission: 'auto',
+        mutating: false,
+        async execute() { return ''; },
+      };
+      const a = toolsToAnthropic([t]);
+      const b = toolsToAnthropic([t]);
+      // Different array reference → cache miss → different result reference
+      expect(a).not.toBe(b);
+      // But structurally equal
+      expect(a).toEqual(b);
+    });
+  });
+
+  describe('toolsToOpenAI memoization', () => {
+    it('returns the same array reference on repeated calls with the same Tool[] input', () => {
+      const t: Tool = {
+        name: 'edit',
+        description: 'edit a file',
+        inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
+        permission: 'confirm',
+        mutating: true,
+        async execute() { return ''; },
+      };
+      const tools = [t];
+      const first = toolsToOpenAI(tools);
+      const second = toolsToOpenAI(tools);
+      expect(first).toBe(second);
+    });
+
+    it('recomputes when a different Tool[] array is passed', () => {
+      const t: Tool = {
+        name: 'bash',
+        description: 'run shell command',
+        inputSchema: { type: 'object', properties: { command: { type: 'string' } } },
+        permission: 'confirm',
+        mutating: true,
+        async execute() { return ''; },
+      };
+      const a = toolsToOpenAI([t]);
+      const b = toolsToOpenAI([t]);
+      expect(a).not.toBe(b);
+      expect(a).toEqual(b);
+    });
+  });
 });

@@ -1,17 +1,43 @@
-import { Box, Text } from '../ink.js';
+import { Box, Text, useInput } from '../ink.js';
 import type React from 'react';
 import { theme } from '../theme.js';
 import type { GoalSummary } from '../app-state.js';
 
 export interface GoalPanelProps {
   goal: GoalSummary;
+  /** Start the AutonomousCoordinator with the given goal text. */
+  onCoordinatorStart?: ((goal: string) => void) | undefined;
+  /** Stop the AutonomousCoordinator. */
+  onCoordinatorStop?: (() => void) | undefined;
+  /** Whether the coordinator is currently running. */
+  coordinatorRunning?: boolean | undefined;
 }
 
 /**
  * Full-screen overlay showing the current goal, deliverables checklist,
  * and progress bar. Opened with F9.
  */
-export function GoalPanel({ goal }: GoalPanelProps): React.ReactElement {
+export function GoalPanel({
+  goal,
+  onCoordinatorStart,
+  onCoordinatorStop,
+  coordinatorRunning,
+}: GoalPanelProps): React.ReactElement {
+  // Keyboard shortcuts for coordinator control (called before early returns so hooks always fire)
+  useInput((input) => {
+    if (input === 'c' || input === 'C') {
+      if (onCoordinatorStart && goal) {
+        const goalText = goal.refinedGoal || goal.goal;
+        onCoordinatorStart(goalText);
+      }
+    }
+    if (input === 'S') {
+      if (onCoordinatorStop) {
+        onCoordinatorStop();
+      }
+    }
+  });
+
   if (!goal) {
     return (
       <Box flexDirection="column" padding={1}>
@@ -25,6 +51,19 @@ export function GoalPanel({ goal }: GoalPanelProps): React.ReactElement {
         </Box>
         <Box marginTop={1}>
           <Text dimColor>Press F9 to close.</Text>
+        </Box>
+        {/* Coordinator controls — also work when no goal is set */}
+        <Box marginTop={1}>
+          {coordinatorRunning ? (
+            <>
+              <Text color="green">● Coordinator running  </Text>
+              <Text dimColor>[S] Stop coordinator</Text>
+            </>
+          ) : (
+            <>
+              <Text dimColor>[C] Start coordinator</Text>
+            </>
+          )}
         </Box>
       </Box>
     );
@@ -115,6 +154,19 @@ export function GoalPanel({ goal }: GoalPanelProps): React.ReactElement {
         )}
         <Box marginTop={1}>
           <Text dimColor>Press F9 to close.</Text>
+        </Box>
+        {/* Coordinator status + controls */}
+        <Box marginTop={1}>
+          {coordinatorRunning ? (
+            <>
+              <Text color="green">● Coordinator running  </Text>
+              <Text dimColor>[S] Stop coordinator</Text>
+            </>
+          ) : (
+            <>
+              <Text dimColor>[C] Start coordinator</Text>
+            </>
+          )}
         </Box>
       </Box>
     </Box>

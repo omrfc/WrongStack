@@ -66,15 +66,52 @@ export interface SessionStoreOptions {
   secretScrubber?: SecretScrubber | undefined;
 }
 
+/**
+ * Cache entry for load() — stores the parsed SessionData along with the
+ * file's mtimeMs and size at the time of loading. On subsequent calls,
+ * if the file's mtimeMs+size match, we return the cached data without
+ * re-reading or re-parsing the JSONL.
+ */
+interface LoadCacheEntry {
+  mtimeMs: number;
+  size: number;
+  data: SessionData;
+}
+
 export class DefaultSessionStore implements SessionStore {
   private readonly dir: string;
   private readonly events?: EventBus | undefined;
   private readonly secretScrubber?: SecretScrubber | undefined;
 
+  /**
+   * In-memory cache for load() results, keyed by session ID. The cache is
+   * invalidated when the file's mtimeMs or size changes (indicating the
+   * file was written to). This eliminates redundant full-file reads and
+   * JSON parses when the same session is loaded multiple times within the
+   * store's lifetime (e.g., webui session detail views, list() fallbacks).
+   *
+   * Max size is capped to prevent unbounded memory growth in long-running
+   * processes. When the limit is reached, the oldest entry is evicted.
+   */
+  private readonly _loadCache = new Map<string, LoadCacheEntry>();
+  private static readonly LOAD_CACHE_MAX_ENTRIES = 50;
+
   constructor(opts: SessionStoreOptions) {
     this.dir = opts.dir;
     this.events = opts.events;
     this.secretScrubber = opts.secretScrubber;
+  }
+
+  /**
+   * Clear the load() cache. Useful for testing or when the caller knows
+   * the file has changed externally (e.g., another process wrote to it).
+   */
+  clearLoadCache(sessionId?: string): void {
+    if (sessionId !== undefined) {
+      this._loadCache.delete(sessionId);
+    } else {
+      this._loadCache.clear();
+    }
   }
 
   // ── Storage event helpers ───────────────────────────────────────────────────
@@ -252,7 +289,29 @@ export class DefaultSessionStore implements SessionStore {
     const t0 = Date.now();
     let outcome: 'success' | 'failure' = 'success';
     let errorMsg: string | undefined;
+    let cacheHit = false;
     try {
+      // Stat the file first to check the cache. The stat is cheap (no content
+      // read) and lets us skip the full readFile + JSON parse when the file
+      // hasn't changed since the last load.
+      let stat: { mtimeMs: number; size: number };
+      try {
+        const s = await fsp.stat(file);
+        stat = { mtimeMs: s.mtimeMs, size: s.size };
+      } catch (err) {
+        // File doesn't exist or can't be stat'd — fall through to the
+        // readFile path which will throw the original ENOENT.
+        throw err;
+      }
+
+      // Check cache: if mtimeMs AND size match, the file hasn't changed.
+      const cached = this._loadCache.get(id);
+      if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+        cacheHit = true;
+        return cached.data;
+      }
+
+      // Cache miss — do the full read + parse.
       const raw = await fsp.readFile(file, 'utf8');
       const lines = raw.split('\n').filter((l) => l.trim());
       const events: SessionEvent[] = [];
@@ -275,13 +334,34 @@ export class DefaultSessionStore implements SessionStore {
       const { messages, usage } = this.replay(events, id);
       // Extract tool_call_end events for TUI tool entry rendering on resume.
       const toolCallEnds = extractToolCallEnds(events);
-      return { metadata: meta, events, messages, usage, toolCallEnds };
+      const data: SessionData = { metadata: meta, events, messages, usage, toolCallEnds };
+
+      // Update the cache. Evict oldest entry if at capacity.
+      if (this._loadCache.size >= DefaultSessionStore.LOAD_CACHE_MAX_ENTRIES) {
+        // Map iteration order is insertion order — delete the first key.
+        const oldest = this._loadCache.keys().next().value;
+        if (oldest !== undefined) {
+          this._loadCache.delete(oldest);
+        }
+      }
+      this._loadCache.set(id, { mtimeMs: stat.mtimeMs, size: stat.size, data });
+
+      return data;
     } catch (err) {
       outcome = 'failure';
       errorMsg = toErrorMessage(err);
       throw err;
     } finally {
       this.emitRead(id, file, 'load', outcome, Date.now() - t0, errorMsg);
+      if (cacheHit) {
+        this.events?.emit('storage.cache_hit', {
+          sessionId: id,
+          store: 'session',
+          filePath: file,
+          operation: 'load',
+          durationMs: Date.now() - t0,
+        });
+      }
     }
   }
 

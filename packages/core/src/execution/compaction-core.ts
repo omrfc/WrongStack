@@ -38,8 +38,22 @@ interface CompactionMetrics {
   changed: boolean;
 }
 
-/** Emit compaction instrumentation as a structured log event. */
+/**
+ * Whether compaction instrumentation should be emitted to stdout.
+ * Gated behind WRONGSTACK_DEBUG=1 or NODE_ENV=development so the hot path
+ * does not pay for JSON.stringify + console.log on every compaction pass
+ * in production. Matches the guard at the ratio-guard site (line ~281).
+ */
+function compactionDebugEnabled(): boolean {
+  return (
+    process.env['NODE_ENV'] === 'development' ||
+    process.env['WRONGSTACK_DEBUG'] === '1'
+  );
+}
+
+/** Emit compaction instrumentation as a structured log event (debug-only). */
 function emitCompactionMetrics(event: string, metrics: CompactionMetrics): void {
+  if (!compactionDebugEnabled()) return;
   console.log(
     JSON.stringify({
       level: 'debug',
@@ -142,19 +156,21 @@ export function findPreserveStart(messages: readonly Message[], preserveK: numbe
     }
   }
 
-  console.log(
-    JSON.stringify({
-      level: 'debug',
-      event: 'compaction.find_preserve_start.ended',
-      messageCount: messages.length,
-      preserveK,
-      preserveStart,
-      forwardWalkIterations,
-      forwardWalkInnerIterations,
-      forwardWalkInnerPerOuter:
-        forwardWalkIterations > 0 ? forwardWalkInnerIterations / forwardWalkIterations : 0,
-    }),
-  );
+  if (compactionDebugEnabled()) {
+    console.log(
+      JSON.stringify({
+        level: 'debug',
+        event: 'compaction.find_preserve_start.ended',
+        messageCount: messages.length,
+        preserveK,
+        preserveStart,
+        forwardWalkIterations,
+        forwardWalkInnerIterations,
+        forwardWalkInnerPerOuter:
+          forwardWalkIterations > 0 ? forwardWalkInnerIterations / forwardWalkIterations : 0,
+      }),
+    );
+  }
 
   return preserveStart;
 }
@@ -277,10 +293,7 @@ export function eliseOldToolResults(
     // consistently. In that case, add `&& changed` to the if-condition below
     // to break after the first elision is applied — capping worst-case from
     // O(n·m) to O(k·m) where k is the first oversized message index.
-    if (
-      process.env['NODE_ENV'] === 'development' ||
-      process.env['WRONGSTACK_DEBUG'] === '1'
-    ) {
+    if (compactionDebugEnabled()) {
       const ratio = fullPassInnerIterations / fullPassIterations;
 
       if (ratio > 10) {

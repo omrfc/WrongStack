@@ -1,0 +1,1 @@
+chore: remove dead coordination/parallel-eternal-engine.ts stub

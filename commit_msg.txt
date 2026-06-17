@@ -1,0 +1,8 @@
+feat(autonomous-coordinator): wire run() startup to TUI and slash context
+
+Adds onCoordinatorStart/onCoordinatorStop callbacks to SlashCommandContext
+and RunTuiOptions, enabling TUI and slash commands to start/stop the
+AutonomousCoordinator loop. The coordinator's run() is now callable
+fire-and-forget via onCoordinatorStart(goal), and stop() via
+onCoordinatorStop(). This completes the integration of AutonomousCoordinator
+with the existing autonomy infrastructure.

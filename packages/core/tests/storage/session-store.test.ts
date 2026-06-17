@@ -823,3 +823,126 @@ describe('DefaultSessionStore — secret scrubbing (F-06)', () => {
     expect(raw).toContain(FAKE_KEY);
   });
 });
+
+// ── load() mtime-based cache ─────────────────────────────────────────────
+describe('DefaultSessionStore — load() cache', () => {
+  let tmp: string;
+  let store: DefaultSessionStore;
+
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-sess-cache-'));
+    store = new DefaultSessionStore({ dir: tmp });
+  });
+  afterEach(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  it('returns the same object reference on repeated load() calls (cache hit)', async () => {
+    const w = await store.create({ id: 'cache1', model: 'm', provider: 'p' });
+    await w.append({ type: 'user_input', ts: new Date().toISOString(), content: 'hello' });
+    await w.close();
+
+    const first = await store.load('cache1');
+    const second = await store.load('cache1');
+    // Same reference — the cache returned the exact same object without
+    // re-reading or re-parsing the JSONL.
+    expect(first).toBe(second);
+  });
+
+  it('invalidates cache when the file is modified (mtime changes)', async () => {
+    const w = await store.create({ id: 'cache2', model: 'm', provider: 'p' });
+    await w.append({ type: 'user_input', ts: new Date().toISOString(), content: 'v1' });
+    await w.close();
+
+    const first = await store.load('cache2');
+    expect(first.messages).toHaveLength(1);
+
+    // Modify the file externally — append a new event and force mtime change.
+    const file = path.join(tmp, 'cache2.jsonl');
+    const newEvent = JSON.stringify({
+      type: 'user_input',
+      ts: new Date().toISOString(),
+      content: 'v2',
+    });
+    await fs.appendFile(file, '\n' + newEvent + '\n', 'utf8');
+
+    // The cache must detect the mtime change and re-parse.
+    const second = await store.load('cache2');
+    expect(second).not.toBe(first);
+    expect(second.messages).toHaveLength(2);
+  });
+
+  it('clearLoadCache() forces a full re-read even when mtime is unchanged', async () => {
+    const w = await store.create({ id: 'cache3', model: 'm', provider: 'p' });
+    await w.append({ type: 'user_input', ts: new Date().toISOString(), content: 'hello' });
+    await w.close();
+
+    const first = await store.load('cache3');
+    // Clear the cache for this session.
+    store.clearLoadCache('cache3');
+    const second = await store.load('cache3');
+    // Different reference (re-parsed) but structurally equal.
+    expect(second).not.toBe(first);
+    expect(second.messages).toEqual(first.messages);
+  });
+
+  it('clearLoadCache() without args clears all entries', async () => {
+    const w1 = await store.create({ id: 'a', model: 'm', provider: 'p' });
+    await w1.append({ type: 'user_input', ts: new Date().toISOString(), content: 'x' });
+    await w1.close();
+    const w2 = await store.create({ id: 'b', model: 'm', provider: 'p' });
+    await w2.append({ type: 'user_input', ts: new Date().toISOString(), content: 'y' });
+    await w2.close();
+
+    const a1 = await store.load('a');
+    const b1 = await store.load('b');
+    store.clearLoadCache();
+    const a2 = await store.load('a');
+    const b2 = await store.load('b');
+    expect(a2).not.toBe(a1);
+    expect(b2).not.toBe(b1);
+  });
+
+  it('cache does not serve stale data after clearHistory()', async () => {
+    const w = await store.create({ id: 'cache4', model: 'm', provider: 'p' });
+    await w.append({ type: 'user_input', ts: new Date().toISOString(), content: 'original' });
+    await w.close();
+
+    const first = await store.load('cache4');
+    expect(first.messages).toHaveLength(1);
+
+    // clearHistory() rewrites the file — mtime changes.
+    await store.clearHistory('cache4');
+
+    const second = await store.load('cache4');
+    expect(second).not.toBe(first);
+    // After clearHistory, the file contains only a session_start event,
+    // so no user messages.
+    expect(second.messages).toHaveLength(0);
+  });
+
+  it('emits storage.cache_hit event on cache hit when EventBus is wired', async () => {
+    const events: Array<{ type: string; sessionId?: string }> = [];
+    const eventBus = {
+      emit: (type: string, payload: Record<string, unknown>) => {
+        events.push({ type, ...payload } as { type: string; sessionId?: string });
+      },
+      on: () => () => {},
+    };
+    const cachedStore = new DefaultSessionStore({ dir: tmp, events: eventBus as never });
+    const w = await cachedStore.create({ id: 'ev1', model: 'm', provider: 'p' });
+    await w.append({ type: 'user_input', ts: new Date().toISOString(), content: 'hi' });
+    await w.close();
+
+    // First load — cache miss.
+    await cachedStore.load('ev1');
+    const missEvents = events.filter((e) => e.type === 'storage.cache_hit');
+    expect(missEvents).toHaveLength(0);
+
+    // Second load — cache hit.
+    await cachedStore.load('ev1');
+    const hitEvents = events.filter((e) => e.type === 'storage.cache_hit');
+    expect(hitEvents).toHaveLength(1);
+    expect(hitEvents[0]?.sessionId).toBe('ev1');
+  });
+});

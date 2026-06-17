@@ -581,6 +581,13 @@ export interface AppProps {
    * function. TUI uses this to drive the coordinator panel live view.
    */
   subscribeCoordinatorEvents?: ((fn: (event: CoordinatorEvent) => void) => (() => void)) | undefined;
+
+  /** Start the AutonomousCoordinator with the given goal text. */
+  onCoordinatorStart?: ((goal: string) => void) | undefined;
+  /** Stop the AutonomousCoordinator. */
+  onCoordinatorStop?: (() => void) | undefined;
+  /** Whether the AutonomousCoordinator is currently running. */
+  coordinatorRunning?: boolean | undefined;
 }
 
 const PASTE_THRESHOLD_CHARS = 200;
@@ -670,6 +677,9 @@ export function App({
   onSwitchToSession,
   initialAgentsMonitorOpen,
   subscribeCoordinatorEvents,
+  onCoordinatorStart,
+  onCoordinatorStop,
+  coordinatorRunning = false,
 }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -5857,7 +5867,14 @@ export function App({
           {/* Process list overlay (F8) — shows background bash/exec processes. */}
           {state.processListOpen ? <ProcessListMonitor /> : null}
           {/* Goal panel (F9) — shows current goal, deliverables, progress. */}
-          {state.goalPanelOpen ? <GoalPanel goal={state.goalSummary} /> : null}
+          {state.goalPanelOpen ? (
+            <GoalPanel
+              goal={state.goalSummary}
+              onCoordinatorStart={onCoordinatorStart ?? undefined}
+              onCoordinatorStop={onCoordinatorStop ?? undefined}
+              coordinatorRunning={coordinatorRunning}
+            />
+          ) : null}
           {/* Key hint bar — shows keyboard shortcuts and a discovery hint for the next panel. */}
           {(() => {
             const anyMonitorOpen =
