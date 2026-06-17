@@ -309,7 +309,9 @@ export class AutonomousCoordinator {
 
   /** Stop the autonomous loop. */
   stop(): void {
+    if (!this.running) return;
     this.running = false;
+    console.error(`[AutonomousCoordinator] stop signal received — shutting down (iteration ${this.iterationCount})`);
   }
 
   /** Get a stats snapshot. */
