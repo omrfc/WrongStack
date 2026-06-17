@@ -24,6 +24,7 @@ import { Button } from '../ui/button';
 import { AgentsPanel } from './AgentsPanel';
 import { HistoryPanel } from './HistoryPanel';
 import { SessionPanel } from './SessionPanel';
+import { SkillsPanel } from '../SkillsPanel';
 
 const PANEL_TITLE: Record<Activity, string> = {
   chat: 'Session',
@@ -32,6 +33,7 @@ const PANEL_TITLE: Record<Activity, string> = {
   files: 'Files',
   projects: 'Projects',
   mailbox: 'Mailbox',
+  skills: 'Skills',
 };
 
 export function SidePanel() {
@@ -118,6 +120,11 @@ export function SidePanel() {
         {activeActivity === 'mailbox' && (
           <div className="flex-1 overflow-y-auto p-3">
             <MailboxPanel />
+          </div>
+        )}
+        {activeActivity === 'skills' && (
+          <div className="flex-1 overflow-y-auto p-3">
+            <SkillsPanel />
           </div>
         )}
       </div>

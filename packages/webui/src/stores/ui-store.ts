@@ -8,9 +8,9 @@ import { persist } from 'zustand/middleware';
 // Activity types shown in the ActivityBar (secondary panel content).
 // One icon = one full panel. 'context' and 'sessions' were folded into
 // 'chat' and 'history' — coerceActivity maps persisted legacy values.
-export type Activity = 'chat' | 'agents' | 'history' | 'files' | 'projects' | 'mailbox';
+export type Activity = 'chat' | 'agents' | 'history' | 'files' | 'projects' | 'mailbox' | 'skills';
 
-const ACTIVITIES: readonly Activity[] = ['chat', 'agents', 'history', 'files', 'projects', 'mailbox'];
+const ACTIVITIES: readonly Activity[] = ['chat', 'agents', 'history', 'files', 'projects', 'mailbox', 'skills'];
 
 /** Map any persisted (possibly legacy) activity value onto the current set. */
 export function coerceActivity(value: unknown): Activity {
@@ -77,6 +77,17 @@ interface UIState {
   queuePanelOpen: boolean;
   setProcessMonitorOpen: (open: boolean) => void;
   setQueuePanelOpen: (open: boolean) => void;
+
+  /** Skills panel breadcrumb state — persisted so history survives panel switches. */
+  skillsState: {
+    /** The skill currently shown in the detail pane. */
+    selectedSkill: { name: string; description: string; version: string; source: string; path: string; trigger: string; scope: string[] } | null;
+    /** Ordered history of skills navigated to via related links. */
+    navHistory: { name: string; description: string; version: string; source: string; path: string; trigger: string; scope: string[] }[];
+    /** Current position in navHistory. */
+    historyIndex: number;
+  };
+  setSkillsState: (state: UIState['skillsState']) => void;
 
   /** Active prompt-refinement panel. Set while RefinePanel is shown. Null when no refinement is pending. */
   refinePanel: {
@@ -151,6 +162,11 @@ export const useUIStore = create<UIState>()(
       inspectorTab: 'fleet',
       processMonitorOpen: false,
       queuePanelOpen: false,
+      skillsState: {
+        selectedSkill: null,
+        navHistory: [],
+        historyIndex: -1,
+      },
 
       selectActivity: (activity) => set({ activeActivity: activity }),
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
@@ -215,16 +231,18 @@ export const useUIStore = create<UIState>()(
       toggleInspector: () => set((s) => ({ inspectorOpen: !s.inspectorOpen })),
       setProcessMonitorOpen: (open: boolean) => set({ processMonitorOpen: open }),
       setQueuePanelOpen: (open: boolean) => set({ queuePanelOpen: open }),
+      setSkillsState: (state) => set({ skillsState: state }),
     }),
     {
       name: 'wrongstack-ui',
-      version: 2,
+      version: 3,
       // v0 → v1: 'context'/'sessions' activities were removed and the
       // sidebar width bounds changed — coerce persisted values so a stale
       // localStorage entry can't select a panel that no longer exists.
       // v1 → v2: the modal FleetDrawer/AgentsDrawer were replaced by a
       // single docked InspectorPanel; drop the stale drawer booleans so
       // they can't force the (removed) fields back into state.
+      // v2 → v3: added skillsState for Skills panel breadcrumb persistence.
       migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Record<string, unknown>;
         p.activeActivity = coerceActivity(p.activeActivity);
@@ -250,6 +268,7 @@ export const useUIStore = create<UIState>()(
         refineEnabled: s.refineEnabled,
         inspectorOpen: s.inspectorOpen,
         inspectorTab: s.inspectorTab,
+        skillsState: s.skillsState,
       }),
     },
   ),

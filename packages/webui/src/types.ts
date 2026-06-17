@@ -549,6 +549,7 @@ export type WSClientMessage =
   | { type: 'memory.remember'; payload: { text: string; scope?: MemoryScope | undefined } }
   | { type: 'memory.forget'; payload: { text: string; scope?: MemoryScope | undefined } }
   | { type: 'skills.list' }
+  | { type: 'skills.content'; payload: { name: string; source: string } }
   | { type: 'diag.get' }
   | { type: 'stats.get' }
   | { type: 'session.save' }
