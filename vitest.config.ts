@@ -56,6 +56,10 @@ export default defineConfig({
     exclude: [
         '**/node_modules/**',
         '**/dist/**',
+        // WebUI tests require jsdom + globals:true — run separately:
+        //   cd packages/webui && pnpm test
+        // or: pnpm --filter webui test
+        'packages/webui/**',
       ],
     coverage: {
       provider: 'v8',
