@@ -165,6 +165,7 @@ export function attachTodosCheckpoint(
   const enqueueWrite = (todos: readonly TodoItem[]) => {
     writeChain = writeChain
       .then(() => saveTodosCheckpoint(filePath, sessionId, todos, events, traceId))
+      /* v8 ignore start -- defensive: saveTodosCheckpoint swallows its own errors and never rejects */
       .catch((err) => {
         // Log and keep the chain alive — a failed write must not
         // poison the chain and silently stop all subsequent writes.
@@ -177,6 +178,7 @@ export function attachTodosCheckpoint(
           timestamp: new Date().toISOString(),
         }));
       });
+      /* v8 ignore stop */
     return writeChain;
   };
 
@@ -187,6 +189,7 @@ export function attachTodosCheckpoint(
       pending = null;
       return enqueueWrite(todos);
     }
+    /* v8 ignore next -- defensive: flush is only invoked when a change is pending */
     return writeChain;
   };
 

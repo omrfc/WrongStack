@@ -82,6 +82,7 @@ export class SessionRecovery {
       stat = await fs.stat(fp);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      /* v8 ignore next -- defensive: any other stat failure is also non-recoverable */
       return null;
     }
     if (stat.size === 0) return null;
@@ -119,11 +120,13 @@ export class SessionRecovery {
         }
       }
       return null;
+      /* v8 ignore start -- defensive: tail open/read failure after a successful stat is rare */
     } catch {
       return null;
     } finally {
       if (fh) await fh.close();
     }
+    /* v8 ignore stop */
   }
 
   /**
@@ -143,6 +146,7 @@ export class SessionRecovery {
       raw = await fs.readFile(fp, 'utf8');
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      /* v8 ignore next -- defensive: any other read failure is also non-recoverable */
       return null;
     }
     const events: SessionEvent[] = [];
@@ -198,9 +202,11 @@ export class SessionRecovery {
       let entries: import('node:fs').Dirent[];
       try {
         entries = await fs.readdir(dir, { withFileTypes: true });
+        /* v8 ignore start -- defensive: the sessions dir (and its shards) are readable during a scan */
       } catch {
         return;
       }
+      /* v8 ignore stop */
       for (const entry of entries) {
         if (entry.name.startsWith('.')) continue;
         if (

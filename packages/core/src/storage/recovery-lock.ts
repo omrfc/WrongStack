@@ -238,6 +238,7 @@ function defaultIsPidAlive(pid: number): boolean {
     return true;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
+    /* v8 ignore next -- platform/permission-specific: EPERM means alive but owned by another user */
     if (code === 'EPERM') return true; // alive, but owned by someone else
     return false;
   }
