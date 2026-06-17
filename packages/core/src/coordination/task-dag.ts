@@ -78,9 +78,11 @@ export class TaskDAG {
     }
 
     // Cycle detection: would adding this edge create a cycle?
+    /* v8 ignore start -- unreachable: a brand-new id has no dependents, so adding it can never close a cycle */
     if (this._wouldCycle(id, deps)) {
       throw new Error(`TaskDAG.addNode: adding deps [${deps.join(', ')}] to "${id}" would create a cycle.`);
     }
+    /* v8 ignore stop */
 
     const node: DAGNode = {
       id,
@@ -164,6 +166,7 @@ export class TaskDAG {
     const blocked: string[] = [];
     for (const depId of node.dependents) {
       const dep = this.nodes.get(depId);
+      /* v8 ignore next -- defensive: dependents are kept consistent (removeNode prunes them) */
       if (!dep) continue;
       // Check if all deps are now done
       const allDone = dep.deps
@@ -195,6 +198,7 @@ export class TaskDAG {
     const blocked: string[] = [];
     for (const depId of node.dependents) {
       const dep = this.nodes.get(depId);
+      /* v8 ignore next -- defensive: dependents are kept consistent (removeNode prunes them) */
       if (!dep) continue;
       const allDone = dep.deps
         .filter((d) => this.nodes.has(d))
@@ -203,6 +207,7 @@ export class TaskDAG {
           return s === 'done' || s === 'skipped';
         });
       if (allDone) {
+        /* v8 ignore next -- unreachable: the just-failed dep is never done/skipped, so a dependent is never fully satisfied here */
         this._transition(depId, 'pending', 'ready');
       } else {
         blocked.push(depId);
@@ -226,6 +231,7 @@ export class TaskDAG {
 
     for (const depId of node.dependents) {
       const dep = this.nodes.get(depId);
+      /* v8 ignore next -- defensive: dependents are kept consistent (removeNode prunes them) */
       if (!dep) continue;
       const allDone = dep.deps
         .filter((d) => this.nodes.has(d))
@@ -399,6 +405,7 @@ export class TaskDAG {
     const stack = [...newDeps];
     while (stack.length > 0) {
       const current = stack.pop()!;
+      /* v8 ignore next -- unreachable: id is brand-new, so no dependents-path leads back to it */
       if (current === id) return true;
       if (visited.has(current)) continue;
       visited.add(current);
