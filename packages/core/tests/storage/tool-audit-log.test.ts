@@ -20,6 +20,11 @@ vi.mock('node:fs/promises', async () => {
       if (store[k] !== undefined) return store[k];
       return await real.readFile(k, 'utf8');
     }),
+    appendFile: vi.fn(async (filepath: string | Buffer | URL, data: string) => {
+      const k = String(filepath);
+      store[k] = (store[k] ?? '') + data;
+      await real.appendFile(k, data, 'utf8');
+    }),
     writeFile: vi.fn(async (filepath: string | Buffer | URL, data: string) => {
       const k = String(filepath);
       store[k] = data;
@@ -383,7 +388,7 @@ describe('ToolAuditLog', () => {
   it('emits storage.error when record() encounters a write failure', async () => {
     const events: EventBus = { emit: vi.fn() } as never;
     const loggedLog = new ToolAuditLog({ dir, events });
-    fsp.writeFile.mockRejectedValueOnce(
+    fsp.appendFile.mockRejectedValueOnce(
       Object.assign(new Error('ENOSPC no space left'), { code: 'ENOSPC' }),
     );
     try {

@@ -2,7 +2,7 @@ import { expectDefined } from '../utils/expect-defined.js';
 import { toErrorMessage } from '../utils/error.js';
 import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
-import { atomicWrite, withFileLock } from '../utils/atomic-write.js';
+import { withFileLock } from '../utils/atomic-write.js';
 import { safeParse } from '../utils/safe-json.js';
 import { sessionScopedPath } from '../utils/session-scoped-path.js';
 import type { EventBus } from '../kernel/events.js';
@@ -91,6 +91,13 @@ export class ToolAuditLog {
   private readonly tailHash = new Map<string, string>();
   /** In-memory counter for entry indices — avoids re-reading the file on every write. */
   private readonly tailIndex = new Map<string, number>();
+  /**
+   * File mtime+size recorded after our last write, per session. Used to
+   * detect cross-process writes (session handoff, recovery) that would
+   * invalidate the in-memory tail cache: if the stat no longer matches
+   * we re-read the file to re-establish the chain tip before appending.
+   */
+  private readonly tailStat = new Map<string, { mtimeMs: number; size: number }>();
   /** Tracks writes since last fsync, per session. */
   private readonly unSyncedWrites = new Map<string, number>();
   private readonly writeChains = new Map<string, Promise<void>>();
@@ -123,10 +130,16 @@ export class ToolAuditLog {
     try {
       await this.enqueue(input.sessionId, async () => {
         await withFileLock(fp, async () => {
-          const entries = await this.readAll(input.sessionId);
-          const prev = entries.at(-1);
-          const prevHash = prev?.hash ?? GENESIS_PREV;
-          const index = prev ? prev.index + 1 : 0;
+          // Resolve the chain tip from the in-memory cache when possible,
+          // re-reading the file only on first contact or when an external
+          // writer (cross-process session handoff) changed it under us.
+          // The previous implementation did `readAll` on every single
+          // record just to find `entries.at(-1)` — a full parse of the
+          // audit file per tool call.
+          const tip = await this._resolveChainTip(input.sessionId, fp);
+          const prevHash = tip.prevHash;
+          const index = tip.nextIndex;
+
           const id = randomUUID();
           const ts = new Date().toISOString();
           const content = {
@@ -153,10 +166,27 @@ export class ToolAuditLog {
             isError: input.isError,
             index,
           };
-          entries.push(entry);
-          await this.writeAll(input.sessionId, entries);
+
+          // True O(1) append — one line, no full-file rewrite. The previous
+          // `writeAll(entries)` path re-serialized every entry on every
+          // record; a 1000-call session rewrote a multi-MB audit file 1000
+          // times (quadratic in session length). `withFileLock` above
+          // guarantees no concurrent writer interleaves with our append.
+          await fs.appendFile(fp, JSON.stringify(entry) + '\n', 'utf8');
+
+          // Refresh caches + fsync bookkeeping. We stat post-write so the
+          // mtime+size tracker reflects the just-appended line — the next
+          // record can trust the cache without re-reading.
+          try {
+            const st = await fs.stat(fp);
+            this.tailStat.set(input.sessionId, { mtimeMs: st.mtimeMs, size: st.size });
+          } catch {
+            /* best-effort; next record will just re-read */
+          }
           this.tailHash.set(input.sessionId, hash);
           this.tailIndex.set(input.sessionId, index + 1);
+          await this._trackUnsynced(input.sessionId, fp);
+
           const durationMs = Date.now() - t0;
           this.events?.emit('storage.write', {
             sessionId: input.sessionId,
@@ -184,6 +214,57 @@ export class ToolAuditLog {
       });
       throw err;
     }
+  }
+
+  /**
+   * Resolve the chain tip (previous hash + next index) for an append.
+   * Uses the in-memory `tailHash`/`tailIndex` cache when the file's
+   * stat matches our last known write; falls back to a full read on
+   * cache miss or when an external writer has extended the file.
+   */
+  private async _resolveChainTip(
+    sessionId: string,
+    fp: string,
+  ): Promise<{ prevHash: string; nextIndex: number }> {
+    const cachedHash = this.tailHash.get(sessionId);
+    const cachedIndex = this.tailIndex.get(sessionId);
+    const cachedStat = this.tailStat.get(sessionId);
+
+    if (cachedHash !== undefined && cachedIndex !== undefined && cachedStat) {
+      // Verify no other process appended since our last write. Stat is a
+      // single inode lookup; the common case (same-process sequential
+      // writes) returns immediately and we skip the full read.
+      try {
+        const st = await fs.stat(fp);
+        if (st.mtimeMs === cachedStat.mtimeMs && st.size === cachedStat.size) {
+          return { prevHash: cachedHash, nextIndex: cachedIndex };
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          // File was removed out from under us — reset and start a new chain.
+          this.tailHash.delete(sessionId);
+          this.tailIndex.delete(sessionId);
+          this.tailStat.delete(sessionId);
+          return { prevHash: GENESIS_PREV, nextIndex: 0 };
+        }
+        throw err;
+      }
+    }
+
+    // Cache miss or external write detected — read the true tail.
+    const entries = await this.readAll(sessionId);
+    const prev = entries.at(-1);
+    const prevHash = prev?.hash ?? GENESIS_PREV;
+    const nextIndex = prev ? prev.index + 1 : 0;
+    this.tailHash.set(sessionId, prevHash);
+    this.tailIndex.set(sessionId, nextIndex);
+    try {
+      const st = await fs.stat(fp);
+      this.tailStat.set(sessionId, { mtimeMs: st.mtimeMs, size: st.size });
+    } catch {
+      /* leave cache empty; next record re-reads */
+    }
+    return { prevHash, nextIndex };
   }
 
   /**
@@ -340,15 +421,12 @@ export class ToolAuditLog {
     }
   }
 
-  private async writeAll(sessionId: string, entries: AuditEntry[]): Promise<void> {
-    const fp = this.filePath(sessionId);
-    const line = entries.map((e) => JSON.stringify(e)).join('\n') + (entries.length ? '\n' : '');
-    // Real append — O(1) per write. The write chain ensures serial
-    // ordering per session. On crash a partial line may appear;
-    // readAll skips unparseable lines so the chain stays verifiable.
-    await atomicWrite(fp, line, { mode: 0o600 });
-    // Periodic fsync: every fsyncEvery writes, open the file and sync it.
-    // This limits data loss to at most fsyncEvery entries on crash.
+  /**
+   * Tracks writes since last fsync and triggers periodic fsync.
+   * Called after each O(1) append to maintain the same durability
+   * guarantees as the old writeAll approach.
+   */
+  private async _trackUnsynced(sessionId: string, fp: string): Promise<void> {
     const count = (this.unSyncedWrites.get(sessionId) ?? 0) + 1;
     this.unSyncedWrites.set(sessionId, count);
     if (this.fsyncEvery !== Number.POSITIVE_INFINITY && count % this.fsyncEvery === 0) {

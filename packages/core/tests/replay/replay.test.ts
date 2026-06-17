@@ -13,19 +13,15 @@ import type { Request, Response } from '../../src/types/provider.js';
 vi.mock('node:fs/promises', async () => {
   const real = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
 
-  // In-memory store so writes and reads share state within a test.
-  const store: Record<string, string> = {};
-
   const mockFs = {
     mkdtemp: real.mkdtemp,
-    readFile: vi.fn(async (filepath: string | Buffer | URL) => {
-      const k = String(filepath);
-      if (store[k] !== undefined) return store[k];
-      return await real.readFile(k, 'utf8');
-    }),
+    // All fs operations delegate to real fs so that atomicWrite (temp+rename)
+    // and concurrent appends stay coherent.  Wrapped in vi.fn() so that
+    // error-injection tests can call .mockRejectedValueOnce() on them.
+    readFile: vi.fn(real.readFile),
+    appendFile: vi.fn(real.appendFile),
     writeFile: vi.fn(async (filepath: string | Buffer | URL, data: string) => {
       const k = String(filepath);
-      store[k] = data;
       try { await real.writeFile(k, data, 'utf8'); } catch { /* best-effort real write */ }
     }),
     rename: real.rename,
@@ -348,7 +344,7 @@ describe('ReplayLogStore', () => {
   it('emits storage.error when record() encounters a write failure', async () => {
     const events: EventBus = { emit: vi.fn() } as never;
     const loggedStore = new ReplayLogStore({ dir, events });
-    fs.writeFile.mockRejectedValueOnce(
+    fs.appendFile.mockRejectedValueOnce(
       Object.assign(new Error('No space left on device'), { code: 'ENOSPC' }),
     );
     try {
@@ -363,7 +359,7 @@ describe('ReplayLogStore', () => {
         error: expect.stringContaining('ENOSPC'),
       }));
     } finally {
-      fs.writeFile.mockReset();
+      fs.appendFile.mockReset();
     }
   });
 
