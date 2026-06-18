@@ -15,6 +15,7 @@ import { buildBm25Index, tokenise } from '../src/codebase-index/bm25.js';
 import { codebaseIndexTool } from '../src/codebase-index/codebase-index-tool.js';
 import { codebaseSearchTool } from '../src/codebase-index/codebase-search-tool.js';
 import { codebaseStatsTool } from '../src/codebase-index/codebase-stats-tool.js';
+import { resetIndexStateForTesting } from '../src/codebase-index/background-indexer.js';
 import {
   LSPSymbolKind,
   internalKindToLspKind,
@@ -608,6 +609,7 @@ describe('codebase-index tool', () => {
   let ctx: Context;
 
   beforeEach(async () => {
+    resetIndexStateForTesting();
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-cbi-'));
     ctx = mkCtx(tmpDir);
   });
@@ -723,6 +725,7 @@ describe('codebase-stats tool', () => {
   let ctx: Context;
 
   beforeEach(async () => {
+    resetIndexStateForTesting();
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-cbs-'));
     ctx = mkCtx(tmpDir);
   });
@@ -753,6 +756,7 @@ describe('codebase-search tool', () => {
   let ctx: Context;
 
   beforeEach(async () => {
+    resetIndexStateForTesting();
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-cbsea-'));
     ctx = mkCtx(tmpDir);
   });

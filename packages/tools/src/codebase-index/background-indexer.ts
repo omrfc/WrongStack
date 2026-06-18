@@ -552,3 +552,29 @@ export async function codebaseIndexStats(
     signal: opts.signal,
   });
 }
+
+// ─── Test-only reset ───────────────────────────────────────────────────────────
+
+/**
+ * Reset all process-global indexing state for test isolation.
+ *
+ * Vitest runs test files in parallel within the same process, so module-level
+ * state (`_indexing`, `_ready`, `chain`, `indexCircuitBreaker`) leaks between
+ * tests. Call this in `beforeEach` to ensure each test starts with a clean
+ * slate. Production code should NEVER call this.
+ */
+export function resetIndexStateForTesting(): void {
+  _ready = false;
+  _indexing = false;
+  _currentFile = 0;
+  _totalFiles = 0;
+  _lastError = null;
+  chain = Promise.resolve();
+  indexCircuitBreaker.reset();
+  cancelPendingReindexes();
+  // Don't terminate the worker — it's expensive to respawn and tests that
+  // need it will call ensureWorker() lazily. Just clear the RPC state.
+  for (const [, p] of pending) p.reject(new Error('test reset'));
+  pending.clear();
+  nextRpcId = 1;
+}
