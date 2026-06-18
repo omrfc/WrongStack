@@ -242,8 +242,11 @@ export class AutonomousBrain implements BrainArbiter {
       return { type: 'deny', reason: `Brain LLM failed: ${String(err)}` };
     }
 
-    // Record the decision in the knowledge graph (fire-and-forget for perf)
-    void this._recordDecision({
+    // Record the decision in the knowledge graph (fire-and-forget for perf).
+    // Use .catch(() => {}) rather than void — void discards the return value
+    // but does NOT swallow promise rejections, so errors would become unhandled
+    // promise rejections that crash the process.
+    this._recordDecision({
       id,
       decisionType,
       question,
@@ -252,7 +255,7 @@ export class AutonomousBrain implements BrainArbiter {
       rationale: result.rationale,
       madeBy: 'autonomous-brain',
       context: JSON.stringify(context),
-    });
+    }).catch(() => {});
 
     // Handle consensus requirement
     if (requiresConsensus) {
