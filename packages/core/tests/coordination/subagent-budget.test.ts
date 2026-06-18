@@ -170,14 +170,54 @@ describe('SubagentBudget', () => {
     expect(() => b.recordIteration()).toThrow(BudgetExceededError);
   });
 
-  it('auto mode with no listener hard-stops (no coordinator to ask)', () => {
-    const bus = new EventBus(); // no listeners registered
+  it('auto mode with a bus but no listener: async handler hard-stops (no one to grant)', () => {
+    const bus = new EventBus(); // bus present, but no budget.threshold_reached listener
     const b = new SubagentBudget({ maxIterations: 2 }, 'auto');
     (b as unknown as { _events: EventBus })._events = bus;
+    let handlerCalls = 0;
+    // Production handler shape: defers to the bus via requestDecision(). With no
+    // listener the negotiation can only resolve to 'stop' — so the budget
+    // hard-stops with BudgetExceededError. This is the documented "auto + no
+    // listener → hard stop" invariant that protects a bare /spawn (no director)
+    // from a runaway subagent. (A wired listener would instead get a
+    // BudgetThresholdSignal to negotiate — see the listener tests.)
+    b.onThreshold = ({ requestDecision }) => {
+      handlerCalls++;
+      return requestDecision();
+    };
+    b.recordIteration();
+    b.recordIteration();
+    expect(() => b.recordIteration()).toThrow(BudgetExceededError);
+    expect(handlerCalls).toBeGreaterThan(0);
+  });
+
+  it('auto mode with a bus but no listener: a SYNC policy handler is honored without throwing', () => {
+    const bus = new EventBus(); // no listener
+    const b = new SubagentBudget({ maxIterations: 2 }, 'auto');
+    (b as unknown as { _events: EventBus })._events = bus;
+    let handlerCalls = 0;
+    // A synchronous policy/recording handler (the coordinator watchdog shape):
+    // it decides in-process and grants headroom directly via `extend`. No
+    // listener is needed and the budget does NOT hard-stop — it keeps running
+    // under the raised ceiling.
+    b.onThreshold = ({ extend }) => {
+      handlerCalls++;
+      extend?.({ maxIterations: 999 });
+      return 'continue';
+    };
+    b.recordIteration();
+    b.recordIteration();
+    expect(() => b.recordIteration()).not.toThrow();
+    expect(handlerCalls).toBeGreaterThan(0);
+    expect(b.limits.maxIterations).toBe(999);
+  });
+
+  it('auto mode with NO event bus hard-stops with BudgetExceededError', () => {
+    // No `_events` wired at all → nobody to negotiate with → hard stop.
+    const b = new SubagentBudget({ maxIterations: 2 }, 'auto');
     b.onThreshold = ({ requestDecision }) => requestDecision();
     b.recordIteration();
     b.recordIteration();
-    // No listener → hasListenerFor is false → BudgetExceededError, hard stop
     expect(() => b.recordIteration()).toThrow(BudgetExceededError);
   });
 

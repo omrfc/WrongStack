@@ -1146,6 +1146,12 @@ export function reducer(state: State, action: Action): State {
         ? { ...state, processListOpen: true, monitorOpen: false, agentsMonitorOpen: false, helpOpen: false, todosMonitorOpen: false, queuePanelOpen: false, goalPanelOpen: false }
         : { ...state, processListOpen: false };
     }
+    case 'togglePlanPanel': {
+      const opening = !state.planPanelOpen;
+      return opening
+        ? { ...state, planPanelOpen: true, monitorOpen: false, agentsMonitorOpen: false, helpOpen: false, todosMonitorOpen: false, queuePanelOpen: false, processListOpen: false, goalPanelOpen: false }
+        : { ...state, planPanelOpen: false };
+    }
     case 'toggleGoalPanel': {
       const opening = !state.goalPanelOpen;
       return opening

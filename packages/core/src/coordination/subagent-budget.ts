@@ -14,6 +14,14 @@ export type BudgetKind = 'tool_calls' | 'iterations' | 'tokens' | 'timeout' | 'i
  */
 export const TIMEOUT_PREEMPT_FRACTION = 0.85;
 
+/**
+ * Hard safety net for budget negotiation decisions. If no listener responds to
+ * `budget.threshold_reached` within this window the negotiation defaults to
+ * `'stop'`. Exported so the coordinator's watchdog can reuse the same ceiling
+ * without hardcoding a second copy.
+ */
+export const DECISION_TIMEOUT_MS = 60_000;
+
 export class BudgetExceededError extends Error {
   readonly kind: BudgetKind;
   readonly limit: number;
@@ -121,7 +129,16 @@ export type BudgetThresholdHandler = (info: {
   used: number;
   limit: number;
   requestDecision: () => Promise<BudgetThresholdDecision>;
-}) => 'throw' | 'continue' | Promise<BudgetThresholdDecision>;
+  /**
+   * Direct grant/deny hooks for SYNCHRONOUS policy or recording handlers that
+   * decide in-process without a wired `budget.threshold_reached` listener
+   * (e.g. the coordinator watchdog). `extend` patches the limits in place;
+   * `deny` records the intent to stop. Production listener-driven handlers use
+   * `requestDecision()` instead and can ignore these.
+   */
+  extend?: (extra: Partial<BudgetLimits>) => void;
+  deny?: () => void;
+}) => 'throw' | 'continue' | 'stop' | { extend: Partial<BudgetLimits> } | Promise<BudgetThresholdDecision>;
 
 /**
  * Per-subagent budget enforcement. Each subagent gets its own instance so a
@@ -144,6 +161,32 @@ export type BudgetThresholdHandler = (info: {
  */
 export class SubagentBudget {
   readonly limits: Readonly<BudgetLimits>;
+
+  /** Patch one or more budget limits in-place after construction.
+   * Used by the coordinator watchdog when granting an extension.
+   * All fields are optional — only provided fields are updated.
+   * This is the single write path for limit mutations so that future
+   * validation or side-effects live in one place (M1). */
+  patchLimits(ext: Partial<BudgetLimits>): void {
+    if (ext.maxIterations !== undefined) {
+      (this.limits as Record<string, unknown>).maxIterations = ext.maxIterations;
+    }
+    if (ext.maxToolCalls !== undefined) {
+      (this.limits as Record<string, unknown>).maxToolCalls = ext.maxToolCalls;
+    }
+    if (ext.maxTokens !== undefined) {
+      (this.limits as Record<string, unknown>).maxTokens = ext.maxTokens;
+    }
+    if (ext.maxCostUsd !== undefined) {
+      (this.limits as Record<string, unknown>).maxCostUsd = ext.maxCostUsd;
+    }
+    if (ext.timeoutMs !== undefined) {
+      (this.limits as Record<string, unknown>).timeoutMs = ext.timeoutMs;
+    }
+    if (ext.idleTimeoutMs !== undefined) {
+      (this.limits as Record<string, unknown>).idleTimeoutMs = ext.idleTimeoutMs;
+    }
+  }
   private iterations = 0;
   private toolCalls = 0;
   private tokenInput = 0;
@@ -164,12 +207,42 @@ export class SubagentBudget {
    * or hung listener (Director not built / event filter detached mid-run)
    * leaves the budget over-limit and never enforces anything.
    */
-  private static readonly DECISION_TIMEOUT_MS = 60_000;
+  private static readonly DECISION_TIMEOUT_MS = DECISION_TIMEOUT_MS;
   /**
    * Injected by the runner when wiring the budget to its EventBus.
    * Used to emit `budget.threshold_reached` events in `'auto'` mode.
    */
   _events?: EventBus | undefined;
+
+  /**
+   * Guard against dual-path races between the coordinator watchdog
+   * (`executeWithTimeout`) and the budget's own `checkTimeout()`.
+   * Both paths detect `elapsed >= timeoutMs` and can emit
+   * `budget.threshold_reached` for kind `'timeout'` simultaneously.
+   * Set to the current `timeoutMs` ceiling by the coordinator BEFORE
+   * calling `onThreshold`, and cleared after the negotiation resolves.
+   * `checkTimeout()` skips its wall-clock check while this is set so
+   * the coordinator's watchdog is the sole source of wall-clock timeout
+   * events — `checkTimeout()` focuses exclusively on `idle_timeout`.
+   */
+  private _watchdogActive: number | undefined;
+
+  /** Returns the timeout ceiling currently being negotiated by the watchdog,
+   * or `undefined` when no wall-clock negotiation is in flight.
+   * Used by `executeWithTimeout` to detect a stale lock (M3). */
+  get watchdogActive(): number | undefined { return this._watchdogActive; }
+
+  /** Called by the coordinator watchdog BEFORE calling `onThreshold` so that
+   * `checkTimeout()` skips its wall-clock check for this ceiling. Prevents
+   * the budget's own `checkTimeout()` from emitting a second
+   * `budget.threshold_reached` event while the watchdog is already
+   * negotiating the same wall-clock deadline (C1). */
+  setWatchdogNegotiation(timeoutMs: number): void { this._watchdogActive = timeoutMs; }
+
+  /** Clears the watchdog guard after negotiation resolves. Called in the
+   * `finally` block of both the pre-empt and deadline branches so it fires
+   * on every exit path: grant, deny, throw, or error. */
+  clearWatchdogNegotiation(): void { this._watchdogActive = undefined; }
 
   /**
    * Negotiation mode — controls whether a threshold hit tries to emit
@@ -292,7 +365,20 @@ export class SubagentBudget {
       if (this.limits.idleTimeoutMs !== undefined && idle > this.limits.idleTimeoutMs) {
         exceeded.push({ kind: 'idle_timeout', used: idle, limit: this.limits.idleTimeoutMs });
       }
-      if (this.limits.timeoutMs !== undefined && elapsedMs > this.limits.timeoutMs) {
+      // Skip the wall-clock 'timeout' kind while the coordinator watchdog is
+      // negotiating this exact ceiling — it owns wall-clock; checkTimeout/here
+      // own idle. Only suppress in the negotiation path (a handler is set); on
+      // the no-handler hard-throw path the wall-clock must still trip. (Mirrors
+      // the guard in checkTimeout, which previously was NOT applied here — so
+      // an idle trip that called checkLimits re-added 'timeout' and defeated the
+      // watchdog dedup.)
+      const wallOwnedByWatchdog =
+        this._onThreshold !== undefined && this._watchdogActive === this.limits.timeoutMs;
+      if (
+        this.limits.timeoutMs !== undefined &&
+        elapsedMs > this.limits.timeoutMs &&
+        !wallOwnedByWatchdog
+      ) {
         exceeded.push({ kind: 'timeout', used: elapsedMs, limit: this.limits.timeoutMs });
       }
     }
@@ -310,25 +396,138 @@ export class SubagentBudget {
       throw new BudgetExceededError(first.kind, first.limit, first.used);
     }
     const bus = this._events;
-    if (!bus || !bus.hasListenerFor('budget.threshold_reached')) {
+    if (!bus) {
+      // No EventBus wired at all → nobody to negotiate with → hard stop.
       const first = exceeded[0] ?? { kind: 'iterations', limit: 0, used: 0 };
       throw new BudgetExceededError(first.kind, first.limit, first.used);
     }
 
-    // Start a negotiation for each exceeded kind that doesn't already have one.
-    // The first exceeded kind throws BudgetThresholdSignal so the caller sees
-    // the soft-limit event. Subsequent exceeded kinds (in the same call) start
-    // their own negotiations silently — they won't throw again.
-    for (const entry of exceeded) {
-      if (this._pendingNegotiations.has(entry.kind)) continue; // already negotiating this kind
-      const decision = this._negotiateExtension(entry.kind, exceeded);
-      this._pendingNegotiations.set(entry.kind, decision);
+    const first = exceeded[0] ?? { kind: 'iterations', limit: 0, used: 0 };
+
+    // LISTENER-DRIVEN PATH. A registered `budget.threshold_reached` listener
+    // (director / collab / auto-extend) negotiates asynchronously. Start one
+    // negotiation PER exceeded kind — each reports its OWN kind/used/limit and
+    // emits a single event (no O(N^2) re-emission, no cross-kind first-wins
+    // drop). Throw `BudgetThresholdSignal` for the first kind so the runner
+    // awaits the decision and enforces extend/stop.
+    if (bus.hasListenerFor('budget.threshold_reached')) {
+      for (const entry of exceeded) {
+        if (this._pendingNegotiations.has(entry.kind)) continue; // already negotiating this kind
+        this._pendingNegotiations.set(entry.kind, this._negotiateExtension(entry));
+      }
+      const decision = this._pendingNegotiations.get(first.kind);
+      if (!decision) throw new Error(`No pending negotiation for ${first.kind}`);
+      throw new BudgetThresholdSignal(first.kind, first.limit, first.used, decision);
     }
 
-    const first = exceeded[0] ?? { kind: 'iterations', limit: 0, used: 0 };
-    const decision = this._pendingNegotiations.get(first.kind);
-    if (!decision) throw new Error(`No pending negotiation for ${first.kind}`);
-    throw new BudgetThresholdSignal(first.kind, first.limit, first.used, decision);
+    // NO-LISTENER PATH. Invoke the handler synchronously to let an in-process
+    // policy decide. Two outcomes:
+    //   • SYNC handler (returns a string/decision — e.g. the coordinator
+    //     watchdog / recording handlers) → its decision is honored in place
+    //     (an `extend` patches limits); no throw. This is the path the
+    //     watchdog drives while it owns wall-clock enforcement.
+    //   • ASYNC handler (returns a Promise via `requestDecision()`) → there is
+    //     no listener to resolve it and `requestDecision` resolves to 'stop',
+    //     so this is a definite hard stop: throw `BudgetExceededError`. This is
+    //     the documented "auto mode + no listener → hard stop" invariant that
+    //     protects a bare `/spawn` (no director) from a runaway subagent.
+    let hardStop: BudgetExceededError | null = null;
+    for (const entry of exceeded) {
+      // Dedup per kind across back-to-back overruns in the same tick — a still
+      // exceeded kind (e.g. iterations stays over after a grant) must not
+      // re-invoke the handler on every record* call. The marker clears on a
+      // microtask so a genuinely fresh overrun later can re-negotiate.
+      if (this._pendingNegotiations.has(entry.kind)) continue;
+      const marker = Promise.resolve<BudgetThresholdDecision>('stop');
+      this._pendingNegotiations.set(entry.kind, marker);
+      void marker.finally(() => this._pendingNegotiations.delete(entry.kind));
+      const sync = this._invokeHandlerSync(entry);
+      if (!sync) hardStop ??= new BudgetExceededError(entry.kind, entry.limit, entry.used);
+    }
+    if (hardStop) throw hardStop;
+    return exceeded;
+  }
+
+  /**
+   * Invoke `onThreshold` once for `entry` on the NO-LISTENER path and report
+   * whether it decided synchronously. Returns `true` when the handler returned
+   * a synchronous decision (already honored — an `extend` patched the limits),
+   * or `false` when it returned a Promise (async; the caller hard-stops, since
+   * there is no listener to resolve the negotiation). The handler is given the
+   * full info shape (`requestDecision` plus direct `extend`/`deny`) so both
+   * recording handlers and policy handlers work without a wired listener.
+   */
+  private _invokeHandlerSync(entry: { kind: BudgetKind; used: number; limit: number }): boolean {
+    const handler = this._onThreshold;
+    if (!handler) return false;
+    let extendArg: Partial<BudgetLimits> | undefined;
+    const result = handler({
+      kind: entry.kind,
+      used: entry.used,
+      limit: entry.limit,
+      requestDecision: (): Promise<BudgetThresholdDecision> => this._busRequestDecision(entry),
+      // Direct hooks for synchronous policy/recording handlers.
+      extend: (extra: Partial<BudgetLimits>) => {
+        extendArg = extra;
+      },
+      deny: () => {},
+    } as Parameters<BudgetThresholdHandler>[0]);
+    // A thenable means the handler deferred to async negotiation — but there is
+    // no listener here, so it can never be granted → hard stop.
+    if (result && typeof (result as { then?: unknown }).then === 'function') return false;
+    if (result === 'throw') return false; // explicit hard stop
+    // 'continue' / 'stop' / a returned { extend } decision — honor in place.
+    if (result && typeof result === 'object' && 'extend' in result) {
+      extendArg = (result as { extend: Partial<BudgetLimits> }).extend;
+    }
+    if (extendArg) this.patchLimits(extendArg);
+    return true;
+  }
+
+  /**
+   * Emit `budget.threshold_reached` and resolve to the listener's verdict.
+   * Resolves to `'stop'` immediately when there is no listener (or no bus) so
+   * no negotiation can hang and no fallback timer leaks. Mirrors the
+   * coordinator watchdog's own request path so both agree on the no-listener
+   * default.
+   */
+  private _busRequestDecision(entry: {
+    kind: BudgetKind;
+    used: number;
+    limit: number;
+  }): Promise<BudgetThresholdDecision> {
+    const bus = this._events;
+    if (!bus || !bus.hasListenerFor('budget.threshold_reached')) {
+      return Promise.resolve('stop');
+    }
+    return new Promise<BudgetThresholdDecision>((resolve) => {
+      let resolved = false;
+      const respond = (d: BudgetThresholdDecision) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(fallback);
+        resolve(d);
+      };
+      const fallback = setTimeout(() => respond('stop'), SubagentBudget.DECISION_TIMEOUT_MS);
+      bus.emit('budget.threshold_reached', {
+        kind: entry.kind as
+          | 'iterations'
+          | 'tool_calls'
+          | 'tokens'
+          | 'cost'
+          | 'timeout'
+          | 'idle_timeout',
+        used: entry.used,
+        limit: entry.limit,
+        timeoutMs: SubagentBudget.DECISION_TIMEOUT_MS,
+        // deny() wins over a same-dispatch extend(): a listener that both grants
+        // and denies (or two listeners disagreeing) is resolved as a stop. The
+        // grant is deferred a microtask so a synchronous deny in the same emit
+        // pre-empts it; async grants still resolve normally.
+        extend: (extra: Partial<BudgetLimits>) => queueMicrotask(() => respond({ extend: extra })),
+        deny: () => respond('stop'),
+      });
+    });
   }
 
   /**
@@ -351,56 +550,26 @@ export class SubagentBudget {
    * a fresh signal.
    */
   private async _negotiateExtension(
-    kind: BudgetKind,
-    exceeded: { kind: BudgetKind; used: number; limit: number }[],
+    entry: { kind: BudgetKind; used: number; limit: number },
   ): Promise<BudgetThresholdDecision> {
     if (!this._onThreshold) {
       // Should never reach here — caller should have thrown already
       return 'stop';
     }
     try {
-      // Use the first exceeded kind for the handler call.
-      const first = exceeded[0] ?? { kind: 'iterations', limit: 0, used: 0 };
       const result = this._onThreshold({
-        kind: first.kind,
-        used: first.used,
-        limit: first.limit,
-        requestDecision: (): Promise<BudgetThresholdDecision> => {
-          const bus = this._events;
-          if (!bus || !bus.hasListenerFor('budget.threshold_reached')) {
-            return Promise.resolve('stop');
-          }
-          return new Promise<BudgetThresholdDecision>((resolve) => {
-            let resolved = false;
-            const respond = (d: BudgetThresholdDecision) => {
-              if (resolved) return;
-              resolved = true;
-              resolve(d);
-            };
-            const fallback = setTimeout(
-              () => respond('stop'),
-              SubagentBudget.DECISION_TIMEOUT_MS,
-            );
-            // Emit one event per exceeded kind so the FleetBus routes them.
-            for (const { kind, used, limit } of exceeded) {
-              bus.emit('budget.threshold_reached', {
-                kind: kind as 'iterations' | 'tool_calls' | 'tokens' | 'cost' | 'timeout' | 'idle_timeout',
-                used,
-                limit,
-                timeoutMs: SubagentBudget.DECISION_TIMEOUT_MS,
-                extend: (extra: Partial<BudgetLimits>) => {
-                  clearTimeout(fallback);
-                  respond({ extend: extra });
-                },
-                deny: () => {
-                  clearTimeout(fallback);
-                  respond('stop');
-                },
-              });
-            }
-          });
+        kind: entry.kind,
+        used: entry.used,
+        limit: entry.limit,
+        // One event for THIS kind only — each exceeded kind has its own
+        // negotiation (and its own resolve), so there is no cross-kind
+        // first-wins drop and no O(N^2) re-emission.
+        requestDecision: (): Promise<BudgetThresholdDecision> => this._busRequestDecision(entry),
+        extend: (extra: Partial<BudgetLimits>) => {
+          this.patchLimits(extra);
         },
-      });
+        deny: () => {},
+      } as Parameters<BudgetThresholdHandler>[0]);
 
       if (result === 'throw') return 'stop';
       if (result === 'continue') return { extend: {} };
@@ -408,30 +577,11 @@ export class SubagentBudget {
       const decision = await result;
       if (decision === 'stop') return 'stop';
 
-      // 'extend' — patch in-place limits BEFORE resolving so the runner's
-      // continue path sees the new ceiling.
-      const ext = decision.extend;
-      if (ext.maxIterations !== undefined) {
-        (this.limits as Record<string, unknown>).maxIterations = ext.maxIterations;
-      }
-      if (ext.maxToolCalls !== undefined) {
-        (this.limits as Record<string, unknown>).maxToolCalls = ext.maxToolCalls;
-      }
-      if (ext.maxTokens !== undefined) {
-        (this.limits as Record<string, unknown>).maxTokens = ext.maxTokens;
-      }
-      if (ext.maxCostUsd !== undefined) {
-        (this.limits as Record<string, unknown>).maxCostUsd = ext.maxCostUsd;
-      }
-      if (ext.timeoutMs !== undefined) {
-        (this.limits as Record<string, unknown>).timeoutMs = ext.timeoutMs;
-      }
-      if (ext.idleTimeoutMs !== undefined) {
-        (this.limits as Record<string, unknown>).idleTimeoutMs = ext.idleTimeoutMs;
-      }
+      // 'extend' — patch in-place limits BEFORE resolving (single write path).
+      this.patchLimits(decision.extend);
       return decision;
     } finally {
-      this._pendingNegotiations.delete(kind);
+      this._pendingNegotiations.delete(entry.kind);
     }
   }
 
@@ -478,7 +628,16 @@ export class SubagentBudget {
     const { timeoutMs, idleTimeoutMs } = this.limits;
     if (timeoutMs === undefined && idleTimeoutMs === undefined) return;
     const elapsed = Date.now() - this.startTime;
-    const wallTripped = timeoutMs !== undefined && elapsed > timeoutMs;
+    // Skip wall-clock timeout if the coordinator watchdog is already in the middle
+    // of negotiating this exact ceiling — tool.progress is too frequent and creates
+    // a race where both paths emit budget.threshold_reached for the same kind.
+    // The watchdog owns wall-clock; checkTimeout focuses exclusively on idle.
+    const wallSkipped =
+      this._onThreshold !== undefined &&
+      this._watchdogActive !== undefined &&
+      timeoutMs !== undefined &&
+      this._watchdogActive === timeoutMs;
+    const wallTripped = wallSkipped ? false : timeoutMs !== undefined && elapsed > timeoutMs;
     const idleTripped = idleTimeoutMs !== undefined && this.idleMs() > idleTimeoutMs;
     if (!wallTripped && !idleTripped) return;
     void this.checkLimits(elapsed);

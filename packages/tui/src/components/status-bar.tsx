@@ -66,6 +66,8 @@ export interface PlanCounts {
   open: number;
   inProgress: number;
   done: number;
+  /** Active storage scope. Shown as a suffix in the plan chip. */
+  scope?: 'session' | 'project';
 }
 
 export interface TaskCounts {
@@ -74,6 +76,8 @@ export interface TaskCounts {
   completed: number;
   blocked: number;
   failed: number;
+  /** Active storage scope. Shown as a suffix in the task chip. */
+  scope?: 'session' | 'project';
 }
 
 /**
@@ -742,6 +746,9 @@ export function StatusBar({
                 {plan.open > 0 ? <Text dimColor>☐{plan.open}</Text> : null}
                 {plan.open > 0 && plan.done > 0 ? ' ' : ''}
                 {plan.done > 0 ? <Text color="green">✓{plan.done}</Text> : null}
+                {plan.scope ? (
+                  <Text dimColor> [{plan.scope}]</Text>
+                ) : null}
               </Text>
             </>
           ) : null}
@@ -762,6 +769,9 @@ export function StatusBar({
                 {tasks!.completed > 0 ? <Text color="green">✓{tasks!.completed}</Text> : null}
                 {tasks!.completed > 0 && tasks!.failed > 0 ? ' ' : ''}
                 {tasks!.failed > 0 ? <Text color="red">✗{tasks!.failed}</Text> : null}
+                {tasks!.scope ? (
+                  <Text dimColor> [{tasks!.scope}]</Text>
+                ) : null}
               </Text>
             </>
           ) : null}

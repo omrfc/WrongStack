@@ -569,6 +569,47 @@ export class WrongStackWebSocketClient {
     this.send({ type: 'memory.forget', payload: { text, scope } });
   }
 
+  // ── MCP server management ─────────────────────────────────────────────────────
+  listMcpServers() {
+    this.send({ type: 'mcp.list' });
+  }
+
+  addMcpServer(config: { name: string; transport: string; description?: string; enabled?: boolean; command?: string; args?: string[]; env?: Record<string, string>; allowedTools?: string[] }) {
+    this.send({ type: 'mcp.add', payload: config });
+  }
+
+  removeMcpServer(name: string) {
+    this.send({ type: 'mcp.remove', payload: { name } });
+  }
+
+  updateMcpServer(config: { name: string; transport?: string; description?: string; enabled?: boolean; command?: string; args?: string[]; env?: Record<string, string>; allowedTools?: string[] }) {
+    this.send({ type: 'mcp.update', payload: config });
+  }
+
+  wakeMcpServer(name: string) {
+    this.send({ type: 'mcp.wake', payload: { name } });
+  }
+
+  sleepMcpServer(name: string) {
+    this.send({ type: 'mcp.sleep', payload: { name } });
+  }
+
+  discoverMcpServer(name: string) {
+    this.send({ type: 'mcp.discover', payload: { name } });
+  }
+
+  enableMcpServer(name: string) {
+    this.send({ type: 'mcp.enable', payload: { name } });
+  }
+
+  disableMcpServer(name: string) {
+    this.send({ type: 'mcp.disable', payload: { name } });
+  }
+
+  restartMcpServer(name: string) {
+    this.send({ type: 'mcp.restart', payload: { name } });
+  }
+
   listSkills() {
     this.send({ type: 'skills.list' });
   }

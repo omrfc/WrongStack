@@ -28,11 +28,13 @@ import { FleetMonitor } from './components/FleetMonitor';
 import { InspectorPanel } from './components/InspectorPanel';
 import { ProcessMonitor } from './components/ProcessMonitor';
 import { QueuePanel } from './components/QueuePanel';
-import { SkillsPanel } from './components/SkillsPanel';
+import { SkillDetailView } from './components/SkillDetailView';
+import { OfficeMapPanel } from './components/OfficeMapPanel';
+import { DebugDashboard } from './components/DebugDashboard';
 function AppInner() {
   const { theme } = useTheme();
   const {
-    currentView, activeActivity, sidebarOpen, toggleSidebar, setSearchOpen, setSidebarOpen, setCurrentView,
+    currentView, sidebarOpen, toggleSidebar, setSearchOpen, setSidebarOpen, setCurrentView,
     setInspectorTab, toggleInspector,
     fleetMonitorOpen, agentsMonitorOpen, setFleetMonitorOpen, setAgentsMonitorOpen,
     processMonitorOpen, setProcessMonitorOpen, queuePanelOpen, setQueuePanelOpen,
@@ -43,6 +45,13 @@ function AppInner() {
   const sessionTitle = useSessionStore((s) => s.session?.title);
   const sessionId = useSessionStore((s) => s.session?.id);
   const nickname = useUIStore((s) => (sessionId ? s.sessionNicknames[sessionId] : undefined));
+
+  // Detect /debug URL path and switch to debug view
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.location.pathname === '/debug') {
+      setCurrentView('debug');
+    }
+  }, [setCurrentView]);
 
   // Handle file open requests from FileExplorer (dispatches custom events on window)
   useEffect(() => {
@@ -208,6 +217,11 @@ function AppInner() {
           if (!s.inspectorOpen) toggleInspector();
         }
       }
+      // Ctrl+Shift+G — open Debug Dashboard
+      if (mod && e.shiftKey && e.key.toLowerCase() === 'g') {
+        e.preventDefault();
+        setCurrentView('debug');
+      }
       // Escape — collapse the inspector panel when it's open (DevTools
       // habit). Runs only when the inspector is visible so it doesn't steal
       // Esc from search / palette / bubble-focus dismissal.
@@ -327,13 +341,23 @@ function AppInner() {
             <SessionsDashboard />
           </div>
         )}
+        {/* ── Debug Dashboard — accessed via /debug URL ── */}
+        {currentView === 'debug' && <DebugDashboard />}
+
         {/* ── IDE Code Editor (only in Files view) ── */}
         {currentView === 'files' && <CodeEditor />}
 
-        {/* ── Skills Panel — 3-column file-manager layout ── */}
-        {activeActivity === 'skills' && (
+        {/* ── Skill detail — wide main area; list lives in the SidePanel ── */}
+        {currentView === 'skill' && (
           <div className="flex-1 overflow-hidden">
-            <SkillsPanel className="h-full" />
+            <SkillDetailView className="h-full" />
+          </div>
+        )}
+
+        {/* ── Office Map (Fleet HQ) — wide main area; settings in the SidePanel ── */}
+        {currentView === 'officemap' && (
+          <div className="flex-1 overflow-hidden">
+            <OfficeMapPanel />
           </div>
         )}
       </main>

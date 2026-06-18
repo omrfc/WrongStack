@@ -10,9 +10,7 @@ import {
 } from '@wrongstack/core';
 import {
   addPlanItem,
-  emptyPlan,
-  loadPlan,
-  savePlan,
+  mutatePlan,
   formatPlan,
 } from '@wrongstack/core';
 import { randomUUID } from 'node:crypto';
@@ -27,8 +25,9 @@ import type { Tool } from '@wrongstack/core';
 //   - Assignment (which agent/subagent)
 //   - Estimates (hours)
 //
-// Like `todo`, the list is fully replaced on every call. Stored per-session
-// at `ctx.meta['task.path']`.
+// Like `todo`, the list is fully replaced on every call. Session-persistent:
+// stored at `ctx.meta['task.path']` and isolated to this session — other sessions
+// have their own separate task lists.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -67,6 +66,13 @@ interface TaskInput {
   target?: string | undefined;
   /** Optional subtask titles for action=promote. */
   subtasks?: string[] | undefined;
+  /**
+   * Storage scope. Default (unset): uses the session-scoped path — isolated to this
+   * session, survives resume within the same session.
+   * `scope: 'project'`: uses a shared project-level path, visible to all sessions
+   * for this project. Useful for a shared backlog that outlasts any single session.
+   */
+  scope?: 'session' | 'project';
 }
 
 interface TaskOutput {
@@ -81,11 +87,11 @@ export const taskTool: Tool<TaskInput, TaskOutput> = {
   name: 'task',
   category: 'Session',
   description:
-    'Manage structured work items with dependencies, types, and priorities. ' +
-    'Use this for complex, multi-step work where tasks have ordering constraints. ' +
+    'Manage session-persistent structured work items with dependencies, types, and priorities. ' +
     'Unlike `todo` (flat, tactical), `task` supports typed work (feature/bugfix/refactor/etc.), ' +
     'dependencies between items, priority ranking, and agent assignment. ' +
-    'The task list persists across session resumes.',
+    'Tasks are written to disk and survive session resumes. By default they are isolated to this session; ' +
+    'use `scope: "project"` to store tasks in a shared project-level file visible to all sessions.',
   usageHint:
     'USE FOR STRUCTURED WORK:\n' +
     '- `action: "replace"` — set the complete task list (tasks ordered by priority)\n' +
@@ -99,7 +105,8 @@ export const taskTool: Tool<TaskInput, TaskOutput> = {
     '- `type`: "feature" | "bugfix" | "refactor" | "docs" | "test" | "chore"\n' +
     '- `priority`: "critical" | "high" | "medium" | "low"\n' +
     '- `assignee`: agent/subagent name (e.g. "bug-hunter", "refactor-planner")\n' +
-    '- `estimateHours`: rough time estimate',
+    '- `estimateHours`: rough time estimate\n' +
+    '- `scope`: "session" (default, isolated) or "project" (shared across sessions)',
   permission: 'confirm',
   mutating: true,
   capabilities: ['fs.write'],
@@ -170,11 +177,34 @@ export const taskTool: Tool<TaskInput, TaskOutput> = {
         items: { type: 'string' },
         description: 'Optional subtask titles for action=promote. Each becomes a pending todo.',
       },
+      scope: {
+        type: 'string',
+        enum: ['session', 'project'],
+        description: 'Storage scope: "session" (default, isolated to this session) or "project" (shared across all sessions for this project).',
+      },
     },
     required: ['action'],
   },
   async execute(input, ctx) {
-    const taskPath = (ctx.meta as Record<string, unknown>)['task.path'];
+    const sessionTaskPath = (ctx.meta as Record<string, unknown>)['task.path'] as string | undefined;
+    let taskPath: string | undefined;
+
+    if (input.scope === 'project') {
+      // Project-level: derive from the session path by replacing the filename with
+      // 'backlog.tasks.json' so all sessions share the same file.
+      if (typeof sessionTaskPath === 'string') {
+        // Handle BOTH separators — a Windows-native path uses '\\'; a '/'-only
+        // search would miss it and fall back to a bare relative path written
+        // into the process CWD instead of the sessions dir.
+        const lastSep = Math.max(sessionTaskPath.lastIndexOf('/'), sessionTaskPath.lastIndexOf('\\'));
+        taskPath = lastSep >= 0
+          ? sessionTaskPath.slice(0, lastSep + 1) + 'backlog.tasks.json'
+          : 'backlog.tasks.json';
+      }
+    } else {
+      taskPath = sessionTaskPath;
+    }
+
     if (typeof taskPath !== 'string' || !taskPath) {
       return { ok: false, message: 'Task storage path not configured.', count: 0, completed: 0, inProgress: 0 };
     }
@@ -193,7 +223,9 @@ export const taskTool: Tool<TaskInput, TaskOutput> = {
     type TodosReplacement = Array<{ id: string; content: string; status: 'pending' | 'in_progress' | 'completed'; activeForm?: string; promotedFromTask?: string }>;
     let todosToReplace: TodosReplacement | null = null;
 
-    const file = await mutateTasks(taskPath, sessionId, async (f: TaskFile) => {
+    let file: TaskFile;
+    try {
+    file = await mutateTasks(taskPath, sessionId, async (f: TaskFile) => {
       switch (input.action) {
         case 'show':
           // read-only — no mutation, just return current state
@@ -204,8 +236,22 @@ export const taskTool: Tool<TaskInput, TaskOutput> = {
             early = { ok: false, message: 'action=replace requires `tasks` array.', count: 0, completed: 0, inProgress: 0 };
             return f;
           }
-          // Validate dependsOn references: must point to IDs within the new batch
+          // Validate id uniqueness: findTaskIndex / status resolve a task by
+          // the FIRST id match, so a duplicate id silently becomes unaddressable.
           const newIds = new Set(input.tasks.map((t) => t.id));
+          if (newIds.size !== input.tasks.length) {
+            const seen = new Set<string>();
+            const dupes = [...new Set(input.tasks.map((t) => t.id).filter((id) => (seen.has(id) ? true : (seen.add(id), false))))];
+            early = {
+              ok: false,
+              message: `action=replace has duplicate task IDs: ${dupes.join(', ')}. Each task id must be unique.`,
+              count: 0,
+              completed: 0,
+              inProgress: 0,
+            };
+            return f;
+          }
+          // Validate dependsOn references: must point to IDs within the new batch
           for (const t of input.tasks) {
             if (t.dependsOn && t.dependsOn.length > 0) {
               const missing = t.dependsOn.filter((d) => !newIds.has(d));
@@ -378,6 +424,17 @@ export const taskTool: Tool<TaskInput, TaskOutput> = {
 
       return f;
     });
+    } catch (err) {
+      // Persist failed (mutateTasks throws on a failed save) — report ok:false
+      // instead of falsely claiming the tasks were saved.
+      return {
+        ok: false,
+        message: `Task change not saved — ${err instanceof Error ? err.message : String(err)}`,
+        count: 0,
+        completed: 0,
+        inProgress: 0,
+      };
+    }
 
     // Apply todo replacements after the task file mutation succeeds so that
     // on error the state is rolled back cleanly.
@@ -389,20 +446,51 @@ export const taskTool: Tool<TaskInput, TaskOutput> = {
     // If planify copied task data, write it to the plan file now
     if (didPlanify) {
       const { title, details } = planifyMeta;
-      const planPath = (ctx.meta as Record<string, unknown>)['plan.path'];
-      if (typeof planPath === 'string' && planPath) {
-        const planCfg = (await loadPlan(planPath)) ?? emptyPlan(sessionId);
-        const { plan: updated } = addPlanItem(planCfg, title, details || undefined);
-        await savePlan(planPath, updated);
+      const planPathRaw = (ctx.meta as Record<string, unknown>)['plan.path'];
+      const prog = computeTaskItemProgress(file.tasks);
+      if (typeof planPathRaw === 'string' && planPathRaw) {
+        let planPath: string = planPathRaw;
+        // Honor project scope for the PLAN file too (mirror of plan.ts taskify);
+        // handle both separators.
+        if (input.scope === 'project') {
+          const lastSep = Math.max(planPath.lastIndexOf('/'), planPath.lastIndexOf('\\'));
+          planPath = lastSep >= 0 ? planPath.slice(0, lastSep + 1) + 'backlog.plan.json' : 'backlog.plan.json';
+        }
+        // Mutate the cross-file under ITS OWN lock so a concurrent plan tool
+        // call in the same batch can't clobber the write.
+        let formatted = '';
+        try {
+          await mutatePlan(planPath, sessionId, (pf) => {
+            const { plan: updated } = addPlanItem(pf, title, details || undefined);
+            formatted = formatPlan(updated);
+            return updated;
+          });
+        } catch (err) {
+          return {
+            ok: false,
+            message: `planify: plan not saved — ${err instanceof Error ? err.message : String(err)}`,
+            count: file.tasks.length,
+            completed: prog.completed,
+            inProgress: prog.inProgress,
+          };
+        }
         return {
           ok: true,
-          message: `planify ok — added "${title}" to plan.\n${formatPlan(updated)}`,
+          message: `planify ok — added "${title}" to plan.\n${formatted}`,
           count: file.tasks.length,
-          completed: computeTaskItemProgress(file.tasks).completed,
-          inProgress: computeTaskItemProgress(file.tasks).inProgress,
+          completed: prog.completed,
+          inProgress: prog.inProgress,
         };
       }
-      return { ok: false, message: 'Plan storage path not configured — cannot planify.', count: 0, completed: 0, inProgress: 0 };
+      // Plan path missing — still report the REAL task counts (the task file was
+      // loaded and may be non-empty), not zeros.
+      return {
+        ok: false,
+        message: 'Plan storage path not configured — cannot planify.',
+        count: file.tasks.length,
+        completed: prog.completed,
+        inProgress: prog.inProgress,
+      };
     }
 
     const p = computeTaskItemProgress(file.tasks);

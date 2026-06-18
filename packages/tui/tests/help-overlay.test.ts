@@ -5,9 +5,9 @@ const flat = () =>
   helpSections().flatMap((s) => s.entries.map((e) => e.keys));
 
 describe('helpSections', () => {
-  it('always groups the four areas in order', () => {
+  it('always groups the areas in order', () => {
     const titles = helpSections().map((s) => s.title);
-    expect(titles).toEqual(['Navigation', 'Monitors', 'Editing', 'Commands']);
+    expect(titles).toEqual(['Navigation', 'Monitors', 'Editing', 'Commands', 'Tool Colors']);
   });
 
   it('always lists the monitor + help keys', () => {

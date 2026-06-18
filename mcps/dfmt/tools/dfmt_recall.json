@@ -1,0 +1,17 @@
+{
+  "name": "dfmt_recall",
+  "description": "Build a session snapshot with token budget",
+  "inputSchema": {
+    "properties": {
+      "budget": {
+        "description": "Byte budget for snapshot",
+        "type": "integer"
+      },
+      "format": {
+        "description": "Output format (md, json, xml)",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  }
+}

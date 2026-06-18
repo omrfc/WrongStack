@@ -162,16 +162,22 @@ export function createContextManagerTool(
       const beforeTokens = roughEstimate(messages);
 
       // When ctx.state is available, route mutations through the observer
-      // layer so subscribers stay in sync. Fall back to direct splice for
+      // layer so subscribers stay in sync. Fall back to direct mutation for
       // tests and environments that haven't wired ConversationState.
       const applyMessages = (next: Message[]) => {
         const repaired = repairToolUseAdjacency(next);
         const finalMessages = repaired.messages;
+        // Skip if finalMessages === messages (no-op: repair returned the same array).
+        // This also prevents the self-spread bug where spreading an array into
+        // splice(0, 0, ...arr) on the same array reference empties it.
+        if (finalMessages === messages) return repaired.report;
         if (ctx.state) {
           ctx.state.replaceMessages(finalMessages);
         } else {
+          // push(...) is O(k) with no element shift, unlike splice(0, 0, ...) which
+          // shifts all existing elements before inserting at position 0.
           messages.length = 0;
-          messages.splice(0, 0, ...finalMessages);
+          messages.push(...finalMessages);
         }
         return repaired.report;
       };
@@ -275,9 +281,20 @@ export function createContextManagerTool(
 
           const report = await opts.compactor.compact(ctx);
           ctx.clearFileTracking();
-          const repair = applyMessages([...ctx.messages]);
-          const afterTokens = repair.changed ? roughEstimate(ctx.messages) : report.after;
-          const repaired = report.repaired ?? (repair.changed ? repair : undefined);
+
+          // When ctx.state is not wired, the compactor's replaceMessages calls are
+          // no-ops — repairToolUseAdjacency was still called inside the compactor but
+          // the result was never committed. Run repair once to commit via the fallback.
+          // When ctx.state IS wired, the compactor already committed the repair.
+          let repaired = report.repaired;
+          let afterTokens: number;
+          if (!ctx.state) {
+            const repair = applyMessages([...ctx.messages]);
+            repaired = report.repaired ?? (repair.changed ? repair : undefined);
+            afterTokens = repair.changed ? roughEstimate(ctx.messages) : report.after;
+          } else {
+            afterTokens = report.after;
+          }
 
           // Record NOOP state: did compaction actually reduce tokens?
           const reduced = report.fullRequestTokensBefore > report.fullRequestTokensAfter;

@@ -1,6 +1,7 @@
 import { Box, Text } from '../../ink.js';
 import React, { useEffect, useMemo } from 'react';
 import { theme } from '../../theme.js';
+import { getToolVisual } from '../../tool-glyph.js';
 import { Banner } from './banner.js';
 import { DiffBlock, extractDiffPreview } from './code-block.js';
 import { parseNextSteps } from '../suggestions.js';
@@ -188,6 +189,7 @@ export const Entry = React.memo(function Entry({
       );
     }
     case 'tool': {
+      const { glyph, color } = getToolVisual(entry.name);
       const argSummary = formatToolArgs(entry.name, entry.input);
       const outLines = formatToolOutput(
         entry.name,
@@ -214,8 +216,9 @@ export const Entry = React.memo(function Entry({
       return (
         <Box flexDirection="column">
           <Text>
-            <Text color={entry.ok ? theme.success : theme.error}>{entry.ok ? '●' : '✗'}</Text>{' '}
-            <Text bold color={theme.tool}>
+            <Text color={color}>{glyph}</Text>
+            <Text>{' '}</Text>
+            <Text bold color={color}>
               {entry.name}
             </Text>
             {argSummary ? (

@@ -60,6 +60,7 @@ import {
   DEFAULT_CONTEXT_WINDOW_MODE_ID,
   DefaultSecretScrubber,
   GlobalMailbox,
+  projectHash,
   resolveProjectDir,
   TOKENS,
   type TodoItem,
@@ -76,6 +77,7 @@ import {
   createCustomModeStore,
   createEternalSubscription,
   findFreePort,
+  handleGitInfo,
   handleFilesList,
   handleFilesRead,
   handleFilesTree,
@@ -84,7 +86,16 @@ import {
   handleMemoryList,
   handleMemoryRemember,
   handleShellOpen,
+  type SkillsContext,
+  handleSkillsContent,
+  handleSkillsInstall,
+  handleSkillsUninstall,
+  handleSkillsUpdate,
+  handleSkillsCreate,
+  handleSkillsEdit,
+  handleSkillsExport,
 } from '@wrongstack/webui/server';
+import { SkillInstaller } from '@wrongstack/core/skills';
 import {
   announceWebuiReady,
   createWebuiShutdown,
@@ -379,6 +390,11 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     'contextStrategy',
     'logLevel',
     'auditLevel',
+    // Telegram plugin notification settings (parity with the standalone server).
+    'tgConfigured',
+    'tgSessionEnd',
+    'tgDelegate',
+    'tgLongToolMs',
   ] as const;
 
   const prefSnapshot = (): Record<string, unknown> => {
@@ -421,6 +437,14 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       meta['logLevel'] = (cfg.log as Record<string, unknown>)?.['level'] ?? 'info';
       meta['auditLevel'] = (cfg.session as Record<string, unknown>)?.['auditLevel'] ?? 'standard';
       meta['maxIterations'] = (cfg.tools as Record<string, unknown>)?.['maxIterations'] ?? 500;
+      // Telegram plugin notification settings live under extensions.telegram —
+      // same path the standalone server seeds and /telegram-settings writes.
+      const tgExt = (cfg.extensions as Record<string, Record<string, unknown>> | undefined)?.['telegram'];
+      meta['tgConfigured'] = typeof tgExt?.['botToken'] === 'string' && (tgExt['botToken'] as string).length > 0;
+      meta['tgSessionEnd'] = tgExt?.['notifyOnSessionEnd'] === true;
+      meta['tgDelegate'] = tgExt?.['notifyOnDelegate'] !== false; // default true
+      const tgMs = tgExt?.['longToolThresholdMs'];
+      meta['tgLongToolMs'] = typeof tgMs === 'number' ? tgMs : 30_000;
     } catch {
       // best-effort — missing/corrupt config just leaves prefs unseeded
     }
@@ -524,6 +548,22 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
         const toolsCfg = (decrypted.tools as Record<string, unknown>) ?? {};
         toolsCfg.maxIterations = payload['maxIterations'];
         decrypted.tools = toolsCfg;
+      }
+
+      // Telegram plugin notification settings → extensions.telegram (parity
+      // with the standalone server / the path /telegram-settings writes).
+      const tgTouched =
+        typeof payload['tgSessionEnd'] === 'boolean' ||
+        typeof payload['tgDelegate'] === 'boolean' ||
+        typeof payload['tgLongToolMs'] === 'number';
+      if (tgTouched) {
+        const ext = (decrypted.extensions as Record<string, Record<string, unknown>>) ?? {};
+        const tg = ext['telegram'] ?? {};
+        if (typeof payload['tgSessionEnd'] === 'boolean') tg['notifyOnSessionEnd'] = payload['tgSessionEnd'];
+        if (typeof payload['tgDelegate'] === 'boolean') tg['notifyOnDelegate'] = payload['tgDelegate'];
+        if (typeof payload['tgLongToolMs'] === 'number') tg['longToolThresholdMs'] = payload['tgLongToolMs'];
+        ext['telegram'] = tg;
+        decrypted.extensions = ext;
       }
 
       const encrypted = encryptConfigSecrets(decrypted, vault);
@@ -752,9 +792,16 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     // iteration.started
     eventUnsubscribers.push(
       opts.events.on('iteration.started', (e) => {
+        // Include maxIterations (from the seeded meta) so the UI's
+        // "iteration N / max" affordance works the same as under the
+        // standalone server, which already sends it.
+        const maxIt = opts.agent.ctx.meta['maxIterations'];
         broadcast({
           type: 'iteration.started',
-          payload: { index: e.index },
+          payload: {
+            index: e.index,
+            ...(typeof maxIt === 'number' ? { maxIterations: maxIt } : {}),
+          },
         });
       }),
     );
@@ -1072,6 +1119,26 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     send,
     broadcast,
     log: (m) => console.log(m),
+  };
+
+  // Shared skills handlers context. The CLI passes its own skillLoader; the
+  // installer (backing install/uninstall/update) is constructed here the same
+  // way the standalone webui server does. Absent skillLoader ⇒ skills feature
+  // disabled and the handlers respond with an "enabled: false" payload.
+  const skillsProjectRoot =
+    opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '';
+  const skillsCtx: SkillsContext = {
+    skillLoader: opts.skillLoader,
+    skillInstaller: opts.skillLoader
+      ? new SkillInstaller({
+          manifestPath: path.join(wstackGlobalRoot(), 'installed-skills.json'),
+          projectSkillsDir: path.join(skillsProjectRoot, '.wrongstack', 'skills'),
+          globalSkillsDir: path.join(wstackGlobalRoot(), 'skills'),
+          projectHash: skillsProjectRoot ? projectHash(skillsProjectRoot) : '',
+          skillLoader: opts.skillLoader,
+        })
+      : undefined,
+    projectRoot: skillsProjectRoot,
   };
 
   const worklistCtx: WorklistContext = {
@@ -1701,8 +1768,111 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
         return handleMemoryForget(ws, msg, opts.memoryStore);
       }
 
+      // ── MCP operations — MCP servers are read directly from config file ──
+      case 'mcp.list': {
+        const servers: Array<{
+          name: string;
+          transport: string;
+          status: string;
+          enabled: boolean;
+          description?: string;
+          tools?: string[];
+          error?: string;
+          pid?: number;
+        }> = [];
+        if (opts.globalConfigPath) {
+          try {
+            const raw = await fs.readFile(opts.globalConfigPath, 'utf8');
+            const cfg = JSON.parse(raw) as Record<string, unknown>;
+            const mcpServers = cfg.mcpServers as Record<string, {
+              transport?: string;
+              description?: string;
+              enabled?: boolean;
+              command?: string;
+              args?: string[];
+              env?: Record<string, string>;
+              allowedTools?: string[];
+            }> | undefined;
+            if (mcpServers) {
+              for (const [name, serverCfg] of Object.entries(mcpServers)) {
+                servers.push({
+                  name,
+                  transport: serverCfg.transport ?? 'stdio',
+                  status: 'stopped',
+                  enabled: serverCfg.enabled ?? true,
+                  // Conditional spreads keep these absent (not explicitly
+                  // `undefined`) to satisfy exactOptionalPropertyTypes.
+                  ...(serverCfg.description !== undefined && { description: serverCfg.description }),
+                  ...(serverCfg.allowedTools !== undefined && { tools: serverCfg.allowedTools }),
+                });
+              }
+            }
+          } catch {
+            // best-effort — config read failure returns empty list
+          }
+        }
+        send(ws, { type: 'mcp.list', payload: { servers } });
+        break;
+      }
+      case 'mcp.add':
+      case 'mcp.remove':
+      case 'mcp.update':
+      case 'mcp.wake':
+      case 'mcp.sleep':
+      case 'mcp.discover':
+      case 'mcp.enable':
+      case 'mcp.disable':
+      case 'mcp.restart': {
+        // These operations require the full MCP handler with a Config object
+        // and MCP registry — not available in the CLI embedded server context.
+        // The standalone WebUI server handles these correctly.
+        send(ws, {
+          type: 'mcp.operation_result',
+          payload: {
+            success: false,
+            message: 'MCP management operations require the standalone WebUI server. Please run "wrongstack webui" instead of "wrongstack --webui".',
+          },
+        });
+        break;
+      }
+
       case 'skills.list': {
         await handleSkillsList(introspectionCtx, ws);
+        break;
+      }
+
+      case 'skills.content': {
+        await handleSkillsContent(ws, skillsCtx, msg);
+        break;
+      }
+
+      case 'skills.install': {
+        await handleSkillsInstall(ws, skillsCtx, msg);
+        break;
+      }
+
+      case 'skills.uninstall': {
+        await handleSkillsUninstall(ws, skillsCtx, msg);
+        break;
+      }
+
+      case 'skills.update': {
+        await handleSkillsUpdate(ws, skillsCtx, msg);
+        break;
+      }
+
+      case 'skills.create': {
+        await handleSkillsCreate(ws, skillsCtx, msg);
+        break;
+      }
+
+      case 'skills.edit': {
+        await handleSkillsEdit(ws, skillsCtx, msg);
+        break;
+      }
+
+      case 'skills.export': {
+        await handleSkillsExport(ws, skillsCtx);
         break;
       }
 
@@ -2091,48 +2261,10 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       }
 
       case 'git.info': {
-        // Read git branch, change stats, and sync status from the working
-        // directory. Mirrors the standalone webui server's handler so the
-        // status-bar git widget works under the CLI-hosted webui too.
+        // Delegates to the shared handler (single source — see git-handlers.ts).
         const projectRoot =
           opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '';
-        const cwd = projectRoot || undefined;
-        const { execFile: ef } = await import('node:child_process');
-        const git = (args: string[]): Promise<string> =>
-          new Promise((resolve) => {
-            ef('git', args, { cwd, timeout: 3000 }, (err: Error | null, stdout: string) => {
-              resolve(err ? '' : stdout.trim());
-            });
-          });
-
-        const [branchRaw, diffRaw, statusRaw, upstreamRaw] = await Promise.all([
-          git(['branch', '--show-current']),
-          git(['diff', '--stat']),
-          git(['status', '--porcelain']),
-          git(['rev-list', '--left-right', '--count', '@{upstream}...HEAD']),
-        ]);
-
-        const branch = branchRaw || '(detached)';
-
-        // `git diff --stat` summary line: "N files changed, X insertions(+), Y deletions(-)"
-        const addMatch = /(\d+)\s+insertion/i.exec(diffRaw);
-        const delMatch = /(\d+)\s+deletion/i.exec(diffRaw);
-        const added = addMatch ? Number(addMatch[1]) : 0;
-        const deleted = delMatch ? Number(delMatch[1]) : 0;
-
-        // Untracked files from `git status --porcelain` (lines starting with "??")
-        const untracked = statusRaw.split('\n').filter((l) => l.startsWith('??')).length;
-
-        // `--left-right --count @{upstream}...HEAD` prints "<behind>\t<ahead>":
-        // left side = commits in upstream not in HEAD (behind), right = ahead.
-        const [behindRaw, aheadRaw] = (upstreamRaw || '0\t0').split('\t');
-        const behind = Number(behindRaw) || 0;
-        const ahead = Number(aheadRaw) || 0;
-
-        send(ws, {
-          type: 'git.info',
-          payload: { branch, added, deleted, untracked, ahead, behind },
-        });
+        await handleGitInfo(ws, projectRoot);
         break;
       }
 

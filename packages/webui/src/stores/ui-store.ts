@@ -34,7 +34,7 @@ interface UIState {
   /** Which activity icon is selected in the ActivityBar — controls secondary panel content. */
   activeActivity: Activity;
   settingsOpen: boolean;
-  currentView: 'chat' | 'settings' | 'autophase' | 'files' | 'sessions' | 'setup' | 'agentflow' | 'skill';
+  currentView: 'chat' | 'settings' | 'autophase' | 'files' | 'sessions' | 'setup' | 'agentflow' | 'skill' | 'officemap' | 'debug';
   showConfirmDialog: boolean;
   confirmInfo: {
     id: string;

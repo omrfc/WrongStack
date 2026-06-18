@@ -21,7 +21,18 @@ import type { TokenCounter } from '../types/token-counter.js';
 import type { WorktreeManager } from '../worktree/worktree-manager.js';
 import type { Token } from './container.js';
 
-const t = <T>(name: string): Token<T> => Symbol(name) as Token<T>;
+// Tokens use the GLOBAL symbol registry (`Symbol.for`) rather than unique
+// per-call `Symbol()`s. If `@wrongstack/core` is ever evaluated twice in one
+// process — e.g. Node loads it under two path casings on a case-insensitive
+// filesystem (`D:\Codebox\…` vs `D:\codebox\…`), or a bundler inlines a second
+// copy — `Symbol()` would mint distinct tokens per instance, so a binding made
+// via one copy's `TOKENS.ConfigStore` could never be resolved via the other's,
+// surfacing as `Container: token "ConfigStore" not bound`. `Symbol.for(key)`
+// returns the same symbol for the same key across every module instance in the
+// process, making DI resilient to accidental duplication. The key is namespaced
+// to avoid colliding with unrelated global symbols; `.description` (used in
+// container error messages) stays human-readable.
+const t = <T>(name: string): Token<T> => Symbol.for(`@wrongstack/core/kernel#${name}`) as Token<T>;
 
 export const TOKENS = {
   Logger: t<Logger>('Logger'),

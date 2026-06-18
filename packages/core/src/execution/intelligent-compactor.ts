@@ -215,7 +215,12 @@ export class IntelligentCompactor implements Compactor {
     // connected to anything, making cancellation a no-op).
     const ac = ctx.signal ? undefined : new AbortController();
     const signal = ctx.signal ?? ac?.signal;
-    const res = await this.provider.complete(req, { signal });
+    let res;
+    try {
+      res = await this.provider.complete(req, { signal });
+    } finally {
+      ac?.abort();
+    }
 
     const textBlocks = res.content.filter(isTextBlock);
     return (

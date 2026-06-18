@@ -24,8 +24,8 @@ import { Button } from '../ui/button';
 import { AgentsPanel } from './AgentsPanel';
 import { HistoryPanel } from './HistoryPanel';
 import { SessionPanel } from './SessionPanel';
-import { SkillsPanel } from '../SkillsPanel';
-import { OfficeMapPanel } from '../OfficeMapPanel';
+import { SkillsList } from './SkillsList';
+import { OfficeMapSettingsPanel } from '../OfficeMapSettingsPanel';
 
 const PANEL_TITLE: Record<Activity, string> = {
   chat: 'Session',
@@ -126,12 +126,12 @@ export function SidePanel() {
         )}
         {activeActivity === 'skills' && (
           <div className="flex-1 overflow-hidden">
-            <SkillsPanel className="h-full" />
+            <SkillsList className="h-full" />
           </div>
         )}
         {activeActivity === 'officemap' && (
           <div className="flex-1 overflow-hidden">
-            <OfficeMapPanel />
+            <OfficeMapSettingsPanel />
           </div>
         )}
       </div>

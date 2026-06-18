@@ -76,6 +76,12 @@ function isCollabSubagent(subagentId: string): boolean {
   return COLLAB_SUBAGENT_PREFIXES.some((p) => subagentId.startsWith(p));
 }
 
+// Re-exported from subagent-budget.ts so that future consumers of
+// budget.threshold_reached events can reference the same 85% lead point
+// without a cross-module import. See subagent-budget.ts for the canonical
+// definition and documentation.
+export { TIMEOUT_PREEMPT_FRACTION } from './subagent-budget.js';
+
 const HEARTBEAT_MAX_LIMIT_MS = 24 * 60 * 60_000; // 24h ceiling for timeout grants
 const IDLE_HEARTBEAT_MAX_LIMIT_MS = 24 * 60 * 60_000; // same ceiling for idle_timeout grants
 const ITERATIONS_CEILING = 50_000;

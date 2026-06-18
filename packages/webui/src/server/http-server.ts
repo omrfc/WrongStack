@@ -30,6 +30,7 @@ import * as fs from 'node:fs/promises';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import { isLoopbackBind, tokenMatches } from './ws-auth.js';
+import type { FileWatcherMetrics } from './setup-events.js';
 
 export interface CreateHttpServerOptions {
   /** Port to listen on. Defaults to 3456 (or the `PORT` env var). */
@@ -63,6 +64,11 @@ export interface CreateHttpServerOptions {
    * URL-token-only flow (e.g. in tests that don't want cookie state).
    */
   enableWsCookie?: boolean | undefined;
+  /**
+   * Optional file watcher metrics object. When provided, the
+   * /debug/watcher-metrics endpoint will be enabled to expose these metrics.
+   */
+  watcherMetrics?: FileWatcherMetrics | undefined;
 }
 
 const MIME_TYPES: Record<string, string> = {
@@ -201,6 +207,28 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
           return;
         }
         await handleApiSessionAgents(res, opts.globalRoot, agentsMatch[1]!);
+        return;
+      }
+
+      // Debug endpoint: /debug/watcher-metrics
+      // Returns file watcher metrics as JSON. No auth required (localhost only by default).
+      if (url.pathname === '/debug/watcher-metrics' && req.method === 'GET') {
+        if (opts.watcherMetrics) {
+          // Update computed fields before returning
+          const avgDelay = opts.watcherMetrics.broadcastsSent > 0
+            ? opts.watcherMetrics.totalDebounceDelayMs / opts.watcherMetrics.broadcastsSent
+            : 0;
+          const response = {
+            ...opts.watcherMetrics,
+            averageDebounceDelayMs: avgDelay,
+            timestamp: Date.now(),
+          };
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(response));
+        } else {
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'File watcher metrics not available' }));
+        }
         return;
       }
 

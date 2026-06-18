@@ -25,3 +25,14 @@ declare module '@fontsource/ibm-plex-mono/600.css' {
   const _: string;
   export default _;
 }
+
+// Non-standard, Chromium-only memory metrics. Augmented as optional so the
+// DebugDashboard heap widget type-checks; it is `undefined` on Firefox/Safari
+// and the UI must treat it as unavailable rather than show a misleading 0.
+interface Performance {
+  memory?: {
+    usedJSHeapSize: number;
+    totalJSHeapSize: number;
+    jsHeapSizeLimit: number;
+  };
+}

@@ -46,8 +46,17 @@ interface PanelDef {
   label: string;
   shortcut: string;
   /** Main view this panel pairs with, if any. */
-  pairedView?: 'chat' | 'files';
+  pairedView?: 'chat' | 'files' | 'skill' | 'officemap';
 }
+
+/**
+ * Main views that are "owned" by a side panel (their content only makes sense
+ * while that panel is the active activity). Switching to a panel without its
+ * own paired view falls these back to chat, so e.g. clicking Agents while the
+ * Skill detail is open returns the main area to the chat stream rather than
+ * stranding a now-orphaned detail view.
+ */
+const PANEL_OWNED_VIEWS = ['chat', 'files', 'skill', 'officemap'] as const;
 
 type MainView = 'autophase' | 'agentflow' | 'settings';
 
@@ -64,8 +73,8 @@ const PANELS: PanelDef[] = [
   { id: 'files', icon: <FolderOpen size={16} />, label: 'Files', shortcut: 'Ctrl+4', pairedView: 'files' },
   { id: 'projects', icon: <Folders size={16} />, label: 'Projects', shortcut: 'Ctrl+5' },
   { id: 'mailbox', icon: <Mail size={16} />, label: 'Mailbox', shortcut: 'Ctrl+6' },
-  { id: 'skills', icon: <Sparkles size={16} />, label: 'Skills', shortcut: 'Ctrl+7' },
-  { id: 'officemap', icon: <Building2 size={16} />, label: 'Office Map', shortcut: 'Ctrl+8' },
+  { id: 'skills', icon: <Sparkles size={16} />, label: 'Skills', shortcut: 'Ctrl+7', pairedView: 'skill' },
+  { id: 'officemap', icon: <Building2 size={16} />, label: 'Office Map', shortcut: 'Ctrl+8', pairedView: 'officemap' },
 ];
 
 const VIEWS: ViewDef[] = [
@@ -89,10 +98,15 @@ export function openPanel(activity: Activity): void {
   } else {
     ui.selectActivity(activity);
   }
-  // Panels that pair with a main surface steer the main view too.
+  // Panels that pair with a main surface steer the main view too. Panels
+  // without one (agents/history/projects/mailbox) fall a panel-owned view
+  // back to chat so a detached detail/map view doesn't linger in the main
+  // area; standalone views (settings/phases/flow) are left untouched.
   const paired = PANELS.find((p) => p.id === activity)?.pairedView;
-  if (paired && ui.currentView !== paired) {
-    ui.setCurrentView(paired);
+  if (paired) {
+    if (ui.currentView !== paired) ui.setCurrentView(paired);
+  } else if ((PANEL_OWNED_VIEWS as readonly string[]).includes(ui.currentView)) {
+    if (ui.currentView !== 'chat') ui.setCurrentView('chat');
   }
 }
 
@@ -112,6 +126,10 @@ export function ActivityBar() {
     (s) => Array.from(s.agents.values()).filter((a) => a.status === 'running').length,
   );
   const unreadMail = useMailboxStore(selectUnreadCount);
+  // Subscribe (not getState()) so the Fleet/Agents monitor icons re-render and
+  // update their active highlight when the inspector opens/closes or switches tab.
+  const inspectorOpen = useUIStore((s) => s.inspectorOpen);
+  const inspectorTab = useUIStore((s) => s.inspectorTab);
 
   const badgeFor = (id: Activity): number | undefined => {
     if (id === 'agents') return runningAgents || undefined;
@@ -189,7 +207,7 @@ export function ActivityBar() {
         <ActivityIcon
           icon={<LayoutGrid size={16} />}
           label="Fleet Monitor (Ctrl+Shift+M)"
-          active={useUIStore.getState().inspectorOpen && useUIStore.getState().inspectorTab === 'fleet'}
+          active={inspectorOpen && inspectorTab === 'fleet'}
           onClick={() => {
             const ui = useUIStore.getState();
             if (ui.inspectorOpen && ui.inspectorTab === 'fleet') {
@@ -203,7 +221,7 @@ export function ActivityBar() {
         <ActivityIcon
           icon={<ActivityIconSvg size={16} />}
           label="Agents Monitor (Ctrl+Shift+A)"
-          active={useUIStore.getState().inspectorOpen && useUIStore.getState().inspectorTab === 'agents'}
+          active={inspectorOpen && inspectorTab === 'agents'}
           onClick={() => {
             const ui = useUIStore.getState();
             if (ui.inspectorOpen && ui.inspectorTab === 'agents') {

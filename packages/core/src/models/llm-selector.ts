@@ -1,5 +1,5 @@
 import { expectDefined } from '../utils/expect-defined.js';
-import { estimateMessageTokens } from '../utils/token-estimate.js';
+import { estimateMessageTokens, estimateTextTokens } from '../utils/token-estimate.js';
 import { isTextBlock } from '../types/blocks.js';
 import type { Message } from '../types/messages.js';
 import type { Provider, Request } from '../types/provider.js';
@@ -19,6 +19,12 @@ export interface LLMSelectorOptions {
    * Should guide the LLM on importance tiers and output format.
    */
   systemPrompt?: string | undefined;
+  /**
+   * Maximum output tokens for the selector LLM call.
+   * Controls both the JSON response budget and the token reservation for the
+   * history text budget calculation (default: 1024).
+   */
+  maxOutputTokens?: number | undefined;
 }
 
 const DEFAULT_SYSTEM_PROMPT = `You are a context pruning assistant. Given a conversation history and a token budget, decide which message ranges are worth keeping verbatim and which should be collapsed into summaries.
@@ -44,10 +50,14 @@ Rules:
 
 Return ONLY the JSON object, no markdown, no explanation outside the JSON.`;
 
-/** Format messages as a compact text dump for the selector LLM */
-function formatMessages(messages: Message[], maxChars = 8000): string {
+/**
+ * Format messages as a compact text dump for the selector LLM.
+ * Uses token estimation (not character count) to budget the output,
+ * so long sessions don't silently truncate the selector's view of history.
+ */
+function formatMessages(messages: Message[], maxTokens = 2048): string {
   const lines: string[] = [];
-  let used = 0;
+  let usedTokens = 0;
   for (let i = 0; i < messages.length; i++) {
     const m = expectDefined(messages[i]);
     const role = m.role.padEnd(10, ' ');
@@ -63,13 +73,14 @@ function formatMessages(messages: Message[], maxChars = 8000): string {
       // Also capture tool names for context
       const toolUses = content.filter((b) => b.type === 'tool_use');
       if (toolUses.length > 0) {
-        text += ` [tools: ${toolUses.map((b) => (b as { name: string }).name).join(', ')}]`;
+        text += ` [tools: ${toolUses.map((b) => (b as { name?: string }).name).filter(Boolean).join(', ')}]`;
       }
     }
     const line = `[${i}][${role}]: ${text}`;
-    if (used + line.length > maxChars) break;
+    const lineTokens = estimateTextTokens(line);
+    if (usedTokens + lineTokens > maxTokens) break;
     lines.push(line);
-    used += line.length;
+    usedTokens += lineTokens;
   }
   return lines.join('\n');
 }
@@ -84,21 +95,36 @@ export class LLMSelector implements MessageSelector {
   private readonly model: string;
   private readonly maxContextTokens: number;
   private readonly systemPrompt: string;
+  private readonly maxOutputTokens: number;
 
   constructor(opts: LLMSelectorOptions) {
     this.provider = opts.provider;
     this.model = opts.model ?? 'unknown';
+    if (
+      this.model === 'unknown' &&
+      (process.env['NODE_ENV'] === 'development' || process.env['WRONGSTACK_DEBUG'] === '1')
+    ) {
+      console.warn(
+        '[LLMSelector] model not set — selector will use the provider default. Set `model` explicitly in LLMSelectorOptions to silence this warning.',
+      );
+    }
     this.maxContextTokens = opts.maxContextTokens ?? 40_000;
     this.systemPrompt = opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
+    this.maxOutputTokens = opts.maxOutputTokens ?? 1024;
   }
 
   async select(messages: Message[], maxToKeep: number): Promise<SelectorResult> {
     const effectiveBudget = Math.min(maxToKeep, this.maxContextTokens);
 
-    // Build a concise representation of the conversation
-    const historyText = formatMessages(messages);
     const totalTokens = estimateMessageTokens(messages);
     const systemText = `${this.systemPrompt}\n\nConversation (${messages.length} messages, ~${totalTokens} tokens, budget: ${effectiveBudget}):\n`;
+    // Reserve tokens for the system prefix and output (maxOutputTokens), then give the
+    // rest to the formatted history so the selector sees the maximum possible context.
+    const systemTokens = estimateTextTokens(systemText);
+    const historyBudget = Math.max(512, effectiveBudget - systemTokens - this.maxOutputTokens);
+
+    // Build a concise representation of the conversation within the token budget
+    const historyText = formatMessages(messages, historyBudget);
 
     // Add instruction to stay within budget
     const budgetInstruction =
@@ -110,27 +136,32 @@ export class LLMSelector implements MessageSelector {
       model: this.model,
       system: [{ type: 'text', text: systemText + budgetInstruction }],
       messages: [{ role: 'user', content: historyText }],
-      maxTokens: 1024,
+      maxTokens: this.maxOutputTokens,
     };
 
     let raw: string;
+    const ac = new AbortController();
     try {
-      // Wire the AbortController to the provider call so cancellation actually
-      // fires — the original code passed a fresh signal that is never connected
-      // to anything, leaking the controller on every selector call.
-      const ac = new AbortController();
-      const res = await this.provider.complete(req, { signal: ac.signal });
+      // 30-second timeout so a stuck selector LLM call can't hang the compactor.
+      const timeoutSignal = AbortSignal.timeout(30_000);
+      const res = await this.provider.complete(req, {
+        signal: AbortSignal.any([ac.signal, timeoutSignal]),
+      });
       const textBlocks = res.content.filter(isTextBlock);
       raw = textBlocks
         .map((b) => b.text)
         .join('\n')
         .trim();
-    } catch (_err) {
-      // Fallback: use simple recency-based selection
+    } catch (err) {
+      if (err instanceof Error) {
+        console.warn('[LLMSelector] selector call failed, using recency fallback:', err.message);
+      }
       return this.fallbackSelect(messages, effectiveBudget);
+    } finally {
+      ac.abort();
     }
 
-    return this.parseSelectorOutput(raw, messages.length);
+    return this.parseSelectorOutput(raw, messages);
   }
 
   private fallbackSelect(messages: Message[], budget: number): SelectorResult {
@@ -166,41 +197,89 @@ export class LLMSelector implements MessageSelector {
     };
   }
 
-  private parseSelectorOutput(raw: string, messageCount: number): SelectorResult {
+  /**
+   * Parse and validate the raw LLM output into a SelectorResult.
+   * Falls back to recency-based selection if the LLM output is malformed,
+   * out-of-bounds, or internally inconsistent.
+   */
+  private parseSelectorOutput(raw: string, messages: Message[]): SelectorResult {
+    const messageCount = messages.length;
+    if (messageCount === 0) {
+      return { kept: [], collapsed: [], reasoning: 'empty session' };
+    }
+
     // Try to extract JSON from the response
     const jsonStart = raw.indexOf('{');
     const jsonEnd = raw.lastIndexOf('}');
     if (jsonStart === -1 || jsonEnd === -1) {
-      // Can't parse — use fallback
-      return this.fallbackSelect(
-        Array.from({ length: messageCount }, () => ({ role: 'user', content: '' }) as Message),
-        this.maxContextTokens,
-      );
+      return this.fallbackSelect(messages, this.maxContextTokens);
     }
 
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw.slice(jsonStart, jsonEnd + 1));
     } catch {
-      return this.fallbackSelect(
-        Array.from({ length: messageCount }, () => ({ role: 'user', content: '' }) as Message),
-        this.maxContextTokens,
-      );
+      return this.fallbackSelect(messages, this.maxContextTokens);
     }
 
     const obj = parsed as Record<string, unknown>;
-    const kept =
+    const keptRaw =
       (obj.kept as Array<{ from: number; to: number; importance: string }> | undefined) ?? [];
-    const collapsed =
+    const collapsedRaw =
       (obj.collapsed as Array<{ from: number; to: number; summary?: string | undefined }> | undefined) ?? [];
 
-    return {
-      kept: kept.map((k) => ({
+    // Validate kept ranges — must be within [0, messageCount), from <= to
+    const kept: SelectorResult['kept'] = [];
+    for (const k of keptRaw) {
+      if (
+        typeof k.from !== 'number' ||
+        typeof k.to !== 'number' ||
+        k.from < 0 ||
+        k.to >= messageCount ||
+        k.from > k.to
+      ) {
+        return this.fallbackSelect(messages, this.maxContextTokens);
+      }
+      kept.push({
         from: k.from,
         to: k.to,
         importance: (k.importance ?? 'medium') as 'critical' | 'high' | 'medium',
-      })),
-      collapsed: collapsed.map((c) => ({ from: c.from, to: c.to, summary: c.summary })),
+      });
+    }
+
+    // Validate collapsed ranges — same bounds check
+    const collapsed: SelectorResult['collapsed'] = [];
+    for (const c of collapsedRaw) {
+      if (
+        typeof c.from !== 'number' ||
+        typeof c.to !== 'number' ||
+        c.from < 0 ||
+        c.to >= messageCount ||
+        c.from > c.to
+      ) {
+        return this.fallbackSelect(messages, this.maxContextTokens);
+      }
+      collapsed.push({ from: c.from, to: c.to, summary: c.summary });
+    }
+
+    // Check for overlaps: kept ranges must not overlap with each other or with collapsed ranges
+    const allRanges: Array<{ from: number; to: number }> = [...kept, ...collapsed];
+    for (let i = 0; i < allRanges.length; i++) {
+      const a = allRanges[i];
+      if (!a) continue;
+      for (let j = i + 1; j < allRanges.length; j++) {
+        const b = allRanges[j];
+        if (!b) continue;
+        // Overlap: a starts before b ends AND a ends after b starts
+        if (a.from <= b.to && a.to >= b.from) {
+          return this.fallbackSelect(messages, this.maxContextTokens);
+        }
+      }
+    }
+
+    return {
+      kept,
+      collapsed,
       reasoning: typeof obj.reasoning === 'string' ? obj.reasoning : '',
     };
   }

@@ -31,6 +31,8 @@ export interface SelectiveCompactorOptions {
   eliseThreshold?: number | undefined;
   /** Model for selector LLM calls (default: same as provider default). */
   selectorModel?: string | undefined;
+  /** Max output tokens for the selector LLM call (default: 1024). */
+  selectorMaxOutputTokens?: number | undefined;
   /** Summarizer model for collapsed ranges (default: same as selectorModel). */
   summarizerModel?: string | undefined;
   /** Prompt for the summarizer sub-LLM. */
@@ -61,7 +63,7 @@ export class SelectiveCompactor implements Compactor {
   constructor(opts: SelectiveCompactorOptions) {
     this.provider = opts.provider;
     this.selector =
-      opts.selector ?? new LLMSelector({ provider: opts.provider, model: opts.selectorModel });
+      opts.selector ?? new LLMSelector({ provider: opts.provider, model: opts.selectorModel, maxOutputTokens: opts.selectorMaxOutputTokens });
     this.warnThreshold = opts.warnThreshold ?? 0.6;
     this.softThreshold = opts.softThreshold ?? 0.75;
     this.hardThreshold = opts.hardThreshold ?? 0.9;
@@ -69,6 +71,14 @@ export class SelectiveCompactor implements Compactor {
     this.preserveK = opts.preserveK ?? 4;
     this.eliseThreshold = opts.eliseThreshold ?? 500;
     this.summarizerModel = opts.summarizerModel ?? opts.selectorModel ?? 'unknown';
+    if (
+      this.summarizerModel === 'unknown' &&
+      (process.env['NODE_ENV'] === 'development' || process.env['WRONGSTACK_DEBUG'] === '1')
+    ) {
+      console.warn(
+        '[SelectiveCompactor] summarizerModel not set — will use provider default. Set `summarizerModel` explicitly to silence this warning.',
+      );
+    }
     this.summarizerPrompt =
       opts.summarizerPrompt ??
       'You are a context summarizer. Given a list of messages, produce a concise summary that preserves all factual information, decisions, file changes, and state changes. Do not add commentary or opinions.';
@@ -214,8 +224,10 @@ export class SelectiveCompactor implements Compactor {
     };
 
     try {
+      // 30-second timeout so a stuck summarizer can't hang compaction.
+      const timeoutSignal = AbortSignal.timeout(30_000);
       const res = await this.provider.complete(req, {
-        signal: ctx.signal ?? new AbortController().signal,
+        signal: AbortSignal.any([ctx.signal, timeoutSignal]),
       });
       return (
         res.content

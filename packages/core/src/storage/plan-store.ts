@@ -86,7 +86,14 @@ export async function loadPlan(filePath: string, events?: EventBus): Promise<Pla
   }
 }
 
-export async function savePlan(filePath: string, plan: PlanFile, events?: EventBus): Promise<void> {
+/**
+ * Persist a plan. Returns `true` on success, `false` if the write failed
+ * (still emits `storage.error` + warns — it does NOT throw, so callers that
+ * treat a lost plan-save as non-fatal keep working). `mutatePlan` inspects the
+ * result and throws so the plan TOOL can report `ok:false` instead of falsely
+ * claiming the plan was persisted.
+ */
+export async function savePlan(filePath: string, plan: PlanFile, events?: EventBus): Promise<boolean> {
   const t0 = Date.now();
   try {
     await atomicWrite(filePath, JSON.stringify(plan, null, 2), { mode: 0o600 });
@@ -98,6 +105,7 @@ export async function savePlan(filePath: string, plan: PlanFile, events?: EventB
       outcome: 'success',
       durationMs: Date.now() - t0,
     });
+    return true;
   } catch (err) {
     events?.emit('storage.error', {
       sessionId: '~boot~',
@@ -111,6 +119,7 @@ export async function savePlan(filePath: string, plan: PlanFile, events?: EventB
       '[plan-store] save failed:',
       toErrorMessage(err),
     );
+    return false;
   }
 }
 
@@ -260,7 +269,10 @@ export async function mutatePlan(
   return withFileLock(filePath, async () => {
     const plan = (await loadPlan(filePath)) ?? emptyPlan(sessionId);
     const updated = await fn(plan);
-    await savePlan(filePath, updated);
+    const persisted = await savePlan(filePath, updated);
+    if (!persisted) {
+      throw new Error(`Failed to persist plan to ${filePath} — the change was NOT saved.`);
+    }
     return updated;
   });
 }

@@ -606,6 +606,27 @@ export interface EventMap {
     durationMs?: number;
     traceId?: string;
   };
+  /**
+   * Real-time client status event. Emitted by TUI/CLI/WebUI to report current
+   * session stats (tool calls, tokens, model, mode, cost). Broadcast immediately
+   * to all WebUI clients via setup-events.ts and written to status.json for
+   * external watchers.
+   */
+  'client.status': {
+    clientType: string;
+    clientId: string;
+    projectHash: string;
+    agentCount: number;
+    model: string;
+    mode: string;
+    toolCalls: number;
+    inputTokens: number;
+    outputTokens: number;
+    cacheTokens: number;
+    costUsd: number;
+    timestamp: number;
+    projectSlug: string;
+  };
   error: { err: Error; phase: string; _original?: Error | undefined };
 }
 

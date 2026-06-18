@@ -1,0 +1,21 @@
+{
+  "name": "dfmt_write",
+  "description": "Write content to a file. Use this instead of native Write.",
+  "inputSchema": {
+    "properties": {
+      "content": {
+        "description": "Content to write to the file",
+        "type": "string"
+      },
+      "path": {
+        "description": "File path to write",
+        "type": "string"
+      }
+    },
+    "required": [
+      "path",
+      "content"
+    ],
+    "type": "object"
+  }
+}

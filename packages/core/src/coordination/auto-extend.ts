@@ -75,6 +75,10 @@ export function attachAutoExtend(events: EventBus, policy: AutoExtendPolicy = {}
   // wedged (no progress since the last timeout grant).
   let progress = 0;
   let lastTimeoutProgress = -1;
+  // Deduplicates rapid re-entrant events for the same (kind, limit) pair.
+  // If the C1 fix in the coordinator fails to prevent a duplicate emission,
+  // or a listener re-enters synchronously, only the first event is processed.
+  let lastSeenKey: string | null = null;
 
   const unsubs: Array<() => void> = [
     events.on('tool.executed', () => {
@@ -85,6 +89,14 @@ export function attachAutoExtend(events: EventBus, policy: AutoExtendPolicy = {}
     }),
     events.on('budget.threshold_reached', (e) => {
       const { kind, limit, extend, deny } = e;
+
+      // Deduplicate concurrent events for the same (kind, limit) pair.
+      // The coordinator's _watchdogActive guard (C1 fix) prevents duplicate
+      // timeout emissions from the budget's own checkTimeout path, but
+      // non-timeout kinds and any remaining races are caught here.
+      const key = `${kind}:${limit}`;
+      if (key === lastSeenKey) return;
+      lastSeenKey = key;
 
       if (kind === 'timeout' || kind === 'idle_timeout') {
         if (progress > lastTimeoutProgress) {
