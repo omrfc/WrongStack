@@ -53,8 +53,13 @@ export async function* spawnStream(
   // disk, not in the host heap or the chat history.
   const spool = createOutputSpool({ tool: opts.cmd, thresholdBytes: max });
 
-  const cmd = resolveWin32Command(opts.cmd);
-  const needsShell = isWin && (cmd.endsWith('.cmd') || cmd.endsWith('.bat'));
+  const resolved = resolveWin32Command(opts.cmd);
+  const needsShell = isWin && (resolved.endsWith('.cmd') || resolved.endsWith('.bat'));
+  // When using shell: true, the shell resolves the command through PATH —
+  // passing the full resolved path (which may contain spaces, e.g.
+  // "C:\Program Files\nodejs\npx.cmd") breaks because cmd.exe splits on
+  // the space. Use the original command name so the shell finds it.
+  const cmd = needsShell ? opts.cmd : resolved;
 
   // On Windows the abort signal is handled manually below instead of being
   // passed to spawn(): Node's built-in handling kills only the direct child.

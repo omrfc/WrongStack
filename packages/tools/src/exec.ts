@@ -283,12 +283,17 @@ function runCommand(
     // .cmd/.bat files are not natively executable by CreateProcess.
     const resolved = resolveWin32Command(cmd);
     const needsShell = isWin && (resolved.endsWith('.cmd') || resolved.endsWith('.bat'));
+    // When using shell: true, the shell resolves the command through PATH —
+    // passing the full resolved path (which may contain spaces, e.g.
+    // "C:\Program Files\nodejs\pnpm.cmd") breaks because cmd.exe splits on
+    // the space. Use the original command name so the shell finds it.
+    const spawnCmd = needsShell ? cmd : resolved;
 
     // On Windows the abort signal is handled manually below: Node's built-in
     // handling kills only the direct child, orphaning grandchildren (vitest
     // forks, dev servers, anything under a .cmd shim) that keep the inherited
     // stdio pipes open. registry.kill() tree-kills via taskkill instead.
-    const child = spawn(resolved, args, {
+    const child = spawn(spawnCmd, args, {
       cwd,
       env: buildChildEnv(sessionId),
       stdio: ['ignore', 'pipe', 'pipe'],
