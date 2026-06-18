@@ -17,6 +17,7 @@ import {
   useFleetStore,
   useGoalStore,
   useHistoryStore,
+  useMonitorStore,
   useSessionStore,
   useUIStore,
   useWorktreeStore,
@@ -27,6 +28,8 @@ import { useVizStore, wsToVizEvent } from '@/stores/viz-store';
 import { useLocalPrefs } from '@/stores/local-prefs';
 import { useMailboxStore, type MailboxAgent, type MailboxMessage } from '@/stores/mailbox-store';
 import type { WorktreeHandleView, WSServerMessage } from '@/types';
+import { useCoordinatorMonitorStore } from '@/stores';
+
 // ── Session handlers ──
 
 export function handleSessionStart(msg: WSServerMessage) {
@@ -245,6 +248,7 @@ export function handleContextCompacted(msg: WSServerMessage) {
 }
 
 export function handleProviderResponse(msg: WSServerMessage) {
+  pipeViz(msg);
   const payload = msg.payload as { usage: { input: number; output: number; cacheRead?: number | undefined; cacheWrite?: number | undefined }; stopReason: string; messageId: string };
 
   // Update lastInputTokens from usage delta (was a separate handler)
@@ -271,6 +275,7 @@ export function handleProviderResponse(msg: WSServerMessage) {
 }
 
 export function handleContextRepaired(msg: WSServerMessage) {
+  pipeViz(msg);
   const payload = msg.payload as { removedToolUses: string[]; removedToolResults: string[]; removedMessages: number; beforeMessages?: number | undefined; afterMessages?: number | undefined };
   const removed = payload.removedToolUses.length + payload.removedToolResults.length + payload.removedMessages;
   const msgCount = payload.beforeMessages !== undefined && payload.afterMessages !== undefined ? ` Messages: ${payload.beforeMessages} -> ${payload.afterMessages}.` : '';
@@ -296,6 +301,7 @@ export function handleIterationStarted(msg: WSServerMessage) {
 }
 
 export function handleTextDelta(msg: WSServerMessage) {
+  pipeViz(msg);
   const payload = msg.payload as { text: string; messageId: string };
   useChatStore.getState().clearThinking();
   streamCoalescer.drop('__thinking__');
@@ -312,6 +318,7 @@ export function handleTextDelta(msg: WSServerMessage) {
 }
 
 export function handleThinkingDelta(msg: WSServerMessage) {
+  pipeViz(msg);
   const payload = msg.payload as { text: string };
   if (!payload.text) return;
   streamCoalescer.push('__thinking__', payload.text, (_k, text) =>
@@ -320,6 +327,7 @@ export function handleThinkingDelta(msg: WSServerMessage) {
 }
 
 export function handleToolStarted(msg: WSServerMessage) {
+  pipeViz(msg);
   const payload = msg.payload as { id: string; name: string; input?: unknown | undefined; messageId: string };
   const existing = useChatStore.getState().messages.find((m) => m.toolUseId === payload.id);
   if (existing) { useChatStore.getState().setCurrentToolId(existing.id); return; }
@@ -350,6 +358,7 @@ export function handleToolProgress(msg: WSServerMessage) {
 }
 
 export function handleToolExecuted(msg: WSServerMessage) {
+  pipeViz(msg);
   const payload = msg.payload as { id?: string | undefined; name: string; durationMs: number; ok: boolean; input?: unknown | undefined; output?: string | undefined };
   const { messages, currentToolId } = useChatStore.getState();
   const owner = payload.id ? messages.find((m) => m.toolUseId === payload.id) : currentToolId ? messages.find((m) => m.id === currentToolId) : undefined;
@@ -664,6 +673,52 @@ export const WS_HANDLERS: Record<string, (msg: WSServerMessage) => void> = {
   'fleet.concurrency_update': handleFleetConcurrency,
   'goal.updated': handleGoalUpdated,
   'prefs.updated': handlePrefsUpdated,
+  'client.status_update': (msg: WSServerMessage) => {
+    // Real-time client status from TUI/CLI/WebUI — update monitor store
+    const payload = msg.payload as {
+      clientType?: string;
+      clientId?: string;
+      agentCount?: number;
+      model?: string;
+      mode?: string;
+      toolCalls?: number;
+      inputTokens?: number;
+      outputTokens?: number;
+      cacheTokens?: number;
+      costUsd?: number;
+      timestamp?: number;
+    };
+
+    // Update client counts based on client type
+    if (payload.clientType) {
+      const counts = { ...useMonitorStore.getState().clientCounts };
+      const type = payload.clientType as keyof typeof counts;
+      if (type in counts) {
+        counts[type] = 1; // One client of this type
+      }
+      useMonitorStore.getState().setClientCounts(counts);
+    }
+
+    // Update agent stats if provided
+    if (typeof payload.agentCount === 'number') {
+      useMonitorStore.getState().setAgentStats(payload.agentCount, payload.agentCount);
+    }
+
+    // Update current session stats
+    useMonitorStore.getState().setCurrentSession({
+      clientType: payload.clientType,
+      clientId: payload.clientId,
+      agentCount: payload.agentCount,
+      model: payload.model,
+      mode: payload.mode,
+      toolCalls: payload.toolCalls,
+      inputTokens: payload.inputTokens,
+      outputTokens: payload.outputTokens,
+      cacheTokens: payload.cacheTokens,
+      costUsd: payload.costUsd,
+      timestamp: payload.timestamp,
+    });
+  },
   'sessions.status_update': (msg: WSServerMessage) => {
     // Pipe to viz store — creates fleet:snapshot event for AgentFlowViz
     const vizEv = wsToVizEvent('sessions.status_update', msg.payload as Record<string, unknown>);
@@ -832,4 +887,82 @@ export const WS_HANDLERS: Record<string, (msg: WSServerMessage) => void> = {
     const p = msg.payload as { branch: string; added: number; deleted: number; untracked: number; behind: number; ahead: number };
     useGitInfoStore.getState().setInfo({ ...p, fetchedAt: Date.now() });
   },
+  'coordinator.status': (msg) => {
+  const p = msg.payload as { status: string; mode?: string; subagentCount?: number; taskQueue?: { pending: number; running: number; completed: number; failed: number } };
+  useCoordinatorMonitorStore.getState().setCoordinatorStatus(p.status as 'idle' | 'running' | 'draining' | 'stopped', p.mode);
+  if (p.taskQueue) {
+    useCoordinatorMonitorStore.getState().updateCoordinatorStats({
+      total: p.subagentCount ?? 0, running: 0, idle: 0, stopped: 0,
+      inFlight: p.taskQueue.running, pending: p.taskQueue.pending, completed: p.taskQueue.completed,
+    });
+  }
+},
+'coordinator.stats': (msg) => {
+  const p = msg.payload as { total: number; running: number; idle: number; stopped: number; inFlight: number; pending: number; completed: number; subagentStatuses?: Array<{ id: string; name: string; status: string; currentTask?: string }> };
+  useCoordinatorMonitorStore.getState().updateCoordinatorStats(p);
+},
+'budget.threshold_reached': (msg) => {
+  const p = msg.payload as { subagentId: string; taskId?: string; ts?: number; kind: string; used: number; limit: number; timeoutMs: number };
+  useCoordinatorMonitorStore.getState().pushEvent('budget.threshold_reached', p, p.ts ?? Date.now(), p.subagentId, p.taskId);
+  if (p.limit > 0) {
+    const pct = (p.used / p.limit) * 100;
+    if (pct >= 85) {
+      useCoordinatorMonitorStore.getState().recordBudgetAlert(p.subagentId, p.kind as 'iterations' | 'tool_calls' | 'tokens' | 'timeout' | 'idle_timeout' | 'cost', p.used, p.limit);
+    }
+  }
+  useCoordinatorMonitorStore.getState().updateSubagentBudget(p.subagentId, {
+    budgetUsage: { iterations: 0, toolCalls: 0, tokens: 0, costUsd: 0, elapsedMs: p.used ?? 0 },
+  });
+},
+'budget.decision': (msg) => {
+  const p = msg.payload as { subagentId: string; kind: string; decision: string; extended?: { timeoutMs?: number; maxIterations?: number; maxToolCalls?: number } };
+  const newLimit = p.extended?.timeoutMs ?? p.extended?.maxIterations ?? p.extended?.maxToolCalls;
+  useCoordinatorMonitorStore.getState().recordBudgetDecision(p.subagentId, p.kind, p.decision as 'extend' | 'deny', newLimit);
+  useCoordinatorMonitorStore.getState().pushEvent('budget.decision', { subagentId: p.subagentId, kind: p.kind, decision: p.decision, newLimit }, Date.now(), p.subagentId);
+},
+'subagent.budget_extended': (msg) => {
+  const p = msg.payload as { subagentId: string; kind: string; extendedMs?: number; extendedTo?: number };
+  useCoordinatorMonitorStore.getState().recordBudgetExtended(p.subagentId, p.kind, p.extendedTo);
+  useCoordinatorMonitorStore.getState().pushEvent('subagent.budget_extended', p, Date.now(), p.subagentId);
+},
+'consensus.vote_initiated': (msg) => {
+  const p = msg.payload as { changeId: string; title: string; eligible: Array<{ agentId: string; agentName: string }> };
+  useCoordinatorMonitorStore.getState().pushConsensusVote(p.changeId, p.title, p.eligible);
+  useCoordinatorMonitorStore.getState().pushEvent('consensus.vote_initiated', p, Date.now());
+  toast.info('Vote started: ' + p.title);
+},
+'consensus.vote_cast': (msg) => {
+  const p = msg.payload as { changeId: string; voterId: string; value: string };
+  const vote = useCoordinatorMonitorStore.getState().consensusVotes.get(p.changeId);
+  const eligibleEntry = vote?.eligible.find((e) => e.agentId === p.voterId);
+  useCoordinatorMonitorStore.getState().recordConsensusVote(p.changeId, p.voterId, eligibleEntry?.agentName ?? p.voterId, p.value as 'approve' | 'reject' | 'abstain');
+  useCoordinatorMonitorStore.getState().pushEvent('consensus.vote_cast', p, Date.now(), p.voterId);
+},
+'consensus.vote_resolved': (msg) => {
+  const p = msg.payload as { changeId: string; result: string; approveCount: number; rejectCount: number };
+  useCoordinatorMonitorStore.getState().resolveConsensusVote(p.changeId, p.result as 'approved' | 'rejected' | 'vetoed' | 'quorum_not_met' | 'pending', p.approveCount, p.rejectCount);
+  useCoordinatorMonitorStore.getState().pushEvent('consensus.vote_resolved', p, Date.now());
+  toast.info('Vote resolved: ' + p.result + ' (y' + p.approveCount + ' n' + p.rejectCount + ')');
+},
+'task.pending': (msg) => {
+  const p = msg.payload as { taskId: string; description: string; priority?: number };
+  useCoordinatorMonitorStore.getState().pushTaskPending(p.taskId, p.description, p.priority);
+  useCoordinatorMonitorStore.getState().pushEvent('task.pending', p, Date.now());
+},
+'task.started': (msg) => {
+  const p = msg.payload as { taskId: string; subagentId: string };
+  useCoordinatorMonitorStore.getState().startTask(p.taskId, p.subagentId);
+  useCoordinatorMonitorStore.getState().pushEvent('task.started', p, Date.now(), p.subagentId);
+},
+'task.completed': (msg) => {
+  const p = msg.payload as { taskId: string; subagentId: string; status: string; durationMs: number };
+  useCoordinatorMonitorStore.getState().completeTask(p.taskId, p.status, p.durationMs);
+  useCoordinatorMonitorStore.getState().pushEvent('task.completed', p, Date.now(), p.subagentId);
+},
+'task.failed': (msg) => {
+  const p = msg.payload as { taskId: string; subagentId: string; error: string };
+  useCoordinatorMonitorStore.getState().failTask(p.taskId, p.error);
+  useCoordinatorMonitorStore.getState().pushEvent('task.failed', { taskId: p.taskId, subagentId: p.subagentId, error: String(p.error).slice(0, 120) }, Date.now(), p.subagentId);
+  toast.error('Task failed: ' + String(p.error).slice(0, 80));
+},
 };

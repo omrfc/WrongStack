@@ -20,7 +20,7 @@
  * @module change-manager
  */
 import type { ChangeNode, QualityGateResult } from './knowledge-graph.js';
-import { KnowledgeGraph } from './knowledge-graph.js';
+import type { KnowledgeGraph } from './knowledge-graph.js';
 import type { ConsensusProtocol } from './consensus-protocol.js';
 import type { FleetBus } from './fleet-bus.js';
 

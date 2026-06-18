@@ -6,28 +6,28 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {
-  Agent,
-  AttachmentStore,
+  type Agent,
+  type AttachmentStore,
   AutonomousCoordinator,
-  CoordinatorEvent,
-  ChimeraReviewNeededPayload,
-  Config,
-  ConfigStore,
-  Director,
-  EventBus,
-  GlobalMailbox,
-  MemoryStore,
-  ModelsRegistry,
-  ModeStore,
-  ProviderConfig,
-  RecoveryLock,
-  ResolvedProvider,
-  SessionStore,
-  SessionWriter,
-  SlashCommandRegistry,
-  SubagentConfig,
-  TokenCounter,
-  WstackPaths,
+  type CoordinatorEvent,
+  type ChimeraReviewNeededPayload,
+  type Config,
+  type ConfigStore,
+  type Director,
+  type EventBus,
+  type GlobalMailbox,
+  type MemoryStore,
+  type ModelsRegistry,
+  type ModeStore,
+  type ProviderConfig,
+  type RecoveryLock,
+  type ResolvedProvider,
+  type SessionStore,
+  type SessionWriter,
+  type SlashCommandRegistry,
+  type SubagentConfig,
+  type TokenCounter,
+  type WstackPaths,
 } from '@wrongstack/core';
 import {
   type AutonomyStage,
@@ -788,7 +788,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           selfAgentName: 'Leader',
           llmProvider,
           onCoordinatorEvent: (event) => {
-            coordinatorEvents.forEach((fn) => fn(event));
+            for (const fn of coordinatorEvents) fn(event);
           },
         });
         // Wire the stop call so execute()'s finally block can cleanly shut down

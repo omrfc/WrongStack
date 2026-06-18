@@ -19,6 +19,15 @@ export interface SubagentConfig {
    * default reaper for delegated subagents (see `applyRosterBudget`).
    */
   idleTimeoutMs?: number | undefined;
+  /**
+   * Fraction of `timeoutMs` at which the proactive pre-empt fires (0.0–1.0).
+   * At this point the watchdog negotiates a ceiling extension while the
+   * agent is still under its limit, so a progressing agent gets its
+   * ceiling raised before ever entering a timed-out state.
+   * Defaults to `TIMEOUT_PREEMPT_FRACTION` (0.85). Lower values fire earlier;
+   * higher values fire closer to the deadline. Ignored when `timeoutMs` is unset.
+   */
+  preemptFraction?: number | undefined;
   tools?: string[] | undefined;
   /**
    * Tools to explicitly disable for this subagent. These tools will be

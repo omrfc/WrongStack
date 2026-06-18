@@ -44,6 +44,8 @@ export default defineConfig({
     'src/mode.ts',
     'src/process-registry.ts',
     'src/circuit-breaker.ts',
+    // Pure-data tool icon identity (browser-safe; consumed by WebUI + TUI).
+    'src/tool-icons.ts',
     // Codebase index tools
     'src/codebase-index/index.ts',
     // Index worker thread — must be its own emitted file: the host spawns it

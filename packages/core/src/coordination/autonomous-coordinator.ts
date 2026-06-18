@@ -58,7 +58,7 @@ import type {
   GoalPriority,
   QualityCheck,
 } from './knowledge-graph.js';
-import { Director } from './director.js';
+import type { Director } from './director.js';
 import type { SubagentConfig } from '../types/multi-agent.js';
 import { KnowledgeGraph } from './knowledge-graph.js';
 import { TaskDAG, type DAGEdgeEvent } from './task-dag.js';
@@ -147,6 +147,8 @@ export class AutonomousCoordinator {
   private iterationCount = 0;
   /** Tasks already handled by _onSubagentTerminated (to avoid double goal:failed on fleet event). */
   private readonly _handledBySubagent = new Set<string>();
+  /** FleetBus subscription disposers, detached in dispose(). */
+  private readonly unsubs: Array<() => void> = [];
 
   constructor(opts: AutonomousCoordinatorOptions) {
     this.selfAgentId = opts.selfAgentId;
@@ -209,19 +211,21 @@ export class AutonomousCoordinator {
     // NOTE: 'subagent.terminated' is never emitted — '_onSubagentTerminated' was
     // dead code. The correct event is 'subagent.completed' (emitted by
     // MultiAgentCoordinator when a subagent finishes with status).
-    this.fleet?.filter('subagent.completed', (e: FleetEvent) => {
+    const offCompleted = this.fleet?.filter('subagent.completed', (e: FleetEvent) => {
       this._onSubagentTerminated(e);
     });
+    if (offCompleted) this.unsubs.push(offCompleted);
 
     // Wire task:failed from auctioneer — emits goal:failed for orphan tasks
     // (subagent terminations are handled separately in _onSubagentTerminated)
-    this.fleet?.filter('task:failed', (e: FleetEvent) => {
+    const offFailed = this.fleet?.filter('task:failed', (e: FleetEvent) => {
       const payload = e.payload as { taskId: string; error: string } | undefined;
       const taskId = payload?.taskId;
       if (!taskId || this._handledBySubagent.has(taskId)) return;
       this._handledBySubagent.add(taskId);
       this._emit({ type: 'goal:failed', goalId: taskId, text: payload?.error ?? 'Task failed' });
     });
+    if (offFailed) this.unsubs.push(offFailed);
 
     // Emit initial mode so the TUI can display standalone vs fleet indicator
     this._emit({ type: 'coordinator:mode', mode: this.fleet ? 'fleet' : 'standalone' });
@@ -250,6 +254,12 @@ export class AutonomousCoordinator {
       const goalConfigs = await this._decomposeGoal(goal);
       for (const g of goalConfigs) {
         const goalId = await this.auction.publishTask(g);
+        // Mirror the published goal into the DAG. _processGoal gates on
+        // dag.getReady(), and runUntilComplete / deadlock detection read
+        // dag.isDone()/getBlocked(); without a node here the DAG stays empty,
+        // so _processGoal is a permanent no-op and isDone() is vacuously true.
+        // The decomposed sub-goals carry no inter-dependencies → no deps.
+        this.dag.addNode(goalId, g.description, []);
         this._emit({ type: 'goal:added', goalId, title: g.title, text: g.description });
       }
 
@@ -305,10 +315,19 @@ export class AutonomousCoordinator {
           }
         }
 
-        // Check for pending changes that need consensus
+        // Check for pending changes that need consensus. Guard each one: a
+        // consensus/vote error must not abort the whole autonomous loop.
         const pendingChanges = this.changes.getPendingReviews();
         for (const change of pendingChanges) {
-          await this._handlePendingChange(change);
+          try {
+            await this._handlePendingChange(change);
+          } catch (err) {
+            this._emit({
+              type: 'goal:failed',
+              goalId: change.id,
+              text: `Consensus handling failed: ${err instanceof Error ? err.message : String(err)}`,
+            });
+          }
         }
       }
     } finally {
@@ -323,6 +342,25 @@ export class AutonomousCoordinator {
     if (!this.running) return;
     this.running = false;
     console.error(`[AutonomousCoordinator] stop signal received — shutting down (iteration ${this.iterationCount})`);
+  }
+
+  /**
+   * Tear down the coordinator for good: stop the loop and detach all FleetBus
+   * subscriptions (this coordinator's + the auctioneer's) plus any open bid
+   * timers. Call this when discarding the instance (e.g. `/coordinator stop`
+   * that recreates a fresh coordinator on the next start) so handlers and
+   * timers don't accumulate across cycles. `stop()` only pauses the loop.
+   */
+  dispose(): void {
+    this.stop();
+    for (const off of this.unsubs.splice(0)) {
+      try {
+        off();
+      } catch {
+        /* best-effort */
+      }
+    }
+    this.auction.dispose();
   }
 
   /** Get a stats snapshot. */
@@ -416,6 +454,9 @@ export class AutonomousCoordinator {
       description: input.description,
       priority: resolvedPriority,
       ...(input.tags ? { tags: input.tags } : {}),
+      // Mirror the dependency edges into the auction so blocked goals aren't
+      // biddable until their deps complete (the DAG tracks the same edges).
+      ...(input.deps && input.deps.length > 0 ? { blockedBy: input.deps } : {}),
     });
 
     const goal = this.graph.get(goalId) as GoalNode;
@@ -511,6 +552,11 @@ export class AutonomousCoordinator {
         timeoutMs: 600_000, // 10 minutes per goal
       };
       const subagentId = await this.director.spawn(config);
+      // Record the subagent as the published task's assignee. Without this the
+      // GoalNode.assignee stays undefined, so when the subagent terminates
+      // _onSubagentTerminated → getTasksForAgent(subagentId) returns [] and the
+      // completion/failure is never recorded against the task.
+      await this.auction.claim(taskId, subagentId, config.name);
       await this.director.assign({
         id: goalId,
         subagentId,
@@ -596,6 +642,10 @@ export class AutonomousCoordinator {
 
   private _buildVoters() {
     return [
+      // The coordinator itself casts the quality-gate auto-vote in
+      // _handlePendingChange — it MUST be a registered, eligible voter or
+      // castVote throws "unknown voter" and tears down the run() loop.
+      { agentId: this.selfAgentId, agentName: 'Coordinator', role: 'coordinator', weight: 1 },
       { agentId: 'critic', agentName: 'Critic', role: 'critic', weight: 2, veto: true },
       { agentId: 'bug-hunter', agentName: 'Bug Hunter', role: 'bug-hunter', weight: 1.5 },
       { agentId: 'security-scanner', agentName: 'Security Scanner', role: 'security-scanner', weight: 1.5 },

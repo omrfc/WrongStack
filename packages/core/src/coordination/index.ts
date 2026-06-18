@@ -49,6 +49,16 @@ export {
   SubagentBudget,
   BudgetExceededError,
   BudgetThresholdSignal,
+  /** 0.85 — fraction of wall-clock `timeoutMs` at which the coordinator watchdog
+   * fires a PROACTIVE pre-empt (before deadline). Canonical source:
+   * `coordination/subagent-budget.ts`. Re-exported here so all budget symbols
+   * are accessible from one import path. */
+  TIMEOUT_PREEMPT_FRACTION,
+  /** 60 000 ms — hard safety net for budget negotiation decisions. Both the
+   * coordinator watchdog and SubagentBudget._negotiateExtension use this value
+   * so they agree on the decision window. Re-exported here so consumers of
+   * the coordination module can reference it without a sub-module import. */
+  DECISION_TIMEOUT_MS,
 } from './subagent-budget.js';
 export type {
   BudgetNegotiationMode,

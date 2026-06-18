@@ -11,9 +11,7 @@ import {
 } from '@wrongstack/core';
 import {
   type TaskFile,
-  emptyTaskFile,
-  loadTasks,
-  saveTasks,
+  mutateTasks,
   formatTaskList,
 } from '@wrongstack/core';
 import { randomUUID } from 'node:crypto';
@@ -53,6 +51,13 @@ interface PlanInput {
   subtasks?: string[] | undefined;
   /** Required for template_use — the template name (e.g. "new-feature", "bug-fix"). */
   template?: string | undefined;
+  /**
+   * Storage scope. Default (unset): uses the session-scoped path — isolated to this
+   * session, survives resume within the same session.
+   * `scope: 'project'`: uses a shared project-level path, visible to all sessions
+   * for this project. Useful for a shared roadmap that outlasts any single session.
+   */
+  scope?: 'session' | 'project';
 }
 
 interface PlanOutput {
@@ -72,8 +77,10 @@ export const planTool: Tool<PlanInput, PlanOutput> = {
   name: 'plan',
   category: 'Session',
   description:
-    'Manage a persistent strategic plan for the current session. Unlike todos, plans are meant for higher-level, multi-phase approaches and survive across conversation resumptions. ' +
-    'Use this to outline big-picture work, then promote concrete items into the todo list when ready to execute.',
+    'Manage a session-persistent strategic plan. The plan is written to disk and survives conversation resumptions within the same session, but is isolated to this session — other sessions have their own separate plans. ' +
+    'Unlike todos (which are per-turn and lost on restart), a plan tracks high-level progress across multiple turns. ' +
+    'Use this to outline big-picture work, then promote concrete items into the todo list when ready to execute. ' +
+    'By default plans are isolated to this session; use `scope: "project"` to store the plan in a shared project-level file visible to all sessions.',
   usageHint:
     'RECOMMENDED FOR COMPLEX, MULTI-PHASE WORK:\n\n' +
     '- Start by creating a high-level plan with `action: "add"` or using templates (`template_use`).\n' +
@@ -81,7 +88,8 @@ export const planTool: Tool<PlanInput, PlanOutput> = {
     '- Use `taskify` to convert a plan item into a structured task (with type/priority/deps).\n' +
     '- Keep plans at the "why and what" level, and todos at the "how and next step" level.\n' +
     '- Common templates: "new-feature", "bug-fix", "refactor", "release", "security-audit".\n\n' +
-    'This tool is excellent for maintaining long-term direction across many turns or even multiple sessions.',
+    'This tool is excellent for maintaining long-term direction across many turns within a session. Plans survive resume but are not shared across separate sessions.\n' +
+    'Use `scope: "project"` to use a shared project-level plan file.',
   permission: 'confirm',
   mutating: true,
   capabilities: ['fs.write'],
@@ -129,11 +137,33 @@ export const planTool: Tool<PlanInput, PlanOutput> = {
         description:
           'Template identifier when using action=template_use. Common values: new-feature, bug-fix, refactor, release, security-audit.',
       },
+      scope: {
+        type: 'string',
+        enum: ['session', 'project'],
+        description: 'Storage scope: "session" (default, isolated to this session) or "project" (shared across all sessions for this project).',
+      },
     },
     required: ['action'],
   },
   async execute(input, ctx) {
-    const planPath = (ctx.meta as Record<string, unknown>)['plan.path'];
+    const sessionPlanPath = (ctx.meta as Record<string, unknown>)['plan.path'] as string | undefined;
+    let planPath: string | undefined;
+
+    if (input.scope === 'project') {
+      // Project-level: derive from the session path by replacing the filename with
+      // 'backlog.plan.json' so all sessions share the same file.
+      if (typeof sessionPlanPath === 'string') {
+        // Handle BOTH separators — a Windows-native path uses '\\', and a
+        // '/'-only search would miss it and fall back to a bare relative path
+        // written into the process CWD instead of the sessions dir.
+        const lastSep = Math.max(sessionPlanPath.lastIndexOf('/'), sessionPlanPath.lastIndexOf('\\'));
+        planPath = lastSep >= 0
+          ? sessionPlanPath.slice(0, lastSep + 1) + 'backlog.plan.json'
+          : 'backlog.plan.json';
+      }
+    } else {
+      planPath = sessionPlanPath;
+    }
     if (typeof planPath !== 'string' || !planPath) {
       return {
         ok: false,
@@ -150,7 +180,9 @@ export const planTool: Tool<PlanInput, PlanOutput> = {
     const taskifyMeta = { title: '', details: '' };
     let didTaskify = false;
 
-    const plan = await mutatePlan(planPath, sessionId, async (p) => {
+    let plan: PlanFile;
+    try {
+    plan = await mutatePlan(planPath, sessionId, async (p) => {
       switch (input.action) {
         case 'show':
           break;
@@ -278,34 +310,62 @@ export const planTool: Tool<PlanInput, PlanOutput> = {
 
       return p;
     });
+    } catch (err) {
+      // Persist failed (mutatePlan throws on a failed save) — report ok:false
+      // with the real reason instead of falsely claiming the plan was saved.
+      return {
+        ok: false,
+        message: `Plan change not saved — ${err instanceof Error ? err.message : String(err)}`,
+        plan: '',
+        count: 0,
+        open: 0,
+      };
+    }
 
     // If the callback set an early-return result, use it
     if (early) return early;
 
     // If taskify copied plan item data, write it to the task file now
     if (didTaskify) {
-      const taskPath = (ctx.meta as Record<string, unknown>)['task.path'];
-      if (typeof taskPath !== 'string' || !taskPath) {
+      const taskPathRaw = (ctx.meta as Record<string, unknown>)['task.path'];
+      if (typeof taskPathRaw !== 'string' || !taskPathRaw) {
         return mkResult(plan, false, 'Task storage path not configured — cannot taskify.');
       }
-      const taskFile: TaskFile = (await loadTasks(taskPath)) ?? emptyTaskFile(sessionId);
+      let taskPath: string = taskPathRaw;
+      // Honor project scope for the TASK file too: a project-scoped taskify must
+      // append to the shared backlog.tasks.json, not the per-session task file
+      // (mirrors the plan-path derivation above; handles both separators).
+      if (input.scope === 'project') {
+        const lastSep = Math.max(taskPath.lastIndexOf('/'), taskPath.lastIndexOf('\\'));
+        taskPath = lastSep >= 0 ? taskPath.slice(0, lastSep + 1) + 'backlog.tasks.json' : 'backlog.tasks.json';
+      }
       const now = new Date().toISOString();
-      taskFile.tasks.push({
-        id: `task_${randomUUID()}`,
-        title: taskifyMeta.title,
-        description: taskifyMeta.details || undefined,
-        type: 'feature',
-        priority: 'medium',
-        status: 'pending',
-        createdAt: now,
-        updatedAt: now,
-      });
-      await saveTasks(taskPath, taskFile);
-      return mkResult(
-        plan,
-        true,
-        `taskify ok — added "${taskifyMeta.title}" to tasks.\n${formatTaskList(taskFile.tasks)}`,
-      );
+      // Mutate the cross-file under ITS OWN lock — a raw loadTasks/push/saveTasks
+      // can interleave with a concurrent task tool call in the same batch and
+      // clobber writes. mutateTasks is the documented race-safe write path.
+      try {
+        const taskFile: TaskFile = await mutateTasks(taskPath, sessionId, (f) => {
+          f.tasks.push({
+            id: `task_${randomUUID()}`,
+            title: taskifyMeta.title,
+            description: taskifyMeta.details || undefined,
+            type: 'feature',
+            priority: 'medium',
+            status: 'pending',
+            createdAt: now,
+            updatedAt: now,
+          });
+          return f;
+        });
+        return mkResult(
+          plan,
+          true,
+          `taskify ok — added "${taskifyMeta.title}" to tasks.\n${formatTaskList(taskFile.tasks)}`,
+        );
+      } catch (err) {
+        // The plan item was saved, but copying it into the task file failed.
+        return mkResult(plan, false, `taskify: task not saved — ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
 
     return mkResult(plan, true, `Plan ${input.action} ok.`);

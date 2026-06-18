@@ -28,6 +28,10 @@
       "types": "./dist/pack.d.ts",
       "import": "./dist/pack.js"
     },
+    "./tool-icons": {
+      "types": "./dist/tool-icons.d.ts",
+      "import": "./dist/tool-icons.js"
+    },
     "./read": {
       "types": "./dist/read.d.ts",
       "import": "./dist/read.js"

@@ -1,8 +1,24 @@
-import type { EventBus, Context, SessionEventBridge } from '@wrongstack/core';
+import type { EventBus, Context, SessionEventBridge, WstackPaths } from '@wrongstack/core';
 import type { WebSocket } from 'ws';
 import type { ConnectedClient, WSServerMessage } from './types.js';
 
+import * as fs from 'node:fs/promises';
+import { watch as fsWatch } from 'node:fs';
 import * as path from 'node:path';
+
+/** Metrics for the file watcher that watches status.json files. */
+export interface FileWatcherMetrics {
+  fileChangesDetected: number;
+  filesProcessed: number;
+  broadcastsSent: number;
+  debounceResets: number;
+  totalDebounceDelayMs: number;
+  activeProjects: number;
+  /** Average debounce delay in ms across all broadcasts. */
+  averageDebounceDelayMs: number;
+  /** Whether the file watcher is currently active. */
+  watcherActive: boolean;
+}
 
 export interface SetupEventsDeps {
   events: EventBus;
@@ -20,10 +36,30 @@ export interface SetupEventsDeps {
    * with no tool history.
    */
   sessionBridge?: SessionEventBridge | undefined;
+  /** Optional wpaths for writing status.json file. */
+  wpaths?: WstackPaths | undefined;
+  /**
+   * Optional object to populate with file watcher metrics.
+   * When provided, the setupEvents function will populate this object
+   * with real-time metrics from the file watcher.
+   */
+  watcherMetrics?: FileWatcherMetrics | undefined;
 }
 
-export function setupEvents(deps: SetupEventsDeps): void {
-  const { events, broadcast, clients, config, context, pendingConfirms, globalConfigPath, sessionBridge } = deps;
+/**
+ * Wire kernel events to WS broadcasts and (when wpaths/globalConfigPath are
+ * given) start the status-file watcher and session-poll interval.
+ *
+ * Returns a disposer that stops the watcher, clears the metrics/poll
+ * intervals, and flushes pending debounce timers. Callers MUST invoke it on
+ * shutdown — the watcher is `persistent: true` and the metrics interval is not
+ * `unref`'d, so without disposal they keep the process alive and leak across
+ * server restarts. (Previously this was hung off a non-existent
+ * `process.on('cleanup')` event that never fired.)
+ */
+export function setupEvents(deps: SetupEventsDeps): () => void {
+  const { events, broadcast, clients, config, context, pendingConfirms, globalConfigPath, sessionBridge, wpaths, watcherMetrics } = deps;
+  const disposers: Array<() => void> = [];
 
   events.on('iteration.started', (e) => {
     // Read maxIterations from context.meta so the UI reflects the
@@ -65,7 +101,11 @@ export function setupEvents(deps: SetupEventsDeps): void {
   events.on('tool.progress', (e) => {
     broadcast(clients, {
       type: 'tool.progress',
-      payload: { id: e.id, name: e.name, eventType: e.event.type, text: e.event.text },
+      // Nested `event` shape — the client handler reads `payload.event?.text`
+      // and early-returns on a falsy text, so a flat { eventType, text } payload
+      // makes live tool progress (bash streaming, partial_output, warnings)
+      // never render. Must match WSToolProgress and the CLI server.
+      payload: { id: e.id, name: e.name, event: { type: e.event.type, text: e.event.text, data: e.event.data } },
     });
     sessionBridge
       ?.append({
@@ -278,6 +318,226 @@ export function setupEvents(deps: SetupEventsDeps): void {
     broadcast(clients, { type: 'brain.event', payload: { event: eventName, ...payload as Record<string, unknown> } } as unknown as WSServerMessage);
   });
 
+  // ── Client status events — immediate broadcast to WebUI + write to status.json ──
+  // Emitted by TUI/CLI/WebUI when significant status changes occur (tool calls, tokens, etc.)
+  events.on('client.status', async (e) => {
+    // Immediately broadcast to all connected WebUI clients
+    broadcast(clients, { type: 'client.status_update', payload: e });
+
+    // Write to status.json file for external watchers (e.g., other tools monitoring this project)
+    if (wpaths?.projectStatus) {
+      try {
+        const statusFile = wpaths.projectStatus(e.projectHash);
+        const dir = path.dirname(statusFile);
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(statusFile, JSON.stringify(e, null, 2), 'utf-8');
+      } catch (err) {
+        console.error('[setup-events] Failed to write status.json:', err);
+      }
+    }
+  });
+
+  // ── File watcher for external status.json changes ──
+  // Watches ~/.wrongstack/projects/<hash>/status.json files for external tool changes.
+  // Uses project hash filtering and debouncing to handle rapid writes efficiently.
+  if (wpaths?.projectStatus && wpaths.configDir) {
+    // projectsDir = ~/.wrongstack/projects/
+    const projectsDir = path.join(wpaths.configDir, 'projects');
+
+    // Track known project hashes (populated from incoming client.status events)
+    const knownProjectHashes = new Set<string>();
+
+    // Debounce state: map of projectHash -> timer
+    const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    const DEBOUNCE_MS = 150; // Wait 150ms after last write before broadcasting
+
+    // Track pending status updates for debouncing (with write timestamps for delay calculation)
+    const pendingStatuses = new Map<string, { data: unknown; firstWriteAt: number }>();
+
+    // Initialize the external watcher metrics object if provided
+    if (watcherMetrics) {
+      watcherMetrics.fileChangesDetected = 0;
+      watcherMetrics.filesProcessed = 0;
+      watcherMetrics.broadcastsSent = 0;
+      watcherMetrics.debounceResets = 0;
+      watcherMetrics.totalDebounceDelayMs = 0;
+      watcherMetrics.activeProjects = 0;
+      watcherMetrics.averageDebounceDelayMs = 0;
+      watcherMetrics.watcherActive = true;
+    }
+
+    const getAverageDebounceDelay = (): number => {
+      if (!watcherMetrics || watcherMetrics.broadcastsSent === 0) return 0;
+      return watcherMetrics.totalDebounceDelayMs / watcherMetrics.broadcastsSent;
+    };
+
+    const logWatcherMetrics = () => {
+      if (!watcherMetrics) return;
+      // Update computed field
+      watcherMetrics.averageDebounceDelayMs = getAverageDebounceDelay();
+      console.log(
+        `[setup-events] File watcher stats: ` +
+        `${watcherMetrics.broadcastsSent} broadcasts, ` +
+        `${watcherMetrics.fileChangesDetected} file changes, ` +
+        `${watcherMetrics.debounceResets} debounce resets, ` +
+        `avg delay: ${watcherMetrics.averageDebounceDelayMs.toFixed(1)}ms, ` +
+        `${watcherMetrics.activeProjects} active projects`
+      );
+    };
+
+    // Log metrics every 60 seconds
+    const metricsInterval = setInterval(logWatcherMetrics, 60_000);
+
+    const broadcastStatus = (projectHash: string, statusData: unknown, actualDelayMs: number) => {
+      broadcast(clients, { type: 'client.status_update', payload: statusData });
+      if (watcherMetrics) {
+        watcherMetrics.broadcastsSent++;
+        watcherMetrics.totalDebounceDelayMs += actualDelayMs;
+        watcherMetrics.averageDebounceDelayMs = getAverageDebounceDelay();
+      }
+    };
+
+    const scheduleBroadcast = (projectHash: string, statusData: unknown) => {
+      const now = Date.now();
+      const existing = pendingStatuses.get(projectHash);
+
+      // Track if this is a debounce reset (rapid successive write)
+      if (existing && watcherMetrics) {
+        watcherMetrics.debounceResets++;
+      }
+
+      // Store latest status data with first write timestamp
+      pendingStatuses.set(projectHash, {
+        data: statusData,
+        firstWriteAt: existing ? existing.firstWriteAt : now,
+      });
+
+      // Clear existing timer for this project
+      const existingTimer = debounceTimers.get(projectHash);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+      }
+
+      // Set new debounce timer
+      const timer = setTimeout(() => {
+        debounceTimers.delete(projectHash);
+        const pending = pendingStatuses.get(projectHash);
+        if (pending) {
+          const actualDelay = Date.now() - pending.firstWriteAt;
+          broadcastStatus(projectHash, pending.data, actualDelay);
+          pendingStatuses.delete(projectHash);
+        }
+      }, DEBOUNCE_MS);
+
+      debounceTimers.set(projectHash, timer);
+    };
+
+    let watcher: import('fs').FSWatcher | undefined;
+
+    const startWatcher = async () => {
+      try {
+        // Ensure directory exists before watching
+        await fs.mkdir(projectsDir, { recursive: true });
+
+        // Use fs.watch for efficient file change detection
+        // Watch the projects directory for changes to status.json files
+        // recursive:true so nested `<hash>/status.json` writes are delivered —
+        // a non-recursive watch on the parent dir does not reliably fire for
+        // changes inside subdirectories. filename can be null on some platforms.
+        watcher = fsWatch(projectsDir, { persistent: true, recursive: true }, async (eventType, filename) => {
+          if (eventType === 'change') {
+            if (filename == null) return;
+            if (watcherMetrics) watcherMetrics.fileChangesDetected++;
+
+            // filename is the path relative to projectsDir, e.g. '<hash>/status.json'
+            const targetFile = path.join(projectsDir, String(filename));
+            if (targetFile.endsWith('status.json')) {
+              // Extract project hash from path: .../projects/<hash>/status.json
+              const projectHash = path.basename(path.dirname(targetFile));
+
+              // Only process if this is a known project hash
+              if (knownProjectHashes.size > 0 && !knownProjectHashes.has(projectHash)) {
+                return; // Skip unknown project directories
+              }
+
+              if (watcherMetrics) watcherMetrics.filesProcessed++;
+
+              try {
+                const content = await fs.readFile(targetFile, 'utf-8');
+                const statusData = JSON.parse(content);
+
+                // Add to known hashes if not present
+                if (statusData.projectHash) {
+                  const hash = String(statusData.projectHash);
+                  if (!knownProjectHashes.has(hash)) {
+                    knownProjectHashes.add(hash);
+                    if (watcherMetrics) watcherMetrics.activeProjects = knownProjectHashes.size;
+                  }
+                }
+
+                // Debounce the broadcast
+                scheduleBroadcast(projectHash, statusData);
+              } catch {
+                // File may not exist, be readable yet, or invalid JSON
+              }
+            }
+          }
+        });
+
+        console.log(`[setup-events] Watching ${projectsDir} for status.json changes (hash-filtered, debounced)`);
+      } catch (err) {
+        console.error('[setup-events] Failed to start status file watcher:', err);
+      }
+    };
+
+    // Register incoming client.status events to build known project hashes
+    // This ensures we only watch directories that have emitted status before
+    events.on('client.status', (e) => {
+      if (e.projectHash) {
+        const hash = String(e.projectHash);
+        if (!knownProjectHashes.has(hash)) {
+          knownProjectHashes.add(hash);
+          if (watcherMetrics) watcherMetrics.activeProjects = knownProjectHashes.size;
+        }
+      }
+    });
+
+    // Start watcher asynchronously without blocking setup
+    startWatcher();
+
+    // Clean up watcher and timers on shutdown. Registered as a disposer so it
+    // actually runs (the previous `process.on('cleanup')` event never fires).
+    disposers.push(() => {
+      clearInterval(metricsInterval);
+      logWatcherMetrics(); // Final metrics log on shutdown
+
+      // Mark watcher as inactive
+      if (watcherMetrics) watcherMetrics.watcherActive = false;
+
+      // Flush any pending broadcasts before cleanup
+      for (const [projectHash, pending] of pendingStatuses) {
+        const timer = debounceTimers.get(projectHash);
+        if (timer) {
+          clearTimeout(timer);
+          // Broadcast pending status immediately on shutdown
+          broadcastStatus(projectHash, pending.data, 0);
+        }
+      }
+
+      // Clear all debounce timers
+      for (const timer of debounceTimers.values()) {
+        clearTimeout(timer);
+      }
+      debounceTimers.clear();
+      pendingStatuses.clear();
+
+      if (watcher) {
+        watcher.close();
+        console.log('[setup-events] Closed status file watcher');
+      }
+    });
+  }
+
   // ── Cross-process session / fleet status poll ──
   // Periodically read the SessionRegistry and broadcast live session+agent status
   // to all connected clients. Gives the AgentFlowViz a project-level overview of
@@ -318,5 +578,16 @@ export function setupEvents(deps: SetupEventsDeps): void {
       }
     }, 5_000);
     if (statusInterval.unref) statusInterval.unref();
+    disposers.push(() => clearInterval(statusInterval));
   }
+
+  return () => {
+    for (const dispose of disposers) {
+      try {
+        dispose();
+      } catch {
+        /* best-effort teardown */
+      }
+    }
+  };
 }

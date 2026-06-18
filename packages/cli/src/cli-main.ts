@@ -23,6 +23,7 @@
  * order shown above. Do not inline it.
  */
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {
@@ -426,6 +427,62 @@ export async function main(argv: string[]): Promise<number> {
     }
     writeErr(color.red(`  ✗ ${p.description}\n`));
   });
+
+  // ── Client status reporting ────────────────────────────────────────────────
+  // Emit client.status events for real-time monitoring in WebUI StatsHUD.
+  // Similar to TUI's client.status emission pattern.
+  const cliClientId = `cli@${randomBytes(4).toString('hex')}`;
+  let cliToolCalls = 0;
+  let cliInputTokens = 0;
+  let cliOutputTokens = 0;
+  let cliCacheTokens = 0;
+  let cliCostUsd = 0;
+
+  const emitClientStatus = () => {
+    events.emit('client.status', {
+      clientType: 'cli',
+      clientId: cliClientId,
+      projectHash: wpaths.projectSlug,
+      agentCount: 1,
+      model: config.model,
+      mode: activeMode?.id ?? 'off',
+      toolCalls: cliToolCalls,
+      inputTokens: cliInputTokens,
+      outputTokens: cliOutputTokens,
+      cacheTokens: cliCacheTokens,
+      costUsd: cliCostUsd,
+      timestamp: Date.now(),
+      projectSlug: wpaths.projectSlug,
+    });
+  };
+
+  evOn('tool.executed', () => {
+    cliToolCalls++;
+    emitClientStatus();
+  });
+
+  evOn('provider.response', (e) => {
+    if (e.usage) {
+      cliInputTokens = e.usage.input ?? cliInputTokens;
+      cliOutputTokens = e.usage.output ?? cliOutputTokens;
+      cliCacheTokens = (e.usage.cacheRead ?? 0) + (e.usage.cacheWrite ?? 0);
+    }
+    emitClientStatus();
+  });
+
+  // Cost comes from token.accounted (carries `cost.total`); `Usage` has no
+  // `cost` field, so the previous `e.usage.cost` was always undefined → $0.
+  evOn('token.accounted', (e) => {
+    cliCostUsd = e.cost.total;
+    emitClientStatus();
+  });
+
+  evOn('iteration.completed', () => {
+    emitClientStatus();
+  });
+
+  // Emit initial status
+  emitClientStatus();
 
   // Provider instance — registry-driven by default, but falls through to
   // Build system prompt

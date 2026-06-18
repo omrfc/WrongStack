@@ -20,7 +20,7 @@
  */
 import { describe, it } from 'vitest';
 
-import { assertNeverSessionUpdate } from '../src/types/acp-v1.js';
+import type { assertNeverSessionUpdate } from '../src/types/acp-v1.js';
 import type {
   AgentMessageChunkUpdate,
   AnySessionUpdate,

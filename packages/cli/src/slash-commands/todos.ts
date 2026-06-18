@@ -33,7 +33,9 @@ export function buildTodosCommand(opts: SlashCommandContext): SlashCommand {
     name: 'todos',
     category: 'Inspect',
     description:
-      'Inspect or edit the live todo list: /todos [show|clear|add|done|remove|rm <id|index>]',
+      'Inspect or edit the live todo list: /todos [show|clear|add|done|remove|rm <id|index>]. ' +
+      'For multi-phase work use /plan (session-persistent roadmap). ' +
+      'For structured typed work with priorities and dependencies use /tasks (session-persistent).',
     async run(args) {
       const ctx = opts.context;
       if (!ctx) return { message: 'No active context.' };
@@ -87,7 +89,8 @@ export function buildTodosCommand(opts: SlashCommandContext): SlashCommand {
         }
         default:
           return {
-            message: unknownSubcommand(cmd, ['show', 'clear', 'add', 'done', 'remove'], 'todos'),
+            message: unknownSubcommand(cmd, ['show', 'clear', 'add', 'done', 'remove'], 'todos') +
+          '\n\nRelated: /plan (session-persistent roadmap) | /tasks (structured tasks with priorities)',
           };
       }
     },

@@ -24,6 +24,8 @@ export interface StrategyCompactorOptions {
   smart?: boolean | undefined;
   /** Model used by the LLM-backed strategies for summarization/selection. */
   summarizerModel?: string | undefined;
+  /** Max output tokens for the selector LLM call in 'selective' strategy (default: 1024). */
+  selectorMaxOutputTokens?: number | undefined;
   /**
    * Legacy shortcut for `strategy: 'selective'`. When `strategy` is unset (or
    * 'hybrid') and this is true, the selective (LLM-driven) compactor is used.
@@ -104,6 +106,7 @@ class ProviderBackedCompactor implements Compactor {
       return new SelectiveCompactor({
         ...common,
         selectorModel: this.opts.summarizerModel,
+        selectorMaxOutputTokens: this.opts.selectorMaxOutputTokens,
         summarizerModel: this.opts.summarizerModel,
       });
     }

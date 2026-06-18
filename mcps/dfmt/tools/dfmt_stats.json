@@ -1,0 +1,8 @@
+{
+  "name": "dfmt_stats",
+  "description": "Get token savings statistics for the session",
+  "inputSchema": {
+    "properties": {},
+    "type": "object"
+  }
+}

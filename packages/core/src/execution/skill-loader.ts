@@ -115,9 +115,8 @@ export class DefaultSkillLoader implements SkillLoader {
   }
 
   async manifestText(): Promise<string> {
-    const skills = await this.list();
-    if (skills.length === 0) return '';
     const entries = await this.listEntries();
+    if (entries.length === 0) return '';
     const lines = ['## Available skills'];
     for (const e of entries) {
       const scopeTag = e.scope.length > 0 ? ` — ${e.scope.slice(0, 3).join(', ')}` : '';
@@ -132,13 +131,10 @@ export class DefaultSkillLoader implements SkillLoader {
     const skills = await this.list();
     const entries: SkillEntry[] = [];
     for (const s of skills) {
-      try {
-        const raw = await fs.readFile(s.path, 'utf8');
-        const { trigger, scope } = parseDescription(raw);
-        entries.push({ name: s.name, trigger, scope, source: s.source, path: s.path });
-      } catch {
-        // skip
-      }
+      // Parse trigger/scope from the description that list() already parsed —
+      // no need to re-read the file; s.description === fm.description.
+      const { trigger, scope } = parseDescriptionFromText(s.description ?? '');
+      entries.push({ name: s.name, trigger, scope, source: s.source, path: s.path });
     }
     this.entriesCache = entries;
     return entries;
@@ -237,10 +233,11 @@ function parseFrontmatter(raw: string): Frontmatter {
  * - trigger: extracted "Use when..." sentence (first sentence of description)
  * - scope: comma-separated items from first line's parenthetical or file-ext list
  */
-function parseDescription(raw: string): { trigger: string; scope: string[] } {
-  const fm = parseFrontmatter(raw);
-  const desc = fm.description ?? '';
-
+/**
+ * Extract trigger and scope from a skill's description text.
+ * Used by listEntries() when the description has already been parsed from frontmatter.
+ */
+function parseDescriptionFromText(desc: string): { trigger: string; scope: string[] } {
   // Extract first sentence as trigger
   const firstSentenceEnd = desc.indexOf('. ');
   const trigger =
@@ -265,3 +262,5 @@ function parseDescription(raw: string): { trigger: string; scope: string[] } {
 
   return { trigger, scope };
 }
+
+

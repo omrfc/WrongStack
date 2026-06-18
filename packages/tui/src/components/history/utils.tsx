@@ -1,6 +1,6 @@
 import { Box, Text } from '../../ink.js';
 import React, { useEffect, useState } from 'react';
-import { theme } from '../../theme.js';
+import { getToolVisual } from '../../tool-glyph.js';
 
 // ============================================
 // Utility functions used across history components
@@ -715,6 +715,7 @@ export const ToolStreamBox = React.memo(function ToolStreamBox({
   startedAt: number;
   termWidth: number;
 }): React.ReactElement {
+  const { glyph, color } = getToolVisual(name);
   const [tick, setTick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setTick((n) => n + 1), 500);
@@ -734,8 +735,8 @@ export const ToolStreamBox = React.memo(function ToolStreamBox({
   return (
     <Box flexDirection="column" marginTop={0}>
       <Box flexDirection="row">
-        <Text color={theme.warn}>◆ </Text>
-        <Text bold color={theme.tool}>{name}</Text>
+        <Text color={color}>{glyph}{' '}</Text>
+        <Text bold color={color}>{name}</Text>
         <Text dimColor>{`  ⏱ ${fmtDuration(elapsedMs)}`}</Text>
         {hidden > 0 ? (
           <Text dimColor>{`  (${totalLines} lines, showing last ${MAX_STREAM_LINES})`}</Text>

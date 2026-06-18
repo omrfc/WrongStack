@@ -86,6 +86,8 @@ export interface WstackPaths {
   projectAutophase: string;
   /** ~/.wrongstack/sync.json — CloudSync configuration */
   syncConfig: string;
+  /** Function to get the status.json path for a project given its hash. */
+  projectStatus: (projectHash: string) => string;
 }
 
 export function projectHash(absRoot: string): string {
@@ -180,5 +182,6 @@ export function resolveWstackPaths(opts: WstackPathOptions): WstackPaths {
     projectPlan: path.join(projectDir, 'plan.json'),
     projectAutophase: path.join(projectDir, 'autophase'),
     syncConfig: path.join(globalRoot, 'sync.json'),
+    projectStatus: (projectHash: string) => path.join(globalRoot, 'projects', projectHash, 'status.json'),
   };
 }

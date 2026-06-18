@@ -39,9 +39,9 @@
  * `{stopReason: 'cancelled'}`.
  */
 import type { Agent } from '@wrongstack/core';
-import {
-  type ContentBlock,
-  type StopReason,
+import type {
+  ContentBlock,
+  StopReason,
 } from '../types/acp-v1.js';
 import type {
   RunTurn,

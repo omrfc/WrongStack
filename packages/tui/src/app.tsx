@@ -1,4 +1,4 @@
-import { expectDefined } from '@wrongstack/core';
+import { expectDefined, projectSlug } from '@wrongstack/core';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { toErrorMessage } from '@wrongstack/core/utils';
@@ -55,6 +55,7 @@ import { ProjectPicker } from './components/project-picker.js';
 import { QueuePanel } from './components/queue-panel.js';
 import { ProcessListMonitor } from './components/process-list.js';
 import { GoalPanel } from './components/goal-panel.js';
+import { PlanPanel } from './components/plan-panel.js';
 import { CoordinatorPanel } from './components/coordinator-panel.js';
 import { ResumePicker } from './components/resume-picker.js';
 import { SessionsPanel } from './components/sessions-panel.js';
@@ -79,7 +80,7 @@ import { useAutonomousCoordinator } from './hooks/use-autonomous-coordinator.js'
 import { useStatuslineState } from './hooks/use-statusline-state.js';
 import { useTuiControllers } from './hooks/use-tui-controllers.js';
 import { useTuiEventBridge } from './hooks/use-tui-event-bridge.js';
-import { INLINE_TOKEN_SRC, deleteTokenBackward, layoutInputRows, tokenLengthForward } from './input-tokens.js';
+import { INLINE_TOKEN_SRC, deleteTokenBackward, inputIndexAtRowCol, layoutInputRows, tokenLengthForward } from './input-tokens.js';
 import { createKillSlashCommand } from './kill-slash.js';
 import { MOUSE_CLICK_ON, MOUSE_OFF } from './mouse.js';
 import { feedPaste } from './paste-accumulator.js';
@@ -588,6 +589,12 @@ export interface AppProps {
   onCoordinatorStop?: (() => void) | undefined;
   /** Whether the AutonomousCoordinator is currently running. */
   coordinatorRunning?: boolean | undefined;
+  /**
+   * Unique client identifier (e.g. `tui@<uuid>`) used to tag `client.status`
+   * events emitted to the EventBus for the WebUI FleetHQ map HUD. When omitted,
+   * the App skips status emission.
+   */
+  clientId?: string | undefined;
 }
 
 const PASTE_THRESHOLD_CHARS = 200;
@@ -680,6 +687,7 @@ export function App({
   onCoordinatorStart,
   onCoordinatorStop,
   coordinatorRunning = false,
+  clientId,
 }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -874,6 +882,7 @@ export function App({
     todosMonitorOpen: false,
     queuePanelOpen: false,
     processListOpen: false,
+    planPanelOpen: false,
     goalPanelOpen: false,
     sessionsPanelOpen: false,
     sessionsPanel: { sessions: [], busy: false, selected: -1 },
@@ -1760,6 +1769,7 @@ export function App({
       if (stateRef.current.todosMonitorOpen) dispatch({ type: 'toggleTodosMonitor' });
       if (stateRef.current.queuePanelOpen) dispatch({ type: 'toggleQueuePanel' });
       if (stateRef.current.processListOpen) dispatch({ type: 'toggleProcessList' });
+      if (stateRef.current.planPanelOpen) dispatch({ type: 'togglePlanPanel' });
       if (stateRef.current.goalPanelOpen) dispatch({ type: 'toggleGoalPanel' });
       if (stateRef.current.sessionsPanelOpen) dispatch({ type: 'toggleSessionsPanel' });
 
@@ -2927,6 +2937,60 @@ export function App({
     };
   }, [events, agent.ctx.todos]);
 
+  // ── Client status reporting ─────────────────────────────────────────────────
+  // Emit client.status events to the EventBus so the WebUI and other clients
+  // can display real-time stats. This drives the FleetHQ map HUD and the
+  // JSON status file written by setup-events.ts.
+  useEffect(() => {
+    if (!clientId || !events) return;
+
+    // Track cumulative stats for client.status events
+    let toolCalls = 0;
+
+    const emitStatus = (): void => {
+      const usage = tokenCounter?.total();
+      const cost = tokenCounter?.estimateCost();
+      const mode = getAutonomy?.() ?? 'off';
+      events.emit('client.status', {
+        clientType: 'tui',
+        clientId,
+        projectHash: agent.ctx.projectRoot ? projectSlug(agent.ctx.projectRoot) : 'unknown',
+        agentCount: 1, // TUI is a single leader agent
+        model: agent.ctx.model,
+        mode,
+        toolCalls,
+        inputTokens: usage?.input ?? 0,
+        outputTokens: usage?.output ?? 0,
+        cacheTokens: (usage?.cacheRead ?? 0) + (usage?.cacheWrite ?? 0),
+        costUsd: cost?.total ?? 0,
+        timestamp: Date.now(),
+        projectSlug: agent.ctx.projectRoot ? projectSlug(agent.ctx.projectRoot) : 'unknown',
+      });
+    };
+
+    const offTool = events.on('tool.executed', () => {
+      toolCalls++;
+      emitStatus();
+    });
+
+    const offProviderResp = events.on('provider.response', () => {
+      emitStatus();
+    });
+
+    const offIterCompleted = events.on('iteration.completed', () => {
+      emitStatus();
+    });
+
+    // Emit initial status
+    emitStatus();
+
+    return () => {
+      offTool();
+      offProviderResp();
+      offIterCompleted();
+    };
+  }, [events, clientId, tokenCounter, getAutonomy, agent.ctx.model, agent.ctx.projectRoot]);
+
   // ── Debug-stream callback bridge ──
   // The CLI passes a registerDebugStreamCallback prop; this effect
   // installs it once on mount and tears it down on unmount.
@@ -4058,7 +4122,22 @@ export function App({
       toggleWorktreeOverlay();
       return;
     }
-    // F5 → no-op. Settings are accessible via the /settings slash command.
+    // F5 → plan panel overlay. Opening closes any other overlay or panel.
+    if (key.fn === 5) {
+      if (state.planPanelOpen) {
+        dispatch({ type: 'togglePlanPanel' });
+      } else {
+        if (state.agentsMonitorOpen) dispatch({ type: 'toggleAgentsMonitor' });
+        if (state.monitorOpen) dispatch({ type: 'toggleMonitor' });
+        if (state.worktreeMonitorOpen) dispatch({ type: 'worktreeMonitorToggle' });
+        if (state.todosMonitorOpen) dispatch({ type: 'toggleTodosMonitor' });
+        if (state.autoPhase?.monitorOpen) dispatch({ type: 'autoPhaseMonitorToggle' });
+        if (state.settingsPicker.open) dispatch({ type: 'settingsClose' });
+        if (state.helpOpen) dispatch({ type: 'toggleHelp' });
+        dispatch({ type: 'togglePlanPanel' });
+      }
+      return;
+    }
     // F6 → full-screen todos monitor overlay.
     if (key.fn === 6) {
       toggleTodosOverlay();
@@ -4437,6 +4516,62 @@ export function App({
     if (key.end) {
       setDraft(buffer, buffer.length);
       return;
+    }
+
+    // ── Multi-line input navigation ──────────────────────────────────────
+    // Up/Down arrows move between lines when the buffer contains newlines.
+    // PageUp/PageDown jump by a screenful (half the terminal height).
+    if (key.upArrow || key.downArrow || key.pageUp || key.pageDown) {
+      const width = stdout?.columns ?? 80;
+      const rows = layoutInputRows(INPUT_PROMPT, buffer, cursor, width);
+      if (rows.length <= 1) {
+        // Single-line — fall through to left/right arrow character movement.
+        // Up/Down on a single line is a no-op (handled below via left/right).
+      } else {
+        // Multi-line: find current row (0-based, relative to INPUT_PROMPT).
+        let row = 0, col = 0, offset = 0;
+        outer: for (let r = 0; r < rows.length; r++) {
+          const cells = rows[r]!;
+          for (let c = 0; c < cells.length; c++) {
+            if (offset === cursor) { row = r; col = c; break outer; }
+            offset++;
+          }
+          if (cells.length < width) offset++; // newline
+        }
+
+        if (key.upArrow) {
+          if (row > 0) {
+            const prevRowLen = rows[row - 1]!.filter((cell) => !cell.prompt && !cell.chip).length;
+            const targetCol = Math.min(col, prevRowLen);
+            const target = inputIndexAtRowCol(INPUT_PROMPT, buffer, width, row - 1, targetCol);
+            setDraft(buffer, target);
+            return;
+          }
+          return; // already at top — no-op
+        }
+        if (key.downArrow) {
+          if (row < rows.length - 1) {
+            const nextRowLen = rows[row + 1]!.filter((cell) => !cell.prompt && !cell.chip).length;
+            const targetCol = Math.min(col, nextRowLen);
+            const target = inputIndexAtRowCol(INPUT_PROMPT, buffer, width, row + 1, targetCol);
+            setDraft(buffer, target);
+            return;
+          }
+          return; // already at bottom — no-op
+        }
+        if (key.pageUp || key.pageDown) {
+          const pageSize = Math.max(1, Math.floor((stdout?.rows ?? 24) / 2));
+          const delta = key.pageUp ? -pageSize : pageSize;
+          const targetRow = Math.max(0, Math.min(rows.length - 1, row + delta));
+          if (targetRow !== row) {
+            const targetRowLen = rows[targetRow]!.filter((cell) => !cell.prompt && !cell.chip).length;
+            const targetCol = Math.min(col, targetRowLen);
+            const target = inputIndexAtRowCol(INPUT_PROMPT, buffer, width, targetRow, targetCol);
+            setDraft(buffer, target);
+          }
+          return;
+        }
+      }
     }
 
     // History scrolling is delegated to the terminal's native scrollback
@@ -5866,6 +6001,14 @@ export function App({
           {state.queuePanelOpen ? <QueuePanel items={state.queue} /> : null}
           {/* Process list overlay (F8) — shows background bash/exec processes. */}
           {state.processListOpen ? <ProcessListMonitor /> : null}
+          {/* Plan panel (F5) — shows plan items and scope switcher. */}
+          {state.planPanelOpen ? (
+            <PlanPanel
+              projectRoot={projectRoot}
+              sessionId={agent.ctx.session?.id ?? null}
+              onClose={() => dispatch({ type: 'togglePlanPanel' })}
+            />
+          ) : null}
           {/* Goal panel (F9) — shows current goal, deliverables, progress. */}
           {state.goalPanelOpen ? (
             <GoalPanel

@@ -266,9 +266,10 @@ export const Input = memo(function Input({
         return;
       }
       if (bsdel === 'metaBackspace') {
-        // ALT+Backspace / Opt+Backspace — delete previous word.
-        // Translate to Ctrl+Backspace which the handleKey router already
-        // handles by slicing from the last space to the cursor.
+        // ALT+Backspace / Opt+Backspace / Cmd+Backspace (macOS Terminal) —
+        // delete the previous word. Translates to Ctrl+Backspace which the
+        // handleKey router already handles by slicing from the last space
+        // to the cursor.
         suppressInkBackspaceRef.current = true;
         onKey('', { ...EMPTY_KEY, backspace: true, ctrl: true });
         return;

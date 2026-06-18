@@ -19,7 +19,6 @@ import { toErrorMessage } from '../utils/error.js';
  */
 
 export const ENHANCER_SYSTEM_PROMPT = `You are a request refiner embedded in a coding agent. Your ONLY job is to rewrite the user's message into clearer, unambiguous instructions that the coding agent can act on confidently.
-import { toErrorMessage } from '../utils/error.js';
 
 Rules:
 - Preserve the user's intent and scope EXACTLY. Do not add new requirements, features, constraints, or steps the user did not ask for. Do not remove anything they did ask for.
@@ -209,6 +208,9 @@ export async function enhanceUserPrompt(
     opts.onError?.(toErrorMessage(err));
     return null;
   } finally {
+    // Idempotent — abort() after signal already fired is a no-op, so this is
+    // always safe regardless of whether the timeout fired first.
+    timer.abort();
     clearTimeout(to);
   }
 }

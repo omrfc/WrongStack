@@ -1,6 +1,6 @@
 import { expectDefined, GlobalMailbox, projectSlug, getSessionRegistry, AgentStatusTracker } from '@wrongstack/core';
 import { makeMailboxTool, makeMailSendTool, makeMailInboxTool, mailboxSessionTag } from '@wrongstack/core';
-import { toErrorMessage, wstackGlobalRoot, projectHash } from '@wrongstack/core/utils';
+import { toErrorMessage, wstackGlobalRoot, projectHash, resolveWstackPaths } from '@wrongstack/core/utils';
 import { SkillInstaller } from '@wrongstack/core/skills';
 import JSZip from 'jszip';
 import {
@@ -28,6 +28,18 @@ import {
   handleMemoryRemember,
   handleMemoryForget,
 } from './memory-handlers.js';
+import {
+  handleMcpList,
+  handleMcpAdd,
+  handleMcpRemove,
+  handleMcpUpdate,
+  handleMcpWake,
+  handleMcpSleep,
+  handleMcpDiscover,
+  handleMcpEnable,
+  handleMcpDisable,
+  handleMcpRestart,
+} from './mcp-handlers.js';
 import {
   Agent,
   AutoCompactionMiddleware,
@@ -84,13 +96,14 @@ import { findFreePort } from './port-utils.js';
 import { openBrowser } from './open-browser.js';
 import { computeUsageCost, getCostRates } from './usage-cost.js';
 import { createProviderHandlers } from './provider-handlers.js';
-import { setupEvents } from './setup-events.js';
+import { setupEvents, type FileWatcherMetrics } from './setup-events.js';
 import { createCustomModeStore } from './custom-context-modes.js';
 import { maskedKey, normalizeKeys } from './provider-keys.js';
 import { send, broadcast, sendResult, errMessage, generateAuthToken } from './ws-utils.js';
 import { estimateContextBreakdown } from './token-estimator.js';
 import { createEternalSubscription } from './eternal-iteration-broadcast.js';
 import { handleShellOpen, type ShellOpenRequest, type ShellOpenResult } from './shell-open.js';
+import { handleGitInfo } from './git-handlers.js';
 // Re-export types — shared message shapes and options used by both the
 // standalone server and the CLI's `--webui` embedded mode.
 export type { WebUIOptions, BackendServices } from './types.js';
@@ -156,12 +169,30 @@ export {
   handleFilesList,
 } from './file-handlers.js';
 
+// Git info handler shared with CLI (git.info) — single source so the two
+// servers can't drift on ahead/behind / insertion-deletion parsing.
+export { handleGitInfo } from './git-handlers.js';
+
 // Memory operation handlers shared with CLI (memory.list, memory.remember, memory.forget)
 export {
   handleMemoryList,
   handleMemoryRemember,
   handleMemoryForget,
 } from './memory-handlers.js';
+
+// MCP operation handlers shared with CLI (mcp.list, mcp.add, mcp.remove, etc.)
+export {
+  handleMcpList,
+  handleMcpAdd,
+  handleMcpRemove,
+  handleMcpUpdate,
+  handleMcpWake,
+  handleMcpSleep,
+  handleMcpDiscover,
+  handleMcpEnable,
+  handleMcpDisable,
+  handleMcpRestart,
+} from './mcp-handlers.js';
 
 // Custom context-mode store shared with the CLI's embedded server
 // (context.mode.create/update/delete + custom-aware list/switch).
@@ -207,6 +238,22 @@ export {
 // Exported so the CLI's embedded webui-server can also handle autophase.*
 // messages when running in --webui mode.
 export { AutoPhaseWebSocketHandler } from './autophase-ws-handler.js';
+
+// Shared skills WebSocket handlers — one source of truth for both this
+// standalone server and the CLI's embedded --webui server. The CLI imports
+// these so skills.content / install / uninstall / update / create / edit /
+// export are handled there too (they previously fell through to the
+// "Unhandled message type" warning).
+export {
+  type SkillsContext,
+  handleSkillsContent,
+  handleSkillsInstall,
+  handleSkillsUninstall,
+  handleSkillsUpdate,
+  handleSkillsCreate,
+  handleSkillsEdit,
+  handleSkillsExport,
+} from './skills-handlers.js';
 
 // Message + client shapes now live in ./types.ts (shared with the CLI's
 // embedded server). Imported here for internal use; re-exported above for
@@ -1206,13 +1253,17 @@ export async function startWebUI(
   const RATE_LIMIT_MESSAGES = Number.parseInt(process.env['WEBUI_RATE_LIMIT'] ?? '0', 10);
   const RATE_LIMIT_WINDOW_MS = 60_000;
   const rateLimits = new Map<string, { count: number; resetAt: number }>();
+  // Per-connection id sequence. The rate-limit bucket must be keyed per
+  // connection, not per sessionId (every client is created with the same
+  // live `session.id`, so a sessionId key would share one bucket across all
+  // tabs) and not by `String(ws)` (which is `"[object Object]"` for every
+  // socket — identical for all connections and never matching on cleanup).
+  let connSeq = 0;
 
-  function checkRateLimit(ws: WebSocket, client: ConnectedClient): boolean {
+  function checkRateLimit(_ws: WebSocket, client: ConnectedClient): boolean {
     if (RATE_LIMIT_MESSAGES <= 0) return true; // disabled
     const now = Date.now();
-    // Prefer the per-client authenticated sessionId; fall back to the
-    // WebSocket identity for pre-auth messages before session.start.
-    const key = client.sessionId ?? String(ws);
+    const key = client.connId;
     const limit = rateLimits.get(key);
     if (!limit || now > limit.resetAt) {
       rateLimits.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
@@ -1243,7 +1294,12 @@ export async function startWebUI(
   const pendingConfirms = new Map<string, (d: 'yes' | 'no' | 'always' | 'deny') => void>();
 
   const handleConnection = (ws: WebSocket): void => {
-    const client: ConnectedClient = { ws, sessionId: session.id, connectedAt: Date.now() };
+    const client: ConnectedClient = {
+      ws,
+      sessionId: session.id,
+      connectedAt: Date.now(),
+      connId: `c${++connSeq}`,
+    };
     clients.set(ws, client);
 
     // sessionStartPayload handles errors internally; no explicit catch needed.
@@ -1291,7 +1347,17 @@ export async function startWebUI(
         const rawObj = JSON.parse(data.toString());
         if (typeof rawObj === 'object' && rawObj !== null) {
           const obj = rawObj as Record<string, unknown>;
-          if ('__proto__' in obj || 'constructor' in obj || 'prototype' in obj) {
+          // Own-property check only: the `in` operator walks the prototype
+          // chain, so `'constructor' in obj` / `'__proto__' in obj` are true
+          // for EVERY plain object and would reject all legitimate messages.
+          // A malicious JSON payload surfaces these as OWN keys (V8 materializes
+          // a literal "__proto__" data property from JSON), which Object.hasOwn
+          // detects without the false positives.
+          if (
+            Object.hasOwn(obj, '__proto__') ||
+            Object.hasOwn(obj, 'constructor') ||
+            Object.hasOwn(obj, 'prototype')
+          ) {
             send(ws, {
               type: 'error',
               payload: { phase: 'parse', message: 'Invalid message object' },
@@ -1314,8 +1380,9 @@ export async function startWebUI(
     });
 
     ws.on('close', () => {
+      const closing = clients.get(ws);
       clients.delete(ws);
-      rateLimits.delete(String(ws));
+      if (closing) rateLimits.delete(closing.connId);
       // If the client disconnects while a permission prompt is pending,
       // resolve all pending confirms with 'no' so the agent loop doesn't
       // hang forever waiting for a response that will never come.
@@ -1352,11 +1419,12 @@ export async function startWebUI(
   );
 
   let eventsArmed = false;
+  let disposeEvents: (() => void) | null = null;
   const armOnce = (label: string): void => {
     if (eventsArmed) return;
     eventsArmed = true;
     console.log(`[WebUI] Backend ready (${label})`);
-    setupEvents({ events, broadcast, clients, config, context, pendingConfirms, globalConfigPath, sessionBridge });
+    disposeEvents = setupEvents({ events, broadcast, clients, config, context, pendingConfirms, globalConfigPath, sessionBridge, wpaths, watcherMetrics });
   };
 
   wssPrimary.on('listening', () => armOnce(`${wsHost}:${wsPort}`));
@@ -1897,16 +1965,21 @@ export async function startWebUI(
           // the new provider for its modelsRegistry lookup.
           updateAutoCompactionMaxContext?.(newProv);
 
-          // Persist to global config file
+          // Persist to global config file.
+          // Mirror persistPrefsToConfig's non-poisoning lock pattern: chain the
+          // write onto the shared lock, but reset the lock to a NON-rejecting
+          // promise so a failed write here cannot surface as an unrelated
+          // handler's rejection the next time someone awaits configWriteLock.
           try {
-            configWriteLock = configWriteLock.then(async () => {
+            const next = configWriteLock.then(async () => {
               const raw = await fs.readFile(globalConfigPath, 'utf8');
               const parsed = JSON.parse(raw);
               parsed.provider = newProvider;
               parsed.model = newModel;
               await atomicWrite(globalConfigPath, JSON.stringify(parsed, null, 2));
             });
-            await configWriteLock;
+            configWriteLock = next.then(() => undefined, () => undefined);
+            await next;
           } catch (err) {
             console.warn(JSON.stringify({
               level: 'warn',
@@ -2198,6 +2271,28 @@ export async function startWebUI(
         return handleMemoryRemember(ws, msg, memoryStore);
       case 'memory.forget':
         return handleMemoryForget(ws, msg, memoryStore);
+
+      // ── MCP operations — delegated to shared handlers (mcp-handlers.ts) ──
+      case 'mcp.list':
+        return handleMcpList(ws, msg, config, globalConfigPath, undefined);
+      case 'mcp.add':
+        return handleMcpAdd(ws, msg, config, globalConfigPath, undefined);
+      case 'mcp.remove':
+        return handleMcpRemove(ws, msg, config, globalConfigPath, undefined);
+      case 'mcp.update':
+        return handleMcpUpdate(ws, msg, config, globalConfigPath);
+      case 'mcp.wake':
+        return handleMcpWake(ws, msg, config, globalConfigPath, undefined);
+      case 'mcp.sleep':
+        return handleMcpSleep(ws, msg, config, globalConfigPath, undefined);
+      case 'mcp.discover':
+        return handleMcpDiscover(ws, msg, config, globalConfigPath);
+      case 'mcp.enable':
+        return handleMcpEnable(ws, msg, config, globalConfigPath);
+      case 'mcp.disable':
+        return handleMcpDisable(ws, msg, config, globalConfigPath);
+      case 'mcp.restart':
+        return handleMcpRestart(ws, msg, config, globalConfigPath);
 
       case 'skills.list': {
         if (!skillLoader) {
@@ -2969,53 +3064,19 @@ export async function startWebUI(
       }
 
       case 'git.info': {
-        // Read git branch, change stats, and sync status from the working directory.
-        try {
-          const cwd = projectRoot;
-          const execFile = (cmd: string, args: string[]): Promise<string> =>
-            new Promise((resolve) => {
-              import('node:child_process').then(({ execFile: ef }) => {
-                ef(cmd, args, { cwd, timeout: 3000 }, (err: Error | null, stdout: string) => {
-                  resolve(err ? '' : stdout.trim());
-                });
-              });
-            });
+        // Delegates to the shared handler so the CLI-embedded server and this
+        // standalone server can never drift on git parsing again.
+        await handleGitInfo(ws, projectRoot);
+        break;
+      }
 
-          const [branchRaw, diffRaw, statusRaw, upstreamRaw] = await Promise.all([
-            execFile('git', ['branch', '--show-current']),
-            execFile('git', ['diff', '--stat']),
-            execFile('git', ['status', '--porcelain']),
-            execFile('git', ['rev-list', '--left-right', '--count', '@{upstream}...HEAD']),
-          ]);
-
-          const branch = branchRaw || '(detached)';
-
-          // Parse `git diff --stat` output like "3 files changed, 10 insertions(+), 2 deletions(-)"
-          const diffMatch = /\+\s*(\d+)\s*deletion/i.exec(diffRaw);
-          const addMatch  = /(\d+)\s*insertion/i.exec(diffRaw)  ?? /(\d+)\s*addition/i.exec(diffRaw);
-          const delMatch  = /\+\s*(\d+)\s*deletion/i.exec(diffRaw);
-          const added    = addMatch  ? Number(addMatch[1])  : 0;
-          const deleted  = delMatch  ? Number(delMatch[1])  : 0;
-
-          // Count untracked files from `git status --porcelain`
-          const untracked = statusRaw.split('\n').filter((l) => l.startsWith('??')).length;
-
-          // Parse behind/ahead from `@{upstream}...HEAD`
-          const [aheadRaw, behindRaw] = (upstreamRaw || '0\t0').split('\t');
-          const ahead  = Number(aheadRaw) || 0;
-          const behind = Number(behindRaw) || 0;
-
-          send(ws, {
-            type: 'git.info',
-            payload: { branch, added, deleted, untracked, ahead, behind },
-          });
-        } catch {
-          // Git not available or directory not a git repo — send empty info silently
-          send(ws, {
-            type: 'git.info',
-            payload: { branch: '', added: 0, deleted: 0, untracked: 0, ahead: 0, behind: 0 },
-          });
-        }
+      case 'webui.shutdown': {
+        // `/exit` from the client. Trigger the same graceful teardown the
+        // CLI-hosted server does — route through SIGINT so the registered
+        // shutdown handlers (session flush, disposers, registry unregister)
+        // all run. Previously this fell through to the unknown-type error.
+        console.log('[WebUI] Shutdown requested from client');
+        process.kill(process.pid, 'SIGINT');
         break;
       }
 
@@ -3024,7 +3085,11 @@ export async function startWebUI(
         // connected browser sees the same goal state. The file is polled
         // by the frontend every 10s — we serve the latest snapshot here.
         try {
-          const goalPath = path.join(projectRoot, '.wrongstack', 'goal.json');
+          // Canonical goal path — must match /goal, the autonomy engines, and
+          // TUI F9, which all resolve via resolveWstackPaths().projectGoal
+          // (~/.wrongstack/projects/<slug>/goal.json), NOT the repo-local
+          // .wrongstack/goal.json.
+          const goalPath = resolveWstackPaths({ projectRoot }).projectGoal;
           const raw = await fs.readFile(goalPath, 'utf8');
           const goal = JSON.parse(raw);
           broadcast(clients, { type: 'goal.updated', payload: goal });
@@ -3588,12 +3653,27 @@ export async function startWebUI(
   // shared auth token the HTTP API requires when bound to a non-loopback
   // host (LAN exposure). Loopback binds skip the token check, mirroring
   // the WS verifyClient loopback-bootstrap policy.
+
+  // Shared metrics object for file watcher — populated by setupEvents and
+  // exposed via the /debug/watcher-metrics HTTP endpoint.
+  const watcherMetrics: FileWatcherMetrics = {
+    fileChangesDetected: 0,
+    filesProcessed: 0,
+    broadcastsSent: 0,
+    debounceResets: 0,
+    totalDebounceDelayMs: 0,
+    activeProjects: 0,
+    averageDebounceDelayMs: 0,
+    watcherActive: false,
+  };
+
   const httpServer = createHttpServer({
     host: wsHost,
     distDir: path.resolve(import.meta.dirname, '../../dist'),
     wsPort,
     globalRoot: wpaths.globalRoot,
     apiToken: wsToken,
+    watcherMetrics,
   });
   // httpPort/wsPort were resolved (and possibly auto-advanced) at the top.
   // Base dir for the running-instance registry — keep it next to the rest of
@@ -3645,6 +3725,10 @@ export async function startWebUI(
     // reality. Crash exits are healed by the next register()/list() prune pass.
     onShutdown: () => {
       brainMonitor.stop();
+      if (disposeEvents) {
+        disposeEvents();
+        disposeEvents = null;
+      }
       if (eternalSubscription) {
         eternalSubscription.dispose();
         eternalSubscription = null;

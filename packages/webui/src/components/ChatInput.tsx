@@ -106,7 +106,7 @@ export function ChatInput({
           client?.newSession?.();
           return true;
         case '/exit':
-          client?.send?.({ type: 'webui.shutdown' as never, payload: {} });
+          client?.send?.({ type: 'webui.shutdown' });
           addMessage({ role: 'assistant', content: '👋 Shutting down WebUI server…' });
           return true;
         case '/compact':

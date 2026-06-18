@@ -45,12 +45,12 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { GoalNode, GoalStatus, GoalPriority } from './knowledge-graph.js';
-import { KnowledgeGraph } from './knowledge-graph.js';
+import type { KnowledgeGraph } from './knowledge-graph.js';
 import type { FleetBus } from './fleet-bus.js';
 import type { Mailbox } from './mailbox-types.js';
 import { dispatchAgent } from './dispatcher.js';
 
-export { type GoalStatus, type GoalPriority };
+export type { GoalStatus, GoalPriority };
 
 // ── Task bid ─────────────────────────────────────────────────────────────
 
@@ -106,6 +106,9 @@ export class TaskAuctioneer {
   /** Active bid windows keyed by taskId. */
   private readonly bidTimers = new Map<string, NodeJS.Timeout>();
 
+  /** FleetBus subscription disposers, detached in dispose(). */
+  private readonly unsubs: Array<() => void> = [];
+
   /** How many times a task has been republished with no bids received. */
   private readonly bidRetryCounts = new Map<string, number>();
 
@@ -122,9 +125,30 @@ export class TaskAuctioneer {
     this.minConfidence = opts.minConfidence ?? 0.3;
     this.maxBidRetries = opts.maxBidRetries ?? 3;
 
-    // Subscribe to fleet events for bid updates
-    this.fleet?.filter('task:bid', (e) => this._onBidEvent(e));
-    this.fleet?.filter('task:claimed', (e) => this._onClaimedEvent(e as { payload: { taskId: string } }));
+    // Subscribe to fleet events for bid updates. Capture the disposers so a
+    // coordinator stop/restart can detach them instead of leaking a handler
+    // (and its captured `this`) on every cycle.
+    const offBid = this.fleet?.filter('task:bid', (e) => this._onBidEvent(e));
+    const offClaimed = this.fleet?.filter('task:claimed', (e) => this._onClaimedEvent(e as { payload: { taskId: string } }));
+    if (offBid) this.unsubs.push(offBid);
+    if (offClaimed) this.unsubs.push(offClaimed);
+  }
+
+  /**
+   * Detach all FleetBus subscriptions and cancel any open bid-window timers.
+   * Call when the owning coordinator stops/restarts so handlers and timers
+   * don't accumulate across cycles.
+   */
+  dispose(): void {
+    for (const off of this.unsubs.splice(0)) {
+      try {
+        off();
+      } catch {
+        /* best-effort */
+      }
+    }
+    for (const t of this.bidTimers.values()) clearTimeout(t);
+    this.bidTimers.clear();
   }
 
   // ── Publish a task ────────────────────────────────────────────────────
@@ -143,18 +167,26 @@ export class TaskAuctioneer {
     targetAgent?: string; // if set, assign directly (no auction)
     parentGoal?: string;
     satisfiesGoals?: string[];
+    /** Goal ids that must reach 'done' before this goal becomes workable. */
+    blockedBy?: string[];
     deadline?: string;
     reward?: string; // e.g. "$0.05 budget" — informational
   }): Promise<string> {
+    // A goal that declares blockers starts blocked: it must NOT be biddable
+    // until its blockers complete (complete() flips it to 'pending').
+    const blockedBy = input.blockedBy ?? [];
+    const hasOpenBlockers =
+      blockedBy.length > 0 &&
+      blockedBy.some((id) => (this.graph.get(id) as GoalNode | undefined)?.status !== 'done');
     // Create the goal node
     const goal = await this.graph.add({
       type: 'goal',
       title: input.title,
       description: input.description,
-      status: input.targetAgent ? 'in_progress' : 'pending',
+      status: input.targetAgent ? 'in_progress' : hasOpenBlockers ? 'blocked' : 'pending',
       priority: input.priority ?? 'medium',
       assignee: input.targetAgent,
-      blockedBy: [],
+      blockedBy,
       dependsOn: input.satisfiesGoals ?? [],
       createdBy: this.selfAgentId,
       createdAt: new Date().toISOString(),
@@ -171,6 +203,15 @@ export class TaskAuctioneer {
         await this.graph.update(input.parentGoal, {
           children: [...parent.children, goal.id],
         });
+      }
+    }
+
+    // Register this goal as a child of each blocker so complete() — which walks
+    // the completing goal's `children` to unblock dependents — can find it.
+    for (const blockerId of blockedBy) {
+      const blocker = this.graph.get(blockerId) as GoalNode | undefined;
+      if (blocker && !blocker.children.includes(goal.id)) {
+        await this.graph.update(blockerId, { children: [...blocker.children, goal.id] });
       }
     }
 
@@ -331,8 +372,10 @@ export class TaskAuctioneer {
     // Unblock any dependent goals
     for (const childId of goal.children) {
       const child = this.graph.get(childId) as GoalNode | undefined;
-      if (child) {
-        // Check if all blockedBy are done
+      // Only consider children still waiting on a blocker — never resurrect an
+      // in-progress/done/failed child back to pending.
+      if (child && child.status === 'blocked') {
+        // Unblock only once EVERY blocker has reached 'done'.
         const allUnblocked = child.blockedBy.every((blockedId) => {
           const blocked = this.graph.get(blockedId) as GoalNode | undefined;
           return blocked?.status === 'done';
@@ -577,9 +620,21 @@ export class TaskAuctioneer {
       return;
     }
 
-    // Sort by score descending
+    // Sort by score descending, then award to the highest bidder still under
+    // capacity. An agent may have won other tasks between bidding and the
+    // window expiring, so re-check here (bid() only checks at bid time) to
+    // avoid assigning beyond maxTasksPerAgent.
     bids.sort((a, b) => b.score - a.score);
-    const winner = bids[0]!;
+    const winner = bids.find((b) => this._getAgentTaskCount(b.agentId) < this.maxTasksPerAgent);
+    if (!winner) {
+      // Every bidder is now at capacity — re-broadcast and try again later.
+      const goal = this.graph.get(taskId) as GoalNode | undefined;
+      if (goal) {
+        await this._broadcastTask(goal);
+        this._startBidWindow(taskId);
+      }
+      return;
+    }
 
     await this.claim(taskId, winner.agentId, winner.agentName);
   }

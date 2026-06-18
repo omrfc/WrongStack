@@ -1,5 +1,6 @@
 import { expectDefined } from '@wrongstack/core';
 import { summarizeToolInput } from '@/lib/tool-summary';
+import { getToolVisual, getToolTooltip } from '@/lib/tool-icon';
 import { cn } from '@/lib/utils';
 import { getWSClient } from '@/lib/ws-client';
 import type { ChatMessage } from '@/stores';
@@ -190,16 +191,21 @@ export const MessageBubble = memo(function MessageBubble({
           </span>
         )}
 
-        {isTool && message.toolName && (
+        {isTool && message.toolName && (() => {
+          const { Icon: ToolIcon, color: toolColor } = getToolVisual(message.toolName);
+          const tooltip = getToolTooltip(message.toolName);
+          return (
           <button type="button" onClick={() => toggleTool(message.id)}
-            className={cn('flex items-center gap-2 text-sm font-medium cursor-pointer select-none', 'hover:bg-muted/50 rounded-lg px-2 py-1 -mx-2 transition-colors', message.isError ? 'text-destructive' : 'text-foreground')}>
+            className={cn('flex items-center gap-2 text-sm font-medium cursor-pointer select-none', 'hover:bg-muted/50 rounded-lg px-2 py-1 -mx-2 transition-colors', message.isError ? 'text-destructive' : 'text-foreground')}
+            title={tooltip}>
             <span className="text-muted-foreground/50">{expandedTools[message.id] ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}</span>
-            <Terminal className="h-3 w-3" />
-            <span className="font-mono">{message.toolName}</span>
+            <ToolIcon className="h-3 w-3" style={{ color: toolColor }} />
+            <span className="font-mono" style={{ color: toolColor }}>{message.toolName}</span>
             {message.toolResult === undefined ? <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" aria-hidden /> : message.isError ? <XCircle className="h-3 w-3 text-destructive" /> : <CheckCircle2 className="h-3 w-3 text-green-500" />}
             {typeof message.toolDurationMs === 'number' && <span className="text-xs text-muted-foreground tabular-nums font-normal">{formatToolDuration(message.toolDurationMs)}</span>}
           </button>
-        )}
+          );
+        })()}
 
         <div className={cn('rounded-2xl', compactMode ? 'px-3 py-1.5' : 'px-4 py-3',
           isUser ? 'bg-primary text-primary-foreground rounded-br-md' : isTool ? message.isError ? 'bg-destructive/5 border border-destructive/20 text-destructive' : 'bg-muted/80 text-foreground' : 'bg-card border text-foreground',

@@ -95,12 +95,18 @@ export async function loadTasks(
  * Write the task file atomically. Prefer `mutateTasks` for read-modify-write
  * cycles — this low-level function does NOT acquire a lock.
  */
+/**
+ * Persist the task file. Returns `true` on success, `false` if the write
+ * failed (still emits `storage.error` + warns — does NOT throw). `mutateTasks`
+ * inspects the result and throws so the task TOOL can report `ok:false`
+ * instead of falsely claiming the tasks were saved.
+ */
 export async function saveTasks(
   filePath: string,
   tasks: TaskFile,
   events?: EventBus,
   traceId?: string,
-): Promise<void> {
+): Promise<boolean> {
   const t0 = Date.now();
   try {
     tasks.updatedAt = new Date().toISOString();
@@ -114,6 +120,7 @@ export async function saveTasks(
       durationMs: Date.now() - t0,
       ...(traceId !== undefined && { traceId }),
     });
+    return true;
   } catch (err) {
     events?.emit('storage.error', {
       sessionId: traceId ?? '~boot~',
@@ -129,6 +136,7 @@ export async function saveTasks(
       '[task-store] save failed:',
       toErrorMessage(err),
     );
+    return false;
   }
 }
 
@@ -151,7 +159,10 @@ export async function mutateTasks(
   return withFileLock(filePath, async () => {
     const file = (await loadTasks(filePath, events, traceId)) ?? emptyTaskFile(sessionId);
     const updated = await fn(file);
-    await saveTasks(filePath, updated, events, traceId);
+    const persisted = await saveTasks(filePath, updated, events, traceId);
+    if (!persisted) {
+      throw new Error(`Failed to persist tasks to ${filePath} — the change was NOT saved.`);
+    }
     return updated;
   });
 }

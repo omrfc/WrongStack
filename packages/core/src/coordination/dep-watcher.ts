@@ -85,6 +85,10 @@ export interface DependencyWatcherConfig {
   onChange: (entry: DepWatchEntry) => Promise<void>;
   /** Debounce window in ms — multiple changes to the same file within this window are collapsed. */
   debounceMs: number;
+  /** Cancel all in-flight debounce timers. Call when the file watcher is
+   *  stopped (session end / project switch) so pending setTimeouts — each
+   *  holding a closure over the mailbox + entry — don't leak. */
+  dispose: () => void;
 }
 
 export interface DependencyWatcherOptions {
@@ -179,6 +183,10 @@ export function makeDependencyWatcherConfig(
   return {
     watchPaths: unique,
     debounceMs,
+    dispose(): void {
+      for (const t of pending.values()) clearTimeout(t);
+      pending.clear();
+    },
     async onChange(entry: DepWatchEntry): Promise<void> {
       // Only react to create/change events (not delete)
       if (entry.event === 'delete') return;

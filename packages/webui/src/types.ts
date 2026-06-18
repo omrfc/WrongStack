@@ -688,7 +688,21 @@ export type WSClientMessage =
   | { type: 'skills.update'; payload: { name?: string; global?: boolean } }
   | { type: 'skills.create'; payload: { name: string; description: string; scope: 'project' | 'global' } }
   | { type: 'skills.export'; payload?: Record<string, unknown> }
-  | { type: 'skills.edit'; payload: { name: string; body: string } };
+  | { type: 'skills.edit'; payload: { name: string; body: string } }
+  // ── MCP client messages (requests to server) ─────────────────────────────────
+  | { type: 'mcp.list' }
+  | { type: 'mcp.add'; payload: { name: string; transport: string; description?: string; enabled?: boolean; command?: string; args?: string[]; env?: Record<string, string>; allowedTools?: string[] } }
+  | { type: 'mcp.remove'; payload: { name: string } }
+  | { type: 'mcp.update'; payload: { name: string; transport?: string; description?: string; enabled?: boolean; command?: string; args?: string[]; env?: Record<string, string>; allowedTools?: string[] } }
+  | { type: 'mcp.wake'; payload: { name: string } }
+  | { type: 'mcp.sleep'; payload: { name: string } }
+  | { type: 'mcp.discover'; payload: { name: string } }
+  | { type: 'mcp.enable'; payload: { name: string } }
+  | { type: 'mcp.disable'; payload: { name: string } }
+  | { type: 'mcp.restart'; payload: { name: string } }
+  // ── Misc client messages ─────────────────────────────────────────────────────
+  | { type: 'plan.template_use'; payload: { template: string } }
+  | { type: 'webui.shutdown' };
 
 export type WSServerMessage =
   | WSSessionStart
@@ -760,7 +774,31 @@ export type WSServerMessage =
   | { type: 'brain.status'; payload: { maxAutoRisk: string; log: Array<{ at: number; kind: string; question: string; outcome: string }> } }
   | { type: 'brain.answer'; payload: { question: string; decision: { type: string; optionId?: string | undefined; text?: string | undefined; rationale?: string | undefined; reason?: string | undefined; prompt?: string | undefined } } }
   | { type: 'brain.event'; payload: Record<string, unknown> & { event: string } }
-  | { type: 'model.refine_result'; payload: { refined: string; english: string; error?: string | undefined } };
+  | { type: 'model.refine_result'; payload: { refined: string; english: string; error?: string | undefined } }
+  // ── Coordinator / autonomous fleet events ──────────────────────────────
+  | { type: 'coordinator.status'; payload: { status: 'idle' | 'running' | 'draining' | 'stopped'; mode?: string; subagentCount?: number; taskQueue?: { pending: number; running: number; completed: number; failed: number } } }
+  | { type: 'coordinator.stats'; payload: { total: number; running: number; idle: number; stopped: number; inFlight: number; pending: number; completed: number; subagentStatuses?: Array<{ id: string; name: string; status: string; currentTask?: string }> } }
+  | { type: 'budget.threshold_reached'; payload: { subagentId: string; taskId?: string; ts: number; kind: string; used: number; limit: number; timeoutMs: number } }
+  | { type: 'budget.decision'; payload: { subagentId: string; kind: string; decision: 'extend' | 'deny'; extended?: { timeoutMs?: number; maxIterations?: number; maxToolCalls?: number } } }
+  | { type: 'subagent.budget_extended'; payload: { subagentId: string; kind: string; extendedMs?: number; extendedTo?: number } }
+  | { type: 'consensus.vote_initiated'; payload: { changeId: string; title: string; eligible: Array<{ agentId: string; agentName: string }> } }
+  | { type: 'consensus.vote_cast'; payload: { changeId: string; voterId: string; value: 'approve' | 'reject' | 'abstain' } }
+  | { type: 'consensus.vote_resolved'; payload: { changeId: string; result: 'approved' | 'rejected' | 'vetoed' | 'quorum_not_met'; approveCount: number; rejectCount: number } }
+  | { type: 'task.pending'; payload: { taskId: string; description: string; priority?: number } }
+  | { type: 'task.started'; payload: { taskId: string; subagentId: string } }
+  | { type: 'task.completed'; payload: { taskId: string; subagentId: string; status: string; durationMs: number } }
+  | { type: 'task.failed'; payload: { taskId: string; subagentId: string; error: string } }
+  // ── MCP server events ───────────────────────────────────────────────────────
+  | { type: 'mcp.list'; payload: { servers: Array<{ name: string; transport: string; status: string; enabled: boolean; description?: string; tools?: string[]; error?: string; pid?: number }> } }
+  | { type: 'mcp.server.added'; payload: { server: { name: string; transport: string; status: string; enabled: boolean; description?: string; tools?: string[] } } }
+  | { type: 'mcp.server.removed'; payload: { name: string } }
+  | { type: 'mcp.server.updated'; payload: { server: { name: string; transport: string; status: string; enabled: boolean; description?: string; tools?: string[] } } }
+  | { type: 'mcp.server.discovered'; payload: { name: string; tools: string[] } }
+  | { type: 'mcp.server.sleeping'; payload: { name: string } }
+  | { type: 'mcp.server.waking'; payload: { name: string } }
+  | { type: 'mcp.server.connected'; payload: { name: string; pid?: number } }
+  | { type: 'mcp.server.error'; payload: { name: string; error: string } }
+  | { type: 'mcp.operation_result'; payload: { success: boolean; message: string } };
 
 // Helper to broadcast to all clients
 export type BroadcastFn = (msg: WSServerMessage) => void;

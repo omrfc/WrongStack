@@ -66,7 +66,9 @@ export function buildTasksCommand(_opts: SlashCommandContext): SlashCommand {
     name: 'tasks',
     category: 'Inspect',
     description:
-      'Manage structured tasks with dependencies, types, and priorities: /tasks [show|add <title>|start|done|fail|status <id> <status>|promote <id>|planify <id>|clear]',
+      'Manage structured tasks with dependencies, types, and priorities: /tasks [show|add <title>|start|done|fail|status <id> <status>|promote <id>|planify <id>|clear]. ' +
+      'Tasks are session-persistent (survive resume, isolated to this session). Use `scope: "project"` to share across sessions. ' +
+      'For simpler per-turn todos use /todos. For multi-phase roadmaps use /plan.',
     help: [
       'Usage:',
       '  /tasks                            Show task progress + list',
@@ -84,6 +86,7 @@ export function buildTasksCommand(_opts: SlashCommandContext): SlashCommand {
       '',
       'Types: feature, bugfix, refactor, docs, test, chore',
       'Priorities: critical, high, medium, low',
+      'Scope: tasks are session-isolated by default; use scope:"project" in the task tool to share across sessions',
     ].join('\n'),
     async run(args, ctx) {
       if (!ctx) {
@@ -141,10 +144,30 @@ export function buildTasksCommand(_opts: SlashCommandContext): SlashCommand {
               outputMessage = 'Usage: /tasks add <title> [type] [priority]';
               return file;
             }
+            // Peel optional trailing `[type] [priority]` off the END so a
+            // multi-word title isn't truncated to its first word. Priority is
+            // peeled first (priority words rarely appear in titles); a trailing
+            // type is peeled only when a priority was also present (the
+            // documented `<title> [type] [priority]` form), so a title ending in
+            // a type-like word ("Fix the auth bug") is preserved intact.
             const parts = restJoined.split(/\s+/);
-            const title = parts[0] ?? '';
-            const type = validateType(parts[1] ?? '') ?? 'feature';
-            const priority = validatePriority(parts[2] ?? '') ?? 'medium';
+            let type: TaskType = 'feature';
+            let priority: TaskPriority = 'medium';
+            if (parts.length > 1) {
+              const p = validatePriority(parts[parts.length - 1] ?? '');
+              if (p) {
+                priority = p;
+                parts.pop();
+                if (parts.length > 1) {
+                  const t = validateType(parts[parts.length - 1] ?? '');
+                  if (t) {
+                    type = t;
+                    parts.pop();
+                  }
+                }
+              }
+            }
+            const title = parts.join(' ');
             const now = new Date().toISOString();
             file.tasks.push({
               id: `task_${randomUUID()}`,
@@ -307,7 +330,7 @@ export function buildTasksCommand(_opts: SlashCommandContext): SlashCommand {
                 'clear',
               ],
               'tasks',
-            );
+            ) + '\n\nRelated: /plan (session-persistent roadmap) | /todos (per-turn list)';
             return file;
         }
         return file;

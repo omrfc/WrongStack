@@ -79,7 +79,7 @@ export interface VizEdge {
 /** Node in the flow graph — represents a live entity. */
 export interface VizNode {
   id: string;
-  kind: 'provider' | 'agent' | 'tool' | 'mailbox' | 'session' | 'system';
+  kind: 'provider' | 'agent' | 'tool' | 'mailbox' | 'session' | 'system' | 'error' | 'coordinator';
   label: string;
   sublabel?: string | undefined;
   status: 'idle' | 'active' | 'streaming' | 'completed' | 'error';
@@ -145,6 +145,80 @@ interface VizState {
   prunesStale: (olderThan: number) => void;
 }
 
+// ── Kind/status inference helpers ─────────────────────────────────────
+
+/** Map an event's source/kind to a VizNode kind. */
+function inferKind(event: VizEvent, isTarget = false): VizNode['kind'] {
+  if (isTarget && event.target) {
+    // Tools appear as targets of agent:tool
+    if (event.kind === 'agent:tool') return 'tool';
+    if (event.kind === 'tool:executed' || event.kind === 'tool:started') return 'tool';
+    // The leader is the coordinator
+    if (event.source === 'leader' || event.source === 'coordinator') return 'coordinator';
+    if (event.kind.startsWith('provider:')) return 'provider';
+    if (event.kind.startsWith('mailbox:')) return 'mailbox';
+  }
+  switch (event.kind) {
+    case 'provider:call':
+    case 'provider:delta':
+    case 'provider:response':
+      return 'provider';
+    case 'agent:spawned':
+    case 'agent:tool':
+    case 'agent:status':
+    case 'agent:text':
+    case 'agent:ctx':
+    case 'budget:extended':
+      return 'agent';
+    case 'tool:started':
+    case 'tool:executed':
+    case 'tool:progress':
+      return 'tool';
+    case 'mailbox:send':
+    case 'mailbox:deliver':
+      return 'mailbox';
+    case 'session:start':
+    case 'session:end':
+    case 'iteration:start':
+    case 'iteration:end':
+    case 'fleet:snapshot':
+      return 'session';
+    case 'context:compacted':
+    case 'context:repaired':
+    case 'cost:update':
+      return 'system';
+    case 'error':
+      return 'error';
+    default:
+      return 'system';
+  }
+}
+
+/** Map an event kind to a node status. */
+function inferStatus(kind: VizEventKind): VizNode['status'] {
+  switch (kind) {
+    case 'provider:call':
+    case 'provider:delta':
+    case 'agent:tool':
+    case 'tool:started':
+    case 'tool:progress':
+    case 'iteration:start':
+    case 'agent:text':
+      return 'streaming';
+    case 'agent:status':
+    case 'iteration:end':
+      return 'completed';
+    case 'error':
+      return 'error';
+    case 'tool:executed':
+      return 'completed';
+    case 'session:end':
+      return 'idle';
+    default:
+      return 'active';
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────
 
 let _eventSeq = 0;
@@ -191,7 +265,56 @@ export const useVizStore = create<VizState>()((set, get) => ({
   pushEvent: (event) => set((state) => {
     const events = [{ ...event, id: event.id ?? nextId(), timestamp: event.timestamp || Date.now() }, ...state.events];
     if (events.length > state.maxEvents) events.length = state.maxEvents;
-    return { events };
+
+    // ── Apply event to nodes/edges maps ───────────────────────────
+    const nodes = new Map(state.nodes);
+    const edges = new Map(state.edges);
+    const now = Date.now();
+
+    // Upsert source node
+    const sourceNode: VizNode = {
+      id: event.source,
+      kind: inferKind(event),
+      label: event.label,
+      status: inferStatus(event.kind),
+      activity: 1.0,
+      color: event.color ?? NODE_COLORS[inferKind(event)],
+      lastSeenAt: now,
+    };
+    const existingSource = nodes.get(event.source);
+    nodes.set(event.source, { ...existingSource, ...sourceNode });
+
+    // Upsert target node if present
+    if (event.target) {
+      const targetNode: VizNode = {
+        id: event.target,
+        kind: inferKind(event, true),
+        label: event.target,
+        status: inferStatus(event.kind),
+        activity: 0.8,
+        color: event.color ?? NODE_COLORS[inferKind(event, true)],
+        lastSeenAt: now,
+      };
+      const existingTarget = nodes.get(event.target);
+      nodes.set(event.target, { ...existingTarget, ...targetNode });
+
+      // Upsert edge
+      const edgeId = `${event.source}->${event.target}`;
+      const existingEdge = edges.get(edgeId);
+      edges.set(edgeId, {
+        id: edgeId,
+        source: event.source,
+        target: event.target,
+        kind: event.kind as VizEdge['kind'],
+        label: event.label,
+        intensity: existingEdge ? Math.min(1, existingEdge.intensity + 0.3) : 0.7,
+        color: event.color ?? NODE_COLORS[inferKind(event)] ?? '#6366f1',
+        lastActiveAt: now,
+        totalMagnitude: (existingEdge?.totalMagnitude ?? 0) + (event.magnitude ?? 0),
+      });
+    }
+
+    return { events, nodes, edges };
   }),
 
   upsertNode: (partial) => set((state) => {
@@ -255,7 +378,14 @@ export const useVizStore = create<VizState>()((set, get) => ({
         nodes.set(id, { ...node, activity: decayed < 0.01 ? 0 : decayed });
       }
     }
-    return { nodes };
+    const edges = new Map(state.edges);
+    for (const [id, edge] of edges) {
+      if (edge.intensity >= 0.01) {
+        const decayed = edge.intensity * 0.90;
+        edges.set(id, { ...edge, intensity: decayed < 0.01 ? 0 : decayed });
+      }
+    }
+    return { nodes, edges };
   }),
 
   prunesStale: (olderThan) => set((state) => {
@@ -326,6 +456,19 @@ export function wsToVizEvent(
         magnitude: payload.durationMs as number ?? 0,
         data: payload as Record<string, unknown>,
         color: ok ? NODE_COLORS.tool : NODE_COLORS.error,
+        flowGroup: `tool:${name}`,
+      };
+    }
+    case 'tool.progress': {
+      const name = payload.name as string ?? 'tool';
+      const text = (payload.event as { type?: string; text?: string } | undefined)?.text ?? '';
+      return {
+        id: nextId(), kind: 'tool:progress', timestamp: Date.now(),
+        source: name, target: 'leader',
+        label: text.slice(0, 60) || name,
+        magnitude: text.length,
+        data: payload as Record<string, unknown>,
+        color: NODE_COLORS.tool,
         flowGroup: `tool:${name}`,
       };
     }

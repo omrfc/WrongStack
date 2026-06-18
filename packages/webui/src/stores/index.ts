@@ -31,3 +31,18 @@ export { useFileStore } from './file-store.js';
 export type { TreeNode, OpenFile } from './file-store.js';
 export { useVizStore } from './viz-store.js';
 export type { VizEvent, VizEdge, VizNode } from './viz-store.js';
+export { useMonitorStore } from './monitor-store.js';
+export type { ClientCounts, MailActivity, CurrentSessionStats } from './monitor-store.js';
+export { useCoordinatorMonitorStore } from './coordinator-monitor-store.js';
+export type {
+  CoordinatorStatus,
+  BudgetKind,
+  ConsensusResult,
+  VoteValue,
+  SubagentEntry,
+  FleetEvent,
+  ConsensusVote,
+  TaskEntry,
+  BudgetAlert,
+} from './coordinator-monitor-store.js';
+export { useOfficeMapStore, type BackgroundStyle } from './office-map-store.js';

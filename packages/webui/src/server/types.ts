@@ -85,4 +85,9 @@ export interface ConnectedClient {
   ws: WebSocket;
   sessionId: string | null;
   connectedAt: number;
+  /** Unique per-connection id — used to key per-connection state (e.g. the
+   *  rate-limit bucket) so distinct browser tabs that share the same
+   *  `sessionId` do not collide, and so the entry is reliably removable on
+   *  close (`String(ws)` is `"[object Object]"` for every socket). */
+  connId: string;
 }

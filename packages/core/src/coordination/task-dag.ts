@@ -401,16 +401,19 @@ export class TaskDAG {
    * there already exists a path from dep to id.
    */
   private _wouldCycle(id: string, newDeps: string[]): boolean {
+    // Adding edge (id depends on dep) cycles iff `dep` can already reach `id`
+    // by following the dependency direction. So walk `deps` (incoming edges),
+    // NOT `dependents` (outgoing) — the latter walks away from id and can never
+    // find the back-path.
     const visited = new Set<string>();
     const stack = [...newDeps];
     while (stack.length > 0) {
       const current = stack.pop()!;
-      /* v8 ignore next -- unreachable: id is brand-new, so no dependents-path leads back to it */
       if (current === id) return true;
       if (visited.has(current)) continue;
       visited.add(current);
       const node = this.nodes.get(current);
-      if (node) stack.push(...node.dependents);
+      if (node) stack.push(...node.deps);
     }
     return false;
   }

@@ -8,15 +8,16 @@ import { persist } from 'zustand/middleware';
 // Activity types shown in the ActivityBar (secondary panel content).
 // One icon = one full panel. 'context' and 'sessions' were folded into
 // 'chat' and 'history' — coerceActivity maps persisted legacy values.
-export type Activity = 'chat' | 'agents' | 'history' | 'files' | 'projects' | 'mailbox' | 'skills';
+export type Activity = 'chat' | 'agents' | 'history' | 'files' | 'projects' | 'mailbox' | 'skills' | 'officemap';
 
-const ACTIVITIES: readonly Activity[] = ['chat', 'agents', 'history', 'files', 'projects', 'mailbox', 'skills'];
+const ACTIVITIES: readonly Activity[] = ['chat', 'agents', 'history', 'files', 'projects', 'mailbox', 'skills', 'officemap'];
 
 /** Map any persisted (possibly legacy) activity value onto the current set. */
 export function coerceActivity(value: unknown): Activity {
   if (ACTIVITIES.includes(value as Activity)) return value as Activity;
   if (value === 'context') return 'chat';
   if (value === 'sessions') return 'history';
+  if (value === 'officemap') return 'officemap';
   return 'chat';
 }
 
@@ -33,7 +34,7 @@ interface UIState {
   /** Which activity icon is selected in the ActivityBar — controls secondary panel content. */
   activeActivity: Activity;
   settingsOpen: boolean;
-  currentView: 'chat' | 'settings' | 'autophase' | 'files' | 'sessions' | 'setup' | 'agentflow';
+  currentView: 'chat' | 'settings' | 'autophase' | 'files' | 'sessions' | 'setup' | 'agentflow' | 'skill' | 'officemap' | 'debug';
   showConfirmDialog: boolean;
   confirmInfo: {
     id: string;
