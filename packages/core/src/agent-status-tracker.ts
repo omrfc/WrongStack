@@ -22,6 +22,12 @@ export interface AgentStatusTrackerOptions {
   registry: SessionRegistry;
   /** Leader agent name shown in the registry. Default: "leader". */
   leaderName?: string | undefined;
+  /**
+   * Best-effort callback fired after each registry write settles. Used to nudge
+   * local WebUI servers (FleetNotifier) so cross-process status reaches the map
+   * without waiting on their file-watch/poll. Never block or throw.
+   */
+  onUpdate?: (() => void) | undefined;
 }
 
 export class AgentStatusTracker {
@@ -44,11 +50,13 @@ export class AgentStatusTracker {
   private leaderModel: string | undefined;
 
   private unsubscribers: Array<() => void> = [];
+  private readonly onUpdate: (() => void) | undefined;
 
   constructor(opts: AgentStatusTrackerOptions) {
     this.events = opts.events;
     this.registry = opts.registry;
     this.leaderName = opts.leaderName ?? 'leader';
+    this.onUpdate = opts.onUpdate;
   }
 
   start(): void {
@@ -268,6 +276,17 @@ export class AgentStatusTracker {
     };
 
     const allAgents = [leaderEntry, ...this.agents.values()];
-    this.registry.updateAgents(allAgents).catch(() => undefined);
+    // Nudge local WebUIs only AFTER the write settles, so they re-read fresh
+    // data. Best-effort — never let a notifier failure surface here.
+    this.registry
+      .updateAgents(allAgents)
+      .then(() => {
+        try {
+          this.onUpdate?.();
+        } catch {
+          /* best-effort */
+        }
+      })
+      .catch(() => undefined);
   }
 }

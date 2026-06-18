@@ -1,4 +1,4 @@
-import { expectDefined, GlobalMailbox, projectSlug, getSessionRegistry, AgentStatusTracker } from '@wrongstack/core';
+import { expectDefined, GlobalMailbox, projectSlug, getSessionRegistry, AgentStatusTracker, FleetNotifier } from '@wrongstack/core';
 import {
   handleTodosGet,
   handleTodosClear,
@@ -509,10 +509,18 @@ export async function startWebUI(
       pid: process.pid,
       startedAt: new Date().toISOString(),
     });
-    statusTracker = new AgentStatusTracker({ events, registry });
+    // Push-on-write: nudge OTHER same-project WebUIs when our agents advance,
+    // so a fleet of WebUI windows stays in lockstep without watch/poll lag.
+    const fleetNotifier = new FleetNotifier({
+      baseDir: wpaths.globalRoot,
+      projectRoot,
+      selfPid: process.pid,
+    });
+    statusTracker = new AgentStatusTracker({ events, registry, onUpdate: () => fleetNotifier.notify() });
     statusTracker.start();
     const stopTracking = async () => {
       try {
+        fleetNotifier.dispose();
         await registry.markClosing();
         statusTracker?.stop();
       } catch { /* ignore */ }
@@ -1433,11 +1441,17 @@ export async function startWebUI(
 
   let eventsArmed = false;
   let disposeEvents: (() => void) | null = null;
+  // Captured from setupEvents so `POST /api/fleet/ping` can trigger an
+  // immediate fleet re-broadcast (push-on-write from a TUI/REPL).
+  let fleetBroadcast: (() => Promise<void>) | null = null;
   const armOnce = (label: string): void => {
     if (eventsArmed) return;
     eventsArmed = true;
     console.log(`[WebUI] Backend ready (${label})`);
-    disposeEvents = setupEvents({ events, broadcast, clients, config, context, pendingConfirms, globalConfigPath, sessionBridge, wpaths, watcherMetrics });
+    disposeEvents = setupEvents({
+      events, broadcast, clients, config, context, pendingConfirms, globalConfigPath, sessionBridge, wpaths, watcherMetrics,
+      onFleetBroadcaster: (fn) => { fleetBroadcast = fn; },
+    });
   };
 
   wssPrimary.on('listening', () => armOnce(`${wsHost}:${wsPort}`));
@@ -3532,6 +3546,7 @@ export async function startWebUI(
     globalRoot: wpaths.globalRoot,
     apiToken: wsToken,
     watcherMetrics,
+    onFleetPing: () => { void fleetBroadcast?.(); },
   });
   // httpPort/wsPort were resolved (and possibly auto-advanced) at the top.
   // Base dir for the running-instance registry — keep it next to the rest of
