@@ -15,7 +15,7 @@ import * as path from 'node:path';
 import type { Dirent, Stats } from 'node:fs';
 import type { Context } from '@wrongstack/core';
 import { compileGlob } from '@wrongstack/core';
-import type { FileMeta, IndexResult, Symbol as IndexSymbol } from './schema.js';
+import type { FileMeta, IndexResult, Ref, Symbol as IndexSymbol } from './schema.js';
 import { IndexStore } from './writer.js';
 import { parseSymbols as parseTs, detectLang } from './ts-parser.js';
 import { parseSymbols as parseGo } from './go-parser.js';
@@ -321,15 +321,31 @@ async function runIndexerWithStore(store: IndexStore, opts: IndexerOptions): Pro
     symbolsIndexed += count;
     langStats[lang] = (langStats[lang] ?? 0) + count;
 
-    // Insert cross-references for each symbol
+    // Insert cross-references. Group refs by line once (O(refs)) instead of
+    // re-filtering the whole list per symbol (O(refs × symbols) per file), then
+    // emit a single batched insert — one transaction for the file, not one per
+    // symbol. deleteRefsForFile already ran above, so no per-source DELETE needed.
     if (parsed.refs && parsed.refs.length > 0) {
-      for (let i = 0; i < symbolsWithIds.length; i++) {
-        const sym = expectDefined(symbolsWithIds[i]);
-        const symRefs = parsed.refs.filter((r) => r.line === sym.line);
-        if (symRefs.length > 0) {
-          const refsWithFromId = symRefs.map((r) => ({ ...r, fromId: sym.id }));
-          store.insertRefs(sym.id, refsWithFromId);
+      const refsByLine = new Map<number, Ref[]>();
+      for (const r of parsed.refs) {
+        let arr = refsByLine.get(r.line);
+        if (!arr) {
+          arr = [];
+          refsByLine.set(r.line, arr);
         }
+        arr.push(r);
+      }
+      const batch: Ref[] = [];
+      for (const sym of symbolsWithIds) {
+        const symRefs = refsByLine.get(sym.line);
+        if (symRefs) {
+          for (const r of symRefs) {
+            batch.push({ ...r, fromId: sym.id });
+          }
+        }
+      }
+      if (batch.length > 0) {
+        store.insertRefsBatch(batch);
       }
     }
 

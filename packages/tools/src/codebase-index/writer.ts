@@ -676,40 +676,58 @@ export class IndexStore {
   }
 
   /**
+   * Bulk-insert refs for many source symbols in a single transaction.
+   *
+   * Unlike {@link insertRefs} this does NOT delete per source id — the caller
+   * (the indexer) has already cleared stale refs for the file via
+   * {@link deleteRefsForFile}, so the per-source DELETE would be redundant work
+   * repeated once per symbol. One transaction for the whole file instead of one
+   * per symbol turns an O(symbols) transaction count into O(1).
+   *
+   * Each ref's own {@link Ref.fromId} is used; pass an empty array to no-op.
+   */
+  insertRefsBatch(refs: Ref[]): void {
+    if (refs.length === 0) return;
+    this.runWithRetry(() => {
+      const stmt = this.db.prepare(
+        `INSERT INTO refs(from_id, to_name, to_id, call_type, line)
+         VALUES (?, ?, ?, ?, ?)`,
+      );
+      for (const ref of refs) {
+        stmt.run(ref.fromId, ref.toName, ref.toId ?? null, ref.callType, ref.line);
+      }
+    });
+  }
+
+  /**
    * Delete all refs whose source symbols are in a given file.
    * Used when re-indexing a file to clear stale refs.
    */
   deleteRefsForFile(file: string): void {
     this.runWithRetry(() => {
-      const ids = this.db.prepare(
-        'SELECT id FROM symbols WHERE file = ?',
-      ).all(file) as { id: number }[];
-      if (!ids.length) return;
-      const placeholders = ids.map(() => '?').join(',');
-      this.db.prepare(`DELETE FROM refs WHERE from_id IN (${placeholders})`).run(...ids.map((r) => r.id));
+      this.db.prepare(
+        'DELETE FROM refs WHERE from_id IN (SELECT id FROM symbols WHERE file = ?)',
+      ).run(file);
     });
   }
 
   /**
    * Resolve `to_name` → `to_id` for all refs that have a name but no id.
    * Call this after all symbols have been inserted to fill in cross-references.
+   *
+   * Single statement: the `to_name IN (SELECT name FROM symbols)` guard restricts
+   * the UPDATE to refs that will actually resolve, so `.changes` counts only refs
+   * that found a target — matching the previous per-row loop's return value.
    */
   resolveRefs(): number {
     return this.runWithRetry(() => {
-      const unresolved = this.db.prepare(
-        'SELECT id, to_name FROM refs WHERE to_id IS NULL AND to_name IS NOT NULL',
-      ).all() as { id: number; to_name: string }[];
-
-      let resolved = 0;
-      for (const row of unresolved) {
-        const target = this.db.prepare('SELECT id FROM symbols WHERE name = ? LIMIT 1').all(row.to_name) as { id: number }[];
-        const first = target[0];
-        if (first) {
-          this.db.prepare('UPDATE refs SET to_id = ? WHERE id = ?').run(first.id, row.id);
-          resolved++;
-        }
-      }
-      return resolved;
+      const result = this.db.prepare(
+        `UPDATE refs SET to_id = (
+           SELECT id FROM symbols WHERE name = refs.to_name LIMIT 1
+         ) WHERE to_id IS NULL AND to_name IS NOT NULL
+           AND to_name IN (SELECT name FROM symbols)`,
+      ).run() as { changes?: number };
+      return result.changes ?? 0;
     });
   }
 

@@ -69,6 +69,12 @@ export interface CreateHttpServerOptions {
    * /debug/watcher-metrics endpoint will be enabled to expose these metrics.
    */
   watcherMetrics?: FileWatcherMetrics | undefined;
+  /**
+   * Push-on-write hook. `POST /api/fleet/ping` (loopback only) invokes this to
+   * trigger an immediate fleet re-broadcast, so a TUI/REPL's registry write
+   * reaches the map without waiting on the file-watch/poll. Best-effort.
+   */
+  onFleetPing?: (() => void) | undefined;
 }
 
 const MIME_TYPES: Record<string, string> = {
@@ -179,6 +185,28 @@ export function createHttpServer(opts: CreateHttpServerOptions): http.Server {
           'Cache-Control': 'no-store',
         });
         res.end('ok');
+        return;
+      }
+
+      // /api/fleet/ping — push-on-write nudge from a same-project TUI/REPL.
+      // Triggers an immediate fleet re-broadcast of data the WS clients already
+      // receive (no new disclosure, no persistent mutation). Same auth posture
+      // as /api/sessions: open on loopback, token-gated on a LAN bind.
+      if (url.pathname === '/api/fleet/ping' && req.method === 'POST') {
+        const headerToken = req.headers['x-ws-token'];
+        const provided = Array.isArray(headerToken) ? headerToken[0] : headerToken;
+        if (requireApiToken && !tokenMatches(provided, opts.apiToken ?? '')) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Unauthorized' }));
+          return;
+        }
+        try {
+          opts.onFleetPing?.();
+        } catch {
+          /* best-effort */
+        }
+        res.writeHead(204);
+        res.end();
         return;
       }
 

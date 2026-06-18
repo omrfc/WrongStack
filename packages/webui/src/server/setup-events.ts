@@ -44,6 +44,12 @@ export interface SetupEventsDeps {
    * with real-time metrics from the file watcher.
    */
   watcherMetrics?: FileWatcherMetrics | undefined;
+  /**
+   * Receives the internal `broadcastSessions` fn so the HTTP layer can trigger
+   * an immediate fleet re-broadcast on `POST /api/fleet/ping` (push-on-write
+   * from a TUI/REPL), instead of waiting on the registry file-watch/poll.
+   */
+  onFleetBroadcaster?: ((fn: () => Promise<void>) => void) | undefined;
 }
 
 /**
@@ -58,7 +64,7 @@ export interface SetupEventsDeps {
  * `process.on('cleanup')` event that never fired.)
  */
 export function setupEvents(deps: SetupEventsDeps): () => void {
-  const { events, broadcast, clients, config, context, pendingConfirms, globalConfigPath, sessionBridge, wpaths, watcherMetrics } = deps;
+  const { events, broadcast, clients, config, context, pendingConfirms, globalConfigPath, sessionBridge, wpaths, watcherMetrics, onFleetBroadcaster } = deps;
   const disposers: Array<() => void> = [];
 
   events.on('iteration.started', (e) => {
@@ -538,13 +544,15 @@ export function setupEvents(deps: SetupEventsDeps): () => void {
     });
   }
 
-  // ── Cross-process session / fleet status poll ──
-  // Periodically read the SessionRegistry and broadcast live session+agent status
-  // to all connected clients. Gives the AgentFlowViz a project-level overview of
-  // how many sessions are active, what agents are doing, costs, and context usage.
+  // ── Cross-process session / fleet status ──
+  // Read the SessionRegistry and broadcast live session+agent status to all
+  // connected clients. Three triggers, from fastest to slowest: a push-on-write
+  // `POST /api/fleet/ping` (via onFleetBroadcaster, ~ms), an `fs.watch` on the
+  // registry file (~150ms), and a 5s fallback poll that also prunes stale
+  // entries via `list()`.
   const globalRoot = globalConfigPath ? path.dirname(globalConfigPath) : undefined;
   if (globalRoot) {
-    const statusInterval = setInterval(async () => {
+    const broadcastSessions = async () => {
       try {
         const { SessionRegistry } = await import('@wrongstack/core');
         const registry = new SessionRegistry(globalRoot);
@@ -588,11 +596,39 @@ export function setupEvents(deps: SetupEventsDeps): () => void {
           }));
         broadcast(clients, { type: 'sessions.status_update', payload: { sessions: live } });
       } catch {
-        // Best-effort — never crash for status polling errors
+        // Best-effort — never crash for status broadcasting errors
       }
-    }, 5_000);
+    };
+
+    // Hand the broadcaster to the HTTP layer for push-on-write (/api/fleet/ping).
+    onFleetBroadcaster?.(broadcastSessions);
+
+    // Fallback poll (also prunes stale entries on read).
+    const statusInterval = setInterval(() => void broadcastSessions(), 5_000);
     if (statusInterval.unref) statusInterval.unref();
     disposers.push(() => clearInterval(statusInterval));
+
+    // Event-driven: watch the registry file so a TUI/REPL agent's write reaches
+    // the map in ~150ms. Atomic writes go via `<file>.<uuid>.tmp` → rename, so
+    // watch the dir and match any `session-registry.json*` change (ignore .lock).
+    let regDebounce: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const regWatcher = fsWatch(globalRoot, { persistent: false }, (_event, filename) => {
+        const name = filename ? String(filename) : '';
+        if (!name.startsWith('session-registry.json') || name.endsWith('.lock')) return;
+        if (regDebounce) clearTimeout(regDebounce);
+        regDebounce = setTimeout(() => void broadcastSessions(), 150);
+      });
+      disposers.push(() => {
+        if (regDebounce) clearTimeout(regDebounce);
+        regWatcher.close();
+      });
+    } catch {
+      // Watch unsupported on this platform — the 5s poll still covers it.
+    }
+
+    // Push an immediate snapshot so a freshly-connected client doesn't wait.
+    void broadcastSessions();
   }
 
   return () => {

@@ -87,6 +87,10 @@ export {
   type AgentStatusTrackerOptions,
 } from '../agent-status-tracker.js';
 export {
+  FleetNotifier,
+  type FleetNotifierOptions,
+} from '../fleet-notifier.js';
+export {
   DefaultSessionRewinder,
   type SessionRewinderOptions,
 } from './session-rewinder.js';
