@@ -325,6 +325,8 @@ export class TaskAuctioneer {
     });
 
     this.bidRetryCounts.delete(taskId);
+    this.pendingBids.delete(taskId);
+    this._cancelBidWindow(taskId);
 
     // Unblock any dependent goals
     for (const childId of goal.children) {
@@ -372,6 +374,8 @@ export class TaskAuctioneer {
     });
 
     this.bidRetryCounts.delete(taskId);
+    this.pendingBids.delete(taskId);
+    this._cancelBidWindow(taskId);
 
     this._emit('task:failed', { taskId, agentId, error });
     await this._mailboxPublish({
@@ -483,12 +487,15 @@ export class TaskAuctioneer {
       tags: goal.tags,
     });
 
-    // Cross-session via mailbox
-    void this._mailboxPublish({
+    // Cross-session via mailbox — use .catch(() => {}) not void.
+    // void discards the return value but does NOT swallow promise rejections;
+    // without .catch, any rejection from _mailboxPublish becomes an unhandled
+    // promise rejection that crashes the process.
+    this._mailboxPublish({
       type: 'broadcast',
       subject: `[task] ${goal.title} (${goal.priority})`,
       body: `New task available: "${goal.title}"\nPriority: ${goal.priority}\nDescription: ${goal.description.slice(0, 200)}${goal.description.length > 200 ? '...' : ''}\n\nTask ID: ${goal.id}\nTags: ${goal.tags.join(', ') || 'none'}\n\nBid by calling taskAuctioneer.bid("${goal.id}", ...)`,
-    });
+    }).catch(() => {});
   }
 
   private async _mailboxPublish(msg: {
