@@ -56,6 +56,7 @@ import type {
   GoalNode,
   FactCategory,
   GoalPriority,
+  QualityCheck,
 } from './knowledge-graph.js';
 import { Director } from './director.js';
 import type { SubagentConfig } from '../types/multi-agent.js';
@@ -520,7 +521,7 @@ export class AutonomousCoordinator {
     // polling needed here; completion is reported via the fleet bus.
   }
 
-  private async _handlePendingChange(change: { id: string; qualityGate: { passed: boolean; checks: { name: string }[] } }): Promise<void> {
+  private async _handlePendingChange(change: { id: string; qualityGate: { passed: boolean; checks: QualityCheck[] } }): Promise<void> {
     const result = this.consensus.getStatus(change.id);
     if (result?.outcome !== 'pending') return;
 
@@ -531,6 +532,14 @@ export class AutonomousCoordinator {
       if (voteResult.outcome === 'approved') {
         await this.changes.markApplied(change.id, new Date().toISOString());
         this._emit({ type: 'consensus:reached', goalId: change.id, text: 'Change approved and applied' });
+      }
+    } else {
+      // Quality gate failed — reject the change outright
+      const voteResult = await this.consensus.castVote(change.id, this.selfAgentId, 'reject',
+        `Quality gate failed: ${change.qualityGate.checks.map((c) => `${c.name}=${c.passed}`).join(', ')}`);
+      if (voteResult.outcome === 'rejected' || voteResult.outcome === 'vetoed') {
+        // Status update (rejected) is handled inside castVote via graph.update
+        this._emit({ type: 'consensus:reached', goalId: change.id, text: 'Change rejected by quality gate' });
       }
     }
   }

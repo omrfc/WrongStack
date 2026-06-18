@@ -200,9 +200,11 @@ export class ConsensusProtocol {
 
   // ── Private ───────────────────────────────────────────────────────────
 
-  private _eligibleVoters(_change: ChangeNode): string[] {
-    // All registered voters are eligible by default
-    return Array.from(this.voters.keys());
+  private _eligibleVoters(change: ChangeNode): string[] {
+    // The proposer has a conflict of interest — they cannot vote on their own proposal.
+    return Array.from(this.voters.keys()).filter(
+      (agentId) => agentId !== change.proposedBy,
+    );
   }
 
   private _resolve(
