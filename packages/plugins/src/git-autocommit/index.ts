@@ -217,11 +217,11 @@ const plugin: Plugin = {
   },
 
   setup(api) {
-    const cwd = api.config.extensions?.['git-autocommit'] as Record<string, unknown> | undefined;
+    const extConfig = api.config.extensions?.['git-autocommit'] as Record<string, unknown> | undefined;
     const opts = {
-      conventionalCommits: (cwd?.['conventionalCommits'] as boolean) ?? true,
-      autoStage: (cwd?.['autoStage'] as boolean) ?? false,
-      defaultType: (cwd?.['defaultType'] as string) ?? 'feat',
+      conventionalCommits: (extConfig?.['conventionalCommits'] as boolean) ?? true,
+      autoStage: (extConfig?.['autoStage'] as boolean) ?? false,
+      defaultType: (extConfig?.['defaultType'] as string) ?? 'feat',
     };
 
     // --- git_autocommit tool ---

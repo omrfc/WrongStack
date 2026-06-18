@@ -142,9 +142,9 @@ describe('auto_doc_preview', () => {
     expect((await tools.auto_doc_preview!.execute({ files: [] })).ok).toBe(false);
   });
 
-  it('previews docs for already-documented entities (jsdoc)', async () => {
-    // preview only includes entities that do NOT need a doc comment (already documented)
-    fsm.readFileSync.mockReturnValue(['  /**', '  function documented(): number {', '  }'].join('\n'));
+  it('previews docs for undocumented entities (jsdoc)', async () => {
+    // preview includes entities that NEED a doc comment (not yet documented)
+    fsm.readFileSync.mockReturnValue('function undocumented(): number {\n  return 1;\n}');
     const tools = setup();
     const res = await tools.auto_doc_preview!.execute({ files: ['a.ts'], style: 'jsdoc' });
     expect(res.ok).toBe(true);
@@ -153,7 +153,7 @@ describe('auto_doc_preview', () => {
   });
 
   it('previews with the default tsdoc style', async () => {
-    fsm.readFileSync.mockReturnValue(['  /**', '  function documented(): number {', '  }'].join('\n'));
+    fsm.readFileSync.mockReturnValue('function undocumented(): number {\n  return 1;\n}');
     const tools = setup();
     const res = await tools.auto_doc_preview!.execute({ files: ['a.ts'] }); // default style
     expect((res.previews as Array<{ entities: string[] }>)[0]!.entities.length).toBe(1);

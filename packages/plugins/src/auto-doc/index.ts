@@ -81,24 +81,10 @@ function parseSource(content: string): ParsedEntity[] {
   return entities;
 }
 
-function generateJSDoc(entity: ParsedEntity, includeTypes: boolean): string {
-  switch (entity.kind) {
-    case 'function': {
-      const params = entity.params
-        .map((p) => `   * @param ${p} - TODO: describe parameter`)
-        .join('\n');
-      const returns = entity.returnType
-        ? `\n   * @returns ${includeTypes ? `{${entity.returnType}} ` : ''}TODO: describe return value`
-        : '';
-      return `/**\n   * TODO: One-line description of ${entity.name}\n${params}${returns}\n   */`;
-    }
-    case 'class':    return `/**\n   * TODO: Describe class ${entity.name}\n   */`;
-    case 'type':     return `/**\n   * TODO: Describe type ${entity.name}\n   */`;
-    case 'interface': return `/**\n   * TODO: Describe interface ${entity.name}\n   */`;
-  }
-}
-
-function generateTSDoc(entity: ParsedEntity, includeTypes: boolean): string {
+function generateDocComment(entity: ParsedEntity, includeTypes: boolean): string {
+  // JSDoc and TSDoc share the same @param/@returns syntax for the entity
+  // types this plugin supports (function, class, type, interface). When
+  // TSDoc-specific tags (@typeParam, @remarks) are needed, extend here.
   switch (entity.kind) {
     case 'function': {
       const params = entity.params
@@ -146,7 +132,6 @@ async function runAutoDoc(input: AutoDocInput, api: Parameters<Plugin['setup']>[
   if (input.files.length === 0) {
     return { ok: false, error: 'input.files is empty — provide at least one file path', filesProcessed: 0, changes: [] };
   }
-  const style = (input.style as 'jsdoc' | 'tsdoc') ?? 'tsdoc';
   const includeTypes = (api.config.extensions?.['auto-doc'] as Record<string, unknown>)?.['includeTypes'] as boolean ?? false;
   const results: Array<{ file: string; entity: string }> = [];
 
@@ -167,9 +152,7 @@ async function runAutoDoc(input: AutoDocInput, api: Parameters<Plugin['setup']>[
       for (const entity of entities) {
         if (!input.force && !needsDocComment(modified, entity)) continue;
 
-        const doc = style === 'jsdoc'
-          ? generateJSDoc(entity, includeTypes)
-          : generateTSDoc(entity, includeTypes);
+        const doc = generateDocComment(entity, includeTypes);
 
         modified = injectDocComment(modified, entity, doc);
         results.push({ file, entity: entity.name });
@@ -194,7 +177,6 @@ async function runAutoDocPreview(input: AutoDocPreviewInput, api: Parameters<Plu
   if (input.files.length === 0) {
     return { ok: false, error: 'input.files is empty — provide at least one file path', previews: [] };
   }
-  const style = (input.style as 'jsdoc' | 'tsdoc') ?? 'tsdoc';
   const includeTypes = (api.config.extensions?.['auto-doc'] as Record<string, unknown>)?.['includeTypes'] as boolean ?? false;
   const previews: Array<{ file: string; entities: string[] }> = [];
 
@@ -204,8 +186,8 @@ async function runAutoDocPreview(input: AutoDocPreviewInput, api: Parameters<Plu
       const content = readFileSync(file, 'utf-8');
       const entities = parseSource(content);
       const generated = entities
-        .filter((e) => !needsDocComment(content, e))
-        .map((e) => style === 'jsdoc' ? generateJSDoc(e, includeTypes) : generateTSDoc(e, includeTypes));
+        .filter((e) => needsDocComment(content, e))
+        .map((e) => generateDocComment(e, includeTypes));
       previews.push({ file, entities: generated });
     } catch {
       api.log.warn(`auto-doc-preview: could not read file ${file}`);
