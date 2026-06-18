@@ -74,7 +74,7 @@ function expandLoops(
   );
 }
 
-function renderTemplate(template: string, variables: Record<string, string>): string {
+function renderTemplate(template: string, variables: Record<string, string>, escapeHtml = true): string {
   let result = template;
 
   // Process conditionals first
@@ -86,9 +86,8 @@ function renderTemplate(template: string, variables: Record<string, string>): st
   // Process simple variable substitution
   result = expandTemplate(result, variables);
 
-  // Auto-escape HTML if configured
-  const shouldEscape = true; // safe default
-  if (shouldEscape) {
+  // Auto-escape HTML when enabled (controlled by config or caller)
+  if (escapeHtml) {
     result = result
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
@@ -135,6 +134,7 @@ const plugin: Plugin = {
 
   setup(api) {
     const templates = new Map<string, StoredTemplate>();
+    const autoEscapeHtml = (api.config.extensions?.['template-engine'] as Record<string, unknown>)?.['autoEscapeHtml'] as boolean ?? true;
 
     // --- template_expand ---
     api.tools.register({
@@ -172,7 +172,7 @@ const plugin: Plugin = {
         let result: string;
         /* v8 ignore start -- the render pipeline (regex replaces) does not throw; this guard is defensive. */
         try {
-          result = raw ? renderTemplateRaw(template, variables) : renderTemplate(template, variables);
+          result = raw ? renderTemplateRaw(template, variables) : renderTemplate(template, variables, autoEscapeHtml);
         } catch (err: unknown) {
           return { ok: false, error: String(err) };
         }
@@ -248,7 +248,7 @@ const plugin: Plugin = {
         let result: string;
         /* v8 ignore start -- the render pipeline (regex replaces) does not throw; this guard is defensive. */
         try {
-          result = raw ? renderTemplateRaw(content, variables) : renderTemplate(content, variables);
+          result = raw ? renderTemplateRaw(content, variables) : renderTemplate(content, variables, autoEscapeHtml);
         } catch (err: unknown) {
           return { ok: false, error: `Template rendering failed: ${err}` };
         }

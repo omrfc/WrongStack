@@ -131,7 +131,7 @@ function injectDocComment(content: string, entity: ParsedEntity, doc: string): s
   const codeLine = lines[idx] ?? '';
   /* v8 ignore next -- /^(\s*)/ always matches; the ?.[1] ?? '' fallback is defensive. */
   const indent = codeLine.match(/^(\s*)/)?.[1] ?? '';
-  lines.splice(idx, 0, `${indent}${doc} ${codeLine.trim()}`);
+  lines.splice(idx, 0, `${indent}${doc}`);
   return lines.join('\n');
 }
 
