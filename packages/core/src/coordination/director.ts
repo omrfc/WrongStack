@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
+import type { Logger } from '../types/logger.js';
 import type { BrainArbiter } from './brain.js';
 import { DirectorStateCheckpoint, type DirectorStateSnapshot } from '../storage/director-state.js';
 import type { BridgeMessage } from '../types/agent-bridge.js';
@@ -80,6 +81,8 @@ export interface DirectorOptions {
   runner?: SubagentRunner | undefined;
   /** Optional Brain arbiter above the director for policy/decision escalation. */
   brain?: BrainArbiter | undefined;
+  /** Optional logger for structured debug/error logging. Falls back to console if omitted. */
+  logger?: Logger | undefined;
   /**
    * When set, the director writes a `fleet.json` manifest to this path
    * recording every spawned subagent (id, provider, model, role, task
@@ -421,6 +424,8 @@ export class Director implements ICoordinator {
   private readonly sessionsRoot?: string | undefined;
   /** Director run id for JSONL path resolution. */
   private readonly directorRunId: string;
+  /** Optional logger for structured logging. Falls back to noop when omitted. */
+  private readonly logger: Logger | undefined;
   /** Resolves task descriptions back from `assign()` so completion events
    *  can also carry a human-readable title. */
   private readonly taskDescriptions = new Map<string, string>();
@@ -519,6 +524,7 @@ export class Director implements ICoordinator {
         )
       : null;
     this.fleetManager = opts.fleetManager;
+    this.logger = opts.logger;
     if (this.sharedScratchpadPath) {
       // Create the directory eagerly so subagents that try to write
       // there on first iteration don't trip on ENOENT. Fire-and-forget,
@@ -933,7 +939,10 @@ export class Director implements ICoordinator {
     // is silently lost.
     for (const [_role, subagentId] of entry.session.getSubagentIds()) {
       this.coordinator.stop(subagentId).catch((err) => {
-        console.debug(`[director] stop subagent ${subagentId} failed (may have already completed): ${err}`);
+        this.logger?.debug(`stop subagent ${subagentId} failed (may have already completed)`, {
+          subagentId,
+          err: err instanceof Error ? err.message : String(err),
+        });
       });
     }
   }

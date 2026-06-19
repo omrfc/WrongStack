@@ -32,6 +32,13 @@ export interface SlashCommand {
    */
   help?: string | undefined;
   /**
+   * When true, this command does not appear in the slash-picker list
+   * triggered by typing `/` alone. It is still dispatchable and
+   * searchable when the user types a matching prefix (e.g. `/f`).
+   * Defaults to false.
+   */
+  hidden?: boolean | undefined;
+  /**
    * Execute the command.
    * @param args Everything after the command name (trimmed by dispatch).
    * @param ctx The current agent context.

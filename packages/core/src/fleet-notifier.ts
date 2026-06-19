@@ -136,11 +136,8 @@ export class FleetNotifier {
 }
 
 async function defaultPost(url: string): Promise<void> {
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), POST_TIMEOUT_MS);
-  try {
-    await fetch(url, { method: 'POST', signal: ac.signal });
-  } finally {
-    clearTimeout(t);
-  }
+  await fetch(url, {
+    method: 'POST',
+    signal: AbortSignal.timeout(POST_TIMEOUT_MS),
+  });
 }

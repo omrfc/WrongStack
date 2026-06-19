@@ -170,6 +170,18 @@ export { noOpVault, encryptedPrefixForVersion, parseEncryptedVersion } from './t
 export type { Compactor, CompactReport } from './types/compactor.js';
 export { DefaultSecretScrubber } from './security/secret-scrubber.js';
 export type { SecretScrubber } from './types/secret-scrubber.js';
+// Well-known tool capabilities + subagent capability helpers. Public so
+// first-party consumers (CLI fleet host, plugins) can reason about and widen
+// subagent capability allowlists instead of hardcoding capability strings.
+export {
+  ToolCapabilities,
+  type ToolCapability,
+  DANGEROUS_FOR_SUBAGENTS,
+  WIDE_SUBAGENT_CAPABILITIES,
+  hasCapability,
+  hasDangerousCapabilityForSubagents,
+  getDangerousCapabilities,
+} from './security/capabilities.js';
 export {
   HybridCompactor,
   IntelligentCompactor,
@@ -412,6 +424,12 @@ export {
   type FileAuthorLog,
   type FileAuthorTrackerOptions,
 } from './coordination/file-author-tracker.js';
+export {
+  assessCommitSafety,
+  type CommitSafetyOptions,
+  type CommitSafetyReport,
+  type ForeignFile,
+} from './coordination/commit-safety.js';
 export {
   recordPackageAction,
   getPackageAuthor,

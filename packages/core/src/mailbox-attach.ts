@@ -77,9 +77,10 @@ function attachMailboxCheckerInner(
         })
         .catch((err: unknown) => {
           // Log but don't fail - registration errors shouldn't crash the agent
-          console.debug(
-            `[mailbox] Failed to register agent ${derived}: ${toErrorMessage(err)}`,
-          );
+          a.logger.debug(`Failed to register agent ${derived}`, {
+            agentId: derived,
+            err: toErrorMessage(err),
+          });
         });
     }
     return derived;

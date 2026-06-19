@@ -111,7 +111,9 @@ describe('/commit worktree warning', () => {
     execFileSync('git', ['worktree', 'add', '-q', '-b', 'feature', wt], { cwd: tmp, stdio: 'ignore' });
     await fs.writeFile(path.join(tmp, 'a.ts'), 'v2'); // an uncommitted change to commit
     const res = await buildCommitCommand().run!('--no-llm', ctxFor());
-    expect(stripAnsi(res!.message)).toContain('worktrees active');
+    const msg = stripAnsi(res!.message);
+    expect(msg).toContain('Shared-worktree warning');
+    expect(msg).toContain('Other active worktrees: feature');
   });
 });
 

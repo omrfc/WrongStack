@@ -36,6 +36,17 @@ export interface SubagentConfig {
    * fully enforce (e.g., preventing delegation by removing the delegate tool).
    */
   disabledTools?: string[] | undefined;
+  /**
+   * Capability allowlist for this subagent's `AutoApprovePermissionPolicy`.
+   * Subagents run non-interactively, so the policy auto-approves only tools
+   * whose declared capabilities intersect this list; everything else is
+   * denied by the subagent guard. Defaults (when omitted) to the read-only
+   * safe set `['fs.read', 'net.outbound']`. Widen it per-spawn when a task
+   * legitimately needs more — e.g. `/techstack` adds `'fs.write'` so the
+   * subagent can write its report. Never grant `shell.*` unless the task
+   * truly requires arbitrary command execution.
+   */
+  allowedCapabilities?: readonly string[] | undefined;
   model?: string | undefined;
   priority?: number | undefined;
 

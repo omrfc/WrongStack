@@ -151,6 +151,23 @@ describe('DefaultSystemPromptBuilder — full configuration', () => {
   });
 });
 
+describe('DefaultSystemPromptBuilder — commit hygiene', () => {
+  it('renders shared-worktree commit guidance when the git tool is present', async () => {
+    const b = new DefaultSystemPromptBuilder({ todayIso: '2026-06-15' });
+    const blocks = await b.build({ cwd: tmp, projectRoot: tmp, tools: [mkTool('git')] } as never);
+    const all = blocks.map((bl) => bl.text).join('\n');
+    expect(all).toContain('Commit hygiene (shared working tree)');
+    expect(all).toContain('Never blind-stage the whole tree');
+    expect(all).toContain('Scope to what you changed');
+  });
+
+  it('omits commit guidance when no git tool is available', async () => {
+    const b = new DefaultSystemPromptBuilder({ todayIso: '2026-06-15' });
+    const blocks = await b.build({ cwd: tmp, projectRoot: tmp, tools: [mkTool('grep')] } as never);
+    expect(blocks.map((bl) => bl.text).join('\n')).not.toContain('Commit hygiene');
+  });
+});
+
 describe('DefaultSystemPromptBuilder — edge cases', () => {
   it('omits the active plan for subagents', async () => {
     const planPath = path.join(tmp, 'plan.json');

@@ -146,10 +146,16 @@ export class ChangeManager {
       satisfiesGoals: input.satisfiesGoals,
     } as Omit<ChangeNode, 'id'>) as ChangeNode;
 
-    // Run quality gate asynchronously
-    void this._runQualityGate(node.id, input.files).then((gate) => {
-      void this.graph.update(node.id, { qualityGate: gate });
-    });
+    // Run quality gate asynchronously. Chain the persistence into the same
+    // promise and guard it with a single .catch: this is best-effort
+    // background work and must never surface as an unhandled rejection (the
+    // graph dir may have been torn down, or a concurrent writer may hold a
+    // lock) — that would crash the process / poison an unrelated test.
+    void this._runQualityGate(node.id, input.files)
+      .then((gate) => this.graph.update(node.id, { qualityGate: gate }))
+      .catch(() => {
+        /* background quality-gate persistence is best-effort */
+      });
 
     this._emit('change:proposed', { changeId: node.id, title: node.title });
     return node;

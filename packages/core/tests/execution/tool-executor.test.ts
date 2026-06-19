@@ -147,6 +147,40 @@ describe('ToolExecutor', () => {
       const { result } = await runWith({});
       expect(result.type).toBe('tool_confirm_pending');
     });
+
+    it('waives the net for an authoritative auto (source "yolo") — subagent allowlist path', async () => {
+      // A subagent's AutoApprovePermissionPolicy returns { permission:'auto',
+      // source:'yolo' } only after enforcing its capability allowlist (every
+      // dangerous cap explicitly granted). The executor must trust that and
+      // skip the downgrade — otherwise a granted write becomes a confirm no
+      // non-interactive subagent can answer. No yolo getters here on purpose.
+      const tool = bashish();
+      const executor = makeExecutor([tool], {
+        permissionPolicy: {
+          evaluate: vi.fn().mockResolvedValue({ permission: 'auto', source: 'yolo' }),
+        } as never,
+        confirmAwaiter: undefined,
+      });
+      const r = await executor.executeBatch([makeUse('bash')], makeCtx(), 'sequential');
+      const result = r.outputs[0]!.result;
+      expect(result.type).toBe('tool_result');
+      expect((result as ToolResultBlock).content).toContain('ran');
+      expect(tool.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT waive the net for a trust-file auto (source "trust")', async () => {
+      // A single trusted pattern must not silently widen into arbitrary
+      // dangerous-capability execution — only authoritative yolo/allowlist autos do.
+      const tool = bashish();
+      const executor = makeExecutor([tool], {
+        permissionPolicy: {
+          evaluate: vi.fn().mockResolvedValue({ permission: 'auto', source: 'trust' }),
+        } as never,
+        confirmAwaiter: undefined,
+      });
+      const r = await executor.executeBatch([makeUse('bash')], makeCtx(), 'sequential');
+      expect(r.outputs[0]!.result.type).toBe('tool_confirm_pending');
+    });
   });
 
   describe('executeBatch — malformed arguments', () => {

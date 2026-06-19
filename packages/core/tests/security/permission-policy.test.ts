@@ -462,7 +462,9 @@ describe('AutoApprovePermissionPolicy', () => {
       tool('my-custom-shell', 'confirm', undefined, true, ['shell.arbitrary'])
     );
     expect(d.permission).toBe('deny');
-    expect(d.reason).toContain('lacks allowed capability');
+    // shell.arbitrary is a dangerous capability not in the allowlist, so the
+    // more specific dangerous-capability reason takes precedence.
+    expect(d.reason).toContain('un-granted dangerous capability');
   });
 
   it('denies tools with fs.write.outside-project capability', async () => {
@@ -508,6 +510,51 @@ describe('AutoApprovePermissionPolicy', () => {
     expect(d.permission).toBe('deny');
     expect(d.source).toBe('subagent_guard');
     expect(d.reason).toContain('lacks allowed capability');
+  });
+
+  it('denies a multi-capability tool when a dangerous cap is not granted', async () => {
+    // `install` bundles package.install + shell.restricted. Granting only
+    // package.install must NOT let shell.restricted ride along: every
+    // dangerous capability has to be explicitly in the allowlist.
+    const p = new AutoApprovePermissionPolicy(['package.install']);
+    const d = await p.evaluate(
+      tool('install', 'confirm', undefined, true, ['package.install', 'shell.restricted']),
+    );
+    expect(d.permission).toBe('deny');
+    expect(d.source).toBe('subagent_guard');
+    expect(d.reason).toContain('un-granted dangerous capability');
+    expect(d.reason).toContain('shell.restricted');
+  });
+
+  it('allows a multi-capability tool when every dangerous cap is granted', async () => {
+    const p = new AutoApprovePermissionPolicy(['package.install', 'shell.restricted']);
+    const d = await p.evaluate(
+      tool('install', 'confirm', undefined, true, ['package.install', 'shell.restricted']),
+    );
+    expect(d.permission).toBe('auto');
+    expect(d.source).toBe('yolo');
+  });
+
+  it('denies a benign+dangerous combo (fs.read + fs.write) under the read-only default', async () => {
+    // A tool that can read AND write must not slip through on the strength of
+    // its fs.read capability alone — fs.write is dangerous and ungranted.
+    const p = new AutoApprovePermissionPolicy();
+    const d = await p.evaluate(
+      tool('read_write', 'confirm', undefined, true, ['fs.read', 'fs.write']),
+    );
+    expect(d.permission).toBe('deny');
+    expect(d.reason).toContain('un-granted dangerous capability');
+  });
+
+  it('allows fs.write when the leader widens the allowlist (e.g. /techstack report)', async () => {
+    const p = new AutoApprovePermissionPolicy(['fs.read', 'net.outbound', 'fs.write']);
+    const write = await p.evaluate(tool('write', 'confirm', undefined, true, ['fs.write']));
+    expect(write.permission).toBe('auto');
+    const fetch = await p.evaluate(tool('fetch', 'confirm', undefined, false, ['net.outbound']));
+    expect(fetch.permission).toBe('auto');
+    // Shell still denied — widening fs.write does not grant arbitrary command exec.
+    const bash = await p.evaluate(tool('bash', 'auto', undefined, true, ['shell.arbitrary']));
+    expect(bash.permission).toBe('deny');
   });
 
   it('MCP tools are still denied regardless of capabilities', async () => {

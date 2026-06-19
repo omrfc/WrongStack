@@ -8,6 +8,7 @@ import {
   buildGitcheckCommand,
   buildPushCommand,
 } from '../../src/plugins/git-plugin.js';
+import { projectSlug } from '../../src/index.js';
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences are valid here
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, '');
@@ -166,6 +167,76 @@ describe('buildCommitCommand', () => {
     const cmd = buildCommitCommand();
     const res = await cmd.run('', ctxFor(tmp));
     expect(stripAnsi(res!.message!)).not.toContain('/push');
+  }, 30_000);
+});
+
+// ── /commit shared-worktree warning ──────────────────────────────────────────
+
+describe('buildCommitCommand — shared-worktree safety', () => {
+  let home: string;
+  let prevHome: string | undefined;
+
+  beforeEach(async () => {
+    home = await fs.mkdtemp(path.join(os.tmpdir(), 'commit-home-'));
+    prevHome = process.env['WRONGSTACK_HOME'];
+    process.env['WRONGSTACK_HOME'] = home;
+  });
+
+  afterEach(async () => {
+    if (prevHome === undefined) delete process.env['WRONGSTACK_HOME'];
+    else process.env['WRONGSTACK_HOME'] = prevHome;
+    await rmWithRetry(home);
+  });
+
+  async function seedTracker(entries: Record<string, unknown>[]): Promise<void> {
+    const dir = path.join(home, 'projects', projectSlug(tmp));
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, 'file-authors.json'),
+      JSON.stringify({ projectRoot: tmp, entries }, null, 2),
+    );
+  }
+
+  it('warns when a dirty file was authored by another session', async () => {
+    initGitRepo();
+    await fs.writeFile(path.join(tmp, 'foreign.ts'), 'not mine');
+    await seedTracker([
+      {
+        filePath: 'foreign.ts',
+        action: 'edit',
+        agentId: 'leader',
+        agentName: 'OtherAgent',
+        sessionId: 'other-session',
+        timestamp: new Date(0).toISOString(),
+      },
+    ]);
+
+    const cmd = buildCommitCommand();
+    // ctxFor sets session.id 's1' — different from 'other-session' → foreign.
+    const res = await cmd.run('--dry-run', { session: { id: 's1' }, cwd: tmp, projectRoot: tmp } as never);
+    const clean = stripAnsi(res!.message!);
+    expect(clean).toContain('Shared-worktree warning');
+    expect(clean).toContain('foreign.ts');
+    expect(clean).toContain('OtherAgent');
+  }, 30_000);
+
+  it('does not warn when the only dirty file is authored by this session', async () => {
+    initGitRepo();
+    await fs.writeFile(path.join(tmp, 'mine.ts'), 'my work');
+    await seedTracker([
+      {
+        filePath: 'mine.ts',
+        action: 'edit',
+        agentId: 'leader',
+        sessionId: 's1',
+        timestamp: new Date(0).toISOString(),
+      },
+    ]);
+
+    const cmd = buildCommitCommand();
+    const res = await cmd.run('--dry-run', { session: { id: 's1' }, cwd: tmp, projectRoot: tmp } as never);
+    const clean = stripAnsi(res!.message!);
+    expect(clean).not.toContain('Shared-worktree warning');
   }, 30_000);
 });
 
