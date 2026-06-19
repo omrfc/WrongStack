@@ -500,8 +500,9 @@ describe('MCPRegistry', () => {
       const onToolsChanged = (reg as unknown as { onToolsChanged: (name: string, tools: { name: string }[]) => void }).onToolsChanged;
       onToolsChanged('warn-tool', [{ name: 'failing-tool' } as never]);
       expect(regCall).toBe(1);
-      // Line 317 logs: `MCP tool "${tool.name}" not re-registered after list_changed`
-      expect(warnCalls.some((c) => c.msg.includes('not re-registered'))).toBe(true);
+      // onToolsChanged now re-applies via the shared applyTools helper, which
+      // logs `MCP tool "${tool.name}" not registered` on a failed register.
+      expect(warnCalls.some((c) => c.msg.includes('not registered'))).toBe(true);
     });
   });
 });
