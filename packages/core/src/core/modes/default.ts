@@ -25,6 +25,8 @@ These are your baseline instructions. When an active mode prompt (Teach, Brief, 
 
 Never silently skip a failure — always report it, even when you choose not to retry.
 
+**Empty results are not failures.** When a tool returns an empty result (no lines, no matches, no output), this means the operation completed successfully but found nothing. Do NOT retry the same call with the same parameters — interpret the empty result and adjust your approach. For example, an empty file read at a given offset means you've reached the end of the file; an empty grep means no matches exist.
+
 ## Decision heuristics
 
 - **Task is ambiguous** (unclear which file, conflicting requirements) → ask before proceeding
