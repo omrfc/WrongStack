@@ -346,6 +346,12 @@ export function SettingsPanel() {
                   selector={null}
                   configKey="soundOnComplete"
                 />
+                <PreferenceToggle
+                  label="Title animation"
+                  hint="Show animated terminal title in the CLI."
+                  value={localPrefs.titleAnimation}
+                  onChange={() => syncPref('titleAnimation', !localPrefs.titleAnimation)}
+                />
               </div>
             </TabsContent>
 
@@ -474,6 +480,15 @@ export function SettingsPanel() {
                   value={localPrefs.streamFleet}
                   onChange={() => syncPref('streamFleet', !localPrefs.streamFleet)}
                 />
+                <PreferenceSlider
+                  label="Max concurrent subagents"
+                  hint="Maximum number of subagents that can run simultaneously."
+                  value={localPrefs.maxConcurrent}
+                  min={1}
+                  max={50}
+                  step={1}
+                  onChange={(v) => syncPref('maxConcurrent', v)}
+                />
                 <PreferenceToggle
                   label="Next-step prediction"
                   hint="After a turn completes, predict likely next steps."
@@ -592,6 +607,31 @@ export function SettingsPanel() {
                     { value: 'selective' as const, label: 'Selective — LLM-driven selection' },
                   ]}
                   onChange={(v) => syncPref('contextStrategy', v)}
+                />
+                <PreferenceSelect
+                  label="Context mode"
+                  hint="Context window policy — balanced is the default."
+                  value={localPrefs.contextMode}
+                  options={[
+                    { value: 'balanced' as const, label: 'Balanced — normal context usage' },
+                    { value: 'frugal' as const, label: 'Frugal — conservative token use' },
+                    { value: 'deep' as const, label: 'Deep — larger context for complex tasks' },
+                    { value: 'archival' as const, label: 'Archival — maximize context retention' },
+                  ]}
+                  onChange={(v) => syncPref('contextMode', v)}
+                />
+                <PreferenceSelect
+                  label="Token-saving mode"
+                  hint="How aggressively to reduce token usage."
+                  value={localPrefs.tokenSavingTier}
+                  options={[
+                    { value: 'off' as const, label: 'Off — no token saving' },
+                    { value: 'minimal' as const, label: 'Minimal — basic optimization' },
+                    { value: 'light' as const, label: 'Light — moderate reduction' },
+                    { value: 'medium' as const, label: 'Medium — significant savings' },
+                    { value: 'aggressive' as const, label: 'Aggressive — maximum compression' },
+                  ]}
+                  onChange={(v) => syncPref('tokenSavingTier', v)}
                 />
                 <PreferenceSelect
                   label="Log level"

@@ -39,6 +39,14 @@ export interface LocalPrefs {
   contextAutoCompact: boolean;
   /** Compactor strategy — matches core's config.context.strategy. */
   contextStrategy: 'hybrid' | 'intelligent' | 'selective';
+  /** Context window mode — matches core's config.context.mode. */
+  contextMode: 'balanced' | 'frugal' | 'deep' | 'archival';
+  /** Token-saving mode — matches core's config.features.tokenSavingMode. */
+  tokenSavingTier: 'off' | 'minimal' | 'light' | 'medium' | 'aggressive';
+  /** Max concurrent subagents */
+  maxConcurrent: number;
+  /** Terminal title animation */
+  titleAnimation: boolean;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   /** Session audit detail — matches core's config.session.auditLevel. */
   auditLevel: 'minimal' | 'standard' | 'full';
@@ -78,6 +86,10 @@ const DEFAULTS: Omit<LocalPrefs, 'set' | 'reset'> = {
   indexOnStart: true,
   contextAutoCompact: true,
   contextStrategy: 'hybrid',
+  contextMode: 'balanced',
+  tokenSavingTier: 'off',
+  maxConcurrent: 10,
+  titleAnimation: true,
   logLevel: 'info',
   auditLevel: 'standard',
   enhanceEnabled: true,

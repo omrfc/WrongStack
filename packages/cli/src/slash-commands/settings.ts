@@ -69,14 +69,13 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
     const cb = opts.configStore.get().circuitBreaker;
     const breakerEnabled = cb?.enabled === true;
     const breakerTimeout = cb?.autoKillResetMs ?? 60_000;
-    const context = opts.configStore.get().context as Record<string, unknown> | undefined;
+    const context = opts.configStore.get().context as unknown as Record<string, unknown> | undefined;
     const contextMode = (context?.mode as string) ?? 'balanced';
     const contextStrategy = (context?.strategy as string) ?? 'hybrid';
     const contextAutoCompact = context?.autoCompact !== false; // default true
-    const features = opts.configStore.get().features as Record<string, unknown> | undefined;
+    const features = opts.configStore.get().features as unknown as Record<string, unknown> | undefined;
     const tokenSavingTier = (features?.tokenSavingMode as string) ?? 'off';
     const maxConcurrent = opts.configStore.get().maxConcurrent ?? 0;
-    const titleAnimation = opts.configStore.get().titleAnimation !== false; // default true
     return [
       `${color.bold('WrongStack')} ${color.dim('— Settings')}`,
       '',
@@ -96,7 +95,6 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
       `  context auto-compact: ${contextAutoCompact ? color.cyan('on') : color.dim('off')}   ${color.dim('change: /settings context-auto-compact on|off')}`,
       `  token-saving:       ${color.cyan(tokenSavingTier)}   ${color.dim('change: /settings token-saving off|minimal|light|medium|aggressive')}`,
       `  max-concurrent:     ${color.cyan(maxConcurrent === 0 ? 'unlimited' : String(maxConcurrent))}   ${color.dim('change: /settings max-concurrent <n>')}`,
-      `  title animation:    ${titleAnimation ? color.cyan('on') : color.dim('off')}   ${color.dim('change: /settings title-animation on|off')}`,
       '',
       color.dim('  Persisted to ~/.wrongstack/config.json · /settings help for more'),
     ].join('\n');
