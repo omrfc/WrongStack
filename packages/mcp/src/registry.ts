@@ -1,7 +1,8 @@
 import { expectDefined } from '@wrongstack/core';
 import type { EventBus, Logger, MCPServerConfig, Tool, ToolRegistry } from '@wrongstack/core';
 import { MCP_CONSTANTS } from './constants.js';
-import { type ConnectionState, MCPClient } from './client.js';
+import { type ConnectionState, MCPClient, type MCPTool } from './client.js';
+import { manifestConfigHash, readManifest, writeManifest } from './manifest-cache.js';
 import { wrapMCPTool } from './wrap-tool.js';
 interface ServerSlot {
   cfg: MCPServerConfig;
@@ -30,12 +31,36 @@ interface ServerSlot {
    * cycles after a few transport flaps.
    */
   onDisconnect?: (() => void) | undefined;
+  /**
+   * Lazy-connect: the server process is not spawned at boot. Tools are
+   * registered from a cached manifest and the process only spawns on the first
+   * tool call (via {@link MCPRegistry.ensureConnected}), then auto-sleeps.
+   */
+  lazy: boolean;
+  /** Epoch ms of the last tool call — drives idle auto-sleep. */
+  lastUsed: number;
+  /** Single-flight guard so concurrent first-calls trigger only one connect. */
+  connecting?: Promise<MCPClient> | undefined;
+  /** Whether this lazy server's resolver wrappers are registered (register once). */
+  registeredLazy: boolean;
 }
 
 export interface MCPRegistryOptions {
   toolRegistry: ToolRegistry;
   events: EventBus;
   log: Logger;
+  /**
+   * Directory for the on-disk tool-manifest cache (lazy-connect). Without it,
+   * `lazy` servers cannot register tools cold and fall back to eager connect.
+   * Typically `wpaths.cacheDir` (`~/.wrongstack/cache`).
+   */
+  cacheDir?: string | undefined;
+  /**
+   * Idle window (ms) after which a connected lazy server is auto-stopped and
+   * re-woken on the next tool call. 0 disables idle auto-sleep.
+   * Default: {@link MCP_CONSTANTS.IDLE.DEFAULT_TIMEOUT_MS}.
+   */
+  idleTimeoutMs?: number | undefined;
   /**
    * Lazy mode: when true, MCP server tools are NOT registered into the
    * tool registry on connect. They are cached internally and can be
@@ -54,16 +79,24 @@ export class MCPRegistry {
   private readonly events: EventBus;
   private readonly log: Logger;
   private readonly lazyMode: boolean;
+  private readonly cacheDir?: string | undefined;
+  private readonly idleTimeoutMs: number;
+  /** Single shared idle sweep timer (started lazily; unref'd; cleared on stopAll). */
+  private idleTimer?: ReturnType<typeof setInterval> | undefined;
 
   constructor(opts: MCPRegistryOptions) {
     this.toolRegistry = opts.toolRegistry;
     this.events = opts.events;
     this.log = opts.log;
     this.lazyMode = opts.lazyMode ?? false;
+    this.cacheDir = opts.cacheDir;
+    this.idleTimeoutMs = opts.idleTimeoutMs ?? MCP_CONSTANTS.IDLE.DEFAULT_TIMEOUT_MS;
   }
 
   async start(cfg: MCPServerConfig): Promise<void> {
     if (cfg.enabled === false) return;
+    // Lazy-connect requires a manifest cache dir to register tools cold.
+    const lazy = !!cfg.lazy && !!this.cacheDir;
     const slot: ServerSlot = {
       cfg,
       state: 'idle',
@@ -72,9 +105,73 @@ export class MCPRegistry {
       attempts: 0,
       reconnectPending: false,
       reconnectCycles: 0,
+      lazy,
+      lastUsed: Date.now(),
+      registeredLazy: false,
     };
     this.servers.set(cfg.name, slot);
+    if (lazy) {
+      await this.startLazy(slot);
+    } else {
+      await this.attemptConnect(slot);
+    }
+  }
+
+  /**
+   * Boot a lazy server WITHOUT spawning it. If a tool manifest is cached (from a
+   * prior connect with matching config), register resolver-backed wrappers and
+   * go `dormant` — the process spawns on the first tool call. If there is no
+   * cache yet, do a one-time cold discovery connect to learn + cache the tools.
+   */
+  private async startLazy(slot: ServerSlot): Promise<void> {
+    const cacheDir = this.cacheDir;
+    if (!cacheDir) {
+      await this.attemptConnect(slot);
+      return;
+    }
+    const hash = manifestConfigHash(slot.cfg);
+    const cached = await readManifest(cacheDir, slot.cfg.name, hash);
+    if (cached && cached.length > 0) {
+      this.applyTools(slot, cached);
+      slot.state = 'dormant';
+      this.ensureIdleSweep();
+      this.log.info(
+        `MCP server "${slot.cfg.name}" registered lazily from cache (${cached.length} tools, dormant)`,
+      );
+      return;
+    }
+    // No cache — must connect once to discover the tool list, then it stays
+    // connected and becomes eligible for idle auto-sleep.
     await this.attemptConnect(slot);
+  }
+
+  /**
+   * Ensure a lazy server is connected, spawning it on demand. Single-flight:
+   * concurrent first-calls share one connect. Resolver wrappers call this.
+   */
+  async ensureConnected(name: string): Promise<MCPClient> {
+    const slot = this.servers.get(name);
+    if (!slot) throw new Error(`MCP server "${name}" not registered`);
+    slot.lastUsed = Date.now();
+    if (slot.client && slot.state === 'connected') return slot.client;
+    if (slot.connecting) return slot.connecting;
+    slot.connecting = (async () => {
+      try {
+        // start fresh budget — a deliberate wake is not a crash-reconnect.
+        slot.attempts = 0;
+        slot.reconnectCycles = 0;
+        await this.attemptConnect(slot);
+        if (!slot.client) {
+          throw new Error(`MCP server "${name}" failed to connect on demand`);
+        }
+        slot.lastUsed = Date.now();
+        this.ensureIdleSweep();
+        return slot.client;
+      } finally {
+        slot.connecting = undefined;
+      }
+    })();
+    return slot.connecting;
   }
 
   /**
@@ -84,7 +181,10 @@ export class MCPRegistry {
    */
   activateServer(name: string): void {
     const slot = this.servers.get(name);
-    if (!slot || !slot.client) return;
+    if (!slot) return;
+    // A dormant lazy server has no client yet — its resolver wrappers connect on
+    // demand, so it can still be activated (registered) without a live process.
+    if (!slot.client && !slot.lazy) return;
     if (slot.toolNames.length > 0) return; // already active
     const cached = slot.lazyTools;
     if (cached.length === 0) return;
@@ -143,9 +243,12 @@ export class MCPRegistry {
       slot.client = undefined;
     }
     slot.onDisconnect = undefined;
+    slot.connecting = undefined;
     for (const t of slot.toolNames) this.toolRegistry.unregister(t);
     slot.toolNames = [];
     slot.lazyTools = [];
+    // Full teardown — a future start()/restart() re-registers lazy wrappers.
+    slot.registeredLazy = false;
     slot.state = 'disconnected';
     this.events.emit('mcp.server.disconnected', { name, reason: 'stop' });
   }
@@ -159,12 +262,106 @@ export class MCPRegistry {
     await this.attemptConnect(slot);
   }
 
-  list(): { name: string; state: ConnectionState; toolCount: number }[] {
-    return Array.from(this.servers.values()).map((s) => ({
-      name: s.cfg.name,
-      state: s.state,
-      toolCount: Math.max(s.toolNames.length, s.lazyTools.length),
-    }));
+  list(): { name: string; state: ConnectionState; toolCount: number; tools: string[] }[] {
+    return Array.from(this.servers.values()).map((s) => {
+      const tools = this.toolNamesForSlot(s);
+      return {
+        name: s.cfg.name,
+        state: s.state,
+        toolCount: tools.length,
+        tools,
+      };
+    });
+  }
+
+  /**
+   * Resolve the live tool names for a slot — the registered names in normal
+   * mode, or the cached lazy-tool names when running in lazy mode (where
+   * tools are connected but intentionally not registered).
+   */
+  private toolNamesForSlot(s: ServerSlot): string[] {
+    return s.toolNames.length > 0 ? s.toolNames.slice() : (s.lazyTools ?? []).map((t) => t.name);
+  }
+
+  /**
+   * Wrap + register (or cache) a server's tools. Lazy servers get resolver-backed
+   * wrappers that spawn the process on first use; eager servers bind the live
+   * client directly. Honours token-saving `lazyMode` (cache, don't register) and
+   * a register-once guard for lazy resolver wrappers (so a wake/reconnect reuses
+   * the existing registrations rather than churning the tool list).
+   */
+  private applyTools(slot: ServerSlot, tools: MCPTool[], client?: MCPClient | undefined): void {
+    // Resolver wrappers survive sleep/wake — only register them once.
+    if (slot.lazy && slot.registeredLazy && !this.lazyMode) return;
+    const allowed = slot.cfg.allowedTools;
+    const filtered = tools.filter((t) => !allowed || allowed.includes(t.name));
+    const clientArg = slot.lazy
+      ? () => this.ensureConnected(slot.cfg.name)
+      : expectDefined(client);
+    const wrapped = filtered.map((t) =>
+      wrapMCPTool(slot.cfg.name, t, clientArg, slot.cfg.permission ?? 'confirm'),
+    );
+    if (this.lazyMode) {
+      // Token-saving mode: cache without registering (mcp_use activates on demand).
+      slot.lazyTools = wrapped;
+      return;
+    }
+    for (const tool of wrapped) {
+      try {
+        this.toolRegistry.register(tool, `mcp:${slot.cfg.name}`);
+        slot.toolNames.push(tool.name);
+      } catch (err) {
+        this.log.warn(`MCP tool "${tool.name}" not registered`, err);
+      }
+    }
+    if (slot.lazy) slot.registeredLazy = true;
+  }
+
+  /** Start the shared idle sweep timer once (unref'd so it never holds the process). */
+  private ensureIdleSweep(): void {
+    if (this.idleTimer || this.idleTimeoutMs <= 0) return;
+    this.idleTimer = setInterval(() => {
+      void this.sweepIdle();
+    }, MCP_CONSTANTS.IDLE.SWEEP_INTERVAL_MS);
+    // Node-only: don't keep the event loop alive just for the sweep.
+    this.idleTimer.unref?.();
+  }
+
+  /** Auto-sleep connected lazy servers that have been idle past the timeout. */
+  private async sweepIdle(): Promise<void> {
+    if (this.idleTimeoutMs <= 0) return;
+    const now = Date.now();
+    for (const slot of this.servers.values()) {
+      if (
+        slot.lazy &&
+        slot.state === 'connected' &&
+        slot.client &&
+        now - slot.lastUsed > this.idleTimeoutMs
+      ) {
+        await this.sleepIdle(slot);
+      }
+    }
+  }
+
+  /**
+   * Soft stop: close the server process but KEEP its resolver wrappers and
+   * cached manifest registered, so the next tool call transparently re-wakes it.
+   * Distinct from {@link stop} (full teardown for disable/remove).
+   */
+  private async sleepIdle(slot: ServerSlot): Promise<void> {
+    slot.reconnectPending = false;
+    if (slot.client) {
+      // Remove the exit listener BEFORE close so the teardown isn't seen as a crash.
+      slot.client.removeExitListener(this.onChildExit);
+      if (slot.onDisconnect) slot.client.removeDisconnectListener(slot.onDisconnect);
+      slot.client.removeToolsChangedListener(this.onToolsChanged);
+      await slot.client.close();
+      slot.client = undefined;
+    }
+    slot.onDisconnect = undefined;
+    slot.state = 'dormant';
+    this.log.info(`MCP server "${slot.cfg.name}" idle — sleeping (tools stay registered)`);
+    this.events.emit('mcp.server.disconnected', { name: slot.cfg.name, reason: 'idle-sleep' });
   }
 
   /**
@@ -173,16 +370,30 @@ export class MCPRegistry {
    * Useful for the `mcp_control` tool to show all known servers without
    * triggering connections.
    */
-  describe(): { name: string; state: ConnectionState; toolCount: number; enabled: boolean }[] {
-    return Array.from(this.servers.values()).map((s) => ({
-      name: s.cfg.name,
-      state: s.state,
-      toolCount: Math.max(s.toolNames.length, s.lazyTools.length),
-      enabled: s.cfg.enabled !== false,
-    }));
+  describe(): {
+    name: string;
+    state: ConnectionState;
+    toolCount: number;
+    enabled: boolean;
+    tools: string[];
+  }[] {
+    return Array.from(this.servers.values()).map((s) => {
+      const tools = this.toolNamesForSlot(s);
+      return {
+        name: s.cfg.name,
+        state: s.state,
+        toolCount: tools.length,
+        enabled: s.cfg.enabled !== false,
+        tools,
+      };
+    });
   }
 
   async stopAll(): Promise<void> {
+    if (this.idleTimer) {
+      clearInterval(this.idleTimer);
+      this.idleTimer = undefined;
+    }
     for (const name of Array.from(this.servers.keys())) {
       await this.stop(name);
     }
@@ -209,7 +420,7 @@ export class MCPRegistry {
   private readonly onToolsChanged = (name: string, _tools: { name: string }[]): void => {
     const slot = this.servers.get(name);
     if (!slot || !slot.client) return;
-    // Unregister any previously registered tools
+    // Unregister any previously registered tools, then re-apply the fresh set.
     for (const t of slot.toolNames) {
       try {
         this.toolRegistry.unregister(t);
@@ -218,34 +429,19 @@ export class MCPRegistry {
       }
     }
     slot.toolNames = [];
-    const allowed = slot.cfg.allowedTools;
-    const wrapped = slot.client
-      .listTools()
-      .filter((t) => !allowed || allowed.includes(t.name))
-      .map((t) => wrapMCPTool(slot.cfg.name, t, expectDefined(slot.client), slot.cfg.permission ?? 'confirm'));
-    if (this.lazyMode) {
-      // Lazy mode: cache tools without registering
-      slot.lazyTools = wrapped;
-      this.log.info(
-        `MCP server "${slot.cfg.name}" tools refreshed in lazy mode (${wrapped.length} cached)`,
-      );
-    } else {
-      // Normal mode: register tools
-      for (const tool of wrapped) {
-        try {
-          this.toolRegistry.register(tool, `mcp:${slot.cfg.name}`);
-          slot.toolNames.push(tool.name);
-        } catch (err) {
-          this.log.warn(`MCP tool "${tool.name}" not re-registered after list_changed`, err);
-        }
-      }
+    slot.registeredLazy = false;
+    const discovered = slot.client.listTools();
+    // Refresh the lazy manifest so a future cold boot sees the new tool set.
+    if (slot.lazy && this.cacheDir) {
+      void writeManifest(this.cacheDir, slot.cfg.name, manifestConfigHash(slot.cfg), discovered);
     }
+    this.applyTools(slot, discovered, slot.client);
     this.events.emit('mcp.server.connected', {
       name: slot.cfg.name,
       toolCount: slot.toolNames.length,
     });
     this.log.info(
-      `MCP server "${slot.cfg.name}" tools refreshed (${slot.toolNames.length} active, ${wrapped.length} total)`,
+      `MCP server "${slot.cfg.name}" tools refreshed (${this.toolNamesForSlot(slot).length} active)`,
     );
   };
 
@@ -256,6 +452,17 @@ export class MCPRegistry {
   ): void => {
     const slot = this.servers.get(name);
     if (!slot) return;
+    if (slot.lazy) {
+      // Lazy server died — go dormant (keep resolver wrappers); the next tool
+      // call re-spawns it. No reconnect storm for an on-demand server.
+      slot.client = undefined;
+      slot.state = 'dormant';
+      this.events.emit('mcp.server.disconnected', {
+        name,
+        reason: `exit:${code ?? 'unknown'} (dormant)`,
+      });
+      return;
+    }
     for (const t of slot.toolNames) {
       try {
         this.toolRegistry.unregister(t);
@@ -274,6 +481,12 @@ export class MCPRegistry {
   private readonly onTransportDisconnect = (name: string): void => {
     const slot = this.servers.get(name);
     if (!slot) return;
+    if (slot.lazy) {
+      slot.client = undefined;
+      slot.state = 'dormant';
+      this.events.emit('mcp.server.disconnected', { name, reason: 'http-disconnect (dormant)' });
+      return;
+    }
     for (const t of slot.toolNames) {
       try {
         this.toolRegistry.unregister(t);
@@ -385,32 +598,20 @@ export class MCPRegistry {
         // L2-B: a healthy connect resets the cycle counter so future
         // crashes get the full reconnect budget again.
         slot.reconnectCycles = 0;
-        const allowed = slot.cfg.allowedTools;
-        // Prefer cached tools to avoid a round-trip to the server on reconnect.
-        // The cache is populated by client.listTools() on first connect.
         const mc = client as MCPClient;
-        const candidateTools = mc.listTools();
-        const toWrap = candidateTools.length > 0 ? candidateTools : mc.listTools(); // fallback — in practice both return the same list
-        const wrapped = toWrap
-          .filter((t) => !allowed || allowed.includes(t.name))
-          .map((t) => wrapMCPTool(slot.cfg.name, t, mc, slot.cfg.permission ?? 'confirm'));
-        if (this.lazyMode) {
-          // Lazy mode: cache tools without registering them
-          slot.lazyTools = wrapped;
-          this.log.info(
-            `MCP server "${slot.cfg.name}" connected in lazy mode (${wrapped.length} tools cached, not registered)`,
+        const discovered = mc.listTools();
+        // Lazy servers persist their manifest so later boots can register cold.
+        if (slot.lazy && this.cacheDir) {
+          await writeManifest(
+            this.cacheDir,
+            slot.cfg.name,
+            manifestConfigHash(slot.cfg),
+            discovered,
           );
-        } else {
-          // Normal mode: register all tools
-          for (const tool of wrapped) {
-            try {
-              this.toolRegistry.register(tool, `mcp:${slot.cfg.name}`);
-              slot.toolNames.push(tool.name);
-            } catch (err) {
-              this.log.warn(`MCP tool "${tool.name}" not registered`, err);
-            }
-          }
         }
+        this.applyTools(slot, discovered, mc);
+        slot.lastUsed = Date.now();
+        if (slot.lazy) this.ensureIdleSweep();
         this.events.emit(isReconnect ? 'mcp.server.reconnected' : 'mcp.server.connected', {
           name: slot.cfg.name,
           toolCount: slot.toolNames.length,

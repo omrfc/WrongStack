@@ -38,6 +38,14 @@ export const MCP_CONSTANTS = Object.freeze({
     FORCE_TIMEOUT_MS: 1200,
   }),
 
+  /** Lazy-connect idle lifecycle. */
+  IDLE: Object.freeze({
+    /** Default ms a lazy server stays connected with no tool calls before auto-sleep. */
+    DEFAULT_TIMEOUT_MS: 300_000,
+    /** How often the idle sweep runs (kept well below the timeout). */
+    SWEEP_INTERVAL_MS: 30_000,
+  }),
+
   /** JSON-RPC response timeout for outstanding requests. */
   RESPONSE_TIMEOUT_MS: 500,
 

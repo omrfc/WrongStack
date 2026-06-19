@@ -23,10 +23,17 @@ function isMutatingTool(mcpTool: MCPTool): boolean {
   return false;
 }
 
+/**
+ * Resolves the live client for a tool call. A plain {@link MCPClient} for eager
+ * servers, or a thunk that connects-on-demand for lazy/dormant servers (the
+ * registry passes `() => this.ensureConnected(name)`).
+ */
+export type MCPClientResolver = MCPClient | (() => Promise<MCPClient>);
+
 export function wrapMCPTool(
   serverName: string,
   mcpTool: MCPTool,
-  client: MCPClient,
+  client: MCPClientResolver,
   permission: Permission = 'confirm',
 ): Tool {
   const qualifiedName = `mcp__${serverName}__${mcpTool.name}`;
@@ -38,7 +45,10 @@ export function wrapMCPTool(
     mutating: isMutatingTool(mcpTool),
     inputSchema: mcpTool.inputSchema ?? { type: 'object', properties: {} },
     async execute(input, _ctx, _opts) {
-      const res = await client.callTool(mcpTool.name, input);
+      // For a dormant lazy server this spawns the process + handshakes before
+      // the first call; for an eager server it resolves to the fixed client.
+      const live = typeof client === 'function' ? await client() : client;
+      const res = await live.callTool(mcpTool.name, input);
       if (res.isError) {
         throw new Error(stringify(res.content));
       }

@@ -25,7 +25,9 @@ export type ConnectionState =
   | 'connected'
   | 'disconnected'
   | 'reconnecting'
-  | 'failed';
+  | 'failed'
+  /** Lazy server: registered from a cached manifest, process not spawned. */
+  | 'dormant';
 
 export interface MCPTool {
   name: string;
