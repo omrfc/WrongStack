@@ -3,6 +3,7 @@ import { color } from '../utils/color.js';
 import { toErrorMessage } from '../utils/error.js';
 import { ERROR_CODES, WrongStackError } from '../types/errors.js';
 import type { Plugin } from '../types/plugin.js';
+import { assessCommitSafety } from '../coordination/commit-safety.js';
 import type { SlashCommand, Context } from '../index.js';
 
 /**
@@ -232,27 +233,23 @@ export function buildCommitCommand(): SlashCommand {
       const dryRun = args.includes('--dry-run') || args.includes('-n');
       const noLlm = args.includes('--no-llm');
 
-      // ═══ Simultaneous-edit detection ═══
+      // ═══ Shared-worktree / foreign-change detection ═══
+      // `/commit` stages the whole working tree (`git add .`). When another
+      // agent or a separate wrongstack process is editing the same tree, that
+      // sweep captures their half-done work. Warn (loudly) before committing;
+      // we don't change WHAT gets committed — the decision stays with the user.
       let worktreeWarning = '';
       try {
-        const wtResult = await runGit(['worktree', 'list', '--porcelain'], cwd);
-        const worktrees = wtResult.stdout
-          .split('\n\n')
-          .filter((b) => b.trim().startsWith('worktree '));
-        if (worktrees.length > 1) {
-          const branches = worktrees
-            .map((b) => {
-              const branchLine = b.split('\n').find((l) => l.startsWith('branch '));
-              return branchLine ? branchLine.slice(7).replace('refs/heads/', '') : '?';
-            })
-            .filter(Boolean);
-          worktreeWarning =
-            `\n${color.yellow('⚠')} ${color.dim('Simultaneous edits:')} ${worktrees.length} worktrees active ` +
-            `(${branches.join(', ')}). ` +
-            `${color.dim('Changes from other agents may be captured. Review the diff below.')}\n`;
+        const report = await assessCommitSafety({
+          cwd,
+          projectRoot: ctx?.projectRoot ?? cwd,
+          sessionId: ctx?.session?.id,
+        });
+        if (report.warning) {
+          worktreeWarning = `\n${color.yellow(report.warning)}\n`;
         }
       } catch {
-        // worktree detection is best-effort; ignore failures
+        // commit-safety is best-effort; never block a commit on it
       }
 
       // Draft message — LLM from the session provider first, heuristics on any

@@ -60,6 +60,31 @@ export const DANGEROUS_FOR_SUBAGENTS: readonly ToolCapability[] = [
 ];
 
 /**
+ * Wide capability allowlist for subagents that the user has authorized to act
+ * with full developer power (the CLI fleet host applies this to any subagent
+ * that isn't given an explicit, narrower grant). It covers everything needed to
+ * do real work end-to-end — read, write/edit inside the project, outbound
+ * network, and shell/build/install — so a delegated coding or build agent runs
+ * the same toolchain the leader would, without per-tool confirmation it cannot
+ * answer.
+ *
+ * Deliberately EXCLUDED (require an explicit per-spawn `allowedCapabilities`
+ * grant, because they escape the task's blast radius rather than perform it):
+ *   - `fs.write.outside-project` — writing outside the repo (e.g. ~/.ssh).
+ *   - `mcp.proxy` — third-party MCP tools (also hard-blocked by name).
+ *   - `subagent.spawn` — recursive delegation (the baseline prompt forbids it).
+ *   - `config.mutate` — rewriting trust/config is privilege escalation, not work.
+ */
+export const WIDE_SUBAGENT_CAPABILITIES: readonly ToolCapability[] = [
+  ToolCapabilities.FS_READ,
+  ToolCapabilities.FS_WRITE,
+  ToolCapabilities.NET_OUTBOUND,
+  ToolCapabilities.SHELL_ARBITRARY,
+  ToolCapabilities.SHELL_RESTRICTED,
+  ToolCapabilities.PACKAGE_INSTALL,
+];
+
+/**
  * Check if a tool (or its capabilities array) includes any dangerous capability
  * for subagent execution.
  */

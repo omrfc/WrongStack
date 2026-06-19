@@ -20,8 +20,14 @@ export interface MCPRegistryHandle {
   start(cfg: MCPServerConfig): Promise<void>;
   stop(name: string): Promise<void>;
   restart(name: string): Promise<void>;
-  describe(): { name: string; state: string; toolCount: number; enabled: boolean }[];
-  list(): { name: string; state: string; toolCount: number }[];
+  describe(): {
+    name: string;
+    state: string;
+    toolCount: number;
+    enabled: boolean;
+    tools?: string[];
+  }[];
+  list(): { name: string; state: string; toolCount: number; tools?: string[] }[];
   /**
    * Register all cached tools for a server without restarting it.
    * No-op if the server is not connected or tools are already active.

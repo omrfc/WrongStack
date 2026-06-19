@@ -192,6 +192,14 @@ export interface MCPServerConfig {
   permission?: Permission | undefined;
   startupTimeoutMs?: number | undefined;
   requestTimeoutMs?: number | undefined;
+  /**
+   * Lazy connect: when true, the server process is NOT spawned at boot. Its
+   * tools are registered from a cached manifest (discovered on the first ever
+   * connect) and the server only spawns when one of its tools is actually
+   * called, then auto-sleeps after an idle period. Default (false/undefined) =
+   * eager connect at boot.
+   */
+  lazy?: boolean | undefined;
 }
 
 export interface LogConfig {

@@ -3,7 +3,7 @@ import type { Context } from '../core/context.js';
 import type { InputReader } from '../types/input-reader.js';
 import type { PermissionDecision, PermissionPolicy, TrustPolicy } from '../types/permission.js';
 import type { Tool } from '../types/tool.js';
-import { hasCapability, ToolCapabilities } from './capabilities.js';
+import { getDangerousCapabilities, hasCapability, ToolCapabilities } from './capabilities.js';
 import { atomicWrite } from '../utils/atomic-write.js';
 import { matchAny, matchGlob } from '../utils/glob-match.js';
 import { safeParse } from '../utils/safe-json.js';
@@ -514,15 +514,32 @@ export class AutoApprovePermissionPolicy implements PermissionPolicy {
     const hasAllowedCap = caps.some((c) => this.allowedCapabilities.includes(c));
     const isMcp = AutoApprovePermissionPolicy.isMcpTool(tool.name);
 
-    // Block if: tool is MCP, tool default is deny, or no allowed capability
-    const blocked = tool.permission === 'deny' || isMcp || !hasAllowedCap;
+    // A tool may bundle several capabilities (e.g. `install` declares both
+    // `package.install` and `shell.restricted`). The `some()` check above only
+    // confirms the tool has *a* useful allowed capability — it does not stop a
+    // dangerous capability from riding along. Require every DANGEROUS capability
+    // the tool declares to be explicitly present in the allowlist, so widening
+    // the allowlist (e.g. `/techstack` adding `fs.write`) grants exactly that
+    // capability and nothing more. This is what lets the ToolExecutor trust an
+    // `auto` from this policy and skip its post-permission dangerous-capability
+    // downgrade (which would otherwise force a `confirm` no subagent can answer).
+    const dangerousNotAllowed = getDangerousCapabilities(tool).filter(
+      (c) => !this.allowedCapabilities.includes(c),
+    );
+
+    // Block if: tool is MCP, tool default is deny, no allowed capability, or it
+    // carries a dangerous capability the leader did not explicitly grant.
+    const blocked =
+      tool.permission === 'deny' || isMcp || !hasAllowedCap || dangerousNotAllowed.length > 0;
 
     if (blocked) {
       const reason = isMcp
         ? `MCP tool ${tool.name} is not auto-approved for subagents — ask the leader to allow it explicitly`
         : tool.permission === 'deny'
           ? 'tool default deny'
-          : `tool lacks allowed capability (has: ${caps.join(', ') || 'none'}, allowed: ${this.allowedCapabilities.join(', ')})`;
+          : dangerousNotAllowed.length > 0
+            ? `tool requires un-granted dangerous capability (needs: ${dangerousNotAllowed.join(', ')}, allowed: ${this.allowedCapabilities.join(', ')})`
+            : `tool lacks allowed capability (has: ${caps.join(', ') || 'none'}, allowed: ${this.allowedCapabilities.join(', ')})`;
 
       return {
         permission: 'deny',

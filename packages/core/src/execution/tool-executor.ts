@@ -166,7 +166,19 @@ export class ToolExecutor {
       const policy = this.opts.permissionPolicy;
       const yolo = policy.getYolo?.() === true || policy.getYoloDestructive?.() === true;
 
-      if (toolDangerousCaps.length > 0 && effectivePermission === 'auto' && !yolo) {
+      // An `auto` decision sourced from `'yolo'` is authoritative: it comes
+      // either from the leader's explicit YOLO mode or from a subagent's
+      // `AutoApprovePermissionPolicy`, which already enforces a capability
+      // allowlist (and now requires every dangerous capability to be granted
+      // explicitly). In both cases the allowlist IS the blast-radius control,
+      // so the conservative downgrade below would be redundant — and for a
+      // non-interactive subagent (no confirmAwaiter) it would turn a granted
+      // write into a `confirm` that can never be answered. Trust-file `auto`
+      // (source 'trust') is NOT waived: a single trusted pattern must not
+      // silently widen into arbitrary dangerous-capability execution.
+      const authoritativeAuto = decision.source === 'yolo';
+
+      if (toolDangerousCaps.length > 0 && effectivePermission === 'auto' && !yolo && !authoritativeAuto) {
         // Outside yolo we force at least 'confirm' for dangerous-capability tools.
         effectivePermission = 'confirm';
       }
