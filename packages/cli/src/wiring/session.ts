@@ -171,15 +171,16 @@ export async function setupSession(params: {
     tokenCounter,
     cwd,
     projectRoot,
-    // Filesystem-access scope: when restrictToProjectRoot is false (default),
-    // file tools may reach paths outside the project root. Togglable live via
-    // `/settings` ("Filesystem access").
-    restrictFsToRoot: config.tools?.restrictToProjectRoot ?? false,
+    // Filesystem-access scope: derived from features.allowOutsideProjectRoot,
+    // falling back to the old tools.restrictToProjectRoot config key (inverted:
+    // restrict=false in old config → allow=true in new). Togglable live via
+    // `/settings` ("Allow outside project").
+    allowOutsideProjectRoot:
+      config.features?.allowOutsideProjectRoot ?? !(config.tools?.restrictToProjectRoot ?? false),
     model: config.model,
     agentId: 'leader',
     agentName: 'Leader Agent',
     traceId,
-    allowOutsideProjectRoot: config.features?.allowOutsideProjectRoot ?? true,
   });
   // Inject package-author-tracker options so the install tool can record authorship.
   context.meta['packageTrackerOpts'] = {

@@ -44,12 +44,12 @@ export interface ContextInit {
   /** Mutable working directory. Defaults to `cwd`. Must stay within `projectRoot`. */
   workingDir?: string | undefined;
   /**
-   * When true, file tools and `setWorkingDir()` are confined to `projectRoot`.
-   * Defaults to `true` when omitted so directly-constructed contexts (tests,
-   * embedded callers) keep the safe behavior; the runtime passes the
-   * config-derived value (default `false` — unrestricted) explicitly.
+   * When false, file tools and `setWorkingDir()` are confined to `projectRoot`.
+   * Defaults to `false` (restrictive) when omitted so directly-constructed
+   * contexts (tests, embedded callers) keep the safe behavior; the runtime
+   * passes the config-derived value (default `true` — permissive) explicitly.
    */
-  restrictFsToRoot?: boolean | undefined;
+  allowOutsideProjectRoot?: boolean | undefined;
   model: string;
   tools?: Tool[] | undefined;
   /** Agent id performing this run (e.g. 'leader', 'executor', 'tech-stack'). */
@@ -64,12 +64,6 @@ export interface ContextInit {
    * `session.traceId` automatically.
    */
   traceId?: string | undefined;
-  /**
-   * Allow tools to read/write paths outside the project root directory.
-   * When true, tools can access any path on the filesystem.
-   * When false or undefined, tools are restricted to the project root.
-   */
-  allowOutsideProjectRoot?: boolean | undefined;
 }
 
 /**
@@ -109,7 +103,7 @@ export class Context implements RunEnv {
    * tools may reach paths outside the project (still gated by permission
    * tiers). Mutable so `/settings` can toggle it live on the running session.
    */
-  restrictFsToRoot: boolean;
+  allowOutsideProjectRoot: boolean;
   model: string;
   tools: Tool[] = [];
   meta: Record<string, unknown> = {};
@@ -163,13 +157,13 @@ export class Context implements RunEnv {
     this.cwd = init.cwd;
     this.projectRoot = init.projectRoot;
     this.workingDir = init.workingDir ?? init.cwd;
-    this.restrictFsToRoot = init.restrictFsToRoot ?? true;
+    this.allowOutsideProjectRoot = init.allowOutsideProjectRoot ?? false;
     this.model = init.model;
     this.tools = init.tools ?? [];
     this.agentId = init.agentId ?? 'unknown';
     this.agentName = init.agentName ?? 'Unknown Agent';
     this.traceId = init.traceId;
-    this.allowOutsideProjectRoot = init.allowOutsideProjectRoot ?? true;
+    this.allowOutsideProjectRoot = init.allowOutsideProjectRoot ?? false;
     // Propagate traceId to the SessionWriter so storage operations
     // can read it without needing a direct handle on the Context.
     this.session.traceId = init.traceId;
@@ -253,7 +247,7 @@ export class Context implements RunEnv {
 
     // Validate containment within projectRoot — unless filesystem access is
     // unrestricted, in which case the working dir may leave the project root.
-    if (this.restrictFsToRoot !== false) {
+    if (!this.allowOutsideProjectRoot) {
       const root = path.resolve(this.projectRoot);
       const rel = path.relative(root, resolved);
       if (rel.startsWith('..') || path.isAbsolute(rel)) {

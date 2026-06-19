@@ -37,7 +37,6 @@ function settingsBase(overrides: Record<string, unknown> = {}) {
       enhanceLanguage: 'original' as const,
       debugStream: false,
       configScope: 'global' as const,
-      restrictFsToRoot: false,
       hint: undefined as string | undefined,
       ...overrides,
     },
@@ -77,7 +76,6 @@ describe('token-saving tier in settings picker', () => {
         enhanceLanguage: 'original',
         debugStream: false,
         configScope: 'global',
-        restrictFsToRoot: false,
       },
     );
     expect(s.settingsPicker.tokenSavingTier).toBe('minimal');

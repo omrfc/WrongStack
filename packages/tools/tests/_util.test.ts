@@ -81,15 +81,15 @@ describe('safeResolve', () => {
   });
 });
 
-describe('unrestricted filesystem access (restrictFsToRoot === false)', () => {
-  // The runtime constructs the leader/subagent Context with restrictFsToRoot
-  // derived from `tools.restrictToProjectRoot` (default false). When false, the
+describe('unrestricted filesystem access (allowOutsideProjectRoot === true)', () => {
+  // The runtime constructs the leader/subagent Context with allowOutsideProjectRoot
+  // derived from `features.allowOutsideProjectRoot` (default true). When true, the
   // project-root containment checks are bypassed so tools can reach outside.
   const open = (overrides: Partial<Context> = {}): Context =>
     ({
       cwd: overrides.cwd ?? path.resolve('/tmp/project'),
       projectRoot: overrides.projectRoot ?? path.resolve('/tmp/project'),
-      restrictFsToRoot: false,
+      allowOutsideProjectRoot: true,
     }) as Context;
 
   it('ensureInsideRoot returns an outside path instead of throwing', () => {

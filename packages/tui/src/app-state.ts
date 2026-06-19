@@ -295,8 +295,6 @@ export type State = {
     debugStream: boolean;
     /** Where to persist settings: 'global' or 'project'. */
     configScope: 'global' | 'project';
-    /** When true, file tools are confined to the project root (default false). */
-    restrictFsToRoot: boolean;
     hint?: string | undefined;
   };
   /** Project switcher panel — opened by F1 or `/project`. */
@@ -594,8 +592,6 @@ export type Settings = {
   debugStream: boolean;
   /** Where to persist settings: 'global' or 'project'. */
   configScope: 'global' | 'project';
-  /** When true, file tools are confined to the project root (default false). */
-  restrictFsToRoot?: boolean | undefined;
   /** Full mouse mode: in-app managed scroll + clickable UI (SGR tracking on). */
   mouseMode?: boolean | undefined;
   /** Whether the process circuit breaker gates bash/exec. Default false (off). */
@@ -696,7 +692,6 @@ export type Action =
       enhanceLanguage: 'original' | 'english';
       debugStream: boolean;
       configScope: 'global' | 'project';
-      restrictFsToRoot: boolean;
     }
   | { type: 'settingsClose' }
   | { type: 'settingsFieldMove'; delta: number }

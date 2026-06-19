@@ -108,13 +108,11 @@ export interface SettingsPickerProps {
   debugStream: boolean;
   /** Where settings are persisted. */
   configScope: ConfigScope;
-  /** When true, file tools are confined to the project root (default false). */
-  restrictFsToRoot: boolean;
   hint?: string | undefined;
 }
 
 /** Total number of settings rows (used for wrap-around navigation). */
-export const SETTINGS_FIELD_COUNT = 28;
+export const SETTINGS_FIELD_COUNT = 27;
 
 export const CONFIG_SCOPES = ['global', 'project'] as const;
 export type ConfigScope = (typeof CONFIG_SCOPES)[number];
@@ -148,7 +146,6 @@ export function SettingsPicker({
   enhanceLanguage,
   debugStream,
   configScope,
-  restrictFsToRoot,
   hint,
 }: SettingsPickerProps): React.ReactElement {
   const boolVal = (v: boolean) => (v ? 'on' : 'off');
@@ -309,13 +306,6 @@ export function SettingsPicker({
       label: 'Config scope',
       value: configScope,
       detail: 'global (~/.wrongstack/) or project (.wrongstack/)',
-    },
-    // ── Filesystem ──
-    { section: 'Filesystem' },
-    {
-      label: 'Filesystem access',
-      value: restrictFsToRoot ? 'project only' : 'unrestricted',
-      detail: 'Allow file tools outside the project root, or confine them to it',
     },
   ];
 

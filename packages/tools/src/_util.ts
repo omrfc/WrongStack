@@ -35,8 +35,7 @@ export function resolvePath(input: string, ctx: Context): string {
 export function ensureInsideRoot(absPath: string, ctx: Context): string {
   const target = path.resolve(absPath);
   // Unrestricted filesystem access: skip the project-root containment check.
-  // `=== false` (not falsy) so a ctx lacking the field stays confined.
-  if (ctx.restrictFsToRoot === false || ctx.allowOutsideProjectRoot) return target;
+  if (ctx.allowOutsideProjectRoot) return target;
   const root = path.resolve(ctx.projectRoot);
   const rel = path.relative(root, target);
   if (rel.startsWith('..') || path.isAbsolute(rel)) {
