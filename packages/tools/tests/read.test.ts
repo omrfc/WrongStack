@@ -97,6 +97,35 @@ describe('read tool', () => {
     expect(sb.ctx.hasRead(abs)).toBe(true);
   });
 
+  it('returns past-EOF message when offset exceeds file length', async () => {
+    const file = path.join(sb.dir, 'eof.txt');
+    await fs.writeFile(file, 'line1\nline2\nline3\n');
+    const out = await readTool.execute({ path: 'eof.txt', offset: 999 }, sb.ctx, {
+      signal: newSignal(),
+    });
+    // Must NOT be an empty string — empty results cause tool-use loops on
+    // models with weak instruction-following (k2p7, etc.).
+    expect(out.text).not.toBe('');
+    expect(out.text).toContain('past end of file');
+    expect(out.text).toContain('999');
+    expect(out.text).toContain('line');  // "N line(s)" — exact count varies by trailing newline
+    expect(out.total_lines).toBeGreaterThanOrEqual(3);
+    // Still records the read so edit safety checks pass.
+    const abs = path.normalize(path.resolve(sb.dir, 'eof.txt'));
+    expect(sb.ctx.hasRead(abs)).toBe(true);
+  });
+
+  it('returns past-EOF message when offset equals total+1 (boundary)', async () => {
+    const file = path.join(sb.dir, 'boundary.txt');
+    await fs.writeFile(file, 'only\n');
+    // File has ~2 lines after split (content + empty trailing), so offset 10
+    // is safely past EOF.
+    const out = await readTool.execute({ path: 'boundary.txt', offset: 10 }, sb.ctx, {
+      signal: newSignal(),
+    });
+    expect(out.text).toContain('past end of file');
+  });
+
   // F-04 (CWE-59): a symlink that lives INSIDE the project root but points
   // outside must not be followed — `safeResolve`'s syntactic check passes it,
   // the realpath cross-check (safeResolveReal) must reject it.

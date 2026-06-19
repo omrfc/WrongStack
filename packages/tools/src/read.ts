@@ -88,6 +88,21 @@ export const readTool: Tool<ReadInput, ReadOutput> = {
       ctx.recordRead(absPath, stat.mtimeMs);
       return { text: '', total_lines: total, encoding: 'utf8', truncated: total > 0 };
     }
+    // Offset past EOF: return an explicit message instead of an empty string.
+    // Without this, models with weak instruction-following (e.g. k2p7) see an
+    // empty result, assume the read failed transiently, and retry the exact
+    // same offset indefinitely — a tight tool-use loop that burns iterations
+    // and context without making progress.
+    if (offset > total) {
+      ctx.recordRead(absPath, stat.mtimeMs);
+      return {
+        text: `[offset ${offset} is past end of file "${input.path}" — file has ${total} line(s). Do not retry this offset.]`,
+        total_lines: total,
+        encoding: 'utf8',
+        truncated: false,
+      };
+    }
+
     const slice = allLines.slice(offset - 1, offset - 1 + limit);
     const truncated = offset - 1 + slice.length < total;
 
