@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import { CopyButton } from './MessageBubble/CopyButton.js';
 import { ToolInputView } from './MessageBubble/ToolInputView.js';
 import { ErrorBodyWithStack } from './MessageBubble/ErrorBody.js';
+import { markdownComponents, rehypePlugins } from './MessageBubble/utils.js';
 
 interface WatchEntry {
   ts: string;
@@ -45,52 +46,52 @@ const ROLE_CONFIG: Record<
   user: {
     Icon: User,
     label: 'You',
-    avatarBg: 'bg-blue-500/10',
-    avatarColor: 'text-blue-600 dark:text-blue-400',
-    avatarRing: 'ring-2 ring-offset-2 ring-offset-background ring-blue-500/20',
-    bubbleBg: 'bg-blue-500/[0.06]',
-    bubbleBorder: 'border-blue-500/15',
-    textColor: 'text-blue-900 dark:text-blue-100',
+    avatarBg: 'bg-primary',
+    avatarColor: 'text-primary-foreground',
+    avatarRing: 'ring-2 ring-offset-2 ring-offset-background ring-primary/20',
+    bubbleBg: 'bg-primary',
+    bubbleBorder: 'border-transparent',
+    textColor: 'text-primary-foreground',
   },
   assistant: {
     Icon: Bot,
-    label: 'Claude',
-    avatarBg: 'bg-violet-500/10',
-    avatarColor: 'text-violet-600 dark:text-violet-400',
-    avatarRing: 'ring-2 ring-offset-2 ring-offset-background ring-violet-500/20',
-    bubbleBg: 'bg-violet-500/[0.06]',
-    bubbleBorder: 'border-violet-500/15',
-    textColor: 'text-violet-900 dark:text-violet-100',
+    label: 'Assistant',
+    avatarBg: 'bg-accent',
+    avatarColor: 'text-accent-foreground',
+    avatarRing: 'ring-2 ring-offset-2 ring-offset-background ring-accent/20',
+    bubbleBg: 'bg-card',
+    bubbleBorder: 'border-border',
+    textColor: 'text-foreground',
   },
   tool: {
     Icon: Terminal,
     label: 'Tool',
-    avatarBg: 'bg-amber-500/10',
-    avatarColor: 'text-amber-600 dark:text-amber-400',
-    avatarRing: 'ring-2 ring-offset-2 ring-offset-background ring-amber-500/20',
-    bubbleBg: 'bg-amber-500/[0.06]',
-    bubbleBorder: 'border-amber-500/15',
-    textColor: 'text-amber-900 dark:text-amber-100',
+    avatarBg: 'bg-secondary',
+    avatarColor: 'text-secondary-foreground',
+    avatarRing: 'ring-2 ring-offset-2 ring-offset-background ring-secondary/20',
+    bubbleBg: 'bg-muted/80',
+    bubbleBorder: 'border-border',
+    textColor: 'text-foreground',
   },
   system: {
     Icon: Bot,
     label: 'System',
-    avatarBg: 'bg-gray-500/10',
-    avatarColor: 'text-gray-500',
-    avatarRing: 'ring-2 ring-offset-2 ring-offset-background ring-gray-500/10',
-    bubbleBg: 'bg-gray-500/[0.06]',
-    bubbleBorder: 'border-gray-500/15',
-    textColor: 'text-gray-600 dark:text-gray-300',
+    avatarBg: 'bg-muted',
+    avatarColor: 'text-muted-foreground',
+    avatarRing: 'ring-2 ring-offset-2 ring-offset-background ring-muted/20',
+    bubbleBg: 'bg-muted/50',
+    bubbleBorder: 'border-border',
+    textColor: 'text-muted-foreground',
   },
   error: {
     Icon: AlertCircle,
     label: 'Error',
-    avatarBg: 'bg-red-500/10',
-    avatarColor: 'text-red-600 dark:text-red-400',
-    avatarRing: 'ring-2 ring-offset-2 ring-offset-background ring-red-500/20',
-    bubbleBg: 'bg-red-500/[0.06]',
-    bubbleBorder: 'border-red-500/15',
-    textColor: 'text-red-900 dark:text-red-100',
+    avatarBg: 'bg-destructive',
+    avatarColor: 'text-destructive-foreground',
+    avatarRing: 'ring-2 ring-offset-2 ring-offset-background ring-destructive/20',
+    bubbleBg: 'bg-destructive/5',
+    bubbleBorder: 'border-destructive/20',
+    textColor: 'text-destructive',
   },
 };
 
@@ -120,18 +121,18 @@ function WatchBubbleContent({ entry }: { entry: WatchEntry }) {
     }
 
     return (
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-1.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+      <div className="flex flex-col gap-1.5 tool-details">
+        <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
           <Terminal className="h-3 w-3" />
-          {toolName}
+          <span className="font-mono">{toolName}</span>
         </div>
         {inputText ? (
-          <div className="rounded-lg bg-black/20 dark:bg-white/5 border border-amber-500/20 p-2">
+          <div className="p-3 bg-muted/50 rounded-lg overflow-x-auto">
             <ToolInputView input={JSON.parse(inputText)} />
           </div>
         ) : (
-          <div className="prose-sm dark:prose-invert prose-p:my-1 prose-pre:m-0 max-w-none">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.text}</ReactMarkdown>
+          <div className="text-sm leading-relaxed markdown-content">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>{entry.text}</ReactMarkdown>
           </div>
         )}
       </div>
@@ -139,16 +140,11 @@ function WatchBubbleContent({ entry }: { entry: WatchEntry }) {
   }
 
   return (
-    <div className="prose-sm dark:prose-invert prose-p:my-1 prose-pre:m-0 max-w-none">
+    <div className="text-sm leading-relaxed markdown-content">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        components={{
-          p: ({ children }) => <p className="my-1">{children}</p>,
-          pre: ({ children }) => <pre className="m-0 rounded-lg bg-muted">{children}</pre>,
-          code: ({ children }) => (
-            <code className="text-sm bg-muted rounded px-1 py-0.5">{children}</code>
-          ),
-        }}
+        rehypePlugins={rehypePlugins}
+        components={markdownComponents}
       >
         {entry.text}
       </ReactMarkdown>
@@ -182,27 +178,22 @@ export function WatchMessageBubble({
       )}
 
       {/* Content */}
-      <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+      <div className="flex flex-col gap-1.5 min-w-0 flex-1">
         {/* Role label + timestamp — only shown on first message of a chain */}
         {!isContinuation && (
           <div className="flex items-center gap-2">
             <span
               className={cn(
-                'text-[11px] font-semibold',
-                entry.role === 'user' && 'text-blue-600 dark:text-blue-400',
-                entry.role === 'assistant' && 'text-violet-600 dark:text-violet-400',
-                entry.role === 'tool' && 'text-amber-600 dark:text-amber-400',
-                entry.role === 'system' && 'text-gray-500',
-                entry.role === 'error' && 'text-red-600 dark:text-red-400',
+                'text-xs font-medium',
+                cfg.textColor,
               )}
             >
               {entry.role === 'tool' && entry.tool ? entry.tool : cfg.label}
             </span>
-            <span className="text-[10px] text-gray-500">
+            <span className="text-xs text-muted-foreground">
               {new Date(entry.ts).toLocaleTimeString([], {
                 hour: '2-digit',
                 minute: '2-digit',
-                second: '2-digit',
               })}
             </span>
           </div>
@@ -211,22 +202,20 @@ export function WatchMessageBubble({
         {/* Bubble */}
         <div
           className={cn(
-            'rounded-2xl px-3 py-2 border',
-            entry.role === 'user' && 'rounded-bl-md bg-blue-500/[0.06] border-blue-500/15',
-            entry.role === 'assistant' && 'rounded-bl-md bg-violet-500/[0.06] border-violet-500/15',
-            entry.role === 'tool' && 'rounded-bl-sm bg-amber-500/[0.06] border-amber-500/15',
-            entry.role === 'system' && 'rounded-bl-sm bg-gray-500/[0.06] border-gray-500/15 opacity-70',
-            entry.role === 'error' && 'rounded-bl-sm bg-red-500/[0.06] border-red-500/30',
+            'rounded-2xl px-4 py-3 border',
+            entry.role === 'user' && 'rounded-br-md',
+            entry.role === 'assistant' && 'rounded-bl-md',
+            entry.role === 'tool' && 'rounded-bl-sm',
+            entry.role === 'system' && 'rounded-bl-sm opacity-70',
+            entry.role === 'error' && 'rounded-bl-sm',
+            cfg.bubbleBg,
+            cfg.bubbleBorder,
           )}
         >
           <div
             className={cn(
-              'text-sm leading-relaxed',
-              entry.role === 'user' && 'text-blue-900 dark:text-blue-100',
-              entry.role === 'assistant' && 'text-violet-900 dark:text-violet-100',
-              entry.role === 'tool' && 'text-amber-900 dark:text-amber-100',
-              entry.role === 'system' && 'text-gray-600 dark:text-gray-300',
-              entry.role === 'error' && 'text-red-900 dark:text-red-100',
+              'text-sm leading-relaxed markdown-content',
+              cfg.textColor,
             )}
           >
             <WatchBubbleContent entry={entry} />

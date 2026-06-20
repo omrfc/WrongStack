@@ -3,6 +3,7 @@ import type { Context } from '../../src/core/context.js';
 import { AutoCompactionMiddleware } from '../../src/execution/auto-compaction-middleware.js';
 import { EventBus } from '../../src/kernel/events.js';
 import type { SessionEventBridge } from '../../src/storage/session-event-bridge.js';
+import { createContextEvidenceState } from '../../src/utils/context-evidence.js';
 import type { CompactReport, Compactor } from '../../src/types/compactor.js';
 
 function mockContext(tokenEstimate: number): Context {
@@ -143,6 +144,50 @@ describe('AutoCompactionMiddleware', () => {
 
     expect(compactor.compactCalls).toHaveLength(1);
     expect(compactor.compactCalls[0].aggressive).toBe(true);
+  });
+
+  it('emits the budget snapshot used for compaction decisions', async () => {
+    const events = new EventBus();
+    const fired: unknown[] = [];
+    events.on('compaction.fired', (e) => fired.push(e));
+    const mw = new AutoCompactionMiddleware(
+      compactor,
+      10000,
+      simpleEstimator(9500),
+      { warn: 0.5, soft: 0.75, hard: 0.9 },
+      { events },
+    );
+
+    await mw.handler()(mockContext(0), async (c) => c);
+
+    expect(fired).toHaveLength(1);
+    expect(fired[0]).toMatchObject({
+      budget: {
+        maxContext: 10000,
+        inputTokens: 9500,
+        reservedOutputTokens: 800,
+        reservedSafetyTokens: 200,
+        availableInputTokens: 9000,
+        remainingInputTokens: -500,
+        overflowTokens: 500,
+      },
+    });
+  });
+
+  it('uses repeated read pressure as an adaptive warn signal', async () => {
+    const mw = new AutoCompactionMiddleware(compactor, 10000, simpleEstimator(4300), {
+      warn: 0.5,
+      soft: 0.75,
+      hard: 0.9,
+    });
+    const ctx = mockContext(0);
+    ctx.contextEvidence = createContextEvidenceState();
+    ctx.contextEvidence.repeatedReads.push({ file: 'src/a.ts', count: 3, lastToolUseId: 'u3' });
+
+    await mw.handler()(ctx, async (c) => c);
+
+    expect(compactor.compactCalls).toHaveLength(1);
+    expect(compactor.compactCalls[0].aggressive).toBe(false);
   });
 
   it('respects aggressiveOn=hard setting', async () => {
@@ -321,7 +366,7 @@ describe('AutoCompactionMiddleware', () => {
     expect(noopCompactor.calls).toBe(1);
 
     // Tiny growth — still skipped
-    currentRaw = 8100;
+    currentRaw = 8050;
     await mw.handler()(mockContext(0), async (c) => c);
     expect(noopCompactor.calls).toBe(1);
 

@@ -12,6 +12,7 @@ import {
   Bot,
   Clock,
   Command,
+  GitCompare,
   FolderOpen,
   Folders,
   Keyboard,
@@ -45,7 +46,7 @@ interface PanelDef {
   label: string;
   shortcut: string;
   /** Main view this panel pairs with, if any. */
-  pairedView?: 'chat' | 'files' | 'skill' | 'officemap';
+  pairedView?: 'chat' | 'files' | 'skill' | 'officemap' | 'changes' | 'mailbox';
 }
 
 /**
@@ -55,7 +56,7 @@ interface PanelDef {
  * Skill detail is open returns the main area to the chat stream rather than
  * stranding a now-orphaned detail view.
  */
-const PANEL_OWNED_VIEWS = ['chat', 'files', 'skill', 'officemap'] as const;
+const PANEL_OWNED_VIEWS = ['chat', 'files', 'skill', 'officemap', 'changes', 'mailbox'] as const;
 
 type MainView = 'autophase' | 'settings';
 
@@ -70,10 +71,11 @@ const PANELS: PanelDef[] = [
   { id: 'agents', icon: <Bot size={16} />, label: 'Agents', shortcut: 'Ctrl+2' },
   { id: 'history', icon: <Clock size={16} />, label: 'History', shortcut: 'Ctrl+3' },
   { id: 'files', icon: <FolderOpen size={16} />, label: 'Files', shortcut: 'Ctrl+4', pairedView: 'files' },
-  { id: 'projects', icon: <Folders size={16} />, label: 'Projects', shortcut: 'Ctrl+5' },
-  { id: 'mailbox', icon: <Mail size={16} />, label: 'Mailbox', shortcut: 'Ctrl+6' },
-  { id: 'skills', icon: <Sparkles size={16} />, label: 'Skills', shortcut: 'Ctrl+7', pairedView: 'skill' },
-  { id: 'officemap', icon: <Building2 size={16} />, label: 'Office Map', shortcut: 'Ctrl+8', pairedView: 'officemap' },
+  { id: 'changes', icon: <GitCompare size={16} />, label: 'Changes', shortcut: 'Ctrl+5', pairedView: 'changes' },
+  { id: 'projects', icon: <Folders size={16} />, label: 'Projects', shortcut: 'Ctrl+6' },
+  { id: 'mailbox', icon: <Mail size={16} />, label: 'Mailbox', shortcut: 'Ctrl+7', pairedView: 'mailbox' },
+  { id: 'skills', icon: <Sparkles size={16} />, label: 'Skills', shortcut: 'Ctrl+8', pairedView: 'skill' },
+  { id: 'officemap', icon: <Building2 size={16} />, label: 'Office Map', shortcut: 'Ctrl+9', pairedView: 'officemap' },
 ];
 
 const VIEWS: ViewDef[] = [

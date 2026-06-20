@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Context } from '../../src/core/context.js';
 import { HybridCompactor } from '../../src/execution/compactor.js';
+import { createContextEvidenceState } from '../../src/utils/context-evidence.js';
 import type { Message } from '../../src/types/messages.js';
 
 function fakeContext(messages: Message[]): Context {
@@ -160,5 +161,48 @@ describe('HybridCompactor', () => {
     expect(digestMsg).toBeDefined();
     expect(String(digestMsg?.content)).toContain('IMPORTANT: always use tabs not spaces');
     expect(report.collapsedDigest).toContain('IMPORTANT: always use tabs not spaces');
+  });
+
+  it('injects context evidence into aggressive collapse digests', async () => {
+    const messages: Message[] = [];
+    for (let i = 0; i < 12; i++) {
+      messages.push({ role: 'user', content: `q${i}` });
+      messages.push({ role: 'assistant', content: `a${i}` });
+    }
+    const ctx = fakeContext(messages);
+    ctx.contextEvidence = createContextEvidenceState();
+    ctx.contextEvidence.currentIntent = {
+      text: 'improve context window management',
+      updatedAt: Date.now(),
+    };
+    ctx.contextEvidence.fileGraph['packages/core/src/execution/compactor.ts'] = {
+      path: 'packages/core/src/execution/compactor.ts',
+      reads: 1,
+      writes: 0,
+      tools: ['read#u1'],
+      referenced: true,
+      lastToolUseId: 'u1',
+    };
+    ctx.contextEvidence.toolCalls.push({
+      toolUseId: 'u1',
+      toolName: 'read',
+      ok: true,
+      summary: 'read packages/core/src/execution/compactor.ts',
+      files: ['packages/core/src/execution/compactor.ts'],
+      symbols: ['HybridCompactor'],
+      commands: [],
+      errors: [],
+      status: 'referenced',
+      referenceCount: 1,
+      seenAt: Date.now(),
+    });
+
+    const report = await new HybridCompactor({ preserveK: 2 }).compact(ctx, { aggressive: true });
+
+    expect(report.evidenceDigest).toContain('intent: improve context window management');
+    expect(report.collapsedDigest).toContain('[context_state]');
+    expect(report.collapsedDigest).toContain('dependency_graph');
+    expect(report.collapsedDigest).toContain('packages/core/src/execution/compactor.ts');
+    expect(report.quality?.ok).toBe(true);
   });
 });

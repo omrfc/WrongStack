@@ -137,6 +137,31 @@ describe('eliseOldToolResults', () => {
     expect(JSON.stringify(blocks)).toContain('elided');
   });
 
+  it('keeps semantic hints in elided tool result markers', () => {
+    const messages: Message[] = [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'u1',
+            name: 'grep',
+            content: `packages/core/src/execution/compactor.ts:12:boom\nError: failed to parse\n${'z'.repeat(8000)}`,
+            is_error: true,
+          },
+        ],
+      } as Message,
+      text('user', 'recent'),
+    ];
+
+    const res = eliseOldToolResults(messages, { preserveK: 1, eliseThreshold: 100 });
+
+    expect(res.changed).toBe(true);
+    expect(JSON.stringify(res.messages[0])).toContain('tool=grep');
+    expect(JSON.stringify(res.messages[0])).toContain('packages/core/src/execution/compactor.ts');
+    expect(JSON.stringify(res.messages[0])).toContain('Error: failed to parse');
+  });
+
   it('returns unchanged when nothing is oversized', () => {
     const messages: Message[] = [big(10), text('user', 'a'), text('user', 'b')];
     const res = eliseOldToolResults(messages, { preserveK: 1, eliseThreshold: 100000 });

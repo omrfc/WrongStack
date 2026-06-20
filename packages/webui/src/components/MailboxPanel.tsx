@@ -1,6 +1,6 @@
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
-import { useMailboxStore } from '@/stores';
+import { useMailboxStore, useUIStore } from '@/stores';
 import {
   CheckCircle2,
   Mail,
@@ -70,6 +70,26 @@ export function MailboxPanel({ className }: { className?: string }) {
     client.send({ type: 'mailbox.messages', payload: { limit: 30 } });
     client.send({ type: 'mailbox.agents', payload: {} });
   }, [ready, client]);
+
+  const selectedMailMessage = useUIStore((s) => s.selectedMailMessage);
+  const setSelectedMailMessage = useUIStore((s) => s.setSelectedMailMessage);
+  const selectActivity = useUIStore((s) => s.selectActivity);
+  const setCurrentView = useUIStore((s) => s.setCurrentView);
+  const setSidebarOpen = useUIStore((s) => s.setSidebarOpen);
+
+  function handleMessageClick(m: typeof messages[number]) {
+    // Re-clicking the same message deselects and goes back to chat
+    if (selectedMailMessage?.id === m.id) {
+      setSelectedMailMessage(null);
+      setCurrentView('chat');
+      return;
+    }
+    setSelectedMailMessage(m);
+    // Ensure the mailbox panel is open and the main area shows the detail
+    setSidebarOpen(true);
+    selectActivity('mailbox');
+    setCurrentView('mailbox');
+  }
 
   const unreadCount = messages.filter((m) => !m.completed).length;
   const onlineCount = agents.filter((a) => a.online).length;
@@ -168,12 +188,16 @@ export function MailboxPanel({ className }: { className?: string }) {
               {messages.slice(0, 8).map((m) => {
                 const Icon = TYPE_ICONS[m.type] ?? MessageSquare;
                 const isRead = m.readByCount > 0;
+                const isSelected = selectedMailMessage?.id === m.id;
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={m.id}
+                    onClick={() => handleMessageClick(m)}
                     className={cn(
-                      'flex items-start gap-2 px-2 py-1.5 rounded text-xs',
+                      'flex items-start gap-2 px-2 py-1.5 rounded text-xs w-full text-left cursor-pointer transition-colors hover:bg-accent/60',
                       !isRead && 'bg-yellow-50 dark:bg-yellow-950/20',
+                      isSelected && 'ring-1 ring-primary bg-primary/5',
                     )}
                   >
                     <Icon className={cn('h-3.5 w-3.5 mt-0.5 shrink-0', isRead ? 'text-muted-foreground' : 'text-yellow-600')} />
@@ -199,7 +223,7 @@ export function MailboxPanel({ className }: { className?: string }) {
                         </span>
                       )}
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>

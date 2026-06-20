@@ -85,6 +85,8 @@ import {
   handleFilesRead,
   handleFilesTree,
   handleFilesWrite,
+  handleGitChanges,
+  handleGitDiff,
   handleGitInfo,
   handleMcpAdd,
   handleMcpDisable,
@@ -2086,6 +2088,19 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
         break;
       }
 
+      case 'git.changes': {
+        const projectRoot = opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '';
+        await handleGitChanges(ws, projectRoot);
+        break;
+      }
+
+      case 'git.diff': {
+        const projectRoot = opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '';
+        const filePath = (msg as { payload?: { path?: string } }).payload?.path ?? '';
+        await handleGitDiff(ws, projectRoot, filePath);
+        break;
+      }
+
       case 'shell.open': {
         // Logic lives in `@wrongstack/webui/server`'s `shell-open.ts`
         // so the standalone and CLI entry points share the same
@@ -2276,6 +2291,20 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
         const projectRoot =
           opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '';
         await handleGitInfo(ws, projectRoot);
+        break;
+      }
+
+      case 'git.changes': {
+        const projectRoot =
+          opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '';
+        await handleGitChanges(ws, projectRoot);
+        break;
+      }
+
+      case 'git.diff': {
+        const projectRoot =
+          opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '';
+        await handleGitDiff(ws, projectRoot, String((msg.payload as { path?: unknown })?.path ?? ''));
         break;
       }
 

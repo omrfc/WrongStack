@@ -39,6 +39,15 @@ export {
   type MessageRepairResult,
 } from './message-invariants.js';
 export {
+  buildContextEvidenceDigest,
+  createContextEvidenceState,
+  markAssistantReferencedEvidence,
+  recordToolOutputEvidence,
+  recordUserIntentEvidence,
+  repeatedReadPressure,
+  type RecordToolOutputEvidenceInput,
+} from './context-evidence.js';
+export {
   validateAgainstSchema,
   type ValidationError,
   type ValidationResult,

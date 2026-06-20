@@ -6,6 +6,11 @@ interface DiffViewProps {
   newText: string;
   /** Optional caption shown above the diff (file path, "write" vs "edit", etc.) */
   caption?: string | undefined;
+  /**
+   * When true, the diff body fills its container's height instead of the
+   * compact `max-h-96` chat preview. Used by the full-pane Changes view.
+   */
+  fill?: boolean | undefined;
 }
 
 /**
@@ -18,7 +23,7 @@ interface DiffViewProps {
  * Limits: text > 5000 lines is shown without a diff (just a "too large"
  * note); that's a UI guard, not a hard limit on the underlying tool.
  */
-export const DiffView = memo(function DiffView({ oldText, newText, caption }: DiffViewProps) {
+export const DiffView = memo(function DiffView({ oldText, newText, caption, fill }: DiffViewProps) {
   const rows = useMemo(() => computeDiff(oldText, newText), [oldText, newText]);
 
   if (rows === null) {
@@ -33,8 +38,13 @@ export const DiffView = memo(function DiffView({ oldText, newText, caption }: Di
   const dels = rows.filter((r) => r.kind === 'del').length;
 
   return (
-    <div className="rounded-lg border bg-background/40 overflow-hidden text-xs">
-      <div className="flex items-center justify-between px-3 py-1.5 border-b bg-muted/40">
+    <div
+      className={cn(
+        'rounded-lg border bg-background/40 overflow-hidden text-xs',
+        fill && 'flex flex-col h-full',
+      )}
+    >
+      <div className="flex items-center justify-between px-3 py-1.5 border-b bg-muted/40 shrink-0">
         <span className="font-mono text-muted-foreground truncate">{caption ?? 'diff'}</span>
         <span className="font-mono shrink-0">
           <span className="text-emerald-600 dark:text-emerald-400">+{adds}</span>
@@ -42,7 +52,9 @@ export const DiffView = memo(function DiffView({ oldText, newText, caption }: Di
           <span className="text-rose-600 dark:text-rose-400">-{dels}</span>
         </span>
       </div>
-      <div className="font-mono leading-relaxed max-h-96 overflow-auto">
+      <div
+        className={cn('font-mono leading-relaxed overflow-auto', fill ? 'flex-1' : 'max-h-96')}
+      >
         {rows.map((r, i) => (
           <div
             // biome-ignore lint/suspicious/noArrayIndexKey: static diff rows

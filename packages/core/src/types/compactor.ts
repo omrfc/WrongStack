@@ -37,6 +37,24 @@ export interface CompactReport {
    * session log). Undefined when no range was collapsed this pass.
    */
   collapsedDigest?: string | undefined;
+  /**
+   * Compact state digest derived from tool-output instrumentation. It carries
+   * intent, path integrity, referenced tool results, active errors and implicit
+   * facts without copying full tool outputs back into the context window.
+   */
+  evidenceDigest?: string | undefined;
+  /**
+   * Deterministic post-compaction sanity check. This is deliberately local and
+   * cheap; LLM self-verification can be layered on top, but the compactor still
+   * records whether the compacted context retained an intent anchor and path
+   * trail.
+   */
+  quality?: {
+    ok: boolean;
+    hasIntent: boolean;
+    hasPathTrail: boolean;
+    issues: string[];
+  } | undefined;
 }
 
 export interface Compactor {

@@ -7,6 +7,7 @@ import type { ToolUseBlock, ToolResultBlock } from '../types/blocks.js';
 import type { Tool } from '../types/tool.js';
 import type { SessionEvent } from '../types/session.js';
 import { sizeSignals, truncateForEvent } from '../utils/tool-output-serializer.js';
+import { recordToolOutputEvidence } from '../utils/context-evidence.js';
 import { toErrorMessage } from '../utils/error.js';
 import type { AgentInternals } from './agent-internals.js';
 
@@ -86,6 +87,16 @@ export function createAgentToolHandler(a: AgentInternals): AgentToolHandler {
     content: string,
   ): void {
     const sig = sizeSignals(toolName, content);
+    const metadata = recordToolOutputEvidence(a.ctx, {
+      toolUseId,
+      toolName,
+      input,
+      content,
+      ok,
+      outputBytes: sig.outputBytes,
+      outputTokens: sig.outputTokens,
+      outputLines: sig.outputLines,
+    });
     a.events.emit('tool.executed', {
       id: toolUseId,
       name: toolName,
@@ -96,6 +107,7 @@ export function createAgentToolHandler(a: AgentInternals): AgentToolHandler {
       outputBytes: sig.outputBytes,
       outputTokens: sig.outputTokens,
       outputLines: sig.outputLines,
+      metadata,
     });
   }
 

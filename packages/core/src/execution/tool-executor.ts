@@ -1,3 +1,5 @@
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import type { Context } from '../core/context.js';
 import {
   getDangerousCapabilities,
@@ -12,10 +14,11 @@ import type {
   ToolExecutorOptions,
   ToolExecutorStrategy,
 } from '../types/tool-executor.js';
-import { expectDefined } from '../utils/expect-defined.js';
 import { toErrorMessage } from '../utils/error.js';
+import { expectDefined } from '../utils/expect-defined.js';
 import { validateAgainstSchema } from '../utils/json-schema-validate.js';
 import { createToolOutputSerializer } from '../utils/tool-output-serializer.js';
+import { wstackGlobalRoot } from '../utils/wstack-paths.js';
 export class ToolExecutor {
   /** Minimum gap between coalesced `partial_output` tool.progress emits. */
   static readonly PROGRESS_EMIT_INTERVAL_MS = 100;
@@ -178,7 +181,12 @@ export class ToolExecutor {
       // silently widen into arbitrary dangerous-capability execution.
       const authoritativeAuto = decision.source === 'yolo';
 
-      if (toolDangerousCaps.length > 0 && effectivePermission === 'auto' && !yolo && !authoritativeAuto) {
+      if (
+        toolDangerousCaps.length > 0 &&
+        effectivePermission === 'auto' &&
+        !yolo &&
+        !authoritativeAuto
+      ) {
         // Outside yolo we force at least 'confirm' for dangerous-capability tools.
         effectivePermission = 'confirm';
       }
@@ -360,13 +368,14 @@ export class ToolExecutor {
     });
     this.opts.renderer?.writeToolCall(tool.name, use.input);
     const output = await this.runWithTimeout(tool, use.input, ctx.signal, ctx, use.id);
-    const text = this.serializer.serialize(output);
+    const text = this.serializer.serialize(output, { toolName: tool.name, input: use.input });
     const scrubbed = this.opts.secretScrubber.scrub(text);
+    const withArtifact = await maybePersistLargeToolOutput(tool.name, scrubbed, budget);
     // enforceCap already walks the text to compute bytes for the budget
     // cap. Carry the residual budget back as `bytes` so the caller can
     // deduct the spend without a second `Buffer.byteLength` walk — and
     // never falls back to `JSON.stringify` on a structured value.
-    const { text: capped, newBudget } = this.serializer.enforceCap(scrubbed, budget);
+    const { text: capped, newBudget } = this.serializer.enforceCap(withArtifact, budget);
     this.opts.renderer?.writeToolResult(tool.name, capped, false);
     return {
       block: {
@@ -399,54 +408,44 @@ export class ToolExecutor {
       tool.timeoutMs ?? this.iterationTimeoutMs,
       this.maxToolTimeoutMs,
     );
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(new Error('tool timeout')), timeoutMs);
-    const combined = AbortSignal.any([parentSignal, ctrl.signal]);
-    let cleanupCalled = false;
-    let caught = false;
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const combined = AbortSignal.any([parentSignal, timeoutSignal]);
+
+    let output: unknown;
     try {
       // Streaming variant takes precedence — yields progress events, then
       // a final 'final' event with the typed output. Tools that don't
       // implement executeStream fall through to the standard execute path.
-      if (typeof tool.executeStream === 'function') {
-        return await this.runStreamedTool(tool, input, ctx, combined, toolUseId);
-      }
-      return await tool.execute(input, ctx, { signal: combined });
+      output =
+        typeof tool.executeStream === 'function'
+          ? await this.runStreamedTool(tool, input, ctx, combined, toolUseId)
+          : await tool.execute(input, ctx, { signal: combined });
     } catch (err) {
-      caught = true;
-      if (combined.aborted && typeof tool.cleanup === 'function') {
-        // Best-effort cleanup; never let it mask the original error.
-        cleanupCalled = true;
-        try {
-          await tool.cleanup(input, ctx);
-        } catch {
-          /* swallow */
-        }
-      }
+      // If aborted, run cleanup before re-throwing so the tool can release
+      // resources (child processes, file handles, network connections).
+      if (combined.aborted) await this.runToolCleanup(tool, input, ctx);
       throw err;
-    } finally {
-      clearTimeout(timer);
-      // If the tool completed successfully (no error thrown) but the combined
-      // signal was aborted (e.g. timeout), the catch block above never fired.
-      // Call cleanup here and then throw so the caller sees the abort.
-      // When `caught` is true, we already have an in-flight throw — don't
-      // override it from `finally` (that would replace the original error
-      // with the abort reason and mask the actual failure).
-      if (combined.aborted && !caught) {
-        if (!cleanupCalled && typeof tool.cleanup === 'function') {
-          try {
-            await tool.cleanup(input, ctx);
-          } catch {
-            /* swallow */
-          }
-        }
-        const reason =
-          combined.reason instanceof Error
-            ? combined.reason
-            : new Error(typeof combined.reason === 'string' ? combined.reason : 'aborted');
-        // biome-ignore lint/correctness/noUnsafeFinally: guarded by `!caught` — only runs when the tool returned cleanly but the signal aborted, so there is no in-flight exception to override.
-        throw reason;
-      }
+    }
+    // The tool returned without throwing, but the signal may have aborted (e.g.
+    // a timeout fired) while a tool that ignores the abort signal kept running.
+    // Treat that as an abort: clean up and surface the abort to the caller so a
+    // late, stale result is never returned as success.
+    if (combined.aborted) {
+      await this.runToolCleanup(tool, input, ctx);
+      throw combined.reason instanceof Error
+        ? combined.reason
+        : new Error(typeof combined.reason === 'string' ? combined.reason : 'tool timeout');
+    }
+    return output;
+  }
+
+  /** Best-effort tool cleanup; never let it mask the original error. */
+  private async runToolCleanup(tool: Tool, input: unknown, ctx: Context): Promise<void> {
+    if (typeof tool.cleanup !== 'function') return;
+    try {
+      await tool.cleanup(input, ctx);
+    } catch {
+      /* swallow — never let cleanup mask the original error */
     }
   }
 
@@ -683,5 +682,34 @@ function extractMalformedRaw(input: unknown): string | undefined {
     return JSON.stringify(value);
   } catch {
     return String(value);
+  }
+}
+
+const TOOL_OUTPUT_ARTIFACT_THRESHOLD_BYTES = 64 * 1024;
+
+async function maybePersistLargeToolOutput(
+  toolName: string,
+  content: string,
+  budget: number,
+): Promise<string> {
+  const bytes = Buffer.byteLength(content, 'utf8');
+  if (bytes <= Math.min(TOOL_OUTPUT_ARTIFACT_THRESHOLD_BYTES, Math.max(0, budget))) {
+    return content;
+  }
+
+  try {
+    const dir = path.join(wstackGlobalRoot(), 'tool-output');
+    await fs.mkdir(dir, { recursive: true });
+    const safeTool = toolName.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 40) || 'tool';
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const rand = Math.random().toString(36).slice(2, 8);
+    const filePath = path.join(dir, `${stamp}-${safeTool}-${rand}.log`);
+    await fs.writeFile(filePath, content, 'utf8');
+    return (
+      content +
+      `\n[full tool output: ${bytes} bytes at ${filePath}; read/grep that file selectively instead of re-running or requesting more output]`
+    );
+  } catch {
+    return content;
   }
 }

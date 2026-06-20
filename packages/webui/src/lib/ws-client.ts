@@ -411,6 +411,16 @@ export class WrongStackWebSocketClient {
     this.send({ type: 'git.info' });
   }
 
+  /** Request the working-tree change set (file list for the Changes panel). */
+  getGitChanges() {
+    this.send({ type: 'git.changes' });
+  }
+
+  /** Request the before/after content for one changed file. */
+  getGitDiff(path: string) {
+    this.send({ type: 'git.diff', payload: { path } });
+  }
+
   sendConfirm(id: string, decision: 'yes' | 'no' | 'always' | 'deny') {
     const pending = this.pendingConfirms.get(id);
     if (pending) {

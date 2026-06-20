@@ -23,6 +23,7 @@ import {
   useWorktreeStore,
   useFileStore,
   useGitInfoStore,
+  useGitChangesStore,
 } from '@/stores';
 import { useVizStore, wsToVizEvent } from '@/stores/viz-store';
 import type { LiveSession } from '@/stores/monitor-store';
@@ -905,6 +906,33 @@ export const WS_HANDLERS: Record<string, (msg: WSServerMessage) => void> = {
   'git.info': (msg: WSServerMessage) => {
     const p = msg.payload as { branch: string; added: number; deleted: number; untracked: number; behind: number; ahead: number };
     useGitInfoStore.getState().setInfo({ ...p, fetchedAt: Date.now() });
+  },
+  'git.changes': (msg: WSServerMessage) => {
+    const p = msg.payload as {
+      files: Array<{ path: string; status: string; added: number; deleted: number; staged: boolean }>;
+      error?: string | undefined;
+    };
+    useGitChangesStore.getState().setFiles(p.files ?? [], p.error ?? null);
+  },
+  'git.diff': (msg: WSServerMessage) => {
+    const p = msg.payload as {
+      path: string;
+      oldText?: string | undefined;
+      newText?: string | undefined;
+      binary?: boolean | undefined;
+      tooLarge?: boolean | undefined;
+      error?: string | undefined;
+    };
+    // Ignore a reply for a file the user has since navigated away from.
+    if (useGitChangesStore.getState().selectedPath !== p.path) return;
+    useGitChangesStore.getState().setDiff({
+      path: p.path,
+      oldText: p.oldText ?? '',
+      newText: p.newText ?? '',
+      binary: p.binary,
+      tooLarge: p.tooLarge,
+      error: p.error,
+    });
   },
   'coordinator.status': (msg) => {
   const p = msg.payload as { status: string; mode?: string; subagentCount?: number; taskQueue?: { pending: number; running: number; completed: number; failed: number } };

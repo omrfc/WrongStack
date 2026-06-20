@@ -22,6 +22,7 @@ import { MailboxPanel } from '../MailboxPanel';
 import { ProjectsPanel } from '../ProjectsPanel';
 import { Button } from '../ui/button';
 import { AgentsPanel } from './AgentsPanel';
+import { ChangesPanel } from './ChangesPanel';
 import { HistoryPanel } from './HistoryPanel';
 import { SessionPanel } from './SessionPanel';
 import { SkillsList } from './SkillsList';
@@ -32,6 +33,7 @@ const PANEL_TITLE: Record<Activity, string> = {
   agents: 'Agents',
   history: 'History',
   files: 'Files',
+  changes: 'Changes',
   projects: 'Projects',
   mailbox: 'Mailbox',
   skills: 'Skills',
@@ -114,6 +116,7 @@ export function SidePanel() {
             <FileExplorer />
           </div>
         )}
+        {activeActivity === 'changes' && <ChangesPanel />}
         {activeActivity === 'projects' && (
           <div className="flex-1 overflow-y-auto p-3">
             <ProjectsPanel />

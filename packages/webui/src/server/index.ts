@@ -117,7 +117,7 @@ import { send, broadcast, sendResult, errMessage, generateAuthToken } from './ws
 import { estimateContextBreakdown } from './token-estimator.js';
 import { createEternalSubscription } from './eternal-iteration-broadcast.js';
 import { handleShellOpen, type ShellOpenRequest, type ShellOpenResult } from './shell-open.js';
-import { handleGitInfo } from './git-handlers.js';
+import { handleGitChanges, handleGitDiff, handleGitInfo } from './git-handlers.js';
 // Re-export types — shared message shapes and options used by both the
 // standalone server and the CLI's `--webui` embedded mode.
 export type { WebUIOptions, BackendServices } from './types.js';
@@ -185,7 +185,7 @@ export {
 
 // Git info handler shared with CLI (git.info) — single source so the two
 // servers can't drift on ahead/behind / insertion-deletion parsing.
-export { handleGitInfo } from './git-handlers.js';
+export { handleGitChanges, handleGitDiff, handleGitInfo } from './git-handlers.js';
 
 // Memory operation handlers shared with CLI (memory.list, memory.remember, memory.forget)
 export {
@@ -2965,6 +2965,16 @@ export async function startWebUI(
         break;
       }
 
+      case 'git.changes': {
+        await handleGitChanges(ws, projectRoot);
+        break;
+      }
+
+      case 'git.diff': {
+        await handleGitDiff(ws, projectRoot, String((msg.payload as { path?: unknown })?.path ?? ''));
+        break;
+      }
+
       case 'webui.shutdown': {
         // `/exit` from the client. Trigger the same graceful teardown the
         // CLI-hosted server does — route through SIGINT so the registered
@@ -3429,6 +3439,19 @@ export async function startWebUI(
         } catch (err) {
           sendResult(ws, false, errMessage(err));
         }
+        break;
+      }
+
+      // ── Git changes / diff ───────────────────────────────────────────
+
+      case 'git.changes': {
+        await handleGitChanges(ws, projectRoot);
+        break;
+      }
+
+      case 'git.diff': {
+        const filePath = (msg as { payload?: { path?: string } }).payload?.path ?? '';
+        await handleGitDiff(ws, projectRoot, filePath);
         break;
       }
 

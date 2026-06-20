@@ -1983,7 +1983,7 @@ export function OfficeMapCanvas() {
       {selectedNode && (
         <div
           className={cn(
-            'absolute top-20 right-4 bg-slate-800/95 backdrop-blur border border-slate-700 rounded-lg p-4 shadow-xl z-20',
+            'absolute top-20 right-4 bg-background border border-border rounded-lg p-4 shadow-xl z-20',
             selectedNode.data.sessionId ? 'w-80' : 'w-64',
           )}
         >
@@ -1994,7 +1994,7 @@ export function OfficeMapCanvas() {
               {selectedNode.data.kind === 'coordinator' && <Cpu className="h-4 w-4 text-purple-500" />}
               {selectedNode.data.kind === 'agent' && <Bot className="h-4 w-4 text-cyan-500" />}
               {selectedNode.data.kind === 'mailbox' && <Mail className="h-4 w-4 text-yellow-500" />}
-              <span className="text-sm font-bold text-white">{selectedNode.data.label}</span>
+              <span className="text-sm font-bold text-foreground">{selectedNode.data.label}</span>
             </div>
             <div className="flex items-center gap-1.5">
               {selectedNode.data.sessionId && (
@@ -2007,14 +2007,14 @@ export function OfficeMapCanvas() {
                       label: selectedNode.data.label,
                     })
                   }
-                  className="text-gray-400 hover:text-cyan-300"
+                  className="text-muted-foreground hover:text-primary"
                 >
                   <Maximize2 className="h-3.5 w-3.5" />
                 </button>
               )}
               <button
                 onClick={onPaneClick}
-                className="text-gray-400 hover:text-white text-lg leading-none"
+                className="text-muted-foreground hover:text-foreground text-lg leading-none"
               >
                 ×
               </button>
@@ -2026,8 +2026,8 @@ export function OfficeMapCanvas() {
             const now = Date.now();
             const Row = ({ k, v, accent }: { k: string; v: React.ReactNode; accent?: string }) => (
               <div className="flex justify-between gap-3">
-                <span className="text-gray-400 shrink-0">{k}</span>
-                <span className={cn('font-mono truncate text-right', accent ?? 'text-gray-200')}>{v}</span>
+                <span className="text-muted-foreground shrink-0">{k}</span>
+                <span className={cn('font-mono truncate text-right', accent ?? 'text-foreground/80')}>{v}</span>
               </div>
             );
             const isAgent = d.kind === 'agent';
@@ -2039,49 +2039,49 @@ export function OfficeMapCanvas() {
                   k="Status"
                   v={String(d.status).toUpperCase()}
                   accent={cn(
-                    d.status === 'active' && 'text-emerald-400',
-                    d.status === 'streaming' && 'text-blue-400',
-                    d.status === 'error' && 'text-red-400',
-                    d.status === 'idle' && 'text-gray-400',
-                    d.status === 'offline' && 'text-gray-500',
+                    d.status === 'active' && 'text-emerald-600 dark:text-emerald-400',
+                    d.status === 'streaming' && 'text-blue-600 dark:text-blue-400',
+                    d.status === 'error' && 'text-destructive',
+                    d.status === 'idle' && 'text-muted-foreground',
+                    d.status === 'offline' && 'text-muted-foreground/50',
                   )}
                 />
 
                 {isAgent && (
                   <>
-                    {d.model && <Row k="Model" v={shortModel(d.model)} accent="text-cyan-400" />}
-                    {d.currentTask && <Row k="Tool" v={d.currentTask} accent="text-cyan-300" />}
-                    <Row k="Iterations" v={d.iteration || 0} accent="text-cyan-400" />
-                    <Row k="Tool calls" v={d.toolCalls || 0} accent="text-yellow-400" />
+                    {d.model && <Row k="Model" v={shortModel(d.model)} accent="text-cyan-600 dark:text-cyan-400" />}
+                    {d.currentTask && <Row k="Tool" v={d.currentTask} accent="text-cyan-600 dark:text-cyan-400" />}
+                    <Row k="Iterations" v={d.iteration || 0} accent="text-cyan-600 dark:text-cyan-400" />
+                    <Row k="Tool calls" v={d.toolCalls || 0} accent="text-amber-600 dark:text-amber-400" />
                     <Row k="Tokens in" v={fmtCompact(d.tokensIn)} />
                     <Row k="Tokens out" v={fmtCompact(d.tokensOut)} />
                     <Row k="Tokens total" v={fmtCompact(tokTotal)} />
                     {d.ctxPct != null && d.ctxPct > 0 && (
-                      <Row k="Context" v={`${d.ctxPct}%`} accent={d.ctxPct >= 90 ? 'text-red-400' : d.ctxPct >= 70 ? 'text-amber-400' : 'text-gray-300'} />
+                      <Row k="Context" v={`${d.ctxPct}%`} accent={d.ctxPct >= 90 ? 'text-destructive' : d.ctxPct >= 70 ? 'text-amber-600 dark:text-amber-400' : 'text-foreground/70'} />
                     )}
-                    <Row k="Cost" v={`$${(d.costUsd || 0).toFixed(4)}`} accent="text-emerald-400" />
-                    {d.lastActivityAt && <Row k="Last seen" v={fmtAgo(d.lastActivityAt, now)} accent="text-gray-400" />}
+                    <Row k="Cost" v={`$${(d.costUsd || 0).toFixed(4)}`} accent="text-emerald-600 dark:text-emerald-400" />
+                    {d.lastActivityAt && <Row k="Last seen" v={fmtAgo(d.lastActivityAt, now)} accent="text-muted-foreground" />}
                   </>
                 )}
 
                 {isClient && (
                   <>
-                    <Row k="Surface" v={surfaceLabel(d.kind as 'tui' | 'webui' | 'repl')} accent="text-gray-200" />
-                    {d.branch && <Row k="Branch" v={`⎇ ${d.branch}`} accent="text-gray-300" />}
+                    <Row k="Surface" v={surfaceLabel(d.kind as 'tui' | 'webui' | 'repl')} accent="text-foreground/80" />
+                    {d.branch && <Row k="Branch" v={`⎇ ${d.branch}`} accent="text-foreground/70" />}
                     {d.pid != null && <Row k="PID" v={d.pid} />}
-                    {d.workingDir && <Row k="Dir" v={d.workingDir} accent="text-gray-400" />}
-                    <Row k="Agents" v={d.agentCount ?? 0} accent="text-cyan-400" />
-                    {d.startedAt && <Row k="Uptime" v={fmtUptime(d.startedAt, now)} accent="text-gray-300" />}
+                    {d.workingDir && <Row k="Dir" v={d.workingDir} accent="text-muted-foreground" />}
+                    <Row k="Agents" v={d.agentCount ?? 0} accent="text-cyan-600 dark:text-cyan-400" />
+                    {d.startedAt && <Row k="Uptime" v={fmtUptime(d.startedAt, now)} accent="text-foreground/70" />}
                   </>
                 )}
 
                 {d.kind === 'mailbox' && (
                   <>
-                    <Row k="Total messages" v={d.messageCount || 0} accent="text-yellow-400" />
-                    <Row k="Unread" v={d.unreadCount || 0} accent="text-yellow-400" />
+                    <Row k="Total messages" v={d.messageCount || 0} accent="text-amber-600 dark:text-amber-400" />
+                    <Row k="Unread" v={d.unreadCount || 0} accent="text-amber-600 dark:text-amber-400" />
                     {mailboxMessages.length > 0 && (
-                      <div className="mt-1 space-y-1 border-t border-slate-700 pt-2">
-                        <div className="text-[10px] uppercase tracking-wide text-gray-500">Recent</div>
+                      <div className="mt-1 space-y-1 border-t border-border pt-2">
+                        <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Recent</div>
                         {[...mailboxMessages]
                           .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
                           .slice(0, 6)
@@ -2092,12 +2092,12 @@ export function OfficeMapCanvas() {
                                 <span
                                   className={cn(
                                     'mt-1 h-1.5 w-1.5 shrink-0 rounded-full',
-                                    unread ? 'bg-yellow-400' : m.completed ? 'bg-emerald-500' : 'bg-gray-600',
+                                    unread ? 'bg-amber-500' : m.completed ? 'bg-emerald-500' : 'bg-muted',
                                   )}
                                 />
                                 <div className="min-w-0 flex-1">
-                                  <div className="truncate text-gray-300">{m.subject || '(no subject)'}</div>
-                                  <div className="truncate font-mono text-[9px] text-gray-500">
+                                  <div className="truncate text-foreground/80">{m.subject || '(no subject)'}</div>
+                                  <div className="truncate font-mono text-[9px] text-muted-foreground">
                                     {m.from} → {m.to} · {fmtAgo(m.timestamp, now)}
                                   </div>
                                 </div>
@@ -2111,13 +2111,13 @@ export function OfficeMapCanvas() {
 
                 {d.kind === 'coordinator' && (
                   <>
-                    <Row k="Connections" v={d.connections || 0} accent="text-purple-400" />
-                    <Row k="Iterations" v={d.iteration || 0} accent="text-purple-400" />
+                    <Row k="Connections" v={d.connections || 0} accent="text-purple-600 dark:text-purple-400" />
+                    <Row k="Iterations" v={d.iteration || 0} accent="text-purple-600 dark:text-purple-400" />
                   </>
                 )}
 
                 {(isAgent || isClient) && d.sessionId && (
-                  <div className="mt-2 border-t border-slate-700 pt-2 h-72">
+                  <div className="mt-2 border-t border-border pt-2 h-72">
                     <SessionWatchPanel sessionId={d.sessionId} />
                   </div>
                 )}
@@ -2130,13 +2130,13 @@ export function OfficeMapCanvas() {
       {/* Expanded watch drawer — full-height, wide overlay on the right showing
           the selected agent/client's COMPLETE operation stream + composer. */}
       {watch && (
-        <div className="absolute inset-y-0 right-0 z-30 flex w-[min(680px,92%)] flex-col border-l border-slate-700 bg-slate-900/97 shadow-2xl backdrop-blur">
-          <div className="flex items-center justify-between border-b border-slate-700 px-4 py-2.5 shrink-0">
+        <div className="absolute inset-y-0 right-0 z-30 flex w-[min(680px,92%)] flex-col border-l border-border bg-background shadow-2xl">
+          <div className="flex items-center justify-between border-b border-border px-4 py-2.5 shrink-0 bg-card">
             <div className="flex items-center gap-2 min-w-0">
-              <Bot className="h-4 w-4 text-cyan-400 shrink-0" />
+              <Bot className="h-4 w-4 text-primary shrink-0" />
               <div className="min-w-0">
-                <div className="truncate text-sm font-bold text-white">{watch.label}</div>
-                <div className="text-[10px] uppercase tracking-wide text-cyan-400/70">
+                <div className="truncate text-sm font-bold text-foreground">{watch.label}</div>
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
                   Full operation stream
                 </div>
               </div>
@@ -2145,7 +2145,7 @@ export function OfficeMapCanvas() {
               type="button"
               onClick={() => setWatch(null)}
               title="Close (Esc)"
-              className="text-gray-400 hover:text-white text-xl leading-none shrink-0"
+              className="text-muted-foreground hover:text-foreground text-xl leading-none shrink-0"
             >
               ×
             </button>

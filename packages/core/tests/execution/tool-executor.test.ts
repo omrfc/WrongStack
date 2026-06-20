@@ -1,3 +1,6 @@
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Context } from '../../src/core/context.js';
 import { ToolExecutor } from '../../src/execution/tool-executor.js';
@@ -118,7 +121,10 @@ describe('ToolExecutor', () => {
     const runWith = async (policyExtra: Record<string, unknown>) => {
       const tool = bashish();
       const executor = makeExecutor([tool], {
-        permissionPolicy: { evaluate: vi.fn().mockResolvedValue(autoPermit()), ...policyExtra } as never,
+        permissionPolicy: {
+          evaluate: vi.fn().mockResolvedValue(autoPermit()),
+          ...policyExtra,
+        } as never,
         confirmAwaiter: undefined,
       });
       const r = await executor.executeBatch([makeUse('bash')], makeCtx(), 'sequential');
@@ -132,7 +138,10 @@ describe('ToolExecutor', () => {
     });
 
     it('skips the confirm net under regular --yolo (no prompt for shell)', async () => {
-      const { tool, result } = await runWith({ getYolo: () => true, getYoloDestructive: () => false });
+      const { tool, result } = await runWith({
+        getYolo: () => true,
+        getYoloDestructive: () => false,
+      });
       expect(result.type).toBe('tool_result');
       expect((result as ToolResultBlock).content).toContain('ran');
       expect(tool.execute).toHaveBeenCalledTimes(1);
@@ -184,26 +193,27 @@ describe('ToolExecutor', () => {
   });
 
   describe('executeBatch — malformed arguments', () => {
-    it.each([['__raw'], ['__raw_arguments'], ['_raw']])(
-      'returns an actionable error when input is wrapped under %s and never executes the tool',
-      async (marker) => {
-        const tool = makeTool({ name: 'edit', execute: vi.fn() });
-        const executor = makeExecutor([tool]);
-        const result = await executor.executeBatch(
-          [makeUse('edit', { [marker]: 'path=a.ts old=foo' })],
-          makeCtx(),
-          'sequential',
-        );
-        const output = result.outputs[0]!;
-        expect((output.result as ToolResultBlock).is_error).toBe(true);
-        expect((output.result as ToolResultBlock).content).toContain('not a valid JSON object');
-        // Echo the raw payload back so the model can self-correct instead of
-        // resending the identical malformed call in a loop.
-        expect((output.result as ToolResultBlock).content).toContain('path=a.ts old=foo');
-        expect(tool.execute).not.toHaveBeenCalled();
-        expect(policy.evaluate).not.toHaveBeenCalled();
-      },
-    );
+    it.each([
+      ['__raw'],
+      ['__raw_arguments'],
+      ['_raw'],
+    ])('returns an actionable error when input is wrapped under %s and never executes the tool', async (marker) => {
+      const tool = makeTool({ name: 'edit', execute: vi.fn() });
+      const executor = makeExecutor([tool]);
+      const result = await executor.executeBatch(
+        [makeUse('edit', { [marker]: 'path=a.ts old=foo' })],
+        makeCtx(),
+        'sequential',
+      );
+      const output = result.outputs[0]!;
+      expect((output.result as ToolResultBlock).is_error).toBe(true);
+      expect((output.result as ToolResultBlock).content).toContain('not a valid JSON object');
+      // Echo the raw payload back so the model can self-correct instead of
+      // resending the identical malformed call in a loop.
+      expect((output.result as ToolResultBlock).content).toContain('path=a.ts old=foo');
+      expect(tool.execute).not.toHaveBeenCalled();
+      expect(policy.evaluate).not.toHaveBeenCalled();
+    });
 
     it('truncates an oversized raw payload in the feedback message', async () => {
       const tool = makeTool({ name: 'edit', execute: vi.fn() });
@@ -538,6 +548,29 @@ describe('ToolExecutor', () => {
       expect(renderer.writeToolCall).toHaveBeenCalledWith('read', expect.anything());
       expect(renderer.writeToolResult).toHaveBeenCalledWith('read', expect.anything(), false);
     });
+
+    it('persists oversized generic tool output and leaves a selectable artifact marker', async () => {
+      const oldHome = process.env['WRONGSTACK_HOME'];
+      const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-tool-output-'));
+      process.env['WRONGSTACK_HOME'] = tempHome;
+      try {
+        const tool = makeTool({
+          name: 'large',
+          execute: vi.fn().mockResolvedValue('x'.repeat(70_000)),
+        });
+        const executor = makeExecutor([tool]);
+        const result = await executor.executeBatch([makeUse('large')], makeCtx(), 'sequential');
+        const content = String((result.outputs[0]!.result as ToolResultBlock).content);
+        expect(content).toContain('[full tool output:');
+        const match = / at (.*?); read\/grep/.exec(content);
+        expect(match?.[1]).toBeTruthy();
+        await expect(fs.stat(match![1]!)).resolves.toBeTruthy();
+      } finally {
+        if (oldHome === undefined) delete process.env['WRONGSTACK_HOME'];
+        else process.env['WRONGSTACK_HOME'] = oldHome;
+        await fs.rm(tempHome, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('executeTool — pre-aborted signal', () => {
@@ -671,9 +704,7 @@ describe('ToolExecutor', () => {
         'parallel',
       );
       expect(result.outputs).toHaveLength(2);
-      const errors = result.outputs.filter(
-        (o) => (o.result as ToolResultBlock).is_error === true,
-      );
+      const errors = result.outputs.filter((o) => (o.result as ToolResultBlock).is_error === true);
       expect(errors.length).toBeGreaterThanOrEqual(1);
     });
   });
@@ -798,7 +829,11 @@ describe('ToolExecutor', () => {
       const tool = makeTool({ name: 'a', execute: vi.fn().mockResolvedValue({ ok: true }) });
       const executor = makeExecutor([tool]);
       // @ts-expect-error intentionally testing with null entry
-      const result = await executor.executeBatch([null, makeUse('a'), undefined], makeCtx(), 'sequential');
+      const result = await executor.executeBatch(
+        [null, makeUse('a'), undefined],
+        makeCtx(),
+        'sequential',
+      );
       expect(result.outputs).toHaveLength(1); // only 'a' was executed
       expect(tool.execute).toHaveBeenCalledTimes(1);
     });

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { MailboxMessage } from './mailbox-store';
 
 // ============================================
 // UI Store
@@ -8,9 +9,9 @@ import { persist } from 'zustand/middleware';
 // Activity types shown in the ActivityBar (secondary panel content).
 // One icon = one full panel. 'context' and 'sessions' were folded into
 // 'chat' and 'history' — coerceActivity maps persisted legacy values.
-export type Activity = 'chat' | 'agents' | 'history' | 'files' | 'projects' | 'mailbox' | 'skills' | 'officemap';
+export type Activity = 'chat' | 'agents' | 'history' | 'files' | 'changes' | 'projects' | 'mailbox' | 'skills' | 'officemap';
 
-const ACTIVITIES: readonly Activity[] = ['chat', 'agents', 'history', 'files', 'projects', 'mailbox', 'skills', 'officemap'];
+const ACTIVITIES: readonly Activity[] = ['chat', 'agents', 'history', 'files', 'changes', 'projects', 'mailbox', 'skills', 'officemap'];
 
 /** Map any persisted (possibly legacy) activity value onto the current set. */
 export function coerceActivity(value: unknown): Activity {
@@ -34,7 +35,7 @@ interface UIState {
   /** Which activity icon is selected in the ActivityBar — controls secondary panel content. */
   activeActivity: Activity;
   settingsOpen: boolean;
-  currentView: 'chat' | 'settings' | 'autophase' | 'files' | 'sessions' | 'setup' | 'skill' | 'officemap' | 'debug';
+  currentView: 'chat' | 'settings' | 'autophase' | 'files' | 'changes' | 'sessions' | 'setup' | 'skill' | 'officemap' | 'mailbox' | 'debug';
   showConfirmDialog: boolean;
   confirmInfo: {
     id: string;
@@ -95,6 +96,10 @@ interface UIState {
     updateAvailableCount: number;
   };
   setSkillsState: (state: UIState['skillsState']) => void;
+
+  /** The mailbox message currently shown in the main-area detail view. */
+  selectedMailMessage: MailboxMessage | null;
+  setSelectedMailMessage: (msg: MailboxMessage | null) => void;
 
   /** Active prompt-refinement panel. Set while RefinePanel is shown. Null when no refinement is pending. */
   refinePanel: {
@@ -169,6 +174,7 @@ export const useUIStore = create<UIState>()(
       inspectorTab: 'fleet',
       processMonitorOpen: false,
       queuePanelOpen: false,
+      selectedMailMessage: null,
       skillsState: {
         selectedSkill: null,
         navHistory: [],
@@ -242,6 +248,7 @@ export const useUIStore = create<UIState>()(
       setProcessMonitorOpen: (open: boolean) => set({ processMonitorOpen: open }),
       setQueuePanelOpen: (open: boolean) => set({ queuePanelOpen: open }),
       setSkillsState: (state) => set({ skillsState: state }),
+      setSelectedMailMessage: (msg) => set({ selectedMailMessage: msg }),
     }),
     {
       name: 'wrongstack-ui',

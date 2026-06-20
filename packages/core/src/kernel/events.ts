@@ -8,6 +8,7 @@ import type { Context } from '../core/context.js';
 import type { MemoryClearedPayload, MemoryConsolidatedPayload, MemoryForgottenPayload, MemoryRememberedPayload } from '../types/memory.js';
 import type { Usage } from '../types/provider.js';
 import type { Tool, ToolProgressEvent } from '../types/tool.js';
+import type { ToolOutputMetadata } from '../types/context-evidence.js';
 
 export interface EventMap {
   'brain.decision_requested': { request: BrainDecisionRequest; at: number };
@@ -217,6 +218,13 @@ export interface EventMap {
      * actual lines the model received and forwards it here. Undefined
      * for tools without a meaningful line count. */
     outputLines?: number | undefined;
+    /**
+     * Parsed context-management metadata for the result the model saw. This is
+     * intentionally compact: file/symbol/error/path-integrity hints, not the
+     * full output body. Compaction uses it to distinguish seen information from
+     * information later referenced by the assistant.
+     */
+    metadata?: ToolOutputMetadata | undefined;
   };
   /**
    * Fired by the `delegate` tool right before it hands work to a subagent
@@ -332,6 +340,19 @@ export interface EventMap {
     load: number;
     /** Provider's max context window in tokens. */
     maxContext: number;
+    /** Budget snapshot used for the compaction decision. */
+    budget?: {
+      maxContext: number;
+      inputTokens: number;
+      availableInputTokens: number;
+      remainingInputTokens: number;
+      reservedOutputTokens: number;
+      reservedSafetyTokens: number;
+      load: number;
+      overflowTokens: number;
+    } | undefined;
+    /** Adaptive trigger signals observed alongside token pressure. */
+    signals?: { repeatedReadCount?: number | undefined } | undefined;
     /** Full compaction report from the compactor. */
     report: { before: number; after: number; reductions: { phase: string; saved: number }[] };
     /** Whether aggressive (summary) mode was used. */
@@ -350,6 +371,17 @@ export interface EventMap {
     level: 'warn' | 'soft' | 'hard';
     tokens: number;
     maxContext: number;
+    budget?: {
+      maxContext: number;
+      inputTokens: number;
+      availableInputTokens: number;
+      remainingInputTokens: number;
+      reservedOutputTokens: number;
+      reservedSafetyTokens: number;
+      load: number;
+      overflowTokens: number;
+    } | undefined;
+    signals?: { repeatedReadCount?: number | undefined } | undefined;
     load: number;
     fatal: boolean;
   };

@@ -3,8 +3,10 @@ import type { TextBlock } from '../types/blocks.js';
 import type { Message } from '../types/messages.js';
 import type { Provider, Usage } from '../types/provider.js';
 import type { SessionWriter } from '../types/session.js';
+import type { ContextEvidenceState } from '../types/context-evidence.js';
 import type { TokenCounter } from '../types/token-counter.js';
 import type { Tool } from '../types/tool.js';
+import { createContextEvidenceState } from '../utils/context-evidence.js';
 import { ConversationState } from './conversation-state.js';
 import type { RunEnv } from './run-env.js';
 
@@ -88,6 +90,7 @@ export class Context implements RunEnv {
   todos: TodoItem[] = [];
   readFiles = new Set<string>();
   fileMtimes = new Map<string, number>();
+  contextEvidence: ContextEvidenceState = createContextEvidenceState();
   systemPrompt: TextBlock[];
   provider: Provider;
   session: SessionWriter;

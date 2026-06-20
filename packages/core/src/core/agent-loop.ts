@@ -8,6 +8,7 @@ import type { ContentBlock, TextBlock } from '../types/blocks.js';
 import { isTextBlock, isToolUseBlock } from '../types/blocks.js';
 import { toWrongStackError } from '../types/errors.js';
 import { estimateRequestTokens, estimateRequestTokensCalibrated, getCalibrationState, recordActualUsage } from '../utils/token-estimate.js';
+import { recordUserIntentEvidence } from '../utils/context-evidence.js';
 import { toErrorMessage } from '../utils/error.js';
 import { consumeAutonomousContinue } from './continue-to-next-iteration.js';
 import { buildBtwBlock, consumeBtwNotes } from './btw.js';
@@ -323,6 +324,7 @@ export function createAgentLoopHandler(
     autonomousContinue: boolean,
   ): Promise<RunResult> {
     await a.pipelines.userInput.run(inputPayload);
+    recordUserIntentEvidence(a.ctx, inputPayload.text);
     a.ctx.state.appendMessage({ role: 'user', content: inputPayload.content });
     await a.ctx.session.append({
       type: 'user_input',

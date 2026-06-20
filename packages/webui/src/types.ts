@@ -656,6 +656,8 @@ export type WSClientMessage =
   | { type: 'process.kill'; payload: { pid: number } }
   | { type: 'process.killAll' }
   | { type: 'git.info' }
+  | { type: 'git.changes' }
+  | { type: 'git.diff'; payload: { path: string } }
   | { type: 'goal.get' }
   | { type: 'autonomy.switch'; payload: { mode: string } }
   | { type: 'prefs.update'; payload: Record<string, unknown> }
@@ -767,6 +769,8 @@ export type WSServerMessage =
   | { type: 'prefs.updated'; payload: Record<string, unknown> }
   | { type: 'process.list'; payload: { processes: Array<{ pid: number; command: string; tool: string; startedAt: number; status: 'running' | 'exited' | 'killed'; protected?: boolean | undefined }> } }
   | { type: 'git.info'; payload: { branch: string; added: number; deleted: number; untracked: number; behind: number; ahead: number } }
+  | { type: 'git.changes'; payload: { files: Array<{ path: string; status: string; added: number; deleted: number; staged: boolean }>; error?: string | undefined } }
+  | { type: 'git.diff'; payload: { path: string; oldText?: string | undefined; newText?: string | undefined; binary?: boolean | undefined; tooLarge?: boolean | undefined; error?: string | undefined } }
   | { type: 'projects.list'; payload: { projects: Array<{ name: string; root: string; slug: string; lastSeen?: string | undefined }> } }
   | { type: 'projects.added'; payload: { name: string; root: string; slug: string; message: string } }
   | { type: 'projects.selected'; payload: { root: string; name: string; message: string } }

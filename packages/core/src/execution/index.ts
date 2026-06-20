@@ -7,7 +7,10 @@ export {
   type CompactorStrategy,
   type StrategyCompactorOptions,
 } from './strategy-compactor.js';
-export { AutoCompactionMiddleware } from './auto-compaction-middleware.js';
+export {
+  AutoCompactionMiddleware,
+  type ContextWindowBudgetSnapshot,
+} from './auto-compaction-middleware.js';
 export { ToolExecutor } from './tool-executor.js';
 export {
   AutonomousRunner,

@@ -8,6 +8,7 @@ import { ActivityBar, openPanel, PANEL_ORDER } from './components/ActivityBar';
 import { AutoPhaseView } from './components/AutoPhaseView';
 import { ChatView } from './components/ChatView';
 import { CodeEditor } from './components/CodeEditor';
+import { ChangesView } from './components/ChangesView';
 import { CommandPalette, downloadChatAsMarkdown } from './components/CommandPalette';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { ConfirmModalHost } from './components/ConfirmModal';
@@ -27,6 +28,7 @@ import { FleetMonitor } from './components/FleetMonitor';
 import { InspectorPanel } from './components/InspectorPanel';
 import { ProcessMonitor } from './components/ProcessMonitor';
 import { QueuePanel } from './components/QueuePanel';
+import { MailboxDetailView } from './components/MailboxDetailView';
 import { SkillDetailView } from './components/SkillDetailView';
 import { OfficeMapPanel } from './components/OfficeMapPanel';
 import { DebugDashboard } from './components/DebugDashboard';
@@ -340,6 +342,12 @@ function AppInner() {
 
         {/* ── IDE Code Editor (only in Files view) ── */}
         {currentView === 'files' && <CodeEditor />}
+
+        {/* ── Source-control diff — file list lives in the SidePanel ── */}
+        {currentView === 'changes' && <ChangesView className="h-full" />}
+
+        {/* ── Mailbox detail — wide main area; list lives in the SidePanel ── */}
+        {currentView === 'mailbox' && <MailboxDetailView className="h-full" />}
 
         {/* ── Skill detail — wide main area; list lives in the SidePanel ── */}
         {currentView === 'skill' && (

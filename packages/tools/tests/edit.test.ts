@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { editTool } from '../src/edit.js';
 import { readTool } from '../src/read.js';
-import { type Sandbox, mkSandbox, newSignal } from './fixtures.js';
+import { mkSandbox, newSignal, type Sandbox } from './fixtures.js';
 
 describe('edit tool', () => {
   let sb: Sandbox;
@@ -47,13 +47,16 @@ describe('edit tool', () => {
     ).rejects.toThrow(/not a regular file/);
   });
 
-  it('requires prior read', async () => {
+  it('auto-reads when no prior read is recorded and the edit is unambiguous', async () => {
     await fs.writeFile(path.join(sb.dir, 'a.txt'), 'hello world');
-    await expect(
-      editTool.execute({ path: 'a.txt', old_string: 'hello', new_string: 'hi' }, sb.ctx, {
-        signal: newSignal(),
-      }),
-    ).rejects.toThrow(/not read/);
+    const out = await editTool.execute(
+      { path: 'a.txt', old_string: 'hello', new_string: 'hi' },
+      sb.ctx,
+      { signal: newSignal() },
+    );
+    expect(out.replacements).toBe(1);
+    expect(out.note).toMatch(/auto-read/);
+    expect(await fs.readFile(path.join(sb.dir, 'a.txt'), 'utf8')).toBe('hi world');
   });
 
   it('single replacement succeeds', async () => {
@@ -77,6 +80,16 @@ describe('edit tool', () => {
         signal: newSignal(),
       }),
     ).rejects.toThrow(/matched 3 times/);
+  });
+
+  it('auto-read still refuses ambiguous edits', async () => {
+    await fs.writeFile(path.join(sb.dir, 'a.txt'), 'foo\nfoo\nfoo\n');
+    await expect(
+      editTool.execute({ path: 'a.txt', old_string: 'foo', new_string: 'bar' }, sb.ctx, {
+        signal: newSignal(),
+      }),
+    ).rejects.toThrow(/matched 3 times/);
+    expect(await fs.readFile(path.join(sb.dir, 'a.txt'), 'utf8')).toBe('foo\nfoo\nfoo\n');
   });
 
   it('replace_all replaces all occurrences', async () => {

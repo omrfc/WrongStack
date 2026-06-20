@@ -4,6 +4,7 @@ import type { ContextWindowPolicy } from '../types/context-window.js';
 import type { Message } from '../types/messages.js';
 import { estimateRequestTokens } from '../utils/token-estimate.js';
 import { repairToolUseAdjacency } from '../utils/message-invariants.js';
+import { buildContextEvidenceDigest } from '../utils/context-evidence.js';
 import {
   buildLosslessDigest,
   buildSmartDigest,
@@ -69,10 +70,12 @@ export class HybridCompactor implements Compactor {
     // Preserves ALL textual content (instructions, decisions, conclusions);
     // only raw tool I/O is dropped (it remains in the session log). No sub-LLM call.
     let collapsedDigest: string | undefined;
+    let evidenceDigest: string | undefined;
     if (opts.aggressive) {
       const phase2 = this.collapseAncientTurns(ctx, preserveK);
       if (phase2.saved > 0) reductions.push({ phase: 'summary', saved: phase2.saved });
       collapsedDigest = phase2.digest;
+      evidenceDigest = phase2.evidenceDigest;
     }
 
     const repaired = repairToolUseAdjacency(ctx.messages);
@@ -82,6 +85,11 @@ export class HybridCompactor implements Compactor {
 
     const afterTokens = estimateMessages(ctx.messages);
     const afterFull = this.estimateFullRequest(ctx);
+    const quality = checkCompactionQuality(ctx, {
+      collapsedDigest,
+      evidenceDigest,
+      reduced: beforeTokens > afterTokens || beforeFull > afterFull,
+    });
     return {
       before: beforeTokens,
       after: afterTokens,
@@ -89,6 +97,8 @@ export class HybridCompactor implements Compactor {
       fullRequestTokensAfter: afterFull,
       reductions,
       collapsedDigest,
+      evidenceDigest,
+      quality,
       repaired: repaired.report.changed
         ? {
             removedToolUses: repaired.report.removedToolUses,
@@ -121,7 +131,7 @@ export class HybridCompactor implements Compactor {
   private collapseAncientTurns(
     ctx: Context,
     preserveK = this.preserveK,
-  ): { saved: number; digest?: string | undefined } {
+  ): { saved: number; digest?: string | undefined; evidenceDigest?: string | undefined } {
     const messages = ctx.messages;
     const cutTarget = Math.max(0, messages.length - preserveK * 2);
     if (cutTarget <= 0) return { saved: 0 };
@@ -141,12 +151,17 @@ export class HybridCompactor implements Compactor {
     const removed = messages.slice(0, boundary);
     const removedTokens = estimateMessages(removed);
 
-    const digest =
+    const historyDigest =
       this.smart
         ? buildSmartDigest(removed) ||
-          `${removed.length} earlier turns (no textual content; tool I/O omitted — see session log)`
+          `${removed.length} earlier turns (no textual content; tool I/O omitted; see session log)`
         : buildLosslessDigest(removed) ||
-          `${removed.length} earlier turns (no textual content; tool I/O omitted — see session log)`;
+          `${removed.length} earlier turns (no textual content; tool I/O omitted; see session log)`;
+
+    const evidenceDigest = buildContextEvidenceDigest(ctx);
+    const digest = evidenceDigest
+      ? `[context_state]\n${evidenceDigest}\n\n[prior_history]\n${historyDigest}`
+      : historyDigest;
 
     const summaryMsg: Message = {
       role: 'system',
@@ -159,8 +174,36 @@ export class HybridCompactor implements Compactor {
     return {
       saved: Math.max(0, removedTokens - estimateMessages([summaryMsg])),
       digest,
+      evidenceDigest: evidenceDigest || undefined,
     };
   }
+}
+
+function checkCompactionQuality(
+  ctx: Context,
+  opts: {
+    collapsedDigest?: string | undefined;
+    evidenceDigest?: string | undefined;
+    reduced: boolean;
+  },
+): CompactReport['quality'] {
+  const evidence = ctx.contextEvidence;
+  const digest = `${opts.collapsedDigest ?? ''}\n${opts.evidenceDigest ?? ''}`;
+  const hasIntent = Boolean(evidence?.currentIntent?.text || /\b(intent|goal|session_goals)\b/i.test(digest));
+  const hasPathTrail = Boolean(
+    Object.keys(evidence?.fileGraph ?? {}).length > 0 ||
+      (evidence?.toolCalls.length ?? 0) > 0 ||
+      /\b(dependency_graph|tool_trail|files=)\b/i.test(digest),
+  );
+  const issues: string[] = [];
+  if (opts.reduced && !hasIntent) issues.push('missing intent anchor');
+  if (opts.reduced && !hasPathTrail) issues.push('missing tool/path trail');
+  return {
+    ok: issues.length === 0,
+    hasIntent,
+    hasPathTrail,
+    issues,
+  };
 }
 
 function readContextWindowPolicy(ctx: Context): ContextWindowPolicy | null {

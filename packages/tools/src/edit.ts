@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises';
+import type { Tool } from '@wrongstack/core';
 import {
   atomicWrite,
   detectNewlineStyle,
@@ -6,7 +7,6 @@ import {
   toStyle,
   unifiedDiff,
 } from '@wrongstack/core';
-import type { Tool } from '@wrongstack/core';
 import { safeResolveReal } from './_util.js';
 
 interface EditInput {
@@ -26,6 +26,7 @@ interface EditOutput {
   path: string;
   replacements: number;
   diff: string;
+  note?: string | undefined;
 }
 
 export const editTool: Tool<EditInput, EditOutput> = {
@@ -33,15 +34,15 @@ export const editTool: Tool<EditInput, EditOutput> = {
   category: 'Filesystem',
   description:
     'Perform a precise, surgical text replacement in a file. This is the preferred tool for modifying existing code. ' +
-    'It requires that you have previously called `read` on the file in the current session. ' +
+    'It works best after a prior `read`, but can auto-read the current file when the replacement is still unambiguous. ' +
     'Fails safely if the `old_string` appears more than once unless `replace_all` is set.',
   usageHint:
-    'MANDATORY WORKFLOW:\n' +
-    '1. Call `read` on the target file first (in the same conversation).\n' +
+    'RECOMMENDED WORKFLOW:\n' +
+    '1. Prefer calling `read` on the target file first when planning an edit.\n' +
     '2. Use a sufficiently unique `old_string` (include surrounding lines/context if needed).\n' +
     '3. If the string appears multiple times and you want to change all of them, set `replace_all: true`.\n' +
     '4. `new_string` must be the exact replacement text.\n\n' +
-    'This tool is much safer than `write` for existing files because it works against the last-read version.',
+    'If no prior read is recorded, the tool auto-reads the current file and only applies the edit after the same ambiguity checks pass.',
   permission: 'confirm',
   mutating: true,
   capabilities: ['fs.write'],
@@ -72,10 +73,7 @@ export const editTool: Tool<EditInput, EditOutput> = {
     });
     if (!stat.isFile()) throw new Error(`edit: "${input.path}" is not a regular file`);
 
-    // Read-before-write invariant
-    if (!ctx.hasRead(absPath)) {
-      throw new Error(`edit: file "${input.path}" was not read in this session. Read it first.`);
-    }
+    const autoRead = !ctx.hasRead(absPath);
     // Read BEFORE mtime check to eliminate TOCTOU window.
     // The sequence must be: read content → check mtime → apply edit.
     // If we check mtime first, a concurrent modification between the
@@ -87,16 +85,24 @@ export const editTool: Tool<EditInput, EditOutput> = {
     if (lastReadMtime !== undefined && updated.mtimeMs > lastReadMtime + mtimeTolerance) {
       throw new Error(`edit: file "${input.path}" was modified externally. Re-read it first.`);
     }
+    if (autoRead && updated.mtimeMs > stat.mtimeMs + mtimeTolerance) {
+      throw new Error(`edit: file "${input.path}" changed while being auto-read. Retry the edit.`);
+    }
+    const autoReadNote = autoRead
+      ? `No prior read was recorded for "${input.path}"; edit auto-read the current file and applied the replacement only after the ambiguity checks passed.`
+      : undefined;
     const style = detectNewlineStyle(original);
     const fileLf = normalizeToLf(original);
     const oldLf = normalizeToLf(input.old_string);
     const newLf = normalizeToLf(input.new_string);
 
     if (oldLf === newLf) {
+      if (autoRead) ctx.recordRead(absPath, updated.mtimeMs);
       return {
         path: absPath,
         replacements: 0,
         diff: '(no-op: old and new are identical)',
+        note: autoReadNote,
       };
     }
 
@@ -152,6 +158,7 @@ export const editTool: Tool<EditInput, EditOutput> = {
       path: absPath,
       replacements: input.replace_all ? count : 1,
       diff,
+      note: autoReadNote,
     };
   },
 };

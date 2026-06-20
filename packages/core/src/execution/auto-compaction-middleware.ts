@@ -9,9 +9,21 @@ import {
   estimateRequestTokensCalibrated,
   getCalibrationState,
 } from '../utils/token-estimate.js';
+import { repeatedReadPressure } from '../utils/context-evidence.js';
 
 type PressureLevel = 'warn' | 'soft' | 'hard';
 const LEVEL_RANK: Record<PressureLevel, number> = { warn: 0, soft: 1, hard: 2 };
+
+export interface ContextWindowBudgetSnapshot {
+  maxContext: number;
+  inputTokens: number;
+  availableInputTokens: number;
+  remainingInputTokens: number;
+  reservedOutputTokens: number;
+  reservedSafetyTokens: number;
+  load: number;
+  overflowTokens: number;
+}
 
 /** Max chars of collapse digest persisted to the session log line. */
 const MAX_DIGEST_LOG_CHARS = 4_000;
@@ -203,21 +215,26 @@ export class AutoCompactionMiddleware {
         this._cachedMsgCount = msgCount;
         this._cachedToolCount = toolCount;
       }
-      const load = tokens / this._maxContext;
+      const budget = computeContextWindowBudget(ctx, tokens, this._maxContext);
+      const load = budget.load;
       const policy = this.policyProvider?.(ctx);
       const thresholds = policy?.thresholds ?? {
         warn: this.warnThreshold,
         soft: this.softThreshold,
         hard: this.hardThreshold,
       };
+      const repetition = repeatedReadPressure(ctx);
+      const adaptiveThresholds = adaptThresholdsForSignals(thresholds, {
+        repeatedReadCount: repetition,
+      });
       const aggressiveOn = policy?.aggressiveOn ?? this.aggressiveOn;
 
       const level: PressureLevel | null =
-        load >= thresholds.hard
+        load >= adaptiveThresholds.hard
           ? 'hard'
-          : load >= thresholds.soft
+          : load >= adaptiveThresholds.soft
             ? 'soft'
-            : load >= thresholds.warn
+            : load >= adaptiveThresholds.warn
               ? 'warn'
               : null;
 
@@ -239,7 +256,13 @@ export class AutoCompactionMiddleware {
             ? aggressiveOn !== 'hard'
             : aggressiveOn === 'warn';
 
-      await this.compact(ctx, aggressive, { level, tokens, load });
+      await this.compact(ctx, aggressive, {
+        level,
+        tokens,
+        load,
+        budget,
+        signals: { repeatedReadCount: repetition },
+      });
 
       return next(ctx);
     };
@@ -299,7 +322,13 @@ export class AutoCompactionMiddleware {
   private async compact(
     ctx: Context,
     aggressive: boolean,
-    pressure: { level: PressureLevel; tokens: number; load: number },
+    pressure: {
+      level: PressureLevel;
+      tokens: number;
+      load: number;
+      budget: ContextWindowBudgetSnapshot;
+      signals: { repeatedReadCount: number };
+    },
   ): Promise<void> {
     try {
       const report = await this.compactor.compact(ctx, { aggressive });
@@ -309,6 +338,8 @@ export class AutoCompactionMiddleware {
         tokens: pressure.tokens,
         load: pressure.load,
         maxContext: this._maxContext,
+        budget: pressure.budget,
+        signals: pressure.signals,
         report,
         aggressive,
       });
@@ -324,6 +355,8 @@ export class AutoCompactionMiddleware {
         level: pressure.level,
         aggressive,
         reductions: report.reductions?.map((r) => ({ phase: r.phase, saved: r.saved })),
+        budget: pressure.budget,
+        signals: pressure.signals,
         // Record what was collapsed so the audit trail shows the preserved
         // content, not just token counts. Bounded to keep the log line small;
         // the full original turns are already in the session JSONL.
@@ -346,6 +379,8 @@ export class AutoCompactionMiddleware {
         level: pressure.level,
         tokens: pressure.tokens,
         maxContext: this._maxContext,
+        budget: pressure.budget,
+        signals: pressure.signals,
         load: pressure.load,
         fatal,
       });
@@ -364,4 +399,52 @@ export class AutoCompactionMiddleware {
       }
     }
   }
+}
+
+function computeContextWindowBudget(
+  ctx: Context,
+  inputTokens: number,
+  maxContext: number,
+): ContextWindowBudgetSnapshot {
+  const reservedOutputTokens = readPositiveMetaNumber(ctx, 'contextOutputReserveTokens') ??
+    Math.floor(Math.min(8192, maxContext * 0.08));
+  const reservedSafetyTokens = readPositiveMetaNumber(ctx, 'contextSafetyBufferTokens') ??
+    Math.floor(Math.min(4096, maxContext * 0.02));
+  const availableInputTokens = Math.max(
+    1,
+    maxContext - reservedOutputTokens - reservedSafetyTokens,
+  );
+  const remainingInputTokens = availableInputTokens - inputTokens;
+  return {
+    maxContext,
+    inputTokens,
+    availableInputTokens,
+    remainingInputTokens,
+    reservedOutputTokens,
+    reservedSafetyTokens,
+    load: inputTokens / availableInputTokens,
+    overflowTokens: Math.max(0, -remainingInputTokens),
+  };
+}
+
+function readPositiveMetaNumber(ctx: Context, key: string): number | undefined {
+  const value = ctx.meta?.[key];
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : undefined;
+}
+
+function adaptThresholdsForSignals(
+  thresholds: { warn: number; soft: number; hard: number },
+  signals: { repeatedReadCount: number },
+): { warn: number; soft: number; hard: number } {
+  if (signals.repeatedReadCount < 3) return thresholds;
+  // Re-reading the same file repeatedly is a strong sign of shrinking-spiral
+  // behavior. Lower only warn/soft a little so compaction can refresh anchors
+  // before the hard overflow path, but keep hard fixed as the safety boundary.
+  return {
+    warn: Math.max(0.25, thresholds.warn - 0.08),
+    soft: Math.max(0.35, thresholds.soft - 0.04),
+    hard: thresholds.hard,
+  };
 }

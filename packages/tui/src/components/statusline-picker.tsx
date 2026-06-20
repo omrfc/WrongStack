@@ -109,21 +109,25 @@ export interface StatuslinePickerProps {
 /** Total number of statusline fields. */
 export const STATUSLINE_FIELD_COUNT = Object.keys(ITEM_LINE).length;
 
-/** Ordered list of statusline items — same order as ALL_CONFIG_KEYS in the CLI. */
+/** Ordered list of statusline items — grouped by display line, then alphabetically within each line for consistent navigation. */
 export const STATUSLINE_ITEMS: StatuslineItem[] = [
-  'todos',
-  'plan',
-  'tasks',
-  'fleet',
-  'git',
-  'elapsed',
+  // Line 1
   'context',
   'cost',
+  // Line 2
+  'elapsed',
+  'git',
   'working_dir',
+  // Line 3
   'brain',
-  'mailbox',
-  'enhance',
   'debug_stream',
+  'enhance',
+  'mailbox',
+  'plan',
+  'tasks',
+  'todos',
+  // Line 4
+  'fleet',
 ];
 
 /** Stream-triggered chips — these auto-expire unless the user has toggled them on permanently. */

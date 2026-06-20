@@ -6,6 +6,7 @@
 import type { Request, Response } from '../types/provider.js';
 import { isTextBlock } from '../types/blocks.js';
 import { repairToolUseAdjacency } from '../utils/message-invariants.js';
+import { markAssistantReferencedEvidence } from '../utils/context-evidence.js';
 import { parseContinueDirective, type ContinueDirective } from './continue-to-next-iteration.js';
 import type { RunOptions } from './context.js';
 import type { AgentInternals } from './agent-internals.js';
@@ -117,6 +118,7 @@ export function createAgentResponseHandler(a: AgentInternals): AgentResponseHand
       }
     }
     const finalText = parts.join('');
+    markAssistantReferencedEvidence(a.ctx, finalText);
 
     let directive: ContinueDirective = 'none';
     if (finalText) {

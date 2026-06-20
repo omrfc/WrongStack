@@ -265,7 +265,7 @@ export function eliseOldToolResults(
       const elided: ToolResultBlock = {
         type: 'tool_result',
         tool_use_id: b.tool_use_id,
-        content: `[elided: ~${tokens} tokens]`,
+        content: summarizeToolResultElision(b, tokens),
         is_error: b.is_error,
       };
       return elided;
@@ -331,6 +331,38 @@ export function eliseOldToolResults(
   });
 
   return { messages: changed ? next : (messages as Message[]), saved, changed };
+}
+
+function summarizeToolResultElision(block: ToolResultBlock, tokens: number): string {
+  const parts = [`elided: ~${tokens} tokens`];
+  if (block.name) parts.push(`tool=${block.name}`);
+  const files = extractPathHints(block.content).slice(0, 5);
+  if (files.length > 0) parts.push(`files=${files.join(', ')}`);
+  const error = firstErrorLine(block.content);
+  if (error) parts.push(`error=${error}`);
+  return `[${parts.join('; ')}]`;
+}
+
+function extractPathHints(content: unknown): string[] {
+  const text = typeof content === 'string' ? content : JSON.stringify(content);
+  const out = new Set<string>();
+  const re = /(?:(?:[A-Za-z]:)?[./\\]?[\w@.-]+(?:[\\/][\w@(). -]+)+\.[A-Za-z0-9]{1,12})/g;
+  for (const match of text.matchAll(re)) {
+    const clean = match[0]?.replace(/\\/g, '/').replace(/^["'`]+|["'`),;:]+$/g, '');
+    if (clean && clean.length <= 220) out.add(clean);
+    if (out.size >= 5) break;
+  }
+  return [...out];
+}
+
+function firstErrorLine(content: unknown): string | undefined {
+  const text = typeof content === 'string' ? content : JSON.stringify(content);
+  for (const line of text.split(/\r?\n/)) {
+    if (!/\b(error|exception|failed|failure|fatal|panic|timeout|denied|enoent|eacces|eperm)\b/i.test(line)) continue;
+    const trimmed = line.replace(/\s+/g, ' ').trim();
+    if (trimmed) return trimmed.slice(0, 180);
+  }
+  return undefined;
 }
 
 /**

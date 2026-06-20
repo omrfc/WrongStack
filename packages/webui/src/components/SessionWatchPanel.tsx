@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useMonitorStore } from '@/stores/monitor-store';
 import { WatchMessageBubble } from './WatchMessageBubble.js';
+import { Bot } from 'lucide-react';
 
 interface WatchEntry {
   ts: string;
@@ -246,18 +247,18 @@ export function SessionWatchPanel({
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="flex items-center justify-between mb-1.5 shrink-0">
-        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-cyan-400/80">
+        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
           <span
             className={cn(
               'h-1.5 w-1.5 rounded-full',
-              isRunning ? 'bg-emerald-400 animate-pulse' : 'bg-gray-600',
+              isRunning ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground',
             )}
           />
           Live stream
         </div>
         <div className="flex items-center gap-2">
           {data && (
-            <div className="text-[10px] text-gray-500">
+            <div className="text-[10px] text-muted-foreground">
               {data.total} event{data.total === 1 ? '' : 's'} · {data.status}
             </div>
           )}
@@ -267,7 +268,7 @@ export function SessionWatchPanel({
               onClick={() => void interrupt()}
               disabled={interrupting}
               title="Cooperatively stop this agent at its next step (not a process kill)"
-              className="rounded border border-rose-500/40 bg-rose-500/15 px-1.5 py-0.5 text-[10px] text-rose-300 hover:bg-rose-500/25 disabled:opacity-40 transition-colors"
+              className="rounded border border-destructive/40 bg-destructive/15 px-1.5 py-0.5 text-[10px] text-destructive hover:bg-destructive/25 disabled:opacity-40 transition-colors"
             >
               {interrupting ? '…' : '⏸ Interrupt'}
             </button>
@@ -275,16 +276,16 @@ export function SessionWatchPanel({
         </div>
       </div>
       {nowDoing && (
-        <div className="mb-1.5 shrink-0 text-[10px] text-emerald-300/90 truncate">▶ {nowDoing}</div>
+        <div className="mb-1.5 shrink-0 text-[10px] text-foreground truncate">▶ {nowDoing}</div>
       )}
-      {error && <div className="text-[11px] text-red-400 mb-1 shrink-0">· {error}</div>}
+      {error && <div className="text-[11px] text-destructive mb-1 shrink-0">· {error}</div>}
       <div
         ref={scrollRef}
         onScroll={onScroll}
         className="flex-1 overflow-y-auto space-y-1.5 pr-1 min-h-0"
       >
         {entries.length === 0 && !error && (
-          <div className="text-[11px] text-gray-500 italic">Loading session…</div>
+          <div className="text-[11px] text-muted-foreground italic">Loading session…</div>
         )}
         {entries.map((e, i) => (
           <WatchMessageBubble
@@ -295,20 +296,17 @@ export function SessionWatchPanel({
         ))}
         {livePartial && (
           <div className="flex gap-3 animate-message">
-            <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-violet-500/10 text-violet-600 dark:text-violet-400 ring-2 ring-offset-2 ring-offset-background ring-violet-500/20">
-              <svg className="h-4 w-4 animate-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" />
-                <path d="M9 21h6M10 17v4M14 17v4" />
-              </svg>
+            <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-accent text-accent-foreground ring-2 ring-offset-2 ring-offset-background ring-accent/20">
+              <Bot className="h-4 w-4 animate-pulse" />
             </div>
-            <div className="flex flex-col gap-1 max-w-[85%] min-w-0">
-              <span className="text-[11px] font-semibold text-violet-600 dark:text-violet-400 px-1">
+            <div className="flex flex-col gap-1.5 max-w-[85%] min-w-0">
+              <span className="text-xs font-medium text-muted-foreground px-1">
                 {livePartial.label}
               </span>
-              <div className="rounded-2xl rounded-bl-md px-3 py-2 bg-violet-500/[0.06] border border-violet-500/20">
-                <span className="text-sm leading-relaxed text-violet-900 dark:text-violet-200 whitespace-pre-wrap break-words">
+              <div className="rounded-2xl rounded-bl-md px-4 py-3 bg-card border border-border">
+                <span className="text-sm leading-relaxed text-foreground whitespace-pre-wrap break-words">
                   {livePartial.text}
-                  <span className="animate-pulse text-cyan-500">▋</span>
+                  <span className="animate-pulse text-primary">▋</span>
                 </span>
               </div>
             </div>
@@ -319,8 +317,8 @@ export function SessionWatchPanel({
       {/* Thread — the two-way loop made visible: what you sent + read-receipts
           + the agent's replies. Last few only, oldest→newest. */}
       {thread.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-slate-700/70 shrink-0 max-h-28 overflow-y-auto space-y-1">
-          <div className="text-[9px] uppercase tracking-wide text-gray-500">Messages</div>
+        <div className="mt-2 pt-2 border-t border-border shrink-0 max-h-28 overflow-y-auto space-y-1">
+          <div className="text-[9px] uppercase tracking-wide text-muted-foreground">Messages</div>
           {thread.slice(-6).map((m) => {
             const status = m.completed
               ? '✓✓ done'
@@ -332,21 +330,21 @@ export function SessionWatchPanel({
                 <span
                   className={cn(
                     'font-semibold mr-1.5',
-                    m.fromLeader ? 'text-violet-400' : 'text-blue-400',
+                    m.fromLeader ? 'text-accent' : 'text-primary',
                   )}
                 >
                   {m.fromLeader ? 'Agent' : 'You'}
                 </span>
-                <span className="text-gray-300 whitespace-pre-wrap break-words">{m.body}</span>
+                <span className="text-foreground whitespace-pre-wrap break-words">{m.body}</span>
                 {!m.fromLeader && (
                   <span
                     className={cn(
                       'ml-1.5 text-[9px]',
                       m.completed
-                        ? 'text-emerald-400'
+                        ? 'text-green-500'
                         : m.readByLeader
-                          ? 'text-cyan-400'
-                          : 'text-gray-500',
+                          ? 'text-cyan-500'
+                          : 'text-muted-foreground',
                     )}
                   >
                     {status}
@@ -359,13 +357,13 @@ export function SessionWatchPanel({
       )}
 
       {/* Composer — steer this session from here (two-way). */}
-      <div className="mt-2 pt-2 border-t border-slate-700/70 shrink-0">
+      <div className="mt-2 pt-2 border-t border-border shrink-0">
         <div className="mb-1 flex items-center gap-1.5">
           <select
             value={msgType}
             onChange={(ev) => setMsgType(ev.target.value as MsgType)}
             title={MSG_TYPES.find((t) => t.value === msgType)?.hint}
-            className="rounded bg-slate-900/70 border border-slate-700 px-1.5 py-0.5 text-[10px] text-gray-200 focus:outline-none focus:border-cyan-500/50"
+            className="rounded bg-muted border border-border px-1.5 py-0.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           >
             {MSG_TYPES.map((t) => (
               <option key={t.value} value={t.value}>
@@ -377,7 +375,7 @@ export function SessionWatchPanel({
             value={priority}
             onChange={(ev) => setPriority(ev.target.value as 'low' | 'normal' | 'high')}
             title="Priority"
-            className="rounded bg-slate-900/70 border border-slate-700 px-1.5 py-0.5 text-[10px] text-gray-200 focus:outline-none focus:border-cyan-500/50"
+            className="rounded bg-muted border border-border px-1.5 py-0.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           >
             <option value="high">high</option>
             <option value="normal">normal</option>
@@ -396,19 +394,19 @@ export function SessionWatchPanel({
             }}
             rows={2}
             placeholder={`${MSG_TYPES.find((t) => t.value === msgType)?.label ?? 'Send'} → this session…`}
-            className="flex-1 resize-none rounded-md bg-slate-900/70 border border-slate-700 px-2 py-1 text-[11px] text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-cyan-500/50"
+            className="flex-1 resize-none rounded-md bg-muted border border-border px-2 py-1 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
           <button
             type="button"
             onClick={() => void send()}
             disabled={sending || !draft.trim()}
-            className="shrink-0 rounded-md bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 px-2.5 py-1.5 text-[11px] hover:bg-cyan-500/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="shrink-0 rounded-md bg-primary text-primary-foreground px-2.5 py-1.5 text-xs hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             {sending ? '…' : 'Send'}
           </button>
         </div>
-        {sent && <div className="mt-1 text-[10px] text-gray-500">{sent}</div>}
-        <div className="mt-0.5 text-[9px] text-gray-600">⌘/Ctrl+Enter to send · seen on the agent's next iteration</div>
+        {sent && <div className="mt-1 text-[10px] text-muted-foreground">{sent}</div>}
+        <div className="mt-0.5 text-[9px] text-muted-foreground">⌘/Ctrl+Enter to send · seen on the agent's next iteration</div>
       </div>
     </div>
   );

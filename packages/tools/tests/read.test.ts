@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readTool } from '../src/read.js';
-import { type Sandbox, mkSandbox, newSignal } from './fixtures.js';
+import { mkSandbox, newSignal, type Sandbox } from './fixtures.js';
 
 describe('read tool', () => {
   let sb: Sandbox;
@@ -34,10 +34,62 @@ describe('read tool', () => {
     expect(out.text).not.toContain('15→');
   });
 
+  it('suppresses repeated reads of an unchanged already-seen range', async () => {
+    const file = path.join(sb.dir, 'repeat.txt');
+    await fs.writeFile(file, 'first\nsecond\nthird\n');
+    const first = await readTool.execute({ path: 'repeat.txt' }, sb.ctx, {
+      signal: newSignal(),
+    });
+    expect(first.text).toContain('1→first');
+
+    const second = await readTool.execute({ path: 'repeat.txt' }, sb.ctx, {
+      signal: newSignal(),
+    });
+    expect(second.cached).toBe(true);
+    expect(second.text).toContain('unchanged since previous read');
+    expect(second.text).not.toContain('1→first');
+  });
+
+  it('does not suppress a new explicit range that was not seen yet', async () => {
+    const file = path.join(sb.dir, 'ranges.txt');
+    await fs.writeFile(file, Array.from({ length: 20 }, (_, i) => `line${i + 1}`).join('\n'));
+    await readTool.execute({ path: 'ranges.txt', offset: 1, limit: 3 }, sb.ctx, {
+      signal: newSignal(),
+    });
+
+    const out = await readTool.execute({ path: 'ranges.txt', offset: 10, limit: 2 }, sb.ctx, {
+      signal: newSignal(),
+    });
+    expect(out.cached).toBeUndefined();
+    expect(out.text).toContain('10→line10');
+    expect(out.text).toContain('11→line11');
+  });
+
+  it('supports compact summary mode', async () => {
+    const file = path.join(sb.dir, 'summary.ts');
+    await fs.writeFile(
+      file,
+      [
+        "import { value } from './value';",
+        'const hidden = 1;',
+        'export function run() {',
+        '  return value + hidden;',
+        '}',
+      ].join('\n'),
+    );
+    const out = await readTool.execute({ path: 'summary.ts', mode: 'summary' }, sb.ctx, {
+      signal: newSignal(),
+    });
+    expect(out.text).toContain('summary: summary.ts');
+    expect(out.text).toContain('1: import');
+    expect(out.text).toContain('3: export function run');
+    expect(out.text).not.toContain('return value');
+  });
+
   it('requires a path', async () => {
-    await expect(
-      readTool.execute({ path: '' }, sb.ctx, { signal: newSignal() }),
-    ).rejects.toThrow(/path is required/);
+    await expect(readTool.execute({ path: '' }, sb.ctx, { signal: newSignal() })).rejects.toThrow(
+      /path is required/,
+    );
   });
 
   it('rejects a directory (not a regular file)', async () => {
@@ -108,7 +160,7 @@ describe('read tool', () => {
     expect(out.text).not.toBe('');
     expect(out.text).toContain('past end of file');
     expect(out.text).toContain('999');
-    expect(out.text).toContain('line');  // "N line(s)" — exact count varies by trailing newline
+    expect(out.text).toContain('line'); // "N line(s)" — exact count varies by trailing newline
     expect(out.total_lines).toBeGreaterThanOrEqual(3);
     // Still records the read so edit safety checks pass.
     const abs = path.normalize(path.resolve(sb.dir, 'eof.txt'));

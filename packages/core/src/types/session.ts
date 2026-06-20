@@ -82,6 +82,19 @@ export type SessionEvent =
       aggressive?: boolean | undefined;
       /** Summary of token savings per phase (elision, summary, selective). */
       reductions?: Array<{ phase: string; saved: number }>;
+      /** Context budget snapshot used to trigger this compaction. */
+      budget?: {
+        maxContext: number;
+        inputTokens: number;
+        availableInputTokens: number;
+        remainingInputTokens: number;
+        reservedOutputTokens: number;
+        reservedSafetyTokens: number;
+        load: number;
+        overflowTokens: number;
+      } | undefined;
+      /** Adaptive trigger signals observed alongside token pressure. */
+      signals?: { repeatedReadCount?: number | undefined } | undefined;
       /**
        * Lossless digest of the range collapsed during this compaction (text
        * content preserved; raw tool I/O omitted). Captures *what* was collapsed
