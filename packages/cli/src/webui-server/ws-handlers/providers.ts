@@ -1,5 +1,5 @@
 import type { ProviderConfig } from '@wrongstack/core';
-import { DefaultSecretScrubber } from '@wrongstack/core';
+import { DefaultSecretScrubber, resolveProviderModelList } from '@wrongstack/core';
 import { probeLocalLlm } from '@wrongstack/runtime/probe';
 import type { WebSocket } from 'ws';
 import { toErrorMessage } from '@wrongstack/core/utils';
@@ -97,29 +97,21 @@ export async function handleProviderModels(
     return;
   }
   try {
-    const provider = await ctx.modelsRegistry.getProvider(providerId);
-    if (!provider) {
-      sendResult(ctx, ws, false, `Provider "${providerId}" not found in catalog`);
-      return;
-    }
+    // Resolve models from the catalog AND the saved config. OAuth / subscription
+    // providers (github-copilot, anthropic-oauth, openai-codex, …) are never in
+    // the models.dev catalog — their model list lives only in the saved config.
+    // The switcher lazy-loads every saved provider, so a catalog miss must yield
+    // the saved allowlist (or an empty list), never an error result — that error
+    // path produced a "not found in catalog" toast per non-catalog provider.
+    const saved = await ctx.providerStore.load();
+    const cfg = saved[providerId];
+    const catalogId = cfg?.type && cfg.type !== providerId ? cfg.type : providerId;
+    const provider = await ctx.modelsRegistry.getProvider(catalogId);
     ctx.send(ws, {
       type: 'provider.models',
       payload: {
         provider: providerId,
-        models: provider.models.map((m) => ({
-          id: m.id,
-          name: m.name,
-          releaseDate: m.release_date,
-          contextWindow: m.limit?.context,
-          inputCost: m.cost?.input,
-          outputCost: m.cost?.output,
-          capabilities: [
-            ...(m.tool_call ? ['tools'] : []),
-            ...(m.reasoning ? ['reasoning'] : []),
-            ...(m.modalities?.input?.includes('image') ? ['vision'] : []),
-            ...(m.open_weights ? ['open_weights'] : []),
-          ],
-        })),
+        models: resolveProviderModelList(cfg?.models, provider),
       },
     });
   } catch (err) {

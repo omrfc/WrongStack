@@ -205,7 +205,24 @@ export async function runPicker(deps: {
   // Build a flat numbered list (family → providers). Track which entry
   // matches the current default so we can highlight + accept Enter.
   const ordered: Array<{ provider: ResolvedProvider; index: number }> = [];
-  const familyOrder = ['anthropic', 'openai', 'google', 'openai-compatible'];
+  // Preferred grouping order, then any remaining families present in the list.
+  // The trailing append is essential: OAuth / subscription families
+  // (anthropic-oauth, openai-codex, github-copilot) live only in saved config,
+  // never the catalog — a fixed allowlist would silently drop them from the
+  // launch picker even though they have keys.
+  const preferredOrder = [
+    'anthropic',
+    'anthropic-oauth',
+    'openai',
+    'openai-codex',
+    'github-copilot',
+    'google',
+    'openai-compatible',
+  ];
+  const familyOrder = [
+    ...preferredOrder.filter((f) => families.has(f)),
+    ...[...families.keys()].filter((f) => !preferredOrder.includes(f)),
+  ];
   let idx = 1;
   let defaultIdx: number | undefined;
   renderer.write('\n');

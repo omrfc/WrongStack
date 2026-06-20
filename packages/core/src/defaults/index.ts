@@ -300,6 +300,11 @@ export {
   type ModeLoaderOptions,
 } from '../models/mode-store.js';
 export { LLMSelector, type LLMSelectorOptions } from '../models/llm-selector.js';
+export {
+  resolveProviderModelList,
+  describeCatalogModel,
+  type ProviderModelDescriptor,
+} from '../models/provider-model-resolve.js';
 
 // ---- SDD ----
 export { SpecParser } from '../sdd/spec-parser.js';

@@ -11,6 +11,11 @@ export {
   type ModeLoaderOptions,
 } from './mode-store.js';
 export { LLMSelector, type LLMSelectorOptions } from './llm-selector.js';
+export {
+  resolveProviderModelList,
+  describeCatalogModel,
+  type ProviderModelDescriptor,
+} from './provider-model-resolve.js';
 
 // Model intelligence: capability profiles and auto-routing
 export {

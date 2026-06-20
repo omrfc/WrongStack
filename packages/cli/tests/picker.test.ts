@@ -95,6 +95,36 @@ describe('runPicker', () => {
     expect(result!.model).toBe('claude-sonnet-4-20250514');
   });
 
+  it('shows an OAuth-family provider that lives only in saved config (not the catalog)', async () => {
+    const { renderer, out } = mkRig();
+    // github-copilot is never in the models.dev catalog — it exists only as a
+    // saved config entry with an OAuth key and a model allowlist. It must still
+    // appear in the launch picker and be selectable.
+    const registry = fakeRegistry([]); // empty catalog
+    const config = {
+      providers: {
+        'github-copilot': {
+          type: 'github-copilot',
+          family: 'github-copilot',
+          apiKeys: [{ label: 'oauth-default', apiKey: 'tok', createdAt: '2026-01-01' }],
+          activeKey: 'oauth-default',
+          models: ['gpt-5-mini', 'claude-haiku-4.5'],
+        },
+      },
+    } as never;
+    const reader = fakeReader(['1', '1', 'n']); // provider 1, model 1, don't save
+    const result = await runPicker({
+      modelsRegistry: registry as never,
+      renderer,
+      reader: reader as never,
+      config,
+    });
+    expect(out.buf).toContain('github-copilot'); // family header + provider entry rendered
+    expect(result).toBeDefined();
+    expect(result!.provider).toBe('github-copilot');
+    expect(result!.model).toBe('gpt-5-mini');
+  });
+
   it('returns undefined when user cancels provider selection', async () => {
     const { renderer } = mkRig();
     const providers = [fakeProvider()];

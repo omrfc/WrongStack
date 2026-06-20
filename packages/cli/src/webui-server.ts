@@ -2294,20 +2294,6 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
         break;
       }
 
-      case 'git.changes': {
-        const projectRoot =
-          opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '';
-        await handleGitChanges(ws, projectRoot);
-        break;
-      }
-
-      case 'git.diff': {
-        const projectRoot =
-          opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '';
-        await handleGitDiff(ws, projectRoot, String((msg.payload as { path?: unknown })?.path ?? ''));
-        break;
-      }
-
       default: {
         // Delegate AutoPhase lifecycle messages to the AutoPhase handler.
         // If the message type starts with 'autophase.', forward it; otherwise

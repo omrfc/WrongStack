@@ -88,6 +88,7 @@ import {
   resolveContextWindowPolicy,
   enhanceUserPrompt,
   recentTextTurns,
+  resolveProviderModelList,
   type TodoItem,
 } from '@wrongstack/core';
 import { ToolExecutor } from '@wrongstack/core/execution';
@@ -1967,27 +1968,21 @@ export async function startWebUI(
 
       case 'provider.models': {
         const providerId = (msg as { payload: { providerId: string } }).payload.providerId;
-        const provider = await modelsRegistry.getProvider(providerId);
-        if (provider) {
-          send(ws, {
-            type: 'provider.models',
-            payload: {
-              provider: providerId,
-              models: provider.models.map((m) => ({
-                id: m.id,
-                name: m.name,
-                releaseDate: (m as { release_date?: string | undefined }).release_date,
-                contextWindow: (m as { limit?: { context?: number | undefined } }).limit?.context,
-                inputCost: (m as { cost?: { input?: number | undefined } }).cost?.input,
-                outputCost: (m as { cost?: { output?: number | undefined } }).cost?.output,
-                capabilities: [
-                  ...((m as { tool_call?: boolean | undefined }).tool_call ? ['tools'] : []),
-                  ...((m as { reasoning?: boolean | undefined }).reasoning ? ['reasoning'] : []),
-                ],
-              })),
-            },
-          });
-        }
+        // Merge catalog + saved config so OAuth / subscription providers
+        // (github-copilot, anthropic-oauth, openai-codex, …) that models.dev
+        // doesn't list still resolve to their saved model allowlist. Always
+        // reply (possibly empty) — the switcher lazy-loads every saved provider.
+        const saved = await providerHandlers.loadConfigProviders();
+        const cfg = saved[providerId];
+        const catalogId = cfg?.type && cfg.type !== providerId ? cfg.type : providerId;
+        const provider = await modelsRegistry.getProvider(catalogId);
+        send(ws, {
+          type: 'provider.models',
+          payload: {
+            provider: providerId,
+            models: resolveProviderModelList(cfg?.models, provider),
+          },
+        });
         break;
       }
 
@@ -3439,19 +3434,6 @@ export async function startWebUI(
         } catch (err) {
           sendResult(ws, false, errMessage(err));
         }
-        break;
-      }
-
-      // ── Git changes / diff ───────────────────────────────────────────
-
-      case 'git.changes': {
-        await handleGitChanges(ws, projectRoot);
-        break;
-      }
-
-      case 'git.diff': {
-        const filePath = (msg as { payload?: { path?: string } }).payload?.path ?? '';
-        await handleGitDiff(ws, projectRoot, filePath);
         break;
       }
 

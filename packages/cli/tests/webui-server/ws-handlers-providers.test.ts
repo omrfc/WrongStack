@@ -17,6 +17,7 @@ import {
   handleKeyUpsert,
   handleProviderAdd,
   handleProviderClearModels,
+  handleProviderModels,
   handleProviderProbe,
   handleProviderRemove,
   handleProviderUndoClear,
@@ -90,6 +91,46 @@ describe('ws-handlers/providers (PR 5 of #30)', () => {
     const { ctx, cap } = makeCtx(configPath, undefined);
     await handleProvidersList(ctx, FAKE_WS);
     expect(lastResult(cap).success).toBe(false);
+  });
+
+  it('handleProviderModels: OAuth provider not in catalog → saved allowlist, NO error toast', async () => {
+    // github-copilot shape: saved with a model allowlist, absent from models.dev.
+    const seed = makeCtx(configPath);
+    await handleProviderAdd(seed.ctx, FAKE_WS, { id: 'github-copilot', family: 'github-copilot' });
+    const upd = makeCtx(configPath);
+    await handleProviderUpdate(upd.ctx, FAKE_WS, {
+      id: 'github-copilot',
+      models: ['gpt-5-mini', 'claude-haiku-4.5'],
+    });
+
+    // Registry that never has the provider (catalog miss).
+    const emptyRegistry = {
+      getProvider: async () => undefined,
+    } as unknown as WsHandlerContext['modelsRegistry'];
+    const { ctx, cap } = makeCtx(configPath, emptyRegistry);
+    await handleProviderModels(ctx, FAKE_WS, 'github-copilot');
+
+    // No error result was emitted (this is what flooded the UI before).
+    expect(cap.sent.some((m) => m.type === 'key.operation_result')).toBe(false);
+    const msg = cap.sent.find((m) => m.type === 'provider.models')?.payload as {
+      provider: string;
+      models: Array<{ id: string }>;
+    };
+    expect(msg.provider).toBe('github-copilot');
+    expect(msg.models.map((m) => m.id)).toEqual(['gpt-5-mini', 'claude-haiku-4.5']);
+  });
+
+  it('handleProviderModels: unknown provider with no catalog/allowlist → empty list, no toast', async () => {
+    const emptyRegistry = {
+      getProvider: async () => undefined,
+    } as unknown as WsHandlerContext['modelsRegistry'];
+    const { ctx, cap } = makeCtx(configPath, emptyRegistry);
+    await handleProviderModels(ctx, FAKE_WS, 'mystery');
+    expect(cap.sent.some((m) => m.type === 'key.operation_result')).toBe(false);
+    const msg = cap.sent.find((m) => m.type === 'provider.models')?.payload as {
+      models: unknown[];
+    };
+    expect(msg.models).toEqual([]);
   });
 
   it('handleProvidersSaved: empty config → empty providers list', async () => {

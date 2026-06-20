@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Context } from '../../src/core/context.js';
+import { estimateMessages } from '../../src/execution/compaction-core.js';
 import { SelectiveCompactor } from '../../src/execution/selective-compactor.js';
 import type { ContentBlock, TextBlock } from '../../src/types/blocks.js';
 import type { CompactReport, Compactor } from '../../src/types/compactor.js';
@@ -467,19 +468,25 @@ describe('SelectiveCompactor', () => {
     });
   });
 
-  describe('roughTokenEstimate', () => {
-    it('estimates token count as ceiling of length/3.5', () => {
+  describe('estimateTokens', () => {
+    it('delegates to the shared estimateMessages primitive', () => {
       const provider = makeFakeProvider([]);
       const compactor = new SelectiveCompactor({ provider });
-      const result = (compactor as any).roughTokenEstimate('abcdefgh');
-      expect(result).toBe(3); // ceil(8/3.5)
+      const messages = [makeMessage('user', [makeTextBlock('abcdefgh')])];
+      const result = (compactor as any).estimateTokens(messages);
+      expect(result).toBe(estimateMessages(messages));
     });
 
-    it('returns minimum 1 for empty string', () => {
+    it('grows with message content', () => {
       const provider = makeFakeProvider([]);
       const compactor = new SelectiveCompactor({ provider });
-      const result = (compactor as any).roughTokenEstimate('');
-      expect(result).toBe(1);
+      const small = (compactor as any).estimateTokens([
+        makeMessage('user', [makeTextBlock('hi')]),
+      ]);
+      const large = (compactor as any).estimateTokens([
+        makeMessage('user', [makeTextBlock('hi'.repeat(500))]),
+      ]);
+      expect(large).toBeGreaterThan(small);
     });
   });
 });

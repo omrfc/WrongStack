@@ -144,7 +144,47 @@ export async function pollForGitHubToken(device: DeviceCode, signal: AbortSignal
   throw new Error('Device code expired — please restart the login.');
 }
 
-/** Fetch the user's selectable Copilot model ids (best-effort). */
+/** Shape of the fields we read from a `/models` entry (everything optional). */
+interface CopilotModelEntry {
+  id?: unknown;
+  model_picker_enabled?: unknown;
+  is_chat_default?: unknown;
+  is_chat_fallback?: unknown;
+  vendor?: unknown;
+  supported_endpoints?: unknown;
+  policy?: { state?: unknown } | undefined;
+  capabilities?: { type?: unknown; supports?: { tool_calls?: unknown } | undefined } | undefined;
+}
+
+/**
+ * Decide whether a Copilot `/models` entry is a chat model we can actually
+ * drive over this provider's wire.
+ *
+ * The provider POSTs to `…/chat/completions`, so the discriminators are:
+ *   - `capabilities.type === 'chat'` — drops embeddings and completion-only ids.
+ *   - `capabilities.supports.tool_calls` — the agent loop needs tool calling.
+ *   - `supported_endpoints` (when present) must include `/chat/completions`.
+ *     This is the key fix: `/responses`-only ids (the `*-picker` router models,
+ *     `gpt-5.4-mini-free-auto`, `mai-code-1-flash*`) advertise themselves in the
+ *     model picker but 400 on `/chat/completions`. Absent field ⇒ legacy chat
+ *     model (gpt-4o, gpt-4.1) ⇒ allowed.
+ *   - `policy.state !== 'disabled'` — disabled means the user hasn't enabled the
+ *     model in their GitHub Copilot settings; calling it would 403.
+ *   - `vendor !== 'Experimental'` — drops internal previews (trajectory-compaction).
+ */
+export function isUsableCopilotChatModel(item: CopilotModelEntry): boolean {
+  if (typeof item.id !== 'string' || item.id.length === 0) return false;
+  const cap = item.capabilities;
+  if (cap?.type !== 'chat') return false;
+  if (cap.supports?.tool_calls !== true) return false;
+  const eps = item.supported_endpoints;
+  if (Array.isArray(eps) && !eps.includes('/chat/completions')) return false;
+  if (item.policy?.state === 'disabled') return false;
+  if (item.vendor === 'Experimental') return false;
+  return true;
+}
+
+/** Fetch the user's usable Copilot chat-model ids (best-effort, never throws). */
 async function fetchCopilotModels(copilotToken: string, signal: AbortSignal): Promise<string[]> {
   try {
     const base = copilotBaseUrlFromToken(copilotToken);
@@ -158,25 +198,24 @@ async function fetchCopilotModels(copilotToken: string, signal: AbortSignal): Pr
       signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]),
     });
     if (!res.ok) return [];
-    const json = (await res.json()) as { data?: Array<Record<string, unknown>> } | null;
+    const json = (await res.json()) as { data?: CopilotModelEntry[] } | null;
     const data = json?.data;
     if (!Array.isArray(data)) return [];
-    const ids: string[] = [];
-    for (const item of data) {
-      const id = item['id'];
-      const policy = item['policy'] as { state?: string } | undefined;
-      if (
-        typeof id === 'string' &&
-        item['model_picker_enabled'] === true &&
-        policy?.state !== 'disabled'
-      ) {
-        ids.push(id);
-      }
-    }
-    return ids;
+    const usable = data.filter(isUsableCopilotChatModel);
+    // Float the provider's own default/fallback chat model to the front so the
+    // saved list's first entry is a sane `--model` default.
+    usable.sort((a, b) => copilotModelRank(a) - copilotModelRank(b));
+    return usable.map((m) => m.id as string);
   } catch {
     return [];
   }
+}
+
+/** Lower rank sorts first: chat default, then fallback, then everything else. */
+function copilotModelRank(item: CopilotModelEntry): number {
+  if (item.is_chat_default === true) return 0;
+  if (item.is_chat_fallback === true) return 1;
+  return 2;
 }
 
 export interface CopilotLoginOptions {
