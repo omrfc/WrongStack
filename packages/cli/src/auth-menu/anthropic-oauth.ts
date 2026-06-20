@@ -319,7 +319,12 @@ export async function runClaudeOAuthLogin(
 
   deps.renderer.write(
     color.bold(`\n  Sign in with Claude — ${color.cyan(providerId)}\n`) +
-      color.dim('  Uses your Claude Pro/Max subscription (not an API key).\n\n') +
+      color.dim('  Uses your Claude Pro/Max subscription (not an API key).\n') +
+      color.amber('  ⚠ Using a subscription outside the official Claude Code client is against\n') +
+      color.amber('    Anthropic’s Terms — your account could be rate-limited or banned.\n') +
+      color.dim('    Sanctioned programmatic use = an API key: ') +
+      color.bold('wstack auth anthropic') +
+      color.dim('\n\n') +
       color.bold(`  ${'─'.repeat(56)}\n`) +
       color.bold('  Open this URL in your browser to sign in:\n') +
       color.cyan(`  ${authorizeUrl}\n`) +

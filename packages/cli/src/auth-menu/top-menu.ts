@@ -12,11 +12,16 @@ import type { AuthMenuDeps } from './types.js';
 async function runSignInMenu(deps: AuthMenuDeps): Promise<void> {
   deps.renderer.write(
     `\n  ${color.bold('Sign in with a subscription:')}\n` +
+      color.amber('  ⚠ Subscription tokens used outside official clients may violate provider\n') +
+      color.amber('    Terms — your account could be rate-limited or banned. An API key is the\n') +
+      color.dim('    sanctioned path for programmatic use.\n') +
       `    ${color.bold('1')}  ChatGPT Plus/Pro  ${color.dim('(→ openai-codex)')}\n` +
       `    ${color.bold('2')}  Claude Pro/Max    ${color.dim('(→ anthropic-oauth)')}\n` +
       `    ${color.bold('3')}  GitHub Copilot    ${color.dim('(→ github-copilot)')}\n`,
   );
-  const pick = (await deps.reader.readLine(`  ${color.amber('?')} Pick ${color.dim('(or b to go back)')}: `))
+  const pick = (
+    await deps.reader.readLine(`  ${color.amber('?')} Pick ${color.dim('(or b to go back)')}: `)
+  )
     .trim()
     .toLowerCase();
   if (pick === '1' || pick === 'chatgpt' || pick === 'openai' || pick === 'codex') {

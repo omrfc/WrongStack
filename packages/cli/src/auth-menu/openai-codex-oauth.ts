@@ -389,7 +389,12 @@ export async function runCodexOAuthLogin(
 
   deps.renderer.write(
     color.bold(`\n  Sign in with ChatGPT — ${color.cyan(providerId)}\n`) +
-      color.dim('  Uses your ChatGPT Plus/Pro/Team subscription (not an API key).\n\n') +
+      color.dim('  Uses your ChatGPT Plus/Pro/Team subscription (not an API key).\n') +
+      color.amber('  ⚠ Using a subscription outside the official Codex client may violate\n') +
+      color.amber('    OpenAI’s Terms — your account could be rate-limited or banned.\n') +
+      color.dim('    Sanctioned programmatic use = an API key: ') +
+      color.bold('wstack auth openai') +
+      color.dim('\n\n') +
       color.bold(`  ${'─'.repeat(56)}\n`) +
       color.bold('  Open this URL in your browser to sign in:\n') +
       color.cyan(`  ${authorizeUrl}\n`) +

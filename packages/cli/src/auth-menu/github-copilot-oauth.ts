@@ -195,7 +195,9 @@ export async function runCopilotOAuthLogin(
   try {
     deps.renderer.write(
       color.bold(`\n  Sign in with GitHub Copilot — ${color.cyan(providerId)}\n`) +
-        color.dim('  Uses your GitHub Copilot subscription (not an API key).\n\n'),
+        color.dim('  Uses your GitHub Copilot subscription (not an API key).\n') +
+        color.amber('  ⚠ Using Copilot outside its official editor integrations may violate\n') +
+        color.amber('    GitHub’s Terms — your account could be rate-limited or banned.\n\n'),
     );
 
     const device = await startDeviceFlow(ac.signal);
