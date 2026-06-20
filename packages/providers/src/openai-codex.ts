@@ -141,7 +141,7 @@ export interface OpenAICodexProviderOptions {
     | ((refreshToken: string, signal?: AbortSignal) => Promise<CodexOAuthTokens>)
     | undefined;
   /**
-   * Reasoning effort for the Codex (gpt-5-codex) reasoning models. Sent as
+   * Reasoning effort for the Codex (gpt-5.x) reasoning models. Sent as
    * `reasoning.effort` with `summary: 'auto'` so chain-of-thought streams back
    * as thinking deltas. Default 'medium'. Set 'none' to omit reasoning entirely.
    */

@@ -73,7 +73,7 @@ export const CAPABILITIES_BY_FAMILY: Record<WireFamily, Capabilities> = {
     systemPrompt: true,
     jsonMode: false,
     reasoning: true,
-    maxContext: 400_000,
+    maxContext: 272_000,
     cacheControl: 'auto',
   },
   google: {

@@ -458,7 +458,7 @@ export async function runCodexOAuthLogin(
     deps.renderer.write(color.green('\n  ✓ Signed in with ChatGPT!\n'));
     deps.renderer.writeInfo(
       `  Saved as provider ${color.bold(providerId)}.\n` +
-        `  Use: ${color.bold(`wstack --provider ${providerId} --model gpt-5-codex`)} "<task>"\n` +
+        `  Use: ${color.bold(`wstack --provider ${providerId} --model gpt-5.5`)} "<task>"\n` +
         color.dim('  Tokens refresh automatically before they expire.\n'),
     );
     return 0;
@@ -501,7 +501,9 @@ async function saveCodexTokens(
       const p: ProviderConfig = existing ? { ...existing } : { type: providerId };
       p.family = 'openai-codex';
       if (!p.baseUrl) p.baseUrl = CODEX_BASE_URL;
-      if (!p.models || p.models.length === 0) p.models = ['gpt-5-codex'];
+      if (!p.models || p.models.length === 0) {
+        p.models = ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark'];
+      }
 
       const keys = normalizeKeys(p).filter((k) => k.label !== entry.label);
       keys.push(entry);

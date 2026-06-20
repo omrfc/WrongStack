@@ -147,6 +147,33 @@ export async function exchangeAuthorizationCode(
   return readTokens(res, 'exchange');
 }
 
+/**
+ * Fetch the account's available Claude model ids live from
+ * `api.anthropic.com/v1/models` using the OAuth token. Best-effort: returns []
+ * on any failure so login still succeeds with a sensible fallback list.
+ */
+async function fetchClaudeModels(accessToken: string, signal: AbortSignal): Promise<string[]> {
+  try {
+    const res = await fetch(`${CLAUDE_BASE_URL}/v1/models?limit=100`, {
+      headers: {
+        accept: 'application/json',
+        authorization: `Bearer ${accessToken}`,
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20',
+      },
+      signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]),
+    });
+    if (!res.ok) return [];
+    const json = (await res.json()) as { data?: Array<{ id?: string }> } | null;
+    const ids = (json?.data ?? [])
+      .map((m) => m.id)
+      .filter((id): id is string => typeof id === 'string' && id.startsWith('claude-'));
+    return ids;
+  } catch {
+    return [];
+  }
+}
+
 // ── Loopback server ──────────────────────────────────────────────────────────
 
 function callbackHtml(ok: boolean, message: string): string {
@@ -344,14 +371,16 @@ export async function runClaudeOAuthLogin(
 
     deps.renderer.write(color.dim('\n  Exchanging authorization code for tokens...\n'));
     const tokens = await exchangeAuthorizationCode(code, state, verifier, ac.signal);
+    const models = await fetchClaudeModels(tokens.access, ac.signal);
 
-    const saved = await saveClaudeTokens(deps, providerId, tokens);
+    const saved = await saveClaudeTokens(deps, providerId, tokens, models);
     if (!saved) return 1;
 
     deps.renderer.write(color.green('\n  ✓ Signed in with Claude!\n'));
+    const modelHint = models.find((m) => m.includes('sonnet')) ?? models[0] ?? 'claude-sonnet-4-6';
     deps.renderer.writeInfo(
-      `  Saved as provider ${color.bold(providerId)}.\n` +
-        `  Use: ${color.bold(`wstack --provider ${providerId} --model claude-sonnet-4-6`)} "<task>"\n` +
+      `  Saved as provider ${color.bold(providerId)}${models.length ? ` (${models.length} models)` : ''}.\n` +
+        `  Use: ${color.bold(`wstack --provider ${providerId} --model ${modelHint}`)} "<task>"\n` +
         color.dim('  Tokens refresh automatically before they expire.\n'),
     );
     return 0;
@@ -372,6 +401,7 @@ async function saveClaudeTokens(
   deps: AuthMenuDeps,
   providerId: string,
   tokens: ClaudeTokens,
+  models: string[],
 ): Promise<boolean> {
   const entry: ProviderApiKey = {
     label: 'oauth-default',
@@ -389,7 +419,9 @@ async function saveClaudeTokens(
       const p: ProviderConfig = existing ? { ...existing } : { type: providerId };
       p.family = 'anthropic-oauth';
       if (!p.baseUrl) p.baseUrl = CLAUDE_BASE_URL;
-      if (!p.models || p.models.length === 0) p.models = ['claude-sonnet-4-6'];
+      if (models.length > 0) p.models = models;
+      else if (!p.models || p.models.length === 0)
+        p.models = ['claude-sonnet-4-6', 'claude-opus-4-8'];
       const keys = normalizeKeys(p).filter((k) => k.label !== entry.label);
       keys.push(entry);
       writeKeysBack(p, keys);
