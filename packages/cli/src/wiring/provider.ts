@@ -24,7 +24,22 @@ export async function setupProvider(params: {
       .catch(() => undefined);
   }
   if (!resolvedProvider) {
-    if (!savedProviderCfg?.family) {
+    if (savedProviderCfg?.family) {
+      // Config-only provider not in the models.dev catalog — e.g. the OAuth
+      // subscription families (openai-codex, anthropic-oauth, github-copilot)
+      // or any user-defined provider with an explicit `family`. Synthesize a
+      // ResolvedProvider from config so boot proceeds (the actual transport is
+      // still built below via makeProviderFromConfig / the registry).
+      resolvedProvider = {
+        id: config.provider,
+        name: config.provider,
+        family: savedProviderCfg.family,
+        apiBase: savedProviderCfg.baseUrl,
+        envVars: savedProviderCfg.envVars ?? [],
+        models: (savedProviderCfg.models ?? []).map((m) => ({ id: m, name: m })),
+        npm: undefined,
+      };
+    } else {
       logger.warn(
         `Provider "${config.provider}" not found in models.dev. Continuing with raw config.`,
       );

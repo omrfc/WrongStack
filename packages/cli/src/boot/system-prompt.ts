@@ -156,14 +156,27 @@ export async function resolveModeAndCapabilities(
     deps.modelsRegistry.getModel(deps.config.provider, deps.config.model).catch(() => undefined),
   ]);
 
-  const modelCapabilities: ModelCapabilities | undefined = resolvedCaps
-    ? {
-        maxContextTokens: resolvedCaps.maxContext,
-        supportsTools: resolvedCaps.tools,
-        supportsVision: resolvedCaps.vision,
-        supportsReasoning: resolvedModel?.capabilities.reasoning ?? false,
-      }
-    : undefined;
+  // When the model isn't in the models.dev catalog (config-only providers such
+  // as the OAuth subscription families openai-codex / anthropic-oauth /
+  // github-copilot), `capabilitiesFor` falls back to the `unsupported` family
+  // and would wrongly report no tools / 0 context. The provider INSTANCE was
+  // built from the configured family and carries the correct capabilities, so
+  // prefer it whenever the catalog has no entry for this model.
+  const instanceCaps = provider.capabilities as typeof provider.capabilities | undefined;
+  const useInstanceCaps = !resolvedModel && !!instanceCaps;
+  const modelCapabilities: ModelCapabilities | undefined =
+    resolvedCaps || useInstanceCaps
+      ? {
+          maxContextTokens:
+            (useInstanceCaps ? instanceCaps?.maxContext : resolvedCaps?.maxContext) ||
+            instanceCaps?.maxContext ||
+            0,
+          supportsTools: useInstanceCaps ? !!instanceCaps?.tools : (resolvedCaps?.tools ?? false),
+          supportsVision: useInstanceCaps ? !!instanceCaps?.vision : (resolvedCaps?.vision ?? false),
+          supportsReasoning:
+            resolvedModel?.capabilities.reasoning ?? instanceCaps?.reasoning ?? false,
+        }
+      : undefined;
 
   return {
     kind: 'ok',
