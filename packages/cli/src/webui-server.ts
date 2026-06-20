@@ -802,6 +802,139 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       payload: { fleetConcurrency, fleetConcurrencyMax: FLEET_CONCURRENCY_MAX },
     });
 
+  // Coalesce high-volume live events on the server before they hit every
+  // connected browser tab. The frontend also coalesces per animation frame,
+  // but without this layer long streams still create one WebSocket message per
+  // provider token/tool progress event.
+  const STREAM_COALESCE_MS = 16;
+  const STREAM_COALESCE_MAX_CHARS = 8 * 1024;
+  let textDeltaBuffer = '';
+  let textDeltaTimer: ReturnType<typeof setTimeout> | null = null;
+  let thinkingDeltaBuffer = '';
+  let thinkingDeltaTimer: ReturnType<typeof setTimeout> | null = null;
+  const toolProgressBuffers = new Map<
+    string,
+    {
+      id: string;
+      name: string;
+      eventType: string;
+      text: string;
+      timer: ReturnType<typeof setTimeout> | null;
+    }
+  >();
+
+  const flushTextDelta = (): void => {
+    if (textDeltaTimer) {
+      clearTimeout(textDeltaTimer);
+      textDeltaTimer = null;
+    }
+    if (!textDeltaBuffer) return;
+    const text = textDeltaBuffer;
+    textDeltaBuffer = '';
+    broadcast({
+      type: 'provider.text_delta',
+      payload: { text, messageId: 'current' },
+    });
+  };
+
+  const flushThinkingDelta = (): void => {
+    if (thinkingDeltaTimer) {
+      clearTimeout(thinkingDeltaTimer);
+      thinkingDeltaTimer = null;
+    }
+    if (!thinkingDeltaBuffer) return;
+    const text = thinkingDeltaBuffer;
+    thinkingDeltaBuffer = '';
+    broadcast({
+      type: 'provider.thinking_delta',
+      payload: { text },
+    });
+  };
+
+  const queueTextDelta = (text: string): void => {
+    if (!text) return;
+    textDeltaBuffer += text;
+    if (textDeltaBuffer.length >= STREAM_COALESCE_MAX_CHARS) {
+      flushTextDelta();
+      return;
+    }
+    if (!textDeltaTimer) {
+      textDeltaTimer = setTimeout(flushTextDelta, STREAM_COALESCE_MS);
+      textDeltaTimer.unref?.();
+    }
+  };
+
+  const queueThinkingDelta = (text: string): void => {
+    if (!text) return;
+    thinkingDeltaBuffer += text;
+    if (thinkingDeltaBuffer.length >= STREAM_COALESCE_MAX_CHARS) {
+      flushThinkingDelta();
+      return;
+    }
+    if (!thinkingDeltaTimer) {
+      thinkingDeltaTimer = setTimeout(flushThinkingDelta, STREAM_COALESCE_MS);
+      thinkingDeltaTimer.unref?.();
+    }
+  };
+
+  const flushToolProgress = (id: string): void => {
+    const buffered = toolProgressBuffers.get(id);
+    if (!buffered) return;
+    if (buffered.timer) clearTimeout(buffered.timer);
+    toolProgressBuffers.delete(id);
+    if (!buffered.text) return;
+    broadcast({
+      type: 'tool.progress',
+      payload: {
+        name: buffered.name,
+        id: buffered.id,
+        event: { type: buffered.eventType, text: buffered.text },
+      },
+    });
+  };
+
+  const flushAllStreamBuffers = (): void => {
+    flushTextDelta();
+    flushThinkingDelta();
+    for (const id of [...toolProgressBuffers.keys()]) flushToolProgress(id);
+  };
+
+  const queueToolProgress = (payload: {
+    id: string;
+    name: string;
+    event: { type?: string | undefined; text?: string | undefined };
+  }): void => {
+    const text = payload.event.text;
+    if (!text) {
+      flushToolProgress(payload.id);
+      broadcast({ type: 'tool.progress', payload });
+      return;
+    }
+
+    const eventType = payload.event.type ?? 'progress';
+    const existing = toolProgressBuffers.get(payload.id);
+    if (existing && existing.eventType !== eventType) flushToolProgress(payload.id);
+    const buffered = toolProgressBuffers.get(payload.id) ?? {
+      id: payload.id,
+      name: payload.name,
+      eventType,
+      text: '',
+      timer: null,
+    };
+    buffered.name = payload.name;
+    buffered.text += buffered.text ? `\n${text}` : text;
+    toolProgressBuffers.set(payload.id, buffered);
+
+    if (buffered.text.length >= STREAM_COALESCE_MAX_CHARS) {
+      flushToolProgress(payload.id);
+      return;
+    }
+    if (!buffered.timer) {
+      buffered.timer = setTimeout(() => flushToolProgress(payload.id), STREAM_COALESCE_MS);
+      buffered.timer.unref?.();
+    }
+  };
+
   function setupEvents() {
     // Clear any existing subscriptions
     for (const unsub of eventUnsubscribers) unsub();
@@ -844,10 +977,8 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     // provider.text_delta
     eventUnsubscribers.push(
       opts.events.on('provider.text_delta', (e) => {
-        broadcast({
-          type: 'provider.text_delta',
-          payload: { text: e.text, messageId: 'current' },
-        });
+        flushThinkingDelta();
+        queueTextDelta(e.text);
       }),
     );
 
@@ -857,16 +988,14 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     // pollutes the persisted transcript.
     eventUnsubscribers.push(
       opts.events.on('provider.thinking_delta', (e) => {
-        broadcast({
-          type: 'provider.thinking_delta',
-          payload: { text: e.text },
-        });
+        queueThinkingDelta(e.text);
       }),
     );
 
     // tool.started
     eventUnsubscribers.push(
       opts.events.on('tool.started', (e) => {
+        flushAllStreamBuffers();
         broadcast({
           type: 'tool.started',
           payload: {
@@ -882,13 +1011,10 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     // tool.progress
     eventUnsubscribers.push(
       opts.events.on('tool.progress', (e) => {
-        broadcast({
-          type: 'tool.progress',
-          payload: {
-            name: e.name,
-            id: e.id,
-            event: e.event,
-          },
+        queueToolProgress({
+          name: e.name,
+          id: e.id,
+          event: e.event,
         });
       }),
     );
@@ -896,6 +1022,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     // tool.executed
     eventUnsubscribers.push(
       opts.events.on('tool.executed', (e) => {
+        flushAllStreamBuffers();
         broadcast({
           type: 'tool.executed',
           payload: {
@@ -960,6 +1087,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     // provider.response
     eventUnsubscribers.push(
       opts.events.on('provider.response', (e) => {
+        flushAllStreamBuffers();
         broadcast({
           type: 'provider.response',
           payload: {
@@ -1233,6 +1361,23 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
   // Bare messaging surface for handler groups that need no run-loop state.
   const wsCommon: WsCommon = { send, broadcast, log: (m) => console.log(m) };
 
+  // Reuse per-project mailbox instances so WebUI mailbox panels benefit from
+  // GlobalMailbox's in-process message/registry caches. `opts.projectRoot` can
+  // change during project switches, so cache by resolved mailbox directory.
+  const mailboxCache = new Map<string, GlobalMailbox>();
+  const getWebuiMailbox = (): GlobalMailbox | null => {
+    const projectRoot = opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '';
+    const globalRoot = opts.globalConfigPath ? path.dirname(opts.globalConfigPath) : '';
+    if (!projectRoot || !globalRoot) return null;
+    const mbDir = resolveProjectDir(projectRoot, globalRoot);
+    let mailbox = mailboxCache.get(mbDir);
+    if (!mailbox) {
+      mailbox = new GlobalMailbox(mbDir, opts.events);
+      mailboxCache.set(mbDir, mailbox);
+    }
+    return mailbox;
+  };
+
   // `opts` is passed by reference so the session handlers read live
   // agent.ctx.session / opts.sessionStore at call time.
   const sessionsCtx: SessionsContext = {
@@ -1475,6 +1620,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
         abortControllers.clear();
       },
       unsubscribeEvents: () => {
+        flushAllStreamBuffers();
         for (const unsub of eventUnsubscribers) unsub();
       },
       closeClients: () => {
@@ -2133,10 +2279,8 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
 
       // ── Mailbox operations — project-level inter-agent messaging ────
       case 'mailbox.messages': {
-        const projectRoot =
-          opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '';
-        const globalRoot = opts.globalConfigPath ? path.dirname(opts.globalConfigPath) : '';
-        if (!projectRoot || !globalRoot) {
+        const mb = getWebuiMailbox();
+        if (!mb) {
           send(ws, {
             type: 'mailbox.messages',
             payload: { messages: [], error: 'No project root available' },
@@ -2144,17 +2288,14 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
           break;
         }
         try {
-          // Single source of truth for the per-project dir — the inline slug
-          // this replaced drifted from projectSlug() on edge-case names.
-          const mbDir = resolveProjectDir(projectRoot, globalRoot);
-          const mb = new GlobalMailbox(mbDir);
           const payload = (
-            msg as { payload?: { limit?: number; agentId?: string; unreadOnly?: boolean } }
+            msg as { payload?: { limit?: number; agentId?: string; unreadOnly?: boolean; incompleteOnly?: boolean } }
           ).payload;
           const messages = await mb.query({
             limit: payload?.limit ?? 30,
             to: payload?.agentId,
             unreadBy: payload?.unreadOnly ? payload.agentId : undefined,
+            incompleteOnly: payload?.incompleteOnly,
           });
           send(ws, {
             type: 'mailbox.messages',
@@ -2188,10 +2329,8 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       }
 
       case 'mailbox.agents': {
-        const projectRoot =
-          opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '';
-        const globalRoot = opts.globalConfigPath ? path.dirname(opts.globalConfigPath) : '';
-        if (!projectRoot || !globalRoot) {
+        const mb = getWebuiMailbox();
+        if (!mb) {
           send(ws, {
             type: 'mailbox.agents',
             payload: { agents: [], error: 'No project root available' },
@@ -2199,10 +2338,6 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
           break;
         }
         try {
-          // Single source of truth for the per-project dir — the inline slug
-          // this replaced drifted from projectSlug() on edge-case names.
-          const mbDir = resolveProjectDir(projectRoot, globalRoot);
-          const mb = new GlobalMailbox(mbDir);
           const payload = (msg as { payload?: { onlineOnly?: boolean } }).payload;
           const agents = payload?.onlineOnly
             ? await mb.getOnlineAgents()
@@ -2237,18 +2372,12 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       }
 
       case 'mailbox.clear': {
-        const projectRoot =
-          opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '';
-        const globalRoot = opts.globalConfigPath ? path.dirname(opts.globalConfigPath) : '';
-        if (!projectRoot || !globalRoot) {
+        const mb = getWebuiMailbox();
+        if (!mb) {
           send(ws, { type: 'mailbox.cleared', payload: { error: 'No project root available' } });
           break;
         }
         try {
-          // Single source of truth for the per-project dir — the inline slug
-          // this replaced drifted from projectSlug() on edge-case names.
-          const mbDir = resolveProjectDir(projectRoot, globalRoot);
-          const mb = new GlobalMailbox(mbDir);
           await mb.clearAll();
           send(ws, { type: 'mailbox.cleared', payload: {} });
         } catch (err) {
@@ -2261,16 +2390,12 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       }
 
       case 'mailbox.purge': {
-        const projectRoot =
-          opts.projectRoot ?? (opts.agent.ctx as { projectRoot?: string }).projectRoot ?? '';
-        const globalRoot = opts.globalConfigPath ? path.dirname(opts.globalConfigPath) : '';
-        if (!projectRoot || !globalRoot) {
+        const mb = getWebuiMailbox();
+        if (!mb) {
           send(ws, { type: 'mailbox.purged', payload: { error: 'No project root available' } });
           break;
         }
         try {
-          const mbDir = resolveProjectDir(projectRoot, globalRoot);
-          const mb = new GlobalMailbox(mbDir);
           const payload = msg as {
             type: 'mailbox.purge';
             payload?: { completedMaxAgeMs?: number; incompleteMaxAgeMs?: number };
@@ -2319,6 +2444,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
 
   function shutdown(): void {
     console.log('[WebUI] Shutting down...');
+    flushAllStreamBuffers();
     unregisterWebuiClient();
     httpServer?.server.close();
     opts.onExit?.();
