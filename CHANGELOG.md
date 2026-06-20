@@ -3582,8 +3582,8 @@ commands and CLI flags work unchanged.
 ### Added
 
 - **Session checkpoint system.** Three new sidecar files next to each
-  session JSONL turn `wstack resume <id>` into a real "kaldığım yerden
-  devam" experience instead of just replaying messages:
+  session JSONL turn `wstack resume <id>` into a real "resume where I
+  left off" experience instead of just replaying messages:
   - `<id>.todos.json` — `ctx.todos` mirrored to disk on every
     `todos_replaced` mutation (150ms debounce, atomic write). Reloaded
     transparently on resume; `attachTodosCheckpoint(state, path, id)`

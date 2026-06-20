@@ -86,7 +86,7 @@ export class CheckpointManager {
     // Save to disk.
     await this.saveToDisk(checkpoint);
 
-    // Eski checkpoint'leri temizle
+    // Clean up old checkpoints.
     await this.pruneCheckpoints();
 
     return checkpoint;
