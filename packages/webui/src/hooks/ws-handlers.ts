@@ -378,8 +378,8 @@ export function handleThinkingDelta(msg: WSServerMessage) {
 export function handleToolStarted(msg: WSServerMessage) {
   pipeViz(msg);
   const payload = msg.payload as { id: string; name: string; input?: unknown | undefined; messageId: string };
-  const existing = useChatStore.getState().messages.find((m) => m.toolUseId === payload.id);
-  if (existing) { useChatStore.getState().setCurrentToolId(existing.id); return; }
+  const existingId = useChatStore.getState().getToolMessageId(payload.id);
+  if (existingId) { useChatStore.getState().setCurrentToolId(existingId); return; }
   useChatStore.getState().clearThinking();
   streamCoalescer.drop('__thinking__');
   useChatStore.getState().setCurrentAssistantMessage(null);
@@ -392,15 +392,14 @@ export function handleToolProgress(msg: WSServerMessage) {
   const payload = msg.payload as { id: string; name: string; event: { type: string; text?: string | undefined } };
   const text = (payload.event?.text ?? '').trim();
   if (!text) return;
-  const messages = useChatStore.getState().messages;
-  const owner = messages.find((m) => m.toolUseId === payload.id);
-  if (!owner) return;
+  const ownerId = useChatStore.getState().getToolMessageId(payload.id);
+  if (!ownerId) return;
   const prefix = payload.event?.type === 'warning' ? '⚠ ' : '';
   // Coalesce progress lines per owner; flush splits back into lines and does a
   // single store write. Lines are newline-joined in the buffer.
-  streamCoalescer.push(owner.id, `${prefix}${text}\n`, (oid, buffered) =>
-    useChatStore.getState().appendToolProgressLines(
-      oid,
+  streamCoalescer.push(ownerId, `${prefix}${text}\n`, (_oid, buffered) =>
+    useChatStore.getState().appendToolProgressLinesByUseId(
+      payload.id,
       buffered.split('\n').filter((l) => l.length > 0),
     ),
   );
@@ -409,18 +408,21 @@ export function handleToolProgress(msg: WSServerMessage) {
 export function handleToolExecuted(msg: WSServerMessage) {
   pipeViz(msg);
   const payload = msg.payload as { id?: string | undefined; name: string; durationMs: number; ok: boolean; input?: unknown | undefined; output?: string | undefined };
-  const { messages, currentToolId } = useChatStore.getState();
-  const owner = payload.id ? messages.find((m) => m.toolUseId === payload.id) : currentToolId ? messages.find((m) => m.id === currentToolId) : undefined;
-  if (owner?.toolResult !== undefined) return;
-  if (owner) {
+  const { currentToolId } = useChatStore.getState();
+  const ownerId = payload.id ? useChatStore.getState().getToolMessageId(payload.id) : currentToolId;
+  if (ownerId) {
     // The final result replaces progress lines — discard any still-buffered
     // progress so it can't re-add a progressLines array a frame later.
-    streamCoalescer.drop(owner.id);
-    useChatStore.getState().setToolResult(owner.id, payload.output ?? '', payload.ok);
-    useChatStore.getState().updateMessage(owner.id, { toolDurationMs: payload.durationMs });
+    streamCoalescer.drop(ownerId);
+    if (payload.id) {
+      useChatStore.getState().setToolResultByUseId(payload.id, payload.output ?? '', payload.ok);
+    } else {
+      useChatStore.getState().setToolResult(ownerId, payload.output ?? '', payload.ok);
+    }
+    useChatStore.getState().updateMessage(ownerId, { toolDurationMs: payload.durationMs });
   }
   if (payload.id) useChatStore.getState().updateExecution(payload.id, { completedAt: Date.now(), durationMs: payload.durationMs, output: payload.output, ok: payload.ok });
-  if (currentToolId && owner && owner.id === currentToolId) useChatStore.getState().setCurrentToolId(null);
+  if (currentToolId && ownerId === currentToolId) useChatStore.getState().setCurrentToolId(null);
 }
 
 export function handleToolConfirmNeeded(msg: WSServerMessage) {

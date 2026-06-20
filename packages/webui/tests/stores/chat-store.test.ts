@@ -38,6 +38,7 @@ beforeEach(() => {
     isLoading: false,
     abortController: null,
     executions: new Map(),
+    toolMessageIdsByUseId: new Map(),
     queue: [],
     runStart: null,
     thinkingBuffer: '',
@@ -139,6 +140,11 @@ describe('addMessage', () => {
     expect(msg.toolName).toBe('Bash');
     expect((msg as ChatMessage).toolInput).toEqual({ command: 'ls' });
   });
+
+  it('indexes tool messages by toolUseId', () => {
+    const id = addMsg({ role: 'tool', toolUseId: 'toolu_1' });
+    expect(useChatStore.getState().getToolMessageId('toolu_1')).toBe(id);
+  });
 });
 
 // ── setMessages ───────────────────────────────────────────────────────
@@ -158,6 +164,15 @@ describe('setMessages', () => {
     expect(state.currentAssistantMessageId).toBeNull();
     expect(state.currentToolId).toBeNull();
     expect(state.executions.size).toBe(0);
+    expect(state.getToolMessageId('toolu_1')).toBeUndefined();
+  });
+
+  it('rebuilds the toolUseId index for replayed tool messages', () => {
+    useChatStore.getState().setMessages([
+      { id: 'replay_tool', role: 'tool', content: '', timestamp: 123, toolUseId: 'toolu_replay' },
+    ]);
+
+    expect(useChatStore.getState().getToolMessageId('toolu_replay')).toBe('replay_tool');
   });
 });
 
@@ -264,6 +279,12 @@ describe('setToolResult', () => {
   it('ignores unknown id', () => {
     expect(() => useChatStore.getState().setToolResult('not-found', 'x', true)).not.toThrow();
   });
+
+  it('sets tool results by toolUseId via the index', () => {
+    addMsg({ role: 'tool', toolUseId: 'toolu_1' });
+    useChatStore.getState().setToolResultByUseId('toolu_1', 'indexed result', true);
+    expect(useChatStore.getState().messages[0].toolResult).toBe('indexed result');
+  });
 });
 
 // ── appendToolProgressLines ───────────────────────────────────────────
@@ -298,6 +319,12 @@ describe('appendToolProgressLines', () => {
 
   it('ignores unknown message id', () => {
     expect(() => useChatStore.getState().appendToolProgressLines('not-found', ['x'])).not.toThrow();
+  });
+
+  it('appends progress by toolUseId via the index', () => {
+    addMsg({ role: 'tool', toolUseId: 'toolu_1' });
+    useChatStore.getState().appendToolProgressLinesByUseId('toolu_1', ['indexed']);
+    expect(useChatStore.getState().messages[0].progressLines).toEqual(['indexed']);
   });
 });
 
@@ -371,6 +398,12 @@ describe('clearMessages', () => {
     useChatStore.getState().clearMessages();
     expect(useChatStore.getState().executions.size).toBe(0);
   });
+
+  it('clears the toolUseId index', () => {
+    addMsg({ role: 'tool', toolUseId: 'toolu_1' });
+    useChatStore.getState().clearMessages();
+    expect(useChatStore.getState().getToolMessageId('toolu_1')).toBeUndefined();
+  });
 });
 
 // ── setCurrentAssistantMessage ────────────────────────────────────────
@@ -415,6 +448,14 @@ describe('truncateAfter', () => {
     addMsg({ content: 'msg3' });
     useChatStore.getState().truncateAfter(id1);
     expect(useChatStore.getState().messages.map((m) => m.content)).toEqual(['msg1']);
+  });
+
+  it('rebuilds the toolUseId index after truncation', () => {
+    const kept = addMsg({ role: 'tool', content: '', toolUseId: 'toolu_kept' });
+    addMsg({ role: 'tool', content: '', toolUseId: 'toolu_removed' });
+    useChatStore.getState().truncateAfter(kept);
+    expect(useChatStore.getState().getToolMessageId('toolu_kept')).toBe(kept);
+    expect(useChatStore.getState().getToolMessageId('toolu_removed')).toBeUndefined();
   });
 
   it('keeps all messages when truncating after the last message', () => {

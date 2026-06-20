@@ -35,6 +35,14 @@ function dedupeRepeatedBlocks(text: string): string {
 // Chat Store
 // ============================================
 
+function indexToolMessages(messages: readonly ChatMessage[]): Map<string, string> {
+  const index = new Map<string, string>();
+  for (const m of messages) {
+    if (m.role === 'tool' && m.toolUseId) index.set(m.toolUseId, m.id);
+  }
+  return index;
+}
+
 interface ChatState {
   messages: ChatMessage[];
   currentAssistantMessageId: string | null;
@@ -42,6 +50,7 @@ interface ChatState {
   isLoading: boolean;
   abortController: AbortController | null;
   executions: Map<string, ToolExecution>;
+  toolMessageIdsByUseId: Map<string, string>;
   /** Messages typed while the agent was running. Drained one-at-a-time
    *  after run.result lands so the user can stack up follow-ups without
    *  waiting for each turn to finish. */
@@ -70,6 +79,9 @@ interface ChatState {
   setToolResult: (id: string, result: string, ok: boolean) => void;
   appendToolProgress: (id: string, line: string) => void;
   appendToolProgressLines: (id: string, lines: string[]) => void;
+  getToolMessageId: (toolUseId: string) => string | undefined;
+  setToolResultByUseId: (toolUseId: string, result: string, ok: boolean) => void;
+  appendToolProgressLinesByUseId: (toolUseId: string, lines: string[]) => void;
   setLoading: (loading: boolean) => void;
   setAbortController: (ctrl: AbortController | null) => void;
   clearMessages: () => void;
@@ -107,6 +119,7 @@ export const useChatStore = create<ChatState>()(
       isLoading: false,
       abortController: null,
       executions: new Map(),
+      toolMessageIdsByUseId: new Map(),
       queue: [],
       runStart: null,
       thinkingBuffer: '',
@@ -115,11 +128,19 @@ export const useChatStore = create<ChatState>()(
       addMessage: (msg) => {
         const id = `msg_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
         const fullMsg: ChatMessage = { ...msg, id, timestamp: msg.timestamp ?? Date.now() };
-        set((state) => ({
-          messages: [...state.messages, fullMsg],
-          currentAssistantMessageId:
-            msg.role === 'assistant' ? id : state.currentAssistantMessageId,
-        }));
+        set((state) => {
+          const next: Partial<ChatState> = {
+            messages: [...state.messages, fullMsg],
+            currentAssistantMessageId:
+              msg.role === 'assistant' ? id : state.currentAssistantMessageId,
+          };
+          if (fullMsg.role === 'tool' && fullMsg.toolUseId) {
+            const nextIndex = new Map(state.toolMessageIdsByUseId);
+            nextIndex.set(fullMsg.toolUseId, id);
+            next.toolMessageIdsByUseId = nextIndex;
+          }
+          return next;
+        });
         return id;
       },
 
@@ -129,6 +150,7 @@ export const useChatStore = create<ChatState>()(
           currentAssistantMessageId: null,
           currentToolId: null,
           executions: new Map(),
+          toolMessageIdsByUseId: indexToolMessages(messages),
         });
       },
 
@@ -179,6 +201,18 @@ export const useChatStore = create<ChatState>()(
         }));
       },
 
+      getToolMessageId: (toolUseId) => get().toolMessageIdsByUseId.get(toolUseId),
+
+      setToolResultByUseId: (toolUseId, result, ok) => {
+        const id = get().toolMessageIdsByUseId.get(toolUseId);
+        if (id) get().setToolResult(id, result, ok);
+      },
+
+      appendToolProgressLinesByUseId: (toolUseId, lines) => {
+        const id = get().toolMessageIdsByUseId.get(toolUseId);
+        if (id) get().appendToolProgressLines(id, lines);
+      },
+
       setLoading: (loading) => set({ isLoading: loading }),
       setAbortController: (ctrl) => set({ abortController: ctrl }),
 
@@ -188,6 +222,7 @@ export const useChatStore = create<ChatState>()(
           currentAssistantMessageId: null,
           currentToolId: null,
           executions: new Map(),
+          toolMessageIdsByUseId: new Map(),
         }),
 
       setCurrentAssistantMessage: (id) => set({ currentAssistantMessageId: id }),
@@ -197,10 +232,12 @@ export const useChatStore = create<ChatState>()(
         set((state) => {
           const idx = state.messages.findIndex((m) => m.id === id);
           if (idx === -1) return state;
+          const messages = state.messages.slice(0, idx + 1);
           return {
-            messages: state.messages.slice(0, idx + 1),
+            messages,
             currentAssistantMessageId: null,
             currentToolId: null,
+            toolMessageIdsByUseId: indexToolMessages(messages),
           };
         }),
 
