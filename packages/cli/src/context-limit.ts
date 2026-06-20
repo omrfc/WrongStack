@@ -9,6 +9,17 @@ import type {
 import { mergeCustomModelDefs } from '@wrongstack/core';
 import { capabilitiesFor } from '@wrongstack/providers';
 
+/**
+ * Config-only OAuth/subscription wire families → the canonical models.dev
+ * provider that lists the same models. Lets us resolve the real per-model
+ * context window (these families aren't published in the catalog themselves).
+ */
+const SIBLING_CATALOG: Record<string, string> = {
+  'anthropic-oauth': 'anthropic',
+  'openai-codex': 'openai',
+  'github-copilot': 'openai',
+};
+
 export interface ResolveMaxContextInput {
   modelsRegistry?: ModelsRegistry | undefined;
   config: {
@@ -32,9 +43,13 @@ export interface ResolveMaxContextInput {
  * Priority chain (first hit wins):
  *  1. config.context.effectiveMaxContext        — explicit session/global value
  *  2. providers.<id>.capabilities.maxContext    — explicit per-provider override
- *  3. models.dev catalog (capabilitiesFor → getModel) — the published per-model
+ *  3. sibling catalog for OAuth families        — anthropic-oauth/openai-codex/
+ *     github-copilot share their models with a canonical models.dev provider
+ *     (anthropic/openai) but aren't themselves listed, so resolve the real
+ *     per-model window there (e.g. Opus 4.8 → 1M, gpt-5.5 → 1.05M)
+ *  4. models.dev catalog (capabilitiesFor → getModel) — the published per-model
  *     window, keyed by provider (e.g. 1M for an OpenRouter model)
- *  4. provider.capabilities.maxContext          — family default (may be 0)
+ *  5. provider.capabilities.maxContext          — family default (may be 0)
  *
  * Returns 0 when the context window cannot be determined — callers should
  * treat this as "unknown" and disable auto-compaction rather than guessing.
@@ -54,6 +69,31 @@ export async function resolveRuntimeMaxContext(input: ResolveMaxContextInput): P
   const providerConfig = input.runtimeProviderConfig ?? input.config.providers?.[input.providerId];
   const providerOverride = positiveNumber(readConfiguredMaxContext(providerConfig));
   if (providerOverride) return providerOverride;
+
+  // OAuth/subscription families (Sign in with Claude/ChatGPT/Copilot) aren't in
+  // the models.dev catalog under their own id, but they serve the SAME models as
+  // a canonical catalog provider. Resolve the real per-model window there. The
+  // configured baseUrl is an auth/proxy endpoint (api.anthropic.com, a Copilot
+  // proxy, …), not a context-shrinking gateway, so we bypass the divergence
+  // guard that the generic catalog path applies below.
+  const sibling = providerConfig?.family ? SIBLING_CATALOG[providerConfig.family] : undefined;
+  if (sibling && input.modelsRegistry) {
+    const mergedModels = mergeCustomModelDefs(providerConfig?.customModels, input.config.models);
+    const caps = await capabilitiesFor(
+      input.modelsRegistry,
+      sibling,
+      input.modelId,
+      mergedModels,
+    ).catch(() => undefined);
+    const siblingMax = positiveNumber(caps?.maxContext);
+    if (siblingMax) return siblingMax;
+
+    const directModel = await input.modelsRegistry
+      .getModel(sibling, input.modelId)
+      .catch(() => undefined);
+    const directMax = positiveNumber(directModel?.capabilities.maxContext);
+    if (directMax) return directMax;
+  }
 
   // Resolve alias → catalog id so registry lookups hit the real provider. The
   // launch id (input.providerId) may be a user alias whose `type` points at the
