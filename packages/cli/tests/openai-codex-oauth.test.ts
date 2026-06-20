@@ -1,0 +1,144 @@
+import { createHash } from 'node:crypto';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  buildAuthorizeUrl,
+  exchangeAuthorizationCode,
+  extractAccountId,
+  generatePkce,
+  parseAuthorizationInput,
+  refreshCodexToken,
+} from '../src/auth-menu/openai-codex-oauth.js';
+
+function b64url(s: string): string {
+  return Buffer.from(s).toString('base64url');
+}
+
+function fakeJwt(accountId: string): string {
+  const payload = b64url(
+    JSON.stringify({ 'https://api.openai.com/auth': { chatgpt_account_id: accountId } }),
+  );
+  return `${b64url('{}')}.${payload}.sig`;
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe('generatePkce', () => {
+  it('produces a base64url verifier with a matching S256 challenge', () => {
+    const { verifier, challenge } = generatePkce();
+    expect(verifier).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(challenge).toMatch(/^[A-Za-z0-9_-]+$/);
+    const expected = createHash('sha256')
+      .update(verifier)
+      .digest('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+    expect(challenge).toBe(expected);
+  });
+
+  it('is random per call', () => {
+    expect(generatePkce().verifier).not.toBe(generatePkce().verifier);
+  });
+});
+
+describe('buildAuthorizeUrl', () => {
+  it('includes all Codex-required query params', () => {
+    const url = new URL(buildAuthorizeUrl('CHAL', 'STATE'));
+    expect(url.origin + url.pathname).toBe('https://auth.openai.com/oauth/authorize');
+    const p = url.searchParams;
+    expect(p.get('response_type')).toBe('code');
+    expect(p.get('client_id')).toBe('app_EMoamEEZ73f0CkXaXp7hrann');
+    expect(p.get('redirect_uri')).toBe('http://localhost:1455/auth/callback');
+    expect(p.get('scope')).toBe('openid profile email offline_access');
+    expect(p.get('code_challenge')).toBe('CHAL');
+    expect(p.get('code_challenge_method')).toBe('S256');
+    expect(p.get('state')).toBe('STATE');
+    expect(p.get('id_token_add_organizations')).toBe('true');
+    expect(p.get('codex_cli_simplified_flow')).toBe('true');
+    expect(p.get('originator')).toBe('wrongstack');
+  });
+});
+
+describe('parseAuthorizationInput', () => {
+  it('parses a full redirect URL', () => {
+    expect(
+      parseAuthorizationInput('http://localhost:1455/auth/callback?code=abc&state=xyz'),
+    ).toEqual({ code: 'abc', state: 'xyz' });
+  });
+  it('parses a bare query string', () => {
+    expect(parseAuthorizationInput('code=abc&state=xyz')).toEqual({ code: 'abc', state: 'xyz' });
+  });
+  it('treats a bare token as the code', () => {
+    expect(parseAuthorizationInput('justcode')).toEqual({ code: 'justcode' });
+  });
+});
+
+describe('extractAccountId', () => {
+  it('decodes the chatgpt_account_id claim', () => {
+    expect(extractAccountId(fakeJwt('acc_7'))).toBe('acc_7');
+  });
+  it('returns null when absent', () => {
+    expect(extractAccountId('garbage')).toBeNull();
+  });
+});
+
+describe('exchangeAuthorizationCode', () => {
+  it('POSTs the authorization_code grant and maps the token response', async () => {
+    let captured: { url?: string; body?: string } = {};
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: { body?: string }) => {
+        captured = { url, body: init.body };
+        return new Response(
+          JSON.stringify({ access_token: 'AT', refresh_token: 'RT', expires_in: 3600 }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    const before = Date.now();
+    const tokens = await exchangeAuthorizationCode('CODE', 'VERIFIER');
+    expect(captured.url).toBe('https://auth.openai.com/oauth/token');
+    const body = new URLSearchParams(captured.body ?? '');
+    expect(body.get('grant_type')).toBe('authorization_code');
+    expect(body.get('client_id')).toBe('app_EMoamEEZ73f0CkXaXp7hrann');
+    expect(body.get('code')).toBe('CODE');
+    expect(body.get('code_verifier')).toBe('VERIFIER');
+    expect(body.get('redirect_uri')).toBe('http://localhost:1455/auth/callback');
+    expect(tokens.access).toBe('AT');
+    expect(tokens.refresh).toBe('RT');
+    expect(tokens.expires).toBeGreaterThanOrEqual(before + 3600 * 1000);
+  });
+
+  it('throws on a non-2xx token response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('bad', { status: 400 })),
+    );
+    await expect(exchangeAuthorizationCode('CODE', 'V')).rejects.toThrow(/token exchange failed/i);
+  });
+});
+
+describe('refreshCodexToken', () => {
+  it('POSTs the refresh_token grant', async () => {
+    let body = '';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: { body?: string }) => {
+        body = init.body ?? '';
+        return new Response(
+          JSON.stringify({ access_token: 'AT2', refresh_token: 'RT2', expires_in: 60 }),
+          { status: 200 },
+        );
+      }),
+    );
+    const tokens = await refreshCodexToken('OLD_RT');
+    const params = new URLSearchParams(body);
+    expect(params.get('grant_type')).toBe('refresh_token');
+    expect(params.get('refresh_token')).toBe('OLD_RT');
+    expect(tokens.access).toBe('AT2');
+    expect(tokens.refresh).toBe('RT2');
+  });
+});

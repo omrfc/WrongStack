@@ -123,6 +123,32 @@ export interface ProviderApiKey {
   apiKey: string;
   /** ISO-8601 timestamp the key was added. */
   createdAt: string;
+  /**
+   * How this credential was obtained.
+   * - `api_key`       — manually pasted API key (default)
+   * - `oauth`         — OAuth 2.0 device-code / authorization-code flow
+   * - `session_token` — extracted from browser session (ChatGPT web, etc.)
+   */
+  authMethod?: 'api_key' | 'oauth' | 'session_token' | undefined;
+  /** ISO-8601 expiry. When set, the token manager will refresh before this time. */
+  expiresAt?: string | undefined;
+  /**
+   * OAuth refresh token. Stored encrypted by the secret-vault walker because
+   * the field name contains `Token` (case-insensitive match by vault).
+   */
+  refreshToken?: string | undefined;
+  /** Token type as returned by the OAuth endpoint (e.g. "bearer"). */
+  tokenType?: string | undefined;
+  /** OAuth scope string (e.g. "openai.models.read openai.models.use"). */
+  scope?: string | undefined;
+  /**
+   * ChatGPT account id, extracted from the OAuth access-token JWT
+   * (`https://api.openai.com/auth`.chatgpt_account_id). Sent as the
+   * `chatgpt-account-id` header by the `openai-codex` wire family. Cached
+   * here for display/diagnostics; the provider re-derives it from the live
+   * token at request time so it can never go stale after a refresh.
+   */
+  accountId?: string | undefined;
 }
 
 export interface ProviderConfig {
@@ -161,6 +187,23 @@ export interface ProviderConfig {
    * capability overrides. The model id is the key, not a fully qualified id.
    */
   customModels?: Record<string, CustomModelDefinition>;
+  /**
+   * Per-provider OAuth configuration. When present, `wstack auth login <id>`
+   * uses this instead of prompting for a raw API key. Set by the catalog or
+   * by the user via `/settings`.
+   */
+  oauthConfig?: {
+    /** OAuth client id registered with the provider. */
+    clientId?: string | undefined;
+    /** Device authorization endpoint (RFC 8628). */
+    deviceCodeEndpoint?: string | undefined;
+    /** Token endpoint for code exchange and refresh. */
+    tokenEndpoint?: string | undefined;
+    /** Authorization server URL shown to the user for opening in browser. */
+    authorizationEndpoint?: string | undefined;
+    /** Default OAuth scopes to request. */
+    scopes?: string[] | undefined;
+  } | undefined;
 }
 
 /**

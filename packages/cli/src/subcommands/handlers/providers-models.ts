@@ -19,6 +19,7 @@ export const providersCmd: SubcommandHandler = async (args, deps) => {
       anthropic: [],
       openai: [],
       'openai-compatible': [],
+      'openai-codex': [],
       google: [],
       unsupported: [],
     };

@@ -1,6 +1,6 @@
 import { color } from '@wrongstack/core';
 import { parseAuthFlags } from '../../arg-parser.js';
-import { type AuthMenuDeps, runAuthDirect, runAuthMenu } from '../../auth-menu/index.js';
+import { type AuthMenuDeps, CODEX_PROVIDER_ID, runAuthDirect, runAuthMenu, runCodexOAuthLogin } from '../../auth-menu/index.js';
 import {
   loadConfigProviders,
   maskedKey,
@@ -50,6 +50,24 @@ export const authCmd: SubcommandHandler = async (args, deps) => {
       return 1;
     }
     return runAuthRemove(menuDeps, pid);
+  }
+
+  // `wstack auth login [openai|codex|chatgpt]` — "Sign in with ChatGPT"
+  // (OAuth Authorization Code + PKCE). Uses a ChatGPT Plus/Pro/Team
+  // subscription. Stored under the canonical `openai-codex` provider so it
+  // never clobbers a separately-configured API-key `openai` provider.
+  if (first === 'login') {
+    const pid = flags.positional[1];
+    const codexAliases = new Set(['openai', 'codex', 'chatgpt', 'codex-cli', CODEX_PROVIDER_ID]);
+    if (pid && !codexAliases.has(pid)) {
+      deps.renderer.writeError('OAuth login is only supported for ChatGPT / Codex.');
+      deps.renderer.write(
+        color.dim('  Sign in with ChatGPT: ') + color.bold('wstack auth login chatgpt') + '\n' +
+        color.dim(`  For an API key instead: `) + color.bold(`wstack auth ${pid}`) + '\n',
+      );
+      return 1;
+    }
+    return runCodexOAuthLogin(menuDeps);
   }
 
   // `wstack auth <provider>` — direct add

@@ -73,7 +73,12 @@ import {
   normalizeTokenSavingTier,
 } from '@wrongstack/core';
 import { MCPRegistry } from '@wrongstack/mcp';
-import { makeProviderFromConfig } from '@wrongstack/providers';
+import { makeProviderFromConfig, setCodexTokenPersister } from '@wrongstack/providers';
+import {
+  mutateConfigProviders,
+  normalizeKeys,
+  writeKeysBack,
+} from './provider-config-utils.js';
 import { createAutoPhaseHost } from './autophase-host.js';
 import { boot } from './boot.js';
 import { registerBuiltinTools } from './boot/tool-registry.js';
@@ -191,6 +196,28 @@ export async function main(argv: string[]): Promise<number> {
   // been ruled out.
   const { updateInfo: refreshedUpdateInfo } = await runPreflight(config, updateInfo);
   updateInfo = refreshedUpdateInfo;
+
+  // Persist rotated `openai-codex` (Sign in with ChatGPT) OAuth tokens back to
+  // the encrypted config. Auth0 rotates the refresh token on every refresh, so
+  // dropping the new pair would break the NEXT session's login. Installed once;
+  // covers every provider-construction site via the providers-module hook.
+  setCodexTokenPersister((providerId, creds) => {
+    void mutateConfigProviders(wpaths.globalConfig, vault, (all) => {
+      const p = all[providerId];
+      if (!p) return;
+      const keys = normalizeKeys(p);
+      const active = p.activeKey ? keys.find((k) => k.label === p.activeKey) : keys[0];
+      if (!active) return;
+      active.apiKey = creds.accessToken;
+      active.refreshToken = creds.refreshToken;
+      active.expiresAt = new Date(creds.expiresAt).toISOString();
+      if (creds.accountId) active.accountId = creds.accountId;
+      writeKeysBack(p, keys);
+    }).catch(() => {
+      // Best-effort: a failed persist still leaves the in-memory token valid
+      // for this session; the next session will refresh from the prior token.
+    });
+  });
 
   // PR 3 of Issue #29: PathResolver + EventBus + container
   // setup is now in `wireContainer()`. The function returns

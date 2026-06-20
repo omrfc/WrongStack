@@ -3,6 +3,7 @@ import type {
   Logger,
   ModelsRegistry,
   Provider,
+  ProviderApiKey,
   ProviderConfig,
   ProviderFactory,
   ResolvedProvider,
@@ -11,6 +12,7 @@ import type {
 import { ERROR_CODES, WrongStackError } from '@wrongstack/core';
 import { AnthropicProvider } from './anthropic.js';
 import { GoogleProvider } from './google.js';
+import { OpenAICodexProvider } from './openai-codex.js';
 import {
   type CompatibilityQuirks,
   isCompatibilityQuirks,
@@ -25,6 +27,15 @@ export {
   type CompatibilityQuirks,
 } from './openai-compatible.js';
 export { GoogleProvider, type GoogleProviderOptions } from './google.js';
+export {
+  OpenAICodexProvider,
+  type OpenAICodexProviderOptions,
+  type CodexCredentials,
+  type CodexOAuthTokens,
+  refreshCodexAccessToken,
+  extractAccountId,
+  resolveCodexUrl,
+} from './openai-codex.js';
 export { WireAdapter, type WireAdapterStreamOptions } from './wire-adapter.js';
 export {
   isDebugStreamEnabled,
@@ -65,6 +76,29 @@ export interface BuildFactoriesOptions {
   registry: ModelsRegistry;
   /** Used to log unsupported families during boot. */
   log?: Logger | undefined;
+}
+
+/** Rotated-token payload handed to the codex persister after a refresh. */
+export interface CodexRefreshedTokens {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+  accountId: string | undefined;
+}
+
+/**
+ * Module-level hook so refreshed `openai-codex` tokens can be persisted back to
+ * the encrypted config WITHOUT threading a vault/configPath through every
+ * provider-construction site. The CLI installs this once at boot. When unset
+ * (tests, headless tools), refresh still works in-memory for the session — only
+ * cross-session persistence is skipped.
+ */
+let _codexPersist: ((providerId: string, creds: CodexRefreshedTokens) => void) | undefined;
+
+export function setCodexTokenPersister(
+  fn: ((providerId: string, creds: CodexRefreshedTokens) => void) | undefined,
+): void {
+  _codexPersist = fn;
 }
 
 /**
@@ -134,6 +168,18 @@ function resolveActiveKey(cfg: ProviderConfig): string | undefined {
   return cfg.apiKey && cfg.apiKey.length > 0 ? cfg.apiKey : undefined;
 }
 
+/** Resolve the full active key ENTRY (not just the string) — needed by OAuth
+ *  families that carry refresh tokens / expiry / account id alongside the key. */
+function resolveActiveKeyEntry(cfg: ProviderConfig): ProviderApiKey | undefined {
+  if (Array.isArray(cfg.apiKeys) && cfg.apiKeys.length > 0) {
+    const active = cfg.activeKey
+      ? cfg.apiKeys.find((k) => k.label === cfg.activeKey)
+      : undefined;
+    return active ?? cfg.apiKeys[0];
+  }
+  return undefined;
+}
+
 function makeProvider(p: ResolvedProvider, cfg: ProviderConfig): Provider {
   // Config overrides the catalog. This is the path that lets users wire
   // up internal proxies / self-hosted endpoints without needing models.dev.
@@ -180,6 +226,21 @@ function makeProvider(p: ResolvedProvider, cfg: ProviderConfig): Provider {
         headers: cfg.headers,
         quirks: validateQuirks(p.id, cfg.quirks),
       });
+    case 'openai-codex': {
+      const entry = resolveActiveKeyEntry(cfg);
+      const parsedExpiry = entry?.expiresAt ? Date.parse(entry.expiresAt) : Number.NaN;
+      return new OpenAICodexProvider({
+        id: p.id,
+        baseUrl,
+        credentials: {
+          accessToken: expectDefined(apiKey),
+          refreshToken: entry?.refreshToken,
+          expiresAt: Number.isFinite(parsedExpiry) ? parsedExpiry : undefined,
+          accountId: entry?.accountId,
+        },
+        onRefresh: (creds) => _codexPersist?.(p.id, creds),
+      });
+    }
     case 'google':
       return new GoogleProvider({ id: p.id, apiKey: expectDefined(apiKey), baseUrl });
     default:

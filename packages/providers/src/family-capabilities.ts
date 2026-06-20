@@ -37,6 +37,19 @@ export const CAPABILITIES_BY_FAMILY: Record<WireFamily, Capabilities> = {
     maxContext: 0,
     cacheControl: 'none',
   },
+  // ChatGPT-backend Responses API (Sign in with ChatGPT / Codex subscription).
+  'openai-codex': {
+    tools: true,
+    parallelTools: true,
+    vision: true,
+    streaming: true,
+    promptCache: true,
+    systemPrompt: true,
+    jsonMode: false,
+    reasoning: true,
+    maxContext: 400_000,
+    cacheControl: 'auto',
+  },
   google: {
     tools: true,
     parallelTools: true,
