@@ -48,7 +48,7 @@ describe('git change-set handlers', () => {
   });
 
   describe('handleGitChanges', () => {
-    it('reports modified, added (untracked), and deleted files with counts', async () => {
+    it('reports modified, untracked, and deleted files without reading untracked counts', async () => {
       // modify
       fsSync.writeFileSync(path.join(repo, 'keep.txt'), 'line1\nCHANGED\nline3\nline4\n');
       // untracked new file
@@ -74,7 +74,8 @@ describe('git change-set handlers', () => {
       expect(byPath.get('keep.txt')?.added).toBeGreaterThan(0);
 
       expect(byPath.get('fresh.txt')?.status).toBe('?');
-      expect(byPath.get('fresh.txt')?.added).toBe(3);
+      expect(byPath.get('fresh.txt')?.added).toBe(0);
+      expect(byPath.get('fresh.txt')?.deleted).toBe(0);
       expect(byPath.get('fresh.txt')?.staged).toBe(false);
 
       expect(byPath.get('gone.txt')?.status).toBe('D');

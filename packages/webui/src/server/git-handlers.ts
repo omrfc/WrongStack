@@ -101,7 +101,9 @@ function makeGit(cwd: string | undefined) {
  * The file list comes from `git status --porcelain -z` (NUL-delimited so
  * paths with spaces/unicode survive intact, and renames are unambiguous).
  * Per-file line counts come from `--numstat` of both the unstaged and the
- * staged diff, summed; untracked files count their own lines as additions.
+ * staged diff, summed. Untracked files intentionally report 0/0 here so the
+ * list view does not read every untracked file; `git.diff` loads a selected
+ * file lazily on demand.
  * Never throws — a non-repo yields an empty list.
  */
 export async function handleGitChanges(ws: WebSocket, projectRoot: string): Promise<void> {
@@ -170,8 +172,10 @@ export async function handleGitChanges(ws: WebSocket, projectRoot: string): Prom
       let added = counts.get(path)?.added ?? 0;
       let deleted = counts.get(path)?.deleted ?? 0;
       if (status === '?') {
-        // Untracked: numstat doesn't see it — count its own lines as additions.
-        added = await countUntrackedLines(cwd, path);
+        // Untracked files are not present in numstat. Do not read every file
+        // here: large generated/untracked trees made git.changes an N+1 file
+        // scan. The diff endpoint loads a selected file on demand.
+        added = 0;
         deleted = 0;
       }
       files.push({ path, status, added, deleted, staged });
@@ -183,25 +187,6 @@ export async function handleGitChanges(ws: WebSocket, projectRoot: string): Prom
       type: 'git.changes',
       payload: { files: [], error: err instanceof Error ? err.message : String(err) },
     });
-  }
-}
-
-/** Count newline-delimited lines of an untracked file (0 on any error/binary). */
-async function countUntrackedLines(cwd: string | undefined, relPath: string): Promise<number> {
-  try {
-    const { readFile } = await import('node:fs/promises');
-    const { join } = await import('node:path');
-    const abs = cwd ? join(cwd, relPath) : relPath;
-    const buf = await readFile(abs);
-    if (buf.includes(0)) return 0; // binary
-    if (buf.length === 0) return 0;
-    let lines = 0;
-    for (let i = 0; i < buf.length; i++) if (buf[i] === 10) lines++;
-    // Count a trailing partial line as a line too.
-    if (buf[buf.length - 1] !== 10) lines++;
-    return lines;
-  } catch {
-    return 0;
   }
 }
 
