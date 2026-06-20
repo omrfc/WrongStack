@@ -287,11 +287,11 @@ export class ReplayLogStore {
         if (!entry.isFile() || !entry.name.endsWith('.replay.jsonl')) continue;
         const base = entry.name.slice(0, -'.replay.jsonl'.length);
         const sessionId = prefix ? `${prefix}/${base}` : base;
-        const all = await this.load(sessionId);
+        const fp = path.join(dir, entry.name);
         out.push({
           sessionId,
-          entryCount: all.length,
-          path: path.join(dir, entry.name),
+          entryCount: await this.countEntries(fp),
+          path: fp,
         });
       }
     };
@@ -306,6 +306,37 @@ export class ReplayLogStore {
     // legitimate; traversal is rejected. A plain slash ban would throw
     // the moment a real (sharded) session id is used for --replay.
     return sessionScopedPath(this.dir, sessionId, '.replay.jsonl');
+  }
+
+  private async countEntries(filePath: string): Promise<number> {
+    // list() only needs a count, not provider request/response payloads. Count
+    // non-empty JSONL rows in fixed-size chunks so large replay logs are not
+    // parsed or materialized just to render `wstack replay --list`.
+    const handle = await fs.open(filePath, 'r');
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let count = 0;
+    let hasNonWhitespace = false;
+    try {
+      while (true) {
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+        if (bytesRead === 0) break;
+        for (let i = 0; i < bytesRead; i++) {
+          const ch = buffer[i]!;
+          if (ch === 10) {
+            if (hasNonWhitespace) count++;
+            hasNonWhitespace = false;
+            continue;
+          }
+          if (ch !== 13 && ch !== 32 && ch !== 9) {
+            hasNonWhitespace = true;
+          }
+        }
+      }
+    } finally {
+      await handle.close();
+    }
+    if (hasNonWhitespace) count++;
+    return count;
   }
 
   private async readAll(sessionId: string): Promise<ReplayEntry[]> {

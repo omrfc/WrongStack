@@ -43,6 +43,20 @@ describe('ReplayLogStore.list', () => {
     expect(flat?.path.endsWith('flat.replay.jsonl')).toBe(true);
   });
 
+  it('counts non-empty JSONL rows without parsing replay payloads', async () => {
+    await fs.writeFile(
+      path.join(dir, 'big.replay.jsonl'),
+      `${ENTRY('sha256:a1')}\n   \n${ENTRY('sha256:a2').trimEnd()}`,
+      'utf8',
+    );
+    const parseSpy = vi.spyOn(JSON, 'parse');
+
+    const listed = await store.list();
+
+    expect(listed).toEqual([{ sessionId: 'big', entryCount: 2, path: path.join(dir, 'big.replay.jsonl') }]);
+    expect(parseSpy).not.toHaveBeenCalled();
+  });
+
   it('returns [] when the store directory does not exist (ENOENT)', async () => {
     const missing = new ReplayLogStore({ dir: path.join(dir, 'nope') });
     expect(await missing.list()).toEqual([]);
