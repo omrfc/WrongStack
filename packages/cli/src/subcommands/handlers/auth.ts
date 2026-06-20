@@ -1,6 +1,13 @@
 import { color } from '@wrongstack/core';
 import { parseAuthFlags } from '../../arg-parser.js';
-import { type AuthMenuDeps, CODEX_PROVIDER_ID, runAuthDirect, runAuthMenu, runCodexOAuthLogin } from '../../auth-menu/index.js';
+import {
+  type AuthMenuDeps,
+  CODEX_PROVIDER_ID,
+  runAuthDirect,
+  runAuthMenu,
+  runClaudeOAuthLogin,
+  runCodexOAuthLogin,
+} from '../../auth-menu/index.js';
 import {
   loadConfigProviders,
   maskedKey,
@@ -52,22 +59,28 @@ export const authCmd: SubcommandHandler = async (args, deps) => {
     return runAuthRemove(menuDeps, pid);
   }
 
-  // `wstack auth login [openai|codex|chatgpt]` — "Sign in with ChatGPT"
-  // (OAuth Authorization Code + PKCE). Uses a ChatGPT Plus/Pro/Team
-  // subscription. Stored under the canonical `openai-codex` provider so it
-  // never clobbers a separately-configured API-key `openai` provider.
+  // `wstack auth login <chatgpt|claude>` — subscription OAuth login.
+  //   chatgpt/openai/codex → "Sign in with ChatGPT"  (provider openai-codex)
+  //   claude/anthropic     → "Sign in with Claude"   (provider anthropic-oauth)
+  // Both store under a canonical provider id so they never clobber a separately
+  // configured API-key `openai`/`anthropic` provider.
   if (first === 'login') {
-    const pid = flags.positional[1];
-    const codexAliases = new Set(['openai', 'codex', 'chatgpt', 'codex-cli', CODEX_PROVIDER_ID]);
-    if (pid && !codexAliases.has(pid)) {
-      deps.renderer.writeError('OAuth login is only supported for ChatGPT / Codex.');
-      deps.renderer.write(
-        color.dim('  Sign in with ChatGPT: ') + color.bold('wstack auth login chatgpt') + '\n' +
-        color.dim(`  For an API key instead: `) + color.bold(`wstack auth ${pid}`) + '\n',
-      );
-      return 1;
+    const pid = (flags.positional[1] ?? '').toLowerCase();
+    const codexAliases = new Set(['', 'openai', 'codex', 'chatgpt', 'codex-cli', CODEX_PROVIDER_ID]);
+    const claudeAliases = new Set(['claude', 'anthropic', 'claude-pro', 'claude-max', 'anthropic-oauth']);
+    if (claudeAliases.has(pid)) {
+      return runClaudeOAuthLogin(menuDeps);
     }
-    return runCodexOAuthLogin(menuDeps);
+    if (codexAliases.has(pid)) {
+      return runCodexOAuthLogin(menuDeps);
+    }
+    deps.renderer.writeError('OAuth login is only supported for ChatGPT and Claude.');
+    deps.renderer.write(
+      color.dim('  Sign in with ChatGPT: ') + color.bold('wstack auth login chatgpt') + '\n' +
+        color.dim('  Sign in with Claude:  ') + color.bold('wstack auth login claude') + '\n' +
+        color.dim('  For an API key instead: ') + color.bold(`wstack auth ${pid}`) + '\n',
+    );
+    return 1;
   }
 
   // `wstack auth <provider>` — direct add

@@ -37,6 +37,19 @@ export const CAPABILITIES_BY_FAMILY: Record<WireFamily, Capabilities> = {
     maxContext: 0,
     cacheControl: 'none',
   },
+  // Claude Pro/Max via OAuth (Sign in with Claude). Same wire as anthropic.
+  'anthropic-oauth': {
+    tools: true,
+    parallelTools: true,
+    vision: true,
+    streaming: true,
+    promptCache: true,
+    systemPrompt: true,
+    jsonMode: false,
+    reasoning: false,
+    maxContext: 200_000,
+    cacheControl: 'native',
+  },
   // ChatGPT-backend Responses API (Sign in with ChatGPT / Codex subscription).
   'openai-codex': {
     tools: true,

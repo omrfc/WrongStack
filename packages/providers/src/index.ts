@@ -11,6 +11,7 @@ import type {
 } from '@wrongstack/core';
 import { ERROR_CODES, WrongStackError } from '@wrongstack/core';
 import { AnthropicProvider } from './anthropic.js';
+import { AnthropicOAuthProvider } from './anthropic-oauth.js';
 import { GoogleProvider } from './google.js';
 import { OpenAICodexProvider } from './openai-codex.js';
 import {
@@ -36,6 +37,14 @@ export {
   extractAccountId,
   resolveCodexUrl,
 } from './openai-codex.js';
+export {
+  AnthropicOAuthProvider,
+  type AnthropicOAuthProviderOptions,
+  type AnthropicOAuthCredentials,
+  type AnthropicOAuthTokens,
+  refreshAnthropicOAuthToken,
+  CLAUDE_CODE_SYSTEM_PROMPT,
+} from './anthropic-oauth.js';
 export { WireAdapter, type WireAdapterStreamOptions } from './wire-adapter.js';
 export {
   isDebugStreamEnabled,
@@ -78,28 +87,35 @@ export interface BuildFactoriesOptions {
   log?: Logger | undefined;
 }
 
-/** Rotated-token payload handed to the codex persister after a refresh. */
-export interface CodexRefreshedTokens {
+/** Rotated-token payload handed to the OAuth persister after a refresh. */
+export interface OAuthRefreshedTokens {
   accessToken: string;
   refreshToken: string;
   expiresAt: number;
-  accountId: string | undefined;
+  /** ChatGPT account id (codex only); undefined for other OAuth families. */
+  accountId?: string | undefined;
 }
+
+/** @deprecated use OAuthRefreshedTokens */
+export type CodexRefreshedTokens = OAuthRefreshedTokens;
 
 /**
- * Module-level hook so refreshed `openai-codex` tokens can be persisted back to
- * the encrypted config WITHOUT threading a vault/configPath through every
- * provider-construction site. The CLI installs this once at boot. When unset
- * (tests, headless tools), refresh still works in-memory for the session — only
- * cross-session persistence is skipped.
+ * Module-level hook so refreshed OAuth tokens (openai-codex, anthropic-oauth, …)
+ * can be persisted back to the encrypted config WITHOUT threading a
+ * vault/configPath through every provider-construction site. The CLI installs
+ * this once at boot. When unset (tests, headless tools), refresh still works
+ * in-memory for the session — only cross-session persistence is skipped.
  */
-let _codexPersist: ((providerId: string, creds: CodexRefreshedTokens) => void) | undefined;
+let _oauthPersist: ((providerId: string, creds: OAuthRefreshedTokens) => void) | undefined;
 
-export function setCodexTokenPersister(
-  fn: ((providerId: string, creds: CodexRefreshedTokens) => void) | undefined,
+export function setOAuthTokenPersister(
+  fn: ((providerId: string, creds: OAuthRefreshedTokens) => void) | undefined,
 ): void {
-  _codexPersist = fn;
+  _oauthPersist = fn;
 }
+
+/** @deprecated use setOAuthTokenPersister */
+export const setCodexTokenPersister = setOAuthTokenPersister;
 
 /**
  * Build one ProviderFactory per provider known to models.dev. The factory's
@@ -238,7 +254,21 @@ function makeProvider(p: ResolvedProvider, cfg: ProviderConfig): Provider {
           expiresAt: Number.isFinite(parsedExpiry) ? parsedExpiry : undefined,
           accountId: entry?.accountId,
         },
-        onRefresh: (creds) => _codexPersist?.(p.id, creds),
+        onRefresh: (creds) => _oauthPersist?.(p.id, creds),
+      });
+    }
+    case 'anthropic-oauth': {
+      const entry = resolveActiveKeyEntry(cfg);
+      const parsedExpiry = entry?.expiresAt ? Date.parse(entry.expiresAt) : Number.NaN;
+      return new AnthropicOAuthProvider({
+        id: p.id,
+        baseUrl,
+        credentials: {
+          accessToken: expectDefined(apiKey),
+          refreshToken: entry?.refreshToken,
+          expiresAt: Number.isFinite(parsedExpiry) ? parsedExpiry : undefined,
+        },
+        onRefresh: (creds) => _oauthPersist?.(p.id, creds),
       });
     }
     case 'google':

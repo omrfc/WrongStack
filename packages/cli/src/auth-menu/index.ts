@@ -11,6 +11,12 @@ export {
   type CodexTokens,
 } from './openai-codex-oauth.js';
 export {
+  runClaudeOAuthLogin,
+  CLAUDE_PROVIDER_ID,
+  type ClaudeLoginOptions,
+  type ClaudeTokens,
+} from './anthropic-oauth.js';
+export {
   runAuthLocal,
   resolveModelList,
   probeLocalLlm,

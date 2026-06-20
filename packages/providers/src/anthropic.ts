@@ -38,7 +38,7 @@ function isAnthropicHost(baseUrl: string): boolean {
 }
 
 export class AnthropicProvider extends WireAdapter {
-  override readonly id = 'anthropic';
+  override readonly id: string = 'anthropic';
   override readonly capabilities: Capabilities = capabilitiesForFamily('anthropic');
 
   private readonly opts: AnthropicProviderOptions;

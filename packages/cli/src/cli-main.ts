@@ -73,7 +73,7 @@ import {
   normalizeTokenSavingTier,
 } from '@wrongstack/core';
 import { MCPRegistry } from '@wrongstack/mcp';
-import { makeProviderFromConfig, setCodexTokenPersister } from '@wrongstack/providers';
+import { makeProviderFromConfig, setOAuthTokenPersister } from '@wrongstack/providers';
 import {
   mutateConfigProviders,
   normalizeKeys,
@@ -201,7 +201,7 @@ export async function main(argv: string[]): Promise<number> {
   // the encrypted config. Auth0 rotates the refresh token on every refresh, so
   // dropping the new pair would break the NEXT session's login. Installed once;
   // covers every provider-construction site via the providers-module hook.
-  setCodexTokenPersister((providerId, creds) => {
+  setOAuthTokenPersister((providerId, creds) => {
     void mutateConfigProviders(wpaths.globalConfig, vault, (all) => {
       const p = all[providerId];
       if (!p) return;

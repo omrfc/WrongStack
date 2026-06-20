@@ -432,7 +432,7 @@ const helpTable: Record<string, PerSubcommandHelp> = {
       { name: 'remove <id>', description: 'Remove a provider and its keys.' },
       { name: '<provider>', description: 'Add a key for a named provider (--label, --family, …).' },
       { name: 'local', description: 'Pre-fill Ollama / vLLM / LM Studio (--name, --base-url, --no-probe, --model, --audit …).' },
-      { name: 'login [chatgpt]', description: 'Sign in with ChatGPT (OAuth PKCE). Uses your ChatGPT Plus/Pro subscription; saved as provider "openai-codex".' },
+      { name: 'login <chatgpt|claude>', description: 'Subscription OAuth login: "chatgpt" (ChatGPT Plus/Pro → openai-codex) or "claude" (Claude Pro/Max → anthropic-oauth). Opens browser; no API key.' },
     ],
     seeAlso: 'wstack auth local (pre-fill Ollama / vLLM / LM Studio)',
   },

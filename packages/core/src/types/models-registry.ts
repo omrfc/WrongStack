@@ -55,6 +55,7 @@ export type ModelsDevPayload = Record<string, ModelsDevProvider>;
  */
 export type WireFamily =
   | 'anthropic'
+  | 'anthropic-oauth'
   | 'openai'
   | 'openai-compatible'
   | 'openai-codex'

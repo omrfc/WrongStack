@@ -17,6 +17,7 @@ export const providersCmd: SubcommandHandler = async (args, deps) => {
     const all = await deps.modelsRegistry.listProviders();
     const byFamily: Record<WireFamily, typeof all> = {
       anthropic: [],
+      'anthropic-oauth': [],
       openai: [],
       'openai-compatible': [],
       'openai-codex': [],
