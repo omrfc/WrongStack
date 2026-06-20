@@ -1,5 +1,13 @@
 import * as path from 'node:path';
 
+// Best-effort heuristic detection of destructive shell commands — NOT a
+// security boundary. Static analysis of shell strings is inherently defeatable
+// by obfuscation: env-variable indirection (`$RM -rf /`), quote-splitting
+// (`r''m`), base64/eval pipes (`echo ... | base64 -d | sh`), command
+// substitution (`$(printf rm) -rf`), and aliases all evade these patterns.
+// This is one defense-in-depth layer behind the permission policy and the
+// project-escape checks below, not the sole gate. Treat a miss here as
+// expected, not as a hole to be plugged with ever-more-clever regexes.
 const DESTRUCTIVE_BASH_PATTERNS: RegExp[] = [
   /\bgit\s+(?:clean\s+-[^\s]*[xdf]|reset\s+--hard)\b/i,
   /\b(?:drop|truncate)\s+(?:table|database|schema)\b/i,
