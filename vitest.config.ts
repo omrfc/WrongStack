@@ -28,12 +28,19 @@ export default defineConfig({
     // NOTE: the old `poolOptions.forks.singleFork` knob was removed in
     // Vitest 4 and had been silently ignored — do not reintroduce it.
     pool: 'forks',
-    // Cap fork workers at half the logical cores. At the default (= all 32
-    // logical cores) spawn-heavy tests (bash/git/biome/mock servers) starve:
+    // Cap fork workers at a quarter of the logical cores. At the default (= all
+    // 32 logical cores) spawn-heavy tests (bash/git/biome/mock servers) starve:
     // each release:check run failed a different set with empty output, wrong
     // exit codes, or timeouts — all passing in isolation. Shells spawned BY
     // tests need free cores too, and live dev servers share this machine.
-    maxWorkers: '50%',
+    //
+    // 50% (~16 workers) still flaked a single file per full run on this machine
+    // — system-prompt-builder / wiring-plugins / plug-lsp intermittently failed
+    // under worker contention while passing in isolation. Dropping to 25%
+    // (~8 workers) leaves headroom for test-spawned shells and the dev servers
+    // that share this box. Raise only if full-suite wall-time becomes the
+    // bottleneck and the machine is otherwise idle.
+    maxWorkers: '25%',
     // 5s (the default) flakes under full-suite load on this machine: with
     // ~16 fork workers competing, wiring-plugins / system-prompt-builder /
     // plug-lsp setup intermittently time out while passing in isolation.

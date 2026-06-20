@@ -192,7 +192,7 @@ export interface DirectorOptions {
    * director denies further extensions. A subagent hitting the same
    * soft limit repeatedly (e.g. 3× budget.threshold_reached for
    * tool_calls) is likely looping on a prompt/config issue, not
-   * making legitimate progress. Default: 2. Set to Infinity to
+   * making legitimate progress. Default: 5. Set to Infinity to
    * disable the cap (use with caution — a misconfigured subagent
    * could burn unlimited budget).
    */
@@ -1010,7 +1010,7 @@ export class Director implements ICoordinator {
    * it the `cost` column in `usage.snapshot()` stays at 0.
    */
   async spawn(
-    config: SubagentConfig,
+    callerConfig: SubagentConfig,
     priceLookup?: {
       input?: number | undefined;
       output?: number | undefined;
@@ -1028,6 +1028,12 @@ export class Director implements ICoordinator {
         'workComplete() has been called — director closed further spawning',
       );
     }
+    // Clone the caller's config before any mutation. spawn() rewrites
+    // model/provider (model matrix) and name (nickname) below; doing that on
+    // the caller's object would make a reused SubagentConfig "stick" to the
+    // first spawn's resolved model/nickname. A shallow copy is enough — only
+    // top-level scalar fields are mutated here.
+    const config: SubagentConfig = { ...callerConfig };
     // Per-task model matrix: when the caller didn't pin a model, resolve one
     // from the matrix by role (→ phase → `*`). Done here, before the spawned
     // event + manifest + coordinator handoff, so the fleet UI and the agent
