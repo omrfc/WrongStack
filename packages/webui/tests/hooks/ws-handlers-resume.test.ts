@@ -61,7 +61,62 @@ describe('session.start resume transition', () => {
     const messages = useChatStore.getState().messages;
     expect(messages).toHaveLength(2);
     expect(messages[0]?.content).toBe('hello');
+    expect(messages[0]?.timestamp).toBe(Date.parse('2026-06-11T10:00:00Z'));
     expect(messages[1]?.content).toBe('world');
+  });
+
+  it('attaches replayed tool_result blocks to tool_use messages by id', () => {
+    fireSessionStart({
+      ...BASE_PAYLOAD,
+      reset: true,
+      replayMessages: [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'checking' },
+            { type: 'tool_use', id: 'toolu_1', name: 'read', input: { path: 'a.ts' } },
+            { type: 'tool_use', id: 'toolu_2', name: 'grep', input: { pattern: 'x' } },
+            { type: 'tool_result', tool_use_id: 'toolu_1', content: 'file contents', is_error: false },
+            { type: 'tool_result', tool_use_id: 'toolu_2', content: [{ type: 'text', text: 'no matches' }], is_error: true },
+            { type: 'text', text: 'done' },
+          ],
+        },
+      ],
+    });
+
+    const messages = useChatStore.getState().messages;
+    expect(messages.map((m) => m.role)).toEqual(['assistant', 'tool', 'tool', 'assistant']);
+    expect(messages[1]).toMatchObject({
+      toolUseId: 'toolu_1',
+      toolName: 'read',
+      toolResult: 'file contents',
+      isError: false,
+    });
+    expect(messages[2]).toMatchObject({
+      toolUseId: 'toolu_2',
+      toolName: 'grep',
+      toolResult: JSON.stringify([{ type: 'text', text: 'no matches' }]),
+      isError: true,
+    });
+  });
+
+  it('hydrates replayed messages with one bulk chat-store update', () => {
+    const addSpy = vi.spyOn(useChatStore.getState(), 'addMessage');
+    const setToolResultSpy = vi.spyOn(useChatStore.getState(), 'setToolResult');
+    const setMessagesSpy = vi.spyOn(useChatStore.getState(), 'setMessages');
+
+    fireSessionStart({
+      ...BASE_PAYLOAD,
+      reset: true,
+      replayMessages: [
+        { role: 'user', content: 'hello' },
+        { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'read' }, { type: 'tool_result', tool_use_id: 'toolu_1', content: 'ok' }] },
+      ],
+    });
+
+    expect(addSpy).not.toHaveBeenCalled();
+    expect(setToolResultSpy).not.toHaveBeenCalled();
+    expect(setMessagesSpy).toHaveBeenCalledTimes(1);
   });
 
   it('restores lifetime usage and recomputes cost from the payload rates', () => {

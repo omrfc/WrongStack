@@ -8,6 +8,7 @@ import { streamCoalescer } from '@/lib/stream-coalescer';
 import type { WrongStackWebSocketClient } from '@/lib/ws-client';
 import type { PhaseItem } from '@/components/PhasePanel';
 import {
+  type ChatMessage,
   type SessionHistoryEntry,
   type SubagentEvent,
   type SubagentView,
@@ -33,6 +34,79 @@ import type { WorktreeHandleView, WSServerMessage } from '@/types';
 import { useCoordinatorMonitorStore } from '@/stores';
 
 // ── Session handlers ──
+
+type ReplayMessage = { role: string | undefined; content: unknown; ts?: string | undefined };
+
+function replayTimestamp(ts: string | undefined): number {
+  if (typeof ts !== 'string') return Date.now();
+  const parsed = Date.parse(ts);
+  return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
+function replayMessageId(index: number): string {
+  return `replay_${Date.now()}_${index}`;
+}
+
+function contentToToolResult(content: unknown): string {
+  return typeof content === 'string' ? content : JSON.stringify(content);
+}
+
+function hydrateReplayMessages(replay: ReplayMessage[]): ChatMessage[] {
+  const messages: ChatMessage[] = [];
+  const toolMessagesByUseId = new Map<string, ChatMessage>();
+
+  const pushText = (role: 'user' | 'assistant' | 'system', content: string, timestamp: number) => {
+    if (!content) return;
+    messages.push({ id: replayMessageId(messages.length), role, content, timestamp });
+  };
+
+  for (const m of replay) {
+    if (m.role !== 'user' && m.role !== 'assistant' && m.role !== 'system') continue;
+    const role = m.role;
+    const timestamp = replayTimestamp(m.ts);
+    if (typeof m.content === 'string') {
+      pushText(role, m.content, timestamp);
+      continue;
+    }
+    if (!Array.isArray(m.content)) continue;
+
+    let text = '';
+    for (const block of m.content as Array<Record<string, unknown>>) {
+      if (block.type === 'text' && typeof block.text === 'string') {
+        text += (text ? '\n' : '') + block.text;
+        continue;
+      }
+      if (block.type === 'tool_use') {
+        pushText(role, text, timestamp);
+        text = '';
+        const toolUseId = String(block.id ?? '');
+        const toolMessage: ChatMessage = {
+          id: replayMessageId(messages.length),
+          role: 'tool',
+          content: '',
+          toolName: String(block.name ?? 'tool'),
+          toolInput: block.input,
+          toolUseId,
+          timestamp,
+        };
+        messages.push(toolMessage);
+        if (toolUseId) toolMessagesByUseId.set(toolUseId, toolMessage);
+        continue;
+      }
+      if (block.type === 'tool_result') {
+        const toolUseId = String(block.tool_use_id ?? '');
+        const toolMessage = toolMessagesByUseId.get(toolUseId);
+        if (toolMessage) {
+          toolMessage.toolResult = contentToToolResult(block.content);
+          toolMessage.isError = Boolean(block.is_error);
+        }
+      }
+    }
+    pushText(role, text, timestamp);
+  }
+
+  return messages;
+}
 
 export function handleSessionStart(msg: WSServerMessage) {
   // Pipe to viz store — session start creates the session node
@@ -137,39 +211,12 @@ export function handleSessionStart(msg: WSServerMessage) {
     useFileStore.getState().setTreeLoading(true);
     getWSClient().send({ type: 'files.tree', payload: { path: useSessionStore.getState().cwd } });
   }
-  // Resume hydration
-  const replay = (payload as { replayMessages?: Array<{ role: string | undefined; content: unknown; ts?: string }> }).replayMessages;
+  // Resume hydration: build the replayed chat in one pass, then commit one
+  // store update. Tool results are attached through a tool_use id map so large
+  // resumes avoid repeated scans over the growing message array.
+  const replay = (payload as { replayMessages?: ReplayMessage[] }).replayMessages;
   if (replay && replay.length > 0) {
-    const chat = useChatStore.getState();
-    for (const m of replay) {
-      // Preserve the original event timestamp so replayed messages show
-      // their real "when" instead of all clustering at "just now".
-      const parsedTs = typeof m.ts === 'string' ? Date.parse(m.ts) : Number.NaN;
-      const msgTimestamp: number | undefined = Number.isFinite(parsedTs) ? parsedTs : undefined;
-      if (m.role === 'user' || m.role === 'assistant' || m.role === 'system') {
-        let text = '';
-        if (typeof m.content === 'string') {
-          text = m.content;
-        } else if (Array.isArray(m.content)) {
-          for (const b of m.content as Array<Record<string, unknown>>) {
-            if (b.type === 'text' && typeof b.text === 'string') {
-              text += (text ? '\n' : '') + b.text;
-            } else if (b.type === 'tool_use') {
-              if (text) { chat.addMessage({ role: m.role as 'user' | 'assistant', content: text, timestamp: msgTimestamp }); text = ''; }
-              chat.addMessage({ role: 'tool', content: '', toolName: String(b.name ?? 'tool'), toolInput: b.input, toolUseId: String(b.id ?? ''), timestamp: msgTimestamp });
-            } else if (b.type === 'tool_result') {
-              const all = useChatStore.getState().messages;
-              let last: { id: string } | undefined;
-              for (let i = all.length - 1; i >= 0; i--) {
-                if (all[i]?.toolUseId === String(b.tool_use_id ?? '')) { last = expectDefined(all[i]); break; }
-              }
-              if (last) { chat.setToolResult(last.id, typeof b.content === 'string' ? b.content : JSON.stringify(b.content), !b.is_error); }
-            }
-          }
-        }
-        if (text) chat.addMessage({ role: m.role as 'user' | 'assistant', content: text, timestamp: msgTimestamp });
-      }
-    }
+    useChatStore.getState().setMessages(hydrateReplayMessages(replay));
   }
   // The replayMessages field is only present on a session.resume — never on
   // connect, session.new, or a project switch (see server session.resume).

@@ -63,6 +63,7 @@ interface ChatState {
   thinkingStartedAt: number | null;
 
   addMessage: (msg: Omit<ChatMessage, 'id' | 'timestamp'> & { timestamp?: number }) => string;
+  setMessages: (messages: ChatMessage[]) => void;
   updateMessage: (id: string, updates: Partial<ChatMessage>) => void;
   appendToMessage: (id: string, text: string) => void;
   finalizeMessage: (id: string) => void;
@@ -120,6 +121,15 @@ export const useChatStore = create<ChatState>()(
             msg.role === 'assistant' ? id : state.currentAssistantMessageId,
         }));
         return id;
+      },
+
+      setMessages: (messages) => {
+        set({
+          messages,
+          currentAssistantMessageId: null,
+          currentToolId: null,
+          executions: new Map(),
+        });
       },
 
       updateMessage: (id, updates) => {

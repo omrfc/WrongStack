@@ -141,6 +141,26 @@ describe('addMessage', () => {
   });
 });
 
+// ── setMessages ───────────────────────────────────────────────────────
+
+describe('setMessages', () => {
+  it('replaces messages in one store update and clears active stream/tool state', () => {
+    const assistantId = addMsg({ role: 'assistant', content: 'streaming', streaming: true });
+    const toolId = addMsg({ role: 'tool', content: '', toolUseId: 'toolu_1' });
+    useChatStore.setState({ currentAssistantMessageId: assistantId, currentToolId: toolId });
+
+    useChatStore.getState().setMessages([
+      { id: 'replay_0', role: 'user', content: 'resumed', timestamp: 123 },
+    ]);
+
+    const state = useChatStore.getState();
+    expect(state.messages).toEqual([{ id: 'replay_0', role: 'user', content: 'resumed', timestamp: 123 }]);
+    expect(state.currentAssistantMessageId).toBeNull();
+    expect(state.currentToolId).toBeNull();
+    expect(state.executions.size).toBe(0);
+  });
+});
+
 // ── updateMessage ─────────────────────────────────────────────────────
 
 describe('updateMessage', () => {
