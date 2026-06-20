@@ -50,6 +50,19 @@ export const CAPABILITIES_BY_FAMILY: Record<WireFamily, Capabilities> = {
     maxContext: 200_000,
     cacheControl: 'native',
   },
+  // GitHub Copilot subscription (OpenAI chat/completions-compatible wire).
+  'github-copilot': {
+    tools: true,
+    parallelTools: true,
+    vision: true,
+    streaming: true,
+    promptCache: false,
+    systemPrompt: true,
+    jsonMode: true,
+    reasoning: false,
+    maxContext: 128_000,
+    cacheControl: 'auto',
+  },
   // ChatGPT-backend Responses API (Sign in with ChatGPT / Codex subscription).
   'openai-codex': {
     tools: true,

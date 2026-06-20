@@ -12,6 +12,7 @@ import type {
 import { ERROR_CODES, WrongStackError } from '@wrongstack/core';
 import { AnthropicProvider } from './anthropic.js';
 import { AnthropicOAuthProvider } from './anthropic-oauth.js';
+import { GitHubCopilotProvider } from './github-copilot.js';
 import { GoogleProvider } from './google.js';
 import { OpenAICodexProvider } from './openai-codex.js';
 import {
@@ -45,6 +46,14 @@ export {
   refreshAnthropicOAuthToken,
   CLAUDE_CODE_SYSTEM_PROMPT,
 } from './anthropic-oauth.js';
+export {
+  GitHubCopilotProvider,
+  type GitHubCopilotProviderOptions,
+  type CopilotCredentials,
+  type CopilotTokenResult,
+  refreshCopilotToken,
+  copilotBaseUrlFromToken,
+} from './github-copilot.js';
 export { WireAdapter, type WireAdapterStreamOptions } from './wire-adapter.js';
 export {
   isDebugStreamEnabled,
@@ -266,6 +275,19 @@ function makeProvider(p: ResolvedProvider, cfg: ProviderConfig): Provider {
         credentials: {
           accessToken: expectDefined(apiKey),
           refreshToken: entry?.refreshToken,
+          expiresAt: Number.isFinite(parsedExpiry) ? parsedExpiry : undefined,
+        },
+        onRefresh: (creds) => _oauthPersist?.(p.id, creds),
+      });
+    }
+    case 'github-copilot': {
+      const entry = resolveActiveKeyEntry(cfg);
+      const parsedExpiry = entry?.expiresAt ? Date.parse(entry.expiresAt) : Number.NaN;
+      return new GitHubCopilotProvider({
+        id: p.id,
+        credentials: {
+          copilotToken: resolveActiveKey(cfg) ?? '',
+          githubToken: entry?.refreshToken,
           expiresAt: Number.isFinite(parsedExpiry) ? parsedExpiry : undefined,
         },
         onRefresh: (creds) => _oauthPersist?.(p.id, creds),

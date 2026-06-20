@@ -140,6 +140,12 @@ export interface OpenAICodexProviderOptions {
   refreshFn?:
     | ((refreshToken: string, signal?: AbortSignal) => Promise<CodexOAuthTokens>)
     | undefined;
+  /**
+   * Reasoning effort for the Codex (gpt-5-codex) reasoning models. Sent as
+   * `reasoning.effort` with `summary: 'auto'` so chain-of-thought streams back
+   * as thinking deltas. Default 'medium'. Set 'none' to omit reasoning entirely.
+   */
+  reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | undefined;
 }
 
 export class OpenAICodexProvider extends WireAdapter {
@@ -155,6 +161,7 @@ export class OpenAICodexProvider extends WireAdapter {
     refreshToken: string,
     signal?: AbortSignal,
   ) => Promise<CodexOAuthTokens>;
+  private readonly reasoningEffort: 'none' | 'minimal' | 'low' | 'medium' | 'high';
 
   constructor(opts: OpenAICodexProviderOptions) {
     super(
@@ -170,6 +177,7 @@ export class OpenAICodexProvider extends WireAdapter {
     this.accountId = opts.credentials.accountId ?? extractAccountId(this.access) ?? undefined;
     this.onRefresh = opts.onRefresh;
     this.refreshFn = opts.refreshFn ?? refreshCodexAccessToken;
+    this.reasoningEffort = opts.reasoningEffort ?? 'medium';
     this.capabilities = capabilitiesForFamily('openai-codex', { ...opts.capabilities });
   }
 
@@ -251,6 +259,9 @@ export class OpenAICodexProvider extends WireAdapter {
     }
     if (req.temperature !== undefined) body['temperature'] = req.temperature;
     if (req.topP !== undefined) body['top_p'] = req.topP;
+    if (this.reasoningEffort !== 'none') {
+      body['reasoning'] = { effort: this.reasoningEffort, summary: 'auto' };
+    }
     return body;
   }
 

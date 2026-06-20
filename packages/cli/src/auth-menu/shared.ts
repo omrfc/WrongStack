@@ -137,6 +137,9 @@ export function renderTopMenu(
   renderer.write(`\n  ${color.dim('Actions:')}\n`);
   renderer.write(`    ${color.bold('a')}  Add a provider (from catalog)\n`);
   renderer.write(`    ${color.bold('c')}  Add a custom provider\n`);
+  renderer.write(
+    `    ${color.bold('s')}  Sign in with a subscription ${color.dim('(ChatGPT / Claude / Copilot)')}\n`,
+  );
   if (ids.length > 0) {
     renderer.write(
       `    ${color.dim('1-')}${color.dim(String(ids.length))}  ${color.bold('Manage a provider')}\n`,

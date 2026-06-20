@@ -7,6 +7,7 @@ import {
   runAuthMenu,
   runClaudeOAuthLogin,
   runCodexOAuthLogin,
+  runCopilotOAuthLogin,
 } from '../../auth-menu/index.js';
 import {
   loadConfigProviders,
@@ -68,16 +69,21 @@ export const authCmd: SubcommandHandler = async (args, deps) => {
     const pid = (flags.positional[1] ?? '').toLowerCase();
     const codexAliases = new Set(['', 'openai', 'codex', 'chatgpt', 'codex-cli', CODEX_PROVIDER_ID]);
     const claudeAliases = new Set(['claude', 'anthropic', 'claude-pro', 'claude-max', 'anthropic-oauth']);
+    const copilotAliases = new Set(['copilot', 'github', 'github-copilot', 'gh']);
     if (claudeAliases.has(pid)) {
       return runClaudeOAuthLogin(menuDeps);
+    }
+    if (copilotAliases.has(pid)) {
+      return runCopilotOAuthLogin(menuDeps);
     }
     if (codexAliases.has(pid)) {
       return runCodexOAuthLogin(menuDeps);
     }
-    deps.renderer.writeError('OAuth login is only supported for ChatGPT and Claude.');
+    deps.renderer.writeError('OAuth login is only supported for ChatGPT, Claude, and GitHub Copilot.');
     deps.renderer.write(
       color.dim('  Sign in with ChatGPT: ') + color.bold('wstack auth login chatgpt') + '\n' +
         color.dim('  Sign in with Claude:  ') + color.bold('wstack auth login claude') + '\n' +
+        color.dim('  Sign in with Copilot: ') + color.bold('wstack auth login copilot') + '\n' +
         color.dim('  For an API key instead: ') + color.bold(`wstack auth ${pid}`) + '\n',
     );
     return 1;

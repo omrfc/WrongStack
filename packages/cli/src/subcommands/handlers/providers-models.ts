@@ -21,6 +21,7 @@ export const providersCmd: SubcommandHandler = async (args, deps) => {
       openai: [],
       'openai-compatible': [],
       'openai-codex': [],
+      'github-copilot': [],
       google: [],
       unsupported: [],
     };

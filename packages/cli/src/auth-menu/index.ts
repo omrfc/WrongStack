@@ -17,6 +17,11 @@ export {
   type ClaudeTokens,
 } from './anthropic-oauth.js';
 export {
+  runCopilotOAuthLogin,
+  COPILOT_PROVIDER_ID,
+  type CopilotLoginOptions,
+} from './github-copilot-oauth.js';
+export {
   runAuthLocal,
   resolveModelList,
   probeLocalLlm,

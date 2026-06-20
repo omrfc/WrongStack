@@ -59,6 +59,7 @@ export type WireFamily =
   | 'openai'
   | 'openai-compatible'
   | 'openai-codex'
+  | 'github-copilot'
   | 'google'
   | 'unsupported';
 
