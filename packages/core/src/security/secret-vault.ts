@@ -455,8 +455,21 @@ export async function rotateConfigKeys(
   }
 
   // Count encrypted fields and decrypt them
-  const counter = { n: 0 };
+  const counter = { n: 0, failed: [] as string[] };
   const decrypted = walkDecryptCount(parsed, vault, counter);
+
+  // Abort BEFORE rotating if any encrypted field could not be decrypted with
+  // the current key. Rotation would discard the old key while these fields
+  // still hold old-key ciphertext, and walkReencrypt skips already-encrypted
+  // values — so they would become permanently undecryptable. Surface the
+  // corruption and leave the key intact for the operator to investigate.
+  if (counter.failed.length > 0) {
+    throw new Error(
+      `[secret-vault] Aborting key rotation: ${counter.failed.length} field(s) could not be decrypted ` +
+        `with the current key and would be permanently lost on rotation: ${counter.failed.join(', ')}. ` +
+        `Restore or remove these fields before rotating.`,
+    );
+  }
 
   if (counter.n === 0) {
     // No encrypted fields — just rotate the key
@@ -482,25 +495,43 @@ export async function rotateConfigKeys(
 /**
  * Walk a config object, decrypt all encrypted values, and count them.
  * Returns a new object with decrypted values.
+ *
+ * `counter.failed` collects the key paths of any field that is encrypted but
+ * could NOT be decrypted with the current key. These are left as-is (old
+ * ciphertext). The caller MUST treat a non-empty `failed` list as a hard stop
+ * before rotating: rotation discards the old key, and `walkReencrypt` skips
+ * already-encrypted values, so a retained old-key ciphertext would become
+ * permanently undecryptable. Surfacing it is strictly safer than entombing it.
  */
-function walkDecryptCount<T>(node: T, vault: SecretVault, counter: { n: number }): T {
+function walkDecryptCount<T>(
+  node: T,
+  vault: SecretVault,
+  counter: { n: number; failed: string[] },
+  pathPrefix = '',
+): T {
   if (node === null || node === undefined) return node;
   if (typeof node !== 'object') return node;
   if (Array.isArray(node)) {
-    return node.map((item) => walkDecryptCount(item, vault, counter)) as unknown as T;
+    return node.map((item, i) =>
+      walkDecryptCount(item, vault, counter, `${pathPrefix}[${i}]`),
+    ) as unknown as T;
   }
   const out: Record<string, unknown> = Object.create(null);
   for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+    const keyPath = pathPrefix ? `${pathPrefix}.${k}` : k;
     if (typeof v === 'string' && vault.isEncrypted(v)) {
       try {
         out[k] = vault.decrypt(v);
         counter.n++;
       } catch {
-        // Decryption failed — leave the value as-is (will be re-encrypted as plaintext)
+        // Decryption failed — record the path and keep the old ciphertext.
+        // The caller aborts rotation when counter.failed is non-empty, so
+        // the old key is never discarded while this value still depends on it.
+        counter.failed.push(keyPath);
         out[k] = v;
       }
     } else if (typeof v === 'object' && v !== null) {
-      out[k] = walkDecryptCount(v, vault, counter);
+      out[k] = walkDecryptCount(v, vault, counter, keyPath);
     } else {
       out[k] = v;
     }

@@ -448,4 +448,52 @@ describe('Key rotation', () => {
 
     await fs.rm(dir, { recursive: true, force: true });
   });
+
+  it('rotateConfigKeys aborts and preserves the key when a field cannot be decrypted', async () => {
+    const { dir, vault } = await makeVault();
+    const cfgPath = path.join(dir, 'config.json');
+
+    // One valid v1 secret and one well-formed-but-corrupt v1 ciphertext
+    // (passes isEncrypted, fails GCM auth on decrypt).
+    const good = vault.encrypt('api-key-good');
+    expect(good.startsWith('enc:v1:')).toBe(true);
+    // Tamper the final ciphertext hex char so the auth tag check fails on
+    // decrypt, while keeping the enc:v1: prefix so isEncrypted() stays true.
+    // Flip relative to the original char to guarantee an actual change.
+    const last = good.slice(-1);
+    const corrupt = `${good.slice(0, -1)}${last === '0' ? '1' : '0'}`;
+    expect(corrupt).not.toBe(good);
+    expect(vault.isEncrypted(corrupt)).toBe(true);
+
+    await fs.writeFile(
+      cfgPath,
+      JSON.stringify({
+        version: 1,
+        providers: {
+          anthropic: { apiKey: good },
+          openai: { apiKey: corrupt },
+        },
+      }),
+    );
+
+    // Rotation must throw, naming the offending field path...
+    await expect(rotateConfigKeys(cfgPath, vault)).rejects.toThrow(
+      /providers\.openai\.apiKey/,
+    );
+
+    // ...and must NOT have rotated the key (old key still intact, so the
+    // valid field remains recoverable).
+    expect(vault.keyVersion).toBe(1);
+
+    // The config file is left untouched: both values are still the original
+    // v1 ciphertext, and the good one still decrypts with the unrotated key.
+    const after = JSON.parse(await fs.readFile(cfgPath, 'utf8')) as {
+      providers: { anthropic: { apiKey: string }; openai: { apiKey: string } };
+    };
+    expect(after.providers.anthropic.apiKey).toBe(good);
+    expect(after.providers.openai.apiKey).toBe(corrupt);
+    expect(vault.decrypt(after.providers.anthropic.apiKey)).toBe('api-key-good');
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
 });
