@@ -223,18 +223,23 @@ even though Phase 1 is read-only. The HQ channel carries, at minimum:
 - Client channel is unauthenticated — any process that can reach the
   port can publish telemetry under any `clientId` / `projectId`.
 
-**Phase 1 non-goals (deferred to Phase 2).**
+**Phase 1 non-goals (now partially shipped in Phase 2/3).**
 
-- No authentication / authorization on `/ws/browser` or `/ws/client`.
-- No CORS / origin enforcement.
-- No rate limiting on HTTP endpoints or WebSocket frames.
-- No TLS termination (HQ speaks plain HTTP/WS; reverse-proxy it).
-- No audit log of who connected, when, and from which IP.
-- No persistence of client / browser state beyond the process lifetime.
+- ✅ **shipped (Phase 3)**: opt-in browser token auth on `/ws/browser`
+  (TOKEN MODE — see `wstack hq token create`).
+- 📋 **still planned**: authentication on `/ws/client` (any frame is
+  accepted today).
+- 📋 **still planned**: CORS / origin enforcement.
+- 📋 **still planned**: rate limiting on HTTP endpoints or WebSocket frames.
+- 📋 **still planned**: TLS termination (HQ speaks plain HTTP/WS;
+  reverse-proxy it).
+- 📋 **still planned**: audit log of who connected, when, and from which IP.
+- 📋 **still planned**: persistence of client / browser state beyond the
+  process lifetime (`<dataDir>/events.jsonl` schema reserved).
 
 See [HQ command center — Remote / relay deployment](docs/subcommands/hq.md#remote--relay-deployment)
 for what is and is not safe to expose today, and the
-[Phase 2 roadmap](#hq-phase-2-auth-roadmap) below for the planned
+[Phase 2+ roadmap](#hq-phase-2-auth-roadmap) below for the planned
 controls.
 
 ## Known limitations / deliberate non-goals
@@ -265,11 +270,14 @@ controls.
   repo, or a tampered MCP response, can carry prompt-injection content
   that the next LLM turn might act on. The user is the last line of
   defense via the `confirm` permission prompt.
-- **HQ command center is unauthenticated in Phase 1.** See
-  [HQ command center (Phase 1)](#hq-command-center-phase-1) above. The
-  server has no auth, CORS, origin, or rate-limit controls on any route
-  or WebSocket channel. Do not expose `--host 0.0.0.0` on a public VPS or
-  any network you do not fully trust until Phase 2 auth ships.
+- **HQ command center browser auth is opt-in (token mode).** See
+  [HQ command center (Phase 1)](#hq-command-center-phase-1) and the
+  [Phase 2+ auth roadmap](#hq-phase-2-auth-roadmap). By default the
+  server runs in OPEN MODE (all `/ws/browser` connections accepted); run
+  `wstack hq token create` to enter TOKEN MODE. Browser password auth,
+  `/ws/client` token validation, CORS, origin, and rate-limit controls
+  are not yet shipped — do not expose `--host 0.0.0.0` on a public VPS or
+  any network you do not fully trust until those land.
 
 ### Accepted risks & deliberate trade-offs (from 2026 security audits)
 
@@ -303,14 +311,18 @@ The two rules that keep things safe:
    this; new tools should declare `subjectKey` rather than rely on the
    policy's fallback heuristic.
 
-## HQ Phase 2 auth roadmap
+## HQ Phase 2+ auth roadmap
 
 The HQ plan
 ([`docs/plans/hq-command-center-2026-06.md`](docs/plans/hq-command-center-2026-06.md))
-specifies the following controls for Phase 2. None of these have shipped
-yet; Phase 1 is unauthenticated by design.
+specified the following controls for Phase 2+. Phase 2 and Phase 3 have
+landed in slices (v0.275.0 / v0.276.0); the remaining controls are
+planned for later Phase 2 / Phase 4 slices. Each subsection below is
+marked **shipped**, **partial**, or **planned**.
 
 ### Browser auth
+
+**Planned** — not yet shipped.
 
 - Local loopback can bootstrap a browser session automatically.
 - Remote browser access requires password login.
@@ -324,36 +336,51 @@ wstack hq auth set-password        # rotate password
 wstack hq auth reset               # revoke all browser sessions
 ```
 
+> **What shipped instead (v0.276.0):** browser **token mode**. When
+> `auth.json` carries one or more `browserTokens`, browsers must append
+> `?token=<full-token>` to `/ws/browser`. Unknown/missing tokens are
+> rejected at the HTTP layer (401) before the WS handshake. Token mode
+> covers the immediate case of "let a teammate open the dashboard without
+> exposing it publicly"; password auth (below) covers multi-tenant /
+> unattended deployments.
+
 ### Client auth (enrollment tokens)
+
+**Partial** — schema + publisher plumbing shipped (Phase 1); browser
+token lifecycle shipped (Phase 3); `/ws/client` token validation is
+planned.
 
 Clients should use enrollment tokens, not the browser password. Tokens
 are distinct from browser cookies so a stolen browser cookie cannot be
 reused to publish telemetry.
 
 ```bash
-wstack hq token create --name laptop-tui
-wstack hq token list
-wstack hq token revoke <id>
+wstack hq token create --name laptop-tui   # ✅ shipped (v0.276.0)
+wstack hq token list                       # ✅ shipped (v0.276.0)
+wstack hq token revoke <id>                # ✅ shipped (v0.276.0)
 ```
 
 Token storage:
 
 ```text
-~/.wrongstack/hq/auth.json
+~/.wrongstack/hq/auth.json   # ✅ shipped (v0.275.0, v0.276.0)
 ```
 
 Token model:
 
-- Generated random token, shown once at creation.
-- Server stores only the token hash (salted slow KDF).
-- Token metadata: `id`, `label`, `createdAt`, `lastUsedAt`, optional
-  `expiresAt`.
-- Optional capability scope: `telemetry.publish`, `control.receive`.
-- Client passes the raw token via the `?token=…` query parameter on the
-  `/ws/client` upgrade. The publisher's `toClientUrl()` already supports
-  this via `WRONGSTACK_HQ_TOKEN` (see [`packages/core/src/hq/publisher.ts`](packages/core/src/hq/publisher.ts)).
+- ✅ **shipped**: generated random token, shown once at creation; `id`,
+  `label`, `createdAt`, `lastUsedAt`; operator passes the raw token via
+  `?token=…` on `/ws/browser`.
+- 🚧 **partial**: server stores the raw token today (mode `0o600`,
+  atomic write). Hashing with a slow KDF is planned to harden at-rest
+  storage.
+- 📋 **planned**: `/ws/client` token validation (today `/ws/client` is
+  exempt — any frame is accepted). Capability scope
+  (`telemetry.publish`, `control.receive`) and `expiresAt` land with it.
 
 ### Frame & endpoint hygiene
+
+**Planned** — none of these have shipped.
 
 - Rate-limit WebSocket frames and HTTP endpoints (token bucket per IP,
   per channel).
@@ -366,13 +393,21 @@ Token model:
 
 ### Persistence
 
-- Add an optional `--data-dir <path>` flag (default
-  `~/.wrongstack/hq`) for auth state, audit log, and any future
-  persistence (snapshot retention, event log spill-to-disk).
-- Add retention knobs (default keep `MAX_EVENT_LOG = 500` events in
-  memory; configurable TTL or size cap).
+**Partial** — `--data-dir` + `auth.json` shipped; event log + snapshot
+cache planned.
+
+- ✅ **shipped** (v0.275.0): `--data-dir <path>` flag (default
+  `~/.wrongstack/hq`, honors `WRONGSTACK_HOME` / `WRONGSTACK_HQ_DATA_DIR`)
+  for auth state.
+- 📋 **planned**: retention knobs (default keep `MAX_EVENT_LOG = 500`
+  events in memory; configurable TTL or size cap).
+- 📋 **planned**: persistent event log (`<dataDir>/events.jsonl`) and
+  snapshot cache (`<dataDir>/snapshot.json`) so a server restart
+  preserves recent history. Schema reservation is already in place.
 
 ### TLS / deployment
+
+**Planned** — unchanged from Phase 1 posture.
 
 - HQ itself stays plain HTTP/WS. TLS terminates in front via Cloudflare
   Tunnel or an HTTPS reverse proxy.
@@ -382,22 +417,30 @@ Token model:
 - Cloudflare Access can be layered in front, but does **not** replace
   client enrollment tokens on `/ws/client`.
 
-### Flags & subcommands to add
+### Flags & subcommands
 
-| Flag / subcommand | Purpose |
+| Flag / subcommand | Status |
 |---|---|
-| `--password` | Prompt / set the browser password on first run |
-| `--data-dir <path>` | HQ storage directory (default `~/.wrongstack/hq`) |
-| `wstack hq auth set-password` | Rotate the browser password |
-| `wstack hq auth reset` | Revoke all browser sessions |
-| `wstack hq token create --name <label>` | Generate an enrollment token |
-| `wstack hq token list` | List active tokens (id, label, lastUsedAt) |
-| `wstack hq token revoke <id>` | Revoke an enrollment token |
+| `--password` | 📋 planned |
+| `--data-dir <path>` | ✅ shipped (v0.275.0) |
+| `wstack hq` / `wstack hq serve` | ✅ shipped (v0.276.0) |
+| `wstack hq auth set-password` | 📋 planned |
+| `wstack hq auth reset` | 📋 planned |
+| `wstack hq token create --name <label>` | ✅ shipped (v0.276.0) |
+| `wstack hq token list` | ✅ shipped (v0.276.0) |
+| `wstack hq token revoke <id>` | ✅ shipped (v0.276.0) |
 
-Until these land, the supported deployment is: loopback on the
-developer's own machine, optional LAN exposure on a trusted network,
-with any TLS / tunnel handled by an external proxy that does not
-forward unauthenticated traffic from the public internet.
+### Live token reload
+
+**Planned** — the server reads `auth.json` once at startup today. Run
+`wstack hq` (or `wstack --hq`) again after creating or revoking tokens
+for the change to take effect. Phase 4 will add a file-watcher.
+
+Until browser password auth and client token validation land, the
+supported deployment is: loopback on the developer's own machine,
+optional LAN exposure on a trusted network, with any TLS / tunnel
+handled by an external proxy that does not forward unauthenticated
+traffic from the public internet.
 
 ## See also
 
