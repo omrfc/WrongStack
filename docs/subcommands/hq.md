@@ -22,6 +22,11 @@ are intentionally out of scope.
 | `wstack --hq --port 4000` | Override the default port |
 | `wstack --hq --strict-port` | Fail (exit non-zero) if the requested port is busy instead of auto-advancing |
 | `wstack --hq --open` | Auto-open the dashboard in the user's default browser after the server starts |
+| `wstack hq` | Equivalent to `wstack --hq` (subcommand form) |
+| `wstack hq serve` | Same as `wstack hq` (explicit form) |
+| `wstack hq token create [label]` | Mint a browser token (enters TOKEN MODE), write to `<dataDir>/auth.json` |
+| `wstack hq token list` | List issued browser tokens (`ls` alias works) |
+| `wstack hq token revoke <id>` | Revoke a browser token (id prefix match; `rm`/`remove` aliases work) |
 
 The handler short-circuits the normal `boot()` flow, so `--hq` works without
 a valid project root or `.wrongstack/` directory.
@@ -755,9 +760,9 @@ Phase 2 is landing in slices. What is already shipped:
     and the result is sent to clients in the `hq.welcome` handshake. The
     operator can therefore tighten whatever publishers declare — never
     loosen.
-  - `browserTokens` (optional, empty today): schema placeholder for issued
-    browser tokens. Phase 3 populates this via `wstack hq token create`
-    and validates tokens on `/ws/browser`.
+  - `browserTokens` (optional): issued browser tokens. Phase 3 populates
+    this via `wstack hq token create` and validates tokens on `/ws/browser`.
+    See **TOKEN MODE** below.
   - Missing or corrupt file: server starts with an empty policy and emits
     an `hq.auth_load_failed` warning. The operator can recover by editing
     or deleting the file.
@@ -766,19 +771,79 @@ Phase 2 is landing in slices. What is already shipped:
 
 What is still coming in later Phase 2 / Phase 3 slices:
 
-- **Browser auth** — password login for non-loopback browsers, HTTP-only
-  session cookie, `scrypt`/`argon2` password hash.
-- **Client auth** — enrollment tokens validated on `/ws/client` (today
-  the schema exists in `auth.json` but the endpoint accepts any frame).
-- **Subcommands** — `wstack hq auth set-password`,
-  `wstack hq token create|list|revoke`.
+- **Browser password auth** — password login for non-loopback browsers,
+  HTTP-only session cookie, `scrypt`/`argon2` password hash. Token mode
+  (shipped) covers the immediate case of "let a teammate open the dashboard
+  without exposing it publicly"; password auth covers multi-tenant /
+  unattended deployments.
+- **Client token validation** — `/ws/client` is currently exempt from
+  token validation. The schema is in place; the endpoint still accepts
+  any frame.
+- **Subcommands** — `wstack hq auth set-password` (paired with the
+  password-auth work above).
+- **Live token reload** — token list is loaded once at startup today.
+  Revoking a token requires a server restart. Phase 4 will add a
+  file-watcher.
 - **Persistent event log + snapshot cache** — `<dataDir>/events.jsonl`
   and `<dataDir>/snapshot.json` so a server restart preserves recent
   history. Schema reservation is already in place.
 - **Frame hygiene** — rate limiting, frame-size cap, explicit protocol
   version negotiation (the `1008` close on mismatch is already in place).
 
-Until browser/client auth lands, the supported deployment is: loopback on
+### TOKEN MODE
+
+The HQ server has two browser-auth modes, gated by the `browserTokens`
+field in `<dataDir>/auth.json`:
+
+- **OPEN MODE** (default, backwards compatible): `browserTokens` is
+  empty or absent → all `/ws/browser` connections are accepted. Use this
+  for the loopback-only developer workflow (`wstack --hq` then open
+  `http://127.0.0.1:3499/`).
+- **TOKEN MODE**: one or more browser tokens exist → browsers must
+  append `?token=<full-token>` to the `/ws/browser` upgrade URL. Unknown
+  or missing tokens are rejected at the HTTP layer with `401
+  Unauthorized`. `/ws/client` is exempt (client auth lands in a later
+  slice).
+
+Workflow:
+
+```bash
+# Mint a token (server does NOT need to be running):
+$ wstack hq token create "erwin@laptop"
+Created browser token.
+  id:         7a3c1f2e-...
+  label:      erwin@laptop
+  token:      e1b8c0a3...
+  createdAt:  2026-06-21T12:00:00.000Z
+
+Connect with: ws://localhost:3499/ws/browser?token=e1b8c0a3...
+(Copy the token now — it will not be shown again in full.)
+
+# Start the server:
+$ wstack hq --port 4000
+
+# Open the dashboard with the token:
+$ open "http://127.0.0.1:4000/?token=e1b8c0a3..."
+# The dashboard's connect() reads `?token=` from the URL query string and
+# appends it to its /ws/browser upgrade.
+```
+
+Listing and revoking:
+
+```bash
+$ wstack hq token list
+Browser tokens (1) — HQ is in TOKEN MODE:
+  7a3c1f2e-...  e1b8c0…0a3  2026-06-21T12:00:00.000Z  "erwin@laptop"
+
+$ wstack hq token revoke 7a3c1f2e
+Revoked token 7a3c1f2e-... ("erwin@laptop").
+```
+
+Phase 3 limitation: the server reads `auth.json` once at startup. Run
+`wstack hq` (or `wstack --hq`) again after creating or revoking tokens
+for the change to take effect. Phase 4 will add a live file-watcher.
+
+Until browser password auth lands, the supported deployment is: loopback on
 the developer's own machine, optional LAN exposure on a trusted network,
 with any TLS / tunnel handled by an external proxy that does not forward
 unauthenticated traffic from the public internet. The authoritative

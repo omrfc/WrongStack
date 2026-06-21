@@ -39,6 +39,7 @@ import { authCmd } from './handlers/auth.js';
 import { benchCmd } from './handlers/bench.js';
 import { diagCmd, doctorCmd } from './handlers/diag-doctor.js';
 import { exportCmd } from './handlers/export.js';
+import { hqCmd } from './handlers/hq.js';
 import { initCmd } from './handlers/init.js';
 import { mcpCmd } from './handlers/mcp.js';
 import { modeldiagCmd } from './handlers/modeldiag.js';
@@ -80,4 +81,5 @@ export const subcommands: Record<string, SubcommandHandler> = {
   modeldiag: modeldiagCmd,
   quick: quickCmd,
   bench: benchCmd,
+  hq: hqCmd,
 };

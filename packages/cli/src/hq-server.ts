@@ -776,6 +776,14 @@ function startHqServerWithAuth(
 
     const wss = new WebSocketServer({ noServer: true, maxPayload: 1 * 1024 * 1024 });
 
+    // Browser token allowlist (open mode when empty — backwards compatible
+    // with Phase 1/2 loopback deployments). In token mode, browsers must
+    // send `?token=xxx` on the upgrade URL.
+    const validBrowserTokens: ReadonlySet<string> = new Set(
+      (authFile.browserTokens ?? []).map((t) => t.token),
+    );
+    const tokenModeActive = validBrowserTokens.size > 0;
+
     httpServer.on('upgrade', (req, socket, head) => {
       const url = new URL(req.url ?? '/', `http://${host}:${port}`);
       const pathname = url.pathname;
@@ -783,6 +791,25 @@ function startHqServerWithAuth(
       if (pathname !== '/ws/client' && pathname !== '/ws/browser') {
         socket.destroy();
         return;
+      }
+
+      // Token mode: browsers without a valid token are rejected at the
+      // HTTP layer before the WS handshake completes. Clients are exempt
+      // — token validation on /ws/client lands in a later slice.
+      if (pathname === '/ws/browser' && tokenModeActive) {
+        const supplied = url.searchParams.get('token') ?? '';
+        if (!supplied || !validBrowserTokens.has(supplied)) {
+          // RFC 6455 §7.4.1: 1008 policy violation.
+          socket.write(
+            'HTTP/1.1 401 Unauthorized\r\n' +
+              'Content-Type: application/json\r\n' +
+              'Connection: close\r\n' +
+              '\r\n' +
+              JSON.stringify({ error: { code: 'INVALID_TOKEN', message: 'A valid ?token= is required for browser connections in token mode.' } }),
+          );
+          socket.destroy();
+          return;
+        }
       }
 
       wss.handleUpgrade(req, socket, head, (ws) => {
