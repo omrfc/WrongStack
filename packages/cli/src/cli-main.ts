@@ -172,7 +172,8 @@ export async function main(argv: string[]): Promise<number> {
     const { startHqServer } = await import('./hq-server.js');
     const host = typeof earlyFlags['host'] === 'string' ? earlyFlags['host'] : '127.0.0.1';
     const port = typeof earlyFlags['port'] === 'string' ? Number.parseInt(earlyFlags['port'], 10) : 3499;
-    const handle = await startHqServer({ host, port, strictPort: earlyFlags['strict-port'] === true });
+    const dataDir = typeof earlyFlags['data-dir'] === 'string' ? earlyFlags['data-dir'] : undefined;
+    const handle = await startHqServer({ host, port, strictPort: earlyFlags['strict-port'] === true, ...(dataDir !== undefined ? { dataDir } : {}) });
     if (earlyFlags['open'] === true) {
       try {
         const { openBrowser } = await import('@wrongstack/webui/server');

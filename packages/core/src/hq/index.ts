@@ -3,3 +3,4 @@ export * from './redaction.js';
 export * from './mailbox-mapper.js';
 export * from './publisher.js';
 export * from './factory.js';
+export * from './auth-store.js';

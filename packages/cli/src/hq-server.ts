@@ -21,6 +21,7 @@ import * as http from 'node:http';
 import {
   DEFAULT_HQ_REDACTION_POLICY,
   HQ_PROTOCOL_VERSION,
+  type HqAuthFile,
   type HqBrowserMessage,
   type HqClientCapability,
   type HqClientRecord,
@@ -29,10 +30,13 @@ import {
   type HqMailboxSnapshotPayload,
   type HqMailboxSummary,
   type HqProjectRecord,
+  type HqRedactionPolicy,
   type HqSnapshot,
   type HqWelcomePayload,
   parseHqEventPayload,
   parseHqFrame,
+  readHqAuthFile,
+  resolveHqDataDir,
   scrubAndTruncateHqPreview,
 } from '@wrongstack/core';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -41,6 +45,13 @@ export interface HqServerOptions {
   host?: string;
   port?: number;
   strictPort?: boolean;
+  /**
+   * HQ data directory. When omitted, the server resolves one via
+   * `resolveHqDataDir()` (honoring `WRONGSTACK_HQ_DATA_DIR` then falling
+   * back to `~/.wrongstack/hq`). The directory holds `auth.json` and, in
+   * later phases, the persistent event log and snapshot cache.
+   */
+  dataDir?: string;
 }
 
 export interface HqServerHandle {
@@ -677,6 +688,43 @@ const HQ_HTML = `<!DOCTYPE html>
 export function startHqServer(options: HqServerOptions = {}): Promise<HqServerHandle> {
   const host = options.host ?? DEFAULT_HOST;
   const port = options.port ?? DEFAULT_PORT;
+  const dataDir = resolveHqDataDir(options.dataDir);
+
+  // Load the operator-configured auth file (best-effort — never fail
+  // startup over a missing or corrupt auth.json). The redaction policy
+  // override, if present, tightens whatever publishers declare.
+  return readHqAuthFile(dataDir, {
+    warn: (msg: string) => console.warn(JSON.stringify({ level: 'warn', event: 'hq.auth_load_failed', message: msg, timestamp: new Date().toISOString() })),
+  }).then((authFile: HqAuthFile) => startHqServerWithAuth(options, host, port, dataDir, authFile));
+}
+
+function startHqServerWithAuth(
+  options: HqServerOptions,
+  host: string,
+  port: number,
+  dataDir: string,
+  authFile: HqAuthFile,
+): Promise<HqServerHandle> {
+  // Operator override merges over the default; publisher claims are
+  // clamped against this at broadcast time (see scrubAndTruncateHqPreview
+  // call sites + the welcome handshake redactionPolicy field).
+  const operatorPolicy: HqRedactionPolicy = {
+    ...DEFAULT_HQ_REDACTION_POLICY,
+    ...(authFile.redactionPolicy ?? {}),
+  };
+  // Surface the resolved data directory + whether an operator override
+  // is in effect. Helps the operator confirm `--data-dir` took hold.
+  console.warn(JSON.stringify({
+    level: 'info',
+    event: 'hq.startup',
+    message: 'WrongStack HQ starting',
+    dataDir,
+    host,
+    port,
+    operatorPolicyActive: authFile.redactionPolicy !== undefined,
+    timestamp: new Date().toISOString(),
+  }));
+  void options;
 
   return new Promise((resolve, reject) => {
     const clients = new Map<WebSocket, ConnectedClient>();
@@ -746,7 +794,7 @@ export function startHqServer(options: HqServerOptions = {}): Promise<HqServerHa
       if (pathname === '/ws/browser') {
         handleBrowser(ws, clients, browsers);
       } else {
-        handleClient(ws, clients, browsers, eventLog);
+        handleClient(ws, clients, browsers, eventLog, operatorPolicy);
       }
     });
 
@@ -803,6 +851,7 @@ function handleClient(
   clients: Map<WebSocket, ConnectedClient>,
   browsers: Set<WebSocket>,
   eventLog: HqEventEnvelope[],
+  operatorPolicy: HqRedactionPolicy,
 ): void {
   let registered = false;
 
@@ -856,7 +905,9 @@ function handleClient(
         protocolVersion: HQ_PROTOCOL_VERSION,
         serverTime: new Date().toISOString(),
         acceptedCapabilities: payload.capabilities,
-        redactionPolicy: DEFAULT_HQ_REDACTION_POLICY,
+        // The operator-configured override (from <dataDir>/auth.json) wins
+        // over the default. The client learns the *effective* policy.
+        redactionPolicy: operatorPolicy,
       };
       ws.send(JSON.stringify(welcome));
 

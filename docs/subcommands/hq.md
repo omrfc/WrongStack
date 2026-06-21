@@ -47,6 +47,7 @@ All flags are parsed by the unified `parseArgs()` in
 | `--port` | `--port <n>` or `--port=<n>` | number | `3499` | Bind port. Parsed via `Number.parseInt(value, 10)`; non-numeric values fall through as `NaN` and `startHqServer` will reject the bind |
 | `--strict-port` | `--strict-port` | boolean | `false` | Fail if the port is in use; otherwise auto-advance to the next free port. Only takes effect when passed as a standalone flag (no value) — a `--strict-port <value>` form is ignored because `strict-port` is not in the `BOOLEAN_FLAGS` set and the dispatch checks `=== true` |
 | `--open` | `--open` | boolean | `false` | Open the dashboard URL in the default browser after the server prints its listening URL. Implementation: dynamic `import('@wrongstack/webui/server')` of `openBrowser()`. Errors are best-effort and silently swallowed |
+| `--data-dir` | `--data-dir <path>` or `--data-dir=<path>` | string | `~/.wrongstack/hq` | HQ data directory: where `auth.json` (and in later phases, the persistent event log + snapshot cache) live. Relative paths resolve against `process.cwd()`. The env var `WRONGSTACK_HQ_DATA_DIR` provides the same override without a CLI flag; the flag wins when both are set. The default honors `WRONGSTACK_HOME`, so pointing that at a sandbox also relocates HQ state |
 
 `--host` and `--port` accept both forms:
 - `--key=value` → `flags[name] = "value"` (parsed by the `=` branch)
@@ -731,28 +732,60 @@ the prerequisites (HTTPS reverse proxy, strong password, client enrollment
 tokens, explicit retention/data directory, no raw content publishing) —
 all of which require Phase 2 auth work that has not shipped yet.
 
-### What Phase 2 will add
+### What Phase 2 adds (in progress)
 
-Per the plan, the missing controls are:
+Phase 2 is landing in slices. What is already shipped:
+
+- **`--data-dir` flag** — HQ data directory override. Resolves to
+  `~/.wrongstack/hq` by default (honoring `WRONGSTACK_HOME`), or to the
+  `WRONGSTACK_HQ_DATA_DIR` env var, or to the explicit `--data-dir <path>`
+  flag (flag wins). See the flags table above.
+- **`~/.wrongstack/hq/auth.json`** — operator-configured auth file.
+  Written atomically (tmp + rename) with mode `0o600`. Current schema:
+  ```json
+  {
+    "version": 1,
+    "updatedAt": "2026-06-21T12:00:00.000Z",
+    "redactionPolicy": { "rawContent": false, "toolArgs": "summary", "paths": "project-relative" },
+    "browserTokens": []
+  }
+  ```
+  - `redactionPolicy` (optional): operator override applied server-side.
+    When present, the HQ server merges it over `DEFAULT_HQ_REDACTION_POLICY`
+    and the result is sent to clients in the `hq.welcome` handshake. The
+    operator can therefore tighten whatever publishers declare — never
+    loosen.
+  - `browserTokens` (optional, empty today): schema placeholder for issued
+    browser tokens. Phase 3 populates this via `wstack hq token create`
+    and validates tokens on `/ws/browser`.
+  - Missing or corrupt file: server starts with an empty policy and emits
+    an `hq.auth_load_failed` warning. The operator can recover by editing
+    or deleting the file.
+  - Helpers in `@wrongstack/core`: `resolveHqDataDir()`, `readHqAuthFile()`,
+    `writeHqAuthFile()`, `mutateHqAuthFile()`, `mintHqBrowserToken()`.
+
+What is still coming in later Phase 2 / Phase 3 slices:
 
 - **Browser auth** — password login for non-loopback browsers, HTTP-only
   session cookie, `scrypt`/`argon2` password hash.
-- **Client auth** — enrollment tokens (random, stored as hash, with id /
-  label / `lastUsedAt` / optional `expiresAt` / optional capability scope),
-  kept under `~/.wrongstack/hq/auth.json`.
-- **Flags** — `--password`, `--data-dir <path>`, plus `wstack hq auth
-  set-password` / `wstack hq token create|list|revoke` subcommands.
+- **Client auth** — enrollment tokens validated on `/ws/client` (today
+  the schema exists in `auth.json` but the endpoint accepts any frame).
+- **Subcommands** — `wstack hq auth set-password`,
+  `wstack hq token create|list|revoke`.
+- **Persistent event log + snapshot cache** — `<dataDir>/events.jsonl`
+  and `<dataDir>/snapshot.json` so a server restart preserves recent
+  history. Schema reservation is already in place.
 - **Frame hygiene** — rate limiting, frame-size cap, explicit protocol
   version negotiation (the `1008` close on mismatch is already in place).
 
-Until those land, the supported deployment is: loopback on the developer's
-own machine, optional LAN exposure on a trusted network, with any TLS /
-tunnel handled by an external proxy that does not forward unauthenticated
-traffic from the public internet. The authoritative source for the HQ
-security posture is [SECURITY.md](../../SECURITY.md) (sections *HQ command
-center (Phase 1)* and *HQ Phase 2 auth roadmap*) — this subcommand doc
-reproduces the highlights but defers to SECURITY.md for the full set of
-controls and accepted risks.
+Until browser/client auth lands, the supported deployment is: loopback on
+the developer's own machine, optional LAN exposure on a trusted network,
+with any TLS / tunnel handled by an external proxy that does not forward
+unauthenticated traffic from the public internet. The authoritative
+source for the HQ security posture is [SECURITY.md](../../SECURITY.md)
+(sections *HQ command center (Phase 1)* and *HQ Phase 2 auth roadmap*) —
+this subcommand doc reproduces the highlights but defers to SECURITY.md
+for the full set of controls and accepted risks.
 
 ## Exit codes
 
