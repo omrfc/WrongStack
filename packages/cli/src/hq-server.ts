@@ -38,6 +38,7 @@ import {
   readHqAuthFile,
   resolveHqDataDir,
   scrubAndTruncateHqPreview,
+  watchHqAuthFile,
 } from '@wrongstack/core';
 import { WebSocket, WebSocketServer } from 'ws';
 
@@ -708,10 +709,21 @@ function startHqServerWithAuth(
   // Operator override merges over the default; publisher claims are
   // clamped against this at broadcast time (see scrubAndTruncateHqPreview
   // call sites + the welcome handshake redactionPolicy field).
-  const operatorPolicy: HqRedactionPolicy = {
-    ...DEFAULT_HQ_REDACTION_POLICY,
-    ...(authFile.redactionPolicy ?? {}),
+  // Mutable: the file-watcher below refreshes these on auth.json change
+  // (Phase 4 live reload).
+  const mutableAuth: {
+    operatorPolicy: HqRedactionPolicy;
+    browserTokens: Set<string>;
+    clientTokens: Set<string>;
+  } = {
+    operatorPolicy: {
+      ...DEFAULT_HQ_REDACTION_POLICY,
+      ...(authFile.redactionPolicy ?? {}),
+    },
+    browserTokens: new Set((authFile.browserTokens ?? []).map((t) => t.token)),
+    clientTokens: new Set((authFile.clientTokens ?? []).map((t) => t.token)),
   };
+
   // Surface the resolved data directory + whether an operator override
   // is in effect. Helps the operator confirm `--data-dir` took hold.
   console.warn(JSON.stringify({
@@ -722,6 +734,8 @@ function startHqServerWithAuth(
     host,
     port,
     operatorPolicyActive: authFile.redactionPolicy !== undefined,
+    browserTokenMode: mutableAuth.browserTokens.size > 0,
+    clientTokenMode: mutableAuth.clientTokens.size > 0,
     timestamp: new Date().toISOString(),
   }));
   void options;
@@ -776,14 +790,6 @@ function startHqServerWithAuth(
 
     const wss = new WebSocketServer({ noServer: true, maxPayload: 1 * 1024 * 1024 });
 
-    // Browser token allowlist (open mode when empty — backwards compatible
-    // with Phase 1/2 loopback deployments). In token mode, browsers must
-    // send `?token=xxx` on the upgrade URL.
-    const validBrowserTokens: ReadonlySet<string> = new Set(
-      (authFile.browserTokens ?? []).map((t) => t.token),
-    );
-    const tokenModeActive = validBrowserTokens.size > 0;
-
     httpServer.on('upgrade', (req, socket, head) => {
       const url = new URL(req.url ?? '/', `http://${host}:${port}`);
       const pathname = url.pathname;
@@ -793,19 +799,25 @@ function startHqServerWithAuth(
         return;
       }
 
-      // Token mode: browsers without a valid token are rejected at the
-      // HTTP layer before the WS handshake completes. Clients are exempt
-      // — token validation on /ws/client lands in a later slice.
-      if (pathname === '/ws/browser' && tokenModeActive) {
+      // Token mode: each channel checks its own allowlist. Browser and
+      // client tokens are separate — a browser-only token cannot be
+      // replayed on /ws/client and vice versa. OPEN MODE for a channel
+      // when its token set is empty (backwards compatible).
+      const tokenSet = pathname === '/ws/browser' ? mutableAuth.browserTokens : mutableAuth.clientTokens;
+      if (tokenSet.size > 0) {
         const supplied = url.searchParams.get('token') ?? '';
-        if (!supplied || !validBrowserTokens.has(supplied)) {
-          // RFC 6455 §7.4.1: 1008 policy violation.
+        if (!supplied || !tokenSet.has(supplied)) {
           socket.write(
             'HTTP/1.1 401 Unauthorized\r\n' +
               'Content-Type: application/json\r\n' +
               'Connection: close\r\n' +
               '\r\n' +
-              JSON.stringify({ error: { code: 'INVALID_TOKEN', message: 'A valid ?token= is required for browser connections in token mode.' } }),
+              JSON.stringify({
+                error: {
+                  code: 'INVALID_TOKEN',
+                  message: `A valid ?token= is required for ${pathname} connections in token mode.`,
+                },
+              }),
           );
           socket.destroy();
           return;
@@ -821,9 +833,41 @@ function startHqServerWithAuth(
       if (pathname === '/ws/browser') {
         handleBrowser(ws, clients, browsers);
       } else {
-        handleClient(ws, clients, browsers, eventLog, operatorPolicy);
+        handleClient(ws, clients, browsers, eventLog, mutableAuth.operatorPolicy);
       }
     });
+
+    // Phase 4 — live reload of auth.json. The watcher re-reads the file on
+    // change and atomically swaps the in-memory token sets + operator policy.
+    // No active connections are dropped; subsequent upgrades and broadcasts
+    // see the new state immediately.
+    const authWatcher = watchHqAuthFile(
+      dataDir,
+      (next) => {
+        mutableAuth.operatorPolicy = {
+          ...DEFAULT_HQ_REDACTION_POLICY,
+          ...(next.redactionPolicy ?? {}),
+        };
+        mutableAuth.browserTokens = new Set((next.browserTokens ?? []).map((t) => t.token));
+        mutableAuth.clientTokens = new Set((next.clientTokens ?? []).map((t) => t.token));
+        console.warn(JSON.stringify({
+          level: 'info',
+          event: 'hq.auth.reloaded',
+          message: 'HQ auth.json reloaded',
+          browserTokenCount: mutableAuth.browserTokens.size,
+          clientTokenCount: mutableAuth.clientTokens.size,
+          timestamp: new Date().toISOString(),
+        }));
+      },
+      {
+        warn: (msg) => console.warn(JSON.stringify({
+          level: 'warn',
+          event: 'hq.auth.reload_failed',
+          message: msg,
+          timestamp: new Date().toISOString(),
+        })),
+      },
+    );
 
     const onError = (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE' && !options.strictPort) {
@@ -848,6 +892,7 @@ function startHqServerWithAuth(
         port: actualPort,
         close: () =>
           new Promise<void>((res) => {
+            authWatcher.close();
             for (const ws of browsers) ws.close(1001, 'HQ shutting down');
             for (const ws of clients.keys()) ws.close(1001, 'HQ shutting down');
             wss.close();

@@ -174,7 +174,7 @@ when permission prompts are approved out of habit.
   array cannot be mutated by external plugins at all. This is a safe default:
   legacy tools are protected until explicitly tagged.
 
-### HQ command center (Phase 1)
+### HQ command center (Phase 4)
 
 `wstack --hq` starts a project-independent command center on a single HTTP /
 WebSocket port (default `3499`). It accepts telemetry from local WrongStack
@@ -206,29 +206,38 @@ even though Phase 1 is read-only. The HQ channel carries, at minimum:
   output / file / log fields are dropped unless `rawContent: true`,
   secret patterns are scrubbed via `DefaultSecretScrubber`.
 
-**Defaults (Phase 1).**
+**Defaults (Phase 4).**
 
 - Bind to `127.0.0.1` by default (configurable via `--host`, defaults to
   loopback in `cli-main.ts:173`).
 - Protocol version is negotiated — `payload.protocolVersion !==
-  HQ_PROTOCOL_VERSION` closes the socket with WebSocket close code `1008`
-  (`hq-server.ts:806-808`).
+  HQ_PROTOCOL_VERSION` closes the socket with WebSocket close code `1008`.
 - Frame size is capped at 1 MiB (`WebSocketServer({ maxPayload: 1 * 1024 *
-  1024 })`, `hq-server.ts:715`).
-- Client identity is verified only via `client.hello.client.clientId` —
-  there is no challenge / response or token exchange yet.
-- Browser channel is unauthenticated in Phase 1 — any web page that can
-  reach the port can open a `/ws/browser` socket and read the global
-  snapshot.
-- Client channel is unauthenticated — any process that can reach the
-  port can publish telemetry under any `clientId` / `projectId`.
+  1024 })`).
+- **Browser token auth** (`/ws/browser`): OPEN MODE by default (all
+  connections accepted). Enter TOKEN MODE by running
+  `wstack hq token create` — browsers must then append `?token=<full-token>`
+  to the upgrade URL. Unknown/missing tokens are rejected with `401
+  Unauthorized` at the HTTP layer.
+- **Client token auth** (`/ws/client`): OPEN MODE by default. Enter TOKEN
+  MODE by running `wstack hq token create --client` — clients must then
+  append `?token=<full-token>` (or set `WRONGSTACK_HQ_TOKEN`). Browser and
+  client token lists are separate — a browser token cannot be replayed on
+  `/ws/client` and vice versa (cross-channel isolation).
+- **Live reload**: the server watches `<dataDir>/auth.json` for changes
+  and refreshes its in-memory token sets and operator redaction policy
+  without a restart. Token create/revoke in another terminal takes effect
+  immediately.
 
-**Phase 1 non-goals (now partially shipped in Phase 2/3).**
+**Phase 1 non-goals (status as of Phase 4).**
 
 - ✅ **shipped (Phase 3)**: opt-in browser token auth on `/ws/browser`
   (TOKEN MODE — see `wstack hq token create`).
-- 📋 **still planned**: authentication on `/ws/client` (any frame is
-  accepted today).
+- ✅ **shipped (Phase 4)**: client token auth on `/ws/client`
+  (`wstack hq token create --client`), cross-channel token isolation, and
+  live `auth.json` reload via a file-watcher.
+- 📋 **still planned**: browser password auth (for multi-tenant /
+  unattended deployments where token-sharing is impractical).
 - 📋 **still planned**: CORS / origin enforcement.
 - 📋 **still planned**: rate limiting on HTTP endpoints or WebSocket frames.
 - 📋 **still planned**: TLS termination (HQ speaks plain HTTP/WS;
@@ -270,12 +279,13 @@ controls.
   repo, or a tampered MCP response, can carry prompt-injection content
   that the next LLM turn might act on. The user is the last line of
   defense via the `confirm` permission prompt.
-- **HQ command center browser auth is opt-in (token mode).** See
-  [HQ command center (Phase 1)](#hq-command-center-phase-1) and the
-  [Phase 2+ auth roadmap](#hq-phase-2-auth-roadmap). By default the
-  server runs in OPEN MODE (all `/ws/browser` connections accepted); run
-  `wstack hq token create` to enter TOKEN MODE. Browser password auth,
-  `/ws/client` token validation, CORS, origin, and rate-limit controls
+- **HQ command center auth is opt-in (token mode).** See
+  [HQ command center (Phase 4)](#hq-command-center-phase-4) and the
+  [Phase 2+ auth roadmap](#hq-phase-2-auth-roadmap). By default both
+  `/ws/browser` and `/ws/client` run in OPEN MODE (all connections
+  accepted); run `wstack hq token create` (browser) or
+  `wstack hq token create --client` (client) to enter TOKEN MODE.
+  Browser password auth, CORS, origin, and rate-limit controls
   are not yet shipped — do not expose `--host 0.0.0.0` on a public VPS or
   any network you do not fully trust until those land.
 
@@ -346,37 +356,43 @@ wstack hq auth reset               # revoke all browser sessions
 
 ### Client auth (enrollment tokens)
 
-**Partial** — schema + publisher plumbing shipped (Phase 1); browser
-token lifecycle shipped (Phase 3); `/ws/client` token validation is
-planned.
+**Shipped** (Phase 4) — schema, publisher plumbing, browser token
+lifecycle (Phase 3), and `/ws/client` token validation + live reload
+(Phase 4) are all live.
 
-Clients should use enrollment tokens, not the browser password. Tokens
-are distinct from browser cookies so a stolen browser cookie cannot be
-reused to publish telemetry.
+Clients use enrollment tokens, not the browser password. Tokens are
+distinct from browser cookies so a stolen browser cookie cannot be
+reused to publish telemetry. Browser and client tokens are also distinct
+from each other — a browser token cannot be replayed on `/ws/client`
+and vice versa (cross-channel isolation).
 
 ```bash
-wstack hq token create --name laptop-tui   # ✅ shipped (v0.276.0)
-wstack hq token list                       # ✅ shipped (v0.276.0)
-wstack hq token revoke <id>                # ✅ shipped (v0.276.0)
+wstack hq token create --client --name ci-runner   # ✅ shipped (Phase 4)
+wstack hq token list --client                      # ✅ shipped (Phase 4)
+wstack hq token revoke --client <id>               # ✅ shipped (Phase 4)
 ```
 
 Token storage:
 
 ```text
-~/.wrongstack/hq/auth.json   # ✅ shipped (v0.275.0, v0.276.0)
+~/.wrongstack/hq/auth.json   # ✅ shipped (v0.275.0–Phase 4)
 ```
 
 Token model:
 
 - ✅ **shipped**: generated random token, shown once at creation; `id`,
   `label`, `createdAt`, `lastUsedAt`; operator passes the raw token via
-  `?token=…` on `/ws/browser`.
+  `?token=…` on `/ws/browser` or `/ws/client`.
+- ✅ **shipped (Phase 4)**: `/ws/client` token validation. When
+  `clientTokens` is non-empty, the upgrade handler checks `?token=…`
+  against the client token allowlist. Empty list = OPEN MODE (backwards
+  compatible). Live reload via `fs.watch` means token changes take effect
+  without a server restart.
 - 🚧 **partial**: server stores the raw token today (mode `0o600`,
   atomic write). Hashing with a slow KDF is planned to harden at-rest
   storage.
-- 📋 **planned**: `/ws/client` token validation (today `/ws/client` is
-  exempt — any frame is accepted). Capability scope
-  (`telemetry.publish`, `control.receive`) and `expiresAt` land with it.
+- 📋 **planned**: capability scope (`telemetry.publish`,
+  `control.receive`) and `expiresAt` per-token.
 
 ### Frame & endpoint hygiene
 

@@ -25,8 +25,11 @@ are intentionally out of scope.
 | `wstack hq` | Equivalent to `wstack --hq` (subcommand form) |
 | `wstack hq serve` | Same as `wstack hq` (explicit form) |
 | `wstack hq token create [label]` | Mint a browser token (enters TOKEN MODE), write to `<dataDir>/auth.json` |
+| `wstack hq token create --client [label]` | Mint a client token for `/ws/client` enrollment (Phase 4) |
 | `wstack hq token list` | List issued browser tokens (`ls` alias works) |
+| `wstack hq token list --client` | List issued client tokens (Phase 4) |
 | `wstack hq token revoke <id>` | Revoke a browser token (id prefix match; `rm`/`remove` aliases work) |
+| `wstack hq token revoke --client <id>` | Revoke a client token (Phase 4) |
 
 The handler short-circuits the normal `boot()` flow, so `--hq` works without
 a valid project root or `.wrongstack/` directory.
@@ -53,6 +56,7 @@ All flags are parsed by the unified `parseArgs()` in
 | `--strict-port` | `--strict-port` | boolean | `false` | Fail if the port is in use; otherwise auto-advance to the next free port. Only takes effect when passed as a standalone flag (no value) — a `--strict-port <value>` form is ignored because `strict-port` is not in the `BOOLEAN_FLAGS` set and the dispatch checks `=== true` |
 | `--open` | `--open` | boolean | `false` | Open the dashboard URL in the default browser after the server prints its listening URL. Implementation: dynamic `import('@wrongstack/webui/server')` of `openBrowser()`. Errors are best-effort and silently swallowed |
 | `--data-dir` | `--data-dir <path>` or `--data-dir=<path>` | string | `~/.wrongstack/hq` | HQ data directory: where `auth.json` (and in later phases, the persistent event log + snapshot cache) live. Relative paths resolve against `process.cwd()`. The env var `WRONGSTACK_HQ_DATA_DIR` provides the same override without a CLI flag; the flag wins when both are set. The default honors `WRONGSTACK_HOME`, so pointing that at a sandbox also relocates HQ state |
+| `--client` | `--client` or `-c` | boolean | `false` | Token subcommand scope selector. When passed to `wstack hq token create/list/revoke`, operates on **client tokens** (validated on `/ws/client`) instead of the default **browser tokens** (validated on `/ws/browser`). Phase 4 |
 
 `--host` and `--port` accept both forms:
 - `--key=value` → `flags[name] = "value"` (parsed by the `=` branch)
@@ -663,18 +667,18 @@ simultaneously.
 
 ## Remote / relay deployment
 
-> ⚠️ **Phase 1 security posture.** As of this writing the HQ server does
-> **not** implement authentication, authorization, CORS, origin checks, or
-> rate limiting on its `/ws/client`, `/ws/browser`, or HTTP routes (verified
-> against `packages/cli/src/hq-server.ts`). It is designed to bind to the
-> loopback interface and be driven by local WrongStack processes. Exposing
-> it beyond loopback is a Phase 2+ concern — the plan for auth, browser
-> password, client enrollment tokens, and TLS termination lives in
+> ⚠️ **Current security posture (Phase 4).** The HQ server implements
+> **token-based authentication** for both browser (`/ws/browser`) and
+> client (`/ws/client`) WebSocket channels, with **live reload** of the
+> token lists from `auth.json`. However, it still does **not** implement
+> browser password auth, CORS enforcement, origin checks, or rate limiting
+> on its HTTP routes. For unattended / multi-tenant deployments, use
+> TOKEN MODE + a TLS-terminating reverse proxy. The plan for password auth
+> and stricter browser controls lives in
 > [Access Control and Security](../plans/hq-command-center-2026-06.md#access-control-and-security).
-> The consolidated threat model, defaults, and Phase 2 roadmap are tracked
-> in [SECURITY.md](../../SECURITY.md) (sections *HQ command center (Phase 1)*
-> and *HQ Phase 2 auth roadmap*). Treat anything below as forward-looking
-> guidance, not a supported production configuration.
+> The consolidated threat model, defaults, and roadmap are tracked
+> in [SECURITY.md](../../SECURITY.md). Treat anything below as
+> forward-looking guidance, not a supported production configuration.
 
 ### LAN / local network (loopback default)
 
@@ -694,14 +698,15 @@ export WRONGSTACK_HQ_URL=http://<hq-host>:3499
 
 **Caveats that apply today:**
 
+- Browser and client token auth is enforced on the respective `/ws/*`
+  upgrade when TOKEN MODE is active (tokens present in `auth.json`). In
+  OPEN MODE (no tokens), any connection is accepted.
 - There is no origin / CORS enforcement on the `/ws/browser` upgrade. Any
-  web page that can reach the HQ port can open a browser socket and read
-  the full global snapshot. Bind to `0.0.0.0` only on a trusted LAN.
-- There is no token check on `/ws/client`. Any process that can reach the
-  port can publish telemetry under any `clientId` / `projectId`. Consider
-  this before opening the port on a shared network.
+  web page that can reach the HQ port can open a browser socket — use
+  TOKEN MODE on untrusted networks.
 - All HTTP routes (`/`, `/api/snapshot`, `/api/projects/:id`) are
-  unauthenticated and return full redacted-preview payloads.
+  unauthenticated and return full redacted-preview payloads. Token auth
+  applies only to WebSocket upgrades, not HTTP GET routes.
 
 ### TLS termination (reverse proxy / Cloudflare Tunnel)
 
@@ -752,7 +757,8 @@ Phase 2 is landing in slices. What is already shipped:
     "version": 1,
     "updatedAt": "2026-06-21T12:00:00.000Z",
     "redactionPolicy": { "rawContent": false, "toolArgs": "summary", "paths": "project-relative" },
-    "browserTokens": []
+    "browserTokens": [],
+    "clientTokens": []
   }
   ```
   - `redactionPolicy` (optional): operator override applied server-side.
@@ -763,11 +769,15 @@ Phase 2 is landing in slices. What is already shipped:
   - `browserTokens` (optional): issued browser tokens. Phase 3 populates
     this via `wstack hq token create` and validates tokens on `/ws/browser`.
     See **TOKEN MODE** below.
+  - `clientTokens` (optional): issued client tokens. Phase 4 populates this
+    via `wstack hq token create --client` and validates tokens on `/ws/client`.
+    See **TOKEN MODE** below.
   - Missing or corrupt file: server starts with an empty policy and emits
     an `hq.auth_load_failed` warning. The operator can recover by editing
     or deleting the file.
   - Helpers in `@wrongstack/core`: `resolveHqDataDir()`, `readHqAuthFile()`,
-    `writeHqAuthFile()`, `mutateHqAuthFile()`, `mintHqBrowserToken()`.
+    `writeHqAuthFile()`, `mutateHqAuthFile()`, `mintHqToken()`,
+    `watchHqAuthFile()` (Phase 4 live reload).
 
 What is still coming in later Phase 2 / Phase 3 slices:
 
@@ -776,39 +786,47 @@ What is still coming in later Phase 2 / Phase 3 slices:
   (shipped) covers the immediate case of "let a teammate open the dashboard
   without exposing it publicly"; password auth covers multi-tenant /
   unattended deployments.
-- **Client token validation** — `/ws/client` is currently exempt from
-  token validation. The schema is in place; the endpoint still accepts
-  any frame.
 - **Subcommands** — `wstack hq auth set-password` (paired with the
   password-auth work above).
-- **Live token reload** — token list is loaded once at startup today.
-  Revoking a token requires a server restart. Phase 4 will add a
-  file-watcher.
 - **Persistent event log + snapshot cache** — `<dataDir>/events.jsonl`
   and `<dataDir>/snapshot.json` so a server restart preserves recent
   history. Schema reservation is already in place.
 - **Frame hygiene** — rate limiting, frame-size cap, explicit protocol
   version negotiation (the `1008` close on mismatch is already in place).
 
+> **Phase 4 shipped.** Client token validation (`/ws/client`) and live
+> `auth.json` reload via a file-watcher are now live. See **TOKEN MODE**
+> below for details.
+
 ### TOKEN MODE
 
-The HQ server has two browser-auth modes, gated by the `browserTokens`
-field in `<dataDir>/auth.json`:
+The HQ server has two independent auth channels, each with its own token
+list in `<dataDir>/auth.json`:
 
-- **OPEN MODE** (default, backwards compatible): `browserTokens` is
-  empty or absent → all `/ws/browser` connections are accepted. Use this
-  for the loopback-only developer workflow (`wstack --hq` then open
+| Channel | Endpoint | Token list | `--client` flag |
+|---|---|---|---|
+| Browser | `/ws/browser` | `browserTokens` | _(default, no flag)_ |
+| Client | `/ws/client` | `clientTokens` | `--client` / `-c` |
+
+Each channel operates independently in OPEN MODE or TOKEN MODE:
+
+- **OPEN MODE** (default, backwards compatible): the channel's token list
+  is empty or absent → all connections to that endpoint are accepted. Use
+  this for the loopback-only developer workflow (`wstack --hq` then open
   `http://127.0.0.1:3499/`).
-- **TOKEN MODE**: one or more browser tokens exist → browsers must
-  append `?token=<full-token>` to the `/ws/browser` upgrade URL. Unknown
-  or missing tokens are rejected at the HTTP layer with `401
-  Unauthorized`. `/ws/client` is exempt (client auth lands in a later
-  slice).
+- **TOKEN MODE**: one or more tokens exist → connections must append
+  `?token=<full-token>` to the upgrade URL. Unknown or missing tokens are
+  rejected at the HTTP layer with `401 Unauthorized`.
+
+**Cross-channel isolation:** a browser token cannot be replayed on
+`/ws/client` and vice versa. The two token lists are validated against
+their respective endpoints only. This means a browser dashboard token
+(leaked via a shared URL) does not grant telemetry-publishing access.
 
 Workflow:
 
 ```bash
-# Mint a token (server does NOT need to be running):
+# Mint a browser token (server does NOT need to be running):
 $ wstack hq token create "erwin@laptop"
 Created browser token.
   id:         7a3c1f2e-...
@@ -819,29 +837,71 @@ Created browser token.
 Connect with: ws://localhost:3499/ws/browser?token=e1b8c0a3...
 (Copy the token now — it will not be shown again in full.)
 
+# Mint a client token (for CI / remote client enrollment):
+$ wstack hq token create --client "ci-runner"
+Created client token.
+  id:         9b4d2e3f-...
+  label:      ci-runner
+  token:      f2c9d1b4...
+  createdAt:  2026-06-21T12:01:00.000Z
+
+Connect with: ws://localhost:3499/ws/client?token=f2c9d1b4...
+(Copy the token now — it will not be shown again in full.)
+
 # Start the server:
 $ wstack hq --port 4000
 
-# Open the dashboard with the token:
+# Open the dashboard with the browser token:
 $ open "http://127.0.0.1:4000/?token=e1b8c0a3..."
 # The dashboard's connect() reads `?token=` from the URL query string and
 # appends it to its /ws/browser upgrade.
+
+# Connect a client with the client token:
+$ export WRONGSTACK_HQ_URL=http://localhost:4000
+$ export WRONGSTACK_HQ_TOKEN=f2c9d1b4...
+$ wstack
+# The publisher appends the token as ?token= on the /ws/client upgrade.
 ```
 
 Listing and revoking:
 
 ```bash
 $ wstack hq token list
-Browser tokens (1) — HQ is in TOKEN MODE:
+Browser tokens (1) — TOKEN MODE:
   7a3c1f2e-...  e1b8c0…0a3  2026-06-21T12:00:00.000Z  "erwin@laptop"
 
+$ wstack hq token list --client
+Client tokens (1) — TOKEN MODE:
+  9b4d2e3f-...  f2c9…d1b4  2026-06-21T12:01:00.000Z  "ci-runner"
+
 $ wstack hq token revoke 7a3c1f2e
-Revoked token 7a3c1f2e-... ("erwin@laptop").
+Revoked browser token 7a3c1f2e-... ("erwin@laptop").
+
+$ wstack hq token revoke --client 9b4d2e3f
+Revoked client token 9b4d2e3f-... ("ci-runner").
 ```
 
-Phase 3 limitation: the server reads `auth.json` once at startup. Run
-`wstack hq` (or `wstack --hq`) again after creating or revoking tokens
-for the change to take effect. Phase 4 will add a live file-watcher.
+### Live reload (Phase 4)
+
+The HQ server watches `<dataDir>/auth.json` for changes and refreshes its
+in-memory token sets and operator redaction policy **without a restart**.
+This means:
+
+- Running `wstack hq token create` / `revoke` in another terminal takes
+  effect immediately — the next WebSocket upgrade sees the new token list.
+- Editing `auth.json` directly (e.g., by a config-management tool) is also
+  picked up.
+- No active connections are dropped; only subsequent upgrade attempts are
+  affected by token changes.
+
+The watcher debounces events (200ms default) because most editors do a
+tmp+rename dance that emits multiple `fs.watch` events. On read failure
+(file deleted, corrupt, etc.) the server logs a warning and keeps the
+previous valid state; a future valid write re-triggers the reload.
+
+> **Platform note:** `fs.watch` is best-effort across platforms. On some
+> network filesystems events may not fire; the operator must restart the
+> server to pick up changes in that case.
 
 Until browser password auth lands, the supported deployment is: loopback on
 the developer's own machine, optional LAN exposure on a trusted network,

@@ -6,8 +6,11 @@
  *   wstack hq                      → start HQ server (alias for `wstack --hq`)
  *   wstack hq serve                → start HQ server (explicit form)
  *   wstack hq token create [label] → mint a browser token, write auth.json
+ *   wstack hq token create --client [label] → mint a client token (/ws/client)
  *   wstack hq token list           → list issued browser tokens
+ *   wstack hq token list --client   → list issued client tokens
  *   wstack hq token revoke <id>    → revoke a browser token (prefix match)
+ *   wstack hq token revoke --client <id> → revoke a client token
  *
  * All subcommands accept `--data-dir <path>` to override the HQ data
  * directory (default `~/.wrongstack/hq`, honors `WRONGSTACK_HOME` /
@@ -19,10 +22,10 @@ import {
   HQ_AUTH_FILE_VERSION,
   expectDefined,
   mutateHqAuthFile,
-  mintHqBrowserToken,
+  mintHqToken,
   readHqAuthFile,
   resolveHqDataDir,
-  type HqBrowserToken,
+  type HqToken,
 } from '@wrongstack/core';
 import type { SubcommandDeps, SubcommandHandler } from '../index.js';
 
@@ -95,7 +98,7 @@ async function hqTokenCmd(args: string[], deps: SubcommandDeps): Promise<number>
     return tokenCreate(args.slice(1), deps);
   }
   if (action === 'list' || action === 'ls' || !action) {
-    return tokenList(deps);
+    return tokenList(args.slice(1), deps);
   }
   if (action === 'revoke' || action === 'rm' || action === 'remove') {
     return tokenRevoke(args.slice(1), deps);
@@ -106,32 +109,53 @@ async function hqTokenCmd(args: string[], deps: SubcommandDeps): Promise<number>
   return 1;
 }
 
+/**
+ * Token scope: `browser` (validated on `/ws/browser`) or `client`
+ * (validated on `/ws/client`). Defaults to `browser` for backward
+ * compatibility with Phase 3.
+ */
+type TokenScope = 'browser' | 'client';
+
+/** Detect `--client` / `-c` flag from the arg list. */
+function resolveTokenScope(args: string[]): TokenScope {
+  return args.some((a) => a === '--client' || a === '-c') ? 'client' : 'browser';
+}
+
+/** Strip flags from args, returning only positional values. */
+function positionals(args: string[]): string[] {
+  return args.filter((a) => !a.startsWith('-'));
+}
+
 async function tokenCreate(args: string[], deps: SubcommandDeps): Promise<number> {
-  // First non-flag arg is the label; everything else ignored.
-  const label = args.find((a) => !a.startsWith('-') && a !== 'create');
+  const scope = resolveTokenScope(args);
+  const pos = positionals(args);
+  const label = pos[0]; // first positional is the label
   const dataDir = resolveDataDir(deps);
+  const tokenField = scope === 'client' ? 'clientTokens' : 'browserTokens';
 
   try {
     const next = await mutateHqAuthFile(
       dataDir,
       (current) => {
-        const tokens = current.browserTokens ?? [];
-        const newToken = mintHqBrowserToken(label);
+        const tokens = current[tokenField] ?? [];
+        const newToken = mintHqToken(label);
         return {
           ...current,
-          browserTokens: [...tokens, newToken],
+          [tokenField]: [...tokens, newToken],
         };
       },
       { warn: (msg) => deps.renderer.writeWarning(`${msg}\n`) },
     );
-    const token = expectDefined(next.browserTokens?.[next.browserTokens.length - 1]);
-    deps.renderer.write(`Created browser token.\n`);
+    const list = next[tokenField] ?? [];
+    const token = expectDefined(list[list.length - 1]);
+    const endpoint = scope === 'client' ? '/ws/client' : '/ws/browser';
+    deps.renderer.write(`Created ${scope} token.\n`);
     deps.renderer.write(`  id:         ${token.id}\n`);
     if (token.label) deps.renderer.write(`  label:      ${token.label}\n`);
     deps.renderer.write(`  token:      ${token.token}\n`);
     deps.renderer.write(`  createdAt:  ${token.createdAt}\n`);
     deps.renderer.write(`\n`);
-    deps.renderer.write(`Connect with: ws://localhost:3499/ws/browser?token=${token.token}\n`);
+    deps.renderer.write(`Connect with: ws://localhost:3499${endpoint}?token=${token.token}\n`);
     deps.renderer.write(`(Copy the token now — it will not be shown again in full.)\n`);
     return 0;
   } catch (err) {
@@ -140,44 +164,49 @@ async function tokenCreate(args: string[], deps: SubcommandDeps): Promise<number
   }
 }
 
-async function tokenList(deps: SubcommandDeps): Promise<number> {
+async function tokenList(args: string[], deps: SubcommandDeps): Promise<number> {
+  const scope = resolveTokenScope(args);
   const dataDir = resolveDataDir(deps);
+  const tokenField = scope === 'client' ? 'clientTokens' : 'browserTokens';
   const authFile = await readHqAuthFile(dataDir, {
     warn: (msg) => deps.renderer.writeWarning(`${msg}\n`),
   });
-  const tokens = authFile.browserTokens ?? [];
+  const tokens: HqToken[] = authFile[tokenField] ?? [];
 
   if (tokens.length === 0) {
-    deps.renderer.write(`No browser tokens issued. HQ is in OPEN MODE (all browsers accepted).\n`);
-    deps.renderer.write(`Run \`wstack hq token create [label]\` to enter TOKEN MODE.\n`);
+    deps.renderer.write(`No ${scope} tokens issued. ${scope === 'browser' ? 'Browsers' : 'Clients'} are in OPEN MODE.\n`);
+    deps.renderer.write(`Run \`wstack hq token create ${scope === 'client' ? '--client ' : ''}[label]\` to enter TOKEN MODE.\n`);
     return 0;
   }
 
-  deps.renderer.write(`Browser tokens (${tokens.length}) — HQ is in TOKEN MODE:\n`);
+  deps.renderer.write(`${scope === 'client' ? 'Client' : 'Browser'} tokens (${tokens.length}) — TOKEN MODE:\n`);
   deps.renderer.write('\n');
   for (const t of tokens) {
     const masked = `${t.token.slice(0, 6)}…${t.token.slice(-4)} (${t.token.length} chars)`;
     deps.renderer.write(`  ${t.id}  ${masked}  ${t.createdAt}${t.label ? `  "${t.label}"` : ''}${t.lastUsedAt ? `  lastUsed ${t.lastUsedAt}` : ''}\n`);
   }
   deps.renderer.write('\n');
-  deps.renderer.write(`Browsers must append ?token=<full-token> to /ws/browser.\n`);
+  deps.renderer.write(`${scope === 'client' ? 'Clients' : 'Browsers'} must append ?token=<full-token> to /ws/${scope}.\n`);
   return 0;
 }
 
 async function tokenRevoke(args: string[], deps: SubcommandDeps): Promise<number> {
-  const idPrefix = args.find((a) => !a.startsWith('-') && a !== 'revoke' && a !== 'rm' && a !== 'remove');
+  const scope = resolveTokenScope(args);
+  const pos = positionals(args);
+  const idPrefix = pos[0];
   if (!idPrefix) {
-    deps.renderer.writeError('Usage: wstack hq token revoke <id-prefix>\n');
+    deps.renderer.writeError(`Usage: wstack hq token revoke ${scope === 'client' ? '--client ' : ''}<id-prefix>\n`);
     return 1;
   }
 
   const dataDir = resolveDataDir(deps);
-  let revoked: HqBrowserToken | undefined;
+  const tokenField = scope === 'client' ? 'clientTokens' : 'browserTokens';
+  let revoked: HqToken | undefined;
   try {
     await mutateHqAuthFile(
       dataDir,
       (current) => {
-        const tokens = current.browserTokens ?? [];
+        const tokens = current[tokenField] ?? [];
         // Prefix match: revoke the first token whose id starts with the
         // supplied prefix. The full id is long; users usually paste the
         // first 8 chars.
@@ -193,7 +222,7 @@ async function tokenRevoke(args: string[], deps: SubcommandDeps): Promise<number
         revoked = matches[0];
         return {
           ...current,
-          browserTokens: tokens.filter((t) => t.id !== (revoked as HqBrowserToken).id),
+          [tokenField]: tokens.filter((t) => t.id !== (revoked as HqToken).id),
         };
       },
       { warn: (msg) => deps.renderer.writeWarning(`${msg}\n`) },
@@ -204,10 +233,10 @@ async function tokenRevoke(args: string[], deps: SubcommandDeps): Promise<number
   }
 
   if (!revoked) {
-    deps.renderer.writeError(`No token found matching id-prefix "${idPrefix}".\n`);
+    deps.renderer.writeError(`No ${scope} token found matching id-prefix "${idPrefix}".\n`);
     return 1;
   }
-  deps.renderer.write(`Revoked token ${revoked.id}${revoked.label ? ` ("${revoked.label}")` : ''}.\n`);
+  deps.renderer.write(`Revoked ${scope} token ${revoked.id}${revoked.label ? ` ("${revoked.label}")` : ''}.\n`);
   return 0;
 }
 
@@ -217,8 +246,11 @@ function printHelp(deps: SubcommandDeps): void {
   deps.renderer.write(`  wstack hq                      Start the HQ command center server.\n`);
   deps.renderer.write(`  wstack hq serve                Same as above (explicit form).\n`);
   deps.renderer.write(`  wstack hq token create [label] Mint a browser token, enter token mode.\n`);
+  deps.renderer.write(`  wstack hq token create --client [label]  Mint a client token (/ws/client).\n`);
   deps.renderer.write(`  wstack hq token list           List issued browser tokens.\n`);
+  deps.renderer.write(`  wstack hq token list --client   List issued client tokens.\n`);
   deps.renderer.write(`  wstack hq token revoke <id>    Revoke a browser token (id prefix match).\n`);
+  deps.renderer.write(`  wstack hq token revoke --client <id>  Revoke a client token.\n`);
   deps.renderer.write('\n');
   deps.renderer.write(`Flags (apply to all subcommands):\n`);
   deps.renderer.write(`  --data-dir <path>   Override HQ data directory (default ~/.wrongstack/hq).\n`);
@@ -226,6 +258,7 @@ function printHelp(deps: SubcommandDeps): void {
   deps.renderer.write(`  --port <n>          Bind port (default 3499).\n`);
   deps.renderer.write(`  --strict-port       Fail if port is in use.\n`);
   deps.renderer.write(`  --open              Open the dashboard in the default browser.\n`);
+  deps.renderer.write(`  --client, -c        Operate on client tokens instead of browser tokens.\n`);
   deps.renderer.write('\n');
   deps.renderer.write(`auth.json schema version: ${HQ_AUTH_FILE_VERSION}.\n`);
 }
