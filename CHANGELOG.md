@@ -5,6 +5,189 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added — Documentation
+
+- **`docs/subcommands/hq.md` — `wstack --hq` user command reference (new file, ~785 lines).**
+  Full user-facing reference for the HQ command center: usage & flag table
+  (`--hq`, `--host`, `--port`, `--strict-port`, `--open`), the dispatch
+  order in `cli-main.ts`, HTTP routes (`/`, `/api/snapshot`,
+  `/api/projects/:id`) with full `HqSnapshot` / `ProjectDetail` /
+  per-record response shapes cross-checked against
+  `packages/core/src/hq/protocol.ts`, WebSocket frame union tables
+  (`HqBrowserMessage` / `HqClientMessage` / `HqServerMessage`) with
+  complete `client.hello` / `client.event` envelope examples, the
+  browser drawer + live mailbox event feed behavior, the
+  `WRONGSTACK_HQ_*` env var table cross-checked against
+  `packages/core/src/hq/factory.ts` + URL normalization table, and a
+  server-side `parseHqFrame()` discriminated-dispatcher TypeScript
+  example. Exit codes with file:line references into `cli-main.ts` and
+  `hq-server.ts`.
+
+- **`docs/README.md` — `SECURITY.md` indexed in two places.** Quick-links
+  row ("Understand the security posture / report a vulnerability") and a
+  Configuration & Operations row, both pointing to `../SECURITY.md`.
+
+### Security
+
+- **`SECURITY.md` — HQ command center threat model + Phase 2 auth roadmap.**
+  New `### HQ command center (Phase 1)` subsection under "Controls in
+  place" captures: what HQ carries (`HqClientIdentity`,
+  `HqProjectIdentity`, mailbox summaries, tool metadata), defaults
+  (loopback bind at `cli-main.ts:173`, `1008` close on protocol
+  mismatch at `hq-server.ts:806-808`, 1 MiB `maxPayload` at
+  `hq-server.ts:715`), and Phase 1 non-goals (no auth / CORS / origin /
+  rate limit / TLS / audit / persistence). New "HQ command center is
+  unauthenticated in Phase 1" entry under "Known limitations". New
+  `## HQ Phase 2 auth roadmap` section documents the planned browser
+  password (`scrypt` / `argon2` hash, HTTP-only cookie), client
+  enrollment tokens (`~/.wrongstack/hq/auth.json`, random + hash-only,
+  capability scope), frame & endpoint hygiene, persistence (`--data-dir`
+  flag), and TLS / Cloudflare Tunnel guidance. `docs/subcommands/hq.md`
+  and `docs/plans/hq-command-center-2026-06.md` linked as authoritative
+  sources.
+
+Docs-only release — no code or behavior change. Phase 1 HQ security
+posture is unchanged; the new docs make the existing limitations
+discoverable instead of implicit.
+
+- **`docs/plans/hq-command-center-2026-06.md` — Mailbox event feed
+  section.** Phase 4 acceptance criteria, Recommended MVP, and
+  Success Criteria updated to reflect the live mailbox event feed's
+  ring-buffer preservation: events for a project accumulate even
+  while the drawer is closed, so re-opening the drawer immediately
+  renders the buffered history. `docs/subcommands/hq.md` Drawer
+  section + project switching note aligned to the same behavior.
+
+- **`packages/cli/tests/hq-dashboard.test.ts` — `jsdom` drawer
+  auto-refresh test (10th test in the suite).** Live-server-backed
+  integration test that publishes a `mailbox.snapshot` envelope via a
+  real WS client, mounts the dashboard with `?project=proj_refresh`
+  so the drawer auto-opens, then publishes a second snapshot with
+  different totals. Asserts that within ~250ms (the schedule
+  debounce) the drawer mailbox table re-renders to reflect the new
+  totals via the `/api/projects/:id` round-trip — i.e. the live
+  auto-refresh path (`scheduleAutoRefresh` → `fetchProjectDetail` →
+  `renderProjectDetail`) is exercised end-to-end under jsdom without
+  a real browser.
+
+- **`packages/cli/tests/hq-dashboard.test.ts` — `jsdom` URL hash
+  deep-link drawer test (11th test in the suite).** Companion to the
+  `?project=` query-form test: mounts the dashboard with
+  `http://127.0.0.1:<port>/#proj_hash`, registers a WS client with
+  `projectId: 'proj_hash'`, and asserts the drawer auto-opens
+  (`drawer.classList.contains('open') === true`),
+  `drawer-title.textContent === 'proj_hash'`, and the URL hash is
+  preserved (`location.hash === '#proj_hash'`) after auto-open.
+  Exercises the `getInitialProjectId()` helper in the inline
+  dashboard JS (parses `location.hash.slice(1)` with
+  `decodeURIComponent`) followed by `openProject(projectId)`. Both
+  deep-link forms (`?project=` and `#<projectId>`) are now covered
+  under jsdom — bookmarking, deployment script links, and
+  copy-paste-able URLs from browser address bars all work without a
+  real browser.
+
+- **`packages/cli/tests/hq-dashboard.test.ts` — `jsdom` drawer live
+  feed latency + timestamp render test (12th test in the suite).**
+  Companion to the existing live-feed test: mounts the dashboard
+  with `?project=proj_ts`, registers a WS client with
+  `projectId: 'proj_ts'`, stamps `t0 = Date.now()` immediately before
+  `publishMailboxEvent`, then polls `drawer-event-feed.textContent`
+  in a 25ms-cycle with a hard 1000ms ceiling until the event summary
+  string shows up. Asserts the publish-to-render latency is under
+  1000ms, the action pill (`message.completed`) renders, and the
+  event timestamp rendered by `fmtTime(evt.timestamp)` matches the
+  locale-stable regex `\b\d+:\d{2}(:\d{2})?\b` (HH:MM:SS in
+  en-US/tr-TR/de-DE/etc.). Validates the full chain end-to-end:
+  publisher → server `parseHqEventPayload` + `scrubAndTruncateHqPreview`
+  → `broadcastEvent` over WS → browser `handleHqEvent` →
+  `renderEventFeed` → DOM update. Sub-second round-trip is the
+  documented Phase 4 acceptance criterion; this test enforces it
+  in jsdom.
+
+- **`packages/cli/tests/hq-dashboard.test.ts` — `jsdom` event-feed
+  ring-buffer cap test (13th test in the suite).** Enforces the
+  `FEED_MAX = 50` constant in the inline dashboard JS
+  (`hq-server.ts:371`) and the `if (list.length > FEED_MAX) list.length = FEED_MAX`
+  cap logic (`hq-server.ts:619`). Mounts the dashboard with
+  `?project=proj_cap`, publishes 51 unique `mailbox.event` envelopes
+  with zero-padded summaries (`event-001` through `event-051`),
+  then asserts the rendered feed contains `event-051` (newest,
+  unshifted last) and `event-002` (oldest kept at slot 50), does
+  **not** contain `event-001` (the dropped entry), and that
+  `drawer-event-feed.querySelectorAll('.feed-row').length === 50`.
+  Using `querySelectorAll` on `.feed-row` (rather than textContent
+  whitespace counting) gives a precise row count that survives any
+  whitespace / newline insertion in `renderEventFeed`. A regression
+  that doubles the cap (or removes it entirely) would surface as
+  `length === 51` instead of 50; a regression that drops the wrong
+  end of the array would surface as `event-051` missing or
+  `event-001` still present.
+
+
+- **`packages/core/src/hq/protocol.ts` + `packages/cli/src/hq-server.ts` —
+  `hq.welcome` server reply (Phase 1 handshake).** Added
+  `type: 'hq.welcome'` discriminator to `HqWelcomePayload` so the
+  `HqServerMessage = HqServerCommandBatchMessage | HqWelcomePayload`
+  union parses cleanly on the wire. The server's `client.hello`
+  branch now replies with `ws.send(JSON.stringify(welcome))` on the
+  same socket — payload carries `protocolVersion`, `serverTime`
+  (ISO-8601), `acceptedCapabilities` (Phase 1 echo-back of what the
+  client advertised), and `redactionPolicy` (core's
+  `DEFAULT_HQ_REDACTION_POLICY`: `{ rawContent: false,
+  toolArgs: 'summary', paths: 'project-relative' }`). The reply
+  is a true Phase 1 deliverable: clients can now confirm the server
+  accepted their protocol version and learn the active redaction
+  policy without polling `/api/snapshot`. New test
+  `packages/cli/tests/hq-welcome.test.ts` mounts a real
+  `/ws/client` connection, sends a full `HqClientHelloPayload`
+  (including the previously-omitted `machineId` / `projectName` /
+  `workspaceKind` required fields), polls up to 1500ms for the
+  welcome frame, and asserts all four fields exactly.
+  Field-order-agnostic `text.includes('hq.welcome')` substring match
+  keeps the test stable against future field reordering. Companion
+  docs update in `docs/subcommands/hq.md`: the
+  "Server → client (Phase 2)" tablo notu is now
+  `"Server → client"` (welcome is shipped); the `client.hello`
+  behavior note spells out the four-field reply shape inline.
+  `hq.command_batch` server emit, `client.command_poll` /
+  `client.command_ack` queue handling, and capability negotiation
+  remain Phase 2.
+
+### Security
+
+- **`packages/core/src/hq/protocol.ts` — `parseHqFrame()` discriminated
+  dispatcher (real wire contract enforcement).** New
+  `HqParseResult` discriminated union (`{ ok: true; frame } | { ok: false;
+  reason }`), `KNOWN_HQ_CLIENT_FRAME_TYPES` set, and 7 `isHq*` field-shape
+  guards (`hasStringType`, `isHqClientIdentity`, `isHqProjectIdentity`,
+  `isHqClientHelloPayload`, `isHqEventEnvelope`, `isHqClientCommandPollMessage`,
+  `isHqClientCommandAckMessage`) plus per-frame deep payload guards
+  for the `client.event` envelope's `mailbox.snapshot` / `mailbox.event`
+  shapes. `isHqMailboxSnapshotPayload` now also validates each
+  `messages` and `agents` array element with the corresponding guard
+  (previously only `Array.isArray` was checked — garbage array elements
+  could pass validation). Server (`packages/cli/src/hq-server.ts`)
+  replaces the previous `JSON.parse(...) as HqClientMessage` and
+  `as HqClientHelloMessage` casts with a single `parseHqFrame()` call:
+  invalid JSON → `ws.close(1003)` (RFC 6455 §7.4.1 unsupported data),
+  unknown type or malformed shape → `ws.close(1008)` (policy violation),
+  valid → discriminated switch with no runtime `as` cast. Pre-hello
+  frames are still dropped silently without closing the connection.
+  `mailbox.event` envelopes are also validated and dropped if
+  malformed, and the optional `summary` field is scrubbed +
+  truncated to 280 chars before being stored in the event log and
+  broadcast to browsers.
+
+- **`packages/core/src/hq/redaction.ts` — `scrubAndTruncateHqPreview()`
+  helper.** New public helper that runs `DefaultSecretScrubber` over
+  a free-text preview field and truncates it to a configurable max
+  length (default 280 chars) with a `…[truncated:N]` suffix. Returns
+  `undefined` for non-string or empty input. Re-exported via
+  `@wrongstack/core/hq` for server-side callers that need to sanitize
+  user-supplied preview text before logging or broadcasting.
+
 ## [0.267.0] — 2026-06-20
 
 > The **subscription sign-in** release. The headline is **Sign in with a
@@ -4658,3 +4841,5 @@ something useful: `core`, `cli`, `providers`, `tools`, `tui`, `mcp`,
 
 Initial release.
 
+
+- `**packages/webui/** + **packages/core/src/coordination/agents/phase8-delivery.ts** — `pnpm release:check` cleanup`: fixed seven pre-existing WebUI test failures (`@testing-library/react` dep added; AgentsPage-local `fmtCost/fmtDuration/fmtElapsed/sparkline` added with compact semantics; `dashboard-primitives.fmtCost` accepts negative values; `clientNodeType('cli')` maps to repl; `slash-routing` test fixture `listMemory` typo + vi.hoisted shared mocks; `queued-messages-file-mention-picker` `toBeEmptyDOMElement` replaced with native assertion + `mockTextarea` helper + manual raf flush; `streaming-performance` chunk count check via regex). Fixed a parse error in core's `phase8-delivery.ts` (line 139) where an unescaped `{` inside a template-literal prompt was being interpreted as a JS interpolation start. Release:check now exits 0 with 663 test files / 9057 tests passed + 89 webui files / 1558 tests passed, no vulnerabilities, typecheck + build clean.

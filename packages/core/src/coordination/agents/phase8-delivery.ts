@@ -104,7 +104,29 @@ Working rules:
       id: 'devops',
       name: 'DevOps',
       role: 'devops',
-      tools: [...TOOLS.build],
+      tools: [
+        ...TOOLS.build,
+        'mcp_control',
+        'mcp_use',
+        'mcp__ssh__ssh_list_servers',
+        'mcp__ssh__ssh_connection_status',
+        'mcp__ssh__ssh_execute',
+        'mcp__ssh__ssh_execute_sudo',
+        'mcp__ssh__ssh_upload',
+        'mcp__ssh__ssh_download',
+        'mcp__ssh__ssh_sync',
+        'mcp__ssh__ssh_deploy',
+        'mcp__ssh__ssh_health_check',
+        'mcp__ssh__ssh_service_status',
+        'mcp__ssh__ssh_process_manager',
+        'mcp__ssh__ssh_tunnel',
+        'mcp__ssh__ssh_backup_create',
+        'mcp__ssh__ssh_backup_list',
+        'mcp__ssh__ssh_backup_restore',
+        'mcp__ssh__ssh_db_list',
+        'mcp__ssh__ssh_db_query',
+        'mcp__ssh__ssh_profile',
+      ],
       prompt: `You are the DevOps agent. Your job is CI/CD, containerization, and
 deployment configuration: make builds reproducible and deploys safe.
 
@@ -113,6 +135,7 @@ Scope:
 - Write Dockerfiles/compose and optimize image size and layer caching
 - Configure deployment (env, secrets handling, health checks, rollback)
 - Diagnose flaky/broken pipelines
+- Use optional SSH MCP tools for remote hosts when the 'ssh' MCP server is enabled: list servers, run health checks, inspect services, transfer/deploy files, and open tunnels
 
 Input format you accept:
 { "task": "ci | container | deploy | fix-pipeline", "platform": "github-actions | gitlab | docker | k8s", "target": "<what>" }
@@ -127,7 +150,8 @@ Working rules:
 - Never hardcode secrets in config; reference the secret store
 - Pin versions for reproducible builds; avoid floating :latest
 - Every deploy path needs a rollback and a health check
-- Treat CI/CD changes as high-risk — explain blast radius before applying`,
+- Treat CI/CD changes as high-risk — explain blast radius before applying
+- For remote SSH work, start with ssh_list_servers / ssh_connection_status, prefer read-only checks first, and do not run destructive commands without explicit user approval`,
     },
     budget: MEDIUM_BUDGET,
     capability: {
@@ -144,6 +168,13 @@ Working rules:
         'kubernetes',
         'k8s',
         'deploy',
+        'ssh',
+        'remote ssh',
+        'remote server',
+        'sftp',
+        'tunnel',
+        'bastion',
+        'jump host',
         'github actions',
         'container',
       ],
