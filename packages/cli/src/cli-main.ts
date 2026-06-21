@@ -86,7 +86,7 @@ import { registerBuiltinTools } from './boot/tool-registry.js';
 import { parseArgs } from './arg-parser.js';
 import { launchEternalFromFlag } from './cli-eternal-flag.js';
 import { promptRecovery } from './cli-recovery-prompt.js';
-import { runPreflight } from './preflight.js';
+import { applyNodeEnvDefault, runPreflight } from './preflight.js';
 import { wireContainer } from './boot/container-wiring.js';
 import { bindSystemPromptBuilder } from './boot/system-prompt-builder.js';
 import { helpCmd, versionCmd } from './subcommands/handlers/version-help.js';
@@ -133,10 +133,7 @@ export async function main(argv: string[]): Promise<number> {
   // call `runPreflight` here at the top of main() because the
   // `--help` / `--version` short-circuit below needs to fire
   // without paying for the 2-second update-notice network call.
-  if (process.env['NODE_ENV'] === undefined) {
-    process.env['NODE_ENV'] = 'production';
-    process.env['WRONGSTACK_NODE_ENV_DEFAULTED'] = '1';
-  }
+  applyNodeEnvDefault();
 
   // --help / --version short-circuit (PR 1 of Issue #29):
   //
@@ -216,10 +213,11 @@ export async function main(argv: string[]): Promise<number> {
 
   // PR 2 of Issue #29: pre-boot side effects (update-notice
   // quick-check, debug-stream seed) are now in `runPreflight()`. The
-  // NODE_ENV defaulting stayed at the top of main() because it has
-  // to fire *before* the lazy `--tui` import and also before the
-  // --help / --version short-circuit (the TUI-less paths still
-  // hit it on a cold start). Everything else runs after `boot()`
+  // NODE_ENV defaulting is already applied at the top of main() via
+  // `applyNodeEnvDefault()` — it must fire *before* the lazy `--tui`
+  // import and also before the --help / --version short-circuit. The
+  // second `applyNodeEnvDefault()` call inside `runPreflight()` is a
+  // no-op (NODE_ENV is already set). Everything else runs after `boot()`
   // returns the BootContext and the early-return short-circuit has
   // been ruled out.
   const { updateInfo: refreshedUpdateInfo } = await runPreflight(config, updateInfo);
