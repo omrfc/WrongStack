@@ -53,6 +53,7 @@ import { FleetStatusLine } from './fleet-statusline.js';
 import { runWebUIDispatch } from './boot/dispatch-webui.js';
 import { runSingleShotDispatch } from './boot/dispatch-singleshot.js';
 import { wireAutoPhase } from './boot/tui-autophase-wiring.js';
+import { handleProjectSwitchSpawn } from './boot/tui-project-spawn.js';
 import type { ReadlineInputReader } from './input-reader.js';
 import { type PredictLLMProvider, predictNextTasks } from './next-task-predictor.js';
 import type { TerminalRenderer } from './renderer.js';
@@ -609,7 +610,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
 
       // Special exit code for project switch — triggers a clean wstack restart
       // in the target project directory after the TUI unmounts.
-      const PROJECT_SWITCH_EXIT_CODE = 42;
+      // (Imported from boot/tui-project-spawn.ts — the spawn logic lives there.)
 
       // Stores the pending project switch info set by onProjectSelect (F1
       // picker) or onSwitchToSession (F10 sessions panel). Checked after
@@ -1843,61 +1844,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         // After TUI exits with PROJECT_SWITCH_EXIT_CODE, spawn wstack in the new project.
         // This replaces the old behavior of spawning mid-session (which left the TUI
         // running and corrupted the terminal state).
-        if (code === PROJECT_SWITCH_EXIT_CODE && pendingProjectSwitch) {
-          const { root, name, resumeSessionId } = pendingProjectSwitch;
-
-          // Clear screen before spawning — removes TUI artifacts so the new wstack
-          // banner starts fresh. \x1b[2J clears visible screen, \x1b[H homes cursor.
-          process.stdout.write('\x1b[2J\x1b[H');
-
-          const { spawn } = await import('node:child_process');
-          const { createRequire } = await import('node:module');
-          let cliPath: string;
-          try {
-            const req = createRequire(import.meta.url);
-            const pkgPath = req.resolve('@wrongstack/cli/package.json');
-            const pkgDir = path.dirname(pkgPath);
-            cliPath = path.join(pkgDir, 'dist', 'index.js');
-            await fs.access(cliPath);
-          } catch {
-            cliPath = process.argv[1] ?? '';
-            if (!cliPath) {
-              console.error(color.red('Could not locate the CLI entry point.\n'));
-              return 1;
-            }
-          }
-
-          const nodeExe = process.execPath;
-          const spawnArgs = [cliPath, '--no-interactive'];
-          if (resumeSessionId) spawnArgs.push('--resume', resumeSessionId);
-          // No abort signal here: the spawned wstack OUTLIVES this process
-          // (we exit right after). A previous AbortSignal.timeout(30_000)
-          // on this spawn killed the successor 30 seconds in whenever the
-          // parent lingered.
-          // Use stdio: 'ignore' + detached: true so the child truly outlives
-          // the parent — stdio: 'inherit' would pipe the child's stdin to
-          // the parent's, and when the parent exits the pipes close, crashing
-          // a child that is still initializing (module load, provider connect).
-          spawn(nodeExe, spawnArgs, {
-            cwd: root,
-            stdio: 'ignore',
-            detached: true,
-          }).on('error', (err: Error) => {
-            console.error(color.red(`Failed to spawn wstack: ${err.message}`));
-          });
-
-          console.log(
-            [
-              '',
-              color.green(`  Switched to ${name}`),
-              color.dim(`  Root: ${root}`),
-              color.dim('  (current session stays open — Ctrl+C to return)'),
-              '',
-            ].join('\n'),
-          );
-
-          return 0;
-        }
+        const spawnResult = await handleProjectSwitchSpawn({ code, pendingProjectSwitch });
+        if (spawnResult !== null) return spawnResult;
       } finally {
         renderer.setSilent(false);
         // Cleanup: stop Director lifecycle listener so the coordinator no-op guard fires.
