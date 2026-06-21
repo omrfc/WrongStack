@@ -22,6 +22,7 @@ import { withFileLock } from '../utils/atomic-write.js';
 import { projectSlug } from '../utils/wstack-paths.js';
 import { normalizeRecipient } from './mailbox-types.js';
 import type { EventBus } from '../kernel/events.js';
+import type { HqPublisher } from '../hq/publisher.js';
 import type {
   AgentHeartbeatInput,
   AgentRegistrationInput,
@@ -93,6 +94,8 @@ export class GlobalMailbox implements Mailbox {
   readonly clientRegistryPath: string;
   /** Optional event bus for emitting agent registration/heartbeat events. */
   private readonly _events?: EventBus | undefined;
+  /** Optional HQ publisher for cross-project command-center telemetry. */
+  private readonly _hqPublisher?: HqPublisher | undefined;
   /**
    * Local cache of the agent registry to avoid re-reading on every call.
    * Time-bounded: the registry file is shared ACROSS PROCESSES (that's the
@@ -131,12 +134,33 @@ export class GlobalMailbox implements Mailbox {
   /**
    * @param projectDir — `~/.wrongstack/projects/<slug>/`
    * @param events — optional EventBus for real-time TUI/WebUI notifications
+   * @param hqPublisher — optional HQ publisher for cross-project telemetry
    */
-  constructor(projectDir: string, events?: EventBus) {
+  constructor(projectDir: string, events?: EventBus, hqPublisher?: HqPublisher) {
     this.messagePath = path.join(projectDir, MAILBOX_FILE);
     this.registryPath = path.join(projectDir, '_mailbox.registry.json');
     this.clientRegistryPath = path.join(projectDir, CLIENT_REGISTRY_FILE);
     this._events = events;
+    this._hqPublisher = hqPublisher;
+  }
+
+  private get hqMailboxId(): string {
+    return `${path.basename(path.dirname(this.messagePath))}:mailbox`;
+  }
+
+  private publishHqMailboxEvent(input: Parameters<HqPublisher['publishMailboxEvent']>[0]): void {
+    try {
+      this._hqPublisher?.publishMailboxEvent(input);
+    } catch {
+      // HQ telemetry is best-effort and must never affect mailbox behavior.
+    }
+  }
+
+  private publishHqMailboxSnapshot(): void {
+    if (this._hqPublisher === undefined) return;
+    void this._hqPublisher.publishMailboxSnapshot(this, { mailboxId: this.hqMailboxId }).catch(() => {
+      // HQ telemetry is best-effort and must never affect mailbox behavior.
+    });
   }
 
   // ── Messages ────────────────────────────────────────────────────────────
@@ -173,6 +197,8 @@ export class GlobalMailbox implements Mailbox {
       this._pushToCache(msg);
     });
 
+    this.publishHqMailboxEvent({ mailboxId: this.hqMailboxId, action: 'message.sent', message: msg });
+    this.publishHqMailboxSnapshot();
     return msg;
   }
 
@@ -276,6 +302,14 @@ export class GlobalMailbox implements Mailbox {
 
     // Promote the freshly-read array to the cache without re-reading.
     if (cacheSnapshot) this._setMessageCache(cacheSnapshot);
+    for (const message of updated) {
+      this.publishHqMailboxEvent({
+        mailboxId: this.hqMailboxId,
+        action: message.completed ? 'message.completed' : 'message.read',
+        message,
+      });
+    }
+    if (updated.length > 0) this.publishHqMailboxSnapshot();
     return updated;
   }
 
@@ -331,6 +365,25 @@ export class GlobalMailbox implements Mailbox {
       agentId: input.agentId, sessionId: input.sessionId,
       name: input.name, role: input.role, source: input.source,
     });
+    this.publishHqMailboxEvent({
+      mailboxId: this.hqMailboxId,
+      action: 'agent.registered',
+      agent: {
+        agentId: input.agentId,
+        name: input.name,
+        ...(input.role !== undefined ? { role: input.role } : {}),
+        sessionId: input.sessionId,
+        status: 'idle',
+        iterations: 0,
+        toolCalls: 0,
+        lastActivityAt: now,
+        lastSeenAt: now,
+        online: true,
+        pid: input.pid,
+        ...(input.source !== undefined ? { source: input.source } : {}),
+      },
+    });
+    this.publishHqMailboxSnapshot();
   }
 
   async heartbeat(input: AgentHeartbeatInput): Promise<void> {
@@ -372,6 +425,12 @@ export class GlobalMailbox implements Mailbox {
       currentTool: input.currentTool,
       currentTask: input.currentTask,
     });
+    this.publishHqMailboxEvent({
+      mailboxId: this.hqMailboxId,
+      action: 'agent.heartbeat',
+      summary: input.agentId,
+    });
+    this.publishHqMailboxSnapshot();
   }
 
   async getAgentStatuses(): Promise<MailboxAgentStatus[]> {

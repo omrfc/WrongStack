@@ -11,6 +11,7 @@
  */
 
 import { GlobalMailbox, resolveProjectDir } from './coordination/global-mailbox.js';
+import { createHqPublisherFromEnv } from './hq/factory.js';
 import { wstackGlobalRoot } from './utils/wstack-paths.js';
 import { toErrorMessage } from './utils/error.js';
 import { mailboxSessionTag, resolveMailboxIdentity } from './coordination/mailbox-tool.js';
@@ -42,7 +43,12 @@ function attachMailboxCheckerInner(
   const projectDir = resolveProjectDir(a.ctx.projectRoot, wstackGlobalRoot());
   // Pass the agent's EventBus so GlobalMailbox can emit real-time events
   // (agent_registered, agent_heartbeat, etc.) for TUI/WebUI display.
-  const mailbox: Mailbox = new GlobalMailbox(projectDir, a.events);
+  const hqPublisher = createHqPublisherFromEnv({ clientKind: source ?? 'cli', projectRoot: a.ctx.projectRoot });
+  hqPublisher?.connect();
+  if (hqPublisher) {
+    a.ctx.registerAbortHook(() => hqPublisher.close());
+  }
+  const mailbox: Mailbox = new GlobalMailbox(projectDir, a.events, hqPublisher);
   const surface = source ?? ((a.ctx.meta['source'] as 'cli' | 'webui' | undefined) ?? 'cli');
   if (!a.ctx.meta['source']) a.ctx.meta['source'] = surface;
 

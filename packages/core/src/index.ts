@@ -4,6 +4,7 @@ export * from './utils/index.js';
 export * from './defaults/index.js';
 export * from './skills/index.js';
 export * from './storage/index.js';
+export * from './hq/index.js';
 export { expectDefined } from './utils/expect-defined.js';
 
 // Explicit re-exports for the new session audit bridge (helps some consumers
