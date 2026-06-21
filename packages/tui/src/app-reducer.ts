@@ -19,6 +19,7 @@ import {
   MAX_ITERATIONS_PRESETS,
   SETTINGS_FIELD_COUNT,
   SETTINGS_MODES,
+  STATUSLINE_MODES,
   TOKEN_SAVING_TIERS,
 } from './components/settings-picker.js';
 import type {
@@ -28,6 +29,47 @@ import type {
   State,
 } from './app-state.js';
 import type { ProjectPickerItem } from './components/project-picker.js';
+
+type PanelResetState = Pick<
+  State,
+  | 'monitorOpen'
+  | 'agentsMonitorOpen'
+  | 'helpOpen'
+  | 'todosMonitorOpen'
+  | 'queuePanelOpen'
+  | 'processListOpen'
+  | 'planPanelOpen'
+  | 'goalPanelOpen'
+  | 'sessionsPanelOpen'
+  | 'settingsPicker'
+  | 'statuslinePicker'
+  | 'projectPicker'
+  | 'fKeyPicker'
+  | 'autoPhase'
+  | 'worktreeMonitorOpen'
+  | 'coordinator'
+>;
+
+function closePanels(state: State): PanelResetState {
+  return {
+    monitorOpen: false,
+    agentsMonitorOpen: false,
+    helpOpen: false,
+    todosMonitorOpen: false,
+    queuePanelOpen: false,
+    processListOpen: false,
+    planPanelOpen: false,
+    goalPanelOpen: false,
+    sessionsPanelOpen: false,
+    settingsPicker: { ...state.settingsPicker, open: false },
+    statuslinePicker: { ...state.statuslinePicker, open: false },
+    projectPicker: { ...state.projectPicker, open: false },
+    fKeyPicker: { ...state.fKeyPicker, open: false },
+    autoPhase: state.autoPhase ? { ...state.autoPhase, monitorOpen: false } : state.autoPhase,
+    worktreeMonitorOpen: false,
+    coordinator: { ...state.coordinator, monitorOpen: false },
+  };
+}
 // Re-export types from app-state.ts for backward compatibility.
 export type {
   Action,
@@ -393,6 +435,7 @@ export function reducer(state: State, action: Action): State {
     case 'modelPickerOpen':
       return {
         ...state,
+        ...closePanels(state),
         modelPicker: {
           open: true,
           step: 'provider',
@@ -486,6 +529,7 @@ export function reducer(state: State, action: Action): State {
     case 'autonomyPickerOpen':
       return {
         ...state,
+        ...closePanels(state),
         autonomyPicker: { open: true, options: action.options, selected: 0, hint: undefined },
       };
     case 'autonomyPickerClose':
@@ -510,6 +554,7 @@ export function reducer(state: State, action: Action): State {
     case 'resumePickerOpen':
       return {
         ...state,
+        ...closePanels(state),
         resumePicker: { open: true, sessions: action.sessions, selected: 0, busy: false, hint: undefined, error: undefined },
       };
     case 'resumePickerClose':
@@ -546,6 +591,7 @@ export function reducer(state: State, action: Action): State {
     case 'settingsOpen':
       return {
         ...state,
+        ...closePanels(state),
         settingsPicker: {
           open: true,
           field: 0,
@@ -577,6 +623,7 @@ export function reducer(state: State, action: Action): State {
           enhanceEnabled: action.enhanceEnabled,
           enhanceLanguage: action.enhanceLanguage,
           debugStream: action.debugStream,
+          statuslineMode: action.statuslineMode,
           configScope: action.configScope,
           hint: undefined,
         },
@@ -714,8 +761,15 @@ export function reducer(state: State, action: Action): State {
       }
       // Field 27: debug stream (boolean toggle)
       if (f === 27) return { ...state, settingsPicker: { ...sp, debugStream: !sp.debugStream, hint: undefined } };
-      // Field 28: config scope (cycle global/project)
+      // Field 28: statusline mode (cycle minimum/detailed)
       if (f === 28) {
+        const i = STATUSLINE_MODES.indexOf(sp.statuslineMode);
+        const base = i < 0 ? STATUSLINE_MODES.indexOf('detailed') : i;
+        const next = (base + action.delta + STATUSLINE_MODES.length) % STATUSLINE_MODES.length;
+        return { ...state, settingsPicker: { ...sp, statuslineMode: expectDefined(STATUSLINE_MODES[next]), hint: undefined } };
+      }
+      // Field 29: config scope (cycle global/project)
+      if (f === 29) {
         const i = CONFIG_SCOPES.indexOf(sp.configScope);
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + CONFIG_SCOPES.length) % CONFIG_SCOPES.length;
@@ -729,6 +783,7 @@ export function reducer(state: State, action: Action): State {
     case 'statuslineOpen':
       return {
         ...state,
+        ...closePanels(state),
         statuslinePicker: { open: true, field: 0, hiddenItems: action.hiddenItems, visibleChips: state.statuslinePicker.visibleChips, hint: undefined },
       };
     case 'statuslineClose':
@@ -789,6 +844,7 @@ export function reducer(state: State, action: Action): State {
     case 'projectPickerOpen':
       return {
         ...state,
+        ...closePanels(state),
         projectPicker: {
           open: true,
           allItems: action.items,
@@ -834,7 +890,7 @@ export function reducer(state: State, action: Action): State {
     case 'projectPickerHint':
       return { ...state, projectPicker: { ...state.projectPicker, hint: action.text } };
     case 'fKeyPickerOpen':
-      return { ...state, fKeyPicker: { open: true, selected: 0 } };
+      return { ...state, ...closePanels(state), fKeyPicker: { open: true, selected: 0 } };
     case 'fKeyPickerClose':
       return { ...state, fKeyPicker: { open: false, selected: 0 } };
     case 'fKeyPickerMove': {
@@ -1204,50 +1260,46 @@ export function reducer(state: State, action: Action): State {
     }
     case 'toggleMonitor': {
       const opening = !state.monitorOpen;
-      return opening
-        ? { ...state, monitorOpen: true, agentsMonitorOpen: false, helpOpen: false, todosMonitorOpen: false, queuePanelOpen: false, processListOpen: false, goalPanelOpen: false }
-        : { ...state, monitorOpen: false };
+      return opening ? { ...state, ...closePanels(state), monitorOpen: true } : { ...state, monitorOpen: false };
     }
     case 'toggleAgentsMonitor': {
       const opening = !state.agentsMonitorOpen;
       return opening
-        ? { ...state, agentsMonitorOpen: true, monitorOpen: false, helpOpen: false, todosMonitorOpen: false, queuePanelOpen: false, processListOpen: false, goalPanelOpen: false }
+        ? { ...state, ...closePanels(state), agentsMonitorOpen: true }
         : { ...state, agentsMonitorOpen: false };
     }
     case 'toggleHelp': {
       const opening = !state.helpOpen;
-      return opening
-        ? { ...state, helpOpen: true, monitorOpen: false, agentsMonitorOpen: false, todosMonitorOpen: false, queuePanelOpen: false, processListOpen: false, goalPanelOpen: false }
-        : { ...state, helpOpen: false };
+      return opening ? { ...state, ...closePanels(state), helpOpen: true } : { ...state, helpOpen: false };
     }
     case 'toggleTodosMonitor': {
       const opening = !state.todosMonitorOpen;
       return opening
-        ? { ...state, todosMonitorOpen: true, monitorOpen: false, agentsMonitorOpen: false, helpOpen: false, queuePanelOpen: false, processListOpen: false, goalPanelOpen: false }
+        ? { ...state, ...closePanels(state), todosMonitorOpen: true }
         : { ...state, todosMonitorOpen: false };
     }
     case 'toggleQueuePanel': {
       const opening = !state.queuePanelOpen;
       return opening
-        ? { ...state, queuePanelOpen: true, monitorOpen: false, agentsMonitorOpen: false, helpOpen: false, todosMonitorOpen: false, processListOpen: false, goalPanelOpen: false }
+        ? { ...state, ...closePanels(state), queuePanelOpen: true }
         : { ...state, queuePanelOpen: false };
     }
     case 'toggleProcessList': {
       const opening = !state.processListOpen;
       return opening
-        ? { ...state, processListOpen: true, monitorOpen: false, agentsMonitorOpen: false, helpOpen: false, todosMonitorOpen: false, queuePanelOpen: false, goalPanelOpen: false }
+        ? { ...state, ...closePanels(state), processListOpen: true }
         : { ...state, processListOpen: false };
     }
     case 'togglePlanPanel': {
       const opening = !state.planPanelOpen;
       return opening
-        ? { ...state, planPanelOpen: true, monitorOpen: false, agentsMonitorOpen: false, helpOpen: false, todosMonitorOpen: false, queuePanelOpen: false, processListOpen: false, goalPanelOpen: false }
+        ? { ...state, ...closePanels(state), planPanelOpen: true }
         : { ...state, planPanelOpen: false };
     }
     case 'toggleGoalPanel': {
       const opening = !state.goalPanelOpen;
       return opening
-        ? { ...state, goalPanelOpen: true, monitorOpen: false, agentsMonitorOpen: false, helpOpen: false, todosMonitorOpen: false, queuePanelOpen: false, processListOpen: false }
+        ? { ...state, ...closePanels(state), goalPanelOpen: true }
         : { ...state, goalPanelOpen: false };
     }
     case 'checkpointReceived': {
@@ -1336,10 +1388,17 @@ export function reducer(state: State, action: Action): State {
     }
     case 'autoPhaseMonitorToggle': {
       if (!state.autoPhase) return state;
-      return {
-        ...state,
-        autoPhase: { ...state.autoPhase, monitorOpen: !state.autoPhase.monitorOpen },
-      };
+      const opening = !state.autoPhase.monitorOpen;
+      return opening
+        ? {
+            ...state,
+            ...closePanels(state),
+            autoPhase: { ...state.autoPhase, monitorOpen: true },
+          }
+        : {
+            ...state,
+            autoPhase: { ...state.autoPhase, monitorOpen: false },
+          };
     }
     case 'autoPhaseReset': {
       return { ...state, autoPhase: null };
@@ -1370,7 +1429,10 @@ export function reducer(state: State, action: Action): State {
       return { ...state, worktrees: next };
     }
     case 'worktreeMonitorToggle': {
-      return { ...state, worktreeMonitorOpen: !state.worktreeMonitorOpen };
+      const opening = !state.worktreeMonitorOpen;
+      return opening
+        ? { ...state, ...closePanels(state), worktreeMonitorOpen: true }
+        : { ...state, worktreeMonitorOpen: false };
     }
     // --- In-app chat scroll ---
     case 'scrollBy': {
@@ -1573,7 +1635,10 @@ export function reducer(state: State, action: Action): State {
       return { ...state, debugStreamStats: null };
     }
     case 'toggleSessionsPanel': {
-      return { ...state, sessionsPanelOpen: !state.sessionsPanelOpen };
+      const opening = !state.sessionsPanelOpen;
+      return opening
+        ? { ...state, ...closePanels(state), sessionsPanelOpen: true, sessionResumeConfirm: null }
+        : { ...state, sessionsPanelOpen: false, sessionResumeConfirm: null };
     }
     case 'sessionsPanelSet': {
       const sessions = Array.isArray(action.sessions) ? action.sessions : [];
@@ -1659,15 +1724,8 @@ export function reducer(state: State, action: Action): State {
       return opening
         ? {
             ...state,
+            ...closePanels(state),
             coordinator: { ...state.coordinator, monitorOpen: true },
-            // Close other monitors when opening coordinator
-            monitorOpen: false,
-            agentsMonitorOpen: false,
-            helpOpen: false,
-            todosMonitorOpen: false,
-            queuePanelOpen: false,
-            processListOpen: false,
-            goalPanelOpen: false,
           }
         : { ...state, coordinator: { ...state.coordinator, monitorOpen: false } };
     }

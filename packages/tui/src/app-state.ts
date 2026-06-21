@@ -10,6 +10,7 @@ import type {
   ContextMode,
   LogLevel,
   SettingsMode,
+  StatuslineMode,
 } from './components/settings-picker.js';
 import type { ChipMeta, StatuslineItem } from './components/statusline-picker.js';
 import type { ProjectPickerItem } from './components/project-picker.js';
@@ -298,6 +299,8 @@ export type State = {
     enhanceLanguage: 'original' | 'english';
     /** Raw SSE stream debugging toggle. */
     debugStream: boolean;
+    /** Statusline density mode. */
+    statuslineMode: StatuslineMode;
     /** Where to persist settings: 'global' or 'project'. */
     configScope: 'global' | 'project';
     hint?: string | undefined;
@@ -617,6 +620,8 @@ export type Settings = {
   enhanceLanguage: 'original' | 'english';
   /** Raw SSE stream debugging — hex-dump every byte received from providers. */
   debugStream: boolean;
+  /** Statusline density mode. Defaults to detailed. */
+  statuslineMode: StatuslineMode;
   /** Where to persist settings: 'global' or 'project'. */
   configScope: 'global' | 'project';
   /** Full mouse mode: in-app managed scroll + clickable UI (SGR tracking on). */
@@ -720,6 +725,7 @@ export type Action =
       enhanceEnabled: boolean;
       enhanceLanguage: 'original' | 'english';
       debugStream: boolean;
+      statuslineMode: StatuslineMode;
       configScope: 'global' | 'project';
     }
   | { type: 'settingsClose' }

@@ -43,6 +43,7 @@ import { FilePicker } from './components/file-picker.js';
 import { FleetMonitor } from './components/fleet-monitor.js';
 import { FleetPanel } from './components/fleet-panel.js';
 import { FKeyPicker, F_KEY_ENTRIES } from './components/f-key-picker.js';
+import { actionForFKeyPanel } from './f-key-panels.js';
 import { MailboxPanel } from './components/mailbox-panel.js';
 import { HelpOverlay } from './components/help-overlay.js';
 import { History, type HistoryEntry } from './components/history.js';
@@ -61,7 +62,7 @@ import { PlanPanel } from './components/plan-panel.js';
 import { CoordinatorPanel } from './components/coordinator-panel.js';
 import { ResumePicker } from './components/resume-picker.js';
 import { SessionsPanel } from './components/sessions-panel.js';
-import { SettingsPicker, type ContextMode } from './components/settings-picker.js';
+import { SettingsPicker, type ContextMode, type StatuslineMode } from './components/settings-picker.js';
 import { StatuslinePicker, STATUSLINE_ITEMS, isChipExpired } from './components/statusline-picker.js';
 import { SlashMenu } from './components/slash-menu.js';
 import { KeyHintBar, type KeyHintContext } from './components/key-hint-bar.js';
@@ -923,7 +924,7 @@ export function App({
     },
     autonomyPicker: { open: false, options: [], selected: 0 },
     resumePicker: { open: false, sessions: [], selected: 0, busy: false, hint: undefined, error: undefined },
-    settingsPicker: { open: false, field: 0, mode: 'off', delayMs: 0, titleAnimation: true, yolo: false, streamFleet: true, chime: false, confirmExit: true, nextPrediction: false, featureMcp: true, featurePlugins: true, featureMemory: true, featureSkills: true, featureModelsRegistry: true, tokenSavingTier: 'off' as TokenSavingTier, allowOutsideProjectRoot: true, contextAutoCompact: true, contextStrategy: 'hybrid', contextMode: 'balanced' as ContextMode, maxConcurrent: 10, logLevel: 'info', auditLevel: 'standard', indexOnStart: true, maxIterations: 500, autoProceedMaxIterations: 50, enhanceDelayMs: 60_000, enhanceEnabled: true, enhanceLanguage: 'original', debugStream: false, configScope: 'global' },
+    settingsPicker: { open: false, field: 0, mode: 'off', delayMs: 0, titleAnimation: true, yolo: false, streamFleet: true, chime: false, confirmExit: true, nextPrediction: false, featureMcp: true, featurePlugins: true, featureMemory: true, featureSkills: true, featureModelsRegistry: true, tokenSavingTier: 'off' as TokenSavingTier, allowOutsideProjectRoot: true, contextAutoCompact: true, contextStrategy: 'hybrid', contextMode: 'balanced' as ContextMode, maxConcurrent: 10, logLevel: 'info', auditLevel: 'standard', indexOnStart: true, maxIterations: 500, autoProceedMaxIterations: 50, enhanceDelayMs: 60_000, enhanceEnabled: true, enhanceLanguage: 'original', debugStream: false, statuslineMode: 'detailed' as StatuslineMode, configScope: 'global' },
     statuslinePicker: { open: false, field: 0, hiddenItems: [], visibleChips: [], hint: undefined },
     projectPicker: { open: false, allItems: [], items: [], selected: 0, filter: '', hint: undefined },
     fKeyPicker: { open: false, selected: 0 },
@@ -1132,6 +1133,7 @@ export function App({
   // updates on every ←/→ change, so these refs stay current within the running
   // session without a restart. Falls back to the boot prop when unavailable.
   const liveSettings = getSettings?.();
+  const liveStatuslineMode = liveSettings?.statuslineMode ?? 'detailed';
   const chimeRef = useRef(chime);
   chimeRef.current = liveSettings?.chime ?? chime;
   const confirmExitRef = useRef(confirmExit);
@@ -1250,7 +1252,7 @@ export function App({
     async (checkpointIndex: number) => {
       const sessionId = agent.ctx.session.id;
       if (!sessionId) return;
-      const rewinder = new DefaultSessionRewinder(sessionsDir ?? '', projectRoot ?? agent.ctx.cwd);
+      const rewinder = new DefaultSessionRewinder(sessionsDir ?? '', agent.ctx.projectRoot ?? agent.ctx.cwd);
       // Revert file system changes first (read-only, safe to do eagerly).
       await rewinder.rewindToCheckpoint(sessionId, checkpointIndex);
       // Then truncate the conversation history — this fires session.rewound
@@ -1258,7 +1260,7 @@ export function App({
       // dispatches sessionRewound + clearHistory.
       await agent.ctx.session.truncateToCheckpoint(checkpointIndex);
     },
-    [agent.ctx.session, sessionsDir, projectRoot, agent.ctx.cwd],
+    [agent.ctx.session, sessionsDir, agent.ctx.projectRoot, agent.ctx.cwd],
   );
 
   const setDraft = (buffer: string, cursor: number): void => {
@@ -1653,8 +1655,8 @@ export function App({
     const leaderEntry: FleetEntry = {
       id: 'leader',
       name: 'LEADER',
-      provider,
-      model,
+      provider: liveProvider,
+      model: liveModel,
       status:
         state.status === 'running' || state.status === 'streaming' || state.leader.iterating
           ? 'running'
@@ -1676,7 +1678,7 @@ export function App({
       ctxMaxTokens: state.leader.ctxMaxTokens ?? effectiveMaxContext,
     };
     return { leader: leaderEntry, ...state.fleet };
-  }, [state.fleet, state.leader, state.status, provider, model, effectiveMaxContext, tokenCounter]);
+  }, [state.fleet, state.leader, state.status, liveProvider, liveModel, effectiveMaxContext, tokenCounter]);
 
   // Plan counts come from `<sessionId>.plan.json` on disk, not React
   // state. We poll lazily every few ticks so the chip stays current
@@ -1958,6 +1960,7 @@ export function App({
             enhanceEnabled: sp.enhanceEnabled,
             enhanceLanguage: sp.enhanceLanguage,
             debugStream: sp.debugStream,
+            statuslineMode: sp.statuslineMode,
             configScope: sp.configScope,
           });
         }
@@ -2505,6 +2508,7 @@ export function App({
       enhanceEnabled: s.enhanceEnabled ?? true,
       enhanceLanguage: (s.enhanceLanguage as 'original' | 'english') ?? 'original',
       debugStream: s.debugStream ?? false,
+      statuslineMode: s.statuslineMode ?? 'detailed',
       configScope: s.configScope ?? 'global',
     });
   }, [getSettings]);
@@ -2715,6 +2719,7 @@ export function App({
       enhanceEnabled: sp.enhanceEnabled,
       enhanceLanguage: sp.enhanceLanguage,
       debugStream: sp.debugStream,
+      statuslineMode: sp.statuslineMode,
       configScope: sp.configScope,
     })).then((err: string | null) => {
       if (err) dispatch({ type: 'settingsHint', text: err });
@@ -2749,6 +2754,7 @@ export function App({
     state.settingsPicker.enhanceEnabled,
     state.settingsPicker.enhanceLanguage,
     state.settingsPicker.debugStream,
+    state.settingsPicker.statuslineMode,
     saveSettings,
   ]);
 
@@ -3947,24 +3953,21 @@ export function App({
           dispatch({ type: 'projectPickerClose' });
           return;
         }
-        // For project selections, onProjectSelect stores the pending switch and
-        // we request a clean TUI exit with code 42. The host CLI spawns wstack
-        // in the new project after runTui returns.
+        // Project selections re-root the live app in place; no exit/restart.
         if (item.kind === 'project') {
           await onProjectSelect?.(item.key, item.kind);
           dispatch({ type: 'projectPickerClose' });
-          requestExit?.(42);
+          dispatch({ type: 'addEntry', entry: { kind: 'info', text: `Switched project: ${item.label.trim()}.` } });
           return;
         }
-        // Actions: 'new-session' restarts wstack in the current project via
-        // the same exit-42 path (onProjectSelect records the pending switch);
+        // Actions: 'new-session' starts a fresh session in the current project;
         // 'prev-sessions' opens the in-TUI /resume picker. These used to be
         // dead menu items — onProjectSelect no-op'd on actions and nothing
         // else handled them.
         dispatch({ type: 'projectPickerClose' });
         if (item.key === 'new-session') {
           await onProjectSelect?.(item.key, item.kind);
-          requestExit?.(42);
+          dispatch({ type: 'addEntry', entry: { kind: 'info', text: 'Started a fresh session in this project.' } });
         } else if (item.key === 'prev-sessions') {
           void submit('/resume');
         }
@@ -4153,7 +4156,12 @@ export function App({
         const entry = F_KEY_ENTRIES[selected];
         if (!entry) return;
         dispatch({ type: 'fKeyPickerClose' });
-        dispatch({ type: entry.action as 'toggleMonitor' });
+        if (entry.action === 'projectPickerOpen') {
+          openProjectPicker();
+          return;
+        }
+        const action = actionForFKeyPanel(entry, state.statuslinePicker.hiddenItems);
+        if (action) dispatch(action);
         return;
       }
       return;
@@ -4284,7 +4292,8 @@ export function App({
     // Monitor overlays. Ctrl+F/G/T are the primary chords; F2/F3/F4 are
     // terminal-safe aliases because some terminals intercept the chord before
     // it reaches the app (notably Windows Terminal eats Ctrl+F for "Find").
-    // F11 is deliberately unused — most terminals reserve it for fullscreen.
+    // F11/F12 are exposed as optional direct panel shortcuts; terminals that
+    // reserve them can still use /f or the slash-command alternatives.
     // All toggles are allowed even while aborting, so the user can check
     // subagent state mid-steer.
     const toggleFleetOverlay = () => {
@@ -4484,8 +4493,14 @@ export function App({
       dispatch({ type: 'toggleCoordinatorMonitor' });
       return;
     }
+    // F12 → status line picker. Mirrors /statusline for terminals where slash
+    // commands are inconvenient during a busy session.
+    if (key.fn === 12) {
+      dispatch({ type: 'statuslineOpen', hiddenItems: state.statuslinePicker.hiddenItems });
+      return;
+    }
     // Ctrl+S toggles the autonomy settings editor (also openable via
-    // F5 and `/settings`). Opening closes any other overlay or panel.
+    // `/settings`). Opening closes any other overlay or panel.
     if (key.ctrl && input === 's') {
       if (state.settingsPicker.open) {
         dispatch({ type: 'settingsClose' });
@@ -4529,6 +4544,7 @@ export function App({
           enhanceEnabled: cfg.enhanceEnabled ?? true,
           enhanceLanguage: cfg.enhanceLanguage ?? 'original',
           debugStream: cfg.debugStream ?? false,
+          statuslineMode: cfg.statuslineMode ?? 'detailed',
           configScope: cfg.configScope ?? 'global',
         });
       }
@@ -5896,6 +5912,21 @@ export function App({
   // AgentsMonitor.)
   const hideInput = enhanceActive || state.helpOpen || state.processListOpen;
 
+  // F2–F9 panels should all occupy the same first row below the statusline.
+  // Keep persistent background panels (fleet summary, phase/worktree strips)
+  // out of this slot while a function-key panel is open; otherwise F5/F7/F8/F9
+  // start one panel lower than F2/F3/F4/F6.
+  const lowerFunctionPanelOpen =
+    state.monitorOpen ||
+    state.agentsMonitorOpen ||
+    (state.autoPhase?.monitorOpen ?? false) ||
+    state.worktreeMonitorOpen ||
+    state.planPanelOpen ||
+    state.todosMonitorOpen ||
+    state.queuePanelOpen ||
+    state.processListOpen ||
+    state.goalPanelOpen;
+
   return (
     <Box flexDirection="column">
       <Box flexDirection="column" flexGrow={1} flexShrink={0}>
@@ -6031,6 +6062,7 @@ export function App({
               enhanceEnabled={state.settingsPicker.enhanceEnabled}
               enhanceLanguage={state.settingsPicker.enhanceLanguage}
               debugStream={state.settingsPicker.debugStream}
+              statuslineMode={state.settingsPicker.statuslineMode}
               configScope={state.settingsPicker.configScope}
               hint={state.settingsPicker.hint}
             />
@@ -6219,6 +6251,7 @@ export function App({
             subagentCount={Object.keys(state.fleet).length}
             processCount={getProcessRegistry().activeCount}
             hiddenItems={hiddenItems}
+            mode={liveStatuslineMode}
             visibleChips={state.statuslinePicker.visibleChips}
             events={events}
             eternalStage={state.eternalStage}
@@ -6261,6 +6294,7 @@ export function App({
               leaderCost={tokenCounter?.estimateCost().total ?? 0}
               totalTokens={state.fleetTokens}
               nowTick={nowTick}
+              onClose={() => dispatch({ type: 'toggleAgentsMonitor' })}
             />
           ) : state.autoPhase?.monitorOpen ? (
             <PhaseMonitor
@@ -6287,6 +6321,23 @@ export function App({
               nowTick={nowTick}
               collabSession={state.collabSession}
             />
+          ) : state.planPanelOpen ? (
+            <PlanPanel
+              projectRoot={agent.ctx.projectRoot}
+              sessionId={agent.ctx.session?.id ?? null}
+              onClose={() => dispatch({ type: 'togglePlanPanel' })}
+            />
+          ) : state.queuePanelOpen ? (
+            <QueuePanel items={state.queue} />
+          ) : state.processListOpen ? (
+            <ProcessListMonitor />
+          ) : state.goalPanelOpen ? (
+            <GoalPanel
+              goal={state.goalSummary}
+              onCoordinatorStart={onCoordinatorStart ?? undefined}
+              onCoordinatorStop={onCoordinatorStop ?? undefined}
+              coordinatorRunning={coordinatorRunning}
+            />
           ) : director ? (
             <FleetPanel
               entries={entriesWithLeader}
@@ -6295,7 +6346,7 @@ export function App({
               collabSession={state.collabSession}
             />
           ) : null}
-          {state.autoPhase && !state.autoPhase.monitorOpen ? (
+          {state.autoPhase && !lowerFunctionPanelOpen ? (
             <PhasePanel
               phases={state.autoPhase.phases}
               runningPhaseIds={state.autoPhase.runningPhaseIds}
@@ -6303,30 +6354,8 @@ export function App({
             />
           ) : null}
           {Object.keys(state.worktrees).length > 0 &&
-          !state.worktreeMonitorOpen &&
-          !state.monitorOpen ? (
+          !lowerFunctionPanelOpen ? (
             <WorktreePanel worktrees={state.worktrees} nowTick={nowTick} />
-          ) : null}
-          {/* Queue panel — renders as full-width panel at the bottom. */}
-          {state.queuePanelOpen ? <QueuePanel items={state.queue} /> : null}
-          {/* Process list overlay (F8) — shows background bash/exec processes. */}
-          {state.processListOpen ? <ProcessListMonitor /> : null}
-          {/* Plan panel (F5) — shows plan items and scope switcher. */}
-          {state.planPanelOpen ? (
-            <PlanPanel
-              projectRoot={projectRoot}
-              sessionId={agent.ctx.session?.id ?? null}
-              onClose={() => dispatch({ type: 'togglePlanPanel' })}
-            />
-          ) : null}
-          {/* Goal panel (F9) — shows current goal, deliverables, progress. */}
-          {state.goalPanelOpen ? (
-            <GoalPanel
-              goal={state.goalSummary}
-              onCoordinatorStart={onCoordinatorStart ?? undefined}
-              onCoordinatorStop={onCoordinatorStop ?? undefined}
-              coordinatorRunning={coordinatorRunning}
-            />
           ) : null}
           {/* Key hint bar — shows keyboard shortcuts and a discovery hint for the next panel. */}
           {(() => {

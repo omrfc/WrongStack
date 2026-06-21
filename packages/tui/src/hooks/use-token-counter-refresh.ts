@@ -7,6 +7,14 @@ export interface TokenRefreshData {
   cacheStats: CacheStats;
 }
 
+export function snapshotTokenCounter(tokenCounter: TokenCounter): TokenRefreshData {
+  return {
+    usage: tokenCounter.total(),
+    cost: tokenCounter.estimateCost(),
+    cacheStats: tokenCounter.cacheStats(),
+  };
+}
+
 /**
  * Subscribes to `token.accounted` events and forces a re-render so StatusBar
  * always shows fresh token/cost data without waiting for the slow polling
@@ -32,14 +40,22 @@ export function useTokenCounterRefresh(
   );
 
   useEffect(() => {
-    if (!tokenCounter || !events) return;
+    if (!tokenCounter) {
+      setData(undefined);
+      return;
+    }
+
+    const snapshot = () => snapshotTokenCounter(tokenCounter);
+
+    // Keep the rendered values in sync when App receives a new counter instance
+    // (for example after an in-place project/session switch), even before the
+    // next provider response emits token.accounted.
+    setData(snapshot());
+
+    if (!events) return;
 
     const off = events.on('token.accounted', () => {
-      setData({
-        usage: tokenCounter.total(),
-        cost: tokenCounter.estimateCost(),
-        cacheStats: tokenCounter.cacheStats(),
-      });
+      setData(snapshot());
     });
 
     return off;

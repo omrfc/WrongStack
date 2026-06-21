@@ -3,6 +3,7 @@ import type { EventBus, TokenCounter, AutonomyStage } from '@wrongstack/core';
 import { Box, Text, useStdout } from '../ink.js';
 import type React from 'react';
 import { type ChipMeta } from './statusline-picker.js';
+import type { StatuslineMode } from './settings-picker.js';
 import { useEffect, useState } from 'react';
 import { useTokenCounterRefresh } from '../hooks/use-token-counter-refresh.js';
 import type { GitInfo } from '../git-info.js';
@@ -261,6 +262,8 @@ export interface StatusBarProps {
   processCount?: number | undefined;
   /** Items to hide from the status bar. */
   hiddenItems?: Array<'todos' | 'plan' | 'tasks' | 'fleet' | 'git' | 'elapsed' | 'context' | 'cost' | 'working_dir' | 'brain' | 'mailbox' | 'enhance' | 'debug_stream'> | undefined;
+  /** Statusline density. Detailed is the default to preserve the full multi-line display. */
+  mode?: StatuslineMode | undefined;
   /** EventBus for subscribing to token.accounted events for real-time cost/token updates. */
   events?: EventBus | undefined;
   /**
@@ -380,6 +383,7 @@ export function StatusBar({
   context,
   contextStrategy,
   hiddenItems,
+  mode = 'detailed',
   events,
   eternalStage,
   goalSummary,
@@ -501,6 +505,73 @@ export function StatusBar({
     showEnhance ||
     hasNextStepsAutoSubmit;
 
+  const minimalWorkParts = [
+    queueCount > 0 ? `q${queueCount}` : '',
+    todos && !hiddenSet.has('todos') && todos.inProgress + todos.pending > 0
+      ? `todo ${todos.inProgress}/${todos.pending}`
+      : '',
+    hasTaskActivity && !hiddenSet.has('tasks') ? `task ${tasks!.inProgress}/${tasks!.pending}` : '',
+    fleetHasActivity && !hiddenSet.has('fleet')
+      ? fleet ? `agent ▶${fleet.running} ·${fleet.idle}` : `agent ${subagentCount}`
+      : '',
+    typeof processCount === 'number' && processCount > 0 ? `proc ${processCount}` : '',
+  ].filter(Boolean);
+
+  if (mode === 'minimum') {
+    const ctxMax = context?.max;
+    const ctxRatio = context && ctxMax ? context.used / ctxMax : undefined;
+    const ctxClampedRatio = ctxRatio !== undefined ? Math.min(ctxRatio, 1) : undefined;
+    const ctxPctText = ctxRatio !== undefined ? `${Math.min(Math.round(ctxRatio * 100), 100)}%` : undefined;
+    return (
+      <Box
+        flexDirection="column"
+        paddingX={1}
+        borderStyle="single"
+        borderTop={true}
+        borderBottom={false}
+        borderLeft={false}
+        borderRight={false}
+      >
+        <Box flexDirection="row" gap={2}>
+          {version ? (
+            <Text>
+              <Text color="blue" bold>WS</Text>
+              <Text dimColor> v{version}</Text>
+            </Text>
+          ) : null}
+          {version ? <Text dimColor>│</Text> : null}
+          {thinking ? (
+            <WaveText text={`${statePrefix} ${stateLabel}`} phase={spinnerIdx} />
+          ) : (
+            <Text color={stateColor}>{statePrefix} {stateLabel}</Text>
+          )}
+          <Text dimColor>│</Text>
+          <Text color="magenta">{model}</Text>
+          {ctxClampedRatio !== undefined && ctxPctText && ctxMax !== undefined && !hiddenSet.has('context') ? (
+            <>
+              <Text dimColor>│</Text>
+              <Text color={ctxClampedRatio < 0.6 ? 'green' : ctxClampedRatio < 0.75 ? 'yellow' : 'red'}>
+                ctx {ctxPctText}/{fmtTok(ctxMax)}
+              </Text>
+            </>
+          ) : null}
+          {cost && cost.total > 0 && !hiddenSet.has('cost') ? (
+            <>
+              <Text dimColor>│</Text>
+              <Text color="yellow">${cost.total.toFixed(4)}</Text>
+            </>
+          ) : null}
+          {minimalWorkParts.length > 0 ? (
+            <>
+              <Text dimColor>│</Text>
+              <Text color="cyan">{minimalWorkParts.slice(0, 3).join(' · ')}</Text>
+            </>
+          ) : null}
+        </Box>
+      </Box>
+    );
+  }
+
   return (
     <Box
       flexDirection="column"
@@ -559,7 +630,7 @@ export function StatusBar({
                   const pctText = `${Math.min(Math.round(ratio * 100), 100)}%`;
                   return (
                     <Text color={clampedRatio < 0.6 ? 'green' : clampedRatio < 0.75 ? 'yellow' : 'red'}>
-                      ctx {renderMeter(clampedRatio, 8)} {pctText}
+                      ctx {renderMeter(clampedRatio, 8)} {pctText}/{fmtTok(context.max)}
                       {contextStrategy ? (
                         <Text dimColor> [{contextStrategy}]</Text>
                       ) : null}

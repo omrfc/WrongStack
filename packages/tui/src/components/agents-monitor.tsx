@@ -1,9 +1,10 @@
 import { Box, Text, useInput } from '../ink.js';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type React from 'react';
 import type { FleetEntry } from '../app.js';
 import { bucketActivity, fmtModelLabel, sparkline } from './fleet-monitor.js';
 import { fmtElapsed } from './status-bar.js';
+import { getToolVisual } from '../tool-glyph.js';
 
 export interface AgentsMonitorProps {
   entries: Record<string, FleetEntry>;
@@ -19,6 +20,8 @@ export interface AgentsMonitorProps {
   totalTokens?: { input: number; output: number };
   /** 1s clock tick so elapsed times + sparklines stay live. */
   nowTick: number;
+  /** Called when there are no active/detail-worthy agents left to show. */
+  onClose?: (() => void) | undefined;
 }
 
 const STATUS: Record<FleetEntry['status'], { icon: string; color: string }> = {
@@ -30,42 +33,38 @@ const STATUS: Record<FleetEntry['status'], { icon: string; color: string }> = {
   stopped: { icon: '⊘', color: 'gray' },
 };
 
-function isTerminal(status: FleetEntry['status']): boolean {
-  return (
-    status === 'success' || status === 'failed' || status === 'timeout' || status === 'stopped'
-  );
-}
-
 /**
  * An idle agent that hasn't produced any event for this long is considered
- * stale and dropped from the live view — a running agent is never hidden.
+ * stale. F3 still shows stale agents, but calls them out in the summary.
  * `lastEventAt` is bumped on every tool / message / stream event.
  */
 export const IDLE_HIDE_MS = 60_000;
+export const EMPTY_AGENTS_CLOSE_DELAY_MS = 7_500;
+
+function isTerminalAgentStatus(status: FleetEntry['status']): boolean {
+  return status === 'success' || status === 'failed' || status === 'timeout' || status === 'stopped';
+}
+
+function isLeaderEntry(entry: FleetEntry): boolean {
+  return entry.id === 'leader' || entry.name === 'LEADER';
+}
 
 /**
- * Select the agents the live monitor should render: never-terminal agents,
- * with idle agents pruned once they've been silent longer than `idleHideMs`.
- * Running agents come first (oldest first), then surviving idle agents
- * (most-recently-active first). Pure + exported for unit testing.
+ * Select the agents the live monitor should render. Terminal subagents disappear
+ * once their task closes. LEADER stays visible while any subagent is still active
+ * (or while LEADER itself is running) so F3 always has a detail card fallback;
+ * when everything is complete and LEADER is idle, the list becomes empty so the
+ * overlay can close.
  */
 export function selectLiveAgents(
   all: FleetEntry[],
-  now: number,
-  idleHideMs: number = IDLE_HIDE_MS,
+  _now: number,
+  _idleHideMs: number = IDLE_HIDE_MS,
 ): FleetEntry[] {
-  const visible = all.filter((e) => {
-    if (isTerminal(e.status)) return false;
-    if (e.status === 'running') return true;
-    // idle: keep only while it's been recently active
-    return now - e.lastEventAt < idleHideMs;
-  });
-  return visible.sort((a, b) => {
-    if (a.status === 'running' && b.status !== 'running') return -1;
-    if (a.status !== 'running' && b.status === 'running') return 1;
-    if (a.status === 'running') return a.startedAt - b.startedAt; // oldest run first
-    return b.lastEventAt - a.lastEventAt; // freshest idle first
-  });
+  const leader = all.find(isLeaderEntry);
+  const activeSubagents = all.filter((entry) => !isLeaderEntry(entry) && !isTerminalAgentStatus(entry.status));
+  const showLeader = leader !== undefined && (leader.status !== 'idle' || activeSubagents.length > 0);
+  return all.filter((entry) => (isLeaderEntry(entry) ? showLeader : activeSubagents.some((active) => active.id === entry.id)));
 }
 
 function fmtTokens(n: number): string {
@@ -82,6 +81,110 @@ function snippet(s: string, max = 72): string {
   const oneLine = s.replace(/\s+/g, ' ').trim();
   if (oneLine.length <= max) return oneLine;
   return `${oneLine.slice(0, max - 1)}…`;
+}
+
+function fmtShortDuration(ms: number): string {
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
+  const m = Math.floor(ms / 60_000);
+  const s = Math.floor((ms % 60_000) / 1000);
+  return `${m}m${s.toString().padStart(2, '0')}s`;
+}
+
+function fmtSignedTokens(n: number): string {
+  return n <= 0 ? '0' : fmtTokens(n);
+}
+
+function fmtOptionalTimestamp(ms?: number): string {
+  if (!ms || ms <= 0) return 'unknown';
+  return new Date(ms).toLocaleTimeString('en-US', { hour12: false });
+}
+
+export function formatContextRunway(tokens?: number, maxTokens?: number): string {
+  if (!tokens || !maxTokens || maxTokens <= 0) return 'ctx unknown';
+  const left = Math.max(0, maxTokens - tokens);
+  return `${fmtTokens(tokens)}/${fmtTokens(maxTokens)} · ${fmtSignedTokens(left)} free`;
+}
+
+export function formatRecentToolChip(tool: FleetEntry['recentTools'][number]): string {
+  const status = tool.ok === false ? '✗' : '✓';
+  const duration = typeof tool.durationMs === 'number' ? ` ${fmtShortDuration(tool.durationMs)}` : '';
+  const lines = typeof tool.outputLines === 'number' && tool.outputLines > 0 ? ` ${tool.outputLines}L` : '';
+  const bytes = typeof tool.outputBytes === 'number' && tool.outputBytes > 0 ? ` ${fmtTokens(tool.outputBytes)}B` : '';
+  return `${status} ${tool.name}${duration}${lines}${bytes}`;
+}
+
+export function formatAgentDetailHeader(entry: FleetEntry): string {
+  return entry.name || entry.id;
+}
+
+export function agentRisk(entry: FleetEntry): 'calm' | 'busy' | 'hot' | 'critical' {
+  const pct = entry.ctxPct ?? 0;
+  if (entry.budgetWarning || entry.failureReason || pct >= 0.9) return 'critical';
+  if (pct >= 0.75 || (entry.extensions ?? 0) > 0) return 'hot';
+  if (entry.status === 'running' || pct >= 0.55) return 'busy';
+  return 'calm';
+}
+
+function riskMeta(risk: ReturnType<typeof agentRisk>): { icon: string; color: string; label: string } {
+  switch (risk) {
+    case 'critical':
+      return { icon: '◆', color: 'red', label: 'critical' };
+    case 'hot':
+      return { icon: '▲', color: 'yellow', label: 'hot' };
+    case 'busy':
+      return { icon: '●', color: 'cyan', label: 'busy' };
+    case 'calm':
+      return { icon: '○', color: 'green', label: 'calm' };
+  }
+}
+
+function currentAction(entry: FleetEntry, now: number): string {
+  if (entry.currentTool) return `→ ${entry.currentTool.name} ${fmtShortDuration(now - entry.currentTool.startedAt)}`;
+  if (entry.status === 'running') return 'thinking';
+  const last = entry.recentTools[entry.recentTools.length - 1];
+  if (last) return `last ${last.name}`;
+  const msg = entry.recentMessages[entry.recentMessages.length - 1];
+  if (msg) return `msg ${snippet(msg.text, 34)}`;
+  return 'standing by';
+}
+
+export function selectAgentDetail(live: FleetEntry[], selectedId?: string): FleetEntry | undefined {
+  return live.find((entry) => entry.id === selectedId) ?? live.find(isLeaderEntry) ?? live[0];
+}
+
+export function nextEmptyAgentsCloseStartedAt(
+  liveCount: number,
+  now: number,
+  currentStartedAt?: number,
+): number | undefined {
+  if (liveCount > 0) return undefined;
+  return currentStartedAt ?? now;
+}
+
+export function shouldCloseEmptyAgentsMonitor(
+  liveCount: number,
+  now: number,
+  emptyStartedAt: number | undefined,
+  delayMs = EMPTY_AGENTS_CLOSE_DELAY_MS,
+): boolean {
+  return liveCount === 0 && emptyStartedAt !== undefined && now - emptyStartedAt >= delayMs;
+}
+
+function selectHotAgent(entries: FleetEntry[]): FleetEntry | undefined {
+  const riskScore = { critical: 3, hot: 2, busy: 1, calm: 0 } as const;
+  return [...entries]
+    .sort((a, b) => {
+      const ar = riskScore[agentRisk(a)];
+      const br = riskScore[agentRisk(b)];
+      if (br !== ar) return br - ar;
+      const bp = b.ctxPct ?? 0;
+      const ap = a.ctxPct ?? 0;
+      if (bp !== ap) return bp - ap;
+      if (b.toolCalls !== a.toolCalls) return b.toolCalls - a.toolCalls;
+      return b.lastEventAt - a.lastEventAt;
+    })
+    .at(0);
 }
 
 /** Colored context-window fill bar: ████░░░░░░ 67% */
@@ -128,6 +231,8 @@ function AgentRow({
   const elapsed =
     entry.status === 'running' ? fmtElapsed(Math.max(0, now - entry.startedAt)) : entry.status;
   const modelLabel = fmtModelLabel(entry.provider, entry.model);
+  const activity = sparkline(bucketActivity(entry.recentTools, now, 10, 3000));
+  const risk = riskMeta(agentRisk(entry));
   const ctxCostStr = entry.ctxCost !== undefined && entry.ctxCost > 0
     ? ` ctx ${entry.ctxCost.toFixed(4)}`
     : '';
@@ -140,6 +245,7 @@ function AgentRow({
       <Text color={s.color} bold>
         {s.icon}
       </Text>
+      <Text color={risk.color}>{risk.icon}</Text>
       {/* Name */}
       <Text bold={selected} {...(selected ? { color: 'magenta' } : {})}>
         {entry.name}
@@ -150,19 +256,15 @@ function AgentRow({
       <Text dimColor>
         L{entry.iterations} {entry.toolCalls}t
       </Text>
+      {activity ? <Text color="green">{activity}</Text> : null}
       {/* Context bar */}
       {entry.ctxPct !== undefined ? (
         <ContextBar pct={entry.ctxPct} tokens={entry.ctxTokens} maxTokens={entry.ctxMaxTokens} />
       ) : null}
       {/* Context cost */}
       {ctxCostStr ? <Text color="yellow">{ctxCostStr}</Text> : null}
-      {/* Current tool (inline) */}
-      {entry.status === 'running' && entry.currentTool ? (
-        <Text color="cyan">
-          → {entry.currentTool.name}
-          <Text dimColor> ({Math.max(0, now - entry.currentTool.startedAt)}ms)</Text>
-        </Text>
-      ) : null}
+      {/* Current activity (inline) */}
+      <Text color={entry.currentTool ? 'cyan' : 'gray'}>{currentAction(entry, now)}</Text>
       {/* Elapsed */}
       <Text dimColor>{elapsed}</Text>
       {/* Extensions badge */}
@@ -190,10 +292,55 @@ function AgentDetail({
   const lastTool = entry.recentTools[entry.recentTools.length - 1];
   const lastMessage = entry.recentMessages[entry.recentMessages.length - 1];
   const streamTail = entry.streamingText ? snippet(entry.streamingText.slice(-160)) : '';
-  const modelLabel = fmtModelLabel(entry.provider, entry.model);
+  const risk = riskMeta(agentRisk(entry));
+  const ctxLine = formatContextRunway(entry.ctxTokens, entry.ctxMaxTokens);
+  const modelLabel = fmtModelLabel(entry.provider, entry.model) || [entry.provider, entry.model].filter(Boolean).join('/');
 
   return (
-    <Box flexDirection="column" paddingLeft={4} borderStyle="single" borderColor="magenta" borderLeft>
+    <Box alignSelf="stretch" flexDirection="column" width="100%" flexGrow={1}>
+      <Box
+        alignSelf="stretch"
+        flexDirection="column"
+        width="100%"
+        flexGrow={1}
+        paddingX={1}
+        borderStyle="single"
+        borderColor="magenta"
+      >
+        <Box flexDirection="row" gap={1}>
+          <Text color="magenta" bold>
+            {formatAgentDetailHeader(entry)}
+          </Text>
+        </Box>
+        <Box flexDirection="row" gap={1}>
+          <Text dimColor>id</Text>
+          <Text>{entry.id}</Text>
+          {modelLabel ? (
+            <>
+              <Text dimColor>· model</Text>
+              <Text color="cyan">{modelLabel}</Text>
+            </>
+          ) : null}
+          <Text dimColor>· status</Text>
+          <Text color={STATUS[entry.status].color}>{STATUS[entry.status].icon} {entry.status}</Text>
+        </Box>
+        <Box flexDirection="row" gap={1}>
+          <Text dimColor>runtime</Text>
+          <Text>{fmtElapsed(Math.max(0, now - entry.startedAt))}</Text>
+          <Text dimColor>· started</Text>
+          <Text>{fmtOptionalTimestamp(entry.startedAt)}</Text>
+          <Text dimColor>· last event</Text>
+          <Text>{fmtShortDuration(Math.max(0, now - entry.lastEventAt))} ago</Text>
+          {entry.extensions && entry.extensions > 0 ? <Text color="yellow">· extensions ⚡×{entry.extensions}</Text> : null}
+        </Box>
+        <Box flexDirection="row" gap={1}>
+          <Text dimColor>throughput</Text>
+          <Text color="cyan">{entry.iterations} iterations</Text>
+          <Text dimColor>·</Text>
+          <Text color="cyan">{entry.toolCalls} tools</Text>
+          <Text dimColor>· current</Text>
+          <Text color={entry.currentTool ? 'cyan' : 'gray'}>{currentAction(entry, now)}</Text>
+        </Box>
       {/* Activity sparkline + last completed tool */}
       {spark || lastTool ? (
         <Box flexDirection="row" gap={1}>
@@ -208,14 +355,12 @@ function AgentDetail({
         </Box>
       ) : null}
 
-      {/* Provider + Model info — only show fallback when fmtModelLabel returned nothing */}
-      {!modelLabel && (entry.provider || entry.model) ? (
-        <Box>
-          <Text dimColor>
-            provider: {entry.provider || '(leader)'}  ·  model: {entry.model || '—'}
-          </Text>
-        </Box>
-      ) : null}
+      <Box flexDirection="row" gap={1}>
+        <Text color={risk.color}>{risk.icon} {risk.label}</Text>
+        <Text dimColor>ctx</Text>
+        <Text color={risk.color}>{ctxLine}</Text>
+        <Text dimColor>idle {fmtShortDuration(Math.max(0, now - entry.lastEventAt))}</Text>
+      </Box>
 
       {/* Cost breakdown */}
       {(entry.cost > 0 || (entry.ctxCost && entry.ctxCost > 0)) ? (
@@ -226,6 +371,27 @@ function AgentDetail({
           {entry.ctxCost && entry.ctxCost > 0 ? (
             <Text color="yellow">${entry.ctxCost.toFixed(4)} ctx</Text>
           ) : null}
+        </Box>
+      ) : null}
+
+      {entry.transcriptPath ? (
+        <Box>
+          <Text dimColor>transcript: {snippet(entry.transcriptPath, 120)}</Text>
+        </Box>
+      ) : null}
+
+      {entry.recentTools.length > 0 ? (
+        <Box flexDirection="row" gap={1}>
+          <Text dimColor>recent</Text>
+          {entry.recentTools.slice(-4).map((tool, i) => {
+            const visual = getToolVisual(tool.name);
+            return (
+              // biome-ignore lint/suspicious/noArrayIndexKey: recent tool entries do not carry stable ids.
+              <Text key={`${tool.name}-${tool.at}-${i}`} color={tool.ok === false ? 'red' : visual.color}>
+                {`‹${visual.glyph} ${formatRecentToolChip(tool)}›`}
+              </Text>
+            );
+          })}
         </Box>
       ) : null}
 
@@ -261,16 +427,16 @@ function AgentDetail({
           <Text color="red">✗ {entry.failureReason}</Text>
         </Box>
       ) : null}
+      </Box>
     </Box>
   );
 }
 
 /**
  * Live per-agent monitor (Ctrl+G / F3). Hybrid compact view:
- * - All agents rendered in single-line rows with ↑↓/jk navigation.
- * - Selected agent expands an inline detail card showing sparkline,
- *   last tool, streaming text, budget warnings, and failure reason.
- * - Terminal agents are excluded; stale idle agents pruned after 60s.
+ * - All agents, including LEADER, are available via ↑↓ navigation.
+ * - Non-selected agents render as single-line rows.
+ * - The selected agent expands in place into a titled detail rectangle.
  */
 export function AgentsMonitor({
   entries,
@@ -278,38 +444,62 @@ export function AgentsMonitor({
   leaderCost = 0,
   totalTokens,
   nowTick,
+  onClose,
 }: AgentsMonitorProps): React.ReactElement {
   const all = Object.values(entries);
   const grandCost = leaderCost + totalCost;
 
   const live = useMemo(() => selectLiveAgents(all, nowTick), [all, nowTick]);
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
+  const [emptyAgentsCloseStartedAt, setEmptyAgentsCloseStartedAt] = useState<number | undefined>(undefined);
 
-  // Clamp selection when the list shrinks
-  const safeIndex = Math.min(selectedIndex, Math.max(0, live.length - 1));
+  useEffect(() => {
+    const nextStartedAt = nextEmptyAgentsCloseStartedAt(live.length, nowTick, emptyAgentsCloseStartedAt);
+    if (nextStartedAt !== emptyAgentsCloseStartedAt) setEmptyAgentsCloseStartedAt(nextStartedAt);
+    if (shouldCloseEmptyAgentsMonitor(live.length, nowTick, nextStartedAt)) onClose?.();
+  }, [emptyAgentsCloseStartedAt, live.length, nowTick, onClose]);
+
+  const selected = selectAgentDetail(live, selectedId);
+  const selectedIndex = selected ? live.findIndex((entry) => entry.id === selected.id) : -1;
 
   // Keyboard navigation. Arrow keys ONLY — the chat input stays live beneath
   // this panel, so j/k are left free to type into the message buffer rather
   // than being captured here as navigation.
   useInput((_input, key) => {
+    if (live.length === 0) return;
     if (key.upArrow) {
-      setSelectedIndex((prev) => Math.max(0, prev - 1));
+      const next = Math.max(0, selectedIndex - 1);
+      setSelectedId(live[next]?.id);
     } else if (key.downArrow) {
-      setSelectedIndex((prev) => Math.min(live.length - 1, prev + 1));
+      const next = Math.min(live.length - 1, selectedIndex + 1);
+      setSelectedId(live[next]?.id);
     }
   });
 
   const running = live.filter((e) => e.status === 'running').length;
   const totalDone = all.filter((e) => e.status === 'success').length;
   const totalFailed = all.filter((e) => e.status === 'failed' || e.status === 'timeout').length;
-  const hiddenIdle = all.filter(
+  const staleIdle = all.filter(
     (e) => e.status === 'idle' && nowTick - e.lastEventAt >= IDLE_HIDE_MS,
   ).length;
+  const hotAgent = selectHotAgent(live);
+  const pressure = live.length > 0
+    ? live.reduce((max, e) => Math.max(max, e.ctxPct ?? 0), 0)
+    : 0;
+  const toolCalls = live.reduce((sum, e) => sum + e.toolCalls, 0);
+  const iterations = live.reduce((sum, e) => sum + e.iterations, 0);
 
-  const selected = live[safeIndex];
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={1}>
+    <Box
+      alignSelf="stretch"
+      flexDirection="column"
+      width="100%"
+      borderStyle="round"
+      borderColor="magenta"
+      paddingX={1}
+      flexGrow={1}
+    >
       {/* Header */}
       <Box flexDirection="row" gap={1}>
         <Text bold color="magenta">
@@ -324,6 +514,24 @@ export function AgentsMonitor({
         <Text dimColor>failed</Text>
         {totalFailed > 0 ? <Text color="red">✗{totalFailed}</Text> : null}
         <Text dimColor>· ↑↓ nav · Ctrl+G / F3 close</Text>
+      </Box>
+
+      {/* Mission-control pulse: pressure, hottest agent, total throughput. */}
+      <Box flexDirection="row" gap={1}>
+        <Text dimColor>pulse</Text>
+        <Text color={pressure >= 0.9 ? 'red' : pressure >= 0.75 ? 'yellow' : 'green'}>
+          max ctx {Math.round(pressure * 100)}%
+        </Text>
+        <Text dimColor>· hot</Text>
+        {hotAgent ? (
+          <Text color={riskMeta(agentRisk(hotAgent)).color}>
+            {hotAgent.name} {hotAgent.ctxPct !== undefined ? `${Math.round(hotAgent.ctxPct * 100)}%` : ''}
+          </Text>
+        ) : (
+          <Text dimColor>none</Text>
+        )}
+        <Text dimColor>· throughput</Text>
+        <Text color="cyan">{iterations}L/{toolCalls}t</Text>
       </Box>
 
       {/* Agent-type → model mapping (compact one-liner) */}
@@ -359,29 +567,21 @@ export function AgentsMonitor({
         <Text dimColor>
           (leader ${leaderCost.toFixed(4)} · fleet ${totalCost.toFixed(4)})
         </Text>
-        {hiddenIdle > 0 ? <Text dimColor>· {hiddenIdle} idle hidden</Text> : null}
+        {staleIdle > 0 ? <Text dimColor>· {staleIdle} idle stale</Text> : null}
       </Box>
 
       {live.length === 0 ? (
         <Text dimColor>No live agents — spawn with /spawn or /fleet dispatch.</Text>
       ) : null}
 
-      {/* Compact agent rows */}
+      {/* Agent rows: only the selected entry expands in-place. */}
       {live.map((e) => (
-        <AgentRow key={e.id} entry={e} now={nowTick} selected={e.id === selected?.id} />
+        e.id === selected?.id ? (
+          <AgentDetail key={e.id} entry={e} now={nowTick} />
+        ) : (
+          <AgentRow key={e.id} entry={e} now={nowTick} selected={false} />
+        )
       ))}
-
-      {/* Expanded detail for selected agent */}
-      {selected ? (
-        <Box flexDirection="column" marginTop={1}>
-          <Box flexDirection="row" gap={1} paddingLeft={2}>
-            <Text dimColor>───</Text>
-            <Text color="magenta">{selected.name}</Text>
-            <Text dimColor>details ───</Text>
-          </Box>
-          <AgentDetail entry={selected} now={nowTick} />
-        </Box>
-      ) : null}
     </Box>
   );
 }

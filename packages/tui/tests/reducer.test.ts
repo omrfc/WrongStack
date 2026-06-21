@@ -39,11 +39,119 @@ function initial() {
     contextChipVersion: 0,
     fleet: {},
     fleetCost: 0,
+    fleetTokens: { input: 0, output: 0 },
     streamFleet: true,
+    monitorOpen: false,
+    agentsMonitorOpen: false,
+    helpOpen: false,
+    todosMonitorOpen: false,
+    queuePanelOpen: false,
+    processListOpen: false,
+    planPanelOpen: false,
+    goalPanelOpen: false,
+    sessionsPanelOpen: false,
+    sessionsPanel: { sessions: [], busy: false, selected: -1 },
+    sessionResumeConfirm: null,
+    settingsPicker: {
+      open: false,
+      field: 0,
+      mode: 'off' as const,
+      delayMs: 0,
+      titleAnimation: false,
+      yolo: false,
+      streamFleet: true,
+      chime: false,
+      confirmExit: false,
+      nextPrediction: false,
+      featureMcp: false,
+      featurePlugins: false,
+      featureMemory: false,
+      featureSkills: false,
+      featureModelsRegistry: false,
+      tokenSavingTier: 'off' as const,
+      allowOutsideProjectRoot: true,
+      contextAutoCompact: true,
+      contextStrategy: 'hybrid' as const,
+      contextMode: 'full' as const,
+      maxConcurrent: 4,
+      logLevel: 'info' as const,
+      auditLevel: 'standard' as const,
+      indexOnStart: false,
+      maxIterations: 100,
+      autoProceedMaxIterations: 0,
+      enhanceDelayMs: 4000,
+      enhanceEnabled: true,
+      enhanceLanguage: 'original' as const,
+      debugStream: false,
+      statuslineMode: 'detailed' as const,
+      configScope: 'global' as const,
+    },
+    statuslinePicker: { open: false, field: 0, hiddenItems: [], visibleChips: [] },
+    projectPicker: { open: false, allItems: [], items: [], selected: 0, filter: '' },
+    fKeyPicker: { open: false, selected: 0 },
+    autoPhase: null,
+    worktreeMonitorOpen: false,
+    coordinator: { goals: [], timeline: [], knowledgeCount: 0, monitorOpen: false, healthy: false },
   };
 }
 
 describe('TUI reducer', () => {
+  it('opening the F5 plan panel closes other F-key panels', () => {
+    const s = {
+      ...initial(),
+      monitorOpen: true,
+      agentsMonitorOpen: true,
+      helpOpen: true,
+      todosMonitorOpen: true,
+      queuePanelOpen: true,
+      processListOpen: true,
+      goalPanelOpen: true,
+      sessionsPanelOpen: true,
+      settingsPicker: { ...initial().settingsPicker, open: true },
+      statuslinePicker: { ...initial().statuslinePicker, open: true },
+      projectPicker: { ...initial().projectPicker, open: true },
+      fKeyPicker: { open: true, selected: 4 },
+      autoPhase: {
+        title: 'Plan',
+        phases: {},
+        runningPhaseIds: [],
+        elapsedMs: 0,
+        monitorOpen: true,
+      },
+      worktreeMonitorOpen: true,
+      coordinator: { ...initial().coordinator, monitorOpen: true },
+    };
+
+    const out = reducer(s, { type: 'togglePlanPanel' });
+
+    expect(out.planPanelOpen).toBe(true);
+    expect(out.monitorOpen).toBe(false);
+    expect(out.agentsMonitorOpen).toBe(false);
+    expect(out.helpOpen).toBe(false);
+    expect(out.todosMonitorOpen).toBe(false);
+    expect(out.queuePanelOpen).toBe(false);
+    expect(out.processListOpen).toBe(false);
+    expect(out.goalPanelOpen).toBe(false);
+    expect(out.sessionsPanelOpen).toBe(false);
+    expect(out.settingsPicker.open).toBe(false);
+    expect(out.statuslinePicker.open).toBe(false);
+    expect(out.projectPicker.open).toBe(false);
+    expect(out.fKeyPicker.open).toBe(false);
+    expect(out.autoPhase?.monitorOpen).toBe(false);
+    expect(out.worktreeMonitorOpen).toBe(false);
+    expect(out.coordinator.monitorOpen).toBe(false);
+  });
+
+  it('opening another panel closes the F5 plan panel', () => {
+    let s = reducer(initial(), { type: 'togglePlanPanel' });
+    expect(s.planPanelOpen).toBe(true);
+
+    s = reducer(s, { type: 'toggleAgentsMonitor' });
+
+    expect(s.agentsMonitorOpen).toBe(true);
+    expect(s.planPanelOpen).toBe(false);
+  });
+
   it('fleetBatch folds actions in order into one new state', () => {
     let s = initial();
     // A batch of three appends behaves identically to dispatching them one by
@@ -294,6 +402,7 @@ describe('TUI reducer', () => {
       enhanceEnabled: true,
       enhanceLanguage: 'original',
       debugStream: false,
+      statuslineMode: 'detailed' as const,
       configScope: 'global',
       restrictFsToRoot: false,
     } as never);
@@ -582,7 +691,8 @@ describe('settings picker reducer', () => {
         enhanceEnabled: true,
         enhanceLanguage: 'original' as const,
         debugStream: false,
-        configScope: 'global' as const,
+      statuslineMode: 'detailed' as const,
+      configScope: 'global' as const,
         ...over,
       },
     }) as unknown as Parameters<typeof reducer>[0];
@@ -614,6 +724,7 @@ describe('settings picker reducer', () => {
       enhanceEnabled: true,
       enhanceLanguage: 'original',
       debugStream: false,
+      statuslineMode: 'detailed' as const,
       configScope: 'global',
     });
     expect(s.settingsPicker).toMatchObject({ open: true, field: 0, mode: 'auto', delayMs: 30_000 });
@@ -669,6 +780,17 @@ describe('settings picker reducer', () => {
       delta: -1,
     });
     expect(down.settingsPicker.delayMs).toBe(120_000);
+  });
+
+  it('cycles the statusline mode on the dedicated field', () => {
+    let s = reducer(base({ open: true, field: 28, statuslineMode: 'detailed' }), {
+      type: 'settingsValueChange',
+      delta: 1,
+    });
+    expect(s.settingsPicker.statuslineMode).toBe('minimum');
+
+    s = reducer(s, { type: 'settingsValueChange', delta: 1 });
+    expect(s.settingsPicker.statuslineMode).toBe('detailed');
   });
 
 });

@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import type { FleetEntry } from '../src/app.js';
-import { IDLE_HIDE_MS, fmtExactTokens, selectLiveAgents } from '../src/components/agents-monitor.js';
+import {
+  EMPTY_AGENTS_CLOSE_DELAY_MS,
+  IDLE_HIDE_MS,
+  agentRisk,
+  fmtExactTokens,
+  formatAgentDetailHeader,
+  formatContextRunway,
+  formatRecentToolChip,
+  nextEmptyAgentsCloseStartedAt,
+  selectAgentDetail,
+  selectLiveAgents,
+  shouldCloseEmptyAgentsMonitor,
+} from '../src/components/agents-monitor.js';
 import { bucketActivity, sparkline } from '../src/components/fleet-monitor.js';
 
 function entry(over: Partial<FleetEntry> & Pick<FleetEntry, 'id' | 'status'>): FleetEntry {
@@ -22,52 +34,82 @@ function entry(over: Partial<FleetEntry> & Pick<FleetEntry, 'id' | 'status'>): F
 describe('selectLiveAgents', () => {
   const now = 1_000_000;
 
-  it('always keeps running agents and excludes terminal ones', () => {
+  it('hides terminal subagents while keeping leader as the detail fallback', () => {
     const agents = [
+      entry({ id: 'leader', name: 'LEADER', status: 'idle' }),
       entry({ id: 'run', status: 'running' }),
+      entry({ id: 'idle-worker', status: 'idle' }),
       entry({ id: 'ok', status: 'success' }),
       entry({ id: 'bad', status: 'failed' }),
       entry({ id: 'to', status: 'timeout' }),
       entry({ id: 'stop', status: 'stopped' }),
     ];
     const ids = selectLiveAgents(agents, now).map((e) => e.id);
-    expect(ids).toEqual(['run']);
+    expect(ids).toEqual(['leader', 'run', 'idle-worker']);
   });
 
-  it('keeps recently-active idle agents but prunes stale ones', () => {
+  it('returns an empty list when only an idle leader and terminal subagents remain', () => {
     const agents = [
+      entry({ id: 'leader', name: 'LEADER', status: 'idle' }),
+      entry({ id: 'ok', status: 'success' }),
+      entry({ id: 'bad', status: 'failed' }),
+    ];
+    expect(selectLiveAgents(agents, now)).toEqual([]);
+  });
+
+  it('keeps a running leader visible even when there are no active subagents', () => {
+    const agents = [
+      entry({ id: 'leader', name: 'LEADER', status: 'running' }),
+      entry({ id: 'ok', status: 'success' }),
+    ];
+    expect(selectLiveAgents(agents, now).map((e) => e.id)).toEqual(['leader']);
+  });
+
+  it('keeps stale idle subagents instead of pruning them', () => {
+    const agents = [
+      entry({ id: 'leader', name: 'LEADER', status: 'idle' }),
       entry({ id: 'fresh', status: 'idle', lastEventAt: now - 5_000 }),
       entry({ id: 'stale', status: 'idle', lastEventAt: now - (IDLE_HIDE_MS + 1) }),
     ];
     const ids = selectLiveAgents(agents, now).map((e) => e.id);
-    expect(ids).toContain('fresh');
-    expect(ids).not.toContain('stale');
+    expect(ids).toEqual(['leader', 'fresh', 'stale']);
   });
 
-  it('never prunes a running agent regardless of how long since its last event', () => {
-    const agents = [entry({ id: 'run', status: 'running', lastEventAt: now - 10 * IDLE_HIDE_MS })];
-    expect(selectLiveAgents(agents, now).map((e) => e.id)).toEqual(['run']);
-  });
-
-  it('orders running first (oldest run first), then freshest idle', () => {
+  it('preserves caller order instead of sorting by status/activity', () => {
     const agents = [
+      entry({ id: 'leader', name: 'LEADER', status: 'idle' }),
       entry({ id: 'idle-old', status: 'idle', lastEventAt: now - 20_000 }),
       entry({ id: 'idle-new', status: 'idle', lastEventAt: now - 1_000 }),
       entry({ id: 'run-new', status: 'running', startedAt: now - 1_000, lastEventAt: now }),
       entry({ id: 'run-old', status: 'running', startedAt: now - 50_000, lastEventAt: now }),
     ];
     expect(selectLiveAgents(agents, now).map((e) => e.id)).toEqual([
-      'run-old',
-      'run-new',
-      'idle-new',
+      'leader',
       'idle-old',
+      'idle-new',
+      'run-new',
+      'run-old',
     ]);
   });
 
-  it('respects a custom idleHideMs threshold', () => {
-    const agents = [entry({ id: 'i', status: 'idle', lastEventAt: now - 5_000 })];
-    expect(selectLiveAgents(agents, now, 4_000).map((e) => e.id)).toEqual([]);
-    expect(selectLiveAgents(agents, now, 6_000).map((e) => e.id)).toEqual(['i']);
+  it('falls back to leader details when the selected agent disappears', () => {
+    const agents = [
+      entry({ id: 'leader', name: 'LEADER', status: 'running' }),
+      entry({ id: 'run', status: 'running' }),
+    ];
+    const live = selectLiveAgents(agents, now);
+    expect(selectAgentDetail(live, 'closed-agent')?.id).toBe('leader');
+    expect(selectAgentDetail(live, 'run')?.id).toBe('run');
+  });
+
+  it('delays empty-list close and cancels it when agents return', () => {
+    const emptyStartedAt = nextEmptyAgentsCloseStartedAt(0, now);
+    expect(emptyStartedAt).toBe(now);
+    expect(shouldCloseEmptyAgentsMonitor(0, now + EMPTY_AGENTS_CLOSE_DELAY_MS - 1, emptyStartedAt)).toBe(false);
+    expect(shouldCloseEmptyAgentsMonitor(0, now + EMPTY_AGENTS_CLOSE_DELAY_MS, emptyStartedAt)).toBe(true);
+
+    expect(nextEmptyAgentsCloseStartedAt(1, now + 1_000, emptyStartedAt)).toBeUndefined();
+    expect(shouldCloseEmptyAgentsMonitor(1, now + EMPTY_AGENTS_CLOSE_DELAY_MS, emptyStartedAt)).toBe(false);
   });
 });
 
@@ -75,6 +117,52 @@ describe('agents-monitor formatting', () => {
   it('renders exact model context windows instead of compact abbreviations', () => {
     expect(fmtExactTokens(1_050_000)).toBe('1,050,000 tok');
     expect(fmtExactTokens(128_000)).toBe('128,000 tok');
+  });
+
+  it('formats context runway with used/max/free tokens', () => {
+    expect(formatContextRunway(80_000, 200_000)).toBe('80.0k/200.0k · 120.0k free');
+    expect(formatContextRunway(undefined, 200_000)).toBe('ctx unknown');
+  });
+
+  it('formats recent tool chip content compactly', () => {
+    expect(
+      formatRecentToolChip({
+        name: 'read',
+        at: 1000,
+        ok: true,
+        durationMs: 1234,
+        outputLines: 8,
+        outputBytes: 2048,
+      }),
+    ).toBe('✓ read 1.2s 8L 2.0kB');
+    expect(formatRecentToolChip({ name: 'bash', at: 1000, ok: false })).toBe('✗ bash');
+  });
+
+  it('formats the agent detail header as a non-duplicated title', () => {
+    expect(
+      formatAgentDetailHeader(
+        entry({
+          id: 'bug-hunter',
+          name: 'Bug Hunter',
+          status: 'running',
+          provider: 'anthropic',
+          model: 'claude-sonnet-4-6',
+          ctxPct: 0.8,
+        }),
+      ),
+    ).toBe('Bug Hunter');
+  });
+
+  it('falls back to id when the agent detail header has no name', () => {
+    expect(formatAgentDetailHeader(entry({ id: 'leader', name: '', status: 'running' }))).toBe('leader');
+  });
+
+  it('classifies agent pressure by context, budget, and status', () => {
+    expect(agentRisk(entry({ id: 'idle', status: 'idle' }))).toBe('calm');
+    expect(agentRisk(entry({ id: 'run', status: 'running' }))).toBe('busy');
+    expect(agentRisk(entry({ id: 'hot', status: 'idle', ctxPct: 0.8 }))).toBe('hot');
+    expect(agentRisk(entry({ id: 'crit', status: 'idle', ctxPct: 0.95 }))).toBe('critical');
+    expect(agentRisk(entry({ id: 'warn', status: 'idle', budgetWarning: { kind: 'tokens', used: 9, limit: 10, at: 0 } }))).toBe('critical');
   });
 });
 

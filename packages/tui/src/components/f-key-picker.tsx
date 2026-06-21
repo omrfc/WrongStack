@@ -1,28 +1,9 @@
 import { Box, Text } from '../ink.js';
 import type React from 'react';
+import { F_KEY_PANEL_ENTRIES } from '../f-key-panels.js';
 
-/** A single F-key entry in the picker. */
-export interface FKeyEntry {
-  key: number;
-  label: string;
-  action: string;
-}
-
-/** All 12 F-key panels in order. */
-export const F_KEY_ENTRIES: FKeyEntry[] = [
-  { key: 1, label: 'Project switcher', action: 'projectPickerOpen' },
-  { key: 2, label: 'Fleet orchestration monitor', action: 'toggleMonitor' },
-  { key: 3, label: 'Agents live monitor', action: 'toggleAgentsMonitor' },
-  { key: 4, label: 'Worktree monitor', action: 'toggleWorktreeMonitor' },
-  { key: 5, label: 'Autonomy settings', action: 'togglePlanPanel' },
-  { key: 6, label: 'Todos monitor overlay', action: 'toggleTodosMonitor' },
-  { key: 7, label: 'Queue panel', action: 'toggleQueuePanel' },
-  { key: 8, label: 'Process list overlay', action: 'toggleProcessList' },
-  { key: 9, label: 'Goal panel', action: 'toggleGoalPanel' },
-  { key: 10, label: 'Live sessions panel', action: 'toggleSessionsPanel' },
-  { key: 11, label: 'Coordinator monitor', action: 'toggleCoordinatorMonitor' },
-  { key: 12, label: 'Status line picker', action: 'statuslineOpen' },
-];
+export { F_KEY_PANEL_ENTRIES as F_KEY_ENTRIES } from '../f-key-panels.js';
+export type { FKeyPanelEntry as FKeyEntry } from '../f-key-panels.js';
 
 export interface FKeyPickerProps {
   selected: number;
@@ -41,7 +22,7 @@ export function FKeyPicker({ selected }: FKeyPickerProps): React.ReactElement {
       </Text>
       <Text dimColor>↑↓ navigate · Enter open · Esc close</Text>
 
-      {F_KEY_ENTRIES.map((entry) => {
+      {F_KEY_PANEL_ENTRIES.map((entry) => {
         const idx = entry.key - 1;
         const isSelected = idx === selected;
         const marker = isSelected ? '▸' : ' ';

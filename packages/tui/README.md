@@ -70,9 +70,21 @@ process.exit(exitCode);
 | `↑` / `↓` | History navigation when buffer empty |
 | `@` | File picker |
 | `/` (at start) | Slash command picker |
-| `Ctrl+G` | Toggle agents monitor overlay |
-| `Ctrl+S` | Edit autonomy settings (default mode + auto-proceed delay); also `/settings` |
-| `Esc` | Close any picker / dialog / agents monitor |
+| `?` (empty prompt) | Keyboard shortcuts help overlay |
+| `F1` | Project switcher (also `/project`) |
+| `Ctrl+F` / `F2` | Toggle fleet orchestration monitor |
+| `Ctrl+G` / `F3` | Toggle agents live monitor |
+| `Ctrl+T` / `F4` | Toggle worktree monitor |
+| `F5` | Toggle plan panel |
+| `F6` | Toggle todos monitor overlay |
+| `F7` | Toggle queue panel |
+| `F8` | Toggle process list overlay |
+| `F9` | Toggle goal panel |
+| `F10` | Toggle live sessions panel |
+| `F11` | Toggle coordinator monitor |
+| `F12` | Open status line picker |
+| `Ctrl+S` | Edit autonomy/settings defaults; also `/settings` |
+| `Esc` | Close any picker / dialog / monitor / panel |
 | `Ctrl+L` | Clear screen (TUI keeps state — equivalent to scrolling) |
 
 ## Options worth knowing
@@ -95,8 +107,7 @@ State is a single `useReducer` `State` shape with discriminated-union `Action`s.
 
 ## React Version
 
-TUI remains on React 18 because ink v5 does not yet fully support React 19.
-WebUI uses React 19. This is a known divergence tracked in this codebase.
+TUI uses React 19 with Ink 7, matching the package dependencies in this workspace.
 
 ## License
 

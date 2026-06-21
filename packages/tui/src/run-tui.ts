@@ -10,7 +10,7 @@ import type {
   SlashCommandRegistry,
   TokenCounter,
 } from '@wrongstack/core';
-import { writeErr, type AutonomyStage, GlobalMailbox, resolveProjectDir, wstackGlobalRoot } from '@wrongstack/core';
+import { writeErr, type AutonomyStage, GlobalMailbox, createHqPublisherFromEnv, resolveProjectDir, wstackGlobalRoot } from '@wrongstack/core';
 import type { VisionAdapters } from '@wrongstack/runtime/vision';
 import { render } from 'ink';
 import { randomUUID } from 'node:crypto';
@@ -645,7 +645,9 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
     if (!opts.projectRoot) return null;
     try {
       const projectDir = resolveProjectDir(opts.projectRoot, wstackGlobalRoot());
-      const mailbox = new GlobalMailbox(projectDir, opts.events);
+      const hqPublisher = createHqPublisherFromEnv({ clientKind: 'tui', projectRoot: opts.projectRoot, projectName: path.basename(opts.projectRoot) });
+      hqPublisher?.connect();
+      const mailbox = new GlobalMailbox(projectDir, opts.events, hqPublisher);
       // Unique per-process: tui@<uuid>
       const clientId = `tui@${randomUUID().slice(0, 8)}`;
       await mailbox.registerClient({

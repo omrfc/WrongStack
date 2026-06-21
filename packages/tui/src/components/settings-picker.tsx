@@ -27,6 +27,14 @@ export const CONTEXT_MODE_DESCS: Record<ContextMode, string> = {
   archival: 'Maximize context retention',
 };
 
+export const STATUSLINE_MODES = ['minimum', 'detailed'] as const;
+export type StatuslineMode = (typeof STATUSLINE_MODES)[number];
+
+export const STATUSLINE_MODE_DESCS: Record<StatuslineMode, string> = {
+  minimum: 'Single line with essential chips only',
+  detailed: 'Full multi-line statusline (default)',
+};
+
 /** Presets for max iterations — cyclable via ←/→. 0 = unlimited. */
 export const MAX_ITERATIONS_PRESETS = [100, 200, 500, 1000, 0];
 
@@ -123,13 +131,15 @@ export interface SettingsPickerProps {
   enhanceLanguage: EnhanceLanguage;
   /** Raw SSE stream debugging toggle — hex-dump every byte received from providers. */
   debugStream: boolean;
+  /** Statusline density: minimum single-line or detailed multi-line. */
+  statuslineMode: StatuslineMode;
   /** Where settings are persisted. */
   configScope: ConfigScope;
   hint?: string | undefined;
 }
 
 /** Total number of settings rows (used for wrap-around navigation). */
-export const SETTINGS_FIELD_COUNT = 29;
+export const SETTINGS_FIELD_COUNT = 30;
 
 export const CONFIG_SCOPES = ['global', 'project'] as const;
 export type ConfigScope = (typeof CONFIG_SCOPES)[number];
@@ -164,6 +174,7 @@ export function SettingsPicker({
   enhanceEnabled,
   enhanceLanguage,
   debugStream,
+  statuslineMode,
   configScope,
   hint,
 }: SettingsPickerProps): React.ReactElement {
@@ -332,6 +343,11 @@ export function SettingsPicker({
       label: 'Stream debug logging',
       value: boolVal(debugStream),
       detail: 'Hex-dump raw SSE bytes to stderr',
+    },
+    {
+      label: 'Statusline',
+      value: statuslineMode,
+      detail: STATUSLINE_MODE_DESCS[statuslineMode],
     },
     {
       label: 'Config scope',

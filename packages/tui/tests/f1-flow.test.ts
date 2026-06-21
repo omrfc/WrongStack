@@ -4,6 +4,8 @@
  * Verifies the full flow: open → filter → navigate → select → close.
  * Pure reducer tests, no DOM/Ink rendering.
  */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { reducer } from '../src/app-reducer.js';
 import type { ProjectPickerItem } from '../src/components/project-picker.js';
@@ -36,7 +38,7 @@ function initialState(over: Partial<State> = {}): State {
     modelPicker: { open: false, step: 'provider', providerOptions: [], modelOptions: [], filteredOptions: [], selected: 0, searchQuery: '' },
     autonomyPicker: { open: false, options: [], selected: 0 },
     resumePicker: { open: false, sessions: [], selected: 0, busy: false, hint: undefined, error: undefined },
-    settingsPicker: { open: false, field: 0, mode: 'off', delayMs: 0, titleAnimation: true, yolo: false, streamFleet: true, chime: false, confirmExit: true, nextPrediction: false, featureMcp: true, featurePlugins: true, featureMemory: true, featureSkills: true, featureModelsRegistry: true, contextAutoCompact: true, contextStrategy: 'hybrid', logLevel: 'info', auditLevel: 'standard', indexOnStart: true, maxIterations: 500, autoProceedMaxIterations: 50, enhanceDelayMs: 60_000, enhanceEnabled: true, enhanceLanguage: 'original', debugStream: false, configScope: 'global' },
+    settingsPicker: { open: false, field: 0, mode: 'off', delayMs: 0, titleAnimation: true, yolo: false, streamFleet: true, chime: false, confirmExit: true, nextPrediction: false, featureMcp: true, featurePlugins: true, featureMemory: true, featureSkills: true, featureModelsRegistry: true, contextAutoCompact: true, contextStrategy: 'hybrid', logLevel: 'info', auditLevel: 'standard', indexOnStart: true, maxIterations: 500, autoProceedMaxIterations: 50, enhanceDelayMs: 60_000, enhanceEnabled: true, enhanceLanguage: 'original', debugStream: false, statuslineMode: 'detailed', configScope: 'global' },
     projectPicker: { open: false, allItems: [], items: [], selected: 0, filter: '', hint: undefined },
     confirmQueue: [],
     enhance: null,
@@ -223,5 +225,19 @@ describe('F1 scroll with 50 projects', () => {
     const filtered = state.projectPicker.items.filter((i) => i.kind === 'project');
     expect(filtered).toHaveLength(1);
     expect(filtered[0]!.label).toContain('25');
+  });
+});
+
+describe('F1 project switch behavior', () => {
+  it('does not use requestExit(42) for project selections', () => {
+    const appPath = fileURLToPath(new URL('../src/app.tsx', import.meta.url));
+    const source = readFileSync(appPath, 'utf8');
+    const projectSelectionBlock = source.slice(
+      source.indexOf('if (item.kind === \'project\')'),
+      source.indexOf("if (item.key === 'new-session')"),
+    );
+
+    expect(projectSelectionBlock).toContain('onProjectSelect?.(item.key, item.kind)');
+    expect(projectSelectionBlock).not.toContain('requestExit?.(42)');
   });
 });
