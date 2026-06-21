@@ -14,7 +14,6 @@ import {
 import { makeMailboxTool, makeMailSendTool, makeMailInboxTool, mailboxSessionTag } from '@wrongstack/core';
 import { toErrorMessage, wstackGlobalRoot, projectHash, resolveWstackPaths } from '@wrongstack/core/utils';
 import { SkillInstaller } from '@wrongstack/core/skills';
-import JSZip from 'jszip';
 import {
   BrainMonitor,
   DefaultBrainArbiter,
@@ -35,30 +34,19 @@ import {
   handleFilesWrite,
   handleFilesList,
 } from './file-handlers.js';
-import { resolveWorkingDirInsideProject } from './path-containment.js';
 import {
   validateMailboxAgentsPayload,
   validateMailboxMessagesPayload,
   validateMailboxPurgePayload,
-  validateModeSwitchPayload,
   validateModelSwitchPayload,
   validatePrefsUpdatePayload,
   validatePlanTemplateUsePayload,
   validateProcessKillPayload,
-  validateProjectsAddPayload,
-  validateProjectsSelectPayload,
   validateShellOpenPayload,
   validateGitDiffPayload,
   validateAutonomySwitchPayload,
   validateBrainAskPayload,
   validateBrainRiskPayload,
-  validateContextModeCreatePayload,
-  validateContextModeDeletePayload,
-  validateContextModeSwitchPayload,
-  validateContextModeUpdatePayload,
-  validateSkillsCreatePayload,
-  validateSkillsEditPayload,
-  validateWorkingDirSetPayload,
 } from './ws-payload-validation.js';
 import {
   handleMemoryList,
@@ -77,6 +65,16 @@ import {
   handleMcpDisable,
   handleMcpRestart,
 } from './mcp-handlers.js';
+import {
+  handleSkillsList,
+  handleSkillsContent,
+  handleSkillsInstall,
+  handleSkillsUninstall,
+  handleSkillsUpdate,
+  handleSkillsCreate,
+  handleSkillsEdit,
+  handleSkillsExport,
+} from './skills-handlers.js';
 import {
   Agent,
   AutoCompactionMiddleware,
@@ -109,7 +107,6 @@ import {
   DEFAULT_SESSION_PRUNE_DAYS,
   DEFAULT_TOOLS_CONFIG,
   listContextWindowModes,
-  repairToolUseAdjacency,
   resolveContextWindowPolicy,
   enhanceUserPrompt,
   recentTextTurns,
@@ -127,6 +124,13 @@ import { createDefaultContainer } from '../../../runtime/src/container.js';
 import { bootConfig, patchConfig } from './boot.js';
 import { AutoPhaseWebSocketHandler } from './autophase-ws-handler.js';
 import { CollaborationWebSocketHandler } from './collaboration-ws-handler.js';
+import {
+  ensureProjectDataDir,
+  generateProjectSlug,
+  loadManifest,
+  saveManifest,
+} from './projects-manifest.js';
+import { TerminalWebSocketHandler } from './terminal-ws-handler.js';
 import { WorktreeWebSocketHandler } from './worktree-ws-handler.js';
 import { handleMailboxMessages, handleMailboxAgents, handleMailboxClear, handleMailboxPurge } from './mailbox-handlers.js';
 import { verifyClient as verifyWsClient } from './ws-auth.js';
@@ -136,6 +140,9 @@ import { findFreePort } from './port-utils.js';
 import { openBrowser } from './open-browser.js';
 import { computeUsageCost, getCostRates } from './usage-cost.js';
 import { createProviderHandlers } from './provider-handlers.js';
+import { createModeHandlers } from './mode-handlers.js';
+import { createProjectHandlers } from './project-handlers.js';
+import { createSessionHandlers } from './session-handlers.js';
 import { handleProviderRoute, type ProviderRouteHandlers } from './provider-routes.js';
 import { handleSessionRoute, type SessionRouteHandlers } from './session-routes.js';
 import { handleProjectRoute, type ProjectRouteHandlers } from './project-routes.js';
@@ -148,7 +155,6 @@ import { setupEvents, type FileWatcherMetrics } from './setup-events.js';
 import { createCustomModeStore } from './custom-context-modes.js';
 import { maskedKey, normalizeKeys } from './provider-keys.js';
 import { send, broadcast, sendResult, errMessage, generateAuthToken } from './ws-utils.js';
-import { estimateContextBreakdown } from './token-estimator.js';
 import { createEternalSubscription } from './eternal-iteration-broadcast.js';
 import { handleShellOpen, type ShellOpenRequest, type ShellOpenResult } from './shell-open.js';
 import { handleGitChanges, handleGitDiff, handleGitInfo } from './git-handlers.js';
@@ -804,6 +810,11 @@ export async function startWebUI(
     context.meta['logLevel'] = config.log?.level ?? 'info';
     context.meta['auditLevel'] = config.session?.auditLevel ?? 'standard';
     context.meta['maxIterations'] = config.tools?.maxIterations ?? 500;
+    const hqConfig = (config as { hq?: { enabled?: boolean; url?: string; token?: string; rawContent?: boolean } }).hq;
+    context.meta['hqEnabled'] = hqConfig?.enabled === true;
+    context.meta['hqUrl'] = hqConfig?.url ?? '';
+    context.meta['hqToken'] = hqConfig?.token ?? '';
+    context.meta['hqRawContent'] = hqConfig?.rawContent === true;
 
     // Telegram plugin notification settings live under
     // extensions.telegram — same path the CLI's /telegram-settings writes.
@@ -825,7 +836,9 @@ export async function startWebUI(
     'featureMcp', 'featurePlugins', 'featureMemory', 'featureSkills',
     'featureModelsRegistry', 'indexOnStart',
     'contextAutoCompact', 'contextStrategy', 'logLevel', 'auditLevel',
+    'hqEnabled', 'hqUrl', 'hqToken', 'hqRawContent',
     'tgConfigured', 'tgSessionEnd', 'tgDelegate', 'tgLongToolMs',
+    'reasoningMode', 'reasoningEffort', 'reasoningPreserve', 'cacheTtl',
   ] as const;
 
   const prefSnapshot = (): Record<string, unknown> => {
@@ -912,6 +925,20 @@ export async function startWebUI(
         decrypted.tools = toolsCfg;
       }
 
+      const hqTouched =
+        typeof payload['hqEnabled'] === 'boolean' ||
+        typeof payload['hqUrl'] === 'string' ||
+        typeof payload['hqToken'] === 'string' ||
+        typeof payload['hqRawContent'] === 'boolean';
+      if (hqTouched) {
+        const hqCfg = (decrypted.hq as Record<string, unknown>) ?? {};
+        if (typeof payload['hqEnabled'] === 'boolean') hqCfg.enabled = payload['hqEnabled'];
+        if (typeof payload['hqUrl'] === 'string') hqCfg.url = payload['hqUrl'];
+        if (typeof payload['hqToken'] === 'string') hqCfg.token = payload['hqToken'];
+        if (typeof payload['hqRawContent'] === 'boolean') hqCfg.rawContent = payload['hqRawContent'];
+        decrypted.hq = hqCfg;
+      }
+
       const tgTouched =
         typeof payload['tgSessionEnd'] === 'boolean' ||
         typeof payload['tgDelegate'] === 'boolean' ||
@@ -930,6 +957,27 @@ export async function startWebUI(
         }
         ext['telegram'] = tg;
         decrypted.extensions = ext;
+      }
+
+      // Reasoning / cache runtime controls → Config.modelRuntime
+      const modelRuntimeTouched =
+        typeof payload['reasoningMode'] === 'string' ||
+        typeof payload['reasoningEffort'] === 'string' ||
+        typeof payload['reasoningPreserve'] === 'boolean' ||
+        typeof payload['cacheTtl'] === 'string';
+      if (modelRuntimeTouched) {
+        const mr = (decrypted.modelRuntime as Record<string, unknown>) ?? {};
+        const reasoning = (mr.reasoning as Record<string, unknown>) ?? {};
+        if (typeof payload['reasoningMode'] === 'string') reasoning.mode = payload['reasoningMode'];
+        if (typeof payload['reasoningEffort'] === 'string') reasoning.effort = payload['reasoningEffort'];
+        if (typeof payload['reasoningPreserve'] === 'boolean') reasoning.preserve = payload['reasoningPreserve'];
+        mr.reasoning = reasoning;
+        if (typeof payload['cacheTtl'] === 'string' && payload['cacheTtl'] !== 'default') {
+          mr.cache = { ttl: payload['cacheTtl'] };
+        } else if (payload['cacheTtl'] === 'default') {
+          delete mr.cache;
+        }
+        decrypted.modelRuntime = mr;
       }
     }, 'prefs');
   };
@@ -1158,6 +1206,10 @@ export async function startWebUI(
   // Worktree handler — subscribes to the shared EventBus `worktree.*` events
   // and streams live swim-lane / DAG state to connected clients.
   const worktreeHandler = new WorktreeWebSocketHandler(events, logger);
+
+  // Integrated terminal handler — per-client node-pty sessions backing the
+  // WebUI terminal panel. New terminals open in the live working directory.
+  const terminalHandler = new TerminalWebSocketHandler(() => workingDir, logger);
 
   // Collaboration handler — Phase 1 of idea #13. Lets a second client
   // (e.g. a senior dev) join an active agent run as a read-only
@@ -1414,6 +1466,8 @@ export async function startWebUI(
     worktreeHandler.addClient(ws);
     // …and the collaboration handler for read-only session observation.
     collabHandler.addClient(ws);
+    // …and the terminal handler for the integrated terminal panel.
+    terminalHandler.addClient(ws);
 
     ws.on('message', async (data) => {
       if (!checkRateLimit(ws, client)) {
@@ -1562,20 +1616,6 @@ export async function startWebUI(
 
   // ── Project manifest helpers ──────────────────────────────────────────
 
-  interface ProjectEntry {
-    name: string;
-    root: string;
-    slug: string;
-    lastSeen?: string | undefined;
-    createdAt?: string | undefined;
-    /** Working directory of the most recent session (may differ from root). */
-    lastWorkingDir?: string | undefined;
-  }
-
-  interface ProjectsManifest {
-    projects: ProjectEntry[];
-  }
-
   /**
    * Idempotent manifest registration (mirrors the CLI's
    * touchProjectInManifest): create the projects.json entry when missing,
@@ -1601,40 +1641,6 @@ export async function startWebUI(
     }
     await saveManifest(manifest, globalConfigPath);
     await ensureProjectDataDir(generateProjectSlug(resolved), globalConfigPath);
-  }
-
-  function projectsJsonPath(globalConfigPath: string): string {
-    const base = path.dirname(globalConfigPath);
-    return path.join(base, 'projects.json');
-  }
-
-  async function loadManifest(globalConfigPath: string): Promise<ProjectsManifest> {
-    try {
-      const raw = await fs.readFile(projectsJsonPath(globalConfigPath), 'utf8');
-      const parsed = JSON.parse(raw) as ProjectsManifest;
-      return { projects: parsed.projects ?? [] };
-    } catch {
-      return { projects: [] };
-    }
-  }
-
-  async function saveManifest(manifest: ProjectsManifest, globalConfigPath: string): Promise<void> {
-    const file = projectsJsonPath(globalConfigPath);
-    await fs.mkdir(path.dirname(file), { recursive: true });
-    await fs.writeFile(file, JSON.stringify(manifest, null, 2), 'utf8');
-  }
-
-  function generateProjectSlug(rootPath: string): string {
-    // Canonical derivation — must match wstack-paths/projectSlug exactly or
-    // the WebUI and CLI would key the same project under different dirs.
-    return projectSlug(rootPath);
-  }
-
-  async function ensureProjectDataDir(slug: string, globalConfigPath: string): Promise<string> {
-    const base = path.dirname(globalConfigPath);
-    const dir = path.join(base, 'projects', slug);
-    await fs.mkdir(dir, { recursive: true });
-    return dir;
   }
 
   function makeWorklistContext(): WorklistContext {
@@ -1684,6 +1690,14 @@ export async function startWebUI(
       case 'collab.request_pause':
       case 'collab.resume': {
         collabHandler.handleMessage(ws, msg as { type: string; payload?: unknown | undefined });
+        return;
+      }
+      // Integrated terminal — interactive pty transport, bypasses the agent loop.
+      case 'terminal.create':
+      case 'terminal.input':
+      case 'terminal.resize':
+      case 'terminal.close': {
+        terminalHandler.handleMessage(ws, msg);
         return;
       }
       case 'user_message': {
@@ -1821,332 +1835,33 @@ export async function startWebUI(
       case 'mcp.restart':
         return handleMcpRestart(ws, msg, globalConfigPath, mcpRegistry);
 
-      case 'skills.list': {
-        if (!skillLoader) {
-          send(ws, { type: 'skills.list', payload: { skills: [], enabled: false } });
-          break;
-        }
-        try {
-          const manifests = await skillLoader.list();
-          const entries = await skillLoader.listEntries();
-          const byName = new Map(entries.map((e) => [e.name, e]));
-
-          // Fetch source URLs and commit refs from the manifest (installed-skills.json)
-          const sourceUrlsByName = new Map<string, string>();
-          const refsByName = new Map<string, string>();
-          if (skillInstaller) {
-            try {
-              const installed = await skillInstaller.listInstalled();
-              for (const entry of installed) {
-                sourceUrlsByName.set(entry.name, entry.source);
-                refsByName.set(entry.name, entry.ref);
-              }
-            } catch {
-              // Non-fatal — source URLs just won't be shown
-            }
-          }
-
-          send(ws, {
-            type: 'skills.list',
-            payload: {
-              enabled: true,
-              skills: manifests.map((m) => ({
-                name: m.name,
-                description: m.description,
-                version: m.version ?? '',
-                source: m.source,
-                sourceUrl: sourceUrlsByName.get(m.name) ?? '',
-                ref: refsByName.get(m.name) ?? '',
-                path: m.path,
-                trigger: byName.get(m.name)?.trigger ?? '',
-                scope: byName.get(m.name)?.scope ?? [],
-              })),
-            },
-          });
-        } catch (err) {
-          send(ws, {
-            type: 'skills.list',
-            payload: {
-              skills: [],
-              enabled: true,
-              error: errMessage(err),
-            },
-          });
-        }
+      // Skills — full request→response cycle lives in skills-handlers.ts
+      // (shared with the CLI's embedded server). skillsCtx is the closed-over
+      // loader/installer/projectRoot the handlers need.
+      case 'skills.list':
+        await handleSkillsList(ws, { skillLoader, skillInstaller, projectRoot });
         break;
-      }
-
-      case 'skills.content': {
-        if (!skillLoader) {
-          send(ws, { type: 'skills.content', payload: { name: '', body: '', path: '', source: '', relatedFiles: [], references: [], error: 'Skills not enabled' } });
-          break;
-        }
-        const contentPayload = msg.payload as { name: string; source: string };
-        if (!contentPayload?.name) {
-          send(ws, { type: 'skills.content', payload: { name: '', body: '', path: '', source: '', relatedFiles: [], references: [], error: 'Skill name is required' } });
-          break;
-        }
-        try {
-          const { name, source } = contentPayload;
-          const entries = await skillLoader.listEntries();
-          const entry = entries.find((e) => e.name.toLowerCase() === name.toLowerCase());
-          if (!entry) {
-            send(ws, { type: 'skills.content', payload: { name, body: '', path: '', source, relatedFiles: [], references: [], error: `Skill "${name}" not found` } });
-            break;
-          }
-          const body = await skillLoader.readBody(name);
-          const skillDir = path.dirname(entry.path);
-
-          // Related files — other files in the same skill directory
-          let relatedFiles: string[] = [];
-          try {
-            const files = await fs.readdir(skillDir);
-            relatedFiles = files
-              .filter((f) => f !== path.basename(entry.path))
-              .map((f) => path.join(skillDir, f));
-          } catch {
-            // Non-fatal
-          }
-
-          // References — which other skills reference this one (by name)
-          const refs: string[] = [];
-          for (const e of entries) {
-            if (e.name.toLowerCase() === name.toLowerCase()) continue;
-            try {
-              const content = await skillLoader.readBody(e.name);
-              if (content.toLowerCase().includes(name.toLowerCase())) {
-                refs.push(e.name);
-              }
-            } catch {
-              // Non-fatal — skip skills we can't read
-            }
-          }
-
-          send(ws, { type: 'skills.content', payload: { name, body, path: entry.path, source, relatedFiles, references: refs } });
-        } catch (err) {
-          send(ws, { type: 'skills.content', payload: { name: contentPayload.name, body: '', path: '', source: contentPayload.source, relatedFiles: [], references: [], error: errMessage(err) } });
-        }
+      case 'skills.content':
+        await handleSkillsContent(ws, { skillLoader, skillInstaller, projectRoot }, msg);
         break;
-      }
-
-      case 'skills.install': {
-        if (!skillInstaller) {
-          send(ws, { type: 'skills.installed', payload: { success: false, error: 'Skills not enabled' } });
-          break;
-        }
-        const installPayload = msg.payload as { ref: string; global?: boolean };
-        if (!installPayload?.ref?.trim()) {
-          send(ws, { type: 'skills.installed', payload: { success: false, error: 'Skill reference is required (e.g. owner/repo or https://github.com/owner/repo)' } });
-          break;
-        }
-        try {
-          const results = await skillInstaller.install(installPayload.ref.trim(), { global: installPayload.global });
-          send(ws, {
-            type: 'skills.installed',
-            payload: {
-              success: true,
-              results,
-              error: null,
-            },
-          });
-        } catch (err) {
-          send(ws, {
-            type: 'skills.installed',
-            payload: {
-              success: false,
-              error: errMessage(err),
-            },
-          });
-        }
+      case 'skills.install':
+        await handleSkillsInstall(ws, { skillLoader, skillInstaller, projectRoot }, msg);
         break;
-      }
-
-      case 'skills.uninstall': {
-        if (!skillInstaller) {
-          send(ws, { type: 'skills.uninstalled', payload: { success: false, error: 'Skills not enabled' } });
-          break;
-        }
-        const uninstallPayload = msg.payload as { name: string; global?: boolean };
-        if (!uninstallPayload?.name?.trim()) {
-          send(ws, { type: 'skills.uninstalled', payload: { success: false, error: 'Skill name is required' } });
-          break;
-        }
-        try {
-          await skillInstaller.uninstall(uninstallPayload.name.trim(), { global: uninstallPayload.global });
-          send(ws, { type: 'skills.uninstalled', payload: { success: true, error: null } });
-        } catch (err) {
-          send(ws, { type: 'skills.uninstalled', payload: { success: false, error: errMessage(err) } });
-        }
+      case 'skills.uninstall':
+        await handleSkillsUninstall(ws, { skillLoader, skillInstaller, projectRoot }, msg);
         break;
-      }
-
-      case 'skills.update': {
-        if (!skillInstaller) {
-          send(ws, { type: 'skills.updated', payload: { success: false, error: 'Skills not enabled' } });
-          break;
-        }
-        const updatePayload = msg.payload as { name?: string; global?: boolean } | undefined;
-        try {
-          const result = await skillInstaller.update(updatePayload?.name, { global: updatePayload?.global });
-          send(ws, {
-            type: 'skills.updated',
-            payload: {
-              success: true,
-              error: null,
-              updated: result.updated,
-              unchanged: result.unchanged,
-              errors: result.errors,
-            },
-          });
-        } catch (err) {
-          send(ws, { type: 'skills.updated', payload: { success: false, error: errMessage(err) } });
-        }
+      case 'skills.update':
+        await handleSkillsUpdate(ws, { skillLoader, skillInstaller, projectRoot }, msg);
         break;
-      }
-
-      case 'skills.create': {
-        const parsed = validateSkillsCreatePayload(msg.payload);
-        if (!parsed.ok) {
-          send(ws, { type: 'skills.created', payload: { success: false, error: parsed.message } });
-          break;
-        }
-        const createPayload = parsed.value;
-        try {
-          const targetDir =
-            createPayload.scope === 'global'
-              ? path.join(wstackGlobalRoot(), 'skills', createPayload.name.trim())
-              : path.join(projectRoot, '.wrongstack', 'skills', createPayload.name.trim());
-
-          // Check if directory already exists
-          try {
-            await fs.access(targetDir);
-            send(ws, { type: 'skills.created', payload: { success: false, error: `Skill "${createPayload.name}" already exists` } });
-            break;
-          } catch {
-            // Directory does not exist — good
-          }
-
-          await fs.mkdir(targetDir, { recursive: true });
-
-          // Parse description lines to build the skill content
-          const lines = createPayload.description.trim().split('\n');
-          const firstLine = lines[0].trim();
-          const bodyLines = lines.slice(1).map((l) => l.trim()).filter(Boolean);
-          const descriptionText = firstLine + (bodyLines.length > 0 ? `\n${bodyLines.join('\n')}` : '');
-          const trigger = bodyLines.find((l) => l.toLowerCase().startsWith('triggers:')) ?? '';
-
-          const skillContent = [
-            '---',
-            `name: ${createPayload.name.trim()}`,
-            'description: |',
-            `  ${descriptionText.replace(/\n/g, '\n  ')}`,
-            `version: 1.0.0`,
-            '---',
-            '',
-            `# ${createPayload.name.trim().split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}`,
-            '',
-            '## Overview',
-            '',
-            firstLine,
-            '',
-            ...(bodyLines.length > 0 ? bodyLines.filter((l) => !l.toLowerCase().startsWith('triggers:')) : []),
-            '',
-            '## Rules',
-            '- TODO: add your first rule',
-            '',
-            '## Patterns',
-            '### Do',
-            '```ts',
-            '// TODO: add a good example',
-            '```',
-            '',
-            '### Don\'t',
-            '```ts',
-            '// TODO: add a bad example',
-            '```',
-            '',
-            '## Workflow',
-            '1. TODO: describe step one',
-            '2. TODO: describe step two',
-            '',
-            trigger ? `\n${trigger}\n` : '',
-            '## Skills in scope',
-            '- `bug-hunter` — for systematic bug detection patterns',
-            '- `output-standards` — for standardized `<next_steps>` formatting',
-          ].join('\n');
-
-          await atomicWrite(path.join(targetDir, 'SKILL.md'), skillContent);
-
-          send(ws, {
-            type: 'skills.created',
-            payload: {
-              success: true,
-              error: null,
-              skill: { name: createPayload.name.trim(), path: path.join(targetDir, 'SKILL.md'), scope: createPayload.scope },
-            },
-          });
-        } catch (err) {
-          send(ws, { type: 'skills.created', payload: { success: false, error: errMessage(err) } });
-        }
+      case 'skills.create':
+        await handleSkillsCreate(ws, { skillLoader, skillInstaller, projectRoot }, msg);
         break;
-      }
-
-      case 'skills.edit': {
-        if (!skillLoader) {
-          send(ws, { type: 'skills.edited', payload: { success: false, error: 'Skills not enabled' } });
-          break;
-        }
-        const parsed = validateSkillsEditPayload(msg.payload);
-        if (!parsed.ok) {
-          send(ws, { type: 'skills.edited', payload: { success: false, error: parsed.message } });
-          break;
-        }
-        const editPayload = parsed.value;
-        try {
-          const entries = await skillLoader.listEntries();
-          const entry = entries.find((e) => e.name.toLowerCase() === editPayload.name.toLowerCase());
-          if (!entry) {
-            send(ws, { type: 'skills.edited', payload: { success: false, error: `Skill "${editPayload.name}" not found` } });
-            break;
-          }
-          // Only allow editing project/user skills (not bundled)
-          if (entry.scope.includes('bundled')) {
-            send(ws, { type: 'skills.edited', payload: { success: false, error: 'Bundled skills cannot be edited' } });
-            break;
-          }
-          await atomicWrite(entry.path, editPayload.body);
-          send(ws, { type: 'skills.edited', payload: { success: true, error: null } });
-        } catch (err) {
-          send(ws, { type: 'skills.edited', payload: { success: false, error: errMessage(err) } });
-        }
+      case 'skills.edit':
+        await handleSkillsEdit(ws, { skillLoader, skillInstaller, projectRoot }, msg);
         break;
-      }
-
-      case 'skills.export': {
-        if (!skillLoader) {
-          send(ws, { type: 'skills.exported', payload: { zipBase64: '', skillCount: 0, error: 'Skills not enabled' } });
-          break;
-        }
-        try {
-          const entries = await skillLoader.listEntries();
-          const zip = new JSZip();
-          for (const entry of entries) {
-            try {
-              const body = await skillLoader!.readBody(entry.name);
-              const safeName = entry.name.replace(/\//g, '_');
-              zip.file(`${safeName}/SKILL.md`, body);
-            } catch {
-              // Skip skills we can't read
-            }
-          }
-          const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
-          const zipBase64 = zipBuffer.toString('base64');
-          send(ws, { type: 'skills.exported', payload: { zipBase64, skillCount: entries.length, error: undefined } });
-        } catch (err) {
-          send(ws, { type: 'skills.exported', payload: { zipBase64: '', skillCount: 0, error: errMessage(err) } });
-        }
+      case 'skills.export':
+        await handleSkillsExport(ws, { skillLoader, skillInstaller, projectRoot });
         break;
-      }
 
       case 'diag.get': {
         // Snapshot of the moving parts so the user can debug "why is X
@@ -2634,666 +2349,82 @@ export async function startWebUI(
     },
   };
 
-  sessionRoutes = {
-    newSession: async (ws) => {
-      try {
-        await session.append({
-          type: 'session_end',
-          ts: new Date().toISOString(),
-          usage: tokenCounter.total(),
-        });
-        await session.close();
-      } catch {
-        // best-effort
-      }
-      session = await sessionStore.create({
-        id: '',
-        title: '',
-        model: config.model,
-        provider: config.provider,
-      });
-      context.session = session;
-      context.state.replaceMessages([]);
-      context.state.replaceTodos([]);
-      context.readFiles.clear();
-      context.fileMtimes.clear();
-      tokenCounter.reset();
-      sessionStartedAt = Date.now();
-      broadcast(clients, { type: 'session.start', payload: await sessionStartPayload() });
+
+
+  sessionRoutes = createSessionHandlers({
+    config,
+    clients,
+    context,
+    toolRegistry,
+    compactor,
+    customModeStore,
+    tokenCounter,
+    getProjectRoot: () => projectRoot,
+    getSession: () => session,
+    getSessionStore: () => sessionStore,
+    setSession: (s) => {
+      session = s;
     },
-    clearContext: async (ws) => {
-      context.state.replaceMessages([]);
-      context.state.replaceTodos([]);
-      context.readFiles.clear();
-      context.fileMtimes.clear();
-      tokenCounter.reset();
-      sendResult(ws, true, 'Context cleared');
-      broadcast(clients, {
-        type: 'session.start',
-        payload: { ...(await sessionStartPayload()), reset: true },
-      });
+    setSessionStartedAt: (t) => {
+      sessionStartedAt = t;
     },
-    debugContext: async (ws) => {
-      const breakdown = estimateContextBreakdown({
-        systemPrompt: context.systemPrompt,
-        tools: toolRegistry.list(),
-        messages: context.messages,
-      });
-      send(ws, {
-        type: 'context.debug',
-        payload: {
-          ...breakdown,
-          mode: context.meta['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID,
-          policy: context.meta['contextWindowPolicy'],
-        },
-      });
+    sessionStartPayload,
+  });
+
+  projectRoutes = createProjectHandlers({
+    globalConfigPath,
+    wpaths,
+    clients,
+    context,
+    modeStore,
+    memoryStore,
+    skillLoader,
+    modelCapabilities,
+    toolRegistry,
+    tokenCounter,
+    config,
+    getModeId: () => modeId,
+    getProjectRoot: () => projectRoot,
+    getSession: () => session,
+    setProjectRoot: (p) => {
+      projectRoot = p;
     },
-    compactContext: async (ws, msg) => {
-      const aggressive = !!(msg as { payload?: { aggressive?: boolean | undefined } }).payload?.aggressive;
-      try {
-        const report = await compactor.compact(context, { aggressive });
-        send(ws, {
-          type: 'context.compacted',
-          payload: {
-            before: report.before,
-            after: report.after,
-            saved: Math.max(0, report.before - report.after),
-            reductions: report.reductions,
-            repaired: report.repaired,
-          },
-        });
-        sendResult(
-          ws,
-          true,
-          `Compacted: ${report.before} → ${report.after} tokens (saved ~${Math.max(0, report.before - report.after)})`,
-        );
-      } catch (err) {
-        sendResult(ws, false, errMessage(err));
+    setWorkingDir: (p) => {
+      workingDir = p;
+    },
+    setSession: (s) => {
+      session = s;
+    },
+    setSessionStore: (s) => {
+      sessionStore = s;
+    },
+    setSessionStartedAt: (t) => {
+      sessionStartedAt = t;
+    },
+    abortRunLock: () => {
+      if (runLock) {
+        runLock.abort();
+        runLock = null;
       }
     },
-    repairContext: async (ws) => {
-      const beforeMessages = context.messages.length;
-      const repaired = repairToolUseAdjacency(context.messages);
-      if (repaired.report.changed) {
-        context.state.replaceMessages(repaired.messages);
-      }
-      const payload = {
-        removedToolUses: repaired.report.removedToolUses,
-        removedToolResults: repaired.report.removedToolResults,
-        removedMessages: repaired.report.removedMessages,
-        beforeMessages,
-        afterMessages: context.messages.length,
-      };
-      broadcast(clients, { type: 'context.repaired', payload });
-      const removed =
-        payload.removedToolUses.length +
-        payload.removedToolResults.length +
-        payload.removedMessages;
-      sendResult(
-        ws,
-        true,
-        removed > 0
-          ? `Context repaired: removed ${removed} orphan protocol item(s)`
-          : 'Context repair found no orphan protocol blocks',
-      );
+    sessionStartPayload,
+  });
+
+  modeRoutes = createModeHandlers({
+    modeStore,
+    memoryStore,
+    skillLoader,
+    modelCapabilities,
+    context,
+    toolRegistry,
+    config,
+    projectRoot,
+    clients,
+    setModeId: (id) => {
+      modeId = id;
     },
-    listContextModes: async (ws) => {
-      const active = String(context.meta['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID);
-      const allModes = customModeStore.list().map((m) => ({
-        id: m.id,
-        name: m.name,
-        description: m.description,
-        isActive: m.id === active,
-        thresholds: m.thresholds,
-        preserveK: m.preserveK,
-        eliseThreshold: m.eliseThreshold,
-        custom: (m as { custom?: boolean }).custom === true,
-      }));
-      send(ws, {
-        type: 'context.modes.list',
-        payload: { activeId: active, modes: allModes },
-      });
-    },
-    switchContextMode: async (ws, msg) => {
-      const parsed = validateContextModeSwitchPayload(msg.payload);
-      if (!parsed.ok) {
-        sendResult(ws, false, parsed.message);
-        return;
-      }
-      const { id } = parsed.value;
-      let policy = resolveContextWindowPolicy({}, id);
-      if (policy.id !== id) {
-        const customModes = customModeStore.list().filter((m) => (m as { custom?: boolean }).custom === true);
-        const custom = customModes.find((m) => m.id === id);
-        if (!custom) {
-          sendResult(ws, false, `Unknown context mode "${id}"`);
-          return;
-        }
-        policy = custom as unknown as typeof policy;
-      }
-      context.meta['contextWindowMode'] = policy.id;
-      context.meta['contextWindowPolicy'] = policy;
-      sendResult(ws, true, `Context mode switched to ${policy.id}`);
-      broadcast(clients, {
-        type: 'context.mode.changed',
-        payload: { id: policy.id, name: policy.name, policy },
-      });
-    },
-    createContextMode: async (ws, msg) => {
-      const parsed = validateContextModeCreatePayload(msg.payload);
-      if (!parsed.ok) {
-        sendResult(ws, false, parsed.message);
-        return;
-      }
-      const payload = parsed.value;
-      const result = customModeStore.create({
-        id: payload.id,
-        name: payload.name,
-        description: payload.description,
-        thresholds: payload.thresholds,
-        preserveK: payload.preserveK,
-        eliseThreshold: payload.eliseThreshold,
-        custom: true,
-        aggressiveOn: 'soft',
-        targetLoad: 0.65,
-      });
-      sendResult(ws, result.ok, result.error ?? `Mode "${payload.id}" created`);
-    },
-    updateContextMode: async (ws, msg) => {
-      const parsed = validateContextModeUpdatePayload(msg.payload);
-      if (!parsed.ok) {
-        sendResult(ws, false, parsed.message);
-        return;
-      }
-      const payload = parsed.value;
-      const result = customModeStore.update(payload.id, {
-        name: payload.name,
-        description: payload.description,
-        thresholds: payload.thresholds ? {
-          warn: payload.thresholds.warn ?? 0.6,
-          soft: payload.thresholds.soft ?? 0.75,
-          hard: payload.thresholds.hard ?? 0.9,
-        } : undefined,
-        preserveK: payload.preserveK,
-        eliseThreshold: payload.eliseThreshold,
-      });
-      sendResult(ws, result.ok, result.error ?? `Mode "${payload.id}" updated`);
-    },
-    deleteContextMode: async (ws, msg) => {
-      const parsed = validateContextModeDeletePayload(msg.payload);
-      if (!parsed.ok) {
-        sendResult(ws, false, parsed.message);
-        return;
-      }
-      const { id } = parsed.value;
-      if (String(context.meta['contextWindowMode'] ?? '') === id) {
-        context.meta['contextWindowMode'] = DEFAULT_CONTEXT_WINDOW_MODE_ID;
-        context.meta['contextWindowPolicy'] = resolveContextWindowPolicy({}, DEFAULT_CONTEXT_WINDOW_MODE_ID);
-      }
-      const result = customModeStore.remove(id);
-      sendResult(ws, result.ok, result.error ?? `Mode "${id}" deleted`);
-    },
-    listSessions: async (ws, msg) => {
-      const limit = (msg as { payload?: { limit?: number | undefined } }).payload?.limit ?? 50;
-      try {
-        const list = await sessionStore.list(limit);
-        send(ws, {
-          type: 'sessions.list',
-          payload: {
-            sessions: list.map((s) => ({
-              id: s.id,
-              title: s.title,
-              startedAt: s.startedAt,
-              model: s.model,
-              provider: s.provider,
-              tokenTotal: s.tokenTotal,
-              isCurrent: s.id === session.id,
-            })),
-          },
-        });
-      } catch (err) {
-        send(ws, {
-          type: 'sessions.list',
-          payload: { sessions: [], error: errMessage(err) },
-        });
-      }
-    },
-    deleteSession: async (ws, msg) => {
-      const { id } = (msg as { payload: { id: string } }).payload;
-      try {
-        if (id === session.id) {
-          sendResult(ws, false, 'Cannot delete the active session');
-          return;
-        }
-        await sessionStore.delete(id);
-        sendResult(ws, true, `Session ${id} deleted`);
-      } catch (err) {
-        sendResult(ws, false, errMessage(err));
-      }
-    },
-    resumeSession: async (ws, msg) => {
-      const { id } = (msg as { payload: { id: string } }).payload;
-      try {
-        if (id === session.id) {
-          sendResult(ws, false, 'Session is already active');
-          return;
-        }
-        const resumed = await sessionStore.resume(id);
-        try {
-          await session.append({
-            type: 'session_end',
-            ts: new Date().toISOString(),
-            usage: tokenCounter.total(),
-          });
-          await session.close();
-        } catch {
-          /* noop */
-        }
-        session = resumed.writer;
-        context.session = session;
-        context.state.replaceMessages(resumed.data.messages);
-        context.readFiles.clear();
-        context.fileMtimes.clear();
-        tokenCounter.reset();
-        tokenCounter.account(resumed.data.usage, config.model);
-        sessionStartedAt = Date.now();
-        broadcast(clients, {
-          type: 'session.start',
-          payload: {
-            ...(await sessionStartPayload()),
-            reset: true,
-            replayMessages: resumed.data.messages,
-            replayUsage: resumed.data.usage,
-          },
-        });
-        sendResult(ws, true, `Resumed session ${id}`);
-      } catch (err) {
-        sendResult(ws, false, errMessage(err));
-      }
-    },
-    saveSession: async (ws) => {
-      sendResult(ws, true, `Session ${session.id} is auto-saved`);
-    },
-    listCheckpoints: async (ws) => {
-      try {
-        const { DefaultSessionRewinder } = await import('@wrongstack/core');
-        const rewinder = new DefaultSessionRewinder(
-          path.join(projectRoot, '.wrongstack', 'sessions'),
-          projectRoot,
-        );
-        const checkpoints = await rewinder.listCheckpoints(session.id);
-        send(ws, {
-          type: 'session.checkpoints',
-          payload: { checkpoints },
-        });
-      } catch {
-        send(ws, {
-          type: 'session.checkpoints',
-          payload: { checkpoints: [] },
-        });
-      }
-    },
-    rewindSession: async (ws, msg) => {
-      const { checkpointIndex } = (msg as { payload: { checkpointIndex: number } }).payload;
-      try {
-        const { DefaultSessionRewinder } = await import('@wrongstack/core');
-        const rewinder = new DefaultSessionRewinder(
-          path.join(projectRoot, '.wrongstack', 'sessions'),
-          projectRoot,
-        );
-        await rewinder.rewindToCheckpoint(session.id, checkpointIndex);
-        await context.session.truncateToCheckpoint(checkpointIndex);
-        sendResult(ws, true, `Rewound to checkpoint ${checkpointIndex}`);
-        broadcast(clients, {
-          type: 'session.start',
-          payload: { ...(await sessionStartPayload()), reset: true },
-        });
-      } catch (err) {
-        sendResult(ws, false, errMessage(err));
-      }
-    },
-  };
-
-  projectRoutes = {
-    listProjects: async (ws) => {
-      try {
-        const manifest = await loadManifest(globalConfigPath);
-        send(ws, {
-          type: 'projects.list',
-          payload: { projects: manifest.projects },
-        });
-      } catch (err) {
-        send(ws, {
-          type: 'projects.list',
-          payload: { projects: [], error: errMessage(err) },
-        });
-      }
-    },
-    addProject: async (ws, msg) => {
-      const parsed = validateProjectsAddPayload(msg.payload);
-      if (!parsed.ok) {
-        send(ws, {
-          type: 'projects.added',
-          payload: { name: '', root: '', slug: '', message: parsed.message },
-        });
-        return;
-      }
-      const { root: addRoot, name: displayName } = parsed.value;
-      try {
-        const resolved = path.resolve(addRoot);
-        await fs.access(resolved);
-        const stat = await fs.stat(resolved);
-        if (!stat.isDirectory()) throw new Error(`Not a directory: ${resolved}`);
-
-        const manifest = await loadManifest(globalConfigPath);
-        const existing = manifest.projects.find((p) => p.root === resolved);
-        if (existing) {
-          send(ws, {
-            type: 'projects.added',
-            payload: {
-              name: existing.name,
-              root: existing.root,
-              slug: existing.slug,
-              message: `Already registered as "${existing.name}"`,
-            },
-          });
-          return;
-        }
-
-        const name = displayName?.trim() || path.basename(resolved);
-        const slug = generateProjectSlug(resolved);
-        await ensureProjectDataDir(slug, globalConfigPath);
-        const now = new Date().toISOString();
-        manifest.projects.push({ name, root: resolved, slug, lastSeen: now, createdAt: now });
-        await saveManifest(manifest, globalConfigPath);
-
-        send(ws, {
-          type: 'projects.added',
-          payload: {
-            name,
-            root: resolved,
-            slug,
-            message: `Registered project "${name}"`,
-          },
-        });
-      } catch (err) {
-        send(ws, {
-          type: 'projects.added',
-          payload: {
-            name: path.basename(addRoot),
-            root: addRoot,
-            slug: '',
-            message: errMessage(err),
-          },
-        });
-      }
-    },
-    selectProject: async (ws, msg) => {
-      const parsed = validateProjectsSelectPayload(msg.payload);
-      if (!parsed.ok) {
-        send(ws, {
-          type: 'projects.selected',
-          payload: { root: '', name: '', message: parsed.message },
-        });
-        return;
-      }
-      const { root: selRoot, name: selName } = parsed.value;
-      try {
-        const resolved = path.resolve(selRoot);
-
-        try {
-          await fs.access(resolved);
-          const stat = await fs.stat(resolved);
-          if (!stat.isDirectory()) throw new Error(`Not a directory: ${resolved}`);
-        } catch (err) {
-          send(ws, {
-            type: 'projects.selected',
-            payload: {
-              root: selRoot,
-              name: selName || path.basename(selRoot),
-              message: `Cannot switch: ${errMessage(err)}`,
-            },
-          });
-          return;
-        }
-
-        const manifest = await loadManifest(globalConfigPath);
-        const entry = manifest.projects.find((p) => p.root === resolved);
-        if (entry) {
-          entry.lastSeen = new Date().toISOString();
-          entry.lastWorkingDir = resolved;
-        } else {
-          const name = selName?.trim() || path.basename(resolved);
-          const slug = generateProjectSlug(resolved);
-          manifest.projects.push({
-            name,
-            root: resolved,
-            slug,
-            lastSeen: new Date().toISOString(),
-            createdAt: new Date().toISOString(),
-            lastWorkingDir: resolved,
-          });
-          await ensureProjectDataDir(slug, globalConfigPath);
-        }
-        await saveManifest(manifest, globalConfigPath);
-
-        if (runLock) {
-          runLock.abort();
-          runLock = null;
-        }
-
-        projectRoot = resolved;
-        workingDir = resolved;
-
-        context.cwd = workingDir;
-        context.projectRoot = projectRoot;
-
-        const switchSlug = entry?.slug ?? generateProjectSlug(resolved);
-
-        try {
-          const switchMode = modeId === 'default' ? undefined : await modeStore.getMode(modeId);
-          const switchBuilder = new DefaultSystemPromptBuilder({
-            memoryStore,
-            skillLoader,
-            modeStore,
-            modeId,
-            modePrompt: switchMode?.prompt ?? '',
-            modelCapabilities,
-          });
-          context.systemPrompt = await switchBuilder.build({
-            cwd: workingDir,
-            projectRoot,
-            tools: toolRegistry.list(),
-            provider: config.provider,
-            model: config.model,
-          });
-        } catch {
-          /* best-effort */
-        }
-
-        const newSessionsDir = path.join(
-          path.dirname(globalConfigPath),
-          'projects',
-          switchSlug,
-          'sessions',
-        );
-        await fs.mkdir(newSessionsDir, { recursive: true });
-        const newSessionStore = new DefaultSessionStore({ dir: newSessionsDir });
-
-        const oldSessionId = session.id;
-        try {
-          await session.append({
-            type: 'session_end',
-            ts: new Date().toISOString(),
-            usage: tokenCounter.total(),
-          });
-          await session.close();
-        } catch {
-          // best-effort
-        }
-
-        sessionStore = newSessionStore;
-        session = await sessionStore.create({
-          id: '',
-          title: '',
-          model: config.model,
-          provider: config.provider,
-        });
-        context.session = session;
-        context.state.replaceMessages([]);
-        context.state.replaceTodos([]);
-        context.readFiles.clear();
-        context.fileMtimes.clear();
-        tokenCounter.reset();
-        sessionStartedAt = Date.now();
-
-        try {
-          const registry = getSessionRegistry(wpaths.globalRoot);
-          await registry.register({
-            sessionId: session.id,
-            projectSlug: switchSlug,
-            projectRoot,
-            projectName: path.basename(projectRoot),
-            workingDir,
-            clientType: 'webui',
-            pid: process.pid,
-            startedAt: new Date().toISOString(),
-          });
-        } catch {
-          /* best-effort */
-        }
-
-        send(ws, {
-          type: 'projects.selected',
-          payload: {
-            root: resolved,
-            name: selName || path.basename(resolved),
-            message: `Switched to ${selName || path.basename(resolved)}`,
-          },
-        });
-
-        broadcast(clients, {
-          type: 'subagent.event',
-          payload: {
-            kind: 'session_stopped',
-            sessionId: oldSessionId,
-          },
-        });
-
-        broadcast(clients, {
-          type: 'session.start',
-          payload: {
-            ...(await sessionStartPayload()),
-            reset: true,
-            clearedSessionId: oldSessionId,
-          },
-        });
-      } catch (err) {
-        send(ws, {
-          type: 'projects.selected',
-          payload: {
-            root: selRoot,
-            name: selName || path.basename(selRoot),
-            message: errMessage(err),
-          },
-        });
-      }
-    },
-    setWorkingDir: async (ws, msg) => {
-      const parsed = validateWorkingDirSetPayload(msg.payload);
-      if (!parsed.ok) {
-        sendResult(ws, false, parsed.message);
-        return;
-      }
-      const { path: newPath } = parsed.value;
-      try {
-        const resolved = await resolveWorkingDirInsideProject(projectRoot, newPath);
-
-        workingDir = resolved;
-        context.cwd = resolved;
-
-        broadcast(clients, {
-          type: 'working_dir.changed',
-          payload: { cwd: resolved, projectRoot },
-        });
-
-        sendResult(ws, true, `Working directory set to ${resolved}`);
-      } catch (err) {
-        sendResult(ws, false, errMessage(err));
-      }
-    },
-  };
-
-  modeRoutes = {
-    listModes: async (ws) => {
-      try {
-        const modes = await modeStore.listModes();
-        const active = await modeStore.getActiveMode();
-        send(ws, {
-          type: 'modes.list',
-          payload: {
-            modes: modes.map((m) => ({
-              id: m.id,
-              name: m.name,
-              description: m.description,
-              isActive: m.id === (active?.id ?? 'default'),
-            })),
-            activeId: active?.id ?? 'default',
-          },
-        });
-      } catch (err) {
-        send(ws, {
-          type: 'modes.list',
-          payload: {
-            modes: [],
-            activeId: 'default',
-            error: errMessage(err),
-          },
-        });
-      }
-    },
-    switchMode: async (ws, msg) => {
-      const parsed = validateModeSwitchPayload(msg.payload);
-      if (!parsed.ok) {
-        sendResult(ws, false, parsed.message);
-        return;
-      }
-      const { id } = parsed.value;
-      try {
-        if (id === 'default') {
-          await modeStore.setActiveMode(null);
-        } else {
-          const found = await modeStore.getMode(id);
-          if (!found) throw new Error(`Unknown mode "${id}"`);
-          await modeStore.setActiveMode(id);
-        }
-        modeId = id;
-        const modePrompt = id === 'default' ? '' : ((await modeStore.getMode(id))?.prompt ?? '');
-        const freshBuilder = new DefaultSystemPromptBuilder({
-          memoryStore,
-          skillLoader,
-          modeStore,
-          modeId: id,
-          modePrompt,
-          modelCapabilities,
-        });
-        context.systemPrompt = await freshBuilder.build({
-          cwd: projectRoot,
-          projectRoot,
-          tools: toolRegistry.list(),
-          provider: config.provider,
-          model: config.model,
-        });
-        sendResult(ws, true, `Switched to mode "${id}"`);
-        broadcast(clients, {
-          type: 'session.start',
-          payload: { ...(await sessionStartPayload()) },
-        });
-      } catch (err) {
-        sendResult(ws, false, errMessage(err));
-      }
-    },
-  };
+    sessionStartPayload,
+  });
 
   shellGitRoutes = {
     gitInfo: async (ws) => {
