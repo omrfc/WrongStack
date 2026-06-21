@@ -608,6 +608,20 @@ export interface AppProps {
   onCoordinatorStop?: (() => void) | undefined;
   /** Whether the AutonomousCoordinator is currently running. */
   coordinatorRunning?: boolean | undefined;
+  /** List available coordinator tasks the current terminal can claim. */
+  onCoordinatorTasks?: (() => Promise<Array<{ id: string; title: string; priority: string; tags: string[] }> | null>) | undefined;
+  /** Claim a coordinator task. Returns description on success. */
+  onCoordinatorClaim?: ((taskId: string) => Promise<string | null | { description: string }>) | undefined;
+  /** Mark a claimed task as completed. */
+  onCoordinatorComplete?: ((taskId: string, result?: string) => Promise<string | null>) | undefined;
+  /** Mark a claimed task as failed. */
+  onCoordinatorFail?: ((taskId: string, error: string) => Promise<string | null>) | undefined;
+  /** Get coordinator stats for status display. */
+  onCoordinatorStatus?: (() => Promise<{
+    goals: { total: number; done: number; pending: number; failed: number };
+    dag: { running: number; ready: number; done: number; failed: number };
+    auction: { pending: number; inProgress: number };
+  } | null>) | undefined;
   /**
    * Unique client identifier (e.g. `tui@<uuid>`) used to tag `client.status`
    * events emitted to the EventBus for the WebUI FleetHQ map HUD. When omitted,
@@ -710,6 +724,9 @@ export function App({
   subscribeCoordinatorEvents,
   onCoordinatorStart,
   onCoordinatorStop,
+  // Reserved for the coordinator monitor panel: terminal-driven task discovery/claim.
+  onCoordinatorTasks: _onCoordinatorTasks,
+  onCoordinatorClaim: _onCoordinatorClaim,
   coordinatorRunning = false,
   clientId,
 }: AppProps): React.ReactElement {

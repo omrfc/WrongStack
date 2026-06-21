@@ -223,6 +223,47 @@ export interface SlashCommandContext {
   /** Stop the AutonomousCoordinator loop. */
   onCoordinatorStop?: (() => void) | undefined;
   /**
+   * List available coordinator tasks for the current terminal/session to claim.
+   * Returns an array of pending tasks (id, title, priority, tags) or null when
+   * no coordinator is active. Terminals are treated as eligible workers — an
+   * open terminal session is sufficient; no subagent needs to be spawned.
+   */
+  onCoordinatorTasks?: (() => Promise<Array<{ id: string; title: string; priority: string; tags: string[] }> | null>) | undefined;
+  /**
+   * Claim a coordinator task from the terminal. On success returns the task
+   * description so the caller can inject it as the next agent prompt.
+   * Returns null when no coordinator is active, or an error message string.
+   */
+  onCoordinatorClaim?: ((taskId: string) => Promise<string | null | { description: string }>) | undefined;
+  /** Mark a claimed task as completed. Returns null on success or an error message. */
+  onCoordinatorComplete?: ((taskId: string, result?: string) => Promise<string | null>) | undefined;
+  /** Mark a claimed task as failed. Returns null on success or an error message. */
+  onCoordinatorFail?: ((taskId: string, error: string) => Promise<string | null>) | undefined;
+  /** Get coordinator stats for status display. Returns null when no coordinator is active. */
+  onCoordinatorStatus?: (() => Promise<{
+    goals: { total: number; done: number; pending: number; failed: number };
+    dag: { running: number; ready: number; done: number; failed: number };
+    auction: { pending: number; inProgress: number };
+  } | null>) | undefined;
+  /**
+   * Mutable holder for coordinator callbacks. Set by execution.ts when the
+   * coordinator is created; read by slash commands. Mirrors the
+   * `onPanelOpen.current` indirection pattern.
+   */
+  coordinatorController?: {
+    onCoordinatorStart?: ((goal?: string) => void) | undefined;
+    onCoordinatorStop?: (() => void) | undefined;
+    onCoordinatorTasks?: (() => Promise<Array<{ id: string; title: string; priority: string; tags: string[] }> | null>) | undefined;
+    onCoordinatorClaim?: ((taskId: string) => Promise<string | null | { description: string }>) | undefined;
+    onCoordinatorComplete?: ((taskId: string, result?: string) => Promise<string | null>) | undefined;
+    onCoordinatorFail?: ((taskId: string, error: string) => Promise<string | null>) | undefined;
+    onCoordinatorStatus?: (() => Promise<{
+      goals: { total: number; done: number; pending: number; failed: number };
+      dag: { running: number; ready: number; done: number; failed: number };
+      auction: { pending: number; inProgress: number };
+    } | null>) | undefined;
+  };
+  /**
    * Ask the user a yes/no question on the REPL. Returns `true`/`false` for
    * Y/N answers, `null` when the user cancels (q). Resolves to `defaultYes`
    * on non-TTY / EOF so non-interactive callers don't hang. Slash commands

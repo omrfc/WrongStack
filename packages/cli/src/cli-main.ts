@@ -1610,6 +1610,10 @@ export async function main(argv: string[]): Promise<number> {
     log: (line) => renderer.write(`${line}\n`),
   });
 
+  // Mutable coordinator controller — execution.ts fills its callbacks when
+  // the AutonomousCoordinator is created lazily. Slash commands read from it.
+  const coordinatorController: NonNullable<Parameters<typeof buildBuiltinSlashCommands>[0]['coordinatorController']> = {};
+
   const slashCmds = buildBuiltinSlashCommands({
     registry: slashRegistry,
     toolRegistry,
@@ -1651,6 +1655,7 @@ export async function main(argv: string[]): Promise<number> {
     brain,
     brainSettings,
     getBrainLog: () => brainLog,
+    coordinatorController,
     confirm: async (question, defaultYes = true): Promise<boolean | null> => {
       // Non-TTY / piped stdin → don't block. For destructive or surprising
       // actions (e.g. starting eternal mode against a stale goal) the safe
@@ -2522,6 +2527,8 @@ export async function main(argv: string[]): Promise<number> {
     getPickableProviders: () => buildPickableProviders(modelsRegistry, config),
     switchProviderAndModel,
     director: director ?? null,
+    getDirector: () => director,
+    coordinatorController,
     fleetRoster: FLEET_ROSTER as Record<string, { name: string }>,
     fleetStreamController,
     interruptController,

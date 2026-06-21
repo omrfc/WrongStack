@@ -413,6 +413,20 @@ export interface RunTuiOptions {
   onCoordinatorStart?: ((goal?: string) => void) | undefined;
   /** Stop the AutonomousCoordinator loop. */
   onCoordinatorStop?: (() => void) | undefined;
+  /** List pending coordinator tasks claimable by this terminal. */
+  onCoordinatorTasks?: (() => Promise<Array<{ id: string; title: string; priority: string; tags: string[] }> | null>) | undefined;
+  /** Claim a coordinator task. Returns description on success. */
+  onCoordinatorClaim?: ((taskId: string) => Promise<string | null | { description: string }>) | undefined;
+  /** Mark a claimed task as completed. */
+  onCoordinatorComplete?: ((taskId: string, result?: string) => Promise<string | null>) | undefined;
+  /** Mark a claimed task as failed. */
+  onCoordinatorFail?: ((taskId: string, error: string) => Promise<string | null>) | undefined;
+  /** Get coordinator stats for status display. */
+  onCoordinatorStatus?: (() => Promise<{
+    goals: { total: number; done: number; pending: number; failed: number };
+    dag: { running: number; ready: number; done: number; failed: number };
+    auction: { pending: number; inProgress: number };
+  } | null>) | undefined;
 }
 
 // Bracketed paste mode wraps any pasted text with these markers, letting us
@@ -832,6 +846,11 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
           onPanelOpen: opts.onPanelOpen,
           onCoordinatorStart: opts.onCoordinatorStart,
           onCoordinatorStop: opts.onCoordinatorStop,
+          onCoordinatorTasks: opts.onCoordinatorTasks,
+          onCoordinatorClaim: opts.onCoordinatorClaim,
+          onCoordinatorComplete: opts.onCoordinatorComplete,
+          onCoordinatorFail: opts.onCoordinatorFail,
+          onCoordinatorStatus: opts.onCoordinatorStatus,
         }),
         { exitOnCtrlC: false, stdin: inkStdin },
       );

@@ -368,6 +368,174 @@ describe('AutonomousCoordinator', () => {
       const stats = await runPromise;
       expect(stats).toBeDefined();
     });
+
+    it('does not re-process auction-pending tasks that are already in the DAG (no Director)', async () => {
+      let brainCallCount = 0;
+      const llmProvider = {
+        decide: vi.fn(async (prompt: { options: Array<{ id: string }> }) => {
+          brainCallCount++;
+          return {
+            optionId: prompt.options[0]?.id ?? '',
+            rationale: 'pick first',
+          };
+        }),
+      };
+      const coordinator = new AutonomousCoordinator({
+        sessionDir: tempDir,
+        selfAgentId: 'leader@test',
+        selfAgentName: 'Leader',
+        // No director — tasks go to the auction and wait for terminal claiming
+        llmProvider,
+        disableSelfImprove: true,
+        maxConcurrentAgents: 3,
+      });
+
+      const stats = await coordinator.run({ goal: 'fix bugs', maxIterations: 10 });
+
+      // Brain should be called at most a few times (for decomposition + at most
+      // once per unique dispatchable goal), NOT 10 times.
+      // Decomposition for 'bug' category produces 2 sub-goals → at most 2
+      // Brain calls for prioritization + decomposition overhead.
+      expect(brainCallCount).toBeLessThanOrEqual(4);
+      expect(stats.goals.total).toBeGreaterThan(0);
+      // Goals should be pending (waiting for a terminal) or in the DAG, not
+      // reprocessed every iteration.
+      const pendingCount = coordinator.auction.getPendingTasks().length;
+      expect(pendingCount).toBeGreaterThan(0);
+    });
+
+    it('assigns the selected goal to a director subagent using the original goal id', async () => {
+      const events: CoordinatorEvent[] = [];
+      const director = createMockDirector() as unknown as Director & {
+        _assignCalls: Array<{ task: TaskSpec }>;
+      };
+      const llmProvider = {
+        decide: vi.fn(async (prompt: { options: Array<{ id: string }> }) => ({
+          optionId: prompt.options[0]!.id,
+          rationale: 'choose first ready goal',
+        })),
+      };
+      const coordinator = new AutonomousCoordinator({
+        sessionDir: tempDir,
+        selfAgentId: 'leader@test',
+        selfAgentName: 'Leader',
+        director,
+        llmProvider,
+        disableSelfImprove: true,
+        maxConcurrentAgents: 3,
+        onCoordinatorEvent: (event) => events.push(event),
+      });
+
+      await coordinator.run({ goal: 'fix null pointer bug', maxIterations: 2 });
+
+      const ready = events.find((event) => event.type === 'task:ready') as
+        | { type: 'task:ready'; goalId: string; taskId: string }
+        | undefined;
+      expect(ready).toBeDefined();
+      expect(ready!.taskId).toBe(ready!.goalId);
+      expect(director._assignCalls).toHaveLength(1);
+      expect(director._assignCalls[0]!.task.id).toBe(ready!.goalId);
+      expect(coordinator.auction.getTasksForAgent(director._assignCalls[0]!.task.subagentId!)[0]!.id)
+        .toBe(ready!.goalId);
+    });
+
+    it('treats subagent.completed status=success as task completion and marks the DAG node done', async () => {
+      const events: CoordinatorEvent[] = [];
+      const fleet = createMockFleetBus();
+      const director = createMockDirector() as unknown as Director & {
+        _assignCalls: Array<{ task: TaskSpec }>;
+      };
+      const llmProvider = {
+        decide: vi.fn(async (prompt: { options: Array<{ id: string }> }) => ({
+          optionId: prompt.options[0]!.id,
+          rationale: 'choose first ready goal',
+        })),
+      };
+      const coordinator = new AutonomousCoordinator({
+        sessionDir: tempDir,
+        selfAgentId: 'leader@test',
+        selfAgentName: 'Leader',
+        fleet,
+        director,
+        llmProvider,
+        disableSelfImprove: true,
+        maxConcurrentAgents: 3,
+        onCoordinatorEvent: (event) => events.push(event),
+      });
+
+      await coordinator.run({ goal: 'fix null pointer bug', maxIterations: 2 });
+      const assignedTask = director._assignCalls[0]!.task;
+      const subagentId = assignedTask.subagentId!;
+
+      (fleet.emit as unknown as (type: string, event: unknown) => void)('subagent.completed', {
+        subagentId,
+        payload: { subagentId, taskId: assignedTask.id, status: 'success' },
+      });
+      await vi.waitFor(() => {
+        expect(events.some((event) => event.type === 'task:completed' && event.taskId === assignedTask.id)).toBe(true);
+      });
+
+      expect(events.some((event) => event.type === 'goal:failed' && event.goalId === assignedTask.id)).toBe(false);
+      expect(coordinator.dag.getNode(assignedTask.id)?.status).toBe('done');
+      expect(coordinator.graph.getGoals({ status: 'done' }).some((goal) => goal.id === assignedTask.id)).toBe(true);
+      expect(coordinator.graph.getFacts({ category: 'quality' }).some((fact) =>
+        fact.key === `task-result:${assignedTask.id}` &&
+        fact.detail === 'Subagent completed successfully' &&
+        fact.related.includes(assignedTask.id),
+      )).toBe(true);
+      expect(events.some((event) => event.type === 'knowledge:added' && event.text === 'Subagent completed successfully')).toBe(true);
+    });
+
+    it('creates follow-up goals from NEXT/TODO markers in the subagent result', async () => {
+      const events: CoordinatorEvent[] = [];
+      const fleet = createMockFleetBus();
+      const director = createMockDirector() as unknown as Director & {
+        _assignCalls: Array<{ task: TaskSpec }>;
+      };
+      const llmProvider = {
+        decide: vi.fn(async (prompt: { options: Array<{ id: string }> }) => ({
+          optionId: prompt.options[0]!.id,
+          rationale: 'choose first ready goal',
+        })),
+      };
+      const coordinator = new AutonomousCoordinator({
+        sessionDir: tempDir,
+        selfAgentId: 'leader@test',
+        selfAgentName: 'Leader',
+        fleet,
+        director,
+        llmProvider,
+        disableSelfImprove: true,
+        onCoordinatorEvent: (event) => events.push(event),
+      });
+
+      await coordinator.run({ goal: 'fix null pointer bug', maxIterations: 2 });
+      const assignedTask = director._assignCalls[0]!.task;
+      const result = [
+        'Implemented first pass.',
+        'NEXT: Add regression coverage for retry path',
+        '- TODO: Document the retry behavior',
+        'FOLLOW-UP: Check telemetry output',
+      ].join('\n');
+
+      (fleet.emit as unknown as (type: string, event: unknown) => void)('subagent.completed', {
+        subagentId: assignedTask.subagentId!,
+        payload: { subagentId: assignedTask.subagentId!, taskId: assignedTask.id, status: 'success', result },
+      });
+      await vi.waitFor(() => {
+        expect(coordinator.graph.getGoals({}).some((goal) => goal.title === 'Add regression coverage for retry path')).toBe(true);
+      });
+
+      const followUps = coordinator.graph.getGoals({}).filter((goal) => goal.tags.includes('follow-up'));
+      expect(followUps.map((goal) => goal.title)).toEqual([
+        'Add regression coverage for retry path',
+        'Document the retry behavior',
+        'Check telemetry output',
+      ]);
+      expect(followUps.every((goal) => goal.tags.includes('task-result') && goal.tags.includes(assignedTask.id))).toBe(true);
+      expect(events.filter((event) => event.type === 'goal:added').some((event) => event.title === 'Check telemetry output')).toBe(true);
+      expect(coordinator.graph.getFacts({ category: 'quality' }).some((fact) => fact.detail === result)).toBe(true);
+    });
   });
 
   describe('goal decomposition', () => {
@@ -462,6 +630,71 @@ describe('AutonomousCoordinator', () => {
           }),
         ).resolves.not.toThrow();
       }
+    });
+  });
+
+  describe('DAG rebuild from persisted graph', () => {
+    it('reconstructs persisted completed goals into the DAG on run startup', async () => {
+      const coordinator1 = new AutonomousCoordinator({
+        sessionDir: tempDir,
+        selfAgentId: 'leader@test',
+        selfAgentName: 'Leader',
+        llmProvider: createMockLlmProvider(),
+        disableSelfImprove: true,
+      });
+      const goal = await coordinator1.createGoal({
+        title: 'Persisted goal',
+        description: 'Goal created before coordinator restart',
+      });
+      await coordinator1.auction.complete(goal.id, 'done before restart');
+
+      const coordinator2 = new AutonomousCoordinator({
+        sessionDir: tempDir,
+        selfAgentId: 'leader@test',
+        selfAgentName: 'Leader',
+        llmProvider: createMockLlmProvider(),
+        disableSelfImprove: true,
+      });
+
+      await coordinator2.run({ goal: 'new startup goal', maxIterations: 1 });
+
+      expect(coordinator2.dag.getNode(goal.id)?.status).toBe('done');
+      expect(coordinator2.dag.getNode(goal.id)?.result).toBe('done before restart');
+    });
+
+    it('syncFromGraph picks up new goals and status changes from another coordinator', async () => {
+      const coordinator1 = new AutonomousCoordinator({
+        sessionDir: tempDir,
+        selfAgentId: 'leader@terminal-a',
+        selfAgentName: 'Terminal A',
+        llmProvider: createMockLlmProvider(),
+        disableSelfImprove: true,
+      });
+      const coordinator2 = new AutonomousCoordinator({
+        sessionDir: tempDir,
+        selfAgentId: 'leader@terminal-b',
+        selfAgentName: 'Terminal B',
+        llmProvider: createMockLlmProvider(),
+        disableSelfImprove: true,
+      });
+
+      // Terminal A creates a goal that Terminal B doesn't know about yet.
+      const goal = await coordinator1.createGoal({
+        title: 'Cross-session task',
+        description: 'Published by terminal A',
+      });
+
+      // Terminal B syncs and should discover the new goal in its DAG.
+      await coordinator2.syncFromGraph();
+      expect(coordinator2.dag.getNode(goal.id)).toBeDefined();
+      expect(coordinator2.auction.getPendingTasks().some((g) => g.id === goal.id)).toBe(true);
+
+      // Terminal A completes the goal.
+      await coordinator1.auction.complete(goal.id, 'Done by terminal A');
+
+      // Terminal B syncs again — DAG node should now be 'done'.
+      await coordinator2.syncFromGraph();
+      expect(coordinator2.dag.getNode(goal.id)?.status).toBe('done');
     });
   });
 

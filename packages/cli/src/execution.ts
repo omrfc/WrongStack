@@ -142,8 +142,12 @@ export interface ExecutionDeps {
   resolvedProvider: ResolvedProvider | undefined;
   getPickableProviders: () => Promise<Array<{ id: string; family: string; models: string[] }>>;
   switchProviderAndModel: (providerId: string, modelId: string) => string | null;
-  /** Live director instance for the TUI fleet panel. Null when director mode is off. */
+  /** Initial director snapshot for the TUI fleet panel. Null when director mode is off. */
   director: Director | null;
+  /** Read the current director; unlike `director`, this sees lazy promotion after startup. */
+  getDirector?: (() => Director | null) | undefined;
+  /** Mutable holder for coordinator callbacks — filled by execute() when coordinator is created. */
+  coordinatorController?: Record<string, unknown> | undefined;
   /** Fleet roster for human-readable subagent names. */
   fleetRoster?: Record<string, { name: string }>;
   /**
@@ -335,6 +339,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
     getPickableProviders,
     switchProviderAndModel,
     director,
+    getDirector,
+    coordinatorController,
     fleetRoster,
     fleetStreamController,
     interruptController,
@@ -749,9 +755,13 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
       // becomes available so we have access to director.fleet for cross-session events.
       const coordinatorEvents = new Set<(event: CoordinatorEvent) => void>();
       let autonomousCoordinator: AutonomousCoordinator | null = null;
+      let coordinatorRun: Promise<void> | null = null;
 
-      const onDirectorReady = (dir: Director) => {
-        if (autonomousCoordinator) return;
+      const ensureAutonomousCoordinator = (): AutonomousCoordinator | null => {
+        if (autonomousCoordinator) return autonomousCoordinator;
+        const currentDirector = getDirector?.() ?? director;
+        if (!currentDirector) return null;
+
         // Resolve the session dir from the transcript path (e.g.
         // "~/.wrongstack/.../sessions/<id>.jsonl" → parent dir). Fall back
         // to the global project dir when the writer is in-memory.
@@ -774,7 +784,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             const userPrompt = {
               type: 'text' as const,
               text: `Decision: ${prompt.question}\n\n`
-                + `Context: ${prompt.context}\n\n`
+                + `Context: ${JSON.stringify(prompt.context)}\n\n`
                 + `Options:\n${prompt.options
                   .map((o, i) => `  ${i + 1}. [${o.id}] ${o.label}${o.consequence ? ` — ${o.consequence}` : ''}`)
                   .join('\n')}\n\n`
@@ -815,7 +825,9 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         };
         autonomousCoordinator = new AutonomousCoordinator({
           sessionDir,
-          fleet: dir.fleet,
+          fleet: currentDirector.fleet,
+          fleetManager: currentDirector.fleetManager,
+          director: currentDirector,
           mailbox: mailbox as unknown as import('@wrongstack/core').Mailbox,
           selfAgentId: `leader@${context.session.id ?? 'unknown'}`,
           selfAgentName: 'Leader',
@@ -826,15 +838,76 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         });
         // Wire the stop call so execute()'s finally block can cleanly shut down
         // the coordinator when the TUI exits (Ctrl+C, /exit, or session end).
-        deps.onCoordinatorStop = () => autonomousCoordinator?.stop();
+        deps.onCoordinatorStop = () => autonomousCoordinator?.dispose();
+
+        // Populate the mutable controller so slash commands (built before
+        // execute() was called) can reach the coordinator callbacks.
+        if (coordinatorController) {
+          coordinatorController['onCoordinatorStart'] = (goal?: string) => {
+            const coordinator = autonomousCoordinator;
+            if (!coordinator) return;
+            coordinator.run({ goal: goal ?? 'Improve the codebase', runUntilComplete: true })
+              .then(() => undefined)
+              .catch((err: unknown) => console.error('[coordinator] run() failed:', err));
+          };
+          coordinatorController['onCoordinatorStop'] = () => autonomousCoordinator?.stop();
+          coordinatorController['onCoordinatorTasks'] = async () => {
+            if (!autonomousCoordinator) return null;
+            await autonomousCoordinator.graph.load();
+            return autonomousCoordinator.auction
+              .getPendingTasks()
+              .map((task) => ({ id: task.id, title: task.title, priority: task.priority, tags: task.tags }));
+          };
+          coordinatorController['onCoordinatorClaim'] = async (taskId: string) => {
+            if (!autonomousCoordinator) return 'No coordinator is active.';
+            await autonomousCoordinator.graph.load();
+            const goal = autonomousCoordinator.graph.get(taskId) as import('@wrongstack/core').GoalNode | undefined;
+            if (!goal || goal.type !== 'goal') return `Task ${taskId.slice(0, 8)} not found.`;
+            if (goal.status !== 'pending') return `Task ${taskId.slice(0, 8)} is ${goal.status}, not claimable.`;
+            const ok = await autonomousCoordinator.auction.claim(
+              taskId, `terminal@${context.session.id ?? 'unknown'}`, 'Terminal worker',
+            );
+            if (!ok) return `Task ${taskId.slice(0, 8)} could not be claimed.`;
+            return { description: goal.description };
+          };
+          coordinatorController['onCoordinatorComplete'] = async (taskId: string, result?: string) => {
+            if (!autonomousCoordinator) return 'No coordinator is active.';
+            await autonomousCoordinator.graph.load();
+            const goal = autonomousCoordinator.graph.get(taskId) as import('@wrongstack/core').GoalNode | undefined;
+            if (!goal || goal.type !== 'goal') return `Task ${taskId.slice(0, 8)} not found.`;
+            if (goal.status !== 'in_progress') return `Task ${taskId.slice(0, 8)} is ${goal.status}, cannot complete.`;
+            await autonomousCoordinator.reportTaskCompletion(taskId, result ?? 'Terminal worker completed the task');
+            return null;
+          };
+          coordinatorController['onCoordinatorFail'] = async (taskId: string, error: string) => {
+            if (!autonomousCoordinator) return 'No coordinator is active.';
+            await autonomousCoordinator.graph.load();
+            const goal = autonomousCoordinator.graph.get(taskId) as import('@wrongstack/core').GoalNode | undefined;
+            if (!goal || goal.type !== 'goal') return `Task ${taskId.slice(0, 8)} not found.`;
+            if (goal.status !== 'in_progress') return `Task ${taskId.slice(0, 8)} is ${goal.status}, cannot fail.`;
+            await autonomousCoordinator.reportTaskFailure(taskId, error);
+            return null;
+          };
+          coordinatorController['onCoordinatorStatus'] = async () => {
+            if (!autonomousCoordinator) return null;
+            await autonomousCoordinator.syncFromGraph();
+            const stats = autonomousCoordinator.getStats();
+            return {
+              goals: { total: stats.goals.total, done: stats.goals.done, pending: stats.goals.pending, failed: stats.goals.failed },
+              dag: { running: stats.dag.running, ready: stats.dag.ready, done: stats.dag.done, failed: stats.dag.failed },
+              auction: { pending: stats.auction.pending, inProgress: stats.auction.in_progress },
+            };
+          };
+        }
+
+        return autonomousCoordinator;
       };
 
       // Hook into Director lifecycle: Director is created lazily on first subagent.spawned.
       // If it already exists, wire immediately; otherwise wait for the spawn event.
-      if (director) onDirectorReady(director);
+      if (director) ensureAutonomousCoordinator();
       const offDirectorSpawned = events.onPattern('subagent.spawned', () => {
-        const dir = director;
-        if (dir) { offDirectorSpawned(); onDirectorReady(dir); }
+        if (ensureAutonomousCoordinator()) offDirectorSpawned();
       });
 
       const switchProjectInPlace = async (targetRoot: string, displayName: string): Promise<string | null> => {
@@ -1348,22 +1421,121 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           // The coordinator tracks goals, tasks, knowledge, and consensus across all
           // active sessions in the same project. It runs independently of the leader
           // agent and is accessible to any session in the project via the GlobalMailbox.
-          getAutonomousCoordinator: () => autonomousCoordinator,
+          getAutonomousCoordinator: () => ensureAutonomousCoordinator(),
           subscribeCoordinatorEvents: (fn: (event: CoordinatorEvent) => void) => {
             coordinatorEvents.add(fn);
             return () => { coordinatorEvents.delete(fn); };
           },
           onCoordinatorStart: (goal?: string) => {
-            if (!autonomousCoordinator) {
-              console.error('[coordinator] not ready — no director yet (spawn a subagent first)');
+            const coordinator = ensureAutonomousCoordinator();
+            if (!coordinator) {
+              console.error('[coordinator] not ready — no director available');
               return;
             }
-            autonomousCoordinator.run({ goal: goal ?? '' }).catch((err) => {
-              console.error('[coordinator] run() failed:', err);
-            });
+            if (coordinatorRun) return;
+            coordinatorRun = coordinator.run({ goal: goal ?? 'Improve the codebase', runUntilComplete: true })
+              .then(() => undefined)
+              .catch((err) => {
+                console.error('[coordinator] run() failed:', err);
+              })
+              .finally(() => {
+                coordinatorRun = null;
+              });
           },
           onCoordinatorStop: () => {
             autonomousCoordinator?.stop();
+          },
+          onCoordinatorTasks: async () => {
+            const coordinator = ensureAutonomousCoordinator();
+            if (!coordinator) return null;
+            await coordinator.graph.load();
+            return coordinator.auction
+              .getPendingTasks()
+              .map((task) => ({
+                id: task.id,
+                title: task.title,
+                priority: task.priority,
+                tags: task.tags,
+              }));
+          },
+          onCoordinatorClaim: async (taskId: string) => {
+            const coordinator = ensureAutonomousCoordinator();
+            if (!coordinator) return 'No coordinator is active.';
+            await coordinator.graph.load();
+            const goal = coordinator.graph.get(taskId) as
+              | import('@wrongstack/core').GoalNode
+              | undefined;
+            if (!goal || goal.type !== 'goal') {
+              return `Task ${taskId.slice(0, 8)} not found in the coordinator graph.`;
+            }
+            if (goal.status !== 'pending') {
+              return `Task ${taskId.slice(0, 8)} is ${goal.status}, not claimable.`;
+            }
+            const ok = await coordinator.auction.claim(
+              taskId,
+              `terminal@${context.session.id ?? 'unknown'}`,
+              'Terminal worker',
+            );
+            if (!ok) {
+              return `Task ${taskId.slice(0, 8)} could not be claimed (status changed?).`;
+            }
+            return { description: goal.description };
+          },
+          onCoordinatorComplete: async (taskId: string, result?: string) => {
+            const coordinator = ensureAutonomousCoordinator();
+            if (!coordinator) return 'No coordinator is active.';
+            await coordinator.graph.load();
+            const goal = coordinator.graph.get(taskId) as
+              | import('@wrongstack/core').GoalNode
+              | undefined;
+            if (!goal || goal.type !== 'goal') {
+              return `Task ${taskId.slice(0, 8)} not found in the coordinator graph.`;
+            }
+            if (goal.status !== 'in_progress') {
+              return `Task ${taskId.slice(0, 8)} is ${goal.status}, cannot complete.`;
+            }
+            await coordinator.reportTaskCompletion(taskId, result ?? 'Terminal worker completed the task');
+            return null;
+          },
+          onCoordinatorFail: async (taskId: string, error: string) => {
+            const coordinator = ensureAutonomousCoordinator();
+            if (!coordinator) return 'No coordinator is active.';
+            await coordinator.graph.load();
+            const goal = coordinator.graph.get(taskId) as
+              | import('@wrongstack/core').GoalNode
+              | undefined;
+            if (!goal || goal.type !== 'goal') {
+              return `Task ${taskId.slice(0, 8)} not found in the coordinator graph.`;
+            }
+            if (goal.status !== 'in_progress') {
+              return `Task ${taskId.slice(0, 8)} is ${goal.status}, cannot fail.`;
+            }
+            await coordinator.reportTaskFailure(taskId, error);
+            return null;
+          },
+          onCoordinatorStatus: async () => {
+            const coordinator = ensureAutonomousCoordinator();
+            if (!coordinator) return null;
+            await coordinator.syncFromGraph();
+            const stats = coordinator.getStats();
+            return {
+              goals: {
+                total: stats.goals.total,
+                done: stats.goals.done,
+                pending: stats.goals.pending,
+                failed: stats.goals.failed,
+              },
+              dag: {
+                running: stats.dag.running,
+                ready: stats.dag.ready,
+                done: stats.dag.done,
+                failed: stats.dag.failed,
+              },
+              auction: {
+                pending: stats.auction.pending,
+                inProgress: stats.auction.in_progress,
+              },
+            };
           },
           // /clear: signal the TUI to wipe entries and reset fleet/leader stats
           // AND bump the context chip version — so the display reflects a

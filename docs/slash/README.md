@@ -54,7 +54,7 @@ WrongStack's REPL supports core slash commands plus commands registered by built
 | `/statusline` | `packages/cli/src/slash-commands/statusline.ts` | Toggle TUI status bar items; `/sl` alias |
 | `/interrupt` | `packages/cli/src/slash-commands/interrupt.ts` | Abort the in-flight leader iteration |
 | `/brain` | `packages/cli/src/slash-commands/brain.ts` | View and configure Brain risk arbiter; `/brain ask <q>`, `/brain risk <level>` |
-| `/coordinator` | `packages/cli/src/slash-commands/coordinator.ts` | Start/stop the AutonomousCoordinator for multi-session goal tracking |
+| `/coordinator` | `packages/cli/src/slash-commands/coordinator.ts` | Start/stop the AutonomousCoordinator for multi-session goal tracking; see `docs/slash/coordinator.md` and `docs/autonomous-coordinator.md` |
 | `/review` | `packages/cli/src/slash-commands/review.ts` | Run a review pass (LLM-driven code review) |
 | `/mailbox` | `packages/cli/src/slash-commands/mailbox.ts` | Inter-agent mailbox inspection and messaging |
 | `/mailbox-demo` | `packages/cli/src/slash-commands/mailbox-demo.ts` | Demo mailbox routing for development |

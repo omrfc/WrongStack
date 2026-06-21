@@ -363,6 +363,7 @@ export class TaskAuctioneer {
     await this.graph.update(taskId, {
       status: 'done',
       updatedAt: new Date().toISOString(),
+      ...(_result !== undefined ? { result: _result } : {}),
     });
 
     this.bidRetryCounts.delete(taskId);

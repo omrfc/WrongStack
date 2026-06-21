@@ -145,6 +145,8 @@ export class AutonomousCoordinator {
 
   private running = false;
   private iterationCount = 0;
+  private lastSyncAt = 0;
+  private static readonly SYNC_INTERVAL_MS = 5_000;
   /** Tasks already handled by _onSubagentTerminated (to avoid double goal:failed on fleet event). */
   private readonly _handledBySubagent = new Set<string>();
   /** FleetBus subscription disposers, detached in dispose(). */
@@ -223,7 +225,7 @@ export class AutonomousCoordinator {
       const taskId = payload?.taskId;
       if (!taskId || this._handledBySubagent.has(taskId)) return;
       this._handledBySubagent.add(taskId);
-      this._emit({ type: 'goal:failed', goalId: taskId, text: payload?.error ?? 'Task failed' });
+      this._recordTaskFailed(taskId, payload?.error ?? 'Task failed');
     });
     if (offFailed) this.unsubs.push(offFailed);
 
@@ -250,6 +252,9 @@ export class AutonomousCoordinator {
       // Load persisted state (inside try so errors are caught)
       await this.graph.load();
 
+      // Rebuild volatile DAG state from persisted goals before adding new work.
+      this._rebuildDagFromGraph();
+
       // Phase 1: Decompose the goal into sub-goals
       const goalConfigs = await this._decomposeGoal(goal);
       for (const g of goalConfigs) {
@@ -265,7 +270,15 @@ export class AutonomousCoordinator {
 
       // Phase 2: Run the autonomous loop
       while (this.running) {
+        if (this.dag.getRunning().length > 0 && this.auction.getPendingTasks().length === 0) {
+          await this._waitForDagProgress(1_000);
+          continue;
+        }
+
         this.iterationCount++;
+
+        // Pick up goals/status changes published by other terminal sessions.
+        await this._maybeSyncFromGraph();
 
         // Check exit conditions
         if (this.iterationCount >= maxIterations) break;
@@ -275,17 +288,48 @@ export class AutonomousCoordinator {
         }
         if (opts.runUntilComplete && this.dag.isDone()) break;
 
+        const pendingTasks = this.auction.getPendingTasks();
+        // Filter out tasks that already have a running DAG node — they've been
+        // dispatched (to a Director subagent or published to the auction for
+        // terminal claiming). Re-processing them wastes a Brain call every
+        // iteration and risks duplicate subagent spawns.
+        const dispatchable = pendingTasks.filter((task) => {
+          const dagNode = this.dag.getNode(task.id);
+          return !dagNode || dagNode.status === 'ready';
+        });
+
+        if (dispatchable.length === 0) {
+          if (this.dag.getRunning().length > 0 || this.dag.getReady().length > 0) {
+            // Work is in flight or ready for a terminal to claim. Back off.
+            await this._waitForDagProgress(1_000);
+            continue;
+          }
+          // No running, no ready, but tasks are still pending in the auction —
+          // they're waiting for a terminal worker to claim them. Back off and
+          // let syncFromGraph pick up any cross-session changes.
+          if (pendingTasks.length > 0) {
+            await this._waitForDagProgress(2_000);
+            continue;
+          }
+          if (this.dag.hasDeadlock()) {
+            const blocked = this.dag.getBlocked();
+            (this.events?.emit as (type: string, payload: unknown) => void)('autonomous:deadlock', { blocked });
+            this._emit({ type: 'deadlock:detected', goalId: blocked[0]?.id ?? '', text: `Deadlock detected: ${blocked.map((n) => n.id).join(', ')}` });
+          }
+          break;
+        }
+
         // Decide: what to work on next?
         const decision = await this.brain.decideAuto({
           id: randomUUID(),
           source: 'system',
           decisionType: 'prioritize_goals',
-          question: `What should we work on next? Open goals: ${this.auction.getPendingTasks().map((g) => g.title).join(', ') || 'none'}`,
+          question: `What should we work on next? Open goals: ${dispatchable.map((g) => g.title).join(', ')}`,
           context: {
-            goals: this.auction.getPendingTasks(),
+            goals: dispatchable,
             fleetStatus: this._fleetStatus(),
           },
-          options: this._goalToOptions(this.auction.getPendingTasks()),
+          options: this._goalToOptions(dispatchable),
           risk: 'medium',
           requiresConsensus: false,
         });
@@ -342,6 +386,60 @@ export class AutonomousCoordinator {
     if (!this.running) return;
     this.running = false;
     console.error(`[AutonomousCoordinator] stop signal received — shutting down (iteration ${this.iterationCount})`);
+  }
+
+  /**
+   * Report that a terminal worker (not a Director subagent) completed a claimed
+   * task. This updates the auction, DAG, publishes a task-result fact, and
+   * extracts follow-up goals — the same path as subagent completion.
+   */
+  async reportTaskCompletion(taskId: string, result: string): Promise<void> {
+    this._handledBySubagent.add(taskId);
+    await this._completeTask(taskId, result);
+  }
+
+  /**
+   * Report that a terminal worker failed a claimed task.
+   */
+  async reportTaskFailure(taskId: string, error: string): Promise<void> {
+    this._handledBySubagent.add(taskId);
+    await this._failTask(taskId, error);
+  }
+
+  /**
+   * Reload the KnowledgeGraph from disk and sync the in-memory DAG with any
+   * changes published by other terminal sessions. New goals are added to the
+   * DAG; existing goals whose status changed (e.g. completed by another
+   * terminal) are transitioned accordingly.
+   *
+   * Safe to call at any time — also used internally by the run loop.
+   */
+  async syncFromGraph(): Promise<void> {
+    await this.graph.load();
+    this._rebuildDagFromGraph();
+    this._syncDagStatuses();
+  }
+
+  private _syncDagStatuses(): void {
+    const goals = this.graph.getGoals({});
+    for (const goal of goals) {
+      const dagNode = this.dag.getNode(goal.id);
+      if (!dagNode) continue;
+      if (goal.status === 'done' && dagNode.status !== 'done' && dagNode.status !== 'failed') {
+        this.dag.complete(goal.id, goal.result ?? 'Completed by another session');
+      } else if (goal.status === 'failed' && dagNode.status !== 'failed' && dagNode.status !== 'done') {
+        this.dag.fail(goal.id, goal.result ?? 'Failed by another session');
+      } else if (goal.status === 'in_progress' && (dagNode.status === 'ready' || dagNode.status === 'pending')) {
+        this.dag.start(goal.id, goal.assignee ?? 'another-session');
+      }
+    }
+  }
+
+  private async _maybeSyncFromGraph(): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastSyncAt < AutonomousCoordinator.SYNC_INTERVAL_MS) return;
+    this.lastSyncAt = now;
+    await this.syncFromGraph();
   }
 
   /**
@@ -474,6 +572,76 @@ export class AutonomousCoordinator {
 
   // ── Private ───────────────────────────────────────────────────────────
 
+  private _waitForDagProgress(timeoutMs: number): Promise<void> {
+    const before = this._dagProgressKey();
+    if (this.dag.isDone()) return Promise.resolve();
+
+    return new Promise((resolve) => {
+      let off: (() => void) | undefined;
+      const timer = setTimeout(() => {
+        off?.();
+        resolve();
+      }, timeoutMs);
+
+      off = this.dag.onEvent(() => {
+        if (this._dagProgressKey() === before) return;
+        clearTimeout(timer);
+        off?.();
+        resolve();
+      });
+    });
+  }
+
+  private _dagProgressKey(): string {
+    const s = this.dag.stats();
+    return `${s.pending}:${s.ready}:${s.running}:${s.done}:${s.failed}:${s.skipped}`;
+  }
+
+  private _rebuildDagFromGraph(): void {
+    const goals = this.graph.getGoals({});
+    const knownGoalIds = new Set(goals.map((goal) => goal.id));
+    const added = new Set<string>();
+    const remaining = new Map(goals.map((goal) => [goal.id, goal]));
+
+    while (remaining.size > 0) {
+      let progressed = false;
+      for (const [id, goal] of Array.from(remaining.entries())) {
+        const deps = goal.blockedBy.filter((depId) => knownGoalIds.has(depId));
+        if (!deps.every((depId) => added.has(depId))) continue;
+        this._rebuildDagNode(goal, deps);
+        added.add(id);
+        remaining.delete(id);
+        progressed = true;
+      }
+
+      if (!progressed) {
+        // Persisted graph has a cycle or dangling dependency set. Preserve the
+        // nodes without deps rather than throwing during coordinator startup;
+        // the normal deadlock detector will still surface blocked live work.
+        for (const [id, goal] of Array.from(remaining.entries())) {
+          this._rebuildDagNode(goal, []);
+          added.add(id);
+          remaining.delete(id);
+        }
+      }
+    }
+  }
+
+  private _rebuildDagNode(goal: GoalNode, deps: string[]): void {
+    this.dag.addNode(goal.id, goal.description, deps, { tags: goal.tags });
+    if (goal.status === 'in_progress') {
+      this.dag.start(goal.id, goal.assignee ?? 'unknown');
+      return;
+    }
+    if (goal.status === 'done') {
+      this.dag.complete(goal.id, goal.result ?? 'Persisted completion');
+      return;
+    }
+    if (goal.status === 'failed') {
+      this.dag.fail(goal.id, goal.result ?? 'Persisted failure');
+    }
+  }
+
   private async _decomposeGoal(goalText: string): Promise<{
     title: string;
     description: string;
@@ -531,19 +699,12 @@ export class AutonomousCoordinator {
 
     const title = goalNode.title || dagNode.description;
 
-    // Publish to the auction so the task is visible fleet-wide (other agents can bid)
-    const taskId = await this.auction.publishTask({
-      title,
-      description: goalNode.description,
-      priority: this._dagPriorityToGoal(dagNode.priority),
-      tags: dagNode.tags,
-    });
-
-    this._emit({ type: 'task:ready', goalId, taskId, title });
+    this._emit({ type: 'task:ready', goalId, taskId: goalId, title });
 
     // Spawn a subagent to work on this goal — the director handles lifecycle
     // (spawn → assign → listen for subagent.completed → mark done/failed).
-    // If no director is available, fall back to fleet-based claim mechanism.
+    // If no director is available, the original auctioned goal remains visible
+    // for other fleet agents to bid on.
     if (this.director) {
       const config: SubagentConfig = {
         name: `worker-${goalId.slice(0, 8)}`,
@@ -552,11 +713,10 @@ export class AutonomousCoordinator {
         timeoutMs: 600_000, // 10 minutes per goal
       };
       const subagentId = await this.director.spawn(config);
-      // Record the subagent as the published task's assignee. Without this the
-      // GoalNode.assignee stays undefined, so when the subagent terminates
-      // _onSubagentTerminated → getTasksForAgent(subagentId) returns [] and the
-      // completion/failure is never recorded against the task.
-      await this.auction.claim(taskId, subagentId, config.name);
+      // Claim the original goal task. Publishing a second task here splits the
+      // task id from the DAG goal id and completion events can update the wrong
+      // record; the decomposed goal is already in the auction from run()/createGoal().
+      await this.auction.claim(goalId, subagentId, config.name);
       await this.director.assign({
         id: goalId,
         subagentId,
@@ -564,8 +724,88 @@ export class AutonomousCoordinator {
       });
     }
     // When director is absent (standalone, no fleet), another agent in the
-    // fleet will pick up the published task via the auctioneer — no wait
-    // polling needed here; completion is reported via the fleet bus.
+    // fleet will pick up the original published task via the auctioneer — no
+    // wait polling needed here; completion is reported via the fleet bus.
+  }
+
+  private _stringifyTaskResult(result: unknown): string {
+    if (typeof result === 'string' && result.trim()) return result.trim();
+    if (result === undefined || result === null) return 'Subagent completed successfully';
+    try {
+      return JSON.stringify(result);
+    } catch {
+      return String(result);
+    }
+  }
+
+  private async _completeTask(taskId: string, result: string): Promise<void> {
+    await this.auction.complete(taskId, result);
+    if (this.dag.getNode(taskId)) {
+      this.dag.complete(taskId, result);
+    }
+    await this._publishTaskResultFact(taskId, result);
+    await this._createFollowUpGoalsFromResult(taskId, result);
+    this._emit({ type: 'task:completed', goalId: taskId, taskId, text: result });
+  }
+
+  private async _publishTaskResultFact(taskId: string, result: string): Promise<void> {
+    const key = `task-result:${taskId}`;
+    if (this.graph.getFacts({ category: 'quality' }).some((fact) => fact.key === key)) return;
+    const goal = this.graph.get(taskId) as GoalNode | undefined;
+    const subject = goal?.type === 'goal' ? `Task completed: ${goal.title}` : `Task completed: ${taskId}`;
+    const fact = await this.graph.add({
+      type: 'fact',
+      category: 'quality',
+      subject,
+      detail: result,
+      discoveredBy: this.selfAgentId,
+      discoveredAt: new Date().toISOString(),
+      tags: ['task-result', 'autonomous-coordinator'],
+      key,
+      related: [taskId],
+    } as Omit<FactNode, 'id'>) as FactNode;
+    this._emit({ type: 'knowledge:added', knowledgeId: fact.id, title: subject, text: result });
+  }
+
+  private async _createFollowUpGoalsFromResult(taskId: string, result: string): Promise<void> {
+    const followUps = this._extractFollowUps(result);
+    if (followUps.length === 0) return;
+
+    const existing = this.graph.getGoals({});
+    for (const title of followUps) {
+      if (existing.some((goal) => goal.title === title && goal.tags.includes('follow-up'))) continue;
+      const goal = await this.createGoal({
+        title,
+        description: title,
+        priority: 'medium',
+        tags: ['follow-up', 'task-result', taskId],
+      });
+      this._emit({ type: 'goal:added', goalId: goal.id, title: goal.title, text: goal.description });
+    }
+  }
+
+  private _extractFollowUps(result: string): string[] {
+    const found: string[] = [];
+    for (const line of result.split(/\r?\n/)) {
+      const match = /^\s*(?:[-*]\s*)?(?:NEXT|TODO|FOLLOW-?UP):\s*(.+)$/i.exec(line);
+      const text = match?.[1]?.trim();
+      if (!text || found.includes(text)) continue;
+      found.push(text);
+      if (found.length >= 5) break;
+    }
+    return found;
+  }
+
+  private async _failTask(taskId: string, error: string): Promise<void> {
+    await this.auction.fail(taskId, error);
+    this._recordTaskFailed(taskId, error);
+  }
+
+  private _recordTaskFailed(taskId: string, error: string): void {
+    if (this.dag.getNode(taskId)) {
+      this.dag.fail(taskId, error);
+    }
+    this._emit({ type: 'goal:failed', goalId: taskId, text: error });
   }
 
   private async _handlePendingChange(change: { id: string; qualityGate: { passed: boolean; checks: QualityCheck[] } }): Promise<void> {
@@ -611,22 +851,27 @@ export class AutonomousCoordinator {
     const payload = e.payload as {
       subagentId?: string;
       stopReason?: string;
-      status?: 'ok' | 'error' | 'timeout' | 'aborted';
+      status?: 'ok' | 'success' | 'error' | 'timeout' | 'aborted' | 'failed' | 'stopped';
       taskId?: string;
+      result?: unknown;
     } | undefined;
     const subagentId = payload?.subagentId ?? e.subagentId;
-    // 'stopReason' is from the old format; 'status' is from 'subagent.completed'
-    const stopReason = payload?.stopReason ?? (payload?.status === 'ok' ? 'end_turn' : (payload?.status ?? 'unknown'));
-    const tasks = this.auction.getTasksForAgent(subagentId);
+    // 'stopReason' is from the old format; 'status' is from 'subagent.completed'.
+    // MultiAgentCoordinator emits status='success' for a clean finish; older
+    // coordinator integrations used 'ok' or stopReason='end_turn'. Treat all
+    // clean variants as success so successful subagents do not fail their goal.
+    const rawStatus = payload?.stopReason ?? payload?.status ?? 'unknown';
+    const succeeded = rawStatus === 'end_turn' || rawStatus === 'ok' || rawStatus === 'success';
+    const tasks = payload?.taskId
+      ? this.auction.getTasksForAgent(subagentId).filter((task) => task.id === payload.taskId)
+      : this.auction.getTasksForAgent(subagentId);
 
     for (const task of tasks) {
       this._handledBySubagent.add(task.id); // prevent double-emission when fleet fires task:failed
-      if (stopReason === 'end_turn') {
-        void this.auction.complete(task.id, 'Subagent completed successfully');
-        this._emit({ type: 'task:completed', goalId: task.id, taskId: task.id, text: 'Subagent completed successfully' });
+      if (succeeded) {
+        void this._completeTask(task.id, this._stringifyTaskResult(payload?.result));
       } else {
-        void this.auction.fail(task.id, `Subagent terminated: ${stopReason}`);
-        this._emit({ type: 'goal:failed', goalId: task.id, text: `Subagent terminated: ${stopReason}` });
+        void this._failTask(task.id, `Subagent terminated: ${rawStatus}`);
       }
     }
   }
@@ -666,12 +911,6 @@ export class AutonomousCoordinator {
     return this.graph.get(optionId) as GoalNode | undefined;
   }
 
-  private _dagPriorityToGoal(p: number): 'critical' | 'high' | 'medium' | 'low' {
-    if (p <= 1) return 'critical';
-    if (p <= 2) return 'high';
-    if (p <= 4) return 'medium';
-    return 'low';
-  }
 
   private async _mailboxBroadcast(msg: { type: 'note' | 'broadcast'; subject: string; body: string }): Promise<void> {
     if (!this.mailbox) return;

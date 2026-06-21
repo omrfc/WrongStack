@@ -1066,6 +1066,7 @@ export class DefaultMultiAgentCoordinator extends EventEmitter implements MultiA
         subagentId: result.subagentId,
         taskId: result.taskId,
         status: result.status,
+        result: result.result,
         iterations: result.iterations,
         toolCalls: result.toolCalls,
         durationMs: result.durationMs,

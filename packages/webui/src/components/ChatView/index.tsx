@@ -621,8 +621,10 @@ export function ChatView() {
           </button>
         )}
         {rows.length === 0 && !isLoading ? (
-          <div className="mx-auto max-w-5xl w-full px-4 pt-4">
-            <WelcomeScreen />
+          <div className="h-full overflow-y-auto overscroll-contain">
+            <div className="mx-auto max-w-5xl w-full px-4 pt-4 pb-8">
+              <WelcomeScreen />
+            </div>
           </div>
         ) : (
           <VList ref={vlistRef} className="h-full" onScroll={handleScroll}>

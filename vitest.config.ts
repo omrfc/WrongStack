@@ -67,6 +67,10 @@ export default defineConfig({
         //   cd packages/webui && pnpm test
         // or: pnpm --filter webui test
         'packages/webui/**',
+        // hq-dashboard.test.ts requires jsdom environment which the root
+        // forks pool may fail to resolve from the global vitest binary.
+        // Run it separately: cd packages/cli && npx vitest run tests/hq-dashboard.test.ts
+        'packages/cli/tests/hq-dashboard.test.ts',
       ],
     coverage: {
       provider: 'v8',

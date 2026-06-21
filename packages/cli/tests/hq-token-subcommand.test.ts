@@ -178,7 +178,7 @@ describe('wstack hq — token revoke', () => {
     const code = await hqCmd(['token', 'revoke', 'nonexistent-id'], deps);
     expect(code).toBe(1);
     const err = (deps.renderer as unknown as { captured: CapturedRenderer }).captured.err.join('');
-    expect(err).toContain('No token found');
+    expect(err).toContain('No browser token found');
   });
 
   it('exits 1 with usage when revoke has no id argument', async () => {
