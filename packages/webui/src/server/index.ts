@@ -35,6 +35,31 @@ import {
   handleFilesWrite,
   handleFilesList,
 } from './file-handlers.js';
+import { resolveWorkingDirInsideProject } from './path-containment.js';
+import {
+  validateMailboxAgentsPayload,
+  validateMailboxMessagesPayload,
+  validateMailboxPurgePayload,
+  validateModeSwitchPayload,
+  validateModelSwitchPayload,
+  validatePrefsUpdatePayload,
+  validatePlanTemplateUsePayload,
+  validateProcessKillPayload,
+  validateProjectsAddPayload,
+  validateProjectsSelectPayload,
+  validateShellOpenPayload,
+  validateGitDiffPayload,
+  validateAutonomySwitchPayload,
+  validateBrainAskPayload,
+  validateBrainRiskPayload,
+  validateContextModeCreatePayload,
+  validateContextModeDeletePayload,
+  validateContextModeSwitchPayload,
+  validateContextModeUpdatePayload,
+  validateSkillsCreatePayload,
+  validateSkillsEditPayload,
+  validateWorkingDirSetPayload,
+} from './ws-payload-validation.js';
 import {
   handleMemoryList,
   handleMemoryRemember,
@@ -111,6 +136,14 @@ import { findFreePort } from './port-utils.js';
 import { openBrowser } from './open-browser.js';
 import { computeUsageCost, getCostRates } from './usage-cost.js';
 import { createProviderHandlers } from './provider-handlers.js';
+import { handleProviderRoute, type ProviderRouteHandlers } from './provider-routes.js';
+import { handleSessionRoute, type SessionRouteHandlers } from './session-routes.js';
+import { handleProjectRoute, type ProjectRouteHandlers } from './project-routes.js';
+import { handleModeRoute, type ModeRouteHandlers } from './mode-routes.js';
+import { handleShellGitRoute, type ShellGitRouteHandlers } from './shell-git-routes.js';
+import { handleMailboxRoute, type MailboxRouteHandlers } from './mailbox-routes.js';
+import { handleBrainRoute, type BrainRouteHandlers } from './brain-routes.js';
+import { handleAutoPhaseRoute, type AutoPhaseRouteHandlers } from './autophase-routes.js';
 import { setupEvents, type FileWatcherMetrics } from './setup-events.js';
 import { createCustomModeStore } from './custom-context-modes.js';
 import { maskedKey, normalizeKeys } from './provider-keys.js';
@@ -351,6 +384,48 @@ export async function startWebUI(
   // Serialize concurrent config writes to prevent races between model.switch
   // and key.add/key.update handlers that both read-modify-write globalConfigPath.
   let configWriteLock: Promise<void> = Promise.resolve();
+
+  /**
+   * Unified global config mutation: read → decrypt → mutate → encrypt → write.
+   * All config writes MUST go through this helper so encryption is always
+   * preserved and writes are serialized behind configWriteLock.
+   * The `mutate` callback receives the decrypted config and mutates it in place.
+   * Failures log but never break the caller (non-poisoning lock).
+   */
+  const updateGlobalConfig = async (
+    mutate: (config: Record<string, unknown>) => void,
+    errorLabel: string,
+  ): Promise<void> => {
+    const write = async (): Promise<void> => {
+      let raw: string;
+      try {
+        raw = await fs.readFile(globalConfigPath, 'utf8');
+      } catch {
+        raw = '{}';
+      }
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        logger.warn(`${errorLabel}: refusing to overwrite corrupt config at ${globalConfigPath}`);
+        return;
+      }
+      const decrypted = decryptConfigSecrets(parsed, vault) as Record<string, unknown>;
+      mutate(decrypted);
+      const encrypted = encryptConfigSecrets(decrypted, vault);
+      await atomicWrite(globalConfigPath, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
+    };
+    const next = configWriteLock.then(write);
+    configWriteLock = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    try {
+      await next;
+    } catch (err) {
+      logger.warn(`${errorLabel}: failed to persist to config: ${errMessage(err)}`);
+    }
+  };
 
   console.log('[WebUI] Config loaded:', config.provider ?? '(none)', '/', config.model ?? '(none)');
 
@@ -769,23 +844,7 @@ export async function startWebUI(
    * provider/key handlers); failures log but never break the WS reply.
    */
   const persistPrefsToConfig = async (payload: Record<string, unknown>): Promise<void> => {
-    const write = async (): Promise<void> => {
-      let raw: string;
-      try {
-        raw = await fs.readFile(globalConfigPath, 'utf8');
-      } catch {
-        raw = '{}';
-      }
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(raw) as Record<string, unknown>;
-      } catch {
-        // Refuse to overwrite a corrupt-but-existing config.
-        logger.warn(`prefs: refusing to overwrite corrupt config at ${globalConfigPath}`);
-        return;
-      }
-      const decrypted = decryptConfigSecrets(parsed, vault) as Record<string, unknown>;
-
+    await updateGlobalConfig((decrypted) => {
       const autonomyCfg = (decrypted.autonomy as Record<string, unknown>) ?? {};
       let autonomyTouched = false;
       const setAutonomy = (key: string, val: unknown): void => {
@@ -853,8 +912,6 @@ export async function startWebUI(
         decrypted.tools = toolsCfg;
       }
 
-      // Telegram plugin notification settings → extensions.telegram
-      // (same path the CLI's /telegram-settings writes).
       const tgTouched =
         typeof payload['tgSessionEnd'] === 'boolean' ||
         typeof payload['tgDelegate'] === 'boolean' ||
@@ -874,20 +931,7 @@ export async function startWebUI(
         ext['telegram'] = tg;
         decrypted.extensions = ext;
       }
-
-      const encrypted = encryptConfigSecrets(decrypted, vault);
-      await atomicWrite(globalConfigPath, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
-    };
-    const next = configWriteLock.then(write);
-    configWriteLock = next.then(
-      () => undefined,
-      () => undefined,
-    );
-    try {
-      await next;
-    } catch (err) {
-      logger.warn(`prefs: failed to persist to config: ${errMessage(err)}`);
-    }
+    }, 'prefs');
   };
 
   // Pipelines
@@ -1593,11 +1637,42 @@ export async function startWebUI(
     return dir;
   }
 
+  function makeWorklistContext(): WorklistContext {
+    return {
+      context: {
+        todos: context.todos,
+        meta: context.meta as Record<string, unknown>,
+        session: context.session ? { id: context.session.id } : null,
+        state: context.state,
+      },
+      send: (w, m) => send(w, m),
+      broadcast: (m) => broadcast(clients, m),
+    };
+  }
+
+  let providerRoutes: ProviderRouteHandlers;
+  let sessionRoutes: SessionRouteHandlers;
+  let projectRoutes: ProjectRouteHandlers;
+  let modeRoutes: ModeRouteHandlers;
+  let shellGitRoutes: ShellGitRouteHandlers;
+  let mailboxRoutes: MailboxRouteHandlers;
+  let brainRoutes: BrainRouteHandlers;
+  let autoPhaseRoutes: AutoPhaseRouteHandlers;
+
   async function handleMessage(
     ws: WebSocket,
     _client: ConnectedClient,
     msg: WSClientMessage,
   ): Promise<void> {
+    if (await handleProviderRoute(ws, msg, providerRoutes)) return;
+    if (await handleSessionRoute(ws, msg, sessionRoutes)) return;
+    if (await handleProjectRoute(ws, msg, projectRoutes)) return;
+    if (await handleModeRoute(ws, msg, modeRoutes)) return;
+    if (await handleShellGitRoute(ws, msg, shellGitRoutes)) return;
+    if (await handleMailboxRoute(ws, msg, mailboxRoutes)) return;
+    if (await handleBrainRoute(ws, msg, brainRoutes)) return;
+    if (await handleAutoPhaseRoute(ws, msg, autoPhaseRoutes)) return;
+
     switch (msg.type) {
       // Collaboration messages short-circuit the user/agent flow.
       // They don't touch runLock, the agent loop, or the message queue —
@@ -1696,600 +1771,6 @@ export async function startWebUI(
       case 'ping':
         send(ws, { type: 'pong', payload: {} });
         break;
-
-      case 'session.new': {
-        // Truly fresh chat: new on-disk session AND reset every piece of
-        // in-memory state that survived (messages history, todos, read-file
-        // tracking, token totals). Otherwise the model still sees the prior
-        // turns even though the UI looks empty — that's the "ghost context"
-        // bug. After this, the next user message goes out as turn 1 with no
-        // prior history.
-        //
-        // Finalize the writer we are leaving (session_end + close) — same
-        // pattern as projects.select/shutdown. Without it the old JSONL
-        // never ends cleanly, the summary sidecar/index entry are never
-        // written, and the file handle leaks for the daemon's lifetime.
-        try {
-          await session.append({
-            type: 'session_end',
-            ts: new Date().toISOString(),
-            usage: tokenCounter.total(),
-          });
-          await session.close();
-        } catch {
-          // best-effort
-        }
-        session = await sessionStore.create({
-          id: '',
-          title: '',
-          model: config.model,
-          provider: config.provider,
-        });
-        context.session = session;
-        context.state.replaceMessages([]);
-        context.state.replaceTodos([]);
-        context.readFiles.clear();
-        context.fileMtimes.clear();
-        tokenCounter.reset();
-        sessionStartedAt = Date.now();
-        broadcast(clients, { type: 'session.start', payload: await sessionStartPayload() });
-        break;
-      }
-
-      case 'context.clear': {
-        // Same in-memory wipe as session.new, but reuses the current session
-        // file (so the JSONL still has the history for audit / replay). The
-        // user wants a clean slate on the model side; the disk record stays.
-        context.state.replaceMessages([]);
-        context.state.replaceTodos([]);
-        context.readFiles.clear();
-        context.fileMtimes.clear();
-        tokenCounter.reset();
-        sendResult(ws, true, 'Context cleared');
-        broadcast(clients, {
-          type: 'session.start',
-          payload: { ...(await sessionStartPayload()), reset: true },
-        });
-        break;
-      }
-
-      case 'context.debug': {
-        // Per-section token estimate so users can see what's actually eating
-        // the context window. The breakdown maths lives in ./token-estimator.ts
-        // (4-chars-per-token heuristic); we layer the active mode/policy on top.
-        const breakdown = estimateContextBreakdown({
-          systemPrompt: context.systemPrompt,
-          tools: toolRegistry.list(),
-          messages: context.messages,
-        });
-        send(ws, {
-          type: 'context.debug',
-          payload: {
-            ...breakdown,
-            mode: context.meta['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID,
-            policy: context.meta['contextWindowPolicy'],
-          },
-        });
-        break;
-      }
-
-      case 'context.compact': {
-        const aggressive = !!(msg as { payload?: { aggressive?: boolean | undefined } }).payload
-          ?.aggressive;
-        try {
-          const report = await compactor.compact(context, { aggressive });
-          send(ws, {
-            type: 'context.compacted',
-            payload: {
-              before: report.before,
-              after: report.after,
-              saved: Math.max(0, report.before - report.after),
-              reductions: report.reductions,
-              repaired: report.repaired,
-            },
-          });
-          sendResult(
-            ws,
-            true,
-            `Compacted: ${report.before} → ${report.after} tokens (saved ~${Math.max(0, report.before - report.after)})`,
-          );
-        } catch (err) {
-          sendResult(ws, false, errMessage(err));
-        }
-        break;
-      }
-
-      case 'context.repair': {
-        const beforeMessages = context.messages.length;
-        const repaired = repairToolUseAdjacency(context.messages);
-        if (repaired.report.changed) {
-          context.state.replaceMessages(repaired.messages);
-        }
-        const payload = {
-          removedToolUses: repaired.report.removedToolUses,
-          removedToolResults: repaired.report.removedToolResults,
-          removedMessages: repaired.report.removedMessages,
-          beforeMessages,
-          afterMessages: context.messages.length,
-        };
-        broadcast(clients, { type: 'context.repaired', payload });
-        const removed =
-          payload.removedToolUses.length +
-          payload.removedToolResults.length +
-          payload.removedMessages;
-        sendResult(
-          ws,
-          true,
-          removed > 0
-            ? `Context repaired: removed ${removed} orphan protocol item(s)`
-            : 'Context repair found no orphan protocol blocks',
-        );
-        break;
-      }
-
-      case 'context.modes.list': {
-        const active = String(context.meta['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID);
-        const allModes = customModeStore.list().map((m) => ({
-          id: m.id,
-          name: m.name,
-          description: m.description,
-          isActive: m.id === active,
-          thresholds: m.thresholds,
-          preserveK: m.preserveK,
-          eliseThreshold: m.eliseThreshold,
-          custom: (m as { custom?: boolean }).custom === true,
-        }));
-        send(ws, {
-          type: 'context.modes.list',
-          payload: { activeId: active, modes: allModes },
-        });
-        break;
-      }
-
-      case 'context.mode.switch': {
-        const { id } = (msg as { payload: { id: string } }).payload;
-        // Try built-in first, then custom
-        let policy = resolveContextWindowPolicy({}, id);
-        if (policy.id !== id) {
-          // Check custom modes
-          const customModes = customModeStore.list().filter(
-            (m) => (m as { custom?: boolean }).custom === true,
-          );
-          const custom = customModes.find((m) => m.id === id);
-          if (!custom) {
-            sendResult(ws, false, `Unknown context mode "${id}"`);
-            break;
-          }
-          // Create a policy from the custom mode
-          policy = custom as unknown as typeof policy;
-        }
-        context.meta['contextWindowMode'] = policy.id;
-        context.meta['contextWindowPolicy'] = policy;
-        sendResult(ws, true, `Context mode switched to ${policy.id}`);
-        broadcast(clients, {
-          type: 'context.mode.changed',
-          payload: { id: policy.id, name: policy.name, policy },
-        });
-        break;
-      }
-
-      case 'context.mode.create': {
-        const payload = (msg as { payload: { id: string; name: string; description: string; thresholds: { warn: number; soft: number; hard: number }; preserveK: number; eliseThreshold: number } }).payload;
-        const result = customModeStore.create({
-          id: payload.id,
-          name: payload.name,
-          description: payload.description,
-          thresholds: payload.thresholds,
-          preserveK: payload.preserveK,
-          eliseThreshold: payload.eliseThreshold,
-          custom: true,
-          aggressiveOn: 'soft',
-          targetLoad: 0.65,
-        });
-        sendResult(ws, result.ok, result.error ?? `Mode "${payload.id}" created`);
-        break;
-      }
-
-      case 'context.mode.update': {
-        const payload = (msg as { payload: { id: string; name?: string | undefined; description?: string | undefined; thresholds?: { warn?: number | undefined; soft?: number | undefined; hard?: number | undefined } | undefined; preserveK?: number | undefined; eliseThreshold?: number | undefined } }).payload;
-        const result = customModeStore.update(payload.id, {
-          name: payload.name,
-          description: payload.description,
-          thresholds: payload.thresholds ? {
-            warn: payload.thresholds.warn ?? 0.6,
-            soft: payload.thresholds.soft ?? 0.75,
-            hard: payload.thresholds.hard ?? 0.9,
-          } : undefined,
-          preserveK: payload.preserveK,
-          eliseThreshold: payload.eliseThreshold,
-        });
-        sendResult(ws, result.ok, result.error ?? `Mode "${payload.id}" updated`);
-        break;
-      }
-
-      case 'context.mode.delete': {
-        const { id } = (msg as { payload: { id: string } }).payload;
-        // If the active mode is being deleted, reset to default
-        if (String(context.meta['contextWindowMode'] ?? '') === id) {
-          context.meta['contextWindowMode'] = DEFAULT_CONTEXT_WINDOW_MODE_ID;
-          context.meta['contextWindowPolicy'] = resolveContextWindowPolicy({}, DEFAULT_CONTEXT_WINDOW_MODE_ID);
-        }
-        const result = customModeStore.remove(id);
-        sendResult(ws, result.ok, result.error ?? `Mode "${id}" deleted`);
-        break;
-      }
-
-      case 'providers.list': {
-        const providers = await modelsRegistry.listProviders();
-        // "Configured" should mean *any* working credential, not just env vars.
-        // Users register keys with `wstack auth`, which writes apiKey/apiKeys
-        // into config.providers[<id>] — those are decrypted in memory here.
-        const savedIds = new Set(Object.keys(config.providers ?? {}));
-        send(ws, {
-          type: 'provider.catalog',
-          payload: {
-            providers: providers.map((p) => ({
-              id: p.id,
-              name: p.name,
-              family: p.family,
-              apiBase: p.apiBase,
-              envVars: p.envVars,
-              modelCount: p.models.length,
-              hasApiKey: savedIds.has(p.id) || p.envVars.some((v) => !!process.env[v]),
-            })),
-          },
-        });
-        break;
-      }
-
-      case 'providers.saved': {
-        const saved = await providerHandlers.loadConfigProviders();
-        send(ws, {
-          type: 'providers.saved',
-          payload: {
-            providers: Object.entries(saved).map(([id, cfg]) => {
-              const keys = normalizeKeys(cfg);
-              return {
-                id,
-                family: cfg.family ?? id,
-                baseUrl: cfg.baseUrl,
-                apiKeys: keys.map((k) => ({
-                  label: k.label,
-                  maskedKey: maskedKey(k.apiKey),
-                  isActive: k.label === cfg.activeKey,
-                  createdAt: k.createdAt,
-                })),
-              };
-            }),
-          },
-        });
-        break;
-      }
-
-      case 'provider.models': {
-        const providerId = (msg as { payload: { providerId: string } }).payload.providerId;
-        // Merge catalog + saved config so OAuth / subscription providers
-        // (github-copilot, anthropic-oauth, openai-codex, …) that models.dev
-        // doesn't list still resolve to their saved model allowlist. Always
-        // reply (possibly empty) — the switcher lazy-loads every saved provider.
-        const saved = await providerHandlers.loadConfigProviders();
-        const cfg = saved[providerId];
-        const catalogId = cfg?.type && cfg.type !== providerId ? cfg.type : providerId;
-        const provider = await modelsRegistry.getProvider(catalogId);
-        send(ws, {
-          type: 'provider.models',
-          payload: {
-            provider: providerId,
-            models: resolveProviderModelList(cfg?.models, provider),
-          },
-        });
-        break;
-      }
-
-      case 'model.switch': {
-        const { provider: newProvider, model: newModel } = (
-          msg as { payload: { provider: string; model: string } }
-        ).payload;
-        try {
-          // Update config
-          config = patchConfig(config, { provider: newProvider, model: newModel });
-          configStore.update({ provider: newProvider, model: newModel });
-          context.model = newModel;
-
-          // Create new provider instance — fail loudly if the user picks a
-          // provider with no creds rather than silently keeping the old one.
-          const providerCfg = config.providers?.[newProvider] ?? { type: newProvider };
-          const newProv = providerRegistry.has(newProvider)
-            ? providerRegistry.create({ ...providerCfg, type: newProvider })
-            : makeProviderFromConfig(newProvider, providerCfg);
-          context.provider = newProv;
-
-          // Update AutoCompactionMiddleware with the new model's maxContext so
-          // backend threshold triggers (warn/soft/hard) use the correct denominator.
-          // sessionStartPayload is called below (after this block) and uses
-          // the new provider for its modelsRegistry lookup.
-          updateAutoCompactionMaxContext?.(newProv);
-
-          // Persist to global config file.
-          // Mirror persistPrefsToConfig's non-poisoning lock pattern: chain the
-          // write onto the shared lock, but reset the lock to a NON-rejecting
-          // promise so a failed write here cannot surface as an unrelated
-          // handler's rejection the next time someone awaits configWriteLock.
-          try {
-            const next = configWriteLock.then(async () => {
-              const raw = await fs.readFile(globalConfigPath, 'utf8');
-              const parsed = JSON.parse(raw);
-              parsed.provider = newProvider;
-              parsed.model = newModel;
-              await atomicWrite(globalConfigPath, JSON.stringify(parsed, null, 2));
-            });
-            configWriteLock = next.then(() => undefined, () => undefined);
-            await next;
-          } catch (err) {
-            console.warn(JSON.stringify({
-              level: 'warn',
-              event: 'webui.config_save_failed',
-              message: toErrorMessage(err),
-              timestamp: new Date().toISOString(),
-            }));
-          }
-
-          // Toast for the SettingsPanel
-          send(ws, {
-            type: 'key.operation_result',
-            payload: { success: true, message: `Switched to ${newProvider} / ${newModel}` },
-          });
-        } catch (err) {
-          send(ws, {
-            type: 'key.operation_result',
-            payload: {
-              success: false,
-              message: `Switch failed: ${errMessage(err)}`,
-            },
-          });
-          break;
-        }
-
-        broadcast(clients, { type: 'session.start', payload: await sessionStartPayload() });
-        break;
-      }
-
-      case 'model.refine': {
-        const { text } = (msg as { payload: { text: string } }).payload;
-        if (!text?.trim()) {
-          send(ws, {
-            type: 'model.refine_result',
-            payload: { refined: '', english: '', error: 'Empty text' },
-          });
-          break;
-        }
-        try {
-          const history = recentTextTurns(context.messages);
-          const result = await enhanceUserPrompt({
-            provider: context.provider,
-            model: context.model,
-            text,
-            history,
-            timeoutMs: 90000,
-            onError: (reason) => {
-              console.warn(JSON.stringify({
-                level: 'warn',
-                event: 'model.refine_failed',
-                reason,
-                timestamp: new Date().toISOString(),
-              }));
-            },
-          });
-          if (result) {
-            send(ws, {
-              type: 'model.refine_result',
-              payload: { refined: result.refined, english: result.english },
-            });
-          } else {
-            send(ws, {
-              type: 'model.refine_result',
-              payload: { refined: text, english: text, error: 'Refinement returned no result' },
-            });
-          }
-        } catch (err) {
-          console.error(JSON.stringify({
-            level: 'error',
-            event: 'model.refine.error',
-            error: errMessage(err),
-            timestamp: new Date().toISOString(),
-          }));
-          send(ws, {
-            type: 'model.refine_result',
-            payload: { refined: text, english: text, error: errMessage(err) },
-          });
-        }
-        break;
-      }
-
-      case 'key.add':
-      case 'key.update': {
-        const { providerId, label, apiKey } = (
-          msg as { payload: { providerId: string; label: string; apiKey: string } }
-        ).payload;
-        await providerHandlers.handleKeyUpsert(ws, providerId, label, apiKey);
-        break;
-      }
-
-      case 'key.delete': {
-        const { providerId, label } = (msg as { payload: { providerId: string; label: string } })
-          .payload;
-        await providerHandlers.handleKeyDelete(ws, providerId, label);
-        break;
-      }
-
-      case 'key.set_active': {
-        const { providerId, label } = (msg as { payload: { providerId: string; label: string } })
-          .payload;
-        await providerHandlers.handleKeySetActive(ws, providerId, label);
-        break;
-      }
-
-      case 'provider.add': {
-        const p = (
-          msg as {
-            payload: {
-              id: string;
-              family: string;
-              baseUrl?: string | undefined;
-              apiKey?: string | undefined;
-            };
-          }
-        ).payload;
-        await providerHandlers.handleProviderAdd(ws, p);
-        break;
-      }
-
-      case 'provider.remove': {
-        const { providerId } = (msg as { payload: { providerId: string } }).payload;
-        await providerHandlers.handleProviderRemove(ws, providerId);
-        break;
-      }
-
-      case 'provider.clear_models': {
-        const { providerId } = (msg as { payload: { providerId: string } }).payload;
-        await providerHandlers.handleProviderClearModels(ws, providerId);
-        break;
-      }
-
-      case 'provider.undo_clear': {
-        const { providerId, previousModels } = (
-          msg as { payload: { providerId: string; previousModels: string[] } }
-        ).payload;
-        await providerHandlers.handleProviderUndoClear(ws, providerId, previousModels);
-        break;
-      }
-
-      case 'provider.update': {
-        const p = (
-          msg as {
-            payload: {
-              id: string;
-              family?: string | undefined;
-              baseUrl?: string | undefined;
-              envVars?: string[] | undefined;
-              models?: string[] | undefined;
-            };
-          }
-        ).payload;
-        await providerHandlers.handleProviderUpdate(ws, p);
-        break;
-      }
-
-      case 'provider.probe': {
-        const { providerId, timeoutMs } = (
-          msg as { payload: { providerId: string; timeoutMs?: number | undefined } }
-        ).payload;
-        await providerHandlers.handleProviderProbe(ws, providerId, timeoutMs);
-        break;
-      }
-
-      case 'sessions.list': {
-        // Per-project history. Sessions live under .wrongstack/sessions/ for
-        // this project; we never enumerate cross-project state.
-        const limit = (msg as { payload?: { limit?: number | undefined } }).payload?.limit ?? 50;
-        try {
-          const list = await sessionStore.list(limit);
-          send(ws, {
-            type: 'sessions.list',
-            payload: {
-              sessions: list.map((s) => ({
-                id: s.id,
-                title: s.title,
-                startedAt: s.startedAt,
-                model: s.model,
-                provider: s.provider,
-                tokenTotal: s.tokenTotal,
-                isCurrent: s.id === session.id,
-              })),
-            },
-          });
-        } catch (err) {
-          send(ws, {
-            type: 'sessions.list',
-            payload: { sessions: [], error: errMessage(err) },
-          });
-        }
-        break;
-      }
-
-      case 'session.delete': {
-        const { id } = (msg as { payload: { id: string } }).payload;
-        try {
-          if (id === session.id) {
-            sendResult(ws, false, 'Cannot delete the active session');
-            break;
-          }
-          await sessionStore.delete(id);
-          sendResult(ws, true, `Session ${id} deleted`);
-        } catch (err) {
-          sendResult(ws, false, errMessage(err));
-        }
-        break;
-      }
-
-      case 'session.resume': {
-        // Load a past session's messages + usage, swap the active session
-        // writer, hydrate the live Context, then broadcast a session.start
-        // payload tagged with the replayed transcript so the UI can render
-        // the chat history.
-        const { id } = (msg as { payload: { id: string } }).payload;
-        try {
-          if (id === session.id) {
-            sendResult(ws, false, 'Session is already active');
-            break;
-          }
-          const resumed = await sessionStore.resume(id);
-          // Finalize the prior writer (session_end + close) best-effort;
-          // swallow errors so we don't block the resume on a crashed file
-          // handle. The end marker is what makes the session we are leaving
-          // read as cleanly completed (summary outcome, endedAt).
-          try {
-            await session.append({
-              type: 'session_end',
-              ts: new Date().toISOString(),
-              usage: tokenCounter.total(),
-            });
-            await session.close();
-          } catch {
-            /* noop */
-          }
-          session = resumed.writer;
-          context.session = session;
-          context.state.replaceMessages(resumed.data.messages);
-          context.readFiles.clear();
-          context.fileMtimes.clear();
-          tokenCounter.reset();
-          // Replay usage so the topbar shows accurate totals after resume.
-          tokenCounter.account(resumed.data.usage, config.model);
-          sessionStartedAt = Date.now();
-          broadcast(clients, {
-            type: 'session.start',
-            payload: {
-              ...(await sessionStartPayload()),
-              reset: true,
-              replayMessages: resumed.data.messages,
-              replayUsage: resumed.data.usage,
-            },
-          });
-          sendResult(ws, true, `Resumed session ${id}`);
-        } catch (err) {
-          sendResult(ws, false, errMessage(err));
-        }
-        break;
-      }
-
-      case 'session.save': {
-        // SessionWriter already flushes after every event; this is mostly a
-        // no-op marker so the user gets confirmation. Useful for habit
-        // parity with the CLI /save command.
-        sendResult(ws, true, `Session ${session.id} is auto-saved`);
-        break;
-      }
 
       case 'tools.list': {
         // Full tool registry dump for the /tools inspect view. We surface
@@ -2524,19 +2005,12 @@ export async function startWebUI(
       }
 
       case 'skills.create': {
-        const createPayload = msg.payload as { name: string; description: string; scope: 'project' | 'global' };
-        if (!createPayload?.name?.trim()) {
-          send(ws, { type: 'skills.created', payload: { success: false, error: 'Skill name is required' } });
+        const parsed = validateSkillsCreatePayload(msg.payload);
+        if (!parsed.ok) {
+          send(ws, { type: 'skills.created', payload: { success: false, error: parsed.message } });
           break;
         }
-        if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(createPayload.name.trim())) {
-          send(ws, { type: 'skills.created', payload: { success: false, error: 'Skill name must be kebab-case (e.g. my-new-skill)' } });
-          break;
-        }
-        if (!createPayload?.description?.trim()) {
-          send(ws, { type: 'skills.created', payload: { success: false, error: 'Description/trigger is required' } });
-          break;
-        }
+        const createPayload = parsed.value;
         try {
           const targetDir =
             createPayload.scope === 'global'
@@ -2601,7 +2075,7 @@ export async function startWebUI(
             '- `output-standards` — for standardized `<next_steps>` formatting',
           ].join('\n');
 
-          await fs.writeFile(path.join(targetDir, 'SKILL.md'), skillContent, 'utf-8');
+          await atomicWrite(path.join(targetDir, 'SKILL.md'), skillContent);
 
           send(ws, {
             type: 'skills.created',
@@ -2622,15 +2096,12 @@ export async function startWebUI(
           send(ws, { type: 'skills.edited', payload: { success: false, error: 'Skills not enabled' } });
           break;
         }
-        const editPayload = msg.payload as { name: string; body: string };
-        if (!editPayload?.name?.trim()) {
-          send(ws, { type: 'skills.edited', payload: { success: false, error: 'Skill name is required' } });
+        const parsed = validateSkillsEditPayload(msg.payload);
+        if (!parsed.ok) {
+          send(ws, { type: 'skills.edited', payload: { success: false, error: parsed.message } });
           break;
         }
-        if (!editPayload?.body) {
-          send(ws, { type: 'skills.edited', payload: { success: false, error: 'Skill body is required' } });
-          break;
-        }
+        const editPayload = parsed.value;
         try {
           const entries = await skillLoader.listEntries();
           const entry = entries.find((e) => e.name.toLowerCase() === editPayload.name.toLowerCase());
@@ -2643,7 +2114,7 @@ export async function startWebUI(
             send(ws, { type: 'skills.edited', payload: { success: false, error: 'Bundled skills cannot be edited' } });
             break;
           }
-          await fs.writeFile(entry.path, editPayload.body, 'utf-8');
+          await atomicWrite(entry.path, editPayload.body);
           send(ws, { type: 'skills.edited', payload: { success: true, error: null } });
         } catch (err) {
           send(ws, { type: 'skills.edited', payload: { success: false, error: errMessage(err) } });
@@ -2707,83 +2178,52 @@ export async function startWebUI(
       }
 
       case 'todos.get': {
-        const ctx: WorklistContext = {
-          context: { todos: context.todos, meta: context.meta as Record<string, unknown>, session: context.session ? { id: context.session.id } : null, state: context.state },
-          send: (w, m) => send(w, m),
-          broadcast: (m) => broadcast(clients, m),
-        };
+        const ctx = makeWorklistContext();
         handleTodosGet(ctx, ws);
         break;
       }
       case 'todos.clear': {
-        const ctx: WorklistContext = {
-          context: { todos: context.todos, meta: context.meta as Record<string, unknown>, session: context.session ? { id: context.session.id } : null, state: context.state },
-          send: (w, m) => send(w, m),
-          broadcast: (m) => broadcast(clients, m),
-        };
+        const ctx = makeWorklistContext();
         handleTodosClear(ctx, ws);
         break;
       }
       case 'todos.remove': {
-        const ctx: WorklistContext = {
-          context: { todos: context.todos, meta: context.meta as Record<string, unknown>, session: context.session ? { id: context.session.id } : null, state: context.state },
-          send: (w, m) => send(w, m),
-          broadcast: (m) => broadcast(clients, m),
-        };
+        const ctx = makeWorklistContext();
         handleTodosRemove(ctx, ws, msg.payload as { id?: string; index?: number } | undefined);
         break;
       }
       case 'tasks.get': {
-        const ctx: WorklistContext = {
-          context: { todos: context.todos, meta: context.meta as Record<string, unknown>, session: context.session ? { id: context.session.id } : null, state: context.state },
-          send: (w, m) => send(w, m),
-          broadcast: (m) => broadcast(clients, m),
-        };
+        const ctx = makeWorklistContext();
         await handleTasksGet(ctx, ws);
         break;
       }
       case 'plan.get': {
-        const ctx: WorklistContext = {
-          context: { todos: context.todos, meta: context.meta as Record<string, unknown>, session: context.session ? { id: context.session.id } : null, state: context.state },
-          send: (w, m) => send(w, m),
-          broadcast: (m) => broadcast(clients, m),
-        };
+        const ctx = makeWorklistContext();
         await handlePlanGet(ctx, ws);
         break;
       }
       case 'plan.template_use': {
-        const ctx: WorklistContext = {
-          context: { todos: context.todos, meta: context.meta as Record<string, unknown>, session: context.session ? { id: context.session.id } : null, state: context.state },
-          send: (w, m) => send(w, m),
-          broadcast: (m) => broadcast(clients, m),
-        };
-        await handlePlanTemplateUse(ctx, ws, (msg as { payload: { template: string } }).payload.template);
+        const parsed = validatePlanTemplateUsePayload(msg.payload);
+        if (!parsed.ok) {
+          sendResult(ws, false, parsed.message);
+          break;
+        }
+        const ctx = makeWorklistContext();
+        await handlePlanTemplateUse(ctx, ws, parsed.value.template);
         break;
       }
       case 'todo.update': {
-        const ctx: WorklistContext = {
-          context: { todos: context.todos, meta: context.meta as Record<string, unknown>, session: context.session ? { id: context.session.id } : null, state: context.state },
-          send: (w, m) => send(w, m),
-          broadcast: (m) => broadcast(clients, m),
-        };
+        const ctx = makeWorklistContext();
         handleTodoUpdate(ctx, ws, msg.payload as { id: string; status?: TodoItem['status']; activeForm?: string });
         break;
       }
       case 'task.update': {
-        const ctx: WorklistContext = {
-          context: { todos: context.todos, meta: context.meta as Record<string, unknown>, session: context.session ? { id: context.session.id } : null, state: context.state },
-          send: (w, m) => send(w, m),
-          broadcast: (m) => broadcast(clients, m),
-        };
+        const ctx = makeWorklistContext();
         await handleTaskUpdate(ctx, ws, msg.payload as { id: string; status: 'pending' | 'in_progress' | 'blocked' | 'failed' | 'review' | 'completed' });
         break;
       }
       case 'plan.item.update': {
-        const ctx: WorklistContext = {
-          context: { todos: context.todos, meta: context.meta as Record<string, unknown>, session: context.session ? { id: context.session.id } : null, state: context.state },
-          send: (w, m) => send(w, m),
-          broadcast: (m) => broadcast(clients, m),
-        };
+        const ctx = makeWorklistContext();
         await handlePlanItemUpdate(ctx, ws, msg.payload as { target: string; status: 'open' | 'in_progress' | 'done' });
         break;
       }
@@ -2800,82 +2240,6 @@ export async function startWebUI(
         return handleFilesRead(ws, msg, projectRoot);
       case 'files.write':
         return handleFilesWrite(ws, msg, projectRoot);
-
-      case 'modes.list': {
-        try {
-          const modes = await modeStore.listModes();
-          const active = await modeStore.getActiveMode();
-          send(ws, {
-            type: 'modes.list',
-            payload: {
-              modes: modes.map((m) => ({
-                id: m.id,
-                name: m.name,
-                description: m.description,
-                isActive: m.id === (active?.id ?? 'default'),
-              })),
-              activeId: active?.id ?? 'default',
-            },
-          });
-        } catch (err) {
-          send(ws, {
-            type: 'modes.list',
-            payload: {
-              modes: [],
-              activeId: 'default',
-              error: errMessage(err),
-            },
-          });
-        }
-        break;
-      }
-
-      case 'mode.switch': {
-        const { id } = (msg as { payload: { id: string } }).payload;
-        try {
-          // 'default' is the implicit no-mode state — persisting null
-          // clears the override. Anything else has to exist in the store.
-          if (id === 'default') {
-            await modeStore.setActiveMode(null);
-          } else {
-            const found = await modeStore.getMode(id);
-            if (!found) throw new Error(`Unknown mode "${id}"`);
-            await modeStore.setActiveMode(id);
-          }
-          modeId = id;
-          // Rebuild the system prompt so the next turn picks up the new
-          // mode's instructions. The builder caches the environment block
-          // per projectRoot (including the modeId), so we clear the cache
-          // and rebuild. The `buildMode()` method reads this.opts.modePrompt
-          // which is set on the builder constructor — we construct a fresh
-          // builder with the updated mode. This is cheap (no fs/net IO in
-          // the constructor; the real work happens in build()).
-          const modePrompt = id === 'default' ? '' : ((await modeStore.getMode(id))?.prompt ?? '');
-          const freshBuilder = new DefaultSystemPromptBuilder({
-            memoryStore,
-            skillLoader,
-            modeStore,
-            modeId: id,
-            modePrompt,
-            modelCapabilities,
-          });
-          context.systemPrompt = await freshBuilder.build({
-            cwd: projectRoot,
-            projectRoot,
-            tools: toolRegistry.list(),
-            provider: config.provider,
-            model: config.model,
-          });
-          sendResult(ws, true, `Switched to mode "${id}"`);
-          broadcast(clients, {
-            type: 'session.start',
-            payload: { ...(await sessionStartPayload()) },
-          });
-        } catch (err) {
-          sendResult(ws, false, errMessage(err));
-        }
-        break;
-      }
 
       case 'stats.get': {
         // Mirror of the CLI's /stats: detailed session report.
@@ -2926,7 +2290,12 @@ export async function startWebUI(
       }
 
       case 'process.kill': {
-        const { pid } = (msg as { payload: { pid: number } }).payload;
+        const parsed = validateProcessKillPayload(msg.payload);
+        if (!parsed.ok) {
+          sendResult(ws, false, parsed.message);
+          break;
+        }
+        const { pid } = parsed.value;
         try {
           const { getProcessRegistry } = await import('@wrongstack/tools');
           const proc = getProcessRegistry().get(pid);
@@ -2950,23 +2319,6 @@ export async function startWebUI(
         } catch (err) {
           sendResult(ws, false, errMessage(err));
         }
-        break;
-      }
-
-      case 'git.info': {
-        // Delegates to the shared handler so the CLI-embedded server and this
-        // standalone server can never drift on git parsing again.
-        await handleGitInfo(ws, projectRoot);
-        break;
-      }
-
-      case 'git.changes': {
-        await handleGitChanges(ws, projectRoot);
-        break;
-      }
-
-      case 'git.diff': {
-        await handleGitDiff(ws, projectRoot, String((msg.payload as { path?: unknown })?.path ?? ''));
         break;
       }
 
@@ -3004,7 +2356,12 @@ export async function startWebUI(
       case 'autonomy.switch': {
         // Autonomy mode switch — forwarded to the agent context.
         // The mode is stored in context.meta for the permission policy to read.
-        const { mode } = (msg as { payload: { mode: string } }).payload;
+        const parsed = validateAutonomySwitchPayload(msg.payload);
+        if (!parsed.ok) {
+          sendResult(ws, false, parsed.message);
+          break;
+        }
+        const { mode } = parsed.value;
         context.meta['autonomy'] = mode;
         sendResult(ws, true, `Autonomy mode set to "${mode}"`);
         // Keep every browser tab + the settings panel in sync, and persist
@@ -3020,7 +2377,12 @@ export async function startWebUI(
         // broadcasts the full pref snapshot to every connected client so all
         // browser tabs stay in sync, and persists the durable keys to
         // config.json (same keys the TUI settings picker writes).
-        const payload = (msg as { payload: Record<string, unknown> }).payload;
+        const parsed = validatePrefsUpdatePayload(msg.payload);
+        if (!parsed.ok) {
+          sendResult(ws, false, parsed.message);
+          break;
+        }
+        const payload = parsed.value.prefs;
         // Write each pref into context.meta
         for (const [key, val] of Object.entries(payload)) {
           context.meta[key] = val;
@@ -3086,451 +2448,11 @@ export async function startWebUI(
         break;
       }
 
-      case 'session.checkpoints': {
-        // Return session checkpoints for the rewind timeline.
-        try {
-          const { DefaultSessionRewinder } = await import('@wrongstack/core');
-          const rewinder = new DefaultSessionRewinder(
-            path.join(projectRoot, '.wrongstack', 'sessions'),
-            projectRoot,
-          );
-          const checkpoints = await rewinder.listCheckpoints(session.id);
-          send(ws, {
-            type: 'session.checkpoints',
-            payload: { checkpoints },
-          });
-        } catch (err) {
-          send(ws, {
-            type: 'session.checkpoints',
-            payload: { checkpoints: [] },
-          });
-        }
-        break;
-      }
-
-      case 'session.rewind': {
-        const { checkpointIndex } = (msg as { payload: { checkpointIndex: number } }).payload;
-        try {
-          const { DefaultSessionRewinder } = await import('@wrongstack/core');
-          const rewinder = new DefaultSessionRewinder(
-            path.join(projectRoot, '.wrongstack', 'sessions'),
-            projectRoot,
-          );
-          await rewinder.rewindToCheckpoint(session.id, checkpointIndex);
-          await context.session.truncateToCheckpoint(checkpointIndex);
-          sendResult(ws, true, `Rewound to checkpoint ${checkpointIndex}`);
-          broadcast(clients, {
-            type: 'session.start',
-            payload: { ...(await sessionStartPayload()), reset: true },
-          });
-        } catch (err) {
-          sendResult(ws, false, errMessage(err));
-        }
-        break;
-      }
-
-      // ── Project management ────────────────────────────────────────────
-
-      case 'projects.list': {
-        try {
-          const manifest = await loadManifest(globalConfigPath);
-          send(ws, {
-            type: 'projects.list',
-            payload: { projects: manifest.projects },
-          });
-        } catch (err) {
-          send(ws, {
-            type: 'projects.list',
-            payload: { projects: [], error: errMessage(err) },
-          });
-        }
-        break;
-      }
-
-      case 'projects.add': {
-        const { root: addRoot, name: displayName } = (
-          msg as { payload: { root: string; name?: string | undefined } }
-        ).payload;
-        try {
-          const resolved = path.resolve(addRoot);
-          await fs.access(resolved);
-          const stat = await fs.stat(resolved);
-          if (!stat.isDirectory()) throw new Error(`Not a directory: ${resolved}`);
-
-          const manifest = await loadManifest(globalConfigPath);
-          const existing = manifest.projects.find((p) => p.root === resolved);
-          if (existing) {
-            send(ws, {
-              type: 'projects.added',
-              payload: {
-                name: existing.name,
-                root: existing.root,
-                slug: existing.slug,
-                message: `Already registered as "${existing.name}"`,
-              },
-            });
-            break;
-          }
-
-          const name = displayName?.trim() || path.basename(resolved);
-          const slug = generateProjectSlug(resolved);
-          await ensureProjectDataDir(slug, globalConfigPath);
-          const now = new Date().toISOString();
-          manifest.projects.push({ name, root: resolved, slug, lastSeen: now, createdAt: now });
-          await saveManifest(manifest, globalConfigPath);
-
-          send(ws, {
-            type: 'projects.added',
-            payload: {
-              name,
-              root: resolved,
-              slug,
-              message: `Registered project "${name}"`,
-            },
-          });
-        } catch (err) {
-          send(ws, {
-            type: 'projects.added',
-            payload: {
-              name: path.basename(addRoot),
-              root: addRoot,
-              slug: '',
-              message: errMessage(err),
-            },
-          });
-        }
-        break;
-      }
-
-      case 'projects.select': {
-        const { root: selRoot, name: selName } = (
-          msg as { payload: { root: string; name?: string | undefined } }
-        ).payload;
-        try {
-          const resolved = path.resolve(selRoot);
-
-          // Validate the directory exists
-          try {
-            await fs.access(resolved);
-            const stat = await fs.stat(resolved);
-            if (!stat.isDirectory()) throw new Error(`Not a directory: ${resolved}`);
-          } catch (err) {
-            send(ws, {
-              type: 'projects.selected',
-              payload: {
-                root: selRoot,
-                name: selName || path.basename(selRoot),
-                message: `Cannot switch: ${errMessage(err)}`,
-              },
-            });
-            break;
-          }
-
-          // Update lastSeen in manifest
-          const manifest = await loadManifest(globalConfigPath);
-          const entry = manifest.projects.find((p) => p.root === resolved);
-          if (entry) {
-            entry.lastSeen = new Date().toISOString();
-            entry.lastWorkingDir = resolved;
-          } else {
-            // Auto-register if not in manifest
-            const name = selName?.trim() || path.basename(resolved);
-            const slug = generateProjectSlug(resolved);
-            manifest.projects.push({
-              name,
-              root: resolved,
-              slug,
-              lastSeen: new Date().toISOString(),
-              createdAt: new Date().toISOString(),
-              lastWorkingDir: resolved,
-            });
-            await ensureProjectDataDir(slug, globalConfigPath);
-          }
-          await saveManifest(manifest, globalConfigPath);
-
-          // ── Hot-swap the project root + working dir ─────────────────
-          // Abort any in-flight agent run before switching — the agent's
-          // context (cwd, projectRoot, session) is about to change and
-          // continuing would cause inconsistent state.
-          if (runLock) {
-            runLock.abort();
-            runLock = null;
-          }
-
-          projectRoot = resolved;
-          workingDir = resolved;
-
-          // Update the live context so tools use the new directory
-          context.cwd = workingDir;
-          context.projectRoot = projectRoot;
-
-          const switchSlug = entry?.slug ?? generateProjectSlug(resolved);
-
-          // Rebuild the system prompt for the NEW project. The environment
-          // block (project root, git status, detected languages) is baked into
-          // the prompt at boot and cached by projectRoot; without this rebuild
-          // the agent keeps the launch-directory environment and tries to work
-          // in the old folder until tool errors force a correction. Mirrors the
-          // mode.switch rebuild; best-effort so a failure here leaves the prior
-          // (stale-but-usable) prompt rather than breaking the switch.
-          try {
-            const switchMode =
-              modeId === 'default' ? undefined : await modeStore.getMode(modeId);
-            const switchBuilder = new DefaultSystemPromptBuilder({
-              memoryStore,
-              skillLoader,
-              modeStore,
-              modeId,
-              modePrompt: switchMode?.prompt ?? '',
-              modelCapabilities,
-            });
-            context.systemPrompt = await switchBuilder.build({
-              cwd: workingDir,
-              projectRoot,
-              tools: toolRegistry.list(),
-              provider: config.provider,
-              model: config.model,
-            });
-          } catch {
-            /* best-effort — keep the prior system prompt if rebuild fails */
-          }
-
-          // Create a new session store for the new project's sessions dir
-          const newSessionsDir = path.join(
-            path.dirname(globalConfigPath),
-            'projects',
-            switchSlug,
-            'sessions',
-          );
-          await fs.mkdir(newSessionsDir, { recursive: true });
-          const newSessionStore = new DefaultSessionStore({ dir: newSessionsDir });
-
-          // Switch the session store for the new project.
-          // Close the old session gracefully
-          const oldSessionId = session.id;
-          try {
-            await session.append({
-              type: 'session_end',
-              ts: new Date().toISOString(),
-              usage: tokenCounter.total(),
-            });
-            await session.close();
-          } catch {
-            // best-effort
-          }
-
-          // Create a fresh session in the new project
-          sessionStore = newSessionStore;
-          session = await sessionStore.create({
-            id: '',
-            title: '',
-            model: config.model,
-            provider: config.provider,
-          });
-          context.session = session;
-          context.state.replaceMessages([]);
-          context.state.replaceTodos([]);
-          context.readFiles.clear();
-          context.fileMtimes.clear();
-          tokenCounter.reset();
-          sessionStartedAt = Date.now();
-
-          // Re-point the cross-process SessionRegistry at the new project +
-          // session id. Without this, `/sessions status`, the WebUI sessions
-          // dashboard, and the 5s status poll keep listing this process under
-          // the launch project's root/workingDir — the WebUI looks like it is
-          // still "in" the old folder after the switch. register() is now
-          // re-entrant (drops the old entry, restarts a single heartbeat).
-          try {
-            const registry = getSessionRegistry(wpaths.globalRoot);
-            await registry.register({
-              sessionId: session.id,
-              projectSlug: switchSlug,
-              projectRoot,
-              projectName: path.basename(projectRoot),
-              workingDir,
-              clientType: 'webui',
-              pid: process.pid,
-              startedAt: new Date().toISOString(),
-            });
-          } catch {
-            /* best-effort — discovery degrades gracefully */
-          }
-
-          send(ws, {
-            type: 'projects.selected',
-            payload: {
-              root: resolved,
-              name: selName || path.basename(resolved),
-              message: `Switched to ${selName || path.basename(resolved)}`,
-            },
-          });
-
-          // Broadcast old-session subagents as stopped so the frontend
-          // fleet store cleans them via its normal event pipeline.
-          broadcast(clients, {
-            type: 'subagent.event',
-            payload: {
-              kind: 'session_stopped',
-              sessionId: oldSessionId,
-            },
-          });
-
-          // Broadcast updated project info to ALL clients so file
-          // explorer / context bar pick up the new root.
-          broadcast(clients, {
-            type: 'session.start',
-            payload: {
-              ...(await sessionStartPayload()),
-              reset: true,
-              clearedSessionId: oldSessionId,
-            },
-          });
-        } catch (err) {
-          send(ws, {
-            type: 'projects.selected',
-            payload: {
-              root: selRoot,
-              name: selName || path.basename(selRoot),
-              message: errMessage(err),
-            },
-          });
-        }
-        break;
-      }
-
-      // ── Working directory (within current project) ───────────────────
-
-      case 'working_dir.set': {
-        const { path: newPath } = (msg as { payload: { path: string } }).payload;
-        try {
-          const resolved = path.resolve(projectRoot, newPath);
-
-          // Guard: must stay inside projectRoot
-          if (!resolved.startsWith(projectRoot + path.sep) && resolved !== projectRoot) {
-            sendResult(ws, false, `Path must stay inside the project root: ${projectRoot}`);
-            break;
-          }
-
-          try {
-            await fs.access(resolved);
-            const stat = await fs.stat(resolved);
-            if (!stat.isDirectory()) throw new Error('Not a directory');
-          } catch {
-            sendResult(ws, false, `Directory not found or not accessible: ${resolved}`);
-            break;
-          }
-
-          workingDir = resolved;
-          context.cwd = resolved;
-
-          // Notify all clients so the file explorer and context bar update
-          broadcast(clients, {
-            type: 'working_dir.changed',
-            payload: { cwd: resolved, projectRoot },
-          });
-
-          sendResult(ws, true, `Working directory set to ${resolved}`);
-        } catch (err) {
-          sendResult(ws, false, errMessage(err));
-        }
-        break;
-      }
-
-      // ── Shell open — spawn terminal or file manager at a path ─────────
-
-      case 'shell.open': {
-        // Logic lives in `shell-open.ts` so the CLI's `runWebUI` can
-        // share the same metacharacter guard + cross-platform spawn
-        // chain. See the docstring in shell-open.ts for the security
-        // rationale and the fallback chain.
-        const result: ShellOpenResult = await handleShellOpen(
-          msg.payload as ShellOpenRequest,
-          logger,
-        );
-        sendResult(ws, result.success, result.message);
-        break;
-      }
-
-      // ── Mailbox operations — project-level inter-agent messaging ────
-      case 'mailbox.messages':
-        return handleMailboxMessages(
-          ws,
-          { projectRoot, globalRoot: path.dirname(globalConfigPath) },
-          (msg as { payload?: { limit?: number; agentId?: string; unreadOnly?: boolean } }).payload,
-        );
-      case 'mailbox.agents':
-        return handleMailboxAgents(
-          ws,
-          { projectRoot, globalRoot: path.dirname(globalConfigPath) },
-          (msg as { payload?: { onlineOnly?: boolean } }).payload,
-        );
-      case 'mailbox.clear':
-        return handleMailboxClear(
-          ws,
-          { projectRoot, globalRoot: path.dirname(globalConfigPath) },
-        );
-      case 'mailbox.purge':
-        return handleMailboxPurge(
-          ws,
-          { projectRoot, globalRoot: path.dirname(globalConfigPath) },
-          (msg as { payload?: { completedMaxAgeMs?: number; incompleteMaxAgeMs?: number } }).payload,
-        );
-
-      // ── Brain — status, autonomy ceiling, direct decision support ───
-      case 'brain.status':
-        send(ws, {
-          type: 'brain.status',
-          payload: { maxAutoRisk: brainSettings.maxAutoRisk, log: brainLog },
-        });
-        break;
-      case 'brain.risk': {
-        const level = (msg as { payload?: { level?: string } }).payload?.level ?? '';
-        const valid = ['off', 'low', 'medium', 'high', 'all'];
-        if (!valid.includes(level)) {
-          sendResult(ws, false, `Unknown risk level "${level}". Use: ${valid.join(', ')}.`);
-          break;
-        }
-        brainSettings.maxAutoRisk = level as BrainAutoRisk;
-        send(ws, {
-          type: 'brain.status',
-          payload: { maxAutoRisk: brainSettings.maxAutoRisk, log: brainLog },
-        });
-        break;
-      }
-      case 'brain.ask': {
-        const question = (msg as { payload?: { question?: string } }).payload?.question?.trim();
-        if (!question) {
-          sendResult(ws, false, 'Usage: /brain ask <question>');
-          break;
-        }
-        try {
-          const decision = await brain.decide({
-            id: `brain-ask-${Date.now().toString(36)}`,
-            source: 'user',
-            question,
-            risk: 'medium',
-            fallback: 'ask_human',
-          });
-          send(ws, { type: 'brain.answer', payload: { question, decision } });
-        } catch (err) {
-          sendResult(ws, false, `Brain consultation failed: ${errMessage(err)}`);
-        }
-        break;
-      }
-
       default:
-        if (msg.type.startsWith('autophase.')) {
-          // Delegate all AutoPhase lifecycle messages to the handler
-          await autoPhaseHandler.handleMessage(
-            msg as { type: string; payload?: Record<string, unknown> },
-          );
-        } else {
-          send(ws, {
-            type: 'error',
-            payload: { phase: 'handleMessage', message: `Unknown message type: ${msg.type}` },
-          });
-        }
+        send(ws, {
+          type: 'error',
+          payload: { phase: 'handleMessage', message: `Unknown message type: ${msg.type}` },
+        });
     }
   }
 
@@ -3545,6 +2467,934 @@ export async function startWebUI(
     broadcast,
     clients,
   });
+
+  providerRoutes = {
+    providerHandlers,
+    listProviders: async (ws) => {
+      const providers = await modelsRegistry.listProviders();
+      // "Configured" should mean *any* working credential, not just env vars.
+      // Users register keys with `wstack auth`, which writes apiKey/apiKeys
+      // into config.providers[<id>] — those are decrypted in memory here.
+      const savedIds = new Set(Object.keys(config.providers ?? {}));
+      send(ws, {
+        type: 'provider.catalog',
+        payload: {
+          providers: providers.map((p: { id: string; name: string; family: unknown; apiBase?: unknown; envVars: string[]; models: readonly unknown[] }) => ({
+            id: p.id,
+            name: p.name,
+            family: p.family,
+            apiBase: p.apiBase,
+            envVars: p.envVars,
+            modelCount: p.models.length,
+            hasApiKey: savedIds.has(p.id) || p.envVars.some((v: string) => !!process.env[v]),
+          })),
+        },
+      });
+    },
+    listSavedProviders: async (ws) => {
+      const saved = await providerHandlers.loadConfigProviders();
+      send(ws, {
+        type: 'providers.saved',
+        payload: {
+          providers: Object.entries(saved).map(([id, cfg]) => {
+            const keys = normalizeKeys(cfg);
+            return {
+              id,
+              family: cfg.family ?? id,
+              baseUrl: cfg.baseUrl,
+              apiKeys: keys.map((k) => ({
+                label: k.label,
+                maskedKey: maskedKey(k.apiKey),
+                isActive: k.label === cfg.activeKey,
+                createdAt: k.createdAt,
+              })),
+            };
+          }),
+        },
+      });
+    },
+    listProviderModels: async (ws, msg) => {
+      const providerId = (msg as { payload: { providerId: string } }).payload.providerId;
+      // Merge catalog + saved config so OAuth / subscription providers
+      // (github-copilot, anthropic-oauth, openai-codex, …) that models.dev
+      // doesn't list still resolve to their saved model allowlist. Always
+      // reply (possibly empty) — the switcher lazy-loads every saved provider.
+      const saved = await providerHandlers.loadConfigProviders();
+      const cfg = saved[providerId];
+      const catalogId = cfg?.type && cfg.type !== providerId ? cfg.type : providerId;
+      const provider = await modelsRegistry.getProvider(catalogId);
+      send(ws, {
+        type: 'provider.models',
+        payload: {
+          provider: providerId,
+          models: resolveProviderModelList(cfg?.models, provider),
+        },
+      });
+    },
+    switchModel: async (ws, msg) => {
+      const parsed = validateModelSwitchPayload(msg.payload);
+      if (!parsed.ok) {
+        sendResult(ws, false, parsed.message);
+        return;
+      }
+      const { provider: newProvider, model: newModel } = parsed.value;
+      try {
+        // Update config
+        config = patchConfig(config, { provider: newProvider, model: newModel });
+        configStore.update({ provider: newProvider, model: newModel });
+        context.model = newModel;
+
+        // Create new provider instance — fail loudly if the user picks a
+        // provider with no creds rather than silently keeping the old one.
+        const providerCfg = config.providers?.[newProvider] ?? { type: newProvider };
+        const newProv = providerRegistry.has(newProvider)
+          ? providerRegistry.create({ ...providerCfg, type: newProvider })
+          : makeProviderFromConfig(newProvider, providerCfg);
+        context.provider = newProv;
+
+        // Update AutoCompactionMiddleware with the new model's maxContext so
+        // backend threshold triggers (warn/soft/hard) use the correct denominator.
+        // sessionStartPayload is called below (after this block) and uses
+        // the new provider for its modelsRegistry lookup.
+        updateAutoCompactionMaxContext?.(newProv);
+
+        // Persist to global config file via the unified config mutation helper.
+        await updateGlobalConfig((cfg) => {
+          cfg.provider = newProvider;
+          cfg.model = newModel;
+        }, 'model.switch');
+
+        // Toast for the SettingsPanel
+        send(ws, {
+          type: 'key.operation_result',
+          payload: { success: true, message: `Switched to ${newProvider} / ${newModel}` },
+        });
+      } catch (err) {
+        send(ws, {
+          type: 'key.operation_result',
+          payload: {
+            success: false,
+            message: `Switch failed: ${errMessage(err)}`,
+          },
+        });
+        return;
+      }
+
+      broadcast(clients, { type: 'session.start', payload: await sessionStartPayload() });
+    },
+    refineModel: async (ws, msg) => {
+      const { text } = (msg as { payload: { text: string } }).payload;
+      if (!text?.trim()) {
+        send(ws, {
+          type: 'model.refine_result',
+          payload: { refined: '', english: '', error: 'Empty text' },
+        });
+        return;
+      }
+      try {
+        const history = recentTextTurns(context.messages);
+        const result = await enhanceUserPrompt({
+          provider: context.provider,
+          model: context.model,
+          text,
+          history,
+          timeoutMs: 90000,
+          onError: (reason: unknown) => {
+            console.warn(JSON.stringify({
+              level: 'warn',
+              event: 'model.refine_failed',
+              reason,
+              timestamp: new Date().toISOString(),
+            }));
+          },
+        });
+        if (result) {
+          send(ws, {
+            type: 'model.refine_result',
+            payload: { refined: result.refined, english: result.english },
+          });
+        } else {
+          send(ws, {
+            type: 'model.refine_result',
+            payload: { refined: text, english: text, error: 'Refinement returned no result' },
+          });
+        }
+      } catch (err) {
+        console.error(JSON.stringify({
+          level: 'error',
+          event: 'model.refine.error',
+          error: errMessage(err),
+          timestamp: new Date().toISOString(),
+        }));
+        send(ws, {
+          type: 'model.refine_result',
+          payload: { refined: text, english: text, error: errMessage(err) },
+        });
+      }
+    },
+  };
+
+  sessionRoutes = {
+    newSession: async (ws) => {
+      try {
+        await session.append({
+          type: 'session_end',
+          ts: new Date().toISOString(),
+          usage: tokenCounter.total(),
+        });
+        await session.close();
+      } catch {
+        // best-effort
+      }
+      session = await sessionStore.create({
+        id: '',
+        title: '',
+        model: config.model,
+        provider: config.provider,
+      });
+      context.session = session;
+      context.state.replaceMessages([]);
+      context.state.replaceTodos([]);
+      context.readFiles.clear();
+      context.fileMtimes.clear();
+      tokenCounter.reset();
+      sessionStartedAt = Date.now();
+      broadcast(clients, { type: 'session.start', payload: await sessionStartPayload() });
+    },
+    clearContext: async (ws) => {
+      context.state.replaceMessages([]);
+      context.state.replaceTodos([]);
+      context.readFiles.clear();
+      context.fileMtimes.clear();
+      tokenCounter.reset();
+      sendResult(ws, true, 'Context cleared');
+      broadcast(clients, {
+        type: 'session.start',
+        payload: { ...(await sessionStartPayload()), reset: true },
+      });
+    },
+    debugContext: async (ws) => {
+      const breakdown = estimateContextBreakdown({
+        systemPrompt: context.systemPrompt,
+        tools: toolRegistry.list(),
+        messages: context.messages,
+      });
+      send(ws, {
+        type: 'context.debug',
+        payload: {
+          ...breakdown,
+          mode: context.meta['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID,
+          policy: context.meta['contextWindowPolicy'],
+        },
+      });
+    },
+    compactContext: async (ws, msg) => {
+      const aggressive = !!(msg as { payload?: { aggressive?: boolean | undefined } }).payload?.aggressive;
+      try {
+        const report = await compactor.compact(context, { aggressive });
+        send(ws, {
+          type: 'context.compacted',
+          payload: {
+            before: report.before,
+            after: report.after,
+            saved: Math.max(0, report.before - report.after),
+            reductions: report.reductions,
+            repaired: report.repaired,
+          },
+        });
+        sendResult(
+          ws,
+          true,
+          `Compacted: ${report.before} → ${report.after} tokens (saved ~${Math.max(0, report.before - report.after)})`,
+        );
+      } catch (err) {
+        sendResult(ws, false, errMessage(err));
+      }
+    },
+    repairContext: async (ws) => {
+      const beforeMessages = context.messages.length;
+      const repaired = repairToolUseAdjacency(context.messages);
+      if (repaired.report.changed) {
+        context.state.replaceMessages(repaired.messages);
+      }
+      const payload = {
+        removedToolUses: repaired.report.removedToolUses,
+        removedToolResults: repaired.report.removedToolResults,
+        removedMessages: repaired.report.removedMessages,
+        beforeMessages,
+        afterMessages: context.messages.length,
+      };
+      broadcast(clients, { type: 'context.repaired', payload });
+      const removed =
+        payload.removedToolUses.length +
+        payload.removedToolResults.length +
+        payload.removedMessages;
+      sendResult(
+        ws,
+        true,
+        removed > 0
+          ? `Context repaired: removed ${removed} orphan protocol item(s)`
+          : 'Context repair found no orphan protocol blocks',
+      );
+    },
+    listContextModes: async (ws) => {
+      const active = String(context.meta['contextWindowMode'] ?? DEFAULT_CONTEXT_WINDOW_MODE_ID);
+      const allModes = customModeStore.list().map((m) => ({
+        id: m.id,
+        name: m.name,
+        description: m.description,
+        isActive: m.id === active,
+        thresholds: m.thresholds,
+        preserveK: m.preserveK,
+        eliseThreshold: m.eliseThreshold,
+        custom: (m as { custom?: boolean }).custom === true,
+      }));
+      send(ws, {
+        type: 'context.modes.list',
+        payload: { activeId: active, modes: allModes },
+      });
+    },
+    switchContextMode: async (ws, msg) => {
+      const parsed = validateContextModeSwitchPayload(msg.payload);
+      if (!parsed.ok) {
+        sendResult(ws, false, parsed.message);
+        return;
+      }
+      const { id } = parsed.value;
+      let policy = resolveContextWindowPolicy({}, id);
+      if (policy.id !== id) {
+        const customModes = customModeStore.list().filter((m) => (m as { custom?: boolean }).custom === true);
+        const custom = customModes.find((m) => m.id === id);
+        if (!custom) {
+          sendResult(ws, false, `Unknown context mode "${id}"`);
+          return;
+        }
+        policy = custom as unknown as typeof policy;
+      }
+      context.meta['contextWindowMode'] = policy.id;
+      context.meta['contextWindowPolicy'] = policy;
+      sendResult(ws, true, `Context mode switched to ${policy.id}`);
+      broadcast(clients, {
+        type: 'context.mode.changed',
+        payload: { id: policy.id, name: policy.name, policy },
+      });
+    },
+    createContextMode: async (ws, msg) => {
+      const parsed = validateContextModeCreatePayload(msg.payload);
+      if (!parsed.ok) {
+        sendResult(ws, false, parsed.message);
+        return;
+      }
+      const payload = parsed.value;
+      const result = customModeStore.create({
+        id: payload.id,
+        name: payload.name,
+        description: payload.description,
+        thresholds: payload.thresholds,
+        preserveK: payload.preserveK,
+        eliseThreshold: payload.eliseThreshold,
+        custom: true,
+        aggressiveOn: 'soft',
+        targetLoad: 0.65,
+      });
+      sendResult(ws, result.ok, result.error ?? `Mode "${payload.id}" created`);
+    },
+    updateContextMode: async (ws, msg) => {
+      const parsed = validateContextModeUpdatePayload(msg.payload);
+      if (!parsed.ok) {
+        sendResult(ws, false, parsed.message);
+        return;
+      }
+      const payload = parsed.value;
+      const result = customModeStore.update(payload.id, {
+        name: payload.name,
+        description: payload.description,
+        thresholds: payload.thresholds ? {
+          warn: payload.thresholds.warn ?? 0.6,
+          soft: payload.thresholds.soft ?? 0.75,
+          hard: payload.thresholds.hard ?? 0.9,
+        } : undefined,
+        preserveK: payload.preserveK,
+        eliseThreshold: payload.eliseThreshold,
+      });
+      sendResult(ws, result.ok, result.error ?? `Mode "${payload.id}" updated`);
+    },
+    deleteContextMode: async (ws, msg) => {
+      const parsed = validateContextModeDeletePayload(msg.payload);
+      if (!parsed.ok) {
+        sendResult(ws, false, parsed.message);
+        return;
+      }
+      const { id } = parsed.value;
+      if (String(context.meta['contextWindowMode'] ?? '') === id) {
+        context.meta['contextWindowMode'] = DEFAULT_CONTEXT_WINDOW_MODE_ID;
+        context.meta['contextWindowPolicy'] = resolveContextWindowPolicy({}, DEFAULT_CONTEXT_WINDOW_MODE_ID);
+      }
+      const result = customModeStore.remove(id);
+      sendResult(ws, result.ok, result.error ?? `Mode "${id}" deleted`);
+    },
+    listSessions: async (ws, msg) => {
+      const limit = (msg as { payload?: { limit?: number | undefined } }).payload?.limit ?? 50;
+      try {
+        const list = await sessionStore.list(limit);
+        send(ws, {
+          type: 'sessions.list',
+          payload: {
+            sessions: list.map((s) => ({
+              id: s.id,
+              title: s.title,
+              startedAt: s.startedAt,
+              model: s.model,
+              provider: s.provider,
+              tokenTotal: s.tokenTotal,
+              isCurrent: s.id === session.id,
+            })),
+          },
+        });
+      } catch (err) {
+        send(ws, {
+          type: 'sessions.list',
+          payload: { sessions: [], error: errMessage(err) },
+        });
+      }
+    },
+    deleteSession: async (ws, msg) => {
+      const { id } = (msg as { payload: { id: string } }).payload;
+      try {
+        if (id === session.id) {
+          sendResult(ws, false, 'Cannot delete the active session');
+          return;
+        }
+        await sessionStore.delete(id);
+        sendResult(ws, true, `Session ${id} deleted`);
+      } catch (err) {
+        sendResult(ws, false, errMessage(err));
+      }
+    },
+    resumeSession: async (ws, msg) => {
+      const { id } = (msg as { payload: { id: string } }).payload;
+      try {
+        if (id === session.id) {
+          sendResult(ws, false, 'Session is already active');
+          return;
+        }
+        const resumed = await sessionStore.resume(id);
+        try {
+          await session.append({
+            type: 'session_end',
+            ts: new Date().toISOString(),
+            usage: tokenCounter.total(),
+          });
+          await session.close();
+        } catch {
+          /* noop */
+        }
+        session = resumed.writer;
+        context.session = session;
+        context.state.replaceMessages(resumed.data.messages);
+        context.readFiles.clear();
+        context.fileMtimes.clear();
+        tokenCounter.reset();
+        tokenCounter.account(resumed.data.usage, config.model);
+        sessionStartedAt = Date.now();
+        broadcast(clients, {
+          type: 'session.start',
+          payload: {
+            ...(await sessionStartPayload()),
+            reset: true,
+            replayMessages: resumed.data.messages,
+            replayUsage: resumed.data.usage,
+          },
+        });
+        sendResult(ws, true, `Resumed session ${id}`);
+      } catch (err) {
+        sendResult(ws, false, errMessage(err));
+      }
+    },
+    saveSession: async (ws) => {
+      sendResult(ws, true, `Session ${session.id} is auto-saved`);
+    },
+    listCheckpoints: async (ws) => {
+      try {
+        const { DefaultSessionRewinder } = await import('@wrongstack/core');
+        const rewinder = new DefaultSessionRewinder(
+          path.join(projectRoot, '.wrongstack', 'sessions'),
+          projectRoot,
+        );
+        const checkpoints = await rewinder.listCheckpoints(session.id);
+        send(ws, {
+          type: 'session.checkpoints',
+          payload: { checkpoints },
+        });
+      } catch {
+        send(ws, {
+          type: 'session.checkpoints',
+          payload: { checkpoints: [] },
+        });
+      }
+    },
+    rewindSession: async (ws, msg) => {
+      const { checkpointIndex } = (msg as { payload: { checkpointIndex: number } }).payload;
+      try {
+        const { DefaultSessionRewinder } = await import('@wrongstack/core');
+        const rewinder = new DefaultSessionRewinder(
+          path.join(projectRoot, '.wrongstack', 'sessions'),
+          projectRoot,
+        );
+        await rewinder.rewindToCheckpoint(session.id, checkpointIndex);
+        await context.session.truncateToCheckpoint(checkpointIndex);
+        sendResult(ws, true, `Rewound to checkpoint ${checkpointIndex}`);
+        broadcast(clients, {
+          type: 'session.start',
+          payload: { ...(await sessionStartPayload()), reset: true },
+        });
+      } catch (err) {
+        sendResult(ws, false, errMessage(err));
+      }
+    },
+  };
+
+  projectRoutes = {
+    listProjects: async (ws) => {
+      try {
+        const manifest = await loadManifest(globalConfigPath);
+        send(ws, {
+          type: 'projects.list',
+          payload: { projects: manifest.projects },
+        });
+      } catch (err) {
+        send(ws, {
+          type: 'projects.list',
+          payload: { projects: [], error: errMessage(err) },
+        });
+      }
+    },
+    addProject: async (ws, msg) => {
+      const parsed = validateProjectsAddPayload(msg.payload);
+      if (!parsed.ok) {
+        send(ws, {
+          type: 'projects.added',
+          payload: { name: '', root: '', slug: '', message: parsed.message },
+        });
+        return;
+      }
+      const { root: addRoot, name: displayName } = parsed.value;
+      try {
+        const resolved = path.resolve(addRoot);
+        await fs.access(resolved);
+        const stat = await fs.stat(resolved);
+        if (!stat.isDirectory()) throw new Error(`Not a directory: ${resolved}`);
+
+        const manifest = await loadManifest(globalConfigPath);
+        const existing = manifest.projects.find((p) => p.root === resolved);
+        if (existing) {
+          send(ws, {
+            type: 'projects.added',
+            payload: {
+              name: existing.name,
+              root: existing.root,
+              slug: existing.slug,
+              message: `Already registered as "${existing.name}"`,
+            },
+          });
+          return;
+        }
+
+        const name = displayName?.trim() || path.basename(resolved);
+        const slug = generateProjectSlug(resolved);
+        await ensureProjectDataDir(slug, globalConfigPath);
+        const now = new Date().toISOString();
+        manifest.projects.push({ name, root: resolved, slug, lastSeen: now, createdAt: now });
+        await saveManifest(manifest, globalConfigPath);
+
+        send(ws, {
+          type: 'projects.added',
+          payload: {
+            name,
+            root: resolved,
+            slug,
+            message: `Registered project "${name}"`,
+          },
+        });
+      } catch (err) {
+        send(ws, {
+          type: 'projects.added',
+          payload: {
+            name: path.basename(addRoot),
+            root: addRoot,
+            slug: '',
+            message: errMessage(err),
+          },
+        });
+      }
+    },
+    selectProject: async (ws, msg) => {
+      const parsed = validateProjectsSelectPayload(msg.payload);
+      if (!parsed.ok) {
+        send(ws, {
+          type: 'projects.selected',
+          payload: { root: '', name: '', message: parsed.message },
+        });
+        return;
+      }
+      const { root: selRoot, name: selName } = parsed.value;
+      try {
+        const resolved = path.resolve(selRoot);
+
+        try {
+          await fs.access(resolved);
+          const stat = await fs.stat(resolved);
+          if (!stat.isDirectory()) throw new Error(`Not a directory: ${resolved}`);
+        } catch (err) {
+          send(ws, {
+            type: 'projects.selected',
+            payload: {
+              root: selRoot,
+              name: selName || path.basename(selRoot),
+              message: `Cannot switch: ${errMessage(err)}`,
+            },
+          });
+          return;
+        }
+
+        const manifest = await loadManifest(globalConfigPath);
+        const entry = manifest.projects.find((p) => p.root === resolved);
+        if (entry) {
+          entry.lastSeen = new Date().toISOString();
+          entry.lastWorkingDir = resolved;
+        } else {
+          const name = selName?.trim() || path.basename(resolved);
+          const slug = generateProjectSlug(resolved);
+          manifest.projects.push({
+            name,
+            root: resolved,
+            slug,
+            lastSeen: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+            lastWorkingDir: resolved,
+          });
+          await ensureProjectDataDir(slug, globalConfigPath);
+        }
+        await saveManifest(manifest, globalConfigPath);
+
+        if (runLock) {
+          runLock.abort();
+          runLock = null;
+        }
+
+        projectRoot = resolved;
+        workingDir = resolved;
+
+        context.cwd = workingDir;
+        context.projectRoot = projectRoot;
+
+        const switchSlug = entry?.slug ?? generateProjectSlug(resolved);
+
+        try {
+          const switchMode = modeId === 'default' ? undefined : await modeStore.getMode(modeId);
+          const switchBuilder = new DefaultSystemPromptBuilder({
+            memoryStore,
+            skillLoader,
+            modeStore,
+            modeId,
+            modePrompt: switchMode?.prompt ?? '',
+            modelCapabilities,
+          });
+          context.systemPrompt = await switchBuilder.build({
+            cwd: workingDir,
+            projectRoot,
+            tools: toolRegistry.list(),
+            provider: config.provider,
+            model: config.model,
+          });
+        } catch {
+          /* best-effort */
+        }
+
+        const newSessionsDir = path.join(
+          path.dirname(globalConfigPath),
+          'projects',
+          switchSlug,
+          'sessions',
+        );
+        await fs.mkdir(newSessionsDir, { recursive: true });
+        const newSessionStore = new DefaultSessionStore({ dir: newSessionsDir });
+
+        const oldSessionId = session.id;
+        try {
+          await session.append({
+            type: 'session_end',
+            ts: new Date().toISOString(),
+            usage: tokenCounter.total(),
+          });
+          await session.close();
+        } catch {
+          // best-effort
+        }
+
+        sessionStore = newSessionStore;
+        session = await sessionStore.create({
+          id: '',
+          title: '',
+          model: config.model,
+          provider: config.provider,
+        });
+        context.session = session;
+        context.state.replaceMessages([]);
+        context.state.replaceTodos([]);
+        context.readFiles.clear();
+        context.fileMtimes.clear();
+        tokenCounter.reset();
+        sessionStartedAt = Date.now();
+
+        try {
+          const registry = getSessionRegistry(wpaths.globalRoot);
+          await registry.register({
+            sessionId: session.id,
+            projectSlug: switchSlug,
+            projectRoot,
+            projectName: path.basename(projectRoot),
+            workingDir,
+            clientType: 'webui',
+            pid: process.pid,
+            startedAt: new Date().toISOString(),
+          });
+        } catch {
+          /* best-effort */
+        }
+
+        send(ws, {
+          type: 'projects.selected',
+          payload: {
+            root: resolved,
+            name: selName || path.basename(resolved),
+            message: `Switched to ${selName || path.basename(resolved)}`,
+          },
+        });
+
+        broadcast(clients, {
+          type: 'subagent.event',
+          payload: {
+            kind: 'session_stopped',
+            sessionId: oldSessionId,
+          },
+        });
+
+        broadcast(clients, {
+          type: 'session.start',
+          payload: {
+            ...(await sessionStartPayload()),
+            reset: true,
+            clearedSessionId: oldSessionId,
+          },
+        });
+      } catch (err) {
+        send(ws, {
+          type: 'projects.selected',
+          payload: {
+            root: selRoot,
+            name: selName || path.basename(selRoot),
+            message: errMessage(err),
+          },
+        });
+      }
+    },
+    setWorkingDir: async (ws, msg) => {
+      const parsed = validateWorkingDirSetPayload(msg.payload);
+      if (!parsed.ok) {
+        sendResult(ws, false, parsed.message);
+        return;
+      }
+      const { path: newPath } = parsed.value;
+      try {
+        const resolved = await resolveWorkingDirInsideProject(projectRoot, newPath);
+
+        workingDir = resolved;
+        context.cwd = resolved;
+
+        broadcast(clients, {
+          type: 'working_dir.changed',
+          payload: { cwd: resolved, projectRoot },
+        });
+
+        sendResult(ws, true, `Working directory set to ${resolved}`);
+      } catch (err) {
+        sendResult(ws, false, errMessage(err));
+      }
+    },
+  };
+
+  modeRoutes = {
+    listModes: async (ws) => {
+      try {
+        const modes = await modeStore.listModes();
+        const active = await modeStore.getActiveMode();
+        send(ws, {
+          type: 'modes.list',
+          payload: {
+            modes: modes.map((m) => ({
+              id: m.id,
+              name: m.name,
+              description: m.description,
+              isActive: m.id === (active?.id ?? 'default'),
+            })),
+            activeId: active?.id ?? 'default',
+          },
+        });
+      } catch (err) {
+        send(ws, {
+          type: 'modes.list',
+          payload: {
+            modes: [],
+            activeId: 'default',
+            error: errMessage(err),
+          },
+        });
+      }
+    },
+    switchMode: async (ws, msg) => {
+      const parsed = validateModeSwitchPayload(msg.payload);
+      if (!parsed.ok) {
+        sendResult(ws, false, parsed.message);
+        return;
+      }
+      const { id } = parsed.value;
+      try {
+        if (id === 'default') {
+          await modeStore.setActiveMode(null);
+        } else {
+          const found = await modeStore.getMode(id);
+          if (!found) throw new Error(`Unknown mode "${id}"`);
+          await modeStore.setActiveMode(id);
+        }
+        modeId = id;
+        const modePrompt = id === 'default' ? '' : ((await modeStore.getMode(id))?.prompt ?? '');
+        const freshBuilder = new DefaultSystemPromptBuilder({
+          memoryStore,
+          skillLoader,
+          modeStore,
+          modeId: id,
+          modePrompt,
+          modelCapabilities,
+        });
+        context.systemPrompt = await freshBuilder.build({
+          cwd: projectRoot,
+          projectRoot,
+          tools: toolRegistry.list(),
+          provider: config.provider,
+          model: config.model,
+        });
+        sendResult(ws, true, `Switched to mode "${id}"`);
+        broadcast(clients, {
+          type: 'session.start',
+          payload: { ...(await sessionStartPayload()) },
+        });
+      } catch (err) {
+        sendResult(ws, false, errMessage(err));
+      }
+    },
+  };
+
+  shellGitRoutes = {
+    gitInfo: async (ws) => {
+      await handleGitInfo(ws, projectRoot);
+    },
+    gitChanges: async (ws) => {
+      await handleGitChanges(ws, projectRoot);
+    },
+    gitDiff: async (ws, msg) => {
+      const parsed = validateGitDiffPayload(msg.payload);
+      if (!parsed.ok) {
+        sendResult(ws, false, parsed.message);
+        return;
+      }
+      await handleGitDiff(ws, projectRoot, parsed.value.path);
+    },
+    shellOpen: async (ws, msg) => {
+      const parsed = validateShellOpenPayload(msg.payload);
+      if (!parsed.ok) {
+        sendResult(ws, false, parsed.message);
+        return;
+      }
+      const result: ShellOpenResult = await handleShellOpen(parsed.value as ShellOpenRequest, logger);
+      sendResult(ws, result.success, result.message);
+    },
+  };
+
+  mailboxRoutes = {
+    messages: (ws, msg) => {
+      const parsed = validateMailboxMessagesPayload(msg.payload);
+      if (!parsed.ok) {
+        sendResult(ws, false, parsed.message);
+        return;
+      }
+      return handleMailboxMessages(ws, { projectRoot, globalRoot: path.dirname(globalConfigPath) }, parsed.value);
+    },
+    agents: (ws, msg) => {
+      const parsed = validateMailboxAgentsPayload(msg.payload);
+      if (!parsed.ok) {
+        sendResult(ws, false, parsed.message);
+        return;
+      }
+      return handleMailboxAgents(ws, { projectRoot, globalRoot: path.dirname(globalConfigPath) }, parsed.value);
+    },
+    clear: (ws) =>
+      handleMailboxClear(ws, { projectRoot, globalRoot: path.dirname(globalConfigPath) }),
+    purge: (ws, msg) => {
+      const parsed = validateMailboxPurgePayload(msg.payload);
+      if (!parsed.ok) {
+        sendResult(ws, false, parsed.message);
+        return;
+      }
+      return handleMailboxPurge(ws, { projectRoot, globalRoot: path.dirname(globalConfigPath) }, parsed.value);
+    },
+  };
+
+  brainRoutes = {
+    status: (ws) => {
+      send(ws, {
+        type: 'brain.status',
+        payload: { maxAutoRisk: brainSettings.maxAutoRisk, log: brainLog },
+      });
+    },
+    risk: (ws, msg) => {
+      const parsed = validateBrainRiskPayload(msg.payload);
+      if (!parsed.ok) {
+        sendResult(ws, false, parsed.message);
+        return;
+      }
+      const { level } = parsed.value;
+      brainSettings.maxAutoRisk = level as BrainAutoRisk;
+      send(ws, {
+        type: 'brain.status',
+        payload: { maxAutoRisk: brainSettings.maxAutoRisk, log: brainLog },
+      });
+    },
+    ask: async (ws, msg) => {
+      const parsed = validateBrainAskPayload(msg.payload);
+      if (!parsed.ok) {
+        sendResult(ws, false, parsed.message);
+        return;
+      }
+      const { question } = parsed.value;
+      try {
+        const decision = await brain.decide({
+          id: `brain-ask-${Date.now().toString(36)}`,
+          source: 'user',
+          question,
+          risk: 'medium',
+          fallback: 'ask_human',
+        });
+        send(ws, { type: 'brain.answer', payload: { question, decision } });
+      } catch (err) {
+        sendResult(ws, false, `Brain consultation failed: ${errMessage(err)}`);
+      }
+    },
+  };
+
+  autoPhaseRoutes = {
+    handleMessage: (msg) => autoPhaseHandler.handleMessage(msg),
+  };
 
   // HTTP server for the React frontend (port 3456) — see `http-server.ts`
   // for the static-serve, MIME matching, path-traversal guard, and CSP

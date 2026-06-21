@@ -193,10 +193,12 @@ export const useChatStore = create<ChatState>()(
         set((state) => ({
           messages: state.messages.map((m) => {
             if (m.id !== id) return m;
+            // Mutate in-place to avoid repeated array allocations.
+            // This is safe because set() gives us a new state object.
             const prev = m.progressLines ?? [];
-            const next = [...prev, ...lines];
-            const trimmed = next.length > 30 ? next.slice(next.length - 30) : next;
-            return { ...m, progressLines: trimmed };
+            prev.push(...lines);
+            if (prev.length > 30) prev.splice(0, prev.length - 30);
+            return { ...m, progressLines: prev };
           }),
         }));
       },

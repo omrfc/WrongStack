@@ -87,8 +87,8 @@ function DockChip({
       onClick={onClick}
       title={active ? `Collapse ${label}` : `Expand ${label}`}
       className={cn(
-        'flex items-center gap-1.5 h-6 px-2 rounded-full border text-[11px] font-medium shrink-0 transition-colors',
-        active ? tone.active : cn('border-transparent', tone.idle),
+        'flex items-center gap-2 h-7 px-2.5 rounded-full border text-xs font-medium shrink-0 transition-colors',
+        active ? tone.active : cn('border-border/40', tone.idle),
       )}
     >
       <span className={cn(pulse && 'animate-pulse')}>{icon}</span>
@@ -166,7 +166,7 @@ export function WorkspaceDock({ sessionId }: { sessionId: string }) {
   return (
     <div className="space-y-2">
       {/* ── Chip strip ── */}
-      <div className="flex flex-wrap items-center gap-1">
+      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border/50 bg-muted/20 px-2 py-1.5">
         {visible.autophase && (
           <DockChip
             section="autophase"
@@ -228,7 +228,7 @@ export function WorkspaceDock({ sessionId }: { sessionId: string }) {
               // Toggle dock section to git if implemented; for now just
               // show the branch name and stats as a static info chip.
             }}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono border border-transparent hover:border-border transition-colors"
+            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-border/40 text-xs font-mono hover:bg-muted/60 transition-colors"
           >
             <GitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />
             <span className="font-semibold text-foreground">{gitInfo.branch}</span>
@@ -269,13 +269,14 @@ export function WorkspaceDock({ sessionId }: { sessionId: string }) {
       </div>
 
       {/* ── Expanded section — exactly one, or nothing ── */}
+      {open && <div className="border-t border-border/40 pt-2" />}
       {open === 'autophase' && phasesActive && (
         <div className="space-y-1.5">
           <div className="flex justify-end">
             <Button
               variant="outline"
               size="sm"
-              className="h-6 gap-1 text-[10px]"
+              className="h-7 gap-1 text-xs"
               onClick={() => setCurrentView('autophase')}
             >
               <Maximize2 className="h-3 w-3" />
@@ -304,7 +305,7 @@ export function WorkspaceDock({ sessionId }: { sessionId: string }) {
                 type="button"
                 onClick={() => setWorktreeView(v)}
                 className={cn(
-                  'text-[10px] px-2 py-0.5 rounded-full border transition-colors capitalize',
+                  'text-xs px-2.5 py-0.5 rounded-full border transition-colors capitalize',
                   worktreeView === v
                     ? 'bg-primary/10 border-primary/30 text-primary'
                     : 'border-border text-muted-foreground hover:text-foreground',

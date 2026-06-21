@@ -16,24 +16,7 @@ const STATUS_META: Record<
   stopped: { led: 'text-muted-foreground', label: 'stopped', pulse: false },
 };
 
-function fmtCost(v: number): string {
-  if (v <= 0) return '$0';
-  if (v >= 0.01) return `$${v.toFixed(3)}`;
-  return `$${v.toFixed(5)}`.replace(/0+$/, '').replace(/\.$/, '');
-}
-
-function fmtTok(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
-}
-
-function fmtDuration(ms: number): string {
-  const sec = Math.floor(ms / 1000);
-  if (sec < 60) return `${sec}s`;
-  const min = Math.floor(sec / 60);
-  return `${min}m ${sec % 60}s`;
-}
+import { fmtCost, fmtTok, fmtElapsed as fmtDuration } from './dashboard-primitives.js';
 
 // ── Agent detail overlay ──────────────────────────────────────────────
 

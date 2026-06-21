@@ -6,12 +6,13 @@ import { useAutoSubmitStreak } from '@/stores/auto-submit-streak.js';
 import { Pencil, Send, Square, Sparkles } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { downloadChatAsMarkdown } from './CommandPalette';
-import { FilePicker } from './FilePicker';
 import { Button } from './ui/button';
 
-import { type SlashCommandDef, SLASH_COMMANDS, SLASH_CATEGORY_ORDER, matchSlash, detectAtMention } from './ChatInput/slash-commands.js';
-import { autoFenceCode } from './ChatInput/code-detect.js';
+import { type SlashCommandDef, SLASH_CATEGORY_ORDER, matchSlash, detectAtMention } from './ChatInput/slash-commands.js';
+import { FileMentionPicker, type FileMentionState } from './ChatInput/file-mention-picker.js';
+import { QueuedMessages } from './ChatInput/queued-messages.js';
+import { runChatSlashCommand } from './ChatInput/slash-routing.js';
+import { usePasteDrop } from './ChatInput/use-paste-drop.js';
 import { RefinePanel } from './RefinePanel.js';
 
 export function ChatInput({
@@ -53,293 +54,40 @@ export function ChatInput({
   /** Open `@`-mention picker state. We track the starting position of the
    *  `@` in the textarea so on pick we can replace the partial token
    *  (`@compa`) with the chosen path. Null = closed. */
-  const [atMention, setAtMention] = useState<{ start: number; query: string } | null>(null);
-  /** Transient hint shown after a large paste. The user can read it for a
-   *  few seconds then it auto-dismisses. We only surface it for genuinely
-   *  big drops (>800 chars) — smaller pastes don't need a callout.
-   *  When `lang` is set, the paste was auto-fenced as code. */
-  const [pasteHint, setPasteHint] = useState<{
-    chars: number;
-    lines: number;
-    /** Detected language if code was auto-fenced. */
-    lang?: string | undefined;
-    /** If set, the fenced version can be undone via this callback. */
-    undoFence?: (() => void) | undefined;
-  } | null>(null);
-  /** True while an OS-drag is hovering over the input area. Triggers the
-   *  drop overlay so the user gets visual confirmation they're about to
-   *  attach. Browsers don't expose full filesystem paths from drops for
-   *  security reasons, so we seed the @-mention picker with the file's
-   *  basename and let the user confirm the resolved workspace path. */
-  const [draggingOver, setDraggingOver] = useState(false);
+  const [atMention, setAtMention] = useState<FileMentionState | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const {
+    draggingOver,
+    onDragEnter,
+    onDragLeave,
+    onDragOver,
+    onDrop,
+    onTextPaste,
+    pasteHint,
+    pendingImageRef,
+    setPasteHint,
+  } = usePasteDrop({ input, textareaRef, setInput, setAtMention });
 
   const runSlashCommand = useCallback(
-    (raw: string): boolean => {
-      const trimmed = raw.trim();
-      // Split into head (with leading slash) + the rest. Lowercase the
-      // head so `/Todos` and `/TODOS` route the same; preserve case on
-      // the args because the user might be inserting a content string.
-      const sp = trimmed.indexOf(' ');
-      const head = (sp === -1 ? trimmed : trimmed.slice(0, sp)).toLowerCase();
-      const args = sp === -1 ? '' : trimmed.slice(sp + 1).trim();
-      const cmd = head;
-      switch (cmd) {
-        case '/help': {
-          // Render the registry inline as an assistant message.
-          const lines = [
-            '📖 **Slash commands**',
-            '',
-            ...SLASH_COMMANDS.map(
-              (c) =>
-                `• \`${c.name}\`${c.aliases?.length ? ` (${c.aliases.map((a) => `\`${a}\``).join(', ')})` : ''} — ${c.description}`,
-            ),
-          ];
-          addMessage({ role: 'assistant', content: lines.join('\n') });
-          return true;
-        }
-        case '/clear':
-          clearMessages();
-          client?.clearContext?.();
-          return true;
-        case '/new':
-          client?.newSession?.();
-          return true;
-        case '/exit':
-          client?.send?.({ type: 'webui.shutdown' });
-          addMessage({ role: 'assistant', content: '👋 Shutting down WebUI server…' });
-          return true;
-        case '/compact':
-        case '/compact!':
-          client?.compactContext?.(cmd === '/compact!');
-          return true;
-        case '/repair':
-          client?.repairContext?.();
-          return true;
-        case '/debug':
-        case '/context':
-          onOpenBreakdown?.();
-          return true;
-        case '/tools':
-          ws.listTools();
-          return true;
-        case '/memory':
-          ws.listMemory();
-          return true;
-        case '/skill':
-        case '/skills':
-          ws.listSkills();
-          return true;
-        case '/diag':
-          ws.getDiag();
-          return true;
-        case '/stats':
-          ws.getStats();
-          return true;
-        case '/save':
-          ws.saveSession();
-          return true;
-        case '/load':
-        case '/resume':
-          ws.listSessions(50);
-          setCurrentView('sessions');
-          return true;
-        case '/agents':
-          useUIStore.getState().setAgentsMonitorOpen(true);
-          return true;
-        case '/brain': {
-          // Mirrors the CLI's /brain: status (default), risk <level>, ask <question>.
-          const [sub, ...rest] = args.split(/\s+/).filter(Boolean);
-          const subcmd = (sub ?? '').toLowerCase();
-          if (subcmd === 'risk') {
-            client?.send?.({ type: 'brain.risk', payload: { level: (rest[0] ?? '').toLowerCase() } });
-          } else if (subcmd === 'ask') {
-            const question = rest.join(' ').trim();
-            if (!question) {
-              addMessage({ role: 'assistant', content: 'Usage: `/brain ask <question>`' });
-            } else {
-              client?.send?.({ type: 'brain.ask', payload: { question } });
-            }
-          } else {
-            client?.send?.({ type: 'brain.status' });
-          }
-          return true;
-        }
-        case '/plan':
-          ws.getPlan();
-          setCurrentView('chat');
-          // Surface the Work section of the dock strip above the chat.
-          useUIStore.getState().setDockSection('work');
-          return true;
-        case '/todos': {
-          // Sub-commands: `/todos` (default = list), `/todos clear`. We
-          // pull live state from the session store so the rendered output
-          // matches what the sidebar already shows — no separate fetch.
-          const sub = args.toLowerCase();
-          if (sub === 'clear') {
-            client?.clearTodos?.();
-            return true;
-          }
-          const list = useSessionStore.getState().todos;
-          if (list.length === 0) {
-            addMessage({
-              role: 'assistant',
-              content:
-                "✅ **Todos** — _empty. Ask the agent to plan something and they'll show up here._",
-            });
-            return true;
-          }
-          const lines: string[] = [
-            `✅ **Todos** (${list.filter((t) => t.status === 'completed').length}/${list.length} done)`,
-            '',
-          ];
-          for (const t of list) {
-            const mark =
-              t.status === 'completed' ? '[x]' : t.status === 'in_progress' ? '[~]' : '[ ]';
-            const text = t.status === 'in_progress' && t.activeForm ? t.activeForm : t.content;
-            lines.push(`- ${mark} ${text}`);
-          }
-          lines.push('', '_Use `/todos clear` to wipe the list._');
-          addMessage({ role: 'assistant', content: lines.join('\n') });
-          return true;
-        }
-        case '/export':
-          downloadChatAsMarkdown();
-          addMessage({ role: 'assistant', content: '📥 Chat exported to your downloads folder.' });
-          return true;
-        case '/interrupt':
-        case '/abort':
-        case '/stop':
-        case '/int':
-          sendAbort();
-          setLoading(false);
-          return true;
-        case '/settings':
-        case '/model':
-          setCurrentView('settings');
-          return true;
-        case '/enhance': {
-          const enabled = !useUIStore.getState().refineEnabled;
-          toggleRefineEnabled();
-          addMessage({
-            role: 'assistant',
-            content: `Prompt refinement ${enabled ? 'enabled' : 'disabled'}.`,
-          });
-          return true;
-        }
-        case '/suggest':
-        case '/next-steps':
-          // Ask the agent to suggest next steps
-          sendMsg('What are the next steps I should take? Be specific and actionable.');
-          return true;
-        case '/kill':
-        case '/ps': {
-          // /kill — open the Process Monitor overlay
-          // /ps  — open it too (read-only view is the same component)
-          setProcessMonitorOpen(true);
-          return true;
-        }
-        case '/queue': {
-          // Show queue state: count + items preview
-          const q = queue;
-          if (q.length === 0) {
-            addMessage({
-              role: 'assistant',
-              content:
-                '📋 **Message Queue** — empty.\n\nType while the agent is running to queue messages; they are sent automatically when the agent finishes.',
-            });
-          } else {
-            const lines = [`📋 **Message Queue** (${q.length} queued)`, ''];
-            q.forEach((item, i) => {
-              const preview = item.length > 80 ? `${item.slice(0, 77)}…` : item;
-              lines.push(`${i + 1}. ${preview}`);
-            });
-            lines.push('', '_Use `/queue open` to manage, or `/queue clear` to wipe._');
-            addMessage({ role: 'assistant', content: lines.join('\n') });
-          }
-          // /queue open — show the overlay panel
-          if (args.toLowerCase() === 'open') {
-            setQueuePanelOpen(true);
-          }
-          return true;
-        }
-        case '/next': {
-          const narg = args.trim().toLowerCase();
-          if (!narg || narg === 'list' || narg === 'ls' || narg === 'show') return handleNextList();
-          if (narg === 'clear' || narg === 'reset') {
-            addMessage({ role: 'assistant', content: '💡 _Suggestion list cleared._' });
-            return true;
-          }
-          return handleNextSelect(args.trim());
-        }
-        case '/f':
-        case '/f1':
-        case '/f2':
-        case '/f3':
-        case '/f4':
-        case '/f5':
-        case '/f6':
-        case '/f7':
-        case '/f8':
-        case '/f9':
-        case '/f10':
-        case '/f11':
-        case '/f12': {
-          const panelMap: Record<string, string> = {
-            '/f': '',
-            '/f1': 'projectPicker',
-            '/f2': 'fleetMonitor',
-            '/f3': 'agentsMonitor',
-            '/f4': 'worktreeMonitor',
-            '/f5': 'autonomySettings',
-            '/f6': 'todosMonitor',
-            '/f7': 'queuePanel',
-            '/f8': 'processList',
-            '/f9': 'goalPanel',
-            '/f10': 'sessionsPanel',
-            '/f11': 'coordinatorMonitor',
-            '/f12': 'statuslinePicker',
-          };
-          const panel = panelMap[cmd];
-          if (!panel) {
-            // /f with no args — show the list
-            const lines = [
-              '🎛️  **F-key panels**',
-              '',
-              '/f 1 — Project switcher',
-              '/f 2 — Fleet orchestration monitor',
-              '/f 3 — Agents live monitor',
-              '/f 4 — Worktree monitor',
-              '/f 5 — Autonomy settings',
-              '/f 6 — Todos monitor overlay',
-              '/f 7 — Queue panel',
-              '/f 8 — Process list overlay',
-              '/f 9 — Goal panel',
-              '/f 10 — Live sessions panel',
-              '/f 11 — Coordinator monitor',
-              '/f 12 — Status line picker',
-              '',
-              '_Or use /f1 … /f12 directly._',
-            ];
-            addMessage({ role: 'assistant', content: lines.join('\n') });
-            return true;
-          }
-          // Dispatch to the appropriate WebUI store action
-          const ui = useUIStore.getState();
-          if (panel === 'fleetMonitor') { ui.setFleetMonitorOpen(true); return true; }
-          if (panel === 'agentsMonitor') { ui.setAgentsMonitorOpen(true); return true; }
-          if (panel === 'queuePanel') { ui.setQueuePanelOpen(true); return true; }
-          if (panel === 'processList') { ui.setProcessMonitorOpen(true); return true; }
-          addMessage({
-            role: 'assistant',
-            content: `Panel \`${panel}\` is not available in the WebUI. Try the TUI for full F-key panel support.`,
-          });
-          return true;
-        }
-        default:
-          return false;
-      }
-    },
+    (raw: string): boolean =>
+      runChatSlashCommand({
+        raw,
+        addMessage,
+        clearMessages,
+        client,
+        queue,
+        sendAbort,
+        sendMsg,
+        setLoading,
+        setCurrentView,
+        toggleRefineEnabled,
+        setProcessMonitorOpen,
+        setQueuePanelOpen,
+        ws,
+        onOpenBreakdown,
+        handleNextList,
+        handleNextSelect,
+      }),
     [
       addMessage,
       clearMessages,
@@ -686,45 +434,6 @@ export function ChatInput({
     [slashSuggestions, slashIndex, atMention, promptHistory, historyIdx, input, runSlashCommand, handleSubmit],
   );
 
-  /** Accumulates base64 image data pasted while the input is focused.
-   *  Cleared after each submit so images aren't re-sent accidentally. */
-  const pendingImageRef = useRef<string | null>(null);
-
-  /** Intercept pastes on the textarea to detect and accumulate clipboard images.
-   *  Mirrors the TUI's `readClipboardImage` behaviour (paste image → attach to
-   *  next message) but uses the browser's Async Clipboard API instead of
-   *  Node.js subprocesses. */
-  useEffect(() => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-
-    const onPaste = async (e: ClipboardEvent) => {
-      const items = e.clipboardData?.items;
-      if (!items) return;
-
-      for (const item of items) {
-        if (item.type.startsWith('image/')) {
-          e.preventDefault();
-          try {
-            const blob = item.getAsFile();
-            if (!blob) continue;
-            const reader = new FileReader();
-            reader.onload = () => {
-              pendingImageRef.current = reader.result as string;
-            };
-            reader.readAsDataURL(blob);
-          } catch {
-            // Clipboard access requires permission in some browsers; silently skip.
-          }
-          return;
-        }
-      }
-    };
-
-    ta.addEventListener('paste', onPaste);
-    return () => ta.removeEventListener('paste', onPaste);
-  }, []);
-
   const adjustTextareaHeight = () => {
     const textarea = textareaRef.current;
     if (textarea) {
@@ -787,41 +496,7 @@ export function ChatInput({
       {/* Queue visualization — shows messages the user stacked while the
           agent was still running. Each row has a remove button; the whole
           queue can be cleared. The hook below drains them after run.result. */}
-      {queue.length > 0 && (
-        <div className="rounded-lg border bg-muted/30 p-2 text-xs">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-              Queued ({queue.length})
-            </span>
-            <button
-              type="button"
-              onClick={clearQueue}
-              className="text-muted-foreground hover:text-destructive text-xs"
-            >
-              Clear all
-            </button>
-          </div>
-          <ul className="space-y-1">
-            {queue.map((q, i) => (
-              <li
-                // biome-ignore lint/suspicious/noArrayIndexKey: queue has stable order
-                key={i}
-                className="flex items-start justify-between gap-2 rounded bg-background/60 border px-2 py-1"
-              >
-                <span className="truncate flex-1 min-w-0">{q}</span>
-                <button
-                  type="button"
-                  onClick={() => removeQueued(i)}
-                  className="text-muted-foreground hover:text-destructive shrink-0"
-                  title="Remove from queue"
-                >
-                  ×
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <QueuedMessages queue={queue} onClear={clearQueue} onRemove={removeQueued} />
 
       {/* Prompt-refinement panel — shown when the user submits and refine is enabled */}
       {refinePanel && (
@@ -856,75 +531,10 @@ export function ChatInput({
 
       <form
         onSubmit={handleSubmit}
-        onDragEnter={(e) => {
-          // Only react to drags carrying files — text/uri-list drags from
-          // other parts of the page shouldn't trip the overlay.
-          if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes('Files')) return;
-          e.preventDefault();
-          setDraggingOver(true);
-        }}
-        onDragOver={(e) => {
-          if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes('Files')) return;
-          // preventDefault on dragover is what makes the area a valid drop
-          // target — without it the browser navigates to the file instead.
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'copy';
-        }}
-        onDragLeave={(e) => {
-          // dragleave fires when crossing child boundaries too; only clear if
-          // the cursor genuinely left the form (relatedTarget outside or null).
-          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-          setDraggingOver(false);
-        }}
-        onDrop={(e) => {
-          if (!e.dataTransfer) return;
-          const files = Array.from(e.dataTransfer.files ?? []);
-          if (files.length === 0) {
-            setDraggingOver(false);
-            return;
-          }
-          e.preventDefault();
-          setDraggingOver(false);
-          // Insert `@<filename>` per dropped file at the current cursor, with
-          // spaces between them. Browsers strip the full path for security, so
-          // we use the basename only — the FilePicker (opened by setting
-          // atMention to the last inserted handle) will resolve it against
-          // the workspace tree.
-          const ta = textareaRef.current;
-          const insertPos = ta?.selectionStart ?? input.length;
-          const before = input.slice(0, insertPos);
-          const after = input.slice(insertPos);
-          const needsLeadingSpace = before.length > 0 && !/\s$/.test(before);
-          const lead = needsLeadingSpace ? ' ' : '';
-          const tokens = files.map((f) => `@${f.name}`);
-          const joined = tokens.join(' ');
-          // Trailing space only when there isn't already one — keeps the
-          // cursor neatly between insert and following text.
-          const needsTrailingSpace = after.length === 0 || !/^\s/.test(after);
-          const trail = needsTrailingSpace ? ' ' : '';
-          const insertion = `${lead}${joined}${trail}`;
-          const next = before + insertion + after;
-          setInput(next);
-          // Open the FilePicker against the LAST dropped basename so the user
-          // can replace the basename with the correctly-resolved workspace
-          // path. Position the @-mention start at the `@` of the last token.
-          const lastTokenStart =
-            before.length +
-            lead.length +
-            tokens.slice(0, -1).join(' ').length +
-            (tokens.length > 1 ? 1 : 0);
-          const lastBasename = files[files.length - 1]?.name;
-          requestAnimationFrame(() => {
-            if (ta) {
-              const cur = before.length + insertion.length - trail.length;
-              ta.focus();
-              ta.setSelectionRange(cur, cur);
-              ta.style.height = 'auto';
-              ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
-            }
-            setAtMention({ start: lastTokenStart, query: lastBasename });
-          });
-        }}
+        onDragEnter={onDragEnter}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
         className={cn(
           'flex items-end gap-2 relative rounded-lg transition-colors',
           draggingOver && 'ring-2 ring-primary ring-offset-2 ring-offset-background bg-primary/5',
@@ -938,33 +548,13 @@ export function ChatInput({
         <div className="relative flex-1">
           {/* @-mention file picker — takes priority over the slash popup
             since `@` and `/` can't both be active at the cursor. */}
-          {atMention && (
-            <FilePicker
-              query={atMention.query}
-              onClose={() => setAtMention(null)}
-              onPick={(p) => {
-                // Replace the partial `@query` with `@<path> `, then move
-                // the cursor after the inserted space so typing continues
-                // naturally.
-                const before = input.slice(0, atMention.start);
-                const after = input.slice(atMention.start + 1 + atMention.query.length);
-                const inserted = `@${p} `;
-                const next = before + inserted + after;
-                setInput(next);
-                setAtMention(null);
-                requestAnimationFrame(() => {
-                  const ta = textareaRef.current;
-                  if (ta) {
-                    const pos = before.length + inserted.length;
-                    ta.focus();
-                    ta.setSelectionRange(pos, pos);
-                    ta.style.height = 'auto';
-                    ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
-                  }
-                });
-              }}
-            />
-          )}
+          <FileMentionPicker
+            atMention={atMention}
+            input={input}
+            textareaRef={textareaRef}
+            setInput={setInput}
+            setAtMention={setAtMention}
+          />
 
           {/* Slash command popup — descriptions inline, ↑/↓ to select, Tab to
             autocomplete, Enter to dispatch directly. Click also works. */}
@@ -1042,68 +632,7 @@ export function ChatInput({
               setAtMention(detectAtMention(ta.value, ta.selectionStart));
             }}
             onKeyDown={handleKeyDown}
-            onPaste={(e) => {
-              const text = e.clipboardData?.getData('text') ?? '';
-              if (!text) return;
-
-              // ── Code detection & auto-fencing ──
-              // Check if the pasted content looks like source code.
-              // If it does and isn't already fenced, auto-wrap in ``` fences
-              // so the markdown renderer shows syntax highlighting.
-              const result = autoFenceCode(text);
-              if (result) {
-                e.preventDefault();
-                const ta = textareaRef.current;
-                if (!ta) return;
-                const start = ta.selectionStart;
-                const end = ta.selectionEnd;
-                const before = input.slice(0, start);
-                const after = input.slice(end);
-                const fenced = result.fenced;
-                const next = before + fenced + after;
-                setInput(next);
-                const lines = text.split('\n').length;
-                // Store undo callback — replaces the paste with the raw text
-                const undo = () => {
-                  const raw = before + text + after;
-                  setInput(raw);
-                  setPasteHint(null);
-                  requestAnimationFrame(() => {
-                    if (ta) {
-                      ta.focus();
-                      ta.style.height = 'auto';
-                      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
-                    }
-                  });
-                };
-                setPasteHint({
-                  chars: text.length,
-                  lines,
-                  lang: result.lang,
-                  undoFence: undo,
-                });
-                setTimeout(() => setPasteHint(null), 6000);
-                requestAnimationFrame(() => {
-                  ta.style.height = 'auto';
-                  ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
-                  // Place cursor after the closing ```
-                  const newPos = before.length + fenced.length;
-                  ta.setSelectionRange(newPos, newPos);
-                });
-                // Exit — don't run the large-paste hint
-                return;
-              }
-
-              // ── Large paste hint (non-code) ──
-              // Surface a tiny hint when the user drops a chunky payload —
-              // helps them realize they pasted the wrong thing (e.g. an
-              // entire file when they meant a snippet). 4-second TTL.
-              if (text.length > 800) {
-                const lines = text.split('\n').length;
-                setPasteHint({ chars: text.length, lines });
-                setTimeout(() => setPasteHint(null), 4000);
-              }
-            }}
+            onPaste={onTextPaste}
             placeholder={
               !client?.isConnected
                 ? 'Connect to server first…'

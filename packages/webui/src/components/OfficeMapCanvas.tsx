@@ -65,82 +65,31 @@ import type { LiveSession } from '@/stores/monitor-store';
 import type { VizEvent } from '@/stores/viz-store';
 import type { SubagentView } from '@/stores/types';
 import { SessionWatchPanel } from './SessionWatchPanel';
-
-// ── Client Types ─────────────────────────────────────────────────────────────
-
-type ClientKind = 'webui' | 'tui' | 'repl' | 'coordinator' | 'agent' | 'mailbox';
-type ClientStatus = 'idle' | 'active' | 'streaming' | 'completed' | 'error' | 'offline';
-
-interface OfficeNodeData extends Record<string, unknown> {
-  label: string;
-  sublabel?: string;
-  kind: ClientKind;
-  status: ClientStatus;
-  unreadCount?: number;
-  messageCount?: number;
-  currentTask?: string;
-  iteration?: number;
-  toolCalls?: number;
-  costUsd?: number;
-  tokensIn?: number;
-  tokensOut?: number;
-  ctxPct?: number;
-  model?: string;
-  lastActivityAt?: string;
-  lastSeenAt?: number;
-  connections?: number;
-  // Coordinator / fleet-summary extras
-  agentsActive?: number;
-  agentsTotal?: number;
-  // Client-node extras
-  sessionId?: string;
-  pid?: number;
-  branch?: string;
-  workingDir?: string;
-  startedAt?: string;
-  agentCount?: number;
-  color?: string;
-  /** 0–1 activity level from VizStore for glow intensity */
-  vizActivity?: number;
-}
-
-// ── Formatting helpers ───────────────────────────────────────────────────────
-
-/** Compact token/number formatting: 1234 → "1.2k", 1_500_000 → "1.5M". */
-function fmtCompact(n?: number): string {
-  if (!n) return '0';
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}
-
-/** Relative "Xs/Xm/Xh ago" from an ISO timestamp, using a passed `now` (ms). */
-function fmtAgo(iso: string | undefined, now: number): string {
-  if (!iso) return '—';
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return '—';
-  const s = Math.max(0, Math.round((now - t) / 1000));
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  return `${Math.floor(s / 3600)}h ago`;
-}
-
-/** Compact uptime "Xs/Xm/Xh" from an ISO start, using a passed `now` (ms). */
-function fmtUptime(iso: string | undefined, now: number): string {
-  if (!iso) return '—';
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return '—';
-  const s = Math.max(0, Math.round((now - t) / 1000));
-  if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
-}
-
-/** Short model label, e.g. "anthropic/claude-opus-4-8" → "claude-opus-4-8". */
-function shortModel(model: string | undefined): string | undefined {
-  if (!model) return undefined;
-  return model.split('/').pop()?.slice(0, 22);
-}
+import {
+  type ClientKind,
+  type ClientStatus,
+  type OfficeNodeData,
+  fmtCompact,
+  fmtAgo,
+  fmtUptime,
+  shortModel,
+  CENTER_X,
+  HUB_Y,
+  HUB_GAP,
+  MAILBOX_Y,
+  COORD_Y,
+  CLIENT_Y,
+  AGENT_Y0,
+  CLIENT_COL_W,
+  AGENT_COLS,
+  AGENT_FAN_W,
+  AGENT_ROW_H,
+  layoutClientXs,
+  agentFanPos,
+  clientNodeType,
+  surfaceLabel,
+  mapAgentStatus,
+} from './OfficeMapCanvas/utils.js';
 
 // ── Status LED ─────────────────────────────────────────────────────────────
 
@@ -796,86 +745,6 @@ const edgeTypes: EdgeTypes = {
     );
   },
 };
-
-// ── Office Layout ────────────────────────────────────────────────────────────
-//
-//  Per-client desks floor plan (driven by the live cross-process snapshot):
-//
-//        [ Mailbox Hub ]            ← lobby (top center)
-//             |
-//      [ Fleet Coordinator ]        ← executive floor
-//      /        |         \
-//  [TUI #1234] [WebUI …]  [REPL …]  ← one client node per live session
-//   |   |        |
-//  [A1][A2]    [A3]                 ← that client's agents sit at desks below it
-
-const CENTER_X = 600;
-// Mailbox Hub + Fleet Coordinator share the top row, side by side (not stacked).
-const HUB_Y = 50;
-const HUB_GAP = 230; // each hub offset horizontally from CENTER_X
-const MAILBOX_Y = HUB_Y;
-const COORD_Y = HUB_Y;
-const CLIENT_Y = 370;
-const AGENT_Y0 = 640;
-const CLIENT_COL_W = 380;
-
-/** Horizontal x for each client id, spread symmetrically around CENTER_X.
- *  `colW` is widened by the caller when clients hold many fanned-out agents. */
-function layoutClientXs(clientIds: string[], colW: number = CLIENT_COL_W): Map<string, number> {
-  const map = new Map<string, number>();
-  const n = Math.max(1, clientIds.length);
-  clientIds.forEach((id, i) => {
-    map.set(id, CENTER_X + (i - (n - 1) / 2) * colW);
-  });
-  return map;
-}
-
-// Agent fan-out under a client: a centered grid (≤ AGENT_COLS per row) so each
-// client→agent wire lands on a distinct desk instead of stacking on one column.
-const AGENT_COLS = 3;
-const AGENT_FAN_W = 190; // horizontal gap between fanned desks (≥ desk width)
-const AGENT_ROW_H = 150; // vertical gap between fan rows
-
-/** Position (relative to the client's x) of agent `j` of `total`. */
-function agentFanPos(cx: number, j: number, total: number): { x: number; y: number } {
-  const cols = Math.min(AGENT_COLS, total);
-  const row = Math.floor(j / cols);
-  const col = j % cols;
-  const inRow = Math.min(cols, total - row * cols); // last row may be shorter
-  return {
-    x: cx + (col - (inRow - 1) / 2) * AGENT_FAN_W,
-    y: AGENT_Y0 + row * AGENT_ROW_H,
-  };
-}
-
-/** Map a registry surface to one of the three office client node kinds. */
-function clientNodeType(clientType: string | undefined): 'tui' | 'webui' | 'repl' {
-  if (clientType === 'tui') return 'tui';
-  if (clientType === 'cli' || clientType === 'repl') return 'repl';
-  return 'webui';
-}
-
-function surfaceLabel(kind: 'tui' | 'webui' | 'repl'): string {
-  return kind === 'tui' ? 'Terminal UI' : kind === 'repl' ? 'REPL' : 'Web UI';
-}
-
-/** Normalise a raw agent status (snapshot or fleet store) to a node status. */
-function mapAgentStatus(raw: string | undefined): ClientStatus {
-  switch (raw) {
-    case 'running':
-    case 'active':
-      return 'active';
-    case 'streaming':
-      return 'streaming';
-    case 'completed':
-      return 'completed';
-    case 'failed':
-    case 'error':
-      return 'error';
-    default:
-      return 'idle';
-  }
-}
 
 /** A resolved agent ready to render as an office desk node. */
 interface ResolvedAgent {

@@ -4,19 +4,17 @@ import {
   buildProviderUpdateMessage,
   buildUndoClearMessage,
 } from './ws-client-helpers';
+import {
+  type EventHandler,
+  type PendingConfirm,
+  type WsStatus,
+  getTokenFromWsUrl,
+  defaultWsUrl,
+  httpOriginForAuth,
+} from './ws-client-utils';
 
-type EventHandler = (msg: WSServerMessage) => void;
-
-interface PendingConfirm {
-  resolve: (decision: 'yes' | 'no' | 'always' | 'deny') => void;
-}
-
-/** Internal connection lifecycle states the UI subscribes to. */
-export type WsStatus =
-  | { state: 'connecting' }
-  | { state: 'open' }
-  | { state: 'closed'; error?: string | undefined }
-  | { state: 'reconnecting'; attempt: number; nextRetryAt: number; lastError?: string | undefined };
+// Re-export types for backward compat
+export type { WsStatus };
 
 // C-2 fix (Phase 1.4): the auth token is delivered via the HttpOnly
 // cookie set by `/ws-auth` (preferred) OR via the `?token=…` query param
@@ -26,23 +24,6 @@ export type WsStatus =
 // where an XSS could lift it. See ws-auth.ts for the full policy and
 // security rationale.
 
-/**
- * Read `?token=…` from the WS URL the client was constructed with.
- * Used by the cookie bootstrap (`ensureAuthCookie`) — when the server
- * prints the WS URL to its startup banner (e.g. `ws://127.0.0.1:3457?token=…`)
- * the page is loaded with the token in the URL, the client reads it
- * here, hits `/ws-auth?token=…` to swap it for an HttpOnly cookie, and
- * the cookie carries forward on every reconnect. There is no
- * persistent client-side store of the token.
- */
-function getTokenFromWsUrl(wsUrl: string): string | null {
-  try {
-    const u = new URL(wsUrl);
-    return u.searchParams.get('token');
-  } catch {
-    return null;
-  }
-}
 
 export class WrongStackWebSocketClient {
   private ws: WebSocket | null = null;
@@ -797,54 +778,6 @@ let client: WrongStackWebSocketClient | null = null;
  * several WebUI instances can run on different PORT/WS_PORT pairs at once. We
  * fall back to 3457 only when the tag is absent (e.g. the vite dev server).
  */
-const DEFAULT_WS_PORT = 3457;
-
-function resolveWsPort(): number {
-  if (typeof document === 'undefined') return DEFAULT_WS_PORT;
-  const raw = document
-    .querySelector('meta[name="wrongstack-ws-port"]')
-    ?.getAttribute('content');
-  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
-  return Number.isFinite(parsed) && parsed > 0 && parsed < 65536 ? parsed : DEFAULT_WS_PORT;
-}
-
-function defaultWsUrl(): string {
-  const port = resolveWsPort();
-  if (typeof window === 'undefined' || !window.location?.hostname) {
-    return `ws://127.0.0.1:${port}`;
-  }
-  const host = window.location.hostname.toLowerCase();
-  if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1') {
-    return `ws://127.0.0.1:${port}`;
-  }
-  return `ws://${window.location.hostname}:${port}`;
-}
-
-/**
- * Derive the HTTP origin for `/ws-auth` from the page's own location.
- * `/ws-auth` is a same-origin HTTP call, so we use the page's host
- * (NOT the WS port). The same `loopback→127.0.0.1` DNS-dance fix from
- * `defaultWsUrl()` applies — on Windows, browsers resolve `localhost`
- * to `[::1]` first, so we force IPv4 loopback for cookie consistency.
- */
-function httpOriginForAuth(): string {
-  if (typeof window === 'undefined' || !window.location?.hostname) {
-    return 'http://127.0.0.1:3456';
-  }
-  const host = window.location.hostname.toLowerCase();
-  // Reuse the page's HTTP port when it exists (different WS port and
-  // HTTP port are the common dev case). Fall back to the well-known
-  // HTTP port when the page is on a custom WS-only origin.
-  const pagePort = window.location.port
-    ? Number.parseInt(window.location.port, 10)
-    : Number.NaN;
-  const httpPort = Number.isFinite(pagePort) && pagePort > 0 ? pagePort : 3456;
-  if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1') {
-    return `http://127.0.0.1:${httpPort}`;
-  }
-  return `http://${window.location.hostname}:${httpPort}`;
-}
-
 export function getWSClient(url?: string): WrongStackWebSocketClient {
   if (!client) {
     client = new WrongStackWebSocketClient(url);

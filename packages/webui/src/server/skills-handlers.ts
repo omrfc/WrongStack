@@ -23,9 +23,11 @@ import path from 'node:path';
 import type { WebSocket } from 'ws';
 import JSZip from 'jszip';
 import type { SkillLoader } from '@wrongstack/core';
+import { atomicWrite } from '@wrongstack/core';
 import type { SkillInstaller } from '@wrongstack/core/skills';
 import { wstackGlobalRoot } from '@wrongstack/core/utils';
 import { send, errMessage } from './ws-utils.js';
+import { validateSkillsCreatePayload, validateSkillsEditPayload } from './ws-payload-validation.js';
 
 export interface SkillsContext {
   /** Backs skills.list/content/edit/export. Absent ⇒ feature disabled. */
@@ -268,21 +270,12 @@ export async function handleSkillsCreate(
   ctx: SkillsContext,
   msg: unknown,
 ): Promise<void> {
-  const createPayload = (
-    msg as { payload: { name: string; description: string; scope: 'project' | 'global' } }
-  ).payload;
-  if (!createPayload?.name?.trim()) {
-    send(ws, { type: 'skills.created', payload: { success: false, error: 'Skill name is required' } });
+  const parsed = validateSkillsCreatePayload((msg as { payload?: unknown }).payload);
+  if (!parsed.ok) {
+    send(ws, { type: 'skills.created', payload: { success: false, error: parsed.message } });
     return;
   }
-  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(createPayload.name.trim())) {
-    send(ws, { type: 'skills.created', payload: { success: false, error: 'Skill name must be kebab-case (e.g. my-new-skill)' } });
-    return;
-  }
-  if (!createPayload?.description?.trim()) {
-    send(ws, { type: 'skills.created', payload: { success: false, error: 'Description/trigger is required' } });
-    return;
-  }
+  const createPayload = parsed.value;
   try {
     const targetDir =
       createPayload.scope === 'global'
@@ -347,7 +340,7 @@ export async function handleSkillsCreate(
       '- `output-standards` — for standardized `<next_steps>` formatting',
     ].join('\n');
 
-    await fs.writeFile(path.join(targetDir, 'SKILL.md'), skillContent, 'utf-8');
+    await atomicWrite(path.join(targetDir, 'SKILL.md'), skillContent);
 
     send(ws, {
       type: 'skills.created',
@@ -375,15 +368,12 @@ export async function handleSkillsEdit(
     send(ws, { type: 'skills.edited', payload: { success: false, error: 'Skills not enabled' } });
     return;
   }
-  const editPayload = (msg as { payload: { name: string; body: string } }).payload;
-  if (!editPayload?.name?.trim()) {
-    send(ws, { type: 'skills.edited', payload: { success: false, error: 'Skill name is required' } });
+  const parsed = validateSkillsEditPayload((msg as { payload?: unknown }).payload);
+  if (!parsed.ok) {
+    send(ws, { type: 'skills.edited', payload: { success: false, error: parsed.message } });
     return;
   }
-  if (!editPayload?.body) {
-    send(ws, { type: 'skills.edited', payload: { success: false, error: 'Skill body is required' } });
-    return;
-  }
+  const editPayload = parsed.value;
   try {
     const entries = await ctx.skillLoader.listEntries();
     const entry = entries.find((e) => e.name.toLowerCase() === editPayload.name.toLowerCase());
@@ -396,7 +386,7 @@ export async function handleSkillsEdit(
       send(ws, { type: 'skills.edited', payload: { success: false, error: 'Bundled skills cannot be edited' } });
       return;
     }
-    await fs.writeFile(entry.path, editPayload.body, 'utf-8');
+    await atomicWrite(entry.path, editPayload.body);
     send(ws, { type: 'skills.edited', payload: { success: true, error: null } });
   } catch (err) {
     send(ws, { type: 'skills.edited', payload: { success: false, error: errMessage(err) } });

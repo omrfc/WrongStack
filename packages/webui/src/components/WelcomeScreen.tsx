@@ -219,7 +219,7 @@ export function WelcomeScreen() {
       )}
 
       {/* Prompt cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-h-[calc(100vh-16rem)] lg:max-h-none overflow-y-auto">
         {CARDS.map((card, ci) => {
           const Icon = card.icon;
           return (

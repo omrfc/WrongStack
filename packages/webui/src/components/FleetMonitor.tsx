@@ -43,26 +43,7 @@ export interface FleetMonitorProps {
   onSelectAgent?: (agent: SubagentView) => void;
 }
 
-function fmtCost(v: number): string {
-  if (v <= 0) return '$0';
-  if (v >= 0.01) return `$${v.toFixed(3)}`;
-  return `$${v.toFixed(5)}`.replace(/0+$/, '').replace(/\.$/, '');
-}
-
-function fmtTok(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
-}
-
-function fmtElapsed(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  const m = Math.floor(s / 60);
-  const h = Math.floor(m / 60);
-  if (h > 0) return `${h}h ${m % 60}m`;
-  if (m > 0) return `${m}m ${s % 60}s`;
-  return `${s}s`;
-}
+import { fmtCost, fmtTok, fmtElapsed } from './dashboard-primitives.js';
 
 const STATUS_META: Record<SubagentView['status'], { led: string; label: string; pulse: boolean; color: string }> = {
   running: { led: 'bg-emerald-500', label: 'running', pulse: true, color: 'text-emerald-500' },
