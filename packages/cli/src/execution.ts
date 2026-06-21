@@ -50,6 +50,7 @@ import { createSettingsAdapter } from './boot/tui-settings-adapter.js';
 import { resumeSession } from './boot/tui-session-resume.js';
 import { getProjectPickerItems, onProjectSelect, type ProjectPickerContext } from './boot/tui-project-picker-callback.js';
 import { getLiveSessions, onSwitchToSession } from './boot/tui-live-sessions.js';
+import { getSDDContext as getSDDContextExtracted, onSDDOutput as onSDDOutputExtracted } from './boot/tui-sdd-callback.js';
 import type { TuiRuntimeState } from './boot/tui-runtime-state.js';
 import type { ReadlineInputReader } from './input-reader.js';
 import { type PredictLLMProvider, predictNextTasks } from './next-task-predictor.js';
@@ -914,45 +915,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           initialAsk: askFlag,
           projectRoot,
           appConfig: config,
-          getSDDContext: async () => {
-            const { getActiveSDDContext } = await import('./slash-commands/sdd.js');
-            return getActiveSDDContext();
-          },
-          onSDDOutput: async (output: string) => {
-            const {
-              trySaveSpecFromAIOutput,
-              trySaveImplementationPlan,
-              trySaveTasksFromAIOutput,
-              autoDetectTaskCompletion,
-              getTaskProgress,
-              getActiveSDDPhase,
-            } = await import('./slash-commands/sdd.js');
-            const messages: string[] = [];
-            const specSaved = await trySaveSpecFromAIOutput(output);
-            if (specSaved)
-              messages.push('✓ Spec detected and saved! Use /sdd approve to continue.');
-            const planSaved = trySaveImplementationPlan(output);
-            if (planSaved) messages.push('✓ Implementation plan saved!');
-            const tasksSaved = await trySaveTasksFromAIOutput(output);
-            if (tasksSaved) {
-              const progress = getTaskProgress();
-              const count = progress?.total ?? 0;
-              messages.push(`✓ ${count} tasks detected and saved! Use /sdd approve to execute.`);
-            }
-            const sddPhase = getActiveSDDPhase();
-            if (sddPhase === 'executing') {
-              const autoCompleted = autoDetectTaskCompletion(output);
-              if (autoCompleted > 0) {
-                const progress = getTaskProgress();
-                if (progress) {
-                  messages.push(
-                    `✓ ${autoCompleted} task(s) auto-completed! Progress: ${progress.completed}/${progress.total} (${progress.percentComplete}%)`,
-                  );
-                }
-              }
-            }
-            return messages;
-          },
+          getSDDContext: () => getSDDContextExtracted(),
+          onSDDOutput: (output: string) => onSDDOutputExtracted(output),
           modeLabel: modeId,
           getModeLabel: () => {
             const metaMode = context.meta?.['mode'];
