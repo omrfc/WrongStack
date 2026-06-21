@@ -8,7 +8,8 @@ the top-level design; this page is the CLI surface reference.
 
 | Command | Effect |
 |---|---|
-| `wstack acp` | Start WrongStack as an ACP server; blocks on stdin/stdout |
+| `wstack acp` | Start WrongStack as an ACP server (real agent); blocks on stdin/stdout |
+| `wstack acp --echo` | Start the ACP server in no-op echo mode (connectivity test, no provider needed) |
 | `wstack acp server` | Same as `wstack acp` |
 | `wstack acp serve` | Same as `wstack acp` |
 | `wstack acp list` | List ACP-supporting agents detected on this host (live probe) |
@@ -98,9 +99,30 @@ prints a single error and exits non-zero.
 
 ## `wstack acp server`
 
-Starts the v1 server. The default `runTurn` is a no-op echo (useful for
-smoke-testing the wire format with any v1 client). To plug in a real
-`@wrongstack/core` Agent instance:
+Starts the v1 server. By default it wires each ACP session to a real
+`@wrongstack/core` `Agent` built from your configured provider/model, so any
+ACP-capable client (Zed, JetBrains, VS Code ACP extension, etc.) gets genuine
+WrongStack responses over stdio JSON-RPC 2.0.
+
+```
+wstack acp            # serves a real agent (needs `wstack auth` first)
+wstack acp --echo     # no-op turn; connectivity smoke test, no provider needed
+```
+
+Run `wstack auth` first to configure a provider. If none is configured, the
+server prints an actionable error and exits rather than silently echoing.
+
+The per-session `Agent` is built by `buildAcpServerAgentFactory`
+(`packages/cli/src/acp-server-agent.ts`) and driven by
+`makeACPServerAgentTurn` (`@wrongstack/acp/agent`). Each session gets its own
+`EventBus` and `Context` for isolation; the provider registry and container are
+shared across sessions. The server runs headless under an
+`AutoApprovePermissionPolicy` (same posture as subagents) since there is no
+interactive permission channel over ACP.
+
+For programmatic control — e.g. a custom agent factory, MCP wiring, or richer
+session behaviour — instantiate `WrongStackACPServer` directly with a
+`runTurn` of your own:
 
 ```ts
 import { WrongStackACPServer, makeACPServerAgentTurn } from '@wrongstack/acp';
@@ -121,6 +143,7 @@ full v1 session and asserts on every response.
 ## Code reference
 
 - `packages/cli/src/subcommands/handlers/acp.ts` — the CLI handler
+- `packages/cli/src/acp-server-agent.ts` — builds a real per-session `Agent` for the server
 - `packages/acp/src/integration/acp-subagent-runner.ts` — single-agent runner
 - `packages/acp/src/integration/ensemble-runner.ts` — multi-agent orchestrator
 - `packages/acp/src/registry/{agents.catalog,ensemble-registry}.ts` — discovery

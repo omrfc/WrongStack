@@ -18,9 +18,10 @@ import {
   makeACPSubagentRunnerWithStop,
   runEnsemble,
 } from '@wrongstack/acp';
-import { WrongStackACPServer } from '@wrongstack/acp/agent';
+import { makeACPServerAgentTurn, WrongStackACPServer } from '@wrongstack/acp/agent';
 import type { SubagentRunContext } from '@wrongstack/core';
 import { SubagentBudget } from '@wrongstack/core/coordination';
+import { AcpServerConfigError, buildAcpServerAgentFactory } from '../../acp-server-agent.js';
 import type { SubcommandDeps, SubcommandHandler } from '../index.js';
 
 /**
@@ -66,10 +67,11 @@ Usage:
   wstack acp help         Show this help
 
 ACP Mode:
-  When run as \`wstack acp\`. WrongStack acts as an ACP-compatible agent.
-  ACP clients (Zed, JetBrains, VS Code) spawn it as a subprocess and
-  communicate over stdio JSON-RPC.
-  Press Ctrl+C to stop.
+  When run as \`wstack acp\`. WrongStack acts as an ACP-compatible agent driven
+  by your configured model provider. ACP clients (Zed, JetBrains, VS Code)
+  spawn it as a subprocess and communicate over stdio JSON-RPC. Run
+  \`wstack auth\` first to configure a provider, or pass \`--echo\` for a no-op
+  connectivity test that needs no provider. Press Ctrl+C to stop.
 
 spawn:
   Spawns a named ACP agent (claude-code, gemini-cli, codex-cli, copilot,
@@ -105,12 +107,38 @@ parallel:
 };
 
 async function runACPServer(deps: SubcommandDeps): Promise<number> {
-  deps.renderer.writeInfo('Starting WrongStack ACP server...\n');
-  deps.renderer.writeInfo('Waiting for ACP client connection on stdin/stdout...\n');
-  deps.renderer.writeInfo('(default runTurn is a no-op echo — wire makeACPServerAgentTurn for a real agent)\n');
-  deps.renderer.writeInfo('Press Ctrl+C to stop.\n');
+  // `--echo` keeps the no-op connectivity-smoke-test path that the default
+  // runTurn provided before this server was wired to a real Agent. Useful for
+  // `wstack acp --echo` when you just want to verify the wire format against a
+  // client without needing a configured provider.
+  const echo = deps.flags?.echo === true || deps.flags?.echo === 'true';
 
-  const server = new WrongStackACPServer({});
+  const server = new WrongStackACPServer(
+    echo
+      ? {}
+      : (() => {
+          let agentFor;
+          try {
+            agentFor = buildAcpServerAgentFactory(deps);
+          } catch (err) {
+            if (err instanceof AcpServerConfigError) {
+              deps.renderer.writeError(`${err.message}\n`);
+              return {};
+            }
+            throw err;
+          }
+          return { runTurn: makeACPServerAgentTurn({ agentFor }) };
+        })(),
+  );
+
+  if (echo) {
+    deps.renderer.writeInfo('ACP server starting in --echo mode (no-op turn; no provider needed).\n');
+  } else {
+    deps.renderer.writeInfo(
+      `Starting WrongStack ACP server (${deps.config.provider}/${deps.config.model})…\n`,
+    );
+    deps.renderer.writeInfo('Waiting for an ACP client connection on stdin/stdout. Press Ctrl+C to stop.\n');
+  }
 
   const shutdown = () => {
     deps.renderer.writeWarning('\nShutting down ACP server...');
