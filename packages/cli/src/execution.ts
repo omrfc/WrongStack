@@ -52,6 +52,7 @@ import { capabilitiesFor } from '@wrongstack/providers';
 import { createToolVisionAdapters } from '@wrongstack/runtime/vision';
 import { contextOverflowHint } from './context-overflow-diagnostic.js';
 import { FleetStatusLine } from './fleet-statusline.js';
+import { runWebUIDispatch } from './boot/dispatch-webui.js';
 import type { ReadlineInputReader } from './input-reader.js';
 import { type PredictLLMProvider, predictNextTasks } from './next-task-predictor.js';
 import type { TerminalRenderer } from './renderer.js';
@@ -2031,110 +2032,31 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         offDirectorSpawned();
       }
     } else if (flags.webui) {
-      // Route permission confirmations to the browser (tool.confirm_needed
-      // events) instead of inline terminal prompts — runWebUI forwards them to
-      // the WebUI and resolves on the client's tool.confirm_result. Without
-      // this, approvals appear in the terminal even when you're driving the
-      // agent from the browser.
-      agent.disableInteractiveConfirmation();
-      // Silence CLI rendering — WebUI owns the output surface. The writeInfo
-      // calls below still flow (stderr), but streaming text/tool events are
-      // suppressed so they don't appear in both the terminal and the browser.
-      renderer.setSilent(true);
-      const { runWebUI } = await import('./webui-server.js');
-      const webuiPromise = runWebUI({
+      code = await runWebUIDispatch({
         agent,
         events,
         session,
-        port: Number.parseInt(String(flags.port ?? '3457'), 10),
+        config,
+        flags,
         projectRoot,
-        appConfig: config,
-        open: !!flags.open,
-        modelsRegistry,
         globalConfigPath: wpaths.globalConfig,
+        projectSessionsDir: wpaths.projectSessions,
+        modelsRegistry,
         mcpRegistry,
-        subscribeEternalIteration,
-        sessionStore: activeSessionStore,
-        sessionsDir: wpaths.projectSessions,
         brain,
         brainSettings,
         getBrainLog,
-        onSessionSwapped: (newSessionId: string) => {
-          // Re-point crash recovery (active.json) at the resumed session —
-          // otherwise a crash after an in-app resume would offer recovery
-          // for the OLD (cleanly finalized) session and miss the live one.
-          void activeRecoveryLock
-            .clear()
-            .then(() => activeRecoveryLock.write(newSessionId))
-            .catch(() => undefined);
-        },
+        subscribeEternalIteration,
+        sessionStore: activeSessionStore,
         memoryStore,
         skillLoader,
         modeStore,
         modeId,
         needsSetup,
-        // Print the "open this" banner only once the server is actually
-        // listening, using the RESOLVED ports. The requested port
-        // (flags.port) auto-advances past busy ports inside runWebUI, so a
-        // banner printed up-front with flags.port lies whenever 3456/3457 are
-        // taken (a second instance, leftover sockets). Bind is 127.0.0.1-only,
-        // so the host must be the literal IPv4 loopback — `localhost` resolves
-        // to `::1` first on Windows and never reaches the server.
-        onListening: ({ httpPort: boundHttpPort }) => {
-          renderer.writeInfo(
-            color.green(
-              `  ✦ WebUI running → ${color.bold(`http://127.0.0.1:${boundHttpPort}`)}`,
-            ),
-          );
-          renderer.writeInfo(
-            color.dim('  Press Ctrl+C in this terminal to stop the WebUI server.\n'),
-          );
-        },
-        // Make autonomy.switch from the browser flip the CLI's real
-        // autonomy mode — context.meta alone never reaches the run loop.
-        onAutonomySwitch: (mode: string) => {
-          if (
-            mode === 'off' ||
-            mode === 'suggest' ||
-            mode === 'auto' ||
-            mode === 'eternal' ||
-            mode === 'eternal-parallel'
-          ) {
-            onAutonomy?.(mode);
-          }
-        },
+        renderer,
+        onAutonomy,
+        activeRecoveryLock,
       });
-      // In --webui mode, skip the full REPL — just keep the process alive
-      // until the WebUI server shuts down. The WebUI WS handler listens for
-      // /exit or abort signals and resolves webuiPromise when the server stops.
-      // The ready banner is printed from `onListening` above (with the resolved
-      // ports), not here — printing it up-front with the requested port lied
-      // whenever the port auto-advanced.
-      const webuiExit = new Promise<number>((resolve) => {
-        const onSigint = () => {
-          renderer.setSilent(false);
-          renderer.write('\n');
-          renderer.writeInfo(color.yellow('  Shutting down WebUI server…'));
-          resolve(0);
-        };
-        process.on('SIGINT', onSigint);
-        process.on('SIGTERM', onSigint);
-        webuiPromise
-          .then(() => {
-            renderer.setSilent(false);
-            process.off('SIGINT', onSigint);
-            process.off('SIGTERM', onSigint);
-            resolve(0);
-          })
-          .catch((err) => {
-            renderer.setSilent(false);
-            process.off('SIGINT', onSigint);
-            process.off('SIGTERM', onSigint);
-            console.debug(`[execution] webui error: ${err}`);
-            resolve(1);
-          });
-      });
-      code = await webuiExit;
     } else {
       code = await runRepl({
         agent,

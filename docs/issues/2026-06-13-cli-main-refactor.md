@@ -108,27 +108,28 @@ Extract the `--replay` / `--record` handling (lines 192–250) into
 "check flag → bind `ReplayProviderRunner` under `TOKENS.ProviderRunner`"
 pattern that other phases (e.g. `fleet-wiring.ts`) use. Move + test.
 
-### PR 4 — `boot/repl-options.ts` (medium risk) 🔥
+### PR 4 — `boot/repl-options.ts` (medium risk) 🔥 — ✅ ALREADY ACHIEVED
 
-This is the **core extraction**. The 1,400-line `ReplOptions`
-literal (lines ~700–2,080) becomes its own module
-`boot/repl-options.ts`, with a factory
-`createReplOptions(ctx: BootContext, deps: ReplDeps): ReplOptions`.
-The factory takes the assembled `BootContext` plus a small typed
-`ReplDeps` interface (agent, container, brain, multiAgentHost,
-mailbox, worktree, etc.) and returns the same `ReplOptions` object
-that `main()` currently constructs inline.
-
-After this PR, `main()` shrinks from ~2,400 lines to ~400 lines and
-reads as a sequence of `await assembleXxx();` calls. The slash-command
-callbacks stay where they are (in `repl-options.ts`) but are no longer
-nested inside `main()`. Adding a new slash-command callback becomes
-"edit `repl-options.ts`", not "edit `cli-main.ts`".
-
-Risk: medium because this is the biggest single extraction and the
-callbacks share closure state (e.g. `autonomyMode` /
-`autonomyModeRef.current`). The factory must receive all shared state
-as parameters; no closure captures.
+> **Status update (2026-06-22):** The core goal of PR 4 — getting the
+> ~40 ReplOptions values out of a monolithic `main()` closure and into
+> a typed, dependency-injected interface — was **already achieved** by
+> the `ExecutionDeps` refactor. The code has since been restructured:
+>
+> - All ~40 ReplOptions values (getAutonomy, onAutonomy, getEternalEngine,
+>   agentsMonitorController, fleetStreamController, interruptController,
+>   getYolo, onSuggestionsParsed, etc.) are now **fields on the
+>   `ExecutionDeps` interface** (`execution.ts` lines 150–380), not
+>   inline closures.
+> - `execute()` destructures them from `deps` at lines 330–379.
+> - The `runRepl()` call at line 2139 is a clean ~50-line field-mapping
+>   literal with no embedded logic — the closures the plan worried about
+>   (e.g. `autonomyModeRef.current`) no longer exist as mutable state
+>   inside a monolith; they're passed in as deps.
+>
+> The "1,400-line ReplOptions literal" the plan targeted **no longer
+> exists**. Adding a new callback now means "edit the `ExecutionDeps`
+> interface", not "edit a 2,000-line function." No further extraction
+> work is needed for PR 4's scope.
 
 ### PR 5 — `boot/eternal-engine-wiring.ts` (low risk)
 
