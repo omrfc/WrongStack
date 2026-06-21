@@ -705,8 +705,10 @@ export WRONGSTACK_HQ_URL=http://<hq-host>:3499
   web page that can reach the HQ port can open a browser socket — use
   TOKEN MODE on untrusted networks.
 - All HTTP routes (`/`, `/api/snapshot`, `/api/projects/:id`) are
-  unauthenticated and return full redacted-preview payloads. Token auth
-  applies only to WebSocket upgrades, not HTTP GET routes.
+  token-gated when browser TOKEN MODE is active — the same browser token
+  that unlocks `/ws/browser` also unlocks HTTP access via `?token=` or
+  `Authorization: Bearer`. In OPEN MODE (no browser tokens), HTTP routes
+  remain unauthenticated.
 
 ### TLS termination (reverse proxy / Cloudflare Tunnel)
 

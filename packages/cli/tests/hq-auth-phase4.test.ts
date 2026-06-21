@@ -390,3 +390,153 @@ describe('HQ Phase 4 — token subcommand --client flag', () => {
     expect(out).toContain('revoke --client');
   });
 });
+
+// ── HTTP route auth tests ─────────────────────────────────────────────────
+
+describe('HQ — HTTP route token auth (browser TOKEN MODE)', () => {
+  it('rejects /api/snapshot without token when browser TOKEN MODE is active', async () => {
+    const browserToken = 'browser-token-for-http';
+    const authFile: HqAuthFile = {
+      version: HQ_AUTH_FILE_VERSION,
+      updatedAt: new Date().toISOString(),
+      browserTokens: [
+        { id: 'bt-http-1', token: browserToken, createdAt: new Date().toISOString() },
+      ],
+    };
+    await writeHqAuthFile(dataDir, authFile);
+
+    const port = getPort();
+    handle = await startHqServer({ port, dataDir });
+
+    const res = await fetch(`http://127.0.0.1:${handle.port}/api/snapshot`);
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('INVALID_TOKEN');
+  });
+
+  it('accepts /api/snapshot with ?token= in browser TOKEN MODE', async () => {
+    const browserToken = 'browser-token-query';
+    const authFile: HqAuthFile = {
+      version: HQ_AUTH_FILE_VERSION,
+      updatedAt: new Date().toISOString(),
+      browserTokens: [
+        { id: 'bt-http-2', token: browserToken, createdAt: new Date().toISOString() },
+      ],
+    };
+    await writeHqAuthFile(dataDir, authFile);
+
+    const port = getPort();
+    handle = await startHqServer({ port, dataDir });
+
+    const res = await fetch(`http://127.0.0.1:${handle.port}/api/snapshot?token=${browserToken}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { totals: { activeClients: number } };
+    expect(body.totals).toBeDefined();
+  });
+
+  it('accepts /api/snapshot with Authorization: Bearer in browser TOKEN MODE', async () => {
+    const browserToken = 'browser-token-bearer';
+    const authFile: HqAuthFile = {
+      version: HQ_AUTH_FILE_VERSION,
+      updatedAt: new Date().toISOString(),
+      browserTokens: [
+        { id: 'bt-http-3', token: browserToken, createdAt: new Date().toISOString() },
+      ],
+    };
+    await writeHqAuthFile(dataDir, authFile);
+
+    const port = getPort();
+    handle = await startHqServer({ port, dataDir });
+
+    const res = await fetch(`http://127.0.0.1:${handle.port}/api/snapshot`, {
+      headers: { Authorization: `Bearer ${browserToken}` },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { totals: { activeClients: number } };
+    expect(body.totals).toBeDefined();
+  });
+
+  it('rejects dashboard HTML (/) without token in browser TOKEN MODE', async () => {
+    const browserToken = 'browser-token-html';
+    const authFile: HqAuthFile = {
+      version: HQ_AUTH_FILE_VERSION,
+      updatedAt: new Date().toISOString(),
+      browserTokens: [
+        { id: 'bt-http-4', token: browserToken, createdAt: new Date().toISOString() },
+      ],
+    };
+    await writeHqAuthFile(dataDir, authFile);
+
+    const port = getPort();
+    handle = await startHqServer({ port, dataDir });
+
+    const res = await fetch(`http://127.0.0.1:${handle.port}/`);
+    expect(res.status).toBe(401);
+  });
+
+  it('accepts dashboard HTML (/) with ?token= in browser TOKEN MODE', async () => {
+    const browserToken = 'browser-token-html-ok';
+    const authFile: HqAuthFile = {
+      version: HQ_AUTH_FILE_VERSION,
+      updatedAt: new Date().toISOString(),
+      browserTokens: [
+        { id: 'bt-http-5', token: browserToken, createdAt: new Date().toISOString() },
+      ],
+    };
+    await writeHqAuthFile(dataDir, authFile);
+
+    const port = getPort();
+    handle = await startHqServer({ port, dataDir });
+
+    const res = await fetch(`http://127.0.0.1:${handle.port}/?token=${browserToken}`);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('<!DOCTYPE html>');
+  });
+
+  it('rejects /api/projects/:id without token in browser TOKEN MODE', async () => {
+    const browserToken = 'browser-token-proj';
+    const authFile: HqAuthFile = {
+      version: HQ_AUTH_FILE_VERSION,
+      updatedAt: new Date().toISOString(),
+      browserTokens: [
+        { id: 'bt-http-6', token: browserToken, createdAt: new Date().toISOString() },
+      ],
+    };
+    await writeHqAuthFile(dataDir, authFile);
+
+    const port = getPort();
+    handle = await startHqServer({ port, dataDir });
+
+    const res = await fetch(`http://127.0.0.1:${handle.port}/api/projects/some-project`);
+    expect(res.status).toBe(401);
+  });
+
+  it('does NOT gate HTTP routes with client-only tokens', async () => {
+    // Client tokens should NOT unlock HTTP routes — only browser tokens do.
+    const clientToken = 'client-only-token-http';
+    const authFile: HqAuthFile = {
+      version: HQ_AUTH_FILE_VERSION,
+      updatedAt: new Date().toISOString(),
+      clientTokens: [
+        { id: 'ct-http-1', token: clientToken, createdAt: new Date().toISOString() },
+      ],
+    };
+    await writeHqAuthFile(dataDir, authFile);
+
+    const port = getPort();
+    handle = await startHqServer({ port, dataDir });
+
+    // No browser tokens → HTTP routes are in OPEN MODE
+    const res = await fetch(`http://127.0.0.1:${handle.port}/api/snapshot`);
+    expect(res.status).toBe(200);
+  });
+
+  it('HTTP routes are open when no tokens exist at all (OPEN MODE)', async () => {
+    const port = getPort();
+    handle = await startHqServer({ port, dataDir });
+
+    const res = await fetch(`http://127.0.0.1:${handle.port}/api/snapshot`);
+    expect(res.status).toBe(200);
+  });
+});

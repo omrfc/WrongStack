@@ -228,6 +228,10 @@ even though Phase 1 is read-only. The HQ channel carries, at minimum:
   and refreshes its in-memory token sets and operator redaction policy
   without a restart. Token create/revoke in another terminal takes effect
   immediately.
+- **HTTP route auth**: when browser TOKEN MODE is active, all HTTP routes
+  (`/`, `/api/snapshot`, `/api/projects/:id`) require a valid browser
+  token via `?token=…` query param or `Authorization: Bearer` header.
+  Client-only tokens do not unlock HTTP routes.
 
 **Phase 1 non-goals (status as of Phase 4).**
 

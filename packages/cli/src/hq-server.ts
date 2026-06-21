@@ -699,6 +699,24 @@ export function startHqServer(options: HqServerOptions = {}): Promise<HqServerHa
   }).then((authFile: HqAuthFile) => startHqServerWithAuth(options, host, port, dataDir, authFile));
 }
 
+/**
+ * Extract a browser token from an HTTP request. Accepts:
+ *   1. `?token=…` query parameter (for browser navigation / dashboard)
+ *   2. `Authorization: Bearer …` header (for programmatic / curl access)
+ * Returns the token string if found, otherwise `undefined`.
+ */
+function extractBrowserToken(req: http.IncomingMessage, url: URL): string | undefined {
+  const queryToken = url.searchParams.get('token');
+  if (queryToken) return queryToken;
+
+  const auth = req.headers.authorization;
+  if (typeof auth === 'string' && auth.toLowerCase().startsWith('bearer ')) {
+    return auth.slice(7).trim();
+  }
+
+  return undefined;
+}
+
 function startHqServerWithAuth(
   options: HqServerOptions,
   host: string,
@@ -747,6 +765,28 @@ function startHqServerWithAuth(
 
     const httpServer: HttpServer = http.createServer((req, res) => {
       const url = new URL(req.url ?? '/', `http://${host}:${port}`);
+
+      // When browser TOKEN MODE is active, all HTTP routes require a valid
+      // browser token. This closes the gap where /api/snapshot and
+      // /api/projects/:id were accessible without authentication even
+      // though /ws/browser was gated. Token is accepted via ?token= query
+      // param (for browser/dashboard use) or Authorization: Bearer header
+      // (for programmatic / curl access).
+      if (mutableAuth.browserTokens.size > 0) {
+        const supplied = extractBrowserToken(req, url);
+        if (!supplied || !mutableAuth.browserTokens.has(supplied)) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              error: {
+                code: 'INVALID_TOKEN',
+                message: 'A valid ?token= or Authorization: Bearer is required for HTTP access in browser token mode.',
+              },
+            }),
+          );
+          return;
+        }
+      }
 
       if (url.pathname === '/' || url.pathname === '/index.html') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
