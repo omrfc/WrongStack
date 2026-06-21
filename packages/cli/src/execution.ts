@@ -49,6 +49,7 @@ import { switchProjectInPlace as switchProjectInPlaceExtracted, type ProjectSwit
 import { createSettingsAdapter } from './boot/tui-settings-adapter.js';
 import { resumeSession } from './boot/tui-session-resume.js';
 import { getProjectPickerItems, onProjectSelect, type ProjectPickerContext } from './boot/tui-project-picker-callback.js';
+import { getLiveSessions, onSwitchToSession } from './boot/tui-live-sessions.js';
 import type { TuiRuntimeState } from './boot/tui-runtime-state.js';
 import type { ReadlineInputReader } from './input-reader.js';
 import { type PredictLLMProvider, predictNextTasks } from './next-task-predictor.js';
@@ -907,52 +908,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           setStatuslineHiddenItems,
           saveStatuslineHiddenItems,
           agentsMonitorController,
-          getLiveSessions: async () => {
-            const { SessionRegistry } = await import('@wrongstack/core');
-            const globalRoot = path.dirname(wpaths.globalConfig);
-            const registry = new SessionRegistry(globalRoot);
-            const sessions = await registry.list();
-            return sessions
-              .filter((s) => s.status !== 'stale')
-              .map((s) => ({
-                sessionId: s.sessionId,
-                projectName: s.projectName,
-                projectSlug: s.projectSlug,
-                projectRoot: s.projectRoot,
-                workingDir: s.workingDir,
-                gitBranch: s.gitBranch,
-                status: s.status,
-                pid: s.pid,
-                startedAt: s.startedAt,
-                agentCount: s.agentCount,
-                agents: s.agents.map((a) => ({
-                  id: a.id,
-                  name: a.name,
-                  status: a.status,
-                  currentTool: a.currentTool,
-                  iterations: a.iterations,
-                  toolCalls: a.toolCalls,
-                  lastActivityAt: a.lastActivityAt,
-                })),
-              }));
-          },
-          onSwitchToSession: (_sessionId: string, targetRoot: string, projectName: string) => {
-            // Record the pending switch; the TUI follows up with
-            // requestExit(PROJECT_SWITCH_EXIT_CODE) and the spawn happens
-            // after runTui returns — exactly like the F1 project switch.
-            //
-            // Deliberately NOT `--resume <sessionId>`: the F10 panel lists
-            // LIVE sessions (their owner processes are alive — 'stale' is
-            // filtered out), and resuming one would put two processes on the
-            // same session JSONL. We open the target project fresh instead.
-            //
-            // This REPLACED an in-place `spawn(..., { stdio: 'inherit' })`
-            // that launched a second interactive wstack while this TUI kept
-            // running: two raw-mode processes fighting over one terminal,
-            // and a stray `AbortSignal.timeout(30_000)` that SIGTERM'd the
-            // new instance 30 seconds in.
-            state.pendingProjectSwitch = { root: targetRoot, name: projectName };
-          },
+          getLiveSessions: () => getLiveSessions({ state }),
+          onSwitchToSession: (_sessionId: string, targetRoot: string, projectName: string) => onSwitchToSession({ state }, _sessionId, targetRoot, projectName),
           initialGoal: goalFlag,
           initialAsk: askFlag,
           projectRoot,
