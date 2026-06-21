@@ -3,7 +3,6 @@
  * Extracted from index.ts so the main() function focuses on
  * boot + wiring; this file owns the three run modes and cleanup.
  */
-import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {
   type Agent,
@@ -33,13 +32,9 @@ import {
 import {
   type AutonomyStage,
   attachTodosCheckpoint,
-  atomicWrite,
   CHIMERA_REVIEW_PROMPT,
   color,
-  decryptConfigSecrets,
-  encryptConfigSecrets,
   mergeCustomModelDefs,
-  noOpVault,
   setQueuedMessagesSnapshot,
 } from '@wrongstack/core';
 import type { MCPRegistry } from '@wrongstack/mcp';
@@ -52,6 +47,7 @@ import { wireAutoPhase } from './boot/tui-autophase-wiring.js';
 import { handleProjectSwitchSpawn } from './boot/tui-project-spawn.js';
 import { setupAutonomousCoordinator } from './boot/tui-coordinator-setup.js';
 import { switchProjectInPlace as switchProjectInPlaceExtracted, type ProjectSwitchContext } from './boot/tui-project-switch.js';
+import { createSettingsAdapter } from './boot/tui-settings-adapter.js';
 import type { TuiRuntimeState } from './boot/tui-runtime-state.js';
 import type { ReadlineInputReader } from './input-reader.js';
 import { type PredictLLMProvider, predictNextTasks } from './next-task-predictor.js';
@@ -59,7 +55,6 @@ import type { TerminalRenderer } from './renderer.js';
 import { parseSuggestionsFromOutput, runRepl } from './repl.js';
 import type { SessionStats } from './session-stats.js';
 import { resolveActiveApiKey } from './provider-config-utils.js';
-import { filterSafeForProject, persistAutonomySetting } from './settings-menu.js';
 import { setSuggestions } from './slash-commands/suggestion-store.js';
 import { CLI_VERSION } from './version.js';
 
@@ -734,343 +729,12 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             onAutonomy?.(mode);
             return null;
           },
-          getSettings: () => {
-            const cfg = configStore.get();
-            const autonomy = cfg.autonomy as Record<string, unknown> | undefined;
-            const rawMode = autonomy?.defaultMode as string | undefined;
-            const mode: 'off' | 'suggest' | 'auto' =
-              rawMode === 'suggest' || rawMode === 'auto' ? rawMode : 'off';
-            const modelRuntime = (cfg as { modelRuntime?: { reasoning?: { mode?: string; effort?: string; preserve?: boolean }; cache?: { ttl?: string } } }).modelRuntime;
-            const reasoningEffortRaw = modelRuntime?.reasoning?.effort;
-            const reasoningEffort =
-              reasoningEffortRaw === 'none' ||
-              reasoningEffortRaw === 'minimal' ||
-              reasoningEffortRaw === 'low' ||
-              reasoningEffortRaw === 'medium' ||
-              reasoningEffortRaw === 'high' ||
-              reasoningEffortRaw === 'xhigh' ||
-              reasoningEffortRaw === 'max'
-                ? reasoningEffortRaw
-                : 'high';
-            return {
-              mode,
-              delayMs: (autonomy?.autoProceedDelayMs as number) ?? 45_000,
-              titleAnimation: autonomy?.terminalTitleAnimation !== false,
-              yolo: (autonomy?.yolo as boolean) ?? false,
-              streamFleet: autonomy?.streamFleet !== false,
-              chime: (autonomy?.chime as boolean) ?? false,
-              confirmExit: autonomy?.confirmExit !== false,
-              nextPrediction: cfg.nextPrediction ?? false,
-              featureMcp: cfg.features?.mcp !== false,
-              featurePlugins: cfg.features?.plugins !== false,
-              featureMemory: cfg.features?.memory !== false,
-              featureSkills: cfg.features?.skills !== false,
-              featureModelsRegistry: cfg.features?.modelsRegistry !== false,
-              featureTokenSaving: normalizeTokenSavingTier(cfg.features?.tokenSavingMode),
-              allowOutsideProjectRoot: cfg.features?.allowOutsideProjectRoot ?? true,
-              contextAutoCompact: cfg.context?.autoCompact !== false,
-              contextStrategy: cfg.context?.strategy ?? 'hybrid',
-              contextMode: ((): 'balanced' | 'frugal' | 'deep' | 'archival' => {
-                const m = (cfg.context as unknown as Record<string, unknown> | undefined)?.[
-                  'mode'
-                ] as string | undefined;
-                return m === 'frugal' || m === 'deep' || m === 'archival' ? m : 'balanced';
-              })(),
-              maxConcurrent: cfg.maxConcurrent ?? 0,
-              logLevel: cfg.log?.level ?? 'info',
-              auditLevel: cfg.session?.auditLevel ?? 'standard',
-              indexOnStart: cfg.indexing?.onSessionStart !== false,
-              maxIterations: cfg.tools?.maxIterations ?? 500,
-              restrictFsToRoot: cfg.tools?.restrictToProjectRoot ?? false,
-              autoProceedMaxIterations:
-                ((cfg.autonomy as Record<string, unknown> | undefined)
-                  ?.autoProceedMaxIterations as number) ?? 50,
-              debugStream: cfg.debugStream ?? false,
-              statuslineMode: autonomy?.statuslineMode === 'minimum' ? 'minimum' : 'detailed',
-              configScope: cfg.configScope ?? 'global',
-              enhanceDelayMs:
-                ((cfg.autonomy as Record<string, unknown> | undefined)?.enhanceDelayMs as number) ??
-                60_000,
-              enhanceEnabled:
-                ((cfg.autonomy as Record<string, unknown> | undefined)?.enhance as boolean) ?? true,
-              enhanceLanguage:
-                (cfg.autonomy as Record<string, unknown> | undefined)?.enhanceLanguage === 'english'
-                  ? ('english' as const)
-                  : ('original' as const),
-              mouseMode: (autonomy?.mouseMode as boolean) ?? false,
-              autonomyNextPrompt:
-                ((cfg.autonomy as Record<string, unknown> | undefined)
-                  ?.autonomyNextPrompt as string | undefined) ?? 'auto {{suggestion}}',
-              reasoningMode:
-                modelRuntime?.reasoning?.mode === 'on' || modelRuntime?.reasoning?.mode === 'off'
-                  ? modelRuntime.reasoning.mode
-                  : 'auto',
-              reasoningEffort,
-              reasoningPreserve: modelRuntime?.reasoning?.preserve === true,
-              cacheTtl:
-                modelRuntime?.cache?.ttl === '5m' || modelRuntime?.cache?.ttl === '1h'
-                  ? modelRuntime.cache.ttl
-                  : 'default',
-              breakerEnabled: cfg.circuitBreaker?.enabled === true,
-              breakerAutoKillResetMs: cfg.circuitBreaker?.autoKillResetMs ?? 60_000,
-            };
-          },
-          async saveSettings(s: LiveSettingsInput) {
-            try {
-              // Persist autonomy section (existing behaviour).
-              await persistAutonomySetting(
-                {
-                  configStore,
-                  globalConfigPath: wpaths.globalConfig,
-                  inProjectConfigPath: wpaths.inProjectConfig,
-                  vault: noOpVault,
-                },
-                (autonomy) => {
-                  autonomy.defaultMode = s.mode;
-                  autonomy.autoProceedDelayMs = s.delayMs;
-                  const a = autonomy as Record<string, unknown>;
-                  a['terminalTitleAnimation'] = s.titleAnimation ?? true;
-                  a['yolo'] = s.yolo ?? false;
-                  a['streamFleet'] = s.streamFleet ?? true;
-                  a['chime'] = s.chime ?? false;
-                  a['confirmExit'] = s.confirmExit ?? true;
-                  // Only written when explicitly provided — the SettingsPicker
-                  // auto-save omits mouseMode, so an unconditional write would
-                  // reset a /mouse-enabled session back to false on any toggle.
-                  if (s.mouseMode !== undefined) a['mouseMode'] = s.mouseMode;
-                  if (s.enhanceEnabled !== undefined) a['enhance'] = s.enhanceEnabled;
-                  if (s.enhanceLanguage !== undefined) a['enhanceLanguage'] = s.enhanceLanguage;
-                  if (s.statuslineMode !== undefined) a['statuslineMode'] = s.statuslineMode;
-                  if (s.autonomyNextPrompt !== undefined) a['autonomyNextPrompt'] = s.autonomyNextPrompt;
-                  // Sync autoProceedMaxIterations through persistAutonomySetting so
-                  // it lands in the in-memory configStore (and on disk) atomically
-                  // with the other autonomy fields. getSettings() reads it live for
-                  // the TUI auto-proceed countdown; the later full-config block only
-                  // wrote it to disk, leaving configStore stale until restart.
-                  if (s.autoProceedMaxIterations !== undefined)
-                    a['autoProceedMaxIterations'] = s.autoProceedMaxIterations;
-                },
-              );
-
-              // Persist other config sections that the SettingsPicker now exposes.
-              // Use the same read → modify → encrypt → atomic-write pattern as
-              // persistAutonomySetting, but applied to the full config.
-              if (
-                s.featureMcp !== undefined ||
-                s.featurePlugins !== undefined ||
-                s.featureMemory !== undefined ||
-                s.featureSkills !== undefined ||
-                s.featureModelsRegistry !== undefined ||
-                s.featureTokenSaving !== undefined ||
-                s.allowOutsideProjectRoot !== undefined ||
-                s.contextAutoCompact !== undefined ||
-                s.contextStrategy !== undefined ||
-                s.logLevel !== undefined ||
-                s.auditLevel !== undefined ||
-                s.indexOnStart !== undefined ||
-                s.maxIterations !== undefined ||
-                s.restrictFsToRoot !== undefined ||
-                s.nextPrediction !== undefined ||
-                s.debugStream !== undefined ||
-                s.configScope !== undefined ||
-                s.enhanceDelayMs !== undefined
-              ) {
-                // Resolve target config path based on scope.
-                // When scope is 'project', write to projectLocalConfig
-                // so provider/model/ux settings live in the project folder.
-                const configScope = s.configScope ?? configStore.get().configScope ?? 'global';
-                const targetPath =
-                  configScope === 'project' && wpaths.inProjectConfig
-                    ? wpaths.inProjectConfig
-                    : wpaths.globalConfig;
-                let raw: string;
-                try {
-                  raw = await fs.readFile(targetPath, 'utf8');
-                } catch (err) {
-                  // Re-throw with context so the outer catch handles it (e.g. user sees the real error)
-                  throw new Error(
-                    `Failed to read config at ${targetPath}: ${err instanceof Error ? err.message : String(err)}`,
-                    { cause: err },
-                  );
-                }
-                const parsed = JSON.parse(raw) as Record<string, unknown>;
-                const decrypted = decryptConfigSecrets(parsed, noOpVault) as Record<
-                  string,
-                  unknown
-                >;
-
-                if (s.nextPrediction !== undefined) {
-                  decrypted.nextPrediction = s.nextPrediction;
-                }
-                if (
-                  s.featureMcp !== undefined ||
-                  s.featurePlugins !== undefined ||
-                  s.featureMemory !== undefined ||
-                  s.featureSkills !== undefined ||
-                  s.featureModelsRegistry !== undefined ||
-                  s.featureTokenSaving !== undefined ||
-                s.allowOutsideProjectRoot !== undefined
-                ) {
-                  const feats = (decrypted.features as Record<string, unknown>) ?? {};
-                  if (s.featureMcp !== undefined) feats.mcp = s.featureMcp;
-                  if (s.featurePlugins !== undefined) feats.plugins = s.featurePlugins;
-                  if (s.featureMemory !== undefined) feats.memory = s.featureMemory;
-                  if (s.featureSkills !== undefined) feats.skills = s.featureSkills;
-                  if (s.featureModelsRegistry !== undefined)
-                    feats.modelsRegistry = s.featureModelsRegistry;
-                  if (s.featureTokenSaving !== undefined)
-                    feats.tokenSavingMode = s.featureTokenSaving;
-                  if (s.allowOutsideProjectRoot !== undefined)
-                    feats.allowOutsideProjectRoot = s.allowOutsideProjectRoot;
-                  decrypted.features = feats;
-                }
-                if (s.contextAutoCompact !== undefined || s.contextStrategy !== undefined) {
-                  const ctx = (decrypted.context as Record<string, unknown>) ?? {};
-                  if (s.contextAutoCompact !== undefined) ctx.autoCompact = s.contextAutoCompact;
-                  if (s.contextStrategy !== undefined) ctx.strategy = s.contextStrategy;
-                  decrypted.context = ctx;
-                }
-                if (s.logLevel !== undefined) {
-                  const log = (decrypted.log as Record<string, unknown>) ?? {};
-                  log.level = s.logLevel;
-                  decrypted.log = log;
-                }
-                if (s.auditLevel !== undefined) {
-                  const sess = (decrypted.session as Record<string, unknown>) ?? {};
-                  sess.auditLevel = s.auditLevel;
-                  decrypted.session = sess;
-                }
-                if (s.indexOnStart !== undefined) {
-                  const idx = (decrypted.indexing as Record<string, unknown>) ?? {};
-                  idx.onSessionStart = s.indexOnStart;
-                  decrypted.indexing = idx;
-                }
-                if (s.maxIterations !== undefined || s.restrictFsToRoot !== undefined) {
-                  const tools = (decrypted.tools as Record<string, unknown>) ?? {};
-                  if (s.maxIterations !== undefined) tools.maxIterations = s.maxIterations;
-                  if (s.restrictFsToRoot !== undefined)
-                    tools.restrictToProjectRoot = s.restrictFsToRoot;
-                  decrypted.tools = tools;
-                }
-                if (s.restrictFsToRoot !== undefined) {
-                  // Dual-write the new canonical key in sync (inverse of restrict).
-                  const features = (decrypted.features as Record<string, unknown>) ?? {};
-                  features.allowOutsideProjectRoot = !s.restrictFsToRoot;
-                  decrypted.features = features;
-                }
-                if (s.debugStream !== undefined) {
-                  decrypted.debugStream = s.debugStream;
-                  // Flip the runtime singleton so the toggle takes effect
-                  // on the next provider request without a restart.
-                  const { setDebugStreamEnabled } = await import('@wrongstack/providers');
-                  setDebugStreamEnabled(s.debugStream);
-                }
-                if (s.configScope !== undefined) {
-                  decrypted.configScope = s.configScope;
-                }
-                if (s.enhanceDelayMs !== undefined) {
-                  const autonomy = (decrypted.autonomy as Record<string, unknown>) ?? {};
-                  autonomy.enhanceDelayMs = s.enhanceDelayMs;
-                  decrypted.autonomy = autonomy;
-                }
-                if (s.autoProceedMaxIterations !== undefined) {
-                  const autonomy = (decrypted.autonomy as Record<string, unknown>) ?? {};
-                  autonomy.autoProceedMaxIterations = s.autoProceedMaxIterations;
-                  decrypted.autonomy = autonomy;
-                }
-                // When writing to the project-local config, strip credentials
-                // so apiKey / providers / sync never leak into a per-project file.
-                const toWrite =
-                  targetPath === wpaths.globalConfig ? decrypted : filterSafeForProject(decrypted);
-                const encrypted = encryptConfigSecrets(toWrite, noOpVault);
-                // Ensure the project directory exists before writing.
-                // `recursive: true` handles EEXIST internally — only permission
-                // errors or invalid paths will throw. Let those propagate to the
-                // outer catch so the user sees the real root cause.
-                if (targetPath !== wpaths.globalConfig) {
-                  await fs.mkdir(path.dirname(targetPath), { recursive: true });
-                }
-                await atomicWrite(targetPath, JSON.stringify(encrypted, null, 2), { mode: 0o600 });
-
-                // Sync in-memory config store.
-                configStore.update({
-                  ...(s.nextPrediction !== undefined ? { nextPrediction: s.nextPrediction } : {}),
-                  ...(s.featureMcp !== undefined ||
-                  s.featurePlugins !== undefined ||
-                  s.featureMemory !== undefined ||
-                  s.featureSkills !== undefined ||
-                  s.featureModelsRegistry !== undefined
-                    ? { features: decrypted.features as Config['features'] }
-                    : {}),
-                  ...(s.contextAutoCompact !== undefined || s.contextStrategy !== undefined
-                    ? { context: decrypted.context as Config['context'] }
-                    : {}),
-                  ...(s.logLevel !== undefined ? { log: decrypted.log as Config['log'] } : {}),
-                  ...(s.auditLevel !== undefined
-                    ? { session: decrypted.session as Config['session'] }
-                    : {}),
-                  ...(s.indexOnStart !== undefined
-                    ? { indexing: decrypted.indexing as Config['indexing'] }
-                    : {}),
-                  ...(s.maxIterations !== undefined || s.restrictFsToRoot !== undefined
-                    ? { tools: decrypted.tools as Config['tools'] }
-                    : {}),
-                  ...(s.debugStream !== undefined ? { debugStream: s.debugStream } : {}),
-                  ...(s.configScope !== undefined
-                    ? { configScope: s.configScope as 'global' | 'project' }
-                    : {}),
-                  ...(s.enhanceDelayMs !== undefined
-                    ? {
-                        autonomy: {
-                          ...((configStore.get().autonomy as Record<string, unknown>) ?? {}),
-                          enhanceDelayMs: s.enhanceDelayMs,
-                        } as Config['autonomy'],
-                      }
-                    : {}),
-                  ...(s.enhanceEnabled !== undefined
-                    ? {
-                        autonomy: {
-                          ...((configStore.get().autonomy as Record<string, unknown>) ?? {}),
-                          enhance: s.enhanceEnabled,
-                        } as Config['autonomy'],
-                      }
-                    : {}),
-                  ...(s.enhanceLanguage !== undefined
-                    ? {
-                        autonomy: {
-                          ...((configStore.get().autonomy as Record<string, unknown>) ?? {}),
-                          enhanceLanguage: s.enhanceLanguage,
-                        } as Config['autonomy'],
-                      }
-                    : {}),
-                });
-              }
-
-              // Apply runtime effects immediately.
-              if (s.streamFleet !== undefined) {
-                fleetStreamController?.setEnabled(s.streamFleet);
-              }
-              // Apply the rest of the settings to the running session (yolo,
-              // nextPrediction, enhance, maxIterations, logLevel, auditLevel,
-              // auto-compact). The host wires each field to its live setter.
-              deps.applyLiveSettings?.(s);
-              return null;
-            } catch (err) {
-              // The outer caller expects string | null (null = success, string = error message).
-              // Log the full error with structure before returning the message string.
-              const message = err instanceof Error ? err.message : String(err);
-              console.debug(
-                JSON.stringify({
-                  level: 'error',
-                  event: 'execution.settings_persist_failed',
-                  message,
-                  errorName: err instanceof Error ? err.name : undefined,
-                  timestamp: new Date().toISOString(),
-                }),
-              );
-              return message;
-            }
-          },
+          ...createSettingsAdapter({
+            configStore,
+            wpaths,
+            fleetStreamController,
+            applyLiveSettings: deps.applyLiveSettings,
+          }),
           effectiveMaxContext,
           // Terminal title animation: read from config (default on).
           titleAnimation:
