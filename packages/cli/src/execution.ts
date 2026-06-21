@@ -51,6 +51,7 @@ import { resumeSession } from './boot/tui-session-resume.js';
 import { getProjectPickerItems, onProjectSelect, type ProjectPickerContext } from './boot/tui-project-picker-callback.js';
 import { getLiveSessions, onSwitchToSession } from './boot/tui-live-sessions.js';
 import { getSDDContext as getSDDContextExtracted, onSDDOutput as onSDDOutputExtracted } from './boot/tui-sdd-callback.js';
+import { registerDebugStreamCallback, restoreDebugStreamCallback } from './boot/tui-debug-stream.js';
 import type { TuiRuntimeState } from './boot/tui-runtime-state.js';
 import type { ReadlineInputReader } from './input-reader.js';
 import { type PredictLLMProvider, predictNextTasks } from './next-task-predictor.js';
@@ -922,40 +923,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             const metaMode = context.meta?.['mode'];
             return typeof metaMode === 'string' ? metaMode : (modeId ?? 'default');
           },
-          registerDebugStreamCallback: async (cb: import('@wrongstack/providers').DebugStreamCallback) => {
-            // Swap the debug-stream callback from stderr → TUI reducer.
-            // Restored on TUI unmount via the cleanup in app.tsx.
-            try {
-              const { setDebugStreamCallback } = await import('@wrongstack/providers');
-              setDebugStreamCallback(cb);
-            } catch (err) {
-              console.error(
-                JSON.stringify({
-                  level: 'error',
-                  event: 'execution.debug_stream_register_failed',
-                  message: err instanceof Error ? err.message : String(err),
-                  timestamp: new Date().toISOString(),
-                }),
-              );
-            }
-          },
-          restoreDebugStreamCallback: async () => {
-            try {
-              const { setDebugStreamCallback, defaultDebugStreamCallback } = await import(
-                '@wrongstack/providers'
-              );
-              setDebugStreamCallback(defaultDebugStreamCallback);
-            } catch (err) {
-              console.error(
-                JSON.stringify({
-                  level: 'error',
-                  event: 'execution.debug_stream_restore_failed',
-                  message: err instanceof Error ? err.message : String(err),
-                  timestamp: new Date().toISOString(),
-                }),
-              );
-            }
-          },
+          registerDebugStreamCallback,
+          restoreDebugStreamCallback,
           restoredMessages,
           restoredToolCalls,
           // ── Session resume support ──────────────────────────────────
