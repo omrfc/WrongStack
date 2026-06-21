@@ -43,16 +43,15 @@ import {
   mergeCustomModelDefs,
   noOpVault,
   setQueuedMessagesSnapshot,
-  writeOut,
   resolveWstackPaths,
 } from '@wrongstack/core';
 import type { MCPRegistry } from '@wrongstack/mcp';
 import { DefaultSessionStore } from '@wrongstack/core/storage';
 import { capabilitiesFor } from '@wrongstack/providers';
 import { createToolVisionAdapters } from '@wrongstack/runtime/vision';
-import { contextOverflowHint } from './context-overflow-diagnostic.js';
 import { FleetStatusLine } from './fleet-statusline.js';
 import { runWebUIDispatch } from './boot/dispatch-webui.js';
+import { runSingleShotDispatch } from './boot/dispatch-singleshot.js';
 import type { ReadlineInputReader } from './input-reader.js';
 import { type PredictLLMProvider, predictNextTasks } from './next-task-predictor.js';
 import type { TerminalRenderer } from './renderer.js';
@@ -61,7 +60,6 @@ import type { SessionStats } from './session-stats.js';
 import { resolveActiveApiKey } from './provider-config-utils.js';
 import { filterSafeForProject, persistAutonomySetting } from './settings-menu.js';
 import { setSuggestions } from './slash-commands/suggestion-store.js';
-import { fmtTok } from './utils.js';
 import { CLI_VERSION } from './version.js';
 
 /**
@@ -566,82 +564,13 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
       fleetStatusLine.start();
     }
     if (positional.length > 0 || promptFlag) {
-      const query = positional.join(' ');
-      const ctrl = new AbortController();
-      const onSigint = () => ctrl.abort();
-      process.on('SIGINT', onSigint);
-      const startedAt = Date.now();
-      const before = tokenCounter.total();
-      const costBefore = tokenCounter.estimateCost().total;
-      let result: import('@wrongstack/core').RunResult;
-      try {
-        result = await agent.run(query, { signal: ctrl.signal });
-      } finally {
-        process.off('SIGINT', onSigint);
-        // Clean up any lingering bash/exec processes.
-        const { getProcessRegistry } = await import('@wrongstack/tools');
-        getProcessRegistry().killAll();
-      }
-      const after = tokenCounter.total();
-      const costAfter = tokenCounter.estimateCost().total;
-      const usage = {
-        input: after.input - before.input,
-        output: after.output - before.output,
-        iterations: result.iterations,
-        cost: costAfter - costBefore,
-        elapsedMs: Date.now() - startedAt,
-      };
-      if (flags['output-json']) {
-        const json = JSON.stringify({
-          status: result.status,
-          finalText: result.finalText ?? null,
-          error: result.error
-            ? {
-                code: result.error.code,
-                subsystem: result.error.subsystem,
-                severity: result.error.severity,
-                recoverable: result.error.recoverable,
-                message: result.error.message,
-                context: result.error.context ?? null,
-              }
-            : null,
-          usage,
-        });
-        writeOut(json + '\n');
-      } else {
-        if (result.status === 'failed') {
-          code = 1;
-          const err = result.error;
-          if (err) {
-            const tag = err.recoverable ? ' (recoverable)' : '';
-            renderer.writeError(`Failed [${err.severity}]${tag}: ${err.describe()}`);
-            const hint = contextOverflowHint(err);
-            if (hint) renderer.writeWarning(hint);
-          } else {
-            renderer.writeError('Failed.');
-          }
-        } else if (result.status === 'aborted') {
-          code = 130;
-          renderer.writeWarning('Aborted.');
-        } else if (result.status === 'max_iterations') {
-          code = 1;
-          renderer.writeWarning(`Hit max iterations (${result.iterations}).`);
-        }
-        if (result.finalText) renderer.write('\n' + result.finalText + '\n');
-        // Surface any delegate subagent completion banners.
-        const r = result as {
-          delegateSummaries?: Array<{ summary: string | undefined; ok: boolean }>;
-          messages?: Array<unknown> | undefined;
-        };
-        renderer.writeDelegateSummaries(r);
-        renderer.write(
-          '\n' +
-            color.dim(
-              `[in: ${fmtTok(usage.input)}  out: ${fmtTok(usage.output)}  iters: ${usage.iterations}  cost: ${usage.cost.toFixed(4)}  ${(usage.elapsedMs / 1000).toFixed(1)}s]`,
-            ) +
-            '\n',
-        );
-      }
+      code = await runSingleShotDispatch({
+        agent,
+        query: positional.join(' '),
+        flags,
+        tokenCounter,
+        renderer,
+      });
     } else if (flags.tui && !flags['no-tui'] && !flags.webui) {
       // --webui takes precedence over the TUI: both want exclusive ownership of
       // stdout, and the webui branch (below) runs the REPL + browser server. The
