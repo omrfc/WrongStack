@@ -243,6 +243,8 @@ interface CliWebUIOptions {
   httpPort?: number | undefined;
   /** Project root — recorded in the running-instance registry. */
   projectRoot?: string | undefined;
+  /** Full app config, used for HQ client publishing settings. */
+  appConfig?: import('@wrongstack/core').Config | undefined;
   /** Pop the browser open to the served URL once the frontend is ready. */
   open?: boolean | undefined;
   /**
@@ -410,6 +412,10 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     'contextStrategy',
     'logLevel',
     'auditLevel',
+    'hqEnabled',
+    'hqUrl',
+    'hqToken',
+    'hqRawContent',
     // Telegram plugin notification settings (parity with the standalone server).
     'tgConfigured',
     'tgSessionEnd',
@@ -457,6 +463,11 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       meta['logLevel'] = (cfg.log as Record<string, unknown>)?.['level'] ?? 'info';
       meta['auditLevel'] = (cfg.session as Record<string, unknown>)?.['auditLevel'] ?? 'standard';
       meta['maxIterations'] = (cfg.tools as Record<string, unknown>)?.['maxIterations'] ?? 500;
+      const hqCfg = (cfg.hq as Record<string, unknown>) ?? {};
+      meta['hqEnabled'] = hqCfg['enabled'] === true;
+      meta['hqUrl'] = typeof hqCfg['url'] === 'string' ? hqCfg['url'] : '';
+      meta['hqToken'] = typeof hqCfg['token'] === 'string' ? hqCfg['token'] : '';
+      meta['hqRawContent'] = hqCfg['rawContent'] === true;
       // Telegram plugin notification settings live under extensions.telegram —
       // same path the standalone server seeds and /telegram-settings writes.
       const tgExt = (cfg.extensions as Record<string, Record<string, unknown>> | undefined)?.[
@@ -571,6 +582,20 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
         const toolsCfg = (decrypted.tools as Record<string, unknown>) ?? {};
         toolsCfg.maxIterations = payload['maxIterations'];
         decrypted.tools = toolsCfg;
+      }
+
+      const hqTouched =
+        typeof payload['hqEnabled'] === 'boolean' ||
+        typeof payload['hqUrl'] === 'string' ||
+        typeof payload['hqToken'] === 'string' ||
+        typeof payload['hqRawContent'] === 'boolean';
+      if (hqTouched) {
+        const hqCfg = (decrypted.hq as Record<string, unknown>) ?? {};
+        if (typeof payload['hqEnabled'] === 'boolean') hqCfg.enabled = payload['hqEnabled'];
+        if (typeof payload['hqUrl'] === 'string') hqCfg.url = payload['hqUrl'];
+        if (typeof payload['hqToken'] === 'string') hqCfg.token = payload['hqToken'];
+        if (typeof payload['hqRawContent'] === 'boolean') hqCfg.rawContent = payload['hqRawContent'];
+        decrypted.hq = hqCfg;
       }
 
       // Telegram plugin notification settings → extensions.telegram (parity
@@ -689,7 +714,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
     if (!opts.projectRoot) return null;
     try {
       const projectDir = resolveProjectDir(opts.projectRoot, wstackGlobalRoot());
-      const hqPublisher = createHqPublisherFromEnv({ clientKind: 'webui', projectRoot: opts.projectRoot, projectName: path.basename(opts.projectRoot) });
+      const hqPublisher = createHqPublisherFromEnv({ clientKind: 'webui', projectRoot: opts.projectRoot, projectName: path.basename(opts.projectRoot), appConfig: opts.appConfig } as unknown as Parameters<typeof createHqPublisherFromEnv>[0]);
       hqPublisher?.connect();
       const mailbox = new GlobalMailbox(projectDir, opts.events, hqPublisher);
       webuiClientId = `webui@${crypto.randomUUID().slice(0, 8)}`;
@@ -2203,6 +2228,17 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
       case 'collab.resolve':
       case 'collab.request_pause':
       case 'collab.resume':
+        break;
+
+      // Integrated terminal — the CLI embedded server doesn't run a pty
+      // transport (it already has its own terminal); silently acknowledge
+      // and ignore so the browser client's terminal panel doesn't trip the
+      // "Unhandled message type" warning. The standalone webui server wires
+      // the real TerminalWebSocketHandler.
+      case 'terminal.create':
+      case 'terminal.input':
+      case 'terminal.resize':
+      case 'terminal.close':
         break;
 
       case 'projects.list': {

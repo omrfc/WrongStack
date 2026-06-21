@@ -4,9 +4,14 @@
  * the CLI subcommand handler (packages/cli/src/subcommands/handlers/mcp.ts)
  * and the slash-command wiring in index.ts.
  */
-import * as fs from 'node:fs/promises';
 import type { Config, MCPServerConfig } from '@wrongstack/core';
 import { color, expectDefined } from '@wrongstack/core';
+import {
+  readJsonObjectFile,
+  removeJsonPath,
+  setJsonPath,
+  updateJsonObjectFile,
+} from '@wrongstack/core/utils';
 import type { MCPRegistry } from '@wrongstack/mcp';
 export interface McpParsedArgs {
   action: 'list' | 'add' | 'remove' | 'enable' | 'disable' | 'restart';
@@ -52,7 +57,7 @@ export async function runMcpManagementCommand(
   deps: McpManagementDeps,
 ): Promise<string> {
   const { config, configPath, mcpRegistry, allServerPresets } = deps;
-  const diskConfig = await readConfig(configPath);
+  const diskConfig = await readJsonObjectFile(configPath);
   const configured = isMcpServerRecord(diskConfig.mcpServers)
     ? diskConfig.mcpServers
     : (config.mcpServers ?? {});
@@ -146,13 +151,10 @@ async function runAdd(
     ? { ...preset, ...existing, enabled: enable }
     : { ...preset, enabled: enable };
 
-  const full = await readConfig(configPath);
-  const mcpServers: Record<string, MCPServerConfig> = {
-    ...(isMcpServerRecord(full.mcpServers) ? full.mcpServers : {}),
-    [name]: nextCfg,
-  };
-  full.mcpServers = mcpServers;
-  await writeConfig(configPath, full);
+  await updateJsonObjectFile(configPath, (full) => {
+    const current = isMcpServerRecord(full.mcpServers) ? full.mcpServers : {};
+    setJsonPath(full, ['mcpServers', name], { ...current[name], ...nextCfg });
+  });
 
   if (!enable) {
     const verb = existing ? 'Updated' : 'Added (disabled — /mcp enable to start)';
@@ -194,13 +196,11 @@ async function runRemove(
       }),
     );
   }
-  const full = await readConfig(configPath);
-  const mcpServers: Record<string, MCPServerConfig> = {
-    ...((full.mcpServers as Record<string, MCPServerConfig> | undefined) ?? {}),
-  };
-  delete mcpServers[name];
-  full.mcpServers = mcpServers;
-  await writeConfig(configPath, full);
+  await updateJsonObjectFile(configPath, (full) => {
+    const current = isMcpServerRecord(full.mcpServers) ? full.mcpServers : configured;
+    setJsonPath(full, ['mcpServers'], { ...current });
+    removeJsonPath(full, ['mcpServers', name]);
+  });
   return `${color.yellow('Removed')} "${name}" from config.`;
 }
 
@@ -222,13 +222,10 @@ async function runEnable(
       return `${color.green('Enabled')} "${name}" and started.`;
     }
   }
-  const full = await readConfig(configPath);
-  const mcpServers: Record<string, MCPServerConfig> = {
-    ...((full.mcpServers as Record<string, MCPServerConfig> | undefined) ?? {}),
-  };
-  mcpServers[name] = { ...cfg, ...(mcpServers[name] ?? {}), enabled: true };
-  full.mcpServers = mcpServers;
-  await writeConfig(configPath, full);
+  await updateJsonObjectFile(configPath, (full) => {
+    const current = isMcpServerRecord(full.mcpServers) ? full.mcpServers : {};
+    setJsonPath(full, ['mcpServers', name], { ...cfg, ...current[name], enabled: true });
+  });
   try {
     await mcpRegistry.restart(name);
   } catch {
@@ -259,13 +256,10 @@ async function runDisable(
       }),
     );
   }
-  const full = await readConfig(configPath);
-  const mcpServers: Record<string, MCPServerConfig> = {
-    ...((full.mcpServers as Record<string, MCPServerConfig> | undefined) ?? {}),
-  };
-  mcpServers[name] = { ...cfg, ...(mcpServers[name] ?? {}), enabled: false };
-  full.mcpServers = mcpServers;
-  await writeConfig(configPath, full);
+  await updateJsonObjectFile(configPath, (full) => {
+    const current = isMcpServerRecord(full.mcpServers) ? full.mcpServers : {};
+    setJsonPath(full, ['mcpServers', name], { ...cfg, ...current[name], enabled: false });
+  });
   return `${color.yellow('Disabled')} "${name}" and stopped.`;
 }
 
@@ -301,22 +295,6 @@ function stateBadge(state: string): string {
   }
 }
 
-async function readConfig(path: string): Promise<Record<string, unknown>> {
-  try {
-    return JSON.parse(await fs.readFile(path, 'utf8')) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
-
 function isMcpServerRecord(value: unknown): value is Record<string, MCPServerConfig> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
-async function writeConfig(path: string, cfg: Record<string, unknown>): Promise<void> {
-  const raw = JSON.stringify(cfg, null, 2);
-  // atomic write (inline — avoids importing atomicWrite from core here)
-  const tmp = path + '.tmp';
-  await fs.writeFile(tmp, raw, 'utf8');
-  await fs.rename(tmp, path);
 }

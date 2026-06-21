@@ -941,7 +941,7 @@ export function App({
     },
     autonomyPicker: { open: false, options: [], selected: 0 },
     resumePicker: { open: false, sessions: [], selected: 0, busy: false, hint: undefined, error: undefined },
-    settingsPicker: { open: false, field: 0, mode: 'off', delayMs: 0, titleAnimation: true, yolo: false, streamFleet: true, chime: false, confirmExit: true, nextPrediction: false, featureMcp: true, featurePlugins: true, featureMemory: true, featureSkills: true, featureModelsRegistry: true, tokenSavingTier: 'off' as TokenSavingTier, allowOutsideProjectRoot: true, contextAutoCompact: true, contextStrategy: 'hybrid', contextMode: 'balanced' as ContextMode, maxConcurrent: 10, logLevel: 'info', auditLevel: 'standard', indexOnStart: true, maxIterations: 500, autoProceedMaxIterations: 50, enhanceDelayMs: 60_000, enhanceEnabled: true, enhanceLanguage: 'original', debugStream: false, statuslineMode: 'detailed' as StatuslineMode, configScope: 'global' },
+    settingsPicker: { open: false, field: 0, mode: 'off', delayMs: 0, titleAnimation: true, yolo: false, streamFleet: true, chime: false, confirmExit: true, nextPrediction: false, featureMcp: true, featurePlugins: true, featureMemory: true, featureSkills: true, featureModelsRegistry: true, tokenSavingTier: 'off' as TokenSavingTier, allowOutsideProjectRoot: true, contextAutoCompact: true, contextStrategy: 'hybrid', contextMode: 'balanced' as ContextMode, maxConcurrent: 10, logLevel: 'info', auditLevel: 'standard', indexOnStart: true, maxIterations: 500, autoProceedMaxIterations: 50, enhanceDelayMs: 60_000, enhanceEnabled: true, enhanceLanguage: 'original', debugStream: false, statuslineMode: 'detailed' as StatuslineMode, reasoningMode: 'auto' as 'auto', reasoningEffort: 'high', reasoningPreserve: false, cacheTtl: 'default', configScope: 'global' },
     statuslinePicker: { open: false, field: 0, hiddenItems: [], visibleChips: [], hint: undefined },
     projectPicker: { open: false, allItems: [], items: [], selected: 0, filter: '', hint: undefined },
     fKeyPicker: { open: false, selected: 0 },
@@ -1978,6 +1978,10 @@ export function App({
             enhanceLanguage: sp.enhanceLanguage,
             debugStream: sp.debugStream,
             statuslineMode: sp.statuslineMode,
+            reasoningMode: sp.reasoningMode,
+            reasoningEffort: sp.reasoningEffort,
+            reasoningPreserve: sp.reasoningPreserve,
+            cacheTtl: sp.cacheTtl,
             configScope: sp.configScope,
           });
         }
@@ -2526,6 +2530,10 @@ export function App({
       enhanceLanguage: (s.enhanceLanguage as 'original' | 'english') ?? 'original',
       debugStream: s.debugStream ?? false,
       statuslineMode: s.statuslineMode ?? 'detailed',
+      reasoningMode: (s as any).reasoningMode ?? 'auto',
+      reasoningEffort: (s as any).reasoningEffort ?? 'high',
+      reasoningPreserve: (s as any).reasoningPreserve ?? false,
+      cacheTtl: (s as any).cacheTtl ?? 'default',
       configScope: s.configScope ?? 'global',
     });
   }, [getSettings]);
@@ -2737,6 +2745,10 @@ export function App({
       enhanceLanguage: sp.enhanceLanguage,
       debugStream: sp.debugStream,
       statuslineMode: sp.statuslineMode,
+      reasoningMode: sp.reasoningMode,
+      reasoningEffort: sp.reasoningEffort,
+      reasoningPreserve: sp.reasoningPreserve,
+      cacheTtl: sp.cacheTtl,
       configScope: sp.configScope,
     })).then((err: string | null) => {
       if (err) dispatch({ type: 'settingsHint', text: err });
@@ -2772,6 +2784,10 @@ export function App({
     state.settingsPicker.enhanceLanguage,
     state.settingsPicker.debugStream,
     state.settingsPicker.statuslineMode,
+    state.settingsPicker.reasoningMode,
+    state.settingsPicker.reasoningEffort,
+    state.settingsPicker.reasoningPreserve,
+    state.settingsPicker.cacheTtl,
     saveSettings,
   ]);
 
@@ -4562,6 +4578,10 @@ export function App({
           enhanceLanguage: cfg.enhanceLanguage ?? 'original',
           debugStream: cfg.debugStream ?? false,
           statuslineMode: cfg.statuslineMode ?? 'detailed',
+          reasoningMode: (cfg as any).reasoningMode ?? 'auto',
+          reasoningEffort: (cfg as any).reasoningEffort ?? 'high',
+          reasoningPreserve: (cfg as any).reasoningPreserve ?? false,
+          cacheTtl: (cfg as any).cacheTtl ?? 'default',
           configScope: cfg.configScope ?? 'global',
         });
       }
@@ -6080,6 +6100,10 @@ export function App({
               enhanceLanguage={state.settingsPicker.enhanceLanguage}
               debugStream={state.settingsPicker.debugStream}
               statuslineMode={state.settingsPicker.statuslineMode}
+              reasoningMode={state.settingsPicker.reasoningMode}
+              reasoningEffort={state.settingsPicker.reasoningEffort}
+              reasoningPreserve={state.settingsPicker.reasoningPreserve}
+              cacheTtl={state.settingsPicker.cacheTtl}
               configScope={state.settingsPicker.configScope}
               hint={state.settingsPicker.hint}
             />

@@ -21,7 +21,7 @@ import * as http from 'node:http';
 import {
   DEFAULT_HQ_REDACTION_POLICY,
   HQ_PROTOCOL_VERSION,
-  type HqAuthFile,
+  type EnsureHqFirstRunAuthResult,
   type HqBrowserMessage,
   type HqClientCapability,
   type HqClientRecord,
@@ -33,9 +33,9 @@ import {
   type HqRedactionPolicy,
   type HqSnapshot,
   type HqWelcomePayload,
+  ensureHqFirstRunAuthFile,
   parseHqEventPayload,
   parseHqFrame,
-  readHqAuthFile,
   resolveHqDataDir,
   scrubAndTruncateHqPreview,
   watchHqAuthFile,
@@ -55,9 +55,19 @@ export interface HqServerOptions {
   dataDir?: string;
 }
 
+export interface HqFirstRunSetup {
+  dataDir: string;
+  browserUrl: string;
+  clientEnv: {
+    WRONGSTACK_HQ_URL: string;
+    WRONGSTACK_HQ_TOKEN: string;
+  };
+}
+
 export interface HqServerHandle {
   host: string;
   port: number;
+  firstRunSetup?: HqFirstRunSetup;
   close(): Promise<void>;
 }
 
@@ -82,6 +92,38 @@ interface ConnectedClient {
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 3499;
 const MAX_EVENT_LOG = 500;
+
+function displayHost(host: string): string {
+  return host === '0.0.0.0' ? '127.0.0.1' : host;
+}
+
+function buildHttpUrl(host: string, port: number, token?: string): string {
+  const url = new URL(`http://${displayHost(host)}:${port}/`);
+  if (token) url.searchParams.set('token', token);
+  return url.toString();
+}
+
+function buildClientWsUrl(host: string, port: number, token?: string): string {
+  const url = new URL(`ws://${displayHost(host)}:${port}/ws/client`);
+  if (token) url.searchParams.set('token', token);
+  return url.toString();
+}
+
+function writeHqStartupInfo(write: (line: string) => void, handle: HqServerHandle): void {
+  const firstRun = handle.firstRunSetup;
+  write(`WrongStack HQ listening on http://${handle.host}:${handle.port}\n`);
+  if (firstRun) {
+    write(`Browser endpoint: ${firstRun.browserUrl}\n`);
+    write(`Client endpoint:  ${buildClientWsUrl(handle.host, handle.port, firstRun.clientEnv.WRONGSTACK_HQ_TOKEN)}\n`);
+    write(`\nFirst-run HQ auth created in ${firstRun.dataDir}\n`);
+    write(`Start clients with:\n`);
+    write(`  WRONGSTACK_HQ_URL=${firstRun.clientEnv.WRONGSTACK_HQ_URL}\n`);
+    write(`  WRONGSTACK_HQ_TOKEN=${firstRun.clientEnv.WRONGSTACK_HQ_TOKEN}\n`);
+  } else {
+    write(`Client endpoint:  ws://${handle.host}:${handle.port}/ws/client\n`);
+    write(`Browser endpoint: http://${handle.host}:${handle.port}\n`);
+  }
+}
 
 const HQ_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -686,17 +728,18 @@ const HQ_HTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
-export function startHqServer(options: HqServerOptions = {}): Promise<HqServerHandle> {
+export async function startHqServer(options: HqServerOptions = {}): Promise<HqServerHandle> {
   const host = options.host ?? DEFAULT_HOST;
   const port = options.port ?? DEFAULT_PORT;
   const dataDir = resolveHqDataDir(options.dataDir);
 
-  // Load the operator-configured auth file (best-effort — never fail
-  // startup over a missing or corrupt auth.json). The redaction policy
-  // override, if present, tightens whatever publishers declare.
-  return readHqAuthFile(dataDir, {
+  // First run should be usable without manual token/config setup: if
+  // auth.json is missing, create browser + client tokens. Existing auth.json
+  // remains operator-owned, including explicit empty-token open mode.
+  const firstRunAuth = await ensureHqFirstRunAuthFile(dataDir, {
     warn: (msg: string) => console.warn(JSON.stringify({ level: 'warn', event: 'hq.auth_load_failed', message: msg, timestamp: new Date().toISOString() })),
-  }).then((authFile: HqAuthFile) => startHqServerWithAuth(options, host, port, dataDir, authFile));
+  });
+  return startHqServerWithAuth(options, host, port, dataDir, firstRunAuth);
 }
 
 /**
@@ -722,8 +765,9 @@ function startHqServerWithAuth(
   host: string,
   port: number,
   dataDir: string,
-  authFile: HqAuthFile,
+  firstRunAuth: EnsureHqFirstRunAuthResult,
 ): Promise<HqServerHandle> {
+  const authFile = firstRunAuth.authFile;
   // Operator override merges over the default; publisher claims are
   // clamped against this at broadcast time (see scrubAndTruncateHqPreview
   // call sites + the welcome handshake redactionPolicy field).
@@ -923,13 +967,20 @@ function startHqServerWithAuth(
       const addr = httpServer.address();
       const actualPort = typeof addr === 'object' && addr ? addr.port : port;
 
-      console.log(`WrongStack HQ listening on http://${host}:${actualPort}`);
-      console.log(`Client endpoint:  ws://${host}:${actualPort}/ws/client`);
-      console.log(`Browser endpoint: http://${host}:${actualPort}`);
-
-      resolve({
+      const firstRunSetup = firstRunAuth.created && firstRunAuth.browserToken && firstRunAuth.clientToken
+        ? {
+            dataDir,
+            browserUrl: buildHttpUrl(host, actualPort, firstRunAuth.browserToken.token),
+            clientEnv: {
+              WRONGSTACK_HQ_URL: `http://${displayHost(host)}:${actualPort}`,
+              WRONGSTACK_HQ_TOKEN: firstRunAuth.clientToken.token,
+            },
+          }
+        : undefined;
+      const handle: HqServerHandle = {
         host,
         port: actualPort,
+        ...(firstRunSetup ? { firstRunSetup } : {}),
         close: () =>
           new Promise<void>((res) => {
             authWatcher.close();
@@ -938,7 +989,9 @@ function startHqServerWithAuth(
             wss.close();
             httpServer.close(() => res());
           }),
-      });
+      };
+      writeHqStartupInfo((line) => console.log(line.trimEnd()), handle);
+      resolve(handle);
     });
   });
 }

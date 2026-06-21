@@ -34,12 +34,27 @@ are intentionally out of scope.
 The handler short-circuits the normal `boot()` flow, so `--hq` works without
 a valid project root or `.wrongstack/` directory.
 
+### First-run setup
+
+On first run, when `<dataDir>/auth.json` is missing, HQ automatically creates
+one browser token and one client token. Startup output prints the tokenized
+browser URL plus the client environment variables. For same-machine clients,
+setting only `WRONGSTACK_HQ_ENABLED=1` or `WRONGSTACK_HQ_URL=<hq-url>` is enough:
+clients auto-load the first client token from `<dataDir>/auth.json` unless
+`WRONGSTACK_HQ_TOKEN` is explicitly set. Existing `auth.json` is treated as
+operator intent, including empty token arrays for open mode.
+
 Once running, the URL the browser should hit is printed to stdout, e.g.:
 
 ```text
 WrongStack HQ listening on http://127.0.0.1:3499
-Browser dashboard: http://127.0.0.1:3499/
-Client endpoint:   ws://127.0.0.1:3499/ws/client
+Browser endpoint: http://127.0.0.1:3499/?token=<browser-token>
+Client endpoint:  ws://127.0.0.1:3499/ws/client?token=<client-token>
+
+First-run HQ auth created in C:\\Users\\you\\.wrongstack\\hq
+Start clients with:
+  WRONGSTACK_HQ_URL=http://127.0.0.1:3499
+  WRONGSTACK_HQ_TOKEN=<client-token>
 ```
 
 ## Flags

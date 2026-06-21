@@ -136,6 +136,15 @@ describe('mcp_control list/search/unknown rendering', () => {
     expect(await run(make(fakeRegistry()), { action: 'frobnicate' })).toContain('Unknown action');
   });
 
+  it('list prefers disk config over stale in-memory config after disable', async () => {
+    await fs.writeFile(configPath, JSON.stringify({ mcpServers: { ssh: { transport: 'stdio', enabled: false } } }));
+    const stale = { ssh: { transport: 'stdio', enabled: true } } as never;
+    const out = await run(make(fakeRegistry(), stale), { action: 'list' });
+    expect(out).toContain('ssh');
+    expect(out).toContain('disabled');
+    expect(out).not.toContain('● enabled');
+  });
+
   it('disables a configured server even when stop() reports it was not running', async () => {
     // runDisable reads the config FILE (not getConfig()) and expectDefined()s the
     // entry, so the file must already contain the server.

@@ -162,6 +162,9 @@ const TOKEN_SAVING_TIER_VALUES = new Set(['off', 'minimal', 'light', 'medium', '
 const ENHANCE_LANGUAGE_VALUES = new Set(['original', 'english']);
 const LOG_LEVEL_VALUES = new Set(['debug', 'info', 'warn', 'error']);
 const AUDIT_LEVEL_VALUES = new Set(['minimal', 'standard', 'full']);
+const REASONING_MODE_VALUES = new Set(['auto', 'on', 'off']);
+const REASONING_EFFORT_VALUES = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+const CACHE_TTL_VALUES = new Set(['default', '5m', '1h']);
 
 const BOOLEAN_PREF_KEYS = new Set([
   'yolo',
@@ -180,6 +183,9 @@ const BOOLEAN_PREF_KEYS = new Set([
   'contextAutoCompact',
   'tgSessionEnd',
   'tgDelegate',
+  'reasoningPreserve',
+  'hqEnabled',
+  'hqRawContent',
 ]);
 
 const NUMBER_PREF_KEYS = new Set([
@@ -191,6 +197,8 @@ const NUMBER_PREF_KEYS = new Set([
   'tgLongToolMs',
 ]);
 
+const STRING_PREF_KEYS = new Set(['hqUrl', 'hqToken']);
+
 const ENUM_PREF_KEYS: Record<string, Set<string>> = {
   autonomy: AUTONOMY_VALUES,
   contextStrategy: CONTEXT_STRATEGY_VALUES,
@@ -199,6 +207,9 @@ const ENUM_PREF_KEYS: Record<string, Set<string>> = {
   enhanceLanguage: ENHANCE_LANGUAGE_VALUES,
   logLevel: LOG_LEVEL_VALUES,
   auditLevel: AUDIT_LEVEL_VALUES,
+  reasoningMode: REASONING_MODE_VALUES,
+  reasoningEffort: REASONING_EFFORT_VALUES,
+  cacheTtl: CACHE_TTL_VALUES,
 };
 
 function validatePreferenceValue(key: string, value: unknown): string | null {
@@ -209,6 +220,9 @@ function validatePreferenceValue(key: string, value: unknown): string | null {
     return typeof value === 'number' && Number.isFinite(value)
       ? null
       : `prefs.update payload.${key} must be a finite number`;
+  }
+  if (STRING_PREF_KEYS.has(key)) {
+    return typeof value === 'string' ? null : `prefs.update payload.${key} must be a string`;
   }
   const allowed = ENUM_PREF_KEYS[key];
   if (allowed) {

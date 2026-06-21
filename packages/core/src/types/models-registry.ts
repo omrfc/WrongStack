@@ -3,12 +3,15 @@
  * We keep `unknown` for fields we don't read so the cached payload stays faithful.
  */
 
+import type { ReasoningConfig } from './provider.js';
+
 export interface ModelsDevModel {
   id: string;
   name: string;
   family?: string | undefined;
   attachment?: boolean | undefined;
   reasoning?: boolean | undefined;
+  reasoningConfig?: ReasoningConfig | undefined;
   tool_call?: boolean | undefined;
   temperature?: boolean | undefined;
   knowledge?: string | undefined;
@@ -24,6 +27,8 @@ export interface ModelsDevModel {
     output?: number | undefined;
     cache_read?: number | undefined;
     cache_write?: number | undefined;
+    cache_write_5m?: number | undefined;
+    cache_write_1h?: number | undefined;
     [k: string]: number | undefined;
   };
   limit?: {
@@ -84,6 +89,7 @@ export interface ResolvedModel {
     maxContext: number;
     maxOutput?: number | undefined;
     knowledge?: string | undefined;
+    reasoningConfig?: ReasoningConfig | undefined;
   };
   cost?: ModelsDevModel['cost'] | undefined;
 }

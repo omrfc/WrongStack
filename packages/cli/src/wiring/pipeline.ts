@@ -1,6 +1,7 @@
 import {
   Agent,
   type AgentPipelines,
+  applyModelRuntime,
   AutoCompactionMiddleware,
   type Context,
   createDefaultPipelines,
@@ -22,9 +23,39 @@ import { resolveRuntimeMaxContext } from '../context-limit.js';
 
 type CompactionDriver = ConstructorParameters<typeof AutoCompactionMiddleware>[0];
 
-export function setupPipelines(params: { events: EventBus; logger: Logger }): AgentPipelines {
+export function setupPipelines(params: {
+  events: EventBus;
+  logger: Logger;
+  /**
+   * Optional request overrides applied on every outgoing request. Used by the
+   * model-runtime middleware to map shared reasoning/cache settings into the
+   * provider `Request`, gated by the active model's capabilities.
+   */
+  modelRuntime?: {
+    getSettings(): import('@wrongstack/core').ModelRuntimeConfig | undefined;
+    getReasoningConfig(): import('@wrongstack/core').ReasoningConfig | undefined;
+    onWarning?: ((message: string) => void) | undefined;
+  } | undefined;
+}): AgentPipelines {
   const { events, logger } = params;
   const pipelines = createDefaultPipelines();
+
+  // Model-runtime middleware: overlay Config.modelRuntime onto every request.
+  // Installed first so all hosts (REPL/TUI/WebUI) share one behavior — UIs only
+  // need to mutate Config.modelRuntime for the change to take effect.
+  if (params.modelRuntime) {
+    const mr = params.modelRuntime;
+    pipelines.request.use({
+      name: 'ModelRuntimeSettings',
+      async handler(req: import('@wrongstack/core').Request) {
+        return applyModelRuntime(req, {
+          getSettings: mr.getSettings,
+          getReasoningConfig: mr.getReasoningConfig,
+          onWarning: mr.onWarning,
+        });
+      },
+    });
+  }
 
   const installBoundary = <_T>(p: {
     setErrorHandler: (

@@ -37,6 +37,14 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
     '  /settings token-saving off|minimal|light|medium|aggressive   Token-saving mode',
     '  /settings max-concurrent <n>   Max concurrent subagents (0 = unlimited)',
     '  /settings title-animation on|off   Terminal title animation',
+    '  /settings reasoning auto|on|off   Reasoning mode (auto = provider default)',
+    '  /settings reasoning-effort none|minimal|low|medium|high|xhigh|max   Reasoning effort',
+    '  /settings reasoning-preserve on|off   Preserve thinking across turns',
+    '  /settings cache-ttl 5m|1h   Prompt cache TTL (Anthropic)',
+    '  /settings hq on|off           Enable/disable HQ client publishing',
+    '  /settings hq-url <url>        HQ URL for remote clients (http://host:3499)',
+    '  /settings hq-token <token>    HQ client token for remote clients',
+    '  /settings hq-raw on|off       Send raw content previews to HQ',
     '  /settings defaults            Show built-in default values',
     '',
     'Settings are persisted to ~/.wrongstack/config.json.',
@@ -76,6 +84,19 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
     const features = opts.configStore.get().features as unknown as Record<string, unknown> | undefined;
     const tokenSavingTier = (features?.tokenSavingMode as string) ?? 'off';
     const maxConcurrent = opts.configStore.get().maxConcurrent ?? 0;
+    const modelRuntime = opts.configStore.get().modelRuntime as
+      | { reasoning?: { mode?: string; effort?: string; preserve?: boolean }; cache?: { ttl?: string } }
+      | undefined;
+    const reasoningMode = modelRuntime?.reasoning?.mode ?? 'auto';
+    const reasoningEffort = modelRuntime?.reasoning?.effort ?? '(unset)';
+    const reasoningPreserve = modelRuntime?.reasoning?.preserve === true;
+    const cacheTtl = modelRuntime?.cache?.ttl ?? 'default';
+    const hq = (opts.configStore.get() as { hq?: unknown }).hq as
+      | { enabled?: boolean; url?: string; token?: string; rawContent?: boolean; projectAlias?: string }
+      | undefined;
+    const hqEnabled = hq?.enabled === true;
+    const hqUrl = hq?.url ?? '(auto/local)';
+    const hqToken = hq?.token ? `${hq.token.slice(0, 6)}…${hq.token.slice(-4)} (${hq.token.length} chars)` : '(auto/local)';
     return [
       `${color.bold('WrongStack')} ${color.dim('— Settings')}`,
       '',
@@ -95,6 +116,14 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
       `  context auto-compact: ${contextAutoCompact ? color.cyan('on') : color.dim('off')}   ${color.dim('change: /settings context-auto-compact on|off')}`,
       `  token-saving:       ${color.cyan(tokenSavingTier)}   ${color.dim('change: /settings token-saving off|minimal|light|medium|aggressive')}`,
       `  max-concurrent:     ${color.cyan(maxConcurrent === 0 ? 'unlimited' : String(maxConcurrent))}   ${color.dim('change: /settings max-concurrent <n>')}`,
+      `  reasoning mode:     ${color.cyan(reasoningMode)}   ${color.dim('change: /settings reasoning auto|on|off')}`,
+      `  reasoning effort:   ${color.cyan(reasoningEffort)}   ${color.dim('change: /settings reasoning-effort <level>')}`,
+      `  reasoning preserve: ${reasoningPreserve ? color.cyan('on') : color.dim('off')}   ${color.dim('change: /settings reasoning-preserve on|off')}`,
+      `  cache TTL:          ${color.cyan(cacheTtl)}   ${color.dim('change: /settings cache-ttl 5m|1h')}`,
+      `  HQ publishing:     ${hqEnabled ? color.cyan('on') : color.dim('off')}   ${color.dim('change: /settings hq on|off')}`,
+      `  HQ URL:            ${color.cyan(hqUrl)}   ${color.dim('change: /settings hq-url <url>')}`,
+      `  HQ token:          ${color.cyan(hqToken)}   ${color.dim('change: /settings hq-token <token>')}`,
+      `  HQ raw content:    ${hq?.rawContent === true ? color.cyan('on') : color.dim('off')}   ${color.dim('change: /settings hq-raw on|off')}`,
       '',
       color.dim('  Persisted to ~/.wrongstack/config.json · /settings help for more'),
     ].join('\n');
@@ -147,6 +176,64 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
       };
 
       try {
+        if (sub === 'hq') {
+          const raw = (rest[0] ?? '').toLowerCase();
+          if (!['on', 'off'].includes(raw)) {
+            return { message: `${color.amber('Usage:')} /settings hq on|off` };
+          }
+          const on = raw === 'on';
+          await persistConfigSetting({ ...persistDeps, forceGlobal: true }, (cfg) => {
+            const hq = (cfg.hq as Record<string, unknown> | undefined) ?? {};
+            hq.enabled = on;
+            cfg.hq = hq;
+          });
+          return { message: `${color.green('✓')} HQ publishing → ${on ? color.cyan('on') : color.dim('off')}` };
+        }
+
+        if (sub === 'hq-url') {
+          const raw = rest.join(' ').trim();
+          if (!raw) return { message: `${color.amber('Usage:')} /settings hq-url <http://host:3499>` };
+          try {
+            const url = new URL(raw);
+            if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('bad protocol');
+          } catch {
+            return { message: `${color.red('Invalid URL')}: ${raw}` };
+          }
+          await persistConfigSetting({ ...persistDeps, forceGlobal: true }, (cfg) => {
+            const hq = (cfg.hq as Record<string, unknown> | undefined) ?? {};
+            hq.url = raw;
+            hq.enabled = true;
+            cfg.hq = hq;
+          });
+          return { message: `${color.green('✓')} HQ URL → ${color.cyan(raw)}` };
+        }
+
+        if (sub === 'hq-token') {
+          const token = rest.join(' ').trim();
+          if (!token) return { message: `${color.amber('Usage:')} /settings hq-token <client-token>` };
+          await persistConfigSetting({ ...persistDeps, forceGlobal: true }, (cfg) => {
+            const hq = (cfg.hq as Record<string, unknown> | undefined) ?? {};
+            hq.token = token;
+            hq.enabled = true;
+            cfg.hq = hq;
+          });
+          return { message: `${color.green('✓')} HQ token saved ${color.dim('(global config)')}` };
+        }
+
+        if (sub === 'hq-raw') {
+          const raw = (rest[0] ?? '').toLowerCase();
+          if (!['on', 'off'].includes(raw)) {
+            return { message: `${color.amber('Usage:')} /settings hq-raw on|off` };
+          }
+          const on = raw === 'on';
+          await persistConfigSetting({ ...persistDeps, forceGlobal: true }, (cfg) => {
+            const hq = (cfg.hq as Record<string, unknown> | undefined) ?? {};
+            hq.rawContent = on;
+            cfg.hq = hq;
+          });
+          return { message: `${color.green('✓')} HQ raw content → ${on ? color.cyan('on') : color.dim('off')}` };
+        }
+
         if (sub === 'delay') {
           const raw = rest[0];
           if (raw === undefined) {
@@ -468,8 +555,77 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
           };
         }
 
+        if (sub === 'reasoning') {
+          const raw = (rest[0] ?? '').toLowerCase();
+          const modes = ['auto', 'on', 'off'];
+          if (!modes.includes(raw)) {
+            return { message: `${color.amber('Usage:')} /settings reasoning auto|on|off` };
+          }
+          await persistConfigSetting(persistDeps, (cfg) => {
+            const mr = (cfg as Record<string, unknown>).modelRuntime as
+              | Record<string, unknown>
+              | undefined;
+            const reasoning = (mr?.reasoning as Record<string, unknown> | undefined) ?? {};
+            reasoning.mode = raw;
+            (cfg as Record<string, unknown>).modelRuntime = { ...mr, reasoning };
+          });
+          return { message: `${color.green('✓')} reasoning mode → ${color.bold(raw)}` };
+        }
+
+        if (sub === 'reasoning-effort') {
+          const raw = (rest[0] ?? '').toLowerCase();
+          const efforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+          if (!efforts.includes(raw)) {
+            return {
+              message: `${color.amber('Usage:')} /settings reasoning-effort none|minimal|low|medium|high|xhigh|max`,
+            };
+          }
+          await persistConfigSetting(persistDeps, (cfg) => {
+            const mr = (cfg as Record<string, unknown>).modelRuntime as
+              | Record<string, unknown>
+              | undefined;
+            const reasoning = (mr?.reasoning as Record<string, unknown> | undefined) ?? {};
+            reasoning.effort = raw;
+            (cfg as Record<string, unknown>).modelRuntime = { ...mr, reasoning };
+          });
+          return { message: `${color.green('✓')} reasoning effort → ${color.bold(raw)}` };
+        }
+
+        if (sub === 'reasoning-preserve') {
+          const raw = (rest[0] ?? '').toLowerCase();
+          if (!['on', 'off'].includes(raw)) {
+            return { message: `${color.amber('Usage:')} /settings reasoning-preserve on|off` };
+          }
+          const on = raw === 'on';
+          await persistConfigSetting(persistDeps, (cfg) => {
+            const mr = (cfg as Record<string, unknown>).modelRuntime as
+              | Record<string, unknown>
+              | undefined;
+            const reasoning = (mr?.reasoning as Record<string, unknown> | undefined) ?? {};
+            reasoning.preserve = on;
+            (cfg as Record<string, unknown>).modelRuntime = { ...mr, reasoning };
+          });
+          return {
+            message: `${color.green('✓')} reasoning preserve → ${on ? color.cyan('on') : color.dim('off')}`,
+          };
+        }
+
+        if (sub === 'cache-ttl') {
+          const raw = (rest[0] ?? '').toLowerCase();
+          if (!['5m', '1h'].includes(raw)) {
+            return { message: `${color.amber('Usage:')} /settings cache-ttl 5m|1h` };
+          }
+          await persistConfigSetting(persistDeps, (cfg) => {
+            const mr = (cfg as Record<string, unknown>).modelRuntime as
+              | Record<string, unknown>
+              | undefined;
+            (cfg as Record<string, unknown>).modelRuntime = { ...mr, cache: { ttl: raw } };
+          });
+          return { message: `${color.green('✓')} cache TTL → ${color.bold(raw)}` };
+        }
+
         return {
-          message: `${color.red('Unknown setting')} "${sub}". ${unknownSubcommand(sub, ['delay', 'mode', 'hints', 'debug-stream', 'config-scope', 'fs-access', 'refine', 'refine-delay', 'refine-language', 'semver-part', 'breaker', 'breaker-timeout', 'context-mode', 'context-strategy', 'context-auto-compact', 'token-saving', 'max-concurrent', 'title-animation', 'defaults'], 'settings')}`,
+          message: `${color.red('Unknown setting')} "${sub}". ${unknownSubcommand(sub, ['delay', 'mode', 'hints', 'debug-stream', 'config-scope', 'fs-access', 'refine', 'refine-delay', 'refine-language', 'semver-part', 'breaker', 'breaker-timeout', 'context-mode', 'context-strategy', 'context-auto-compact', 'token-saving', 'max-concurrent', 'title-animation', 'reasoning', 'reasoning-effort', 'reasoning-preserve', 'cache-ttl', 'defaults'], 'settings')}`,
         };
       } catch (err) {
         return {

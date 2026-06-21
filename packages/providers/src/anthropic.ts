@@ -1,4 +1,5 @@
 import type {
+  CacheTtl,
   Capabilities,
   ContentBlock,
   Message,
@@ -84,7 +85,14 @@ export class AnthropicProvider extends WireAdapter {
       messages: req.messages.map((m) => this.normalizeMessage(m)),
       stream: true,
     };
-    if (req.system && req.system.length > 0) body['system'] = req.system;
+    if (req.system && req.system.length > 0) {
+      const systemBlocks = req.system;
+      body['system'] = systemBlocks.map((b, index) =>
+        req.cache?.ttl && index === systemBlocks.length - 1
+          ? { ...b, cache_control: { type: 'ephemeral', ttl: req.cache.ttl } }
+          : b,
+      );
+    }
     if (req.tools && req.tools.length > 0) body['tools'] = toolsToAnthropic(req.tools);
     if (req.temperature !== undefined) body['temperature'] = req.temperature;
     if (req.topP !== undefined) body['top_p'] = req.topP;
@@ -96,8 +104,9 @@ export class AnthropicProvider extends WireAdapter {
   protected override parseStream(
     body: Parameters<typeof parseSSE>[0],
     fallbackModel: string,
+    req: Request,
   ): AsyncIterable<StreamEvent> {
-    return parseAnthropicStream(body, fallbackModel);
+    return parseAnthropicStream(body, fallbackModel, req.cache?.ttl);
   }
 
   protected override translateError(status: number, text: string): ProviderError {
@@ -163,6 +172,7 @@ type Response2Body = ReadableStream<Uint8Array> | NodeJS.ReadableStream | null;
 async function* parseAnthropicStream(
   body: Response2Body,
   fallbackModel: string,
+  cacheTtl: CacheTtl | undefined,
 ): AsyncIterable<StreamEvent> {
   type BlockKind = 'text' | 'tool_use' | 'thinking' | 'unknown';
   const blocks = new Map<
@@ -195,11 +205,14 @@ async function* parseAnthropicStream(
             }
           | undefined;
         if (message?.model) model = message.model;
+        const cacheWrite = message?.usage?.cache_creation_input_tokens;
         usage = {
           input: message?.usage?.input_tokens ?? 0,
           output: 0,
           cacheRead: message?.usage?.cache_read_input_tokens,
-          cacheWrite: message?.usage?.cache_creation_input_tokens,
+          cacheWrite,
+          cacheWrite5m: cacheTtl === '1h' ? undefined : cacheWrite,
+          cacheWrite1h: cacheTtl === '1h' ? cacheWrite : undefined,
         };
         if (!started) {
           started = true;

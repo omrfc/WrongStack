@@ -6,6 +6,7 @@ import {
   HQ_AUTH_FILE_VERSION,
   defaultHqDataDir,
   emptyHqAuthFile,
+  ensureHqFirstRunAuthFile,
   hqAuthFilePath,
   mintHqBrowserToken,
   mutateHqAuthFile,
@@ -177,6 +178,35 @@ describe('HQ auth-store — writeHqAuthFile', () => {
       await writeHqAuthFile(dir, emptyHqAuthFile());
       const stat = await fs.stat(hqAuthFilePath(dir));
       expect(stat.mode & 0o777).toBe(0o600);
+    });
+  });
+});
+
+describe('HQ auth-store — ensureHqFirstRunAuthFile', () => {
+  it('creates browser and client tokens when auth.json is missing', async () => {
+    await withTempDir(async (dir) => {
+      const result = await ensureHqFirstRunAuthFile(dir);
+      expect(result.created).toBe(true);
+      expect(result.browserToken?.token).toBeTruthy();
+      expect(result.clientToken?.token).toBeTruthy();
+      expect(result.authFile.browserTokens).toHaveLength(1);
+      expect(result.authFile.clientTokens).toHaveLength(1);
+      expect(await fs.stat(hqAuthFilePath(dir))).toBeTruthy();
+    });
+  });
+
+  it('preserves existing explicit open-mode auth.json', async () => {
+    await withTempDir(async (dir) => {
+      await writeHqAuthFile(dir, {
+        version: HQ_AUTH_FILE_VERSION,
+        updatedAt: '2026-06-21T00:00:00.000Z',
+        browserTokens: [],
+        clientTokens: [],
+      });
+      const result = await ensureHqFirstRunAuthFile(dir);
+      expect(result.created).toBe(false);
+      expect(result.authFile.browserTokens).toEqual([]);
+      expect(result.authFile.clientTokens).toEqual([]);
     });
   });
 });

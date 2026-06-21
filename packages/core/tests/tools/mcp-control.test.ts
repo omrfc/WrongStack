@@ -1,4 +1,7 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import { createMcpControlTool, type MCPRegistryHandle } from '../../src/tools/mcp-control.js';
 import { ToolCapabilities } from '../../src/security/capabilities.js';
 import type { Config } from '../../src/index.js';
@@ -31,11 +34,19 @@ describe('createMcpControlTool', () => {
   let tool: ReturnType<typeof createMcpControlTool>;
   let registry: MCPRegistryHandle;
   let getConfig: () => Config;
+  let tmp: string;
+  let configPath: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-control-'));
+    configPath = path.join(tmp, 'config.json');
     registry = fakeRegistry();
     getConfig = () => fakeConfig({ mcpServers: {} });
-    tool = createMcpControlTool({ getConfig, configPath: '/tmp/config.json', registry });
+    tool = createMcpControlTool({ getConfig, configPath, registry });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
   });
 
   it('has name "mcp_control"', () => {
@@ -78,7 +89,7 @@ describe('createMcpControlTool', () => {
       },
     });
     registry = fakeRegistry({ describe: () => [{ name: 'github', state: 'connected', toolCount: 12, enabled: true }] });
-    tool = createMcpControlTool({ getConfig, configPath: '/tmp/config.json', registry });
+    tool = createMcpControlTool({ getConfig, configPath, registry });
     const result = await tool.execute({ action: 'list' }, undefined as never, { signal: new AbortController().signal });
     expect(result).toContain('github');
     expect(result).toContain('connected');
@@ -132,7 +143,7 @@ describe('createMcpControlTool', () => {
 
   it('enable: already running server reports "already running"', async () => {
     registry = fakeRegistry({ describe: () => [{ name: 'github', state: 'connected', toolCount: 12, enabled: true }] });
-    tool = createMcpControlTool({ getConfig, configPath: '/tmp/config.json', registry });
+    tool = createMcpControlTool({ getConfig, configPath, registry });
     const result = await tool.execute({ action: 'enable', server: 'github' }, undefined as never, { signal: new AbortController().signal });
     expect(result).toContain('already running');
   });
@@ -155,7 +166,8 @@ describe('createMcpControlTool', () => {
         github: { name: 'github', transport: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-github'], enabled: true },
       },
     });
-    tool = createMcpControlTool({ getConfig, configPath: '/tmp/config.json', registry });
+    await fs.writeFile(configPath, JSON.stringify({ mcpServers: getConfig().mcpServers }));
+    tool = createMcpControlTool({ getConfig, configPath, registry });
     const result = await tool.execute({ action: 'disable', server: 'github' }, undefined as never, { signal: new AbortController().signal });
     expect(registry.stop).toHaveBeenCalledWith('github');
     expect(result).toContain('Disabled');
@@ -180,7 +192,7 @@ describe('createMcpControlTool', () => {
       },
     });
     registry = fakeRegistry({ describe: () => [{ name: 'github', state: 'connected', toolCount: 12, enabled: true }] });
-    tool = createMcpControlTool({ getConfig, configPath: '/tmp/config.json', registry });
+    tool = createMcpControlTool({ getConfig, configPath, registry });
     const result = await tool.execute({ action: 'restart', server: 'github' }, undefined as never, { signal: new AbortController().signal });
     expect(registry.restart).toHaveBeenCalledWith('github');
     expect(result).toContain('Restarted');

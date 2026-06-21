@@ -8,6 +8,7 @@ import type { ChipMeta } from './components/statusline-picker.js';
 import {
   AUDIT_LEVELS,
   AUTO_PROCEED_MAX_PRESETS,
+  CACHE_TTLS,
   COMPACTOR_STRATEGIES,
   CONFIG_SCOPES,
   CONTEXT_MODES,
@@ -17,6 +18,8 @@ import {
   LOG_LEVELS,
   MAX_CONCURRENT_PRESETS,
   MAX_ITERATIONS_PRESETS,
+  REASONING_EFFORTS,
+  REASONING_MODES,
   SETTINGS_FIELD_COUNT,
   SETTINGS_MODES,
   STATUSLINE_MODES,
@@ -624,6 +627,10 @@ export function reducer(state: State, action: Action): State {
           enhanceLanguage: action.enhanceLanguage,
           debugStream: action.debugStream,
           statuslineMode: action.statuslineMode,
+          reasoningMode: action.reasoningMode,
+          reasoningEffort: action.reasoningEffort,
+          reasoningPreserve: action.reasoningPreserve,
+          cacheTtl: action.cacheTtl,
           configScope: action.configScope,
           hint: undefined,
         },
@@ -774,6 +781,29 @@ export function reducer(state: State, action: Action): State {
         const base = i < 0 ? 0 : i;
         const next = (base + action.delta + CONFIG_SCOPES.length) % CONFIG_SCOPES.length;
         return { ...state, settingsPicker: { ...sp, configScope: expectDefined(CONFIG_SCOPES[next]), hint: undefined } };
+      }
+      // Field 30: reasoning mode (cycle auto/on/off)
+      if (f === 30) {
+        const i = REASONING_MODES.indexOf(sp.reasoningMode as (typeof REASONING_MODES)[number]);
+        const base = i < 0 ? 0 : i;
+        const next = (base + action.delta + REASONING_MODES.length) % REASONING_MODES.length;
+        return { ...state, settingsPicker: { ...sp, reasoningMode: expectDefined(REASONING_MODES[next]), hint: undefined } };
+      }
+      // Field 31: reasoning effort (cycle)
+      if (f === 31) {
+        const i = REASONING_EFFORTS.indexOf(sp.reasoningEffort as (typeof REASONING_EFFORTS)[number]);
+        const base = i < 0 ? REASONING_EFFORTS.indexOf('high') : i;
+        const next = (base + action.delta + REASONING_EFFORTS.length) % REASONING_EFFORTS.length;
+        return { ...state, settingsPicker: { ...sp, reasoningEffort: expectDefined(REASONING_EFFORTS[next]), hint: undefined } };
+      }
+      // Field 32: reasoning preserve (boolean toggle)
+      if (f === 32) return { ...state, settingsPicker: { ...sp, reasoningPreserve: !sp.reasoningPreserve, hint: undefined } };
+      // Field 33: cache TTL (cycle default/5m/1h)
+      if (f === 33) {
+        const i = CACHE_TTLS.indexOf(sp.cacheTtl as (typeof CACHE_TTLS)[number]);
+        const base = i < 0 ? 0 : i;
+        const next = (base + action.delta + CACHE_TTLS.length) % CACHE_TTLS.length;
+        return { ...state, settingsPicker: { ...sp, cacheTtl: expectDefined(CACHE_TTLS[next]), hint: undefined } };
       }
       return state;
     }

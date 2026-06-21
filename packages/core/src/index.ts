@@ -82,6 +82,14 @@ export {
   type ContentScore,
 } from './execution/compaction-core.js';
 export {
+  applyModelRuntime,
+  resolveModelRuntime,
+  resolveReasoningForRequest,
+  resolveCacheForRequest,
+  type ModelRuntimeMiddlewareOptions,
+  type ResolvedModelRuntime,
+} from './execution/model-runtime.js';
+export {
   bootConfig,
   flagsToConfigPatch,
   type BootConfigOptions,

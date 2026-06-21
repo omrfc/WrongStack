@@ -46,3 +46,11 @@ export {
 export { DefaultRetryPolicy } from './retry-policy.js';
 export { DefaultErrorHandler } from './error-handler.js';
 export { DefaultSkillLoader, type SkillLoaderOptions } from './skill-loader.js';
+export {
+  applyModelRuntime,
+  resolveModelRuntime,
+  resolveReasoningForRequest,
+  resolveCacheForRequest,
+  type ModelRuntimeMiddlewareOptions,
+  type ResolvedModelRuntime,
+} from './model-runtime.js';

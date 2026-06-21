@@ -100,12 +100,12 @@ export class ConsensusProtocol {
    * Initiate a vote on a proposed change. Updates the change node's status
    * to 'proposed' and notifies eligible voters via FleetBus.
    */
-  initiateVote(changeId: string): void {
+  async initiateVote(changeId: string): Promise<void> {
     const change = this.graph.get(changeId) as ChangeNode | undefined;
     if (!change || change.type !== 'change') {
       throw new Error(`ConsensusProtocol: no change found with id "${changeId}"`);
     }
-    this.graph.update(changeId, { status: 'proposed', votes: [] });
+    await this.graph.update(changeId, { status: 'proposed', votes: [] });
     const eligible = this._eligibleVoters(change);
     this._notifyVoters(change, eligible, 'vote_initiated');
   }
@@ -114,12 +114,12 @@ export class ConsensusProtocol {
    * Cast a vote. Updates the change node in the graph and re-evaluates
    * consensus. If the vote triggers a resolution, updates the change status.
    */
-  castVote(
+  async castVote(
     changeId: string,
     voterId: string,
     value: VoteValue,
     rationale?: string,
-  ): ConsensusResult {
+  ): Promise<ConsensusResult> {
     const change = this.graph.get(changeId) as ChangeNode | undefined;
     if (!change || change.type !== 'change') {
       throw new Error(`ConsensusProtocol: no change found for "${changeId}"`);
@@ -152,7 +152,7 @@ export class ConsensusProtocol {
     const result = this._resolve(changeId, newVotes, eligible);
 
     // Update graph with votes and final status if resolved
-    this.graph.update(changeId, {
+    await this.graph.update(changeId, {
       votes: newVotes,
       ...(result.outcome !== 'pending' ? { status: this._toChangeStatus(result.outcome) } : {}),
     });
@@ -167,14 +167,14 @@ export class ConsensusProtocol {
    * Resolve the current vote without waiting for all eligible voters.
    * Useful when a timeout fires or an agent decides to finalize early.
    */
-  resolveNow(changeId: string): ConsensusResult {
+  async resolveNow(changeId: string): Promise<ConsensusResult> {
     const change = this.graph.get(changeId) as ChangeNode | undefined;
     if (!change) throw new Error(`ConsensusProtocol: unknown change "${changeId}"`);
     const eligible = this._eligibleVoters(change);
     const result = this._resolve(changeId, change.votes, eligible);
 
     if (result.outcome !== 'pending') {
-      this.graph.update(changeId, { status: this._toChangeStatus(result.outcome) });
+      await this.graph.update(changeId, { status: this._toChangeStatus(result.outcome) });
       this._notifyVoters(change, eligible, 'vote_resolved', { result });
     }
 

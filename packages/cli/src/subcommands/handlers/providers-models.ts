@@ -101,6 +101,12 @@ function positionals(args: string[]): string[] {
 
 const DEFAULT_PER_PAGE = 15;
 
+function fmtPrice(usdPer1M: number | undefined): string {
+  if (usdPer1M === undefined) return color.dim('?');
+  const value = usdPer1M >= 10 ? usdPer1M.toFixed(1) : usdPer1M.toFixed(2);
+  return '$' + value;
+}
+
 export const modelsCmd: SubcommandHandler = async (args, deps) => {
   const sub = args[0];
 
@@ -108,6 +114,7 @@ export const modelsCmd: SubcommandHandler = async (args, deps) => {
   if (sub === 'add') return modelsAdd(args.slice(1), deps);
   if (sub === 'remove') return modelsRemove(args.slice(1), deps);
   if (sub === 'list') return modelsList(args.slice(1), deps);
+  if (sub === 'caps' || sub === 'capabilities') return modelsCaps(args.slice(1), deps);
 
   if (sub === 'refresh') {
     deps.renderer.writeInfo('Refreshing models.dev cache…');
@@ -227,6 +234,54 @@ export const modelsCmd: SubcommandHandler = async (args, deps) => {
   return 0;
 };
 
+async function modelsCaps(args: string[], deps: Parameters<SubcommandHandler>[1]): Promise<number> {
+  const providerId = args[0] ?? deps.config.provider;
+  const modelId = args[1] ?? deps.config.model;
+  if (!providerId || !modelId) {
+    deps.renderer.writeError('Usage: wstack models caps [provider] [model]');
+    deps.renderer.write(color.dim('Defaults to current configured provider/model when omitted.\n'));
+    return 1;
+  }
+
+  const resolved = await deps.modelsRegistry.getModel(providerId, modelId);
+  if (!resolved) {
+    deps.renderer.writeError('Model not found in catalog: ' + providerId + '/' + modelId);
+    deps.renderer.write(color.dim('Run `wstack models refresh` or add a custom model if this is expected.\n'));
+    return 1;
+  }
+
+  const caps = resolved.capabilities;
+  const flags = [
+    caps.tools ? 'tools' : undefined,
+    caps.vision ? 'vision' : undefined,
+    caps.reasoning ? 'reasoning' : undefined,
+  ].filter((v): v is string => v !== undefined);
+  const rc = caps.reasoningConfig;
+  const cost = resolved.cost;
+
+  deps.renderer.write(color.bold('Model capabilities') + ' ' + color.dim(providerId + '/' + modelId) + '\n');
+  deps.renderer.write('  context:      ' + (caps.maxContext ? color.yellow(String(caps.maxContext)) : color.dim('?')) + '\n');
+  if (caps.maxOutput !== undefined) {
+    deps.renderer.write('  max output:   ' + color.yellow(String(caps.maxOutput)) + '\n');
+  }
+  if (caps.knowledge) deps.renderer.write('  knowledge:    ' + caps.knowledge + '\n');
+  deps.renderer.write('  flags:        ' + (flags.length > 0 ? flags.join(', ') : color.dim('(none)')) + '\n');
+  deps.renderer.write('  pricing/1M:   input ' + fmtPrice(cost?.input) + '  output ' + fmtPrice(cost?.output) + '  cacheR ' + fmtPrice(cost?.cache_read) + '\n');
+  if (cost?.cache_write !== undefined || cost?.cache_write_5m !== undefined || cost?.cache_write_1h !== undefined) {
+    const cacheWrite1h = cost.cache_write_1h ?? (cost.input !== undefined ? cost.input * 2 : undefined);
+    deps.renderer.write('  cache write:  default ' + fmtPrice(cost.cache_write) + '  5m ' + fmtPrice(cost.cache_write_5m ?? cost.cache_write) + '  1h ' + fmtPrice(cacheWrite1h) + '\n');
+  }
+  if (rc) {
+    deps.renderer.write('  reasoning:\n');
+    deps.renderer.write('    default:    ' + rc.default + '\n');
+    deps.renderer.write('    disable:    ' + (rc.disableSupported ? 'supported' : 'unsupported') + '\n');
+    deps.renderer.write('    effort:     ' + (rc.effortSupported ? rc.effortLevels.join(', ') : 'unsupported') + '\n');
+    deps.renderer.write('    preserve:   ' + rc.preserveThinking + '\n');
+  } else if (caps.reasoning) {
+    deps.renderer.write(color.dim('  reasoning:    supported, but no detailed config in catalog\n'));
+  }
+  return 0;
+}
 /* ------------------------------------------------------------------ */
 /*  Custom model management (top-level Config.models)                  */
 /* ------------------------------------------------------------------ */

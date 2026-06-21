@@ -113,6 +113,21 @@ describe('DefaultTokenCounter', () => {
     expect(cost.total).toBeCloseTo(0.056, 4);
   });
 
+  it('prices Anthropic 1h cache writes at 2x input when no explicit 1h rate exists', () => {
+    const tc = new DefaultTokenCounter();
+    tc.accountWithModel({ input: 0, output: 0, cacheWrite1h: 1_000_000 }, m1);
+    expect(tc.estimateCost().input).toBeCloseTo(6, 4);
+  });
+
+  it('does not double-charge mixed TTL cache writes through aggregate cacheWrite', () => {
+    const tc = new DefaultTokenCounter();
+    tc.accountWithModel(
+      { input: 0, output: 0, cacheWrite: 2_000_000, cacheWrite5m: 1_000_000, cacheWrite1h: 1_000_000 },
+      m1,
+    );
+    expect(tc.estimateCost().input).toBeCloseTo(9.75, 4);
+  });
+
   it('uses cached price on subsequent account() calls', async () => {
     const getModel = vi.fn().mockResolvedValue(m1);
     const registry = {

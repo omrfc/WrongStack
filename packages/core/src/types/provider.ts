@@ -25,11 +25,36 @@ import { truncate } from '../utils/string.js';
  * invariant — a TOTAL `input` plus a separate `cacheRead` count would bill
  * cached tokens twice and skew cache-hit-ratio reporting.
  */
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type CacheTtl = '5m' | '1h';
+
 export interface Usage {
   input: number;
   output: number;
   cacheRead?: number | undefined;
+  /** Back-compat aggregate of all cache-write tokens. Prefer TTL-specific fields when present. */
   cacheWrite?: number | undefined;
+  cacheWrite5m?: number | undefined;
+  cacheWrite1h?: number | undefined;
+}
+
+export interface ReasoningRequest {
+  enabled?: boolean | undefined;
+  effort?: ReasoningEffort | undefined;
+  preserve?: boolean | undefined;
+  display?: 'summarized' | 'omitted' | undefined;
+}
+
+export interface RequestCacheControl {
+  ttl?: CacheTtl | undefined;
+}
+
+export interface ReasoningConfig {
+  default: 'enabled' | 'disabled' | 'adaptive' | 'always_on';
+  disableSupported: boolean;
+  effortSupported: boolean;
+  effortLevels: ReasoningEffort[];
+  preserveThinking: 'unsupported' | 'optional' | 'always_on';
 }
 
 export interface Capabilities {
@@ -55,6 +80,8 @@ export interface Request {
   topP?: number | undefined;
   stopSequences?: string[] | undefined;
   toolChoice?: 'auto' | 'required' | 'none' | { type: 'tool' | undefined; name: string };
+  reasoning?: ReasoningRequest | undefined;
+  cache?: RequestCacheControl | undefined;
 }
 
 export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence' | 'refusal';

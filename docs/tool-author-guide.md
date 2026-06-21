@@ -116,8 +116,9 @@ doesn't own if the plugin declares a matching `toolMutateCapabilities` entry.
 | `tool.meta` | Queries tool metadata | `tool-help`, `tool-search` |
 | `tool.mutate.any` | Can mutate any tool (broad power) | `tool-use`, `batch-tool-use` |
 | `package.install` | Installs packages | `install` |
-| `mcp.proxy` | Proxies to an MCP server | *(reserved for MCP tools)* |
+| `mcp.proxy` | Proxies to an MCP server | *(reserved for MCP tools; automatically set by `wrapMCPTool`)* |
 | `subagent.spawn` | Spawns subagents | *(reserved for subagent tools)* |
+| `config.mutate` | Mutates global config | `mcp_control` (MCP server lifecycle) |
 
 ### Declaring capabilities on a tool
 

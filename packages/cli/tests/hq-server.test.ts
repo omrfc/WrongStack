@@ -1,16 +1,35 @@
-import { HQ_PROTOCOL_VERSION } from '@wrongstack/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { HQ_AUTH_FILE_VERSION, HQ_PROTOCOL_VERSION, writeHqAuthFile } from '@wrongstack/core';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { type HqServerHandle, startHqServer } from '../src/hq-server.js';
 
 let handle: HqServerHandle | null = null;
+let dataDir: string;
+
+beforeEach(async () => {
+  dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hq-server-'));
+});
 
 afterEach(async () => {
   if (handle) {
     await handle.close();
     handle = null;
   }
+  await fs.rm(dataDir, { recursive: true, force: true });
 });
+
+async function startOpenHqServer(options: Omit<Parameters<typeof startHqServer>[0], 'dataDir'> = {}): Promise<HqServerHandle> {
+  await writeHqAuthFile(dataDir, {
+    version: HQ_AUTH_FILE_VERSION,
+    updatedAt: new Date().toISOString(),
+    browserTokens: [],
+    clientTokens: [],
+  });
+  return startHqServer({ ...options, dataDir });
+}
 
 function getPort(): number {
   // Use a random high port to avoid conflicts with running services.
@@ -112,7 +131,7 @@ function makeBrowserCollector(ws: WebSocket) {
 describe('HQ server', () => {
   it('starts on a single port, serves HTML and /api/snapshot', async () => {
     const port = getPort();
-    handle = await startHqServer({ port });
+    handle = await startOpenHqServer({ port });
 
     const res = await fetch(`http://127.0.0.1:${handle.port}/`);
     expect(res.status).toBe(200);
@@ -150,7 +169,7 @@ describe('HQ server', () => {
 
   it('accepts client connections on /ws/client and pushes snapshots to /ws/browser', async () => {
     const port = getPort();
-    handle = await startHqServer({ port });
+    handle = await startOpenHqServer({ port });
 
     const browser = new WebSocket(`ws://127.0.0.1:${handle.port}/ws/browser`);
     await waitForOpen(browser);
@@ -202,7 +221,7 @@ describe('HQ server', () => {
 
   it('rejects wrong protocol version on /ws/client', async () => {
     const port = getPort();
-    handle = await startHqServer({ port });
+    handle = await startOpenHqServer({ port });
 
     const client = new WebSocket(`ws://127.0.0.1:${handle.port}/ws/client`);
     await waitForOpen(client);
@@ -240,7 +259,7 @@ describe('HQ server', () => {
 
   it('aggregates mailbox.snapshot envelopes into global totals for browsers', async () => {
     const port = getPort();
-    handle = await startHqServer({ port });
+    handle = await startOpenHqServer({ port });
 
     const browser = new WebSocket(`ws://127.0.0.1:${handle.port}/ws/browser`);
     const browserCol = makeBrowserCollector(browser);
@@ -326,7 +345,7 @@ describe('HQ server', () => {
 
   it('serves /api/projects/:id with project, clients, and mailbox snapshots', async () => {
     const port = getPort();
-    handle = await startHqServer({ port });
+    handle = await startOpenHqServer({ port });
 
     // Connect a client and publish a mailbox.snapshot envelope so the
     // server has actual mailbox payloads to surface in the drilldown.
@@ -432,7 +451,7 @@ describe('HQ server', () => {
 
   it('returns 404 for unknown projects on /api/projects/:id', async () => {
     const port = getPort();
-    handle = await startHqServer({ port });
+    handle = await startOpenHqServer({ port });
 
     const res = await fetch(`http://127.0.0.1:${handle.port}/api/projects/nope`);
     expect(res.status).toBe(404);
@@ -442,7 +461,7 @@ describe('HQ server', () => {
 
   it('renders drawer markup and project-link wiring in the dashboard HTML', async () => {
     const port = getPort();
-    handle = await startHqServer({ port });
+    handle = await startOpenHqServer({ port });
     const res = await fetch(`http://127.0.0.1:${handle.port}/`);
     const html = await res.text();
     expect(html).toContain('id="drawer"');
@@ -475,7 +494,7 @@ describe('HQ server', () => {
     // mailbox.snapshot envelope must show up in the next /api/projects/:id
     // response.
     const port = getPort();
-    handle = await startHqServer({ port });
+    handle = await startOpenHqServer({ port });
 
     const client = new WebSocket(`ws://127.0.0.1:${handle.port}/ws/client`);
     await waitForOpen(client);
@@ -578,7 +597,7 @@ describe('HQ server', () => {
     // test verifies the server-side contract: client-side mailbox.event
     // envelopes must be broadcast to /ws/browser sockets as hq.event.
     const port = getPort();
-    handle = await startHqServer({ port });
+    handle = await startOpenHqServer({ port });
 
     const browser = new WebSocket(`ws://127.0.0.1:${handle.port}/ws/browser`);
     const browserCol = makeBrowserCollector(browser);
@@ -687,14 +706,14 @@ describe('HQ server frame validation', () => {
 
   it('closes the client socket with 1003 (invalid-json) on non-JSON payloads', async () => {
     const port = getPort();
-    handle = await startHqServer({ port });
+    handle = await startOpenHqServer({ port });
     const code = await sendAndAwaitClose(port, '/ws/client', '{not json');
     expect(code).toBe(1003);
   });
 
   it('closes the client socket with 1008 (policy violation) on unknown frame types', async () => {
     const port = getPort();
-    handle = await startHqServer({ port });
+    handle = await startOpenHqServer({ port });
     const code = await sendAndAwaitClose(
       port,
       '/ws/client',
@@ -705,7 +724,7 @@ describe('HQ server frame validation', () => {
 
   it('closes the client socket with 1008 (policy violation) on a malformed client.hello', async () => {
     const port = getPort();
-    handle = await startHqServer({ port });
+    handle = await startOpenHqServer({ port });
     // payload.client is missing the required `kind`, `machineId`, `startedAt`
     // fields, so parseHqFrame rejects it as `malformed`.
     const code = await sendAndAwaitClose(
@@ -732,7 +751,7 @@ describe('HQ server frame validation', () => {
 
   it('rejects pre-hello frames (drops them without closing the connection)', async () => {
     const port = getPort();
-    handle = await startHqServer({ port });
+    handle = await startOpenHqServer({ port });
 
     const client = new WebSocket(`ws://127.0.0.1:${port}/ws/client`);
     await waitForOpen(client);
@@ -799,7 +818,7 @@ describe('HQ server frame validation', () => {
 
   it('drops malformed mailbox.event envelopes (does not broadcast them to browsers)', async () => {
     const port = getPort();
-    handle = await startHqServer({ port });
+    handle = await startOpenHqServer({ port });
 
     const browser = new WebSocket(`ws://127.0.0.1:${handle.port}/ws/browser`);
     const browserCol = makeBrowserCollector(browser);
@@ -910,7 +929,7 @@ describe('HQ server frame validation', () => {
 
   it('scrubs and truncates long or secret-laden mailbox.event summaries before broadcasting', async () => {
     const port = getPort();
-    handle = await startHqServer({ port });
+    handle = await startOpenHqServer({ port });
 
     const browser = new WebSocket(`ws://127.0.0.1:${handle.port}/ws/browser`);
     const browserCol = makeBrowserCollector(browser);

@@ -313,10 +313,11 @@ export class DefaultModelsRegistry implements ModelsRegistry {
       capabilities: {
         tools: model.tool_call ?? false,
         vision: Boolean(model.modalities?.input?.includes('image')),
-        reasoning: model.reasoning ?? false,
+        reasoning: model.reasoning ?? model.reasoningConfig !== undefined,
         maxContext: model.limit?.context ?? 0,
         maxOutput: model.limit?.output,
         knowledge: model.knowledge,
+        reasoningConfig: model.reasoningConfig,
       },
       cost: model.cost,
     };

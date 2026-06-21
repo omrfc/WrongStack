@@ -2,6 +2,7 @@ export * from './assert-never.js';
 export * from './atomic-write.js';
 export * from './child-env.js';
 export * from './color.js';
+export * from './config-json.js';
 export {
   buildContextEvidenceDigest,
   createContextEvidenceState,

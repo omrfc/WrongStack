@@ -1,8 +1,66 @@
 import type { ContextWindowModeId } from './context-window.js';
 import type { HookEvent, ShellHook } from './hooks.js';
 import type { WireFamily } from './models-registry.js';
-import type { Capabilities } from './provider.js';
+import type { CacheTtl, Capabilities, ReasoningEffort } from './provider.js';
 import type { Permission } from './tool.js';
+
+/**
+ * Runtime reasoning controls the user can set per-session/project. Mapped into
+ * the provider `Request.reasoning` field by the model-runtime request
+ * middleware, gated by the active model's `reasoningConfig` capabilities so
+ * unsupported values are omitted (and warned) instead of triggering provider
+ * 400s. See `resolveReasoningForRequest()` in packages/core.
+ */
+export interface ModelRuntimeReasoningConfig {
+  /**
+   * Whether to send explicit reasoning enable/disable.
+   * - 'auto'    → do not send explicit fields; provider/model default wins
+   * - 'on'      → send `reasoning.enabled = true`
+   * - 'off'     → send `reasoning.enabled = false` only when the model supports disable
+   */
+  mode?: 'auto' | 'on' | 'off' | undefined;
+  /** Reasoning effort. Only sent when the model advertises `effortSupported`. */
+  effort?: ReasoningEffort | undefined;
+  /** Preserve thinking across turns. Only sent when `preserveThinking !== 'unsupported'`. */
+  preserve?: boolean | undefined;
+}
+
+/**
+ * Runtime prompt-cache controls mapped into `Request.cache`. Currently only the
+ * Anthropic TTL toggle (5m vs 1h) is exposed; other providers ignore it.
+ */
+export interface ModelRuntimeCacheConfig {
+  ttl?: CacheTtl | undefined;
+}
+
+/**
+ * Shared runtime controls applied to every provider request, regardless of host
+ * (REPL / TUI / WebUI). The CLI installs a single request-pipeline middleware
+ * that reads these and mutates the outgoing `Request`.
+ */
+export interface ModelRuntimeConfig {
+  reasoning?: ModelRuntimeReasoningConfig | undefined;
+  cache?: ModelRuntimeCacheConfig | undefined;
+}
+
+/**
+ * HQ client connection settings. Same-machine clients can auto-discover the
+ * local HQ auth file; remote clients use this config-backed URL/token pair.
+ */
+export interface HqClientConfig {
+  /** Enable HQ publishing. Env WRONGSTACK_HQ_ENABLED still overrides at runtime. */
+  enabled?: boolean | undefined;
+  /** HQ HTTP base URL, e.g. http://host:3499. */
+  url?: string | undefined;
+  /** Client token for /ws/client. Stored encrypted by SecretVault when persisted. */
+  token?: string | undefined;
+  /** Optional HQ data dir for same-machine auth.json discovery. */
+  dataDir?: string | undefined;
+  /** Send raw content previews to HQ instead of redacted previews. */
+  rawContent?: boolean | undefined;
+  /** Override project display name in HQ. */
+  projectAlias?: string | undefined;
+}
 
 /**
  * Token-saving mode tier levels. Controls how aggressively the system prompt
@@ -503,6 +561,15 @@ export interface Config {
    * Controls what gets written to the persistent JSONL transcript.
    */
   session?: SessionLoggingConfig | undefined;
+  /**
+   * Runtime reasoning / cache controls applied to every provider request
+   * (REPL/TUI/WebUI). Mapped into `Request.reasoning` and `Request.cache` by a
+   * single request-pipeline middleware, gated by the active model's
+   * capabilities. See `ModelRuntimeConfig`.
+   */
+  modelRuntime?: ModelRuntimeConfig | undefined;
+  /** HQ client publishing settings, used by CLI/REPL/TUI/WebUI consistently. */
+  hq?: HqClientConfig | undefined;
   /**
    * Cloud sync configuration. Stored separately in sync.json to avoid
    * accidentally committing the GitHub token to project configs.

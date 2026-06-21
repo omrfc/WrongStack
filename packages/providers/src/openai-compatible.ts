@@ -12,6 +12,7 @@ export interface CompatibilityQuirks {
   parallelToolsDisabled?: boolean | undefined;
   jsonArgumentsBuggy?: boolean | undefined;
   emptyToolCallContent?: 'null' | 'empty_string' | undefined;
+  thinkingParam?: 'zai-glm' | 'kimi-toggle' | 'always-on' | undefined;
 }
 
 const VALID_QUIRK_KEYS = new Set<keyof CompatibilityQuirks>([
@@ -22,6 +23,7 @@ const VALID_QUIRK_KEYS = new Set<keyof CompatibilityQuirks>([
   'parallelToolsDisabled',
   'jsonArgumentsBuggy',
   'emptyToolCallContent',
+  'thinkingParam',
 ]);
 
 export function isCompatibilityQuirks(value: unknown): value is CompatibilityQuirks {
@@ -33,6 +35,8 @@ export function isCompatibilityQuirks(value: unknown): value is CompatibilityQui
     if (!VALID_QUIRK_KEYS.has(key as keyof CompatibilityQuirks)) return false;
     if (key === 'emptyToolCallContent') {
       if (v !== 'null' && v !== 'empty_string') return false;
+    } else if (key === 'thinkingParam') {
+      if (v !== 'zai-glm' && v !== 'kimi-toggle' && v !== 'always-on') return false;
     } else if (typeof v !== 'boolean') {
       return false;
     }
@@ -96,10 +100,53 @@ export class OpenAICompatibleProvider extends OpenAIProvider {
     return 'max_tokens';
   }
 
+  protected override buildBody(req: Request): Record<string, unknown> {
+    const body = super.buildBody(req);
+    applyThinkingParams(body, req, this.opts.quirks?.thinkingParam);
+    return body;
+  }
+
   protected override buildHeaders(req: Request): Record<string, string> {
     return {
       ...super.buildHeaders(req),
       ...this.extraHeaders,
     };
+  }
+}
+
+function applyThinkingParams(
+  body: Record<string, unknown>,
+  req: Request,
+  mode: CompatibilityQuirks['thinkingParam'],
+): void {
+  if (!mode || !req.reasoning) return;
+  if (mode === 'always-on') {
+    // Models such as kimi-k2.7-code reject explicit disabled thinking.
+    return;
+  }
+  if (req.reasoning.enabled === false) {
+    body['thinking'] = { type: 'disabled' };
+    return;
+  }
+  if (mode === 'kimi-toggle' && req.reasoning.enabled === true) {
+    body['thinking'] = { type: 'enabled' };
+  }
+  if (mode === 'zai-glm' && req.reasoning.effort) {
+    body['reasoning_effort'] = mapZaiReasoningEffort(req.reasoning.effort);
+  }
+}
+
+function mapZaiReasoningEffort(effort: NonNullable<Request['reasoning']>['effort']): string | undefined {
+  switch (effort) {
+    case 'none':
+    case 'minimal':
+      return 'none';
+    case 'low':
+    case 'medium':
+      return 'high';
+    case 'xhigh':
+      return 'max';
+    default:
+      return effort;
   }
 }

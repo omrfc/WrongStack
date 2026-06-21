@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto';
+import * as fs from 'node:fs';
 import { hostname } from 'node:os';
 import { basename } from 'node:path';
 import { GlobalMailbox } from '../coordination/global-mailbox.js';
 import type { EventBus } from '../kernel/events.js';
+import type { HqClientConfig } from '../types/config.js';
+import { hqAuthFilePath, resolveHqDataDir, type HqAuthFile } from './auth-store.js';
 import type { HqClientIdentity, HqProjectIdentity, HqRedactionPolicy } from './protocol.js';
 import { HqPublisher, type HqSocketFactory } from './publisher.js';
 
@@ -14,20 +17,58 @@ export interface HqPublisherEnvConfig {
   projectAlias?: string;
 }
 
+function readFirstClientTokenFromAuthFile(dataDir: string): string | undefined {
+  try {
+    const raw = fs.readFileSync(hqAuthFilePath(dataDir), 'utf8');
+    const parsed = JSON.parse(raw) as HqAuthFile;
+    return parsed.clientTokens?.find((t) => t.token.trim().length > 0)?.token;
+  } catch {
+    return undefined;
+  }
+}
+
 export function resolveHqConfigFromEnv(env: NodeJS.ProcessEnv = process.env): HqPublisherEnvConfig | undefined {
-  const url = env['WRONGSTACK_HQ_URL']?.trim();
+  return resolveHqConfig({ env });
+}
+
+export function resolveHqConfig(options: {
+  env?: NodeJS.ProcessEnv | undefined;
+  config?: HqClientConfig | undefined;
+} = {}): HqPublisherEnvConfig | undefined {
+  const env = options.env ?? process.env;
+  const fileConfig = options.config;
+  const envUrl = env['WRONGSTACK_HQ_URL']?.trim();
+  const envToken = env['WRONGSTACK_HQ_TOKEN']?.trim();
+  const configUrl = fileConfig?.url?.trim();
+  const configToken = fileConfig?.token?.trim();
+  const envEnabledRaw = env['WRONGSTACK_HQ_ENABLED']?.trim();
+  const enabled = envEnabledRaw !== undefined && envEnabledRaw.length > 0
+    ? envEnabledRaw !== '0'
+    : fileConfig?.enabled;
+  const dataDir = resolveHqDataDir(fileConfig?.dataDir, env);
+  const token = envToken || configToken || readFirstClientTokenFromAuthFile(dataDir);
+  const url = envUrl || configUrl;
+
   if (!url) {
-    if (env['WRONGSTACK_HQ_ENABLED']?.trim() === '1') {
-      return { url: 'http://localhost:3499', enabled: true };
+    if (enabled === false) return undefined;
+    if (enabled === true || token) {
+      return {
+        url: 'http://localhost:3499',
+        enabled: true,
+        ...(token ? { token } : {}),
+      };
     }
     return undefined;
   }
+
+  const rawContentEnv = env['WRONGSTACK_HQ_RAW_CONTENT']?.trim();
+  const projectAliasEnv = env['WRONGSTACK_HQ_PROJECT_ALIAS']?.trim();
   return {
     url,
-    ...(env['WRONGSTACK_HQ_TOKEN']?.trim() ? { token: env['WRONGSTACK_HQ_TOKEN']!.trim() } : {}),
-    ...(env['WRONGSTACK_HQ_ENABLED']?.trim() ? { enabled: env['WRONGSTACK_HQ_ENABLED']!.trim() !== '0' } : {}),
-    ...(env['WRONGSTACK_HQ_RAW_CONTENT']?.trim() ? { rawContent: env['WRONGSTACK_HQ_RAW_CONTENT']!.trim() === '1' } : {}),
-    ...(env['WRONGSTACK_HQ_PROJECT_ALIAS']?.trim() ? { projectAlias: env['WRONGSTACK_HQ_PROJECT_ALIAS']!.trim() } : {}),
+    ...(token ? { token } : {}),
+    ...(enabled !== undefined ? { enabled } : {}),
+    ...(rawContentEnv ? { rawContent: rawContentEnv === '1' } : fileConfig?.rawContent !== undefined ? { rawContent: fileConfig.rawContent } : {}),
+    ...(projectAliasEnv ? { projectAlias: projectAliasEnv } : fileConfig?.projectAlias ? { projectAlias: fileConfig.projectAlias } : {}),
   };
 }
 
@@ -47,11 +88,12 @@ export interface CreateHqPublisherOptions {
   hostnameOverride?: string;
   socketFactory?: HqSocketFactory;
   config?: HqPublisherEnvConfig;
+  appConfig?: { hq?: HqClientConfig | undefined } | undefined;
   redactionPolicy?: Partial<HqRedactionPolicy>;
 }
 
 export function createHqPublisherFromEnv(options: CreateHqPublisherOptions): HqPublisher | undefined {
-  const config = options.config ?? resolveHqConfigFromEnv();
+  const config = options.config ?? resolveHqConfig({ config: options.appConfig?.hq });
   if (!config || config.enabled === false) return undefined;
 
   const machineId = options.machineId ?? stableMachineId();

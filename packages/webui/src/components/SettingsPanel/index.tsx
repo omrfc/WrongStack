@@ -434,6 +434,96 @@ export function SettingsPanel() {
 
               <div className="pt-2 border-t">
                 <h3 className="text-sm font-semibold mb-3 mt-3 flex items-center gap-2">
+                  <Cpu className="h-4 w-4 text-muted-foreground" />
+                  Reasoning & Cache
+                </h3>
+                <PreferenceSelect
+                  label="Reasoning mode"
+                  hint="Control how the model uses extended thinking. Auto = provider default."
+                  value={localPrefs.reasoningMode}
+                  options={[
+                    { value: 'auto' as const, label: 'Auto — provider default' },
+                    { value: 'on' as const, label: 'On — force thinking on' },
+                    { value: 'off' as const, label: 'Off — force thinking off' },
+                  ]}
+                  onChange={(v) => syncPref('reasoningMode', v)}
+                />
+                <PreferenceSelect
+                  label="Reasoning effort"
+                  hint="How much compute the model spends thinking. Only sent when the model supports it."
+                  value={localPrefs.reasoningEffort}
+                  options={[
+                    { value: 'none' as const, label: 'None' },
+                    { value: 'minimal' as const, label: 'Minimal' },
+                    { value: 'low' as const, label: 'Low' },
+                    { value: 'medium' as const, label: 'Medium' },
+                    { value: 'high' as const, label: 'High' },
+                    { value: 'xhigh' as const, label: 'Extra High' },
+                    { value: 'max' as const, label: 'Max' },
+                  ]}
+                  onChange={(v) => syncPref('reasoningEffort', v)}
+                />
+                <PreferenceToggle
+                  label="Preserve thinking"
+                  hint="Keep reasoning blocks across turns for context continuity."
+                  value={localPrefs.reasoningPreserve}
+                  onChange={() => syncPref('reasoningPreserve', !localPrefs.reasoningPreserve)}
+                />
+                <PreferenceSelect
+                  label="Cache TTL"
+                  hint="Prompt cache time-to-live. 1h costs more on write but saves on repeat reads (Anthropic)."
+                  value={localPrefs.cacheTtl}
+                  options={[
+                    { value: 'default' as const, label: 'Default — provider default' },
+                    { value: '5m' as const, label: '5 minutes' },
+                    { value: '1h' as const, label: '1 hour' },
+                  ]}
+                  onChange={(v) => syncPref('cacheTtl', v)}
+                />
+                <p className="text-xs text-muted-foreground mt-2">
+                  Use <code className="bg-muted px-1 py-0.5 rounded">wstack models caps</code> to check what the current model supports. Unsupported settings are silently omitted per-request.
+                </p>
+              </div>
+
+              <div className="pt-2 border-t">
+                <h3 className="text-sm font-semibold mb-3 mt-3 flex items-center gap-2">
+                  <Network className="h-4 w-4 text-muted-foreground" />
+                  HQ Client
+                </h3>
+                <PreferenceToggle
+                  label="HQ publishing"
+                  hint="Publish this WebUI/client session to WrongStack HQ. Same-machine clients can auto-discover local HQ auth; remote clients use the URL/token below."
+                  value={localPrefs.hqEnabled}
+                  onChange={() => syncPref('hqEnabled', !localPrefs.hqEnabled)}
+                />
+                <div className="space-y-1 py-2">
+                  <label className="text-sm font-medium">HQ URL</label>
+                  <Input
+                    value={localPrefs.hqUrl}
+                    placeholder="http://host:3499"
+                    onChange={(e) => syncPref('hqUrl', e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">Leave empty for same-machine auto-discovery.</p>
+                </div>
+                <div className="space-y-1 py-2">
+                  <label className="text-sm font-medium">HQ client token</label>
+                  <Input
+                    type="password"
+                    value={localPrefs.hqToken}
+                    placeholder="Client token from wstack --hq"
+                    onChange={(e) => syncPref('hqToken', e.target.value)}
+                  />
+                </div>
+                <PreferenceToggle
+                  label="Raw HQ content"
+                  hint="Send raw content previews to HQ instead of redacted previews."
+                  value={localPrefs.hqRawContent}
+                  onChange={() => syncPref('hqRawContent', !localPrefs.hqRawContent)}
+                />
+              </div>
+
+              <div className="pt-2 border-t">
+                <h3 className="text-sm font-semibold mb-3 mt-3 flex items-center gap-2">
                   <Zap className="h-4 w-4 text-muted-foreground" />
                   Execution
                 </h3>

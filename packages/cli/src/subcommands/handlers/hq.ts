@@ -27,6 +27,7 @@ import {
   resolveHqDataDir,
   type HqToken,
 } from '@wrongstack/core';
+import type { HqServerHandle } from '../../hq-server.js';
 import type { SubcommandDeps, SubcommandHandler } from '../index.js';
 
 function resolveDataDir(deps: SubcommandDeps): string {
@@ -70,15 +71,13 @@ async function startServer(deps: SubcommandDeps): Promise<number> {
   if (open) {
     try {
       const { openBrowser } = await import('@wrongstack/webui/server');
-      openBrowser(`http://${handle.host}:${handle.port}`);
+      openBrowser(handle.firstRunSetup?.browserUrl ?? `http://${handle.host}:${handle.port}`);
     } catch {
       // best-effort
     }
   }
 
-  deps.renderer.write(`WrongStack HQ listening on http://${handle.host}:${handle.port}\n`);
-  deps.renderer.write(`Client endpoint:  ws://${handle.host}:${handle.port}/ws/client\n`);
-  deps.renderer.write(`Browser endpoint: http://${handle.host}:${handle.port}\n`);
+  writeStartupInfo(deps, handle);
 
   // Keep the process alive until SIGINT/SIGTERM
   await new Promise<void>((resolve) => {
@@ -89,6 +88,22 @@ async function startServer(deps: SubcommandDeps): Promise<number> {
     process.on('SIGTERM', shutdown);
   });
   return 0;
+}
+
+function writeStartupInfo(deps: SubcommandDeps, handle: HqServerHandle): void {
+  deps.renderer.write(`WrongStack HQ listening on http://${handle.host}:${handle.port}\n`);
+  if (!handle.firstRunSetup) {
+    deps.renderer.write(`Client endpoint:  ws://${handle.host}:${handle.port}/ws/client\n`);
+    deps.renderer.write(`Browser endpoint: http://${handle.host}:${handle.port}\n`);
+    return;
+  }
+
+  deps.renderer.write(`Browser endpoint: ${handle.firstRunSetup.browserUrl}\n`);
+  deps.renderer.write(`Client endpoint:  ws://${handle.host}:${handle.port}/ws/client?token=${handle.firstRunSetup.clientEnv.WRONGSTACK_HQ_TOKEN}\n`);
+  deps.renderer.write(`\nFirst-run HQ auth created in ${handle.firstRunSetup.dataDir}\n`);
+  deps.renderer.write(`Start clients with:\n`);
+  deps.renderer.write(`  WRONGSTACK_HQ_URL=${handle.firstRunSetup.clientEnv.WRONGSTACK_HQ_URL}\n`);
+  deps.renderer.write(`  WRONGSTACK_HQ_TOKEN=${handle.firstRunSetup.clientEnv.WRONGSTACK_HQ_TOKEN}\n`);
 }
 
 async function hqTokenCmd(args: string[], deps: SubcommandDeps): Promise<number> {

@@ -56,6 +56,18 @@ export interface LocalPrefs {
   enhanceDelayMs: number;
   enhanceLanguage: 'original' | 'english';
 
+  // --- Reasoning / cache runtime ---
+  reasoningMode: 'auto' | 'on' | 'off';
+  reasoningEffort: string;
+  reasoningPreserve: boolean;
+  cacheTtl: 'default' | '5m' | '1h';
+
+  // --- HQ client publishing ---
+  hqEnabled: boolean;
+  hqUrl: string;
+  hqToken: string;
+  hqRawContent: boolean;
+
   // --- Telegram notifications ---
   /** Plugin configured with a bot token (gates the whole section). */
   tgConfigured: boolean;
@@ -95,6 +107,14 @@ const DEFAULTS: Omit<LocalPrefs, 'set' | 'reset'> = {
   enhanceEnabled: true,
   enhanceDelayMs: 60_000,
   enhanceLanguage: 'original',
+  reasoningMode: 'auto',
+  reasoningEffort: 'high',
+  reasoningPreserve: false,
+  cacheTtl: 'default',
+  hqEnabled: false,
+  hqUrl: '',
+  hqToken: '',
+  hqRawContent: false,
   tgConfigured: false,
   tgSessionEnd: false,
   tgDelegate: true,

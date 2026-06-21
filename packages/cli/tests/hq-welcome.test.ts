@@ -1,17 +1,32 @@
 // @vitest-environment node
 
-import { HQ_PROTOCOL_VERSION } from '@wrongstack/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { HQ_AUTH_FILE_VERSION, HQ_PROTOCOL_VERSION, writeHqAuthFile } from '@wrongstack/core';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { type HqServerHandle, startHqServer } from '../src/hq-server.js';
 
 let handle: HqServerHandle | null = null;
+let dataDir: string;
+
+beforeEach(async () => {
+  dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hq-welcome-'));
+  await writeHqAuthFile(dataDir, {
+    version: HQ_AUTH_FILE_VERSION,
+    updatedAt: new Date().toISOString(),
+    browserTokens: [],
+    clientTokens: [],
+  });
+});
 
 afterEach(async () => {
   if (handle) {
     await handle.close();
     handle = null;
   }
+  await fs.rm(dataDir, { recursive: true, force: true });
 });
 
 function getPort(): number {
@@ -24,7 +39,7 @@ function waitMs(ms: number): Promise<void> {
 
 describe('HQ server welcome handshake', () => {
   it('replies to client.hello with an hq.welcome frame on the same socket', async () => {
-    handle = await startHqServer({ port: getPort() });
+    handle = await startHqServer({ port: getPort(), dataDir });
 
     const client = new WebSocket(`ws://127.0.0.1:${handle.port}/ws/client`);
     const rawMessages: string[] = [];

@@ -177,7 +177,7 @@ export async function main(argv: string[]): Promise<number> {
     if (earlyFlags['open'] === true) {
       try {
         const { openBrowser } = await import('@wrongstack/webui/server');
-        openBrowser(`http://${handle.host}:${handle.port}`);
+        openBrowser(handle.firstRunSetup?.browserUrl ?? `http://${handle.host}:${handle.port}`);
       } catch {
         // best-effort
       }
@@ -548,7 +548,7 @@ export async function main(argv: string[]): Promise<number> {
   // Fetch online agents from the shared mailbox to include in system prompt
   let onlineAgents: Awaited<ReturnType<GlobalMailbox['getAgentStatuses']>> = [];
   try {
-    const hqPublisher = createHqPublisherFromEnv({ clientKind: 'cli', projectRoot, projectName: path.basename(projectRoot) });
+    const hqPublisher = createHqPublisherFromEnv({ clientKind: 'cli', projectRoot, projectName: path.basename(projectRoot), appConfig: config } as unknown as Parameters<typeof createHqPublisherFromEnv>[0]);
     hqPublisher?.connect();
     if (hqPublisher) teardownHandlers.push(() => hqPublisher.close());
     const systemMailbox = new GlobalMailbox(wpaths.projectDir, undefined, hqPublisher);
@@ -853,7 +853,31 @@ export async function main(argv: string[]): Promise<number> {
       });
   });
 
-  const pipelines = setupPipelines({ events, logger });
+  // Live view of the active model's reasoning capabilities. Refreshed whenever
+  // the provider/model changes so the model-runtime middleware can gate
+  // reasoning/effort settings on what the model actually accepts.
+  let activeReasoningConfig: import('@wrongstack/core').ReasoningConfig | undefined;
+  const refreshActiveReasoningConfig = async (providerId: string, modelId: string) => {
+    try {
+      const resolved = await modelsRegistry.getModel(providerId, modelId);
+      activeReasoningConfig = resolved?.capabilities.reasoningConfig;
+    } catch {
+      activeReasoningConfig = undefined;
+    }
+  };
+  void refreshActiveReasoningConfig(config.provider, config.model);
+
+  const pipelines = setupPipelines({
+    events,
+    logger,
+    modelRuntime: {
+      getSettings: () => configStore.get().modelRuntime,
+      getReasoningConfig: () => activeReasoningConfig,
+      onWarning: (message) => {
+        logger.warn(`model-runtime: ${message}`);
+      },
+    },
+  });
 
   // ── Lifecycle hooks ──────────────────────────────────────────────────────
   // `--no-hooks` disables everything (shell + in-process). Otherwise shell
@@ -1288,7 +1312,7 @@ export async function main(argv: string[]): Promise<number> {
   // Tool-failure streaks and error storms engage the Brain proactively; a
   // "steer" decision lands in THIS session's leader inbox and is injected
   // before the agent's next step.
-  const hqPublisher = createHqPublisherFromEnv({ clientKind: 'cli', projectRoot, projectName: path.basename(projectRoot) });
+  const hqPublisher = createHqPublisherFromEnv({ clientKind: 'cli', projectRoot, projectName: path.basename(projectRoot), appConfig: config } as unknown as Parameters<typeof createHqPublisherFromEnv>[0]);
   hqPublisher?.connect();
   if (hqPublisher) teardownHandlers.push(() => hqPublisher.close());
   const brainMailbox = new GlobalMailbox(wpaths.projectDir, events, hqPublisher);

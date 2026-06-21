@@ -98,14 +98,14 @@ describe('ConsensusProtocol', () => {
   });
 
   describe('initiateVote', () => {
-    it('updates change status to proposed', () => {
+    it('updates change status to proposed', async () => {
       const protocol = new ConsensusProtocol({
         voters: defaultVoters(),
         graph,
       });
       const change = createChangeNode(graph, 'change-1');
 
-      protocol.initiateVote('change-1');
+      await protocol.initiateVote('change-1');
 
       expect(graph.update).toHaveBeenCalledWith(
         'change-1',
@@ -113,19 +113,19 @@ describe('ConsensusProtocol', () => {
       );
     });
 
-    it('throws for unknown change', () => {
+    it('throws for unknown change', async () => {
       const protocol = new ConsensusProtocol({ voters: [], graph });
 
-      expect(() => protocol.initiateVote('nonexistent')).toThrow(
+      await expect(protocol.initiateVote('nonexistent')).rejects.toThrow(
         /no change found/,
       );
     });
 
-    it('emits vote_initiated via fleet bus', () => {
+    it('emits vote_initiated via fleet bus', async () => {
       const protocol = new ConsensusProtocol({ voters: defaultVoters(), graph, fleet });
       createChangeNode(graph, 'change-1');
 
-      protocol.initiateVote('change-1');
+      await protocol.initiateVote('change-1');
 
       expect(fleet.emit).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -137,7 +137,7 @@ describe('ConsensusProtocol', () => {
   });
 
   describe('castVote', () => {
-    it('records approve vote and returns pending if quorum not met', () => {
+    it('records approve vote and returns pending if quorum not met', async () => {
       const protocol = new ConsensusProtocol({
         voters: defaultVoters(),
         graph,
@@ -145,7 +145,7 @@ describe('ConsensusProtocol', () => {
       });
       createChangeNode(graph, 'change-1');
 
-      const result = protocol.castVote('change-1', 'voter-1', 'approve', 'Looks good');
+      const result = await protocol.castVote('change-1', 'voter-1', 'approve', 'Looks good');
 
       expect(result.outcome).toBe('quorum_not_met');
       expect(result.approveCount).toBe(1);
@@ -163,47 +163,47 @@ describe('ConsensusProtocol', () => {
       );
     });
 
-    it('records reject vote', () => {
+    it('records reject vote', async () => {
       const protocol = new ConsensusProtocol({ voters: defaultVoters(), graph });
       createChangeNode(graph, 'change-1');
 
-      const result = protocol.castVote('change-1', 'voter-1', 'reject', 'Too risky');
+      const result = await protocol.castVote('change-1', 'voter-1', 'reject', 'Too risky');
 
       expect(result.rejectCount).toBe(1);
       expect(result.approveCount).toBe(0);
     });
 
-    it('records abstain vote', () => {
+    it('records abstain vote', async () => {
       const protocol = new ConsensusProtocol({ voters: defaultVoters(), graph });
       createChangeNode(graph, 'change-1');
 
-      const result = protocol.castVote('change-1', 'voter-1', 'abstain');
+      const result = await protocol.castVote('change-1', 'voter-1', 'abstain');
 
       expect(result.abstainCount).toBe(1);
     });
 
-    it('throws for unknown voter', () => {
+    it('throws for unknown voter', async () => {
       const protocol = new ConsensusProtocol({ voters: [], graph });
       createChangeNode(graph, 'change-1');
 
-      expect(() => protocol.castVote('change-1', 'unknown', 'approve')).toThrow(
+      await expect(protocol.castVote('change-1', 'unknown', 'approve')).rejects.toThrow(
         /unknown voter "unknown"/,
       );
     });
 
-    it('throws for non-change node', () => {
+    it('throws for non-change node', async () => {
       const protocol = new ConsensusProtocol({ voters: defaultVoters(), graph });
 
-      expect(() => protocol.castVote('not-a-change', 'voter-1', 'approve')).toThrow();
+      await expect(protocol.castVote('not-a-change', 'voter-1', 'approve')).rejects.toThrow();
     });
 
-    it('allows voter to change their vote', () => {
+    it('allows voter to change their vote', async () => {
       const protocol = new ConsensusProtocol({ voters: defaultVoters(), graph });
       createChangeNode(graph, 'change-1', {
         votes: [{ agentId: 'voter-1', agentName: 'Alice', value: 'approve', votedAt: '' }],
       });
 
-      const result = protocol.castVote('change-1', 'voter-1', 'reject', 'Changed my mind');
+      await protocol.castVote('change-1', 'voter-1', 'reject', 'Changed my mind');
 
       // Should have exactly one vote (updated, not added)
       expect(graph.update).toHaveBeenCalledWith(
@@ -217,7 +217,7 @@ describe('ConsensusProtocol', () => {
       expect((graph.update as ReturnType<typeof vi.fn>).mock.calls[0][1].votes).toHaveLength(1);
     });
 
-    it('calls graph.update when casting a vote', () => {
+    it('calls graph.update when casting a vote', async () => {
       const protocol = new ConsensusProtocol({
         voters: defaultVoters(),
         graph,
@@ -225,7 +225,7 @@ describe('ConsensusProtocol', () => {
       });
       createChangeNode(graph, 'change-1');
 
-      protocol.castVote('change-1', 'voter-1', 'approve');
+      await protocol.castVote('change-1', 'voter-1', 'approve');
 
       // Verify graph.update was called with vote data
       expect(graph.update).toHaveBeenCalled();
@@ -234,7 +234,7 @@ describe('ConsensusProtocol', () => {
       expect(call[1]).toHaveProperty('votes');
     });
 
-    it('returns pending when only some voters have voted', () => {
+    it('returns pending when only some voters have voted', async () => {
       const protocol = new ConsensusProtocol({
         voters: defaultVoters(),
         graph,
@@ -242,14 +242,14 @@ describe('ConsensusProtocol', () => {
       });
       createChangeNode(graph, 'change-1');
 
-      const result = protocol.castVote('change-1', 'voter-1', 'approve');
+      const result = await protocol.castVote('change-1', 'voter-1', 'approve');
 
       // With quorumFraction=1, need all voters
       expect(result.outcome).toBe('quorum_not_met');
       expect(result.quorumMet).toBe(false);
     });
 
-    it('handles veto from veto-role voter', () => {
+    it('handles veto from veto-role voter', async () => {
       const protocol = new ConsensusProtocol({
         voters: [
           { agentId: 'voter-1', agentName: 'Alice', role: 'security', weight: 1, veto: true },
@@ -260,7 +260,7 @@ describe('ConsensusProtocol', () => {
       });
       createChangeNode(graph, 'change-1');
 
-      const result = protocol.castVote('change-1', 'voter-1', 'reject');
+      const result = await protocol.castVote('change-1', 'voter-1', 'reject');
 
       expect(result.outcome).toBe('vetoed');
       expect(result.vetoedBy).toBe('voter-1');
@@ -268,7 +268,7 @@ describe('ConsensusProtocol', () => {
   });
 
   describe('weight-based voting', () => {
-    it('records votes with different weights', () => {
+    it('records votes with different weights', async () => {
       const protocol = new ConsensusProtocol({
         voters: [
           { agentId: 'voter-1', agentName: 'Alice', role: 'reviewer', weight: 1 },
@@ -284,7 +284,7 @@ describe('ConsensusProtocol', () => {
       });
       createChangeNode(graph, 'change-1');
 
-      const result = protocol.castVote('change-1', 'voter-1', 'approve');
+      const result = await protocol.castVote('change-1', 'voter-1', 'approve');
 
       // Should return vote result with weight info
       expect(result).toBeDefined();
@@ -292,7 +292,7 @@ describe('ConsensusProtocol', () => {
       expect(result.eligibleVoters).toContain('voter-2');
     });
 
-    it('calls graph.update with weight information', () => {
+    it('calls graph.update with weight information', async () => {
       const protocol = new ConsensusProtocol({
         voters: [
           { agentId: 'voter-1', agentName: 'Alice', role: 'reviewer', weight: 2 },
@@ -302,7 +302,7 @@ describe('ConsensusProtocol', () => {
       });
       createChangeNode(graph, 'change-1');
 
-      protocol.castVote('change-1', 'voter-1', 'approve');
+      await protocol.castVote('change-1', 'voter-1', 'approve');
 
       // Verify graph.update was called
       expect(graph.update).toHaveBeenCalled();
@@ -310,7 +310,7 @@ describe('ConsensusProtocol', () => {
   });
 
   describe('resolveNow', () => {
-    it('returns consensus result for a change with votes', () => {
+    it('returns consensus result for a change with votes', async () => {
       const protocol = new ConsensusProtocol({
         voters: defaultVoters(),
         graph,
@@ -323,7 +323,7 @@ describe('ConsensusProtocol', () => {
         ],
       });
 
-      const result = protocol.resolveNow('change-1');
+      const result = await protocol.resolveNow('change-1');
 
       // Should return a result object
       expect(result).toBeDefined();
@@ -332,10 +332,10 @@ describe('ConsensusProtocol', () => {
       expect(result).toHaveProperty('rejectCount');
     });
 
-    it('throws for unknown change', () => {
+    it('throws for unknown change', async () => {
       const protocol = new ConsensusProtocol({ voters: [], graph });
 
-      expect(() => protocol.resolveNow('nonexistent')).toThrow();
+      await expect(protocol.resolveNow('nonexistent')).rejects.toThrow();
     });
   });
 
@@ -364,19 +364,19 @@ describe('ConsensusProtocol', () => {
   });
 
   describe('registerVoter', () => {
-    it('adds a new voter', () => {
+    it('adds a new voter', async () => {
       const protocol = new ConsensusProtocol({ voters: [], graph });
       createChangeNode(graph, 'change-1');
 
       protocol.registerVoter({ agentId: 'new-voter', agentName: 'Dave', role: 'reviewer', weight: 1 });
-      const result = protocol.castVote('change-1', 'new-voter', 'approve');
+      const result = await protocol.castVote('change-1', 'new-voter', 'approve');
 
       expect(result.eligibleVoters).toContain('new-voter');
     });
   });
 
   describe('quorum calculation', () => {
-    it('requires minimum voters based on quorum fraction', () => {
+    it('requires minimum voters based on quorum fraction', async () => {
       const protocol = new ConsensusProtocol({
         voters: [
           { agentId: 'v1', agentName: 'V1', role: 'r', weight: 1 },
@@ -390,8 +390,8 @@ describe('ConsensusProtocol', () => {
       createChangeNode(graph, 'change-1');
 
       // Only 2 votes
-      protocol.castVote('change-1', 'v1', 'approve');
-      const result = protocol.castVote('change-1', 'v2', 'approve');
+      await protocol.castVote('change-1', 'v1', 'approve');
+      const result = await protocol.castVote('change-1', 'v2', 'approve');
 
       expect(result.outcome).toBe('quorum_not_met');
       expect(result.quorumMet).toBe(false);

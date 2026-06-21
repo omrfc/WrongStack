@@ -1091,6 +1091,18 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             const rawMode = autonomy?.defaultMode as string | undefined;
             const mode: 'off' | 'suggest' | 'auto' =
               rawMode === 'suggest' || rawMode === 'auto' ? rawMode : 'off';
+            const modelRuntime = (cfg as { modelRuntime?: { reasoning?: { mode?: string; effort?: string; preserve?: boolean }; cache?: { ttl?: string } } }).modelRuntime;
+            const reasoningEffortRaw = modelRuntime?.reasoning?.effort;
+            const reasoningEffort =
+              reasoningEffortRaw === 'none' ||
+              reasoningEffortRaw === 'minimal' ||
+              reasoningEffortRaw === 'low' ||
+              reasoningEffortRaw === 'medium' ||
+              reasoningEffortRaw === 'high' ||
+              reasoningEffortRaw === 'xhigh' ||
+              reasoningEffortRaw === 'max'
+                ? reasoningEffortRaw
+                : 'high';
             return {
               mode,
               delayMs: (autonomy?.autoProceedDelayMs as number) ?? 45_000,
@@ -1140,6 +1152,16 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
               autonomyNextPrompt:
                 ((cfg.autonomy as Record<string, unknown> | undefined)
                   ?.autonomyNextPrompt as string | undefined) ?? 'auto {{suggestion}}',
+              reasoningMode:
+                modelRuntime?.reasoning?.mode === 'on' || modelRuntime?.reasoning?.mode === 'off'
+                  ? modelRuntime.reasoning.mode
+                  : 'auto',
+              reasoningEffort,
+              reasoningPreserve: modelRuntime?.reasoning?.preserve === true,
+              cacheTtl:
+                modelRuntime?.cache?.ttl === '5m' || modelRuntime?.cache?.ttl === '1h'
+                  ? modelRuntime.cache.ttl
+                  : 'default',
               breakerEnabled: cfg.circuitBreaker?.enabled === true,
               breakerAutoKillResetMs: cfg.circuitBreaker?.autoKillResetMs ?? 60_000,
             };
@@ -1610,6 +1632,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           initialGoal: goalFlag,
           initialAsk: askFlag,
           projectRoot,
+          appConfig: config,
           getSDDContext: async () => {
             const { getActiveSDDContext } = await import('./slash-commands/sdd.js');
             return getActiveSDDContext();
@@ -1942,7 +1965,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           tokenSavingMode: normalizeTokenSavingTier(config.features.tokenSavingMode) !== 'off',
           toolCount: agent.tools.list().length,
           onPanelOpen,
-        });
+        } as unknown as import('@wrongstack/tui').RunTuiOptions);
 
         // After TUI exits with PROJECT_SWITCH_EXIT_CODE, spawn wstack in the new project.
         // This replaces the old behavior of spawning mid-session (which left the TUI
@@ -2025,6 +2048,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         session,
         port: Number.parseInt(String(flags.port ?? '3457'), 10),
         projectRoot,
+        appConfig: config,
         open: !!flags.open,
         modelsRegistry,
         globalConfigPath: wpaths.globalConfig,
@@ -2123,6 +2147,8 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
         attachments,
         effectiveMaxContext,
         projectName: path.basename(projectRoot) || undefined,
+        projectRoot,
+        appConfig: config,
         getAutonomy,
         onAutonomy,
         getNextPredict,

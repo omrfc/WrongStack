@@ -17,6 +17,7 @@ export interface OpenAIProviderOptions {
   quirks?: ConvertOptions & {
     parallelToolsDisabled?: boolean | undefined;
     jsonArgumentsBuggy?: boolean | undefined;
+    thinkingParam?: 'zai-glm' | 'kimi-toggle' | 'always-on' | undefined;
   } | undefined;
   id?: string | undefined;
   capabilities?: Partial<Capabilities> | undefined;

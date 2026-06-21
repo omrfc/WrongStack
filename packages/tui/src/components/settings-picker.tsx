@@ -30,6 +30,15 @@ export const CONTEXT_MODE_DESCS: Record<ContextMode, string> = {
 export const STATUSLINE_MODES = ['minimum', 'detailed'] as const;
 export type StatuslineMode = (typeof STATUSLINE_MODES)[number];
 
+export const REASONING_MODES = ['auto', 'on', 'off'] as const;
+export type ReasoningMode = (typeof REASONING_MODES)[number];
+
+export const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+export const CACHE_TTLS = ['default', '5m', '1h'] as const;
+export type CacheTtl = (typeof CACHE_TTLS)[number];
+
 export const STATUSLINE_MODE_DESCS: Record<StatuslineMode, string> = {
   minimum: 'Single line with essential chips only',
   detailed: 'Full multi-line statusline (default)',
@@ -133,13 +142,21 @@ export interface SettingsPickerProps {
   debugStream: boolean;
   /** Statusline density: minimum single-line or detailed multi-line. */
   statuslineMode: StatuslineMode;
+  /** Reasoning mode: auto (provider default) | on | off. */
+  reasoningMode: ReasoningMode;
+  /** Reasoning effort level. */
+  reasoningEffort: ReasoningEffort;
+  /** Preserve thinking across turns. */
+  reasoningPreserve: boolean;
+  /** Prompt cache TTL. */
+  cacheTtl: CacheTtl;
   /** Where settings are persisted. */
   configScope: ConfigScope;
   hint?: string | undefined;
 }
 
 /** Total number of settings rows (used for wrap-around navigation). */
-export const SETTINGS_FIELD_COUNT = 30;
+export const SETTINGS_FIELD_COUNT = 34;
 
 export const CONFIG_SCOPES = ['global', 'project'] as const;
 export type ConfigScope = (typeof CONFIG_SCOPES)[number];
@@ -175,6 +192,10 @@ export function SettingsPicker({
   enhanceLanguage,
   debugStream,
   statuslineMode,
+  reasoningMode,
+  reasoningEffort,
+  reasoningPreserve,
+  cacheTtl,
   configScope,
   hint,
 }: SettingsPickerProps): React.ReactElement {
@@ -336,6 +357,28 @@ export function SettingsPicker({
       label: 'Refine language',
       value: enhanceLanguage,
       detail: 'original (keep language) | english (translate)',
+    },
+    // ── Reasoning ──
+    { section: 'Reasoning' },
+    {
+      label: 'Reasoning mode',
+      value: reasoningMode,
+      detail: 'auto (provider default) | on | off',
+    },
+    {
+      label: 'Reasoning effort',
+      value: reasoningEffort,
+      detail: 'none–max (model-dependent)',
+    },
+    {
+      label: 'Preserve thinking',
+      value: boolVal(reasoningPreserve),
+      detail: 'Keep reasoning across turns',
+    },
+    {
+      label: 'Cache TTL',
+      value: cacheTtl,
+      detail: 'Prompt cache TTL (5m | 1h)',
     },
     // ── Debug ──
     { section: 'Debug' },

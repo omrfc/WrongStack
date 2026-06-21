@@ -6,9 +6,11 @@ import type { HistoryEntry } from './components/history.js';
 import type { ProviderOption } from './components/model-picker.js';
 import type {
   AuditLevel,
+  CacheTtl,
   CompactorStrategy,
   ContextMode,
   LogLevel,
+  ReasoningEffort,
   SettingsMode,
   StatuslineMode,
 } from './components/settings-picker.js';
@@ -301,6 +303,14 @@ export type State = {
     debugStream: boolean;
     /** Statusline density mode. */
     statuslineMode: StatuslineMode;
+    /** Reasoning mode: auto | on | off. */
+    reasoningMode: 'auto' | 'on' | 'off';
+    /** Reasoning effort level. */
+    reasoningEffort: ReasoningEffort;
+    /** Preserve thinking across turns. */
+    reasoningPreserve: boolean;
+    /** Prompt cache TTL. */
+    cacheTtl: CacheTtl;
     /** Where to persist settings: 'global' or 'project'. */
     configScope: 'global' | 'project';
     hint?: string | undefined;
@@ -622,6 +632,14 @@ export type Settings = {
   debugStream: boolean;
   /** Statusline density mode. Defaults to detailed. */
   statuslineMode: StatuslineMode;
+  /** Reasoning mode: auto (provider default) | on | off. */
+  reasoningMode: 'auto' | 'on' | 'off';
+  /** Reasoning effort level. */
+  reasoningEffort: ReasoningEffort;
+  /** Preserve thinking across turns. */
+  reasoningPreserve: boolean;
+  /** Prompt cache TTL. */
+  cacheTtl: CacheTtl;
   /** Where to persist settings: 'global' or 'project'. */
   configScope: 'global' | 'project';
   /** Full mouse mode: in-app managed scroll + clickable UI (SGR tracking on). */
@@ -726,6 +744,10 @@ export type Action =
       enhanceLanguage: 'original' | 'english';
       debugStream: boolean;
       statuslineMode: StatuslineMode;
+      reasoningMode: 'auto' | 'on' | 'off';
+      reasoningEffort: ReasoningEffort;
+      reasoningPreserve: boolean;
+      cacheTtl: CacheTtl;
       configScope: 'global' | 'project';
     }
   | { type: 'settingsClose' }

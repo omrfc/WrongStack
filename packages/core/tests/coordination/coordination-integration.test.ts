@@ -76,7 +76,7 @@ describe('KnowledgeGraph + ConsensusProtocol Integration', () => {
     } as Omit<ChangeNode, 'id'>);
 
     // Initiate vote
-    protocol.initiateVote(changeId.id);
+    await protocol.initiateVote(changeId.id);
 
     // Cast votes (castVote returns ConsensusResult directly)
     const result1 = await protocol.castVote(changeId.id, 'voter-1', 'approve');
@@ -121,7 +121,7 @@ describe('KnowledgeGraph + ConsensusProtocol Integration', () => {
       satisfiesGoals: [],
     } as Omit<ChangeNode, 'id'>);
 
-    protocol.initiateVote(changeId.id);
+    await protocol.initiateVote(changeId.id);
 
     const result1 = await protocol.castVote(changeId.id, 'voter-1', 'reject');
     const result2 = await protocol.castVote(changeId.id, 'voter-2', 'reject');

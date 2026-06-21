@@ -104,6 +104,52 @@ describe('OpenAICompatibleProvider', () => {
     expect(captured?.['max_completion_tokens']).toBeUndefined();
   });
 
+  it('maps Z.AI disabled thinking and compatibility effort aliases', async () => {
+    let captured: Record<string, unknown> | undefined;
+    const spy = vi.fn(async (_url: unknown, init: { body?: string } = {}) => {
+      captured = JSON.parse(init.body ?? '{}');
+      return { ok: true, status: 200, json: async () => ({ model: 'm', choices: [], usage: {} }), text: async () => '' };
+    }) as unknown as typeof fetch;
+    const p = new OpenAICompatibleProvider({
+      id: 'zai',
+      apiKey: 'k',
+      baseUrl: 'https://api.z.ai/api/paas/v4',
+      quirks: { thinkingParam: 'zai-glm' },
+      fetchImpl: spy,
+    });
+    await p.complete(
+      { model: 'glm-5.2', messages: [{ role: 'user', content: 'hi' }], maxTokens: 1, reasoning: { enabled: true, effort: 'medium' } },
+      { signal: new AbortController().signal },
+    );
+    expect(captured?.['reasoning_effort']).toBe('high');
+
+    await p.complete(
+      { model: 'glm-5.2', messages: [{ role: 'user', content: 'hi' }], maxTokens: 1, reasoning: { enabled: false } },
+      { signal: new AbortController().signal },
+    );
+    expect(captured?.['thinking']).toEqual({ type: 'disabled' });
+  });
+
+  it('does not send disabled thinking to always-on compatible models', async () => {
+    let captured: Record<string, unknown> | undefined;
+    const spy = vi.fn(async (_url: unknown, init: { body?: string } = {}) => {
+      captured = JSON.parse(init.body ?? '{}');
+      return { ok: true, status: 200, json: async () => ({ model: 'm', choices: [], usage: {} }), text: async () => '' };
+    }) as unknown as typeof fetch;
+    const p = new OpenAICompatibleProvider({
+      id: 'moonshot',
+      apiKey: 'k',
+      baseUrl: 'https://api.moonshot.ai/v1',
+      quirks: { thinkingParam: 'always-on' },
+      fetchImpl: spy,
+    });
+    await p.complete(
+      { model: 'kimi-k2.7-code', messages: [{ role: 'user', content: 'hi' }], maxTokens: 1, reasoning: { enabled: false } },
+      { signal: new AbortController().signal },
+    );
+    expect(captured?.['thinking']).toBeUndefined();
+  });
+
   it('works without custom headers', async () => {
     const spy = mockFetchSpy();
     const p = new OpenAICompatibleProvider({

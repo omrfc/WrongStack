@@ -98,8 +98,8 @@ browser tasks. Instead of cluttering the main agent's context with
 screenshots and page HTML, delegate browser work to a dedicated subagent:
 
 ```bash
-# Playwright is enabled by default in the internal config.
-# If a user config disabled it, re-enable it with:
+# Add and enable Playwright when browser automation is needed.
+/mcp add playwright
 /mcp enable playwright
 
 # Delegate to the browser agent (lightweight: no bash/write)

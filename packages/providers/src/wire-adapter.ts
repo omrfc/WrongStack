@@ -157,7 +157,7 @@ export abstract class WireAdapter implements Provider {
       sseBody = this.wrapWithHangDetection(sseBody, req.model);
     }
 
-    yield* this.parseStream(sseBody, req.model);
+    yield* this.parseStream(sseBody, req.model, req);
   }
 
   /**
@@ -324,6 +324,7 @@ export abstract class WireAdapter implements Provider {
   protected abstract parseStream(
     body: ReadableStream<Uint8Array> | NodeJS.ReadableStream | null,
     fallbackModel: string,
+    req: Request,
   ): AsyncIterable<StreamEvent>;
 
   /** Build a ProviderError from an HTTP failure response. */

@@ -163,7 +163,11 @@ describe('HQ Phase 4 — client token auth', () => {
   });
 
   it('allows /ws/client in OPEN MODE when clientTokens is empty', async () => {
-    // No auth.json at all → open mode
+    await writeHqAuthFile(dataDir, {
+      version: HQ_AUTH_FILE_VERSION,
+      updatedAt: new Date().toISOString(),
+      clientTokens: [],
+    });
     const port = getPort();
     handle = await startHqServer({ port, dataDir });
 
@@ -176,7 +180,11 @@ describe('HQ Phase 4 — client token auth', () => {
 
 describe('HQ Phase 4 — live auth.json reload', () => {
   it('picks up a newly added client token without restart', async () => {
-    // Start with open mode (no auth file)
+    await writeHqAuthFile(dataDir, {
+      version: HQ_AUTH_FILE_VERSION,
+      updatedAt: new Date().toISOString(),
+      clientTokens: [],
+    });
     const port = getPort();
     handle = await startHqServer({ port, dataDir });
 
@@ -532,7 +540,13 @@ describe('HQ — HTTP route token auth (browser TOKEN MODE)', () => {
     expect(res.status).toBe(200);
   });
 
-  it('HTTP routes are open when no tokens exist at all (OPEN MODE)', async () => {
+  it('HTTP routes are open when explicit auth has no browser tokens (OPEN MODE)', async () => {
+    await writeHqAuthFile(dataDir, {
+      version: HQ_AUTH_FILE_VERSION,
+      updatedAt: new Date().toISOString(),
+      browserTokens: [],
+      clientTokens: [],
+    });
     const port = getPort();
     handle = await startHqServer({ port, dataDir });
 

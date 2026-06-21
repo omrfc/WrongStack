@@ -225,12 +225,45 @@ Controls compaction behavior, token thresholds, and context window modes.
 
 ### Built-in presets
 
-```bash
-wrongstack mcp add filesystem --enable
-wrongstack mcp add github --enable
-wrongstack mcp add context7 --enable
-wrongstack mcp add brave-search --enable
+WrongStack ships with a set of built-in MCP server presets. Use
+`wrongstack mcp add <name>` to add one to your config:
+
+| Preset | Description | Default `permission` | Auto-enabled? |
+|---|---|---|---|
+| `filesystem` | Read/write/navigate local filesystem | `confirm` | No |
+| `github` | GitHub API — issues, PRs, repos, search | `confirm` | No |
+| `context7` | Codebase-aware documentation (context7.ai) | `confirm` | No |
+| `brave-search` | Web search (requires `BRAVE_SEARCH_API_KEY`) | `confirm` | No |
+| `block` | Postgres database access via SQL | `confirm` | No |
+| `everart` | AI image generation | `confirm` | No |
+| `slack` | Slack messaging, channels, search | `confirm` | No |
+| `aws` | EC2, S3, Lambda, IAM, CloudFormation | `confirm` | No |
+| `google-maps` | Directions, geocoding, places | `confirm` | No |
+| `sentinel` | Security vulnerability scanning | `deny` | No |
+| `zai-vision` | Image analysis, screenshot understanding | `auto` | No |
+| `minimax-vision` | MiniMax image understanding (read-only) | `auto` | No |
+| **`playwright`** | Browser automation — navigate, screenshot, click, type, evaluate JS | `confirm` | No |
+| **`ssh`** | Remote SSH — execute commands, transfer files, tunnels, health checks | `confirm` | No |
+
+Playwright and SSH are opt-in presets. Add and enable only the MCP servers you
+want available in a session.
+
+SSH requires the `mcp-ssh-manager` host configuration. After adding the preset,
+set your server credentials in `~/.ssh-manager/.env`:
+
+```env
+SSH_SERVER_PRODUCTION_HOST=prod.example.com
+SSH_SERVER_PRODUCTION_USER=deploy
+SSH_SERVER_PRODUCTION_KEYPATH=~/.ssh/prod_deploy
 ```
+
+Then enable it:
+```bash
+wrongstack mcp add ssh
+/mcp enable ssh
+```
+
+For the full preset reference and usage, see [subcommands/mcp.md](subcommands/mcp.md).
 
 ---
 

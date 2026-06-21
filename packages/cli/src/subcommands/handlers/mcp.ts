@@ -1,5 +1,11 @@
-import * as fs from 'node:fs/promises';
-import { atomicWrite, expectDefined } from '@wrongstack/core';
+import { expectDefined } from '@wrongstack/core';
+import {
+  jsonObjectFileExists,
+  readJsonObjectFile,
+  removeJsonPath,
+  setJsonPath,
+  updateJsonObjectFile,
+} from '@wrongstack/core/utils';
 import { allServers } from '@wrongstack/core/infrastructure';
 import { serveMcpStdio } from '../../mcp-serve.js';
 import type { SubcommandDeps, SubcommandHandler } from '../index.js';
@@ -74,19 +80,13 @@ async function addMcpServer(args: string[], deps: SubcommandDeps): Promise<numbe
   }
   const serverCfg = { ...factory };
   serverCfg.enabled = enable;
-  let existing: Record<string, unknown> = {};
-  try {
-    existing = JSON.parse(await fs.readFile(deps.paths.globalConfig, 'utf8'));
-  } catch {
-    /* fine */
-  }
-  const mcpServers =
-    (existing.mcpServers as Record<string, Record<string, unknown>> | undefined) ?? {};
+  const existing = await readJsonObjectFile(deps.paths.globalConfig);
+  const mcpServers = isRecord(existing.mcpServers) ? existing.mcpServers : {};
   if (mcpServers[name])
     deps.renderer.writeWarning(`Server "${name}" already in config. Updating.\n`);
-  mcpServers[name] = serverCfg as unknown as Record<string, unknown>;
-  existing.mcpServers = mcpServers;
-  await atomicWrite(deps.paths.globalConfig, JSON.stringify(existing, null, 2), { mode: 0o600 });
+  await updateJsonObjectFile(deps.paths.globalConfig, (config) => {
+    setJsonPath(config, ['mcpServers', name], serverCfg);
+  });
   const verb = enable ? 'Enabled' : 'Added (disabled — set enabled:true to activate)';
   deps.renderer.writeInfo(
     `${verb} "${name}" (${serverCfg.transport}). Config written to ${deps.paths.globalConfig}.\n`,
@@ -95,22 +95,23 @@ async function addMcpServer(args: string[], deps: SubcommandDeps): Promise<numbe
 }
 
 async function removeMcpServer(name: string, deps: SubcommandDeps): Promise<number> {
-  let existing: Record<string, unknown> = {};
-  try {
-    existing = JSON.parse(await fs.readFile(deps.paths.globalConfig, 'utf8'));
-  } catch {
+  if (!(await jsonObjectFileExists(deps.paths.globalConfig))) {
     deps.renderer.writeError('No config file found.\n');
     return 1;
   }
-  const mcpServers =
-    (existing.mcpServers as Record<string, Record<string, unknown>> | undefined) ?? {};
+  const existing = await readJsonObjectFile(deps.paths.globalConfig);
+  const mcpServers = isRecord(existing.mcpServers) ? existing.mcpServers : {};
   if (!mcpServers[name]) {
     deps.renderer.writeError(`Server "${name}" not in config.\n`);
     return 1;
   }
-  delete mcpServers[name];
-  existing.mcpServers = mcpServers;
-  await atomicWrite(deps.paths.globalConfig, JSON.stringify(existing, null, 2), { mode: 0o600 });
+  await updateJsonObjectFile(deps.paths.globalConfig, (config) => {
+    removeJsonPath(config, ['mcpServers', name]);
+  });
   deps.renderer.writeInfo(`Removed "${name}" from config.\n`);
   return 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

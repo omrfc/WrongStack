@@ -1,4 +1,4 @@
-import { writeHqAuthFile, type HqBrowserToken } from '@wrongstack/core';
+import { HQ_AUTH_FILE_VERSION, writeHqAuthFile, type HqBrowserToken } from '@wrongstack/core';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -67,8 +67,23 @@ function waitForClose(ws: WebSocket, timeout = 3_000): Promise<number | undefine
 }
 
 describe('HQ server — /ws/browser token validation', () => {
-  it('open mode: accepts browser connections without a token (default)', async () => {
+  it('first run: creates browser auth and rejects browser connections without a token', async () => {
     handle = await startHqServer({ host: '127.0.0.1', port: 0, dataDir });
+    expect(handle.firstRunSetup?.browserUrl).toContain('?token=');
+    const ws = new WebSocket(wsUrl(handle, '/ws/browser'));
+    await expect(waitForOpen(ws)).rejects.toThrow();
+    ws.close();
+  });
+
+  it('explicit open mode: accepts browser connections without a token', async () => {
+    await writeHqAuthFile(dataDir, {
+      version: HQ_AUTH_FILE_VERSION,
+      updatedAt: new Date().toISOString(),
+      browserTokens: [],
+      clientTokens: [],
+    });
+    handle = await startHqServer({ host: '127.0.0.1', port: 0, dataDir });
+    expect(handle.firstRunSetup).toBeUndefined();
     const ws = new WebSocket(wsUrl(handle, '/ws/browser'));
     await expect(waitForOpen(ws)).resolves.toBeUndefined();
     ws.close();
@@ -112,7 +127,13 @@ describe('HQ server — /ws/browser token validation', () => {
     ws.close();
   });
 
-  it('open mode: browsers can connect multiple times in parallel', async () => {
+  it('explicit open mode: browsers can connect multiple times in parallel', async () => {
+    await writeHqAuthFile(dataDir, {
+      version: HQ_AUTH_FILE_VERSION,
+      updatedAt: new Date().toISOString(),
+      browserTokens: [],
+      clientTokens: [],
+    });
     handle = await startHqServer({ host: '127.0.0.1', port: 0, dataDir });
     const a = new WebSocket(wsUrl(handle, '/ws/browser'));
     const b = new WebSocket(wsUrl(handle, '/ws/browser'));

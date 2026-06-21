@@ -160,6 +160,8 @@ export interface ReplOptions {
   projectName?: string | undefined;
   /** Absolute project root — used to locate .wrongstack/goal.json for the goal banner. */
   projectRoot?: string | undefined;
+  /** Full app config, used for HQ client publishing settings. */
+  appConfig?: import('@wrongstack/core').Config | undefined;
   /** Resolve current model vision support. Falls back to provider capability when omitted. */
   supportsVision?: (() => boolean | Promise<boolean>) | undefined;
   /** Skill loader for the skill generator wizard. */
@@ -285,7 +287,7 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
   const replProjectRoot = opts.projectRoot ?? process.cwd();
   const projectDir = resolveProjectDir(replProjectRoot, wstackGlobalRoot());
   const clientId = `repl@${crypto.randomUUID().slice(0, 8)}`;
-  const hqPublisher = createHqPublisherFromEnv({ clientKind: 'repl', projectRoot: replProjectRoot, projectName: path.basename(replProjectRoot) });
+  const hqPublisher = createHqPublisherFromEnv({ clientKind: 'repl', projectRoot: replProjectRoot, projectName: path.basename(replProjectRoot), appConfig: opts.appConfig } as unknown as Parameters<typeof createHqPublisherFromEnv>[0]);
   hqPublisher?.connect();
   const clientMailbox = new GlobalMailbox(projectDir, undefined, hqPublisher);
   let clientHeartbeat: ReturnType<typeof setInterval> | undefined;

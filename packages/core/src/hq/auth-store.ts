@@ -157,6 +157,45 @@ export async function writeHqAuthFile(dataDir: string, file: HqAuthFile): Promis
   await atomicWrite(target, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
 }
 
+export interface EnsureHqFirstRunAuthResult {
+  authFile: HqAuthFile;
+  created: boolean;
+  browserToken?: HqToken;
+  clientToken?: HqToken;
+}
+
+/**
+ * Ensure a brand-new HQ data directory has the auth required for safe
+ * first-run operation. Only a missing auth.json is bootstrapped; an existing
+ * file, including one with empty token arrays, is treated as operator intent.
+ */
+export async function ensureHqFirstRunAuthFile(
+  dataDir: string,
+  opts: { warn?: (msg: string) => void } = {},
+): Promise<EnsureHqFirstRunAuthResult> {
+  const file = hqAuthFilePath(dataDir);
+  try {
+    await fs.access(file);
+    return { authFile: await readHqAuthFile(dataDir, opts), created: false };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      opts.warn?.(`HQ auth file access failed at ${file}: ${(err as Error).message}`);
+      return { authFile: await readHqAuthFile(dataDir, opts), created: false };
+    }
+  }
+
+  const browserToken = mintHqToken('first-run browser');
+  const clientToken = mintHqToken('first-run client');
+  const authFile: HqAuthFile = {
+    version: HQ_AUTH_FILE_VERSION,
+    updatedAt: new Date().toISOString(),
+    browserTokens: [browserToken],
+    clientTokens: [clientToken],
+  };
+  await writeHqAuthFile(dataDir, authFile);
+  return { authFile: await readHqAuthFile(dataDir, opts), created: true, browserToken, clientToken };
+}
+
 /**
  * Load → mutate → write. The mutator receives the current file (or an empty
  * one) and returns the next file. Use this for any read-modify-write cycle

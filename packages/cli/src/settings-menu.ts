@@ -207,9 +207,12 @@ export interface PersistSettingDeps {
    *  root so it can be gitignored or team-shared. */
   inProjectConfigPath?: string | undefined;
   vault: SecretVault;
+  /** Force writes to ~/.wrongstack/config.json even when configScope is project. */
+  forceGlobal?: boolean | undefined;
 }
 
 function resolvePersistPath(deps: PersistSettingDeps): string {
+  if (deps.forceGlobal) return deps.globalConfigPath;
   const scope = (deps.configStore.get() as { configScope?: string | undefined }).configScope;
   if (scope === 'project' && deps.inProjectConfigPath) {
     return deps.inProjectConfigPath;

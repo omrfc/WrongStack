@@ -8,6 +8,8 @@ interface PriceEntry {
   output?: number | undefined;
   cacheRead?: number | undefined;
   cacheWrite?: number | undefined;
+  cacheWrite5m?: number | undefined;
+  cacheWrite1h?: number | undefined;
 }
 
 const PRICE_CACHE_MAX_SIZE = 100;
@@ -171,8 +173,14 @@ export class DefaultTokenCounter implements TokenCounter {
     if (usage.cacheRead && price.cacheRead) {
       this.costInput += (usage.cacheRead / 1_000_000) * price.cacheRead;
     }
-    if (usage.cacheWrite && price.cacheWrite) {
-      this.costInput += (usage.cacheWrite / 1_000_000) * price.cacheWrite;
+    const hasCacheWriteSplit = usage.cacheWrite5m !== undefined || usage.cacheWrite1h !== undefined;
+    const cacheWrite5m = usage.cacheWrite5m ?? (hasCacheWriteSplit ? 0 : usage.cacheWrite);
+    const cacheWrite1h = usage.cacheWrite1h ?? 0;
+    if (cacheWrite5m && (price.cacheWrite5m ?? price.cacheWrite)) {
+      this.costInput += (cacheWrite5m / 1_000_000) * (price.cacheWrite5m ?? price.cacheWrite ?? 0);
+    }
+    if (cacheWrite1h && (price.cacheWrite1h ?? price.cacheWrite)) {
+      this.costInput += (cacheWrite1h / 1_000_000) * (price.cacheWrite1h ?? price.cacheWrite ?? 0);
     }
   }
 }
@@ -183,6 +191,8 @@ function priceFromModel(m: ResolvedModel): PriceEntry {
     output: m.cost?.output,
     cacheRead: m.cost?.cache_read,
     cacheWrite: m.cost?.cache_write,
+    cacheWrite5m: m.cost?.cache_write_5m ?? m.cost?.cache_write,
+    cacheWrite1h: m.cost?.cache_write_1h ?? (m.cost?.input !== undefined ? m.cost.input * 2 : undefined),
   };
 }
 

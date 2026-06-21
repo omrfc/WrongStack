@@ -12,6 +12,7 @@ This is the on-ramp to the WrongStack documentation. If you're new to the projec
 | Add a new tool, plugin, provider, or help module | [Author Guides](#author-guides) below |
 | Understand a specific subcommand | [Subcommand Reference](#subcommand-reference) |
 | Understand a specific slash command | [Slash Command Reference](#slash-command-reference) |
+| Configure MCP servers (browser, SSH, GitHub, …) | [subcommands/mcp.md](subcommands/mcp.md) → `mcpServers` in [configuration.md](configuration.md) |
 | Read the architectural decision history | [ADRs](#architecture-decision-records-adrs) |
 | Configure runtime behavior | [configuration.md](configuration.md) |
 | Debug a problem | [troubleshooting.md](troubleshooting.md) |

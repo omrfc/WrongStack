@@ -14,8 +14,8 @@ import { ToolCapabilities } from '../security/capabilities.js';
  * This is the primary mechanism by which the LLM autonomously extends its
  * own capabilities at runtime — e.g. "I need GitHub access, let me enable it."
  */
-import * as fs from 'node:fs/promises';
 import { allServers } from '../infrastructure/mcp-servers.js';
+import { readJsonObjectFile, setJsonPath, updateJsonObjectFile } from '../utils/config-json.js';
 import type { Config, JSONSchema, MCPServerConfig, Tool } from '../index.js';
 export interface MCPRegistryHandle {
   start(cfg: MCPServerConfig): Promise<void>;
@@ -129,8 +129,8 @@ async function mcpControlDispatch(
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 
-function renderList(deps: { getConfig: () => Config; registry: MCPRegistryHandle }): string {
-  const configured = deps.getConfig().mcpServers ?? {};
+async function renderList(deps: { getConfig: () => Config; configPath: string; registry: MCPRegistryHandle }): Promise<string> {
+  const configured = await getConfiguredMcpServers(deps);
   const live = deps.registry.describe();
 
   if (Object.keys(configured).length === 0) {
@@ -161,11 +161,11 @@ function renderList(deps: { getConfig: () => Config; registry: MCPRegistryHandle
   return lines.join('\n');
 }
 
-function renderSearch(
+async function renderSearch(
   query: string,
-  deps: { getConfig: () => Config; registry: MCPRegistryHandle },
-): string {
-  const configured = deps.getConfig().mcpServers ?? {};
+  deps: { getConfig: () => Config; configPath: string; registry: MCPRegistryHandle },
+): Promise<string> {
+  const configured = await getConfiguredMcpServers(deps);
   const all = allServers();
   const q = query.toLowerCase();
 
@@ -230,14 +230,11 @@ async function runEnable(
     return `Unknown server "${name}". Available presets: ${known}`;
   }
 
-  // Write to config (add or update)
-  const full = await readConfig(deps.configPath);
-  const mcpServers: Record<string, MCPServerConfig> = {
-    ...((full.mcpServers as Record<string, MCPServerConfig> | undefined) ?? {}),
-  };
-  mcpServers[name] = { ...cfg, enabled: true };
-  full.mcpServers = mcpServers;
-  await writeConfig(deps.configPath, full);
+  // Write to config (add or update) using the shared JSON path helper.
+  await updateJsonObjectFile(deps.configPath, (full) => {
+    const current = isMcpServerRecord(full.mcpServers) ? full.mcpServers : {};
+    setJsonPath(full, ['mcpServers', name], { ...current[name], ...cfg, enabled: true });
+  });
 
   // Start the server in the registry
   try {
@@ -264,15 +261,12 @@ async function runDisable(
     return `Server "${name}" is not in config. Add it with \`mcp_control({ action: "enable", server: "${name}" })\`.`;
   }
 
-  // Write to config
-  const full = await readConfig(deps.configPath);
-  const mcpServers: Record<string, MCPServerConfig> = {
-    ...((full.mcpServers as Record<string, MCPServerConfig> | undefined) ?? {}),
-  };
-  const existing = expectDefined(mcpServers[name]);
-  mcpServers[name] = { ...existing, enabled: false };
-  full.mcpServers = mcpServers;
-  await writeConfig(deps.configPath, full);
+  // Write to config using the shared JSON path helper.
+  await updateJsonObjectFile(deps.configPath, (full) => {
+    const current = isMcpServerRecord(full.mcpServers) ? full.mcpServers : {};
+    const existing = expectDefined(current[name]);
+    setJsonPath(full, ['mcpServers', name], { ...existing, enabled: false });
+  });
 
   // Stop the running server
   try {
@@ -353,19 +347,14 @@ async function runDeactivate(
 
 // ── Config helpers ──────────────────────────────────────────────────────────────
 
-async function readConfig(p: string): Promise<Record<string, unknown>> {
-  try {
-    return JSON.parse(await fs.readFile(p, 'utf8')) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
+async function getConfiguredMcpServers(deps: { getConfig: () => Config; configPath: string }): Promise<Record<string, MCPServerConfig>> {
+  const diskConfig = await readJsonObjectFile(deps.configPath);
+  if (isMcpServerRecord(diskConfig.mcpServers)) return diskConfig.mcpServers;
+  return deps.getConfig().mcpServers ?? {};
 }
 
-async function writeConfig(p: string, cfg: Record<string, unknown>): Promise<void> {
-  const raw = JSON.stringify(cfg, null, 2);
-  const tmp = p + '.tmp';
-  await fs.writeFile(tmp, raw, 'utf8');
-  await fs.rename(tmp, p);
+function isMcpServerRecord(value: unknown): value is Record<string, MCPServerConfig> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
 // ── Colour helpers (no dep on core color — inline) ───────────────────────────
