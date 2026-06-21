@@ -1,4 +1,5 @@
 import type { ContentBlock } from '@wrongstack/core';
+import { isPlainObject } from '../object-utils.js';
 
 interface AnthropicBlock {
   type: string;
@@ -40,7 +41,7 @@ export function contentFromAnthropic(
     if (b.type === 'text' && typeof b.text === 'string') {
       out.push({ type: 'text', text: b.text });
     } else if (b.type === 'tool_use' && b.id && b.name) {
-      const input = isPlainObject(b.input) ? (b.input as Record<string, unknown>) : {};
+      const input = isPlainObject(b.input) ? b.input : {};
       out.push({ type: 'tool_use', id: b.id, name: b.name, input });
     } else if (b.type === 'tool_result' && b.tool_use_id) {
       out.push({
@@ -99,6 +100,3 @@ function normalizeToolResultContent(raw: unknown, opts: FromAnthropicOptions): s
   return JSON.stringify(raw);
 }
 
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}

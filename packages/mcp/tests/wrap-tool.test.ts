@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { ToolCapabilities } from '@wrongstack/core';
 import type { MCPClient, MCPTool } from '../src/client.js';
 import { wrapMCPTool } from '../src/wrap-tool.js';
 
@@ -19,6 +20,15 @@ describe('wrapMCPTool', () => {
       mkClient(async () => 'ok'),
     );
     expect(wrapped.name).toBe('mcp__postgres__list');
+  });
+
+  it('declares the MCP proxy capability for permission boundaries', () => {
+    const wrapped = wrapMCPTool(
+      'ssh',
+      { name: 'ssh_execute', inputSchema: { type: 'object' } },
+      mkClient(async () => 'ok'),
+    );
+    expect(wrapped.capabilities).toContain(ToolCapabilities.MCP_PROXY);
   });
 
   it('marks mutating heuristically', () => {

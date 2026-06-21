@@ -1,4 +1,4 @@
-import type { Permission, Tool } from '@wrongstack/core';
+import { ToolCapabilities, type Permission, type Tool } from '@wrongstack/core';
 import type { MCPClient, MCPTool } from './client.js';
 
 /**
@@ -43,6 +43,7 @@ export function wrapMCPTool(
     usageHint: `Tool provided by MCP server "${serverName}". ${mcpTool.description ?? ''}`,
     permission,
     mutating: isMutatingTool(mcpTool),
+    capabilities: [ToolCapabilities.MCP_PROXY],
     inputSchema: mcpTool.inputSchema ?? { type: 'object', properties: {} },
     async execute(input, _ctx, _opts) {
       // For a dormant lazy server this spawns the process + handshakes before

@@ -50,11 +50,11 @@ export class DefaultTokenCounter implements TokenCounter {
     const price = model ? this.priceCache.get(model) : undefined;
     if (price) {
       this.applyPrice(usage, price);
-      this.events?.emit('token.accounted', {
-        usage: this.total(),
-        cost: { input: this.costInput, output: this.costOutput, total: this.costInput + this.costOutput },
-      });
-    } else if (this.registry && this.providerId && model) {
+      this.emitAccounted();
+      return;
+    }
+
+    if (this.registry && this.providerId && model) {
       // Evict oldest entry when cache is full before async lookup.
       if (this.priceCache.size >= PRICE_CACHE_MAX_SIZE) {
         const keys = [...this.priceCache.keys()];
@@ -68,18 +68,24 @@ export class DefaultTokenCounter implements TokenCounter {
             const p = priceFromModel(m);
             this.priceCache.set(model, p);
             this.applyPrice(usage, p);
-            this.events?.emit('token.accounted', {
-              usage: this.total(),
-              cost: { input: this.costInput, output: this.costOutput, total: this.costInput + this.costOutput },
-            });
           }
+          // Token totals are authoritative even when pricing is unresolved.
+          // Emit after the lookup settles so live UIs update for unknown models
+          // without double-emitting when pricing is resolved.
+          this.emitAccounted();
         })
         .catch(() => {
           // Emit so observability tooling can detect unknown models.
           this.events?.emit('token.cost_estimate_unavailable', { model: model ?? '<unknown>' });
+          this.emitAccounted();
           return undefined;
         });
+      return;
     }
+
+    // No pricing source exists. Still emit token totals so live UIs do not stay
+    // at 0 just because cost cannot be estimated.
+    this.emitAccounted();
   }
 
   /** Synchronous variant for code paths that have already resolved the model. */
@@ -98,10 +104,7 @@ export class DefaultTokenCounter implements TokenCounter {
     }
     this.priceCache.set(resolved.modelId, price);
     this.applyPrice(usage, price);
-    this.events?.emit('token.accounted', {
-      usage: this.total(),
-      cost: { input: this.costInput, output: this.costOutput, total: this.costInput + this.costOutput },
-    });
+    this.emitAccounted();
   }
 
   total(): Usage {
@@ -143,6 +146,13 @@ export class DefaultTokenCounter implements TokenCounter {
     this.priceCache.clear();
   }
 
+  private emitAccounted(): void {
+    this.events?.emit('token.accounted', {
+      usage: this.total(),
+      cost: { input: this.costInput, output: this.costOutput, total: this.costInput + this.costOutput },
+    });
+  }
+
   reset(): void {
     this.input = 0;
     this.output = 0;
@@ -150,6 +160,9 @@ export class DefaultTokenCounter implements TokenCounter {
     this.cacheWrite = 0;
     this.costInput = 0;
     this.costOutput = 0;
+    this.lastInput = 0;
+    this.lastCacheRead = 0;
+    this.emitAccounted();
   }
 
   private applyPrice(usage: Usage, price: PriceEntry): void {

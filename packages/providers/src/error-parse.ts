@@ -1,5 +1,6 @@
 import { ProviderError } from '@wrongstack/core';
 import type { ProviderErrorBody } from '@wrongstack/core';
+import { isPlainObject } from './object-utils.js';
 
 /**
  * Provider HTTP error bodies come in three or four shapes depending on
@@ -41,13 +42,13 @@ function parseBody(rawText: string): ProviderErrorBody {
   } catch {
     return body;
   }
-  if (!isRecord(parsed)) return body;
+  if (!isPlainObject(parsed)) return body;
 
   // Anthropic / MiniMax / Kimi: { type: "error", error: { type, message }, request_id }
   // OpenAI / OpenAI-compatible: { error: { message, type, code, param } }
   // Google: { error: { code, message, status } }
   const errField = parsed['error'];
-  if (isRecord(errField)) {
+  if (isPlainObject(errField)) {
     const t = stringOf(errField['type']) ?? stringOf(errField['status']);
     const m = stringOf(errField['message']);
     if (t) body.type = t;
@@ -85,10 +86,6 @@ function isRetryable(status: number, type?: string): boolean {
   if (status >= 500 && status < 600) return true;
   if (type === 'overloaded_error' || type === 'rate_limit_error') return true;
   return false;
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
 function stringOf(v: unknown): string | undefined {

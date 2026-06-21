@@ -12,6 +12,7 @@ import {
   miniMaxVisionServer,
   playwrightServer,
   sentinelServer,
+  sshManagerServer,
   slackServer,
   zaiVisionServer,
 } from '../../src/infrastructure/mcp-servers.js';
@@ -59,6 +60,7 @@ describe('built-in MCP server presets (V0-D)', () => {
     ['zai-vision', zaiVisionServer],
     ['minimax-vision', miniMaxVisionServer],
     ['playwright', playwrightServer],
+    ['ssh', sshManagerServer],
   ];
 
   for (const [label, factory] of presets) {
@@ -82,6 +84,8 @@ describe('built-in MCP server presets (V0-D)', () => {
     expect(names).toContain('context7');
     expect(names).toContain('zai-vision');
     expect(names).toContain('minimax-vision');
+    expect(names).toContain('playwright');
+    expect(names).toContain('ssh');
     // Each entry's key matches its config.name.
     for (const [key, cfg] of Object.entries(all)) {
       expect(key).toBe(cfg.name);

@@ -1,10 +1,20 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   SSEReader,
   SSETransport,
   StreamableHTTPTransport,
   extractJsonRpcResults,
 } from '../src/transport.js';
+
+const originalUnsafeMcpTls = process.env['WRONGSTACK_UNSAFE_MCP_TLS'];
+const originalCi = process.env['CI'];
+
+afterEach(() => {
+  if (originalUnsafeMcpTls === undefined) delete process.env['WRONGSTACK_UNSAFE_MCP_TLS'];
+  else process.env['WRONGSTACK_UNSAFE_MCP_TLS'] = originalUnsafeMcpTls;
+  if (originalCi === undefined) delete process.env['CI'];
+  else process.env['CI'] = originalCi;
+});
 
 describe('extractJsonRpcResults', () => {
   it('parses plain NDJSON', () => {
@@ -192,6 +202,33 @@ describe('validateTransportUrl SSRF guard (via constructor)', () => {
 
   it('allows a normal remote https host', () => {
     expect(() => new SSETransport({ name: 'x', url: 'https://mcp.example.com/' })).not.toThrow();
+  });
+
+  it('rejects disabled TLS verification even when CI=true', () => {
+    delete process.env['WRONGSTACK_UNSAFE_MCP_TLS'];
+    process.env['CI'] = 'true';
+
+    expect(
+      () =>
+        new SSETransport({
+          name: 'x',
+          url: 'https://mcp.example.com/',
+          tls: { rejectUnauthorized: false },
+        }),
+    ).toThrow(/WRONGSTACK_UNSAFE_MCP_TLS=1/);
+  });
+
+  it('allows disabled TLS verification only with explicit opt-in', () => {
+    process.env['WRONGSTACK_UNSAFE_MCP_TLS'] = '1';
+
+    expect(
+      () =>
+        new StreamableHTTPTransport({
+          name: 'x',
+          url: 'https://mcp.example.com/',
+          tls: { rejectUnauthorized: false },
+        }),
+    ).not.toThrow();
   });
 });
 

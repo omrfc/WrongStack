@@ -25,9 +25,8 @@ export interface HttpTransportOptions {
    * disabling certificate validation (NODE_TLS_REJECT_UNAUTHORIZED) which
    * would affect all provider API calls in the same process.
    *
-   * ⚠️ Security gate: `rejectUnauthorized: false` REQUIRES either:
-   *   - `WRONGSTACK_UNSAFE_MCP_TLS=1` env var, OR
-   *   - `CI` env var is set (for automated testing)
+   * ⚠️ Security gate: `rejectUnauthorized: false` REQUIRES
+   * `WRONGSTACK_UNSAFE_MCP_TLS=1` as an explicit opt-in.
    *
    * Without this gate, an active network attacker between the client and the
    * MCP server can read and modify tool calls and responses. Only use this
@@ -38,7 +37,7 @@ export interface HttpTransportOptions {
 }
 
 function isTlsUnsafeAllowed(): boolean {
-  return process.env['WRONGSTACK_UNSAFE_MCP_TLS'] === '1' || process.env['CI'] === 'true';
+  return process.env['WRONGSTACK_UNSAFE_MCP_TLS'] === '1';
 }
 
 /**
@@ -392,7 +391,7 @@ export abstract class BaseHTTPTransport {
         if (!isTlsUnsafeAllowed()) {
           throw new Error(
             `[mcp:${transportName}] TLS verification disabled — set WRONGSTACK_UNSAFE_MCP_TLS=1 ` +
-            `or CI=true to allow. Rejecting insecure configuration for ${this.url}.`,
+            `to allow. Rejecting insecure configuration for ${this.url}.`,
           );
         }
         console.error(

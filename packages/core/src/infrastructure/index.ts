@@ -16,6 +16,7 @@ export {
   zaiVisionServer,
   miniMaxVisionServer,
   playwrightServer,
+  sshManagerServer,
   allServers,
 } from './mcp-servers.js';
 export {

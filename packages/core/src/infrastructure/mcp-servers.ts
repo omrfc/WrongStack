@@ -193,6 +193,26 @@ export const miniMaxVisionServer = (): MCPServerConfig => ({
   permission: 'auto',
 });
 
+/**
+ * SSH Manager — remote SSH execution, file transfer, tunnels, health checks, and deployment ops.
+ * Server credentials are intentionally NOT embedded here. Configure hosts via mcp-ssh-manager's
+ * env/TOML config (for example SSH_SERVER_<NAME>_HOST, USER, KEYPATH/PASSWORD) or ssh-agent.
+ */
+export const sshManagerServer = (): MCPServerConfig => ({
+  name: 'ssh',
+  description:
+    'Remote SSH management — execute commands, transfer files, tunnels, health checks (mcp-ssh-manager)',
+  transport: 'stdio',
+  command: 'npx',
+  args: ['-y', 'mcp-ssh-manager'],
+  env: {
+    MCP_SSH_COMPACT_JSON: 'true',
+    MCP_SSH_DEFAULT_TIMEOUT: '120000',
+  },
+  permission: 'confirm',
+  requestTimeoutMs: 180_000,
+});
+
 /** Everything bundled — full set of built-in servers. Useful for `wstack mcp add --all`. */
 export const allServers = (): Record<string, MCPServerConfig> => ({
   filesystem: { ...filesystemServer(), enabled: false },
@@ -208,4 +228,5 @@ export const allServers = (): Record<string, MCPServerConfig> => ({
   'zai-vision': { ...zaiVisionServer(), enabled: false },
   'minimax-vision': { ...miniMaxVisionServer(), enabled: false },
   playwright: { ...playwrightServer(), enabled: false },
+  ssh: { ...sshManagerServer(), enabled: false },
 });

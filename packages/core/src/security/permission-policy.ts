@@ -7,6 +7,7 @@ import { getDangerousCapabilities, hasCapability, ToolCapabilities } from './cap
 import { atomicWrite } from '../utils/atomic-write.js';
 import { matchAny, matchGlob } from '../utils/glob-match.js';
 import { safeParse } from '../utils/safe-json.js';
+import { subjectForToolInput } from '../utils/tool-subject.js';
 import {
   getInputString,
   isClearlyDestructiveBashCommand,
@@ -173,7 +174,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     const entry = this.policy[tool.name] ?? namespaceEntry;
 
     // 3. Compute subject (the thing being matched)
-    const subject = this.subjectFor(tool.name, input, tool.subjectKey);
+    const subject = subjectForToolInput(tool.name, input, tool.subjectKey);
     const cacheKey = `${tool.name}::${subject ?? tool.name}`;
 
     // S1. Cache check — skip namespace/subject/pattern re-evaluation when the
@@ -405,49 +406,6 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     this._evalCache.clear();
   }
 
-  private subjectFor(toolName: string, input: unknown, subjectKey?: string): string | undefined {
-    if (!input || typeof input !== 'object') return undefined;
-    const obj = input as Record<string, unknown>;
-
-    // Glob metacharacters are dangerous: a crafted subject like "**" or "foo/**/bar"
-    // can match too broadly in the allow/deny pattern match. Escape them so the
-    // matching is done on the literal string.
-    const globChars = /[*?[\]]/g;
-    const escapeGlob = (s: string) => s.replace(globChars, (c) => `\\${c}`);
-    const normalizePath = (s: string) => escapeGlob(s.replace(/\\/g, '/'));
-
-    // 1. Explicit subjectKey on the tool wins — eliminates the cross-tool
-    //    collision where e.g. an HTTP tool's `path` field meant "request
-    //    path" but was matched against filesystem-path trust rules.
-    if (subjectKey) {
-      const v = obj[subjectKey];
-      if (typeof v === 'string') {
-        // Heuristic: path-like keys get backslash normalization for glob
-        // matching on Windows; everything else is treated as opaque.
-        return subjectKey === 'path' || subjectKey === 'file' || subjectKey === 'files'
-          ? normalizePath(v)
-          : escapeGlob(v);
-      }
-      // subjectKey was declared but the runtime value isn't a string —
-      // fall through to the legacy heuristic so the policy still has a
-      // chance to match on something sensible.
-    }
-
-    // 2. Legacy heuristic — preserved for tools that haven't migrated.
-    if (toolName === 'bash' && typeof obj.command === 'string') {
-      return escapeGlob(obj.command);
-    }
-    if (typeof obj.path === 'string') {
-      return normalizePath(obj.path);
-    }
-    if (typeof obj.url === 'string') {
-      return escapeGlob(obj.url);
-    }
-    if (typeof obj.name === 'string') {
-      return escapeGlob(obj.name);
-    }
-    return undefined;
-  }
 
   private findNamespaceEntry(toolName: string): TrustPolicy[string] | undefined {
     // Use pre-compiled wildcard entries — O(k) where k = wildcard count
@@ -513,6 +471,7 @@ export class AutoApprovePermissionPolicy implements PermissionPolicy {
     const caps = tool.capabilities ?? [];
     const hasAllowedCap = caps.some((c) => this.allowedCapabilities.includes(c));
     const isMcp = AutoApprovePermissionPolicy.isMcpTool(tool.name);
+    const mcpProxyAllowed = this.allowedCapabilities.includes(ToolCapabilities.MCP_PROXY);
 
     // A tool may bundle several capabilities (e.g. `install` declares both
     // `package.install` and `shell.restricted`). The `some()` check above only
@@ -527,14 +486,18 @@ export class AutoApprovePermissionPolicy implements PermissionPolicy {
       (c) => !this.allowedCapabilities.includes(c),
     );
 
-    // Block if: tool is MCP, tool default is deny, no allowed capability, or it
-    // carries a dangerous capability the leader did not explicitly grant.
+    // Block if: tool is an MCP proxy without an explicit mcp.proxy grant,
+    // tool default is deny, no allowed capability, or it carries a dangerous
+    // capability the leader did not explicitly grant.
     const blocked =
-      tool.permission === 'deny' || isMcp || !hasAllowedCap || dangerousNotAllowed.length > 0;
+      tool.permission === 'deny' ||
+      (isMcp && !mcpProxyAllowed) ||
+      !hasAllowedCap ||
+      dangerousNotAllowed.length > 0;
 
     if (blocked) {
-      const reason = isMcp
-        ? `MCP tool ${tool.name} is not auto-approved for subagents — ask the leader to allow it explicitly`
+      const reason = isMcp && !mcpProxyAllowed
+        ? `MCP tool ${tool.name} is not auto-approved for subagents — ask the leader to allow mcp.proxy explicitly`
         : tool.permission === 'deny'
           ? 'tool default deny'
           : dangerousNotAllowed.length > 0

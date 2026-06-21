@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DefaultTokenCounter } from '../../src/index.js';
+import { EventBus } from '../../src/kernel/events.js';
 import type { ModelsRegistry, ResolvedModel } from '../../src/index.js';
 
 const m1: ResolvedModel = {
@@ -36,14 +37,52 @@ describe('DefaultTokenCounter', () => {
     expect(cost.currency).toBe('USD');
   });
 
-  it('reset clears tokens and cost', () => {
-    const tc = new DefaultTokenCounter();
-    tc.accountWithModel({ input: 1_000_000, output: 1_000_000 }, m1);
+  it('emits token.accounted even when pricing is unavailable', () => {
+    const events = new EventBus();
+    const seen: Array<{ input: number; output: number; cacheRead?: number; cacheWrite?: number }> = [];
+    events.on('token.accounted', (e) => seen.push(e.usage));
+    const tc = new DefaultTokenCounter({ events });
+
+    tc.account({ input: 1000, output: 500, cacheRead: 250, cacheWrite: 125 }, 'unknown-model');
+
+    expect(seen).toEqual([{ input: 1000, output: 500, cacheRead: 250, cacheWrite: 125 }]);
+  });
+
+  it('emits token.accounted when registry has no matching model', async () => {
+    const events = new EventBus();
+    const seen: Array<{ input: number; output: number; cacheRead?: number; cacheWrite?: number }> = [];
+    events.on('token.accounted', (e) => seen.push(e.usage));
+    const registry = {
+      getModel: vi.fn().mockResolvedValue(undefined),
+      load: async () => ({}) as never,
+      refresh: async () => ({}) as never,
+      listProviders: async () => [],
+      getProvider: async () => undefined,
+      suggestModel: async () => undefined,
+      ageSeconds: async () => 0,
+    } as unknown as ModelsRegistry;
+    const tc = new DefaultTokenCounter({ events, registry, providerId: 'local' });
+
+    tc.account({ input: 1234, output: 56 }, 'custom-model');
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(seen).toEqual([{ input: 1234, output: 56, cacheRead: 0, cacheWrite: 0 }]);
+  });
+
+  it('reset clears tokens and cost and emits a zero snapshot', () => {
+    const events = new EventBus();
+    const seen: Array<{ input: number; output: number; cacheRead?: number; cacheWrite?: number }> = [];
+    events.on('token.accounted', (e) => seen.push(e.usage));
+    const tc = new DefaultTokenCounter({ events });
+    tc.accountWithModel({ input: 1_000_000, output: 1_000_000, cacheRead: 50 }, m1);
     expect(tc.total().input).toBe(1_000_000);
     expect(tc.estimateCost().total).toBeGreaterThan(0);
+    expect(tc.currentRequestTokens()).toEqual({ input: 1_000_000, cacheRead: 50 });
     tc.reset();
     expect(tc.total().input).toBe(0);
     expect(tc.estimateCost().total).toBe(0);
+    expect(tc.currentRequestTokens()).toEqual({ input: 0, cacheRead: 0 });
+    expect(seen.at(-1)).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   });
 
   it('accountWithModel applies pricing synchronously', () => {
