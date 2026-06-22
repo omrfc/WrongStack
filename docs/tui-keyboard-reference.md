@@ -430,9 +430,10 @@ Shown when Esc is pressed while agent is running AND `confirmExit` is enabled.
 
 ### Worktree monitor close
 
-| Key | Effect |
-|---|---|
-| Ctrl+W | Close worktree monitor panel |
+| Key | Effect | Terminal conflict notes |
+|---|---|---|
+| Esc, F4 | Close worktree monitor panel | Preferred terminal-safe close keys |
+| Ctrl+W | Close worktree monitor panel | May be intercepted as close-tab/pane or delete-word by terminal hosts |
 
 ---
 

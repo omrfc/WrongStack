@@ -25,6 +25,13 @@ function fmt(s: string) {
   return WT_STATUS[s] ?? { icon: '?', color: 'white', label: s };
 }
 
+export function isWorktreeMonitorCloseKey(
+  input: string,
+  key: { escape?: boolean | undefined; ctrl?: boolean | undefined },
+): boolean {
+  return key.escape === true || (key.ctrl === true && input === 'w');
+}
+
 /**
  * Full-screen Worktree monitor overlay (Ctrl+T to open, Ctrl+T to close).
  * Shows each AutoPhase worktree: branch, base→branch, owner phase, diff stats,
@@ -45,7 +52,7 @@ export function WorktreeMonitor({
   onClose: () => void;
 }): React.ReactElement {
   useInput((input, key) => {
-    if (key.ctrl && input === 'w') onClose();
+    if (isWorktreeMonitorCloseKey(input, key)) onClose();
   });
 
   /** Terminal worktrees older than this are pruned from the view. */
@@ -83,7 +90,7 @@ export function WorktreeMonitor({
             <Text color="red">✗{failed}</Text>
           </>
         ) : null}
-        <Text dimColor>│ Ctrl+T / F4 to close</Text>
+        <Text dimColor>│ Esc / F4 to close</Text>
       </Box>
 
       {recent.length === 0 ? (
@@ -126,7 +133,7 @@ export function WorktreeMonitor({
       )}
 
       <Box marginTop={1}>
-        <Text dimColor>Ctrl+T to close · merge conflicts with /worktree merge &lt;branch&gt;</Text>
+        <Text dimColor>Esc / F4 to close · merge conflicts with /worktree merge &lt;branch&gt;</Text>
         {staleTerminal > 0 ? <Text dimColor>{` · ${staleTerminal} terminal pruned`}</Text> : null}
       </Box>
     </Box>
