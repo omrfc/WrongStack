@@ -5,6 +5,7 @@
  * SessionRegistry, then verifies each process can discover all others.
  * Uses a temp directory to avoid interfering with the real registry.
  */
+import { spawn } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -44,6 +45,25 @@ function makeAgent(over: Partial<AgentEntry> = {}): AgentEntry {
 
 async function forceHeartbeat(registry: SessionRegistry): Promise<void> {
   await (registry as never as { heartbeat(): Promise<void> }).heartbeat();
+}
+
+/**
+ * Return a PID that is guaranteed not to be alive. Spawning a process and
+ * waiting for it to exit hands back a freshly-freed PID — reliably dead on
+ * every platform. A hardcoded constant (e.g. 99999) is NOT safe: that PID can
+ * belong to a real live process, which makes `pidAlive()`-based pruning flaky.
+ */
+async function deadPid(): Promise<number> {
+  return await new Promise<number>((resolve, reject) => {
+    const child = spawn(process.execPath, ['-e', '0'], { stdio: 'ignore' });
+    const pid = child.pid;
+    if (!pid) {
+      reject(new Error('failed to spawn helper process for deadPid()'));
+      return;
+    }
+    child.once('error', reject);
+    child.once('exit', () => resolve(pid));
+  });
 }
 
 describe('cross-process session discovery', () => {
@@ -212,7 +232,7 @@ describe('cross-process session discovery', () => {
       projectRoot: '/dead',
       projectName: 'Dead Project',
       workingDir: '/dead',
-      pid: 99999, // PID that definitely doesn't exist
+      pid: await deadPid(), // a PID guaranteed not to be alive
       startedAt: new Date(Date.now() - 10 * 60_000).toISOString(), // 10 min ago
     });
 
@@ -281,7 +301,7 @@ describe('lock resilience', () => {
     const root = await freshRoot();
     const lockPath = path.join(root, 'session-registry.json.lock');
     // Plant a leftover lock owned by a PID that is not alive.
-    await fs.writeFile(lockPath, '99999');
+    await fs.writeFile(lockPath, String(await deadPid()));
 
     const reg = new SessionRegistry(root);
     await reg.register({
@@ -298,6 +318,33 @@ describe('lock resilience', () => {
     expect(list.find((s) => s.sessionId === 'sess-wedge')).toBeDefined();
     // The stale lock must have been cleaned up, not left to wedge future writes.
     await expect(fs.access(lockPath)).rejects.toThrow();
+  });
+
+  it('prunes stale registry temp files during writes', async () => {
+    const root = await freshRoot();
+    const reg = new SessionRegistry(root);
+
+    for (let i = 0; i < 25; i++) {
+      const legacyTemp = path.join(root, `session-registry.json.${String(i).padStart(8, '0')}.tmp`);
+      await fs.writeFile(legacyTemp, '{}');
+      const old = new Date(Date.now() - 120_000 - i);
+      await fs.utimes(legacyTemp, old, old);
+    }
+
+    await reg.register({
+      sessionId: 'sess-prune-tmp',
+      projectSlug: 'ws',
+      projectRoot: '/ws',
+      projectName: 'WS',
+      workingDir: '/ws',
+      pid: 6001,
+      startedAt: new Date().toISOString(),
+    });
+
+    const temps = (await fs.readdir(root)).filter(
+      (name) => name.startsWith('session-registry.json.') && name.endsWith('.tmp'),
+    );
+    expect(temps).toHaveLength(20);
   });
 
   it('self-heals an entry whose initial register write was dropped', async () => {

@@ -168,7 +168,7 @@ describe('Agent', () => {
     ]);
 
     const repairs: Array<{ removedToolUses: string[]; removedMessages: number }> = [];
-    (agent as unknown as { events: EventBus }).events.on('context.repaired', (e) => {
+    (agent as never as { events: EventBus }).events.on('context.repaired', (e) => {
       repairs.push({
         removedToolUses: e.removedToolUses,
         removedMessages: e.removedMessages,
@@ -250,7 +250,7 @@ describe('Agent', () => {
     const { agent, tmp } = await buildAgent(provider, [danger]);
     cleanupDirs.push(tmp);
     // Approve the confirmation the moment the agent asks.
-    (agent as unknown as { events: EventBus }).events.on(
+    (agent as never as { events: EventBus }).events.on(
       'tool.confirm_needed',
       (e: { resolve: (d: 'yes' | 'no' | 'always' | 'deny') => void }) => e.resolve('yes'),
     );
@@ -363,8 +363,8 @@ describe('Agent', () => {
     const { agent, tmp } = await buildAgent(provider, [readTool]);
     cleanupDirs.push(tmp);
     const executed: Array<{ name: string; outputLines?: number }> = [];
-    (agent as unknown as { events: EventBus }).events.on('tool.executed', (e) => {
-      executed.push({ name: e.name, outputLines: (e as unknown as { outputLines?: number }).outputLines });
+    (agent as never as { events: EventBus }).events.on('tool.executed', (e) => {
+      executed.push({ name: e.name, outputLines: (e as never as { outputLines?: number }).outputLines });
     });
     await agent.run('go');
     expect(executed).toHaveLength(1);
@@ -393,8 +393,8 @@ describe('Agent', () => {
     const { agent, tmp } = await buildAgent(provider, [bashTool]);
     cleanupDirs.push(tmp);
     const executed: Array<{ name: string; outputLines?: number }> = [];
-    (agent as unknown as { events: EventBus }).events.on('tool.executed', (e) => {
-      executed.push({ name: e.name, outputLines: (e as unknown as { outputLines?: number }).outputLines });
+    (agent as never as { events: EventBus }).events.on('tool.executed', (e) => {
+      executed.push({ name: e.name, outputLines: (e as never as { outputLines?: number }).outputLines });
     });
     await agent.run('go');
     expect(executed).toHaveLength(1);
@@ -424,8 +424,8 @@ describe('Agent', () => {
     const { agent, tmp } = await buildAgent(provider, [customTool]);
     cleanupDirs.push(tmp);
     const executed: Array<{ name: string; outputLines?: number }> = [];
-    (agent as unknown as { events: EventBus }).events.on('tool.executed', (e) => {
-      executed.push({ name: e.name, outputLines: (e as unknown as { outputLines?: number }).outputLines });
+    (agent as never as { events: EventBus }).events.on('tool.executed', (e) => {
+      executed.push({ name: e.name, outputLines: (e as never as { outputLines?: number }).outputLines });
     });
     await agent.run('go');
     expect(executed).toHaveLength(1);
@@ -442,7 +442,7 @@ describe('Agent', () => {
       },
       { content: [{ type: 'text', text: 'done' }], stopReason: 'end_turn' },
     ]);
-    const { agent, tmp } = await buildAgent(provider as unknown as MockProvider);
+    const { agent, tmp } = await buildAgent(provider as never as MockProvider);
     cleanupDirs.push(tmp);
     const toolStarts: Array<{ id: string; name: string }> = [];
     const toolStops: Array<{ id: string; name: string }> = [];
@@ -508,8 +508,8 @@ describe('Agent — sizeSignals coverage', () => {
     const { agent, tmp } = await buildAgent(provider, [bashTool]);
     cleanupDirs.push(tmp);
     const executed: Array<{ name: string; outputLines?: number }> = [];
-    (agent as unknown as { events: EventBus }).events.on('tool.executed', (e) => {
-      executed.push({ name: e.name, outputLines: (e as unknown as { outputLines?: number }).outputLines });
+    (agent as never as { events: EventBus }).events.on('tool.executed', (e) => {
+      executed.push({ name: e.name, outputLines: (e as never as { outputLines?: number }).outputLines });
     });
     await agent.run('go');
     expect(executed).toHaveLength(1);
@@ -538,8 +538,8 @@ describe('Agent — sizeSignals coverage', () => {
     const { agent, tmp } = await buildAgent(provider, [customTool]);
     cleanupDirs.push(tmp);
     const executed: Array<{ name: string; outputLines?: number }> = [];
-    (agent as unknown as { events: EventBus }).events.on('tool.executed', (e) => {
-      executed.push({ name: e.name, outputLines: (e as unknown as { outputLines?: number }).outputLines });
+    (agent as never as { events: EventBus }).events.on('tool.executed', (e) => {
+      executed.push({ name: e.name, outputLines: (e as never as { outputLines?: number }).outputLines });
     });
     await agent.run('go');
     expect(executed).toHaveLength(1);
@@ -567,8 +567,8 @@ describe('Agent — sizeSignals coverage', () => {
     const { agent, tmp } = await buildAgent(provider, [grepTool]);
     cleanupDirs.push(tmp);
     const executed: Array<{ name: string; outputLines?: number }> = [];
-    (agent as unknown as { events: EventBus }).events.on('tool.executed', (e) => {
-      executed.push({ name: e.name, outputLines: (e as unknown as { outputLines?: number }).outputLines });
+    (agent as never as { events: EventBus }).events.on('tool.executed', (e) => {
+      executed.push({ name: e.name, outputLines: (e as never as { outputLines?: number }).outputLines });
     });
     await agent.run('go');
     expect(executed).toHaveLength(1);
@@ -590,7 +590,7 @@ describe('Agent — streaming provider tool_use events', () => {
       },
       { content: [{ type: 'text', text: 'done' }], stopReason: 'end_turn' },
     ]);
-    const { agent, tmp } = await buildAgent(provider as unknown as MockProvider);
+    const { agent, tmp } = await buildAgent(provider as never as MockProvider);
     cleanupDirs.push(tmp);
     const toolStarts: Array<{ id: string; name: string }> = [];
     const toolStops: Array<{ id: string; name: string }> = [];
@@ -606,7 +606,7 @@ describe('Agent — streaming provider tool_use events', () => {
     const provider = new StreamingMockProvider([
       { content: [{ type: 'text', text: 'hello world' }], stopReason: 'end_turn' },
     ]);
-    const { agent, tmp } = await buildAgent(provider as unknown as MockProvider);
+    const { agent, tmp } = await buildAgent(provider as never as MockProvider);
     cleanupDirs.push(tmp);
     const deltas: string[] = [];
     agent.events.on('provider.text_delta', (p) => deltas.push(p.text));
@@ -677,7 +677,7 @@ describe('Agent — additional coverage', () => {
     const provider = new StreamingMockProvider([
       { content: [{ type: 'text', text: 'hello world' }], stopReason: 'end_turn' },
     ]);
-    const { agent, tmp } = await buildAgent(provider as unknown as MockProvider);
+    const { agent, tmp } = await buildAgent(provider as never as MockProvider);
     cleanupDirs.push(tmp);
     const deltas: string[] = [];
     agent.events.on('provider.text_delta', (p) => deltas.push(p.text));
@@ -706,7 +706,7 @@ describe('Agent — additional coverage', () => {
         return (input as { text: string }).text;
       },
     };
-    const { agent, tmp } = await buildAgent(provider as unknown as MockProvider, [echo]);
+    const { agent, tmp } = await buildAgent(provider as never as MockProvider, [echo]);
     cleanupDirs.push(tmp);
     const toolStarts: { id: string; name: string }[] = [];
     agent.events.on('provider.tool_use_start', (p) => toolStarts.push({ id: p.id, name: p.name }));
@@ -747,7 +747,7 @@ describe('Agent — additional coverage', () => {
       async complete() {
         throw new Error('unused');
       },
-    } as unknown as MockProvider;
+    } as never as MockProvider;
     const { agent, ctx, tmp } = await buildAgent(provider);
     cleanupDirs.push(tmp);
     const ctrl = new AbortController();
@@ -770,7 +770,7 @@ describe('Agent — additional coverage', () => {
     const provider = new StreamingMockProvider([
       { content: [{ type: 'text', text: 'ok' }], stopReason: 'end_turn' },
     ]);
-    const { agent, ctx, tmp } = await buildAgent(provider as unknown as MockProvider);
+    const { agent, ctx, tmp } = await buildAgent(provider as never as MockProvider);
     cleanupDirs.push(tmp);
     let hookFired = false;
     ctx.registerAbortHook(() => {
@@ -843,17 +843,17 @@ describe('Agent — additional coverage', () => {
       }
     }
     const provider = new FlakyProvider();
-    const { agent, tmp, ctx } = await buildAgent(provider as unknown as MockProvider);
+    const { agent, tmp, ctx } = await buildAgent(provider as never as MockProvider);
     cleanupDirs.push(tmp);
     // Override retry policy to a near-zero delay so the test runs fast.
-    (agent as unknown as { container: Container }).container.override(TOKENS.RetryPolicy, () => ({
+    (agent as never as { container: Container }).container.override(TOKENS.RetryPolicy, () => ({
       shouldRetry: (err: Error | ProviderError, attempt: number) =>
         err instanceof ProviderError && err.retryable && attempt < 3,
       delayMs: () => 1,
       maxAttempts: () => 3,
     }));
     // Replace the context's provider with our flaky one.
-    (ctx as unknown as { provider: Provider }).provider = provider;
+    (ctx as never as { provider: Provider }).provider = provider;
 
     const retries: Array<{
       providerId: string;
@@ -862,8 +862,8 @@ describe('Agent — additional coverage', () => {
       description: string;
     }> = [];
     const errors: Array<{ providerId: string; status: number; description: string }> = [];
-    (agent as unknown as { events: EventBus }).events.on('provider.retry', (e) => retries.push(e));
-    (agent as unknown as { events: EventBus }).events.on('provider.error', (e) => errors.push(e));
+    (agent as never as { events: EventBus }).events.on('provider.retry', (e) => retries.push(e));
+    (agent as never as { events: EventBus }).events.on('provider.error', (e) => errors.push(e));
 
     const result = await agent.run('ping');
     expect(result.status).toBe('done');
@@ -900,7 +900,7 @@ describe('Agent — additional coverage', () => {
     cleanupDirs.push(tmp);
 
     const executed: Array<{ name: string; output?: string; input?: unknown; ok: boolean }> = [];
-    (agent as unknown as { events: EventBus }).events.on('tool.executed', (e) => {
+    (agent as never as { events: EventBus }).events.on('tool.executed', (e) => {
       executed.push({ name: e.name, output: e.output, input: e.input, ok: e.ok });
     });
 
@@ -939,12 +939,12 @@ describe('Agent — additional coverage', () => {
       }
     }
     const provider = new AlwaysFailProvider();
-    const { agent, tmp, ctx } = await buildAgent(provider as unknown as MockProvider);
+    const { agent, tmp, ctx } = await buildAgent(provider as never as MockProvider);
     cleanupDirs.push(tmp);
-    (ctx as unknown as { provider: Provider }).provider = provider;
+    (ctx as never as { provider: Provider }).provider = provider;
 
     const errors: Array<{ providerId: string; status: number; description: string }> = [];
-    (agent as unknown as { events: EventBus }).events.on('provider.error', (e) => errors.push(e));
+    (agent as never as { events: EventBus }).events.on('provider.error', (e) => errors.push(e));
 
     const result = await agent.run('ping');
     expect(result.status).toBe('failed');
@@ -977,9 +977,9 @@ describe('Agent — additional coverage', () => {
       }
     }
     const provider = new FailProvider();
-    const { agent, tmp, ctx } = await buildAgent(provider as unknown as MockProvider);
+    const { agent, tmp, ctx } = await buildAgent(provider as never as MockProvider);
     cleanupDirs.push(tmp);
-    (ctx as unknown as { provider: Provider }).provider = provider;
+    (ctx as never as { provider: Provider }).provider = provider;
 
     const result = await agent.run('ping');
     expect(result.status).toBe('failed');
@@ -1025,10 +1025,10 @@ describe('Agent — additional coverage', () => {
     }
 
     const provider = new FailsThenSucceedsProvider();
-    const { agent, tmp, ctx } = await buildAgent(provider as unknown as MockProvider);
+    const { agent, tmp, ctx } = await buildAgent(provider as never as MockProvider);
     cleanupDirs.push(tmp);
-    (ctx as unknown as { provider: Provider }).provider = provider;
-    (agent as unknown as { container: Container }).container.override(TOKENS.ErrorHandler, () => ({
+    (ctx as never as { provider: Provider }).provider = provider;
+    (agent as never as { container: Container }).container.override(TOKENS.ErrorHandler, () => ({
       recover: async () => ({
         action: 'retry' as const,
         reason: 'test_retry',
@@ -1069,10 +1069,10 @@ describe('Agent — additional coverage', () => {
     }
 
     const provider = new RecoverViaContinueProvider();
-    const { agent, tmp, ctx } = await buildAgent(provider as unknown as MockProvider);
+    const { agent, tmp, ctx } = await buildAgent(provider as never as MockProvider);
     cleanupDirs.push(tmp);
-    (ctx as unknown as { provider: Provider }).provider = provider;
-    (agent as unknown as { container: Container }).container.override(TOKENS.ErrorHandler, () => ({
+    (ctx as never as { provider: Provider }).provider = provider;
+    (agent as never as { container: Container }).container.override(TOKENS.ErrorHandler, () => ({
       recover: async () => ({
         action: 'continue' as const,
         response: {
@@ -1115,11 +1115,11 @@ describe('Agent — additional coverage', () => {
     }
 
     const provider = new RecoverViaFailProvider();
-    const { agent, tmp, ctx } = await buildAgent(provider as unknown as MockProvider);
+    const { agent, tmp, ctx } = await buildAgent(provider as never as MockProvider);
     cleanupDirs.push(tmp);
-    (ctx as unknown as { provider: Provider }).provider = provider;
+    (ctx as never as { provider: Provider }).provider = provider;
     const terminal = new Error('terminal recovery decision');
-    (agent as unknown as { container: Container }).container.override(TOKENS.ErrorHandler, () => ({
+    (agent as never as { container: Container }).container.override(TOKENS.ErrorHandler, () => ({
       recover: async () => ({ action: 'fail' as const, reason: 'terminal', error: terminal }),
       classify: () => ({ kind: 'server' as const, retryable: false }),
     }));

@@ -11,7 +11,7 @@ const plan = (): RefactorPlan => ({ id: 'p1', basedOnBugIds: ['b1'], phases: [{ 
 const evaluation = (verdict: CriticEvaluation['verdict'] = 'reject'): CriticEvaluation => ({ id: 'e1', subjectType: 'bug_finding', subjectId: 'b1', score: 4, verdict, strengths: ['s'], weaknesses: ['w'], concerns: [{ description: 'blocker', severity: 'blocking' }] });
 
 const fleetEvent = (fleetBus: FleetBus, subagentId: string, type: string, payload: unknown) =>
-  (fleetBus as unknown as { emit: (e: { subagentId: string; ts: number; type: string; payload: unknown }) => void }).emit({ subagentId, ts: Date.now(), type, payload });
+  (fleetBus as never as { emit: (e: { subagentId: string; ts: number; type: string; payload: unknown }) => void }).emit({ subagentId, ts: Date.now(), type, payload });
 
 function makeMockDirector(fleetBus: FleetBus, resultFor?: (id: string) => unknown) {
   return {
@@ -64,7 +64,7 @@ describe('CollabSession getters + simple accessors', () => {
       prebuiltSnapshot: snap(),
       budgetOverrides: { 'bug-hunter': { maxIterations: 9, maxToolCalls: 9, timeoutMs: 9 } },
     });
-    const call = (role: string) => (s as unknown as { budgetForRole: (r: string) => { maxIterations: number } }).budgetForRole(role);
+    const call = (role: string) => (s as never as { budgetForRole: (r: string) => { maxIterations: number } }).budgetForRole(role);
     expect(call('bug-hunter').maxIterations).toBe(9); // override
     expect(call('critic').maxIterations).toBe(1000); // default
     expect(call('mystery').maxIterations).toBe(1500); // fallback
@@ -82,7 +82,7 @@ describe('CollabSession getters + simple accessors', () => {
 
   it('roleFromSubagentId resolves via tracked map, prefix fallback, and null', () => {
     const s = new CollabSession(makeMockDirector(fleetBus) as never, fleetBus, { targetPaths: ['a.ts'], prebuiltSnapshot: snap() });
-    const role = (id: string) => (s as unknown as { roleFromSubagentId: (i: string) => string | null }).roleFromSubagentId(id);
+    const role = (id: string) => (s as never as { roleFromSubagentId: (i: string) => string | null }).roleFromSubagentId(id);
     expect(role('critic-2')).toBe('critic'); // prefix fallback
     expect(role('unrelated-9')).toBeNull();
   });
@@ -143,7 +143,7 @@ describe('CollabSession.parseAndEmit + report assembly (full start)', () => {
 
   it('parseAndEmit skips non-success and key-less results', async () => {
     const s = new CollabSession(makeMockDirector(fleetBus) as never, fleetBus, { targetPaths: ['a.ts'], prebuiltSnapshot: snap() });
-    const parse = (r: unknown) => (s as unknown as { parseAndEmit: (r: unknown) => Promise<void> }).parseAndEmit(r);
+    const parse = (r: unknown) => (s as never as { parseAndEmit: (r: unknown) => Promise<void> }).parseAndEmit(r);
     await parse({ status: 'failed', result: null });
     await parse({ status: 'success', result: null });
     await parse({ status: 'success', subagentId: 's', taskId: 't', result: 'no json {"other":1} here' }); // no finding/plan/evaluation key
@@ -158,7 +158,7 @@ describe('CollabSession.wireFleetBus event handlers', () => {
       prebuiltSnapshot: snap(),
       onBudgetWarning: onBudgetWarning as never,
     });
-    (s as unknown as { wireFleetBus: () => void }).wireFleetBus();
+    (s as never as { wireFleetBus: () => void }).wireFleetBus();
     return s;
   }
   const budgetPayload = (kind: string, over: Record<string, unknown> = {}) => {
@@ -176,7 +176,7 @@ describe('CollabSession.wireFleetBus event handlers', () => {
     fleetEvent(fleetBus, 'refactor-planner-0', 'refactor.plan', { plan: plan() });
     fleetEvent(fleetBus, 'critic-0', 'critic.evaluation', { evaluation: evaluation('approve') });
     fleetEvent(fleetBus, 'bug-hunter-0', 'tool.executed', {});
-    const report = (s as unknown as { assembleReport: () => { bugs: unknown[] } }).assembleReport();
+    const report = (s as never as { assembleReport: () => { bugs: unknown[] } }).assembleReport();
     expect(report.bugs).toHaveLength(1);
   });
 
@@ -265,16 +265,16 @@ describe('CollabSession edge cases', () => {
 
   it('extractJsonObjects tolerates escaped quotes and backslashes', async () => {
     const s = new CollabSession(makeMockDirector(fleetBus) as never, fleetBus, { targetPaths: ['a.ts'], prebuiltSnapshot: snap() });
-    (s as unknown as { wireFleetBus: () => void }).wireFleetBus();
+    (s as never as { wireFleetBus: () => void }).wireFleetBus();
     const json = JSON.stringify({ finding: { id: 'b9', type: 't', severity: 'low', location: { file: 'a.ts', line: 1 }, description: 'a"b\\c' } });
-    await (s as unknown as { parseAndEmit: (r: unknown) => Promise<void> }).parseAndEmit({ status: 'success', subagentId: 'bug-hunter-0', taskId: 't', result: json });
-    const report = (s as unknown as { assembleReport: () => { bugs: unknown[] } }).assembleReport();
+    await (s as never as { parseAndEmit: (r: unknown) => Promise<void> }).parseAndEmit({ status: 'success', subagentId: 'bug-hunter-0', taskId: 't', result: json });
+    const report = (s as never as { assembleReport: () => { bugs: unknown[] } }).assembleReport();
     expect(report.bugs).toHaveLength(1);
   });
 
   it('auto-extends iterations, tokens, and cost on the ignore path', async () => {
     const s = new CollabSession(makeMockDirector(fleetBus) as never, fleetBus, { targetPaths: ['a.ts'], prebuiltSnapshot: snap(), onBudgetWarning: () => 'ignore' });
-    (s as unknown as { wireFleetBus: () => void }).wireFleetBus();
+    (s as never as { wireFleetBus: () => void }).wireFleetBus();
     for (const [kind, field] of [['iterations', 'maxIterations'], ['tokens', 'maxTokens'], ['cost', 'maxCostUsd']] as const) {
       const cap = { extended: null as Record<string, unknown> | null };
       fleetEvent(fleetBus, 'critic-0', 'budget.threshold_reached', { kind, used: 11, limit: 10, extend: (e: Record<string, unknown>) => { cap.extended = e; }, deny: () => {} });
@@ -285,22 +285,22 @@ describe('CollabSession edge cases', () => {
 
   it('clears an armed timer on director.cancel_collab', () => {
     const s = new CollabSession(makeMockDirector(fleetBus) as never, fleetBus, { targetPaths: ['a.ts'], prebuiltSnapshot: snap() });
-    (s as unknown as { wireFleetBus: () => void }).wireFleetBus();
-    (s as unknown as { _timeoutTimer: NodeJS.Timeout })._timeoutTimer = setTimeout(() => {}, 10_000);
+    (s as never as { wireFleetBus: () => void }).wireFleetBus();
+    (s as never as { _timeoutTimer: NodeJS.Timeout })._timeoutTimer = setTimeout(() => {}, 10_000);
     fleetEvent(fleetBus, 'mock-director', 'director.cancel_collab', { sessionId: s.sessionId, reason: 'stop' });
     expect(s.isCancelled()).toBe(true);
   });
 
   it('roleFromSubagentId resolves via the tracked subagent map', () => {
     const s = new CollabSession(makeMockDirector(fleetBus) as never, fleetBus, { targetPaths: ['a.ts'], prebuiltSnapshot: snap() });
-    (s as unknown as { subagentIds: Map<string, string> }).subagentIds.set('critic', 'sub-xyz');
-    expect((s as unknown as { roleFromSubagentId: (i: string) => string | null }).roleFromSubagentId('sub-xyz')).toBe('critic');
+    (s as never as { subagentIds: Map<string, string> }).subagentIds.set('critic', 'sub-xyz');
+    expect((s as never as { roleFromSubagentId: (i: string) => string | null }).roleFromSubagentId('sub-xyz')).toBe('critic');
   });
 
   it('reports a cancelled disposition when assembling after cancel', () => {
     const s = new CollabSession(makeMockDirector(fleetBus) as never, fleetBus, { targetPaths: ['a.ts'], prebuiltSnapshot: snap() });
     s.cancel('done');
-    const report = (s as unknown as { assembleReport: () => { disposition: string } }).assembleReport();
+    const report = (s as never as { assembleReport: () => { disposition: string } }).assembleReport();
     expect(report.disposition).toBe('cancelled');
   });
 
@@ -313,7 +313,7 @@ describe('CollabSession edge cases', () => {
       targetPaths: [f],
       prebuiltSnapshot: snap([{ path: f, content: '', snapshotMtimeMs: 1, snapshotSizeBytes: 1 }]),
     });
-    const warnings = await (s as unknown as { checkSnapshotFreshness: () => Promise<string[]> }).checkSnapshotFreshness();
+    const warnings = await (s as never as { checkSnapshotFreshness: () => Promise<string[]> }).checkSnapshotFreshness();
     expect(warnings.some((w) => w.includes('changed.ts'))).toBe(true);
   });
 });
@@ -322,7 +322,7 @@ describe('CollabSession.assembleReport markdown sections', () => {
   it('renders alerts and snapshot warnings when present', () => {
     const s = new CollabSession(makeMockDirector(fleetBus) as never, fleetBus, { targetPaths: ['a.ts'], prebuiltSnapshot: snap() });
     // Pre-populate the private state that the markdown summary renders.
-    const priv = s as unknown as {
+    const priv = s as never as {
       alerts: unknown[];
       snapshotWarnings: string[];
       bugs: Map<string, BugFinding>;

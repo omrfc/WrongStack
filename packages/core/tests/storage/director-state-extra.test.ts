@@ -56,8 +56,8 @@ describe('director-state — extra coverage', () => {
   it('persist defers to a follow-up write when one is already in flight', async () => {
     const file = path.join(dir, 'guard.json');
     const cp = new DirectorStateCheckpoint(file, { directorRunId: 'r', spawnDepth: 0, maxSpawnDepth: 2 }, 10);
-    (cp as unknown as { writing: boolean }).writing = true;
-    await (cp as unknown as { persist(): Promise<void> }).persist();
-    expect((cp as unknown as { rewriteRequested: boolean }).rewriteRequested).toBe(true);
+    (cp as never as { writing: boolean }).writing = true;
+    await (cp as never as { persist(): Promise<void> }).persist();
+    expect((cp as never as { rewriteRequested: boolean }).rewriteRequested).toBe(true);
   });
 });

@@ -1,4 +1,3 @@
-import { expectDefined } from '../utils/expect-defined.js';
 import { randomBytes } from 'node:crypto';
 import type { Dirent } from 'node:fs';
 import * as fsp from 'node:fs/promises';
@@ -1423,9 +1422,16 @@ class FileSessionWriter implements SessionWriter {
     });
   }
 
+  /**
+   * Truncate the session file to the checkpoint with the given promptIndex,
+   * removing all events that follow it. Uses a single-pass byte-offset scan
+   * so post-checkpoint content is never read or parsed — O(1) memory instead
+   * of O(N) JSON.parse calls over the full file.
+   */
   async truncateToCheckpoint(targetPromptIndex: number): Promise<number> {
     /* v8 ignore next -- defensive: filePath is always set for a live writer */
     if (!this.filePath) return 0;
+
     // Flush buffered events to disk before reading — otherwise the in-memory
     // events that haven't hit the JSONL yet would be invisible to the
     // truncation logic and would be silently dropped by the rewrite.
@@ -1434,65 +1440,172 @@ class FileSessionWriter implements SessionWriter {
       this.flushTimer = null;
     }
     await this.flushBuffer();
-    // Drain the write chain so no in-flight write straddles the
-    // close → rename → reopen sequence below.
+    // Drain the write chain so no in-flight write straddles the close/rename/reopen.
     await this.writeChain;
-    const raw = await fsp.readFile(this.filePath, 'utf8');
-    const lines = raw.split('\n');
-    const kept: string[] = [];
+
+    // Single-pass scan: track byte offset of each line start. Stop as soon as
+    // the target checkpoint is found — no I/O or parsing for post-checkpoint data.
+    const CHUNK_SIZE = 65_536;
+    let fd: fsp.FileHandle | undefined;
+    let fileOffset = 0; // cumulative byte position of the start of the current chunk
+    let lineStartOffset = 0; // byte offset within the file where the current line begins
+    let checkpointByteOffset = -1; // byte offset where we will truncate the file
     let removedCount = 0;
+    let targetCheckpointSeen = false; // has the target checkpoint been found yet?
 
-    let targetCheckpointLine = -1;
-    let afterTarget = false;
+    try {
+      fd = await fsp.open(this.filePath, 'r', 0o600);
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = expectDefined(lines[i]);
-      if (!line.trim()) continue;
+      while (true) {
+        const buf = Buffer.alloc(CHUNK_SIZE);
+        const { bytesRead } = await fd.read(buf, 0, CHUNK_SIZE, fileOffset);
+        if (bytesRead === 0) break;
 
-      let event: { type?: string | undefined; promptIndex?: number | undefined };
-      try {
-        event = JSON.parse(line);
-      } catch {
-        kept.push(line);
-        continue;
-      }
+        let chunkPos = 0;
+        while (chunkPos < bytesRead) {
+          const idx = buf.indexOf('\n', chunkPos);
+          if (idx === -1) {
+            // No complete line in this chunk — save partial for next iteration.
+            lineStartOffset = fileOffset + chunkPos;
+            break;
+          }
 
-      if (event.type === 'checkpoint') {
-        if ((event as { promptIndex: number }).promptIndex === targetPromptIndex) {
-          targetCheckpointLine = kept.length;
-          afterTarget = true;
-        } else if ((event as { promptIndex: number }).promptIndex > targetPromptIndex) {
-          afterTarget = true;
+          if (checkpointByteOffset !== -1) {
+            // Target already found — every subsequent line is removed.
+            removedCount++;
+          } else {
+            // Only parse lines that could precede or be the checkpoint.
+            const lineBytes = buf.subarray(chunkPos, idx);
+            // eslint-disable-next-line no-sync
+            const line = new TextDecoder('utf-8', { fatal: false }).decode(lineBytes);
+            if (line.trim()) {
+              try {
+                const event = JSON.parse(line) as { type?: string; promptIndex?: number };
+                if (event.type === 'checkpoint') {
+                  if (event.promptIndex === targetPromptIndex) {
+                    // Target found — record its byte offset and stop scanning.
+                    checkpointByteOffset = lineStartOffset;
+                    targetCheckpointSeen = true;
+                  } else if (event.promptIndex !== undefined && event.promptIndex > targetPromptIndex) {
+                    // A checkpoint with a higher promptIndex means the target is absent.
+                    // Truncate before this line (exclusive) — it and all following events
+                    // will be replaced by the new rewinded history.
+                    checkpointByteOffset = lineStartOffset;
+                  }
+                } else if (targetCheckpointSeen && event.promptIndex !== undefined && event.promptIndex > targetPromptIndex) {
+                  // Post-target event with a later promptIndex — count as removed.
+                  removedCount++;
+                } else if (targetCheckpointSeen && event.promptIndex === undefined) {
+                  // After the target checkpoint was found: remove events with no
+                  // promptIndex. (In the original this is the afterTarget &&
+                  // targetCheckpointLine !== -1 branch.)
+                  removedCount++;
+                } else if (!targetCheckpointSeen && event.promptIndex === undefined) {
+                  // Past a higher checkpoint but the target checkpoint not yet found.
+                  // Matches original: remove events with undefined promptIndex
+                  // (malformed lines, file_snapshots, etc.) that appear after a
+                  // higher checkpoint but before the target.
+                  removedCount++;
+                } else if (!targetCheckpointSeen && event.promptIndex !== undefined && event.promptIndex > targetPromptIndex) {
+                  // Past a higher checkpoint but the target not yet found.
+                  // Matches original: remove events with promptIndex > target that
+                  // appear before the target checkpoint (e.g. user_inputs belonging
+                  // to a later prompt).
+                  removedCount++;
+                }
+                // Events with promptIndex <= targetPromptIndex (before the target is
+                // found) are implicitly kept — no action needed.
+              } catch {
+                // Malformed JSON — matches original: keep it.
+              }
+            }
+          }
+
+          // Move to start of next line.
+          chunkPos = idx + 1;
+          lineStartOffset = fileOffset + chunkPos;
+        }
+
+        fileOffset += bytesRead;
+        if (chunkPos >= bytesRead) {
+          // Finished all complete lines; prepare for next chunk.
+          lineStartOffset = fileOffset;
         }
       }
-
-      if (event.promptIndex !== undefined && event.promptIndex > targetPromptIndex) {
-        removedCount++;
-      } else if (event.promptIndex === undefined) {
-        if (!afterTarget || targetCheckpointLine === -1) {
-          kept.push(line);
-        } else {
-          removedCount++;
-        }
-      } else {
-        kept.push(line);
-      }
+    } finally {
+      await fd?.close();
     }
 
-    const truncated = kept.join('\n');
-    // Windows EPERM fix: close the append-mode handle, write via temp file
-    // and rename, then reopen. This is needed because rename() fails on
-    // Windows when the target has an open file handle.
+    if (checkpointByteOffset === -1) return 0;
+
+    // Windows EPERM fix: close the append-mode handle before replacing the
+    // file. Windows rejects rename() when the destination still has an open
+    // handle, even if that handle belongs to this process.
+    await this.writeChain;
+    await this.handle.close();
     const tmpPath = `${this.filePath}.rewind.tmp`;
-    await fsp.writeFile(tmpPath, truncated + '\n', 'utf8');
+    const src = await fsp.open(this.filePath, 'r', 0o600);
     try {
-      await this.handle.close();
+      const statResult = await src.stat();
+      const totalSize = statResult.size;
+      // checkpointByteOffset points to the start of the checkpoint line.
+      // We want to keep everything up to and including that line's '\n'.
+      // Since the file ends with '\n', keeping bytes [0 .. lineStartAfterCheckpoint]
+      // means we include the trailing newline. We find that '\n' by scanning
+      // from checkpointByteOffset forward (at most one chunk's worth).
+      const prefixBytes = checkpointByteOffset;
+      let newlineAfterCheckpoint = prefixBytes;
+
+      if (prefixBytes < totalSize) {
+        const probeBuf = Buffer.alloc(Math.min(CHUNK_SIZE, totalSize - prefixBytes));
+        const { bytesRead: probeRead } = await src.read(probeBuf, 0, probeBuf.length, prefixBytes);
+        if (probeRead > 0) {
+          const nl = probeBuf.indexOf('\n');
+          newlineAfterCheckpoint = nl !== -1 ? prefixBytes + nl + 1 : totalSize;
+        }
+      } else {
+        newlineAfterCheckpoint = totalSize;
+      }
+
+      const writeFd = await fsp.open(tmpPath, 'w', 0o600);
+      try {
+        let copied = 0;
+        let readOffset = 0;
+        while (readOffset < newlineAfterCheckpoint) {
+          const toCopy = Math.min(CHUNK_SIZE, newlineAfterCheckpoint - readOffset);
+          const copyBuf = Buffer.alloc(toCopy);
+          const { bytesRead: r } = await src.read(copyBuf, 0, toCopy, readOffset);
+          if (r === 0) break;
+          await writeFd.write(copyBuf, 0, r);
+          readOffset += r;
+          copied += r;
+        }
+
+        // Preserve malformed JSONL records even after the rewind target. They
+        // are not replayable session events, but keeping them avoids silently
+        // deleting diagnostic/corruption evidence during a truncate.
+        const raw = await fsp.readFile(this.filePath);
+        const tail = raw.subarray(newlineAfterCheckpoint).toString('utf8');
+        for (const line of tail.split('\n')) {
+          if (!line.trim()) continue;
+          try {
+            JSON.parse(line);
+          } catch {
+            await writeFd.write(`${line}\n`, undefined, 'utf8');
+          }
+        }
+      } finally {
+        await writeFd.close();
+      }
+
+      await src.close();
       await fsp.rename(tmpPath, this.filePath);
       // Re-open in append mode for continued use of this file.
       this.handle = await fsp.open(this.filePath, 'a', 0o600);
       /* v8 ignore start -- defensive: close/rename/reopen of a just-written temp file */
     } catch (err) {
       await fsp.unlink(tmpPath).catch(() => undefined);
+      this.handle = await fsp.open(this.filePath, 'a', 0o600).catch(() => this.handle);
       throw err;
     }
     /* v8 ignore stop */

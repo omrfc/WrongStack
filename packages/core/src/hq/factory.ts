@@ -52,7 +52,7 @@ export function resolveHqConfig(options: {
 
   if (!url) {
     if (enabled === false) return undefined;
-    if (enabled === true || token) {
+    if (enabled === true || token || runtimeUrl) {
       return {
         url: runtimeUrl || 'http://127.0.0.1:3499',
         enabled: true,

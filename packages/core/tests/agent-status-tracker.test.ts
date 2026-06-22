@@ -40,7 +40,7 @@ function mockRegistry() {
   return {
     updateAgents: vi.fn().mockResolvedValue(undefined),
     register: vi.fn().mockResolvedValue(undefined),
-  } as unknown as SessionRegistry;
+  } as never as SessionRegistry;
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────
@@ -54,8 +54,8 @@ describe('AgentStatusTracker', () => {
     events = mockEventBus();
     registry = mockRegistry();
     tracker = new AgentStatusTracker({
-      events: events as unknown as import('@wrongstack/core').EventBus,
-      registry: registry as unknown as SessionRegistry,
+      events: events as never as import('@wrongstack/core').EventBus,
+      registry: registry as never as SessionRegistry,
     });
   });
 
@@ -364,8 +364,8 @@ describe('AgentStatusTracker', () => {
 
   it('uses custom leader name when provided', () => {
     const customTracker = new AgentStatusTracker({
-      events: events as unknown as import('@wrongstack/core').EventBus,
-      registry: registry as unknown as SessionRegistry,
+      events: events as never as import('@wrongstack/core').EventBus,
+      registry: registry as never as SessionRegistry,
       leaderName: 'commander',
     });
     customTracker.start();
@@ -401,9 +401,9 @@ describe('AgentStatusTracker', () => {
   it('does not register updateAgents failure as a crash', () => {
     const failingRegistry = {
       updateAgents: vi.fn().mockRejectedValue(new Error('disk full')),
-    } as unknown as SessionRegistry;
+    } as never as SessionRegistry;
     const t = new AgentStatusTracker({
-      events: events as unknown as import('@wrongstack/core').EventBus,
+      events: events as never as import('@wrongstack/core').EventBus,
       registry: failingRegistry,
     });
     t.start();

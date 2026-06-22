@@ -161,10 +161,14 @@ export class HookRunner {
   ): Promise<string | undefined> {
     const entries = this.matching(event, toolName);
     if (entries.length === 0) return undefined;
+    // Run all matching hooks in parallel — none mutate state or block;
+    // each only returns additionalContext which is independently useful.
+    const results = await Promise.allSettled(entries.map((entry) => this.invoke(entry, payload)));
     const parts: string[] = [];
-    for (const entry of entries) {
-      const outcome = await this.invoke(entry, payload);
-      if (outcome?.additionalContext) parts.push(outcome.additionalContext);
+    for (const result of results) {
+      if (result.status === 'fulfilled' && result.value?.additionalContext) {
+        parts.push(result.value.additionalContext);
+      }
     }
     return parts.length ? parts.join('\n') : undefined;
   }

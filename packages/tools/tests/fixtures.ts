@@ -37,8 +37,8 @@ export async function mkSandbox(): Promise<Sandbox> {
       recordFileChange: () => {},
     },
     messages,
+  } as never as Context;
   (ctx as never as { state: Pick<Context['state'], 'replaceMessages' | 'replaceTodos'> }).state =
-  (ctx as { state: Pick<Context['state'], 'replaceMessages' | 'replaceTodos'> }).state =
     {
       replaceMessages(next) {
         messages.length = 0;

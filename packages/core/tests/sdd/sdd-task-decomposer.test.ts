@@ -24,10 +24,10 @@ async function harness() {
 describe('SddTaskDecomposer', () => {
   it('clamps parallel slots into 1..16', async () => {
     const { tracker } = await harness();
-    const graph = { nodes: new Map(), edges: [] } as unknown as TaskGraph;
-    expect((new SddTaskDecomposer(tracker, graph, { parallelSlots: 100 }) as unknown as { slots: number }).slots).toBe(16);
-    expect((new SddTaskDecomposer(tracker, graph, { parallelSlots: 0 }) as unknown as { slots: number }).slots).toBe(1);
-    expect((new SddTaskDecomposer(tracker, graph) as unknown as { slots: number }).slots).toBe(4);
+    const graph = { nodes: new Map(), edges: [] } as never as TaskGraph;
+    expect((new SddTaskDecomposer(tracker, graph, { parallelSlots: 100 }) as never as { slots: number }).slots).toBe(16);
+    expect((new SddTaskDecomposer(tracker, graph, { parallelSlots: 0 }) as never as { slots: number }).slots).toBe(1);
+    expect((new SddTaskDecomposer(tracker, graph) as never as { slots: number }).slots).toBe(4);
   });
 
   it('returns ready pending nodes, capped to the slot count and priority-sorted', async () => {

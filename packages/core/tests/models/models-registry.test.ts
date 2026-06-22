@@ -126,7 +126,7 @@ describe('DefaultModelsRegistry', () => {
       ok: true,
       status: 200,
       json: async () => SAMPLE,
-    } as unknown as Response) as unknown as typeof fetch;
+    } as never as Response) as never as typeof fetch;
     const reg = new DefaultModelsRegistry({ cacheFile, fetchImpl });
     await reg.refresh();
     const cached = JSON.parse(await fs.readFile(cacheFile, 'utf8'));
@@ -142,14 +142,14 @@ describe('DefaultModelsRegistry', () => {
       payload: SAMPLE,
     };
     await fs.writeFile(cacheFile, JSON.stringify(recentCache));
-    const fetchImpl = vi.fn().mockRejectedValue(new Error('offline')) as unknown as typeof fetch;
+    const fetchImpl = vi.fn().mockRejectedValue(new Error('offline')) as never as typeof fetch;
     const reg = new DefaultModelsRegistry({ cacheFile, fetchImpl, ttlSeconds: 0 });
     const payload = await reg.load();
     expect(Object.keys(payload).length).toBeGreaterThan(0);
   });
 
   it('throws when network fails and no cache exists', async () => {
-    const fetchImpl = vi.fn().mockRejectedValue(new Error('offline')) as unknown as typeof fetch;
+    const fetchImpl = vi.fn().mockRejectedValue(new Error('offline')) as never as typeof fetch;
     const reg = new DefaultModelsRegistry({ cacheFile, fetchImpl });
     await expect(reg.load()).rejects.toThrow(/offline/);
   });
@@ -167,7 +167,7 @@ describe('DefaultModelsRegistry', () => {
         ok: true,
         status: 200,
         json: async () => payload,
-      } as unknown as Response) as unknown as typeof fetch;
+      } as never as Response) as never as typeof fetch;
 
     it('in-memory overlay overrides a base model field', async () => {
       const fetchImpl = okFetch(SAMPLE);
@@ -229,8 +229,8 @@ describe('DefaultModelsRegistry', () => {
       // base fetch ok, overlay URL fetch fails → falls back to the file.
       const fetchImpl = vi.fn(async (url: string) => {
         if (String(url).includes('providers.json')) throw new Error('overlay offline');
-        return { ok: true, status: 200, json: async () => SAMPLE } as unknown as Response;
-      }) as unknown as typeof fetch;
+        return { ok: true, status: 200, json: async () => SAMPLE } as never as Response;
+      }) as never as typeof fetch;
       const reg = new DefaultModelsRegistry({
         cacheFile,
         fetchImpl,
@@ -268,8 +268,8 @@ describe('DefaultModelsRegistry', () => {
             ok: true,
             status: 200,
             json: async () => SAMPLE,
-          }) as unknown as Response,
-      ) as unknown as typeof fetch;
+          }) as never as Response,
+      ) as never as typeof fetch;
       const reg = new DefaultModelsRegistry({ cacheFile, fetchImpl, overlayFile });
       const model = await reg.getModel('openai', 'gpt-5.5');
       expect(model?.capabilities.maxContext).toBe(1_050_000);
@@ -309,8 +309,8 @@ describe('DefaultModelsRegistry', () => {
             ok: true,
             status: 200,
             json: async () => SAMPLE,
-          }) as unknown as Response,
-      ) as unknown as typeof fetch;
+          }) as never as Response,
+      ) as never as typeof fetch;
       const reg = new DefaultModelsRegistry({
         cacheFile,
         fetchImpl,
@@ -323,7 +323,7 @@ describe('DefaultModelsRegistry', () => {
     });
 
     it('degrades to overlay-only when models.dev fails and no cache exists', async () => {
-      const fetchImpl = vi.fn().mockRejectedValue(new Error('offline')) as unknown as typeof fetch;
+      const fetchImpl = vi.fn().mockRejectedValue(new Error('offline')) as never as typeof fetch;
       const overlay: ModelsDevPayload = {
         myco: {
           id: 'myco',
@@ -340,7 +340,7 @@ describe('DefaultModelsRegistry', () => {
     });
 
     it('still throws offline when there is no overlay source and no cache', async () => {
-      const fetchImpl = vi.fn().mockRejectedValue(new Error('offline')) as unknown as typeof fetch;
+      const fetchImpl = vi.fn().mockRejectedValue(new Error('offline')) as never as typeof fetch;
       const reg = new DefaultModelsRegistry({ cacheFile, fetchImpl });
       await expect(reg.load()).rejects.toThrow(/offline/);
     });

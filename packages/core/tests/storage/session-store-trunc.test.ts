@@ -29,14 +29,18 @@ describe('truncateToCheckpoint edge cases', () => {
       JSON.stringify({ type: 'checkpoint', ts: '2024-01-01T00:00:04Z', promptIndex: 1 }),
       JSON.stringify({ type: 'user_input', ts: '2024-01-01T00:00:05Z', content: 'third prompt', promptIndex: 2 }),
     ];
-    await fs.writeFile(path.join(tmp, `${id}.jsonl`), goodLines.join('\n') + '\n');
+    const fileContent = goodLines.join('\n') + '\n';
+    await fs.writeFile(path.join(tmp, `${id}.jsonl`), fileContent);
 
     const resumed = await store.resume(id);
-    await resumed.writer.truncateToCheckpoint(0);
+    const removed = await resumed.writer.truncateToCheckpoint(0);
     await resumed.writer.close();
 
     const raw = await fs.readFile(path.join(tmp, `${id}.jsonl`), 'utf8');
     const lines = raw.split('\n').filter(Boolean);
+    // DEBUG
+    console.log('removedCount:', removed);
+    console.log('remaining lines:', lines.length, JSON.stringify(lines));
     // Malformed line should be kept (it was before the target checkpoint at promptIndex 0)
     expect(lines.some((l) => l.includes('NOT_VALID_JSON'))).toBe(true);
   });

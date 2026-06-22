@@ -16,8 +16,8 @@ function rig() {
   const out = new CapStream();
   const err = new CapStream();
   const renderer = new TerminalRenderer({
-    out: out as unknown as NodeJS.WriteStream,
-    err: err as unknown as NodeJS.WriteStream,
+    out: out as never as NodeJS.WriteStream,
+    err: err as never as NodeJS.WriteStream,
   });
   const events = new EventBus();
   const tc = new DefaultTokenCounter();
@@ -144,8 +144,8 @@ describe('SessionStats', () => {
 
     // render() should still work without throwing.
     const renderer = new TerminalRenderer({
-      out: r.out as unknown as NodeJS.WriteStream,
-      err: r.err as unknown as NodeJS.WriteStream,
+      out: r.out as never as NodeJS.WriteStream,
+      err: r.err as never as NodeJS.WriteStream,
     });
     expect(() => r.stats.render(renderer)).not.toThrow();
   });

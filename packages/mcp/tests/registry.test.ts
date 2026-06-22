@@ -9,7 +9,7 @@ const silentLog: Logger = {
   debug: () => {},
   trace: () => {},
   child: () => silentLog,
-} as unknown as Logger;
+} as never as Logger;
 
 const stdioCfg = (name: string, extra: Partial<MCPServerConfig> = {}): MCPServerConfig => ({
   name,
@@ -122,10 +122,10 @@ describe('MCPRegistry', () => {
         reconnectPending: false,
         reconnectCycles: 5,
       };
-      (reg as unknown as { servers: Map<string, typeof slot> }).servers.set('exhausted', slot);
+      (reg as never as { servers: Map<string, typeof slot> }).servers.set('exhausted', slot);
       const disconnected: { name: string; reason: string }[] = [];
       events.on('mcp.server.disconnected', (e) => disconnected.push(e));
-      (reg as unknown as { scheduleReconnect: (s: typeof slot) => void }).scheduleReconnect(slot);
+      (reg as never as { scheduleReconnect: (s: typeof slot) => void }).scheduleReconnect(slot);
       expect(slot.state).toBe('failed');
       expect(slot.reconnectPending).toBe(false);
       expect(disconnected[0]?.reason).toContain('reconnect-exhausted');
@@ -142,11 +142,11 @@ describe('MCPRegistry', () => {
         reconnectPending: false,
         reconnectCycles: 4,
       };
-      (reg as unknown as { servers: Map<string, typeof slot> }).servers.set('delay-check', slot);
+      (reg as never as { servers: Map<string, typeof slot> }).servers.set('delay-check', slot);
       // Spy on setTimeout to capture the delay without actually waiting.
       const originalSetTimeout = global.setTimeout;
       let captured = 0;
-      (global.setTimeout as unknown as (fn: () => void, ms: number) => unknown) = ((
+      (global.setTimeout as never as (fn: () => void, ms: number) => unknown) = ((
         _fn: () => void,
         ms: number,
       ) => {
@@ -154,7 +154,7 @@ describe('MCPRegistry', () => {
         return 0;
       }) as never;
       try {
-        (reg as unknown as { scheduleReconnect: (s: typeof slot) => void }).scheduleReconnect(slot);
+        (reg as never as { scheduleReconnect: (s: typeof slot) => void }).scheduleReconnect(slot);
       } finally {
         global.setTimeout = originalSetTimeout;
       }
@@ -191,21 +191,21 @@ describe('MCPRegistry', () => {
         reconnectCycles: 0,
         client: {
           listTools: () => [{ name: 'new_tool', inputSchema: {} }],
-        } as unknown as any,
+        } as never as any,
       };
-      (reg as unknown as { servers: Map<string, typeof slot> }).servers.set('tools-change-test', slot);
+      (reg as never as { servers: Map<string, typeof slot> }).servers.set('tools-change-test', slot);
       // Override toolRegistry.unregister to throw on first call
       let unregisterCall = 0;
-      (reg as unknown as { toolRegistry: ToolRegistry }).toolRegistry = {
+      (reg as never as { toolRegistry: ToolRegistry }).toolRegistry = {
         ...toolReg,
         unregister: (_name: string) => {
           unregisterCall++;
           if (unregisterCall <= 2) throw new Error('simulated error');
         },
         register: () => {},
-      } as unknown as ToolRegistry;
+      } as never as ToolRegistry;
       // The onToolsChanged should still process all tools
-      (reg as unknown as RegistryInternals).onToolsChanged(
+      (reg as never as RegistryInternals).onToolsChanged(
         'tools-change-test',
         [{ name: 'new_tool' } as never],
       );
@@ -217,7 +217,7 @@ describe('MCPRegistry', () => {
       const reg = new MCPRegistry({ toolRegistry: toolReg, events, log: silentLog });
       // Should not throw for unknown server
       expect(() =>
-        (reg as unknown as { onToolsChanged: (name: string, tools: { name: string }[]) => void }).onToolsChanged(
+        (reg as never as { onToolsChanged: (name: string, tools: { name: string }[]) => void }).onToolsChanged(
           'never-registered',
           [{ name: 'x' } as never],
         ),
@@ -243,20 +243,20 @@ describe('MCPRegistry', () => {
         reconnectCycles: 0,
         client: {
           listTools: () => [{ name: 'bad_tool', inputSchema: {} }],
-        } as unknown as any,
+        } as never as any,
       };
-      (reg as unknown as { servers: Map<string, typeof slot> }).servers.set('warn-test', slot);
+      (reg as never as { servers: Map<string, typeof slot> }).servers.set('warn-test', slot);
       // Override register to throw
       let regCall = 0;
-      (reg as unknown as { toolRegistry: ToolRegistry }).toolRegistry = {
+      (reg as never as { toolRegistry: ToolRegistry }).toolRegistry = {
         ...toolReg,
         register: () => {
           regCall++;
           throw new Error('registration failed');
         },
         unregister: () => {},
-      } as unknown as ToolRegistry;
-      (reg as unknown as RegistryInternals).onToolsChanged(
+      } as never as ToolRegistry;
+      (reg as never as RegistryInternals).onToolsChanged(
         'warn-test',
         [{ name: 'bad_tool' } as never],
       );
@@ -275,12 +275,12 @@ describe('MCPRegistry', () => {
         attempts: 1,
         reconnectPending: false,
         reconnectCycles: 0,
-        client: {} as unknown as any,
+        client: {} as never as any,
       };
-      (reg as unknown as { servers: Map<string, typeof slot> }).servers.set('child-exit-test', slot);
+      (reg as never as { servers: Map<string, typeof slot> }).servers.set('child-exit-test', slot);
       const disconnects: unknown[] = [];
       events.on('mcp.server.disconnected', (p) => disconnects.push(p));
-      (reg as unknown as RegistryInternals).onChildExit('child-exit-test', 1, null);
+      (reg as never as RegistryInternals).onChildExit('child-exit-test', 1, null);
       expect(slot.toolNames).toEqual([]);
       expect(slot.state).toBe('disconnected');
       expect(disconnects.length).toBe(1);
@@ -289,7 +289,7 @@ describe('MCPRegistry', () => {
     it('onChildExit skips unknown server', () => {
       const reg = new MCPRegistry({ toolRegistry: toolReg, events, log: silentLog });
       expect(() =>
-        (reg as unknown as { onChildExit: (name: string, code: number | null, signal: string | null) => void }).onChildExit(
+        (reg as never as { onChildExit: (name: string, code: number | null, signal: string | null) => void }).onChildExit(
           'never-registered',
           0,
           null,
@@ -307,19 +307,19 @@ describe('MCPRegistry', () => {
         attempts: 1,
         reconnectPending: false,
         reconnectCycles: 0,
-        client: {} as unknown as any,
+        client: {} as never as any,
       };
-      (reg as unknown as { servers: Map<string, typeof slot> }).servers.set('swallow-test', slot);
-      (reg as unknown as { toolRegistry: ToolRegistry }).toolRegistry = {
+      (reg as never as { servers: Map<string, typeof slot> }).servers.set('swallow-test', slot);
+      (reg as never as { toolRegistry: ToolRegistry }).toolRegistry = {
         ...toolReg,
         unregister: () => {
           unregCall++;
           throw new Error('unregister error');
         },
-      } as unknown as ToolRegistry;
+      } as never as ToolRegistry;
       // Should not throw even when unregister throws
       expect(() =>
-        (reg as unknown as RegistryInternals).onChildExit('swallow-test', 0, null),
+        (reg as never as RegistryInternals).onChildExit('swallow-test', 0, null),
       ).not.toThrow();
       expect(unregCall).toBe(1);
     });
@@ -335,12 +335,12 @@ describe('MCPRegistry', () => {
         attempts: 1,
         reconnectPending: false,
         reconnectCycles: 0,
-        client: {} as unknown as any,
+        client: {} as never as any,
       };
-      (reg as unknown as { servers: Map<string, typeof slot> }).servers.set('http-disconnect-test', slot);
+      (reg as never as { servers: Map<string, typeof slot> }).servers.set('http-disconnect-test', slot);
       const disconnects: { name: string; reason: string }[] = [];
       events.on('mcp.server.disconnected', (p) => disconnects.push(p));
-      (reg as unknown as RegistryInternals).onTransportDisconnect(
+      (reg as never as RegistryInternals).onTransportDisconnect(
         'http-disconnect-test',
       );
       expect(slot.state).toBe('disconnected');
@@ -350,7 +350,7 @@ describe('MCPRegistry', () => {
     it('onTransportDisconnect skips unknown server', () => {
       const reg = new MCPRegistry({ toolRegistry: toolReg, events, log: silentLog });
       expect(() =>
-        (reg as unknown as { onTransportDisconnect: (name: string) => void }).onTransportDisconnect(
+        (reg as never as { onTransportDisconnect: (name: string) => void }).onTransportDisconnect(
           'never-registered',
         ),
       ).not.toThrow();
@@ -373,7 +373,7 @@ describe('MCPRegistry', () => {
         reconnectPending: false,
         reconnectCycles: 0,
       };
-      (reg as unknown as { servers: Map<string, typeof slot> }).servers.set('inactive', slot);
+      (reg as never as { servers: Map<string, typeof slot> }).servers.set('inactive', slot);
       const desc = reg.describe();
       expect(desc).toHaveLength(1);
       expect(desc[0]).toMatchObject({ name: 'inactive', enabled: false });
@@ -390,7 +390,7 @@ describe('MCPRegistry', () => {
         reconnectPending: false,
         reconnectCycles: 0,
       };
-      (reg as unknown as { servers: Map<string, typeof slot> }).servers.set('active', slot);
+      (reg as never as { servers: Map<string, typeof slot> }).servers.set('active', slot);
       const desc = reg.describe();
       expect(desc).toHaveLength(1);
       expect(desc[0]?.enabled).toBe(true);
@@ -422,10 +422,10 @@ describe('MCPRegistry', () => {
         attempts: 1,
         reconnectPending: false,
         reconnectCycles: 0,
-        client: priorClient as unknown as any,
+        client: priorClient as never as any,
         onDisconnect: undefined,
       };
-      (reg as unknown as { servers: Map<string, typeof slot> }).servers.set('replace-test', slot);
+      (reg as never as { servers: Map<string, typeof slot> }).servers.set('replace-test', slot);
       // Verify the condition: slot.client && slot.client !== client
       // This test validates the state before an actual reconnect would replace the client
       expect(slot.client).toBe(priorClient);
@@ -449,10 +449,10 @@ describe('MCPRegistry', () => {
         attempts: 1,
         reconnectPending: false,
         reconnectCycles: 0,
-        client: sharedClient as unknown as any,
+        client: sharedClient as never as any,
         onDisconnect: undefined,
       };
-      (reg as unknown as { servers: Map<string, typeof slot> }).servers.set('same-client', slot);
+      (reg as never as { servers: Map<string, typeof slot> }).servers.set('same-client', slot);
       // Verify the condition check
       expect(slot.client === sharedClient).toBe(true);
     });
@@ -482,22 +482,22 @@ describe('MCPRegistry', () => {
           removeDisconnectListener: () => {},
           removeToolsChangedListener: () => {},
           close: () => Promise.resolve(),
-        } as unknown as any,
+        } as never as any,
         onDisconnect: undefined,
       };
-      (reg as unknown as { servers: Map<string, typeof slot> }).servers.set('warn-tool', slot);
+      (reg as never as { servers: Map<string, typeof slot> }).servers.set('warn-tool', slot);
       // Override register to throw
       let regCall = 0;
-      (reg as unknown as { toolRegistry: ToolRegistry }).toolRegistry = {
+      (reg as never as { toolRegistry: ToolRegistry }).toolRegistry = {
         ...toolReg,
         register: () => {
           regCall++;
           throw new Error('registration failed');
         },
         unregister: () => {},
-      } as unknown as ToolRegistry;
+      } as never as ToolRegistry;
       // Trigger onToolsChanged to exercise the warn path (line 317)
-      const onToolsChanged = (reg as unknown as { onToolsChanged: (name: string, tools: { name: string }[]) => void }).onToolsChanged;
+      const onToolsChanged = (reg as never as { onToolsChanged: (name: string, tools: { name: string }[]) => void }).onToolsChanged;
       onToolsChanged('warn-tool', [{ name: 'failing-tool' } as never]);
       expect(regCall).toBe(1);
       // onToolsChanged now re-applies via the shared applyTools helper, which

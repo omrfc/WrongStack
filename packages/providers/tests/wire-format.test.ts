@@ -86,7 +86,7 @@ function fakeFetch(body: ReadableStream<Uint8Array>, status = 200): typeof fetch
       status,
       text: async () => '',
       body,
-    }) as unknown as Response) as unknown as typeof fetch;
+    }) as never as Response) as never as typeof fetch;
 }
 
 function fakeFetchError(status: number, body: string): typeof fetch {
@@ -96,7 +96,7 @@ function fakeFetchError(status: number, body: string): typeof fetch {
       status,
       text: async () => body,
       body: null,
-    }) as unknown as Response) as unknown as typeof fetch;
+    }) as never as Response) as never as typeof fetch;
 }
 
 // --- Tests ------------------------------------------------------------------
@@ -152,8 +152,8 @@ describe('WireFormatProvider — declarative wire format', () => {
         status: 200,
         text: async () => '',
         body: sseBody([{ data: '[DONE]' }]),
-      } as unknown as Response;
-    }) as unknown as typeof fetch;
+      } as never as Response;
+    }) as never as typeof fetch;
 
     const provider = new WireFormatProvider(miniConfig, {
       apiKey: 'sk-test',

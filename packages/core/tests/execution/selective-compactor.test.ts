@@ -37,8 +37,8 @@ function fakeContext(messages: Message[], signal = new AbortController().signal)
     registerAbortHook: vi.fn(),
     drainAbortHooks: vi.fn(),
     clone: vi.fn(),
-  } as unknown as Context;
-  (ctx as unknown as { state: unknown }).state = {
+  } as never as Context;
+  (ctx as never as { state: unknown }).state = {
     replaceMessages(next: Message[]) {
       messages.length = 0;
       messages.splice(0, 0, ...next);

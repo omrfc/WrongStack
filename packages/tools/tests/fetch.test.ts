@@ -22,7 +22,7 @@ function mkResponse(opts: {
     url: opts.url ?? 'https://example.com/',
     headers: new Headers({ 'content-type': opts.contentType ?? 'text/plain' }),
     body: stream,
-  } as unknown as Response;
+  } as never as Response;
 }
 
 const originalFetch = globalThis.fetch;
@@ -80,7 +80,7 @@ describe('fetchTool', () => {
   it('returns text content with status', async () => {
     globalThis.fetch = vi.fn(async () =>
       mkResponse({ body: 'hello there', contentType: 'text/plain' }),
-    ) as unknown as typeof fetch;
+    ) as never as typeof fetch;
     const sb = await mkSandbox();
     try {
       const out = await fetchTool.execute({ url: 'https://example.com/page' }, sb.ctx, {
@@ -97,7 +97,7 @@ describe('fetchTool', () => {
   it('pretty-prints JSON when content-type is JSON', async () => {
     globalThis.fetch = vi.fn(async () =>
       mkResponse({ body: '{"a":1,"b":2}', contentType: 'application/json' }),
-    ) as unknown as typeof fetch;
+    ) as never as typeof fetch;
     const sb = await mkSandbox();
     try {
       const out = await fetchTool.execute({ url: 'https://api.example.com/d.json' }, sb.ctx, {
@@ -115,7 +115,7 @@ describe('fetchTool', () => {
       '<html><body><h1>Title</h1><p>Hello <a href="https://x/">link</a></p><script>bad()</script></body></html>';
     globalThis.fetch = vi.fn(async () =>
       mkResponse({ body: html, contentType: 'text/html; charset=utf-8' }),
-    ) as unknown as typeof fetch;
+    ) as never as typeof fetch;
     const sb = await mkSandbox();
     try {
       const out = await fetchTool.execute({ url: 'https://example.com/page' }, sb.ctx, {
@@ -132,7 +132,7 @@ describe('fetchTool', () => {
   it('refuses binary content-types', async () => {
     globalThis.fetch = vi.fn(async () =>
       mkResponse({ body: 'x', contentType: 'application/octet-stream' }),
-    ) as unknown as typeof fetch;
+    ) as never as typeof fetch;
     const sb = await mkSandbox();
     try {
       await expect(
@@ -147,7 +147,7 @@ describe('fetchTool', () => {
     const html = '<p>raw</p>';
     globalThis.fetch = vi.fn(async () =>
       mkResponse({ body: html, contentType: 'text/html' }),
-    ) as unknown as typeof fetch;
+    ) as never as typeof fetch;
     const sb = await mkSandbox();
     try {
       const out = await fetchTool.execute({ url: 'https://example.com/', format: 'raw' }, sb.ctx, {
@@ -209,12 +209,12 @@ describe('fetchTool', () => {
             url: u,
             headers: new Headers({ location: 'https://169.254.169.254/latest/meta-data/' }),
             body: null,
-          } as unknown as Response;
+          } as never as Response;
         }
         // Should never reach here — re-validation must throw before we issue
         // the second fetch.
         return mkResponse({ body: 'leaked metadata!', contentType: 'text/plain' });
-      }) as unknown as typeof fetch;
+      }) as never as typeof fetch;
 
       const sb = await mkSandbox();
       try {
@@ -244,7 +244,7 @@ describe('fetchTool', () => {
     it('allows public IPs (e.g. 8.8.8.8) — sanity check the gate is not over-broad', async () => {
       globalThis.fetch = vi.fn(async () =>
         mkResponse({ body: 'ok', contentType: 'text/plain' }),
-      ) as unknown as typeof fetch;
+      ) as never as typeof fetch;
       const sb = await mkSandbox();
       try {
         const out = await fetchTool.execute({ url: 'https://8.8.8.8/' }, sb.ctx, {
@@ -259,7 +259,7 @@ describe('fetchTool', () => {
     it('allows public IPv6 (e.g. 2606:4700:4700::1111)', async () => {
       globalThis.fetch = vi.fn(async () =>
         mkResponse({ body: 'ok', contentType: 'text/plain' }),
-      ) as unknown as typeof fetch;
+      ) as never as typeof fetch;
       const sb = await mkSandbox();
       try {
         // Cloudflare DNS IPv6 — a clear public address. Confirms the IPv6
@@ -293,8 +293,8 @@ describe('fetchTool', () => {
           url: u,
           headers: new Headers({ location: 'http://attacker.example/' }),
           body: null,
-        } as unknown as Response;
-      }) as unknown as typeof fetch;
+        } as never as Response;
+      }) as never as typeof fetch;
 
       const sb = await mkSandbox();
       try {
@@ -318,8 +318,8 @@ describe('fetchTool', () => {
           url: u,
           headers: new Headers({ location: 'https://loop.example/' }),
           body: null,
-        } as unknown as Response;
-      }) as unknown as typeof fetch;
+        } as never as Response;
+      }) as never as typeof fetch;
 
       const sb = await mkSandbox();
       try {
@@ -342,8 +342,8 @@ describe('fetchTool', () => {
           url: u,
           headers: new Headers({ location: 'ftp://files.example/x' }),
           body: null,
-        } as unknown as Response;
-      }) as unknown as typeof fetch;
+        } as never as Response;
+      }) as never as typeof fetch;
       const sb = await mkSandbox();
       try {
         await expect(
@@ -363,8 +363,8 @@ describe('fetchTool', () => {
           url: u,
           headers: new Headers({}), // no location
           body: null,
-        } as unknown as Response;
-      }) as unknown as typeof fetch;
+        } as never as Response;
+      }) as never as typeof fetch;
       const sb = await mkSandbox();
       try {
         await expect(
@@ -380,7 +380,7 @@ describe('fetchTool', () => {
       globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
         const u = typeof input === 'string' ? input : (input as URL).toString();
         return mkResponse({ body: big, contentType: 'text/plain', url: u });
-      }) as unknown as typeof fetch;
+      }) as never as typeof fetch;
       const sb = await mkSandbox();
       try {
         const out = await fetchTool.execute({ url: 'https://big.example/' }, sb.ctx, {
@@ -405,10 +405,10 @@ describe('fetchTool', () => {
             url: u,
             headers: new Headers({ location: 'https://b.example/' }),
             body: null,
-          } as unknown as Response;
+          } as never as Response;
         }
         return mkResponse({ body: 'final', contentType: 'text/plain', url: u });
-      }) as unknown as typeof fetch;
+      }) as never as typeof fetch;
 
       const sb = await mkSandbox();
       try {
@@ -432,7 +432,7 @@ describe('fetch prettyJson error handling', () => {
         body: 'not valid json { broken',
         contentType: 'application/json',
       }),
-    ) as unknown as typeof fetch;
+    ) as never as typeof fetch;
     const sb = await mkSandbox();
     try {
       const out = await fetchTool.execute(
@@ -450,7 +450,7 @@ describe('fetch prettyJson error handling', () => {
   it('prettyPrints valid JSON when content-type is JSON', async () => {
     globalThis.fetch = vi.fn(async () =>
       mkResponse({ body: '{"a":1,"b":2}', contentType: 'application/json' }),
-    ) as unknown as typeof fetch;
+    ) as never as typeof fetch;
     const sb = await mkSandbox();
     try {
       const out = await fetchTool.execute({ url: 'https://api.example.com/d.json' }, sb.ctx, {

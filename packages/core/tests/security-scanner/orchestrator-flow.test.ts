@@ -9,10 +9,10 @@ import type { RetryPolicy } from '../../src/types/retry-policy.js';
 import type { ErrorHandler } from '../../src/types/error-handler.js';
 
 const textResponse = (text: string): Response =>
-  ({ content: [{ type: 'text', text }], stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } }) as unknown as Response;
+  ({ content: [{ type: 'text', text }], stopReason: 'end_turn', usage: { inputTokens: 1, outputTokens: 1 } }) as never as Response;
 
 const fakeProvider = (complete: Provider['complete']): Provider =>
-  ({ id: 'fake', capabilities: {} as never, stream: (async function* () {})() as never, complete }) as unknown as Provider;
+  ({ id: 'fake', capabilities: {} as never, stream: (async function* () {})() as never, complete }) as never as Provider;
 
 const SKILL_JSON = JSON.stringify({
   name: 'custom-skill',
@@ -57,7 +57,7 @@ afterEach(async () => {
 /** Replace the gitignore updater so tests never touch the real repo .gitignore. */
 function stubGitignore(orch: SecurityScannerOrchestrator, result?: unknown) {
   const update = vi.fn().mockResolvedValue(result ?? { added: ['security-reports/'], existing: [], errors: [] });
-  (orch as unknown as { gitignoreUpdater: { update: typeof update } }).gitignoreUpdater = { update };
+  (orch as never as { gitignoreUpdater: { update: typeof update } }).gitignoreUpdater = { update };
   return update;
 }
 
@@ -116,7 +116,7 @@ describe('SecurityScannerOrchestrator.run — full flow', () => {
     const orch = new SecurityScannerOrchestrator();
     stubGitignore(orch);
     // Override the detector so the stack carries dependencies (the real detector returns []).
-    (orch as unknown as { detector: { detect: (r: string) => Promise<unknown> } }).detector = {
+    (orch as never as { detector: { detect: (r: string) => Promise<unknown> } }).detector = {
       detect: async () => ({
         detectedStacks: [{ stack: 'nodejs', packageManager: 'npm', manifestFile: 'package.json', dependencies: [{ name: 'express', version: '4.0.0' }], projectPath: '' }],
         isMonorepo: false,
@@ -134,7 +134,7 @@ describe('SecurityScannerOrchestrator.run — full flow', () => {
     const orch = new SecurityScannerOrchestrator();
     stubGitignore(orch);
     // Force the scan to target a non-existent file → readFile fails → empty batch → [].
-    (orch as unknown as { gatherFiles: () => Promise<string[]> }).gatherFiles = async () => [path.join(dir, 'does-not-exist.ts')];
+    (orch as never as { gatherFiles: () => Promise<string[]> }).gatherFiles = async () => [path.join(dir, 'does-not-exist.ts')];
     const res = await orch.run(fakeProvider(complete), { projectRoot, reportOptions: { outputDir }, skipGitignore: true, scanOptions: { depth: 'quick' } });
     expect(res.scanResult.summary.total).toBe(0);
   });
@@ -217,7 +217,7 @@ describe('SecurityScannerOrchestrator.quickScan', () => {
 describe('SecurityScannerOrchestrator.completeWithRetry (private)', () => {
   const req: Request = { model: 'm', system: [{ type: 'text', text: 's' }], messages: [{ role: 'user', content: 'hi' }], maxTokens: 16 };
   const callRetry = (orch: SecurityScannerOrchestrator, provider: Provider, ac: AbortController) =>
-    (orch as unknown as { completeWithRetry: (p: Provider, r: Request, a: AbortController, n?: number) => Promise<Response> }).completeWithRetry(provider, req, ac);
+    (orch as never as { completeWithRetry: (p: Provider, r: Request, a: AbortController, n?: number) => Promise<Response> }).completeWithRetry(provider, req, ac);
 
   it('rethrows immediately when the signal is already aborted', async () => {
     const ac = new AbortController();
@@ -232,8 +232,8 @@ describe('SecurityScannerOrchestrator.completeWithRetry (private)', () => {
   });
 
   it('retries a ProviderError then succeeds, consulting the error handler', async () => {
-    const retryPolicy: RetryPolicy = { shouldRetry: vi.fn().mockReturnValue(true), delayMs: vi.fn().mockReturnValue(1), maxAttempts: vi.fn().mockReturnValue(3) } as unknown as RetryPolicy;
-    const errorHandler: ErrorHandler = { classify: vi.fn().mockReturnValue({ kind: 'overloaded', retryable: true }), recover: vi.fn() } as unknown as ErrorHandler;
+    const retryPolicy: RetryPolicy = { shouldRetry: vi.fn().mockReturnValue(true), delayMs: vi.fn().mockReturnValue(1), maxAttempts: vi.fn().mockReturnValue(3) } as never as RetryPolicy;
+    const errorHandler: ErrorHandler = { classify: vi.fn().mockReturnValue({ kind: 'overloaded', retryable: true }), recover: vi.fn() } as never as ErrorHandler;
     const complete = vi
       .fn<Provider['complete']>()
       .mockRejectedValueOnce(new ProviderError('overloaded', 529, true, 'fake'))
@@ -246,7 +246,7 @@ describe('SecurityScannerOrchestrator.completeWithRetry (private)', () => {
   });
 
   it('retries a network error (matched by regex) under a retry policy', async () => {
-    const retryPolicy: RetryPolicy = { shouldRetry: vi.fn().mockReturnValue(true), delayMs: vi.fn().mockReturnValue(1), maxAttempts: vi.fn().mockReturnValue(2) } as unknown as RetryPolicy;
+    const retryPolicy: RetryPolicy = { shouldRetry: vi.fn().mockReturnValue(true), delayMs: vi.fn().mockReturnValue(1), maxAttempts: vi.fn().mockReturnValue(2) } as never as RetryPolicy;
     const complete = vi
       .fn<Provider['complete']>()
       .mockRejectedValueOnce(new Error('ECONNRESET while fetching'))
@@ -257,14 +257,14 @@ describe('SecurityScannerOrchestrator.completeWithRetry (private)', () => {
   });
 
   it('stops retrying when the policy says not to', async () => {
-    const retryPolicy: RetryPolicy = { shouldRetry: vi.fn().mockReturnValue(false), delayMs: vi.fn().mockReturnValue(1), maxAttempts: vi.fn().mockReturnValue(1) } as unknown as RetryPolicy;
+    const retryPolicy: RetryPolicy = { shouldRetry: vi.fn().mockReturnValue(false), delayMs: vi.fn().mockReturnValue(1), maxAttempts: vi.fn().mockReturnValue(1) } as never as RetryPolicy;
     const provider = fakeProvider(vi.fn().mockRejectedValue(new ProviderError('boom', 500, true, 'fake')));
     await expect(callRetry(new SecurityScannerOrchestrator(retryPolicy), provider, new AbortController())).rejects.toThrow('boom');
   });
 
   it('stops retrying when the error handler classifies the error as non-retryable', async () => {
-    const retryPolicy: RetryPolicy = { shouldRetry: vi.fn().mockReturnValue(true), delayMs: vi.fn().mockReturnValue(1), maxAttempts: vi.fn().mockReturnValue(3) } as unknown as RetryPolicy;
-    const errorHandler: ErrorHandler = { classify: vi.fn().mockReturnValue({ kind: 'auth', retryable: false }), recover: vi.fn() } as unknown as ErrorHandler;
+    const retryPolicy: RetryPolicy = { shouldRetry: vi.fn().mockReturnValue(true), delayMs: vi.fn().mockReturnValue(1), maxAttempts: vi.fn().mockReturnValue(3) } as never as RetryPolicy;
+    const errorHandler: ErrorHandler = { classify: vi.fn().mockReturnValue({ kind: 'auth', retryable: false }), recover: vi.fn() } as never as ErrorHandler;
     const provider = fakeProvider(vi.fn().mockRejectedValue(new ProviderError('nope', 401, false, 'fake')));
     await expect(callRetry(new SecurityScannerOrchestrator(retryPolicy, errorHandler), provider, new AbortController())).rejects.toThrow('nope');
   });

@@ -45,6 +45,12 @@ from `<dataDir>/auth.json` unless `WRONGSTACK_HQ_TOKEN` is explicitly set.
 Existing `auth.json` is treated as operator intent, including empty token arrays
 for open mode.
 
+HQ also writes `<dataDir>/runtime.json` with the actual bound URL after startup.
+Same-machine clients use it when no explicit `WRONGSTACK_HQ_URL` or config URL is
+set, so custom ports and non-strict auto-advanced ports are discoverable. The
+marker is removed on clean shutdown and ignored when its recorded process is no
+longer alive.
+
 Once running, the URLs the browser and clients should use are printed to stdout,
 e.g.:
 
@@ -70,7 +76,7 @@ All flags are parsed by the unified `parseArgs()` in
 | `--hq` | `--hq` | boolean | `false` | Start HQ command center instead of the normal REPL/TUI/WebUI flow |
 | `--host` | `--host <ip>` or `--host=<ip>` | string | `127.0.0.1` | Bind host. Use `0.0.0.0` for LAN/VPS access |
 | `--port` | `--port <n>` or `--port=<n>` | number | `3499` | Bind port. Parsed via `Number.parseInt(value, 10)`; non-numeric values fall through as `NaN` and `startHqServer` will reject the bind |
-| `--strict-port` | `--strict-port` | boolean | `false` | Fail if the port is in use; otherwise auto-advance to the next free port. Only takes effect when passed as a standalone flag (no value) — a `--strict-port <value>` form is ignored because `strict-port` is not in the `BOOLEAN_FLAGS` set and the dispatch checks `=== true` |
+| `--strict-port` | `--strict-port` | boolean | `false` | Fail if the requested port is in use; otherwise scan forward for a free port (bounded). Only takes effect when passed as a standalone flag (no value) — a `--strict-port <value>` form is ignored because `strict-port` is not in the `BOOLEAN_FLAGS` set and the dispatch checks `=== true` |
 | `--open` | `--open` | boolean | `false` | Open the dashboard URL in the default browser after the server prints its listening URL. Implementation: dynamic `import('@wrongstack/webui/server')` of `openBrowser()`. Errors are best-effort and silently swallowed |
 | `--data-dir` | `--data-dir <path>` or `--data-dir=<path>` | string | `~/.wrongstack/hq` | HQ data directory: where `auth.json` (and in later phases, the persistent event log + snapshot cache) live. Relative paths resolve against `process.cwd()`. The env var `WRONGSTACK_HQ_DATA_DIR` provides the same override without a CLI flag; the flag wins when both are set. The default honors `WRONGSTACK_HOME`, so pointing that at a sandbox also relocates HQ state |
 | `--client` | `--client` or `-c` | boolean | `false` | Token subcommand scope selector. When passed to `wstack hq token create/list/revoke`, operates on **client tokens** (validated on `/ws/client`) instead of the default **browser tokens** (validated on `/ws/browser`). Phase 4 |

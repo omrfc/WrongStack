@@ -56,6 +56,23 @@ function calState(key: string): CalState {
 const MIN_SAMPLES_FOR_CALIBRATION = 3;
 
 /**
+ * Fallback chars/token ratios per model family for providers that don't return
+ * usage data. Used when `recordActualUsage` receives zero/negative tokens and
+ * we have enough samples to trust the fallback. Keys are lowercase prefixes.
+ */
+const MODEL_FAMILY_RATIO: Record<string, number> = {
+  // Anthropic: ~3.8-4.0 chars/token depending on model
+  claude: 3.8,
+  // OpenAI: ~4.0 chars/token
+  'gpt-4': 4.0,
+  'gpt-3.5': 4.0,
+  // Google: ~3.5 chars/token
+  gemini: 3.5,
+  // DeepSeek: ~3.5 chars/token
+  deepseek: 3.5,
+};
+
+/**
  * Cache of computed estimates keyed by the stringified input — not the
  * input object itself. Previously the cache was keyed by the input object
  * via WeakMap, but JSON.stringify() produces a new object reference each
@@ -64,7 +81,7 @@ const MIN_SAMPLES_FOR_CALIBRATION = 3;
  */
 const ESTIMATE_CACHE = new Map<string, number>();
 
-const ESTIMATE_CACHE_MAX_SIZE = 10_000;
+const ESTIMATE_CACHE_MAX_SIZE = 50_000;
 
 function getCachedEstimate(key: string, compute: (key: string) => number): number {
   const existing = ESTIMATE_CACHE.get(key);
@@ -353,7 +370,28 @@ export function estimateRequestTokensCalibrated(
     };
   }
 
+  // No calibration samples yet — fall back to model-family ratio if available,
+  // otherwise use the uncalibrated estimate (ratio = 1.0).
+  const fallbackRatio = getModelFamilyRatio(calibrationKey);
+  if (fallbackRatio !== null) {
+    return {
+      messages: Math.round(result.messages * fallbackRatio),
+      systemPrompt: Math.round(result.systemPrompt * fallbackRatio),
+      tools: Math.round(result.tools * fallbackRatio),
+      total: Math.round(result.total * fallbackRatio),
+    };
+  }
+
   return result;
+}
+
+/** Look up the fallback chars/token ratio for a calibration key (e.g. "provider/model"). */
+function getModelFamilyRatio(calibrationKey: string): number | null {
+  const lower = calibrationKey.toLowerCase();
+  for (const [family, ratio] of Object.entries(MODEL_FAMILY_RATIO)) {
+    if (lower.includes(family)) return ratio / 3.5; // MODEL_FAMILY_RATIO is chars/token, we need multiplier
+  }
+  return null;
 }
 
 /**

@@ -215,3 +215,28 @@ export interface ToolCallContext {
   ctx: Context;
   signal: AbortSignal;
 }
+
+/**
+ * Error categories for tool execution failures.
+ * Used by the executor to classify errors and determine retry strategy.
+ */
+export enum ToolErrorCategory {
+  TRANSIENT = "transient", // ETIMEDOUT, ECONNRESET, network timeout, HTTP 429/503
+  NOT_FOUND = "not_found", // ENOENT, ENOTDIR, HTTP 404
+  PERMISSION = "permission", // EACCES, EPERM, HTTP 401/403
+  VALIDATION = "validation", // schema validation error, HTTP 400
+  FATAL = "fatal", // unhandled exception, crash, invariant violation
+}
+
+/**
+ * Structured tool error information for the LLM and retry logic.
+ */
+export interface ToolErrorInfo {
+  readonly category: ToolErrorCategory;
+  /** Whether the operation can be retried automatically. */
+  readonly retryable: boolean;
+  /** User-facing message describing the error. */
+  readonly userMessage: string;
+  /** Optional technical detail for debugging. */
+  readonly detail?: string;
+}

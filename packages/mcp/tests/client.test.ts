@@ -76,12 +76,12 @@ describe('MCPClient', () => {
       requestTimeoutMs: 20,
     });
     await expect(
-      (c as unknown as { request: (method: string, params: unknown) => Promise<unknown> }).request(
+      (c as never as { request: (method: string, params: unknown) => Promise<unknown> }).request(
         'tools/list',
         {},
       ),
     ).rejects.toThrow(/timed out/);
-    expect((c as unknown as { pending: Map<unknown, unknown> }).pending.size).toBe(0);
+    expect((c as never as { pending: Map<unknown, unknown> }).pending.size).toBe(0);
   });
 
   it('close on idle client is a no-op', async () => {
@@ -151,8 +151,8 @@ describe('MCPClient', () => {
         return { jsonrpc: '2.0', id: 1, result: {} };
       });
       // Cast through unknown to invoke private members for the test.
-      (c as unknown as { request: typeof fakeRequest }).request = fakeRequest;
-      (c as unknown as { onLine: (line: string) => void }).onLine(
+      (c as never as { request: typeof fakeRequest }).request = fakeRequest;
+      (c as never as { onLine: (line: string) => void }).onLine(
         JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }),
       );
       // Allow the async refresh to settle
@@ -166,7 +166,7 @@ describe('MCPClient', () => {
 
     it('filters invalid tools and defaults missing inputSchema during refresh', async () => {
       const c = new MCPClient({ name: 'tlc-normalize', transport: 'stdio', command: 'noop' });
-      (c as unknown as { request: (method: string) => Promise<unknown> }).request = async () => ({
+      (c as never as { request: (method: string) => Promise<unknown> }).request = async () => ({
         jsonrpc: '2.0',
         id: 1,
         result: {
@@ -177,7 +177,7 @@ describe('MCPClient', () => {
           ],
         },
       });
-      (c as unknown as { onLine: (line: string) => void }).onLine(
+      (c as never as { onLine: (line: string) => void }).onLine(
         JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }),
       );
       await new Promise((r) => setTimeout(r, 10));
@@ -189,15 +189,15 @@ describe('MCPClient', () => {
     it('list_changed refresh failure is swallowed; cache stays intact', async () => {
       const c = new MCPClient({ name: 'tlc-3', transport: 'stdio', command: 'noop' });
       // Pre-seed cache so we can verify it isn't wiped on error.
-      (c as unknown as { _tools: { name: string }[] })._tools = [
+      (c as never as { _tools: { name: string }[] })._tools = [
         { name: 'cached', inputSchema: {} } as never,
       ];
       const listener = vi.fn();
       c.addToolsChangedListener(listener);
-      (c as unknown as { request: () => Promise<unknown> }).request = async () => {
+      (c as never as { request: () => Promise<unknown> }).request = async () => {
         throw new Error('upstream rejected');
       };
-      (c as unknown as { onLine: (line: string) => void }).onLine(
+      (c as never as { onLine: (line: string) => void }).onLine(
         JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }),
       );
       await new Promise((r) => setTimeout(r, 10));
@@ -237,7 +237,7 @@ describe('MCPClient', () => {
         // SIGTERM is ignored — the "stuck" server.
         return true;
       };
-      Object.defineProperty(c as unknown as Record<string, unknown>, 'child', {
+      Object.defineProperty(c as never as Record<string, unknown>, 'child', {
         value: fakeChild,
         writable: true,
         configurable: true,
@@ -288,7 +288,7 @@ describe('MCPClient', () => {
       });
       // Call failPending directly on an idle client with empty pending map
       expect(() =>
-        (c as unknown as { failPending: (reason: string) => void }).failPending('test reason'),
+        (c as never as { failPending: (reason: string) => void }).failPending('test reason'),
       ).not.toThrow();
     });
 
@@ -300,9 +300,9 @@ describe('MCPClient', () => {
         args: ['x'],
       });
       // Manually add a pending entry with a reject that throws
-      const id = (c as unknown as { nextId: number }).nextId++;
+      const id = (c as never as { nextId: number }).nextId++;
       (
-        c as unknown as {
+        c as never as {
           pending: Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>;
         }
       ).pending.set(id, {
@@ -313,9 +313,9 @@ describe('MCPClient', () => {
       });
       // failPending should not throw even when a reject handler throws
       expect(() =>
-        (c as unknown as { failPending: (reason: string) => void }).failPending('test'),
+        (c as never as { failPending: (reason: string) => void }).failPending('test'),
       ).not.toThrow();
-      expect((c as unknown as { pending: Map<unknown, unknown> }).pending.size).toBe(0);
+      expect((c as never as { pending: Map<unknown, unknown> }).pending.size).toBe(0);
     });
   });
 
@@ -329,7 +329,7 @@ describe('MCPClient', () => {
   describe('onLine() — JSON-RPC parsing edge cases', () => {
     it('onLine ignores malformed JSON', () => {
       const c = new MCPClient({ name: 'malformed-json', transport: 'stdio', command: 'echo' });
-      (c as unknown as { onLine: (line: string) => void }).onLine('not json at all {{{');
+      (c as never as { onLine: (line: string) => void }).onLine('not json at all {{{');
       // Should not throw and should not call any handler
     });
 
@@ -343,7 +343,7 @@ describe('MCPClient', () => {
       const toolsChanged = vi.fn();
       c.addToolsChangedListener(toolsChanged);
       // Simulate server sending a list_changed notification (no id)
-      (c as unknown as { onLine: (line: string) => void }).onLine(
+      (c as never as { onLine: (line: string) => void }).onLine(
         JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }),
       );
       // Allow async handleToolsListChanged to complete
@@ -401,7 +401,7 @@ describe('MCPClient', () => {
   describe('listTools() — cache fallback behavior', () => {
     it('listTools returns _tools when non-empty', () => {
       const c = new MCPClient({ name: 'tools-nonempty', transport: 'stdio', command: 'echo' });
-      (c as unknown as { _tools: MCPTool[] })._tools = [{ name: 'cached_tool', inputSchema: {} }];
+      (c as never as { _tools: MCPTool[] })._tools = [{ name: 'cached_tool', inputSchema: {} }];
       const tools = c.listTools();
       expect(tools).toHaveLength(1);
       expect(tools[0]?.name).toBe('cached_tool');
@@ -409,8 +409,8 @@ describe('MCPClient', () => {
 
     it('listTools falls back to _toolsCache when _tools is empty', () => {
       const c = new MCPClient({ name: 'cache-fallback', transport: 'stdio', command: 'echo' });
-      (c as unknown as { _tools: never[] })._tools = [];
-      (c as unknown as { _toolsCache: MCPTool[] })._toolsCache = [
+      (c as never as { _tools: never[] })._tools = [];
+      (c as never as { _toolsCache: MCPTool[] })._toolsCache = [
         { name: 'from_cache', inputSchema: {} },
       ];
       const tools = c.listTools();
@@ -448,7 +448,7 @@ describe('MCPClient', () => {
       });
       // Access the private child field after construction (child is assigned during connect()).
       // Use any-cast to bypass TypeScript privacy — we need the actual object reference.
-      const cAny = c as unknown as Record<string, unknown>;
+      const cAny = c as never as Record<string, unknown>;
       // After construction, child may be set if connectStdio was called (it is on construction
       // via connect()). But we need to replace stdin with a throwing one.
       // Directly set child to a mock process with a throwing stdin.write.
@@ -473,12 +473,12 @@ describe('MCPClient', () => {
       // Also set _drainPending to false so the normal write path is taken
       Object.defineProperty(cAny, '_drainPending', { value: false, configurable: true });
       await expect(
-        (c as unknown as { request: (m: string, p: unknown) => Promise<unknown> }).request(
+        (c as never as { request: (m: string, p: unknown) => Promise<unknown> }).request(
           'tools/list',
           {},
         ),
       ).rejects.toThrow(/EPIPE|stdin/);
-      expect((c as unknown as { pending: Map<unknown, unknown> }).pending.size).toBe(0);
+      expect((c as never as { pending: Map<unknown, unknown> }).pending.size).toBe(0);
     });
   });
 
@@ -492,17 +492,17 @@ describe('MCPClient', () => {
         startupTimeoutMs: 500,
       });
       // Manually set _drainPending to true to simulate a concurrent notify already waiting
-      (c as unknown as { _drainPending: boolean })._drainPending = true;
+      (c as never as { _drainPending: boolean })._drainPending = true;
       // Also set _lastNotifySkipped to false to verify it gets set
-      (c as unknown as { _lastNotifySkipped: boolean })._lastNotifySkipped = false;
+      (c as never as { _lastNotifySkipped: boolean })._lastNotifySkipped = false;
       // Call notify — should skip and set _lastNotifySkipped to true
       await expect(
-        (c as unknown as { notify: (m: string, p: unknown) => Promise<void> }).notify(
+        (c as never as { notify: (m: string, p: unknown) => Promise<void> }).notify(
           'notifications/initialized',
           {},
         ),
       ).resolves.toBeUndefined();
-      expect((c as unknown as { _lastNotifySkipped: boolean })._lastNotifySkipped).toBe(true);
+      expect((c as never as { _lastNotifySkipped: boolean })._lastNotifySkipped).toBe(true);
     });
 
     it('notify() throws when drain times out (lines 491-496)', async () => {
@@ -515,8 +515,8 @@ describe('MCPClient', () => {
       });
       // Set _drainPending = false so write() is called; write returns false to trigger
       // the drain-wait path, but stdin.once never fires 'drain' so the timeout fires.
-      Object.defineProperty(c as unknown as Record<string, unknown>, '_drainPending', { value: false, configurable: true });
-      const cAny = c as unknown as Record<string, unknown>;
+      Object.defineProperty(c as never as Record<string, unknown>, '_drainPending', { value: false, configurable: true });
+      const cAny = c as never as Record<string, unknown>;
       Object.defineProperty(cAny, 'child', {
         value: {
           stdin: {
@@ -533,7 +533,7 @@ describe('MCPClient', () => {
       });
       // The notify should eventually time out the drain wait
       await expect(
-        (c as unknown as { notify: (m: string, p: unknown) => Promise<void> }).notify(
+        (c as never as { notify: (m: string, p: unknown) => Promise<void> }).notify(
           'notifications/initialized',
           {},
         ),
@@ -547,7 +547,7 @@ describe('MCPClient', () => {
         command: 'echo',
         args: ['x'],
       });
-      const cAny = c as unknown as Record<string, unknown>;
+      const cAny = c as never as Record<string, unknown>;
       let callCount = 0;
       Object.defineProperty(cAny, 'child', {
         value: {
@@ -568,7 +568,7 @@ describe('MCPClient', () => {
       Object.defineProperty(cAny, '_drainPending', { value: false, configurable: true });
       // First call hits backpressure, second throws
       await expect(
-        (c as unknown as { notify: (m: string, p: unknown) => Promise<void> }).notify(
+        (c as never as { notify: (m: string, p: unknown) => Promise<void> }).notify(
           'test',
           {},
         ),

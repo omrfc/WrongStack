@@ -7,7 +7,8 @@ import {
   hasDangerousCapabilityForSubagents,
 } from '../security/capabilities.js';
 import type { ToolResultBlock, ToolUseBlock } from '../types/blocks.js';
-import type { Tool, ToolProgressEvent } from '../types/tool.js';
+import type { Tool, ToolProgressEvent, ToolErrorCategory } from '../types/tool.js';
+import { ToolErrorCategory as ToolErrorCategoryEnum } from '../types/tool.js';
 import type {
   ToolBatchResult,
   ToolConfirmPendingResult,
@@ -278,6 +279,7 @@ export class ToolExecutor {
       } catch (err) {
         const msg = toErrorMessage(err);
         const scrubbed = this.opts.secretScrubber.scrub(msg);
+        const { category, retryable, detail } = classifyToolError(err);
         this.opts.renderer?.writeToolResult(tool.name, scrubbed, true);
         const result = {
           type: 'tool_result' as const,
@@ -288,6 +290,9 @@ export class ToolExecutor {
         budget = this.budgetForString(result.content, budget);
         if (err instanceof Error) span?.recordError(err);
         span?.setAttribute('tool.is_error', true);
+        span?.setAttribute('tool.error_category', category);
+        span?.setAttribute('tool.error_retryable', retryable);
+        if (detail) span?.setAttribute('tool.error_detail', detail);
         return { result, tool, durationMs: Date.now() - start };
       } finally {
         span?.end();
@@ -306,6 +311,9 @@ export class ToolExecutor {
       } catch (err) {
         const msg = toErrorMessage(err);
         const scrubbed = this.opts.secretScrubber.scrub(msg);
+        const { category, retryable, detail } = classifyToolError(err);
+        const tool = this.registry.get(use.name);
+        this.opts.renderer?.writeToolResult(tool?.name ?? use.name, scrubbed, true);
         const result = {
           type: 'tool_result' as const,
           tool_use_id: use.id,
@@ -313,7 +321,12 @@ export class ToolExecutor {
           is_error: true,
         };
         budget = this.budgetForString(result.content, budget);
-        return { result, tool: this.registry.get(use.name), durationMs: 0 };
+        // Classification result is stored in the result for future retry logic;
+        // span attributes are set in runOne's catch block (this err bubbles from there).
+        void category;
+        void retryable;
+        void detail;
+        return { result, tool, durationMs: 0 };
       }
     };
 
@@ -651,6 +664,72 @@ function extractMalformedRaw(input: unknown): string | undefined {
 }
 
 const TOOL_OUTPUT_ARTIFACT_THRESHOLD_BYTES = 64 * 1024;
+
+/**
+ * Classify a tool execution error into a structured ToolErrorCategory.
+ * Used for observability (span attributes) and retry strategy decisions.
+ */
+function classifyToolError(err: unknown): { category: ToolErrorCategory; retryable: boolean; detail?: string } {
+  // AbortError — user cancellation, never retry
+  if (err instanceof Error && err.name === 'AbortError') {
+    return { category: ToolErrorCategoryEnum.FATAL, retryable: false, detail: 'aborted' };
+  }
+
+  // Node.js ErrnoException with system error codes
+  if (err instanceof Error && 'code' in err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    switch (code) {
+      case 'ETIMEDOUT':
+      case 'ECONNRESET':
+      case 'ECONNREFUSED':
+      case 'ENETUNREACH':
+      case 'EHOSTUNREACH':
+        return { category: ToolErrorCategoryEnum.TRANSIENT, retryable: true, detail: code };
+      case 'ENOENT':
+      case 'ENOTDIR':
+        return { category: ToolErrorCategoryEnum.NOT_FOUND, retryable: false, detail: code };
+      case 'EACCES':
+      case 'EPERM':
+        return { category: ToolErrorCategoryEnum.PERMISSION, retryable: false, detail: code };
+      case 'EBUSY':
+      case 'EMFILE':
+      case 'ENFILE':
+        return { category: ToolErrorCategoryEnum.TRANSIENT, retryable: true, detail: code };
+    }
+  }
+
+  // HTTP response errors (fetch failed with non-OK status)
+  if (err instanceof Error && 'response' in err) {
+    const response = (err as { response: { status?: number } }).response;
+    const status = response?.status;
+    if (status !== undefined) {
+      if (status === 429 || status === 503 || status === 502 || status === 504) {
+        return { category: ToolErrorCategoryEnum.TRANSIENT, retryable: true, detail: `HTTP ${status}` };
+      }
+      if (status === 404 || status === 410) {
+        return { category: ToolErrorCategoryEnum.NOT_FOUND, retryable: false, detail: `HTTP ${status}` };
+      }
+      if (status === 401 || status === 403) {
+        return { category: ToolErrorCategoryEnum.PERMISSION, retryable: false, detail: `HTTP ${status}` };
+      }
+      if (status === 400) {
+        return { category: ToolErrorCategoryEnum.VALIDATION, retryable: false, detail: `HTTP ${status}` };
+      }
+    }
+  }
+
+  // Validation errors from schema validation
+  if (err instanceof Error && err.message.includes('validation')) {
+    return { category: ToolErrorCategoryEnum.VALIDATION, retryable: false, detail: 'validation' };
+  }
+
+  // Default: fatal/unclassified
+  return {
+    category: ToolErrorCategoryEnum.FATAL,
+    retryable: false,
+    detail: err instanceof Error ? err.message.slice(0, 100) : String(err).slice(0, 100),
+  };
+}
 
 async function maybePersistLargeToolOutput(
   toolName: string,

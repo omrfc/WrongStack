@@ -100,6 +100,8 @@ const CLOSING_GRACE_MS = 15_000;
 // A held lock is released within milliseconds; anything older is a crashed
 // owner's leftover and is safe to break so writes never wedge permanently.
 const STALE_LOCK_MS = 10_000;
+const STALE_TMP_MS = 60_000;
+const MAX_STALE_TMP_FILES = 20;
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -435,16 +437,55 @@ export class SessionRegistry {
   }
 
   private async writeAtomicLocked(registry: Record<string, SessionRegistryEntry>): Promise<void> {
-    const tmp = `${this.filePath}.${randomUUID().slice(0, 8)}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(registry, null, 2), 'utf8');
-    await fs.rename(tmp, this.filePath);
+    await this.pruneStaleTempFiles();
+    await this.writeAtomicFile(registry);
   }
 
   /** Legacy write without lock — used by heartbeat for performance. */
   private async writeAtomic(registry: Record<string, SessionRegistryEntry>): Promise<void> {
-    const tmp = `${this.filePath}.${randomUUID().slice(0, 8)}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(registry, null, 2), 'utf8');
-    await fs.rename(tmp, this.filePath);
+    await this.pruneStaleTempFiles();
+    await this.writeAtomicFile(registry);
+  }
+
+  private async writeAtomicFile(registry: Record<string, SessionRegistryEntry>): Promise<void> {
+    const tmp = path.join(
+      path.dirname(this.filePath),
+      `.${path.basename(this.filePath)}.${randomUUID().slice(0, 8)}.tmp`,
+    );
+    try {
+      await fs.writeFile(tmp, JSON.stringify(registry, null, 2), 'utf8');
+      await fs.rename(tmp, this.filePath);
+    } catch (err) {
+      await fs.unlink(tmp).catch(() => undefined);
+      throw err;
+    }
+  }
+
+  private async pruneStaleTempFiles(): Promise<void> {
+    try {
+      const dir = path.dirname(this.filePath);
+      const base = path.basename(this.filePath);
+      const now = Date.now();
+      const stale: Array<{ name: string; mtimeMs: number }> = [];
+
+      for (const name of await fs.readdir(dir)) {
+        const isTemp =
+          (name.startsWith(`${base}.`) || name.startsWith(`.${base}.`)) && name.endsWith('.tmp');
+        if (!isTemp) continue;
+        const stat = await fs.stat(path.join(dir, name)).catch(() => null);
+        if (!stat) continue;
+        if (now - stat.mtimeMs > STALE_TMP_MS) stale.push({ name, mtimeMs: stat.mtimeMs });
+      }
+
+      stale.sort((a, b) => b.mtimeMs - a.mtimeMs);
+      await Promise.all(
+        stale.slice(MAX_STALE_TMP_FILES).map(async ({ name }) => {
+          await fs.unlink(path.join(dir, name)).catch(() => undefined);
+        }),
+      );
+    } catch {
+      // best-effort cleanup must not block registry heartbeats
+    }
   }
 }
 

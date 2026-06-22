@@ -18,8 +18,8 @@ import type { WsServerMessage } from '../../src/webui-server/ws-handlers/index.j
  * directly.
  */
 
-const WS_A = { id: 'a' } as unknown as WebSocket;
-const WS_B = { id: 'b' } as unknown as WebSocket;
+const WS_A = { id: 'a' } as never as WebSocket;
+const WS_B = { id: 'b' } as never as WebSocket;
 
 type RunResult = {
   status: string;

@@ -294,6 +294,37 @@ describe('HQ dashboard drawer (jsdom)', () => {
     expect(backdrop?.classList.contains('open')).toBe(false);
   });
 
+  it('renders the Fleet HQ flow diagram from the live snapshot', async () => {
+    handle = await startHqServer({ port: getPort() });
+    const client = await registerClient(handle.port, {
+      clientId: 'flow_cli',
+      kind: 'cli',
+      projectId: 'proj_flow',
+      projectName: 'Flow Project',
+    });
+    publishMailboxSnapshot(client, {
+      projectId: 'proj_flow',
+      mailboxId: 'proj_flow:mailbox',
+      scope: 'project',
+      messages: [],
+      agents: [],
+      totals: { messages: 4, unread: 2, incomplete: 1, highPriority: 1, onlineAgents: 1 },
+    });
+    await waitMs(40);
+
+    const { document } = await mountDashboardWithLiveServer(handle);
+    await waitMs(80);
+
+    const flow = document.getElementById('hq-flow');
+    expect(flow?.textContent).toContain('WrongStack HQ');
+    expect(flow?.textContent).toContain('Flow Project');
+    expect(flow?.textContent).toContain('4 msgs');
+    expect(flow?.querySelectorAll('[data-flow-node]').length).toBe(3);
+    expect(flow?.querySelectorAll('svg path').length).toBeGreaterThanOrEqual(2);
+
+    client.close();
+  });
+
   it('renders the global stat cards from the live snapshot', async () => {
     handle = await startHqServer({ port: getPort() });
     const client = await registerClient(handle.port, {

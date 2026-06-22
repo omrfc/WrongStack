@@ -5,7 +5,130 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.269.0] — 2026-06-22
+
+> The **HQ command center runtime and discovery hardening** release. Adds runtime endpoint
+> auto-discovery for HQ so clients find HQ on custom/auto-advanced ports, stale-pid
+> protection so dead runtime endpoints are ignored, publisher reconnect hardening so a
+> unreachable HQ can't block process exit, project metadata preserved in snapshots,
+> and dashboard token forwarding so token-mode pages connect without manual reload.
+> Also fixes BEHAVIOR_DEFAULTS so fresh configs include autonomy and feature fields
+> instead of adapter hardcoded fallbacks. All workspace packages and the marketing
+> site are aligned to `0.269.0` in lockstep. Additive only — no breaking changes.
+
+### Added
+
+- **`packages/core/src/hq/factory.ts` — runtime endpoint auto-discovery.** `startHqServer`
+  now writes `dataDir/runtime.json` with the actual bound URL after port selection,
+  and `resolveHqConfig` prefers that URL for same-machine auto-discovery when no
+  explicit URL is set. Clients no longer miss HQ when `--port` is custom or when
+  non-strict port auto-advance lands on a non-default port.
+  (`packages/core/tests/hq/factory.test.ts`)
+
+- **`packages/core/src/hq/factory.ts` — stale-pid runtime endpoint protection.**
+  `readHqRuntimeFileSync` now ignores `runtime.json` URLs when the recorded pid is
+  no longer alive, preventing clients from targeting a dead HQ port after exit.
+
+- **`packages/cli/src/hq-server.ts` — HQ bind-failure cleanup.** `startHqServer`
+  now closes the auth watcher, snapshot broadcaster, and WS server before rejecting
+  when bind fails (e.g. strict-port and port busy).
+
+- **`packages/cli/src/hq-server.ts` — idempotent close + snapshot timer cleanup.**
+  `HqSnapshotBroadcaster` exposes `close()` to clear pending debounce timers, and
+  `HqServerHandle.close()` is idempotent, clears snapshot timers, then removes the
+  runtime marker.
+
+- **`packages/cli/src/hq-server.ts` — runtime marker cleanup on close.**
+  `close()` removes `runtime.json` if the marker matches the current URL+pid, so the
+  marker does not persist stale after HQ exits.
+
+- **`packages/cli/src/hq-server.ts` — Fleet flow panel in standalone HQ dashboard.**
+  Visual panel rendering HQ → projects → mailboxes from live snapshots.
+
+- **`packages/core/src/hq/redaction.ts` — `scrubAndTruncateHqPreview()` helper.**
+  New public helper (added in 0.268.0, now documented): runs `DefaultSecretScrubber`
+  over a free-text preview field and truncates it to 280 chars with a
+  `…[truncated:N]` suffix.
+
+### Changed
+
+- **`packages/core/src/hq/factory.ts` — same-machine discovery default to 127.0.0.1.**
+  Auto-discovery now binds to `127.0.0.1` by default instead of `localhost`, matching
+  the HQ server default bind and avoiding IPv6/Windows localhost resolution issues.
+
+- **`packages/core/src/hq/factory.ts` — open-mode runtime auto-discovery.**
+  `resolveHqConfig` now auto-enables open mode if a live `runtime.json` URL exists
+  even when `auth.json` has no client token, so REPL/TUI/WebUI connect
+  automatically to open-mode HQ on custom/auto-advanced ports.
+
+- **`packages/cli/src/hq-server.ts` — project metadata preserved in snapshots.**
+  `ConnectedClient` now stores the `HqProjectIdentity` from `client.hello`, and
+  `buildSnapshot`/`buildProjectDetail` use `projectName`, `projectRoot`,
+  `machineId(s)`, and `gitBranch` instead of showing `projectId`/blank root.
+
+### Performance
+
+- **`packages/core/src/storage/session-store.ts` — session index read cache.**
+  Added `mtime+size` cache for `DefaultSessionStore.readIndex` so repeated `list()`
+  calls avoid re-reading/re-parsing `_index.jsonl` when unchanged; `append`,
+  `tombstone`, `compact`, and `rebuild` invalidate the cache.
+  (`packages/core/tests/storage/session-store-extra.test.ts`)
+
+- **`packages/core/src/mailbox/mailbox.ts` — per-session mailbox read cache.**
+  Added `mtime+size` bounded message cache to `DefaultMailbox` so `query`,
+  `getAgentStatuses`, and `unreadCount` avoid repeated full JSONL read+parse when
+  unchanged; writers refresh cache after `append`, `ack`, `clear`, and `purge`.
+
+- **`packages/core/src/hq/mailbox-mapper.ts` — HQ snapshot debounce.** HQ snapshot
+  broadcasts are now cached and debounced (250ms) instead of rebuilding/sending full
+  snapshots on every client/mailbox event.
+
+- **`packages/core/src/coordination/mailbox.ts` — compact heartbeat JSON.**
+  Global mailbox agent/client registries now write compact JSON to reduce heartbeat
+  write bytes.
+
+- **`packages/tools/src/codebase-index/index-store.ts` — BM25 fallback optimization.**
+  Fallback BM25 now uses an `id→candidate` map instead of repeated linear scans
+  over all candidates.
+
+### Fixed
+
+- **`packages/core/src/config-loader.ts` — BEHAVIOR_DEFAULTS autonomy and feature
+  fields.** Added missing `autonomy.autoProceedDelayMs: 45_000`,
+  `features.tokenSavingMode: 'off'`, and `features.allowOutsideProjectRoot: true`
+  to `BEHAVIOR_DEFAULTS` so fresh configs written to `config.json` include proper
+  defaults instead of falling back to adapter hardcoded values.
+  (`packages/core/src/config-loader.ts`, committed as `832ed7b5`)
+
+- **`packages/cli/src/hq-server.ts` — dashboard token forwarding to WS and API.**
+  Dashboard inline JS now forwards `?token=` to `/ws/browser` and
+  `/api/projects/:id` so token-mode pages no longer stay stuck on Connecting.
+
+- **`packages/core/src/hq/mailbox-mapper.ts` — snapshot on client register/heartbeat.**
+  `GlobalMailbox` now publishes HQ mailbox snapshots on client register and
+  heartbeat, so REPL/TUI/WebUI client activity refreshes HQ project/mailbox state
+  even before messages/agent events arrive.
+
+- **`packages/core/src/storage/session-store.ts` — Windows EPERM in truncateToCheckpoint.**
+  `truncateToCheckpoint` now drains pending writes and closes the append handle before
+  replacing the JSONL file, then reopens it afterward. Malformed JSONL lines are
+  preserved during rewrite.
+
+- **`packages/core/src/execution/tool-executor.ts` — publisher reconnect hardening.**
+  `HqPublisher.connect()` now catches URL/socket factory failures and schedules
+  reconnect instead of throwing into REPL/TUI/WebUI startup; reconnect and
+  command-poll timers are `unref()`ed so an unreachable HQ cannot keep a process
+  alive.
+
+### Changed — versions
+
+- **All workspace packages aligned to 0.269.0**: `wrongstack`,
+  `@wrongstack/cli`, `@wrongstack/core`, `@wrongstack/mcp`,
+  `@wrongstack/plug-lsp`, `@wrongstack/plugins`, `@wrongstack/providers`,
+  `@wrongstack/runtime`, `@wrongstack/skills`, `@wrongstack/telegram`,
+  `@wrongstack/tools`, `@wrongstack/tui`, `@wrongstack/webui`,
+  `@wrongstack/acp`, and `@wrongstack/bench`. The marketing site (`website/`)
+  is aligned in lockstep.
 
 ## [0.268.0] — 2026-06-21
 

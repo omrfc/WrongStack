@@ -28,8 +28,8 @@ function mkRig() {
   const out = new CapStream();
   const err = new CapStream();
   const renderer = new TerminalRenderer({
-    out: out as unknown as NodeJS.WriteStream,
-    err: err as unknown as NodeJS.WriteStream,
+    out: out as never as NodeJS.WriteStream,
+    err: err as never as NodeJS.WriteStream,
   });
   return { out, err, renderer };
 }
@@ -74,7 +74,7 @@ function fakeRegistry(providers: ResolvedProvider[]): ModelsRegistry {
 function mkDeps(over: Partial<SubcommandDeps> = {}): SubcommandDeps {
   const rig = mkRig();
   return {
-    config: { providers: {}, log: { level: 'error' } } as unknown as Config,
+    config: { providers: {}, log: { level: 'error' } } as never as Config,
     renderer: rig.renderer,
     reader: {
       readLine: vi.fn(async () => ''),
@@ -97,15 +97,15 @@ function mkDeps(over: Partial<SubcommandDeps> = {}): SubcommandDeps {
 function getOut(deps: SubcommandDeps): string {
   // Renderer was injected from mkRig, but TerminalRenderer doesn't expose the stream.
   // We need to keep ref. So we change strategy: build rig manually.
-  return stripAnsi((deps.renderer as unknown as { out: CapStream }).out?.buf ?? '');
+  return stripAnsi((deps.renderer as never as { out: CapStream }).out?.buf ?? '');
 }
 
 function withRig() {
   const out = new CapStream();
   const err = new CapStream();
   const renderer = new TerminalRenderer({
-    out: out as unknown as NodeJS.WriteStream,
-    err: err as unknown as NodeJS.WriteStream,
+    out: out as never as NodeJS.WriteStream,
+    err: err as never as NodeJS.WriteStream,
   });
   return { out, err, renderer };
 }
@@ -153,7 +153,7 @@ describe('subcommands', () => {
       providers: {},
       apiKey: 'sk-secret',
       log: { level: 'error' },
-    } as unknown as Config;
+    } as never as Config;
     await subcommands['config']!(['show'], mkDeps({ renderer: rig.renderer, config }));
     const text = stripAnsi(rig.out.buf);
     expect(text).toContain('[REDACTED]');
@@ -254,7 +254,7 @@ describe('subcommands', () => {
   it('models refresh delegates to registry.refresh', async () => {
     const rig = withRig();
     const refresh = vi.fn().mockResolvedValue({ anthropic: {} });
-    const reg = { ...fakeRegistry([]), refresh } as unknown as ModelsRegistry;
+    const reg = { ...fakeRegistry([]), refresh } as never as ModelsRegistry;
     const code = await subcommands['models']!(
       ['refresh'],
       mkDeps({ renderer: rig.renderer, modelsRegistry: reg }),
@@ -309,7 +309,7 @@ describe('subcommands', () => {
       model: 'claude-sonnet-4-6',
       providers: { anthropic: { envVars: ['ANTHROPIC_API_KEY'] } },
       log: { level: 'error' },
-    } as unknown as Config;
+    } as never as Config;
     process.env.ANTHROPIC_API_KEY = 'sk-test';
     try {
       const code = await subcommands['doctor']!(
@@ -334,7 +334,7 @@ describe('subcommands', () => {
       globalRoot: path.join(tmp, 'g'),
       userHome: tmp,
     });
-    const config = { providers: {}, log: { level: 'error' } } as unknown as Config;
+    const config = { providers: {}, log: { level: 'error' } } as never as Config;
     const code = await subcommands['doctor']!(
       [],
       mkDeps({ renderer: rig.renderer, config, paths }),
@@ -358,7 +358,7 @@ describe('subcommands', () => {
       model: 'claude-sonnet-4-6',
       providers: { anthropic: { envVars: ['ANTHROPIC_API_KEY'] } },
       log: { level: 'error' },
-    } as unknown as Config;
+    } as never as Config;
     const reg: ModelsRegistry = {
       ...fakeRegistry([fakeProvider()]),
       ageSeconds: async () => 30 * 24 * 3600,
@@ -393,7 +393,7 @@ describe('subcommands', () => {
       mcpServers: {
         broken: { name: 'broken', enabled: true, transport: 'stdio' },
       },
-    } as unknown as Config;
+    } as never as Config;
     process.env.ANTHROPIC_API_KEY = 'sk-test';
     try {
       const code = await subcommands['doctor']!(
@@ -559,7 +559,7 @@ describe('subcommands', () => {
         primary: { name: 'primary', transport: 'stdio', command: 'noop' },
         disabled: { name: 'disabled', transport: 'stdio', enabled: false },
       },
-    } as unknown as Config;
+    } as never as Config;
     const code = await subcommands['mcp']!([], mkDeps({ renderer: rig.renderer, config }));
     expect(code).toBe(0);
     const text = stripAnsi(rig.out.buf);
@@ -611,7 +611,7 @@ describe('subcommands', () => {
       providers: {},
       log: { level: 'error' },
       plugins: ['npm:simple', { name: 'fancy', enabled: false }],
-    } as unknown as Config;
+    } as never as Config;
     const code = await subcommands['plugin']!([], mkDeps({ renderer: rig.renderer, config }));
     expect(code).toBe(0);
     const text = stripAnsi(rig.out.buf);
@@ -626,7 +626,7 @@ describe('subcommands', () => {
       providers: {},
       log: { level: 'error' },
       plugins: ['@wrongstack/telegram'],
-    } as unknown as Config;
+    } as never as Config;
     const code = await subcommands['plugins']!(
       ['list'],
       mkDeps({ renderer: rig.renderer, config }),
@@ -641,7 +641,7 @@ describe('subcommands', () => {
       providers: {},
       log: { level: 'error' },
       plugins: [{ name: '@wrongstack/telegram', enabled: false }],
-    } as unknown as Config;
+    } as never as Config;
     const code = await subcommands['plugin']!(
       ['status'],
       mkDeps({ renderer: rig.renderer, config }),
@@ -701,7 +701,7 @@ describe('subcommands', () => {
       providers: {},
       log: { level: 'error' },
       plugins: [{ name: '@wrongstack/telegram', enabled: false }],
-    } as unknown as Config;
+    } as never as Config;
     const code = await subcommands['plugin']!(
       ['official'],
       mkDeps({ renderer: rig.renderer, config }),
@@ -914,7 +914,7 @@ describe('subcommands', () => {
       log: { level: 'error' },
       provider: 'anthropic',
       model: 'claude-sonnet-4-6',
-    } as unknown as Config;
+    } as never as Config;
     const reg = fakeRegistry([fakeProvider()]);
     const code = await subcommands['models']!(
       [],

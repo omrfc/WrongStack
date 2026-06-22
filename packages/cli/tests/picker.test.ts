@@ -16,8 +16,8 @@ function mkRig() {
   const out = new CapStream();
   const err = new CapStream();
   const renderer = new TerminalRenderer({
-    out: out as unknown as NodeJS.WriteStream,
-    err: err as unknown as NodeJS.WriteStream,
+    out: out as never as NodeJS.WriteStream,
+    err: err as never as NodeJS.WriteStream,
   });
   return { out, err, renderer };
 }

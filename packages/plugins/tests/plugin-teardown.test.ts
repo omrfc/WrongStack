@@ -64,7 +64,7 @@ describe('plugin teardown (H1 regression guard)', () => {
   describe('cron', () => {
     it('teardown clears every scheduled timer', async () => {
       const api = makeApi();
-      cronPlugin.setup(api as unknown as Parameters<typeof cronPlugin.setup>[0]);
+      cronPlugin.setup(api as never as Parameters<typeof cronPlugin.setup>[0]);
 
       const scheduleTool = getTool(api, 'cron_schedule');
       await scheduleTool.execute({ name: 'job-a', intervalMs: 60_000, action: 'noop' });
@@ -75,7 +75,7 @@ describe('plugin teardown (H1 regression guard)', () => {
       expect(vi.getTimerCount()).toBe(3);
 
       // Act
-      cronPlugin.teardown!(api as unknown as Parameters<typeof cronPlugin.teardown>[0]);
+      cronPlugin.teardown!(api as never as Parameters<typeof cronPlugin.teardown>[0]);
 
       // All timers must be cleared — no orphan setTimeout left behind
       expect(vi.getTimerCount()).toBe(0);
@@ -85,8 +85,8 @@ describe('plugin teardown (H1 regression guard)', () => {
 
     it('teardown is safe to call after setup has already been called once (reload cycle)', async () => {
       const api = makeApi();
-      cronPlugin.setup(api as unknown as Parameters<typeof cronPlugin.setup>[0]);
-      cronPlugin.teardown!(api as unknown as Parameters<typeof cronPlugin.teardown>[0]);
+      cronPlugin.setup(api as never as Parameters<typeof cronPlugin.setup>[0]);
+      cronPlugin.teardown!(api as never as Parameters<typeof cronPlugin.teardown>[0]);
 
       // Second cycle — setup clears state, then schedule, then teardown.
       // The crucial check: the second teardown also reaches 0 timers, even
@@ -97,7 +97,7 @@ describe('plugin teardown (H1 regression guard)', () => {
       await scheduleTool.execute({ name: 'job-d', intervalMs: 60_000, action: 'noop' });
       expect(vi.getTimerCount()).toBe(1);
 
-      cronPlugin.teardown!(api as unknown as Parameters<typeof cronPlugin.teardown>[0]);
+      cronPlugin.teardown!(api as never as Parameters<typeof cronPlugin.teardown>[0]);
       expect(vi.getTimerCount()).toBe(0);
     });
   });
@@ -105,7 +105,7 @@ describe('plugin teardown (H1 regression guard)', () => {
   describe('file-watcher', () => {
     it('teardown clears every debounce timer', async () => {
       const api = makeApi();
-      fileWatcherPlugin.setup(api as unknown as Parameters<typeof fileWatcherPlugin.setup>[0]);
+      fileWatcherPlugin.setup(api as never as Parameters<typeof fileWatcherPlugin.setup>[0]);
 
       // The watch_start tool itself can enqueue a debounce timer per path.
       const watchTool = getTool(api, 'watch_start');
@@ -115,7 +115,7 @@ describe('plugin teardown (H1 regression guard)', () => {
       const before = vi.getTimerCount();
       expect(before).toBeGreaterThanOrEqual(0); // smoke: API is reachable
 
-      fileWatcherPlugin.teardown!(api as unknown as Parameters<typeof fileWatcherPlugin.teardown>[0]);
+      fileWatcherPlugin.teardown!(api as never as Parameters<typeof fileWatcherPlugin.teardown>[0]);
       expect(vi.getTimerCount()).toBe(0);
     });
 
@@ -124,11 +124,11 @@ describe('plugin teardown (H1 regression guard)', () => {
       // branch that produced a vague log line and nothing else. After
       // the H1 fix, teardown must actually run and log completion.
       const api = makeApi();
-      fileWatcherPlugin.setup(api as unknown as Parameters<typeof fileWatcherPlugin.setup>[0]);
+      fileWatcherPlugin.setup(api as never as Parameters<typeof fileWatcherPlugin.setup>[0]);
 
       // Act + assert: must not throw, must log completion
       expect(() =>
-        fileWatcherPlugin.teardown!(api as unknown as Parameters<typeof fileWatcherPlugin.teardown>[0]),
+        fileWatcherPlugin.teardown!(api as never as Parameters<typeof fileWatcherPlugin.teardown>[0]),
       ).not.toThrow();
 
       const logCalls = (api.log.info as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);

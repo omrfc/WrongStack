@@ -12,8 +12,8 @@ function fakeCtx(): Context {
   };
   return {
     state,
-    readFiles: { clear: vi.fn() } as unknown as Set<string>,
-    fileMtimes: { clear: vi.fn() } as unknown as Map<string, number>,
+    readFiles: { clear: vi.fn() } as never as Set<string>,
+    fileMtimes: { clear: vi.fn() } as never as Map<string, number>,
     meta: { plan: 'x', other: 'y' },
     session: {
       id: 'test-session-id',
@@ -25,7 +25,7 @@ function fakeCtx(): Context {
     model: 'test',
     cwd: '/tmp',
     projectRoot: '/tmp',
-  } as unknown as Context;
+  } as never as Context;
 }
 
 // ── /clear ───────────────────────────────────────────────────────────────────

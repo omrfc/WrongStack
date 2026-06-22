@@ -13,13 +13,13 @@ class CaptureStream extends Writable {
 }
 
 function mkRenderer() {
-  const out = new CaptureStream() as unknown as NodeJS.WriteStream;
-  const err = new CaptureStream() as unknown as NodeJS.WriteStream;
+  const out = new CaptureStream() as never as NodeJS.WriteStream;
+  const err = new CaptureStream() as never as NodeJS.WriteStream;
   const renderer = new TerminalRenderer({ out, err });
   return {
     renderer,
-    out: () => stripAnsi((out as unknown as CaptureStream).buf),
-    err: () => stripAnsi((err as unknown as CaptureStream).buf),
+    out: () => stripAnsi((out as never as CaptureStream).buf),
+    err: () => stripAnsi((err as never as CaptureStream).buf),
   };
 }
 

@@ -87,6 +87,23 @@ describe('HQ publisher factory env config', () => {
     });
   });
 
+  it('auto-enables open-mode same-machine HQ when only a runtime URL exists', async () => {
+    await withTempDir(async (dir) => {
+      await writeHqAuthFile(dir, {
+        version: HQ_AUTH_FILE_VERSION,
+        updatedAt: new Date().toISOString(),
+        browserTokens: [],
+        clientTokens: [],
+      });
+      await writeHqRuntimeFile(dir, { url: 'http://127.0.0.1:45123', pid: process.pid });
+
+      expect(resolveHqConfigFromEnv({ WRONGSTACK_HQ_DATA_DIR: dir })).toEqual({
+        url: 'http://127.0.0.1:45123',
+        enabled: true,
+      });
+    });
+  });
+
   it('prefers the runtime HQ URL when the server bound a non-default port', async () => {
     await withTempDir(async (dir) => {
       await writeHqAuthFile(dir, {

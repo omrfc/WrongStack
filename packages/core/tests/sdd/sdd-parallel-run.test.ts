@@ -26,7 +26,7 @@ function makeFakeStore(): TaskStore {
 }
 
 function fakeAgent(): Agent {
-  return { events: new EventBus(), run: vi.fn() } as unknown as Agent;
+  return { events: new EventBus(), run: vi.fn() } as never as Agent;
 }
 
 async function makeHarness(overrides: Record<string, unknown> = {}) {
@@ -56,10 +56,10 @@ function fakeCoordinator(over: Partial<Record<string, unknown>> = {}) {
 describe('SddParallelRun — constructor clamps', () => {
   it('clamps parallel slots and retries into range', async () => {
     const big = await makeHarness({ parallelSlots: 100, maxRetries: -5 });
-    expect((big.run as unknown as { slots: number }).slots).toBe(16);
-    expect((big.run as unknown as { maxRetries: number }).maxRetries).toBe(0);
+    expect((big.run as never as { slots: number }).slots).toBe(16);
+    expect((big.run as never as { maxRetries: number }).maxRetries).toBe(0);
     const small = await makeHarness({ parallelSlots: 0 });
-    expect((small.run as unknown as { slots: number }).slots).toBe(1);
+    expect((small.run as never as { slots: number }).slots).toBe(1);
   });
 });
 
@@ -67,7 +67,7 @@ describe('SddParallelRun.executeWave', () => {
   it('spawns, assigns, awaits and marks every task completed on success', async () => {
     const { run, tracker, t1, t2 } = await makeHarness();
     const coord = fakeCoordinator();
-    (run as unknown as { coordinator: unknown }).coordinator = coord;
+    (run as never as { coordinator: unknown }).coordinator = coord;
     const wave = await run.executeWave({ wave: 0, tasks: [t1, t2], deadlocked: false, allDone: false } as never);
     expect(wave.successCount).toBe(2);
     expect(wave.failCount).toBe(0);
@@ -81,13 +81,13 @@ describe('SddParallelRun.executeWave', () => {
     const coord = fakeCoordinator({
       awaitTasks: vi.fn(async (ids: string[]) => ids.map((id) => failResult(id, { kind: 'unknown', message: 'boom', retryable: true }))),
     });
-    (run as unknown as { coordinator: unknown }).coordinator = coord;
+    (run as never as { coordinator: unknown }).coordinator = coord;
     await run.executeWave({ wave: 0, tasks: [t1], deadlocked: false, allDone: false } as never);
     // retry path → t1 re-marked pending (not failed), and the retry counter advances
     const t1After = tracker.getAllNodes().find((n) => n.id === t1.id);
     expect(t1After?.status).toBe('pending');
     expect(tracker.getAllNodes({ status: ['failed'] })).toHaveLength(0);
-    expect((run as unknown as { retryMap: Map<string, number> }).retryMap.get(t1.id)).toBe(1);
+    expect((run as never as { retryMap: Map<string, number> }).retryMap.get(t1.id)).toBe(1);
   });
 
   it('marks a task failed once retries are exhausted, formatting the error', async () => {
@@ -95,7 +95,7 @@ describe('SddParallelRun.executeWave', () => {
     const coord = fakeCoordinator({
       awaitTasks: vi.fn(async (ids: string[]) => ids.map((id) => failResult(id, { kind: 'timeout', message: 'too slow', retryable: false }))),
     });
-    (run as unknown as { coordinator: unknown }).coordinator = coord;
+    (run as never as { coordinator: unknown }).coordinator = coord;
     await run.executeWave({ wave: 0, tasks: [t1], deadlocked: false, allDone: false } as never);
     expect(tracker.getAllNodes({ status: ['failed'] })).toHaveLength(1);
   });
@@ -109,14 +109,14 @@ describe('SddParallelRun.executeWave', () => {
         failResult(ids[1]!, undefined),
       ]),
     });
-    (run as unknown as { coordinator: unknown }).coordinator = coord;
+    (run as never as { coordinator: unknown }).coordinator = coord;
     const wave = await run.executeWave({ wave: 0, tasks: nodes, deadlocked: false, allDone: false } as never);
     expect(wave.failCount).toBe(2);
   });
 
   it('throws when a subagent spawn returns no id', async () => {
     const { run, t1 } = await makeHarness();
-    (run as unknown as { coordinator: unknown }).coordinator = fakeCoordinator({
+    (run as never as { coordinator: unknown }).coordinator = fakeCoordinator({
       spawn: vi.fn(async () => ({ subagentId: '' })),
     });
     await expect(run.executeWave({ wave: 0, tasks: [t1], deadlocked: false, allDone: false } as never)).rejects.toThrow(/spawns failed/);
@@ -124,7 +124,7 @@ describe('SddParallelRun.executeWave', () => {
 
   it('synthesizes failed results when awaitTasks throws', async () => {
     const { run, tracker, t1 } = await makeHarness({ maxRetries: 0 });
-    (run as unknown as { coordinator: unknown }).coordinator = fakeCoordinator({
+    (run as never as { coordinator: unknown }).coordinator = fakeCoordinator({
       awaitTasks: vi.fn(async () => { throw new Error('await exploded'); }),
     });
     const wave = await run.executeWave({ wave: 0, tasks: [t1], deadlocked: false, allDone: false } as never);
@@ -134,7 +134,7 @@ describe('SddParallelRun.executeWave', () => {
 
   it('throws when no coordinator has been built', async () => {
     const { run, t1 } = await makeHarness();
-    (run as unknown as { coordinator: unknown }).coordinator = null;
+    (run as never as { coordinator: unknown }).coordinator = null;
     await expect(run.executeWave({ wave: 0, tasks: [t1], deadlocked: false, allDone: false } as never)).rejects.toThrow(/requires a coordinator/);
   });
 });
@@ -143,7 +143,7 @@ describe('SddParallelRun.executeWave', () => {
 function scriptDecomposer(run: SddParallelRun, batches: Array<{ tasks: TaskNode[]; deadlocked?: boolean; allDone?: boolean }>) {
   let i = 0;
   let done = false;
-  (run as unknown as { decomposer: unknown }).decomposer = {
+  (run as never as { decomposer: unknown }).decomposer = {
     isDone: () => done,
     nextBatch: () => ({ wave: i, tasks: [], deadlocked: false, allDone: false, ...batches[Math.min(i, batches.length - 1)] }),
     acknowledgeBatch: () => { i++; if (i >= batches.length - 1) done = true; },
@@ -154,7 +154,7 @@ function scriptDecomposer(run: SddParallelRun, batches: Array<{ tasks: TaskNode[
 describe('SddParallelRun.run', () => {
   it('runs waves until the decomposer reports done', async () => {
     const { run } = await makeHarness();
-    vi.spyOn(run as unknown as { buildCoordinator: () => void }, 'buildCoordinator').mockImplementation(() => {});
+    vi.spyOn(run as never as { buildCoordinator: () => void }, 'buildCoordinator').mockImplementation(() => {});
     const exec = vi.spyOn(run, 'executeWave').mockResolvedValue({ wave: 0, batch: {} as never, results: [], successCount: 1, failCount: 0, durationMs: 1, stopRequested: false });
     scriptDecomposer(run, [{ tasks: [{ id: 'x' } as TaskNode] }, { tasks: [], allDone: true }]);
     const result = await run.run();
@@ -166,8 +166,8 @@ describe('SddParallelRun.run', () => {
 
   it('breaks and reports deadlock when no task is runnable', async () => {
     const { run } = await makeHarness();
-    vi.spyOn(run as unknown as { buildCoordinator: () => void }, 'buildCoordinator').mockImplementation(() => {});
-    (run as unknown as { decomposer: unknown }).decomposer = {
+    vi.spyOn(run as never as { buildCoordinator: () => void }, 'buildCoordinator').mockImplementation(() => {});
+    (run as never as { decomposer: unknown }).decomposer = {
       isDone: () => false,
       nextBatch: () => ({ wave: 0, tasks: [], deadlocked: true, allDone: false }),
       acknowledgeBatch: () => {},
@@ -180,8 +180,8 @@ describe('SddParallelRun.run', () => {
 
   it('breaks cleanly when the graph is already complete', async () => {
     const { run } = await makeHarness();
-    vi.spyOn(run as unknown as { buildCoordinator: () => void }, 'buildCoordinator').mockImplementation(() => {});
-    (run as unknown as { decomposer: unknown }).decomposer = {
+    vi.spyOn(run as never as { buildCoordinator: () => void }, 'buildCoordinator').mockImplementation(() => {});
+    (run as never as { decomposer: unknown }).decomposer = {
       isDone: () => false,
       nextBatch: () => ({ wave: 0, tasks: [], deadlocked: false, allDone: true }),
       acknowledgeBatch: () => {},
@@ -197,7 +197,7 @@ describe('SddParallelRun.run', () => {
     const onWave = vi.fn(() => stopRun.stop());
     const { run: r2 } = await makeHarness({ onWave });
     stopRun = r2;
-    vi.spyOn(r2 as unknown as { buildCoordinator: () => void }, 'buildCoordinator').mockImplementation(() => {});
+    vi.spyOn(r2 as never as { buildCoordinator: () => void }, 'buildCoordinator').mockImplementation(() => {});
     vi.spyOn(r2, 'executeWave').mockResolvedValue({ wave: 0, batch: {} as never, results: [], successCount: 0, failCount: 0, durationMs: 1, stopRequested: false });
     scriptDecomposer(r2, [{ tasks: [{ id: 'x' } as TaskNode] }, { tasks: [{ id: 'y' } as TaskNode] }, { tasks: [], allDone: true }]);
     const result = await r2.run();
@@ -209,7 +209,7 @@ describe('SddParallelRun.run', () => {
   it('emits progress via onProgress', async () => {
     const onProgress = vi.fn();
     const { run } = await makeHarness({ onProgress });
-    vi.spyOn(run as unknown as { buildCoordinator: () => void }, 'buildCoordinator').mockImplementation(() => {});
+    vi.spyOn(run as never as { buildCoordinator: () => void }, 'buildCoordinator').mockImplementation(() => {});
     vi.spyOn(run, 'executeWave').mockResolvedValue({ wave: 0, batch: {} as never, results: [], successCount: 1, failCount: 0, durationMs: 1, stopRequested: false });
     scriptDecomposer(run, [{ tasks: [{ id: 'x' } as TaskNode] }, { tasks: [], allDone: true }]);
     await run.run();
@@ -220,9 +220,9 @@ describe('SddParallelRun.run', () => {
 describe('SddParallelRun — coordinator + helpers', () => {
   it('buildCoordinator wires a real coordinator and the default factory returns the main agent', async () => {
     const { run } = await makeHarness();
-    (run as unknown as { buildCoordinator: () => void }).buildCoordinator();
-    expect((run as unknown as { coordinator: unknown }).coordinator).not.toBeNull();
-    const factory = (run as unknown as { defaultFactory: () => (c: unknown) => Promise<unknown> }).defaultFactory();
+    (run as never as { buildCoordinator: () => void }).buildCoordinator();
+    expect((run as never as { coordinator: unknown }).coordinator).not.toBeNull();
+    const factory = (run as never as { defaultFactory: () => (c: unknown) => Promise<unknown> }).defaultFactory();
     const made = await factory({ id: 'x', name: 'x', role: 'executor' });
     expect(made).toHaveProperty('agent');
     expect(made).toHaveProperty('events');
@@ -231,16 +231,16 @@ describe('SddParallelRun — coordinator + helpers', () => {
   it('uses an injected subagentFactory when provided', async () => {
     const subagentFactory = vi.fn(async () => ({ agent: fakeAgent(), events: new EventBus() }));
     const { run } = await makeHarness({ subagentFactory });
-    (run as unknown as { buildCoordinator: () => void }).buildCoordinator();
-    expect((run as unknown as { coordinator: unknown }).coordinator).not.toBeNull();
+    (run as never as { buildCoordinator: () => void }).buildCoordinator();
+    expect((run as never as { coordinator: unknown }).coordinator).not.toBeNull();
   });
 
   it('stop() flags the run and stops the coordinator', async () => {
     const { run } = await makeHarness();
     const stopAll = vi.fn();
-    (run as unknown as { coordinator: unknown }).coordinator = { stopAll };
+    (run as never as { coordinator: unknown }).coordinator = { stopAll };
     run.stop();
-    expect((run as unknown as { stopRequested: boolean }).stopRequested).toBe(true);
+    expect((run as never as { stopRequested: boolean }).stopRequested).toBe(true);
     expect(stopAll).toHaveBeenCalled();
   });
 });

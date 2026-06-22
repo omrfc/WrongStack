@@ -24,6 +24,10 @@ const DIFF_INLINE_LINE_LIMIT = 260;
 const DIFF_HUNK_LIMIT = 8;
 const DIFF_HUNK_CONTEXT = 14;
 
+// Pre-compiled regex — used in parseGrepContentLine() for every grep match line.
+// Compiling once at module load avoids repeated RegExp construction overhead.
+const GREP_LINE_RE = /^(.+?):(\d+):(.*)$/;
+
 export function createToolOutputSerializer(opts: ToolOutputSerializerOptions = {}) {
   const capBytes = opts.perIterationOutputCapBytes ?? 100_000;
 
@@ -441,7 +445,7 @@ function renderGrepMatches(matches: string[], mode: string | undefined): string 
 function parseGrepContentLine(
   line: string,
 ): { file: string; line: string; text: string } | undefined {
-  const match = /^(.+?):(\d+):(.*)$/.exec(line);
+  const match = GREP_LINE_RE.exec(line);
   if (!match?.[1] || !match[2]) return undefined;
   return { file: match[1], line: match[2], text: match[3] ?? '' };
 }
@@ -463,24 +467,25 @@ function compactDiff(diff: string): string {
   const hunks = lines.filter((line) => line.startsWith('@@')).length;
   const added = lines.filter((line) => line.startsWith('+') && !line.startsWith('+++')).length;
   const removed = lines.filter((line) => line.startsWith('-') && !line.startsWith('---')).length;
-  const selected = new Set<number>();
+
+  // Collect [start, end] intervals as we scan lines sequentially.
+  // Intervals are naturally ordered by line index — no sort needed.
+  const intervals: Array<[number, number]> = [];
   let hunkCount = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? '';
     if (line.startsWith('diff --git') || line.startsWith('--- ') || line.startsWith('+++ ')) {
-      selected.add(i);
+      intervals.push([i, i]);
       continue;
     }
     if (!line.startsWith('@@')) continue;
     if (hunkCount >= DIFF_HUNK_LIMIT) continue;
     hunkCount++;
-    for (let j = i; j <= Math.min(lines.length - 1, i + DIFF_HUNK_CONTEXT); j++) {
-      selected.add(j);
-    }
+    intervals.push([i, Math.min(lines.length - 1, i + DIFF_HUNK_CONTEXT)]);
   }
 
-  if (selected.size === 0) {
+  if (intervals.length === 0) {
     return joinSections([
       renderHeader('diff_summary', {
         files: fileCount,
@@ -494,17 +499,34 @@ function compactDiff(diff: string): string {
     ]);
   }
 
+  // Merge overlapping / adjacent intervals in a single O(n) pass.
+  // Intervals are already in ascending order from the sequential scan.
+  const merged: Array<[number, number]> = [intervals[0]!];
+  for (let i = 1; i < intervals.length; i++) {
+    const last = merged[merged.length - 1]!;
+    const current = intervals[i]!;
+    if (current[0] <= last[1] + 1) {
+      last[1] = Math.max(last[1], current[1]);
+    } else {
+      merged.push(current);
+    }
+  }
+
+  // Build excerpt from merged intervals — O(n), no sort.
   const excerpt: string[] = [];
-  let previous = -1;
-  for (const index of [...selected].sort((a, b) => a - b)) {
-    if (index > previous + 1) {
-      const omitted = previous === -1 ? index : index - previous - 1;
+  let prevLine = -1;
+  for (const [start, end] of merged) {
+    if (start > prevLine + 1) {
+      const omitted = prevLine === -1 ? start : start - prevLine - 1;
       excerpt.push(`[serializer omitted ${omitted} diff line(s)]`);
     }
-    excerpt.push(lines[index] ?? '');
-    previous = index;
+    for (let j = start; j <= end; j++) {
+      excerpt.push(lines[j] ?? '');
+    }
+    prevLine = end;
   }
-  const trailing = lines.length - previous - 1;
+
+  const trailing = lines.length - prevLine - 1;
   if (trailing > 0) excerpt.push(`[serializer omitted ${trailing} trailing diff line(s)]`);
 
   return joinSections([
@@ -752,6 +774,8 @@ export function truncateForEvent(content: string, max = 400): string {
  *  - lines: read prefixes lines with `<n>→`; for shell/grep/logs we fall
  *    back to a newline count. Undefined for tools without a line notion.
  */
+const READ_LINE_PREFIX_RE = /^\s*\d+→/gm;
+
 export function sizeSignals(
   toolName: string | undefined,
   content: string,
@@ -763,9 +787,9 @@ export function sizeSignals(
   const outputTokens = Math.max(1, Math.round(outputBytes / 3.5));
   let outputLines: number | undefined;
   if (toolName === 'read') {
-    const lineRe = /^\s*\d+→/gm;
+    READ_LINE_PREFIX_RE.lastIndex = 0;
     let count = 0;
-    while (lineRe.exec(content) !== null) count++;
+    while (READ_LINE_PREFIX_RE.exec(content) !== null) count++;
     if (count > 0) outputLines = count;
   } else if (
     toolName === 'bash' ||
