@@ -318,6 +318,7 @@ describe('parseHqEventPayload', () => {
     scope: 'project' as const,
     messages: [
       {
+        mailId: 'm_1',
         messageId: 'm_1',
         from: 'agent-a',
         to: 'agent-b',

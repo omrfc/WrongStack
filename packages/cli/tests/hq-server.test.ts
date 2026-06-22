@@ -160,6 +160,20 @@ function makeBrowserCollector(ws: WebSocket) {
 }
 
 describe('HQ server', () => {
+  it('writes and clears the runtime endpoint marker for same-machine discovery', async () => {
+    const port = getPort();
+    handle = await startOpenHqServer({ port });
+    const runtimePath = path.join(dataDir, 'runtime.json');
+
+    const runtime = JSON.parse(await fs.readFile(runtimePath, 'utf8')) as { url: string; pid: number };
+    expect(runtime).toMatchObject({ url: `http://127.0.0.1:${handle.port}`, pid: process.pid });
+
+    await handle.close();
+    await handle.close();
+    handle = null;
+    await expect(fs.access(runtimePath)).rejects.toThrow();
+  });
+
   it('prints tokenized browser and client links on every token-mode startup', async () => {
     await writeHqAuthFile(dataDir, {
       version: HQ_AUTH_FILE_VERSION,
@@ -181,6 +195,16 @@ describe('HQ server', () => {
       },
       createdAuth: false,
     });
+  });
+
+  it('rejects with EADDRINUSE when strictPort is true and the port is busy', async () => {
+    const port = getPort();
+    const blocker = await occupyPort(port);
+    try {
+      await expect(startOpenHqServer({ port, strictPort: true })).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    } finally {
+      await closeHttpServer(blocker);
+    }
   });
 
   it('auto-advances past multiple busy ports when strictPort is false', async () => {
@@ -516,6 +540,7 @@ describe('HQ server', () => {
             scope: 'project',
             messages: [
               {
+                mailId: 'm-1',
                 messageId: 'm-1',
                 from: 'agent-a',
                 to: 'agent-b',
