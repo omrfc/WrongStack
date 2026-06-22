@@ -435,16 +435,16 @@ describe('TUI reducer', () => {
   });
 
   it('settingsValueChange flags compactor strategy (boot-only) but not auto-compact toggle (live)', () => {
-    // Auto-compact on/off (field 15) applies live → no hint.
+    // Auto-compact on/off (field 26) applies live → no hint.
     let live = openSettings(initial());
-    live = reducer(live, { type: 'settingsFieldMove', delta: 15 });
+    live = reducer(live, { type: 'settingsFieldMove', delta: 26 });
     live = reducer(live, { type: 'settingsValueChange', delta: 1 } as never);
     expect(live.settingsPicker.contextAutoCompact).toBe(false);
     expect(live.settingsPicker.hint).toBeUndefined();
 
-    // Compactor strategy (field 16) needs a restart → hint.
+    // Compactor strategy (field 27) needs a restart → hint.
     let strat = openSettings(initial());
-    strat = reducer(strat, { type: 'settingsFieldMove', delta: 16 });
+    strat = reducer(strat, { type: 'settingsFieldMove', delta: 27 });
     strat = reducer(strat, { type: 'settingsValueChange', delta: 1 } as never);
     expect(strat.settingsPicker.hint).toBe('↻ Takes effect next session');
   });
@@ -714,7 +714,7 @@ describe('settings picker reducer', () => {
         configScope: 'global' as const,
         ...over,
       },
-    }) as unknown as Parameters<typeof reducer>[0];
+    }) as never as Parameters<typeof reducer>[0];
 
   it('opens with the supplied mode + delay and focuses the first field', () => {
     const s = reducer(base(), {

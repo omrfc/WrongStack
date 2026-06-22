@@ -3,13 +3,13 @@ import { reducer } from '../src/app.js';
 import { TOKEN_SAVING_TIERS } from '../src/components/settings-picker.js';
 
 // Minimal settingsPicker with all required fields for the token-saving tier tests.
-// The reducer only reads/writes tokenSavingTier for field-14 operations, so
+// The reducer only reads/writes tokenSavingTier for field-13 operations, so
 // other fields can be any valid value.
 function settingsBase(overrides: Record<string, unknown> = {}) {
   return {
     settingsPicker: {
       open: true,
-      field: 14, // token-saving tier field
+      field: 13, // token-saving tier field
       mode: 'off' as const,
       delayMs: 0,
       titleAnimation: true,
@@ -141,7 +141,7 @@ describe('token-saving tier in settings picker', () => {
     expect(s.settingsPicker.tokenSavingTier).toBe('aggressive');
   });
 
-  it('settingsValueChange on field 14 sets restart hint (boot-only)', () => {
+  it('settingsValueChange on field 13 sets restart hint (boot-only)', () => {
     const s = reducer(
       { ...settingsBase({ hint: undefined }) } as never as Parameters<typeof reducer>[0],
       { type: 'settingsValueChange', delta: 1 },
@@ -153,17 +153,17 @@ describe('token-saving tier in settings picker', () => {
     expect(TOKEN_SAVING_TIERS).toEqual(['off', 'minimal', 'light', 'medium', 'aggressive']);
   });
 
-  it('field 14 is the token-saving tier field', () => {
-    // Verify that field 14 is indeed token-saving tier by checking that field 13
-    // (allowOutsideProjectRoot) does NOT change when we issue a field-14 value change.
+  it('field 13 is the token-saving tier field', () => {
+    // Verify that field 13 is indeed token-saving tier by checking that field 12
+    // (featureModelsRegistry) does NOT change when we issue a field-13 value change.
     const s = reducer(
       {
-        ...settingsBase({ field: 14, allowOutsideProjectRoot: true }),
+        ...settingsBase({ field: 13, featureModelsRegistry: true }),
       } as never as Parameters<typeof reducer>[0],
       { type: 'settingsValueChange', delta: 1 },
     );
-    // allowOutsideProjectRoot should be unchanged (it's in field 13)
-    expect(s.settingsPicker.allowOutsideProjectRoot).toBe(true);
+    // featureModelsRegistry should be unchanged (it's in field 12)
+    expect(s.settingsPicker.featureModelsRegistry).toBe(true);
     // tokenSavingTier should have changed
     expect(s.settingsPicker.tokenSavingTier).not.toBe('off');
   });
