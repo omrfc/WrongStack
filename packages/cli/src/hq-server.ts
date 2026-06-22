@@ -99,7 +99,7 @@ interface ConnectedClient {
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 3499;
-const MAX_EVENT_LOG = 500;
+const MAX_EVENT_LOG = 5000;
 const MAX_NON_STRICT_PORT_SCAN = 50;
 
 function displayHost(host: string): string {
@@ -195,9 +195,9 @@ const HQ_HTML = `<!DOCTYPE html>
   .hq-led.live { background: var(--live); box-shadow: 0 0 6px var(--live); }
   .hq-led.dead { background: var(--dim); }
   .hq-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
-  .hq-flow { position: relative; min-height: 320px; overflow: hidden; background: radial-gradient(circle at 1px 1px, rgba(139,148,158,0.18) 1px, transparent 0), #0d1117; background-size: 22px 22px; border: 1px solid var(--border); border-radius: 10px; }
-  .hq-flow svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-  .hq-flow .flow-node { position: absolute; width: 168px; min-height: 74px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: rgba(22,27,34,0.96); box-shadow: 0 8px 18px rgba(0,0,0,0.28); }
+  .hq-flow { position: relative; min-height: 320px; overflow-x: auto; overflow-y: visible; background: radial-gradient(circle at 1px 1px, rgba(139,148,158,0.18) 1px, transparent 0), #0d1117; background-size: 22px 22px; border: 1px solid var(--border); border-radius: 10px; }
+  .hq-flow svg { position: absolute; top: 0; left: 0; height: 100%; pointer-events: none; z-index: 0; }
+  .hq-flow .flow-node { position: absolute; width: 168px; min-height: 74px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: rgba(22,27,34,0.96); box-shadow: 0 8px 18px rgba(0,0,0,0.28); z-index: 1; }
   .hq-flow .flow-node.core { border-color: rgba(88,166,255,0.65); box-shadow: 0 0 0 1px rgba(88,166,255,0.08), 0 8px 18px rgba(0,0,0,0.28); }
   .hq-flow .flow-node.project { border-color: rgba(63,185,80,0.45); }
   .hq-flow .flow-node.mailbox { border-color: rgba(210,153,34,0.45); }
@@ -470,28 +470,72 @@ const HQ_HTML = `<!DOCTYPE html>
     const projectIndex = new Map(orderedProjects.map((id, index) => [id, index]));
     const rows = Math.max(1, orderedProjects.length);
     const height = Math.max(320, 150 + rows * 112);
-    root.style.minHeight = height + 'px';
+    // Grid layout: each project gets a row band; mailboxes stack vertically within their project column.
+    // This prevents overlap that occurred with the old formula:
+    //   y: y + mailboxIdx * 92 - Math.max(0, projectMailboxes.length - 1) * 28
+    // which produced negative offsets when projectMailboxes.length > 1.
+    const HQ_X = 20;
+    const PROJECT_X = 280;
+    const MAILBOX_X = 540;
+    const NODE_W = 168;
+    const ROW_HEIGHT = 100; // vertical spacing per project row
+    const MAILBOX_ROW_H = 80; // vertical spacing per mailbox under same project
+    const TOP_PADDING = 20;
+    const HQ_HEIGHT = 74;
 
-    const nodes = [{ id: 'hq', kind: 'core', title: 'WrongStack HQ', x: 24, y: Math.max(24, Math.round(height / 2) - 38), meta: [clients.length + ' clients', orderedProjects.length + ' projects'] }];
+    const nodes = [{
+      id: 'hq',
+      kind: 'core',
+      title: 'WrongStack HQ',
+      x: HQ_X,
+      y: TOP_PADDING,
+      meta: [clients.length + ' clients', orderedProjects.length + ' projects'],
+    }];
     const edges = [];
     const projectById = new Map(projects.map((p) => [p.projectId, p]));
+
     for (const projectId of orderedProjects) {
       const idx = projectIndex.get(projectId) || 0;
       const project = projectById.get(projectId) || { projectId, projectName: projectId, activeClients: 0 };
-      const y = 40 + idx * 112;
+      const projectY = TOP_PADDING + idx * ROW_HEIGHT;
       const projectNodeId = 'project:' + projectId;
-      nodes.push({ id: projectNodeId, kind: 'project', title: project.projectName || projectId, x: 260, y, meta: [(project.activeClients || 0) + ' clients', shortId(projectId)] });
+      nodes.push({
+        id: projectNodeId,
+        kind: 'project',
+        title: project.projectName || projectId,
+        x: PROJECT_X,
+        y: projectY,
+        meta: [(project.activeClients || 0) + ' clients', shortId(projectId)],
+      });
       edges.push({ from: 'hq', to: projectNodeId });
-      const projectMailboxes = mailboxes.filter((m) => m.projectId === projectId).slice(0, 3);
+
+      // Mailboxes for this project: stack horizontally side-by-side within the row
+      const projectMailboxes = mailboxes.filter((m) => m.projectId === projectId).slice(0, 6);
       projectMailboxes.forEach((m, mailboxIdx) => {
         const mailboxNodeId = 'mailbox:' + m.mailboxId;
-        nodes.push({ id: mailboxNodeId, kind: 'mailbox', title: shortId(m.mailboxId), x: 500, y: y + mailboxIdx * 92 - Math.max(0, projectMailboxes.length - 1) * 28, meta: [m.messageCount + ' msgs', m.unreadCount + ' unread'] });
+        nodes.push({
+          id: mailboxNodeId,
+          kind: 'mailbox',
+          title: shortId(m.mailboxId),
+          x: MAILBOX_X + mailboxIdx * (NODE_W + 16), // horizontal spacing for multiple mailbox columns
+          y: projectY,
+          meta: [m.messageCount + ' msgs', m.unreadCount + ' unread'],
+        });
         edges.push({ from: projectNodeId, to: mailboxNodeId });
       });
     }
 
+    // Recalculate height to fit all rows
+    const usedHeight = TOP_PADDING + orderedProjects.length * ROW_HEIGHT + 80;
+    const usedWidth = MAILBOX_X + 4 * (NODE_W + 16) + NODE_W + 20;
+    root.style.minHeight = Math.max(height, usedHeight) + 'px';
+    root.style.minWidth = Math.max(720, usedWidth) + 'px';
+
     const pos = new Map(nodes.map((n) => [n.id, n]));
-    const svg = '<svg viewBox="0 0 720 ' + height + '" preserveAspectRatio="xMinYMin meet" aria-hidden="true">' +
+    const svgViewW = Math.max(720, usedWidth);
+    const svgViewH = Math.max(height, usedHeight);
+    const svgWidth = svgViewW + 'px';
+    const svg = '<svg viewBox="0 0 ' + svgViewW + ' ' + svgViewH + '" width="' + svgWidth + '" preserveAspectRatio="none" aria-hidden="true">' +
       '<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#58a6ff" opacity="0.8" /></marker></defs>' +
       edges.map((e) => {
         const from = pos.get(e.from);
@@ -564,7 +608,7 @@ const HQ_HTML = `<!DOCTYPE html>
   // Per-project live event feed (ring buffer per project). Keyed by
   // projectId so switching drawers keeps each project's history.
   const eventFeeds = new Map();
-  const FEED_MAX = 50;
+  const FEED_MAX = 500;
   let feedIdleTimer = null;
 
   function currentBrowserToken() {
@@ -819,9 +863,9 @@ const HQ_HTML = `<!DOCTYPE html>
   // ---------- Live mailbox event feed ----------
 
   function handleHqEvent(event) {
-    if (!event || event.type !== 'mailbox.event') return;
+    // Accept all event types — each may carry project-scoped data for the live feed.
+    if (!event || !event.projectId) return;
     const projectId = event.projectId;
-    if (!projectId) return;
     const list = eventFeeds.get(projectId) || [];
     list.unshift(event); // newest first
     if (list.length > FEED_MAX) list.length = FEED_MAX;
@@ -838,7 +882,7 @@ const HQ_HTML = `<!DOCTYPE html>
     const elFeed = el('drawer-event-feed');
     if (!elFeed) return;
     if (!list || list.length === 0) {
-      elFeed.innerHTML = '<p class="empty">No mailbox events yet for this project.</p>';
+      elFeed.innerHTML = '<p class="empty">No events yet for this project.</p>';
       return;
     }
     elFeed.innerHTML = list.map((evt) => {

@@ -251,7 +251,7 @@ export const useVizStore = create<VizState>()((set, get) => ({
   nodes: new Map(),
   edges: new Map(),
   isActive: false,
-  maxEvents: 500,
+  maxEvents: 2000,
   counters: {
     totalTokens: 0,
     totalCost: 0,

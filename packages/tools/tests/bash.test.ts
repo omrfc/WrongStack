@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import type { ToolProgressEvent, ToolStreamEvent } from '@wrongstack/core';
 import { describe, expect, it } from 'vitest';
 import { bashTool } from '../src/bash.js';
+import { getProcessRegistry } from '../src/process-registry.js';
 import { mkSandbox, newSignal } from './fixtures.js';
 
 const isWin = os.platform() === 'win32';
@@ -110,6 +111,35 @@ describe('bashTool', () => {
     } finally {
       // On Windows the detached child may still hold the temp dir for a
       // moment after exit — swallow the cleanup race; the OS reaps soon.
+      try {
+        await sb.cleanup();
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+
+  it('does not bind background processes to the caller abort signal', async () => {
+    const sb = await mkSandbox();
+    const ac = new AbortController();
+    const registry = getProcessRegistry();
+    try {
+      const cmd = isWin ? 'ping -n 30 127.0.0.1 > NUL' : 'sleep 30';
+      const out = await bashTool.execute({ command: cmd, background: true }, sb.ctx, {
+        signal: ac.signal,
+      });
+      expect(out.exit_code).toBeNull();
+      expect(out.pid).toBeDefined();
+      const spawned = registry.bySession('test').find((p) => p.pid === out.pid);
+      expect(spawned).toBeDefined();
+
+      ac.abort();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+
+      expect(registry.bySession('test').some((p) => p.pid === out.pid)).toBe(true);
+      if (out.pid !== undefined) registry.kill(out.pid, { force: true, graceMs: 10 });
+    } finally {
+      for (const proc of registry.bySession('test')) registry.kill(proc.pid, { force: true, graceMs: 10 });
       try {
         await sb.cleanup();
       } catch {

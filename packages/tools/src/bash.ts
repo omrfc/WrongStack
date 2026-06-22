@@ -193,7 +193,6 @@ export const bashTool: Tool<BashInput, BashOutput> = {
         // detached for the process-group kill semantics.
         detached: !isWin,
         windowsHide: true,
-        signal: opts.signal,
       });
       const pid = child.pid;
       if (typeof pid === 'number') {
@@ -227,11 +226,21 @@ export const bashTool: Tool<BashInput, BashOutput> = {
       };
       child.stdout?.on('data', onBgData);
       child.stderr?.on('data', onBgData);
+      const cleanupBackground = () => {
+        child.stdout?.off('data', onBgData);
+        child.stderr?.off('data', onBgData);
+      };
+      child.on('error', () => {
+        cleanupBackground();
+        if (typeof pid === 'number') registry.unregister(pid);
+        registry.afterCall(Date.now() - startedAt, true, bypassBreaker);
+      });
       // The pipe handles would otherwise keep the parent's event loop alive
       // for as long as the background process runs — child.unref() alone
       // does not release stdio. A one-shot (--print) run could never exit
       // while a background dev server kept its pipes open.
       child.on('close', () => {
+        cleanupBackground();
         registry.afterCall(Date.now() - startedAt, false, bypassBreaker);
       });
       if (typeof pid === 'number') child.unref(); // unref() so the event loop can exit while this background process runs.

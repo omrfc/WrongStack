@@ -48,7 +48,7 @@ export function mapMailboxMessageToHqSummary(
   message: MailboxMessage,
   options: Pick<HqMailboxMappingOptions, 'previewLength' | 'redactionPolicy'> = {},
 ): HqMailboxMessageSummary {
-  const previewLength = options.previewLength ?? 160;
+  const previewLength = options.previewLength ?? 500;
   const bodyPreview = previewText(message.body, previewLength, options.redactionPolicy);
   const outcomePreview = previewText(message.outcome, previewLength, options.redactionPolicy);
   const task = taskSummary(message);

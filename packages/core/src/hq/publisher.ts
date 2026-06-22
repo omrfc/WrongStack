@@ -75,8 +75,8 @@ export interface HqPublishEventOptions {
 const OPEN_STATE = 1;
 const DEFAULT_RECONNECT_BASE_MS = 1_000;
 const DEFAULT_RECONNECT_MAX_MS = 30_000;
-const DEFAULT_MAX_QUEUED_MESSAGES = 250;
-const DEFAULT_COMMAND_POLL_INTERVAL_MS = 10_000;
+const DEFAULT_MAX_QUEUED_MESSAGES = 2000;
+const DEFAULT_COMMAND_POLL_INTERVAL_MS = 2_000;
 const DEFAULT_COMMAND_POLL_LIMIT = 25;
 
 function defaultSocketFactory(url: string): HqSocketLike {
