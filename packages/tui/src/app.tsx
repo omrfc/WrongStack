@@ -4583,8 +4583,40 @@ export function App({
       dispatch({ type: 'statuslineOpen', hiddenItems: state.statuslinePicker.hiddenItems });
       return;
     }
-    // Ctrl+S toggles the autonomy settings editor (also openable via
-    // `/settings`). Opening closes any other overlay or panel.
+    // Settings editor (also openable via `/settings`). Opening closes any other
+    // overlay or panel. Arrow keys navigate between fields (↑↓) or cycle values
+    // (←→). Enter also cycles the current field's value. Escape closes.
+    if (state.settingsPicker.open) {
+      if (key.escape) {
+        dispatch({ type: 'settingsClose' });
+        return;
+      }
+      if (key.upArrow) {
+        dispatch({ type: 'settingsFieldMove', delta: -1 });
+        return;
+      }
+      if (key.downArrow) {
+        dispatch({ type: 'settingsFieldMove', delta: 1 });
+        return;
+      }
+      if (key.leftArrow) {
+        dispatch({ type: 'settingsValueChange', delta: -1 });
+        return;
+      }
+      if (key.rightArrow) {
+        dispatch({ type: 'settingsValueChange', delta: 1 });
+        return;
+      }
+      if (isEnter) {
+        const now = Date.now();
+        if (now - lastEnterAtRef.current < 50) return;
+        lastEnterAtRef.current = now;
+        dispatch({ type: 'settingsValueChange', delta: 1 });
+        return;
+      }
+      // Fall through — allow Ctrl+S to also close the settings picker.
+    }
+    // Ctrl+S toggles the settings editor (also openable via `/settings`).
     if (key.ctrl && input === 's') {
       if (state.settingsPicker.open) {
         dispatch({ type: 'settingsClose' });
