@@ -24,7 +24,7 @@ function makeMockWriter(): { writer: SessionWriter; append: ReturnType<typeof vi
     clearSession: vi.fn().mockResolvedValue(undefined),
     writeInFlightMarker: vi.fn().mockResolvedValue(undefined),
     clearInFlightMarker: vi.fn().mockResolvedValue(undefined),
-  } as unknown as SessionWriter;
+  } as never as SessionWriter;
   return { writer, append, appendBatch };
 }
 
@@ -47,7 +47,7 @@ describe('session-event-bridge — extra coverage', () => {
   it('allows an uncategorized event at full level (allow-everything tail)', async () => {
     const { writer, append } = makeMockWriter();
     const bridge = createSessionEventBridge(writer, 'full');
-    await bridge.append({ type: 'task_created', ts: new Date().toISOString(), taskId: 't', title: 'x' } as unknown as SessionEvent);
+    await bridge.append({ type: 'task_created', ts: new Date().toISOString(), taskId: 't', title: 'x' } as never as SessionEvent);
     expect(append).toHaveBeenCalled();
   });
 
@@ -60,7 +60,7 @@ describe('session-event-bridge — extra coverage', () => {
       name: 'bash',
       id: 'c1',
       event: { type: 'final', output: {} },
-    } as unknown as SessionEvent);
+    } as never as SessionEvent);
     expect(append).toHaveBeenCalled();
   });
 
@@ -80,7 +80,7 @@ describe('session-event-bridge — extra coverage', () => {
       const bridge = createSessionEventBridge(writer, 'minimal');
       await bridge.appendBatch([
         userInput(),
-        { type: 'tool_progress', ts: new Date().toISOString(), name: 'b', id: 'c', event: { type: 'log', text: 'x' } } as unknown as SessionEvent,
+        { type: 'tool_progress', ts: new Date().toISOString(), name: 'b', id: 'c', event: { type: 'log', text: 'x' } } as never as SessionEvent,
       ]);
       expect(appendBatch).toHaveBeenCalledTimes(1);
       expect(appendBatch.mock.calls[0]?.[0]).toHaveLength(1);
@@ -90,7 +90,7 @@ describe('session-event-bridge — extra coverage', () => {
       const { writer, appendBatch } = makeMockWriter();
       const bridge = createSessionEventBridge(writer, 'minimal');
       await bridge.appendBatch([
-        { type: 'tool_progress', ts: new Date().toISOString(), name: 'b', id: 'c', event: { type: 'log', text: 'x' } } as unknown as SessionEvent,
+        { type: 'tool_progress', ts: new Date().toISOString(), name: 'b', id: 'c', event: { type: 'log', text: 'x' } } as never as SessionEvent,
       ]);
       expect(appendBatch).not.toHaveBeenCalled();
     });

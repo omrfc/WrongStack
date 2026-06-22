@@ -16,8 +16,10 @@
  * @module hq-server
  */
 import { randomUUID } from 'node:crypto';
+import * as fs from 'node:fs/promises';
 import type { Server as HttpServer } from 'node:http';
 import * as http from 'node:http';
+import * as path from 'node:path';
 import {
   DEFAULT_HQ_REDACTION_POLICY,
   HQ_PROTOCOL_VERSION,
@@ -29,6 +31,7 @@ import {
   type HqMailboxEventPayload,
   type HqMailboxSnapshotPayload,
   type HqMailboxSummary,
+  type HqProjectIdentity,
   type HqProjectRecord,
   type HqRedactionPolicy,
   type HqSnapshot,
@@ -55,14 +58,18 @@ export interface HqServerOptions {
   dataDir?: string;
 }
 
-export interface HqFirstRunSetup {
+export interface HqStartupConnectionInfo {
   dataDir: string;
   browserUrl: string;
+  clientUrl: string;
   clientEnv: {
     WRONGSTACK_HQ_URL: string;
-    WRONGSTACK_HQ_TOKEN: string;
+    WRONGSTACK_HQ_TOKEN?: string;
   };
+  createdAuth: boolean;
 }
+
+export type HqFirstRunSetup = HqStartupConnectionInfo;
 
 export interface HqServerHandle {
   host: string;
@@ -75,6 +82,7 @@ interface ConnectedClient {
   ws: WebSocket;
   clientId: string;
   projectId: string;
+  project: HqProjectIdentity;
   kind: string;
   connectedAt: string;
   lastSeenAt: string;
@@ -92,6 +100,7 @@ interface ConnectedClient {
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 3499;
 const MAX_EVENT_LOG = 500;
+const MAX_NON_STRICT_PORT_SCAN = 50;
 
 function displayHost(host: string): string {
   return host === '0.0.0.0' ? '127.0.0.1' : host;
@@ -109,19 +118,53 @@ function buildClientWsUrl(host: string, port: number, token?: string): string {
   return url.toString();
 }
 
+interface HqRuntimeMarker {
+  url?: string;
+  pid?: number;
+  updatedAt?: string;
+}
+
+function hqRuntimeMarkerPath(dataDir: string): string {
+  return path.join(dataDir, 'runtime.json');
+}
+
+async function writeHqRuntimeMarker(dataDir: string, url: string): Promise<void> {
+  const file = hqRuntimeMarkerPath(dataDir);
+  const payload = JSON.stringify({ url, pid: process.pid, updatedAt: new Date().toISOString() }, null, 2);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, `${payload}\n`, { encoding: 'utf8', mode: 0o600 });
+}
+
+async function clearHqRuntimeMarker(dataDir: string, url: string): Promise<void> {
+  const file = hqRuntimeMarkerPath(dataDir);
+  try {
+    const parsed = JSON.parse(await fs.readFile(file, 'utf8')) as HqRuntimeMarker;
+    if (parsed.url === url && parsed.pid === process.pid) await fs.rm(file, { force: true });
+  } catch {
+    // Best-effort cleanup only.
+  }
+}
+
 function writeHqStartupInfo(write: (line: string) => void, handle: HqServerHandle): void {
-  const firstRun = handle.firstRunSetup;
+  const startup = handle.firstRunSetup;
   write(`WrongStack HQ listening on http://${handle.host}:${handle.port}\n`);
-  if (firstRun) {
-    write(`Browser endpoint: ${firstRun.browserUrl}\n`);
-    write(`Client endpoint:  ${buildClientWsUrl(handle.host, handle.port, firstRun.clientEnv.WRONGSTACK_HQ_TOKEN)}\n`);
-    write(`\nFirst-run HQ auth created in ${firstRun.dataDir}\n`);
-    write(`Start clients with:\n`);
-    write(`  WRONGSTACK_HQ_URL=${firstRun.clientEnv.WRONGSTACK_HQ_URL}\n`);
-    write(`  WRONGSTACK_HQ_TOKEN=${firstRun.clientEnv.WRONGSTACK_HQ_TOKEN}\n`);
+  if (!startup) {
+    write(`Browser endpoint: ${buildHttpUrl(handle.host, handle.port)}\n`);
+    write(`Client endpoint:  ${buildClientWsUrl(handle.host, handle.port)}\n`);
+    return;
+  }
+
+  write(`Browser endpoint: ${startup.browserUrl}\n`);
+  write(`Client endpoint:  ${startup.clientUrl}\n`);
+  if (startup.createdAuth) {
+    write(`\nFirst-run HQ auth created in ${startup.dataDir}\n`);
   } else {
-    write(`Client endpoint:  ws://${handle.host}:${handle.port}/ws/client\n`);
-    write(`Browser endpoint: http://${handle.host}:${handle.port}\n`);
+    write(`\nHQ auth loaded from ${startup.dataDir}\n`);
+  }
+  write(`Start clients with:\n`);
+  write(`  WRONGSTACK_HQ_URL=${startup.clientEnv.WRONGSTACK_HQ_URL}\n`);
+  if (startup.clientEnv.WRONGSTACK_HQ_TOKEN) {
+    write(`  WRONGSTACK_HQ_TOKEN=${startup.clientEnv.WRONGSTACK_HQ_TOKEN}\n`);
   }
 }
 
@@ -152,6 +195,17 @@ const HQ_HTML = `<!DOCTYPE html>
   .hq-led.live { background: var(--live); box-shadow: 0 0 6px var(--live); }
   .hq-led.dead { background: var(--dim); }
   .hq-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .hq-flow { position: relative; min-height: 320px; overflow: hidden; background: radial-gradient(circle at 1px 1px, rgba(139,148,158,0.18) 1px, transparent 0), #0d1117; background-size: 22px 22px; border: 1px solid var(--border); border-radius: 10px; }
+  .hq-flow svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .hq-flow .flow-node { position: absolute; width: 168px; min-height: 74px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: rgba(22,27,34,0.96); box-shadow: 0 8px 18px rgba(0,0,0,0.28); }
+  .hq-flow .flow-node.core { border-color: rgba(88,166,255,0.65); box-shadow: 0 0 0 1px rgba(88,166,255,0.08), 0 8px 18px rgba(0,0,0,0.28); }
+  .hq-flow .flow-node.project { border-color: rgba(63,185,80,0.45); }
+  .hq-flow .flow-node.mailbox { border-color: rgba(210,153,34,0.45); }
+  .hq-flow .flow-node .node-title { font-size: 12px; font-weight: 700; color: #f0f6fc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hq-flow .flow-node .node-kind { margin-top: 2px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--dim); }
+  .hq-flow .flow-node .node-meta { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; font-size: 10px; color: var(--muted); }
+  .hq-flow .flow-node .node-meta span { padding: 1px 5px; border-radius: 999px; background: #21262d; }
+  .hq-flow .flow-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); font-style: italic; font-size: 13px; text-align: center; padding: 24px; }
   .hq-stat { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
   .hq-stat .num { font-size: 26px; font-weight: 700; color: #f0f6fc; line-height: 1.1; }
   .hq-stat .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--dim); margin-top: 4px; }
@@ -187,6 +241,7 @@ const HQ_HTML = `<!DOCTYPE html>
   .pill.priority-high { background: rgba(248,81,73,0.18); color: var(--high); }
   .pill.priority-normal { background: rgba(88,166,255,0.15); color: var(--accent); }
   .pill.priority-low { background: #21262d; color: var(--dim); }
+  code.mail-id { font-size: 10px; color: var(--muted); background: var(--row-alt); padding: 1px 4px; border-radius: 4px; margin-right: 4px; }
   .hq-toolbar { display: flex; align-items: center; gap: 8px; margin: 12px 0 16px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
   .hq-toolbar label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--dim); }
   .hq-toolbar select { background: #0d1117; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px; min-width: 280px; }
@@ -226,6 +281,13 @@ const HQ_HTML = `<!DOCTYPE html>
 </div>
 
 <section>
+  <h2>🧭 Fleet flow</h2>
+  <div class="hq-flow" id="hq-flow" aria-label="Fleet HQ flow diagram">
+    <p class="flow-empty">No flow data yet. Connect clients to see HQ → projects → mailboxes.</p>
+  </div>
+</section>
+
+<section>
   <h2>📬 Mailboxes</h2>
   <table>
     <thead>
@@ -233,6 +295,8 @@ const HQ_HTML = `<!DOCTYPE html>
         <th>Mailbox</th>
         <th>Scope</th>
         <th>Project</th>
+        <th>Project Root</th>
+        <th>Git Branch</th>
         <th class="num">Messages</th>
         <th class="num">Unread</th>
         <th class="num">Open</th>
@@ -241,7 +305,7 @@ const HQ_HTML = `<!DOCTYPE html>
       </tr>
     </thead>
     <tbody id="tbody-mailboxes">
-      <tr><td colspan="8" class="empty">No mailboxes yet. Connect a TUI/REPL/WebUI client with WRONGSTACK_HQ_URL set.</td></tr>
+      <tr><td colspan="10" class="empty">No mailboxes yet. Connect a TUI/REPL/WebUI client with WRONGSTACK_HQ_URL set.</td></tr>
     </tbody>
   </table>
 </section>
@@ -254,12 +318,14 @@ const HQ_HTML = `<!DOCTYPE html>
         <th>Client ID</th>
         <th>Kind</th>
         <th>Project</th>
+        <th>Hostname / PID</th>
+        <th>Version</th>
         <th>Capabilities</th>
         <th>Last seen</th>
       </tr>
     </thead>
     <tbody id="tbody-clients">
-      <tr><td colspan="5" class="empty">No clients connected yet.</td></tr>
+      <tr><td colspan="7" class="empty">No clients connected yet.</td></tr>
     </tbody>
   </table>
 </section>
@@ -335,19 +401,25 @@ const HQ_HTML = `<!DOCTYPE html>
     return s.length > 12 ? s.slice(0, 6) + '…' + s.slice(-4) : s;
   }
 
-  function renderMailboxes(mailboxes) {
+  function renderMailboxes(mailboxes, projects) {
     const tbody = el('tbody-mailboxes');
     if (!mailboxes || mailboxes.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="8" class="empty">No mailboxes yet. Connect a TUI/REPL/WebUI client with WRONGSTACK_HQ_URL set.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="10" class="empty">No mailboxes yet. Connect a TUI/REPL/WebUI client with WRONGSTACK_HQ_URL set.</td></tr>';
       return;
     }
+    const projectById = new Map((projects || []).map((p) => [p.projectId, p]));
     tbody.innerHTML = mailboxes.map((m) => {
       const scopeClass = m.scope === 'global' ? 'global' : 'project';
       const projectCell = '<a href="#' + encodeURIComponent(m.projectId) + '" class="project-link" data-project="' + escapeHtml(m.projectId) + '">' + escapeHtml(shortId(m.projectId)) + '</a>';
+      const project = projectById.get(m.projectId);
+      const projectRoot = project ? escapeHtml(project.projectRootDisplay || project.projectId) : '—';
+      const gitBranch = project && project.gitBranch ? escapeHtml(project.gitBranch) : '—';
       return '<tr>' +
         '<td><code>' + escapeHtml(shortId(m.mailboxId)) + '</code></td>' +
         '<td><span class="pill ' + scopeClass + '">' + escapeHtml(m.scope) + '</span></td>' +
         '<td>' + projectCell + '</td>' +
+        '<td><code>' + (projectRoot.length > 24 ? escapeHtml(projectRoot.slice(0, 22) + '…') : projectRoot) + '</code></td>' +
+        '<td><code>' + gitBranch + '</code></td>' +
         '<td class="num">' + m.messageCount + '</td>' +
         '<td class="num">' + (m.unreadCount > 0 ? '<strong>' + m.unreadCount + '</strong>' : '0') + '</td>' +
         '<td class="num">' + m.incompleteCount + '</td>' +
@@ -361,19 +433,86 @@ const HQ_HTML = `<!DOCTYPE html>
   function renderClients(clients) {
     const tbody = el('tbody-clients');
     if (!clients || clients.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" class="empty">No clients connected yet.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">No clients connected yet.</td></tr>';
       return;
     }
     tbody.innerHTML = clients.map((c) => {
       const caps = (c.capabilities || []).map((cap) => '<span class="badge">' + escapeHtml(cap) + '</span>').join('');
+      const hostInfo = c.hostname ? escapeHtml(c.hostname) + (c.pid ? ' / PID ' + c.pid : '') : (c.pid ? 'PID ' + c.pid : '—');
+      const version = c.version ? escapeHtml(c.version) : '—';
       return '<tr>' +
         '<td><code>' + escapeHtml(shortId(c.clientId)) + '</code></td>' +
-        '<td>' + escapeHtml(c.kind) + '</td>' +
-        '<td>' + escapeHtml(shortId(c.projectId)) + '</td>' +
+        '<td><span class="pill project">' + escapeHtml(c.kind) + '</span></td>' +
+        '<td><code>' + escapeHtml(shortId(c.projectId)) + '</code></td>' +
+        '<td>' + hostInfo + '</td>' +
+        '<td><code>' + version + '</code></td>' +
         '<td>' + caps + '</td>' +
         '<td>' + fmtTime(c.lastSeenAt) + '</td>' +
       '</tr>';
     }).join('');
+  }
+
+  function renderFlow(snapshot) {
+    const root = el('hq-flow');
+    if (!root) return;
+    const projects = snapshot.projects || [];
+    const mailboxes = snapshot.mailboxes || [];
+    const clients = snapshot.clients || [];
+    if (projects.length === 0 && mailboxes.length === 0 && clients.length === 0) {
+      root.innerHTML = '<p class="flow-empty">No flow data yet. Connect clients to see HQ → projects → mailboxes.</p>';
+      return;
+    }
+
+    const projectIds = new Set(projects.map((p) => p.projectId));
+    for (const c of clients) if (c.projectId) projectIds.add(c.projectId);
+    for (const m of mailboxes) if (m.projectId) projectIds.add(m.projectId);
+    const orderedProjects = Array.from(projectIds).sort();
+    const projectIndex = new Map(orderedProjects.map((id, index) => [id, index]));
+    const rows = Math.max(1, orderedProjects.length);
+    const height = Math.max(320, 150 + rows * 112);
+    root.style.minHeight = height + 'px';
+
+    const nodes = [{ id: 'hq', kind: 'core', title: 'WrongStack HQ', x: 24, y: Math.max(24, Math.round(height / 2) - 38), meta: [clients.length + ' clients', orderedProjects.length + ' projects'] }];
+    const edges = [];
+    const projectById = new Map(projects.map((p) => [p.projectId, p]));
+    for (const projectId of orderedProjects) {
+      const idx = projectIndex.get(projectId) || 0;
+      const project = projectById.get(projectId) || { projectId, projectName: projectId, activeClients: 0 };
+      const y = 40 + idx * 112;
+      const projectNodeId = 'project:' + projectId;
+      nodes.push({ id: projectNodeId, kind: 'project', title: project.projectName || projectId, x: 260, y, meta: [(project.activeClients || 0) + ' clients', shortId(projectId)] });
+      edges.push({ from: 'hq', to: projectNodeId });
+      const projectMailboxes = mailboxes.filter((m) => m.projectId === projectId).slice(0, 3);
+      projectMailboxes.forEach((m, mailboxIdx) => {
+        const mailboxNodeId = 'mailbox:' + m.mailboxId;
+        nodes.push({ id: mailboxNodeId, kind: 'mailbox', title: shortId(m.mailboxId), x: 500, y: y + mailboxIdx * 92 - Math.max(0, projectMailboxes.length - 1) * 28, meta: [m.messageCount + ' msgs', m.unreadCount + ' unread'] });
+        edges.push({ from: projectNodeId, to: mailboxNodeId });
+      });
+    }
+
+    const pos = new Map(nodes.map((n) => [n.id, n]));
+    const svg = '<svg viewBox="0 0 720 ' + height + '" preserveAspectRatio="xMinYMin meet" aria-hidden="true">' +
+      '<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#58a6ff" opacity="0.8" /></marker></defs>' +
+      edges.map((e) => {
+        const from = pos.get(e.from);
+        const to = pos.get(e.to);
+        if (!from || !to) return '';
+        const x1 = from.x + 168;
+        const y1 = from.y + 37;
+        const x2 = to.x;
+        const y2 = to.y + 37;
+        const mid = Math.round((x1 + x2) / 2);
+        return '<path d="M ' + x1 + ' ' + y1 + ' C ' + mid + ' ' + y1 + ', ' + mid + ' ' + y2 + ', ' + x2 + ' ' + y2 + '" fill="none" stroke="#58a6ff" stroke-width="1.5" opacity="0.72" marker-end="url(#arrow)" />';
+      }).join('') +
+      '</svg>';
+    const htmlNodes = nodes.map((n) =>
+      '<div class="flow-node ' + n.kind + '" data-flow-node="' + escapeHtml(n.id) + '" style="left:' + n.x + 'px;top:' + n.y + 'px">' +
+        '<div class="node-title">' + escapeHtml(n.title) + '</div>' +
+        '<div class="node-kind">' + escapeHtml(n.kind) + '</div>' +
+        '<div class="node-meta">' + n.meta.map((m) => '<span>' + escapeHtml(m) + '</span>').join('') + '</div>' +
+      '</div>'
+    ).join('');
+    root.innerHTML = svg + htmlNodes;
   }
 
   function escapeHtml(s) {
@@ -401,7 +540,8 @@ const HQ_HTML = `<!DOCTYPE html>
     el('stat-high').textContent = highPriority;
     el('stat-agents').textContent = onlineAgents;
 
-    renderMailboxes(s.mailboxes || []);
+    renderFlow(s);
+    renderMailboxes(s.mailboxes || [], s.projects || []);
     renderClients(s.clients || []);
     renderProjectPicker(s.projects || []);
 
@@ -426,6 +566,17 @@ const HQ_HTML = `<!DOCTYPE html>
   const eventFeeds = new Map();
   const FEED_MAX = 50;
   let feedIdleTimer = null;
+
+  function currentBrowserToken() {
+    return new URL(location.href).searchParams.get('token') || '';
+  }
+
+  function withBrowserToken(path) {
+    const url = new URL(path, location.href);
+    const token = currentBrowserToken();
+    if (token) url.searchParams.set('token', token);
+    return url.pathname + url.search;
+  }
 
   function parseInitialProject() {
     // Prefer ?project=ID over #ID so URL copy/paste stays predictable even
@@ -487,7 +638,7 @@ const HQ_HTML = `<!DOCTYPE html>
     if (!silent) {
       el('drawer-meta').textContent = 'Refreshing…';
     }
-    fetch('/api/projects/' + encodeURIComponent(projectId))
+    fetch(withBrowserToken('/api/projects/' + encodeURIComponent(projectId)))
       .then((r) => {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
@@ -592,6 +743,7 @@ const HQ_HTML = `<!DOCTYPE html>
           return '<div class="msg-row">' +
             '<span class="pill ' + priorityClass + '">' + escapeHtml(m.priority || 'normal') + '</span>' +
             '<span class="pill">' + escapeHtml(m.type || '?') + '</span>' +
+            '<code class="mail-id">' + escapeHtml(m.mailId || m.messageId || '') + '</code>' +
             '<span class="msg-subject"> ' + escapeHtml(m.subject || '(no subject)') + '</span>' +
             '<div class="msg-meta">' + escapeHtml(m.from || '?') + ' → ' + escapeHtml(m.to || '?') + ' · ' + fmtTime(m.timestamp) + (m.completed ? ' · ✓ completed' : '') + task + '</div>' +
             preview +
@@ -644,7 +796,7 @@ const HQ_HTML = `<!DOCTYPE html>
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(proto + '//' + location.host + '/ws/browser');
+    const ws = new WebSocket(proto + '//' + location.host + withBrowserToken('/ws/browser'));
     ws.onopen = () => {
       led.className = 'hq-led live';
       connText.innerHTML = '<span class="hq-led live"></span>Connected to HQ';
@@ -806,6 +958,7 @@ function startHqServerWithAuth(
     const clients = new Map<WebSocket, ConnectedClient>();
     const browsers = new Set<WebSocket>();
     const eventLog: HqEventEnvelope[] = [];
+    const snapshotBroadcaster = createSnapshotBroadcaster(clients, browsers);
 
     const httpServer: HttpServer = http.createServer((req, res) => {
       const url = new URL(req.url ?? '/', `http://${host}:${port}`);
@@ -915,9 +1068,9 @@ function startHqServerWithAuth(
 
     wss.on('connection', (ws: WebSocket, _req: http.IncomingMessage, pathname: string) => {
       if (pathname === '/ws/browser') {
-        handleBrowser(ws, clients, browsers);
+        handleBrowser(ws, snapshotBroadcaster, browsers);
       } else {
-        handleClient(ws, clients, browsers, eventLog, mutableAuth.operatorPolicy);
+        handleClient(ws, clients, browsers, eventLog, mutableAuth.operatorPolicy, snapshotBroadcaster);
       }
     });
 
@@ -953,58 +1106,83 @@ function startHqServerWithAuth(
       },
     );
 
+    let bindAttempts = 0;
+    const listen = (nextPort: number): void => {
+      httpServer.listen(nextPort, host);
+    };
     const onError = (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE' && !options.strictPort) {
-        httpServer.listen(port + 1, host);
+      if (err.code === 'EADDRINUSE' && !options.strictPort && bindAttempts < MAX_NON_STRICT_PORT_SCAN) {
+        bindAttempts += 1;
+        listen(port + bindAttempts);
       } else {
+        authWatcher.close();
+        snapshotBroadcaster.close();
+        wss.close();
         reject(err);
       }
     };
 
-    httpServer.once('error', onError);
-    httpServer.listen(port, host, () => {
-      httpServer.removeListener('error', onError);
-      const addr = httpServer.address();
-      const actualPort = typeof addr === 'object' && addr ? addr.port : port;
+    httpServer.on('error', onError);
+    listen(port);
+    httpServer.once('listening', () => {
+      void (async () => {
+        httpServer.removeListener('error', onError);
+        const addr = httpServer.address();
+        const actualPort = typeof addr === 'object' && addr ? addr.port : port;
 
-      const firstRunSetup = firstRunAuth.created && firstRunAuth.browserToken && firstRunAuth.clientToken
-        ? {
-            dataDir,
-            browserUrl: buildHttpUrl(host, actualPort, firstRunAuth.browserToken.token),
-            clientEnv: {
-              WRONGSTACK_HQ_URL: `http://${displayHost(host)}:${actualPort}`,
-              WRONGSTACK_HQ_TOKEN: firstRunAuth.clientToken.token,
-            },
-          }
-        : undefined;
-      const handle: HqServerHandle = {
-        host,
-        port: actualPort,
-        ...(firstRunSetup ? { firstRunSetup } : {}),
-        close: () =>
-          new Promise<void>((res) => {
-            authWatcher.close();
-            for (const ws of browsers) ws.close(1001, 'HQ shutting down');
-            for (const ws of clients.keys()) ws.close(1001, 'HQ shutting down');
-            wss.close();
-            httpServer.close(() => res());
-          }),
-      };
-      writeHqStartupInfo((line) => console.log(line.trimEnd()), handle);
-      resolve(handle);
+        const browserToken = firstRunAuth.browserToken?.token ?? authFile.browserTokens?.find((t) => t.token.trim().length > 0)?.token;
+        const clientToken = firstRunAuth.clientToken?.token ?? authFile.clientTokens?.find((t) => t.token.trim().length > 0)?.token;
+        const hqUrl = `http://${displayHost(host)}:${actualPort}`;
+        await writeHqRuntimeMarker(dataDir, hqUrl).catch(() => {
+          // Best-effort discovery marker; startup output remains authoritative.
+        });
+        const startupInfo: HqStartupConnectionInfo = {
+          dataDir,
+          browserUrl: buildHttpUrl(host, actualPort, browserToken),
+          clientUrl: buildClientWsUrl(host, actualPort, clientToken),
+          clientEnv: {
+            WRONGSTACK_HQ_URL: hqUrl,
+            ...(clientToken ? { WRONGSTACK_HQ_TOKEN: clientToken } : {}),
+          },
+          createdAuth: firstRunAuth.created,
+        };
+        let closed = false;
+        const handle: HqServerHandle = {
+          host,
+          port: actualPort,
+          firstRunSetup: startupInfo,
+          close: () =>
+            new Promise<void>((res) => {
+              if (closed) {
+                res();
+                return;
+              }
+              closed = true;
+              authWatcher.close();
+              snapshotBroadcaster.close();
+              for (const ws of browsers) ws.close(1001, 'HQ shutting down');
+              for (const ws of clients.keys()) ws.close(1001, 'HQ shutting down');
+              wss.close();
+              httpServer.close(() => {
+                void clearHqRuntimeMarker(dataDir, hqUrl).finally(() => res());
+              });
+            }),
+        };
+        writeHqStartupInfo((line) => console.log(line.trimEnd()), handle);
+        resolve(handle);
+      })();
     });
   });
 }
 
 function handleBrowser(
   ws: WebSocket,
-  clients: Map<WebSocket, ConnectedClient>,
+  snapshotBroadcaster: HqSnapshotBroadcaster,
   browsers: Set<WebSocket>,
 ): void {
   browsers.add(ws);
 
-  const snapshotMsg: HqBrowserMessage = { type: 'hq.snapshot', snapshot: buildSnapshot(clients) };
-  ws.send(JSON.stringify(snapshotMsg));
+  ws.send(snapshotBroadcaster.currentSerialized());
 
   ws.on('close', () => {
     browsers.delete(ws);
@@ -1017,6 +1195,7 @@ function handleClient(
   browsers: Set<WebSocket>,
   eventLog: HqEventEnvelope[],
   operatorPolicy: HqRedactionPolicy,
+  snapshotBroadcaster: HqSnapshotBroadcaster,
 ): void {
   let registered = false;
 
@@ -1048,6 +1227,7 @@ function handleClient(
         ws,
         clientId: payload.client.clientId,
         projectId: payload.project.projectId,
+        project: payload.project,
         kind: payload.client.kind,
         connectedAt: new Date().toISOString(),
         lastSeenAt: new Date().toISOString(),
@@ -1088,7 +1268,7 @@ function handleClient(
       };
       eventLog.push(event);
       if (eventLog.length > MAX_EVENT_LOG) eventLog.splice(0, eventLog.length - MAX_EVENT_LOG);
-      broadcastSnapshot(clients, browsers);
+      snapshotBroadcaster.broadcast();
       broadcastEvent(event, browsers);
       return;
     }
@@ -1110,10 +1290,10 @@ function handleClient(
         const payloadResult = parseHqEventPayload(event.type, event.payload);
         if (payloadResult.ok) {
           const payload = payloadResult.payload as HqMailboxSnapshotPayload;
-          client.mailboxes.set(payload.mailboxId, payload);
+          client.mailboxes.set(client.projectId + ':' + payload.mailboxId, payload);
           eventLog.push(event);
           if (eventLog.length > MAX_EVENT_LOG) eventLog.splice(0, eventLog.length - MAX_EVENT_LOG);
-          broadcastSnapshot(clients, browsers);
+          snapshotBroadcaster.broadcast();
           broadcastEvent(event, browsers);
           return;
         }
@@ -1153,7 +1333,7 @@ function handleClient(
 
   ws.on('close', () => {
     clients.delete(ws);
-    broadcastSnapshot(clients, browsers);
+    snapshotBroadcaster.broadcast();
   });
 }
 
@@ -1185,9 +1365,10 @@ function buildSnapshot(clients: Map<WebSocket, ConnectedClient>): HqSnapshot {
     if (!project) {
       project = {
         projectId: client.projectId,
-        projectName: client.projectId,
-        projectRootDisplay: '',
-        machineIds: [],
+        projectName: client.project.projectName || client.projectId,
+        projectRootDisplay: client.project.projectRoot,
+        machineIds: [client.project.machineId],
+        ...(client.project.gitBranch ? { gitBranch: client.project.gitBranch } : {}),
         activeClients: 0,
         activeSessions: 0,
         activeSubagents: 0,
@@ -1196,6 +1377,8 @@ function buildSnapshot(clients: Map<WebSocket, ConnectedClient>): HqSnapshot {
         status: 'active',
       };
       projectMap.set(client.projectId, project);
+    } else if (!project.machineIds.includes(client.project.machineId)) {
+      project.machineIds = [...project.machineIds, client.project.machineId];
     }
     project.activeClients++;
 
@@ -1253,6 +1436,56 @@ function computeTotals(input: {
   };
 }
 
+interface HqSnapshotBroadcaster {
+  currentSerialized(): string;
+  broadcast(): void;
+  close(): void;
+}
+
+const HQ_SNAPSHOT_BROADCAST_DEBOUNCE_MS = 250;
+
+function createSnapshotBroadcaster(
+  clients: Map<WebSocket, ConnectedClient>,
+  browsers: Set<WebSocket>,
+): HqSnapshotBroadcaster {
+  let cached = '';
+  let dirty = true;
+  let timer: NodeJS.Timeout | null = null;
+
+  const serialize = (): string => {
+    if (!dirty && cached.length > 0) return cached;
+    const msg: HqBrowserMessage = { type: 'hq.snapshot', snapshot: buildSnapshot(clients) };
+    cached = JSON.stringify(msg);
+    dirty = false;
+    return cached;
+  };
+
+  const flush = (): void => {
+    timer = null;
+    if (browsers.size === 0) return;
+    const data = serialize();
+    for (const ws of browsers) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(data);
+    }
+  };
+
+  return {
+    currentSerialized: serialize,
+    broadcast: () => {
+      dirty = true;
+      if (timer !== null) return;
+      timer = setTimeout(flush, HQ_SNAPSHOT_BROADCAST_DEBOUNCE_MS);
+      timer.unref?.();
+    },
+    close: () => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    },
+  };
+}
+
 interface ProjectDetail {
   generatedAt: string;
   project: HqProjectRecord;
@@ -1294,11 +1527,14 @@ function buildProjectDetail(
     }
   }
 
+  const primaryProject = projectClients[0]!.project;
+  const machineIds = Array.from(new Set(projectClients.map((client) => client.project.machineId)));
   const project: HqProjectRecord = {
     projectId,
-    projectName: projectId,
-    projectRootDisplay: '',
-    machineIds: [],
+    projectName: primaryProject.projectName || projectId,
+    projectRootDisplay: primaryProject.projectRoot,
+    machineIds,
+    ...(primaryProject.gitBranch ? { gitBranch: primaryProject.gitBranch } : {}),
     activeClients: projectClients.length,
     activeSessions: 0,
     activeSubagents: 0,
@@ -1313,18 +1549,6 @@ function buildProjectDetail(
     clients: clientRecords,
     mailboxes: mailboxPayloads,
   };
-}
-
-function broadcastSnapshot(
-  clients: Map<WebSocket, ConnectedClient>,
-  browsers: Set<WebSocket>,
-): void {
-  const snapshot = buildSnapshot(clients);
-  const msg: HqBrowserMessage = { type: 'hq.snapshot', snapshot };
-  const data = JSON.stringify(msg);
-  for (const ws of browsers) {
-    if (ws.readyState === WebSocket.OPEN) ws.send(data);
-  }
 }
 
 function broadcastEvent(event: HqEventEnvelope, browsers: Set<WebSocket>): void {

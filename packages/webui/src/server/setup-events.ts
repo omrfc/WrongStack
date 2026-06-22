@@ -230,10 +230,10 @@ export function setupEvents(deps: SetupEventsDeps): () => void {
   // These events are emitted via emit() with untyped names (GlobalMailbox
   // + mailbox-loop), so subscribe by pattern like the TUI does.
   events.onPattern('mailbox.received', (_e, payload) => {
-    broadcast(clients, { type: 'mailbox.received', payload } as unknown as WSServerMessage);
+    broadcast(clients, { type: 'mailbox.received', payload } as never as WSServerMessage);
   });
   events.onPattern('mailbox.agent_registered', (_e, payload) => {
-    broadcast(clients, { type: 'mailbox.agent_registered', payload } as unknown as WSServerMessage);
+    broadcast(clients, { type: 'mailbox.agent_registered', payload } as never as WSServerMessage);
   });
 
   // Subagent fleet lifecycle
@@ -321,7 +321,7 @@ export function setupEvents(deps: SetupEventsDeps): () => void {
 
   // ── Brain events — decisions + proactive interventions, live in the browser ──
   events.onPattern('brain.*', (eventName, payload) => {
-    broadcast(clients, { type: 'brain.event', payload: { event: eventName, ...payload as Record<string, unknown> } } as unknown as WSServerMessage);
+    broadcast(clients, { type: 'brain.event', payload: { event: eventName, ...payload as Record<string, unknown> } } as never as WSServerMessage);
   });
 
   // ── Client status events — immediate broadcast to WebUI + write to status.json ──

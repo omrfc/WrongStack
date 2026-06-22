@@ -148,10 +148,10 @@ export function createAgentToolHandler(a: AgentInternals): AgentToolHandler {
 
         // Soft allow/deny for session-scoped retry prevention
         if (decision === 'yes') {
-          const p = a.permission as unknown as { allowOnce?(r: { tool: string; pattern: string }): void };
+          const p = a.permission as never as { allowOnce?(r: { tool: string; pattern: string }): void };
           p.allowOnce?.({ tool: tool.name, pattern: result.suggestedPattern });
         } else if (decision === 'no') {
-          const p = a.permission as unknown as { denyOnce?(r: { tool: string; pattern: string }): void };
+          const p = a.permission as never as { denyOnce?(r: { tool: string; pattern: string }): void };
           p.denyOnce?.({ tool: tool.name, pattern: result.suggestedPattern });
         }
 

@@ -150,11 +150,11 @@ describe('SubagentBudget', () => {
     const bus = new EventBus();
     bus.on('budget.threshold_reached', ({ extend }) => extend({ timeoutMs: 999_999 }));
     const b = new SubagentBudget({ timeoutMs: 5 }, 'sync');
-    (b as unknown as { _events: EventBus })._events = bus;
+    (b as never as { _events: EventBus })._events = bus;
     b.onThreshold = ({ requestDecision }) => requestDecision();
     b.start();
     // Advance clock manually past the limit
-    (b as unknown as { startTime: number }).startTime = Date.now() - 1000;
+    (b as never as { startTime: number }).startTime = Date.now() - 1000;
     expect(() => b.checkTimeout()).toThrow(/timeout/i);
   });
 
@@ -162,7 +162,7 @@ describe('SubagentBudget', () => {
     const bus = new EventBus();
     bus.on('budget.threshold_reached', ({ extend }) => extend({ maxIterations: 999 }));
     const b = new SubagentBudget({ maxIterations: 2 }, 'sync');
-    (b as unknown as { _events: EventBus })._events = bus; // has a real listener
+    (b as never as { _events: EventBus })._events = bus; // has a real listener
     b.onThreshold = () => 'continue'; // handler that would normally soft-stop
     b.recordIteration();
     b.recordIteration();
@@ -173,7 +173,7 @@ describe('SubagentBudget', () => {
   it('auto mode with a bus but no listener: async handler hard-stops (no one to grant)', () => {
     const bus = new EventBus(); // bus present, but no budget.threshold_reached listener
     const b = new SubagentBudget({ maxIterations: 2 }, 'auto');
-    (b as unknown as { _events: EventBus })._events = bus;
+    (b as never as { _events: EventBus })._events = bus;
     let handlerCalls = 0;
     // Production handler shape: defers to the bus via requestDecision(). With no
     // listener the negotiation can only resolve to 'stop' — so the budget
@@ -194,7 +194,7 @@ describe('SubagentBudget', () => {
   it('auto mode with a bus but no listener: a SYNC policy handler is honored without throwing', () => {
     const bus = new EventBus(); // no listener
     const b = new SubagentBudget({ maxIterations: 2 }, 'auto');
-    (b as unknown as { _events: EventBus })._events = bus;
+    (b as never as { _events: EventBus })._events = bus;
     let handlerCalls = 0;
     // A synchronous policy/recording handler (the coordinator watchdog shape):
     // it decides in-process and grants headroom directly via `extend`. No
@@ -229,7 +229,7 @@ describe('SubagentBudget', () => {
       }
     });
     const b = new SubagentBudget({ maxIterations: 2 }, 'auto');
-    (b as unknown as { _events: EventBus })._events = bus;
+    (b as never as { _events: EventBus })._events = bus;
     b.onThreshold = ({ requestDecision }) => requestDecision();
     b.recordIteration();
     b.recordIteration();

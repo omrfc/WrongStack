@@ -191,7 +191,7 @@ export class ClientTransport {
           // own static catalog or from a hardcoded spec, never from
           // user input, so shell-expansion is bounded.
           shell: process.platform === 'win32',
-        }) as unknown as ACPChildProcess;
+        }) as never as ACPChildProcess;
         /* v8 ignore start -- spawn() throwing synchronously is a defensive guard (e.g. argv0 type errors); the realistic async failure path is the child 'error' event, covered by tests. */
       } catch (err) {
         clearTimeout(timeout);

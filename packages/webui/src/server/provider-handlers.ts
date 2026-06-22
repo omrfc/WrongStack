@@ -279,7 +279,7 @@ export function createProviderHandlers(deps: ProviderHandlerDeps) {
         scrubber: probeScrubber,
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       });
-      reply(result as unknown as Record<string, unknown>);
+      reply(result as never as Record<string, unknown>);
     } catch (err) {
       reply({ ok: false, status: 'unreachable', detail: errMessage(err) });
     }

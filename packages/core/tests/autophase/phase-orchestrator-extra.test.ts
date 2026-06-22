@@ -62,7 +62,7 @@ function throwingMergeWorktrees(): WorktreeManager {
     async release() {},
     get: (id: string) => handles.get(id),
     list: () => [...handles.values()],
-  } as unknown as WorktreeManager;
+  } as never as WorktreeManager;
 }
 
 describe('PhaseOrchestrator — autonomous tick loop', () => {
@@ -74,16 +74,16 @@ describe('PhaseOrchestrator — autonomous tick loop', () => {
       autonomous: true,
     });
     await orch.start();
-    expect((orch as unknown as { tickInterval: unknown }).tickInterval).not.toBeNull();
+    expect((orch as never as { tickInterval: unknown }).tickInterval).not.toBeNull();
     orch.stop();
-    expect((orch as unknown as { tickInterval: unknown }).tickInterval).toBeNull();
+    expect((orch as never as { tickInterval: unknown }).tickInterval).toBeNull();
   });
 
   it('tick() is a no-op when stopped or paused', async () => {
     const graph = await singlePhase();
     const orch = new PhaseOrchestrator({ graph, ctx: { executeTask: async () => {} }, autonomous: false });
     orch.stop();
-    await (orch as unknown as { tick: () => Promise<void> }).tick(); // stopped → early return
+    await (orch as never as { tick: () => Promise<void> }).tick(); // stopped → early return
     orch.resume(); // clears paused, fires a tick (no running phases)
   });
 
@@ -96,7 +96,7 @@ describe('PhaseOrchestrator — autonomous tick loop', () => {
       autonomous: true,
       phaseDelayMs: 1,
     });
-    await (orch as unknown as { tick: () => Promise<void> }).tick();
+    await (orch as never as { tick: () => Promise<void> }).tick();
     // the phase ran via tick and the graph completed → orchestrator stopped
     expect(completed.length).toBe(1);
     expect(orch.isRunning()).toBe(false);
@@ -117,8 +117,8 @@ describe('PhaseOrchestrator — autonomous tick loop', () => {
     phases[0]!.status = 'failed';
     graph.failedPhaseIds.push(phases[0]!.id);
     phases[1]!.status = 'running';
-    (orch as unknown as { runningPhases: Set<string> }).runningPhases.add(phases[1]!.id);
-    await (orch as unknown as { tick: () => Promise<void> }).tick();
+    await (orch as never as { tick: () => Promise<void> }).tick();
+    await (orch as { tick: () => Promise<void> }).tick();
     expect(events).toContain('graph.failed');
   });
 });
@@ -220,7 +220,7 @@ describe('PhaseOrchestrator — accessors + noop event bus', () => {
     expect(orch.isRunning()).toBe(false);
 
     // Exercise every method on the auto-created no-op EventBus (no `events` passed).
-    const bus = (orch as unknown as { events: Record<string, (...a: unknown[]) => unknown> }).events;
+    const bus = (orch as never as { events: Record<string, (...a: unknown[]) => unknown> }).events;
     expect(bus.emit('x', {})).toBeUndefined();
     expect(typeof bus.on('x', () => {})).toBe('function');
     expect(bus.off('x', () => {})).toBeUndefined();
@@ -237,7 +237,7 @@ describe('PhaseOrchestrator — accessors + noop event bus', () => {
     const orch = new PhaseOrchestrator({ graph, ctx: { executeTask: async () => {} }, autonomous: false });
     const phase = Array.from(graph.phases.values())[0]!;
     phase.status = 'running';
-    (orch as unknown as { runningPhases: Set<string> }).runningPhases.add(phase.id);
+    (orch as never as { runningPhases: Set<string> }).runningPhases.add(phase.id);
     expect(orch.isRunning()).toBe(true);
   });
 
@@ -297,11 +297,11 @@ describe('PhaseOrchestrator — start/stop lifecycle edges', () => {
     const wm = {
       list: () => [handle],
       release: async (_h: WorktreeHandle, o: { keep?: boolean } = {}) => { released.push(o); },
-    } as unknown as WorktreeManager;
+    } as never as WorktreeManager;
     const orch = new PhaseOrchestrator({ graph, ctx: { executeTask: async () => {} }, worktrees: wm, autonomous: false });
     const phase = Array.from(graph.phases.values())[0]!;
     phase.status = 'running';
-    (orch as unknown as { runningPhases: Set<string> }).runningPhases.add(phase.id);
+    (orch as never as { runningPhases: Set<string> }).runningPhases.add(phase.id);
     orch.stop();
     await new Promise((r) => setTimeout(r, 5));
     expect(released).toEqual([{ keep: true }]);
@@ -313,7 +313,7 @@ describe('PhaseOrchestrator — start/stop lifecycle edges', () => {
     const orch = new PhaseOrchestrator({ graph, ctx: { executeTask: async () => {} }, autonomous: false });
     const phase = Array.from(graph.phases.values())[0]!;
     phase.status = 'completed';
-    await (orch as unknown as { startPhase: (p: unknown) => Promise<void> }).startPhase(phase);
+    await (orch as never as { startPhase: (p: unknown) => Promise<void> }).startPhase(phase);
     expect(phase.status).toBe('completed'); // untouched
   });
 
@@ -324,9 +324,9 @@ describe('PhaseOrchestrator — start/stop lifecycle edges', () => {
       ctx: { executeTask: async () => {}, verifyPhase: async () => ({ ok: true }) },
       autonomous: false,
     });
-    (orch as unknown as { stopped: boolean }).stopped = true;
+    (orch as never as { stopped: boolean }).stopped = true;
     const phase = Array.from(graph.phases.values())[0]!;
-    const verdict = await (orch as unknown as { runVerifyGate: (p: unknown) => Promise<{ ok: boolean }> }).runVerifyGate(phase);
+    const verdict = await (orch as never as { runVerifyGate: (p: unknown) => Promise<{ ok: boolean }> }).runVerifyGate(phase);
     expect(verdict.ok).toBe(false);
   });
 });

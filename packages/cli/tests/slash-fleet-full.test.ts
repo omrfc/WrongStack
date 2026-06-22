@@ -22,7 +22,7 @@ function ctx(extra: object = {}): Context {
       deleteMeta: () => {},
     },
     ...extra,
-  } as unknown as Context;
+  } as never as Context;
 }
 
 function fleetCtx(extra: object = {}): SlashCommandContext {
@@ -44,7 +44,7 @@ function fleetCtx(extra: object = {}): SlashCommandContext {
       deleteMeta: () => {},
     },
     ...extra,
-  } as unknown as SlashCommandContext;
+  } as never as SlashCommandContext;
 }
 
 describe('buildFleetCommand', () => {

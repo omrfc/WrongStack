@@ -23,7 +23,7 @@ const fakeChild = (): ChildProcess => {
       return true;
     }),
   };
-  return c as unknown as ChildProcess;
+  return c as never as ChildProcess;
 };
 
 const makeProc = (overrides: Partial<Tracked> = {}): Tracked => ({

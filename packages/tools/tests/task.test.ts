@@ -22,7 +22,7 @@ async function mkTaskSandbox(): Promise<TaskSandbox> {
     projectRoot: dir,
     session: { id: 'sess', append: async () => undefined, close: async () => undefined },
     meta: { 'task.path': taskPath, 'plan.path': planPath },
-  } as unknown as Context;
+  } as never as Context;
   return {
     dir,
     taskPath,
@@ -210,7 +210,7 @@ describe('taskTool', () => {
   // -------------------------------------------------------------------
   it('promote converts a task to todo items and calls replaceTodos', async () => {
     const replacedTodos: Array<{ id: string; content: string; status: string }> = [];
-    (sb.ctx as unknown as { state: { replaceTodos: (todos: unknown[]) => void } }).state = {
+    (sb.ctx as never as { state: { replaceTodos: (todos: unknown[]) => void } }).state = {
       replaceTodos(todos: unknown[]) {
         replacedTodos.length = 0;
         replacedTodos.push(...todos as Array<{ id: string; content: string; status: string }>);
@@ -250,7 +250,7 @@ describe('taskTool', () => {
 
   it('promote with subtasks creates multiple todo items', async () => {
     const replacedTodos: Array<{ id: string; content: string; status: string }> = [];
-    (sb.ctx as unknown as { state: { replaceTodos: (todos: unknown[]) => void } }).state = {
+    (sb.ctx as never as { state: { replaceTodos: (todos: unknown[]) => void } }).state = {
       replaceTodos(todos: unknown[]) {
         replacedTodos.length = 0;
         replacedTodos.push(...todos as Array<{ id: string; content: string; status: string }>);
@@ -331,7 +331,7 @@ describe('taskTool', () => {
       projectRoot: sb.dir,
       session: { id: 'x', append: async () => undefined, close: async () => undefined },
       meta: {},
-    } as unknown as Context;
+    } as never as Context;
     const out = await taskTool.execute({ action: 'show' }, noMetaCtx, { signal: newSignal() });
     expect(out.ok).toBe(false);
     expect(out.message).toMatch(/not configured/i);
@@ -366,7 +366,7 @@ describe('taskTool', () => {
   });
 
   it('promote includes the description as a second todo and matches by index/substring', async () => {
-    (sb.ctx as unknown as { state: { replaceTodos: (t: unknown[]) => void } }).state = {
+    (sb.ctx as never as { state: { replaceTodos: (t: unknown[]) => void } }).state = {
       replaceTodos() {},
     };
     await taskTool.execute(
@@ -430,7 +430,7 @@ describe('taskTool', () => {
       projectRoot: sb.dir,
       session: { id: 'sess2', append: async () => undefined, close: async () => undefined },
       meta: { 'task.path': path.join(sb.dir, 'sess2.tasks.json') }, // no plan.path
-    } as unknown as Context;
+    } as never as Context;
     await taskTool.execute(
       {
         action: 'replace',
@@ -447,7 +447,7 @@ describe('taskTool', () => {
   });
 
   it('promote leaves a completed task status unchanged', async () => {
-    (sb.ctx as unknown as { state: { replaceTodos: (t: unknown[]) => void } }).state = {
+    (sb.ctx as never as { state: { replaceTodos: (t: unknown[]) => void } }).state = {
       replaceTodos() {},
     };
     await taskTool.execute(

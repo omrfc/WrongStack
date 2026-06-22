@@ -29,7 +29,7 @@ export async function handleHelpVersionShortCircuit(
 
   const stubRenderer = {
     write: (line: string) => { process.stdout.write(line); },
-  } as unknown as Parameters<typeof helpCmd>[1]['renderer'];
+  } as never as Parameters<typeof helpCmd>[1]['renderer'];
   const handler = earlyFlags['help'] === true ? helpCmd : versionCmd;
   return await handler([], { renderer: stubRenderer } as Parameters<typeof helpCmd>[1]);
 }

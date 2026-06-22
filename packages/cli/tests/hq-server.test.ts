@@ -1,5 +1,13 @@
-import { HQ_AUTH_FILE_VERSION, HQ_PROTOCOL_VERSION, writeHqAuthFile } from '@wrongstack/core';
+import {
+  GlobalMailbox,
+  HQ_AUTH_FILE_VERSION,
+  HQ_PROTOCOL_VERSION,
+  createHqPublisherFromEnv,
+  type HqSocketLike,
+  writeHqAuthFile,
+} from '@wrongstack/core';
 import * as fs from 'node:fs/promises';
+import * as http from 'node:http';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -34,6 +42,29 @@ async function startOpenHqServer(options: Omit<Parameters<typeof startHqServer>[
 function getPort(): number {
   // Use a random high port to avoid conflicts with running services.
   return 30_000 + Math.floor(Math.random() * 10_000);
+}
+
+function occupyPort(port: number): Promise<http.Server> {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(204);
+    res.end();
+  });
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => {
+      server.removeListener('error', reject);
+      resolve(server);
+    });
+  });
+}
+
+function closeHttpServer(server: http.Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.close((err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
 }
 
 function waitForOpen(ws: WebSocket, timeout = 5_000): Promise<void> {
@@ -129,6 +160,40 @@ function makeBrowserCollector(ws: WebSocket) {
 }
 
 describe('HQ server', () => {
+  it('prints tokenized browser and client links on every token-mode startup', async () => {
+    await writeHqAuthFile(dataDir, {
+      version: HQ_AUTH_FILE_VERSION,
+      updatedAt: new Date().toISOString(),
+      browserTokens: [{ id: 'bt-existing', token: 'existing-browser-token', createdAt: new Date().toISOString() }],
+      clientTokens: [{ id: 'ct-existing', token: 'existing-client-token', createdAt: new Date().toISOString() }],
+    });
+    const port = getPort();
+
+    handle = await startHqServer({ port, dataDir });
+
+    expect(handle.firstRunSetup).toMatchObject({
+      dataDir,
+      browserUrl: `http://127.0.0.1:${handle.port}/?token=existing-browser-token`,
+      clientUrl: `ws://127.0.0.1:${handle.port}/ws/client?token=existing-client-token`,
+      clientEnv: {
+        WRONGSTACK_HQ_URL: `http://127.0.0.1:${handle.port}`,
+        WRONGSTACK_HQ_TOKEN: 'existing-client-token',
+      },
+      createdAuth: false,
+    });
+  });
+
+  it('auto-advances past multiple busy ports when strictPort is false', async () => {
+    const port = getPort();
+    const blockers = [await occupyPort(port), await occupyPort(port + 1)];
+    try {
+      handle = await startOpenHqServer({ port, strictPort: false });
+      expect(handle.port).toBe(port + 2);
+    } finally {
+      await Promise.all(blockers.map((server) => closeHttpServer(server)));
+    }
+  });
+
   it('starts on a single port, serves HTML and /api/snapshot', async () => {
     const port = getPort();
     handle = await startOpenHqServer({ port });
@@ -197,8 +262,9 @@ describe('HQ server', () => {
           project: {
             projectId: 'test-project',
             projectRoot: '/test',
-            projectName: 'test',
+            projectName: 'Test Project',
             machineId: 'test-machine',
+            gitBranch: 'main',
             workspaceKind: 'git',
           },
           capabilities: ['telemetry.publish', 'mailbox.summary'],
@@ -210,13 +276,68 @@ describe('HQ server', () => {
     expect(snapshot.snapshot.totals.activeClients).toBe(1);
     // The HqProjectRecord rollup is also produced by buildSnapshot — confirm
     // it surfaces the project count too.
-    const projects = (snapshot.snapshot as unknown as { totals: { activeProjects: number } })
-      .totals;
-    expect(projects.activeProjects).toBe(1);
+    const snapshotBody = snapshot.snapshot as {
+      totals: { activeProjects: number };
+      projects: Array<{ projectName: string; projectRootDisplay: string; machineIds: string[]; gitBranch?: string }>;
+    };
+    expect(snapshotBody.totals.activeProjects).toBe(1);
+    expect(snapshotBody.projects[0]).toMatchObject({
+      projectName: 'Test Project',
+      projectRootDisplay: '/test',
+      machineIds: ['test-machine'],
+      gitBranch: 'main',
+    });
 
     browserCol.dispose();
     browser.close();
     client.close();
+  });
+
+  it('shows a same-process publisher registered through GlobalMailbox as an HQ project', async () => {
+    const port = getPort();
+    handle = await startOpenHqServer({ port });
+
+    const browser = new WebSocket(`ws://127.0.0.1:${handle.port}/ws/browser`);
+    await waitForOpen(browser);
+    const browserCol = makeBrowserCollector(browser);
+
+    const publisher = createHqPublisherFromEnv({
+      clientKind: 'tui',
+      projectRoot: path.join(dataDir, 'project-root'),
+      projectName: 'HQ Integration Project',
+      config: { url: `http://127.0.0.1:${handle.port}`, enabled: true },
+      socketFactory: (url) => new WebSocket(url) as HqSocketLike,
+    });
+    expect(publisher).toBeDefined();
+    publisher!.connect();
+
+    const mailbox = new GlobalMailbox(dataDir, undefined, publisher);
+    await mailbox.registerClient({
+      clientId: 'tui@integration',
+      sessionId: 'session-integration',
+      name: 'TUI Integration',
+      source: 'tui',
+      pid: process.pid,
+    });
+
+    const snapshot = (await browserCol.nextMessage(
+      (m) =>
+        m.type === 'hq.snapshot' &&
+        (m as HqSnapshotMessage).snapshot.totals.activeClients === 1,
+    )) as HqSnapshotMessage;
+    const body = snapshot.snapshot as {
+      projects: Array<{ projectName: string; activeClients: number }>;
+      clients: Array<{ kind: string }>;
+      mailboxes: Array<{ mailboxId: string }>;
+    };
+
+    expect(body.projects[0]).toMatchObject({ projectName: 'HQ Integration Project', activeClients: 1 });
+    expect(body.clients[0]).toMatchObject({ kind: 'tui' });
+    expect(body.mailboxes.length).toBeGreaterThanOrEqual(1);
+
+    publisher!.close();
+    browserCol.dispose();
+    browser.close();
   });
 
   it('rejects wrong protocol version on /ws/client', async () => {

@@ -9,7 +9,7 @@ const mkClient = (callImpl: (name: string, input: unknown) => Promise<unknown>) 
       const out = await callImpl(name, input);
       return { content: out, isError: false };
     }),
-  }) as unknown as MCPClient;
+  }) as never as MCPClient;
 
 describe('wrapMCPTool', () => {
   it('namespaces tool names', () => {

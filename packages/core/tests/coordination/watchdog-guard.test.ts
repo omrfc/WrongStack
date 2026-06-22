@@ -71,7 +71,7 @@ function makeFrequentProgressAgent(opts: {
       }
       return { status: 'done', iterations: iteration, finalText: 'completed' };
     },
-  } as unknown as Agent;
+  } as never as Agent;
 }
 
 /**
@@ -90,7 +90,7 @@ function makeStalledAgent(opts: { durationMs: number; events: EventBus }): Agent
       }
       return { status: 'done', iterations: 1, finalText: 'stalled-done' };
     },
-  } as unknown as Agent;
+  } as never as Agent;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,7 +127,7 @@ describe('watchdogActive guard', () => {
       'auto',
     );
     budget.onThreshold = handler;
-    budget._events = events as unknown as EventBus;
+    budget._events = events as never as EventBus;
     budget.start();
 
     // Advance past BOTH limits.
@@ -164,7 +164,7 @@ describe('watchdogActive guard', () => {
 
     const budget = new SubagentBudget({ timeoutMs: 50 }, 'auto');
     budget.onThreshold = handler;
-    budget._events = events as unknown as EventBus;
+    budget._events = events as never as EventBus;
     budget.start();
 
     vi.advanceTimersByTime(60); // past deadline
@@ -301,7 +301,7 @@ describe('dual-path race: watchdog vs checkTimeout (T2)', () => {
             await new Promise((r) => setTimeout(r, 5));
           }
         },
-      } as unknown as Agent;
+      } as never as Agent;
       return { agent, events };
     };
 

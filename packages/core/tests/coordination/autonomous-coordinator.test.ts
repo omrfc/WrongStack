@@ -62,7 +62,7 @@ function createMockFleetBus(): FleetBus {
     subscribe: vi.fn(() => () => {}),
     unsubscribe: vi.fn(),
     dispose: vi.fn(),
-  } as unknown as FleetBus;
+  } as never as FleetBus;
 }
 
 function createMockMailbox(): Mailbox {
@@ -72,7 +72,7 @@ function createMockMailbox(): Mailbox {
     subscribe: vi.fn(() => () => {}),
     unsubscribe: vi.fn(),
     dispose: vi.fn(),
-  } as unknown as Mailbox;
+  } as never as Mailbox;
 }
 
 function createMockLlmProvider() {
@@ -406,7 +406,7 @@ describe('AutonomousCoordinator', () => {
 
     it('assigns the selected goal to a director subagent using the original goal id', async () => {
       const events: CoordinatorEvent[] = [];
-      const director = createMockDirector() as unknown as Director & {
+      const director = createMockDirector() as never as Director & {
         _assignCalls: Array<{ task: TaskSpec }>;
       };
       const llmProvider = {
@@ -442,7 +442,7 @@ describe('AutonomousCoordinator', () => {
     it('treats subagent.completed status=success as task completion and marks the DAG node done', async () => {
       const events: CoordinatorEvent[] = [];
       const fleet = createMockFleetBus();
-      const director = createMockDirector() as unknown as Director & {
+      const director = createMockDirector() as never as Director & {
         _assignCalls: Array<{ task: TaskSpec }>;
       };
       const llmProvider = {
@@ -467,7 +467,7 @@ describe('AutonomousCoordinator', () => {
       const assignedTask = director._assignCalls[0]!.task;
       const subagentId = assignedTask.subagentId!;
 
-      (fleet.emit as unknown as (type: string, event: unknown) => void)('subagent.completed', {
+      (fleet.emit as never as (type: string, event: unknown) => void)('subagent.completed', {
         subagentId,
         payload: { subagentId, taskId: assignedTask.id, status: 'success' },
       });
@@ -489,7 +489,7 @@ describe('AutonomousCoordinator', () => {
     it('creates follow-up goals from NEXT/TODO markers in the subagent result', async () => {
       const events: CoordinatorEvent[] = [];
       const fleet = createMockFleetBus();
-      const director = createMockDirector() as unknown as Director & {
+      const director = createMockDirector() as never as Director & {
         _assignCalls: Array<{ task: TaskSpec }>;
       };
       const llmProvider = {
@@ -518,7 +518,7 @@ describe('AutonomousCoordinator', () => {
         'FOLLOW-UP: Check telemetry output',
       ].join('\n');
 
-      (fleet.emit as unknown as (type: string, event: unknown) => void)('subagent.completed', {
+      (fleet.emit as never as (type: string, event: unknown) => void)('subagent.completed', {
         subagentId: assignedTask.subagentId!,
         payload: { subagentId: assignedTask.subagentId!, taskId: assignedTask.id, status: 'success', result },
       });
@@ -908,7 +908,7 @@ describe('AutonomousCoordinator', () => {
         selfAgentName: 'Leader',
         fleet,
         mailbox,
-        director: director as unknown as Director,
+        director: director as never as Director,
         llmProvider: createMockLlmProvider(),
         disableSelfImprove: true,
         maxConcurrentAgents: 3,
@@ -1007,7 +1007,7 @@ describe('AutonomousCoordinator', () => {
         selfAgentName: 'Leader',
         fleet,
         mailbox,
-        director: director as unknown as Director,
+        director: director as never as Director,
         llmProvider: createMockLlmProvider(),
         disableSelfImprove: true,
         maxConcurrentAgents: 3,

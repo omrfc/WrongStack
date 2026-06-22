@@ -57,7 +57,7 @@ function makeCtx(): Context {
     hasRead: vi.fn(),
     lastReadMtime: vi.fn(),
     usage: vi.fn().mockReturnValue({ input: 0, output: 0 }),
-  } as unknown as Context;
+  } as never as Context;
 }
 
 function autoPermit(): PermissionDecision {

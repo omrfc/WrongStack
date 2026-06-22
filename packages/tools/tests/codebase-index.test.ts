@@ -58,7 +58,7 @@ function mkCtx(root: string): Context {
       recordFileChange: () => {},
     },
     messages,
-  } as unknown as Context;
+  } as never as Context;
 }
 
 function newSignal(): AbortSignal {
@@ -584,7 +584,7 @@ describe('schema migration', () => {
         1,
       );
       // Simulate a database written by an older schema.
-      (store as unknown as { db: { prepare(sql: string): { run(...a: unknown[]): unknown } } }).db
+      (store as never as { db: { prepare(sql: string): { run(...a: unknown[]): unknown } } }).db
         .prepare('UPDATE metadata SET value = ? WHERE key = ?')
         .run('1', 'version');
       store.close();

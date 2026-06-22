@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 
-import { HQ_PROTOCOL_VERSION } from '@wrongstack/core';
+import { HQ_AUTH_FILE_VERSION, HQ_PROTOCOL_VERSION, writeHqAuthFile } from '@wrongstack/core';
 import { JSDOM } from 'jsdom';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { type HqServerHandle, startHqServer } from '../src/hq-server.js';
@@ -55,11 +58,11 @@ async function mountDashboardWithLiveServer(
   serverHandle: HqServerHandle,
   opts: { url?: string } = {},
 ): Promise<DashboardHandle> {
-  const res = await fetch(`http://127.0.0.1:${serverHandle.port}/`);
+  const url = opts.url ?? `http://127.0.0.1:${serverHandle.port}/`;
+  const res = await fetch(url);
   const html = await res.text();
   const script = extractScript(html);
 
-  const url = opts.url ?? `http://127.0.0.1:${serverHandle.port}/`;
   const dom = new JSDOM(html, { url });
   // Pre-resolve relative URLs against the dashboard's mount URL so the
   // drilldown `fetch('/api/projects/:id')` round-trips to the live server.
@@ -71,16 +74,16 @@ async function mountDashboardWithLiveServer(
   // jsdom does not ship a WebSocket; the dashboard's `new WebSocket(...)`
   // would throw. Inject Node's `ws` package so the script can connect to
   // the live server.
-  (dom.window as unknown as { WebSocket: unknown }).WebSocket = WebSocket;
+  (dom.window as never as { WebSocket: unknown }).WebSocket = WebSocket;
   // jsdom's built-in `fetch` does not allow network resources by default.
   // Inject our base-URL-aware `fetchWithBase` so the drilldown can hit
   // the live server.
-  (dom.window as unknown as { fetch: typeof fetch }).fetch = fetchWithBase as typeof fetch;
+  (dom.window as never as { fetch: typeof fetch }).fetch = fetchWithBase as typeof fetch;
   // The script uses setTimeout/queueMicrotask for reconnect logic; route
   // those through the host so timers don't leak between tests.
-  (dom.window as unknown as { setTimeout: typeof setTimeout }).setTimeout = setTimeout;
-  (dom.window as unknown as { clearTimeout: typeof clearTimeout }).clearTimeout = clearTimeout;
-  (dom.window as unknown as { queueMicrotask: typeof queueMicrotask }).queueMicrotask =
+  (dom.window as never as { queueMicrotask: typeof queueMicrotask }).queueMicrotask =
+  (dom.window as { clearTimeout: typeof clearTimeout }).clearTimeout = clearTimeout;
+  (dom.window as { queueMicrotask: typeof queueMicrotask }).queueMicrotask =
     queueMicrotask;
 
   // JSDOM 29 `dom.window.eval` runs in a vm context where bare
@@ -246,6 +249,32 @@ function publishMailboxEvent(
 }
 
 describe('HQ dashboard drawer (jsdom)', () => {
+  it('connects the browser websocket when the dashboard is opened with a tokenized URL', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hq-dashboard-token-'));
+    try {
+      await writeHqAuthFile(dataDir, {
+        version: HQ_AUTH_FILE_VERSION,
+        updatedAt: new Date().toISOString(),
+        browserTokens: [{ id: 'bt-dashboard', token: 'dashboard-browser-token', createdAt: new Date().toISOString() }],
+        clientTokens: [],
+      });
+      handle = await startHqServer({ port: getPort(), dataDir });
+
+      const { document } = await mountDashboardWithLiveServer(handle, {
+        url: `http://127.0.0.1:${handle.port}/?token=dashboard-browser-token`,
+      });
+      await waitMs(80);
+
+      expect(document.getElementById('hq-conn')?.textContent).toContain('Connected to HQ');
+    } finally {
+      if (handle) {
+        await handle.close();
+        handle = null;
+      }
+      await fs.rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
   it('renders the initial empty state for mailboxes + clients', async () => {
     handle = await startHqServer({ port: getPort() });
     const { document } = await mountDashboardWithLiveServer(handle);

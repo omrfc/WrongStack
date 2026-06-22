@@ -55,7 +55,7 @@ describe('extractTextFromContent', () => {
   it('ignores unrecognised block types', () => {
     const blocks = [
       { type: 'text', text: 'keep' },
-      { type: 'mystery', foo: 1 } as unknown as ContentBlock,
+      { type: 'mystery', foo: 1 } as never as ContentBlock,
     ];
     expect(extractTextFromContent(blocks)).toBe('keep');
   });

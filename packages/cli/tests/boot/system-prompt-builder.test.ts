@@ -127,7 +127,7 @@ describe('bindSystemPromptBuilder (PR 5 of #29)', () => {
     const container = {
       bind: vi.fn((_t: unknown, f: () => unknown) => {
         container._f = f as () => unknown;
-      }) as unknown as { bind: ReturnType<typeof vi.fn>; _f?: () => unknown },
+      }) as never as { bind: ReturnType<typeof vi.fn>; _f?: () => unknown },
     };
     bindSystemPromptBuilder({
       container: container as never,

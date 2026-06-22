@@ -47,7 +47,7 @@ import { codebaseIndexTool } from '../src/codebase-index/codebase-index-tool.js'
 import { codebaseSearchTool } from '../src/codebase-index/codebase-search-tool.js';
 import { codebaseStatsTool } from '../src/codebase-index/codebase-stats-tool.js';
 
-const ctx = () => ({ cwd: '/p', projectRoot: '/p', tools: [], meta: {} }) as unknown as Context;
+const ctx = () => ({ cwd: '/p', projectRoot: '/p', tools: [], meta: {} }) as never as Context;
 const opts = () => ({ signal: new AbortController().signal });
 
 beforeEach(() => {

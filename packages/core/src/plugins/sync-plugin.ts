@@ -36,7 +36,7 @@ export function createSyncPlugin(opts?: SyncPluginOptions): Plugin {
     defaultConfig: {},
 
     setup(api) {
-      const rawConfig = api.config as unknown as Record<string, unknown>;
+      const rawConfig = api.config as never as Record<string, unknown>;
       const paths = opts?.paths ?? (rawConfig.paths as WstackPaths | undefined);
       configStore = opts?.configStore ?? (rawConfig.configStore as ConfigStore | undefined);
       vault = opts?.vault ?? (rawConfig.vault as typeof vault | undefined);

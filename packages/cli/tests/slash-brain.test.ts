@@ -10,9 +10,9 @@ const makeCtx = (overrides: Partial<SlashCommandContext> = {}): SlashCommandCont
   const write = vi.fn();
   const writeWarning = vi.fn();
   return {
-    renderer: { write, writeWarning } as unknown as SlashCommandContext['renderer'],
+    renderer: { write, writeWarning } as never as SlashCommandContext['renderer'],
     ...overrides,
-  } as unknown as SlashCommandContext;
+  } as never as SlashCommandContext;
 };
 
 describe('/brain slash command', () => {
@@ -136,7 +136,7 @@ describe('/brain slash command', () => {
     });
 
     it('requires a question', async () => {
-      const ctx = makeCtx({ brain: { decide: vi.fn() } as unknown as BrainArbiter });
+      const ctx = makeCtx({ brain: { decide: vi.fn() } as never as BrainArbiter });
       const result = await buildBrainCommand(ctx).run!('ask');
       expect(result?.message).toMatch(/Usage/);
     });

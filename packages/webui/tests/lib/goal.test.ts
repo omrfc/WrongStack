@@ -14,11 +14,11 @@ describe('parseGoalState — null guard', () => {
   });
 
   it('returns null for undefined input', () => {
-    expect(parseGoalState(undefined as unknown as Record<string, unknown>)).toBeNull();
+    expect(parseGoalState(undefined as never as Record<string, unknown>)).toBeNull();
   });
 
   it('returns null when goal is missing', () => {
-    expect(parseGoalState({ goal: undefined as unknown as string })).toBeNull();
+    expect(parseGoalState({ goal: undefined as never as string })).toBeNull();
   });
 
   it('returns null when goal is an empty string', () => {
@@ -30,8 +30,8 @@ describe('parseGoalState — null guard', () => {
   });
 
   it('returns null when goal is a non-string type', () => {
-    expect(parseGoalState({ goal: 123 as unknown as string })).toBeNull();
-    expect(parseGoalState({ goal: null as unknown as string })).toBeNull();
+    expect(parseGoalState({ goal: null as never as string })).toBeNull();
+    expect(parseGoalState({ goal: null as string })).toBeNull();
   });
 });
 

@@ -4,7 +4,7 @@ import { handleBrainRoute, type BrainRouteHandlers } from '../../src/server/brai
 import type { WSClientMessage } from '../../src/server/types.js';
 
 function mockWs(): WebSocket & { send: ReturnType<typeof vi.fn> } {
-  return { readyState: 1, send: vi.fn() } as unknown as WebSocket & { send: ReturnType<typeof vi.fn> };
+  return { readyState: 1, send: vi.fn() } as never as WebSocket & { send: ReturnType<typeof vi.fn> };
 }
 
 function sentMessages(ws: { send: ReturnType<typeof vi.fn> }): unknown[] {
@@ -39,7 +39,7 @@ describe('handleBrainRoute', () => {
   ] as const)('dispatches %s to %s', async (type, handlerName) => {
     const ws = mockWs();
     const h = handlers();
-    const msg = { type, payload: { question: 'What next?' } } as unknown as WSClientMessage;
+    const msg = { type, payload: { question: 'What next?' } } as never as WSClientMessage;
 
     await expect(handleBrainRoute(ws, msg, h)).resolves.toBe(true);
 
@@ -49,7 +49,7 @@ describe('handleBrainRoute', () => {
   it('forwards original payload-bearing messages', async () => {
     const ws = mockWs();
     const h = handlers();
-    const msg = { type: 'brain.ask', payload: { question: 'Explain' } } as unknown as WSClientMessage;
+    const msg = { type: 'brain.ask', payload: { question: 'Explain' } } as never as WSClientMessage;
 
     await expect(handleBrainRoute(ws, msg, h)).resolves.toBe(true);
 

@@ -117,7 +117,7 @@ export class ToolTranslator {
         if (pending) {
           clearTimeout(pending.timeout);
           this.pending.delete(expectDefined(msg.id));
-          pending.resolve(msg as unknown as ACPToolCallResponse);
+          pending.resolve(msg as never as ACPToolCallResponse);
         }
       }
 

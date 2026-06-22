@@ -25,7 +25,7 @@ export function createObservabilityPlugin(opts?: ObservabilityPluginOptions): Pl
     defaultConfig: {},
 
     setup(api) {
-      const rawConfig = api.config as unknown as Record<string, unknown>;
+      const rawConfig = api.config as never as Record<string, unknown>;
       const metricsSink = opts?.metricsSink ?? (rawConfig.metricsSink as MetricsSink | undefined);
       const healthRegistry =
         opts?.healthRegistry ?? (rawConfig.healthRegistry as HealthRegistry | undefined);

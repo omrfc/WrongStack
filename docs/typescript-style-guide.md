@@ -75,16 +75,17 @@ to an optional prop expecting a concrete type.
 ## `as any` — trust boundaries only
 
 Never use `as any` to silence a type error. If you MUST cross a trust
-boundary (JSON parse, interop with untyped library), use `as unknown as T`
-with a comment explaining the trust assumption.
+boundary (JSON parse, interop with untyped library), validate or narrow the
+value with an assertion function before using it as a typed value.
 
 ```ts
 // ❌ Silences the checker
 const data = response.json() as any;
 
 // ✅ Explicit trust boundary
-// Response shape guaranteed by the /api/status contract
-const data = response.json() as unknown as StatusResponse;
+const data = await response.json();
+assertStatusResponse(data);
+// data is StatusResponse here
 ```
 
 ---

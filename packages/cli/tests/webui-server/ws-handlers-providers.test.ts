@@ -106,7 +106,7 @@ describe('ws-handlers/providers (PR 5 of #30)', () => {
     // Registry that never has the provider (catalog miss).
     const emptyRegistry = {
       getProvider: async () => undefined,
-    } as unknown as WsHandlerContext['modelsRegistry'];
+    } as never as WsHandlerContext['modelsRegistry'];
     const { ctx, cap } = makeCtx(configPath, emptyRegistry);
     await handleProviderModels(ctx, FAKE_WS, 'github-copilot');
 
@@ -123,7 +123,7 @@ describe('ws-handlers/providers (PR 5 of #30)', () => {
   it('handleProviderModels: unknown provider with no catalog/allowlist → empty list, no toast', async () => {
     const emptyRegistry = {
       getProvider: async () => undefined,
-    } as unknown as WsHandlerContext['modelsRegistry'];
+    } as never as WsHandlerContext['modelsRegistry'];
     const { ctx, cap } = makeCtx(configPath, emptyRegistry);
     await handleProviderModels(ctx, FAKE_WS, 'mystery');
     expect(cap.sent.some((m) => m.type === 'key.operation_result')).toBe(false);

@@ -96,7 +96,7 @@ function abortHookCount(ctx: Context): number {
   // `abortHooks` is private but we want black-box visibility for the
   // leak check. Use a structural cast — if the field is ever renamed,
   // this test fails loudly which is the right outcome.
-  const internal = ctx as unknown as { abortHooks?: Set<unknown> };
+  const internal = ctx as never as { abortHooks?: Set<unknown> };
   return internal.abortHooks?.size ?? 0;
 }
 
@@ -146,7 +146,7 @@ describe('leak smoke (V2-D)', () => {
     // of strings naming each live handle/resource. We allow some
     // variance for short-lived timers and file ops; we just want to flag
     // monotonic growth.
-    const getInfo = (process as unknown as { getActiveResourcesInfo?: () => string[] })
+    const getInfo = (process as never as { getActiveResourcesInfo?: () => string[] })
       .getActiveResourcesInfo;
     if (typeof getInfo !== 'function') {
       // Old Node — skip silently. Real CI runs Node ≥22 (engines field).

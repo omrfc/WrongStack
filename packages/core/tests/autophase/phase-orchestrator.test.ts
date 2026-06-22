@@ -70,7 +70,7 @@ function fakeWorktrees(opts: { conflictOn?: (label: string) => boolean } = {}) {
     list: () => [...handles.values()],
   };
   return {
-    wm: wm as unknown as WorktreeManager,
+    wm: wm as never as WorktreeManager,
     calls,
     get maxLiveMerges() {
       return maxLiveMerges;

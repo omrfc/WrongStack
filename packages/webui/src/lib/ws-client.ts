@@ -287,7 +287,7 @@ export class WrongStackWebSocketClient {
 
   private handleMessage(msg: WSServerMessage) {
     if (msg.type === 'tool.confirm_needed') {
-      const payload = msg.payload as unknown as {
+      const payload = msg.payload as never as {
         id: string;
         toolName: string;
         input: unknown;

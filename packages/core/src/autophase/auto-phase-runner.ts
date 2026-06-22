@@ -166,7 +166,7 @@ export class AutoPhaseRunner {
     // Register event listeners using the untyped surface to handle custom events
     if (this.opts.events) {
       const events = this.opts.events as EventBus;
-      const onUntyped = events.on as unknown as (
+      const onUntyped = events.on as never as (
         event: string,
         handler: (payload: unknown) => void,
       ) => () => void;

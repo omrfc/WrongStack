@@ -62,7 +62,7 @@ describe('budget soft-limit negotiation with a wildcard listener', () => {
     budget.onThreshold = ({ requestDecision }) => requestDecision();
     budget.start();
     // Force the clock past the limit without waiting.
-    (budget as unknown as { startTime: number }).startTime = Date.now() - 1000;
+    (budget as never as { startTime: number }).startTime = Date.now() - 1000;
     expect(() => budget.checkTimeout()).toThrow(/timeout/i);
   });
 });

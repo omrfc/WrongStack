@@ -44,7 +44,7 @@ describe('parseGoalState', () => {
   });
 
   it('returns null for undefined input', () => {
-    expect(parseGoalState(undefined as unknown as null)).toBeNull();
+    expect(parseGoalState(undefined as never as null)).toBeNull();
   });
 
   it('returns null when goal is missing', () => {
@@ -60,8 +60,8 @@ describe('parseGoalState', () => {
   });
 
   it('returns null when goal is not a string', () => {
-    expect(parseGoalState({ goal: 123 as unknown as string })).toBeNull();
-    expect(parseGoalState({ goal: null as unknown as string })).toBeNull();
+    expect(parseGoalState({ goal: null as never as string })).toBeNull();
+    expect(parseGoalState({ goal: null as string })).toBeNull();
   });
 
   it('parses a full goal object', () => {
@@ -115,7 +115,7 @@ describe('parseGoalState', () => {
   });
 
   it('defaults iterations to 0 when non-number', () => {
-    const result = parseGoalState(makeGoal({ iterations: 'five' as unknown as number }));
+    const result = parseGoalState(makeGoal({ iterations: 'five' as never as number }));
     expect(result?.iterations).toBe(0);
   });
 

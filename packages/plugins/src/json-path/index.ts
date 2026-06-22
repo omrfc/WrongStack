@@ -163,7 +163,7 @@ function validateJsonSchema(data: unknown, schema: Record<string, unknown>): { v
 
     if (Array.isArray(value) && s['items'] && Array.isArray(s['items'])) {
       for (let i = 0; i < value.length; i++) {
-        check(value[i], s['items'] as unknown as Record<string, unknown>, `${path}[${i}]`);
+        check(value[i], s['items'] as never as Record<string, unknown>, `${path}[${i}]`);
       }
     }
 

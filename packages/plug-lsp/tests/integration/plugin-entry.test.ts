@@ -52,7 +52,7 @@ describe('plugin entry', () => {
         extensions: { [PLUGIN_NAME]: { autoDiscover: false, servers: {} } },
       },
       log,
-    } as unknown as PluginAPI;
+    } as never as PluginAPI;
 
     await plugin.setup(api);
     expect(tools.size).toBe(4);

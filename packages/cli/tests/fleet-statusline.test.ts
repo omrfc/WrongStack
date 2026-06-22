@@ -110,7 +110,7 @@ describe('FleetStatusLine', () => {
   it('activates a scroll region on spawn and paints agent state', () => {
     const events = new EventBus();
     const out = new FakeTty();
-    const sl = new FleetStatusLine({ events, out: out as unknown as NodeJS.WriteStream });
+    const sl = new FleetStatusLine({ events, out: out as never as NodeJS.WriteStream });
     sl.start();
 
     events.emit('subagent.spawned', { subagentId: 's1', taskId: 't1', name: 'Debugger' });
@@ -128,7 +128,7 @@ describe('FleetStatusLine', () => {
   it('surfaces a budget_extended event as a ⚡N badge', () => {
     const events = new EventBus();
     const out = new FakeTty();
-    const sl = new FleetStatusLine({ events, out: out as unknown as NodeJS.WriteStream, throttleMs: 0 });
+    const sl = new FleetStatusLine({ events, out: out as never as NodeJS.WriteStream, throttleMs: 0 });
     sl.start();
     events.emit('subagent.spawned', { subagentId: 's1', taskId: 't1', name: 'Debugger' });
     events.emit('subagent.budget_extended', { subagentId: 's1', kind: 'timeout', newLimit: 480000, totalExtensions: 2 });
@@ -139,7 +139,7 @@ describe('FleetStatusLine', () => {
   it('restores the scroll region on stop', () => {
     const events = new EventBus();
     const out = new FakeTty();
-    const sl = new FleetStatusLine({ events, out: out as unknown as NodeJS.WriteStream });
+    const sl = new FleetStatusLine({ events, out: out as never as NodeJS.WriteStream });
     sl.start();
     events.emit('subagent.spawned', { subagentId: 's1', taskId: 't1', name: 'X' });
     out.writes.length = 0;
@@ -152,7 +152,7 @@ describe('FleetStatusLine', () => {
     const events = new EventBus();
     const out = new FakeTty();
     out.isTTY = false;
-    const sl = new FleetStatusLine({ events, out: out as unknown as NodeJS.WriteStream });
+    const sl = new FleetStatusLine({ events, out: out as never as NodeJS.WriteStream });
     sl.start();
     events.emit('subagent.spawned', { subagentId: 's1', taskId: 't1', name: 'X' });
     expect(out.writes.length).toBe(0);
@@ -162,7 +162,7 @@ describe('FleetStatusLine', () => {
   it('task_completed success transitions agent to done and shows ✓', () => {
     const events = new EventBus();
     const out = new FakeTty();
-    const sl = new FleetStatusLine({ events, out: out as unknown as NodeJS.WriteStream, throttleMs: 0 });
+    const sl = new FleetStatusLine({ events, out: out as never as NodeJS.WriteStream, throttleMs: 0 });
     sl.start();
     events.emit('subagent.spawned', { subagentId: 's1', taskId: 't1', name: 'E2E' });
     events.emit('subagent.task_completed', {
@@ -179,7 +179,7 @@ describe('FleetStatusLine', () => {
   it('task_completed failure transitions agent to failed and shows ✗', () => {
     const events = new EventBus();
     const out = new FakeTty();
-    const sl = new FleetStatusLine({ events, out: out as unknown as NodeJS.WriteStream, throttleMs: 0 });
+    const sl = new FleetStatusLine({ events, out: out as never as NodeJS.WriteStream, throttleMs: 0 });
     sl.start();
     events.emit('subagent.spawned', { subagentId: 's1', taskId: 't1', name: 'E2E' });
     events.emit('subagent.task_completed', {
@@ -196,7 +196,7 @@ describe('FleetStatusLine', () => {
     vi.useFakeTimers();
     const events = new EventBus();
     const out = new FakeTty();
-    const sl = new FleetStatusLine({ events, out: out as unknown as NodeJS.WriteStream, throttleMs: 0 });
+    const sl = new FleetStatusLine({ events, out: out as never as NodeJS.WriteStream, throttleMs: 0 });
     sl.start();
     events.emit('subagent.spawned', { subagentId: 's1', taskId: 't1', name: 'E2E' });
     events.emit('subagent.task_completed', { subagentId: 's1', status: 'success', iterations: 1, toolCalls: 1 });
@@ -215,7 +215,7 @@ describe('FleetStatusLine', () => {
   it('iteration_summary updates agent iteration and tool call counts', () => {
     const events = new EventBus();
     const out = new FakeTty();
-    const sl = new FleetStatusLine({ events, out: out as unknown as NodeJS.WriteStream, throttleMs: 0 });
+    const sl = new FleetStatusLine({ events, out: out as never as NodeJS.WriteStream, throttleMs: 0 });
     sl.start();
     events.emit('subagent.spawned', { subagentId: 's1', taskId: 't1', name: 'Debugger' });
     events.emit('subagent.iteration_summary', {
@@ -234,7 +234,7 @@ describe('FleetStatusLine', () => {
   it('task_started marks agent as running', () => {
     const events = new EventBus();
     const out = new FakeTty();
-    const sl = new FleetStatusLine({ events, out: out as unknown as NodeJS.WriteStream, throttleMs: 0 });
+    const sl = new FleetStatusLine({ events, out: out as never as NodeJS.WriteStream, throttleMs: 0 });
     sl.start();
     events.emit('subagent.spawned', { subagentId: 's1', taskId: 't1', name: 'E2E' });
     events.emit('subagent.task_completed', { subagentId: 's1', status: 'success', iterations: 1, toolCalls: 1 });

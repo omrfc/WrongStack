@@ -100,7 +100,7 @@ describe('session-reader — extra coverage', () => {
           { type: 'thinking', thinking: 'ignored block type' },
         ],
         usage: { input: 0, output: 0 },
-      } as unknown as SessionEvent,
+      } as never as SessionEvent,
     ];
     const reader = makeReader([{ id: 's', title: 't', startedAt: ts, provider: 'p', model: 'm', tokenTotal: 0 }], { s: events });
     const hits = await reader.search({ query: 'NEEDLE', caseInsensitive: false, limit: 100 }, 's');

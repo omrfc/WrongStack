@@ -43,7 +43,7 @@ function makeAgent(over: Partial<AgentEntry> = {}): AgentEntry {
 }
 
 async function forceHeartbeat(registry: SessionRegistry): Promise<void> {
-  await (registry as unknown as { heartbeat(): Promise<void> }).heartbeat();
+  await (registry as never as { heartbeat(): Promise<void> }).heartbeat();
 }
 
 describe('cross-process session discovery', () => {

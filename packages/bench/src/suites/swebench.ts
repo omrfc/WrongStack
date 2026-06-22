@@ -121,7 +121,7 @@ export function createSwebenchSuite(opts: SwebenchOptions = {}): BenchSuite {
             typeof meta.problem_statement === 'string' ? meta.problem_statement : '',
           ),
           templateDir: path.join(instanceDir, 'repo'),
-          meta: swMeta as unknown as Record<string, unknown>,
+          meta: swMeta as never as Record<string, unknown>,
         });
         if (limit !== undefined && tasks.length >= limit) break;
       }

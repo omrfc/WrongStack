@@ -95,7 +95,7 @@ describe('ts-parser — reference extraction', () => {
       '  run(): I {',
       '    helper();',
       '    obj.method();',
-      '    return null as unknown as I;',
+      '    return null as never as I;',
       '  }',
       '}',
       'function helper() {}',

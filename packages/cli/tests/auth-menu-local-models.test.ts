@@ -50,7 +50,7 @@ function makeRenderer(): TerminalRenderer {
     writeInfo: vi.fn(),
     clear: vi.fn(),
     render: vi.fn(),
-  } as unknown as TerminalRenderer;
+  } as never as TerminalRenderer;
 }
 
 function makeReader(lines: string[], secrets: string[] = []): ReadlineInputReader {
@@ -66,7 +66,7 @@ function makeReader(lines: string[], secrets: string[] = []): ReadlineInputReade
       return secrets[si++] ?? '';
     }),
     close: vi.fn(async () => {}),
-  } as unknown as ReadlineInputReader;
+  } as never as ReadlineInputReader;
 }
 
 function makeModelsRegistry(): ModelsRegistry {
@@ -75,7 +75,7 @@ function makeModelsRegistry(): ModelsRegistry {
     listProviders: vi.fn(async () => []),
     suggestModel: vi.fn(async () => undefined),
     refresh: vi.fn(async () => undefined),
-  } as unknown as ModelsRegistry;
+  } as never as ModelsRegistry;
 }
 
 async function setupDeps(opts: {
@@ -115,7 +115,7 @@ function buildFetch(responder: (url: string) => Response | Promise<Response>): t
   return (async (input: unknown) => {
     const url = typeof input === 'string' ? input : (input as URL).toString();
     return responder(url);
-  }) as unknown as typeof fetch;
+  }) as never as typeof fetch;
 }
 
 function capturedWrite(deps: AuthMenuDeps): string {
@@ -335,7 +335,7 @@ describe('runAuthLocal — --model + probe integration', () => {
       name: 'ollama',
       noProbe: true,
       models: 'llama3.1:8b,qwen2.5:7b',
-      fetchImpl: fetchImpl as unknown as typeof fetch,
+      fetchImpl: fetchImpl as never as typeof fetch,
     });
     expect(code).toBe(0);
     expect(fetchImpl).not.toHaveBeenCalled();

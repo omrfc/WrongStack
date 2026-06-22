@@ -11,7 +11,7 @@ function mockFetch(json: unknown, status = 200) {
     json: async () => json,
     text: async () => JSON.stringify(json),
     body: null,
-  } as unknown as Response);
+  } as never as Response);
 }
 
 describe('WireAdapter — coverage of abstract base paths', () => {
@@ -22,7 +22,7 @@ describe('WireAdapter — coverage of abstract base paths', () => {
 
   it('translateError creates ProviderError with correct providerId from OpenAIProvider', async () => {
     // Lines 118-120: translateError delegates to parseProviderHttpError with this.id
-    const fetchImpl = mockFetch({ error: 'auth' }, 401) as unknown as typeof fetch;
+    const fetchImpl = mockFetch({ error: 'auth' }, 401) as never as typeof fetch;
     const p = new OpenAIProvider({ apiKey: 'k', fetchImpl });
     await expect(
       p.complete(
@@ -33,7 +33,7 @@ describe('WireAdapter — coverage of abstract base paths', () => {
   });
 
   it('translateError is called for 5xx errors', async () => {
-    const fetchImpl = mockFetch({}, 502) as unknown as typeof fetch;
+    const fetchImpl = mockFetch({}, 502) as never as typeof fetch;
     const p = new OpenAIProvider({ apiKey: 'k', fetchImpl });
     await expect(
       p.complete(
@@ -48,7 +48,7 @@ describe('WireAdapter — coverage of abstract base paths', () => {
     // Exercise stream() path when body yields no events
     const fetchImpl = vi.fn(async () =>
       new Response('', { status: 200, headers: { 'content-type': 'text/event-stream' } }),
-    ) as unknown as typeof fetch;
+    ) as never as typeof fetch;
     const p = new OpenAIProvider({ apiKey: 'k', fetchImpl });
     const res = await p.complete(
       { model: 'm', messages: [{ role: 'user', content: 'x' }], maxTokens: 1 },
@@ -71,7 +71,7 @@ describe('WireAdapter — coverage of abstract base paths', () => {
         }),
         { status: 200, headers: { 'content-type': 'text/event-stream' } },
       );
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const p = new OpenAIProvider({ apiKey: 'k', fetchImpl: capturingFetch });
     await p.complete(
       { model: 'm', messages: [{ role: 'user', content: 'x' }], maxTokens: 1 },

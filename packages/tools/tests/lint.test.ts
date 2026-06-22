@@ -5,7 +5,7 @@ import type { Context } from '@wrongstack/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { lintTool } from '../src/lint.js';
 
-const makeCtx = (cwd: string) => ({ cwd, tools: [], projectRoot: cwd }) as unknown as Context;
+const makeCtx = (cwd: string) => ({ cwd, tools: [], projectRoot: cwd }) as never as Context;
 const makeOpts = () => ({ signal: new AbortController().signal });
 
 let tmpDir: string;
@@ -57,7 +57,7 @@ describe('detectLinter config detection', () => {
     await fs.writeFile(path.join(tmpDir, 'biome.json'), '{}');
     const result = await lintTool.execute(
       { linter: 'auto' },
-      { cwd: tmpDir, tools: [], projectRoot: tmpDir } as unknown as Context,
+      { cwd: tmpDir, tools: [], projectRoot: tmpDir } as never as Context,
       makeOpts(),
     );
     expect(result.linter).toBe('biome');
@@ -67,7 +67,7 @@ describe('detectLinter config detection', () => {
     await fs.writeFile(path.join(tmpDir, '.eslintrc.json'), '{}');
     const result = await lintTool.execute(
       { linter: 'auto' },
-      { cwd: tmpDir, tools: [], projectRoot: tmpDir } as unknown as Context,
+      { cwd: tmpDir, tools: [], projectRoot: tmpDir } as never as Context,
       makeOpts(),
     );
     expect(result.linter).toBe('eslint');
@@ -77,7 +77,7 @@ describe('detectLinter config detection', () => {
     await fs.writeFile(path.join(tmpDir, 'tslint.json'), '{}');
     const result = await lintTool.execute(
       { linter: 'auto' },
-      { cwd: tmpDir, tools: [], projectRoot: tmpDir } as unknown as Context,
+      { cwd: tmpDir, tools: [], projectRoot: tmpDir } as never as Context,
       makeOpts(),
     );
     expect(result.linter).toBe('tslint');
@@ -87,7 +87,7 @@ describe('detectLinter config detection', () => {
     // tmpDir has no config files — detectLinter should fall through to 'biome'
     const result = await lintTool.execute(
       { linter: 'auto' },
-      { cwd: tmpDir, tools: [], projectRoot: tmpDir } as unknown as Context,
+      { cwd: tmpDir, tools: [], projectRoot: tmpDir } as never as Context,
       makeOpts(),
     );
     expect(result.linter).toBe('biome');
@@ -97,7 +97,7 @@ describe('detectLinter config detection', () => {
     await fs.writeFile(path.join(tmpDir, '.eslintrc.js'), '{}');
     const result = await lintTool.execute(
       { linter: 'auto' },
-      { cwd: tmpDir, tools: [], projectRoot: tmpDir } as unknown as Context,
+      { cwd: tmpDir, tools: [], projectRoot: tmpDir } as never as Context,
       makeOpts(),
     );
     expect(result.linter).toBe('eslint');
@@ -139,7 +139,7 @@ describe('detectLinter config detection', () => {
     await fs.writeFile(path.join(tmpDir, 'tsconfig.json'), '{}');
     const result = await lintTool.execute(
       { linter: 'auto' },
-      { cwd: tmpDir, tools: [], projectRoot: tmpDir } as unknown as Context,
+      { cwd: tmpDir, tools: [], projectRoot: tmpDir } as never as Context,
       makeOpts(),
     );
     // detectLinter checks ['biome.json', '.eslintrc.json', 'tslint.json', '.eslintrc.js', 'tsconfig.json']

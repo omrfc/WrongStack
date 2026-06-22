@@ -130,9 +130,9 @@ export const rewindCmd: SubcommandHandler = async (args, deps) => {
         // Still truncate even if no files changed
         const store = new DefaultSessionStore({ dir: sessionsDir });
         const resumed = await store.resume(targetSessionId);
-        const toIdx = (result as unknown as { toPromptIndex: number }).toPromptIndex;
+        const toIdx = (result as never as { toPromptIndex: number }).toPromptIndex;
         await (
-          resumed.writer as unknown as { truncateToCheckpoint(n: number): Promise<number> }
+          resumed.writer as never as { truncateToCheckpoint(n: number): Promise<number> }
         ).truncateToCheckpoint(toIdx);
         await resumed.writer.close();
         deps.renderer.write(`  ${color.green('✓')} Session truncated at checkpoint ${toIdx}\n`);
@@ -148,9 +148,9 @@ export const rewindCmd: SubcommandHandler = async (args, deps) => {
     if (flags.resume) {
       const store = new DefaultSessionStore({ dir: sessionsDir });
       const resumed = await store.resume(targetSessionId);
-      const toIdx = (result as unknown as { toPromptIndex: number }).toPromptIndex;
+      const toIdx = (result as never as { toPromptIndex: number }).toPromptIndex;
       const removed = await (
-        resumed.writer as unknown as { truncateToCheckpoint(n: number): Promise<number> }
+        resumed.writer as never as { truncateToCheckpoint(n: number): Promise<number> }
       ).truncateToCheckpoint(toIdx);
       await resumed.writer.close();
       deps.renderer.write(

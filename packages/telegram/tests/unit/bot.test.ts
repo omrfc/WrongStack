@@ -48,7 +48,7 @@ describe('TelegramBot buffer', () => {
 
   function pushMsg(bot: TelegramBot, msg: Partial<TelegramIncomingMessage>) {
     // Use internal push — we simulate what polling would do via processMessage.
-    const buf = (bot as unknown as { buffer: TelegramIncomingMessage[] }).buffer;
+    const buf = (bot as never as { buffer: TelegramIncomingMessage[] }).buffer;
     buf.push({
       messageId: msg.messageId ?? 1,
       chatId: msg.chatId ?? 123,
@@ -205,7 +205,7 @@ describe('TelegramBot lifecycle', () => {
         ok: true,
         json: () => Promise.resolve({ ok: true, result: [] }),
       });
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
   });
 
   afterEach(() => {
@@ -237,7 +237,7 @@ describe('TelegramBot lifecycle', () => {
           ok: true,
           result: { id: 1, is_bot: true, first_name: 'T', username: 'mybot' },
         }),
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
 
     const bot = makeBot();
     const h = await bot.health();
@@ -249,7 +249,7 @@ describe('TelegramBot lifecycle', () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ ok: false, description: 'Unauthorized' }),
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
 
     const bot = makeBot();
     const h = await bot.health();
@@ -270,7 +270,7 @@ describe('TelegramBot lifecycle', () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ ok: true, result: null }),
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
 
     const bot = makeBot();
     const h = await bot.health();
@@ -298,7 +298,7 @@ describe('TelegramBot sendMessage', () => {
         ok: true,
         json: () => Promise.resolve({ ok: true, result: { message_id: 1 } }),
       });
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
 
     // Speed up retry sleep
     const res = await bot.sendMessage('123', 'test');
@@ -311,7 +311,7 @@ describe('TelegramBot sendMessage', () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ ok: false, description: 'Forbidden', error_code: 403 }),
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
 
     await expect(bot.sendMessage('123', 'test')).rejects.toThrow('Forbidden');
   });
@@ -326,7 +326,7 @@ describe('TelegramBot sendMessage', () => {
         ok: true,
         json: () => Promise.resolve({ ok: true, result: { message_id: 2 } }),
       });
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
 
     const res = await bot.sendMessage('123', 'test');
     expect(res.ok).toBe(true);
@@ -355,7 +355,7 @@ describe('TelegramBot poll errors', () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ ok: false, description: 'Service unavailable' }),
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
 
     bot.start();
 
@@ -413,7 +413,7 @@ describe('TelegramBot poll lock', () => {
         ok: true,
         json: () => Promise.resolve({ ok: true, result: [] }),
       });
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
   });
 
   afterEach(() => {
@@ -508,7 +508,7 @@ function mockSingleUpdate(update: Record<string, unknown>) {
       ok: true,
       json: () => Promise.resolve({ ok: true, result: [update] }),
     });
-  }) as unknown as typeof fetch;
+  }) as never as typeof fetch;
 }
 
 describe('TelegramBot allowlist', () => {

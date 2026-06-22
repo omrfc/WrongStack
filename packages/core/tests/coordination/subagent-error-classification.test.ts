@@ -162,7 +162,7 @@ function makeStubAgent(behavior: () => Promise<RunResult>): { agent: Agent; even
     async run(_input: unknown, _opts: { signal: AbortSignal }): Promise<RunResult> {
       return behavior();
     },
-  } as unknown as Agent;
+  } as Agent;
   return { agent, events };
 }
 

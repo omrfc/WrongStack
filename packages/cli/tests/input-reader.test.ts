@@ -26,9 +26,9 @@ function makeFakeStdin(): NodeJS.ReadStream {
     resume: () => undefined,
     setEncoding: () => undefined,
     setRawMode: vi.fn((mode: boolean) => {
-      (stdin as unknown as { isRaw: boolean }).isRaw = mode;
+      (stdin as never as { isRaw: boolean }).isRaw = mode;
     }),
-  }) as unknown as NodeJS.ReadStream;
+  }) as never as NodeJS.ReadStream;
   return stdin;
 }
 
@@ -67,7 +67,7 @@ describe('ReadlineInputReader.readKey', () => {
     // Fire `data` event asynchronously so the .on('data', ...) listener
     // is registered before the event arrives.
     setImmediate(() => {
-      (process.stdin as unknown as EventEmitter).emit('data', Buffer.from('y'));
+      (process.stdin as never as EventEmitter).emit('data', Buffer.from('y'));
     });
     await expect(promise).resolves.toBe('resume');
   });
@@ -78,7 +78,7 @@ describe('ReadlineInputReader.readKey', () => {
       { key: 'y', label: 'yes', value: 'resume' },
     ]);
     setImmediate(() => {
-      (process.stdin as unknown as EventEmitter).emit('data', Buffer.from('Y'));
+      (process.stdin as never as EventEmitter).emit('data', Buffer.from('Y'));
     });
     await expect(promise).resolves.toBe('resume');
   });
@@ -89,7 +89,7 @@ describe('ReadlineInputReader.readKey', () => {
       { key: 'y', label: 'yes', value: 'resume' },
     ]);
     setImmediate(() => {
-      (process.stdin as unknown as EventEmitter).emit('data', Buffer.from('\x03'));
+      (process.stdin as never as EventEmitter).emit('data', Buffer.from('\x03'));
     });
     await expect(promise).resolves.toBe('');
   });
@@ -102,7 +102,7 @@ describe('ReadlineInputReader.readKey', () => {
     // Schedule a wrong key first, then a right one. readKey must
     // keep listening and not resolve early.
     setImmediate(() => {
-      const stdin = process.stdin as unknown as EventEmitter;
+      const stdin = process.stdin as never as EventEmitter;
       stdin.emit('data', Buffer.from('q'));
       stdin.emit('data', Buffer.from('n'));
       stdin.emit('data', Buffer.from('y'));

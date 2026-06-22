@@ -56,7 +56,7 @@ export function makeSpawnTool(director: Director, roster?: Record<string, Subage
         // Smart dispatch: route description to best catalog agent using dispatcher
         const dispatchResult = await dispatchAgent(description, {
           classifier: director.dispatchClassifier,
-          catalog: roster as unknown as Record<string, AgentDefinition> | undefined,
+          catalog: roster as never as Record<string, AgentDefinition> | undefined,
         });
         const dispatchRole = dispatchResult.role;
         // If we have a matching roster entry for the dispatched role, use it

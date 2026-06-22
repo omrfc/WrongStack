@@ -16,7 +16,7 @@ const emptyCtx: BuildContext = {
   cwd: '/tmp',
   projectRoot: '/tmp',
   tools: [],
-} as unknown as BuildContext;
+} as never as BuildContext;
 
 describe('makeAutonomyPromptContributor', () => {
   let tmp: string;

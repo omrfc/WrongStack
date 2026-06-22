@@ -80,7 +80,7 @@ function makeContext(): Context {
       clearSession: async () => {},
       writeInFlightMarker: async () => {},
       clearInFlightMarker: async () => {},
-    } as unknown as SessionWriter,
+    } as never as SessionWriter,
     signal: new AbortController().signal,
     tokenCounter: { total: () => ({ input: 0, output: 0 }), record: () => {} } as never,
     cwd: process.cwd(),

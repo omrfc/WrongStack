@@ -287,7 +287,7 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
   const replProjectRoot = opts.projectRoot ?? process.cwd();
   const projectDir = resolveProjectDir(replProjectRoot, wstackGlobalRoot());
   const clientId = `repl@${crypto.randomUUID().slice(0, 8)}`;
-  const hqPublisher = createHqPublisherFromEnv({ clientKind: 'repl', projectRoot: replProjectRoot, projectName: path.basename(replProjectRoot), appConfig: opts.appConfig } as unknown as Parameters<typeof createHqPublisherFromEnv>[0]);
+  const hqPublisher = createHqPublisherFromEnv({ clientKind: 'repl', projectRoot: replProjectRoot, projectName: path.basename(replProjectRoot), appConfig: opts.appConfig } as never as Parameters<typeof createHqPublisherFromEnv>[0]);
   hqPublisher?.connect();
   const clientMailbox = new GlobalMailbox(projectDir, undefined, hqPublisher);
   let clientHeartbeat: ReturnType<typeof setInterval> | undefined;
@@ -960,7 +960,7 @@ export async function runRepl(opts: ReplOptions): Promise<number> {
                   todos: opts.agent.ctx.todos,
                 },
                 {
-                  provider: opts.agent.ctx.provider as unknown as PredictLLMProvider,
+                  provider: opts.agent.ctx.provider as never as PredictLLMProvider,
                   model: opts.agent.ctx.model,
                   signal: predictCtrl.signal,
                 },
@@ -1281,7 +1281,7 @@ async function autoProceedCooldown(
  */
 async function runContextCompaction(opts: ReplOptions, _signal: AbortSignal): Promise<void> {
   try {
-    const ctx = opts.agent.ctx as unknown as {
+    const ctx = opts.agent.ctx as never as {
       messages?: Array<unknown>;
       compactor?: { compact(ctx: unknown, opts: { aggressive: boolean }): Promise<void> };
     };

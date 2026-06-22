@@ -27,7 +27,7 @@ vi.mock('../src/plugin-api-factory.js', () => ({
 }));
 
 function fakeLogger(): Logger {
-  return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), child: vi.fn(), setLevel: vi.fn() } as unknown as Logger;
+  return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), child: vi.fn(), setLevel: vi.fn() } as never as Logger;
 }
 
 function baseDeps(overrides: Partial<Config> = {}) {
@@ -191,7 +191,7 @@ describe('setupPlugins', () => {
     await setupPlugins(deps);
     const [, opts] = loadPluginsMock.mock.calls[0]!;
     const apiCfgCapture = vi.fn();
-    const apiFactoryMod = (await import('../src/plugin-api-factory.js')) as unknown as {
+    const apiFactoryMod = (await import('../src/plugin-api-factory.js')) as never as {
       default: ReturnType<typeof vi.fn>;
     };
     apiFactoryMod.default.mockImplementation((_name, cfg: { sessionWriter: { append: (e: unknown) => void; transcriptPath: string } }) => {

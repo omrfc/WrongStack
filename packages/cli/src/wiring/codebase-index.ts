@@ -139,7 +139,7 @@ export async function setupCodebaseIndexing(deps: CodebaseIndexingDeps): Promise
       });
       watcher.on('error', (err) => logger.debug(`codebase index watcher error: ${err}`));
       // Don't keep the process alive solely for the watcher.
-      (watcher as unknown as { unref?: () => void }).unref?.();
+      (watcher as never as { unref?: () => void }).unref?.();
     } catch (err) {
       // Recursive watch is unsupported on some platforms — degrade gracefully.
       logger.debug(

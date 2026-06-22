@@ -111,7 +111,7 @@ describe('migrate — null/undefined persisted', () => {
   });
 
   it('handles undefined persisted', () => {
-    const result = migrate(undefined as unknown as null);
+    const result = migrate(undefined as never as null);
     expect(result.contextStrategy).toBe('hybrid');
     expect(result.auditLevel).toBe('standard');
     expect(result.autoProceedMaxIterations).toBe(50);

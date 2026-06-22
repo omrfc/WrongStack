@@ -249,7 +249,7 @@ export class MultiAgentHost {
    *  (`on`, `setRunner`) that isn't part of the `MultiAgentCoordinator`
    *  interface. */
   private getCoordinator(): DefaultMultiAgentCoordinator {
-    return (this.director as unknown as { coordinator: DefaultMultiAgentCoordinator }).coordinator;
+    return (this.director as never as { coordinator: DefaultMultiAgentCoordinator }).coordinator;
   }
 
   /** Public accessor for the Director — used by buildRoutingRunner. */

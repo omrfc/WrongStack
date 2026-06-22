@@ -60,7 +60,7 @@ describe('DefaultTokenCounter', () => {
       getProvider: async () => undefined,
       suggestModel: async () => undefined,
       ageSeconds: async () => 0,
-    } as unknown as ModelsRegistry;
+    } as never as ModelsRegistry;
     const tc = new DefaultTokenCounter({ events, registry, providerId: 'local' });
 
     tc.account({ input: 1234, output: 56 }, 'custom-model');
@@ -138,7 +138,7 @@ describe('DefaultTokenCounter', () => {
       getProvider: async () => undefined,
       suggestModel: async () => undefined,
       ageSeconds: async () => 0,
-    } as unknown as ModelsRegistry;
+    } as never as ModelsRegistry;
     const tc = new DefaultTokenCounter({ registry, providerId: 'anthropic' });
     tc.account({ input: 1_000_000, output: 0 }, 'claude-sonnet-4-6');
     // wait for async price lookup
@@ -195,7 +195,7 @@ describe('DefaultTokenCounter', () => {
       getProvider: async () => undefined,
       suggestModel: async () => undefined,
       ageSeconds: async () => 0,
-    } as unknown as ModelsRegistry;
+    } as never as ModelsRegistry;
     const tc = new DefaultTokenCounter({ registry, providerId: 'p' });
     tc.account({ input: 1, output: 1 }, 'unknown-model');
     await new Promise((r) => setTimeout(r, 5));

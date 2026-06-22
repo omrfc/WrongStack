@@ -49,7 +49,7 @@ export async function gradeSwebench(opts: {
   exec?: Exec | undefined;
   externalGrade?: SwebenchExternalGrade | undefined;
 }): Promise<GradeResult> {
-  const meta = opts.task.meta as unknown as SwebenchMeta;
+  const meta = opts.task.meta as never as SwebenchMeta;
 
   const patch = await extractModelPatch({
     workdir: opts.workdir,

@@ -118,6 +118,42 @@ describe('HqPublisher', () => {
     expect(JSON.stringify(frames)).not.toContain('abcdefghijklmnopqrstuvwxyz');
   });
 
+  it('treats socket factory failures as best-effort and queues telemetry', () => {
+    vi.useFakeTimers();
+    const publisher = new HqPublisher({
+      url: 'http://127.0.0.1:3499',
+      client,
+      project,
+      reconnectBaseMs: 1_000,
+      socketFactory: () => {
+        throw new Error('socket unavailable');
+      },
+    });
+
+    expect(() => publisher.connect()).not.toThrow();
+    expect(() => publisher.publishMailboxEvent({ mailboxId: 'project_1:mailbox', action: 'message.sent', message })).not.toThrow();
+
+    publisher.close();
+    vi.useRealTimers();
+  });
+
+  it('treats invalid HQ URLs as best-effort and queues telemetry', () => {
+    vi.useFakeTimers();
+    const publisher = new HqPublisher({
+      url: 'not a url',
+      client,
+      project,
+      reconnectBaseMs: 1_000,
+      socketFactory: () => new FakeSocket(),
+    });
+
+    expect(() => publisher.connect()).not.toThrow();
+    expect(() => publisher.publishMailboxEvent({ mailboxId: 'project_1:mailbox', action: 'message.sent', message })).not.toThrow();
+
+    publisher.close();
+    vi.useRealTimers();
+  });
+
   it('publishes mailbox snapshots from the mailbox API', async () => {
     const socket = new FakeSocket();
     socket.readyState = 1;

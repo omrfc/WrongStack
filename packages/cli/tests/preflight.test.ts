@@ -39,7 +39,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     // through unknown so the test stays focused on the
     // preflight contract.
     ...overrides,
-  } as unknown as Config;
+  } as never as Config;
 }
 
 const ORIGINAL_NODE_ENV = process.env['NODE_ENV'];
@@ -71,7 +71,7 @@ describe('preflight (PR 2 of #29)', () => {
   });
 
   it('runPreflight returns the update info unchanged (mocked printer)', async () => {
-    const initial = { outdated: false } as unknown as Parameters<typeof runPreflight>[1];
+    const initial = { outdated: false } as never as Parameters<typeof runPreflight>[1];
     const result = await runPreflight(makeConfig(), initial);
     expect(result.updateInfo).toBe(initial);
   });

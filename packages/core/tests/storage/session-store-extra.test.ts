@@ -181,6 +181,34 @@ describe('DefaultSessionStore — rebuildIndex / summary fallback / shard scan',
     expect(idx).toContain('r2');
   });
 
+  it('caches parsed index entries until the index file changes', async () => {
+    for (const id of ['cache-a', 'cache-b']) {
+      const w = await store.create({ id, model: 'm', provider: 'p' });
+      await w.append({ type: 'user_input', ts: now(), content: id });
+      await w.close();
+    }
+
+    const first = await store.list();
+    const cacheAfterFirst = (store as { _indexCache: { summaries: unknown[] } | null })._indexCache;
+    expect(cacheAfterFirst?.summaries.length).toBeGreaterThanOrEqual(2);
+
+    const second = await store.list();
+    const cacheAfterSecond = (store as { _indexCache: { summaries: unknown[] } | null })._indexCache;
+    expect(cacheAfterSecond).toBe(cacheAfterFirst);
+    expect(second.map((s) => s.id)).toEqual(first.map((s) => s.id));
+
+    await fs.appendFile(
+      path.join(tmp, '_index.jsonl'),
+      `${JSON.stringify({ id: 'cache-c', title: 'cache-c', startedAt: new Date(Date.now() + 1_000).toISOString(), model: 'm', provider: 'p', tokenTotal: 0 })}\n`,
+      'utf8',
+    );
+
+    const third = await store.list();
+    const cacheAfterThird = (store as { _indexCache: { summaries: unknown[] } | null })._indexCache;
+    expect(cacheAfterThird).not.toBe(cacheAfterFirst);
+    expect(third.some((s) => s.id === 'cache-c')).toBe(true);
+  });
+
   it('rebuilds a missing summary sidecar during list()', async () => {
     const w = await store.create({ id: 'nosum', model: 'm', provider: 'p' });
     await w.append({ type: 'user_input', ts: now(), content: 'sidecar gone' });

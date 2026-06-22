@@ -83,7 +83,12 @@ describe('HQ server — /ws/browser token validation', () => {
       clientTokens: [],
     });
     handle = await startHqServer({ host: '127.0.0.1', port: 0, dataDir });
-    expect(handle.firstRunSetup).toBeUndefined();
+    expect(handle.firstRunSetup).toMatchObject({
+      browserUrl: `http://127.0.0.1:${handle.port}/`,
+      clientUrl: `ws://127.0.0.1:${handle.port}/ws/client`,
+      clientEnv: { WRONGSTACK_HQ_URL: `http://127.0.0.1:${handle.port}` },
+      createdAuth: false,
+    });
     const ws = new WebSocket(wsUrl(handle, '/ws/browser'));
     await expect(waitForOpen(ws)).resolves.toBeUndefined();
     ws.close();

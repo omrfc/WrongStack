@@ -69,7 +69,7 @@ describe('wireTaskCompletedListener', () => {
 describe('wireBudgetHandler', () => {
   const emit = (d: DirectorInternals, subagentId: string, kind: string, over: Record<string, unknown> = {}) => {
     const cap = { extended: null as Record<string, unknown> | null, denied: false };
-    (d.fleet as unknown as { emit: (e: unknown) => void }).emit({
+    (d.fleet as never as { emit: (e: unknown) => void }).emit({
       subagentId,
       taskId: 'task-1',
       ts: Date.now(),
@@ -79,7 +79,7 @@ describe('wireBudgetHandler', () => {
     return cap;
   };
   const bumpProgress = (d: DirectorInternals, subagentId: string) =>
-    (d.fleet as unknown as { emit: (e: unknown) => void }).emit({ subagentId, ts: Date.now(), type: 'tool.executed', payload: {} });
+    (d.fleet as never as { emit: (e: unknown) => void }).emit({ subagentId, ts: Date.now(), type: 'tool.executed', payload: {} });
 
   it('ignores collab subagents', () => {
     const d = makeInternals();

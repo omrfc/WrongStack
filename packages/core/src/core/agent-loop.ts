@@ -433,10 +433,12 @@ export function createAgentLoopHandler(
           checkMailbox,
           foldBlockIntoConversation,
           {
-            // Cast to the broad parameter type — injectPendingMailboxMessages only
-            // calls emit('mailbox.received', ...) and uses logger.debug optionally.
-            events: a.events as unknown as { emit: (type: string, payload: unknown) => void },
-            logger: a.logger as unknown as { debug?: (...args: unknown[]) => void },
+            events: {
+              emit: (type, payload) => {
+                a.events.emit(type as never, payload as never);
+              },
+            },
+            logger: a.logger as never as { debug?: (...args: unknown[]) => void },
           },
         );
         // Cooperative interrupt: an operator (e.g. Fleet HQ) dropped a

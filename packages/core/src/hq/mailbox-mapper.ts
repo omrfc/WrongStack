@@ -54,6 +54,7 @@ export function mapMailboxMessageToHqSummary(
   const task = taskSummary(message);
 
   return {
+    mailId: message.id, // unique UUID per message record, used for deduplication
     messageId: message.id,
     from: message.from,
     to: message.to,

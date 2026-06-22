@@ -66,7 +66,7 @@ describe('addEntry applies pruning to tool entries', () => {
         output: 'ok',
       },
     } as never);
-    const entry = next.entries[next.entries.length - 1] as unknown as {
+    const entry = next.entries[next.entries.length - 1] as never as {
       input: { content: string; path: string };
     };
     expect(entry.input.content.length).toBeLessThan(2_400);
@@ -78,7 +78,7 @@ describe('addEntry applies pruning to tool entries', () => {
       type: 'addEntry',
       entry: { kind: 'assistant', text: 'hello world' },
     } as never);
-    const entry = next.entries[next.entries.length - 1] as unknown as { text: string };
+    const entry = next.entries[next.entries.length - 1] as never as { text: string };
     expect(entry.text).toBe('hello world');
   });
 });

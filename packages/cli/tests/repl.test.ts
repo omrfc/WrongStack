@@ -19,7 +19,7 @@ function makeFakeAgent(overrides: Partial<Agent> = {}): Agent {
       async (): Promise<RunResult> => ({ status: 'done', iterations: 1, finalText: 'ok' }),
     ),
     ...overrides,
-  } as unknown as Agent;
+  } as never as Agent;
 }
 
 function makeFakeReader(lines: string[]): ReadlineInputReader {
@@ -33,7 +33,7 @@ function makeFakeReader(lines: string[]): ReadlineInputReader {
       return lines[i++] ?? '';
     }),
     close: vi.fn(async () => {}),
-  } as unknown as ReadlineInputReader;
+  } as never as ReadlineInputReader;
 }
 
 function makeFakeRenderer(): TerminalRenderer {
@@ -49,7 +49,7 @@ function makeFakeRenderer(): TerminalRenderer {
     writeInfo: vi.fn(),
     clear: vi.fn(),
     render: vi.fn(),
-  } as unknown as TerminalRenderer;
+  } as never as TerminalRenderer;
 }
 
 function makeFakeSlashRegistry(): SlashCommandRegistry {
@@ -59,7 +59,7 @@ function makeFakeSlashRegistry(): SlashCommandRegistry {
     unregister: vi.fn(),
     list: vi.fn(() => []),
     resolve: vi.fn(),
-  } as unknown as SlashCommandRegistry;
+  } as never as SlashCommandRegistry;
 }
 
 function makeFakeAttachmentStore(): AttachmentStore {
@@ -74,7 +74,7 @@ function makeFakeAttachmentStore(): AttachmentStore {
     // we never insert placeholders, so a plain text-block passthrough is
     // sufficient and keeps the InputBuilder.submit path satisfied.
     expand: vi.fn(async (text: string) => [{ type: 'text', text }]),
-  } as unknown as AttachmentStore;
+  } as never as AttachmentStore;
 }
 
 function makeFakeTokenCounter(): TokenCounter {
@@ -84,7 +84,7 @@ function makeFakeTokenCounter(): TokenCounter {
     total: vi.fn(() => ({ input: 100, output: 50, cached: 0 })),
     estimateCost: vi.fn(() => ({ total: 0.01, breakdown: {} })),
     snapshot: vi.fn(),
-  } as unknown as TokenCounter;
+  } as never as TokenCounter;
 }
 
 describe('runRepl', () => {
@@ -168,7 +168,7 @@ describe('runRepl', () => {
       ctx: {
         provider: { id: 'p', capabilities: { vision: false } },
         model: 'm',
-      } as unknown as Context,
+      } as never as Context,
     });
     const renderer = makeFakeRenderer();
     const reader = makeFakeReader(['see this\n']);
@@ -183,7 +183,7 @@ describe('runRepl', () => {
       attachments: {
         ...makeFakeAttachmentStore(),
         expand: vi.fn(async () => [image]),
-      } as unknown as AttachmentStore,
+      } as never as AttachmentStore,
       banner: false,
       supportsVision,
     });
@@ -366,7 +366,7 @@ describe('runRepl', () => {
         unregister: vi.fn(),
         list: vi.fn(() => []),
         resolve: vi.fn(),
-      } as unknown as SlashCommandRegistry;
+      } as never as SlashCommandRegistry;
     }
 
     it('suggest mode displays suggestions without auto-proceeding', async () => {

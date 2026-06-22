@@ -133,9 +133,9 @@ function makeFakeStdin(isTTY: boolean): FakeStdin {
     resume: vi.fn(),
     setEncoding: vi.fn(),
     setRawMode: vi.fn((mode: boolean) => {
-      (stdin as unknown as { isRaw: boolean }).isRaw = mode;
+      (stdin as never as { isRaw: boolean }).isRaw = mode;
     }),
-  }) as unknown as FakeStdin;
+  }) as never as FakeStdin;
   return stdin;
 }
 

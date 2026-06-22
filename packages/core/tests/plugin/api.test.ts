@@ -14,7 +14,7 @@ import type { Config, ProviderFactory, Tool } from '../../src/index.js';
 const baseConfig: Config = {
   providers: {},
   log: { level: 'error' },
-} as unknown as Config;
+} as never as Config;
 
 const tool = (name: string): Tool => ({
   name,
@@ -226,7 +226,7 @@ describe('DefaultPluginAPI', () => {
     // Inject a throwing cleanup via onEvent + monkey-patched off — use the cleanup
     // path directly by registering an extension that simulates one.
     // Easier: register two real listeners; replace the queued off function with a thrower.
-    const fns = (api as unknown as { pluginCleanupFns: Array<() => void> }).pluginCleanupFns;
+    const fns = (api as never as { pluginCleanupFns: Array<() => void> }).pluginCleanupFns;
     fns.push(() => {
       throw new Error('boom');
     });

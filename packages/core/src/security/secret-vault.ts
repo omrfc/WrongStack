@@ -317,7 +317,7 @@ function walk<T>(node: T, vault: SecretVault, transform: (s: string, key: string
   if (node === null || node === undefined) return node;
   if (typeof node !== 'object') return node;
   if (Array.isArray(node)) {
-    return node.map((item) => walk(item, vault, transform)) as unknown as T;
+    return node.map((item) => walk(item, vault, transform)) as never as T;
   }
   const out: Record<string, unknown> = Object.create(null);
   for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
@@ -514,7 +514,7 @@ function walkDecryptCount<T>(
   if (Array.isArray(node)) {
     return node.map((item, i) =>
       walkDecryptCount(item, vault, counter, `${pathPrefix}[${i}]`),
-    ) as unknown as T;
+    ) as never as T;
   }
   const out: Record<string, unknown> = Object.create(null);
   for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
@@ -550,7 +550,7 @@ function walkReencrypt<T>(node: T, vault: SecretVault): T {
   if (node === null || node === undefined) return node;
   if (typeof node !== 'object') return node;
   if (Array.isArray(node)) {
-    return node.map((item) => walkReencrypt(item, vault)) as unknown as T;
+    return node.map((item) => walkReencrypt(item, vault)) as never as T;
   }
   const out: Record<string, unknown> = Object.create(null);
   for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
@@ -618,7 +618,7 @@ function walkCount<T>(node: T, vault: SecretVault, counter: { n: number }): T {
   if (node === null || node === undefined) return node;
   if (typeof node !== 'object') return node;
   if (Array.isArray(node)) {
-    return node.map((item) => walkCount(item, vault, counter)) as unknown as T;
+    return node.map((item) => walkCount(item, vault, counter)) as never as T;
   }
   const out: Record<string, unknown> = Object.create(null);
   for (const [k, v] of Object.entries(node as Record<string, unknown>)) {

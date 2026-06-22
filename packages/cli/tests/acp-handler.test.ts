@@ -66,7 +66,7 @@ function fakeDeps() {
     projectRoot: '/tmp',
     userHome: '/tmp',
     flags: {},
-  } as unknown as Parameters<typeof acpCmd>[1];
+  } as never as Parameters<typeof acpCmd>[1];
 }
 
 function flattenWriteCalls(deps: ReturnType<typeof fakeDeps>): string {

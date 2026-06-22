@@ -28,7 +28,7 @@ vi.mock('node:fs', async (orig) => {
         s.writableLength = 0;
         // Emit asynchronously, after the spool attaches its 'error' listener.
         process.nextTick(() => s.emit('error', new Error('ENOSPC')));
-        return s as unknown as ReturnType<typeof actual.createWriteStream>;
+        return s as never as ReturnType<typeof actual.createWriteStream>;
       }
       return (actual.createWriteStream as (...a: unknown[]) => unknown)(
         ...args,

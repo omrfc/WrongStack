@@ -52,7 +52,7 @@ import type { ACPMessage } from '../types/acp-messages.js';
 // boundary.
 type WireMessage = { jsonrpc?: '2.0'; id?: string | number; method?: string; params?: unknown; result?: unknown; error?: unknown };
 function toWire(msg: WireMessage): ACPMessage {
-  return msg as unknown as ACPMessage;
+  return msg as never as ACPMessage;
 }
 
 export const WRONGSTACK_VERSION = '0.263.0';

@@ -34,9 +34,13 @@ import type {
 
 const MAILBOX_FILE = '_mailbox.jsonl';
 const LINE_SEPARATOR = '\n';
+const MESSAGE_CACHE_MAX_ENTRIES = 10_000;
 
 export class DefaultMailbox implements Mailbox {
   private readonly filePath: string;
+  private _messageCache: MailboxMessage[] | null = null;
+  private _messageCacheMtime = -1;
+  private _messageCacheSize = -1;
 
   constructor(sessionDir: string) {
     this.filePath = path.join(sessionDir, MAILBOX_FILE);
@@ -73,6 +77,7 @@ export class DefaultMailbox implements Mailbox {
     // lands (it was serialized from a snapshot taken before the append).
     await withFileLock(this.filePath, async () => {
       await fsp.appendFile(this.filePath, line, 'utf8');
+      this._pushToCache(msg);
     });
     return msg;
   }
@@ -80,7 +85,7 @@ export class DefaultMailbox implements Mailbox {
   // ── Query ─────────────────────────────────────────────────────────────
 
   async query(q: MailboxQuery): Promise<MailboxMessage[]> {
-    const all = await this._readAll();
+    const all = await this._readAllCached();
     const limit = q.limit ?? 50;
     const order = q.minPriority !== undefined ? { low: 0, normal: 1, high: 2 } as const : null;
     const minPriorityRank = order && q.minPriority !== undefined ? order[q.minPriority] : 0;
@@ -145,6 +150,7 @@ export class DefaultMailbox implements Mailbox {
           all.map((m) => JSON.stringify(m)).join(LINE_SEPARATOR) + LINE_SEPARATOR;
         await fsp.writeFile(this.filePath, serialized, 'utf8');
       }
+      this._setMessageCache(all);
     });
     return updated;
   }
@@ -152,7 +158,7 @@ export class DefaultMailbox implements Mailbox {
   // ── Agent statuses ────────────────────────────────────────────────────
 
   async getAgentStatuses(): Promise<MailboxAgentStatus[]> {
-    const all = await this._readAll();
+    const all = await this._readAllCached();
     const latest = new Map<string, MailboxAgentStatus>();
     for (const m of all) {
       if (m.type !== 'status') continue;
@@ -198,7 +204,7 @@ export class DefaultMailbox implements Mailbox {
   }
 
   async unreadCount(forAgentId: string): Promise<number> {
-    const all = await this._readAll();
+    const all = await this._readAllCached();
     return all.filter(
       (m) =>
         (m.to === forAgentId || m.to === '*') &&
@@ -208,7 +214,9 @@ export class DefaultMailbox implements Mailbox {
   }
 
   async close(): Promise<void> {
-    // JSONL append-only — no flush needed
+    this._messageCache = null;
+    this._messageCacheMtime = -1;
+    this._messageCacheSize = -1;
   }
 
   async clearAll(): Promise<void> {
@@ -216,6 +224,7 @@ export class DefaultMailbox implements Mailbox {
     // append/ack so a concurrent send can't be half-erased.
     await withFileLock(this.filePath, async () => {
       await fsp.writeFile(this.filePath, '', 'utf8');
+      this._setMessageCache([]);
     });
   }
 
@@ -225,6 +234,7 @@ export class DefaultMailbox implements Mailbox {
 
     let completedPurged = 0;
     let incompletePurged = 0;
+    let remaining = 0;
 
     await withFileLock(this.filePath, async () => {
       const all = await this._readAll();
@@ -250,18 +260,19 @@ export class DefaultMailbox implements Mailbox {
         kept.push(msg);
       }
 
+      remaining = kept.length;
       if (kept.length < all.length) {
         const content = kept.map((m) => JSON.stringify(m)).join(LINE_SEPARATOR) + LINE_SEPARATOR;
         await fsp.writeFile(this.filePath, content, 'utf8');
       }
+      this._setMessageCache(kept);
     });
 
-    const all = await this._readAll();
     return {
       completedPurged,
       incompletePurged,
       totalPurged: completedPurged + incompletePurged,
-      remaining: all.length,
+      remaining,
     };
   }
 
@@ -300,7 +311,7 @@ export class DefaultMailbox implements Mailbox {
             delete parsed['read'];
             delete parsed['readAt'];
           }
-          messages.push(parsed as unknown as MailboxMessage);
+          messages.push(parsed as never as MailboxMessage);
         } catch {
           // Skip malformed lines
         }
@@ -310,5 +321,62 @@ export class DefaultMailbox implements Mailbox {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
       throw err;
     }
+  }
+
+  private async _readAllCached(): Promise<MailboxMessage[]> {
+    try {
+      const st = await fsp.stat(this.filePath);
+      if (
+        this._messageCache !== null &&
+        this._messageCacheMtime === st.mtimeMs &&
+        this._messageCacheSize === st.size
+      ) {
+        return this._messageCache;
+      }
+      const all = await this._readAll();
+      this._setMessageCache(all, st.mtimeMs, st.size);
+      return all;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        this._setMessageCache([], -1, -1);
+        return [];
+      }
+      throw err;
+    }
+  }
+
+  private _setMessageCache(messages: MailboxMessage[], mtime?: number, size?: number): void {
+    if (messages.length > MESSAGE_CACHE_MAX_ENTRIES) {
+      this._messageCache = null;
+      this._messageCacheMtime = -1;
+      this._messageCacheSize = -1;
+      return;
+    }
+    this._messageCache = messages;
+    if (mtime !== undefined && size !== undefined) {
+      this._messageCacheMtime = mtime;
+      this._messageCacheSize = size;
+      return;
+    }
+    void fsp
+      .stat(this.filePath)
+      .then((st) => {
+        this._messageCacheMtime = st.mtimeMs;
+        this._messageCacheSize = st.size;
+      })
+      .catch(() => {
+        /* best-effort cache metadata refresh */
+      });
+  }
+
+  private _pushToCache(msg: MailboxMessage): void {
+    if (this._messageCache === null) return;
+    if (this._messageCache.length >= MESSAGE_CACHE_MAX_ENTRIES) {
+      this._messageCache = null;
+      this._messageCacheMtime = -1;
+      this._messageCacheSize = -1;
+      return;
+    }
+    this._messageCache.push(msg);
   }
 }

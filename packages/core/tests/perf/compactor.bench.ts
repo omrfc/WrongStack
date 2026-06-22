@@ -24,8 +24,8 @@ function buildMessages(n: number): Message[] {
 }
 
 function fakeContext(messages: Message[]): Context {
-  const ctx = { messages } as unknown as Context;
-  (ctx as unknown as { state: unknown }).state = {
+  (ctx as never as { state: unknown }).state = {
+  (ctx as { state: unknown }).state = {
     replaceMessages(next: Message[]) {
       messages.length = 0;
       messages.splice(0, 0, ...next);

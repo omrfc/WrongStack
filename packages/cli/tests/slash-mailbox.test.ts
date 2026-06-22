@@ -25,7 +25,7 @@ describe('/mailbox slash command', () => {
       paths: { projectDir: tmp } as SlashCommandContext['paths'],
       context: {
         meta: { agentId: 'leader', globalAgentId: 'leader#999' },
-      } as unknown as SlashCommandContext['context'],
+      } as never as SlashCommandContext['context'],
     } as SlashCommandContext;
   });
 

@@ -54,7 +54,7 @@ const silentLog: Logger = {
   debug: () => {},
   trace: () => {},
   child: () => silentLog,
-} as unknown as Logger;
+} as never as Logger;
 
 const lazyCfg = (name: string, extra: Partial<MCPServerConfig> = {}): MCPServerConfig => ({
   name,
@@ -181,7 +181,7 @@ describe('MCPRegistry lazy-connect', () => {
 
     await new Promise((r) => setTimeout(r, 20)); // exceed the 5ms idle window
     // Invoke the private sweep directly (the interval would also fire it).
-    await (reg as unknown as { sweepIdle(): Promise<void> }).sweepIdle();
+    await (reg as never as { sweepIdle(): Promise<void> }).sweepIdle();
 
     expect(reg.list().find((s) => s.name === 'svc')?.state).toBe('dormant');
     expect(h.closes).toBeGreaterThanOrEqual(1);

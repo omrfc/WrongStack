@@ -52,7 +52,7 @@ function createMockGraph(): KnowledgeGraph {
     getEdges: vi.fn(() => []),
     subscribe: vi.fn(() => () => {}),
     dispose: vi.fn(),
-  } as unknown as KnowledgeGraph;
+  } as never as KnowledgeGraph;
 }
 
 function createMockConsensus(): ConsensusProtocol {
@@ -62,7 +62,7 @@ function createMockConsensus(): ConsensusProtocol {
     resolveNow: vi.fn(),
     registerVoter: vi.fn(),
     getStatus: vi.fn(() => null),
-  } as unknown as ConsensusProtocol;
+  } as never as ConsensusProtocol;
 }
 
 function createMockFleetBus(): FleetBus {
@@ -71,7 +71,7 @@ function createMockFleetBus(): FleetBus {
     subscribe: vi.fn(() => () => {}),
     unsubscribe: vi.fn(),
     dispose: vi.fn(),
-  } as unknown as FleetBus;
+  } as never as FleetBus;
 }
 
 function sampleChangeProposal(overrides: Partial<ChangeProposal> = {}): ChangeProposal {

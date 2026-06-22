@@ -87,7 +87,7 @@ export function SearchOverlay() {
   useEffect(() => {
     // Feature-detect — falls back to silent no-op on older browsers; the
     // ring-flash navigation behaviour below still works.
-    const win = window as unknown as {
+    const win = window as never as {
       CSS?: { highlights?: Map<string, unknown> };
       Highlight?: new (...ranges: Range[]) => unknown | undefined;
     };

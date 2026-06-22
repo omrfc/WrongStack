@@ -37,7 +37,7 @@ function capturingFetch(body: string, captured: Captured, status = 200): typeof 
     captured.url = url;
     captured.init = init;
     return new Response(status >= 200 && status < 300 ? sseBody(body) : 'err', { status });
-  }) as unknown as typeof fetch;
+  }) as never as typeof fetch;
 }
 
 const baseReq: Request = {
@@ -121,7 +121,7 @@ describe('GitHubCopilotProvider token refresh', () => {
       calls++;
       if (calls === 1) return new Response('unauthorized', { status: 401 });
       return new Response(sseBody(OPENAI_SSE), { status: 200 });
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
 
     const p = new GitHubCopilotProvider({
       credentials: {

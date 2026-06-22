@@ -78,6 +78,12 @@ interface LoadCacheEntry {
   data: SessionData;
 }
 
+interface IndexCacheEntry {
+  mtimeMs: number;
+  size: number;
+  summaries: SessionSummary[];
+}
+
 export class DefaultSessionStore implements SessionStore {
   private readonly dir: string;
   private readonly events?: EventBus | undefined;
@@ -94,6 +100,7 @@ export class DefaultSessionStore implements SessionStore {
    * processes. When the limit is reached, the oldest entry is evicted.
    */
   private readonly _loadCache = new Map<string, LoadCacheEntry>();
+  private _indexCache: IndexCacheEntry | null = null;
   private static readonly LOAD_CACHE_MAX_ENTRIES = 50;
 
   constructor(opts: SessionStoreOptions) {
@@ -419,6 +426,7 @@ export class DefaultSessionStore implements SessionStore {
       await ensureDir(this.dir);
       const line = JSON.stringify(summary) + '\n';
       await fsp.appendFile(this.indexFile, line, 'utf8');
+      this._indexCache = null;
       this.indexAppendCount++;
       // Auto-compact the index periodically to remove tombstones and duplicates.
       if (this.indexAppendCount >= DefaultSessionStore.COMPACT_EVERY) {
@@ -436,6 +444,7 @@ export class DefaultSessionStore implements SessionStore {
       await ensureDir(this.dir);
       const line = JSON.stringify({ action: 'delete', id }) + '\n';
       await fsp.appendFile(this.indexFile, line, 'utf8');
+      this._indexCache = null;
       this.indexAppendCount++;
     } catch {
       // best-effort
@@ -457,6 +466,7 @@ export class DefaultSessionStore implements SessionStore {
       const lines = entries.map((s) => JSON.stringify(s)).join('\n') + '\n';
       await fsp.writeFile(tmp, lines, 'utf8');
       await fsp.rename(tmp, this.indexFile);
+      this._indexCache = null;
     } catch (err) {
       outcome = 'failure';
       errorMsg = toErrorMessage(err);
@@ -472,10 +482,28 @@ export class DefaultSessionStore implements SessionStore {
    * Returns empty array when the index doesn't exist or is corrupt.
    */
   private async readIndex(): Promise<SessionSummary[]> {
+    let stat: { mtimeMs: number; size: number };
+    try {
+      const s = await fsp.stat(this.indexFile);
+      stat = { mtimeMs: s.mtimeMs, size: s.size };
+    } catch {
+      this._indexCache = null;
+      return [];
+    }
+
+    if (
+      this._indexCache !== null &&
+      this._indexCache.mtimeMs === stat.mtimeMs &&
+      this._indexCache.size === stat.size
+    ) {
+      return [...this._indexCache.summaries];
+    }
+
     let raw: string;
     try {
       raw = await fsp.readFile(this.indexFile, 'utf8');
     } catch {
+      this._indexCache = null;
       return [];
     }
     const deleted = new Set<string>();
@@ -497,7 +525,9 @@ export class DefaultSessionStore implements SessionStore {
         // skip corrupt lines
       }
     }
-    return Array.from(seen.values());
+    const summaries = Array.from(seen.values());
+    this._indexCache = { ...stat, summaries };
+    return [...summaries];
   }
 
   /**
@@ -514,6 +544,7 @@ export class DefaultSessionStore implements SessionStore {
     const lines = valid.map((s) => JSON.stringify(s)).join('\n') + '\n';
     await fsp.writeFile(tmp, lines, 'utf8');
     await fsp.rename(tmp, this.indexFile);
+    this._indexCache = null;
     return valid.length;
   }
 

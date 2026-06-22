@@ -15,7 +15,7 @@ const meta = (over: Partial<PolyglotMeta> = {}): PolyglotMeta => ({
   ...over,
 });
 const task = (m: PolyglotMeta): BenchTask =>
-  ({ id: 'polyglot/python/x', suite: 'polyglot', prompt: '', templateDir: '', meta: m as unknown as Record<string, unknown> });
+  ({ id: 'polyglot/python/x', suite: 'polyglot', prompt: '', templateDir: '', meta: m as never as Record<string, unknown> });
 
 beforeEach(() => exec.execCommand.mockReset());
 

@@ -51,7 +51,7 @@ describe('createPolyglotSuite.loadTasks', () => {
     expect(t.prompt).toMatch(/Extra\./);
     expect(t.prompt).toMatch(/bowling\.py/);
     expect(t.prompt).toMatch(/bowling_test\.py/);
-    const meta = t.meta as unknown as PolyglotMeta;
+    const meta = t.meta as never as PolyglotMeta;
     expect(meta.language).toBe('python');
     expect(meta.testCommand).toEqual({ command: 'python', args: ['-m', 'pytest', '-q', 'bowling_test.py'] });
   });

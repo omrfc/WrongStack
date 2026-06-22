@@ -37,14 +37,16 @@ a valid project root or `.wrongstack/` directory.
 ### First-run setup
 
 On first run, when `<dataDir>/auth.json` is missing, HQ automatically creates
-one browser token and one client token. Startup output prints the tokenized
-browser URL plus the client environment variables. For same-machine clients,
-setting only `WRONGSTACK_HQ_ENABLED=1` or `WRONGSTACK_HQ_URL=<hq-url>` is enough:
-clients auto-load the first client token from `<dataDir>/auth.json` unless
-`WRONGSTACK_HQ_TOKEN` is explicitly set. Existing `auth.json` is treated as
-operator intent, including empty token arrays for open mode.
+one browser token and one client token. On every startup, HQ prints the browser
+URL and client WebSocket URL; when tokens exist in `auth.json`, those URLs are
+tokenized. For same-machine clients, setting only `WRONGSTACK_HQ_ENABLED=1` or
+`WRONGSTACK_HQ_URL=<hq-url>` is enough: clients auto-load the first client token
+from `<dataDir>/auth.json` unless `WRONGSTACK_HQ_TOKEN` is explicitly set.
+Existing `auth.json` is treated as operator intent, including empty token arrays
+for open mode.
 
-Once running, the URL the browser should hit is printed to stdout, e.g.:
+Once running, the URLs the browser and clients should use are printed to stdout,
+e.g.:
 
 ```text
 WrongStack HQ listening on http://127.0.0.1:3499
@@ -180,16 +182,14 @@ Server-defined envelope (not exported as a public type from `@wrongstack/core`):
 
 Important differences from `/api/snapshot`:
 
-- `clients` is filtered to `projectId === :id`. Each `HqClientRecord` has
-  `machineId: ""` (server-side limitation — the machine id is not currently
-  re-derived for the drilldown endpoint).
+- `clients` is filtered to `projectId === :id`.
 - `mailboxes` contains **full** `HqMailboxSnapshotPayload` (with `messages[]`,
   `agents[]`, and `totals`), NOT the summarized `HqMailboxSummary[]` shape
   used by `/api/snapshot`. This is intentional — the drawer needs message
   subjects and previews.
-- `project` is server-derived: `projectName` defaults to the `projectId`,
-  `projectRootDisplay: ""`, `machineIds: []`, `status: "active"`,
-  `activeClients` = filtered client count.
+- `project` is derived from the first matching `client.hello` project identity:
+  `projectName`, `projectRootDisplay`, `machineIds`, and optional `gitBranch`
+  are preserved; `activeClients` = filtered client count.
 
 ### Error responses
 

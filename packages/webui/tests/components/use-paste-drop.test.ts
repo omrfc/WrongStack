@@ -18,7 +18,7 @@ function mockTextarea(selectionStart = 0, selectionEnd = 0): HTMLTextAreaElement
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   };
-  return ta as unknown as HTMLTextAreaElement;
+  return ta as never as HTMLTextAreaElement;
 }
 
 function makeHookOptions(overrides: { input?: string; selectionStart?: number } = {}) {
@@ -67,7 +67,7 @@ describe('usePasteDrop', () => {
       const event = {
         dataTransfer: { types: ['Files'] },
         preventDefault: vi.fn(),
-      } as unknown as React.DragEvent<HTMLFormElement>;
+      } as never as React.DragEvent<HTMLFormElement>;
 
       act(() => result.current.onDragEnter(event));
 
@@ -82,7 +82,7 @@ describe('usePasteDrop', () => {
       const event = {
         dataTransfer: { types: ['text/plain'] },
         preventDefault: vi.fn(),
-      } as unknown as React.DragEvent<HTMLFormElement>;
+      } as never as React.DragEvent<HTMLFormElement>;
 
       act(() => result.current.onDragEnter(event));
 
@@ -96,7 +96,7 @@ describe('usePasteDrop', () => {
       const event = {
         dataTransfer: { types: ['Files'], dropEffect: '' },
         preventDefault: vi.fn(),
-      } as unknown as React.DragEvent<HTMLFormElement>;
+      } as never as React.DragEvent<HTMLFormElement>;
 
       act(() => result.current.onDragOver(event));
 
@@ -111,14 +111,14 @@ describe('usePasteDrop', () => {
       act(() => result.current.onDragEnter({
         dataTransfer: { types: ['Files'] },
         preventDefault: vi.fn(),
-      } as unknown as React.DragEvent<HTMLFormElement>));
+      } as never as React.DragEvent<HTMLFormElement>));
 
       expect(result.current.draggingOver).toBe(true);
 
       act(() => result.current.onDragLeave({
         currentTarget: { contains: () => false },
         relatedTarget: null,
-      } as unknown as React.DragEvent<HTMLFormElement>));
+      } as never as React.DragEvent<HTMLFormElement>));
 
       expect(result.current.draggingOver).toBe(false);
     });
@@ -132,7 +132,7 @@ describe('usePasteDrop', () => {
       const event = {
         dataTransfer: { files: [file] },
         preventDefault: vi.fn(),
-      } as unknown as React.DragEvent<HTMLFormElement>;
+      } as never as React.DragEvent<HTMLFormElement>;
 
       act(() => result.current.onDrop(event));
 
@@ -152,7 +152,7 @@ describe('usePasteDrop', () => {
       const event = {
         dataTransfer: { files: [imageFile] },
         preventDefault: vi.fn(),
-      } as unknown as React.DragEvent<HTMLFormElement>;
+      } as never as React.DragEvent<HTMLFormElement>;
 
       act(() => {
         result.current.onDrop(event);
@@ -176,7 +176,7 @@ describe('usePasteDrop', () => {
         result.current.onDrop({
           dataTransfer: { files: [imageFile] },
           preventDefault: vi.fn(),
-        } as unknown as React.DragEvent<HTMLFormElement>);
+        } as never as React.DragEvent<HTMLFormElement>);
       });
       await waitFor(() => expect(result.current.pendingImage).toBeTruthy());
 
@@ -191,7 +191,7 @@ describe('usePasteDrop', () => {
       const event = {
         dataTransfer: { files: [] },
         preventDefault: vi.fn(),
-      } as unknown as React.DragEvent<HTMLFormElement>;
+      } as never as React.DragEvent<HTMLFormElement>;
 
       act(() => result.current.onDrop(event));
 
@@ -208,7 +208,7 @@ describe('usePasteDrop', () => {
       const event = {
         clipboardData: { getData: () => '' },
         preventDefault: vi.fn(),
-      } as unknown as React.ClipboardEvent<HTMLTextAreaElement>;
+      } as never as React.ClipboardEvent<HTMLTextAreaElement>;
 
       act(() => result.current.onTextPaste(event));
 
@@ -229,7 +229,7 @@ describe('usePasteDrop', () => {
       const event = {
         clipboardData: { getData: () => 'const x = 1;' },
         preventDefault: vi.fn(),
-      } as unknown as React.ClipboardEvent<HTMLTextAreaElement>;
+      } as never as React.ClipboardEvent<HTMLTextAreaElement>;
 
       act(() => result.current.onTextPaste(event));
 
@@ -253,7 +253,7 @@ describe('usePasteDrop', () => {
       const event = {
         clipboardData: { getData: () => largeText },
         preventDefault: vi.fn(),
-      } as unknown as React.ClipboardEvent<HTMLTextAreaElement>;
+      } as never as React.ClipboardEvent<HTMLTextAreaElement>;
 
       act(() => result.current.onTextPaste(event));
 
@@ -272,7 +272,7 @@ describe('usePasteDrop', () => {
       const event = {
         clipboardData: { getData: () => 'short' },
         preventDefault: vi.fn(),
-      } as unknown as React.ClipboardEvent<HTMLTextAreaElement>;
+      } as never as React.ClipboardEvent<HTMLTextAreaElement>;
 
       act(() => result.current.onTextPaste(event));
 

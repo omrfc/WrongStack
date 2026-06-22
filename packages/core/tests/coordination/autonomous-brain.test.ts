@@ -24,7 +24,7 @@ function createMockGraph(): KnowledgeGraph {
     })),
     subscribe: vi.fn(() => () => {}),
     dispose: vi.fn(),
-  } as unknown as KnowledgeGraph;
+  } as never as KnowledgeGraph;
 }
 
 function createMockFleetBus(): FleetBus {
@@ -34,7 +34,7 @@ function createMockFleetBus(): FleetBus {
     subscribe: vi.fn(() => () => {}),
     unsubscribe: vi.fn(),
     dispose: vi.fn(),
-  } as unknown as FleetBus;
+  } as never as FleetBus;
 }
 
 // Mock LLM provider

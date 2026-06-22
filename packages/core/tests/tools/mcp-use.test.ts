@@ -22,7 +22,7 @@ function fakeToolRegistry(tools: Tool[] = []): ToolRegistry {
   return {
     get: (name: string) => tools.find((t) => t.name === name),
     list: () => tools,
-  } as unknown as ToolRegistry;
+  } as never as ToolRegistry;
 }
 
 const mcpTool = (name: string, exec: Tool['execute']): Tool =>

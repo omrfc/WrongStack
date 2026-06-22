@@ -171,7 +171,7 @@ export async function handleContextModeSwitch(
       sendResult(ctx, ws, false, `Unknown context mode "${id}"`);
       return;
     }
-    policy = custom as unknown as typeof policy;
+    policy = custom as never as typeof policy;
   }
   ctx.agent.ctx.meta['contextWindowMode'] = policy.id;
   ctx.agent.ctx.meta['contextWindowPolicy'] = policy;

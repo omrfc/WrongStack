@@ -291,7 +291,7 @@ describe('Director budget-threshold extension policy (no brain)', () => {
 describe('Director defensive teardown paths', () => {
   it('swallows a failing session-writer append', async () => {
     const sessionWriter = { append: vi.fn().mockRejectedValue(new Error('writer closed')) };
-    const { d, buses } = makeDirector({ sessionWriter } as unknown as Partial<DirectorOpts>);
+    const { d, buses } = makeDirector({ sessionWriter } as never as Partial<DirectorOpts>);
     const id = await spawnWithBus(d, buses, { name: 'W', provider: 'p', model: 'm' });
     // assign() calls appendSessionEvent('task_created') → append rejects → swallowed
     await expect(d.assign({ id: 't-w', description: 'x', subagentId: id })).resolves.toBeDefined();
@@ -481,7 +481,7 @@ describe('Director.shutdown', () => {
   it('logShutdownError emits a process warning without throwing', () => {
     const { d } = makeDirector();
     const warn = vi.spyOn(process, 'emitWarning').mockImplementation(() => {});
-    (d as unknown as { logShutdownError: (p: string, e: unknown) => void }).logShutdownError('test_phase', new Error('boom'));
+    (d as never as { logShutdownError: (p: string, e: unknown) => void }).logShutdownError('test_phase', new Error('boom'));
     expect(warn).toHaveBeenCalled();
   });
 });

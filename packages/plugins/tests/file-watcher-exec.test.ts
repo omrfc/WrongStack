@@ -119,7 +119,7 @@ describe('watch_start', () => {
     vi.useFakeTimers();
     const tools = setup({ debounceMs: 50 });
     await tools.watch_start!.execute({ paths: ['src'] });
-    lastCb!(undefined as unknown as string, 'a.txt');
+    lastCb!(undefined as never as string, 'a.txt');
     await vi.advanceTimersByTimeAsync(50);
     expect(metrics.counter).toHaveBeenCalledWith('file_change', 1, { event: 'unknown' });
   });

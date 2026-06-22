@@ -124,7 +124,7 @@ describe('renderAuthLocalHelp', () => {
       writeInfo: vi.fn(),
       clear: vi.fn(),
       render: vi.fn(),
-    } as unknown as Parameters<typeof renderAuthLocalHelp>[0];
+    } as never as Parameters<typeof renderAuthLocalHelp>[0];
   }
 
   it('writes a non-empty help block to the renderer', () => {

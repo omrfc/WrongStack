@@ -37,7 +37,7 @@ function makeMockAgent(setup: MockAgentSetup = {}): Agent {
     events,
     pipelines: null as any,
     ctx,
-  } as unknown as Agent;
+  } as never as Agent;
 }
 
 function makeMockTokenCounter(

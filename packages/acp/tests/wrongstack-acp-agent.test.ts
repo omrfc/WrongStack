@@ -23,7 +23,7 @@ vi.mock('../src/agent/stdio-transport.js', () => {
     close = vi.fn();
     read = vi.fn(async () => null);
     constructor() {
-      h.transports.push(this as unknown as MockTransport);
+      h.transports.push(this as never as MockTransport);
     }
   }
   return { StdioTransport };
@@ -33,7 +33,7 @@ vi.mock('../src/agent/protocol-handler.js', () => {
   class ACPProtocolHandler {
     handleMessage = vi.fn(async () => false);
     constructor() {
-      h.handlers.push(this as unknown as MockHandler);
+      h.handlers.push(this as never as MockHandler);
     }
   }
   return { ACPProtocolHandler };

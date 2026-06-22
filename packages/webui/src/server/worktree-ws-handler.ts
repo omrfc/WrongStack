@@ -42,7 +42,7 @@ export class WorktreeWebSocketHandler {
   // ── internals ───────────────────────────────────────────────────────────
 
   private subscribe(): void {
-    const on = this.events.on.bind(this.events) as unknown as (
+    const on = this.events.on.bind(this.events) as never as (
       ev: string,
       fn: (p: unknown) => void,
     ) => () => void;

@@ -48,7 +48,7 @@ const fakeCtx = {
   model: 'test-model',
   cwd: '/tmp',
   projectRoot: '/proj',
-} as unknown as Context;
+} as never as Context;
 
 function makeRig(onMcp?: (args: string) => Promise<string>) {
   const registry = new SlashCommandRegistry();
@@ -61,7 +61,7 @@ function makeRig(onMcp?: (args: string) => Promise<string>) {
     toolRegistry,
     compactor,
     tokenCounter,
-    renderer: renderer as unknown as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
+    renderer: renderer as never as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
     onMcp,
   });
   for (const c of cmds) registry.register(c);

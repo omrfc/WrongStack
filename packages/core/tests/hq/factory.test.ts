@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { HQ_AUTH_FILE_VERSION, resolveHqConfigFromEnv, writeHqAuthFile } from '../../src/hq/index.js';
+import { HQ_AUTH_FILE_VERSION, resolveHqConfigFromEnv, writeHqAuthFile, writeHqRuntimeFile } from '../../src/hq/index.js';
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'hq-factory-'));
@@ -46,7 +46,7 @@ describe('HQ publisher factory env config', () => {
       });
 
       expect(config).toEqual({
-        url: 'http://localhost:3499',
+        url: 'http://127.0.0.1:3499',
         enabled: true,
         token: 'client-token-from-auth',
       });
@@ -80,7 +80,41 @@ describe('HQ publisher factory env config', () => {
       });
 
       expect(resolveHqConfigFromEnv({ WRONGSTACK_HQ_DATA_DIR: dir })).toEqual({
-        url: 'http://localhost:3499',
+        url: 'http://127.0.0.1:3499',
+        enabled: true,
+        token: 'client-token-from-auth',
+      });
+    });
+  });
+
+  it('prefers the runtime HQ URL when the server bound a non-default port', async () => {
+    await withTempDir(async (dir) => {
+      await writeHqAuthFile(dir, {
+        version: HQ_AUTH_FILE_VERSION,
+        updatedAt: new Date().toISOString(),
+        clientTokens: [{ id: 'ct-1', token: 'client-token-from-auth', createdAt: new Date().toISOString() }],
+      });
+      await writeHqRuntimeFile(dir, { url: 'http://127.0.0.1:45123', pid: process.pid });
+
+      expect(resolveHqConfigFromEnv({ WRONGSTACK_HQ_DATA_DIR: dir })).toEqual({
+        url: 'http://127.0.0.1:45123',
+        enabled: true,
+        token: 'client-token-from-auth',
+      });
+    });
+  });
+
+  it('ignores a runtime HQ URL whose recorded process is no longer alive', async () => {
+    await withTempDir(async (dir) => {
+      await writeHqAuthFile(dir, {
+        version: HQ_AUTH_FILE_VERSION,
+        updatedAt: new Date().toISOString(),
+        clientTokens: [{ id: 'ct-1', token: 'client-token-from-auth', createdAt: new Date().toISOString() }],
+      });
+      await writeHqRuntimeFile(dir, { url: 'http://127.0.0.1:45123', pid: 999_999_999 });
+
+      expect(resolveHqConfigFromEnv({ WRONGSTACK_HQ_DATA_DIR: dir })).toEqual({
+        url: 'http://127.0.0.1:3499',
         enabled: true,
         token: 'client-token-from-auth',
       });

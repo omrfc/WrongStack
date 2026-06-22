@@ -64,7 +64,7 @@ function makeStoppedProgressAgent(opts: {
         await new Promise((r) => setTimeout(r, 10));
       }
     },
-  } as unknown as Agent;
+  } as never as Agent;
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +169,7 @@ describe('T1: denied pre-empt falls through to deadline', () => {
           }
           return { status: 'done', iterations: i, finalText: 'completed' };
         },
-      } as unknown as Agent;
+      } as never as Agent;
       return { agent, events };
     };
 
@@ -231,7 +231,7 @@ describe('T4: concurrent multi-kind exceeded reports correct kind to handler', (
       'auto',
     );
     budget.onThreshold = handler;
-    budget._events = events as unknown as EventBus;
+    budget._events = events as never as EventBus;
     budget.start();
 
     // Exhaust iterations.
@@ -291,7 +291,7 @@ describe('T4: concurrent multi-kind exceeded reports correct kind to handler', (
           }
           return { status: 'done', iterations: 7, finalText: 'done' };
         },
-      } as unknown as Agent;
+      } as never as Agent;
       return { agent, events };
     };
 

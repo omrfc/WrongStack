@@ -22,7 +22,7 @@ const OVERLAY: ModelsDevPayload = {
 };
 
 const jsonResponse = (body: unknown, ok = true, status = 200) =>
-  ({ ok, status, json: async () => body }) as unknown as Response;
+  ({ ok, status, json: async () => body }) as never as Response;
 
 let dir: string;
 let cacheFile: string;
@@ -42,7 +42,7 @@ async function writeCache(file: string, payload: ModelsDevPayload, ageMs = 0): P
 describe('models-registry — extra coverage', () => {
   it('serves a fresh cache without hitting the network', async () => {
     await writeCache(cacheFile, SAMPLE);
-    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const fetchImpl = vi.fn() as never as typeof fetch;
     const reg = new DefaultModelsRegistry({ cacheFile, fetchImpl });
     const payload = await reg.load();
     expect(payload.anthropic).toBeDefined();
@@ -50,13 +50,13 @@ describe('models-registry — extra coverage', () => {
   });
 
   it('throws an HTTP error when the fetch is not ok and there is no cache', async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse({}, false, 503)) as unknown as typeof fetch;
+    const fetchImpl = vi.fn(async () => jsonResponse({}, false, 503)) as never as typeof fetch;
     const reg = new DefaultModelsRegistry({ cacheFile, fetchImpl, ttlSeconds: 0 });
     await expect(reg.load()).rejects.toThrow(/HTTP 503/);
   });
 
   it('maps an AbortError to a timeout error', async () => {
-    const fetchImpl = vi.fn(async () => { const e = new Error('aborted'); e.name = 'AbortError'; throw e; }) as unknown as typeof fetch;
+    const fetchImpl = vi.fn(async () => { const e = new Error('aborted'); e.name = 'AbortError'; throw e; }) as never as typeof fetch;
     const reg = new DefaultModelsRegistry({ cacheFile, fetchImpl, ttlSeconds: 0, refreshTimeoutMs: 5 });
     await expect(reg.load()).rejects.toThrow(/timed out/);
   });
@@ -89,7 +89,7 @@ describe('models-registry — extra coverage', () => {
   });
 
   it('memoises an in-memory overlay merged on top of the base', async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse(SAMPLE)) as unknown as typeof fetch;
+    const fetchImpl = vi.fn(async () => jsonResponse(SAMPLE)) as never as typeof fetch;
     const reg = new DefaultModelsRegistry({ cacheFile, fetchImpl, overlay: OVERLAY });
     const first = await reg.load();
     expect(first.custom).toBeDefined();
@@ -102,7 +102,7 @@ describe('models-registry — extra coverage', () => {
     const overlayCacheFile = path.join(dir, 'overlay-cache.json');
     const fetchImpl = vi.fn(async (url: string) =>
       url.includes('overlay') ? jsonResponse(OVERLAY) : jsonResponse(SAMPLE),
-    ) as unknown as typeof fetch;
+    ) as never as typeof fetch;
     const reg = new DefaultModelsRegistry({
       cacheFile,
       fetchImpl,
@@ -120,7 +120,7 @@ describe('models-registry — extra coverage', () => {
     const fetchImpl = vi.fn(async (url: string) => {
       if (url.includes('overlay')) throw new Error('overlay offline');
       return jsonResponse(SAMPLE);
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const reg = new DefaultModelsRegistry({
       cacheFile,
       fetchImpl,
@@ -136,7 +136,7 @@ describe('models-registry — extra coverage', () => {
     const reg = new DefaultModelsRegistry({
       cacheFile,
       seed: undefined,
-      fetchImpl: (async () => jsonResponse(SAMPLE)) as unknown as typeof fetch,
+      fetchImpl: (async () => jsonResponse(SAMPLE)) as never as typeof fetch,
       overlayFile: path.join(dir, 'does-not-exist.json'),
     });
     const payload = await reg.load();

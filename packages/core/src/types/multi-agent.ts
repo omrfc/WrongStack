@@ -326,7 +326,7 @@ export interface SubagentContext {
    * Two-phase initialization: `spawn()` creates the subagent before the
    * bridge is wired (`setSubagentBridge()`), so `parentBridge` is nullable
    * by design. Readers must `hasParentBridge()`-guard or null-check before
-   * use; the prior `null as unknown as AgentBridge` cast was a type lie
+   * use; the prior `null as never as AgentBridge` cast was a type lie
    * that hid this from the compiler.
    */
   parentBridge: AgentBridge | null;

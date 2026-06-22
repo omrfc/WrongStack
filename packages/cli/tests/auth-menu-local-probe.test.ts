@@ -50,7 +50,7 @@ function makeRenderer(): TerminalRenderer {
     writeInfo: vi.fn(),
     clear: vi.fn(),
     render: vi.fn(),
-  } as unknown as TerminalRenderer;
+  } as never as TerminalRenderer;
 }
 
 function makeReader(lines: string[], secrets: string[] = []): ReadlineInputReader {
@@ -66,7 +66,7 @@ function makeReader(lines: string[], secrets: string[] = []): ReadlineInputReade
       return secrets[si++] ?? '';
     }),
     close: vi.fn(async () => {}),
-  } as unknown as ReadlineInputReader;
+  } as never as ReadlineInputReader;
 }
 
 function makeModelsRegistry(): ModelsRegistry {
@@ -75,7 +75,7 @@ function makeModelsRegistry(): ModelsRegistry {
     listProviders: vi.fn(async () => []),
     suggestModel: vi.fn(async () => undefined),
     refresh: vi.fn(async () => undefined),
-  } as unknown as ModelsRegistry;
+  } as never as ModelsRegistry;
 }
 
 async function setupDeps(opts: {
@@ -110,7 +110,7 @@ function buildFetch(responder: (url: string) => Response | Promise<Response>): t
   return (async (input: unknown) => {
     const url = typeof input === 'string' ? input : (input as URL).toString();
     return responder(url);
-  }) as unknown as typeof fetch;
+  }) as never as typeof fetch;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -209,7 +209,7 @@ describe('probeLocalLlm', () => {
     ) => {
       capturedHeaders = Object.fromEntries(new Headers(init?.headers).entries());
       return jsonResponse({ data: [] });
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     await probeLocalLlm({
       baseUrl: 'http://localhost:11434/v1',
       apiKey: 'should-be-ignored',
@@ -229,7 +229,7 @@ describe('probeLocalLlm', () => {
     ) => {
       capturedHeaders = Object.fromEntries(new Headers(init?.headers).entries());
       return jsonResponse({ data: [] });
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     await probeLocalLlm({
       baseUrl: 'http://localhost:8000/v1',
       apiKey: 'sk-local-vllm-abc',
@@ -249,7 +249,7 @@ describe('probeLocalLlm', () => {
     ) => {
       capturedHeaders = Object.fromEntries(new Headers(init?.headers).entries());
       return jsonResponse({ data: [] });
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     await probeLocalLlm({
       baseUrl: 'http://localhost:8000/v1',
       apiKey: '',
@@ -266,7 +266,7 @@ describe('probeLocalLlm', () => {
   it('classifies a network error as unreachable', async () => {
     const fetchImpl = (async () => {
       throw new Error('ECONNREFUSED 127.0.0.1:11434');
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const result = await probeLocalLlm({
       baseUrl: 'http://localhost:11434/v1',
       apiKey: undefined,
@@ -288,7 +288,7 @@ describe('probeLocalLlm', () => {
       const err = new Error('The operation was aborted due to timeout');
       err.name = 'TimeoutError';
       throw err;
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const result = await probeLocalLlm({
       baseUrl: 'http://localhost:11434/v1',
       apiKey: undefined,
@@ -432,7 +432,7 @@ describe('runAuthLocal — health probe integration', () => {
     const code = await runAuthLocal(deps, {
       name: 'ollama',
       noProbe: true,
-      fetchImpl: fetchImpl as unknown as typeof fetch,
+      fetchImpl: fetchImpl as never as typeof fetch,
     });
     expect(code).toBe(0);
     expect(fetchImpl).not.toHaveBeenCalled();

@@ -98,7 +98,7 @@ export function readTelegramConfig(
   api: Pick<PluginAPI, 'config'>,
 ): Required<Omit<TelegramPluginConfig, 'notifyChatId' | 'offsetStoragePath'>> &
   Pick<TelegramPluginConfig, 'notifyChatId' | 'offsetStoragePath'> {
-  const config = api.config as unknown as Record<string, unknown>;
+  const config = api.config as never as Record<string, unknown>;
   const extensions = config.extensions as Record<string, unknown> | undefined;
   const pluginEntries = config.plugins;
   const legacyPlugins = pluginEntries as Record<string, unknown> | undefined;

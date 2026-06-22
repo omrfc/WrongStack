@@ -26,7 +26,7 @@ vi.mock('../../src/coordination/dispatcher.js', () => ({
 type MockDirector = Record<string, ReturnType<typeof vi.fn> | unknown>;
 
 let director: MockDirector;
-const asDir = () => director as unknown as Director;
+const asDir = () => director as never as Director;
 
 beforeEach(() => {
   director = {

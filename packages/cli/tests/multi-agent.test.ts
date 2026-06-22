@@ -52,18 +52,18 @@ function makeDeps(): MultiAgentDeps {
       apiKey: 'fake',
     })),
     watch: vi.fn(() => () => {}),
-  } as unknown as ConfigStore;
+  } as never as ConfigStore;
 
   const systemPromptBuilder = {
     build: vi.fn(async () => [{ type: 'text', text: 'sys' }]),
-  } as unknown as SystemPromptBuilder;
+  } as never as SystemPromptBuilder;
 
   const session = {
     id: 'sess-test',
     append: vi.fn(async () => undefined),
     appendBatch: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
-  } as unknown as SessionWriter;
+  } as never as SessionWriter;
 
   const tokenCounter: TokenCounter = {
     account: vi.fn(),
@@ -73,7 +73,7 @@ function makeDeps(): MultiAgentDeps {
     snapshot: vi.fn(() => []),
     inputTokens: vi.fn(() => 0),
     outputTokens: vi.fn(() => 0),
-  } as unknown as TokenCounter;
+  } as never as TokenCounter;
 
   return {
     container: new Container(),
@@ -624,7 +624,7 @@ describe('MultiAgentHost.makeSubagentFactory', () => {
     return deps;
   }
 
-  const config = { provider: 'anthropic', model: 'claude', apiKey: 'fake' } as unknown as Config;
+  const config = { provider: 'anthropic', model: 'claude', apiKey: 'fake' } as never as Config;
 
   const slotCfg: SubagentConfig = {
     id: 'slot-1',
@@ -679,7 +679,7 @@ describe('MultiAgentHost.makeSubagentFactory', () => {
     // wired, the factory resolves the real window (here mocked to 128k).
     vi.mocked(capabilitiesFor).mockResolvedValueOnce({ maxContext: 128_000 } as never);
     const deps = depsWithTools();
-    deps.modelsRegistry = {} as unknown as MultiAgentDeps['modelsRegistry'];
+    deps.modelsRegistry = {} as never as MultiAgentDeps['modelsRegistry'];
     const host = new MultiAgentHost(deps);
     const { agent, dispose } = await host.makeSubagentFactory(config)(slotCfg);
     expect(agent.ctx.provider.capabilities.maxContext).toBe(128_000);
@@ -689,12 +689,12 @@ describe('MultiAgentHost.makeSubagentFactory', () => {
   it('uses the model-specific maxContext for subagents instead of the provider family default', async () => {
     vi.mocked(capabilitiesFor).mockResolvedValueOnce({ maxContext: 1_050_000 } as never);
     const deps = depsWithTools();
-    deps.modelsRegistry = {} as unknown as MultiAgentDeps['modelsRegistry'];
+    deps.modelsRegistry = {} as never as MultiAgentDeps['modelsRegistry'];
     const gptConfig = {
       provider: 'openai',
       model: 'gpt-5.5',
       apiKey: 'fake',
-    } as unknown as Config;
+    } as never as Config;
     const host = new MultiAgentHost(deps);
     const { agent, dispose } = await host.makeSubagentFactory(gptConfig)({
       ...slotCfg,
@@ -707,7 +707,7 @@ describe('MultiAgentHost.makeSubagentFactory', () => {
 
   it('does not apply catalog maxContext to custom baseUrl subagents', async () => {
     const deps = depsWithTools();
-    deps.modelsRegistry = {} as unknown as MultiAgentDeps['modelsRegistry'];
+    deps.modelsRegistry = {} as never as MultiAgentDeps['modelsRegistry'];
     const gptProxyConfig = {
       provider: 'openai',
       model: 'gpt-5.5',
@@ -718,7 +718,7 @@ describe('MultiAgentHost.makeSubagentFactory', () => {
           baseUrl: 'http://127.0.0.1:8317/v1',
         },
       },
-    } as unknown as Config;
+    } as never as Config;
     const host = new MultiAgentHost(deps);
     const { agent, dispose } = await host.makeSubagentFactory(gptProxyConfig)({
       ...slotCfg,

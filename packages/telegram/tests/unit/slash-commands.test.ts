@@ -150,7 +150,7 @@ describe('tgStatusCommand', () => {
     const bot = makeBot();
     bot.health = vi.fn().mockResolvedValue({ ok: true, username: 'b' });
 
-    const cfg = makeConfig({ pollIntervalSec: undefined as unknown as number });
+    const cfg = makeConfig({ pollIntervalSec: undefined as never as number });
     const cmd = tgStatusCommand(bot, cfg);
     const res = await cmd.run('', null as never);
 

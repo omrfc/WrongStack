@@ -18,7 +18,7 @@ function makeCtx(initial: Record<string, unknown> = {}) {
   const ctx = {
     configStore: { get: vi.fn(() => live), update },
     paths: { globalConfig },
-  } as unknown as SlashCommandContext;
+  } as never as SlashCommandContext;
   const readFile = () => JSON.parse(readFileSync(globalConfig, 'utf8')) as Record<string, unknown>;
   return { ctx, update, readFile, getLive: () => live };
 }

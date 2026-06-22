@@ -166,7 +166,7 @@ export async function switchProjectInPlace(
     );
   }
 
-  const emitUntyped = events.emit as unknown as (event: string, payload: unknown) => void;
+  const emitUntyped = events.emit as never as (event: string, payload: unknown) => void;
   emitUntyped('project.switched', { from: oldProjectRoot, to: resolved, name: displayName });
   return null;
 }

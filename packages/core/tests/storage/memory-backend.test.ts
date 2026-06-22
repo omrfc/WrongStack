@@ -128,6 +128,20 @@ describe('FileMemoryBackend forget/clear/consolidate', () => {
     expect(bak).toBeTruthy();
   });
 
+  it('keeps only the five newest consolidate backups', async () => {
+    await backend.remember(scope, entry('prefer pnpm', { ts: '2026-01-01T00:00:00Z' }), file);
+    await backend.remember(scope, entry('prefer pnpm', { ts: '2026-02-02T00:00:00Z' }), file);
+
+    for (let i = 0; i < 8; i++) {
+      await fs.writeFile(path.join(dir, `memory.md.bak.${1700000000000 + i}`), 'old');
+    }
+
+    await backend.consolidate(scope, file);
+
+    const backups = (await fs.readdir(dir)).filter((fileName) => fileName.startsWith('memory.md.bak.'));
+    expect(backups).toHaveLength(5);
+  });
+
   it('consolidate returns 0 for a missing file', async () => {
     expect(await backend.consolidate(scope, path.join(dir, 'nope.md'))).toBe(0);
   });

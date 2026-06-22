@@ -4,7 +4,7 @@ Strict TypeScript patterns for WrongStack: exhaustive switch, branded types, dis
 
 ## Rules
 
-1. Never silence errors with `as any` — use `as unknown as T` only at trust boundaries with a comment.
+1. Never silence errors with `as any` or double assertions — validate or narrow values at trust boundaries.
 2. Don't use `!` non-null assertion — silence the type checker without explanation.
 3. Always annotate return types on exported functions.
 4. Use `Promise<unknown>` or generics instead of `Promise<any>`.

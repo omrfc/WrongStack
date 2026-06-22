@@ -54,7 +54,7 @@ function makeLogger(): Logger {
     warn: (msg: string) => { calls.push({ level: 'warn', msg }); },
     error: (msg: string) => { calls.push({ level: 'error', msg }); },
     debug: (msg: string) => { calls.push({ level: 'debug', msg }); },
-  } as unknown as Logger;
+  } as never as Logger;
 }
 
 function makeConfig(): Config {
@@ -65,7 +65,7 @@ function makeConfig(): Config {
     debugStream: false,
     context: { preserveK: 0, eliseThreshold: 0 },
     features: { skills: false },
-  } as unknown as Config;
+  } as never as Config;
 }
 
 function makeWpaths(): WstackPaths {
@@ -73,7 +73,7 @@ function makeWpaths(): WstackPaths {
     globalRoot: '/tmp/wrongstack',
     projectRoot: '/tmp/wrongstack/project',
     home: '/tmp',
-  } as unknown as WstackPaths;
+  } as never as WstackPaths;
 }
 
 function makeReader() {
@@ -83,11 +83,11 @@ function makeReader() {
 }
 
 function makeModelsRegistry(): ModelsRegistry {
-  return {} as unknown as ModelsRegistry;
+  return {} as never as ModelsRegistry;
 }
 
 function makeRenderer(): Renderer {
-  return {} as unknown as Renderer;
+  return {} as never as Renderer;
 }
 
 describe('wireContainer (PR 3 of #29)', () => {

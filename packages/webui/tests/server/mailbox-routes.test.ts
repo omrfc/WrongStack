@@ -4,7 +4,7 @@ import { handleMailboxRoute, type MailboxRouteHandlers } from '../../src/server/
 import type { WSClientMessage } from '../../src/server/types.js';
 
 function mockWs(): WebSocket & { send: ReturnType<typeof vi.fn> } {
-  return { readyState: 1, send: vi.fn() } as unknown as WebSocket & { send: ReturnType<typeof vi.fn> };
+  return { readyState: 1, send: vi.fn() } as never as WebSocket & { send: ReturnType<typeof vi.fn> };
 }
 
 function sentMessages(ws: { send: ReturnType<typeof vi.fn> }): unknown[] {
@@ -42,7 +42,7 @@ describe('handleMailboxRoute', () => {
   ] as const)('dispatches %s to %s', async (type, handlerName) => {
     const ws = mockWs();
     const h = handlers();
-    const msg = { type, payload: { limit: 10 } } as unknown as WSClientMessage;
+    const msg = { type, payload: { limit: 10 } } as never as WSClientMessage;
 
     await expect(handleMailboxRoute(ws, msg, h)).resolves.toBe(true);
 
@@ -52,7 +52,7 @@ describe('handleMailboxRoute', () => {
   it('forwards the original message object to payload-bearing handlers', async () => {
     const ws = mockWs();
     const h = handlers();
-    const msg = { type: 'mailbox.purge', payload: { completedMaxAgeMs: 1 } } as unknown as WSClientMessage;
+    const msg = { type: 'mailbox.purge', payload: { completedMaxAgeMs: 1 } } as never as WSClientMessage;
 
     await expect(handleMailboxRoute(ws, msg, h)).resolves.toBe(true);
 

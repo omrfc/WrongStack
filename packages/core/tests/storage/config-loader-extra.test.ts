@@ -14,7 +14,7 @@ const fakeVault = (): SecretVault =>
   ({
     encrypt: (s: string) => (s.startsWith('enc:') ? s : `enc:${s}`),
     decrypt: (s: string) => (s.startsWith('enc:') ? s.slice(4) : s),
-  }) as unknown as SecretVault;
+  }) as never as SecretVault;
 
 const ENV_KEYS = [
   'WRONGSTACK_PROVIDER', 'WRONGSTACK_MODEL', 'WRONGSTACK_API_KEY', 'WRONGSTACK_BASE_URL',

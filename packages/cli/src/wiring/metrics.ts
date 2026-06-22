@@ -92,9 +92,9 @@ export function setupMetrics(params: MetricsWiringDeps): MetricsWiringResult {
         host: process.env['METRICS_HOST'] ?? '127.0.0.1',
         sink: metricsSink,
         healthRegistry,
-      }) as unknown as MetricsServerHandle;
+      }) as never as MetricsServerHandle;
       logger.info(
-        `metrics endpoint listening on ${(metricsServerHandle as unknown as { url?: string | undefined }).url} (healthz on same port)`,
+        `metrics endpoint listening on ${(metricsServerHandle as never as { url?: string | undefined }).url} (healthz on same port)`,
       );
       process.on('exit', () => {
         void metricsServerHandle?.close().catch(() => {});

@@ -77,11 +77,11 @@ export function buildSettingsCommand(opts: SlashCommandContext): SlashCommand {
     const cb = opts.configStore.get().circuitBreaker;
     const breakerEnabled = cb?.enabled === true;
     const breakerTimeout = cb?.autoKillResetMs ?? 60_000;
-    const context = opts.configStore.get().context as unknown as Record<string, unknown> | undefined;
+    const context = opts.configStore.get().context as never as Record<string, unknown> | undefined;
     const contextMode = (context?.mode as string) ?? 'balanced';
     const contextStrategy = (context?.strategy as string) ?? 'hybrid';
     const contextAutoCompact = context?.autoCompact !== false; // default true
-    const features = opts.configStore.get().features as unknown as Record<string, unknown> | undefined;
+    const features = opts.configStore.get().features as never as Record<string, unknown> | undefined;
     const tokenSavingTier = (features?.tokenSavingMode as string) ?? 'off';
     const maxConcurrent = opts.configStore.get().maxConcurrent ?? 0;
     const modelRuntime = opts.configStore.get().modelRuntime as

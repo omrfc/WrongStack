@@ -27,7 +27,7 @@ describe('git.changes / git.diff ws-handlers', () => {
   it('git.changes surfaces an error and defaults files to []', () => {
     WS_HANDLERS['git.changes']?.({
       type: 'git.changes',
-      payload: { files: undefined as unknown as [], error: 'boom' },
+      payload: { files: undefined as never as [], error: 'boom' },
     });
     expect(useGitChangesStore.getState().files).toEqual([]);
     expect(useGitChangesStore.getState().error).toBe('boom');

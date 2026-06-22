@@ -54,7 +54,7 @@ describe.skipIf(!distReady)('index host (worker mode, built dist)', () => {
   it('indexes and searches a project entirely through the worker', async () => {
     api = (await import(
       /* @vite-ignore */ `file://${distEntry.replace(/\\/g, '/')}`
-    )) as unknown as DistIndexApi;
+    )) as never as DistIndexApi;
 
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wstack-worker-'));
     const indexDir = path.join(tmpDir, '.codebase-index');

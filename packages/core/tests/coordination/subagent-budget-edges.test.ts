@@ -73,7 +73,7 @@ describe('subagent budget edges (D3)', () => {
           });
           return { status: 'done', iterations: 1, finalText: 'unreachable' };
         },
-      } as unknown as Agent;
+      } as never as Agent;
       return { agent, events };
     };
     const runner = makeAgentSubagentRunner({ factory });
@@ -133,7 +133,7 @@ describe('subagent budget edges (D3)', () => {
           });
           return { status: 'done', iterations: 1, finalText: 'all good' };
         },
-      } as unknown as Agent;
+      } as never as Agent;
       return { agent, events };
     };
     const runner = makeAgentSubagentRunner({ factory });

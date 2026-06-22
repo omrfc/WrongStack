@@ -43,7 +43,7 @@ function fakeWorktrees() {
     get: (id: string) => handles.get(id),
     list: () => [...handles.values()],
   };
-  return { wm: wm as unknown as WorktreeManager, calls };
+  return { wm: wm as never as WorktreeManager, calls };
 }
 
 function phases(): PhaseTemplate[] {

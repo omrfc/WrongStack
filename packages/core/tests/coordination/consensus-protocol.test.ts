@@ -42,7 +42,7 @@ function createMockGraph(): KnowledgeGraph {
     getEdges: vi.fn(() => []),
     subscribe: vi.fn(() => () => {}),
     dispose: vi.fn(),
-  } as unknown as KnowledgeGraph;
+  } as never as KnowledgeGraph;
 }
 
 function createChangeNode(graph: KnowledgeGraph, id: string, overrides: Partial<ChangeNode> = {}): ChangeNode {
@@ -75,7 +75,7 @@ function createMockFleetBus(): FleetBus {
     subscribe: vi.fn(() => () => {}),
     unsubscribe: vi.fn(),
     dispose: vi.fn(),
-  } as unknown as FleetBus;
+  } as never as FleetBus;
 }
 
 // ── Default voters ───────────────────────────────────────────────────────────

@@ -49,7 +49,7 @@ function mkDeps(rig: ReturnType<typeof mkRig>) {
     cwd: '/tmp',
     projectRoot: '/tmp',
     userHome: '/tmp',
-  } as unknown as SubcommandDeps;
+  } as never as SubcommandDeps;
 }
 
 describe('update subcommand', () => {

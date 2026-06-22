@@ -11,7 +11,7 @@ import { _resetProcessRegistry, getProcessRegistry } from '../src/process-regist
 
 const fakeChild = (): ChildProcess => {
   const c = { killed: false, kill: vi.fn(() => { c.killed = true; return true; }) };
-  return c as unknown as ChildProcess;
+  return c as never as ChildProcess;
 };
 const makeProc = (pid: number) => ({
   pid,

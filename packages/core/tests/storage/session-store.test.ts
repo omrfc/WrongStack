@@ -258,7 +258,7 @@ describe('DefaultSessionStore', () => {
     // Force every appendFile after this point to fail. The first event still
     // hits the real disk (session_start) — we replace the handle's method
     // on the instance only.
-    const handle = (w as unknown as { handle: FileHandle }).handle;
+    const handle = (w as never as { handle: FileHandle }).handle;
     const stub = vi.spyOn(handle, 'appendFile').mockRejectedValue(new Error('ENOSPC'));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
@@ -267,7 +267,7 @@ describe('DefaultSessionStore', () => {
       }
       // Appends are buffered (FLUSH_SIZE 50 / inactivity timer) — force the
       // flush so the failure path runs inside the test instead of on a timer.
-      await (w as unknown as { flushBuffer: () => Promise<void> }).flushBuffer();
+      await (w as never as { flushBuffer: () => Promise<void> }).flushBuffer();
       // Despite 25 failed events, the throttle folds them into a single
       // warning (the 5-second window hasn't elapsed within the test).
       expect(warn).toHaveBeenCalledTimes(1);
@@ -282,12 +282,12 @@ describe('DefaultSessionStore', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       const w = await store.create({ id: 'flood2', model: 'm', provider: 'p' });
-      const handle = (w as unknown as { handle: FileHandle }).handle;
+      const handle = (w as never as { handle: FileHandle }).handle;
       const stub = vi.spyOn(handle, 'appendFile').mockRejectedValue(new Error('ENOSPC'));
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       try {
         const flush = () =>
-          (w as unknown as { flushBuffer: () => Promise<void> }).flushBuffer();
+          (w as never as { flushBuffer: () => Promise<void> }).flushBuffer();
         // First batch: one failing flush of 5 events → one warn that folds
         // the other 4 events into a "+4 suppressed" tail.
         for (let i = 0; i < 5; i++) {

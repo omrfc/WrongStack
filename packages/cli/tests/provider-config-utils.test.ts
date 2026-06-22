@@ -52,7 +52,7 @@ describe('normalizeKeys', () => {
   });
 
   it('returns empty list for empty apiKeys array', () => {
-    const cfg = { apiKeys: [] } as unknown as ProviderConfig;
+    const cfg = { apiKeys: [] } as never as ProviderConfig;
     expect(normalizeKeys(cfg)).toEqual([]);
   });
 

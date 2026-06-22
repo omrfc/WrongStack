@@ -50,7 +50,7 @@ function makeHandler(opts: {
 } = {}): { handler: ACPProtocolHandler; transport: FakeTransport } {
   const transport = fakeTransport();
   const handler = new ACPProtocolHandler({
-    transport: transport as unknown as AgentServerTransport,
+    transport: transport as never as AgentServerTransport,
     defaultCwd: opts.defaultCwd ?? '/test',
     runTurn: opts.runTurn ?? PASSON_RUN_TURN,
   });

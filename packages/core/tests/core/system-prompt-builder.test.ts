@@ -92,7 +92,7 @@ describe('DefaultSystemPromptBuilder', () => {
       list: async () => [],
       find: async () => undefined,
       load: async () => undefined,
-    } as unknown as SkillLoader;
+    } as never as SkillLoader;
     const b = new DefaultSystemPromptBuilder({ memoryStore: memory, skillLoader: skills });
     const blocks = await b.build({ cwd: tmp, projectRoot: tmp, tools: [] });
     expect(blocks).toHaveLength(4);

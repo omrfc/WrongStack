@@ -60,7 +60,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-const ctx = () => ({ cwd: dir, projectRoot: dir, tools: [] }) as unknown as Context;
+const ctx = () => ({ cwd: dir, projectRoot: dir, tools: [] }) as never as Context;
 const opts = () => ({ signal: new AbortController().signal });
 
 describe('replaceTool ripgrep glob path (faked rg)', () => {

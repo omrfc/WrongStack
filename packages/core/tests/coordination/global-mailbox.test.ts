@@ -12,7 +12,7 @@ let events: { emitCustom: ReturnType<typeof vi.fn> };
 beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), 'global-mailbox-'));
   events = { emitCustom: vi.fn() };
-  mb = new GlobalMailbox(dir, events as unknown as EventBus);
+  mb = new GlobalMailbox(dir, events as never as EventBus);
 });
 afterEach(async () => {
   await fs.rm(dir, { recursive: true, force: true });

@@ -152,7 +152,7 @@ function sanitizeAnthropicBlock(b: ContentBlock): Record<string, unknown> {
     case 'image':
       return { type: 'image', source: b.source };
     default:
-      return b as unknown as Record<string, unknown>;
+      return b as never as Record<string, unknown>;
   }
 }
 

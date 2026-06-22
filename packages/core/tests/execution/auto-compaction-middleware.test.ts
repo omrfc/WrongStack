@@ -23,7 +23,7 @@ function mockContext(tokenEstimate: number): Context {
     tools: [],
     meta: {},
     clearFileTracking: () => {},
-  } as unknown as Context;
+  } as never as Context;
 }
 
 function mockCompactor(): Compactor & { compactCalls: { ctx: Context; aggressive: boolean }[] } {

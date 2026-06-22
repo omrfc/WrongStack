@@ -22,7 +22,7 @@ function mockAgent(overrides: Partial<Agent> = {}): Agent {
     pipelines: null as any,
     ctx: null as any,
     ...overrides,
-  } as unknown as Agent;
+  } as never as Agent;
 }
 
 function mockContext(signal?: AbortSignal): Context {

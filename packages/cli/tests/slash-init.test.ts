@@ -32,7 +32,7 @@ function makeRegistry(renderer: FakeRenderer) {
     toolRegistry: { list: () => [] },
     renderer,
     tokenCounter: { total: () => ({ input: 0, output: 0 }) },
-  } as unknown as SlashCommandContext);
+  } as never as SlashCommandContext);
   for (const c of cmds) reg.register(c);
   return reg;
 }
@@ -47,7 +47,7 @@ describe('/init slash command', () => {
   });
 
   function mkCtx(): Context {
-    return { projectRoot: tmp } as unknown as Context;
+    return { projectRoot: tmp } as never as Context;
   }
 
   it('writes .wrongstack/AGENTS.md when missing', async () => {

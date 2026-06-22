@@ -21,7 +21,7 @@ function makeCtx(config: Record<string, unknown> = {}): {
   const ctx = {
     configStore: store,
     paths: { globalConfig, inProjectConfig },
-  } as unknown as SlashCommandContext;
+  } as never as SlashCommandContext;
   return { ctx, globalConfig, inProjectConfig };
 }
 

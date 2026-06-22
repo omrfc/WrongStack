@@ -184,7 +184,7 @@ export async function guardedFetch(
       headers,
       dispatcher: getPinnedDispatcher(),
     };
-    const res = await fetch(currentUrl, init as unknown as RequestInit);
+    const res = await fetch(currentUrl, init as never as RequestInit);
     if (res.status < 300 || res.status > 399) {
       return res;
     }

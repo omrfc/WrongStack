@@ -36,7 +36,7 @@ function fakeDeps() {
     projectRoot: '/tmp',
     userHome: '/tmp',
     flags: {},
-  } as unknown as Parameters<typeof authCmd>[1];
+  } as never as Parameters<typeof authCmd>[1];
 }
 
 beforeEach(() => {

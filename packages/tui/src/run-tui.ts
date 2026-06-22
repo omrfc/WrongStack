@@ -661,7 +661,7 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
     if (!opts.projectRoot) return null;
     try {
       const projectDir = resolveProjectDir(opts.projectRoot, wstackGlobalRoot());
-      const hqPublisher = createHqPublisherFromEnv({ clientKind: 'tui', projectRoot: opts.projectRoot, projectName: path.basename(opts.projectRoot), appConfig: opts.appConfig } as unknown as Parameters<typeof createHqPublisherFromEnv>[0]);
+      const hqPublisher = createHqPublisherFromEnv({ clientKind: 'tui', projectRoot: opts.projectRoot, projectName: path.basename(opts.projectRoot), appConfig: opts.appConfig } as never as Parameters<typeof createHqPublisherFromEnv>[0]);
       hqPublisher?.connect();
       const mailbox = new GlobalMailbox(projectDir, opts.events, hqPublisher);
       // Unique per-process: tui@<uuid>

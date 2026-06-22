@@ -19,7 +19,7 @@ function mockFetch(body: ReadableStream<Uint8Array>): typeof fetch {
     new Response(body, {
       status: 200,
       headers: { 'content-type': 'text/event-stream' },
-    })) as unknown as typeof fetch;
+    })) as never as typeof fetch;
 }
 
 describe('AnthropicProvider.stream', () => {

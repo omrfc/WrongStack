@@ -33,7 +33,7 @@ describe('file handlers integration', () => {
       send(data: string) {
         this.sent.push(JSON.parse(data));
       },
-    } as unknown as WebSocket & { sent: unknown[] };
+    } as never as WebSocket & { sent: unknown[] };
     return ws;
   }
 

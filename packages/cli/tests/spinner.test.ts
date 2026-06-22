@@ -23,7 +23,7 @@ describe('Spinner', () => {
 
   beforeEach(() => {
     stream = new MockStream();
-    spinner = new Spinner(stream as unknown as NodeJS.WriteStream, { enabled: true });
+    spinner = new Spinner(stream as never as NodeJS.WriteStream, { enabled: true });
   });
 
   afterEach(() => {
@@ -86,7 +86,7 @@ describe('Spinner', () => {
 
   describe('disabled state', () => {
     it('is a no-op when enabled is false', () => {
-      const disabledSpinner = new Spinner(stream as unknown as NodeJS.WriteStream, {
+      const disabledSpinner = new Spinner(stream as never as NodeJS.WriteStream, {
         enabled: false,
       });
       disabledSpinner.start('Thinking');
@@ -100,7 +100,7 @@ describe('Spinner', () => {
 describe('renderProgress (via Spinner)', () => {
   it('renders 0% as all empty bars', () => {
     const spinner = new Spinner(
-      { write: vi.fn() } as unknown as NodeJS.WriteStream,
+      { write: vi.fn() } as never as NodeJS.WriteStream,
       { enabled: true },
     );
     // Trigger a render with 0% context

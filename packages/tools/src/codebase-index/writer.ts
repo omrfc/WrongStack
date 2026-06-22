@@ -564,15 +564,16 @@ export class IndexStore {
       return { results: candidates.slice(0, limit), total: candidates.length };
     }
 
+    const candidateById = new Map(candidates.map((c) => [c.id, c]));
     const bm25 = buildBm25Index(
       candidates.map((c) => ({ id: c.id, text: buildIndexableText(c.name, c.signature, c.docComment) })),
     );
-    const scored = bm25.score(query, (id) => candidates.some((c) => c.id === id));
+    const scored = bm25.score(query, (id) => candidateById.has(id));
     scored.sort((a, b) => b.score - a.score);
     const qTokens = tokenise(query);
 
     const results = scored.slice(0, limit).map(({ id, score }) => {
-      const c = expectDefined(candidates.find((cand) => cand.id === id));
+      const c = expectDefined(candidateById.get(id));
       return { ...c, score, snippet: bm25.extractSnippet(id, qTokens) };
     });
     return { results, total: candidates.length };

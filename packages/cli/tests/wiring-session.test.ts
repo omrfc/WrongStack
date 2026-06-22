@@ -36,7 +36,7 @@ function makeSessionWriter(id = 'sess-new'): SessionWriter {
     id,
     append: vi.fn(),
     finalize: vi.fn(),
-  } as unknown as SessionWriter;
+  } as never as SessionWriter;
 }
 
 function makeSessionStore(overrides: Partial<SessionStore> = {}): SessionStore {
@@ -47,7 +47,7 @@ function makeSessionStore(overrides: Partial<SessionStore> = {}): SessionStore {
     list: vi.fn().mockResolvedValue([]),
     prune: vi.fn().mockResolvedValue(0),
     ...overrides,
-  } as unknown as SessionStore;
+  } as never as SessionStore;
 }
 
 function makeRenderer() {

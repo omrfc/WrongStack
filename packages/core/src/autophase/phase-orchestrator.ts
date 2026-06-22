@@ -854,7 +854,7 @@ export class PhaseOrchestrator {
 
   private createNoopEventBus(): EventBus {
     // Intentional test mock — safe because this is only called from test/benchmark code,
-    // never with real event handling. Using `as unknown as EventBus` here is acceptable
+    // never with real event handling. Using `as never as EventBus` here is acceptable
     // since the return value is explicitly typed as EventBus and callers only use the
     // public API surface (which is fully implemented).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -870,7 +870,7 @@ export class PhaseOrchestrator {
       offAny: () => {},
       emitAsync: async () => [],
       waitFor: async () => {},
-    } as unknown as EventBus;
+    } as never as EventBus;
   }
 
   private async waitWhilePaused(): Promise<void> {

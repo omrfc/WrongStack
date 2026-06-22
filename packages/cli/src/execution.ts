@@ -741,7 +741,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
             return predictNextTasks(
               { ...input, todos: context.todos },
               {
-                provider: context.provider as unknown as PredictLLMProvider,
+                provider: context.provider as never as PredictLLMProvider,
                 model: context.model,
               },
             );
@@ -982,7 +982,7 @@ export async function execute(deps: ExecutionDeps): Promise<number> {
           tokenSavingMode: normalizeTokenSavingTier(config.features.tokenSavingMode) !== 'off',
           toolCount: agent.tools.list().length,
           onPanelOpen,
-        } as unknown as import('@wrongstack/tui').RunTuiOptions);
+        } as never as import('@wrongstack/tui').RunTuiOptions);
 
         // After TUI exits with PROJECT_SWITCH_EXIT_CODE, spawn wstack in the new project.
         // This replaces the old behavior of spawning mid-session (which left the TUI

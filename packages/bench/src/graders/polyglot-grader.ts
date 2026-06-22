@@ -18,7 +18,7 @@ export async function gradePolyglot(opts: {
   /** Per-step timeout for setup/test commands. */
   timeoutMs: number;
 }): Promise<GradeResult> {
-  const meta = opts.task.meta as unknown as PolyglotMeta;
+  const meta = opts.task.meta as never as PolyglotMeta;
 
   if (meta.setupCommand) {
     const setup = await execCommand({

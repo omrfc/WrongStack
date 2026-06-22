@@ -45,7 +45,7 @@ function createMockGraph(): KnowledgeGraph {
     getOpenGoals: vi.fn(() => Array.from(nodes.values()).filter(g => g.status === 'pending' || g.status === 'in_progress')),
     subscribe: vi.fn(() => () => {}),
     dispose: vi.fn(),
-  } as unknown as KnowledgeGraph;
+  } as never as KnowledgeGraph;
 }
 
 function createMockFleetBus(): FleetBus {
@@ -55,7 +55,7 @@ function createMockFleetBus(): FleetBus {
     subscribe: vi.fn(() => () => {}),
     unsubscribe: vi.fn(),
     dispose: vi.fn(),
-  } as unknown as FleetBus;
+  } as never as FleetBus;
 }
 
 function createMockMailbox(): Mailbox {
@@ -63,7 +63,7 @@ function createMockMailbox(): Mailbox {
     send: vi.fn(),
     query: vi.fn(),
     broadcast: vi.fn(),
-  } as unknown as Mailbox;
+  } as never as Mailbox;
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

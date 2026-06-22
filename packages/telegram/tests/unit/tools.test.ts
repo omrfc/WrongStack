@@ -30,7 +30,7 @@ function makeBot() {
 }
 
 function pushMsg(bot: TelegramBot, msg: Partial<TelegramIncomingMessage>) {
-  const buf = (bot as unknown as { buffer: TelegramIncomingMessage[] }).buffer;
+  const buf = (bot as never as { buffer: TelegramIncomingMessage[] }).buffer;
   buf.push({
     messageId: msg.messageId ?? 1,
     chatId: msg.chatId ?? 123,

@@ -32,10 +32,10 @@ function makeRig() {
     toolRegistry,
     compactor: new HybridCompactor({ preserveK: 5 }),
     tokenCounter: new DefaultTokenCounter(),
-    renderer: renderer as unknown as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
+    renderer: renderer as never as Parameters<typeof buildBuiltinSlashCommands>[0]['renderer'],
     cwd: '/tmp',
     projectRoot: '/proj',
-  } as unknown as SlashCommandContext);
+  } as never as SlashCommandContext);
   for (const c of cmds) registry.register(c);
   return { registry, renderer, toolRegistry };
 }
@@ -49,7 +49,7 @@ const fakeCtx = {
   model: 'test-model',
   cwd: '/tmp',
   projectRoot: '/proj',
-} as unknown as Context;
+} as never as Context;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // classifyError unit tests

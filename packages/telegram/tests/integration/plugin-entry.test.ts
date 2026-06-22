@@ -91,7 +91,7 @@ function makeApi(): PluginAPI {
       get: vi.fn(),
       list: vi.fn(),
       registerSystemPromptContributor: vi.fn().mockReturnValue(vi.fn()),
-    } as unknown as PluginAPI['extensions'],
+    } as never as PluginAPI['extensions'],
     registerSystemPromptContributor: vi.fn().mockReturnValue(vi.fn()),
     onEvent: vi.fn().mockReturnValue(vi.fn()),
     onPattern: vi.fn().mockReturnValue(vi.fn()),
@@ -113,7 +113,7 @@ function makeApi(): PluginAPI {
       },
     },
     log,
-  } as unknown as PluginAPI;
+  } as never as PluginAPI;
 }
 
 // Mock fetch globally so TelegramBot constructor + start don't hit the network

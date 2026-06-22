@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import * as path from 'node:path';
@@ -49,6 +50,8 @@ async function checkConfigOwnership(
 // Guards against bugs (glob patterns, typos, race conditions)
 // accidentally deleting critical user data.
 const PROTECTED_BASENAMES = new Set(['config.json', '.key', 'index.json']);
+const MAX_CONFIG_BACKUPS = 10;
+export const MAX_CONFIG_HISTORY_ENTRIES = 50;
 
 // Top-level directories that should never be deleted even if a prune
 // pattern accidentally widens. These are absolute directory names
@@ -189,7 +192,7 @@ function backupLastPath(homeFn: HomeDirFn = defaultHomeDir): string {
 }
 
 function entryId(ts: string): string {
-  return ts.replace(/[:.]/g, '-').slice(0, 19);
+  return `${ts.replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}`;
 }
 
 async function ensureHistoryDir(homeFn: HomeDirFn = defaultHomeDir): Promise<void> {
@@ -227,6 +230,37 @@ async function writeIndex(idx: HistoryIndex, homeFn: HomeDirFn = defaultHomeDir)
       path: historyIndexPath(homeFn),
       cause: err,
     });
+  }
+}
+
+async function pruneHistoryEntries(idx: HistoryIndex, homeFn: HomeDirFn = defaultHomeDir): Promise<void> {
+  const removed = idx.entries.splice(MAX_CONFIG_HISTORY_ENTRIES);
+  const keep = new Set(idx.entries.map((entry) => `${entry.id}.json`));
+  const dir = historyDir(homeFn);
+
+  for (const entry of removed) {
+    try {
+      await fs.unlink(path.join(dir, `${entry.id}.json`));
+    } catch {
+      // best-effort: stale index entries should not block config writes
+    }
+  }
+
+  try {
+    const files = await fs.readdir(dir);
+    await Promise.all(
+      files
+        .filter((file) => file.endsWith('.json') && !keep.has(file))
+        .map(async (file) => {
+          try {
+            await fs.unlink(path.join(dir, file));
+          } catch {
+            // best-effort: orphan cleanup should not block config writes
+          }
+        }),
+    );
+  } catch {
+    // best-effort: missing history dir or readdir failure should not block writes
   }
 }
 
@@ -280,7 +314,7 @@ export async function backupCurrent(homeFn: HomeDirFn = defaultHomeDir): Promise
       .filter((f) => f.startsWith('config.json.') && f.endsWith('.bak'))
       .sort()
       .reverse();
-    for (const f of baks.slice(10)) {
+    for (const f of baks.slice(MAX_CONFIG_BACKUPS)) {
       await safeDelete(path.join(dir, f));
     }
   } catch (err) {
@@ -329,6 +363,7 @@ export async function appendHistory(
 
   const idx = await readIndex(homeFn);
   idx.entries.unshift({ id, timestamp, description });
+  await pruneHistoryEntries(idx, homeFn);
   await writeIndex(idx, homeFn);
 
   return id;

@@ -38,7 +38,7 @@ function task(meta: Partial<PolyglotMeta>): BenchTask {
     suite: 'polyglot',
     prompt: 'fixture',
     templateDir: workdir,
-    meta: full as unknown as Record<string, unknown>,
+    meta: full as never as Record<string, unknown>,
   };
 }
 

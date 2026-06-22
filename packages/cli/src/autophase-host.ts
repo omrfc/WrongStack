@@ -513,11 +513,11 @@ export function createAutoPhaseHost(deps: AutoPhaseHostDeps): AutoPhaseHostHooks
       });
 
       // Re-persist on terminal graph events.
-      const onUntyped = deps.events.on as unknown as (
+      const onUntyped = deps.events.on as never as (
         event: string,
         handler: (payload: unknown) => void,
       ) => void;
-      const offUntyped = deps.events.off as unknown as (
+      const offUntyped = deps.events.off as never as (
         event: string,
         handler: (payload: unknown) => void,
       ) => void;

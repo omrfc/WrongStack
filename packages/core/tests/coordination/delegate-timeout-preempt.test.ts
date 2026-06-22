@@ -52,7 +52,7 @@ function makeTimedAgent(opts: {
       }
       return { status: 'done', iterations: i || 1, finalText: 'completed' };
     },
-  } as unknown as Agent;
+  } as never as Agent;
 }
 
 describe('delegate timeout pre-emption (proactive extend)', () => {

@@ -213,7 +213,7 @@ describe('SessionUpdate discriminated union', () => {
     // function — calling it would throw at runtime. The assignment below
     // typechecks only if the function is typed as `(x: never) => never`.
     type Params = Parameters<typeof assertNeverSessionUpdate>;
-    const _params: [never] = null as unknown as Params;
+    const _params: [never] = null as never as Params;
     void _params;
   });
 });

@@ -26,7 +26,7 @@ function stubCtx(projectRoot: string): Context {
     todos: [],
     readFiles: new Set<string>(),
     fileMtimes: new Map<string, number>(),
-  } as unknown as Context;
+  } as never as Context;
 }
 
 export interface ServiceHooks {

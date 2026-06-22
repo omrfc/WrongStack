@@ -21,7 +21,7 @@ import {
 import type { Context } from '../../src/core/context.js';
 import type { Provider, Request } from '../../src/types/provider.js';
 
-const fakeCtx = { messages: [] } as unknown as Context;
+const fakeCtx = { messages: [] } as never as Context;
 
 const noopLogger = {
   level: 'info' as const,

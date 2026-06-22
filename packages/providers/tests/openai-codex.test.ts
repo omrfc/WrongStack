@@ -39,7 +39,7 @@ function capturingFetch(body: string, captured: Captured, status = 200): typeof 
       status,
       headers: { 'content-type': 'text/event-stream' },
     });
-  }) as unknown as typeof fetch;
+  }) as never as typeof fetch;
 }
 
 const baseReq: Request = {
@@ -143,7 +143,7 @@ describe('OpenAICodexProvider stream parsing', () => {
     const p = new OpenAICodexProvider({
       credentials: { accessToken: fakeJwt('a'), expiresAt: Date.now() + 3_600_000 },
       fetchImpl: (async () =>
-        new Response(sseBody(sse), { status: 200 })) as unknown as typeof fetch,
+        new Response(sseBody(sse), { status: 200 })) as never as typeof fetch,
     });
     const res = await p.complete(baseReq, { signal: new AbortController().signal });
 
@@ -202,7 +202,7 @@ describe('OpenAICodexProvider token refresh', () => {
       calls++;
       if (calls === 1) return new Response('unauthorized', { status: 401 });
       return new Response(sseBody(COMPLETED_SSE), { status: 200 });
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
 
     const p = new OpenAICodexProvider({
       credentials: {

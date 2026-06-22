@@ -285,7 +285,7 @@ describe('HQ Phase 4 — token subcommand --client flag', () => {
       cwd: process.cwd(),
       renderer: makeStubRenderer(),
       ...overrides,
-    } as unknown as SubcommandDeps;
+    } as never as SubcommandDeps;
   }
 
   it('`wstack hq token create --client` writes to clientTokens', async () => {
@@ -300,7 +300,7 @@ describe('HQ Phase 4 — token subcommand --client flag', () => {
     // browserTokens should NOT be populated
     expect(auth.browserTokens).toBeUndefined();
 
-    const out = (deps.renderer as unknown as { captured: CapturedRenderer }).captured.out.join('');
+    const out = (deps.renderer as never as { captured: CapturedRenderer }).captured.out.join('');
     expect(out).toContain('Created client token');
     expect(out).toContain('/ws/client');
   });
@@ -325,7 +325,7 @@ describe('HQ Phase 4 — token subcommand --client flag', () => {
     const code = await hqCmd(['token', 'list', '--client'], deps2);
     expect(code).toBe(0);
 
-    const out = (deps2.renderer as unknown as { captured: CapturedRenderer }).captured.out.join('');
+    const out = (deps2.renderer as never as { captured: CapturedRenderer }).captured.out.join('');
     expect(out).toContain('Client tokens (1)');
     expect(out).toContain('ci-runner');
   });
@@ -339,7 +339,7 @@ describe('HQ Phase 4 — token subcommand --client flag', () => {
     const code = await hqCmd(['token', 'list'], deps2);
     expect(code).toBe(0);
 
-    const out = (deps2.renderer as unknown as { captured: CapturedRenderer }).captured.out.join('');
+    const out = (deps2.renderer as never as { captured: CapturedRenderer }).captured.out.join('');
     expect(out).toContain('No browser tokens');
     expect(out).not.toContain('ci-runner');
   });
@@ -360,7 +360,7 @@ describe('HQ Phase 4 — token subcommand --client flag', () => {
     const after = await readHqAuthFile(dataDir);
     expect(after.clientTokens ?? []).toHaveLength(0);
 
-    const out = (deps2.renderer as unknown as { captured: CapturedRenderer }).captured.out.join('');
+    const out = (deps2.renderer as never as { captured: CapturedRenderer }).captured.out.join('');
     expect(out).toContain('Revoked client token');
   });
 
@@ -390,7 +390,7 @@ describe('HQ Phase 4 — token subcommand --client flag', () => {
     const code = await hqCmd(['help'], deps);
     expect(code).toBe(0);
 
-    const out = (deps.renderer as unknown as { captured: CapturedRenderer }).captured.out.join('');
+    const out = (deps.renderer as never as { captured: CapturedRenderer }).captured.out.join('');
     expect(out).toContain('--client');
     expect(out).toContain('create --client');
     expect(out).toContain('list --client');

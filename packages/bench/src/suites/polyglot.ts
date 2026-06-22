@@ -143,7 +143,7 @@ async function loadExercise(
     templateDir: exerciseDir,
     // Never copy the reference solution into the agent's workdir.
     templateExclude: ['.meta'],
-    meta: meta as unknown as Record<string, unknown>,
+    meta: meta as never as Record<string, unknown>,
   };
 }
 

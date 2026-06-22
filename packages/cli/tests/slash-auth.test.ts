@@ -6,7 +6,7 @@ function makeContext(overrides: Partial<SlashCommandContext> = {}): SlashCommand
   return {
     registry: {} as SlashCommandContext['registry'],
     toolRegistry: {} as SlashCommandContext['toolRegistry'],
-    tokenCounter: { count: () => 0 } as unknown as SlashCommandContext['tokenCounter'],
+    tokenCounter: { count: () => 0 } as never as SlashCommandContext['tokenCounter'],
     renderer: {} as SlashCommandContext['renderer'],
     events: {} as SlashCommandContext['events'],
     cwd: '/tmp/test',

@@ -65,7 +65,7 @@ function makeInner(responses: Response[]): ProviderRunner & { calls: number[] } 
       calls.push(idx);
       return responses[idx]!;
     },
-  } as unknown as ProviderRunner & { calls: number[] };
+  } as never as ProviderRunner & { calls: number[] };
 }
 
 function makeRunOpts(req: Request): RunProviderOptions {

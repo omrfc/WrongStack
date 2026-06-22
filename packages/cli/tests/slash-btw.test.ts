@@ -14,7 +14,7 @@ describe('buildBtwCommand', () => {
   });
 
   it('stashes a note on ctx.meta and confirms', async () => {
-    const ctx = { meta: {} } as unknown as Context;
+    const ctx = { meta: {} } as never as Context;
     const res = await build(ctx).run('check the auth module', {} as Context);
     expect(res?.message).toContain('check the auth module');
     expect(res?.message).toMatch(/1 pending/);
@@ -22,7 +22,7 @@ describe('buildBtwCommand', () => {
   });
 
   it('accumulates multiple notes', async () => {
-    const ctx = { meta: {} } as unknown as Context;
+    const ctx = { meta: {} } as never as Context;
     await build(ctx).run('first', {} as Context);
     const res = await build(ctx).run('second', {} as Context);
     expect(res?.message).toMatch(/2 pending/);
@@ -30,7 +30,7 @@ describe('buildBtwCommand', () => {
   });
 
   it('with no args reports pending count', async () => {
-    const ctx = { meta: {} } as unknown as Context;
+    const ctx = { meta: {} } as never as Context;
     const empty = await build(ctx).run('', {} as Context);
     expect(empty?.message).toMatch(/No notes pending/i);
 
@@ -40,7 +40,7 @@ describe('buildBtwCommand', () => {
   });
 
   it('ignores a blank note', async () => {
-    const ctx = { meta: {} } as unknown as Context;
+    const ctx = { meta: {} } as never as Context;
     const res = await build(ctx).run('    ', {} as Context);
     expect(res?.message).toMatch(/No notes pending/i);
     expect((ctx.meta as Record<string, unknown>)._btwNotes).toBeUndefined();

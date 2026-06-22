@@ -54,10 +54,10 @@ function fakeTransport(): FakeTransport {
 function makeHandlerWithFactory(agentFor: (sessionId: string) => FakeAgent) {
   const transport = fakeTransport();
   const turn = makeACPServerAgentTurn({
-    agentFor: async () => agentFor('sess') as unknown as Agent,
+    agentFor: async () => agentFor('sess') as never as Agent,
   });
   const handler = new ACPProtocolHandler({
-    transport: transport as unknown as AgentServerTransport,
+    transport: transport as never as AgentServerTransport,
     defaultCwd: '/test',
     runTurn: turn,
   });
@@ -151,11 +151,11 @@ describe('makeACPServerAgentTurn', () => {
     const turn = makeACPServerAgentTurn({
       agentFor: async () => {
         createCount.value++;
-        return { run: sharedRun, teardown: sharedTeardown } as unknown as Agent;
+        return { run: sharedRun, teardown: sharedTeardown } as never as Agent;
       },
     });
     const handler = new ACPProtocolHandler({
-      transport: transport as unknown as AgentServerTransport,
+      transport: transport as never as AgentServerTransport,
       defaultCwd: '/test',
       runTurn: turn,
     });

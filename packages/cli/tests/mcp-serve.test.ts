@@ -18,7 +18,7 @@ const allowAll: PermissionPolicy = {
   denyOnce: () => {},
   allowOnce: () => {},
   reload: async () => {},
-} as unknown as PermissionPolicy;
+} as never as PermissionPolicy;
 
 describe('selectExposedTools', () => {
   it('safe default (AutoApprove) exposes read-only tools but withholds bash/write/edit', async () => {

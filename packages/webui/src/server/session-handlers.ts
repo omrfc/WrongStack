@@ -200,7 +200,7 @@ export function createSessionHandlers(ctx: SessionHandlersContext): SessionRoute
           sendResult(ws, false, `Unknown context mode "${id}"`);
           return;
         }
-        policy = custom as unknown as typeof policy;
+        policy = custom as never as typeof policy;
       }
       ctx.context.meta['contextWindowMode'] = policy.id;
       ctx.context.meta['contextWindowPolicy'] = policy;

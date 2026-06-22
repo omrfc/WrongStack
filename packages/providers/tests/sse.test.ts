@@ -112,7 +112,7 @@ describe('aggregateStream', () => {
       { type: 'tool_use_start', id: 'u1', name: 'echo' },
       { type: 'tool_use_input_delta', id: 'u1', partial: '{"text":' },
       { type: 'tool_use_input_delta', id: 'u1', partial: '"hi"}' },
-      { type: 'tool_use_stop', id: 'u1', input: undefined as unknown as unknown },
+      { type: 'tool_use_stop', id: 'u1', input: undefined as unknown },
       { type: 'message_stop', stopReason: 'tool_use', usage: { input: 5, output: 2 } },
     ];
     const res = await aggregateStream(arr(events));

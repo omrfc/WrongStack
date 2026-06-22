@@ -10,7 +10,7 @@ function mkTool(partial: Partial<Tool> & { name: string }): Tool {
     permission: 'auto',
     execute: async () => 'ok',
     ...partial,
-  } as unknown as Tool;
+  } as never as Tool;
 }
 
 describe('ACPToolsRegistry', () => {
@@ -137,7 +137,7 @@ describe('ACPToolsRegistry', () => {
 
     it('non-object inputSchema converts to an empty schema', () => {
       const reg = new ACPToolsRegistry();
-      reg.register([mkTool({ name: 'weird', inputSchema: 'not-an-object' as unknown as Tool['inputSchema'] })]);
+      reg.register([mkTool({ name: 'weird', inputSchema: 'not-an-object' as never as Tool['inputSchema'] })]);
       expect(reg.buildToolList().tools[0]!.inputSchema).toEqual({});
     });
   });
@@ -174,7 +174,7 @@ describe('ACPToolsRegistry', () => {
 
     it('stringifies a primitive (number) result', async () => {
       const reg = new ACPToolsRegistry();
-      reg.register([mkTool({ name: 'num', execute: async () => 42 as unknown as string })]);
+      reg.register([mkTool({ name: 'num', execute: async () => 42 as never as string })]);
       expect((await reg.execute('num', {}, {}, ABORT))?.content[0]).toEqual({ type: 'text', text: '42' });
     });
 

@@ -213,7 +213,7 @@ describe('tool-format conversions', () => {
     const t: Tool = {
       name: 'noop',
       description: '',
-      inputSchema: undefined as unknown as Record<string, unknown>,
+      inputSchema: undefined as never as Record<string, unknown>,
       permission: 'auto',
       mutating: false,
       async execute() {

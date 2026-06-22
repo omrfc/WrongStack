@@ -21,7 +21,7 @@ function makeAgent(runImpl: (input: unknown) => Promise<RunResult>, todos: unkno
     events: new EventBus(),
     pipelines: null as never,
     ctx: { todos } as never,
-  } as unknown as Agent;
+  } as never as Agent;
 }
 
 let tmp: string;
@@ -51,12 +51,12 @@ describe('EternalAutonomyEngine.run() loop', () => {
     spy.mockRejectedValueOnce(new Error('iteration boom')); // → catch: onError + appendFailure
     spy.mockResolvedValueOnce(true); // → iterationOk resets consecutiveFailures
     spy.mockImplementationOnce(async () => {
-      (engine as unknown as { stopRequested: boolean }).stopRequested = true;
+      (engine as never as { stopRequested: boolean }).stopRequested = true;
       return false;
     });
     await engine.run();
     expect(onError).toHaveBeenCalledWith(expect.any(Error), 1);
-    expect((engine as unknown as { consecutiveFailures: number }).consecutiveFailures).toBe(0);
+    expect((engine as never as { consecutiveFailures: number }).consecutiveFailures).toBe(0);
     expect(engine.currentState).toBe('stopped');
     const goal = await loadGoal(goalPath);
     expect(goal?.journal.some((e) => e.status === 'failure')).toBe(true);
@@ -69,7 +69,7 @@ describe('EternalAutonomyEngine — agent.run throwing', () => {
     const engine = new EternalAutonomyEngine({ agent, projectRoot, goalPath, cycleGapMs: 0 });
     const ok = await engine.runOneIteration();
     expect(ok).toBe(false);
-    expect((engine as unknown as { consecutiveFailures: number }).consecutiveFailures).toBe(1);
+    expect((engine as never as { consecutiveFailures: number }).consecutiveFailures).toBe(1);
   });
 
   it('classifies a thrown AbortError as an abort', async () => {
@@ -92,19 +92,19 @@ describe('EternalAutonomyEngine — agent.run throwing', () => {
     const ok = await engine.runOneIteration();
     expect(ok).toBe(false);
     // base=0 → computeTransientBackoffMs returns 0 → no backoff sleep, just retry counter
-    expect((engine as unknown as { consecutiveTransientRetries: number }).consecutiveTransientRetries).toBe(1);
+    expect((engine as never as { consecutiveTransientRetries: number }).consecutiveTransientRetries).toBe(1);
   });
 
   it('returns false without counting a failure when aborted after stop()', async () => {
     let engineRef: EternalAutonomyEngine;
     const agent = makeAgent(async () => {
-      (engineRef as unknown as { stopRequested: boolean }).stopRequested = true;
+      (engineRef as never as { stopRequested: boolean }).stopRequested = true;
       return { status: 'aborted', iterations: 1 };
     }, [todo('x')]);
     engineRef = new EternalAutonomyEngine({ agent, projectRoot, goalPath, cycleGapMs: 0 });
     const ok = await engineRef.runOneIteration();
     expect(ok).toBe(false);
-    expect((engineRef as unknown as { consecutiveFailures: number }).consecutiveFailures).toBe(0);
+    expect((engineRef as never as { consecutiveFailures: number }).consecutiveFailures).toBe(0);
   });
 });
 
@@ -115,7 +115,7 @@ describe('EternalAutonomyEngine — brainstorm task variations', () => {
     let engineRef: EternalAutonomyEngine;
     const agent = makeAgent(async () => {
       const r = await brainstormImpl();
-      (engineRef as unknown as { stopRequested: boolean }).stopRequested = true;
+      (engineRef as never as { stopRequested: boolean }).stopRequested = true;
       return r;
     }, []);
     engineRef = new EternalAutonomyEngine({ agent, projectRoot, goalPath, cycleGapMs: 0, gitStatusReader: async () => '' });
@@ -150,7 +150,7 @@ describe('EternalAutonomyEngine — brainstorm task variations', () => {
     // would sleep; stop it pre-emptively so the test stays fast.
     let engineRef: EternalAutonomyEngine;
     const agent = makeAgent(async () => {
-      (engineRef as unknown as { stopRequested: boolean }).stopRequested = true;
+      (engineRef as never as { stopRequested: boolean }).stopRequested = true;
       throw new Error('brainstorm down');
     }, []);
     engineRef = new EternalAutonomyEngine({ agent, projectRoot, goalPath, cycleGapMs: 0, gitStatusReader: async () => '' });
@@ -210,7 +210,7 @@ describe('EternalAutonomyEngine — terminal markers + progress', () => {
     const engine = new EternalAutonomyEngine({ agent, projectRoot, goalPath, cycleGapMs: 0 });
     const ok = await engine.runOneIteration();
     expect(ok).toBe(true);
-    expect((engine as unknown as { stopRequested: boolean }).stopRequested).toBe(true);
+    expect((engine as never as { stopRequested: boolean }).stopRequested).toBe(true);
   });
 });
 
@@ -221,11 +221,11 @@ describe('EternalAutonomyEngine — failure classification', () => {
       [todo('x')],
     );
     const engine = new EternalAutonomyEngine({ agent, projectRoot, goalPath, cycleGapMs: 0 });
-    const backoff = vi.spyOn(engine as unknown as { sleepInterruptible: (ms: number) => Promise<void> }, 'sleepInterruptible').mockResolvedValue();
+    const backoff = vi.spyOn(engine as never as { sleepInterruptible: (ms: number) => Promise<void> }, 'sleepInterruptible').mockResolvedValue();
     const ok = await engine.runOneIteration();
     expect(ok).toBe(false);
     expect(backoff).toHaveBeenCalled();
-    expect((engine as unknown as { consecutiveTransientRetries: number }).consecutiveTransientRetries).toBe(1);
+    expect((engine as never as { consecutiveTransientRetries: number }).consecutiveTransientRetries).toBe(1);
   });
 
   it('treats max_iterations as a non-transient failure', async () => {
@@ -233,7 +233,7 @@ describe('EternalAutonomyEngine — failure classification', () => {
     const engine = new EternalAutonomyEngine({ agent, projectRoot, goalPath, cycleGapMs: 0 });
     const ok = await engine.runOneIteration();
     expect(ok).toBe(false);
-    expect((engine as unknown as { consecutiveFailures: number }).consecutiveFailures).toBe(1);
+    expect((engine as never as { consecutiveFailures: number }).consecutiveFailures).toBe(1);
   });
 
   it('counts a non-user abort as a failure', async () => {
@@ -241,7 +241,7 @@ describe('EternalAutonomyEngine — failure classification', () => {
     const engine = new EternalAutonomyEngine({ agent, projectRoot, goalPath, cycleGapMs: 0 });
     const ok = await engine.runOneIteration();
     expect(ok).toBe(false);
-    expect((engine as unknown as { consecutiveFailures: number }).consecutiveFailures).toBe(1);
+    expect((engine as never as { consecutiveFailures: number }).consecutiveFailures).toBe(1);
   });
 });
 
@@ -283,20 +283,20 @@ describe('EternalAutonomyEngine — brainstorm DONE + brain consultation', () =>
 
   it('stops after the DONE threshold when no brain is wired (heuristic)', async () => {
     const { engine } = await runBrainstormDone();
-    expect((engine as unknown as { stopRequested: boolean }).stopRequested).toBe(true);
+    expect((engine as never as { stopRequested: boolean }).stopRequested).toBe(true);
   });
 
   it('keeps going when the brain denies completion', async () => {
     const { engine } = await runBrainstormDone({ brain: { decide: async () => ({ type: 'deny', reason: 'not done' }) } });
-    expect((engine as unknown as { stopRequested: boolean }).stopRequested).toBe(false);
-    expect((engine as unknown as { consecutiveBrainstormDone: number }).consecutiveBrainstormDone).toBe(0);
+    expect((engine as never as { consecutiveBrainstormDone: number }).consecutiveBrainstormDone).toBe(0);
+    expect((engine as { consecutiveBrainstormDone: number }).consecutiveBrainstormDone).toBe(0);
   });
 
   it('stops when the brain answers that the goal is complete', async () => {
     const { engine } = await runBrainstormDone({
       brain: { decide: async () => ({ type: 'answer', text: 'Yes, the goal is complete.' }) },
     });
-    expect((engine as unknown as { stopRequested: boolean }).stopRequested).toBe(true);
+    expect((engine as never as { stopRequested: boolean }).stopRequested).toBe(true);
   });
 
   it('stops (trusts the heuristic) when the brain asks the human, and journals prior work', async () => {
@@ -306,12 +306,12 @@ describe('EternalAutonomyEngine — brainstorm DONE + brain consultation', () =>
     await saveGoal(goalPath, g!);
     const { engine } = await runBrainstormDone({ brain: { decide: async () => ({ type: 'ask_human', prompt: 'unsure' }) } });
     // ask_human is neither deny nor a complete-answer → consultBrainForDone returns true → stop.
-    expect((engine as unknown as { stopRequested: boolean }).stopRequested).toBe(true);
+    expect((engine as never as { stopRequested: boolean }).stopRequested).toBe(true);
   });
 
   it('trusts the heuristic when the brain decide() throws', async () => {
     const { engine } = await runBrainstormDone({ brain: { decide: async () => { throw new Error('brain down'); } } });
-    expect((engine as unknown as { stopRequested: boolean }).stopRequested).toBe(true);
+    expect((engine as never as { stopRequested: boolean }).stopRequested).toBe(true);
   });
 });
 
@@ -333,7 +333,7 @@ describe('EternalAutonomyEngine — todo selection edges', () => {
   it('falls through when ctx.todos is not an array', async () => {
     let engineRef: EternalAutonomyEngine;
     const agent = makeAgent(async () => {
-      (engineRef as unknown as { stopRequested: boolean }).stopRequested = true;
+      (engineRef as never as { stopRequested: boolean }).stopRequested = true;
       return { status: 'done', iterations: 1, finalText: 'noop' };
     }, undefined as never);
     (agent.ctx as { todos: unknown }).todos = null; // non-array → pickPendingTodo returns null
@@ -345,14 +345,14 @@ describe('EternalAutonomyEngine — todo selection edges', () => {
   it('counts a trailing-text DONE brainstorm answer toward the DONE streak', async () => {
     let engineRef: EternalAutonomyEngine;
     const agent = makeAgent(async () => {
-      (engineRef as unknown as { stopRequested: boolean }).stopRequested = true;
+      (engineRef as never as { stopRequested: boolean }).stopRequested = true;
       return { status: 'done', iterations: 1, finalText: 'DONE\nnothing left to do' };
     }, []);
     engineRef = new EternalAutonomyEngine({
       agent, projectRoot, goalPath, cycleGapMs: 0, gitStatusReader: async () => '', brainstormDoneStopThreshold: 99,
     });
     await engineRef.runOneIteration();
-    expect((engineRef as unknown as { consecutiveBrainstormDone: number }).consecutiveBrainstormDone).toBe(1);
+    expect((engineRef as never as { consecutiveBrainstormDone: number }).consecutiveBrainstormDone).toBe(1);
   });
 });
 

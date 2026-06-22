@@ -78,7 +78,7 @@ describe('CollabSession', () => {
   function emitFleetEvent(fleetBus: FleetBus, subagentId: string, type: string, payload: unknown) {
     // FleetBus.emit is normally called by the Director for fleet-wide events.
     // Cast to access it for test injection.
-    (fleetBus as unknown as { emit: (e: { subagentId: string; ts: number; type: string; payload: unknown }) => void }).emit({
+    (fleetBus as never as { emit: (e: { subagentId: string; ts: number; type: string; payload: unknown }) => void }).emit({
       subagentId,
       ts: Date.now(),
       type,
@@ -133,11 +133,11 @@ describe('CollabSession', () => {
       .spyOn(globalThis, 'setTimeout')
       .mockImplementation(((fn: (...a: unknown[]) => void, ms?: number, ...rest: unknown[]) => {
         const handle = (
-          realSetTimeout as unknown as (...a: unknown[]) => ReturnType<typeof setTimeout>
+          realSetTimeout as never as (...a: unknown[]) => ReturnType<typeof setTimeout>
         )(fn, ms as number, ...rest);
         if (ms === TIMEOUT) sessionTimer = handle;
         return handle;
-      }) as unknown as typeof setTimeout);
+      }) as never as typeof setTimeout);
     const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
 
     try {

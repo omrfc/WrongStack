@@ -141,7 +141,7 @@ export function setupAutonomousCoordinator(
       fleet: currentDirector.fleet,
       fleetManager: currentDirector.fleetManager,
       director: currentDirector,
-      mailbox: mailbox as unknown as Mailbox,
+      mailbox: mailbox as never as Mailbox,
       selfAgentId: `leader@${context.session.id ?? 'unknown'}`,
       selfAgentName: 'Leader',
       llmProvider,

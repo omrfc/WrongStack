@@ -35,6 +35,7 @@ export interface MemoryBackend {
 
 const TYPE_PRIORITY_RE = /^\[(\w+)\|(\w+)\]\s+/;
 const TAG_RE = /#([\w-]+)/g;
+const MAX_MEMORY_CONSOLIDATE_BACKUPS = 5;
 
 function formatMetadata(entry: MemoryEntry): string {
   const parts: string[] = [];
@@ -248,11 +249,34 @@ export class FileMemoryBackend implements MemoryBackend {
 
     const next = lines.join('\n');
     const backup = `${file}.bak.${Date.now()}`;
-    try { await fs.copyFile(file, backup); } catch { /* best-effort */ }
+    try {
+      await fs.copyFile(file, backup);
+      await pruneConsolidateBackups(file);
+    } catch { /* best-effort */ }
     /* v8 ignore next -- best-effort: atomicWrite failure during consolidate is non-fatal */
     try { await atomicWrite(file, next); } catch { return 0; /* best-effort */ }
     return removed;
   }
+}
+
+async function pruneConsolidateBackups(file: string): Promise<void> {
+  const dir = path.dirname(file);
+  const base = path.basename(file);
+  const prefix = `${base}.bak.`;
+  const backups = (await fs.readdir(dir))
+    .filter((name) => name.startsWith(prefix))
+    .sort()
+    .reverse();
+
+  await Promise.all(
+    backups.slice(MAX_MEMORY_CONSOLIDATE_BACKUPS).map(async (name) => {
+      try {
+        await fs.unlink(path.join(dir, name));
+      } catch {
+        // best-effort
+      }
+    }),
+  );
 }
 
 // ── Entry parsing ──────────────────────────────────────────────────────

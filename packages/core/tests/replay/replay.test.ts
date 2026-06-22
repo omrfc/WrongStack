@@ -112,12 +112,12 @@ describe('hashRequest', () => {
       messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
       maxTokens: 100,
       tools: undefined,
-    } as unknown as Request;
+    } as never as Request;
     const b = {
       maxTokens: 100,
       messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
       model: 'm',
-    } as unknown as Request;
+    } as never as Request;
     expect(hashRequest(a)).toBe(hashRequest(b));
   });
 

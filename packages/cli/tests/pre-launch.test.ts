@@ -41,7 +41,7 @@ function makeRenderer(): TerminalRenderer {
     writeInfo: vi.fn(),
     clear: vi.fn(),
     render: vi.fn(),
-  } as unknown as TerminalRenderer;
+  } as never as TerminalRenderer;
 }
 
 const ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
@@ -55,7 +55,7 @@ function makeReader(answers: string[]): ReadlineInputReader {
       return answers[i++] ?? '';
     }),
     close: vi.fn(async () => {}),
-  } as unknown as ReadlineInputReader;
+  } as never as ReadlineInputReader;
 }
 
 describe('detectProjectKind', () => {
@@ -430,7 +430,7 @@ function dirent(name: string, isDir: boolean): Dirent {
     isSocket: () => false,
     parentPath: '',
     path: '',
-  } as unknown as Dirent;
+  } as never as Dirent;
 }
 
 /**
@@ -438,7 +438,7 @@ function dirent(name: string, isDir: boolean): Dirent {
  * are absolute directory paths; values are the entries in that directory.
  */
 function stubReaddir(tree: Record<string, Dirent[]>) {
-  (fs.readdir as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+  (fs.readdir as never as ReturnType<typeof vi.fn>).mockImplementation(
     async (dirPath: unknown) => {
       const key = typeof dirPath === 'string' ? dirPath : String(dirPath);
       return tree[key] ?? [];

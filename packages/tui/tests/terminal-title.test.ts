@@ -12,7 +12,7 @@ function fakeStdout(isTTY: boolean) {
       return true;
     },
     writes,
-  } as unknown as NodeJS.WriteStream & { writes: string[] };
+  } as never as NodeJS.WriteStream & { writes: string[] };
 }
 
 // OSC-0 framing: ESC ] 0 ; <title> BEL. Built from char codes so the test

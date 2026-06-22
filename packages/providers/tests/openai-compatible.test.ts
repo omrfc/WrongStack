@@ -26,7 +26,7 @@ describe('OpenAICompatibleProvider', () => {
       apiKey: 'sk-x',
       baseUrl: 'https://api.groq.com/openai/v1',
       headers: { 'x-custom': '1' },
-      fetchImpl: spy as unknown as typeof fetch,
+      fetchImpl: spy as never as typeof fetch,
     });
     await p.complete(
       { model: 'm', messages: [{ role: 'user', content: 'hi' }], maxTokens: 1 },
@@ -65,7 +65,7 @@ describe('OpenAICompatibleProvider', () => {
       apiKey: 'k',
       baseUrl: 'https://api.example.com',
       urlOverride: (baseUrl, _req) => baseUrl + '/v2/chat',
-      fetchImpl: spy as unknown as typeof fetch,
+      fetchImpl: spy as never as typeof fetch,
     });
     await p.complete(
       { model: 'm', messages: [{ role: 'user', content: 'hi' }], maxTokens: 1 },
@@ -89,7 +89,7 @@ describe('OpenAICompatibleProvider', () => {
         }),
         text: async () => '',
       };
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const p = new OpenAICompatibleProvider({
       id: 'groq',
       apiKey: 'k',
@@ -109,7 +109,7 @@ describe('OpenAICompatibleProvider', () => {
     const spy = vi.fn(async (_url: unknown, init: { body?: string } = {}) => {
       captured = JSON.parse(init.body ?? '{}');
       return { ok: true, status: 200, json: async () => ({ model: 'm', choices: [], usage: {} }), text: async () => '' };
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const p = new OpenAICompatibleProvider({
       id: 'zai',
       apiKey: 'k',
@@ -135,7 +135,7 @@ describe('OpenAICompatibleProvider', () => {
     const spy = vi.fn(async (_url: unknown, init: { body?: string } = {}) => {
       captured = JSON.parse(init.body ?? '{}');
       return { ok: true, status: 200, json: async () => ({ model: 'm', choices: [], usage: {} }), text: async () => '' };
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const p = new OpenAICompatibleProvider({
       id: 'moonshot',
       apiKey: 'k',
@@ -156,7 +156,7 @@ describe('OpenAICompatibleProvider', () => {
       id: 'plain',
       apiKey: 'k',
       baseUrl: 'https://example.com/v1',
-      fetchImpl: spy as unknown as typeof fetch,
+      fetchImpl: spy as never as typeof fetch,
     });
     const res = await p.complete(
       { model: 'm', messages: [{ role: 'user', content: 'hi' }], maxTokens: 1 },

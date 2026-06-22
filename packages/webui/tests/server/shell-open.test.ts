@@ -32,7 +32,7 @@ function makeFixture() {
     debug: vi.fn(),
     trace: vi.fn(),
     child: vi.fn(),
-  } as unknown as Parameters<typeof handleShellOpen>[1];
+  } as never as Parameters<typeof handleShellOpen>[1];
   return { tmp, logger, cleanup: () => rmSync(tmp, { recursive: true, force: true }) };
 }
 
@@ -83,7 +83,7 @@ describe('handleShellOpen', () => {
     try {
       const tmp = mkdtempSync(join(tmpdir(), 'shell-open-unk-'));
       const result = await handleShellOpen(
-        { path: tmp, target: 'invalid-target' as unknown as 'terminal' } as ShellOpenRequest,
+        { path: tmp, target: 'invalid-target' as never as 'terminal' } as ShellOpenRequest,
         logger,
       );
       expect(result.success).toBe(false);

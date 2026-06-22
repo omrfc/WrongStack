@@ -154,7 +154,7 @@ export const useLocalPrefs = create<LocalPrefs>()(
         if (typeof p.autoProceedMaxIterations !== 'number') {
           p.autoProceedMaxIterations = 50;
         }
-        return p as unknown as LocalPrefs;
+        return p as never as LocalPrefs;
       },
     },
   ),

@@ -215,6 +215,6 @@ async function mkRealSandbox() {
     hasRead(p: string) { return this.readFiles.has(p); },
     lastReadMtime(p: string) { return this.fileMtimes.get(p); },
     recordRead(p: string, m: number) { this.readFiles.add(p); this.fileMtimes.set(p, m); },
-  } as unknown as Context;
+  } as never as Context;
   return { ctx, cleanup: async () => fs.rm(dir, { recursive: true, force: true }) };
 }

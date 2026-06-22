@@ -234,7 +234,7 @@ const plugin: Plugin = {
       permission: 'auto',
       mutating: true,
       async execute(input: Record<string, unknown>) {
-        return runAutoDoc(input as unknown as AutoDocInput, api);
+        return runAutoDoc(input as never as AutoDocInput, api);
       },
     });
 
@@ -252,7 +252,7 @@ const plugin: Plugin = {
       permission: 'auto',
       mutating: false,
       async execute(input: Record<string, unknown>) {
-        return runAutoDocPreview(input as unknown as AutoDocPreviewInput, api);
+        return runAutoDocPreview(input as never as AutoDocPreviewInput, api);
       },
     });
 

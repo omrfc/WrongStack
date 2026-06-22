@@ -45,7 +45,7 @@ function openWs(): { ws: WebSocket; messages: WSServerMessage[] } {
   const ws = {
     readyState: 1, // WebSocket.OPEN
     send: (raw: string) => messages.push(JSON.parse(raw) as WSServerMessage),
-  } as unknown as WebSocket;
+  } as never as WebSocket;
   return { ws, messages };
 }
 

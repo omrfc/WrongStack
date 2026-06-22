@@ -134,7 +134,7 @@ describe('term helpers', () => {
     it('registers a listener and calls cb on resize with the current size', () => {
       const stream = makeFakeStream(40, 120);
       const cb = vi.fn();
-      const off = onResize(cb, stream as unknown as NodeJS.WriteStream);
+      const off = onResize(cb, stream as never as NodeJS.WriteStream);
 
       stream.rows = 50;
       stream.columns = 130;
@@ -149,7 +149,7 @@ describe('term helpers', () => {
     it('returns a cleanup that unregisters the listener', () => {
       const stream = makeFakeStream();
       const cb = vi.fn();
-      const off = onResize(cb, stream as unknown as NodeJS.WriteStream);
+      const off = onResize(cb, stream as never as NodeJS.WriteStream);
 
       stream.emit('resize');
       expect(cb).toHaveBeenCalledTimes(1);
@@ -162,10 +162,10 @@ describe('term helpers', () => {
     it('falls back to 24x80 when the stream has no size info', () => {
       const stream = makeFakeStream();
       // null overrides simulate "not yet known"
-      stream.rows = null as unknown as number;
-      stream.columns = null as unknown as number;
+      stream.columns = null as never as number;
+      stream.columns = null as number;
       const cb = vi.fn();
-      onResize(cb, stream as unknown as NodeJS.WriteStream);
+      onResize(cb, stream as never as NodeJS.WriteStream);
 
       stream.emit('resize');
 
@@ -174,7 +174,7 @@ describe('term helpers', () => {
 
     it('returns a no-op cleanup when stream is null/undefined', () => {
       const cb = vi.fn();
-      const off = onResize(cb, null as unknown as NodeJS.WriteStream);
+      const off = onResize(cb, null as never as NodeJS.WriteStream);
 
       // Must not throw, must not register anywhere
       expect(typeof off).toBe('function');
@@ -191,7 +191,7 @@ describe('term helpers', () => {
       return {
         isTTY,
         setRawMode: hasSetRawMode ? vi.fn() : undefined,
-      } as unknown as NodeJS.ReadStream;
+      } as never as NodeJS.ReadStream;
     }
 
     it('toggles raw mode on a TTY stream and returns true', () => {
@@ -201,8 +201,8 @@ describe('term helpers', () => {
     });
 
     it('returns false (no throw) when stream is null/undefined', () => {
-      expect(setRawMode(null as unknown as NodeJS.ReadStream, true)).toBe(false);
-      expect(setRawMode(undefined as unknown as NodeJS.ReadStream, true)).toBe(false);
+      expect(setRawMode(undefined as never as NodeJS.ReadStream, true)).toBe(false);
+      expect(setRawMode(undefined as NodeJS.ReadStream, true)).toBe(false);
     });
 
     it('returns false (no throw) when stream is not a TTY (piped/redirected)', () => {
@@ -221,7 +221,7 @@ describe('term helpers', () => {
   describe('writeOut', () => {
     it('writes the string to the given stream and returns true', () => {
       const write = vi.fn();
-      const stream = { write } as unknown as NodeJS.WriteStream;
+      const stream = { write } as never as NodeJS.WriteStream;
       expect(writeOut('hello', stream)).toBe(true);
       expect(write).toHaveBeenCalledTimes(1);
       expect(write).toHaveBeenCalledWith('hello');
@@ -242,11 +242,11 @@ describe('term helpers', () => {
     it('returns false (no throw) when stream is null', () => {
       // (passing `undefined` triggers the default parameter and routes to
       // process.stdout — that is the documented behaviour, not a guard)
-      expect(writeOut('x', null as unknown as NodeJS.WriteStream)).toBe(false);
+      expect(writeOut('x', null as never as NodeJS.WriteStream)).toBe(false);
     });
 
     it('returns false when stream lacks a callable write method', () => {
-      const stream = { write: 'not-a-fn' } as unknown as NodeJS.WriteStream;
+      const stream = { write: 'not-a-fn' } as never as NodeJS.WriteStream;
       expect(writeOut('x', stream)).toBe(false);
     });
   });
@@ -254,7 +254,7 @@ describe('term helpers', () => {
   describe('writeErr', () => {
     it('writes to the given stream and returns true', () => {
       const write = vi.fn();
-      const stream = { write } as unknown as NodeJS.WriteStream;
+      const stream = { write } as never as NodeJS.WriteStream;
       expect(writeErr('oops', stream)).toBe(true);
       expect(write).toHaveBeenCalledWith('oops');
     });
@@ -272,7 +272,7 @@ describe('term helpers', () => {
     });
 
     it('returns false (no throw) when stream is null', () => {
-      expect(writeErr('x', null as unknown as NodeJS.WriteStream)).toBe(false);
+      expect(writeErr('x', null as never as NodeJS.WriteStream)).toBe(false);
     });
   });
 
@@ -286,7 +286,7 @@ describe('term helpers', () => {
           order.push(`write:${s}`);
           return true;
         },
-      } as unknown as NodeJS.WriteStream;
+      } as never as NodeJS.WriteStream;
       expect(writeErr('WARN telegram\n', stream)).toBe(true);
       expect(order).toEqual(['write:WARN telegram\n']);
     });
@@ -302,7 +302,7 @@ describe('term helpers', () => {
           order.push(`write:${s}`);
           return true;
         },
-      } as unknown as NodeJS.WriteStream;
+      } as never as NodeJS.WriteStream;
 
       // Simulates a logger WARN landing while a readline prompt is live:
       // the draft row is cleared, the message prints, the prompt repaints.
@@ -326,7 +326,7 @@ describe('term helpers', () => {
           order.push(`write:${s}`);
           return true;
         },
-      } as unknown as NodeJS.WriteStream;
+      } as never as NodeJS.WriteStream;
       writeOut('plain\n', stream);
       expect(order).toEqual(['write:plain\n']);
     });
@@ -335,7 +335,7 @@ describe('term helpers', () => {
       const suspend = vi.fn();
       const resume = vi.fn();
       setOutputLineGuard({ suspend, resume });
-      expect(writeOut('x', null as unknown as NodeJS.WriteStream)).toBe(false);
+      expect(writeOut('x', null as never as NodeJS.WriteStream)).toBe(false);
       expect(suspend).not.toHaveBeenCalled();
       expect(resume).not.toHaveBeenCalled();
     });

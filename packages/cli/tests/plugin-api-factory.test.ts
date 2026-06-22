@@ -17,7 +17,7 @@ describe('plugin-api-factory', () => {
       pipelines: {} as never,
       toolRegistry: new ToolRegistry(),
       providerRegistry: new ProviderRegistry(),
-      config: { providers: {}, log: { level: 'error' } } as unknown as Config,
+      config: { providers: {}, log: { level: 'error' } } as never as Config,
       log: new DefaultLogger({ level: 'error' }),
     });
     expect(api).toBeDefined();

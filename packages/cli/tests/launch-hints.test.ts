@@ -15,7 +15,7 @@ function makeRenderer(): { write: (input: string | TextBlock) => void; output: (
   const write = vi.fn<(input: string | TextBlock) => void>();
   return {
     write,
-    output: () => stripAnsi((write as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((c) => String(c[0])).join('')),
+    output: () => stripAnsi((write as never as { mock: { calls: unknown[][] } }).mock.calls.map((c) => String(c[0])).join('')),
   };
 }
 

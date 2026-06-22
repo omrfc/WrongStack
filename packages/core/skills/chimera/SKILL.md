@@ -49,7 +49,7 @@ Write your report as a single message appended to the chat. Use this structure:
 
 ### Medium (N)
 3. [TYPE] `path/helper.ts:15` — `as any` cast silences type error
-   → Use `as unknown as T` with a comment explaining the trust boundary
+   → Replace it with validation or an assertion function at the trust boundary
 
 ### Summary
 - Files reviewed: N

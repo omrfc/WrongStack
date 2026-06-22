@@ -76,6 +76,12 @@ export interface HqToken {
 export type HqBrowserToken = HqToken;
 
 /** On-disk shape of `<dataDir>/auth.json`. */
+export interface HqRuntimeFile {
+  url: string;
+  updatedAt: string;
+  pid?: number;
+}
+
 export interface HqAuthFile {
   version: typeof HQ_AUTH_FILE_VERSION;
   updatedAt: string;
@@ -102,6 +108,44 @@ export function emptyHqAuthFile(): HqAuthFile {
 /** Path to `auth.json` under the given data directory. */
 export function hqAuthFilePath(dataDir: string): string {
   return path.join(dataDir, 'auth.json');
+}
+
+/** Path to the best-effort runtime endpoint marker under the given data directory. */
+export function hqRuntimeFilePath(dataDir: string): string {
+  return path.join(dataDir, 'runtime.json');
+}
+
+export async function writeHqRuntimeFile(dataDir: string, file: Omit<HqRuntimeFile, 'updatedAt'>): Promise<void> {
+  const payload: HqRuntimeFile = {
+    ...file,
+    updatedAt: new Date().toISOString(),
+  };
+  await atomicWrite(hqRuntimeFilePath(dataDir), `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
+}
+
+function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function readHqRuntimeFileSync(dataDir: string): HqRuntimeFile | undefined {
+  try {
+    const parsed = JSON.parse(syncFs.readFileSync(hqRuntimeFilePath(dataDir), 'utf8')) as Partial<HqRuntimeFile>;
+    if (typeof parsed.url !== 'string' || parsed.url.trim().length === 0) return undefined;
+    if (typeof parsed.pid === 'number' && !isProcessAlive(parsed.pid)) return undefined;
+    return {
+      url: parsed.url,
+      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : '',
+      ...(typeof parsed.pid === 'number' ? { pid: parsed.pid } : {}),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 /**

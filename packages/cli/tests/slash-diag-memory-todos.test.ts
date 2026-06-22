@@ -14,7 +14,7 @@ function emptyCtx(overrides: Partial<SlashCommandContext> = {}): SlashCommandCon
     memoryStore: undefined,
     context: undefined,
     ...overrides,
-  } as unknown as SlashCommandContext;
+  } as never as SlashCommandContext;
 }
 
 // ── /diag ────────────────────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ function makeMemStore(initial = '') {
       state.text = '';
     }),
     _state: state,
-  } as unknown as MemoryStore;
+  } as never as MemoryStore;
 }
 
 describe('buildMemoryCommand', () => {

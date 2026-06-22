@@ -27,7 +27,7 @@ function fakeCtx(): Context {
       replaceTodos: vi.fn(),
       deleteMeta: vi.fn(),
     },
-  } as unknown as Context;
+  } as never as Context;
 }
 
 // ── /save ────────────────────────────────────────────────────────────────────

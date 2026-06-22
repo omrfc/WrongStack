@@ -22,7 +22,7 @@ async function mkPlanSandbox(): Promise<PlanSandbox> {
     projectRoot: dir,
     session: { id: 'sess', append: async () => undefined, close: async () => undefined },
     meta: { 'plan.path': planPath, 'task.path': taskPath },
-  } as unknown as Context;
+  } as never as Context;
   return {
     dir,
     planPath,
@@ -92,7 +92,7 @@ describe('planTool', () => {
       projectRoot: sb.dir,
       session: { id: 'x', append: async () => undefined, close: async () => undefined },
       meta: {},
-    } as unknown as Context;
+    } as never as Context;
     const out = await planTool.execute({ action: 'show' }, noMetaCtx, { signal: newSignal() });
     expect(out.ok).toBe(false);
     expect(out.message).toMatch(/path is not configured/i);
@@ -139,7 +139,7 @@ describe('planTool', () => {
       replaceTodos(todos: unknown[]) {
         replacedTodos.push(...todos);
       },
-    } as unknown as Context['state'];
+    } as never as Context['state'];
 
     await planTool.execute({ action: 'add', title: 'Build feature' }, sb.ctx, { signal: newSignal() });
     const out = await planTool.execute(

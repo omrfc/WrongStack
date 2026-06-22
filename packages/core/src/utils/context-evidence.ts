@@ -187,7 +187,7 @@ export function repeatedReadPressure(ctx: Context): number {
 
 function ensureEvidence(ctx: Context): ContextEvidenceState {
   if (!ctx.contextEvidence) {
-    (ctx as unknown as { contextEvidence: ContextEvidenceState }).contextEvidence =
+    (ctx as never as { contextEvidence: ContextEvidenceState }).contextEvidence =
       createContextEvidenceState();
   }
   return ctx.contextEvidence;

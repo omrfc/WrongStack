@@ -378,7 +378,7 @@ export class ACPSession {
         timeoutHandle: handle,
       });
       this.transport
-        .send({ jsonrpc: '2.0', id, method, params } as unknown as ACPMessage)
+        .send({ jsonrpc: '2.0', id, method, params } as never as ACPMessage)
         .catch((err) => {
           clearTimeout(handle);
           this.pending.delete(id);
@@ -515,7 +515,7 @@ export class ACPSession {
     const params = (msg as { params?: { toolCall?: unknown; options?: unknown } }).params;
     const toolCall = params?.toolCall as ToolCallUpdateNotification | undefined;
     const options = Array.isArray(params?.options)
-      ? (params.options as unknown as Parameters<PermissionPolicy>[0]['options'])
+      ? (params.options as never as Parameters<PermissionPolicy>[0]['options'])
       : [];
     if (!toolCall) {
       await this.transport.send({

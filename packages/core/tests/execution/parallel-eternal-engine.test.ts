@@ -411,7 +411,7 @@ describe('ParallelEternalEngine', () => {
     // Seed a single pending todo so decomposeGoal (Strategy 1) yields one known
     // task string and exactly one slot — no git/brainstorm interference.
     function seedTodo(agent: Agent, content: string): void {
-      (agent.ctx as unknown as { todos: Array<{ status: string; content: string }> }).todos = [
+      (agent.ctx as never as { todos: Array<{ status: string; content: string }> }).todos = [
         { status: 'pending', content },
       ];
     }

@@ -7,11 +7,11 @@ import type { ToolRegistry, TokenCounter } from '../src/slash-commands/index.js'
 function ctx(extra: object = {}): SlashCommandContext {
   return {
     session: { id: 's1' },
-    registry: { register: () => {}, dispatch: async () => null } as unknown as SlashCommandContext['registry'],
-    toolRegistry: { list: () => [] } as unknown as ToolRegistry,
-    renderer: { write: () => {}, writeWarning: () => {}, writeError: () => {}, writeInfo: () => {}, projectRoot: '/tmp' } as unknown as SlashCommandContext['renderer'],
-    tokenCounter: { total: () => ({ input: 0, output: 0 }) } as unknown as TokenCounter,
-    events: { on: () => {} } as unknown as SlashCommandContext['events'],
+    events: { on: () => {} } as never as SlashCommandContext['events'],
+    toolRegistry: { list: () => [] } as ToolRegistry,
+    renderer: { write: () => {}, writeWarning: () => {}, writeError: () => {}, writeInfo: () => {}, projectRoot: '/tmp' } as SlashCommandContext['renderer'],
+    tokenCounter: { total: () => ({ input: 0, output: 0 }) } as TokenCounter,
+    events: { on: () => {} } as SlashCommandContext['events'],
     projectRoot: '/tmp',
     cwd: '/tmp',
     messages: [],
@@ -21,15 +21,15 @@ function ctx(extra: object = {}): SlashCommandContext {
     systemPrompt: [],
     model: 'test',
     meta: {},
-    configStore: { get: () => undefined, set: () => {}, has: () => false } as unknown as SlashCommandContext['configStore'],
-    reader: { readFile: async () => null } as unknown as SlashCommandContext['reader'],
+    reader: { readFile: async () => null } as never as SlashCommandContext['reader'],
+    reader: { readFile: async () => null } as SlashCommandContext['reader'],
     state: {
       replaceMessages: vi.fn(),
       replaceTodos: vi.fn(),
       deleteMeta: vi.fn(),
     },
     ...extra,
-  } as unknown as SlashCommandContext;
+  } as never as SlashCommandContext;
 }
 
 describe('buildWorktreeCommand', () => {

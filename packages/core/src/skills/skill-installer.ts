@@ -354,7 +354,7 @@ export class SkillInstaller {
   private invalidateLoaderCache(): void {
     // The SkillLoader interface has a cache internally.
     // We access it via the 'any' cast to call invalidateCache if available.
-    const loader = this.opts.skillLoader as unknown as { invalidateCache?: () => void };
+    const loader = this.opts.skillLoader as never as { invalidateCache?: () => void };
     if (loader && typeof loader.invalidateCache === 'function') {
       loader.invalidateCache();
     }

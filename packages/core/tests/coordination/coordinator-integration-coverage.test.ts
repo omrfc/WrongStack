@@ -64,7 +64,7 @@ function makeHeartbeatAgent(opts: {
       }
       return { status: 'done', iterations: i || 1, finalText: 'completed' };
     },
-  } as unknown as Agent;
+  } as never as Agent;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -196,7 +196,7 @@ describe('IC3: denied pre-empt — deadline fires at 100% (idle timeout)', () =>
           await new Promise((r) => setTimeout(r, idleTimeoutMs * 20));
           return { status: 'done', iterations: 1, finalText: 'never' };
         },
-      } as unknown as Agent;
+      } as never as Agent;
       return { agent, events };
     };
 
@@ -303,7 +303,7 @@ describe('IC5: idle timeout fires independently of wall-clock negotiation', () =
           await new Promise((r) => setTimeout(r, idleTimeoutMs * 20));
           return { status: 'done', iterations: 1, finalText: 'never' };
         },
-      } as unknown as Agent;
+      } as never as Agent;
       return { agent, events };
     };
 

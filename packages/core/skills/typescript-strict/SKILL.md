@@ -15,7 +15,7 @@ Strict TypeScript patterns for WrongStack: exhaustive switch, branded types, dis
 
 ## Rules
 
-1. Never silence errors with `as any` — use `as unknown as T` only at trust boundaries with a comment.
+1. Never silence errors with `as any` or double assertions — validate or narrow values at trust boundaries.
 2. Don't use `!` non-null assertion — silence the type checker without explanation.
 3. Always annotate return types on exported functions — hides errors otherwise.
 4. Use `Promise<unknown>` or generics instead of `Promise<any>`.
@@ -81,7 +81,7 @@ export function processData(data: string) { ... }
 }
 ```
 
-Never silence errors with `as any`. Use `as unknown as T` only at trust boundaries with a comment.
+Never silence errors with `as any` or double assertions. Validate or narrow values at trust boundaries.
 
 ## Workflow — applying strict TypeScript
 
@@ -193,7 +193,7 @@ if (first) console.log(first.toUpperCase());
 | `!` non-null assertion | Silences the type checker | Use a narrow check |
 | `Promise<any>` return type | Loses type safety | Use `Promise<unknown>` or generic |
 | `Function` or `Object` types | Too broad | Be specific |
-| `as any` for shortcuts | Defeats type safety | `as unknown as T` at boundaries |
+| `as any` or double assertions for shortcuts | Defeats type safety | Validate or narrow at boundaries |
 | Optional chaining chain | `a?.b?.c?.d` when `a` might be undefined | Verify with if/guard first |
 | Missing return types on exports | Hides errors | Always annotate public APIs |
 

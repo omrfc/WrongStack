@@ -28,7 +28,7 @@ function mkFetch(body: ReadableStream<Uint8Array>): typeof fetch {
       status: 200,
       text: async () => '',
       body,
-    }) as unknown as Response) as unknown as typeof fetch;
+    }) as never as Response) as never as typeof fetch;
 }
 
 async function collectEvents(body: ReadableStream<Uint8Array>): Promise<StreamEvent[]> {

@@ -118,7 +118,7 @@ export class DefaultPluginAPI implements PluginAPI {
     this.metrics = init.metricsSink ? scopedMetrics(init.metricsSink, owner) : noopMetrics;
 
     // Convert concrete pipelines to read-only views before passing to plugins.
-    const pipelines = init.pipelines as unknown as Record<string, Pipeline<unknown>>;
+    const pipelines = init.pipelines as never as Record<string, Pipeline<unknown>>;
     const readonlyPipelines: PluginPipelines = {} as PluginPipelines;
     for (const [key, pipeline] of Object.entries(pipelines)) {
       readonlyPipelines[key] = pipeline.asReadonly() as PluginPipelines[typeof key];

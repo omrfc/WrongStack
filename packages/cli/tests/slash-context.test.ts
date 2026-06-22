@@ -34,7 +34,7 @@ function fakeCtx(overrides: Record<string, unknown> = {}): Context {
       }),
     },
     ...overrides,
-  } as unknown as Context;
+  } as never as Context;
 }
 
 describe('buildContextCommand', () => {

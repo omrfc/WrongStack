@@ -102,7 +102,7 @@ describe('update-check', () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 404,
-      } as unknown as Response);
+      } as never as Response);
       vi.stubGlobal('fetch', mockFetch);
 
       const info = await checkForUpdate(undefined, () => userHome);

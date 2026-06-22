@@ -13,7 +13,7 @@ const silentLog: Logger = {
   debug: () => {},
   trace: () => {},
   child: () => silentLog,
-} as unknown as Logger;
+} as never as Logger;
 
 /**
  * Inline mock MCP server — no temp file, no spawn.

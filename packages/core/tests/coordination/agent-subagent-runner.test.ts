@@ -47,7 +47,7 @@ function makeStubAgent(opts: {
       }
       return { status: 'done', iterations: opts.iterations, finalText: opts.finalText };
     },
-  } as unknown as Agent;
+  } as never as Agent;
 
   return { agent, events };
 }

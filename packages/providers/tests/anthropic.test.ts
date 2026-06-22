@@ -7,7 +7,7 @@ function mockFetch(json: unknown, status = 200) {
     status,
     json: async () => json,
     text: async () => JSON.stringify(json),
-  } as unknown as Response);
+  } as never as Response);
 }
 
 describe('AnthropicProvider', () => {
@@ -16,7 +16,7 @@ describe('AnthropicProvider', () => {
   // pipeline, not from a JSON body. This file covers everything else.
 
   it('throws ProviderError on non-2xx', async () => {
-    const fetchImpl = mockFetch({ error: 'rate' }, 429) as unknown as typeof fetch;
+    const fetchImpl = mockFetch({ error: 'rate' }, 429) as never as typeof fetch;
     const p = new AnthropicProvider({ apiKey: 'k', fetchImpl });
     await expect(
       p.complete(
@@ -45,7 +45,7 @@ describe('AnthropicProvider', () => {
     const p = new AnthropicProvider({
       apiKey: 'k',
       beta: ['prompt-caching-2024-07-31', 'tools-2024-04-04'],
-      fetchImpl: spy as unknown as typeof fetch,
+      fetchImpl: spy as never as typeof fetch,
     });
     await p.complete(
       { model: 'm', messages: [{ role: 'user', content: 'x' }], maxTokens: 1 },
@@ -70,7 +70,7 @@ describe('AnthropicProvider', () => {
         }),
         text: async () => '',
       };
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const p = new AnthropicProvider({ apiKey: 'k', fetchImpl });
     await p.complete(
       {
@@ -118,7 +118,7 @@ describe('AnthropicProvider', () => {
     const p = new AnthropicProvider({
       apiKey: 'sk-kimi-XYZ',
       baseUrl: 'https://api.kimi.com/coding/v1',
-      fetchImpl: spy as unknown as typeof fetch,
+      fetchImpl: spy as never as typeof fetch,
     });
     await p.complete(
       { model: 'k2p6', messages: [{ role: 'user', content: 'x' }], maxTokens: 1 },
@@ -143,7 +143,7 @@ describe('AnthropicProvider', () => {
     }));
     const p = new AnthropicProvider({
       apiKey: 'sk-ant-XYZ',
-      fetchImpl: spy as unknown as typeof fetch,
+      fetchImpl: spy as never as typeof fetch,
     });
     await p.complete(
       { model: 'm', messages: [{ role: 'user', content: 'x' }], maxTokens: 1 },
@@ -155,7 +155,7 @@ describe('AnthropicProvider', () => {
   });
 
   it('non-2xx with 500 is retryable', async () => {
-    const fetchImpl = mockFetch({}, 500) as unknown as typeof fetch;
+    const fetchImpl = mockFetch({}, 500) as never as typeof fetch;
     const p = new AnthropicProvider({ apiKey: 'k', fetchImpl });
     await expect(
       p.complete(
@@ -179,7 +179,7 @@ describe('AnthropicProvider', () => {
         }),
         text: async () => '',
       };
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const p = new AnthropicProvider({
       apiKey: 'k',
       baseUrl: 'https://api.minimax.io/anthropic/v1',
@@ -202,7 +202,7 @@ describe('AnthropicProvider', () => {
         json: async () => ({ content: [], stop_reason: 'end_turn', usage: {} }),
         text: async () => '',
       };
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const p = new AnthropicProvider({
       apiKey: 'k',
       baseUrl: 'https://example.com',
@@ -225,7 +225,7 @@ describe('AnthropicProvider', () => {
         json: async () => ({ content: [], stop_reason: 'end_turn', usage: {} }),
         text: async () => '',
       };
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const p = new AnthropicProvider({
       apiKey: 'k',
       baseUrl: 'https://example.com/v1/messages',
@@ -239,7 +239,7 @@ describe('AnthropicProvider', () => {
   });
 
   it('wraps fetch network error in ProviderError(retryable)', async () => {
-    const fetchImpl = vi.fn().mockRejectedValue(new Error('boom')) as unknown as typeof fetch;
+    const fetchImpl = vi.fn().mockRejectedValue(new Error('boom')) as never as typeof fetch;
     const p = new AnthropicProvider({ apiKey: 'k', fetchImpl });
     await expect(
       p.complete(
@@ -270,7 +270,7 @@ describe('AnthropicProvider', () => {
         }),
         { status: 200 },
       );
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
 
     const p = new AnthropicProvider({ apiKey: 'k', fetchImpl });
     await p.complete(

@@ -58,13 +58,13 @@ export function makeServeContext(
     stream: () => {
       throw new Error('no model provider in `mcp serve` mode');
     },
-  } as unknown as Provider;
-  const session = { append: async () => {} } as unknown as SessionWriter;
+  } as never as Provider;
+  const session = { append: async () => {} } as never as SessionWriter;
   const tokenCounter = {
     account: () => {},
     total: () => ({ input: 0, output: 0 }),
     estimateCost: () => ({ total: 0 }),
-  } as unknown as TokenCounter;
+  } as never as TokenCounter;
   return new Context({
     systemPrompt: [],
     provider,

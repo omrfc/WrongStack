@@ -42,7 +42,7 @@ function mockWindow() {
     const mockBody = {
       appendChild: vi.fn(),
       removeChild: vi.fn(),
-    } as unknown as HTMLBodyElement;
+    } as never as HTMLBodyElement;
     Object.defineProperty(document, 'body', { value: mockBody, configurable: true });
   }
 
@@ -135,9 +135,9 @@ describe('handleExportSkill', () => {
     URL.createObjectURL = vi.fn(() => 'blob:test-url');
     document.createElement = vi.fn((tagName: string) => {
       if (tagName === 'a') {
-        return { href: '', download: '', click: clickSpy, style: {} } as unknown as HTMLAnchorElement;
+        return { href: '', download: '', click: clickSpy, style: {} } as never as HTMLAnchorElement;
       }
-      return {} as unknown as HTMLElement;
+      return {} as never as HTMLElement;
     });
 
     const body = API_DESIGN_BODY;
@@ -284,9 +284,9 @@ describe('handleExportAll', () => {
     URL.createObjectURL = vi.fn(() => 'blob:test-url');
     document.createElement = vi.fn((tagName: string) => {
       if (tagName === 'a') {
-        return { href: '', download: '', click: clickSpy, style: {} } as unknown as HTMLAnchorElement;
+        return { href: '', download: '', click: clickSpy, style: {} } as never as HTMLAnchorElement;
       }
-      return {} as unknown as HTMLElement;
+      return {} as never as HTMLElement;
     });
 
     const response = { zipBase64: '', skillCount: 0, error: 'Skills not enabled' };

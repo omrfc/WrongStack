@@ -42,7 +42,7 @@ function makeRenderer() {
     writeInfo: vi.fn(),
     clear: vi.fn(),
     render: vi.fn(),
-  } as unknown as Parameters<typeof renderFocusedHelp>[1];
+  } as never as Parameters<typeof renderFocusedHelp>[1];
 }
 
 function capture(renderer: ReturnType<typeof makeRenderer>): string {

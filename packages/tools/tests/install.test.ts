@@ -18,7 +18,7 @@ vi.mock('../src/_spawn-stream.js', () => ({
       exitCode: 0,
       truncated: false,
     };
-  }) as unknown as () => AsyncGenerator<ToolProgressEvent, SpawnStreamResult>,
+  }) as never as () => AsyncGenerator<ToolProgressEvent, SpawnStreamResult>,
 }));
 
 const makeCtx = (overrides?: Record<string, unknown>) =>

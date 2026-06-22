@@ -168,7 +168,7 @@ describe('notifyIfHidden', () => {
     });
     Object.defineProperty(window, 'Notification', {
       configurable: true,
-      value: ThrowingNotification as unknown as typeof Notification,
+      value: ThrowingNotification as never as typeof Notification,
     });
 
     const { notifyIfHidden } = await import('@/lib/notify');

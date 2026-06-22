@@ -8,7 +8,7 @@ function makeCtx(over: Partial<SlashCommandContext> = {}) {
     interruptController: { abortLeader: vi.fn(() => false) },
     onFleetKill: vi.fn(() => 0),
     ...over,
-  } as unknown as SlashCommandContext;
+  } as never as SlashCommandContext;
 }
 
 describe('/interrupt', () => {
@@ -58,7 +58,7 @@ describe('/interrupt', () => {
 
   it('tolerates a missing interruptController (default no-op)', async () => {
     const onFleetKill = vi.fn(() => 0);
-    const ctx = { onFleetKill } as unknown as SlashCommandContext;
+    const ctx = { onFleetKill } as never as SlashCommandContext;
     const res = await buildInterruptCommand(ctx).run('');
     expect(stripAnsi(res?.message ?? '')).toContain('Nothing to interrupt');
   });

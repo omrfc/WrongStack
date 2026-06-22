@@ -159,7 +159,7 @@ async function annotationsCommand(
   // SessionStore interface doesn't expose `dir` directly, so we
   // probe via a private cast — AnnotationsStore expects a path
   // string and the SessionStore dir is set in the same boot config.
-  const storeDir = (opts.sessionStore as unknown as { dir?: string | undefined }).dir;
+  const storeDir = (opts.sessionStore as never as { dir?: string | undefined }).dir;
   if (!storeDir) {
     return {
       message: color.yellow(

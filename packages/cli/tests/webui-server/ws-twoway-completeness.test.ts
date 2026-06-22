@@ -37,7 +37,7 @@ function srcFiles(dir: string): string[] {
     if (!name.endsWith('.ts') && !name.endsWith('.tsx')) continue;
     if (name.endsWith('.test.ts') || name.endsWith('.test.tsx')) continue;
     // recursive readdir gives parentPath on Node 18.17+/20+/22.
-    const base = (entry as unknown as { parentPath?: string; path?: string }).parentPath ?? dir;
+    const base = (entry as never as { parentPath?: string; path?: string }).parentPath ?? dir;
     out.push(path.join(base, name));
   }
   return out;

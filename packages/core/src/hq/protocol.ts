@@ -192,6 +192,7 @@ export type HqMailboxAgentStatus =
   | 'offline';
 
 export interface HqMailboxMessageSummary {
+  mailId: string; // unique UUID per message record, used for deduplication
   messageId: string;
   from: string;
   to: string;
@@ -603,6 +604,7 @@ function isHqMailboxMessageSummary(x: unknown): x is HqMailboxMessageSummary {
   if (typeof x !== 'object' || x === null) return false;
   const v = x as Record<string, unknown>;
   return (
+    typeof v.mailId === 'string' &&
     typeof v.messageId === 'string' &&
     typeof v.from === 'string' &&
     typeof v.to === 'string' &&

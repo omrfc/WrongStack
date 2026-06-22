@@ -495,6 +495,7 @@ export class GlobalMailbox implements Mailbox {
       name: input.name,
       source: input.source,
     });
+    this.publishHqMailboxSnapshot();
   }
 
   async clientHeartbeat(input: ClientHeartbeatInput): Promise<void> {
@@ -525,6 +526,7 @@ export class GlobalMailbox implements Mailbox {
     this._events?.emitCustom('mailbox.client_heartbeat', {
       clientId: input.clientId,
     });
+    this.publishHqMailboxSnapshot();
   }
 
   async getClientStatuses(): Promise<ClientStatus[]> {
@@ -644,7 +646,7 @@ export class GlobalMailbox implements Mailbox {
             delete parsed['read'];
             delete parsed['readAt'];
           }
-          messages.push(parsed as unknown as MailboxMessage);
+          messages.push(parsed as never as MailboxMessage);
         } catch {
           // Skip malformed lines
         }
@@ -821,7 +823,7 @@ export class GlobalMailbox implements Mailbox {
       obj[id] = agent;
     }
     const tmp = `${this.registryPath}.${randomUUID().slice(0, 8)}.tmp`;
-    await fsp.writeFile(tmp, JSON.stringify(obj, null, 2), 'utf8');
+    await fsp.writeFile(tmp, JSON.stringify(obj), 'utf8');
     await fsp.rename(tmp, this.registryPath);
   }
 
@@ -879,7 +881,7 @@ export class GlobalMailbox implements Mailbox {
       obj[id] = client;
     }
     const tmp = `${this.clientRegistryPath}.${randomUUID().slice(0, 8)}.tmp`;
-    await fsp.writeFile(tmp, JSON.stringify(obj, null, 2), 'utf8');
+    await fsp.writeFile(tmp, JSON.stringify(obj), 'utf8');
     await fsp.rename(tmp, this.clientRegistryPath);
   }
 }

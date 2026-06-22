@@ -28,7 +28,7 @@ const skillLoader = (over: Partial<SkillLoader> = {}): SkillLoader =>
     readBody: async () => '---\nname: scan\n---\n# Scan\nLook for bugs.',
     readSaveBody: async () => '---\nname: scan\n---\n## Overview\nCompact scan.',
     ...over,
-  }) as unknown as SkillLoader;
+  }) as never as SkillLoader;
 
 let tmp: string;
 beforeEach(async () => {
@@ -57,7 +57,7 @@ describe('DefaultSystemPromptBuilder — full configuration', () => {
       read: async () => '',
       remember: async () => undefined,
       forget: async () => 0,
-    } as unknown as MemoryStore;
+    } as never as MemoryStore;
 
     const modeStore = { getActiveMode: async () => ({ id: 'review', prompt: 'MODE-PROMPT', suggestedSkills: ['scan'] }) };
     const onlineAgents = [
@@ -203,7 +203,7 @@ describe('DefaultSystemPromptBuilder — edge cases', () => {
   });
 
   it('falls back to readAll when the memory store has no scoreRelevant', async () => {
-    const memoryStore = { readAll: async () => '- legacy memory', read: async () => '', remember: async () => undefined, forget: async () => 0 } as unknown as MemoryStore;
+    const memoryStore = { readAll: async () => '- legacy memory', read: async () => '', remember: async () => undefined, forget: async () => 0 } as never as MemoryStore;
     const b = new DefaultSystemPromptBuilder({ memoryStore, todayIso: '2026-06-15' });
     const blocks = await b.build({ cwd: tmp, projectRoot: tmp, tools: [] } as never);
     expect(blocks.map((bl) => bl.text).join('\n')).toContain('legacy memory');

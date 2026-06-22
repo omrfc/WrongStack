@@ -14,7 +14,7 @@ function createMockWs() {
     send(data: string) {
       this.sent.push(JSON.parse(data));
     },
-  } as unknown as WebSocket & { sent: Array<{ type: string; payload: Record<string, unknown> }> };
+  } as never as WebSocket & { sent: Array<{ type: string; payload: Record<string, unknown> }> };
   return ws;
 }
 

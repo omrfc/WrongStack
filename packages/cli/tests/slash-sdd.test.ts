@@ -119,14 +119,14 @@ describe('SDD module-level helpers (no active session)', () => {
       expect(state).not.toBeNull();
 
       // Add a task so the spec can be saved
-      (state as unknown as { addTask: (task: { id: string; title: string; status: 'pending' | 'in_progress' | 'done' | 'blocked' }) => void }).addTask({ id: 'task-1', title: 'Do thing', status: 'pending' as const });
+      (state as never as { addTask: (task: { id: string; title: string; status: 'pending' | 'in_progress' | 'done' | 'blocked' }) => void }).addTask({ id: 'task-1', title: 'Do thing', status: 'pending' as const });
       state!.setSpec({
         id: 'my-spec-abc',
         title: 'My App',
         version: '1.0.0',
         phases: [],
         tasks: [],
-      } as unknown as Parameters<NonNullable<typeof state>['setSpec']>[0]);
+      } as never as Parameters<NonNullable<typeof state>['setSpec']>[0]);
 
       // list action calls findSpec — we can verify via getActiveSDDContext
       const ctx = getActiveSDDContext();

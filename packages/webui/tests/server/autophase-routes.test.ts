@@ -4,7 +4,7 @@ import { handleAutoPhaseRoute, type AutoPhaseRouteHandlers } from '../../src/ser
 import type { WSClientMessage } from '../../src/server/types.js';
 
 function mockWs(): WebSocket & { send: ReturnType<typeof vi.fn> } {
-  return { readyState: 1, send: vi.fn() } as unknown as WebSocket & { send: ReturnType<typeof vi.fn> };
+  return { readyState: 1, send: vi.fn() } as never as WebSocket & { send: ReturnType<typeof vi.fn> };
 }
 
 function sentMessages(ws: { send: ReturnType<typeof vi.fn> }): unknown[] {
@@ -31,7 +31,7 @@ describe('handleAutoPhaseRoute', () => {
   it('dispatches autophase-prefixed messages', async () => {
     const ws = mockWs();
     const h = handlers();
-    const msg = { type: 'autophase.start', payload: { graphId: 'g1' } } as unknown as WSClientMessage;
+    const msg = { type: 'autophase.start', payload: { graphId: 'g1' } } as never as WSClientMessage;
 
     await expect(handleAutoPhaseRoute(ws, msg, h)).resolves.toBe(true);
 
@@ -42,7 +42,7 @@ describe('handleAutoPhaseRoute', () => {
   it('dispatches unknown autophase-prefixed messages to the AutoPhase handler', async () => {
     const ws = mockWs();
     const h = handlers();
-    const msg = { type: 'autophase.custom', payload: { value: 1 } } as unknown as WSClientMessage;
+    const msg = { type: 'autophase.custom', payload: { value: 1 } } as never as WSClientMessage;
 
     await expect(handleAutoPhaseRoute(ws, msg, h)).resolves.toBe(true);
 

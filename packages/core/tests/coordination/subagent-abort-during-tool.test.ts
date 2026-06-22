@@ -76,7 +76,7 @@ describe('subagent abort during tool execution (D5/T3)', () => {
           });
           return { status: 'done', iterations: 1, finalText: 'late' };
         },
-      } as unknown as Agent;
+      } as never as Agent;
       return {
         agent,
         events,
@@ -148,7 +148,7 @@ describe('subagent abort during tool execution (D5/T3)', () => {
           void runOpts;
           return { status: 'done', iterations: 1, finalText: 'made it' };
         },
-      } as unknown as Agent;
+      } as never as Agent;
       return { agent, events };
     };
     const runner = makeAgentSubagentRunner({ factory });

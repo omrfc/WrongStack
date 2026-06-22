@@ -130,14 +130,14 @@ describe('silenceTerminal', () => {
   it('stderr no-op preserves callback contract (buffer + cb)', () => {
     silenceTerminal();
     const cb = vi.fn();
-    process.stderr.write(Buffer.from('hello'), cb as unknown as (err?: Error) => void);
+    process.stderr.write(Buffer.from('hello'), cb as never as (err?: Error) => void);
     expect(cb).toHaveBeenCalledTimes(1);
   });
 
   it('stderr no-op preserves callback contract (cb only)', () => {
     silenceTerminal();
     const cb = vi.fn();
-    process.stderr.write('hello', cb as unknown as BufferEncoding);
+    process.stderr.write('hello', cb as never as BufferEncoding);
     // second arg is a function → treated as the callback
     expect(cb).toHaveBeenCalledTimes(1);
   });

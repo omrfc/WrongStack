@@ -202,7 +202,7 @@ export async function handleApiSessionEvents(
 
     const all: WatchEntry[] = [];
     for await (const ev of reader.replay(sessionId)) {
-      const mapped = mapWatchEntry(ev as unknown as Record<string, unknown>);
+      const mapped = mapWatchEntry(ev as never as Record<string, unknown>);
       if (mapped) all.push(mapped);
     }
     const tail = all.slice(-limit);

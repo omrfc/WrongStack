@@ -31,7 +31,7 @@ function task(meta: Partial<SwebenchMeta>): BenchTask {
     suite: 'swebench',
     prompt: 'fix it',
     templateDir: '/tmp/x/repo',
-    meta: full as unknown as Record<string, unknown>,
+    meta: full as never as Record<string, unknown>,
   };
 }
 

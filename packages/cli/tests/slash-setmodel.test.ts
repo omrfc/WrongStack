@@ -38,7 +38,7 @@ function makeCtx(initial: Partial<Config>): {
         return store.value;
       },
     },
-  } as unknown as SlashCommandContext;
+  } as never as SlashCommandContext;
   return { ctx, store };
 }
 

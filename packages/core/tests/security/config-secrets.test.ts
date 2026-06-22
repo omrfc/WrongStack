@@ -84,7 +84,7 @@ describe('encryptConfigSecrets', () => {
 
   it('does not encrypt non-string values even at secret-named keys', () => {
     const vault = makeVault();
-    const out = encryptConfigSecrets({ apiKey: 42 as unknown as string }, vault);
+    const out = encryptConfigSecrets({ apiKey: 42 as never as string }, vault);
     expect(out).toEqual({ apiKey: 42 });
   });
 

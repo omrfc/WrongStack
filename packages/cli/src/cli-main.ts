@@ -398,7 +398,7 @@ export async function main(argv: string[]): Promise<number> {
   // Fetch online agents from the shared mailbox to include in system prompt
   let onlineAgents: Awaited<ReturnType<GlobalMailbox['getAgentStatuses']>> = [];
   try {
-    const hqPublisher = createHqPublisherFromEnv({ clientKind: 'cli', projectRoot, projectName: path.basename(projectRoot), appConfig: config } as unknown as Parameters<typeof createHqPublisherFromEnv>[0]);
+    const hqPublisher = createHqPublisherFromEnv({ clientKind: 'cli', projectRoot, projectName: path.basename(projectRoot), appConfig: config } as never as Parameters<typeof createHqPublisherFromEnv>[0]);
     hqPublisher?.connect();
     if (hqPublisher) teardownHandlers.push(() => hqPublisher.close());
     const systemMailbox = new GlobalMailbox(wpaths.projectDir, undefined, hqPublisher);
@@ -533,7 +533,7 @@ export async function main(argv: string[]): Promise<number> {
   // This ensures consistent auditLevel behavior and a single writer.
   // Sampling configuration (especially for tool_progress) is now read from config.
   const sessionConfig = resolveSessionLoggingConfig(
-    config as unknown as Parameters<typeof resolveSessionLoggingConfig>[0],
+    config as never as Parameters<typeof resolveSessionLoggingConfig>[0],
   );
   // Resolve the CURRENT writer on every append (getter form): when the user
   // resumes another session mid-run, agent.ctx.session is swapped to the
@@ -758,7 +758,7 @@ export async function main(argv: string[]): Promise<number> {
     config,
     provider,
     pipelines,
-    fullConfig: config as unknown as Parameters<typeof setupCompaction>[0]['fullConfig'],
+    fullConfig: config as never as Parameters<typeof setupCompaction>[0]['fullConfig'],
     sessionBridge, // share the same bridge for consistent audit logging (compaction + errors + future)
   });
   let effectiveMaxContext = compactionSetup.effectiveMaxContext;
@@ -1155,7 +1155,7 @@ export async function main(argv: string[]): Promise<number> {
   // Tool-failure streaks and error storms engage the Brain proactively; a
   // "steer" decision lands in THIS session's leader inbox and is injected
   // before the agent's next step.
-  const hqPublisher = createHqPublisherFromEnv({ clientKind: 'cli', projectRoot, projectName: path.basename(projectRoot), appConfig: config } as unknown as Parameters<typeof createHqPublisherFromEnv>[0]);
+  const hqPublisher = createHqPublisherFromEnv({ clientKind: 'cli', projectRoot, projectName: path.basename(projectRoot), appConfig: config } as never as Parameters<typeof createHqPublisherFromEnv>[0]);
   hqPublisher?.connect();
   if (hqPublisher) teardownHandlers.push(() => hqPublisher.close());
   const brainMailbox = new GlobalMailbox(wpaths.projectDir, events, hqPublisher);
@@ -2043,7 +2043,7 @@ export async function main(argv: string[]): Promise<number> {
         configPath: wpaths.globalConfig,
       });
       if (result.patch) {
-        const patch = result.patch as unknown as Partial<Config>;
+        const patch = result.patch as never as Partial<Config>;
         config = patchConfig(config, patch);
         configStore.update(patch);
       }

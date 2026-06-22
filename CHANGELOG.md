@@ -4648,7 +4648,7 @@ need the prior behavior.
 - **Session-store error wrapping** uses `Error.cause` to preserve
   ENOENT/EACCES/EMFILE codes.
 - **`SubagentContext.parentBridge` typed `| null`** — the previous
-  `null as unknown as AgentBridge` cast was a type lie that hid the
+  double assertion from `null` to `AgentBridge` was a type lie that hid the
   two-phase init contract.
 - **`SessionAnalyzer.analyze` populates `sessionId`, `tasks`, and
   `modeChanges`** from session_start/task_*/mode_changed events; these

@@ -140,7 +140,7 @@ describe('agent-loop fingerprint detector', () => {
     cleanupDirs.push(tmp);
 
     const detected: Array<{ tools: string; kind?: string; repeatCount: number }> = [];
-    (agent as unknown as { events: EventBus }).events.on(
+    (agent as never as { events: EventBus }).events.on(
       'tool.loop_detected',
       (e) => detected.push({ tools: e.tools, kind: e.kind, repeatCount: e.repeatCount }),
     );
@@ -199,7 +199,7 @@ describe('agent-loop fingerprint detector', () => {
     cleanupDirs.push(tmp);
 
     const detected: Array<unknown> = [];
-    (agent as unknown as { events: EventBus }).events.on('tool.loop_detected', () =>
+    (agent as never as { events: EventBus }).events.on('tool.loop_detected', () =>
       detected.push(true),
     );
 
@@ -234,7 +234,7 @@ describe('agent-loop fingerprint detector', () => {
     cleanupDirs.push(tmp);
 
     const detected: Array<{ kind?: string; tools: string; repeatCount: number }> = [];
-    (agent as unknown as { events: EventBus }).events.on('tool.loop_detected', (e) =>
+    (agent as never as { events: EventBus }).events.on('tool.loop_detected', (e) =>
       detected.push({ kind: e.kind, tools: e.tools, repeatCount: e.repeatCount }),
     );
 
@@ -284,7 +284,7 @@ describe('agent-loop fingerprint detector', () => {
     cleanupDirs.push(tmp);
 
     const detected: Array<unknown> = [];
-    (agent as unknown as { events: EventBus }).events.on('tool.loop_detected', () =>
+    (agent as never as { events: EventBus }).events.on('tool.loop_detected', () =>
       detected.push(true),
     );
 
@@ -320,7 +320,7 @@ describe('agent-loop fingerprint detector', () => {
     cleanupDirs.push(tmp);
 
     const detected: Array<unknown> = [];
-    (agent as unknown as { events: EventBus }).events.on('tool.loop_detected', () =>
+    (agent as never as { events: EventBus }).events.on('tool.loop_detected', () =>
       detected.push(true),
     );
 
@@ -339,7 +339,7 @@ describe('agent-loop fingerprint detector', () => {
     cleanupDirs.push(tmp);
 
     const detected: Array<unknown> = [];
-    (agent as unknown as { events: EventBus }).events.on('tool.loop_detected', () =>
+    (agent as never as { events: EventBus }).events.on('tool.loop_detected', () =>
       detected.push(true),
     );
 

@@ -69,7 +69,7 @@ export function AutoPhaseView({ onClose }: { onClose: () => void }): React.React
 
   // Extract tasks from the active phase or all phases
   const tasks = activePhase
-    ? (activePhase as unknown as { tasks?: Array<{ id: string; title: string; description: string; status: string; priority: string; type: string; estimateHours?: number; assignee?: string; tags?: string[] }> }).tasks ?? []
+    ? (activePhase as never as { tasks?: Array<{ id: string; title: string; description: string; status: string; priority: string; type: string; estimateHours?: number; assignee?: string; tags?: string[] }> }).tasks ?? []
     : [];
 
   return (

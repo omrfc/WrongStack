@@ -45,7 +45,7 @@ class MockBackend implements MemoryBackend {
 
 const recorder = () => {
   const events: Array<{ type: string; payload: any }> = [];
-  const bus = { emit: (type: string, payload: unknown) => events.push({ type, payload }) } as unknown as EventBus;
+  const bus = { emit: (type: string, payload: unknown) => events.push({ type, payload }) } as never as EventBus;
   return { events, bus };
 };
 

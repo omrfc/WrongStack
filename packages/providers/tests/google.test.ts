@@ -7,7 +7,7 @@ function mockFetch(json: unknown, status = 200) {
     status,
     json: async () => json,
     text: async () => JSON.stringify(json),
-  } as unknown as Response);
+  } as never as Response);
 }
 
 describe('GoogleProvider', () => {
@@ -16,7 +16,7 @@ describe('GoogleProvider', () => {
   // request-body shape.
 
   it('non-2xx becomes ProviderError', async () => {
-    const fetchImpl = mockFetch({ error: 'bad' }, 400) as unknown as typeof fetch;
+    const fetchImpl = mockFetch({ error: 'bad' }, 400) as never as typeof fetch;
     const p = new GoogleProvider({ apiKey: 'k', fetchImpl });
     await expect(
       p.complete(
@@ -31,7 +31,7 @@ describe('GoogleProvider', () => {
   });
 
   it('marks 429 and 5xx as retryable', async () => {
-    const fetchImpl = mockFetch({}, 503) as unknown as typeof fetch;
+    const fetchImpl = mockFetch({}, 503) as never as typeof fetch;
     const p = new GoogleProvider({ apiKey: 'k', fetchImpl });
     await expect(
       p.complete(
@@ -56,7 +56,7 @@ describe('GoogleProvider', () => {
         }),
         text: async () => '',
       };
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const p = new GoogleProvider({ apiKey: 'k', fetchImpl });
     await p.complete(
       {
@@ -129,7 +129,7 @@ describe('GoogleProvider', () => {
         }),
         text: async () => '',
       };
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const p = new GoogleProvider({ apiKey: 'k', fetchImpl });
     await p.complete(
       {
@@ -166,7 +166,7 @@ describe('GoogleProvider', () => {
         }),
         text: async () => '',
       };
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const p = new GoogleProvider({ apiKey: 'k', fetchImpl });
     await p.complete(
       {
@@ -228,7 +228,7 @@ describe('GoogleProvider', () => {
         }),
         text: async () => '',
       };
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const p = new GoogleProvider({ apiKey: 'k', fetchImpl });
     await p.complete(
       {

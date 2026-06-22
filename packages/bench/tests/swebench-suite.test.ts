@@ -63,7 +63,7 @@ describe('createSwebenchSuite.loadTasks', () => {
     expect(t.id).toBe('swebench/inst-1');
     expect(t.prompt).toMatch(/Fix the bug/);
     expect(t.templateDir).toBe(path.join(dir, 'dataset', 'inst-1', 'repo'));
-    const meta = t.meta as unknown as SwebenchMeta;
+    const meta = t.meta as never as SwebenchMeta;
     expect(meta).toMatchObject({ instanceId: 'inst-1', image: 'swebench/inst-1:latest', failToPass: ['test_a'], passToPass: ['test_b'] });
   });
 
@@ -72,7 +72,7 @@ describe('createSwebenchSuite.loadTasks', () => {
     await writeInstance('inst-min', { problem_statement: 123 }); // non-string → ''
     const suite = createSwebenchSuite({ subsetFile: subsetPath(), datasetDir: path.join(dir, 'dataset') });
     const tasks = await suite.loadTasks({});
-    const meta = tasks[0]!.meta as unknown as SwebenchMeta;
+    const meta = tasks[0]!.meta as never as SwebenchMeta;
     expect(meta.failToPass).toEqual([]);
     expect(meta.passToPass).toEqual([]);
     expect(meta.image).toBeUndefined();

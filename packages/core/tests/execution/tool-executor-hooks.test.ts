@@ -22,7 +22,7 @@ function makeCtx(): Context {
     model: 'm',
     tools: [],
     meta: {},
-  } as unknown as Context;
+  } as never as Context;
 }
 
 const scrubber = { scrub: (s: string) => s };

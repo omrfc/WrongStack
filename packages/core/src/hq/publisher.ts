@@ -142,9 +142,15 @@ export class HqPublisher {
 
   connect(): void {
     if (this.socket !== null || this.stopped) return;
-    const socket = this.socketFactory(toClientUrl(this.options.url, this.options.token), {
-      ...(this.options.token !== undefined ? { token: this.options.token } : {}),
-    });
+    let socket: HqSocketLike;
+    try {
+      socket = this.socketFactory(toClientUrl(this.options.url, this.options.token), {
+        ...(this.options.token !== undefined ? { token: this.options.token } : {}),
+      });
+    } catch {
+      this.scheduleReconnect();
+      return;
+    }
     this.socket = socket;
 
     const onOpen = () => {
@@ -309,6 +315,7 @@ export class HqPublisher {
   private startCommandPolling(): void {
     if (this.options.onCommand === undefined || this.commandPollTimer !== null) return;
     this.commandPollTimer = setInterval(() => this.pollCommands(), this.options.commandPollIntervalMs ?? DEFAULT_COMMAND_POLL_INTERVAL_MS);
+    this.commandPollTimer.unref?.();
   }
 
   private stopCommandPolling(): void {
@@ -374,5 +381,6 @@ export class HqPublisher {
       this.reconnectTimer = null;
       this.connect();
     }, delay);
+    this.reconnectTimer.unref?.();
   }
 }

@@ -23,7 +23,7 @@ function tool(
   } as Tool;
 }
 
-const ctx = (): Context => ({ hasRead: () => false, projectRoot: '/proj' }) as unknown as Context;
+const ctx = (): Context => ({ hasRead: () => false, projectRoot: '/proj' }) as never as Context;
 
 let dir: string;
 let trustFile: string;
@@ -193,7 +193,7 @@ describe('cache / default / trust-entry paths', () => {
 
   it('auto-approves write when the file was already read this session', async () => {
     const p = new DefaultPermissionPolicy({ trustFile });
-    const c = { hasRead: () => true, projectRoot: '/proj' } as unknown as Context;
+    const c = { hasRead: () => true, projectRoot: '/proj' } as never as Context;
     const d = await p.evaluate(tool('write'), { path: 'x.ts' }, c);
     expect(d).toMatchObject({ permission: 'auto', source: 'context' });
   });

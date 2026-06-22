@@ -88,7 +88,7 @@ export const batchToolUseTool: Tool<BatchToolUseInput, BatchToolUseOutput> = {
       failed = allResults.filter((r) => !r.success).length;
     } else {
       for (const call of input.calls) {
-        const result = await executeSingle(call, ctx, opts ?? { signal: undefined as unknown as AbortSignal });
+        const result = await executeSingle(call, ctx, opts ?? { signal: undefined as never as AbortSignal });
         results.push(result);
         if (result.success) {
           succeeded++;

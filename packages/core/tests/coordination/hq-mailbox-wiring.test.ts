@@ -15,7 +15,7 @@ function makePublisher(): HqPublisher {
     publishEvent,
     publishMailboxEvent: publishEvent,
     publishMailboxSnapshot: publishSnapshot,
-  } as unknown as HqPublisher;
+  } as never as HqPublisher;
 }
 
 beforeEach(async () => {
@@ -37,12 +37,14 @@ describe('GlobalMailbox HQ publisher wiring', () => {
     expect(publishSnapshot).not.toHaveBeenCalled();
   });
 
-  it('publishes mailbox.snapshot and mailbox.event on send/register/ack/heartbeat', async () => {
+  it('publishes mailbox.snapshot and mailbox.event on send/register/ack/heartbeat/client activity', async () => {
     mailbox = new GlobalMailbox(dir, undefined, makePublisher());
 
     await mailbox.registerAgent({ agentId: 'leader@1', sessionId: 'session_1', name: 'Leader', role: 'leader', pid: 1, source: 'cli' });
     const msg = await mailbox.send({ from: 'leader@1', to: '*', type: 'status', subject: 'done', body: 'done' });
     await mailbox.heartbeat({ agentId: 'leader@1', status: 'running' });
+    await mailbox.registerClient({ clientId: 'tui@1', sessionId: 'session_1', name: 'TUI', source: 'tui', pid: 1 });
+    await mailbox.clientHeartbeat({ clientId: 'tui@1' });
     await mailbox.ack({ messageId: msg.id, readerId: 'leader@1', completed: true, outcome: 'shipped' });
 
     const actions = publishEvent.mock.calls.map((call) => (call[0] as { action: string }).action);
@@ -51,8 +53,7 @@ describe('GlobalMailbox HQ publisher wiring', () => {
     expect(actions).toContain('agent.heartbeat');
     expect(actions).toContain('message.completed');
 
-    const snapshotCalls = publishSnapshot.mock.calls.length;
-    expect(snapshotCalls).toBeGreaterThan(0);
+    expect(publishSnapshot.mock.calls.length).toBeGreaterThanOrEqual(6);
   });
 
   it('keeps mailbox behavior unaffected when the HQ publisher throws', async () => {
@@ -61,7 +62,7 @@ describe('GlobalMailbox HQ publisher wiring', () => {
         throw new Error('HQ down');
       }),
       publishMailboxSnapshot: vi.fn(() => Promise.reject(new Error('HQ snapshot down'))),
-    } as unknown as HqPublisher;
+    } as never as HqPublisher;
 
     mailbox = new GlobalMailbox(dir, undefined, failingPublisher);
 

@@ -48,7 +48,7 @@ function makeStubProvider(): Provider {
     stream: () => {
       throw new Error('stub provider: stream not implemented');
     },
-  } as unknown as Provider;
+  } as never as Provider;
 }
 
 function makeDeps(overrides: Partial<SubcommandDeps> = {}): SubcommandDeps {
@@ -60,7 +60,7 @@ function makeDeps(overrides: Partial<SubcommandDeps> = {}): SubcommandDeps {
       model: 'test-model',
       features: {},
       tools: {},
-    } as unknown as Config,
+    } as never as Config,
     renderer: {
       write: vi.fn(),
       writeError: vi.fn(),
@@ -69,8 +69,8 @@ function makeDeps(overrides: Partial<SubcommandDeps> = {}): SubcommandDeps {
       projectRoot: '/tmp',
     } as never,
     reader: { readLine: vi.fn(), readKey: vi.fn(), readSecret: vi.fn(), close: vi.fn() } as never,
-    modelsRegistry: { providers: {}, customModels: {} } as unknown as ModelsRegistry,
-    paths: {} as unknown as WstackPaths,
+    paths: {} as never as WstackPaths,
+    paths: {} as WstackPaths,
     vault: { encrypt: vi.fn((s: string) => s), decrypt: vi.fn((s: string) => s) } as never,
     cwd: '/tmp',
     projectRoot: '/tmp',
@@ -91,7 +91,7 @@ describe('buildAcpServerAgentFactory', () => {
 
   it('throws AcpServerConfigError when no provider is configured', () => {
     const deps = makeDeps({
-      config: { provider: undefined, model: undefined } as unknown as Config,
+      config: { provider: undefined, model: undefined } as never as Config,
     });
     expect(() => buildAcpServerAgentFactory(deps)).toThrow(AcpServerConfigError);
     expect(() => buildAcpServerAgentFactory(deps)).toThrow(/wstack auth/);
@@ -99,14 +99,14 @@ describe('buildAcpServerAgentFactory', () => {
 
   it('throws AcpServerConfigError when provider is set but model is missing', () => {
     const deps = makeDeps({
-      config: { provider: 'anthropic', model: undefined } as unknown as Config,
+      config: { provider: 'anthropic', model: undefined } as never as Config,
     });
     expect(() => buildAcpServerAgentFactory(deps)).toThrow(AcpServerConfigError);
   });
 
   it('builds a real, isolated Agent per session when a provider is configured', async () => {
     const provider = makeStubProvider();
-    const providerRegistry = { has: () => true } as unknown as ProviderRegistry;
+    const providerRegistry = { has: () => true } as never as ProviderRegistry;
     mockSetupProvider.mockResolvedValue({
       provider,
       providerRegistry,
@@ -131,7 +131,7 @@ describe('buildAcpServerAgentFactory', () => {
 
   it('memoizes the provider boot so repeated sessions reuse one setup call', async () => {
     const provider = makeStubProvider();
-    const providerRegistry = { has: () => true } as unknown as ProviderRegistry;
+    const providerRegistry = { has: () => true } as never as ProviderRegistry;
     mockSetupProvider.mockResolvedValue({
       provider,
       providerRegistry,

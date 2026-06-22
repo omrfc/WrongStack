@@ -250,6 +250,35 @@ describe('DefaultMailbox', () => {
     expect(results).toEqual([]);
   });
 
+  it('invalidates its read cache when the mailbox file changes externally', async () => {
+    await mailbox.send({ from: 'a', to: 'b', type: 'note', subject: 'cached', body: 'body' });
+
+    const first = await mailbox.query({ to: 'b' });
+    const second = await mailbox.query({ to: 'b' });
+    expect(first.map((m) => m.subject)).toEqual(['cached']);
+    expect(second.map((m) => m.subject)).toEqual(['cached']);
+
+    await fs.appendFile(
+      mailbox.mailboxPath,
+      `${JSON.stringify({
+        id: 'external',
+        from: 'a',
+        to: 'b',
+        type: 'note',
+        subject: 'external',
+        body: 'body',
+        priority: 'normal',
+        readBy: {},
+        completed: false,
+        timestamp: new Date(Date.now() + 1_000).toISOString(),
+      })}\n`,
+      'utf8',
+    );
+
+    const third = await mailbox.query({ to: 'b' });
+    expect(third.map((m) => m.subject)).toEqual(['external', 'cached']);
+  });
+
   it('persists and reloads messages across instances', async () => {
     await mailbox.send({ from: 'a', to: 'b', type: 'note', subject: 'persistent', body: 'body' });
 

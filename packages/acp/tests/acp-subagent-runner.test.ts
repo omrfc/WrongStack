@@ -90,7 +90,7 @@ function makeCtx(timeoutMs?: number): { ctx: SubagentRunContext; controller: Abo
       markActivity: () => {},
     },
     bridge: null,
-  } as unknown as SubagentRunContext;
+  } as never as SubagentRunContext;
   return { ctx, controller };
 }
 

@@ -24,7 +24,7 @@ function makeApi() {
   };
 }
 
-const ctx = (over: Record<string, unknown> = {}): Context => ({ model: 'm', ...over }) as unknown as Context;
+const ctx = (over: Record<string, unknown> = {}): Context => ({ model: 'm', ...over }) as never as Context;
 
 beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), 'prompts-plugin-'));

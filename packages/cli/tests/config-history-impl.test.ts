@@ -7,6 +7,7 @@ import {
   backupCurrent,
   getHistoryEntry,
   listHistory,
+  MAX_CONFIG_HISTORY_ENTRIES,
   restoreFromHistory,
   restoreLast,
 } from '../src/config-history.js';
@@ -189,6 +190,32 @@ describe('appendHistory + listHistory + getHistoryEntry', () => {
   it('getHistoryEntry returns null for unknown id', async () => {
     const entry = await getHistoryEntry('missing', homeFn);
     expect(entry).toBeNull();
+  });
+
+  it('caps history entries and removes pruned entry files', async () => {
+    for (let i = 0; i < MAX_CONFIG_HISTORY_ENTRIES + 5; i++) {
+      await appendHistory({}, { i }, `entry ${i}`, homeFn);
+    }
+
+    const list = await listHistory(homeFn);
+    expect(list).toHaveLength(MAX_CONFIG_HISTORY_ENTRIES);
+    expect(list[0]?.description).toBe(`entry ${MAX_CONFIG_HISTORY_ENTRIES + 4}`);
+    expect(list.at(-1)?.description).toBe('entry 5');
+
+    const entryDir = path.join(wsRoot(), 'config.history', 'entries');
+    const files = (await fs.readdir(entryDir)).filter((fileName) => fileName.endsWith('.json'));
+    expect(files).toHaveLength(MAX_CONFIG_HISTORY_ENTRIES);
+    expect(files.some((fileName) => fileName.includes('entry'))).toBe(false);
+  });
+
+  it('removes orphaned history entry files while appending', async () => {
+    const entryDir = path.join(wsRoot(), 'config.history', 'entries');
+    await fs.mkdir(entryDir, { recursive: true });
+    await fs.writeFile(path.join(entryDir, 'orphan.json'), '{}');
+
+    await appendHistory({}, { provider: 'b' }, 'new entry', homeFn);
+
+    await expect(fs.access(path.join(entryDir, 'orphan.json'))).rejects.toThrow();
   });
 
   it('listHistory returns empty when index missing', async () => {

@@ -50,7 +50,7 @@ function makeGatedAgent(
       if (runOpts.signal.aborted) return { status: 'aborted', iterations: 1 };
       return { status: 'done', iterations: 1, finalText: 'released' };
     },
-  } as unknown as Agent;
+  } as never as Agent;
   return { agent, events };
 }
 
@@ -193,7 +193,7 @@ describe('coordinator races + invariants (D2)', () => {
           }
           return { status: 'done', iterations: 5, finalText: 'unreachable' };
         },
-      } as unknown as Agent;
+      } as never as Agent;
       return { agent, events };
     };
     const runner = makeAgentSubagentRunner({ factory });
@@ -243,7 +243,7 @@ describe('coordinator races + invariants (D2)', () => {
           });
           return { status: 'done', iterations: 1, finalText: 'second run ok' };
         },
-      } as unknown as Agent;
+      } as never as Agent;
       return { agent, events };
     };
     const runner = makeAgentSubagentRunner({ factory });

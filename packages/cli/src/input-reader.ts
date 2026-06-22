@@ -75,7 +75,7 @@ export class ReadlineInputReader implements InputReader {
           // If the interface is already closed/closing the 'close' event
           // may fire synchronously or on the next tick — the promise
           // handles both.
-          if ((old as unknown as { closed?: boolean | undefined }).closed) {
+          if ((old as never as { closed?: boolean | undefined }).closed) {
             resolve();
           } else {
             old.once('close', resolve);

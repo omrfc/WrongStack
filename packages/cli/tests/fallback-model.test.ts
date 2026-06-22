@@ -14,7 +14,7 @@ function fakeProvider(id: string): Provider {
 }
 
 function makeCtx(providerId: string, model: string) {
-  return { provider: fakeProvider(providerId), model } as unknown as import('@wrongstack/core').Context;
+  return { provider: fakeProvider(providerId), model } as never as import('@wrongstack/core').Context;
 }
 
 function overload(providerId: string) {
@@ -22,7 +22,7 @@ function overload(providerId: string) {
 }
 
 function cfg(over: Partial<Config>): Config {
-  return { provider: 'anthropic', model: 'opus', fallbackModels: [], ...over } as unknown as Config;
+  return { provider: 'anthropic', model: 'opus', fallbackModels: [], ...over } as never as Config;
 }
 
 describe('parseModelRef', () => {

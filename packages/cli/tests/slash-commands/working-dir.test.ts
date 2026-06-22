@@ -21,7 +21,7 @@ const fakeSession = {
   appendBatch: async () => undefined,
   flush: async () => undefined,
   close: async () => undefined,
-} as unknown as SessionWriter;
+} as never as SessionWriter;
 
 function mkContext(overrides: {
   projectRoot: string;
@@ -49,7 +49,7 @@ function mkDeps(): SlashCommandContext {
     events: { emit: () => {}, on: () => () => {}, off: () => {} },
     cwd: '/tmp',
     projectRoot: '/tmp',
-  } as unknown as SlashCommandContext;
+  } as never as SlashCommandContext;
 }
 
 // ── Temp dir setup ─────────────────────────────────────────────────────────

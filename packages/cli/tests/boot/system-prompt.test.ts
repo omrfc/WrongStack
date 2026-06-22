@@ -47,7 +47,7 @@ function makeLogger(): Logger {
     warn: () => {},
     error: () => {},
     debug: () => {},
-  } as unknown as Logger;
+  } as never as Logger;
 }
 
 function makeConfig(): Config {
@@ -58,14 +58,14 @@ function makeConfig(): Config {
     debugStream: false,
     context: { preserveK: 0, eliseThreshold: 0 },
     features: { skills: false },
-  } as unknown as Config;
+  } as never as Config;
 }
 
 function makeModelsRegistry(): ModelsRegistry {
   return {
     getModel: vi.fn(async () => undefined),
     getProvider: vi.fn(async () => undefined),
-  } as unknown as ModelsRegistry;
+  } as never as ModelsRegistry;
 }
 
 function makeProviderResult() {

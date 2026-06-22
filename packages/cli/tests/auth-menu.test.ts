@@ -59,7 +59,7 @@ function makeRenderer(): TerminalRenderer {
     writeInfo: vi.fn(),
     clear: vi.fn(),
     render: vi.fn(),
-  } as unknown as TerminalRenderer;
+  } as never as TerminalRenderer;
 }
 
 function makeReader(lines: string[], secrets: string[] = []): ReadlineInputReader {
@@ -75,7 +75,7 @@ function makeReader(lines: string[], secrets: string[] = []): ReadlineInputReade
       return secrets[si++] ?? '';
     }),
     close: vi.fn(async () => {}),
-  } as unknown as ReadlineInputReader;
+  } as never as ReadlineInputReader;
 }
 
 function makeModelsRegistry(catalog: Record<string, Partial<ResolvedProvider>>): ModelsRegistry {
@@ -86,7 +86,7 @@ function makeModelsRegistry(catalog: Record<string, Partial<ResolvedProvider>>):
     listProviders: vi.fn(async () => Object.values(catalog) as ResolvedProvider[]),
     suggestModel: vi.fn(async () => undefined),
     refresh: vi.fn(async () => undefined),
-  } as unknown as ModelsRegistry;
+  } as never as ModelsRegistry;
 }
 
 async function setupDeps(opts: {

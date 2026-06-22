@@ -69,7 +69,7 @@ describe('startStaticServe', () => {
 
   it('threads options into createHttpServer and listens on httpPort/host', () => {
     const fake = new FakeServer();
-    const createServer = vi.fn(() => fake as unknown as Server);
+    const createServer = vi.fn(() => fake as never as Server);
 
     const handle = startStaticServe(baseOpts, {
       resolveDist: () => '/resolved/dist',
@@ -94,7 +94,7 @@ describe('startStaticServe', () => {
 
   it('passes apiToken to createHttpServer when provided', () => {
     const fake = new FakeServer();
-    const createServer = vi.fn(() => fake as unknown as Server);
+    const createServer = vi.fn(() => fake as never as Server);
 
     const handle = startStaticServe(
       { ...baseOpts, apiToken: 'test-token-123' },

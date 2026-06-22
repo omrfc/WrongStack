@@ -69,7 +69,7 @@ vi.mock('../src/utils/term.js', () => ({ writeErr: (s: string) => process.stderr
 import { bootConfig, flagsToConfigPatch } from '../src/boot.js';
 import { migratePlaintextSecrets } from '../src/security/secret-vault.js';
 
-const migrateMock = migratePlaintextSecrets as unknown as ReturnType<typeof vi.fn>;
+const migrateMock = migratePlaintextSecrets as never as ReturnType<typeof vi.fn>;
 
 describe('bootConfig (core)', () => {
   beforeEach(() => {

@@ -43,7 +43,7 @@ export function createPlanPlugin(opts?: PlanPluginOptions): Plugin {
     defaultConfig: {},
 
     setup(api) {
-      const rawConfig = api.config as unknown as Record<string, unknown>;
+      const rawConfig = api.config as never as Record<string, unknown>;
       const paths = opts?.paths ?? (rawConfig.paths as WstackPaths | undefined);
       api.slashCommands.register(buildPlanCommand(paths?.projectPlan));
       api.log.info('[plan] loaded — /plan available');

@@ -8,13 +8,13 @@ const mockRetryPolicy = (): RetryPolicy =>
     shouldRetry: vi.fn().mockReturnValue(true),
     delayMs: vi.fn().mockReturnValue(10),
     maxAttempts: vi.fn().mockReturnValue(3),
-  } as unknown as RetryPolicy);
+  } as never as RetryPolicy);
 
 const mockErrorHandler = (): ErrorHandler =>
   ({
     classify: vi.fn().mockReturnValue({ kind: 'rate_limit', retryable: true }),
     recover: vi.fn().mockResolvedValue(null),
-  } as unknown as ErrorHandler);
+  } as never as ErrorHandler);
 
 describe('SecurityScannerOrchestrator', () => {
   describe('constructor', () => {

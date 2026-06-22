@@ -6,7 +6,7 @@ function mockWs() {
   return {
     readyState: 1,
     send: vi.fn(),
-  } as unknown as WebSocket & { send: ReturnType<typeof vi.fn> };
+  } as never as WebSocket & { send: ReturnType<typeof vi.fn> };
 }
 
 function sentMessages(ws: ReturnType<typeof mockWs>) {

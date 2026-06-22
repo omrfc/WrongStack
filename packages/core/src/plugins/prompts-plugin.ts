@@ -27,7 +27,7 @@ export function createPromptsPlugin(opts?: PromptsPluginOptions): Plugin {
     defaultConfig: {},
 
     setup(api) {
-      const rawConfig = api.config as unknown as Record<string, unknown>;
+      const rawConfig = api.config as never as Record<string, unknown>;
       const paths = opts?.paths ?? (rawConfig.paths as WstackPaths | undefined);
       store = opts?.store ?? (paths ? new DefaultPromptStore(paths) : null);
 
@@ -123,7 +123,7 @@ function buildPromptsCommand(store: DefaultPromptStore | null): SlashCommand {
           const exact = matches.find((m) => m.title.toLowerCase() === parsed.title?.toLowerCase()) ?? expectDefined(matches[0]);
 
           // ctx.provider is the Provider instance. Cast through unknown for the simple text-in/text-out interface.
-          const prov = ctx.provider as unknown as {
+          const prov = ctx.provider as never as {
             complete?: (model: string | undefined, text: string) => Promise<string>;
           };
           if (!prov?.complete) return { message: 'LLM not available. Configure a provider first.' };

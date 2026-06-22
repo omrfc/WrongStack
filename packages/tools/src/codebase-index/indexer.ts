@@ -265,7 +265,7 @@ async function runIndexerWithStore(store: IndexStore, opts: IndexerOptions): Pro
           stat = await (fs.stat as (path: string, opts: { signal?: AbortSignal }) => Promise<Stats>)(file, statOpts);
         } catch (e) {
           if (isAbortError(e)) throw e;
-          return { file, stat: null as unknown as Stats, lang: '', parsed: null, error: `stat error: ${e instanceof Error ? e.message : String(e)}` };
+          return { file, stat: null as never as Stats, lang: '', parsed: null, error: `stat error: ${e instanceof Error ? e.message : String(e)}` };
         }
         if (!stat.isFile()) return { file, stat, lang: '', parsed: null };
 

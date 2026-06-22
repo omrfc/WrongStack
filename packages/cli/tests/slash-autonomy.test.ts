@@ -51,7 +51,7 @@ function rig(projectRoot: string) {
     toolRegistry: new ToolRegistry(),
     tokenCounter: new DefaultTokenCounter(),
     compactor: new HybridCompactor({ preserveK: 5 }),
-    renderer: renderer as unknown as SlashCommandContext['renderer'],
+    renderer: renderer as never as SlashCommandContext['renderer'],
     cwd: projectRoot,
     projectRoot,
     onAutonomy: (setTo?: AutonomyMode) => {
@@ -84,7 +84,7 @@ const fakeCtx = {
   model: 'test-model',
   cwd: '/tmp',
   projectRoot: '/proj',
-} as unknown as Context;
+} as never as Context;
 
 describe('/autonomy slash command', () => {
   let tmp: string;

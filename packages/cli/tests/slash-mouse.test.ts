@@ -8,7 +8,7 @@ const makeCtx = (overrides: Partial<SlashCommandContext> = {}): SlashCommandCont
   return {
     renderer: { write, writeWarning } as never,
     ...overrides,
-  } as unknown as SlashCommandContext;
+  } as never as SlashCommandContext;
 };
 
 describe('/mouse slash command', () => {

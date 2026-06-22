@@ -12,7 +12,7 @@ const makeCtx = (
   return {
     compactor,
     renderer: { write, writeInfo, writeWarning } as never,
-  } as unknown as SlashCommandContext;
+  } as never as SlashCommandContext;
 };
 
 const fakeContext = {} as Context;

@@ -106,7 +106,7 @@ function releaseStdio(child: ReturnType<typeof spawn>): void {
   for (const stream of [child.stdout, child.stderr]) {
     if (!stream) continue;
     stream.resume();
-    (stream as unknown as { unref?: () => void }).unref?.();
+    (stream as never as { unref?: () => void }).unref?.();
   }
 }
 

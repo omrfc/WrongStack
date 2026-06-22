@@ -64,7 +64,7 @@ describe('/techstack', () => {
     if (opts.withFetch) toolRegistry.register(fetchToolStub());
     const ctx: Partial<SlashCommandContext> = {
       toolRegistry,
-      renderer: renderer as unknown as SlashCommandContext['renderer'],
+      renderer: renderer as never as SlashCommandContext['renderer'],
       cwd: projectRoot,
       projectRoot,
       onSpawnAndWait: opts.onSpawnAndWait,

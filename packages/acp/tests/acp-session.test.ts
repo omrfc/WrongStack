@@ -42,7 +42,7 @@ vi.mock('../src/agent/stdio-transport.js', () => {
       this.sent.push(m);
     });
     constructor() {
-      hoisted.instances.push(this as unknown as FakeTransport);
+      hoisted.instances.push(this as never as FakeTransport);
     }
     onMessage(h: (m: ACPMessage) => void): () => void {
       this.handlers.push(h);
@@ -52,10 +52,10 @@ vi.mock('../src/agent/stdio-transport.js', () => {
       for (const h of [...this.handlers]) h(m);
     }
     respond(id: number | string, method: string, result: unknown): void {
-      this.emit({ jsonrpc: '2.0', id, method, result } as unknown as ACPMessage);
+      this.emit({ jsonrpc: '2.0', id, method, result } as never as ACPMessage);
     }
     respondError(id: number | string, method: string, error: { code: number; message: string }): void {
-      this.emit({ jsonrpc: '2.0', id, method, error } as unknown as ACPMessage);
+      this.emit({ jsonrpc: '2.0', id, method, error } as never as ACPMessage);
     }
   }
   return { ClientTransport, StdioTransport: class {} };
@@ -137,7 +137,7 @@ describe('ACPSession', () => {
         sessionId: 'sess_abc',
         update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hel' } },
       },
-    } as unknown as ACPMessage);
+    } as never as ACPMessage);
     t.emit({
       jsonrpc: '2.0',
       method: 'session/update',
@@ -145,7 +145,7 @@ describe('ACPSession', () => {
         sessionId: 'sess_abc',
         update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'lo' } },
       },
-    } as unknown as ACPMessage);
+    } as never as ACPMessage);
     // Now return the stopReason
     t.respond(promptMsg!.id!, 'session/prompt', { stopReason: 'end_turn' });
 
@@ -225,7 +225,7 @@ describe('ACPSession', () => {
       id,
       method: 'fs/read_text_file',
       params: { sessionId: 'sess_abc', path: filePath },
-    } as unknown as ACPMessage);
+    } as never as ACPMessage);
 
     // Wait for the async handler to read the file and send the response.
     // The handler awaits fileServer.readTextFile (which is a real fs
@@ -250,7 +250,7 @@ describe('ACPSession', () => {
       id,
       method: 'fs/read_text_file',
       params: { sessionId: 'sess_abc', path: '/etc/passwd' },
-    } as unknown as ACPMessage);
+    } as never as ACPMessage);
 
     await new Promise((r) => setImmediate(r));
     const response = t.sent.find(
@@ -278,7 +278,7 @@ describe('ACPSession', () => {
         args: ['-e', "console.log('hi from terminal')"],
         cwd: PROJECT_ROOT,
       },
-    } as unknown as ACPMessage);
+    } as never as ACPMessage);
     await new Promise((r) => setImmediate(r));
 
     const createResp = t.sent.find((m) => m.id === createId);
@@ -293,7 +293,7 @@ describe('ACPSession', () => {
       id: waitId,
       method: 'terminal/wait_for_exit',
       params: { sessionId: 'sess_abc', terminalId },
-    } as unknown as ACPMessage);
+    } as never as ACPMessage);
     // Give the process time to actually run and exit
     await new Promise((r) => setTimeout(r, 500));
     const waitResp = t.sent.find((m) => m.id === waitId);
@@ -307,7 +307,7 @@ describe('ACPSession', () => {
       id: outputId,
       method: 'terminal/output',
       params: { sessionId: 'sess_abc', terminalId },
-    } as unknown as ACPMessage);
+    } as never as ACPMessage);
     await new Promise((r) => setImmediate(r));
     const outputResp = t.sent.find((m) => m.id === outputId);
     expect((outputResp!.result as { output: string }).output).toContain('hi from terminal');
@@ -340,7 +340,7 @@ describe('ACPSession', () => {
           ],
         },
       },
-    } as unknown as ACPMessage);
+    } as never as ACPMessage);
     // Send a usage update
     t.emit({
       jsonrpc: '2.0',
@@ -349,7 +349,7 @@ describe('ACPSession', () => {
         sessionId: 'sess_abc',
         update: { sessionUpdate: 'usage_update', used: 1200, size: 200_000, cost: { amount: 0.01, currency: 'USD' } },
       },
-    } as unknown as ACPMessage);
+    } as never as ACPMessage);
     // And the agent's text
     t.emit({
       jsonrpc: '2.0',
@@ -358,7 +358,7 @@ describe('ACPSession', () => {
         sessionId: 'sess_abc',
         update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'ok' } },
       },
-    } as unknown as ACPMessage);
+    } as never as ACPMessage);
     t.respond(promptMsg.id!, 'session/prompt', { stopReason: 'end_turn' });
 
     const result = await promptP;

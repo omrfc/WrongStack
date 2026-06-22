@@ -80,7 +80,7 @@ describe('createSyncPlugin lifecycle', () => {
   it('wires the config getter/setter callbacks into CloudSync', async () => {
     const sync = { enabled: true, repo: 'r', githubToken: 't', categories: [] };
     const { configStore } = build(() => ({ sync }));
-    const call = (CloudSync as unknown as { mock: { calls: unknown[][] } }).mock.calls.at(-1)!;
+    const call = (CloudSync as never as { mock: { calls: unknown[][] } }).mock.calls.at(-1)!;
     const getCfg = call[1] as () => unknown;
     const setCfg = call[2] as (c: unknown) => Promise<void>;
     expect(getCfg()).toBe(sync); // getter returns config.sync

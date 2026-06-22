@@ -69,11 +69,11 @@ export interface AutoPhaseWiring {
 export function wireAutoPhase(events: EventBus): AutoPhaseWiring {
   const handlers = new Map<string, (payload: unknown) => void>();
 
-  const onUntyped = events.on.bind(events) as unknown as (
+  const onUntyped = events.on.bind(events) as never as (
     event: string,
     handler: (payload: unknown) => void,
   ) => void;
-  const offUntyped = events.off.bind(events) as unknown as (
+  const offUntyped = events.off.bind(events) as never as (
     event: string,
     handler: (payload: unknown) => void,
   ) => void;

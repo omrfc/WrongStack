@@ -10,7 +10,7 @@ const mkStore = () =>
     list: vi.fn(async () => [] as never[]),
     remember: vi.fn(async () => {}),
     forget: vi.fn(async () => 1),
-  }) as unknown as MemoryStore & {
+  }) as never as MemoryStore & {
     list: ReturnType<typeof vi.fn>;
     remember: ReturnType<typeof vi.fn>;
     forget: ReturnType<typeof vi.fn>;
@@ -19,9 +19,9 @@ const mkStore = () =>
 const mkProvider = (text: string): Provider =>
   ({
     complete: vi.fn(async () => ({ content: [{ type: 'text', text }], stopReason: 'end_turn' })),
-  }) as unknown as Provider;
+  }) as never as Provider;
 
-const ctx = (provider?: Provider): Context => ({ provider, model: 'haiku' }) as unknown as Context;
+const ctx = (provider?: Provider): Context => ({ provider, model: 'haiku' }) as never as Context;
 
 const result = (over: Partial<RunResult> = {}): RunResult =>
   ({ status: 'done', finalText: 'a meaningful session summary text', iterations: 5, ...over }) as RunResult;
@@ -134,7 +134,7 @@ describe('SessionMemoryConsolidator operations', () => {
   });
 
   it('swallows a provider failure', async () => {
-    const provider = { complete: vi.fn(async () => { throw new Error('llm down'); }) } as unknown as Provider;
+    const provider = { complete: vi.fn(async () => { throw new Error('llm down'); }) } as never as Provider;
     const c = new SessionMemoryConsolidator({ memoryStore: store, provider });
     await expect(c.afterRun(ctx(), result())).resolves.toBeUndefined();
   });

@@ -24,7 +24,7 @@ function fakeLogger(): Logger {
     error: vi.fn(),
     child: vi.fn(),
     setLevel: vi.fn(),
-  } as unknown as Logger;
+  } as never as Logger;
 }
 
 function fakeModelsRegistry(overrides: Partial<ModelsRegistry> = {}): ModelsRegistry {
@@ -34,7 +34,7 @@ function fakeModelsRegistry(overrides: Partial<ModelsRegistry> = {}): ModelsRegi
     suggestModel: vi.fn(),
     refresh: vi.fn(),
     ...overrides,
-  } as unknown as ModelsRegistry;
+  } as never as ModelsRegistry;
 }
 
 function fakeConfig(overrides: Partial<Config> = {}): Config {

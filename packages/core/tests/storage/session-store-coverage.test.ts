@@ -30,7 +30,7 @@ describe('DefaultSessionStore — observability + edge coverage', () => {
     const w = await store.create({ id: 'e51', model: 'm', provider: 'p' });
     await w.append({ type: 'user_input', ts: now(), content: 'hi' });
     await w.close();
-    const cache = (store as unknown as { _loadCache: Map<string, unknown> })._loadCache;
+    const cache = (store as never as { _loadCache: Map<string, unknown> })._loadCache;
     for (let i = 0; i < 50; i++) {
       cache.set(`dummy-${i}`, { mtimeMs: 0, size: 0, data: {} });
     }
@@ -51,7 +51,7 @@ describe('DefaultSessionStore — observability + edge coverage', () => {
   });
 
   it('auto-compacts the index once the append threshold is crossed', async () => {
-    (store as unknown as { indexAppendCount: number }).indexAppendCount = 29;
+    (store as never as { indexAppendCount: number }).indexAppendCount = 29;
     const w = await store.create({ id: 'compact-trigger', model: 'm', provider: 'p' });
     await w.append({ type: 'user_input', ts: now(), content: 'go' });
     await w.close();
@@ -68,7 +68,7 @@ describe('DefaultSessionStore — observability + edge coverage', () => {
     );
     await fs.mkdir(`${indexFile}.compact.tmp`, { recursive: true });
     events.emit.mockClear();
-    await (store as unknown as { compactIndex(): Promise<void> }).compactIndex();
+    await (store as never as { compactIndex(): Promise<void> }).compactIndex();
     const writeFail = events.emit.mock.calls.find(
       (c) => c[0] === 'storage.write' && (c[1] as { operation?: string }).operation === 'compact',
     );
@@ -78,7 +78,7 @@ describe('DefaultSessionStore — observability + edge coverage', () => {
 
   it('collectSessionIds returns empty for an unreadable directory', async () => {
     const ids = await (
-      store as unknown as { collectSessionIds(dir: string): Promise<string[]> }
+      store as never as { collectSessionIds(dir: string): Promise<string[]> }
     ).collectSessionIds(path.join(tmp, 'does', 'not', 'exist'));
     expect(ids).toEqual([]);
   });
@@ -86,7 +86,7 @@ describe('DefaultSessionStore — observability + edge coverage', () => {
   it('summaryFor rebuilds a damaged session into a fallback summary', async () => {
     await fs.mkdir(path.join(tmp, 'dmg.jsonl'), { recursive: true });
     const summary = await (
-      store as unknown as { summaryFor(id: string): Promise<{ id: string; title: string }> }
+      store as never as { summaryFor(id: string): Promise<{ id: string; title: string }> }
     ).summaryFor('dmg');
     expect(summary.id).toBe('dmg');
     expect(summary.title).toBe('(damaged)');
@@ -100,7 +100,7 @@ describe('DefaultSessionStore — observability + edge coverage', () => {
     );
     await fs.mkdir(path.join(tmp, 'dmg2.summary.json'), { recursive: true });
     events.emit.mockClear();
-    await (store as unknown as { summaryFor(id: string): Promise<unknown> }).summaryFor('dmg2');
+    await (store as never as { summaryFor(id: string): Promise<unknown> }).summaryFor('dmg2');
     const err = events.emit.mock.calls.find(
       (c) => c[0] === 'storage.error' && (c[1] as { operation?: string }).operation === 'summary_fallback',
     );

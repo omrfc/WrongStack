@@ -5,7 +5,7 @@ import { basename } from 'node:path';
 import { GlobalMailbox } from '../coordination/global-mailbox.js';
 import type { EventBus } from '../kernel/events.js';
 import type { HqClientConfig } from '../types/config.js';
-import { hqAuthFilePath, resolveHqDataDir, type HqAuthFile } from './auth-store.js';
+import { hqAuthFilePath, readHqRuntimeFileSync, resolveHqDataDir, type HqAuthFile } from './auth-store.js';
 import type { HqClientIdentity, HqProjectIdentity, HqRedactionPolicy } from './protocol.js';
 import { HqPublisher, type HqSocketFactory } from './publisher.js';
 
@@ -47,13 +47,14 @@ export function resolveHqConfig(options: {
     : fileConfig?.enabled;
   const dataDir = resolveHqDataDir(fileConfig?.dataDir, env);
   const token = envToken || configToken || readFirstClientTokenFromAuthFile(dataDir);
+  const runtimeUrl = readHqRuntimeFileSync(dataDir)?.url.trim();
   const url = envUrl || configUrl;
 
   if (!url) {
     if (enabled === false) return undefined;
     if (enabled === true || token) {
       return {
-        url: 'http://localhost:3499',
+        url: runtimeUrl || 'http://127.0.0.1:3499',
         enabled: true,
         ...(token ? { token } : {}),
       };

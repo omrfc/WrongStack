@@ -6,7 +6,7 @@ const rafCallbacks: FrameRequestCallback[] = [];
   return rafCallbacks.length;
 };
 (globalThis as { cancelAnimationFrame?: typeof cancelAnimationFrame }).cancelAnimationFrame = (handle: number) => {
-  rafCallbacks[handle - 1] = undefined as unknown as FrameRequestCallback;
+  rafCallbacks[handle - 1] = undefined as never as FrameRequestCallback;
 };
 function flushRaf() {
   const cbs = rafCallbacks.splice(0, rafCallbacks.length);
@@ -23,7 +23,7 @@ function mockTextarea(): HTMLTextAreaElement {
     setSelectionRange: vi.fn(),
     selectionStart: 0,
     selectionEnd: 0,
-  } as unknown as HTMLTextAreaElement;
+  } as never as HTMLTextAreaElement;
 }
 
 // Mock FilePicker so we can test FileMentionPicker logic without file-tree rendering
@@ -84,7 +84,7 @@ describe('FileMentionPicker', () => {
       style: { height: '' },
       scrollHeight: 100,
       ...overrides,
-    }) as unknown as HTMLTextAreaElement;
+    }) as never as HTMLTextAreaElement;
 
   it('renders nothing when atMention is null', () => {
     const { container } = render(

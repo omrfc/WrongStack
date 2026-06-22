@@ -60,7 +60,7 @@ describe('searchTool', () => {
       if (u.includes('google')) return GOOGLE_FIXTURE;
       if (u.includes('bing')) return BING_FIXTURE;
       return '';
-    }) as unknown as typeof globalThis.fetch;
+    }) as never as typeof globalThis.fetch;
   });
 
   afterEach(() => {
@@ -169,7 +169,7 @@ describe('search engine parsers (realistic fixtures)', () => {
       <cite>https://example.com/page</cite>
       <span class="aXCZ0b">The result snippet text</span>
     `;
-    globalThis.fetch = mockFetch(() => html) as unknown as typeof globalThis.fetch;
+    globalThis.fetch = mockFetch(() => html) as never as typeof globalThis.fetch;
     const result = await searchTool.execute(
       { query: 'q', source: 'google' },
       {} as any,
@@ -186,7 +186,7 @@ describe('search engine parsers (realistic fixtures)', () => {
       <h2><a href="https://example.com/b">Bing Title</a></h2>
       <p class="b_paractl">Bing snippet text</p>
     `;
-    globalThis.fetch = mockFetch(() => html) as unknown as typeof globalThis.fetch;
+    globalThis.fetch = mockFetch(() => html) as never as typeof globalThis.fetch;
     const result = await searchTool.execute({ query: 'q', source: 'bing' }, {} as any, makeOpts());
     expect(result.results.length).toBeGreaterThan(0);
     expect(result.results[0]?.title).toBe('Bing Title');
@@ -196,7 +196,7 @@ describe('search engine parsers (realistic fixtures)', () => {
   it('returns empty results when Google fetch fails', async () => {
     globalThis.fetch = vi.fn(async () => {
       throw new Error('net down');
-    }) as unknown as typeof globalThis.fetch;
+    }) as never as typeof globalThis.fetch;
     const result = await searchTool.execute({ query: 'q', source: 'google' }, {} as any, makeOpts());
     expect(result.source).toBe('google');
     expect(result.results).toEqual([]);
@@ -205,7 +205,7 @@ describe('search engine parsers (realistic fixtures)', () => {
   it('returns empty results when Bing fetch fails', async () => {
     globalThis.fetch = vi.fn(async () => {
       throw new Error('net down');
-    }) as unknown as typeof globalThis.fetch;
+    }) as never as typeof globalThis.fetch;
     const result = await searchTool.execute({ query: 'q', source: 'bing' }, {} as any, makeOpts());
     expect(result.source).toBe('bing');
     expect(result.results).toEqual([]);
@@ -228,7 +228,7 @@ describe('fetchWithTimeout error path', () => {
     // This covers lines 272-275 (clearTimeout in catch path).
     globalThis.fetch = vi.fn(async () => {
       throw new Error('Network error');
-    }) as unknown as typeof globalThis.fetch;
+    }) as never as typeof globalThis.fetch;
 
     const ctx = {} as any;
     const result = await searchTool.execute({ query: 'test', source: 'duckduckgo' }, ctx, makeOpts());
@@ -245,7 +245,7 @@ describe('anySignal already-aborted', () => {
     // reject immediately, exercising the catch block with clearTimeout.
     globalThis.fetch = vi.fn(async () => {
       throw new Error('Should not be called - already aborted');
-    }) as unknown as typeof globalThis.fetch;
+    }) as never as typeof globalThis.fetch;
 
     const ac = new AbortController();
     ac.abort(); // abort BEFORE passing to execute

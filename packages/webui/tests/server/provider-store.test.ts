@@ -70,7 +70,7 @@ describe('ProviderStore', () => {
     isEncrypted: vi.fn().mockReturnValue(false),
     encryptSync: vi.fn(),
     decryptSync: vi.fn(),
-  } as unknown as import('@wrongstack/core').DefaultSecretVault;
+  } as never as import('@wrongstack/core').DefaultSecretVault;
 
   beforeEach(() => {
     mockReadFile.mockReset();

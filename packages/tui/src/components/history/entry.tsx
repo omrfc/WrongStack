@@ -73,7 +73,7 @@ export const Entry = React.memo(function Entry({
     if (entry.kind !== 'assistant') return { steps: [] as ParsedNextStep[], stripped: '' };
     // strict=true: accepts 💡 emoji heading OR <next_steps> XML tag
     return parseNextSteps(entry.text, true);
-  }, [entry.kind, (entry as unknown as { text?: string }).text]);
+  }, [entry.kind, (entry as never as { text?: string }).text]);
 
   // Store parsed next steps in the shared suggestion store (for /next and
   // auto-submit countdown). Strict=true accepts 💡 headings or <next_steps> XML tags
@@ -83,11 +83,11 @@ export const Entry = React.memo(function Entry({
   useEffect(() => {
     if (!setSuggestions) return;
     if (entry.kind !== 'assistant') return;
-    const text = (entry as unknown as { text?: string }).text ?? '';
+    const text = (entry as never as { text?: string }).text ?? '';
     const { texts } = parseNextSteps(text, true);
     if (texts.length > 0) setSuggestions(texts);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entry.kind, (entry as unknown as { text?: string }).text, setSuggestions]);
+  }, [entry.kind, (entry as never as { text?: string }).text, setSuggestions]);
 
   switch (entry.kind) {
     case 'user':

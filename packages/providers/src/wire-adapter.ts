@@ -251,7 +251,7 @@ export abstract class WireAdapter implements Provider {
     // that never yields another chunk would freeze indefinitely.
     const webStream = Readable.toWeb(body as Readable);
     const wrappedWeb = this.wrapHangWebStream(webStream as ReadableStream<Uint8Array>, model);
-    return Readable.fromWeb(wrappedWeb as unknown as ReadableStream) as unknown as NodeJS.ReadableStream;
+    return Readable.fromWeb(wrappedWeb as never as ReadableStream) as never as NodeJS.ReadableStream;
   }
 
   private wrapHangWebStream(

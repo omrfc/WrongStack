@@ -304,7 +304,7 @@ describe('StreamableHTTPTransport — connect/callTool with mocked fetch', () =>
       const h = handlers[i++];
       if (!h) throw new Error(`unexpected fetch (no handler for call ${i})`);
       return Promise.resolve(h(url, init));
-    }) as unknown as typeof globalThis.fetch;
+    }) as never as typeof globalThis.fetch;
   }
 
   function jsonRes(
@@ -611,13 +611,13 @@ describe('StreamableHTTPTransport — connect/callTool with mocked fetch', () =>
 
   it('SSETransport buildSSEUrl adds session param', () => {
     const t = new SSETransport({ name: 'x', url: 'https://example.test/foo' });
-    const sseUrl = (t as unknown as { buildSSEUrl: () => string }).buildSSEUrl();
+    const sseUrl = (t as never as { buildSSEUrl: () => string }).buildSSEUrl();
     expect(sseUrl).toContain('session=');
   });
 
   it('SSETransport buildSSEUrl propagates URL parse errors gracefully', () => {
     const t = new SSETransport({ name: 'x', url: 'https://example.test/foo?a=1' });
-    const sseUrl = (t as unknown as { buildSSEUrl: () => string }).buildSSEUrl();
+    const sseUrl = (t as never as { buildSSEUrl: () => string }).buildSSEUrl();
     expect(sseUrl).toContain('example.test');
     expect(sseUrl).toContain('session=');
   });
@@ -635,7 +635,7 @@ describe('SSETransport — mocked connect + callTool', () => {
       const h = handlers[i++];
       if (!h) throw new Error(`unexpected fetch (no handler for call ${i})`);
       return Promise.resolve(h(url, init));
-    }) as unknown as typeof globalThis.fetch;
+    }) as never as typeof globalThis.fetch;
   }
 
   function jsonRes(
@@ -799,14 +799,14 @@ describe('SSETransport — mocked connect + callTool', () => {
           },
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
-      )) as unknown as typeof globalThis.fetch;
+      )) as never as typeof globalThis.fetch;
     const origFetch = globalThis.fetch;
     (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
     try {
       const t = new SSETransport({ name: 'x', url: 'https://m.test', requestTimeoutMs: 20 });
       await expect(
         (
-          t as unknown as { httpPost: (method: string, params: unknown) => Promise<unknown> }
+          t as never as { httpPost: (method: string, params: unknown) => Promise<unknown> }
         ).httpPost('tools/list', {}),
       ).rejects.toThrow(/body aborted|timed out|Invalid JSON-RPC response/);
     } finally {
@@ -1017,7 +1017,7 @@ describe('SSETransport — mocked connect + callTool', () => {
           },
         }),
         { status: 200, headers: { 'content-type': 'text/plain' } },
-      )) as unknown as typeof globalThis.fetch;
+      )) as never as typeof globalThis.fetch;
     const origFetch = globalThis.fetch;
     (globalThis as { fetch: typeof globalThis.fetch }).fetch = fetchImpl;
     try {
@@ -1028,7 +1028,7 @@ describe('SSETransport — mocked connect + callTool', () => {
       });
       await expect(
         (
-          t as unknown as { postRaw: (method: string, params: unknown) => Promise<unknown> }
+          t as never as { postRaw: (method: string, params: unknown) => Promise<unknown> }
         ).postRaw('tools/list', {}),
       ).rejects.toThrow(/body aborted|timed out/);
     } finally {
@@ -1056,7 +1056,7 @@ describe('SSETransport — mocked connect + callTool', () => {
       // callTool uses postRaw for error handling, but we test request() directly
       // to cover the non-OK throw path in StreamableHTTPTransport.request()
       await expect(
-        (t as unknown as { request: (m: string, p: unknown) => Promise<unknown> }).request(
+        (t as never as { request: (m: string, p: unknown) => Promise<unknown> }).request(
           'tools/call',
           { name: 'x', arguments: {} },
         ),
@@ -1088,7 +1088,7 @@ describe('SSETransport — mocked connect + callTool', () => {
       const t = new StreamableHTTPTransport({ name: 'x', url: 'https://m.test' });
       await t.connect();
       await expect(
-        (t as unknown as { request: (m: string, p: unknown) => Promise<unknown> }).request(
+        (t as never as { request: (m: string, p: unknown) => Promise<unknown> }).request(
           'tools/call',
           { name: 'x', arguments: {} },
         ),
@@ -1123,7 +1123,7 @@ describe('SSETransport — mocked connect + callTool', () => {
       const t = new StreamableHTTPTransport({ name: 'x', url: 'https://m.test' });
       await t.connect();
       const res = await (
-        t as unknown as { request: (m: string, p: unknown) => Promise<unknown> }
+        t as never as { request: (m: string, p: unknown) => Promise<unknown> }
       ).request('tools/call', { name: 'x', arguments: {} });
       // Should have found the JSON-RPC result in the NDJSON lines
       expect((res as { result?: unknown }).result).toBeDefined();
@@ -1150,7 +1150,7 @@ describe('SSETransport — mocked connect + callTool', () => {
       // Verify that passing an aborted parent signal results in an aborted child
       await expect(
         (
-          t as unknown as {
+          t as never as {
             httpPost: (m: string, p: unknown, timeoutMs?: number) => Promise<unknown>;
           }
         ).httpPost('tools/list', {}, 5000),

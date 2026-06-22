@@ -455,7 +455,7 @@ export abstract class BaseHTTPTransport {
       // The global `RequestInit.dispatcher` type now accepts `HttpDispatcher`
       // (see dispatcher-types.d.ts). The cast through `unknown` is the standard
       // pattern for "I know this is compatible at runtime."
-      fetchOpts.dispatcher = this.tlsAgent as unknown as HttpDispatcher;
+      fetchOpts.dispatcher = this.tlsAgent as never as HttpDispatcher;
     }
   }
 

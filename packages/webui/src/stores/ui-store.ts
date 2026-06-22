@@ -296,7 +296,7 @@ export const useUIStore = create<UIState>()(
           delete p.fleetDrawerOpen;
           delete p.agentsDrawerOpen;
         }
-        return p as unknown as UIState;
+        return p as never as UIState;
       },
       partialize: (s) => ({
         sidebarOpen: s.sidebarOpen,

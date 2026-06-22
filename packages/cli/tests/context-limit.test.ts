@@ -29,10 +29,10 @@ function fakeRegistry(): ModelsRegistry {
         capabilities: { maxContext: max, tools: true, vision: true, reasoning: false },
       };
     },
-  } as unknown as ModelsRegistry;
+  } as never as ModelsRegistry;
 }
 
-const provider = { capabilities: { maxContext: 200_000 } } as unknown as Provider;
+const provider = { capabilities: { maxContext: 200_000 } } as never as Provider;
 
 describe('resolveRuntimeMaxContext — OAuth sibling-catalog resolution', () => {
   it('resolves Opus 4.8 via anthropic-oauth to the real 1M window (not the 200k family default)', async () => {

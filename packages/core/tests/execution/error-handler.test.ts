@@ -95,7 +95,7 @@ describe('recovery strategies', () => {
         after: 3_000,
         reductions: [{ phase: 'system', saved: 7000 }],
       })),
-    } as unknown as Compactor;
+    } as never as Compactor;
     const eh = new DefaultErrorHandler(buildRecoveryStrategies({ compactor }));
     const res = await eh.recover(provErr('payload too big', 413), makeCtx());
     expect(res).toEqual({ action: 'retry', reason: 'context_compacted' });
@@ -109,7 +109,7 @@ describe('recovery strategies', () => {
         after: 10_000,
         reductions: [],
       })),
-    } as unknown as Compactor;
+    } as never as Compactor;
     const eh = new DefaultErrorHandler(buildRecoveryStrategies({ compactor }));
     const res = await eh.recover(provErr('payload too big', 413), makeCtx());
     expect(res).toBeNull();
@@ -120,7 +120,7 @@ describe('recovery strategies', () => {
       compact: vi.fn(async () => {
         throw new Error('compaction failed');
       }),
-    } as unknown as Compactor;
+    } as never as Compactor;
     const eh = new DefaultErrorHandler(buildRecoveryStrategies({ compactor }));
     const res = await eh.recover(provErr('payload too big', 413), makeCtx());
     expect(res).toBeNull();
@@ -163,7 +163,7 @@ describe('recovery strategies', () => {
         cost: { input: 30 },
         capabilities: { tools: true, vision: false },
       })),
-    } as unknown as ModelsRegistry;
+    } as never as ModelsRegistry;
     const eh = new DefaultErrorHandler(buildRecoveryStrategies({ modelsRegistry }));
     const res = await eh.recover(provErr('server', 503), makeCtx());
     expect(res).toEqual({
@@ -186,7 +186,7 @@ describe('recovery strategies', () => {
         cost: { input: 30 },
         capabilities: { tools: true, vision: false },
       })),
-    } as unknown as ModelsRegistry;
+    } as never as ModelsRegistry;
     const eh = new DefaultErrorHandler(buildRecoveryStrategies({ modelsRegistry }));
     expect(await eh.recover(provErr('server', 500), makeCtx())).toBeNull();
   });
@@ -195,7 +195,7 @@ describe('recovery strategies', () => {
     const modelsRegistry = {
       getProvider: vi.fn(async () => undefined),
       getModel: vi.fn(async () => undefined),
-    } as unknown as ModelsRegistry;
+    } as never as ModelsRegistry;
     const eh = new DefaultErrorHandler(buildRecoveryStrategies({ modelsRegistry }));
     expect(await eh.recover(provErr('server', 500), makeCtx())).toBeNull();
   });
@@ -206,7 +206,7 @@ describe('recovery strategies', () => {
         throw new Error('catalog gone');
       }),
       getModel: vi.fn(),
-    } as unknown as ModelsRegistry;
+    } as never as ModelsRegistry;
     const eh = new DefaultErrorHandler(buildRecoveryStrategies({ modelsRegistry }));
     expect(await eh.recover(provErr('server', 500), makeCtx())).toBeNull();
   });
@@ -230,7 +230,7 @@ describe('recovery strategies', () => {
         cost: { input: 30 },
         capabilities: { tools: true, vision: true },
       })),
-    } as unknown as ModelsRegistry;
+    } as never as ModelsRegistry;
     const eh = new DefaultErrorHandler(buildRecoveryStrategies({ modelsRegistry }));
     const res = await eh.recover(provErr('server', 500), makeCtx());
     // gpt-3.5 lacks image input, so no candidates.

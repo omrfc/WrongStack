@@ -25,7 +25,7 @@ function makeCtx(): Context {
     meta: {},
     registerAbortHook: vi.fn().mockReturnValue(() => {}),
     drainAbortHooks: vi.fn(),
-  } as unknown as Context;
+  } as never as Context;
 }
 
 function makeUse(name: string, input: Record<string, unknown> = {}): ToolUseBlock {

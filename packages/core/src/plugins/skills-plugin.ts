@@ -29,7 +29,7 @@ export function createSkillsPlugin(opts?: SkillsPluginOptions): Plugin {
     defaultConfig: {},
 
     setup(api) {
-      const rawConfig = api.config as unknown as Record<string, unknown>;
+      const rawConfig = api.config as never as Record<string, unknown>;
       const skillLoader = opts?.skillLoader ?? (rawConfig.skillLoader as SkillLoader | undefined);
 
       api.slashCommands.register(buildSkillCommand(skillLoader));

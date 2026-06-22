@@ -7,7 +7,7 @@ function mockFetch(json: unknown, status = 200) {
     status,
     json: async () => json,
     text: async () => JSON.stringify(json),
-  } as unknown as Response);
+  } as never as Response);
 }
 
 describe('OpenAIProvider', () => {
@@ -16,7 +16,7 @@ describe('OpenAIProvider', () => {
   // request-body shape.
 
   it('non-2xx becomes ProviderError', async () => {
-    const fetchImpl = mockFetch({ error: 'auth' }, 401) as unknown as typeof fetch;
+    const fetchImpl = mockFetch({ error: 'auth' }, 401) as never as typeof fetch;
     const p = new OpenAIProvider({ apiKey: 'k', fetchImpl });
     await expect(
       p.complete(
@@ -31,7 +31,7 @@ describe('OpenAIProvider', () => {
   });
 
   it('marks 429 and 5xx as retryable', async () => {
-    const fetchImpl = mockFetch({}, 429) as unknown as typeof fetch;
+    const fetchImpl = mockFetch({}, 429) as never as typeof fetch;
     const p = new OpenAIProvider({ apiKey: 'k', fetchImpl });
     await expect(
       p.complete(
@@ -42,7 +42,7 @@ describe('OpenAIProvider', () => {
   });
 
   it('wraps fetch network failure in ProviderError(retryable)', async () => {
-    const fetchImpl = vi.fn().mockRejectedValue(new Error('ECONNRESET')) as unknown as typeof fetch;
+    const fetchImpl = vi.fn().mockRejectedValue(new Error('ECONNRESET')) as never as typeof fetch;
     const p = new OpenAIProvider({ apiKey: 'k', fetchImpl });
     await expect(
       p.complete(
@@ -57,7 +57,7 @@ describe('OpenAIProvider', () => {
     const fetchImpl = vi.fn().mockImplementation(async () => {
       ctrl.abort();
       throw new Error('aborted');
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const p = new OpenAIProvider({ apiKey: 'k', fetchImpl });
     await expect(
       p.complete(
@@ -81,7 +81,7 @@ describe('OpenAIProvider', () => {
         }),
         text: async () => '',
       };
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const p = new OpenAIProvider({ apiKey: 'k', fetchImpl });
     await p.complete(
       {
@@ -100,7 +100,7 @@ describe('OpenAIProvider', () => {
             },
           },
         ],
-        toolChoice: { type: 'tool', name: 'read' } as unknown as 'auto',
+        toolChoice: { type: 'tool', name: 'read' } as never as 'auto',
       },
       { signal: new AbortController().signal },
     );
@@ -124,7 +124,7 @@ describe('OpenAIProvider', () => {
         }),
         text: async () => '',
       };
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const p = new OpenAIProvider({ apiKey: 'k', fetchImpl });
     await p.complete(
       { model: 'gpt-4o', messages: [{ role: 'user', content: 'x' }], maxTokens: 256 },
@@ -148,7 +148,7 @@ describe('OpenAIProvider', () => {
         }),
         text: async () => '',
       };
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const p = new OpenAIProvider({
       apiKey: 'k',
       baseUrl: 'https://api.z.ai/api/coding/paas/v4',
@@ -175,7 +175,7 @@ describe('OpenAIProvider', () => {
         }),
         text: async () => '',
       };
-    }) as unknown as typeof fetch;
+    }) as never as typeof fetch;
     const p = new OpenAIProvider({
       apiKey: 'k',
       baseUrl: 'https://example.com/v1/chat/completions',
@@ -205,7 +205,7 @@ describe('OpenAIProvider', () => {
     const p = new OpenAIProvider({
       apiKey: 'k',
       organization: 'org-x',
-      fetchImpl: spy as unknown as typeof fetch,
+      fetchImpl: spy as never as typeof fetch,
     });
     await p.complete(
       { model: 'm', messages: [{ role: 'user', content: 'x' }], maxTokens: 1 },

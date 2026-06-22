@@ -1506,11 +1506,11 @@ export async function startWebUI(
               payload: { phase: 'parse', message: 'Invalid message object' },
             });
           } else {
-            await handleMessage(ws, client, rawObj as WSClientMessage);
+            await handleMessage(ws, client, rawObj as never as WSClientMessage);
           }
         } else {
           // Non-object JSON (array, string, number…) — pass through
-          await handleMessage(ws, client, rawObj as unknown as WSClientMessage);
+          await handleMessage(ws, client, rawObj as WSClientMessage);
         }
       } catch (err) {
         console.error(JSON.stringify({
@@ -1553,7 +1553,7 @@ export async function startWebUI(
   // getter form resolves the CURRENT writer on every append so events
   // follow session.new / session.resume / projects.select swaps.
   const sessionLogging = resolveSessionLoggingConfig(
-    config as unknown as Parameters<typeof resolveSessionLoggingConfig>[0],
+    config as never as Parameters<typeof resolveSessionLoggingConfig>[0],
   );
   const sessionBridge = createSessionEventBridge(
     () => context.session ?? session,

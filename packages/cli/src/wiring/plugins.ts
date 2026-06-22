@@ -212,7 +212,7 @@ export async function setupPlugins(params: PluginsWiringDeps): Promise<void> {
         official: builtinPlugins.includes(plugin),
         container,
         events,
-        pipelines: pipelines as unknown as Parameters<typeof createApi>[1]['pipelines'],
+        pipelines: pipelines as never as Parameters<typeof createApi>[1]['pipelines'],
         toolRegistry,
         providerRegistry,
         slashCommandRegistry,

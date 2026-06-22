@@ -173,7 +173,7 @@ describe('skills.export — WS handler integration', () => {
       send(data: string) {
         sent.push(JSON.parse(data));
       },
-    } as unknown as WebSocket & { sent: unknown[] };
+    } as never as WebSocket & { sent: unknown[] };
     return { ws, sent };
   }
 

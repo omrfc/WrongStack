@@ -1243,7 +1243,7 @@ describe('Director orchestration', () => {
       // we reach in via a typed cast because the regression test is
       // explicitly white-box — the alternative is to expose a public
       // listener-count getter for a single test, which is worse.
-      const internal = bus as unknown as { byType: Map<string, Set<unknown>> };
+      const internal = bus as never as { byType: Map<string, Set<unknown>> };
       return internal.byType.get(type)?.size ?? 0;
     };
     const toolBefore = countListeners('tool.executed');

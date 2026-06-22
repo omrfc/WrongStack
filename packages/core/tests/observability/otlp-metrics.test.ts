@@ -100,7 +100,7 @@ describe('startOtlpMetricsExporter', () => {
     sink.counter('events_total', 1);
     const fetchImpl = vi.fn(
       async () => new Response('', { status: 200 }),
-    ) as unknown as typeof globalThis.fetch;
+    ) as never as typeof globalThis.fetch;
 
     const exp = startOtlpMetricsExporter({
       sink,
@@ -111,7 +111,7 @@ describe('startOtlpMetricsExporter', () => {
     await exp.flush();
     await exp.stop();
 
-    const calls = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const calls = (fetchImpl as never as { mock: { calls: unknown[][] } }).mock.calls;
     expect(calls.length).toBeGreaterThanOrEqual(1);
     const [url, init] = calls[0] as [string, RequestInit];
     expect(url).toBe('http://collector:4318/v1/metrics');
@@ -124,7 +124,7 @@ describe('startOtlpMetricsExporter', () => {
   it('does not duplicate /v1/metrics when already in the endpoint', async () => {
     const fetchImpl = vi.fn(
       async () => new Response('', { status: 200 }),
-    ) as unknown as typeof globalThis.fetch;
+    ) as never as typeof globalThis.fetch;
     const exp = startOtlpMetricsExporter({
       sink: new InMemoryMetricsSink(),
       endpoint: 'https://otel.example.com/v1/metrics',
@@ -132,7 +132,7 @@ describe('startOtlpMetricsExporter', () => {
     });
     await exp.flush();
     await exp.stop();
-    const [url] = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as [
+    const [url] = (fetchImpl as never as { mock: { calls: unknown[][] } }).mock.calls[0] as [
       string,
     ];
     expect(url).toBe('https://otel.example.com/v1/metrics');
@@ -141,7 +141,7 @@ describe('startOtlpMetricsExporter', () => {
   it('attaches the authorization header when supplied', async () => {
     const fetchImpl = vi.fn(
       async () => new Response('', { status: 200 }),
-    ) as unknown as typeof globalThis.fetch;
+    ) as never as typeof globalThis.fetch;
     const exp = startOtlpMetricsExporter({
       sink: new InMemoryMetricsSink(),
       endpoint: 'http://collector:4318',
@@ -151,7 +151,7 @@ describe('startOtlpMetricsExporter', () => {
     });
     await exp.flush();
     await exp.stop();
-    const [, init] = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as [
+    const [, init] = (fetchImpl as never as { mock: { calls: unknown[][] } }).mock.calls[0] as [
       string,
       RequestInit,
     ];
@@ -163,7 +163,7 @@ describe('startOtlpMetricsExporter', () => {
   it('calls onError on non-2xx responses', async () => {
     const fetchImpl = vi.fn(
       async () => new Response('bad', { status: 500 }),
-    ) as unknown as typeof globalThis.fetch;
+    ) as never as typeof globalThis.fetch;
     const onError = vi.fn();
     const exp = startOtlpMetricsExporter({
       sink: new InMemoryMetricsSink(),
@@ -181,7 +181,7 @@ describe('startOtlpMetricsExporter', () => {
   it('calls onError when fetch throws', async () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('econnrefused');
-    }) as unknown as typeof globalThis.fetch;
+    }) as never as typeof globalThis.fetch;
     const onError = vi.fn();
     const exp = startOtlpMetricsExporter({
       sink: new InMemoryMetricsSink(),
@@ -197,7 +197,7 @@ describe('startOtlpMetricsExporter', () => {
   it('pushes again on the scheduled interval', async () => {
     const fetchImpl = vi.fn(
       async () => new Response('', { status: 200 }),
-    ) as unknown as typeof globalThis.fetch;
+    ) as never as typeof globalThis.fetch;
     const exp = startOtlpMetricsExporter({
       sink: new InMemoryMetricsSink(),
       endpoint: 'http://collector:4318',
@@ -210,7 +210,7 @@ describe('startOtlpMetricsExporter', () => {
     await vi.advanceTimersByTimeAsync(1000);
     await exp.stop();
 
-    const calls = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const calls = (fetchImpl as never as { mock: { calls: unknown[][] } }).mock.calls;
     // 2 interval ticks + 1 final flush during stop()
     expect(calls.length).toBeGreaterThanOrEqual(2);
   });

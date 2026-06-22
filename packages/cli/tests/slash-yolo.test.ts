@@ -9,9 +9,9 @@ const makeCtx = (overrides: Partial<SlashCommandContext> = {}): SlashCommandCont
   const write = vi.fn();
   const writeWarning = vi.fn();
   return {
-    renderer: { write, writeWarning } as unknown as SlashCommandContext['renderer'],
+    renderer: { write, writeWarning } as never as SlashCommandContext['renderer'],
     ...overrides,
-  } as unknown as SlashCommandContext;
+  } as never as SlashCommandContext;
 };
 
 describe('/yolo slash command', () => {
@@ -47,7 +47,7 @@ describe('/yolo slash command', () => {
       onYolo = vi.fn((next?: boolean) => {
         if (next !== undefined) state = next;
         return state;
-      }) as unknown as (next?: boolean) => boolean;
+      }) as never as (next?: boolean) => boolean;
       ctx = makeCtx({ onYolo });
     });
 
@@ -86,7 +86,7 @@ describe('/yolo slash command', () => {
       onYolo = vi.fn((next?: boolean) => {
         if (next !== undefined) state = next;
         return state;
-      }) as unknown as (next?: boolean) => boolean;
+      }) as never as (next?: boolean) => boolean;
       ctx = makeCtx({ onYolo });
     });
 

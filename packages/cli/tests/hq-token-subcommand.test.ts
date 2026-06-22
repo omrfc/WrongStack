@@ -92,7 +92,7 @@ describe('wstack hq — token create', () => {
     expect(token?.token.length).toBeGreaterThanOrEqual(32);
     expect(deps.renderer.captured ? null : null).toBeNull();
     // `create` prints the token once to stdout.
-    const written = (deps.renderer as unknown as { captured: CapturedRenderer }).captured.out.join('');
+    const written = (deps.renderer as never as { captured: CapturedRenderer }).captured.out.join('');
     expect(written).toContain('Created browser token.');
     expect(written).toContain(token?.token ?? '');
   });
@@ -122,7 +122,7 @@ describe('wstack hq — token list', () => {
     const deps = makeDeps();
     const code = await hqCmd(['token', 'list'], deps);
     expect(code).toBe(0);
-    const out = (deps.renderer as unknown as { captured: CapturedRenderer }).captured.out.join('');
+    const out = (deps.renderer as never as { captured: CapturedRenderer }).captured.out.join('');
     expect(out).toContain('OPEN MODE');
     expect(out).toContain('wstack hq token create');
   });
@@ -134,7 +134,7 @@ describe('wstack hq — token list', () => {
     const deps2 = makeDeps();
     const code = await hqCmd(['token', 'list'], deps2);
     expect(code).toBe(0);
-    const out = (deps2.renderer as unknown as { captured: CapturedRenderer }).captured.out.join('');
+    const out = (deps2.renderer as never as { captured: CapturedRenderer }).captured.out.join('');
     expect(out).toContain('TOKEN MODE');
     expect(out).toContain('1)');
     expect(out).toMatch(/…/); // masked
@@ -177,7 +177,7 @@ describe('wstack hq — token revoke', () => {
     const deps = makeDeps();
     const code = await hqCmd(['token', 'revoke', 'nonexistent-id'], deps);
     expect(code).toBe(1);
-    const err = (deps.renderer as unknown as { captured: CapturedRenderer }).captured.err.join('');
+    const err = (deps.renderer as never as { captured: CapturedRenderer }).captured.err.join('');
     expect(err).toContain('No browser token found');
   });
 
@@ -185,7 +185,7 @@ describe('wstack hq — token revoke', () => {
     const deps = makeDeps();
     const code = await hqCmd(['token', 'revoke'], deps);
     expect(code).toBe(1);
-    const err = (deps.renderer as unknown as { captured: CapturedRenderer }).captured.err.join('');
+    const err = (deps.renderer as never as { captured: CapturedRenderer }).captured.err.join('');
     expect(err).toContain('Usage: wstack hq token revoke');
   });
 });
@@ -245,9 +245,9 @@ describe('wstack hq — dispatch + help', () => {
     const deps = makeDeps();
     const code = await hqCmd(['bogus'], deps);
     expect(code).toBe(1);
-    const err = (deps.renderer as unknown as { captured: CapturedRenderer }).captured.err.join('');
+    const err = (deps.renderer as never as { captured: CapturedRenderer }).captured.err.join('');
     expect(err).toContain('Unknown hq subcommand: bogus');
-    const out = (deps.renderer as unknown as { captured: CapturedRenderer }).captured.out.join('');
+    const out = (deps.renderer as never as { captured: CapturedRenderer }).captured.out.join('');
     expect(out).toContain('Usage: wstack hq');
   });
 
@@ -255,7 +255,7 @@ describe('wstack hq — dispatch + help', () => {
     const deps = makeDeps();
     const code = await hqCmd(['help'], deps);
     expect(code).toBe(0);
-    const out = (deps.renderer as unknown as { captured: CapturedRenderer }).captured.out.join('');
+    const out = (deps.renderer as never as { captured: CapturedRenderer }).captured.out.join('');
     expect(out).toContain('wstack hq token create');
     expect(out).toContain('--data-dir');
   });

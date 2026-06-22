@@ -19,7 +19,7 @@ function fakeProvider(text: string): Provider {
     capabilities: {},
     stream: vi.fn(),
     complete: vi.fn(async () => ({ content: [{ type: 'text', text }] })),
-  } as unknown as Provider;
+  } as never as Provider;
 }
 
 function throwingProvider(): Provider {
@@ -30,7 +30,7 @@ function throwingProvider(): Provider {
     complete: vi.fn(async () => {
       throw new Error('LLM down');
     }),
-  } as unknown as Provider;
+  } as never as Provider;
 }
 
 describe('createAutonomyBrain — risk gate', () => {
@@ -144,7 +144,7 @@ describe('createAutonomyBrain — LLM evaluation (llmDecide)', () => {
       capabilities: {},
       stream: vi.fn(),
       complete: vi.fn(async () => ({ text: 'Continue from the text field.' })),
-    } as unknown as Provider;
+    } as never as Provider;
     const brain = createAutonomyBrain({ provider, model: 'm' });
     const d = await brain.decide(req({ question: 'goal complete?', risk: 'medium' }));
     if (d.type === 'answer') expect(d.text).toContain('text field');
@@ -156,7 +156,7 @@ describe('createAutonomyBrain — LLM evaluation (llmDecide)', () => {
       capabilities: {},
       stream: vi.fn(),
       complete: vi.fn(async () => null),
-    } as unknown as Provider;
+    } as never as Provider;
     const brain = createAutonomyBrain({ provider, model: 'm' });
     const d = await brain.decide(req({ question: 'goal complete?', fallback: 'continue' }));
     // empty extracted text → continue fallback
@@ -169,7 +169,7 @@ describe('createAutonomyBrain — LLM evaluation (llmDecide)', () => {
       capabilities: {},
       stream: vi.fn(),
       complete: vi.fn(async () => ({ choices: [{ message: { content: 'go with [a]' } }] })),
-    } as unknown as Provider;
+    } as never as Provider;
     const brain = createAutonomyBrain({ provider, model: 'm' });
     const d = await brain.decide(
       req({
