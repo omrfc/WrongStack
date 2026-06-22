@@ -45,6 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`packages/cli/src/hq-server.ts` — Fleet flow panel in standalone HQ dashboard.**
   Visual panel rendering HQ → projects → mailboxes from live snapshots.
 
+- **`packages/core/src/hq/factory.ts` — config-backed HQ remote URL and token settings.**
+  HQ remote URL and token are now stored in `config.json` (`settings.hqUrl`, `settings.hqToken`)
+  and surfaced through `/settings` and WebUI preferences. CLI/REPL/TUI/WebUI publishers
+  thread the config-backed HQ config automatically. (`packages/core/src/hq/factory.ts`)
+
 - **`packages/core/src/hq/redaction.ts` — `scrubAndTruncateHqPreview()` helper.**
   New public helper (added in 0.268.0, now documented): runs `DefaultSecretScrubber`
   over a free-text preview field and truncates it to 280 chars with a
@@ -119,6 +124,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reconnect instead of throwing into REPL/TUI/WebUI startup; reconnect and
   command-poll timers are `unref()`ed so an unreachable HQ cannot keep a process
   alive.
+
+- **`packages/tui/src/components/status-bar.tsx` — token chip zero-token fallback.**
+  Token display now falls back to `currentRequest` input/cache tokens when provider
+  cumulative usage is still zero, preventing a useless "↑ 0 ↓ 0" chip. Added
+  regression tests in `packages/tui/tests/status-bar.test.ts`.
+
+- **`packages/tui/src/app.tsx` / `packages/tui/src/app-reducer.ts` — settings
+  field mapping and auto-save fix.** Fixed `/settings` reducer field mapping so
+  `Reasoning`, `Debug`, `Statusline`, and `Config` rows apply changes to their own
+  settings. Added `configScope` dependency to settings auto-save so changing config
+  scope persists immediately. (`packages/tui/tests/reducer.test.ts`)
+
+- **`packages/cli/src/acp-server-agent.ts` — ACP server wired to a real agent.**
+  `wstack acp` server now serves a real per-session `Agent` so ACP-capable clients
+  (Zed/JetBrains/VS Code) get genuine WrongStack responses. Added
+  `buildAcpServerAgentFactory`, wired `runACPServer` to `makeACPServerAgentTurn`.
+  Added `--echo` escape hatch for provider-less smoke tests.
+  (`packages/cli/src/acp-server-agent.ts`, `packages/cli/src/acp-server.ts`)
+
+- **`packages/tools/src/codebase-index/indexer.ts` — incremental index skip optimization.**
+  The indexer now skips reading and parsing unchanged files before checking metadata,
+  avoiding redundant I/O when file content hasn't changed since the last index run.
+  (`packages/tools/tests/codebase-index-indexer-mock.test.ts`)
+
+- **`packages/tui/src/app.tsx` / `packages/tui/src/input.tsx` — word navigation
+  and deletion.** TUI input now decodes `Ctrl+Left`/`Ctrl+Right` escape sequences
+  for word-boundary cursor movement, and `Ctrl+Backspace`/`Alt+Backspace`/`Ctrl+Delete`
+  for word-boundary deletion. Attachment chips (e.g. `[pasted #N]`) are treated as
+  single atomic units via `tokenSpanAt` helper.
+
+- **`packages/plugins/src/web-search/index.ts` — DuckDuckGo parser hardening.**
+  Hardened to parse newer DuckDuckGo result markup, decode `/l/?uddg` redirect URLs,
+  and return `ok: false` for blocked/unparseable markup instead of silently returning
+  empty results. (`packages/plugins/tests/web-search-exec.test.ts`)
+
+- **`packages/tui/src/components/worktree-monitor.tsx` — terminal-safe worktree
+  monitor close key.** Added `Esc` as a safe alternative to `Ctrl+W` for closing
+  the WorktreeMonitor overlay, avoiding terminal-level chord interference.
+  (`packages/tui/tests/worktree-monitor.test.ts`)
 
 ### Changed — versions
 
