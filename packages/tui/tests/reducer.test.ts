@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { reducer, selectedSlashCommandLine } from '../src/app.js';
+import {
+  nextInputWordStart,
+  previousInputWordStart,
+  reducer,
+  selectedSlashCommandLine,
+} from '../src/app.js';
 import { SETTINGS_FIELD_COUNT } from '../src/components/settings-picker.js';
 
 function initial() {
@@ -867,5 +872,36 @@ describe('Monitor overlays do not block input buffer mutations', () => {
     expect(s.buffer).toBe('');
     expect(s.cursor).toBe(0);
     expect(s.historyIndex).toBe(0);
+  });
+
+  it('computes Ctrl+Arrow and Ctrl+word-delete targets across whitespace runs', () => {
+    const buffer = 'alpha  beta\tgamma';
+    expect(previousInputWordStart(buffer, buffer.length)).toBe(12);
+    expect(previousInputWordStart(buffer, 12)).toBe(7);
+    expect(previousInputWordStart(buffer, 7)).toBe(0);
+    expect(nextInputWordStart(buffer, 0)).toBe(7);
+    expect(nextInputWordStart(buffer, 7)).toBe(12);
+    expect(nextInputWordStart(buffer, 12)).toBe(buffer.length);
+
+    const backspaceFromEnd = previousInputWordStart(buffer, buffer.length);
+    expect(buffer.slice(0, backspaceFromEnd) + buffer.slice(buffer.length)).toBe('alpha  beta\t');
+    const deleteFromStart = nextInputWordStart(buffer, 0);
+    expect(buffer.slice(0, 0) + buffer.slice(deleteFromStart)).toBe('beta\tgamma');
+  });
+
+  it('treats pasted/file/image chips as one word-navigation and word-delete unit', () => {
+    const chip = '[pasted #3, 10 lines]';
+    const buffer = `alpha ${chip} beta`;
+    const chipStart = 'alpha '.length;
+    const chipEnd = chipStart + chip.length;
+    expect(nextInputWordStart(buffer, chipStart)).toBe(chipEnd + 1);
+    expect(previousInputWordStart(buffer, chipEnd)).toBe(chipStart);
+
+    expect(buffer.slice(0, chipStart) + buffer.slice(nextInputWordStart(buffer, chipStart))).toBe(
+      'alpha beta',
+    );
+    expect(buffer.slice(0, previousInputWordStart(buffer, chipEnd)) + buffer.slice(chipEnd)).toBe(
+      'alpha  beta',
+    );
   });
 });

@@ -5,6 +5,7 @@ import {
   layoutInputRows,
   splitChips,
   tokenLengthForward,
+  tokenSpanAt,
 } from '../src/input-tokens.js';
 
 const rowText = (row: { ch: string }[]) => row.map((c) => c.ch).join('');
@@ -58,6 +59,22 @@ describe('tokenLengthForward', () => {
 
   it('returns 0 when no chip starts at the cursor', () => {
     expect(tokenLengthForward('plain text', 0)).toBe(0);
+  });
+});
+
+describe('tokenSpanAt', () => {
+  it('returns the whole chip span when cursor is inside or at chip boundaries', () => {
+    const chip = '[pasted #3, 10 lines]';
+    const buffer = `before ${chip} after`;
+    const start = 'before '.length;
+    const end = start + chip.length;
+    expect(tokenSpanAt(buffer, start)).toEqual({ start, end });
+    expect(tokenSpanAt(buffer, start + 5)).toEqual({ start, end });
+    expect(tokenSpanAt(buffer, end)).toEqual({ start, end });
+  });
+
+  it('returns null outside a chip', () => {
+    expect(tokenSpanAt('before [file:a.ts] after', 0)).toBeNull();
   });
 });
 

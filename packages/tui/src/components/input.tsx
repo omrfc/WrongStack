@@ -123,6 +123,14 @@ function isHomeEnd(data: string): 'home' | 'end' | null {
   return null;
 }
 
+function isCtrlArrow(data: string): 'left' | 'right' | null {
+  // Xterm/Windows Terminal encode Ctrl+Arrow as CSI 1;5D/C. Some terminals
+  // omit the "1;" prefix and send CSI 5D/C instead.
+  if (data === '\x1b[1;5D' || data === '\x1b[5D') return 'left';
+  if (data === '\x1b[1;5C' || data === '\x1b[5C') return 'right';
+  return null;
+}
+
 /**
  * Detect Backspace / Delete from raw stdin bytes. Ink 5.x `useInput` may
  * miss these on Windows Terminal — Backspace often sends `\x08` (BS / Ctrl+H)
@@ -178,6 +186,8 @@ export const Input = memo(function Input({
   const suppressInkEscRef = useRef(false);
   const suppressInkBackspaceRef = useRef(false);
   const suppressInkDeleteRef = useRef(false);
+  const suppressInkCtrlLeftRef = useRef(false);
+  const suppressInkCtrlRightRef = useRef(false);
 
   useInput((input, key) => {
     if (disabled) return;
@@ -196,6 +206,14 @@ export const Input = memo(function Input({
     }
     if (key.delete && suppressInkDeleteRef.current) {
       suppressInkDeleteRef.current = false;
+      return;
+    }
+    if (key.ctrl && key.leftArrow && suppressInkCtrlLeftRef.current) {
+      suppressInkCtrlLeftRef.current = false;
+      return;
+    }
+    if (key.ctrl && key.rightArrow && suppressInkCtrlRightRef.current) {
+      suppressInkCtrlRightRef.current = false;
       return;
     }
     onKey(input, key as KeyEvent);
@@ -247,6 +265,20 @@ export const Input = memo(function Input({
       }
       if (homeEnd === 'end') {
         onKey('', { ...EMPTY_KEY, end: true });
+        return;
+      }
+
+      // Ctrl+Left / Ctrl+Right — Ink may surface these as plain arrows or text
+      // depending on terminal, so decode the raw CSI sequence explicitly.
+      const ctrlArrow = isCtrlArrow(s);
+      if (ctrlArrow === 'left') {
+        suppressInkCtrlLeftRef.current = true;
+        onKey('', { ...EMPTY_KEY, leftArrow: true, ctrl: true });
+        return;
+      }
+      if (ctrlArrow === 'right') {
+        suppressInkCtrlRightRef.current = true;
+        onKey('', { ...EMPTY_KEY, rightArrow: true, ctrl: true });
         return;
       }
 

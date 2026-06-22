@@ -84,7 +84,14 @@ import { useAutonomousCoordinator } from './hooks/use-autonomous-coordinator.js'
 import { useStatuslineState } from './hooks/use-statusline-state.js';
 import { useTuiControllers } from './hooks/use-tui-controllers.js';
 import { useTuiEventBridge } from './hooks/use-tui-event-bridge.js';
-import { INLINE_TOKEN_SRC, deleteTokenBackward, inputIndexAtRowCol, layoutInputRows, tokenLengthForward } from './input-tokens.js';
+import {
+  INLINE_TOKEN_SRC,
+  deleteTokenBackward,
+  inputIndexAtRowCol,
+  layoutInputRows,
+  tokenLengthForward,
+  tokenSpanAt,
+} from './input-tokens.js';
 import { createKillSlashCommand } from './kill-slash.js';
 import { MOUSE_CLICK_ON, MOUSE_OFF } from './mouse.js';
 import { feedPaste } from './paste-accumulator.js';
@@ -124,6 +131,44 @@ export function selectedSlashCommandLine(picker: {
   if (!picker.open || picker.matches.length === 0) return null;
   const picked = picker.matches[picker.selected];
   return picked ? `/${picked.name}` : null;
+}
+
+function isInputWordSeparator(ch: string | undefined): boolean {
+  return ch === undefined || /\s/.test(ch);
+}
+
+export function previousInputWordStart(buffer: string, cursor: number): number {
+  let i = Math.max(0, Math.min(cursor, buffer.length));
+  const chipAtCursor = tokenSpanAt(buffer, i);
+  if (chipAtCursor && i > chipAtCursor.start) return chipAtCursor.start;
+  while (i > 0 && isInputWordSeparator(buffer[i - 1])) i--;
+  const chipBeforeCursor = tokenSpanAt(buffer, i);
+  if (chipBeforeCursor && i === chipBeforeCursor.end) return chipBeforeCursor.start;
+  while (i > 0 && !isInputWordSeparator(buffer[i - 1])) {
+    const chip = tokenSpanAt(buffer, i - 1);
+    if (chip) {
+      i = chip.start;
+      continue;
+    }
+    i--;
+  }
+  return i;
+}
+
+export function nextInputWordStart(buffer: string, cursor: number): number {
+  let i = Math.max(0, Math.min(cursor, buffer.length));
+  const chipAtCursor = tokenSpanAt(buffer, i);
+  if (chipAtCursor && i < chipAtCursor.end) i = chipAtCursor.end;
+  else while (i < buffer.length && !isInputWordSeparator(buffer[i])) {
+    const chip = tokenSpanAt(buffer, i);
+    if (chip) {
+      i = chip.end;
+      continue;
+    }
+    i++;
+  }
+  while (i < buffer.length && isInputWordSeparator(buffer[i])) i++;
+  return i;
 }
 
 /**
@@ -4741,10 +4786,21 @@ export function App({
     if (key.backspace) {
       if (key.ctrl) {
         if (cursor === 0) return;
-        const beforeCursor = buffer.slice(0, cursor);
-        const lastWordStart = beforeCursor.lastIndexOf(' ') + 1;
-        const next = beforeCursor.slice(0, lastWordStart) + buffer.slice(cursor);
-        setDraft(next, lastWordStart);
+        const chip = tokenSpanAt(buffer, cursor);
+        const deleteStart = chip && cursor > chip.start && cursor < chip.end
+          ? chip.start
+          : previousInputWordStart(buffer, cursor);
+        const deleteEnd = chip && cursor > chip.start && cursor < chip.end ? chip.end : cursor;
+        const next = buffer.slice(0, deleteStart) + buffer.slice(deleteEnd);
+        // Cancel next-steps auto-submit countdown when buffer changes.
+        if (nextStepsAutoSubmitTimerRef.current != null) {
+          clearInterval(nextStepsAutoSubmitTimerRef.current);
+          nextStepsAutoSubmitTimerRef.current = undefined;
+          setNextStepsAutoSubmitCountdown(null);
+          setNextStepsAutoSubmitLabel(null);
+          nextStepsAutoSubmitSuggestionRef.current = null;
+        }
+        setDraft(next, deleteStart);
         return;
       }
 
@@ -4775,18 +4831,21 @@ export function App({
     if (key.delete) {
       if (key.ctrl) {
         if (cursor >= buffer.length) return;
-        const afterCursor = buffer.slice(cursor);
-        const nextWordStart = afterCursor.indexOf(' ');
-        const end = nextWordStart === -1 ? buffer.length : cursor + nextWordStart + 1;
-        const next = buffer.slice(0, cursor) + buffer.slice(end);
+        const chip = tokenSpanAt(buffer, cursor);
+        const deleteStart = chip && cursor > chip.start && cursor < chip.end ? chip.start : cursor;
+        const deleteEnd = chip && cursor > chip.start && cursor < chip.end
+          ? chip.end
+          : nextInputWordStart(buffer, cursor);
+        const next = buffer.slice(0, deleteStart) + buffer.slice(deleteEnd);
         // Cancel next-steps auto-submit countdown when buffer changes.
         if (nextStepsAutoSubmitTimerRef.current != null) {
           clearInterval(nextStepsAutoSubmitTimerRef.current);
           nextStepsAutoSubmitTimerRef.current = undefined;
           setNextStepsAutoSubmitCountdown(null);
+          setNextStepsAutoSubmitLabel(null);
           nextStepsAutoSubmitSuggestionRef.current = null;
         }
-        setDraft(next, cursor);
+        setDraft(next, deleteStart);
         return;
       }
 
@@ -4808,11 +4867,7 @@ export function App({
 
     if (key.leftArrow) {
       if (key.ctrl) {
-        if (cursor === 0) return;
-        const beforeCursor = buffer.slice(0, cursor);
-        const prevWordStart = beforeCursor.lastIndexOf(' ');
-        const target = prevWordStart === -1 ? 0 : prevWordStart + 1;
-        setDraft(buffer, target);
+        setDraft(buffer, previousInputWordStart(buffer, cursor));
         return;
       }
       if (cursor > 0) setDraft(buffer, cursor - 1);
@@ -4820,11 +4875,7 @@ export function App({
     }
     if (key.rightArrow) {
       if (key.ctrl) {
-        if (cursor >= buffer.length) return;
-        const afterCursor = buffer.slice(cursor);
-        const nextWordStart = afterCursor.indexOf(' ');
-        const target = nextWordStart === -1 ? buffer.length : cursor + nextWordStart + 1;
-        setDraft(buffer, target);
+        setDraft(buffer, nextInputWordStart(buffer, cursor));
         return;
       }
       if (cursor < buffer.length) setDraft(buffer, cursor + 1);

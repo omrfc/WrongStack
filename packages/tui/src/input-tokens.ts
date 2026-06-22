@@ -37,6 +37,16 @@ export function tokenLengthForward(buffer: string, cursor: number): number {
   return m ? m[0].length : 0;
 }
 
+export function tokenSpanAt(buffer: string, cursor: number): { start: number; end: number } | null {
+  const clamped = Math.max(0, Math.min(cursor, buffer.length));
+  for (const m of buffer.matchAll(GLOBAL)) {
+    const start = m.index ?? 0;
+    const end = start + m[0].length;
+    if (clamped >= start && clamped <= end) return { start, end };
+  }
+  return null;
+}
+
 export interface ChipSpan {
   text: string;
   /** True for an attachment chip token, false for a plain run. */

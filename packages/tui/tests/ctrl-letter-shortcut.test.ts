@@ -99,4 +99,20 @@ describe('<Input /> Ctrl+letter shortcut (Ink 7 key delivery)', () => {
 
     unmount();
   });
+
+  it('forwards raw Ctrl+Left and Ctrl+Right escape sequences', async () => {
+    const { calls, onKey } = makeCapture();
+    const { stdin, unmount } = render(
+      React.createElement(Input, { value: 'hello world', cursor: 5, onKey }),
+    );
+
+    stdin.write('\x1b[1;5D');
+    stdin.write('\x1b[1;5C');
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(calls.some((c) => c.key.ctrl && c.key.leftArrow)).toBe(true);
+    expect(calls.some((c) => c.key.ctrl && c.key.rightArrow)).toBe(true);
+
+    unmount();
+  });
 });
