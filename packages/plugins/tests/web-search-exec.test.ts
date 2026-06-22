@@ -69,6 +69,13 @@ function ddgHtml(): string {
   `;
 }
 
+function ddgRedirectHtml(): string {
+  return `
+    <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fredirected&amp;rut=abc">Redirected Result</a>
+    <div class="result__snippet">Snippet via div</div>
+  `;
+}
+
 describe('web_search', () => {
   it('rejects an empty query', async () => {
     const { tools } = setup();
@@ -118,6 +125,24 @@ describe('web_search', () => {
     await tools.web_search!.execute({ query: 'cats' });
     await tools.web_search!.execute({ query: 'cats', skipCache: true });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('normalizes DuckDuckGo redirect URLs and div snippets', async () => {
+    fetchMock.mockResolvedValue(resp({ body: ddgRedirectHtml() }));
+    const { tools } = setup();
+    const res = await tools.web_search!.execute({ query: 'redirected' });
+    expect(res.ok).toBe(true);
+    expect(res.results).toMatchObject([
+      { url: 'https://example.com/redirected', title: 'Redirected Result', snippet: 'Snippet via div' },
+    ]);
+  });
+
+  it('returns ok:false when DuckDuckGo markup looks blocked or unparseable', async () => {
+    fetchMock.mockResolvedValue(resp({ body: '<html><body><div id="anomaly-modal">captcha</div></body></html>' }));
+    const { tools } = setup();
+    const res = await tools.web_search!.execute({ query: 'cats' });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/response format|blocked/);
   });
 
   it('returns ok:false when the search engine fails', async () => {

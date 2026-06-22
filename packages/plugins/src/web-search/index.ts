@@ -43,20 +43,20 @@ async function duckduckgoSearch(query: string, numResults: number): Promise<Sear
 
   const html = await resp.text();
 
-  // Parse results from DuckDuckGo HTML
+  // Parse results from DuckDuckGo HTML. DDG has used both anchor and div
+  // snippets; keep this parser tolerant so markup drift does not silently look
+  // like "no results".
   const results: SearchResult[] = [];
-  const resultRe = /<a class="result__a" href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+  const resultRe = /<a\b[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>([\s\S]*?)(?=<a\b[^>]*class="[^"]*result__a[^"]*"|<\/body>|$)/gi;
   let m: RegExpExecArray | null;
 
   // biome-ignore lint/suspicious/noAssignInExpressions: while-loop condition requires assignment
   while ((m = resultRe.exec(html)) !== null && results.length < numResults) {
-    const url = m[1];
-    /* v8 ignore next -- regex capture group 1 ([^"]+) is always non-empty when matched; defensive. */
+    const url = normalizeDuckDuckGoUrl(m[1]);
     if (!url) continue;
     /* v8 ignore next -- group 2 is always defined on a match; the ?? '' fallback is defensive. */
-    const title = (m[2] ?? '').replace(/<[^>]+>/g, '').trim();
-    /* v8 ignore next -- group 3 is always defined on a match; the ?? '' fallback is defensive. */
-    const snippet = (m[3] ?? '').replace(/<[^>]+>/g, '').trim();
+    const title = htmlToText(m[2] ?? '');
+    const snippet = extractDuckDuckGoSnippet(m[3] ?? '');
     results.push({
       url,
       title,
@@ -67,7 +67,45 @@ async function duckduckgoSearch(query: string, numResults: number): Promise<Sear
     });
   }
 
+  if (results.length === 0 && /result__a|result__snippet|result__body|anomaly-modal|captcha/i.test(html)) {
+    throw new Error('DuckDuckGo response format was not recognized or was blocked');
+  }
+
   return results;
+}
+
+function normalizeDuckDuckGoUrl(rawUrl: string | undefined): string | null {
+  if (!rawUrl) return null;
+  let url = htmlToText(rawUrl);
+  if (url.startsWith('//duckduckgo.com/l/')) url = `https:${url}`;
+  if (url.startsWith('/l/')) url = new URL(url, 'https://duckduckgo.com').toString();
+
+  try {
+    const parsed = new URL(url);
+    const redirected = parsed.searchParams.get('uddg');
+    if (redirected) return redirected;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function htmlToText(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractDuckDuckGoSnippet(html: string): string {
+  const snippetRe = /<(?:a|div)\b[^>]*class="[^"]*(?:result__snippet|result__body)[^"]*"[^>]*>([\s\S]*?)<\/(?:a|div)>/i;
+  const snippetMatch = snippetRe.exec(html);
+  return htmlToText(snippetMatch?.[1] ?? '');
 }
 
 function assertSafeIp(ip: string): void {
