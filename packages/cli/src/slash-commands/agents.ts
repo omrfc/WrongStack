@@ -2,11 +2,13 @@
  * `/agents` — agent monitoring and timeline streaming commands.
  *
  * Commands:
- *   /agents stream on      — Show agent conversations in the main chat timeline
- *   /agents stream off     — Hide agent conversations from the main chat
- *   /agents stream status  — Show current stream state
- *   /agents list           — List all active subagents
- *   /agents show <id>      — Show transcript for a specific agent
+ *   /agents               — Show legacy subagent status
+ *   /agents help          — Show detailed help
+ *   /agents stream on     — Show agent conversations in the main chat timeline
+ *   /agents stream off    — Hide agent conversations from the main chat
+ *   /agents stream status — Show current stream state
+ *   /agents list          — List all active subagents
+ *   /agents show <id>     — Show transcript for a specific agent
  */
 import type { SlashCommand } from '@wrongstack/core';
 import type { AgentMonitorService, AgentVirtualSession, AgentTimelineEntry } from '@wrongstack/core/coordination';
@@ -35,13 +37,18 @@ export function buildAgentsCommand(opts: SlashCommandContext): SlashCommand {
     description:
       'Monitor subagent activity: /agents [stream on|off|status|list|show <id>]',
     async run(args) {
-      // Access agentMonitor through the opts extended interface.
       const monitor = (opts as unknown as Record<string, unknown>).agentMonitor as AgentMonitorService | undefined;
       const { cmd, rest } = parseSubcommand(args);
       const restJoined = rest.join(' ').trim();
 
+      if (cmd === '' || cmd === 'legacy') {
+        // No args — legacy behavior: delegate to onAgents callback.
+        const agentsInfo = (opts as unknown as Record<string, unknown>).onAgents;
+        const msg = typeof agentsInfo === 'function' ? agentsInfo() : 'Use `/agents list` or `/agents help`.';
+        return { message: msg };
+      }
+
       switch (cmd) {
-        case '':
         case 'help': {
           return {
             message: [
@@ -54,6 +61,15 @@ export function buildAgentsCommand(opts: SlashCommandContext): SlashCommand {
               '`/agents show <id>`     \u{2014} Show transcript for a specific subagent',
             ].join('\n'),
           };
+        }
+        case 'status': {
+          if (monitor) {
+            const enabled = monitor.streamEnabled;
+            return { message: `Agent stream is **${enabled ? 'ON' : 'OFF'}**. Use \`/agents list\` to see active subagents.` };
+          }
+          const agentsInfo = (opts as unknown as Record<string, unknown>).onAgents;
+          const msg = typeof agentsInfo === 'function' ? agentsInfo() : 'No agent monitor active.';
+          return { message: msg };
         }
 
         case 'stream': {
@@ -104,13 +120,11 @@ export function buildAgentsCommand(opts: SlashCommandContext): SlashCommand {
 
           if (!restJoined) return { message: 'Usage: `/agents show <subagentId>`\nUse `/agents list` to find IDs.' };
 
-          // Try partial match (prefix).
           const allSessions = monitor.getAllSessions();
           let match: AgentVirtualSession | undefined = allSessions.find(
             (s: AgentVirtualSession) => s.subagentId === restJoined || s.subagentId.startsWith(restJoined),
           );
           if (!match) {
-            // Try by agent name.
             match = allSessions.find(
               (s: AgentVirtualSession) => s.agentName.toLowerCase().includes(restJoined.toLowerCase()),
             );
