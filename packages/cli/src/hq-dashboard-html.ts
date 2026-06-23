@@ -241,7 +241,10 @@ export const HQ_HTML = `<!DOCTYPE html>
   td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; background: var(--inset); border: 1px solid var(--border); color: var(--muted); }
   .empty { color: var(--dim); font-style: italic; }
-  #boot { position: fixed; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 14px; }
+  /* pointer-events:none is critical — if React mount is ever delayed (CDN
+     hang / blocked esm.sh), this full-viewport overlay must NEVER intercept
+     clicks meant for the dashboard rendered behind it. */
+  #boot { position: fixed; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 14px; pointer-events: none; }
 </style>
 </head>
 <body>
@@ -523,15 +526,22 @@ function layoutTree(nodes, edges, dir, dagre){
 /* React app (preferred) */
 async function boot(){
   var React, createRoot, RF, Background, Controls, MiniMap, Handle, Position, useNodesState, useEdgesState, dagre;
+  // Race every CDN import against a timeout. A browser-side hang (ad blocker /
+  // corporate proxy that stalls esm.sh without rejecting) would otherwise leave
+  // the page on "Loading…" forever; on timeout we reject → fall back to the
+  // dependency-free offline view instead of an eternal spinner.
+  function imp(url){ return Promise.race([ import(url), new Promise(function(_, rej){ setTimeout(function(){ rej(new Error('cdn-timeout: ' + url)); }, 9000); }) ]); }
   try {
-    React = (await import('https://esm.sh/react@18.3.1')).default;
-    createRoot = (await import('https://esm.sh/react-dom@18.3.1/client')).createRoot;
-    var rf = await import('https://esm.sh/reactflow@11.11.4?deps=react@18.3.1,react-dom@18.3.1');
+    React = (await imp('https://esm.sh/react@18.3.1')).default;
+    createRoot = (await imp('https://esm.sh/react-dom@18.3.1/client')).createRoot;
+    var rf = await imp('https://esm.sh/reactflow@11.11.4?deps=react@18.3.1,react-dom@18.3.1');
     RF = rf.default; Background = rf.Background; Controls = rf.Controls; MiniMap = rf.MiniMap; Handle = rf.Handle; Position = rf.Position;
     useNodesState = rf.useNodesState; useEdgesState = rf.useEdgesState;
-    var dmod = await import('https://esm.sh/dagre@0.8.5');
+    var dmod = await imp('https://esm.sh/dagre@0.8.5');
     dagre = dmod && dmod.default && dmod.default.graphlib ? dmod.default : dmod;
+    if(!React || !createRoot || !RF){ throw new Error('cdn-incomplete'); }
   } catch(e){
+    try { console.error('HQ: CDN load failed, using offline fallback —', e && e.message); } catch(_e){}
     renderFallback();
     connectWs();
     primeSnapshot();

@@ -1,6 +1,7 @@
-import type { Dirent } from 'node:fs';
+import { createReadStream, type Dirent } from 'node:fs';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
+import { createInterface } from 'node:readline';
 import type { EventBus } from '../kernel/events.js';
 import type { ContentBlock } from '../types/blocks.js';
 import type { Message } from '../types/messages.js';
@@ -52,6 +53,16 @@ interface IndexCacheEntry {
   summaries: SessionSummary[];
 }
 
+interface SessionFileRef {
+  id: string;
+  filePath: string;
+}
+
+interface DirectorySummaryCandidate {
+  summary: SessionSummary;
+  needsBackfill: boolean;
+}
+
 export class DefaultSessionStore implements SessionStore {
   private readonly dir: string;
   private readonly events?: EventBus | undefined;
@@ -70,6 +81,7 @@ export class DefaultSessionStore implements SessionStore {
   private readonly _loadCache = new Map<string, LoadCacheEntry>();
   private _indexCache: IndexCacheEntry | null = null;
   private static readonly LOAD_CACHE_MAX_ENTRIES = 50;
+  private static readonly LIST_SCAN_CONCURRENCY = 32;
 
   constructor(opts: SessionStoreOptions) {
     this.dir = opts.dir;
@@ -357,17 +369,10 @@ export class DefaultSessionStore implements SessionStore {
         });
         return indexed.slice(0, limit);
       }
-      // Index unavailable — fall back to full directory scan + summary parse.
-      const ids = await this.collectSessionIds(this.dir);
-      /* v8 ignore next -- summaryFor() never rejects for a collected id (its .jsonl exists) */
-      const sessions = await Promise.all(ids.map((id) => this.summaryFor(id).catch(() => null))); /* best-effort */
-      const out = sessions.filter((s): s is SessionSummary => s !== null);
-      out.sort((a, b) => {
-        if (a.startedAt < b.startedAt) return 1;
-        if (a.startedAt > b.startedAt) return -1;
-        return a.id.localeCompare(b.id);
-      });
-      return out.slice(0, limit);
+      // Index unavailable — fall back to a directory scan. Prefer summary
+      // sidecars and only backfill full JSONL-derived summaries for the page
+      // we are about to return.
+      return await this.listFromDirectoryScan(limit);
     } catch {
       return [];
     }
@@ -516,6 +521,71 @@ export class DefaultSessionStore implements SessionStore {
     return valid.length;
   }
 
+  private async listFromDirectoryScan(limit: number): Promise<SessionSummary[]> {
+    const refs = await this.collectSessionFiles(this.dir);
+    const candidates = await mapWithConcurrency(
+      refs,
+      DefaultSessionStore.LIST_SCAN_CONCURRENCY,
+      async (ref): Promise<DirectorySummaryCandidate | null> => {
+        const manifest = await this.readSummaryManifest(ref.id);
+        if (manifest) return { summary: manifest, needsBackfill: false };
+        const summary = await this.summaryHeaderFor(ref);
+        return summary ? { summary, needsBackfill: true } : null;
+      },
+    );
+    const out = candidates.filter((s): s is DirectorySummaryCandidate => s !== null);
+    out.sort((a, b) => compareSessionSummaries(a.summary, b.summary));
+
+    const selected = out.slice(0, limit);
+    const summaries = await mapWithConcurrency(
+      selected,
+      Math.min(DefaultSessionStore.LIST_SCAN_CONCURRENCY, Math.max(1, limit)),
+      async (candidate): Promise<SessionSummary | null> => {
+        if (!candidate.needsBackfill) return candidate.summary;
+        return await this.summaryFor(candidate.summary.id).catch(() => candidate.summary);
+      },
+    );
+    return summaries.filter((s): s is SessionSummary => s !== null);
+  }
+
+  private async collectSessionFiles(
+    dir: string,
+    prefix = '',
+    depth = 0,
+  ): Promise<SessionFileRef[]> {
+    let entries: Dirent[];
+    try {
+      entries = await fsp.readdir(dir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+
+    const dirEntries: Dirent[] = [];
+    const files: SessionFileRef[] = [];
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') && entry.name !== '.wrongstack') continue;
+      if (entry.name === 'shared' || entry.name === 'subagents' || entry.name === 'attachments')
+        continue;
+      if (entry.isDirectory()) {
+        dirEntries.push(entry);
+      } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+        if (entry.name === '_index.jsonl') continue;
+        const base = entry.name.replace(/\.jsonl$/, '');
+        const id = prefix ? `${prefix}/${base}` : base;
+        files.push({ id, filePath: path.join(dir, entry.name) });
+      }
+    }
+
+    const childFileArrays = await Promise.all(
+      dirEntries.map((entry) => {
+        const childPrefix = depth === 0 ? entry.name : `${prefix}/${entry.name}`;
+        return this.collectSessionFiles(path.join(dir, entry.name), childPrefix, depth + 1);
+      }),
+    );
+
+    return [...childFileArrays.flat(), ...files];
+  }
+
   /** Recursively collect session IDs from date-shard subdirectories.
    *  IDs include the date-prefix path (e.g. "2026-06-06/17-46-57Z_…").
    *  Skips `.jsonl`/`.summary.json` root files, dot-files, and
@@ -565,11 +635,10 @@ export class DefaultSessionStore implements SessionStore {
     const t0 = Date.now();
     let outcome: 'success' | 'failure' = 'success';
     let errorMsg: string | undefined;
+    const fromManifest = await this.readSummaryManifest(id, t0);
+    if (fromManifest) return fromManifest;
+
     try {
-      const raw = await fsp.readFile(manifest, 'utf8');
-      this.emitRead(id, manifest, 'summary', 'success', Date.now() - t0);
-      return JSON.parse(raw) as SessionSummary;
-    } catch {
       const full = this.sessionPath(id, '.jsonl');
       const stat = await fsp.stat(full);
       const summary = await this.summarize(id, stat.mtime.toISOString());
@@ -588,6 +657,84 @@ export class DefaultSessionStore implements SessionStore {
       errorMsg = 'summary fallback — manifest rebuilt';
       this.emitRead(id, manifest, 'summary', outcome, Date.now() - t0, errorMsg);
       return summary;
+    } catch (err) {
+      outcome = 'failure';
+      errorMsg = toErrorMessage(err);
+      this.emitRead(id, manifest, 'summary', outcome, Date.now() - t0, errorMsg);
+      return {
+        id,
+        title: '(damaged)',
+        startedAt: new Date().toISOString(),
+        model: 'unknown',
+        provider: 'unknown',
+        tokenTotal: 0,
+      };
+    }
+  }
+
+  private async readSummaryManifest(
+    id: string,
+    startTime = Date.now(),
+  ): Promise<SessionSummary | null> {
+    const manifest = this.sessionPath(id, '.summary.json');
+    try {
+      const raw = await fsp.readFile(manifest, 'utf8');
+      this.emitRead(id, manifest, 'summary', 'success', Date.now() - startTime);
+      return JSON.parse(raw) as SessionSummary;
+    } catch {
+      return null;
+    }
+  }
+
+  private async summaryHeaderFor(ref: SessionFileRef): Promise<SessionSummary | null> {
+    let mtime = new Date(0).toISOString();
+    try {
+      const stat = await fsp.stat(ref.filePath);
+      if (!stat.isFile()) {
+        return {
+          id: ref.id,
+          title: '(damaged)',
+          startedAt: stat.mtime.toISOString(),
+          model: 'unknown',
+          provider: 'unknown',
+          tokenTotal: 0,
+        };
+      }
+      mtime = stat.mtime.toISOString();
+    } catch {
+      return null;
+    }
+
+    try {
+      for await (const event of this.iterSessionEvents(ref.filePath)) {
+        if (event.type === 'session_start') {
+          return {
+            id: ref.id,
+            title: '(empty session)',
+            startedAt: event.ts,
+            model: event.model ?? 'unknown',
+            provider: event.provider ?? 'unknown',
+            tokenTotal: 0,
+          };
+        }
+      }
+      return {
+        id: ref.id,
+        title: '(empty session)',
+        startedAt: new Date(0).toISOString(),
+        model: 'unknown',
+        provider: 'unknown',
+        tokenTotal: 0,
+      };
+    } catch {
+      return {
+        id: ref.id,
+        title: '(damaged)',
+        startedAt: mtime,
+        model: 'unknown',
+        provider: 'unknown',
+        tokenTotal: 0,
+      };
     }
   }
 
@@ -750,48 +897,66 @@ export class DefaultSessionStore implements SessionStore {
 
   private async summarize(id: string, mtime: string): Promise<SessionSummary> {
     try {
-      const data = await this.load(id);
-      const firstUser = data.events.find((e) => e.type === 'user_input');
-      const title =
-        firstUser && firstUser.type === 'user_input'
-          ? userInputTitle(firstUser.content)
-          : '(empty session)';
-
-      // Compute enriched stats from events.
+      const file = this.sessionPath(id, '.jsonl');
+      let title = '(empty session)';
+      let startedAt = new Date(0).toISOString();
+      let endedAt: string | undefined;
+      let model = 'unknown';
+      let provider = 'unknown';
+      let tokenIn = 0;
+      let tokenOut = 0;
       let iterationCount = 0;
       let toolCallCount = 0;
       let toolErrorCount = 0;
       let fileChangeCount = 0;
       const toolBreakdown: Record<string, number> = {};
       let outcome: SessionSummary['outcome'] ;
-      const lastEvent = data.events[data.events.length - 1];
+      let lastEventType: SessionEvent['type'] | undefined;
+      let hasError = false;
+      let sawStart = false;
 
-      for (const e of data.events) {
-        if (e.type === 'in_flight_start') iterationCount++;
+      for await (const e of this.iterSessionEvents(file)) {
+        lastEventType = e.type;
+        if (e.type === 'session_start') {
+          if (!sawStart) {
+            sawStart = true;
+            startedAt = e.ts;
+            model = e.model ?? 'unknown';
+            provider = e.provider ?? 'unknown';
+          }
+        } else if (e.type === 'session_end') {
+          endedAt = e.ts;
+        } else if (e.type === 'user_input') {
+          if (title === '(empty session)') title = userInputTitle(e.content);
+        } else if (e.type === 'llm_response') {
+          tokenIn += e.usage.input ?? 0;
+          tokenOut += e.usage.output ?? 0;
+        } else if (e.type === 'in_flight_start') iterationCount++;
         else if (e.type === 'tool_call_start') {
           toolCallCount++;
           toolBreakdown[e.name] = (toolBreakdown[e.name] ?? 0) + 1;
         } else if (e.type === 'tool_result' && e.isError) toolErrorCount++;
         else if (e.type === 'file_snapshot') fileChangeCount += e.files.length;
+        else if (e.type === 'error' || e.type === 'provider_error') hasError = true;
       }
 
       // Determine outcome from the last event.
-      if (lastEvent?.type === 'session_end') {
+      if (lastEventType === 'session_end') {
         outcome = 'completed';
-      } else if (lastEvent?.type === 'in_flight_start') {
+      } else if (lastEventType === 'in_flight_start') {
         outcome = 'aborted';
-      } else if (data.events.some((e) => e.type === 'error')) {
+      } else if (hasError) {
         outcome = 'error';
       }
 
       return {
         id,
         title,
-        startedAt: data.metadata.startedAt,
-        endedAt: data.metadata.endedAt,
-        model: data.metadata.model ?? 'unknown',
-        provider: data.metadata.provider ?? 'unknown',
-        tokenTotal: data.usage.input + data.usage.output,
+        startedAt,
+        endedAt,
+        model,
+        provider,
+        tokenTotal: tokenIn + tokenOut,
         iterationCount: iterationCount > 0 ? iterationCount : undefined,
         toolCallCount: toolCallCount > 0 ? toolCallCount : undefined,
         toolErrorCount: toolErrorCount > 0 ? toolErrorCount : undefined,
@@ -808,6 +973,32 @@ export class DefaultSessionStore implements SessionStore {
         provider: 'unknown',
         tokenTotal: 0,
       };
+    }
+  }
+
+  private async *iterSessionEvents(file: string): AsyncGenerator<SessionEvent> {
+    const stream = createReadStream(file, { encoding: 'utf8' });
+    const lines = createInterface({ input: stream, crlfDelay: Infinity });
+    try {
+      for await (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const parsed: unknown = JSON.parse(line);
+          if (
+            parsed !== null &&
+            typeof parsed === 'object' &&
+            typeof (parsed as { type?: unknown | undefined }).type === 'string' &&
+            typeof (parsed as { ts?: unknown | undefined }).ts === 'string'
+          ) {
+            yield parsed as SessionEvent;
+          }
+        } catch {
+          // skip malformed JSON
+        }
+      }
+    } finally {
+      lines.close();
+      stream.destroy();
     }
   }
 
@@ -1669,4 +1860,31 @@ function userInputTitle(content: string | ContentBlock[]): string {
           .map((b) => b.text)
           .join(' ');
   return (text || '(non-text input)').slice(0, 60);
+}
+
+function compareSessionSummaries(a: SessionSummary, b: SessionSummary): number {
+  if (a.startedAt < b.startedAt) return 1;
+  if (a.startedAt > b.startedAt) return -1;
+  return a.id.localeCompare(b.id);
+}
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+  const workers = Array.from({ length: workerCount }, async () => {
+    for (;;) {
+      const idx = next++;
+      if (idx >= items.length) return;
+      const item = items[idx];
+      if (item !== undefined) out[idx] = await fn(item);
+    }
+  });
+  await Promise.all(workers);
+  return out;
 }

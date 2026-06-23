@@ -24,6 +24,7 @@ interface GrepOutput {
 }
 
 const DEFAULT_IGNORE = ['node_modules', '.git', 'dist', 'build', '.next', 'coverage'];
+const NATIVE_SCAN_CONCURRENCY = 32;
 
 export const grepTool: Tool<GrepInput, GrepOutput> = {
   name: 'grep',
@@ -295,6 +296,45 @@ async function runNative(
   let total = 0;
   let stopped = false;
 
+  const scanFile = async (full: string, name: string): Promise<void> => {
+    if (stopped || signal.aborted) return;
+    if (globRe && !globRe.test(name) && !globRe.test(full)) return;
+    if (globRe) globRe.lastIndex = 0;
+    try {
+      const stat = await fs.stat(full);
+      if (stat.size > 1_000_000 || stopped || signal.aborted) return;
+      const head = await fs.readFile(full);
+      if (isBinaryBuffer(head) || stopped || signal.aborted) return;
+      const text = head.toString('utf8');
+      const lines = text.split(/\r?\n/);
+      let fileHits = 0;
+      for (let i = 0; i < lines.length; i++) {
+        if (stopped || signal.aborted) break;
+        const ln = capSubject(lines[i] ?? '');
+        re.lastIndex = 0;
+        if (re.test(ln)) {
+          fileHits++;
+          total++;
+          if (mode === 'content' && matches.length < limit) {
+            matches.push(`${full}:${i + 1}:${ln}`);
+          }
+        }
+      }
+      if (fileHits > 0) {
+        fileMatches.set(full, fileHits);
+        if (mode === 'files_with_matches' && matches.length < limit) {
+          matches.push(full);
+        }
+        if (mode === 'count' && matches.length < limit) {
+          matches.push(`${full}:${fileHits}`);
+        }
+      }
+      if (matches.length >= limit) stopped = true;
+    } catch {
+      // skip read errors
+    }
+  };
+
   const walk = async (dir: string): Promise<void> => {
     if (stopped || signal.aborted) return;
     let entries: import('node:fs').Dirent[];
@@ -303,6 +343,7 @@ async function runNative(
     } catch {
       return;
     }
+    const files: Array<{ full: string; name: string }> = [];
     for (const e of entries) {
       if (stopped) return;
       if (DEFAULT_IGNORE.includes(e.name)) continue;
@@ -315,42 +356,10 @@ async function runNative(
       if (e.isDirectory()) {
         await walk(full);
       } else if (e.isFile()) {
-        if (globRe && !globRe.test(e.name) && !globRe.test(full)) continue;
-        if (globRe) globRe.lastIndex = 0;
-        try {
-          const stat = await fs.stat(full);
-          if (stat.size > 1_000_000) continue;
-          const head = await fs.readFile(full);
-          if (isBinaryBuffer(head)) continue;
-          const text = head.toString('utf8');
-          const lines = text.split(/\r?\n/);
-          let fileHits = 0;
-          for (let i = 0; i < lines.length; i++) {
-            const ln = capSubject(lines[i] ?? '');
-            re.lastIndex = 0;
-            if (re.test(ln)) {
-              fileHits++;
-              total++;
-              if (mode === 'content' && matches.length < limit) {
-                matches.push(`${full}:${i + 1}:${ln}`);
-              }
-            }
-          }
-          if (fileHits > 0) {
-            fileMatches.set(full, fileHits);
-            if (mode === 'files_with_matches' && matches.length < limit) {
-              matches.push(full);
-            }
-            if (mode === 'count' && matches.length < limit) {
-              matches.push(`${full}:${fileHits}`);
-            }
-          }
-          if (matches.length >= limit) stopped = true;
-        } catch {
-          // skip read errors
-        }
+        files.push({ full, name: e.name });
       }
     }
+    await mapWithConcurrency(files, NATIVE_SCAN_CONCURRENCY, ({ full, name }) => scanFile(full, name));
   };
   await walk(base);
 
@@ -360,4 +369,23 @@ async function runNative(
     truncated: stopped,
     used: 'native',
   };
+}
+
+async function mapWithConcurrency<T>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  if (items.length === 0) return;
+  let next = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+  const workers = Array.from({ length: workerCount }, async () => {
+    for (;;) {
+      const idx = next++;
+      if (idx >= items.length) return;
+      const item = items[idx];
+      if (item !== undefined) await fn(item);
+    }
+  });
+  await Promise.all(workers);
 }

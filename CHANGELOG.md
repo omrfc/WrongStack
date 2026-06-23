@@ -5,6 +5,144 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.272.0] — 2026-06-24
+
+> The **agent monitoring, process self-protection, and security-hardening** release.
+> Consolidates the work after `0.269.0` (the `0.270`/`0.271` bumps were bump-only).
+> Adds an `AgentMonitorService` with per-subagent timeline streams surfaced across HQ,
+> the TUI, and the WebUI; a process self-protection layer (`/ps`, process guardian,
+> kill-guard) that stops WrongStack from being killed by its own shell tools; a rapid
+> triple-Ctrl+C force-exit in the TUI; and a dedicated HQ dashboard on `--hq` that no
+> longer depends on the WebUI package. Closes a batch of security findings
+> (untrusted in-project config, child-env credential leaks, vault passphrase KEK,
+> WebSocket cookie auth, `mcp_control` risk tier) and verified issue fixes
+> (#100, #20, #15, #14, #13, #91, #99, #86). All workspace packages and the marketing
+> site are aligned to `0.272.0` in lockstep. Additive only — no breaking changes.
+
+### Added
+
+- **`packages/core` + HQ/TUI/WebUI — agent timeline monitoring.** New
+  `AgentMonitorService` listens on the FleetBus and maintains a per-subagent virtual
+  chat history (ring buffer + JSONL persistence), emitting `agent.timeline.message`
+  and `agent.status_changed` events. Wired into `MultiAgentHost` and `cli-main` boot,
+  bridged to HQ as `agent.message` / `agent.status` envelopes, and rendered in the HQ
+  browser dashboard, the TUI chat history, and the WebUI `FleetMonitor` panel. New
+  `/agents stream on|off|status|list|show <id>` slash command. Full reference in
+  `docs/agent-monitoring.md`.
+
+- **`packages/tools` — process self-protection layer.** New `/ps` command lists every
+  running WrongStack instance; `process-guardian` provides PID-based self-protection;
+  `process-registry-persistent` tracks processes across instances; and `bash-kill-guard`
+  blocks `kill`/`pkill`/`killall`/`taskkill`/`tskill` (including shell-wrapped
+  `bash -c "kill -9 PID"` and kill pipelines) from targeting protected WrongStack
+  processes. Kill protection is wired into both the bash and exec execution streams.
+
+- **`packages/tui/src/run-tui.ts` — rapid Ctrl+C force-exit.** Pressing Ctrl+C three
+  times within a 2-second window exits immediately via `process.exit(130)`, bypassing
+  the normal cleanup + Ink unmount path for a predictable fast kill when the TUI is
+  idle or unresponsive. The counter resets after the window expires.
+
+- **`packages/providers` — minimal/xhigh/max reasoning effort propagation (#14).**
+  `OpenAICompatibleProvider.buildBody` now maps the broader internal effort levels
+  onto OpenAI's accepted scale (`minimal → low`, `xhigh|max → high`) for generic
+  OpenAI-compatible servers (MiniMax, DeepSeek, OpenRouter, …), which previously
+  dropped these values silently. Never overrides a value the base builder or the
+  `zai-glm` quirk already wrote, and respects `reasoning.enabled === false`.
+
+### Changed
+
+- **`packages/cli/src/hq-server.ts` + `boot/short-circuit-hq.ts` — `--hq` serves the
+  dedicated HQ dashboard.** The HQ server root (`/`) now always serves the bundled
+  `HQ_HTML` dashboard instead of the React WebUI, removing the hard dependency on
+  `@wrongstack/webui` (HQ starts even when the package is absent). The dashboard loads
+  initial state over HTTP `/api/snapshot` before connecting via WS so it renders
+  immediately, and an interactive port prompt (`HQ server port [3499]:`) accepts Enter
+  for the default or a custom port (explicit `--port` bypasses the prompt). Static
+  assets (`/assets/*`, `/wrongstack.svg`) are now public and no longer 401 under
+  browser-token mode; API and SPA routes stay protected.
+
+- **`packages/core` HQ buffers + dashboard.** `MAX_EVENT_LOG` 500 → 5000,
+  `FEED_MAX` 50 → 500, publisher `MAX_QUEUED_MESSAGES` 250 → 2000, and
+  `COMMAND_POLL_INTERVAL_MS` 10s → 2s. The dashboard Flow panel uses a grid layout
+  that prevents mailbox overlap (horizontal stacking, dynamic SVG size, overflow-x
+  scroll) and the live feed now accepts all event types, not just `mailbox.event`.
+  Background bash is unbound from the abort signal.
+
+- **`packages/webui/server/index.ts` — handler extraction refactor (#31).** Extracted
+  the `process.*` and `goal.get` handlers and collapsed nine worklist cases into a
+  shared dispatcher, shrinking the monolithic server message switch.
+
+### Fixed
+
+- **`packages/core/src/config-loader.ts` — untrusted in-project config (WS-06,
+  Critical).** `<project>/.wrongstack/config.json` was deep-merged above the user's
+  global config with no filter, letting a cloned/malicious repo get RCE on launch
+  (`mcpServers`/`hooks`/`plugins`/LSP `extensions[].servers[].command`) or exfiltrate
+  the provider API key via a `baseUrl` override. `stripUnsafeInProjectFields()` now
+  drops `provider`/`apiKey`/`baseUrl`/`providers`/`mcpServers`/`hooks`/`plugins`/`sync`/
+  `yolo`/`extensions` from the in-project layer before merge, with an observable
+  warning; benign project prefs still merge.
+
+- **child-env connection-string credential leak (WS-01, Low).** Connection-string env
+  vars (`DATABASE_URL`, `REDIS_URL`, `*_DSN`) embed credentials in their value but not
+  their name, bypassing the child-env secret-name scrub. Any value containing
+  `scheme://[user]:<password>@host` is now dropped before forwarding to bash/exec/MCP
+  children.
+
+- **vault passphrase KEK + WS auth + `mcp_control` (WS-03/04/05).** Opt-in
+  `WRONGSTACK_VAULT_PASSPHRASE` wraps the vault data key (scrypt KEK + AES-256-GCM);
+  browser WebSocket clients now authenticate only via the HttpOnly cookie (the legacy
+  `?token=` URL path is rejected for them so the token can't leak into history /
+  referrer / proxy logs — non-browser clients keep the URL path); and `mcp_control`
+  is marked `riskTier:'destructive'` so its `npx -y <pkg>` fetch+execute behavior hits
+  the YOLO `confirmDestructive` safety net.
+
+- **`packages/tools` + `packages/core` — fetch opacity, glob DoS, trust re-prompt
+  (#100, #20, #15).** `describeFetchError` unwraps undici's swallowed `.cause`
+  (ENOTFOUND/ECONNREFUSED/TLS) instead of surfacing a bare "fetch failed"; a
+  >1024-char trust pattern no longer makes `compileGlob` throw out of every permission
+  check (`getCachedGlob` caches a never-matching regex on compile failure); and
+  bracket-bearing "always"-trusted commands (`[ -f x ]`, `grep "[0-9]"`) re-match their
+  trust entry again.
+
+- **`packages/cli` — `wrongstack update` failure guidance (#13).** On a non-zero
+  `npm install -g` exit, the command now prints npm's captured stderr (EACCES,
+  unwritable prefix, non-npm global) and offers the equivalent pnpm/yarn/bun
+  global-update commands, instead of only "Update failed with exit code N".
+
+- **`packages/plug-lsp` — async tracker listener guard (#91).** The plugin's
+  `tool.executed` listener now wraps its async `tracker.handleToolExecuted` call in a
+  `.catch()` so an unexpected throw can't become a fatal unhandled rejection.
+
+- **`packages/tools` — `killWin32Tree` async spawn error (#99).** The win32 `taskkill /T`
+  tree-kill helper now attaches a no-op `'error'` listener so an async spawn launch
+  failure (taskkill missing/blocked) is absorbed instead of crashing the process; the
+  direct `child.kill()` fallback remains.
+
+- **`packages/core` — `executeWithTimeout` pre-empt NaN.** The
+  `TIMEOUT_PREEMPT_FRACTION` import was shadowed by the `preemptFraction` parameter
+  name, making the default self-referential (`undefined` → `NaN`) so the pre-empt
+  condition never fired and the hard deadline always ran. Imported as
+  `_preemptFraction` and used as the parameter default.
+
+- **cross-platform build runner (#86).** The workspace build runner now uses
+  `$SHELL || /bin/sh` with `-c` on POSIX (Windows `ComSpec + /c` path unchanged),
+  fixing the build failure on macOS/Linux.
+
+- **`packages/acp` — OpenHands docs URL (#102).** Point the agent catalog `docs` field
+  at the canonical `OpenHands/OpenHands` URL after the org rename, instead of relying
+  on the `All-Hands-AI/OpenHands` 301 redirect.
+
+- **TS2379 / `exactOptionalPropertyTypes`.** Resolved a strict-mode type error
+  surfaced while landing the #100/#20/#15 fixes.
+
+### Docs
+
+- **`docs/agent-monitoring.md`** — complete reference for the subagent conversation
+  tracking system.
+- Updated package counts, kernel size, and the `examples/02-tools` tool count (33 → 36)
+  across the documentation.
+
 ## [0.269.0] — 2026-06-22
 
 > The **HQ command center runtime and discovery hardening** release. Adds runtime endpoint

@@ -28,7 +28,9 @@ interface CompactionMetrics {
   fastPathInnerIterations: number;
   /**
    * Outer-loop iterations in the full elision pass.
-   * Ratio fullPassIterations / messageCount ≈ 1.0 when working correctly.
+   * A targeted pass starts at the first oversized old tool block and stops at
+   * the preserve boundary, so this should stay well below messageCount when
+   * the fast-path hit is late in the old window.
    */
   fullPassIterations: number;
   /**
@@ -113,8 +115,8 @@ export function hasTextContent(m: Message): boolean {
  * tool_use is preserved is never elided.
  *
  * Instrumentation: emits `compaction.find_preserve_start.ended` with the
- * forward-walk inner-loop count so we can track whether the `.some()` calls
- * over content blocks are causing measurable O(n·m) overhead.
+ * repair-loop block count so we can track whether protocol-pair repair is
+ * scanning too much content.
  */
 export function findPreserveStart(messages: readonly Message[], preserveK: number): number {
   let pairCount = 0;
@@ -139,17 +141,9 @@ export function findPreserveStart(messages: readonly Message[], preserveK: numbe
     const prev = messages[preserveStart - 1];
     if (!first || !prev || first.role !== 'user' || prev.role !== 'assistant') break;
     if (typeof first.content === 'string' || typeof prev.content === 'string') break;
-    const resultIds = new Set<string>();
-    for (const block of first.content) {
-      pairRepairInnerIterations++;
-      if (block.type === 'tool_result') resultIds.add(block.tool_use_id);
-    }
-    if (resultIds.size === 0) break;
-    const hasMatchingUse = prev.content.some((block) => {
-      pairRepairInnerIterations++;
-      return block.type === 'tool_use' && resultIds.has(block.id);
-    });
-    if (!hasMatchingUse) break;
+    const pairCheck = hasMatchingToolPair(first.content, prev.content);
+    pairRepairInnerIterations += pairCheck.iterations;
+    if (!pairCheck.matched) break;
     preserveStart--;
   }
 
@@ -170,6 +164,37 @@ export function findPreserveStart(messages: readonly Message[], preserveK: numbe
   }
 
   return preserveStart;
+}
+
+function hasMatchingToolPair(
+  resultContent: readonly ContentBlock[],
+  useContent: readonly ContentBlock[],
+): { matched: boolean; iterations: number } {
+  let iterations = 0;
+  let firstResultId: string | undefined;
+  let resultIds: Set<string> | undefined;
+
+  for (const block of resultContent) {
+    iterations++;
+    if (block.type !== 'tool_result') continue;
+    if (firstResultId === undefined) {
+      firstResultId = block.tool_use_id;
+    } else {
+      resultIds ??= new Set([firstResultId]);
+      resultIds.add(block.tool_use_id);
+    }
+  }
+  if (firstResultId === undefined) return { matched: false, iterations };
+
+  for (const block of useContent) {
+    iterations++;
+    if (block.type !== 'tool_use') continue;
+    if (resultIds ? resultIds.has(block.id) : block.id === firstResultId) {
+      return { matched: true, iterations };
+    }
+  }
+
+  return { matched: false, iterations };
 }
 
 export interface EliseResult {
@@ -197,6 +222,7 @@ export function eliseOldToolResults(
   // detect whether the inner block-scan loop is O(n·m) as expected or has
   // regressed to quadratic behaviour.
   let hasOversized = false;
+  let firstOversizedIndex = -1;
   let fastPathIterations = 0;
   let fastPathInnerIterations = 0;
   for (let i = 0; i < preserveStart && !hasOversized; i++) {
@@ -210,6 +236,7 @@ export function eliseOldToolResults(
         (b.type === 'tool_use' && estimateToolInputTokens(b.input) >= opts.eliseThreshold);
       if (oversized) {
         hasOversized = true;
+        firstOversizedIndex = i;
         break;
       }
     }
@@ -234,43 +261,40 @@ export function eliseOldToolResults(
 
   if (!hasOversized) return { messages: messages as Message[], saved: 0, changed: false };
 
-  // ── Full elision pass ──────────────────────────────────────────────────
+  // ── Targeted elision pass ────────────────────────────────────────────────
   //
-  // Optimisation: once we've found the first oversized tool I/O block and
-  // applied the elision, we can break out of the outer loop early. The
-  // preserveStart boundary is already fixed by findPreserveStart(); any
-  // remaining messages before it are either (a) already copied as-is by the
-  // `i >= preserveStart` guard above, or (b) have no oversized tool_results.
-  // Breaking early changes worst-case from O(n·m) to O(k·m) where k is the
-  // index of the first oversized message — typically k << n.
-  //
-  // The instrumentation (ratio guard) is placed inside the loop body so it
-  // fires per-message and can detect regressions before the pass completes.
+  // The fast path already proved that every message before firstOversizedIndex
+  // is below threshold, and preserveStart caps the old window. Only scan that
+  // narrowed range, and only clone the message array/content array when an
+  // actual replacement is made.
   let saved = 0;
   let changed = false;
   let fullPassIterations = 0;
   let fullPassInnerIterations = 0;
-  const next = new Array<Message>(messages.length);
-  for (let i = 0; i < messages.length; i++) {
+  let next: Message[] | undefined;
+  for (let i = firstOversizedIndex; i < preserveStart; i++) {
     fullPassIterations++;
     const msg = messages[i];
-    if (i >= preserveStart || !msg || !Array.isArray(msg.content)) {
-      next[i] = msg as Message;
-      continue;
-    }
+    if (!msg || !Array.isArray(msg.content)) continue;
     const original = msg.content;
-    const newContent: ContentBlock[] = original.map((b) => {
+    let newContent: ContentBlock[] | undefined;
+    for (let idx = 0; idx < original.length; idx++) {
+      fullPassInnerIterations++;
+      const b = original[idx];
+      if (!b) continue;
       if (b.type === 'tool_use') {
         const tokens = estimateToolInputTokens(b.input);
-        if (tokens < opts.eliseThreshold) return b;
+        if (tokens < opts.eliseThreshold) continue;
         const elidedInput = summarizeToolUseInputElision(b, tokens);
         saved += Math.max(0, tokens - estimateToolInputTokens(elidedInput));
-        return { ...b, input: elidedInput };
+        newContent ??= original.slice();
+        newContent[idx] = { ...b, input: elidedInput };
+        continue;
       }
 
-      if (b.type !== 'tool_result') return b;
+      if (b.type !== 'tool_result') continue;
       const tokens = estimateToolResultTokens(b.content);
-      if (tokens < opts.eliseThreshold) return b;
+      if (tokens < opts.eliseThreshold) continue;
       saved += tokens;
       const elided: ToolResultBlock = {
         type: 'tool_result',
@@ -278,31 +302,20 @@ export function eliseOldToolResults(
         content: summarizeToolResultElision(b, tokens),
         is_error: b.is_error,
       };
-      return elided;
-    });
-    if (newContent.every((b, idx) => b === original[idx])) {
-      next[i] = msg;
-    } else {
+      newContent ??= original.slice();
+      newContent[idx] = elided;
+    }
+    if (newContent) {
+      next ??= messages.slice() as Message[];
       next[i] = { ...msg, content: newContent };
       changed = true;
     }
-    // Count inner iterations (same items as the original.map)
-    fullPassInnerIterations += original.length;
 
     // ── Ratio guard: defensive assertion + conditional early-break ─────────
-    //
-    // The ratio is computed here (after each outer iteration) so we can
-    // break as early as possible — before processing remaining messages.
     //
     // Defensive assertion (threshold 10): fires in dev/debug if the inner loop
     // is running more than 10x what we'd expect per message. This catches
     // pathological regressions where a single message has hundreds of blocks.
-    //
-    // Conditional early-break (threshold 1.5): uncomment the `changed &&` guard
-    // below ONLY if production sessions show fullPassInnerPerOuter > 1.5
-    // consistently. In that case, add `&& changed` to the if-condition below
-    // to break after the first elision is applied — capping worst-case from
-    // O(n·m) to O(k·m) where k is the first oversized message index.
     if (compactionDebugEnabled()) {
       const ratio = fullPassInnerIterations / fullPassIterations;
 
@@ -319,13 +332,6 @@ export function eliseOldToolResults(
           }),
         );
       }
-
-      // TODO (prod): uncomment the following `changed &&` guard to enable
-      // early-break once production data confirms fullPassInnerPerOuter > 1.5:
-      //
-      // if (changed) {
-      //   break;  // O(n·m) → O(k·m), k = first oversized message index
-      // }
     }
   }
 
@@ -340,7 +346,7 @@ export function eliseOldToolResults(
     changed,
   });
 
-  return { messages: changed ? next : (messages as Message[]), saved, changed };
+  return { messages: changed && next ? next : (messages as Message[]), saved, changed };
 }
 
 function summarizeToolUseInputElision(
