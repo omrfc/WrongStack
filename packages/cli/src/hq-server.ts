@@ -44,7 +44,32 @@ import {
   scrubAndTruncateHqPreview,
   watchHqAuthFile,
 } from '@wrongstack/core';
-import { buildCspHeader, injectWsPort } from '@wrongstack/webui/server';
+// Inlined from @wrongstack/webui/server — avoids a hard dependency on the webui package.
+// buildCspHeader and injectWsPort are only needed when serving the React WebUI.
+
+/** Build the Content-Security-Policy header value for the given WS port. */
+function buildCspHeader(wsPort: number): string {
+  return (
+    `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; ` +
+    `connect-src 'self' ws://127.0.0.1:${wsPort} wss://127.0.0.1:${wsPort} ` +
+    `ws://[::1]:${wsPort} wss://[::1]:${wsPort}; ` +
+    `img-src 'self' data:; font-src 'self' data:; worker-src 'self' blob:; object-src 'none'; ` +
+    `base-uri 'self'; frame-ancestors 'none'; form-action 'self'`
+  );
+}
+
+/**
+ * Inject the WS port as a `<meta>` tag so the frontend can connect.
+ * Idempotent: never injects twice if the source HTML already carries one.
+ */
+function injectWsPort(html: string, wsPort: number): string {
+  const tag = `<meta name="wrongstack-ws-port" content="${wsPort}" />`;
+  if (html.includes('name="wrongstack-ws-port"')) return html;
+  if (html.includes('</head>')) {
+    return html.replace('</head>', `  ${tag}\n  </head>`);
+  }
+  return `${tag}\n${html}`;
+}
 import { WebSocket, WebSocketServer } from 'ws';
 
 export interface HqServerOptions {
@@ -1317,12 +1342,13 @@ function startHqServerWithAuth(
       const url = new URL(req.url ?? '/', `http://${host}:${port}`);
 
       // When browser TOKEN MODE is active, all HTTP routes require a valid
-      // browser token. This closes the gap where /api/snapshot and
-      // /api/projects/:id were accessible without authentication even
-      // though /ws/browser was gated. Token is accepted via ?token= query
-      // param (for browser/dashboard use) or Authorization: Bearer header
-      // (for programmatic / curl access).
-      if (mutableAuth.browserTokens.size > 0) {
+      // browser token EXCEPT static assets (/assets/, /wrongstack.svg) which
+      // are public and don't need authentication. Token is accepted via
+      // ?token= query param (for browser/dashboard use) or Authorization:
+      // Bearer header (for programmatic / curl access).
+      const isStaticAsset =
+        url.pathname.startsWith('/assets/') || url.pathname === '/wrongstack.svg';
+      if (mutableAuth.browserTokens.size > 0 && !isStaticAsset) {
         const supplied = extractBrowserToken(req, url);
         if (!supplied || !mutableAuth.browserTokens.has(supplied)) {
           res.writeHead(401, { 'Content-Type': 'application/json' });
