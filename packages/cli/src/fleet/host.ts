@@ -177,6 +177,12 @@ export interface MultiAgentHostOptions {
    * the parent session's trace in observability pipelines.
    */
   traceId?: string | undefined;
+  /**
+   * Optional AgentMonitorService for tracking subagent conversations.
+   * When set, the host calls trackSubagent on spawn and completeSubagent
+   * on completion, and starts the monitor's FleetBus listener.
+   */
+  agentMonitor?: import('@wrongstack/core/coordination').AgentMonitorService | undefined;
 }
 
 /**
@@ -323,7 +329,27 @@ export class MultiAgentHost {
     this.director.on('task.completed', ({ task, result }) => {
       this.fleetManager?.removePendingTask(task.id);
       this.emitLifecycleCompleted(task.id, result);
+      // Mark subagent complete in the AgentMonitorService when available.
+      const monitor = this.opts.agentMonitor;
+      if (monitor) {
+        const subagentId = task.subagentId ?? task.id;
+        const status = result.status === 'success' ? 'completed' as const
+          : result.status === 'timeout' ? 'timeout' as const
+          : result.status === 'stopped' ? 'stopped' as const
+          : 'failed' as const;
+        const summary = result.status === 'success'
+          ? `Completed in ${result.iterations} iterations`
+          : result.error?.message ?? result.status;
+        monitor.completeSubagent(subagentId, status, summary);
+      }
     });
+
+    // Start the AgentMonitorService on the Director's FleetBus.
+    const agentMonitor = this.opts.agentMonitor;
+    if (agentMonitor) {
+      agentMonitor.start();
+    }
+
     this.directorOffHandles.push(
       this.director.fleet.filter('budget.threshold_reached', (e) => {
         const payload = e.payload as { kind: string; used: number; limit: number };
@@ -383,6 +409,12 @@ export class MultiAgentHost {
           provider: payload.provider,
           model: payload.model,
         });
+        // Track subagent in the AgentMonitorService when available.
+        const monitor = this.opts.agentMonitor;
+        if (monitor) {
+          const agentName = payload.name ?? payload.role ?? payload.subagentId;
+          monitor.trackSubagent(payload.subagentId, agentName, payload.taskId);
+        }
       }),
     );
     const coordinatorTaskAssignedHandler = ({
@@ -1226,6 +1258,11 @@ export class MultiAgentHost {
     // Stop the director and all subagents
     if (this.director) {
       await this.director.shutdown();
+    }
+    // Stop the AgentMonitorService
+    const monitor = this.opts.agentMonitor;
+    if (monitor) {
+      monitor.stop();
     }
   }
 }
