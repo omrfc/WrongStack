@@ -43,4 +43,18 @@ describe('glob-match', () => {
     expect(matchGlob('file[0-9].txt', 'fileA.txt')).toBe(false);
     expect(matchGlob('file[a-z].txt', 'fileq.txt')).toBe(true);
   });
+
+  it('an over-long pattern is inert, not throwing — one bad trust entry must not break other commands (#20)', () => {
+    // A >1024-char trust pattern (e.g. a long one-liner auto-trusted in
+    // YOLO/Auto mode) used to throw out of every permission check, failing
+    // unrelated commands like `true`/`ls`. It must now degrade to a non-match.
+    const longPattern = `git log ${'A'.repeat(1100)}`;
+    expect(longPattern.length).toBeGreaterThan(1024);
+    expect(() => matchGlob(longPattern, 'true')).not.toThrow();
+    expect(matchGlob(longPattern, 'true')).toBe(false);
+    // And it must not poison matchAny for the other (valid) patterns.
+    expect(() => matchAny([longPattern, 'ls', 'true'], 'true')).not.toThrow();
+    expect(matchAny([longPattern, 'ls', 'true'], 'true')).toBe(true);
+    expect(matchAny([longPattern, 'ls'], 'echo hello')).toBe(false);
+  });
 });

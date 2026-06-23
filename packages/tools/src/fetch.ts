@@ -268,7 +268,19 @@ export const fetchTool: Tool<FetchInput, FetchOutput> = {
     const combined = combineSignals([opts.signal, ctrl.signal]);
 
     try {
-      const res = await guardedFetch(input.url, 5, combined);
+      let res: Response;
+      try {
+        res = await guardedFetch(input.url, 5, combined);
+      } catch (err) {
+        // A user-initiated cancel propagates unchanged. Our own timeout and any
+        // transport failure get a diagnostic message: undici throws an opaque
+        // `TypeError: fetch failed` whose real reason (ENOTFOUND, ECONNREFUSED,
+        // UND_ERR_CONNECT_TIMEOUT, a TLS/cert error, …) lives only on `.cause`.
+        // Surfacing just `.message` left users with "fetch failed" and no clue
+        // why HTTPS broke (see #100), so unwrap the cause chain here.
+        if (opts.signal.aborted) throw err;
+        throw describeFetchError(err, input.url, ctrl.signal.aborted);
+      }
 
       const ct = res.headers.get('content-type') ?? 'application/octet-stream';
       if (/^image\/|^audio\/|^video\/|application\/octet-stream/.test(ct)) {
@@ -373,6 +385,34 @@ async function assertNotPrivate(hostname: string): Promise<void> {
       // DNS failure — let fetch handle it
     }
   }
+}
+
+/**
+ * Turn an opaque undici `TypeError: fetch failed` into an actionable message by
+ * walking its `.cause` chain. undici buries the transport reason (a DNS/socket
+ * errno or a TLS handshake failure) one or more `.cause` hops down, so the bare
+ * `.message` is always just "fetch failed". We join each distinct
+ * `code: message` link so the user sees, e.g.,
+ * `fetch: GET https://x failed — UND_ERR_CONNECT_TIMEOUT: Connect Timeout Error`.
+ */
+function describeFetchError(err: unknown, url: string, timedOut: boolean): Error {
+  if (timedOut) {
+    return new Error(`fetch: GET ${url} timed out after ${TIMEOUT_MS}ms`);
+  }
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  let cur: unknown = err;
+  while (cur instanceof Error && !seen.has(cur)) {
+    seen.add(cur);
+    const code = (cur as NodeJS.ErrnoException).code;
+    const label = code ? `${code}: ${cur.message}` : cur.message;
+    // Skip undici's uninformative top-level "fetch failed" wrapper, but keep it
+    // as a fallback if it turns out to be the only thing we have.
+    if (label && label !== 'fetch failed' && !parts.includes(label)) parts.push(label);
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  const detail = parts.length > 0 ? parts.join(' → ') : 'fetch failed';
+  return new Error(`fetch: GET ${url} failed — ${detail}`);
 }
 
 function prettyJson(s: string): string {

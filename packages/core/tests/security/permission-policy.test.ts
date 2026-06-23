@@ -13,6 +13,7 @@ import {
   getDangerousCapabilities,
   ToolCapabilities,
 } from '../../src/security/capabilities.js';
+import { subjectForToolInput } from '../../src/utils/tool-subject.js';
 
 function tool(
   name: string,
@@ -100,6 +101,32 @@ describe('DefaultPermissionPolicy', () => {
     await p.trust({ tool: 'edit', pattern: 'src/**' });
     const raw = await fs.readFile(trustFile, 'utf8');
     expect(JSON.parse(raw)).toEqual({ edit: { allow: ['src/**'] } });
+  });
+
+  it('an "always"-trusted bash command with glob metacharacters re-matches itself (#15)', async () => {
+    // Subjects are glob-escaped (`[ ] * ?` → `\[ \] \* \?`). Before the fix,
+    // `matchAny` re-parsed `\[`/`\]` as a character class, so a trusted command
+    // containing brackets — the shell `[ -f x ]` test, `grep "[0-9]"`, … — never
+    // matched its own stored pattern and re-prompted on every repeat.
+    for (const command of ['[ -f x ]', 'grep "[0-9]" file.txt', 'echo a[b]c']) {
+      const subject = subjectForToolInput('bash', { command })!;
+      // Emulate the user choosing "always": the subject is stored as the pattern.
+      const p = new DefaultPermissionPolicy({ trustFile });
+      await p.trust({ tool: 'bash', pattern: subject });
+      // A fresh policy (empty eval cache) re-evaluates the identical command —
+      // the same flow as a later repeat in-session after the trust was written.
+      const fresh = new DefaultPermissionPolicy({ trustFile });
+      const d = await fresh.evaluate(tool('bash'), { command }, {} as Context);
+      expect(d.permission, `repeat of ${command} should auto-approve`).toBe('auto');
+    }
+  });
+
+  it('does not widen authorization — a different command is still gated (#15)', async () => {
+    const p = new DefaultPermissionPolicy({ trustFile });
+    await p.trust({ tool: 'bash', pattern: subjectForToolInput('bash', { command: '[ -f a ]' })! });
+    const fresh = new DefaultPermissionPolicy({ trustFile });
+    const d = await fresh.evaluate(tool('bash'), { command: '[ -f b ]' }, {} as Context);
+    expect(d.permission).toBe('confirm');
   });
 
   it('promptDelegate resolves inline when set', async () => {

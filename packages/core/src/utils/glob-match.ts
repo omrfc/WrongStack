@@ -16,6 +16,11 @@ function escapeRegex(s: string): string {
 const COMPILED_GLOB_CACHE = new Map<string, RegExp>();
 const CACHE_MAX_SIZE = 2000;
 
+// Matches nothing — `[^\s\S]` can never be satisfied. Used as the cached
+// result for patterns that fail to compile (e.g. an over-long auto-trusted
+// command) so one bad trust entry degrades to "no match" instead of throwing.
+const NEVER_MATCH = /[^\s\S]/;
+
 function getCachedGlob(pattern: string): RegExp {
   const cached = COMPILED_GLOB_CACHE.get(pattern);
   if (cached) return cached;
@@ -26,7 +31,16 @@ function getCachedGlob(pattern: string): RegExp {
       COMPILED_GLOB_CACHE.delete(expectDefined(keys[i]));
     }
   }
-  const re = compileGlob(pattern);
+  let re: RegExp;
+  try {
+    re = compileGlob(pattern);
+  } catch {
+    // A pathological trust pattern (over MAX_GLOB_PATTERN_LEN — e.g. a long
+    // one-liner auto-trusted in YOLO/Auto mode) must NOT throw out of every
+    // subsequent permission check and break unrelated commands like `true`
+    // or `ls` (#20). Cache a never-matching regex so the bad entry is inert.
+    re = NEVER_MATCH;
+  }
   COMPILED_GLOB_CACHE.set(pattern, re);
   return re;
 }

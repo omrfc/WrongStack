@@ -14,6 +14,25 @@ import {
   pathLooksInsideProject,
 } from './yolo-risk.js';
 
+/**
+ * Match a computed subject against stored trust patterns.
+ *
+ * Exact string equality is checked FIRST, before glob compilation. Subjects are
+ * glob-escaped at the source (`escapeGlobSubject` turns `* ? [ ]` into `\* \? \[
+ * \]`), and a stored "always"-trust pattern is just a prior subject — so for an
+ * identical command the pattern and the subject are byte-for-byte equal. The
+ * glob matcher alone could not confirm that: `compileGlob` does not treat a
+ * backslash as an escape outside character classes, so an escaped `\[`/`\]` is
+ * parsed as a character-class delimiter and a command like `[ -f x ]` or
+ * `grep "[0-9]"` never re-matched its own trust entry — re-prompting forever
+ * even after the user chose "always" (#15). Exact equality is also strictly
+ * tighter than a glob, so this never widens what a pattern authorizes; genuine
+ * wildcard patterns (e.g. a user-authored `git *`) still fall through to glob.
+ */
+function matchesTrust(patterns: string[], subject: string): boolean {
+  return patterns.includes(subject) || matchAny(patterns, subject);
+}
+
 export interface PermissionPolicyOptions {
   trustFile: string;
   yolo?: boolean | undefined;
@@ -208,7 +227,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     }
 
     // 4. Deny — absolute
-    if (entry?.deny && subject && matchAny(entry.deny, subject)) {
+    if (entry?.deny && subject && matchesTrust(entry.deny, subject)) {
       const decision: PermissionDecision = { permission: 'deny', source: 'deny', reason: 'matched deny pattern' };
       this._evalCache.set(cacheKey, decision);
       return decision;
@@ -220,7 +239,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     }
 
     // 5. Allow (trust file)
-    if (entry?.allow && subject && matchAny(entry.allow, subject)) {
+    if (entry?.allow && subject && matchesTrust(entry.allow, subject)) {
       const decision: PermissionDecision = { permission: 'auto', source: 'trust', reason: 'matched allow pattern' };
       this._evalCache.set(cacheKey, decision);
       return decision;

@@ -129,6 +129,29 @@ describe('fetchTool', () => {
     }
   });
 
+  it('surfaces the underlying transport cause instead of opaque "fetch failed" (#100)', async () => {
+    // undici throws `TypeError: fetch failed` and buries the real reason on
+    // `.cause`. The tool must unwrap it so the user sees WHY the request died.
+    const cause = Object.assign(new Error('getaddrinfo ENOTFOUND example.com'), {
+      code: 'ENOTFOUND',
+    });
+    globalThis.fetch = vi.fn(async () => {
+      throw new TypeError('fetch failed', { cause });
+    }) as never as typeof fetch;
+    const sb = await mkSandbox();
+    try {
+      const p = fetchTool.execute({ url: 'https://example.com/page' }, sb.ctx, {
+        signal: newSignal(),
+      });
+      await expect(p).rejects.toThrow(/ENOTFOUND/);
+      await expect(p).rejects.toThrow(/GET https:\/\/example\.com\/page failed/);
+      // The bare wrapper text must not be all the user gets.
+      await expect(p).rejects.not.toThrow(/^fetch failed$/);
+    } finally {
+      await sb.cleanup();
+    }
+  });
+
   it('refuses binary content-types', async () => {
     globalThis.fetch = vi.fn(async () =>
       mkResponse({ body: 'x', contentType: 'application/octet-stream' }),
