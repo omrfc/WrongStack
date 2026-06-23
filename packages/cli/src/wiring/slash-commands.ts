@@ -49,6 +49,8 @@ export interface SlashCommandsDeps {
     visible: boolean;
     setVisible: (visible: boolean) => void;
   };
+  /** Agent Monitor Service — subagent conversation tracking and HQ streaming. */
+  agentMonitor?: import('@wrongstack/core/coordination').AgentMonitorService | undefined;
   compactor: {
     compact(ctx: Context, opts?: { aggressive?: boolean | undefined }): Promise<CompactReport>;
   };
@@ -149,6 +151,7 @@ export async function setupSlashCommands(params: SlashCommandsDeps): Promise<voi
     statuslineHiddenItems: [...currentHiddenItems],
     setStatuslineHiddenItems,
     agentsMonitorController,
+    agentMonitor: params.agentMonitor,
     onSpawn: async (description, spawnOpts) => {
       const { subagentId, taskId } = await multiAgentHost.spawn(description, spawnOpts);
       const tags: string[] = [];

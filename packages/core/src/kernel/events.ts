@@ -263,6 +263,47 @@ export interface EventMap {
     costUsd?: number | undefined;
     subagentId?: string | undefined;
   };
+  // ── Agent Timeline Events ──────────────────────────────────────────
+  /**
+   * Fired when a subagent produces an assistant text block that should
+   * appear in the main chat timeline (when agent streaming is enabled).
+   * The payload carries the subagent's identity, the message content,
+   * and the iteration index so UIs can render a threaded timeline.
+   */
+  'agent.timeline.message': {
+    /** Subagent id (e.g. "bug-hunter@abc123"). */
+    subagentId: string;
+    /** Human-readable name or role label. */
+    agentName: string;
+    /** The assistant text block content, or a tool-call summary. */
+    content: string;
+    /** 'text' | 'tool_use' | 'error' | 'status' */
+    kind: 'text' | 'tool_use' | 'error' | 'status';
+    /** Iteration index within the subagent's own run. */
+    iteration: number;
+    /** ISO 8601 timestamp. */
+    ts: string;
+    /** When kind='tool_use', the tool name. */
+    toolName?: string | undefined;
+    /** Running cost estimate for this subagent so far. */
+    costUsd?: number | undefined;
+  };
+  /**
+   * Fired when a subagent's status changes (started, completed, failed,
+   * timed out, stopped). UIs use this to update agent status indicators
+   * and add status-change entries to the timeline.
+   */
+  'agent.status_changed': {
+    subagentId: string;
+    agentName: string;
+    status: 'spawned' | 'running' | 'completed' | 'failed' | 'timeout' | 'stopped' | 'budget_exhausted';
+    /** ISO 8601 timestamp. */
+    ts: string;
+    /** Human-readable summary or error message. */
+    summary?: string | undefined;
+    /** Task description when available. */
+    task?: string | undefined;
+  };
   /**
    * Fired on every `iteration.completed`. UIs subscribe to render a live
    * context-window fill bar per agent (e.g. "67% ████████░░"). The

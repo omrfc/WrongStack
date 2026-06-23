@@ -92,7 +92,9 @@ export type HqEventType =
   | 'mailbox.snapshot'
   | 'mailbox.event'
   | 'worklist.snapshot'
-  | 'git.snapshot';
+  | 'git.snapshot'
+  | 'agent.message'
+  | 'agent.status';
 
 export interface HqClientHeartbeatPayload {
   uptimeMs: number;
@@ -160,6 +162,28 @@ export interface HqFleetSnapshotPayload {
   failedTasks: number;
   totalCostUsd?: number;
   subagents: readonly HqSubagentSummary[];
+}
+
+/** Payload for `agent.message` events — a subagent's conversational output. */
+export interface HqAgentMessagePayload {
+  subagentId: string;
+  agentName: string;
+  content: string;
+  kind: 'text' | 'tool_use' | 'error' | 'status';
+  iteration: number;
+  ts: string;
+  toolName?: string;
+  costUsd?: number;
+}
+
+/** Payload for `agent.status` events — a subagent's lifecycle transition. */
+export interface HqAgentStatusPayload {
+  subagentId: string;
+  agentName: string;
+  status: 'spawned' | 'running' | 'completed' | 'failed' | 'timeout' | 'stopped' | 'budget_exhausted';
+  ts: string;
+  summary?: string;
+  task?: string;
 }
 
 export interface HqFleetEventPayload {

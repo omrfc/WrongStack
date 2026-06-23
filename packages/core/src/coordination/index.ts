@@ -322,3 +322,12 @@ export type {
   RunOptions,
   CoordinatorStats,
 } from './autonomous-coordinator.js';
+
+/** Agent Monitor — virtual chat history, timeline streaming, HQ bridge */
+export {
+  AgentMonitorService,
+  createAgentMonitorService,
+  type AgentTimelineEntry,
+  type AgentVirtualSession,
+  type AgentMonitorOptions,
+} from './agent-monitor.js';

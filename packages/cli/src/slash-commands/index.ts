@@ -53,6 +53,8 @@ export interface SlashCommandContext {
   onNewSession?: (() => Promise<void>) | undefined;
   onDiag?: (() => string) | undefined;
   onStats?: (() => string | null) | undefined;
+  /** Agent Monitor Service — tracks subagent conversations and streams to HQ. */
+  agentMonitor?: import('@wrongstack/core/coordination').AgentMonitorService | undefined;
   /**
    * Generate a commit message by calling the LLM with the git diff.
    * Receives the raw diff, returns a commit message string.
@@ -454,7 +456,8 @@ import { buildMouseCommand } from './mouse.js';
 import { buildProjectCommand } from './project.js';
 import { buildReviewCommand } from './review.js';
 import { buildSettingsCommand } from './settings.js';
-import { buildAgentsCommand, buildDirectorCommand, buildSpawnCommand } from './spawn-agents.js';
+import { buildAgentsCommand } from './agents.js';
+import { buildDirectorCommand, buildSpawnCommand } from './spawn-agents.js';
 import { buildStatuslineCommand } from './statusline.js';
 import { buildTasksCommand } from './tasks.js';
 import { buildTechStackCommand } from './techstack.js';
