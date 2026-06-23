@@ -20,7 +20,6 @@ import * as fs from 'node:fs/promises';
 import type { Server as HttpServer } from 'node:http';
 import * as http from 'node:http';
 import * as path from 'node:path';
-import { createRequire } from 'node:module';
 import {
   DEFAULT_HQ_REDACTION_POLICY,
   HQ_PROTOCOL_VERSION,
@@ -45,31 +44,6 @@ import {
   watchHqAuthFile,
 } from '@wrongstack/core';
 // Inlined from @wrongstack/webui/server — avoids a hard dependency on the webui package.
-// buildCspHeader and injectWsPort are only needed when serving the React WebUI.
-
-/** Build the Content-Security-Policy header value for the given WS port. */
-function buildCspHeader(wsPort: number): string {
-  return (
-    `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; ` +
-    `connect-src 'self' ws://127.0.0.1:${wsPort} wss://127.0.0.1:${wsPort} ` +
-    `ws://[::1]:${wsPort} wss://[::1]:${wsPort}; ` +
-    `img-src 'self' data:; font-src 'self' data:; worker-src 'self' blob:; object-src 'none'; ` +
-    `base-uri 'self'; frame-ancestors 'none'; form-action 'self'`
-  );
-}
-
-/**
- * Inject the WS port as a `<meta>` tag so the frontend can connect.
- * Idempotent: never injects twice if the source HTML already carries one.
- */
-function injectWsPort(html: string, wsPort: number): string {
-  const tag = `<meta name="wrongstack-ws-port" content="${wsPort}" />`;
-  if (html.includes('name="wrongstack-ws-port"')) return html;
-  if (html.includes('</head>')) {
-    return html.replace('</head>', `  ${tag}\n  </head>`);
-  }
-  return `${tag}\n${html}`;
-}
 import { WebSocket, WebSocketServer } from 'ws';
 
 export interface HqServerOptions {
@@ -125,7 +99,7 @@ interface ConnectedClient {
 }
 
 const DEFAULT_HOST = '127.0.0.1';
-const DEFAULT_PORT = 3499;
+export const DEFAULT_PORT = 3499;
 const MAX_EVENT_LOG = 5000;
 const MAX_NON_STRICT_PORT_SCAN = 50;
 
@@ -1022,92 +996,15 @@ export const HQ_HTML = `<!DOCTYPE html>
     }, 1500);
   }
 
-  connect();
+  // Load initial snapshot via HTTP so the dashboard renders without waiting for WS.
+  fetch(withBrowserToken('/api/snapshot'))
+    .then((r) => r.ok ? r.json() : null)
+    .then((s) => { if (s) applySnapshot(s); })
+    .catch(() => null)
+    .finally(() => connect());
 </script>
 </body>
 </html>`;
-
-// ── React frontend static serving ──────────────────────────────────────
-// Resolve the @wrongstack/webui dist directory. Returns null when the
-// webui package is not built (graceful degradation to WS-only).
-const requireFromCli = createRequire(import.meta.url);
-function resolveWebuiDistDir(): string | null {
-  try {
-    const serverEntry = requireFromCli.resolve('@wrongstack/webui/server');
-    return path.resolve(path.dirname(serverEntry), '..'); // .../dist
-  } catch {
-    return null;
-  }
-}
-
-const WEBUI_MIME: Record<string, string> = {
-  '.html': 'text/html',
-  '.js': 'application/javascript',
-  '.css': 'text/css',
-  '.json': 'application/json',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf',
-};
-
-/** True when `candidate` (resolved absolute path) lies inside `rootDir`. */
-function isInsideDir(candidate: string, rootDir: string): boolean {
-  const resolved = path.resolve(candidate);
-  return resolved === rootDir || resolved.startsWith(rootDir + path.sep);
-}
-
-/** Serve a static file from distDir — no-cache for .html, CSP for all. */
-async function serveWebuiFile(
-  res: http.ServerResponse,
-  distDir: string,
-  urlPath: string,
-  wsPort: number,
-): Promise<boolean> {
-  const filePath = path.resolve(path.join(distDir, urlPath));
-  if (!isInsideDir(filePath, distDir)) return false;
-  const ext = path.extname(filePath);
-  try {
-    const content = await fs.readFile(filePath);
-    const contentType = WEBUI_MIME[ext] ?? 'application/octet-stream';
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    if (ext === '.html') {
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Content-Security-Policy', buildCspHeader(wsPort));
-      const html = content.toString('utf8');
-      res.writeHead(200);
-      res.end(injectWsPort(html, wsPort));
-    } else {
-      res.writeHead(200);
-      res.end(content);
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** SPA fallback: serve index.html for any unmatched route. */
-async function serveWebuiIndex(res: http.ServerResponse, distDir: string, wsPort: number): Promise<void> {
-  try {
-    const indexPath = path.join(distDir, 'index.html');
-    const html = await fs.readFile(indexPath, 'utf8');
-    res.setHeader('Content-Type', 'text/html');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Content-Security-Policy', buildCspHeader(wsPort));
-    res.writeHead(200);
-    res.end(injectWsPort(html, wsPort));
-  } catch {
-    res.writeHead(404, { 'Content-Type': 'text/plain' });
-    res.end('Not found');
-  }
-}
 
 /** GET /api/sessions — list live sessions from the cross-process registry. */
 async function handleApiSessions(res: http.ServerResponse): Promise<void> {
@@ -1364,27 +1261,14 @@ function startHqServerWithAuth(
         }
       }
 
-      // ── React frontend — serve the built WebUI SPA ─────────────────
-      const distDir = resolveWebuiDistDir();
-      const wsPort = port; // browser WS port matches the HTTP port
-
-      // `/` and `/index.html` — serve the React app
+      // ── HQ dashboard — always serve the dedicated HQ HTML interface ──
+      // HQ is the central monitoring interface, not the WebUI. Serve the
+      // inline HTML dashboard directly — it fetches /api/snapshot for
+      // initial state and connects via WS for live updates.
       if (url.pathname === '/' || url.pathname === '/index.html') {
-        if (distDir) {
-          await serveWebuiFile(res, distDir, '/index.html', wsPort);
-          return;
-        }
-        // Fallback: hardcoded dashboard when React is not built
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(HQ_HTML);
         return;
-      }
-
-      // `/assets/*` — React build artifacts (JS, CSS, fonts, icons)
-      if (url.pathname.startsWith('/assets/') && distDir) {
-        const served = await serveWebuiFile(res, distDir, url.pathname, wsPort);
-        if (served) return;
-        // file not found — fall through to SPA fallback below
       }
 
       // ── HQ API routes ──────────────────────────────────────────────
@@ -1430,15 +1314,6 @@ function startHqServerWithAuth(
         const limit = Math.min(500, Math.max(1, Number.isFinite(rawLimit) ? rawLimit : 200));
         await handleApiSessionEvents(res, decodeURIComponent(eventsMatch[1]!), limit);
         return;
-      }
-
-      // ── SPA fallback — let the React frontend handle routing ───────
-      if (distDir) {
-        // Only fallback for non-API, non-dotfile routes
-        if (!url.pathname.startsWith('/api/') && !url.pathname.startsWith('/ws/') && !url.pathname.includes('.')) {
-          await serveWebuiIndex(res, distDir, wsPort);
-          return;
-        }
       }
 
       res.writeHead(404, { 'Content-Type': 'text/plain' });

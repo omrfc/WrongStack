@@ -8,6 +8,38 @@
  * when the flag was absent (caller should proceed to boot()).
  */
 
+import * as readline from 'node:readline';
+import { color } from '@wrongstack/core';
+import { DEFAULT_PORT } from '../hq-server.js';
+
+/**
+ * Ask the user for a port, accepting Enter to use the default.
+ * Returns the chosen port number.
+ */
+async function promptPort(defaultPort: number): Promise<number> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  try {
+    const answer: string = await new Promise((resolve) => {
+      rl.question(
+        `  ${color.cyan('?')} HQ server port ${color.dim(`[${defaultPort}]`)}: `,
+        resolve,
+      );
+    });
+    const trimmed = answer.trim();
+    if (trimmed === '') return defaultPort;
+    const parsed = Number.parseInt(trimmed, 10);
+    if (Number.isFinite(parsed) && parsed > 0 && parsed < 65536) return parsed;
+    // Invalid input — retry
+    process.stdout.write(`${color.red('✗')} Invalid port. Must be 1–65535.\n`);
+    return promptPort(defaultPort);
+  } finally {
+    rl.close();
+  }
+}
+
 /**
  * Check for --hq flag and start the HQ server if present.
  *
@@ -20,7 +52,21 @@ export async function handleHqShortCircuit(
 
   const { startHqServer } = await import('../hq-server.js');
   const host = typeof flags['host'] === 'string' ? flags['host'] : '127.0.0.1';
-  const port = typeof flags['port'] === 'string' ? Number.parseInt(flags['port'], 10) : 3499;
+
+  // Port: use --port flag if explicitly given, otherwise prompt interactively.
+  let port: number;
+  if (typeof flags['port'] === 'string' && flags['port'].trim() !== '') {
+    const parsed = Number.parseInt(flags['port'], 10);
+    if (Number.isFinite(parsed) && parsed > 0 && parsed < 65536) {
+      port = parsed;
+    } else {
+      process.stderr.write(`${color.red('✗')} Invalid --port value: ${flags['port']}\n`);
+      return 1;
+    }
+  } else {
+    port = await promptPort(DEFAULT_PORT);
+  }
+
   const dataDir = typeof flags['data-dir'] === 'string' ? flags['data-dir'] : undefined;
   const handle = await startHqServer({
     host,
