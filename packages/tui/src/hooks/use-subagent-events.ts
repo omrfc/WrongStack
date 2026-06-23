@@ -89,6 +89,33 @@ export function useSubagentEvents(
       dispatch({ type: 'fleetCtxPct', id: e.subagentId, load: e.load, tokens: e.tokens, maxContext: e.maxContext });
     });
 
+    // ── Agent Timeline Stream ───────────────────────────────────────
+    // When /agents stream on is active, these events are emitted by the
+    // AgentMonitorService for every subagent message/tool/status change.
+    const offAgentTimeline = events.on('agent.timeline.message', (e) => {
+      const l = lbl(e.subagentId, e.agentName);
+      const iconMap: Record<string, string> = {
+        text: '\u{1F4AC}',   // 💬
+        tool_use: '\u{1F527}', // 🔧
+        error: '\u{274C}',    // ❌
+        status: '\u{1F4AC}',  // 💬
+      };
+      const icon = iconMap[e.kind] ?? '\u{25CF}'; // ● fallback
+      const toolSuffix = e.toolName ? ` [${e.toolName}]` : '';
+      const text = `#${e.iteration}${toolSuffix} ${e.content.slice(0, 200)}`;
+      dispatch({ type: 'addEntry', entry: { kind: 'subagent', agentLabel: l.label, agentColor: l.color, icon, text } });
+    });
+
+    const offAgentStatus = events.on('agent.status_changed', (e) => {
+      const l = lbl(e.subagentId, e.agentName);
+      const icon = e.status === 'spawned' || e.status === 'running' ? '\u{25B6}' // ▶
+        : e.status === 'completed' ? '\u{2713}'  // ✓
+        : e.status === 'failed' || e.status === 'timeout' ? '\u{2717}' // ✗
+        : '\u{2299}'; // ⊘
+      const text = e.summary ? `${e.status}: ${e.summary.slice(0, 160)}` : e.status;
+      dispatch({ type: 'addEntry', entry: { kind: 'subagent', agentLabel: l.label, agentColor: l.color, icon, text } });
+    });
+
     const offConcurrencyChanged = events.on('concurrency.changed', (e: unknown) => {
       const { n } = e as { n: number };
       if (typeof n === 'number' && n > 0) {
@@ -116,6 +143,7 @@ export function useSubagentEvents(
       offIterationSummary(); offCtxPct(); offConcurrencyChanged();
       offLeaderCtxPct(); offLeaderMaxContext();
       offTool();
+      offAgentTimeline(); offAgentStatus();
     };
   }, [events, dispatch, setActiveMaxContext, lbl]);
 }
