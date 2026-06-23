@@ -1170,6 +1170,25 @@ export async function main(argv: string[]): Promise<number> {
   const hqPublisher = createHqPublisherFromEnv({ clientKind: 'cli', projectRoot, projectName: path.basename(projectRoot), appConfig: config } as never as Parameters<typeof createHqPublisherFromEnv>[0]);
   hqPublisher?.connect();
   if (hqPublisher) teardownHandlers.push(() => hqPublisher.close());
+
+  // ── Agent Monitor → HQ Bridge ───────────────────────────────────
+  // Forward agent.timeline.message and agent.status_changed events to
+  // the HQ publisher so the HQ browser dashboard sees real-time agent
+  // conversations.
+  if (hqPublisher && agentMonitor) {
+    const offMsg = events.on('agent.timeline.message', (payload) => {
+      try {
+        hqPublisher.publishEvent({ type: 'agent.message' as never, payload, timestamp: payload.ts });
+      } catch { /* best-effort */ }
+    });
+    const offStatus = events.on('agent.status_changed', (payload) => {
+      try {
+        hqPublisher.publishEvent({ type: 'agent.status' as never, payload, timestamp: payload.ts });
+      } catch { /* best-effort */ }
+    });
+    teardownHandlers.push(() => { offMsg(); offStatus(); });
+  }
+
   const brainMailbox = new GlobalMailbox(wpaths.projectDir, events, hqPublisher);
   const brainMonitor = new BrainMonitor({
     events,
