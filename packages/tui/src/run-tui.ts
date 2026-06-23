@@ -625,13 +625,59 @@ export async function runTui(opts: RunTuiOptions): Promise<number> {
     }
   };
 
+  // ── Rapid Ctrl+C force-exit ─────────────────────────────────────────────
+  // Tracks consecutive SIGINT signals. When the user presses Ctrl+C 3 times
+  // within RAPID_EXIT_WINDOW_MS, we force-exit immediately instead of going
+  // through the normal cleanup + Ink unmount path. This is intentional: the
+  // user explicitly wants to kill the app, and waiting for Ink to unmount
+  // can take seconds. The counter resets after the window expires so a long
+  // pause between presses doesn't count as "rapid".
+  const RAPID_EXIT_WINDOW_MS = 2_000;
+  const RAPID_EXIT_THRESHOLD = 3;
+  let ctrlCPressTimestamps: number[] = [];
+
+  const forceExitViaRapidCtrlC = (): void => {
+    // Detach all listeners first so cleanup() doesn't race with process.exit()
+    detachListeners();
+    unregisterTuiClient();
+    stdout.write(BRACKETED_PASTE_OFF);
+    stdout.write(MOUSE_OFF);
+    process.exit(130);
+  };
+
+  // ── Signal / exit handlers ───────────────────────────────────────────────
   // If the process is killed externally (terminal closed, SIGTERM from a
   // supervisor) waitUntilExit's .then/.catch never runs. Register signal +
   // exit listeners so the terminal isn't left in bracketed-paste mode.
   const signals: NodeJS.Signals[] = ['SIGTERM', 'SIGHUP', 'SIGINT'];
   const signalHandler = () => cleanup();
   const exitHandler = () => cleanup();
-  for (const s of signals) process.on(s, signalHandler);
+
+  // SIGINT (Ctrl+C) gets special treatment: track rapid presses.
+  const sigintHandler = (): void => {
+    const now = Date.now();
+    // Prune timestamps outside the window
+    ctrlCPressTimestamps = ctrlCPressTimestamps.filter((t) => now - t < RAPID_EXIT_WINDOW_MS);
+    ctrlCPressTimestamps.push(now);
+
+    if (ctrlCPressTimestamps.length >= RAPID_EXIT_THRESHOLD) {
+      // 3+ rapid Ctrl+C — force exit immediately
+      ctrlCPressTimestamps = [];
+      forceExitViaRapidCtrlC();
+      return;
+    }
+    // First or second press — normal cleanup; the user can press again
+    cleanup();
+  };
+
+  process.on('SIGINT', sigintHandler);
+  for (const s of ['SIGTERM', 'SIGHUP']) {
+    try {
+      process.on(s, signalHandler);
+    } catch {
+      // Platform may not support this signal
+    }
+  }
   process.on('exit', exitHandler);
 
   const detachListeners = () => {
