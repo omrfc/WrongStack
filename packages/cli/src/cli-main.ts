@@ -95,6 +95,7 @@ import { type ExecutionDeps, execute } from './execution.js';
 import { createFallbackModelExtension } from './fallback-model.js';
 import { createLifecycleHooksExtension, createUserPromptSubmitMiddleware } from './hooks-wiring.js';
 import { MultiAgentHost } from './multi-agent.js';
+import { createAgentMonitorService } from '@wrongstack/core/coordination';
 import { makeConfirmAwaiter } from './permission-prompt.js';
 import { runPluginManagementCommand } from './plugin-management.js';
 import { buildPickableProviders } from './provider-helpers.js';
@@ -1072,6 +1073,17 @@ export async function main(argv: string[]): Promise<number> {
   // a base dir to write manifest + scratchpad + per-subagent JSONLs into.
   const fleetRootForPromotion = path.join(wpaths.projectSessions, session.id);
 
+  // ── Agent Monitor — subagent conversation tracking ─────────────────────
+  // Creates the AgentMonitorService that listens to FleetBus events and
+  // maintains per-subagent virtual chat history + JSONL transcripts.
+  // The transcripts dir sits alongside the director's subagent sessions.
+  const agentMonitor = createAgentMonitorService({
+    events,
+    transcriptsDir: path.join(fleetRootForPromotion, 'subagents', 'transcripts'),
+    maxEntriesPerAgent: 500,
+    streamEnabled: false,
+  });
+
   // ── Global Brain chain — policy → LLM → human ──────────────────────────
   // Positioning: the Brain is the authority layer above the leader/director
   // and below the human. One instance serves every consumer (director,
@@ -1207,6 +1219,7 @@ export async function main(argv: string[]): Promise<number> {
       maxConcurrent,
       getLeaderMaxContext: () => effectiveMaxContext,
       brain,
+      agentMonitor,
       traceId: sessResult.traceId,
     },
   );
@@ -1516,6 +1529,7 @@ export async function main(argv: string[]): Promise<number> {
     setStatuslineHiddenItems,
     saveStatuslineHiddenItems,
     agentsMonitorController,
+    agentMonitor,
     onPanelOpen,
     configStore,
     reader,

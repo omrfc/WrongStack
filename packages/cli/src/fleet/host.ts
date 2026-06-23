@@ -347,6 +347,7 @@ export class MultiAgentHost {
     // Start the AgentMonitorService on the Director's FleetBus.
     const agentMonitor = this.opts.agentMonitor;
     if (agentMonitor) {
+      agentMonitor.setFleetBus(this.director.fleet);
       agentMonitor.start();
     }
 

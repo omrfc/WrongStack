@@ -52,8 +52,8 @@ export interface AgentVirtualSession {
 }
 
 export interface AgentMonitorOptions {
-  /** The FleetBus to listen on for subagent events. */
-  fleetBus: FleetBus;
+  /** The FleetBus to listen on for subagent events. Optional — set via `setFleetBus()` before `start()`. */
+  fleetBus?: FleetBus | undefined;
   /** Local EventBus for emitting agent.timeline.* and agent.status_changed events. */
   events: EventBus;
   /** Directory where per-subagent JSONL transcripts will be written. */
@@ -69,7 +69,7 @@ export interface AgentMonitorOptions {
 // ── Service ──────────────────────────────────────────────────────────────
 
 export class AgentMonitorService {
-  private readonly _fleetBus: FleetBus;
+  private _fleetBus: FleetBus | undefined;
   private readonly _events: EventBus;
   private readonly _transcriptsDir: string;
   private readonly _maxEntries: number;
@@ -95,6 +95,11 @@ export class AgentMonitorService {
   }
 
   // ── Public API ────────────────────────────────────────────────────
+
+  /** Set the FleetBus to listen on. Must be called before `start()`. */
+  setFleetBus(bus: FleetBus): void {
+    this._fleetBus = bus;
+  }
 
   get streamEnabled(): boolean {
     return this._streamEnabled;
@@ -132,6 +137,11 @@ export class AgentMonitorService {
   /** Start listening to FleetBus events. */
   start(): void {
     if (this._started) return;
+    if (!this._fleetBus) {
+      // FleetBus not set yet — start() will be called again after setFleetBus().
+      this._started = true; // Mark as started so stop() works
+      return;
+    }
     this._started = true;
 
     // Subscribe to every FleetBus event and route to the appropriate handler.
