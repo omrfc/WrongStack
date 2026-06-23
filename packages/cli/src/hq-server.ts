@@ -339,6 +339,15 @@ const HQ_HTML = `<!DOCTYPE html>
   </table>
 </section>
 
+<section id="agent-timeline-section" style="display:none">
+  <h2>🤖 Agent timeline
+    <span style="float:right;font-size:10px;text-transform:none;letter-spacing:0;color:var(--dim);cursor:pointer" id="agent-timeline-clear">clear</span>
+  </h2>
+  <div id="agent-timeline" style="max-height:480px;overflow-y:auto;font-size:12px;">
+    <p class="empty">Waiting for agent activity…</p>
+  </div>
+</section>
+
 <div class="drawer-backdrop" id="drawer-backdrop"></div>
 <aside class="drawer" id="drawer" aria-hidden="true">
   <button class="drawer-close" id="drawer-close">Close</button>
@@ -833,6 +842,17 @@ const HQ_HTML = `<!DOCTYPE html>
     if (ev.key === 'Escape') closeProject();
   });
 
+  // Clear button for agent timeline
+  document.addEventListener('DOMContentLoaded', () => {
+    const clearBtn = el('agent-timeline-clear');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        agentTimeline.length = 0;
+        renderAgentTimeline();
+      });
+    }
+  });
+
   // Respond to browser back/forward to switch projects.
   window.addEventListener('popstate', () => {
     const pid = parseInitialProject();
@@ -871,6 +891,9 @@ const HQ_HTML = `<!DOCTYPE html>
 
   // ---------- Live mailbox event feed ----------
 
+  const agentTimeline = []; // { ts, agentName, content, kind, subagentId, projectId }
+  const AGENT_TIMELINE_MAX = 200;
+
   function handleHqEvent(event) {
     // Accept all event types — each may carry project-scoped data for the live feed.
     if (!event || !event.projectId) return;
@@ -885,6 +908,50 @@ const HQ_HTML = `<!DOCTYPE html>
       renderEventFeed(list);
       flashFeedStatus();
     }
+
+    // ── Agent timeline events ─────────────────────────────────────────
+    if (event.type === 'agent.message' || event.type === 'agent.status') {
+      const p = event.payload || {};
+      const entry = {
+        ts: event.timestamp || p.ts,
+        agentName: p.agentName || p.subagentId || 'agent',
+        content: p.content || p.summary || '',
+        kind: event.type === 'agent.message' ? (p.kind || 'text') : 'status',
+        subagentId: p.subagentId,
+        status: p.status,
+        projectId: event.projectId,
+      };
+      agentTimeline.push(entry);
+      if (agentTimeline.length > AGENT_TIMELINE_MAX) agentTimeline.splice(0, agentTimeline.length - AGENT_TIMELINE_MAX);
+      renderAgentTimeline();
+    }
+  }
+
+  function renderAgentTimeline() {
+    const section = el('agent-timeline-section');
+    const container = el('agent-timeline');
+    if (!section || !container) return;
+    if (agentTimeline.length === 0) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = 'block';
+    container.innerHTML = agentTimeline.map((e) => {
+      const kindIcon = { text: '', tool_use: '\u{1F527}', error: '\u{274C}', status: '\u{1F4AC}' };
+      const icon = kindIcon[e.kind] || '';
+      const agentLabel = '<strong style="color:var(--accent)">' + escapeHtml(e.agentName) + '</strong>';
+      const time = e.ts ? fmtTime(e.ts) : '';
+      const chip = e.kind === 'status' && e.status
+        ? '<span class="pill" style="background:' + (e.status === 'running' || e.status === 'spawned' ? 'rgba(63,185,80,0.18)' : e.status === 'failed' || e.status === 'timeout' ? 'rgba(248,81,73,0.18)' : '#21262d') + ';color:' + (e.status === 'running' || e.status === 'spawned' ? 'var(--live)' : e.status === 'failed' || e.status === 'timeout' ? 'var(--high)' : 'var(--muted)') + '">' + escapeHtml(e.status) + '</span>'
+        : '';
+      const contentHtml = e.kind === 'text' || e.kind === 'status'
+        ? '<span>' + escapeHtml(e.content.slice(0, 300)) + '</span>'
+        : '<code style="color:var(--accent);font-size:11px">' + escapeHtml(e.content) + '</code>';
+      return '<div class="feed-row" style="animation:feed-flash 0.4s ease-out">' +
+        icon + ' ' + agentLabel + ' ' + chip + ' ' + contentHtml +
+        '<div class="feed-meta">' + time + '</div>' +
+      '</div>';
+    }).join('');
   }
 
   function renderEventFeed(list) {
