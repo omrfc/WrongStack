@@ -55,9 +55,10 @@ describe('plugin entry', () => {
     } as never as PluginAPI;
 
     await plugin.setup(api);
-    expect(tools.size).toBe(4);
+    expect(tools.size).toBe(5);
     expect(commands.size).toBe(6);
     expect(tools.has('lsp_diagnostics')).toBe(true);
+    expect(tools.has('codebase-lsp-search')).toBe(true);
     expect(commands.has(`${PLUGIN_NAME}:list`)).toBe(true);
 
     await plugin.teardown?.(api);
