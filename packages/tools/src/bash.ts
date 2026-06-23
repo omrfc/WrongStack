@@ -6,6 +6,7 @@ import { createOutputSpool, spoolNote } from './_output-spool.js';
 import { normalizeCommandOutput } from './_util.js';
 import { killWin32Tree, redactCommand } from './process-registry.js';
 import { getProcessRegistry } from './process-registry.js';
+import { checkAndBlockKillCommand } from './bash-kill-guard.js';
 
 interface BashInput {
   command: string;
@@ -121,6 +122,23 @@ export const bashTool: Tool<BashInput, BashOutput> = {
           pid: null,
           error:
             'bash: circuit breaker open — too many consecutive failures or slow calls. Use /kill to inspect or /kill reset to recover.',
+        },
+      };
+      return;
+    }
+
+    // Kill protection: block commands that try to kill protected WrongStack processes
+    // This includes direct kill commands, bash -c wrapped kills, and name-based kills (pkill, killall)
+    const killCheck = await checkAndBlockKillCommand(input.command);
+    if (killCheck.blocked) {
+      yield {
+        type: 'final',
+        output: {
+          output: '',
+          exit_code: 1,
+          timed_out: false,
+          pid: null,
+          error: killCheck.reason || 'Kill command blocked: targets a protected WrongStack process.',
         },
       };
       return;
