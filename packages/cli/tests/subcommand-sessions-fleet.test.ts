@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { sessionsFleetCmd } from '../src/subcommands/handlers/sessions-fleet.js';
+import type { SubcommandDeps } from '../src/subcommands/index.js';
 
 let tmp: string;
 
@@ -14,11 +15,22 @@ afterEach(async () => {
   await fs.rm(tmp, { recursive: true, force: true });
 });
 
-function deps() {
+function deps(): SubcommandDeps {
   return {
-    renderer: { write: vi.fn(), writeError: vi.fn() },
-    paths: { projectSessions: tmp } as never,
-  } as never;
+    config: {} as SubcommandDeps['config'],
+    renderer: { write: vi.fn(), writeError: vi.fn() } as unknown as SubcommandDeps['renderer'],
+    reader: {} as SubcommandDeps['reader'],
+    sessionStore: undefined,
+    skillLoader: undefined,
+    toolRegistry: undefined,
+    modelsRegistry: {} as SubcommandDeps['modelsRegistry'],
+    paths: { projectSessions: tmp } as unknown as SubcommandDeps['paths'],
+    vault: {} as SubcommandDeps['vault'],
+    cwd: tmp,
+    projectRoot: tmp,
+    userHome: tmp,
+    flags: undefined,
+  };
 }
 
 function joined(spy: ReturnType<typeof vi.fn>): string {
