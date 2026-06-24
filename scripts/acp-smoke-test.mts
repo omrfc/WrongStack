@@ -61,10 +61,11 @@ child.stdout.on('data', (chunk: string) => {
     lineBuffer += chunk;
   }
   // Process complete JSON-RPC lines.
-  let nlIdx;
-  while ((nlIdx = lineBuffer.indexOf('\n')) !== -1) {
+  let nlIdx = lineBuffer.indexOf('\n');
+  while (nlIdx !== -1) {
     const line = lineBuffer.slice(0, nlIdx).trim();
     lineBuffer = lineBuffer.slice(nlIdx + 1);
+    nlIdx = lineBuffer.indexOf('\n');
     if (line.length === 0) continue;
     try {
       const msg = JSON.parse(line);

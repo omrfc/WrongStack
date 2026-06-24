@@ -19,12 +19,10 @@ import { parseInline } from '../packages/tui/dist/index.js';
 
 const {
   AutoCompactionMiddleware,
-  estimateMessageTokens,
   estimateRequestTokens,
   estimateRequestTokensCalibrated,
   computeMessageTokens,
   eliseOldToolResults,
-  estimateToolResultTokens,
   parseContinueDirective,
 } = core;
 
@@ -63,7 +61,6 @@ function hline(label) {
 }
 
 const PASS = '\x1b[32m✓\x1b[0m';
-const FAIL = '\x1b[31m✗\x1b[0m';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Message builders (shared by benchmarks 1 and 3)
@@ -515,6 +512,7 @@ function bench4_perIterHotLoop() {
     // Warmup
     for (let n = 0; n < WARM; n++) {
       const pre = estimateRequestTokens(ctxOld.messages, ctxOld.systemPrompt, ctxOld.tools);
+      void pre;
       estimateRequestTokensCalibrated(
         ctxOld.messages,
         ctxOld.systemPrompt,
@@ -646,7 +644,6 @@ function bench5_toolExecStructured() {
   const serializer = createToolOutputSerializer({ perIterationOutputCapBytes: 100_000 });
   const BATCHES = 1000;
   const TOOLS_PER_BATCH = 5;
-  const PER_TOOL_KB = 32;
 
   const results = [];
   for (const [label, targetKB] of [
@@ -870,6 +867,7 @@ function bench6_mTierSweep() {
         }
       }
     }
+    void hasToolBlock;
   }
   const m1PreFix = performance.now() - m1PreStart;
 
