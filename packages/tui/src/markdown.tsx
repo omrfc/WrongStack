@@ -120,7 +120,6 @@ function InlineLine({ tokens, dim }: { tokens: InlineToken[]; dim?: boolean | un
     <Text>
       {tokens.map((t, j) => (
         <Text
-          // biome-ignore lint/suspicious/noArrayIndexKey: token order is stable per line
           key={j}
           color={t.code ? theme.accent : 'white'}
           bold={Boolean(t.bold)}
@@ -219,7 +218,6 @@ export function MarkdownView({
             // background to avoid inheriting the message panel background.
             <Box flexDirection="row" backgroundColor="transparent">
               {[...qContent].slice(0, (contentWidth ?? termWidth) - 2).map((ch, ci) => (
-                /* biome-ignore lint/suspicious/noArrayIndexKey: characters are not reorderable */
                 <Text key={ci} dimColor>{ch}</Text>
               ))}
             </Box>
@@ -264,7 +262,6 @@ export function MarkdownView({
       rows.push(
         <Box key={`bx${key++}`} width={maxW} backgroundColor="transparent" flexDirection="row">
           {chars.map((ch, ci) => (
-            /* biome-ignore lint/suspicious/noArrayIndexKey: characters are not reorderable */
             <Text key={ci}>{ch}</Text>
           ))}
         </Box>,

@@ -744,7 +744,6 @@ export const ToolStreamBox = React.memo(function ToolStreamBox({
       </Box>
       <Box flexDirection="column" marginLeft={2}>
         {rows.map((r, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: fixed-height block, index is the row
           <Text key={i} dimColor italic={Boolean(r.italic)}>{r.text || ' '}</Text>
         ))}
       </Box>

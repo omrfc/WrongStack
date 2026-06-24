@@ -1396,7 +1396,6 @@ export function App({
   // Keep the F9 goal panel live: refresh the moment it opens and on every tick
   // while it stays open, so a goal set mid-session via `/goal` — or progress
   // updated by the autonomy engine — appears without restarting the TUI.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: nowTick drives polling refresh
   useEffect(() => {
     if (state.goalPanelOpen) refreshGoalSummary();
   }, [state.goalPanelOpen, nowTick, refreshGoalSummary]);
@@ -1466,7 +1465,7 @@ export function App({
           setGitInfo(info);
 
           // Detect branch switch
-          if (info && info.branch) {
+          if (info?.branch) {
             const prev = prevBranchRef.current;
             if (prev !== null && prev !== info.branch) {
               // Branch changed — inject system message so the agent knows
@@ -1687,7 +1686,6 @@ export function App({
   // Todo counts come from the agent's context, which is mutated by
   // the `todo` tool. Re-read on each render — array access is O(N) on
   // a list that's typically < 20 items.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: nowTick intentionally triggers re-render; ctx.todos is not React state
   const todos = useMemo(() => {
     const counts = { pending: 0, inProgress: 0, completed: 0 };
     for (const t of agent.ctx.todos) {
@@ -2086,7 +2084,6 @@ export function App({
 
   // Detect an active `@<query>` token at the cursor and drive the picker.
   // Reruns whenever buffer/cursor changes — guards against stale results.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: picker state reads are intentional — dispatching based on stale picker state is harmless
   useEffect(() => {
     const detected = detectAtToken(state.buffer, state.cursor);
     if (!detected) {
@@ -2111,7 +2108,6 @@ export function App({
   }, [state.buffer, state.cursor, projectRoot]);
 
   // Detect an active `/<query>` token at the cursor and drive the slash picker.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: slashPicker state reads are intentional — same pattern as @ picker above
   useEffect(() => {
     const trimmed = state.buffer.trimStart();
     if (!trimmed.startsWith('/')) {
@@ -2572,7 +2568,7 @@ export function App({
       featureMemory: s.featureMemory ?? true,
       featureSkills: s.featureSkills ?? true,
       featureModelsRegistry: s.featureModelsRegistry ?? true,
-      tokenSavingTier: s.featureTokenSaving ?? 'off' as TokenSavingTier,
+      tokenSavingTier: s.featureTokenSaving ?? ('off' as TokenSavingTier),
       allowOutsideProjectRoot: s.allowOutsideProjectRoot ?? true,
       contextAutoCompact: s.contextAutoCompact ?? true,
       contextStrategy: s.contextStrategy ?? 'hybrid',
@@ -2588,11 +2584,11 @@ export function App({
       enhanceLanguage: (s.enhanceLanguage as 'original' | 'english') ?? 'original',
       debugStream: s.debugStream ?? false,
       statuslineMode: s.statuslineMode ?? 'detailed',
-      reasoningMode: (s as any).reasoningMode ?? 'auto',
-      reasoningEffort: (s as any).reasoningEffort ?? 'high',
-      reasoningPreserve: (s as any).reasoningPreserve ?? false,
+      reasoningMode: s.reasoningMode ?? 'auto',
+      reasoningEffort: s.reasoningEffort ?? 'high',
+      reasoningPreserve: s.reasoningPreserve ?? false,
       thinkingWord: s.thinkingWord ?? 'thinking',
-      cacheTtl: (s as any).cacheTtl ?? 'default',
+      cacheTtl: s.cacheTtl ?? 'default',
       configScope: s.configScope ?? 'global',
     });
   }, [getSettings]);
@@ -2763,7 +2759,6 @@ export function App({
 
   // Persist settings whenever a value field changes (mode, delayMs, toggles, …).
   // Does NOT fire on field-navigation (↑/↓) — only on value mutation (←/→).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: individual field deps are intentional — whole sp object would fire on nav changes
   useEffect(() => {
     const sp = state.settingsPicker;
     const save = saveSettings;
@@ -3039,7 +3034,6 @@ export function App({
       // junk text if Ink's raw rendering catches them. The ESC byte is
       // matched optionally — a stripped/split ESC would otherwise leave a
       // bare `[200~` in the rendered text (same failure as the input path).
-      // biome-ignore lint/suspicious/noControlCharactersInRegex: bracketed paste escape sequences are intentional
       const text = e.text.replace(/\x1b?\[200~|\x1b?\[201~/g, '');
       streamingTextRef.current += text;
       pendingDeltaRef.current += text;
@@ -4656,7 +4650,7 @@ export function App({
           featureMemory: cfg.featureMemory ?? true,
           featureSkills: cfg.featureSkills ?? true,
           featureModelsRegistry: cfg.featureModelsRegistry ?? true,
-          tokenSavingTier: (cfg as any).tokenSavingTier ?? 'off',
+          tokenSavingTier: cfg.featureTokenSaving ?? 'off',
           allowOutsideProjectRoot: cfg.allowOutsideProjectRoot ?? true,
           contextAutoCompact: cfg.contextAutoCompact ?? true,
           contextStrategy: cfg.contextStrategy ?? 'hybrid',
@@ -4672,11 +4666,11 @@ export function App({
           enhanceLanguage: cfg.enhanceLanguage ?? 'original',
           debugStream: cfg.debugStream ?? false,
           statuslineMode: cfg.statuslineMode ?? 'detailed',
-          reasoningMode: (cfg as any).reasoningMode ?? 'auto',
-          reasoningEffort: (cfg as any).reasoningEffort ?? 'high',
-          reasoningPreserve: (cfg as any).reasoningPreserve ?? false,
+          reasoningMode: cfg.reasoningMode ?? 'auto',
+          reasoningEffort: cfg.reasoningEffort ?? 'high',
+          reasoningPreserve: cfg.reasoningPreserve ?? false,
           thinkingWord: cfg.thinkingWord ?? 'thinking',
-          cacheTtl: (cfg as any).cacheTtl ?? 'default',
+          cacheTtl: cfg.cacheTtl ?? 'default',
           configScope: cfg.configScope ?? 'global',
         });
       }

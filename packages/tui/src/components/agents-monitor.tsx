@@ -386,7 +386,6 @@ function AgentDetail({
           {entry.recentTools.slice(-4).map((tool, i) => {
             const visual = getToolVisual(tool.name);
             return (
-              // biome-ignore lint/suspicious/noArrayIndexKey: recent tool entries do not carry stable ids.
               <Text key={`${tool.name}-${tool.at}-${i}`} color={tool.ok === false ? 'red' : visual.color}>
                 {`‹${visual.glyph} ${formatRecentToolChip(tool)}›`}
               </Text>

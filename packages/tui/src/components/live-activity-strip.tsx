@@ -126,7 +126,6 @@ export const LiveActivityStrip = React.memo(function LiveActivityStrip({
   return (
     <Box flexDirection="column" paddingX={1}>
       {rows.map((text, slot) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: fixed-height slots, index IS the identity
         <Box key={`strip-${slot}`} height={1}>
           {text === '' ? (
             <Text> </Text>

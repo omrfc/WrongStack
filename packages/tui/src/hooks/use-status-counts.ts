@@ -39,7 +39,6 @@ export function useStatusCounts({
   fleet,
   nowTick,
 }: UseStatusCountsOptions): { todos: TodoCounts; fleetCounts: FleetCounts | undefined } {
-  // biome-ignore lint/correctness/useExhaustiveDependencies: nowTick intentionally triggers re-render; ctx.todos is not React state
   const todos = useMemo<TodoCounts>(() => {
     const counts: TodoCounts = { pending: 0, inProgress: 0, completed: 0 };
     for (const t of liveTodos) {

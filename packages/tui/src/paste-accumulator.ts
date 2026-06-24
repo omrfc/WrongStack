@@ -11,9 +11,7 @@
 
 const BEGIN = '[200~';
 const END = '[201~';
-// biome-ignore lint/suspicious/noControlCharactersInRegex: paste markers carry a literal ESC
 const BEGIN_RE = /\x1b?\[200~/g;
-// biome-ignore lint/suspicious/noControlCharactersInRegex: paste markers carry a literal ESC
 const END_RE = /\x1b?\[201~/g;
 // Partial ANSI CSI without the ESC prefix — Ink strips ESC from sequences
 // like \x1b[0m, leaving [0m which would otherwise appear as literal text.

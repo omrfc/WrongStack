@@ -370,10 +370,8 @@ export const Input = memo(function Input({
     <Box flexDirection="column">
       {rows.map((row, i) =>
         row.length === 0 ? (
-          // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional and re-laid out every render
           <Text key={i}> </Text> // keep blank lines one row tall
         ) : (
-          // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional and re-laid out every render
           <Text key={i}>{renderRow(row, `r${i}`, promptColor)}</Text>
         ),
       )}

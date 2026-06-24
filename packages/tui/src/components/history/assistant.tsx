@@ -92,10 +92,8 @@ export function AssistantBody({
     <Box flexDirection="column">
       {segments.map((seg, i) =>
         seg.type === 'code' ? (
-          // biome-ignore lint/suspicious/noArrayIndexKey: segment order is stable
           <CodeBlock key={i} code={seg.text} lang={seg.lang ?? 'plain'} contentWidth={inner} />
         ) : (
-          // biome-ignore lint/suspicious/noArrayIndexKey: segment order is stable
           <MarkdownView
             key={i}
             text={seg.text}
@@ -168,7 +166,6 @@ export function AssistantTail({
       </Box>
       <Box flexDirection="column">
         {rows.map((r, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: fixed-height block, index is the row
           <Text key={i} color="white">{r || ' '}</Text>
         ))}
       </Box>

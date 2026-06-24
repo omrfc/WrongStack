@@ -71,7 +71,6 @@ export function KeyHintBar({ context }: { context: KeyHintContext }): React.Reac
   return (
     <Box flexDirection="row" paddingX={1}>
       {hints.map((h, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: hints are positional + stable
         <Box key={i} flexDirection="row" marginRight={2}>
           <Text color={h.discovery ? theme.monitor.agents : theme.accent}>{h.key}</Text>
           <Text dimColor>{` ${h.label}`}</Text>

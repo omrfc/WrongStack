@@ -228,7 +228,6 @@ export function FleetMonitor({
           {collabSession.timeline.length > 0 ? (
             <Box flexDirection="column" marginTop={0}>
               {collabSession.timeline.slice(0, 6).map((ev, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: timeline is rebuilt per render
                 <Box key={i} flexDirection="row" gap={1}>
                   <Text dimColor>
                     {`${fmtElapsed(Math.max(0, nowTick - ev.at))} ago`.padEnd(10)}
@@ -310,7 +309,6 @@ export function FleetMonitor({
         <Box flexDirection="column" marginTop={1}>
           <Text dimColor>timeline</Text>
           {timeline.map((ev, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: timeline is rebuilt per render
             <Box key={i} flexDirection="row" gap={1}>
               <Text dimColor>{`${fmtElapsed(Math.max(0, nowTick - ev.at))} ago`.padEnd(10)}</Text>
               <Text color={ev.color}>{ev.icon}</Text>

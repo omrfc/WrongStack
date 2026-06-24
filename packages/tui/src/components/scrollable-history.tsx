@@ -81,7 +81,6 @@ function Scrollbar({
     <Box flexDirection="column" marginLeft={1} flexShrink={0}>
       {cells.map((c, i) => (
         <Text
-          // biome-ignore lint/suspicious/noArrayIndexKey: fixed-height track, index is the row
           key={i}
           {...(scrollable ? { color: theme.accent } : {})}
           dimColor={!scrollable || c === '│'}

@@ -1088,7 +1088,6 @@ export function StatusBar({
           ) : null}
           {fleetAgents && fleetAgents.length > 0
             ? fleetAgents.map((a, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: agent list is stable per render
                 <Text key={i}>
                   <Text dimColor>│</Text>{' '}
                   <Text color={a.color} bold>
@@ -1121,7 +1120,6 @@ export function StatusBar({
       ) : fleetAgents && fleetAgents.length > 0 ? (
         <Box flexDirection="row" gap={2}>
           {fleetAgents.map((a, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: agent list is stable per render
             <Text key={i}>
               <Text color={a.color} bold>
                 {a.label}
@@ -1343,7 +1341,6 @@ function WaveText({ text, phase }: { text: string; phase: number }): React.React
   return (
     <Text bold>
       {Array.from(text).map((ch, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: glyph order is positional and re-rendered each tick
         <Text key={i} color={WAVE_COLORS[(i + phase) % WAVE_COLORS.length] ?? '#ffffff'}>
           {ch}
         </Text>
