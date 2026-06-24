@@ -11,7 +11,13 @@ afterEach(() => {
 
 describe('startDeviceFlow', () => {
   it('POSTs to GitHub device-code and maps the response', async () => {
-    let captured: { url?: string; body?: string } = {};
+    let captured: {
+      url: string | undefined;
+      body: string | undefined;
+    } = {
+      url: undefined,
+      body: undefined,
+    };
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string, init: { body?: string }) => {
