@@ -77,6 +77,7 @@ function makeDeps(overrides: Partial<SubcommandDeps> = {}): SubcommandDeps {
     reader: { readLine: vi.fn(), readKey: vi.fn(), readSecret: vi.fn(), close: vi.fn() } as never,
     paths: {} as WstackPaths,
     vault: { encrypt: vi.fn((s: string) => s), decrypt: vi.fn((s: string) => s) } as never,
+    modelsRegistry: {} as never,
     cwd: '/tmp',
     projectRoot: '/tmp',
     userHome: '/tmp',
