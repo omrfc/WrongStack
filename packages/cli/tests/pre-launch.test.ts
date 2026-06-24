@@ -410,6 +410,20 @@ describe('runLaunchPrompts', () => {
     expect(parsed.yolo).toBe(false); // updated
     expect(parsed.launch).toEqual({ mode: 'repl', director: true, autonomy: 'off' }); // added
   });
+
+  it('persistLaunchChoices throws on corrupt existing file instead of overwriting', async () => {
+    const dir = await mkTempDir('wstack-persist-');
+    const configPath = path.join(dir, 'config.json');
+    // Write a corrupt (non-JSON) file
+    await fs.writeFile(configPath, '{ "provider": "anthropic", broken: true }');
+    const choices = { mode: 'tui' as const, yolo: false, director: false, autonomy: 'auto' as const };
+
+    await expect(persistLaunchChoices(configPath, choices)).rejects.toThrow(/corrupt/i);
+
+    // File must still contain the corrupt original — NOT overwritten
+    const raw = await fs.readFile(configPath, 'utf8');
+    expect(raw).toBe('{ "provider": "anthropic", broken: true }');
+  });
 });
 
 // ─── maybeAskAboutIndexing ────────────────────────────────────────────────────

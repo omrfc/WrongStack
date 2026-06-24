@@ -380,12 +380,26 @@ export async function persistLaunchChoices(
   configPath: string,
   choices: LaunchModeChoices,
 ): Promise<void> {
+  let fileExists = false;
+  try {
+    await fs.access(configPath);
+    fileExists = true;
+  } catch {}
+
   let existing: Record<string, unknown> = {};
   try {
     const raw = await fs.readFile(configPath, 'utf8');
     existing = JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    // No existing config — start fresh, that's fine.
+  } catch (err) {
+    if (fileExists) {
+      throw new Error(
+        `Refusing to overwrite corrupt config at ${configPath} ` +
+          `(${(err as Error).message}). Fix or move the file aside before retrying.`,
+        { cause: err },
+      );
+    }
+    // No existing file — start fresh, that's fine.
+    existing = {};
   }
 
   existing.yolo = choices.yolo;
