@@ -360,7 +360,7 @@ describe('grep tool', () => {
       events.push(ev);
     }
     // Check that some partial_output events have data
-    const partials = events.filter((e) => e.type === 'partial_output');
+    const _partials = events.filter((e) => e.type === 'partial_output');
     expect(events.some((e) => e.type === 'final')).toBe(true);
   });
 

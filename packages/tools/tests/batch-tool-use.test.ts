@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { batchToolUseTool } from '../src/batch-tool-use.js';
 
 const makeCtx = (tools: any[] = []) =>
@@ -33,9 +33,9 @@ describe('batchToolUseTool', () => {
   });
 
   it('runs tools in parallel by default', async () => {
-    let resolve: (v: any) => void;
-    const promise = new Promise((r) => {
-      resolve = r;
+    let _resolve: (v: any) => void;
+    const _promise = new Promise((r) => {
+      _resolve = r;
     });
     const fakeTool = {
       name: 'test',

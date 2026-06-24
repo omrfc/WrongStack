@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   type DelegateCompletedLike,
   type SessionEndedLike,
-  type ToolExecutedLike,
   fmtDuration,
   fmtTokens,
   fmtToolOutput,

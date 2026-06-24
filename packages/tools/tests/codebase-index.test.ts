@@ -178,7 +178,7 @@ describe('ts-parser', () => {
     it('extracts function declarations', () => {
       const result = parseSymbols({
         file: '/test/utils.ts',
-        content: 'function greet(name: string): string { return `Hello ${name}`; }',
+        content: `function greet(name: string): string { return \`Hello \${name}\`; }`,
         lang: 'ts',
       });
       expect(result.symbols.some((s) => s.kind === 'function' && s.name === 'greet')).toBe(true);

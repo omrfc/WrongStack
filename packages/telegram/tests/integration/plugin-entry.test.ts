@@ -167,7 +167,7 @@ describe('plugin entry', () => {
   });
 
   it('emits telegram:message_received when bot receives a message', async () => {
-    const api = makeApi();
+    makeApi();
 
     // Mock fetch: first call getMe (constructor health check), then getUpdates with a message
     let callCount = 0;

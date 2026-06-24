@@ -89,7 +89,7 @@ async function readDarwin(): Promise<ClipboardImage | null> {
     'return "OK"',
   ].join('\n');
   const out = await runCmd('osascript', ['-e', script]);
-  if (!out || out.trim() !== 'OK') return null;
+  if (out?.trim() !== 'OK') return null;
   return readPngFile(tmp);
 }
 

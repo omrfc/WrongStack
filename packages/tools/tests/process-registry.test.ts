@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   _resetProcessRegistry,
   getProcessRegistry,
-  redactCommand,
 } from '../src/process-registry.js';
 
 type Tracked = {

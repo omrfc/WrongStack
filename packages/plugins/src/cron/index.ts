@@ -86,7 +86,7 @@ const plugin: Plugin = {
 
     function scheduleNextRun(name: string): void {
       const job = state.jobs.get(name);
-      if (!job || !job.enabled) return;
+      if (!job?.enabled) return;
 
       const existing = state.timers.get(name);
       if (existing) clearTimeout(existing);

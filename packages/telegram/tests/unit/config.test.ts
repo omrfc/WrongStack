@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_CONFIG, PLUGIN_NAME, readTelegramConfig } from '../../src/config.js';
+import { PLUGIN_NAME, readTelegramConfig } from '../../src/config.js';
 
 describe('telegram config', () => {
   it('returns defaults when no plugin options are set', () => {

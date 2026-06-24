@@ -23,7 +23,7 @@ const cfg: {
   chunkCount: 0,
 };
 
-let lastChild: (EventEmitter & { killSignals: string[]; killed: boolean; exitCode: number | null });
+let _lastChild: (EventEmitter & { killSignals: string[]; killed: boolean; exitCode: number | null });
 
 vi.mock('node:os', async (orig) => {
   const actual = await orig<typeof import('node:os')>();
@@ -71,7 +71,7 @@ vi.mock('node:child_process', async (orig) => {
           child.emit('close', null);
         });
       };
-      lastChild = child;
+      _lastChild = child;
       process.nextTick(() => {
         if (cfg.stdout) child.stdout.emit('data', Buffer.from(cfg.stdout));
         if (cfg.stderr) child.stderr.emit('data', Buffer.from(cfg.stderr));

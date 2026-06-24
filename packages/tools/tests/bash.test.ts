@@ -1,6 +1,4 @@
 import * as os from 'node:os';
-import * as path from 'node:path';
-import * as fs from 'node:fs/promises';
 import type { ToolProgressEvent, ToolStreamEvent } from '@wrongstack/core';
 import { describe, expect, it } from 'vitest';
 import { bashTool } from '../src/bash.js';
@@ -209,7 +207,7 @@ describe('bashTool partial_output flush paths', () => {
       )) {
         events.push(ev);
       }
-      const partials = events.filter((e) => e.type === 'partial_output');
+      const _partials = events.filter((e) => e.type === 'partial_output');
       // Should emit at least one partial_output before final
       expect(events.some((e) => e.type === 'final')).toBe(true);
       // On Windows or with small output, partials may be empty, but we exercised the flush logic
@@ -234,7 +232,7 @@ describe('bashTool partial_output flush paths', () => {
       )) {
         events.push(ev);
       }
-      const partials = events.filter((e) => e.type === 'partial_output');
+      const _partials = events.filter((e) => e.type === 'partial_output');
       const finals = events.filter((e) => e.type === 'final');
       expect(finals).toHaveLength(1);
       // Output was processed

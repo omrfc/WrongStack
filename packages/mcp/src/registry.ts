@@ -419,7 +419,7 @@ export class MCPRegistry {
    */
   private readonly onToolsChanged = (name: string, _tools: { name: string }[]): void => {
     const slot = this.servers.get(name);
-    if (!slot || !slot.client) return;
+    if (!slot?.client) return;
     // Unregister any previously registered tools, then re-apply the fresh set.
     for (const t of slot.toolNames) {
       try {

@@ -44,13 +44,13 @@ describe('WrongStackPack interface', () => {
     });
 
     it('allows optional setup function', () => {
-      const setupFn = async (api: PluginAPI) => { /* noop */ };
+      const setupFn = async (_api: PluginAPI) => { /* noop */ };
       const pack: WrongStackPack = { name: 'test-pack', setup: setupFn };
       expect(typeof pack.setup).toBe('function');
     });
 
     it('allows optional teardown function', () => {
-      const teardownFn = async (api: PluginAPI) => { /* noop */ };
+      const teardownFn = async (_api: PluginAPI) => { /* noop */ };
       const pack: WrongStackPack = { name: 'test-pack', teardown: teardownFn };
       expect(typeof pack.teardown).toBe('function');
     });
@@ -63,8 +63,8 @@ describe('WrongStackPack interface', () => {
       const mockCommand = { name: 'test-cmd', description: 'A test command', execute: async () => {} } as never as SlashCommand;
       const mockExtension = { name: 'test-ext', onAgentStart: async () => {} } as never as AgentExtension;
 
-      const setupFn = async (api: PluginAPI) => { /* noop */ };
-      const teardownFn = async (api: PluginAPI) => { /* noop */ };
+      const setupFn = async (_api: PluginAPI) => { /* noop */ };
+      const teardownFn = async (_api: PluginAPI) => { /* noop */ };
 
       const pack: WrongStackPack = {
         name: 'complete-pack',

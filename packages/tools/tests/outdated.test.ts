@@ -187,11 +187,11 @@ describe('detectManager via fs stat mocks', () => {
     fsMocks.stat.mockImplementationOnce(async (path: string) => {
       if (String(path).endsWith('pnpm-lock.yaml')) return { isFile: () => true } as any;
       throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-    }).mockImplementationOnce(async (path: string) => {
+    }).mockImplementationOnce(async (_path: string) => {
       // Second call is for yarn.lock — should throw
       throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
     });
-    const result = await outdatedTool.execute({}, makeCtx(), makeOpts());
+    const _result = await outdatedTool.execute({}, makeCtx(), makeOpts());
     expect(spawnMocks.spawn).toHaveBeenCalledWith(
       'pnpm',
       expect.any(Array),
@@ -209,7 +209,7 @@ describe('detectManager via fs stat mocks', () => {
       if (String(path).endsWith('yarn.lock')) return { isFile: () => true } as any;
       throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
     });
-    const result = await outdatedTool.execute({}, makeCtx(), makeOpts());
+    const _result = await outdatedTool.execute({}, makeCtx(), makeOpts());
     expect(spawnMocks.spawn).toHaveBeenCalledWith(
       'yarn',
       expect.any(Array),
