@@ -20,6 +20,25 @@ import type { ChildProcess } from 'node:child_process';
 import { getProcessRegistry, type ProcessRegistryImpl } from './process-registry.js';
 
 const REGISTRY_FILE = '.wrongstack/process-registry.json';
+
+function toErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function emitStructuredLog(level: 'debug' | 'info' | 'warn' | 'error', event: string, message: string, error?: unknown): void {
+  const payload: { level: 'debug' | 'info' | 'warn' | 'error'; event: string; message: string; error?: string; timestamp: string } = {
+    level,
+    event,
+    message,
+    timestamp: new Date().toISOString(),
+  };
+
+  if (error !== undefined) {
+    payload.error = toErrorMessage(error);
+  }
+
+  console.log(JSON.stringify(payload));
+}
 const HEARTBEAT_INTERVAL_MS = 5_000;
 const STALE_THRESHOLD_MS = 30_000;
 const LOCKFILE = '.wrongstack/.process-registry.lock';
@@ -187,8 +206,8 @@ export class PersistentProcessRegistry {
     this.baseRegistry = baseRegistry ?? getProcessRegistry();
 
     // Ensure the .wrongstack directory exists
-    this.ensureDirectory().catch(err => {
-      console.error('PersistentProcessRegistry: failed to create .wrongstack dir', err);
+    this.ensureDirectory().catch((err) => {
+      emitStructuredLog('warn', 'process_registry.dir_create_failed', 'PersistentProcessRegistry: failed to create .wrongstack directory', err);
     });
   }
 
@@ -362,7 +381,7 @@ export class PersistentProcessRegistry {
       data.lastCleanup = now;
       await writeRegistryFile(this.registryPath, data);
     } catch (err) {
-      console.error('PersistentProcessRegistry: sync failed', err);
+      emitStructuredLog('warn', 'process_registry.sync_failed', 'PersistentProcessRegistry: sync failed', err);
     } finally {
       await release();
     }
@@ -388,9 +407,11 @@ export class PersistentProcessRegistry {
               process.kill(entry.pid, 0);
             } else {
               // On Windows, try to open the process
-              // eslint-disable-next-line no-console
-              console.log(`PersistentProcessRegistry: checking stale pid ${entry.pid} (${age}ms old)`);
-            }
+              emitStructuredLog(
+                'debug',
+                'process_registry.stale_pid_check',
+                `PersistentProcessRegistry: checking stale pid ${entry.pid} (${age}ms old)`,
+              );            }
           } catch {
             // Process is dead - mark for removal
             stalePids.push(_pidStr);
@@ -405,7 +426,7 @@ export class PersistentProcessRegistry {
         await writeRegistryFile(this.registryPath, data);
       }
     } catch (err) {
-      console.error('PersistentProcessRegistry: cleanup failed', err);
+      emitStructuredLog('warn', 'process_registry.cleanup_failed', 'PersistentProcessRegistry: cleanup failed', err);
     } finally {
       await release();
     }
