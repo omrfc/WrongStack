@@ -53,7 +53,7 @@ describe('extractTextFromContent', () => {
   });
 
   it('ignores unrecognised block types', () => {
-    const blocks = [
+    const blocks: ContentBlock[] = [
       { type: 'text', text: 'keep' },
       { type: 'mystery', foo: 1 } as never as ContentBlock,
     ];

@@ -51,17 +51,17 @@ beforeEach(() => {
 
 describe('WrongStackACPServer', () => {
   it('constructs a transport and a protocol handler', () => {
-    new WrongStackACPServer({ tools: [] });
+    new WrongStackACPServer();
     expect(h.transports).toHaveLength(1);
     expect(h.handlers).toHaveLength(1);
   });
 
-  it('accepts a custom owner without error', () => {
-    expect(() => new WrongStackACPServer({ tools: [], owner: 'acme' })).not.toThrow();
+  it('accepts a custom agent name without error', () => {
+    expect(() => new WrongStackACPServer({ agentName: 'acme' })).not.toThrow();
   });
 
   it('start sends the marker, dispatches messages, and stops at EOF', async () => {
-    const server = new WrongStackACPServer({ tools: [] });
+    const server = new WrongStackACPServer();
     const t = lastTransport();
     const handler = lastHandler();
     t.read
@@ -77,7 +77,7 @@ describe('WrongStackACPServer', () => {
   });
 
   it('start stops when the handler reports a terminal message', async () => {
-    const server = new WrongStackACPServer({ tools: [] });
+    const server = new WrongStackACPServer();
     const t = lastTransport();
     const handler = lastHandler();
     // read always yields a message; only the terminal handler result breaks the loop.
@@ -91,7 +91,7 @@ describe('WrongStackACPServer', () => {
   });
 
   it('stop closes the transport', () => {
-    const server = new WrongStackACPServer({ tools: [] });
+    const server = new WrongStackACPServer();
     const t = lastTransport();
     server.stop();
     expect(t.close).toHaveBeenCalled();

@@ -87,8 +87,8 @@ describe('ACPToolsRegistry', () => {
       const props = def.inputSchema.properties!;
       expect(props.path).toMatchObject({ type: 'string', description: 'the path', default: '.' });
       expect(props.lines).toMatchObject({ type: 'number', minimum: 1, maximum: 100 });
-      expect(props.tags.items).toMatchObject({ type: 'string' });
-      expect(props.mode.enum).toEqual(['r', 'w']);
+      expect(props.tags?.items).toMatchObject({ type: 'string' });
+      expect(props.mode?.enum).toEqual(['r', 'w']);
     });
 
     it('falls back to tool.description when usageHint is absent', () => {
