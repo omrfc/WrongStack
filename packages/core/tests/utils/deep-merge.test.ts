@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   deepMerge,
   isPrimitiveArray,
-  FORBIDDEN_PROTO_KEYS,
 } from '../../src/utils/deep-merge.js';
 
 // ---------------------------------------------------------------------------

@@ -41,7 +41,7 @@ beforeEach(async () => {
   await fs.mkdir(path.join(projectRoot, 'src'), { recursive: true });
   await fs.writeFile(path.join(projectRoot, 'package.json'), JSON.stringify({ name: 'demo', dependencies: { express: '^4' } }));
   await fs.writeFile(path.join(projectRoot, 'README.md'), '# demo readme');
-  await fs.writeFile(path.join(projectRoot, 'src', 'a.ts'), 'export const q = (id) => `SELECT * WHERE id=${id}`;');
+  await fs.writeFile(path.join(projectRoot, 'src', 'a.ts'), `export const q = (id) => \`SELECT * WHERE id=\${id}\`;`);
   // A skipped directory (node_modules) so gatherFilesRecursive exercises the skip branch.
   await fs.mkdir(path.join(projectRoot, 'node_modules'), { recursive: true });
   await fs.writeFile(path.join(projectRoot, 'node_modules', 'ignored.ts'), 'export {};');

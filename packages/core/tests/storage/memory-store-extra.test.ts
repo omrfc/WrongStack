@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DefaultMemoryStore } from '../../src/storage/memory-store.js';
 import type { MemoryBackend } from '../../src/storage/memory-backend.js';
 import type { EventBus } from '../../src/kernel/events.js';

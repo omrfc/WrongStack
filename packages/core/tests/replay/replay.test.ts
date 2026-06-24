@@ -3,8 +3,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { hashRequest, stableStringify } from '../../src/replay/hash.js';
 import { ReplayLogStore } from '../../src/storage/replay-log-store.js';
-import { ReplayProviderRunner } from '../../src/replay/replay-provider-runner.js';
-import type { ProviderRunner, RunProviderOptions } from '../../src/types/provider-runner.js';
 import type { Request, Response } from '../../src/types/provider.js';
 
 // vi.mock is hoisted above imports.  The factory uses vi.importActual to lazily

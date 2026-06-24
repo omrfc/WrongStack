@@ -52,7 +52,7 @@ describe('DefaultPromptStore', () => {
   // ── save ────────────────────────────────────────────────────────────────────
 
   describe('save', () => {
-    it('writes a `${id}.json` file wrapped in { version, entry }', async () => {
+    it('writes an <id>.json file wrapped in { version, entry }', async () => {
       const store = new DefaultPromptStore(paths);
       const entry = store.createNew('Save Me', 'content here');
       await store.save(entry);

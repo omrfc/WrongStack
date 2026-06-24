@@ -246,7 +246,7 @@ describe('AnnotationsStore', () => {
     for (let i = 0; i < 1001; i++) {
       await loggedStore.add({ sessionId: 's1', atEventIndex: i, authorId: 'alice', text: `t${i}` });
     }
-    const evict = (events.emit as ReturnType<typeof vi.fn>).mock.calls.find(
+    const evict = emitSpy.mock.calls.find(
       ([ev, payload]) =>
         ev === 'storage.write'
         && (payload as { operation: string }).operation === 'evict',

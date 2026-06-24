@@ -357,7 +357,7 @@ describe('Key rotation', () => {
   });
 
   it('rotateConfigKeys re-encrypts all secrets with new key', async () => {
-    const { dir, keyFile, vault } = await makeVault();
+    const { dir, vault } = await makeVault();
     const cfgPath = path.join(dir, 'config.json');
 
     // Write a config with v1-encrypted secrets
