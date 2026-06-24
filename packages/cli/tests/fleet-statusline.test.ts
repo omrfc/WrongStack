@@ -167,9 +167,11 @@ describe('FleetStatusLine', () => {
     events.emit('subagent.spawned', { subagentId: 's1', taskId: 't1', name: 'E2E' });
     events.emit('subagent.task_completed', {
       subagentId: 's1',
+      taskId: 't1',
       status: 'success',
       iterations: 12,
       toolCalls: 45,
+      durationMs: 1000,
     });
     const all = out.all();
     expect(strip(all)).toContain('✓1');
@@ -184,9 +186,11 @@ describe('FleetStatusLine', () => {
     events.emit('subagent.spawned', { subagentId: 's1', taskId: 't1', name: 'E2E' });
     events.emit('subagent.task_completed', {
       subagentId: 's1',
+      taskId: 't1',
       status: 'failed',
       iterations: 3,
       toolCalls: 7,
+      durationMs: 1000,
     });
     expect(strip(out.all())).toContain('✗1');
     sl.stop();
@@ -199,7 +203,7 @@ describe('FleetStatusLine', () => {
     const sl = new FleetStatusLine({ events, out: out as never as NodeJS.WriteStream, throttleMs: 0 });
     sl.start();
     events.emit('subagent.spawned', { subagentId: 's1', taskId: 't1', name: 'E2E' });
-    events.emit('subagent.task_completed', { subagentId: 's1', status: 'success', iterations: 1, toolCalls: 1 });
+    events.emit('subagent.task_completed', { subagentId: 's1', taskId: 't1', status: 'success', iterations: 1, toolCalls: 1, durationMs: 1000 });
     // At this point nothing is running — auto-deactivate is scheduled with setTimeout 800ms
     out.writes.length = 0;
     vi.advanceTimersByTime(799);
@@ -222,6 +226,7 @@ describe('FleetStatusLine', () => {
       subagentId: 's1',
       iteration: 50,
       toolCalls: 200,
+      costUsd: 0.123,
       currentTool: 'read',
     });
     const line = strip(out.all());
@@ -237,7 +242,7 @@ describe('FleetStatusLine', () => {
     const sl = new FleetStatusLine({ events, out: out as never as NodeJS.WriteStream, throttleMs: 0 });
     sl.start();
     events.emit('subagent.spawned', { subagentId: 's1', taskId: 't1', name: 'E2E' });
-    events.emit('subagent.task_completed', { subagentId: 's1', status: 'success', iterations: 1, toolCalls: 1 });
+    events.emit('subagent.task_completed', { subagentId: 's1', taskId: 't1', status: 'success', iterations: 1, toolCalls: 1, durationMs: 1000 });
     events.emit('subagent.task_started', { subagentId: 's1', taskId: 't2' });
     // Agent should now show as running again (▶1, no ✓)
     expect(strip(out.all())).toContain('▶1');
