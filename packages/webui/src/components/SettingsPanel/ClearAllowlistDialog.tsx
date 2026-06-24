@@ -56,7 +56,6 @@ export function ClearAllowlistDialog({
   // Keyboard shortcuts: Enter to confirm, Escape to cancel. Matches
   // the muscle memory of the existing `<ConfirmDialog>` and the
   // CLI's permission prompts (y/n).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: keyboard handler; onConfirm/onCancel are stable in callers
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {

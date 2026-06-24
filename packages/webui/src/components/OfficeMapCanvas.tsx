@@ -19,6 +19,7 @@ import {
   type Connection,
   type NodeTypes,
   type EdgeTypes,
+  type EdgeProps,
   BackgroundVariant,
   useReactFlow,
   Handle,
@@ -43,7 +44,6 @@ import {
   Building2,
   Users,
   Armchair,
-  AppWindow,
   Zap,
   Activity,
   Hash,
@@ -561,8 +561,6 @@ function AgentNode({ data }: { data: OfficeNodeData }) {
 }
 
 function DeskNode({ data }: { data: OfficeNodeData }) {
-  const color = data.color || '#374151';
-
   return (
     <div className={cn(
       'rounded-lg border border-dashed p-3 min-w-[120px] transition-all opacity-40',
@@ -651,6 +649,13 @@ const nodeTypes: NodeTypes = {
   desk: DeskNode,
 };
 
+type OfficeEdgeData = {
+  color?: string;
+  animated?: boolean;
+  intensity?: number;
+  label?: string;
+};
+
 const edgeTypes: EdgeTypes = {
   wire: ({
     sourceX,
@@ -661,7 +666,7 @@ const edgeTypes: EdgeTypes = {
     targetPosition,
     data,
     selected,
-  }: any) => {
+  }: EdgeProps<Edge<OfficeEdgeData>>) => {
     const color = data?.color || '#6366f1';
     // Respect the global "animate edges" toggle from the settings panel.
     // SUBSCRIBE (not getState()) so toggling the setting re-renders the edges.

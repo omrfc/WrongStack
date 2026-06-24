@@ -80,7 +80,6 @@ export function SidePanel() {
       className="relative border-r bg-card flex flex-col shrink-0 overflow-hidden animate-slide-in"
     >
       {/* Drag handle */}
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: mouse-only resize affordance; keyboard users resize via the store default */}
       <div
         onMouseDown={startDrag}
         onDoubleClick={() => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH)}

@@ -1,4 +1,4 @@
-import { expectDefined, GlobalMailbox, projectSlug, getSessionRegistry, AgentStatusTracker, FleetNotifier } from '@wrongstack/core';
+import { expectDefined, GlobalMailbox, getSessionRegistry, AgentStatusTracker, FleetNotifier } from '@wrongstack/core';
 import {
   handleWorklistMessage,
   type WorklistContext,
@@ -17,9 +17,7 @@ import {
   type BrainAutoRisk,
 } from '@wrongstack/core';
 import * as fs from 'node:fs/promises';
-import * as http from 'node:http';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import { createHttpServer } from './http-server.js';
 import { setupWebUICodebaseIndexing } from './codebase-indexing.js';
 import {
@@ -87,7 +85,6 @@ import {
   estimateRequestTokensCalibrated,
   EventBus,
   createStrategyCompactor,
-  type ProviderConfig,
   type Provider,
   ProviderRegistry,
   TOKENS,
@@ -99,7 +96,6 @@ import {
   DEFAULT_CONTEXT_WINDOW_MODE_ID,
   DEFAULT_SESSION_PRUNE_DAYS,
   DEFAULT_TOOLS_CONFIG,
-  listContextWindowModes,
   resolveContextWindowPolicy,
   enhanceUserPrompt,
   gatedEnhancerReasoning,
@@ -111,7 +107,6 @@ import { decryptConfigSecrets, encryptConfigSecrets } from '@wrongstack/core/sec
 import { buildProviderFactoriesFromRegistry, makeProviderFromConfig } from '@wrongstack/providers';
 import { builtinToolsPack, forgetTool, rememberTool, searchMemoryTool, relatedMemoryTool } from '@wrongstack/tools';
 import { MCPRegistry } from '@wrongstack/mcp';
-import { allServers } from '@wrongstack/core';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createDefaultContainer } from '../../../runtime/src/container.js';
 import { bootConfig, patchConfig } from './boot.js';
@@ -323,7 +318,7 @@ export {
 // external consumers. The previous local copies shadowed these and made the
 // `Map<WebSocket, ConnectedClient>` passed to the extracted ws-utils helpers
 // nominally distinct, which TS rejected.
-import type { ConnectedClient, WSClientMessage, WSServerMessage, WebUIOptions } from './types.js';
+import type { ConnectedClient, WSClientMessage, WebUIOptions } from './types.js';
 
 export async function startWebUI(
   opts: WebUIOptions & {

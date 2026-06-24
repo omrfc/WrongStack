@@ -44,9 +44,10 @@ export function openBrowser(url: string, platform: NodeJS.Platform = process.pla
         // Dynamic import to avoid hard dependency on @wrongstack/tools from
         // this module (the webui server may not have tools installed).
         import('@wrongstack/tools').then(({ getProcessRegistry }) => {
+          const pid = child.pid;
+          if (pid === undefined) return;
           getProcessRegistry().register({
-            // biome-ignore lint/style/noNonNullAssertion: pid always present after spawn
-            pid: child.pid!,
+            pid,
             name: 'browser',
             command: `${command} ${args.join(' ')}`,
             startedAt: Date.now(),
@@ -55,8 +56,7 @@ export function openBrowser(url: string, platform: NodeJS.Platform = process.pla
           });
           // Auto-unregister on exit so the process list stays accurate.
           child.on('exit', () => {
-            // biome-ignore lint/style/noNonNullAssertion: pid guaranteed after spawn
-            getProcessRegistry().unregister(child.pid!);
+            getProcessRegistry().unregister(pid);
           });
         }).catch(() => {
           // @wrongstack/tools may not be available — silently skip registration.

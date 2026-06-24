@@ -1,7 +1,7 @@
 import { installFaviconVisibilityReset } from '@/lib/favicon';
 import { getWSClient } from '@/lib/ws-client';
 import type { WrongStackWebSocketClient } from '@/lib/ws-client';
-import { useChatStore, useConfigStore, useHistoryStore, useSessionStore, useUIStore } from '@/stores';
+import { useConfigStore, useHistoryStore, useUIStore } from '@/stores';
 import { useCallback, useEffect, useRef } from 'react';
 import { WS_HANDLERS } from './ws-handlers.js';
 

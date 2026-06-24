@@ -57,7 +57,6 @@ export const DiffView = memo(function DiffView({ oldText, newText, caption, fill
       >
         {rows.map((r, i) => (
           <div
-            // biome-ignore lint/suspicious/noArrayIndexKey: static diff rows
             key={i}
             className={cn(
               'flex',

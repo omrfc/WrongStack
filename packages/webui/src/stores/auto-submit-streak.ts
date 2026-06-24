@@ -17,13 +17,6 @@ import { useLocalPrefs } from './local-prefs.js';
  *  - Every successful auto-submit (countdown fires and suggestion is sent)
  */
 
-interface AutoSubmitStreakState {
-  /** Consecutive auto-submitted turns since last manual input */
-  streak: number;
-  /** Whether we've shown the cap-hit warning (to avoid spamming) */
-  capWarned: boolean;
-}
-
 interface UseAutoSubmitStreak {
   /** Current streak count */
   streak: number;

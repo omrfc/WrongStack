@@ -165,8 +165,8 @@ export interface WireFactoryOptions {
  * `ProviderRegistry.register(...)` or use in `buildProviderFactoriesFromRegistry`
  * for catalog-driven discovery.
  */
-export function createWireFormatFactory(
-  cfg: WireFormatConfig,
+export function createWireFormatFactory<S>(
+  cfg: WireFormatConfig<S>,
   opts: WireFactoryOptions = {},
 ): ProviderFactory {
   return {

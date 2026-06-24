@@ -21,7 +21,7 @@ import {
   OpenAICompatibleProvider,
 } from './openai-compatible.js';
 import { OpenAIProvider } from './openai.js';
-import { createWireFormatFactory, type WireFormatConfig } from './wire-format.js';
+import { createWireFormatFactory } from './wire-format.js';
 import { mistralWireFormat } from './presets/mistral.js';
 import { ollamaWireFormat, vllmWireFormat, lmstudioWireFormat } from './presets/local-llm.js';
 export { AnthropicProvider, type AnthropicProviderOptions } from './anthropic.js';
@@ -131,23 +131,14 @@ export function setOAuthTokenPersister(
 export const setCodexTokenPersister = setOAuthTokenPersister;
 
 /**
- * Known preset wire-format configs keyed by provider id. When the registry
- * returns a provider whose family is `openai-compatible` and whose id matches
- * one of these, the preset's tuned config (base URL, capability overrides,
- * body extras) is used instead of the generic `OpenAICompatibleProvider`.
+ * Known openai-compatible provider ids with tuned wire-format presets.
  *
- * Presets are also exported directly for manual use:
+ * Presets are exported directly for manual use:
  *   ```
  *   import { mistralWireFormat } from '@wrongstack/providers';
  *   const factory = createWireFormatFactory(mistralWireFormat);
  *   ```
  */
-const PRESET_BY_ID: Record<string, WireFormatConfig<any>> = {
-  mistral: mistralWireFormat,
-  ollama: ollamaWireFormat,
-  vllm: vllmWireFormat,
-  lmstudio: lmstudioWireFormat,
-};
 
 /**
  * Build one ProviderFactory per provider known to models.dev. The factory's
@@ -268,11 +259,28 @@ function makeProvider(p: ResolvedProvider, cfg: ProviderConfig): Provider {
       });
     case 'openai-compatible': {
       // Use a tuned preset when available (Mistral, Ollama, vLLM, LM Studio, …).
-      const preset = PRESET_BY_ID[p.id];
-      if (preset) {
-        return createWireFormatFactory(preset, {
+      if (p.id === 'mistral') {
+        return createWireFormatFactory(mistralWireFormat, {
           apiKey: expectDefined(apiKey),
-          baseUrl: baseUrl ?? preset.defaultBaseUrl,
+          baseUrl: baseUrl ?? mistralWireFormat.defaultBaseUrl,
+        }).create(cfg);
+      }
+      if (p.id === 'ollama') {
+        return createWireFormatFactory(ollamaWireFormat, {
+          apiKey: expectDefined(apiKey),
+          baseUrl: baseUrl ?? ollamaWireFormat.defaultBaseUrl,
+        }).create(cfg);
+      }
+      if (p.id === 'vllm') {
+        return createWireFormatFactory(vllmWireFormat, {
+          apiKey: expectDefined(apiKey),
+          baseUrl: baseUrl ?? vllmWireFormat.defaultBaseUrl,
+        }).create(cfg);
+      }
+      if (p.id === 'lmstudio') {
+        return createWireFormatFactory(lmstudioWireFormat, {
+          apiKey: expectDefined(apiKey),
+          baseUrl: baseUrl ?? lmstudioWireFormat.defaultBaseUrl,
         }).create(cfg);
       }
       return new OpenAICompatibleProvider({

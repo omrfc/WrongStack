@@ -73,7 +73,6 @@ function AgentRow({ agent, onClick }: { agent: SubagentView; onClick: () => void
 
 export function AgentsPanel() {
   const fleetAgents = useFleetStore((s) => s.agents);
-  const setCurrentView = useUIStore((s) => s.setCurrentView);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
   const fleetList = useMemo(() => {

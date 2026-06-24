@@ -22,7 +22,6 @@ import {
   PanelRight,
   BookOpen,
 } from 'lucide-react';
-import JSZip from 'jszip';
 import TextareaCodeEditor from '@uiw/react-textarea-code-editor';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';

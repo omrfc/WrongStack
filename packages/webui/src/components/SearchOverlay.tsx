@@ -83,7 +83,6 @@ export function SearchOverlay() {
   // covers only the message currently navigated to (so the user can see
   // where they are in the list). The registry is cleared on unmount and on
   // every query change so stale ranges don't linger.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: repaintNonce re-runs the pass after a virtualized hit mounts
   useEffect(() => {
     // Feature-detect — falls back to silent no-op on older browsers; the
     // ring-flash navigation behaviour below still works.

@@ -8,7 +8,7 @@ import { expectDefined } from '@wrongstack/core';
  * The regex fallback extracts: fn, struct, enum, trait, impl, type, const, static, mod
  */
 
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { FileSymbols, Symbol as IndexSymbol, SymbolLang } from './schema.js';
@@ -73,12 +73,15 @@ async function tryNativeParse(file: string, content: string): Promise<FileSymbol
     await fs.writeFile(tmpFile, content, 'utf8');
 
     // Use spawn for full async control with timeout via Promise.race + setTimeout kill
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const proc: any = spawn('cargo', ['run', '--manifest-path', path.join(toolsDir, 'Cargo.toml')], {
-      cwd: process.cwd(),
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
+    const proc: ChildProcessWithoutNullStreams = spawn(
+      'cargo',
+      ['run', '--manifest-path', path.join(toolsDir, 'Cargo.toml')],
+      {
+        cwd: process.cwd(),
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+      },
+    );
 
     let stdout = '';
     proc.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });

@@ -1,32 +1,5 @@
-import { getWSClient } from '@/lib/ws-client';
-import { streamCoalescer } from '@/lib/stream-coalescer';
-import type { WrongStackWebSocketClient } from '@/lib/ws-client';
-import type { PhaseItem } from '@/components/PhasePanel';
-import {
-  type ChatMessage,
-  type SessionHistoryEntry,
-  type SubagentEvent,
-  type SubagentView,
-  useAutoPhaseStore,
-  useChatStore,
-  useConfigStore,
-  useFleetStore,
-  useGoalStore,
-  useHistoryStore,
-  useMonitorStore,
-  useSessionStore,
-  useUIStore,
-  useWorktreeStore,
-  useFileStore,
-  useGitInfoStore,
-  useGitChangesStore,
-} from '@/stores';
-import { useVizStore, wsToVizEvent } from '@/stores/viz-store';
-import type { LiveSession } from '@/stores/monitor-store';
-import { useLocalPrefs } from '@/stores/local-prefs';
-import { useMailboxStore, type MailboxAgent, type MailboxMessage } from '@/stores/mailbox-store';
-import type { WorktreeHandleView, WSServerMessage } from '@/types';
-import { useCoordinatorMonitorStore } from '@/stores';
+import { type SessionHistoryEntry, useChatStore, useConfigStore, useFleetStore, useHistoryStore, useSessionStore } from '@/stores';
+import type { WSServerMessage } from '@/types';
 
 // Chat domain handlers extracted to chat-handlers.ts
 import { chatHandlerMap } from './ws-handlers/chat-handlers.js';
@@ -135,16 +108,6 @@ export function handleError(msg: WSServerMessage) {
   useChatStore.getState().setLoading(false);
 }
 
-/** Universal viz event pipe — called by every handler that generates a VizEvent. */
-function pipeViz(msg: WSServerMessage) {
-  const vizEv = wsToVizEvent(msg.type, msg.payload as Record<string, unknown>);
-  if (vizEv) {
-    useVizStore.getState().pushEvent(vizEv);
-    useVizStore.getState().setActive(true);
-  }
-  return msg; // chainable
-}
-
 export const WS_HANDLERS: Record<string, (msg: WSServerMessage) => void> = {
   ...chatHandlerMap,
   ...sessionHandlerMap,
@@ -191,7 +154,7 @@ export const WS_HANDLERS: Record<string, (msg: WSServerMessage) => void> = {
       iteration: 0, ts: p.ts, status: p.status,
     });
   },
-  'tasks.updated': (msg: WSServerMessage) => {
+  'tasks.updated': (_msg: WSServerMessage) => {
     // Handled directly by TasksPanel component via WS client.on()
   },
   'plan.updated': (_msg: WSServerMessage) => {

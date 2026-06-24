@@ -24,7 +24,6 @@ export function QueuedMessages({ queue, onClear, onRemove }: QueuedMessagesProps
       <ul className="space-y-1">
         {queue.map((item, index) => (
           <li
-            // biome-ignore lint/suspicious/noArrayIndexKey: queue has stable order
             key={index}
             className="flex items-start justify-between gap-2 rounded bg-background/60 border px-2 py-1"
           >

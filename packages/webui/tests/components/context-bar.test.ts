@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { ContextBar, ContextFillBar } from '../../src/components/ContextBar';
 
 /**
  * Pure-logic tests for ContextBar — we verify the color-threshold and
@@ -25,7 +24,6 @@ function getTextColor(pct: number): 'success' | 'warning' | 'destructive' {
 }
 
 function fmtPct(pct: number): string {
-  const clamped = Math.max(0, Math.min(200, pct));
   if (pct >= 100) return `${Math.round(pct)}%+`;
   return `${Math.round(pct)}%`;
 }

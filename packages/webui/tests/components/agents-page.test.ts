@@ -33,8 +33,6 @@ interface LeaderEntry {
   error?: { kind: string | undefined; message: string } | undefined;
 }
 
-type AgentView = SubagentView | LeaderEntry;
-
 function makeLeader(overrides: Partial<LeaderEntry> = {}): LeaderEntry {
   return {
     id: 'leader',

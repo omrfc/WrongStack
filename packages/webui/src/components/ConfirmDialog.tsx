@@ -104,7 +104,6 @@ export function ConfirmDialog() {
 
   // Keyboard shortcuts: y/n/a/d/Esc — matches the CLI and TUI permission
   // prompts so muscle memory transfers directly across all surfaces.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: keyboard handler; handleConfirm stable
   useEffect(() => {
     if (!showConfirmDialog) return;
     const onKey = (e: KeyboardEvent) => {

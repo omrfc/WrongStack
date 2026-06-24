@@ -187,7 +187,7 @@ function ApiKeyInput({
       onSave(key.trim());
       setKey('');
       toast.success('API key saved');
-    } catch (err) {
+    } catch {
       toast.error('Failed to save API key');
     } finally {
       setIsLoading(false);
@@ -231,7 +231,7 @@ function ApiKeyInput({
 export function SetupScreen() {
   const { setCurrentView } = useUIStore();
   const { provider, model, setProvider, setModel, wsConnected, wsUrl } = useConfigStore();
-  const ws = useWebSocket();
+  useWebSocket();
 
   // Step: 'provider' | 'model' | 'apikey' | 'done'
   const [step, setStep] = useState<'provider' | 'model' | 'apikey' | 'done'>('provider');
@@ -413,7 +413,6 @@ export function SetupScreen() {
   }, [selectedProvider, selectedModel, setProvider, setModel, wsUrl, setCurrentView]);
 
   const currentModels = selectedProvider ? catalogModels[selectedProvider] ?? [] : [];
-  const isLoading = isLoadingCatalog || isLoadingModels;
 
   return (
     <div className="flex flex-col h-full">

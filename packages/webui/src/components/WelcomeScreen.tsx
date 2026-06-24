@@ -243,7 +243,6 @@ export function WelcomeScreen() {
               <div className="flex flex-col gap-1.5">
                 {card.prompts.map((p, i) => (
                   <button
-                    // biome-ignore lint/suspicious/noArrayIndexKey: static list
                     key={i}
                     type="button"
                     onClick={() => fillTextarea(p)}
@@ -312,7 +311,6 @@ export function WelcomeScreen() {
               .slice(0, 5)
               .map((p, i) => (
                 <button
-                  // biome-ignore lint/suspicious/noArrayIndexKey: static list
                   key={i}
                   type="button"
                   onClick={() => fillTextarea(p)}

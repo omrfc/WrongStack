@@ -23,7 +23,7 @@ export interface SparklineChartProps {
   width?: number;
 }
 
-export function SparklineChart({ bins, className, width = NUM_BINS }: SparklineChartProps) {
+export function SparklineChart({ bins, className }: SparklineChartProps) {
   // Normalize to NUM_BINS by padding/truncating from the right (oldest bins)
   const padded = Array.from({ length: NUM_BINS }, (_, i) => bins.at(-(NUM_BINS - i)) ?? 0);
   const maxCount = Math.max(...padded, 1);

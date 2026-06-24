@@ -7,7 +7,7 @@
  *
  * Usage: <SessionsDashboard /> — standalone, no store dependencies.
  */
-import { Bot, Clock, Cpu, FolderGit2, Wifi, WifiOff, XCircle, CheckCircle2, Loader2 } from 'lucide-react';
+import { Clock, Cpu, FolderGit2, Wifi, WifiOff, Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 // ── Types ─────────────────────────────────────────────────────────────
