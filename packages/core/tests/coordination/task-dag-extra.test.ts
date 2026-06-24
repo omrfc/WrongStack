@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, } from 'vitest';
 import { TaskDAG } from '../../src/coordination/task-dag.js';
 
 describe('task-dag — extra coverage', () => {

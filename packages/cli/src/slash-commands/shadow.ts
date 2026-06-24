@@ -191,7 +191,7 @@ export function buildShadowCommand(opts: SlashCommandContext): SlashCommand {
             return { message: '/shadow interval <ms> — change heartbeat interval.\nCurrent: 30000ms (30 seconds)' };
           }
           const ms = parseInt(msStr, 10);
-          if (isNaN(ms) || ms < 5000) {
+          if (Number.isNaN(ms) || ms < 5000) {
             return { message: '/shadow interval: must be >= 5000ms' };
           }
           return { message: `/shadow interval ${ms}ms\n${color.dim('Interval will be applied on next /shadow start')}` };

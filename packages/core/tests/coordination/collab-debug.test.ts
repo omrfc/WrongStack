@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { EventBus } from '../../src/kernel/events.js';
 import { FleetBus } from '../../src/coordination/fleet-bus.js';
 import {
   CollabSession,

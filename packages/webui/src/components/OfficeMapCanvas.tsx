@@ -61,12 +61,9 @@ import {
   useMonitorStore,
   useOfficeMapStore,
 } from '@/stores';
-import type { LiveSession } from '@/stores/monitor-store';
 import type { VizEvent } from '@/stores/viz-store';
-import type { SubagentView } from '@/stores/types';
 import { SessionWatchPanel } from './SessionWatchPanel';
 import {
-  type ClientKind,
   type ClientStatus,
   type OfficeNodeData,
   fmtCompact,
@@ -74,7 +71,6 @@ import {
   fmtUptime,
   shortModel,
   CENTER_X,
-  HUB_Y,
   HUB_GAP,
   MAILBOX_Y,
   COORD_Y,
@@ -83,7 +79,6 @@ import {
   CLIENT_COL_W,
   AGENT_COLS,
   AGENT_FAN_W,
-  AGENT_ROW_H,
   layoutClientXs,
   agentFanPos,
   surfaceLabel,
@@ -97,7 +92,6 @@ function StatusLED({ status, small, activity = 0 }: { status: ClientStatus; smal
 
   // Intensity of the glow: 0–1, driven by VizNode.activity from vizStore.
   // At activity=0 the LED is flat; at activity=1 it glows at full brightness.
-  const glowOpacity = activity > 0 ? Math.min(0.9, 0.3 + activity * 0.6) : 0;
   const glowRadius = small ? 4 + activity * 4 : 6 + activity * 6;
 
   const baseColor: Record<ClientStatus, string> = {
@@ -444,7 +438,6 @@ function REPLNode({ data }: { data: OfficeNodeData }) {
 
 function CoordinatorNode({ data }: { data: OfficeNodeData }) {
   const isActive = data.status === 'active' || data.status === 'streaming';
-  const isError = data.status === 'error';
   const color = data.color || '#a855f7';
 
   return (
@@ -814,7 +807,6 @@ export function OfficeMapCanvas() {
   const showLegend = useOfficeMapStore((s) => s.showLegend);
   const showMinimap = useOfficeMapStore((s) => s.showMinimap);
   const showControls = useOfficeMapStore((s) => s.showControls);
-  const animateEdges = useOfficeMapStore((s) => s.animateEdges);
   const showFeed = useOfficeMapStore((s) => s.showFeed);
   const setShowFeed = useOfficeMapStore((s) => s.setShowFeed);
   const background = useOfficeMapStore((s) => s.background);
@@ -863,10 +855,6 @@ export function OfficeMapCanvas() {
   // Edge animation intensities keyed by office-map edge id (e.g. "coordinator->agent-1").
   // Written by the viz event handler, read by the wire edge component via subscription.
   const edgeIntensitiesRef = useRef<Map<string, number>>(new Map());
-
-  // VizStore nodes/edges maps for activity-driven glow.
-  const vizNodes = useVizStore((s) => s.nodes);
-  const vizEdges = useVizStore((s) => s.edges);
 
   // Node activity: keyed by office-map node id, decays over time.
   const vizActivityRef = useRef<Map<string, number>>(new Map());
@@ -1403,7 +1391,6 @@ export function OfficeMapCanvas() {
       }
 
       // Decay node activity
-      let nodesChanged = false;
       for (const [id, activity] of vizActivityRef.current) {
         const decayed = activity * 0.90;
         if (decayed < 0.03) {
@@ -1422,7 +1409,6 @@ export function OfficeMapCanvas() {
             ),
           );
         }
-        nodesChanged = true;
       }
     }, 1000);
     return () => clearInterval(interval);

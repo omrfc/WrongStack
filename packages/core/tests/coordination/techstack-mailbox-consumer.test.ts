@@ -4,10 +4,8 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import {
   startTechStackConsumer,
-  type TechStackConsumerOptions,
 } from '../../src/coordination/techstack-mailbox-consumer.js';
 import { DefaultMailbox } from '../../src/coordination/mailbox.js';
-import type { MailboxMessage } from '../../src/coordination/mailbox-types.js';
 
 describe('techstack-mailbox-consumer', () => {
   let tmpDir: string;

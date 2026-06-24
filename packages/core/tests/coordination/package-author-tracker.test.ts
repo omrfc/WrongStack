@@ -1,5 +1,4 @@
 import { describe, expect, it, beforeEach } from 'vitest';
-import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import {
@@ -10,7 +9,6 @@ import {
   getFullPackageLog,
   updatePackageOutdatedStatus,
   detectEcosystem,
-  type PackageAuthorEntry,
 } from '../../src/coordination/package-author-tracker.js';
 
 function tempDir(): string {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -520,8 +520,8 @@ describe('Full Coordination Workflow', () => {
     consensus.initiateVote(changeId.id);
 
     // Cast votes - castVote returns ConsensusResult directly
-    const result1 = await consensus.castVote(changeId.id, 'senior-dev', 'approve');
-    const result2 = await consensus.castVote(changeId.id, 'architect', 'approve');
+    const _result1 = await consensus.castVote(changeId.id, 'senior-dev', 'approve');
+    const _result2 = await consensus.castVote(changeId.id, 'architect', 'approve');
     const result3 = await consensus.castVote(changeId.id, 'junior-dev', 'approve');
 
     // Check consensus result

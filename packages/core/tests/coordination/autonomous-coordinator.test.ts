@@ -133,7 +133,7 @@ function createCoordinator(opts?: {
   const changeManager = new ChangeManager({ graph, consensus });
   const auctioneer = new TaskAuctioneer({ graph, fleet, mailbox, maxBidRetries: 3 });
 
-  const brain = new AutonomousBrain({
+  const _brain = new AutonomousBrain({
     llmProvider: createMockLlmProvider(),
     graph,
     fleet,
@@ -191,10 +191,6 @@ describe('AutonomousCoordinator', () => {
 
     it('is called with goal:added for each subgoal during goal decomposition', async () => {
       const events: CoordinatorEvent[] = [];
-      const { coordinator } = createCoordinator({
-        onCoordinatorEvent: (e) => events.push(e),
-      });
-
       // _decomposeGoal is private, but run() calls it. Use run() with
       // maxIterations=1 so the loop exits immediately after decomposition.
       const llmProvider = createMockLlmProvider();
@@ -852,7 +848,7 @@ describe('AutonomousCoordinator', () => {
       // the coordinator must emit goal:failed so the TUI shows the ❌ icon.
       const fleet = createMockFleetBus();
       const mailbox = createMockMailbox();
-      const graph = new KnowledgeGraph(tempDir);
+      const _graph = new KnowledgeGraph(tempDir);
 
       const emittedEvents: CoordinatorEvent[] = [];
       const coord = new AutonomousCoordinator({

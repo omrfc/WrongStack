@@ -10,7 +10,7 @@
  * - backward-compatibility: Director works identically with and without
  *   an injected FleetManager (same behavior, different code path)
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { FleetManager } from '../../src/coordination/fleet-manager.js';
 import { FleetBus } from '../../src/coordination/fleet-bus.js';
 import type { SubagentConfig } from '../../src/types/multi-agent.js';
@@ -137,7 +137,7 @@ describe('FleetManager', () => {
     it('rejects when fleet already hit cost cap', () => {
       const bus = new FleetBus();
       // Create FM with generous cap, then fake a cost event
-      const fm = new FleetManager({ directorBudget: { maxCostUsd: 0.01 }, maxSpawns: 10 });
+      const _fm = new FleetManager({ directorBudget: { maxCostUsd: 0.01 }, maxSpawns: 10 });
       // Emit a large usage event so fleet cost > cap
       bus.emit({
         subagentId: 'existing',
@@ -501,7 +501,7 @@ describe('FleetManager', () => {
   describe('Director backward-compatibility', () => {
     it('Director works without fleetManager (inline state)', async () => {
       const { Director } = await import('../../src/coordination/director.js');
-      const runner = vi.fn(async (task: TaskSpec, ctx: SubagentRunContext) => {
+      const runner = vi.fn(async (_task: TaskSpec, _ctx: SubagentRunContext) => {
         return { result: 'ok', iterations: 1, toolCalls: 1 };
       });
       const director = new Director({
@@ -517,7 +517,7 @@ describe('FleetManager', () => {
     it('Director works with injected FleetManager (delegated state)', async () => {
       const { Director } = await import('../../src/coordination/director.js');
       const fm = new FleetManager({ maxSpawns: 10, maxSpawnDepth: 3 });
-      const runner = vi.fn(async (task: TaskSpec, ctx: SubagentRunContext) => {
+      const runner = vi.fn(async (_task: TaskSpec, _ctx: SubagentRunContext) => {
         return { result: 'ok', iterations: 1, toolCalls: 1 };
       });
       const director = new Director({

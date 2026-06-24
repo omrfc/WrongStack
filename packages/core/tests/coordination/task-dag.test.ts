@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, } from 'vitest';
 import { TaskDAG, type DAGEdgeEvent } from '../../src/coordination/task-dag.js';
 
 describe('TaskDAG', () => {

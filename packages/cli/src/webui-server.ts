@@ -2424,11 +2424,15 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
 
       // ── Mailbox operations — project-level inter-agent messaging (PR 8 of #30) ────
       case 'mailbox.messages':
-        await handleMailboxMessages(mailboxCtx, msg as any, ws);
+        await handleMailboxMessages(
+          mailboxCtx,
+          msg as Parameters<typeof handleMailboxMessages>[1],
+          ws,
+        );
         break;
 
       case 'mailbox.agents':
-        await handleMailboxAgents(mailboxCtx, msg as any, ws);
+        await handleMailboxAgents(mailboxCtx, msg as Parameters<typeof handleMailboxAgents>[1], ws);
         break;
 
       case 'mailbox.clear':
@@ -2436,7 +2440,7 @@ export async function runWebUI(opts: CliWebUIOptions): Promise<void> {
         break;
 
       case 'mailbox.purge':
-        await handleMailboxPurge(mailboxCtx, msg as any, ws);
+        await handleMailboxPurge(mailboxCtx, msg as Parameters<typeof handleMailboxPurge>[1], ws);
         break;
 
       case 'git.info': {

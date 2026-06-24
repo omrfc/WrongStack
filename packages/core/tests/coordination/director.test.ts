@@ -28,7 +28,7 @@ import type {
  */
 
 describe('Director orchestration', () => {
-  let director: Director;
+  let _director: Director;
   /** Map of subagent id → EventBus the test runner uses to emit events
    *  on that subagent's behalf. Populated by `spawn()` so each subagent
    *  gets a distinct bus (true isolation, no cross-talk). */
@@ -114,7 +114,7 @@ describe('Director orchestration', () => {
         return { type: 'answer', optionId: 'extend', text: 'extend' };
       },
     });
-    director = d;
+    _director = d;
     let extended: Record<string, unknown> | null = null;
     let denied = false;
 
@@ -149,7 +149,7 @@ describe('Director orchestration', () => {
     const { director: d } = buildDirector({
       decide: async () => ({ type: 'answer', optionId: 'stop', text: 'stop' }),
     });
-    director = d;
+    _director = d;
     let extended = false;
     let denied = false;
 
@@ -180,7 +180,7 @@ describe('Director orchestration', () => {
 
   it('extends idle_timeout via the heartbeat path with a real idleTimeoutMs (not a no-op extend)', async () => {
     const { director: d } = buildDirector();
-    director = d;
+    _director = d;
     let extended: Record<string, unknown> | null = null;
     let denied = false;
 
@@ -217,7 +217,7 @@ describe('Director orchestration', () => {
 
   it('denies an idle_timeout extension when the subagent made no progress since the last grant', async () => {
     const { director: d } = buildDirector();
-    director = d;
+    _director = d;
     let extendCount = 0;
     let denied = false;
     const emitIdle = () =>
@@ -252,7 +252,7 @@ describe('Director orchestration', () => {
 
   it('isolates subagents: per-id provider + model attribution', async () => {
     const { director: d } = buildDirector();
-    director = d;
+    _director = d;
     const sonnetId = await spawnWithBus(d, {
       name: 'editor',
       provider: 'anthropic',
@@ -280,7 +280,7 @@ describe('Director orchestration', () => {
 
   it('routes a task to the named subagent (no cross-talk)', async () => {
     const { director: d, runner } = buildDirector();
-    director = d;
+    _director = d;
     const editorId = await spawnWithBus(d, {
       name: 'editor',
       provider: 'anthropic',
@@ -314,7 +314,7 @@ describe('Director orchestration', () => {
 
   it('rolls up usage across subagents with per-subagent pricing', async () => {
     const { director: d } = buildDirector();
-    director = d;
+    _director = d;
     // Sonnet: $3/M in, $15/M out.
     const sonnetId = await spawnWithBus(
       d,
@@ -359,7 +359,7 @@ describe('Director orchestration', () => {
     // `completed` cache, awaitTasks would hang forever for a task whose
     // event already fired.
     const { director: d } = buildDirector();
-    director = d;
+    _director = d;
     const id = await spawnWithBus(d, { name: 'w', provider: 'anthropic', model: 'haiku' });
     const taskId = await d.assign({ id: 't-late', description: 'do thing', subagentId: id });
 
@@ -372,7 +372,7 @@ describe('Director orchestration', () => {
 
   it('terminate aborts a running subagent', async () => {
     const { director: d, runner } = buildDirector();
-    director = d;
+    _director = d;
     // Custom slow runner so terminate has something to abort.
     runner.mockImplementationOnce(async (_task, ctx) => {
       await new Promise<void>((resolve, reject) => {
@@ -399,7 +399,7 @@ describe('Director orchestration', () => {
 
   it('director tools expose the same API to an LLM', async () => {
     const { director: d } = buildDirector();
-    director = d;
+    _director = d;
     const tools = d.tools({
       researcher: { name: 'researcher', provider: 'anthropic', model: 'haiku' },
       auditor: { name: 'auditor', provider: 'openai', model: 'gpt-5' },
@@ -462,7 +462,7 @@ describe('Director orchestration', () => {
 
   it('unknown role in spawn_subagent returns an error', async () => {
     const { director: d } = buildDirector();
-    director = d;
+    _director = d;
     const [spawn] = d.tools({ researcher: { name: 'researcher' } });
     const res = (await spawn.execute({ role: 'nope' }, null as never, {
       signal: new AbortController().signal,
@@ -472,7 +472,7 @@ describe('Director orchestration', () => {
 
   it('spawn_subagent can instantiate the same roster role repeatedly', async () => {
     const { director: d } = buildDirector();
-    director = d;
+    _director = d;
     const [spawn] = d.tools({
       researcher: { id: 'researcher', name: 'Researcher', provider: 'anthropic', model: 'haiku' },
     });
@@ -491,7 +491,7 @@ describe('Director orchestration', () => {
 
   it('FleetBus subscribe + filter routes events to the right handlers', async () => {
     const { director: d } = buildDirector();
-    director = d;
+    _director = d;
     const id = await spawnWithBus(d, { name: 'w', provider: 'anthropic', model: 'haiku' });
 
     const perAgent: string[] = [];
@@ -525,7 +525,7 @@ describe('Director orchestration', () => {
     // echoed payload. Director.ask resolves with the reply payload.
     const responses: string[] = [];
     const runner = vi.fn(
-      async (task: TaskSpec, ctx: SubagentRunContext): Promise<SubagentRunOutcome> => {
+      async (_task: TaskSpec, ctx: SubagentRunContext): Promise<SubagentRunOutcome> => {
         // Subscribe BEFORE doing anything else — we want to catch the
         // director's `ask()` message arriving while this task runs.
         ctx.bridge?.subscribe((msg) => {
@@ -559,7 +559,7 @@ describe('Director orchestration', () => {
       config: { coordinatorId: 'ask-d', doneCondition: { type: 'all_tasks_done' } },
       runner,
     });
-    director = d;
+    _director = d;
     const id = await d.spawn({ name: 'answerer', provider: 'anthropic', model: 'haiku' });
     const bus = new EventBus();
     buses.set(id, bus);
@@ -578,13 +578,13 @@ describe('Director orchestration', () => {
 
   it('ask() rejects with a helpful error for unknown subagent', async () => {
     const { director: d } = buildDirector();
-    director = d;
+    _director = d;
     await expect(d.ask('does-not-exist', { question: 'hi' })).rejects.toThrow(/unknown subagent/);
   });
 
   it('rollUp() formats markdown summary across completed tasks', async () => {
     const { director: d } = buildDirector();
-    director = d;
+    _director = d;
     const editor = await spawnWithBus(d, {
       name: 'editor',
       provider: 'anthropic',
@@ -611,7 +611,7 @@ describe('Director orchestration', () => {
 
   it('rollUp(taskIds, "json") emits a parseable JSON array', async () => {
     const { director: d } = buildDirector();
-    director = d;
+    _director = d;
     const id = await spawnWithBus(d, { name: 'w', provider: 'anthropic', model: 'haiku' });
     const taskId = await d.assign({ id: 'j-1', description: 'do thing', subagentId: id });
     await d.awaitTasks([taskId]);
@@ -625,7 +625,7 @@ describe('Director orchestration', () => {
 
   it('rollUp with no matching tasks returns a polite empty marker', () => {
     const { director: d } = buildDirector();
-    director = d;
+    _director = d;
     const md = d.rollUp(['nonexistent']);
     expect(md).toMatch(/No completed tasks/);
   });
@@ -638,7 +638,7 @@ describe('Director orchestration', () => {
     const manifestPath = path.join(tmpDir, 'fleet.json');
     try {
       const { director: d } = buildDirectorWithManifest(manifestPath);
-      director = d;
+      _director = d;
       const editor = await spawnWithBus(d, {
         name: 'editor',
         provider: 'anthropic',
@@ -706,7 +706,7 @@ describe('Director orchestration', () => {
 
   it('director.tools() exposes all 14 tools including collab_debug and fleet_emit', async () => {
     const { director: d } = buildDirector();
-    director = d;
+    _director = d;
     const tools = d.tools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
@@ -923,7 +923,7 @@ describe('Director orchestration', () => {
   describe('readSession robustness', () => {
     it('readSession returns null when sessionsRoot is not set', async () => {
       const { director: d } = buildDirector();
-      director = d;
+      _director = d;
       const id = await spawnWithBus(d, { name: 'w', provider: 'anthropic', model: 'haiku' });
       const result = await d.readSession(id);
       // sessionsRoot is not configured → immediate null
@@ -1008,7 +1008,7 @@ describe('Director orchestration', () => {
   describe('getSubagentMeta', () => {
     it('returns manifest-only fields when no usage is present', async () => {
       const { director: d } = buildDirector();
-      director = d;
+      _director = d;
       const id = await spawnWithBus(d, { name: 'worker', provider: 'openai', model: 'gpt-4o' });
       const meta = d.getSubagentMeta(id);
       // Manifest has name/provider/model — usage was set by buildDirector's price lookup
@@ -1020,7 +1020,7 @@ describe('Director orchestration', () => {
 
     it('returns undefined for unknown subagent id', async () => {
       const { director: d } = buildDirector();
-      director = d;
+      _director = d;
       const meta = d.getSubagentMeta('totally-unknown-id');
       expect(meta).toBeUndefined();
       await d.shutdown();
@@ -1210,8 +1210,8 @@ describe('Director orchestration', () => {
   // ── FleetManager integration ────────────────────────────────────────────────
 
   it('Director registers subagents with FleetManager when available', async () => {
-    const { director: d, runner } = buildDirector();
-    director = d;
+    const { director: d } = buildDirector();
+    _director = d;
     // buildDirector creates a director without an explicit FleetManager
     // — just verify the fleet exists and attach/detach works
     const id = await spawnWithBus(d, { name: 'w', provider: 'anthropic', model: 'haiku' });

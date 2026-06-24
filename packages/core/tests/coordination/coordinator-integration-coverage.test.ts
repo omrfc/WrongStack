@@ -184,7 +184,7 @@ describe('IC3: denied pre-empt — deadline fires at 100% (idle timeout)', () =>
       });
       const ctx = {} as never;
       const agent: Agent = {
-        async run(_input: unknown, runOpts: { signal: AbortSignal }): Promise<RunResult> {
+        async run(_input: unknown, _runOpts: { signal: AbortSignal }): Promise<RunResult> {
           events.emit('iteration.started', { ctx, index: 0 });
           events.emit('tool.executed', { name: 'work', id: 't0', durationMs: 1, ok: true });
           events.emit('provider.response', {
@@ -291,7 +291,7 @@ describe('IC5: idle timeout fires independently of wall-clock negotiation', () =
       const events = new EventBus();
       const ctx = {} as never;
       const agent: Agent = {
-        async run(_input: unknown, runOpts: { signal: AbortSignal }): Promise<RunResult> {
+        async run(_input: unknown, _runOpts: { signal: AbortSignal }): Promise<RunResult> {
           events.emit('iteration.started', { ctx, index: 0 });
           events.emit('tool.executed', { name: 'work', id: 't0', durationMs: 1, ok: true });
           events.emit('provider.response', {

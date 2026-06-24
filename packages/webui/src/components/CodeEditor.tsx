@@ -263,7 +263,9 @@ export function CodeEditor() {
     );
 
     return () => {
-      disposables.forEach((disposable) => disposable.dispose());
+      disposables.forEach((disposable) => {
+        disposable.dispose();
+      });
     };
   }, []);
 

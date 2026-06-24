@@ -1,5 +1,5 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { KnowledgeGraph, type FactNode, type GoalNode, type ChangeNode, type NodeFilter } from '../../src/coordination/knowledge-graph.js';
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { KnowledgeGraph, type FactNode, type GoalNode, type ChangeNode, } from '../../src/coordination/knowledge-graph.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -87,7 +87,7 @@ describe('KnowledgeGraph', () => {
 
     it('fires to matching subscriptions synchronously', async () => {
       const graph = new KnowledgeGraph(tempDir);
-      const received: string[] = [];
+      const _received: string[] = [];
 
       graph.subscribe('agent-1', { type: 'fact' });
       graph.subscribe('agent-2', { type: 'bug' });
@@ -389,7 +389,7 @@ describe('KnowledgeGraph', () => {
       const graph = new KnowledgeGraph(tempDir);
 
       const channel1 = graph.subscribe('agent-1', { type: 'fact' });
-      const channel2 = graph.subscribe('agent-2', { type: 'goal' });
+      const _channel2 = graph.subscribe('agent-2', { type: 'goal' });
 
       // Verify subscriptions exist
       expect(graph.poll(channel1)).toBeDefined();

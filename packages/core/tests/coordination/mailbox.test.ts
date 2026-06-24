@@ -6,7 +6,6 @@ import { randomUUID } from 'node:crypto';
 import { DefaultMailbox } from '../../src/coordination/mailbox.js';
 import type {
   MailboxMessage,
-  MailboxSendInput,
 } from '../../src/coordination/mailbox-types.js';
 import { makeMailboxTool, mailboxSessionTag } from '../../src/coordination/mailbox-tool.js';
 import {
@@ -136,10 +135,10 @@ describe('DefaultMailbox', () => {
   });
 
   it('query sorts newest first', async () => {
-    const m1 = await mailbox.send({ from: 'a', to: 'b', type: 'note', subject: 'older', body: 'b' });
+    const _m1 = await mailbox.send({ from: 'a', to: 'b', type: 'note', subject: 'older', body: 'b' });
     // Small delay to ensure different timestamps
     await new Promise((r) => setTimeout(r, 5));
-    const m2 = await mailbox.send({ from: 'a', to: 'b', type: 'note', subject: 'newer', body: 'b' });
+    const _m2 = await mailbox.send({ from: 'a', to: 'b', type: 'note', subject: 'newer', body: 'b' });
 
     const results = await mailbox.query({ to: 'b' });
     expect(results[0]!.subject).toBe('newer');

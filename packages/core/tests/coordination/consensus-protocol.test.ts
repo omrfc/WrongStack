@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { ConsensusProtocol, type VoterConfig, type QuorumRule } from '../../src/coordination/consensus-protocol.js';
+import { ConsensusProtocol, type VoterConfig, } from '../../src/coordination/consensus-protocol.js';
 import type { ChangeNode, KnowledgeGraph } from '../../src/coordination/knowledge-graph.js';
 import type { FleetBus } from '../../src/coordination/fleet-bus.js';
 
@@ -103,7 +103,7 @@ describe('ConsensusProtocol', () => {
         voters: defaultVoters(),
         graph,
       });
-      const change = createChangeNode(graph, 'change-1');
+      const _change = createChangeNode(graph, 'change-1');
 
       await protocol.initiateVote('change-1');
 
