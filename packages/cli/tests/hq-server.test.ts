@@ -132,6 +132,10 @@ function makeBrowserCollector(ws: WebSocket) {
       const existing = queue.findIndex(predicate);
       if (existing >= 0) {
         const [msg] = queue.splice(existing, 1);
+        if (!msg) {
+          reject(new Error('collector queue unexpectedly empty'));
+          return;
+        }
         resolve(msg);
         return;
       }
@@ -294,8 +298,15 @@ describe('HQ server', () => {
     // The HqProjectRecord rollup is also produced by buildSnapshot — confirm
     // it surfaces the project count too.
     const snapshotBody = snapshot.snapshot as {
-      totals: { activeProjects: number };
+      totals: {
+        activeClients: number;
+        unreadMailboxMessages: number;
+        incompleteMailboxMessages: number;
+        activeProjects: number;
+      };
       projects: Array<{ projectName: string; projectRootDisplay: string; machineIds: string[]; gitBranch?: string }>;
+      mailboxes: Array<{ mailboxId: string; unreadCount: number }>;
+      clients: unknown[];
     };
     expect(snapshotBody.totals.activeProjects).toBe(1);
     expect(snapshotBody.projects[0]).toMatchObject({
@@ -342,9 +353,14 @@ describe('HQ server', () => {
         (m as HqSnapshotMessage).snapshot.totals.activeClients === 1,
     )) as HqSnapshotMessage;
     const body = snapshot.snapshot as {
+      totals: {
+        activeClients: number;
+        unreadMailboxMessages: number;
+        incompleteMailboxMessages: number;
+      };
       projects: Array<{ projectName: string; activeClients: number }>;
       clients: Array<{ kind: string }>;
-      mailboxes: Array<{ mailboxId: string }>;
+      mailboxes: Array<{ mailboxId: string; unreadCount: number }>;
     };
 
     expect(body.projects[0]).toMatchObject({ projectName: 'HQ Integration Project', activeClients: 1 });
