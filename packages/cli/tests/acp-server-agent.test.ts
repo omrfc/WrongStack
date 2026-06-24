@@ -13,7 +13,6 @@
 
 import type {
   Config,
-  ModelsRegistry,
   Provider,
   ProviderRegistry,
   ResolvedProvider,
