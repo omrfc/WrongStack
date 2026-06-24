@@ -109,7 +109,7 @@ export const replaceTool: Tool<ReplaceInput, ReplaceOutput> = {
         /* v8 ignore next -- non-ENOENT lstat failure (EACCES etc.) is a defensive rethrow. */
         throw err;
       });
-      if (!lstat || !lstat.isFile()) continue;
+      if (!lstat?.isFile()) continue;
       if (lstat.isSymbolicLink()) continue;
 
       // Cross-check via realpath: if the resolved target lives outside the
@@ -127,7 +127,7 @@ export const replaceTool: Tool<ReplaceInput, ReplaceOutput> = {
 
       // Now stat the real target so we use its mode for atomicWrite.
       const stat = await fs.stat(realPath).catch(() => null);
-      if (!stat || !stat.isFile()) continue;
+      if (!stat?.isFile()) continue;
 
       let content: string;
       try {

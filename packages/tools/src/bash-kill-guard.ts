@@ -202,7 +202,7 @@ export async function isKillProtected(kill: KillCommand): Promise<boolean> {
     const killNameLower = kill.name.toLowerCase();
 
     for (const entry of entries) {
-      if (entry.name && entry.name.toLowerCase().includes(killNameLower)) {
+      if (entry.name?.toLowerCase().includes(killNameLower)) {
         return true;
       }
     }

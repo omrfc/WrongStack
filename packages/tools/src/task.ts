@@ -241,7 +241,11 @@ export const taskTool: Tool<TaskInput, TaskOutput> = {
           const newIds = new Set(input.tasks.map((t) => t.id));
           if (newIds.size !== input.tasks.length) {
             const seen = new Set<string>();
-            const dupes = [...new Set(input.tasks.map((t) => t.id).filter((id) => (seen.has(id) ? true : (seen.add(id), false))))];
+            const dupes = [...new Set(input.tasks.map((t) => t.id).filter((id) => {
+              if (seen.has(id)) return true;
+              seen.add(id);
+              return false;
+            }))];
             early = {
               ok: false,
               message: `action=replace has duplicate task IDs: ${dupes.join(', ')}. Each task id must be unique.`,
@@ -278,7 +282,7 @@ export const taskTool: Tool<TaskInput, TaskOutput> = {
 
         case 'add': {
           const t = input.task;
-          if (!t || !t.title) {
+          if (!t?.title) {
             early = { ok: false, message: 'action=add requires `task` with at least `title`.', count: 0, completed: 0, inProgress: 0 };
             return f;
           }
