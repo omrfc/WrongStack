@@ -6,6 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildTechStackCommand } from '../src/slash-commands/techstack.js';
 import type { SlashCommandContext } from '../src/slash-commands/index.js';
 
+type SlashResult = { message?: string; runText?: string; metadata?: Record<string, unknown> };
+
+function expectSlashResult(value: void | SlashResult): SlashResult {
+  expect(value).toBeTruthy();
+  return value as SlashResult;
+}
+
 class FakeRenderer {
   output = '';
   warnings: string[] = [];
@@ -62,20 +69,21 @@ describe('/techstack', () => {
     const renderer = new FakeRenderer();
     const toolRegistry = new ToolRegistry();
     if (opts.withFetch) toolRegistry.register(fetchToolStub());
-    const ctx: Partial<SlashCommandContext> = {
+    const ctx = {
       toolRegistry,
       renderer: renderer as never as SlashCommandContext['renderer'],
       cwd: projectRoot,
       projectRoot,
-      onSpawnAndWait: opts.onSpawnAndWait,
-    };
+      ...(opts.onSpawnAndWait ? { onSpawnAndWait: opts.onSpawnAndWait } : {}),
+    } satisfies Pick<SlashCommandContext, 'toolRegistry' | 'renderer' | 'cwd' | 'projectRoot'> &
+      Partial<Pick<SlashCommandContext, 'onSpawnAndWait'>>;
     return { renderer, command: buildTechStackCommand(ctx as SlashCommandContext) };
   }
 
   it('aborts with a tier hint when the fetch tool is not registered', async () => {
     const spawn = vi.fn(async () => 'summary');
     const { renderer, command } = rig({ withFetch: false, onSpawnAndWait: spawn });
-    const res = await command.run('', {} as never);
+    const res = expectSlashResult(await command.run('', {} as never));
     expect(spawn).not.toHaveBeenCalled();
     expect(res.message).toMatch(/fetch.*unavailable|token-saving/i);
     expect(renderer.warnings.join('\n')).toMatch(/fetch/i);
@@ -84,9 +92,10 @@ describe('/techstack', () => {
   it('spawns with a scoped tool allowlist and fs.write capability when fetch is available', async () => {
     const spawn = vi.fn(async () => 'done');
     const { command } = rig({ withFetch: true, onSpawnAndWait: spawn });
-    const res = await command.run('', {} as never);
+    const res = expectSlashResult(await command.run('', {} as never));
     expect(spawn).toHaveBeenCalledTimes(1);
-    const passedOpts = spawn.mock.calls[0]![1]!;
+    const [, passedOpts] = spawn.mock.calls[0]!;
+    expect(passedOpts).toBeDefined();
     expect(passedOpts.tools).toEqual(
       expect.arrayContaining(['read', 'fetch', 'write']),
     );
@@ -102,7 +111,7 @@ describe('/techstack', () => {
 
   it('reports when multi-agent is disabled (no onSpawnAndWait)', async () => {
     const { command } = rig({ withFetch: true });
-    const res = await command.run('', {} as never);
+    const res = expectSlashResult(await command.run('', {} as never));
     expect(res.message).toMatch(/multi-agent is not enabled/i);
   });
 });
