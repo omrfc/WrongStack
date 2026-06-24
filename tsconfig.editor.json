@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./packages/runtime" },
+    { "path": "./packages/tools" },
+    { "path": "./packages/tui" },
+    { "path": "./packages/webui" }
+  ]
+}
