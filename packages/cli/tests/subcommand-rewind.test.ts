@@ -68,7 +68,15 @@ beforeEach(() => {
 describe('rewindCmd', () => {
   it('errors when no sessions available and no id passed', async () => {
     const deps = fakeDeps({
-      sessionStore: { list: vi.fn().mockResolvedValue([]) },
+      sessionStore: {
+        create: vi.fn(),
+        load: vi.fn(),
+        resume: vi.fn(),
+        list: vi.fn().mockResolvedValue([]),
+        delete: vi.fn(),
+        clearHistory: vi.fn(),
+        prune: vi.fn(),
+      } as unknown as NonNullable<SubcommandDeps['sessionStore']>,
     });
     const code = await rewindCmd([], deps);
     expect(code).toBe(1);

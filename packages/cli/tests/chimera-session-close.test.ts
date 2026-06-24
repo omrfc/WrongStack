@@ -55,7 +55,7 @@ describe('chimera session.close ordering', () => {
     return {
       spawn: vi.fn(async () => 'subagent-id'),
       assign: vi.fn(async () => {}),
-      awaitTasks: vi.fn(async () => [
+      awaitTasks: vi.fn(async (_taskIds: string[]) => [
         {
           id: 'task-1',
           status: 'success',

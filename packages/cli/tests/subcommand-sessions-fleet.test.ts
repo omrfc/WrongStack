@@ -29,7 +29,7 @@ function deps(): SubcommandDeps {
     cwd: tmp,
     projectRoot: tmp,
     userHome: tmp,
-    flags: undefined,
+    flags: {},
   };
 }
 
