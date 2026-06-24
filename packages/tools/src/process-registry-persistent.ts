@@ -411,7 +411,9 @@ export class PersistentProcessRegistry {
                 'debug',
                 'process_registry.stale_pid_check',
                 `PersistentProcessRegistry: checking stale pid ${entry.pid} (${age}ms old)`,
-              );            }
+              );
+            }
+
           } catch {
             // Process is dead - mark for removal
             stalePids.push(_pidStr);
