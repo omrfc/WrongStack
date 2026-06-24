@@ -78,7 +78,7 @@ describe('STATUSLINE_ITEMS navigation order matches visual layout', () => {
     }
 
     // Each group should be alphabetically sorted
-    for (const [line, items] of byLine) {
+    for (const [_line, items] of byLine) {
       const sorted = [...items].sort((a, b) => a.localeCompare(b));
       expect(items).toEqual(sorted);
     }

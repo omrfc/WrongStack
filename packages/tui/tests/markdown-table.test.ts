@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { breakLigatures, renderMarkdownTables, strWidth } from '../src/markdown-table.js';
+import { renderMarkdownTables, strWidth } from '../src/markdown-table.js';
 
 describe('strWidth', () => {
   it('returns correct widths for emoji', () => {
@@ -55,7 +55,6 @@ describe('renderMarkdownTables', () => {
     const input = ['| L | C | R |', '|:--|:-:|--:|', '| 1 | 2 | 3 |'].join('\n');
     const out = renderMarkdownTables(input, 80);
     // Strip ANSI escape codes so regex assertions only see visible text.
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequence stripping
     const stripAnsi = (s: string) => s.replace(/\x1B\[\d*m/g, '');
     const row = stripAnsi(out.split('\n').find((l) => l.includes('1'))!);
     // Right column ends with the digit + ` │` (no trailing spaces).

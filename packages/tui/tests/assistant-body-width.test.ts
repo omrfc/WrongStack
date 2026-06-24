@@ -3,7 +3,6 @@ import { renderMarkdownTables, strWidth } from '../src/markdown-table.js';
 import {
   MESSAGE_PANEL_BORDER_WIDTH,
   MESSAGE_PANEL_CHROME_WIDTH,
-  MESSAGE_PANEL_MARGIN,
   assistantContentWidth,
 } from '../src/components/history/assistant.js';
 

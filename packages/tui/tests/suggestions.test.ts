@@ -63,7 +63,7 @@ describe('parseNextSteps (strict mode — assistant-message path)', () => {
       '1. First',
       '2. Second',
     ].join('\n');
-    const { steps, stripped, texts } = parseNextSteps(text, true);
+    const { stripped, texts } = parseNextSteps(text, true);
     expect(texts).toEqual(['First', 'Second']);
     expect(stripped).not.toContain('💡');
   });
