@@ -6,12 +6,17 @@ function makeCommand(overrides: Partial<SlashCommandContext> = {}) {
   return buildCoordinatorCommand(overrides as SlashCommandContext);
 }
 
+function expectSlashResult<T>(value: T | void): T {
+  expect(value).toBeTruthy();
+  return value as T;
+}
+
 describe('/coordinator slash command', () => {
   it('requires a goal for start', async () => {
     const onCoordinatorStart = vi.fn();
     const command = makeCommand({ onCoordinatorStart });
 
-    const result = await command.run('start   ');
+    const result = expectSlashResult(await command.run('start   '));
 
     expect(onCoordinatorStart).not.toHaveBeenCalled();
     expect(result.message).toContain('A goal is required');
@@ -21,7 +26,7 @@ describe('/coordinator slash command', () => {
     const onCoordinatorStart = vi.fn();
     const command = makeCommand({ onCoordinatorStart });
 
-    const result = await command.run('start audit and fix auth security issues');
+    const result = expectSlashResult(await command.run('start audit and fix auth security issues'));
 
     expect(onCoordinatorStart).toHaveBeenCalledOnce();
     expect(onCoordinatorStart).toHaveBeenCalledWith('audit and fix auth security issues');
@@ -32,7 +37,7 @@ describe('/coordinator slash command', () => {
     const onCoordinatorStop = vi.fn();
     const command = makeCommand({ onCoordinatorStop });
 
-    const result = await command.run('stop');
+    const result = expectSlashResult(await command.run('stop'));
 
     expect(onCoordinatorStop).toHaveBeenCalledOnce();
     expect(result.message).toContain('stop signal sent');
@@ -41,7 +46,7 @@ describe('/coordinator slash command', () => {
   it('reports whether start and stop hooks are wired', async () => {
     const command = makeCommand({ onCoordinatorStart: vi.fn(), onCoordinatorStop: vi.fn() });
 
-    const result = await command.run('status');
+    const result = expectSlashResult(await command.run('status'));
 
     expect(result.message).toContain('start=yes');
     expect(result.message).toContain('stop=yes');
@@ -54,7 +59,7 @@ describe('/coordinator slash command', () => {
     ]);
     const command = makeCommand({ onCoordinatorTasks });
 
-    const result = await command.run('tasks');
+    const result = expectSlashResult(await command.run('tasks'));
 
     expect(onCoordinatorTasks).toHaveBeenCalledOnce();
     expect(result.message).toContain('task-1234');
@@ -67,7 +72,7 @@ describe('/coordinator slash command', () => {
     const onCoordinatorClaim = vi.fn(async () => null);
     const command = makeCommand({ onCoordinatorClaim });
 
-    const result = await command.run('claim   ');
+    const result = expectSlashResult(await command.run('claim   '));
 
     expect(onCoordinatorClaim).not.toHaveBeenCalled();
     expect(result.message).toContain('Usage');
@@ -83,7 +88,7 @@ describe('/coordinator slash command', () => {
     });
     const command = makeCommand({ onCoordinatorTasks, onCoordinatorClaim });
 
-    const result = await command.run('claim task-abc');
+    const result = expectSlashResult(await command.run('claim task-abc'));
 
     expect(onCoordinatorClaim).toHaveBeenCalledOnce();
     expect(result.message).toContain('Claimed task');
@@ -98,7 +103,7 @@ describe('/coordinator slash command', () => {
     });
     const command = makeCommand({ onCoordinatorComplete });
 
-    const result = await command.run('done task-xyz All good');
+    const result = expectSlashResult(await command.run('done task-xyz All good'));
 
     expect(onCoordinatorComplete).toHaveBeenCalledOnce();
     expect(result.message).toContain('marked completed');
@@ -112,7 +117,7 @@ describe('/coordinator slash command', () => {
     });
     const command = makeCommand({ onCoordinatorFail });
 
-    const result = await command.run('fail task-bad tests broke');
+    const result = expectSlashResult(await command.run('fail task-bad tests broke'));
 
     expect(onCoordinatorFail).toHaveBeenCalledOnce();
     expect(result.message).toContain('marked failed');
@@ -126,7 +131,7 @@ describe('/coordinator slash command', () => {
     }));
     const command = makeCommand({ onCoordinatorStatus });
 
-    const result = await command.run('status');
+    const result = expectSlashResult(await command.run('status'));
 
     expect(onCoordinatorStatus).toHaveBeenCalledOnce();
     expect(result.message).toContain('5 total');
@@ -139,7 +144,7 @@ describe('/coordinator slash command', () => {
     const onCoordinatorStatus = vi.fn(async () => null);
     const command = makeCommand({ onCoordinatorStatus });
 
-    const result = await command.run('status');
+    const result = expectSlashResult(await command.run('status'));
 
     expect(result.message).toContain('No coordinator is active');
   });
@@ -151,7 +156,7 @@ describe('/coordinator slash command', () => {
     const onCoordinatorClaim = vi.fn(async () => null);
     const command = makeCommand({ onCoordinatorTasks, onCoordinatorClaim });
 
-    const result = await command.run('claim nope');
+    const result = expectSlashResult(await command.run('claim nope'));
 
     expect(onCoordinatorClaim).not.toHaveBeenCalled();
     expect(result.message).toContain('No pending coordinator task matched');
