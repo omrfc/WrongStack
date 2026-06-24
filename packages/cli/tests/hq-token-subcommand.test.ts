@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { hqCmd } from '../src/subcommands/handlers/hq.js';
-import type { SubcommandDeps } from '../src/subcommands/index.js';
+import type { ContentBlock, SubcommandDeps, TextBlock } from '@wrongstack/core';
 
 /**
  * Tests for the `wstack hq` subcommand group (Phase 3).
@@ -50,6 +50,10 @@ interface CapturedRenderer {
 type RendererWithCapture = SubcommandDeps['renderer'] & { captured: CapturedRenderer };
 type TestDeps = SubcommandDeps & { renderer: RendererWithCapture };
 
+function renderText(input: string | TextBlock): string {
+  return typeof input === 'string' ? input : input.text;
+}
+
 function makeDeps(overrides: Partial<SubcommandDeps> = {}): TestDeps {
   return {
     config: {} as SubcommandDeps['config'],
@@ -69,8 +73,23 @@ function makeDeps(overrides: Partial<SubcommandDeps> = {}): TestDeps {
 function makeStubRenderer(): RendererWithCapture {
   const captured: CapturedRenderer = { out: [], err: [], warn: [] };
   return {
-    write: vi.fn((s: string) => {
-      captured.out.push(s);
+    write: vi.fn((input: string | TextBlock) => {
+      captured.out.push(renderText(input));
+    }),
+    writeLine: vi.fn((text = '') => {
+      captured.out.push(text ? `${text}\n` : '\n');
+    }),
+    writeBlock: vi.fn((block: ContentBlock) => {
+      if (block.type === 'text') captured.out.push(block.text);
+    }),
+    writeToolCall: vi.fn((name: string, _input: unknown) => {
+      captured.out.push(name);
+    }),
+    writeToolResult: vi.fn((name: string, content: unknown, _isError: boolean) => {
+      captured.out.push(typeof content === 'string' ? `${name}:${content}` : name);
+    }),
+    writeDiff: vi.fn((diff: string) => {
+      captured.out.push(diff);
     }),
     writeError: vi.fn((s: string) => {
       captured.err.push(s);
@@ -78,6 +97,10 @@ function makeStubRenderer(): RendererWithCapture {
     writeWarning: vi.fn((s: string) => {
       captured.warn.push(s);
     }),
+    writeInfo: vi.fn((s: string) => {
+      captured.out.push(s);
+    }),
+    clear: vi.fn(),
     captured,
   } as RendererWithCapture;
 }

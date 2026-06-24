@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import type { ContentBlock, TextBlock } from '@wrongstack/core';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -15,17 +16,36 @@ afterEach(async () => {
   await fs.rm(tmp, { recursive: true, force: true });
 });
 
-type TestRenderer = {
+type TestRenderer = SubcommandDeps['renderer'] & {
   write: ReturnType<typeof vi.fn>;
   writeError: ReturnType<typeof vi.fn>;
 };
 
-type TestDeps = Omit<SubcommandDeps, 'renderer'> & { renderer: TestRenderer };
+type TestDeps = SubcommandDeps & { renderer: TestRenderer };
+
+function renderText(input: string | TextBlock): string {
+  return typeof input === 'string' ? input : input.text;
+}
 
 function deps(): TestDeps {
   return {
     config: {} as SubcommandDeps['config'],
-    renderer: { write: vi.fn(), writeError: vi.fn() },
+    renderer: {
+      write: vi.fn((input: string | TextBlock) => {
+        void renderText(input);
+      }),
+      writeLine: vi.fn(),
+      writeBlock: vi.fn((block: ContentBlock) => {
+        if (block.type === 'text') void block.text;
+      }),
+      writeToolCall: vi.fn(),
+      writeToolResult: vi.fn(),
+      writeDiff: vi.fn(),
+      writeError: vi.fn(),
+      writeWarning: vi.fn(),
+      writeInfo: vi.fn(),
+      clear: vi.fn(),
+    },
     reader: {} as SubcommandDeps['reader'],
     sessionStore: undefined,
     skillLoader: undefined,
@@ -40,8 +60,8 @@ function deps(): TestDeps {
   };
 }
 
-function joined(spy: { mock: { calls: Array<[string]> } }): string {
-  return spy.mock.calls.map((c) => c[0]).join('');
+function joined(spy: { mock: { calls: Array<unknown[]> } }): string {
+  return spy.mock.calls.map((c) => String(c[0] ?? '')).join('');
 }
 
 describe('sessionsFleetCmd — list mode', () => {
@@ -55,9 +75,9 @@ describe('sessionsFleetCmd — list mode', () => {
   it('errors when projectSessions does not exist', async () => {
     const badTmp = path.join(tmp, 'does-not-exist');
     const d = {
-      renderer: { write: vi.fn(), writeError: vi.fn() },
+      ...deps(),
       paths: { projectSessions: badTmp } as never,
-    } as never;
+    };
     const code = await sessionsFleetCmd([], d);
     expect(code).toBe(1);
     expect(d.renderer.writeError).toHaveBeenCalled();
