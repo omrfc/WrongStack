@@ -5,6 +5,134 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.273.0] — 2026-06-25
+
+> The **Spec-Driven Development "never stuck, never explode"** release. It turns
+> `/sdd parallel` from a fire-and-forget fan-out into a fully observable,
+> self-healing, dependency-driven multi-agent run: a live kanban/DAG board on every
+> surface (CLI · TUI · WebUI), a continuous dependency scheduler, per-task and
+> per-run model + fallback selection, a verification/merge completion gate, a Brain
+> supervisor that reassigns/splits/escalates exhausted tasks, an interactive
+> "start SDD from the WebUI" wizard, interactive Ctrl+C stop, and a full project
+> lifecycle (`clean` / `rollback` / `destroy`). Outside SDD it adds per-tool
+> description-detail control (`/tool`), catalog model-visibility controls
+> (`wstack models hide/show/hidden/reset`), and an event-driven Shadow Agent
+> fleet monitor (`/shadow`). All workspace packages and the marketing site are
+> aligned to `0.273.0` in lockstep. Additive only — no breaking changes.
+
+### Added
+
+- **`packages/core/src/sdd` + CLI/TUI/WebUI — live multi-agent SDD board.** The real
+  `/sdd parallel` run (`SddParallelRun` + `DefaultMultiAgentCoordinator`) is now fully
+  observable. New `TaskTracker.subscribe()`/`notifyChange` primitive feeds an
+  `SddBoardProjector` that throttles `sdd.run.*` / `sdd.task.*` / `sdd.wave` /
+  `sdd.deadlock` events into a persisted `SddBoardSnapshot` (topological columns, short
+  ids, dependency refs, live agent + worktree badges, activity feed). Surfaced as a
+  WebUI **Live Board** (`SddBoardView` — animated React-Flow DAG, kanban toggle, task
+  drawer, activity feed) on both servers, and a TUI overlay (**Ctrl+B**). Each task runs
+  in its own git worktree with success→squash-merge / retry→discard, plus orphan reset,
+  deadlock recovery, and wall-clock/round backstops.
+
+- **`packages/core/src/sdd` — start an SDD project from the WebUI (wizard).** New
+  `SddInterviewDriver` (headless wrapper around `AISpecBuilder`) drives an interactive
+  Q&A spec wizard — goal → questions → spec → task graph → Start Run → live board — over
+  dedicated `sdd.spec.*` / `sdd.run.start` WS messages on both WebUI servers. Real
+  multi-agent execution is provided by a new `makeLightSubagentFactory` (runtime) so the
+  WebUI runs a real fleet without depending on the CLI `MultiAgentHost`. Run setup was
+  extracted into `core/sdd/start-sdd-run.ts` (`startSddRun`), now shared by the CLI and
+  both WebUI servers.
+
+- **`packages/core/src/sdd` — continuous dependency-driven scheduler.** `SddParallelRun.run()`
+  moved from a wave-barrier (whole batch must finish before the next) to a continuous
+  dispatcher: a fast task's dependents start the moment their deps are satisfied,
+  independents run in parallel, and chains run in order. Real `dependsOn` is now captured
+  end-to-end (spec prompt asks for `id` + `dependsOn`; a two-pass resolver wires the
+  graph; `TaskGenerator` adds default tests/docs→feature edges). New
+  `TaskTracker.addDependency` (cycle-guarded), `removeNode`, and `patchMetadata`.
+
+- **`packages/core` + CLI/WebUI — per-task and per-run model, provider & fallback
+  selection.** A run can set a default model/provider/fallback chain, and any task can
+  override its worker model. Threaded through `startSddRun`, the projector, and the board
+  snapshot; controllable via WS (`set_task_model` / `set_task_fallbacks`) and the WebUI
+  `ModelPicker` + `FallbackEditor` (run-config popover, per-task drawer row, and a global
+  fallback editor in WebUI settings). `createFallbackModelExtension` / `parseModelRef`
+  moved `cli → core` and are wired per-worker in the runtime light factory.
+
+- **`packages/core/src/sdd` — never-stuck/explode robustness layer (PR #112).** A
+  completion gate verifies a worker "success" (optional `verifyTask`, runs in the task
+  cwd) before mark-completed and before merge; conflicted worktrees gate completion on a
+  clean merge (`integrateWorktree`, optional `conflictResolver`); a Brain `SddSupervisor`
+  is consulted only when retries are exhausted and maps a decision to
+  retry / reassign(model) / split / fail; and `splitTask` breaks a stuck task into
+  dependency-rewired leaves. New events: `sdd.task.verification_failed` / `conflict` /
+  `split` and `sdd.supervisor.decision`. New env opt-ins:
+  `WRONGSTACK_SDD_VERIFY_FROM_ACCEPTANCE=1` (derive a `verificationCommand` from an
+  acceptance criterion) and `WRONGSTACK_SDD_CONFLICT_RESOLVER=prefer-incoming|prefer-base|llm`
+  (a resolver-landed merge is re-verified and reverted on regression). New slash commands
+  `/sdd split <id> <A ; B>` and `/sdd retry-failed`.
+
+- **`packages/core/src/worktree` + CLI/WebUI/TUI — full SDD run lifecycle.** New
+  WorktreeManager primitives `currentBase()`, `cleanupAllManaged()`, and
+  `revertCommits()` (history-preserving `git revert`, dirty-tree guard) back a full
+  project lifecycle: `/sdd clean` (force-remove managed worktrees + branches),
+  `/sdd rollback` (revert each squash-merge commit recorded in `mergedCommits[]` on the
+  board snapshot), and `/sdd destroy` (clean worktrees + delete specs / task-graphs /
+  session / boards). Post-run disk helpers live in the new `core/sdd/sdd-lifecycle.ts`.
+  Surfaced on all three surfaces — WebUI Clean/Rollback buttons (when no active run) and
+  TUI board-overlay keys (`c` clean / `z` rollback).
+
+- **`packages/cli` — `/tool <name> simple|extend` per-tool description detail.** Tools
+  default to `desc:extend` (full description); `desc:simple` switches a tool to a shorter
+  1–2 line description to trim prompt overhead. Modes are applied at boot via
+  `applyToolDescriptionModes` and shown in `/tools` output. Reference in
+  `docs/slash/tool.md`.
+
+- **`packages/cli` — catalog model-visibility controls.** New
+  `wstack models hide|show|hidden|reset <id>` commands curate which catalog models appear
+  in pickers and listings. A shared `visibleModelIds()` helper (when `cfg.models` is set
+  it is the allowlist, otherwise the full catalog is visible) is applied across the CLI
+  picker, provider-helpers, and subcommands, so hidden models never surface in interactive
+  selection or `wstack models` output.
+
+- **`packages/core` + CLI — event-driven Shadow Agent fleet monitor (`/shadow`).** The
+  Shadow Agent was refactored from a periodic heartbeat to an event-driven one-shot pass:
+  it monitors work depth via `agent.run.*` / `subagent.task.*`, tracks every fleet agent
+  and its current task, detects loops and spike tasks, and can `hoop` a runaway agent
+  (stop + notify). `/shadow start|stop|status|hoop|model|interval` manages its lifecycle,
+  now tracked across host auto-start and the slash-command flow.
+
+### Changed
+
+- **`packages/core/src/sdd/sdd-parallel-run.ts` — subagent timeout model.** Workers no
+  longer get a hard 5-minute wall-clock `timeoutMs` that hard-killed productive tasks
+  (→ `budget_timeout`). The default is now an activity-resetting idle reaper
+  (`idleTimeoutMs`, 600s); `taskTimeoutMs` is opt-in. Default `parallelSlots` 4→2 (for
+  worktree manageability) and `maxRetries` 2→3. A bounded end-of-run failed-task sweep
+  (`maxFailedRetrySweeps`) plus `retryAllFailed()` / `/sdd retry-failed` recover stragglers,
+  and failed worktrees are released (no pile-up).
+
+- **WebUI SDD surfaces — light-theme support + shared design system.** The SDD wizard and
+  board surfaces were converted from a hardcoded dark palette to theme tokens (readable in
+  light mode); the theme-aware `ModelPicker` / `FallbackEditor` follow suit. A single
+  `packages/webui/src/lib/sdd-theme.ts` is now the source of truth for SDD status /
+  priority / agent colors / feed icons consumed by all SDD surfaces.
+
+### Fixed
+
+- **`packages/core/src/sdd/sdd-parallel-run.ts` — dropped dependencies & silent
+  unmerged tasks.** Two latent data bugs: agent task JSON carried no `dependsOn` (so the
+  scheduler saw an edgeless graph and slot-filled naively), and `resolveWorktrees` ignored
+  the `merge()` result — silently leaving conflicted tasks marked "completed" but never
+  merged. Both are closed by the dependency capture path and the merge-gated
+  `integrateWorktree`.
+
+- **`packages/cli` + TUI — `/sdd parallel` was unstoppable mid-run.** A live parallel run
+  blocked the prompt (the slash dispatch awaited the whole run) and the SIGINT handlers
+  only stopped the autonomy engines, never the SDD coordinator. A `getSddRun` getter is
+  now threaded `cli-main → execution → repl / run-tui → app` so the first Ctrl+C calls
+  `stop()` on the active run (aborts workers, drains, returns the prompt). The WebUI Stop
+  already worked via the cross-process control-file drain.
+
 ## [0.272.0] — 2026-06-24
 
 > The **agent monitoring, process self-protection, and security-hardening** release.

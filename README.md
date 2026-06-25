@@ -205,7 +205,7 @@ bar shows a compact `🧠` chip, and the answer flows back through typed
 
 ### Spec-Driven Development (`/sdd`)
 
-The `/sdd <path-to-spec.md>` slash command guides the agent through the SDD loop: `parse` → `analyze` → `generate` → `track` → `execute`. Built on `SpecParser`, `TaskTracker`, `TaskGenerator`, and `TaskFlow` from `@wrongstack/core/sdd`. Reads a markdown spec file, generates tasks via `TaskGenerator`, and displays task status inline.
+The `/sdd` slash command guides the agent through the SDD loop: an interactive Q&A interview → spec → implementation plan → task graph → execute. Built on `SpecParser`, `TaskTracker`, `TaskGenerator`, and `TaskFlow` from `@wrongstack/core/sdd`. `/sdd new` starts a session, `/sdd approve` advances each phase, and `/sdd tasks` / `/sdd graph` / `/sdd critical` track progress.
 
 ```ts
 const parser = new SpecParser();
@@ -219,6 +219,36 @@ await generator.generateFromSpec(spec);
 const flow = new TaskFlow({ tracker });
 await flow.execute({ executeTask: async (task) => { /* ... */ } });
 ```
+
+#### Parallel SDD — live multi-agent board
+
+`/sdd parallel [slots]` fans the task graph out across a real subagent fleet
+(`SddParallelRun` + `DefaultMultiAgentCoordinator`), with every run observable and
+controllable on every surface:
+
+- **Live board** — an `SddBoardProjector` turns `sdd.run.*` / `sdd.task.*` / `sdd.wave`
+  events into a persisted snapshot rendered as an animated React-Flow DAG + kanban in the
+  WebUI **Live Board** (both servers) and a TUI overlay (**Ctrl+B**) — live agent and
+  worktree badges, an activity feed, and deadlock banners.
+- **Continuous dependency scheduler** — a fast task's dependents start the moment their
+  `dependsOn` edges are satisfied; independents run in parallel; chains run in order.
+- **Per-task / per-run model + fallback** — pick a default model/provider/fallback chain
+  for a run and override the worker model on any task (WebUI `ModelPicker` +
+  `FallbackEditor`, or WS `set_task_model` / `set_task_fallbacks`).
+- **Never stuck, never explode** — a verification gate (optional, opt-in from acceptance
+  criteria via `WRONGSTACK_SDD_VERIFY_FROM_ACCEPTANCE=1`) and merge gate (each task in its
+  own git worktree, success→squash-merge; opt-in conflict resolver via
+  `WRONGSTACK_SDD_CONFLICT_RESOLVER=prefer-incoming|prefer-base|llm`, re-verified and
+  reverted on regression); an idle reaper instead of a hard wall-clock kill; a bounded
+  failed-task retry sweep; and a Brain `SddSupervisor` that, once retries are exhausted,
+  reassigns the model, splits the task, or escalates.
+- **Start from the WebUI** — the `SddInterviewDriver` wizard runs the whole goal → Q&A →
+  spec → graph → run flow in the browser and drives a real fleet via the runtime light
+  subagent factory.
+- **Stop & lifecycle** — **Ctrl+C** stops a live run from the CLI/TUI; `/sdd stop`,
+  `/sdd retry-failed`, `/sdd split <id> <A ; B>`, `/sdd clean` (remove managed worktrees),
+  `/sdd rollback` (history-preserving `git revert` of the run's merge commits), and
+  `/sdd destroy` (clean worktrees + delete specs/graphs/session/boards) round out control.
 
 ### Plugin ecosystem — `@wrongstack/plugins`
 
@@ -394,12 +424,18 @@ Flips off MCP, plugins, memory tools, models.dev fetch, and skill discovery. Wha
 
 ## Recent changes
 
-**Current release: 0.268.0.** The HQ command center hardening release. It
-ships the Phase 1 `hq.welcome` handshake, validates HQ client frames with
-`parseHqFrame()`, documents the browser/client protocol and Phase 2 auth
-roadmap, expands mailbox drawer/live-feed jsdom coverage, and includes the
-release-check cleanup needed to keep audit, typecheck, tests, and build green.
-Additive only — no breaking changes.
+**Current release: 0.273.0.** The Spec-Driven Development "never stuck, never
+explode" release. `/sdd parallel` becomes a fully observable, self-healing,
+dependency-driven multi-agent run: a live kanban/DAG board on every surface
+(CLI · TUI **Ctrl+B** · WebUI), a continuous dependency scheduler, per-task and
+per-run model + fallback selection, a verification/merge completion gate, a Brain
+supervisor that reassigns / splits / escalates exhausted tasks, an interactive
+"start SDD from the WebUI" wizard, interactive **Ctrl+C** stop, and a full project
+lifecycle (`/sdd clean` / `rollback` / `destroy`). Outside SDD it adds per-tool
+description-detail control (`/tool <name> simple|extend`), catalog model-visibility
+controls (`wstack models hide/show/hidden/reset`), and an event-driven **Shadow
+Agent** fleet monitor (`/shadow`). All workspace packages and the marketing site
+are aligned to `0.273.0` in lockstep. Additive only — no breaking changes.
 
 See **[CHANGELOG.md](CHANGELOG.md)** for the full, versioned history.
 
@@ -481,11 +517,11 @@ wrongstack --provider openrouter --model anthropic/claude-opus-4-7
 
 ## Slash commands
 
-**Core** (both the plain REPL and the TUI): `/init` `/help` `/clear` `/compact` `/context` `/codebase-reindex` `/dev` `/diag` `/stats` `/tools` `/plugin` `/mcp` `/auth` `/memory` `/todos` `/tasks` `/mode` `/yolo` `/autonomy` `/interrupt` `/btw` `/next` `/enhance` `/fix` `/autophase` `/worktree` `/settings` `/sdd` `/save` `/load` `/prune` `/exit`
+**Core** (both the plain REPL and the TUI): `/init` `/help` `/clear` `/compact` `/context` `/codebase-reindex` `/dev` `/diag` `/stats` `/tools` `/tool` `/plugin` `/mcp` `/auth` `/memory` `/todos` `/tasks` `/mode` `/yolo` `/autonomy` `/interrupt` `/btw` `/next` `/enhance` `/fix` `/autophase` `/worktree` `/settings` `/sdd` `/save` `/load` `/prune` `/exit`
 
 Every built-in command is tagged with a category (`Run` · `Session` · `Inspect` · `Agent` · `Config` · `App`); the TUI slash picker groups matches under category headers, and the WebUI surfaces 55 commands in its slash list.
 
-**Multi-agent:** `/spawn` `/fleet` `/agents` `/goal` `/director` `/collab` `/setmodel` `/models` `/fallback`
+**Multi-agent:** `/spawn` `/fleet` `/agents` `/shadow` `/goal` `/director` `/collab` `/setmodel` `/models` `/fallback`
 
 **TUI-only** (need `--tui`): `/model` (provider → model picker) · `/steer` (mid-flight redirect — the plain REPL uses **Esc** instead) · `/queue`
 
@@ -518,7 +554,9 @@ Every built-in command is tagged with a category (`Run` · `Session` · `Inspect
 | `/context mode <policy>` | Switch context-window mode: `balanced`, `frugal`, `deep`, `archival`. `repair` fixes damaged tool-call adjacency |
 | `/plugin install\|disable\|enable\|remove\|official [name]` | Manage plugins. `install` adds bundled package to config (no npm). Restart to load/unload |
 | `/telegram send\|read\|chat\|attach` | Telegram plugin (enable with `wstack plugin install telegram`): `send <chatId> <message>`, `read <chatId> [limit]`, `chat` list recent, `attach <file>` send file |
-| `/sdd <path-to-spec.md>` | Spec-Driven Development workflow: `parse → analyze → generate → track → execute`. Built on `SpecParser`, `TaskTracker`, `TaskGenerator`, `TaskFlow` |
+| `/sdd new\|approve\|spec\|tasks\|graph\|critical\|parallel\|stop\|retry-failed\|split\|clean\|rollback\|destroy` | Spec-Driven Development workflow: interactive interview → spec → plan → task graph → execute. `parallel [slots]` fans out a real subagent fleet onto the live board; `clean`/`rollback`/`destroy` manage worktrees and run history. Built on `SpecParser`, `TaskTracker`, `TaskGenerator`, `TaskFlow`, `SddParallelRun` |
+| `/tool <name> simple\|extend` | Set a tool's description detail: `extend` (default, full description) or `simple` (1–2 lines) to trim prompt overhead. Shown in `/tools` output |
+| `/shadow start\|stop\|status\|hoop\|model\|interval` | Manage the event-driven Shadow Agent fleet monitor: runs one-shot fleet checks, detects loops/spike tasks, and can `hoop <agent-id>` to stop a runaway agent and notify |
 | `/settings` | View or change settings (non-blocking, works in REPL + TUI): `/settings` (show), `/settings delay <seconds>`, `/settings mode <off\|suggest\|auto>`, `/settings defaults`; persists to `~/.wrongstack/config.json` |
 | `/prune [days] [--dry-run] [--rebuild-index]` | Delete sessions older than N days (default 30, clamped 1–365). `--dry-run` previews; `--rebuild-index` rebuilds the session index from disk. Sessions referenced by `active.json` are never pruned |
 | `/compact`, `/tools`, `/skill`, `/save`, `/resume`, `/help`, `/clear`, `/stats`, `/diag`, `/exit` | Compact context, list tools/skills, save/resume session, help, clear, token+cost stats, diagnostics, exit |
@@ -533,6 +571,7 @@ Every built-in command is tagged with a category (`Run` · `Session` · `Inspect
 | **Ctrl+C** × 1 | Cancel current iteration + terminate fleet (1.5s cap) |
 | **Ctrl+C** × 2 | Force-exit Ink loop |
 | **Ctrl+C** × 3 | Hard `process.exit(130)` |
+| **Ctrl+B** | Toggle the SDD live board overlay — parallel-run task graph, live agents, worktrees, and feed (`c` clean / `z` rollback) |
 | **Ctrl+F** | Toggle the fleet monitor — per-subagent status + fleet-wide token gauge |
 | **Ctrl+G** | Toggle the agents monitor — live per-agent context (current tool, streaming tail, sparkline) |
 | **F9** | Toggle the goal panel — refined mission, deliverables checklist, progress bar, trend, state, and last task |
@@ -555,6 +594,7 @@ wrongstack tools          # List registered tools
 wrongstack skills         # List discovered skills
 wrongstack providers      # ~110 providers grouped by wire family
 wrongstack models [prov] [--search <term>] [--page N] [--per-page N]  # searchable, paginated model list
+wrongstack models hide|show|hidden|reset <id>  # curate which catalog models appear in pickers + listings
 wrongstack mcp            # Inspect connected MCP servers
 wrongstack plugin         # Plugin manifest commands
 wrongstack diag           # Diagnostics: provider, tokens, paths
@@ -653,7 +693,7 @@ For the full walk-through — including the L1-A reactive `ConversationState`, h
 
 ## Status
 
-- **6700+ tests passing** across 500+ test files in the 0.257.0 release gate
+- **9300+ tests passing** across 500+ test files in the 0.273.0 release gate
 - Coverage thresholds: ≥85 % lines / ≥85 % functions / ≥70 % branches / ≥82 % statements
 - All workspace packages build clean with TypeScript strict + `noUncheckedIndexedAccess`
 - Node 22+ only, ESM-only, no CommonJS bundles
