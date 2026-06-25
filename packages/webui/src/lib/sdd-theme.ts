@@ -6,16 +6,16 @@
  * apart as the views evolve.
  */
 import {
-  Check,
-  CircleDot,
-  Loader2,
-  X,
-  Play,
-  Layers,
-  RotateCcw,
   AlertTriangle,
   Ban,
+  Check,
+  CircleDot,
+  Layers,
+  Loader2,
   type LucideIcon,
+  Play,
+  RotateCcw,
+  X,
 } from 'lucide-react';
 
 export type SddStatus =
@@ -46,14 +46,71 @@ export interface SddStatusStyle {
 }
 
 export const SDD_STATUS: Record<SddStatus, SddStatusStyle> = {
-  pending: { label: 'Pending', icon: CircleDot, text: 'text-slate-400', ring: 'border-slate-600/50 bg-slate-700/20', dot: 'bg-slate-500', hex: '#64748b' },
-  queued: { label: 'Ready', icon: CircleDot, text: 'text-cyan-300', ring: 'border-cyan-500/50 bg-cyan-500/10', dot: 'bg-cyan-400', hex: '#22d3ee' },
-  in_progress: { label: 'Running', icon: Loader2, spin: true, text: 'text-amber-300', ring: 'border-amber-400/60 bg-amber-500/10', dot: 'bg-amber-400', hex: '#fbbf24' },
-  blocked: { label: 'Blocked', icon: CircleDot, text: 'text-fuchsia-300', ring: 'border-fuchsia-500/50 bg-fuchsia-500/10', dot: 'bg-fuchsia-400', hex: '#e879f9' },
-  review: { label: 'Review', icon: CircleDot, text: 'text-sky-300', ring: 'border-sky-500/50 bg-sky-500/10', dot: 'bg-sky-400', hex: '#38bdf8' },
-  failed: { label: 'Failed', icon: X, text: 'text-red-300', ring: 'border-red-500/60 bg-red-500/10', dot: 'bg-red-400', hex: '#f87171' },
-  completed: { label: 'Done', icon: Check, text: 'text-emerald-300', ring: 'border-emerald-500/55 bg-emerald-500/10', dot: 'bg-emerald-400', hex: '#34d399' },
-  cancelled: { label: 'Cancelled', icon: Ban, text: 'text-slate-400', ring: 'border-slate-500/50 bg-slate-600/20', dot: 'bg-slate-500', hex: '#94a3b8' },
+  pending: {
+    label: 'Pending',
+    icon: CircleDot,
+    text: 'text-slate-500 dark:text-slate-400',
+    ring: 'border-slate-400/50 bg-slate-400/10 dark:border-slate-600/50 dark:bg-slate-700/20',
+    dot: 'bg-slate-500',
+    hex: '#64748b',
+  },
+  queued: {
+    label: 'Ready',
+    icon: CircleDot,
+    text: 'text-cyan-600 dark:text-cyan-300',
+    ring: 'border-cyan-500/50 bg-cyan-500/10',
+    dot: 'bg-cyan-400',
+    hex: '#22d3ee',
+  },
+  in_progress: {
+    label: 'Running',
+    icon: Loader2,
+    spin: true,
+    text: 'text-amber-600 dark:text-amber-300',
+    ring: 'border-amber-400/60 bg-amber-500/10',
+    dot: 'bg-amber-400',
+    hex: '#fbbf24',
+  },
+  blocked: {
+    label: 'Blocked',
+    icon: CircleDot,
+    text: 'text-fuchsia-600 dark:text-fuchsia-300',
+    ring: 'border-fuchsia-500/50 bg-fuchsia-500/10',
+    dot: 'bg-fuchsia-400',
+    hex: '#e879f9',
+  },
+  review: {
+    label: 'Review',
+    icon: CircleDot,
+    text: 'text-sky-600 dark:text-sky-300',
+    ring: 'border-sky-500/50 bg-sky-500/10',
+    dot: 'bg-sky-400',
+    hex: '#38bdf8',
+  },
+  failed: {
+    label: 'Failed',
+    icon: X,
+    text: 'text-red-600 dark:text-red-300',
+    ring: 'border-red-500/60 bg-red-500/10',
+    dot: 'bg-red-400',
+    hex: '#f87171',
+  },
+  completed: {
+    label: 'Done',
+    icon: Check,
+    text: 'text-emerald-600 dark:text-emerald-300',
+    ring: 'border-emerald-500/55 bg-emerald-500/10',
+    dot: 'bg-emerald-400',
+    hex: '#34d399',
+  },
+  cancelled: {
+    label: 'Cancelled',
+    icon: Ban,
+    text: 'text-slate-500 dark:text-slate-400',
+    ring: 'border-slate-400/50 bg-slate-400/10 dark:border-slate-500/50 dark:bg-slate-600/20',
+    dot: 'bg-slate-500',
+    hex: '#94a3b8',
+  },
 };
 
 export function statusStyle(s: string): SddStatusStyle {
@@ -63,10 +120,22 @@ export function statusStyle(s: string): SddStatusStyle {
 export type SddPriority = 'critical' | 'high' | 'medium' | 'low';
 
 export const SDD_PRIORITY: Record<SddPriority, { text: string; chip: string }> = {
-  critical: { text: 'text-red-400', chip: 'bg-red-500/20 text-red-300' },
-  high: { text: 'text-amber-400', chip: 'bg-amber-500/20 text-amber-300' },
-  medium: { text: 'text-cyan-400', chip: 'bg-cyan-500/15 text-cyan-300' },
-  low: { text: 'text-slate-400', chip: 'bg-slate-600/30 text-slate-400' },
+  critical: {
+    text: 'text-red-600 dark:text-red-400',
+    chip: 'bg-red-500/20 text-red-600 dark:text-red-300',
+  },
+  high: {
+    text: 'text-amber-600 dark:text-amber-400',
+    chip: 'bg-amber-500/20 text-amber-600 dark:text-amber-300',
+  },
+  medium: {
+    text: 'text-cyan-600 dark:text-cyan-400',
+    chip: 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-300',
+  },
+  low: {
+    text: 'text-slate-500 dark:text-slate-400',
+    chip: 'bg-slate-400/20 text-slate-600 dark:bg-slate-600/30 dark:text-slate-400',
+  },
 };
 
 export function priorityStyle(p: string) {
@@ -75,12 +144,12 @@ export function priorityStyle(p: string) {
 
 /** Run-level status badge styles (board header). */
 export const SDD_RUN_STATUS: Record<string, string> = {
-  running: 'border-sky-500/40 bg-sky-500/10 text-sky-300',
-  paused: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
-  completed: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
-  failed: 'border-red-500/40 bg-red-500/10 text-red-300',
-  deadlocked: 'border-rose-500/40 bg-rose-500/10 text-rose-300',
-  idle: 'border-white/10 bg-white/5 text-slate-400',
+  running: 'border-sky-500/40 bg-sky-500/10 text-sky-600 dark:text-sky-300',
+  paused: 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-300',
+  completed: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300',
+  failed: 'border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-300',
+  deadlocked: 'border-rose-500/40 bg-rose-500/10 text-rose-600 dark:text-rose-300',
+  idle: 'border-border bg-muted text-muted-foreground',
 };
 
 /** Deterministic palette for agent avatars (indexed by roster position). */

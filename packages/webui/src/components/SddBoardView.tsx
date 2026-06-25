@@ -1,15 +1,15 @@
+import { Activity, AlertTriangle, Cpu, Pause, Play, Square, X, Zap } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useWebSocket } from '@/hooks/useWebSocket';
 import { useProviderModels } from '@/hooks/useProviderModels';
-import { useSddBoardStore, type BoardTaskItem } from '@/stores';
+import { useWebSocket } from '@/hooks/useWebSocket';
+import { agentInitials, fmtDuration, SDD_AGENT_COLORS, SDD_RUN_STATUS } from '@/lib/sdd-theme';
 import { cn } from '@/lib/utils';
-import { Activity, Pause, Play, Square, X, Zap, AlertTriangle, Cpu } from 'lucide-react';
-import { Button } from './ui/button';
-import { SddFlowGraph, type FlowTask } from './SddFlowGraph';
+import { type BoardTaskItem, useSddBoardStore } from '@/stores';
 import { SddActivityFeed } from './SddActivityFeed';
-import { SddTaskDrawer } from './SddTaskDrawer';
+import { type FlowTask, SddFlowGraph } from './SddFlowGraph';
 import { SddKanbanView } from './SddKanbanView';
-import { SDD_RUN_STATUS, SDD_AGENT_COLORS, agentInitials, fmtDuration } from '@/lib/sdd-theme';
+import { SddTaskDrawer } from './SddTaskDrawer';
+import { Button } from './ui/button';
 
 /** Circular progress ring. */
 function ProgressRing({ pct }: { pct: number }): React.ReactElement {
@@ -39,7 +39,7 @@ function ProgressRing({ pct }: { pct: number }): React.ReactElement {
           </linearGradient>
         </defs>
       </svg>
-      <div className="absolute inset-0 flex items-center justify-center text-sm font-bold text-slate-100">
+      <div className="absolute inset-0 flex items-center justify-center text-sm font-bold text-foreground">
         {Math.round(pct)}%
       </div>
     </div>
@@ -144,13 +144,15 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
   const chains = snapshot?.diagnostics?.deadlockChains ?? [];
 
   return (
-    <div className="flex h-full flex-col bg-[#0a0d14]">
+    <div className="flex h-full flex-col bg-background">
       {/* ── Header ── */}
-      <header className="sdd-sheen shrink-0 border-b border-white/5 px-4 pb-3 pt-2.5">
+      <header className="sdd-sheen shrink-0 border-b border-border px-4 pb-3 pt-2.5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Activity className="h-5 w-5 text-orange-400" />
-            <h1 className="text-lg font-semibold text-slate-100">{snapshot?.title ?? 'Live SDD Board'}</h1>
+            <h1 className="text-lg font-semibold text-foreground">
+              {snapshot?.title ?? 'Live SDD Board'}
+            </h1>
             {snapshot && (
               <span
                 className={cn(
@@ -163,7 +165,7 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
             )}
             {snapshot?.defaultModel && (
               <span
-                className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-slate-400"
+                className="flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] text-muted-foreground"
                 title="Run-level default worker model (per-task overrides take precedence)"
               >
                 <Cpu className="h-3 w-3 text-violet-400" />
@@ -174,7 +176,7 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
           <div className="flex items-center gap-2">
             {/* Graph ↔ Kanban view toggle */}
             {snapshot && (
-              <div className="flex items-center rounded-md border border-white/10 bg-white/5 p-0.5 text-[11px]">
+              <div className="flex items-center rounded-md border border-border bg-muted p-0.5 text-[11px]">
                 {(['graph', 'kanban'] as const).map((m) => (
                   <button
                     key={m}
@@ -182,7 +184,9 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
                     onClick={() => setViewMode(m)}
                     className={cn(
                       'rounded px-2 py-0.5 capitalize transition',
-                      viewMode === m ? 'bg-violet-500/25 text-violet-200' : 'text-slate-400 hover:text-slate-200',
+                      viewMode === m
+                        ? 'bg-violet-500/25 text-violet-700 dark:text-violet-200'
+                        : 'text-muted-foreground hover:text-foreground',
                     )}
                   >
                     {m === 'graph' ? 'Graph' : 'Kanban'}
@@ -196,7 +200,7 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
                   <button
                     type="button"
                     onClick={() => send({ type: 'sdd.board.resume', payload: {} })}
-                    className="inline-flex items-center gap-1 rounded-md bg-sky-500/15 px-2.5 py-1 text-xs font-medium text-sky-300 hover:bg-sky-500/25"
+                    className="inline-flex items-center gap-1 rounded-md bg-sky-500/15 px-2.5 py-1 text-xs font-medium text-sky-600 dark:text-sky-300 hover:bg-sky-500/25"
                   >
                     <Play className="h-3.5 w-3.5" /> Resume
                   </button>
@@ -204,7 +208,7 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
                   <button
                     type="button"
                     onClick={() => send({ type: 'sdd.board.pause', payload: {} })}
-                    className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2.5 py-1 text-xs font-medium text-amber-300 hover:bg-amber-500/25"
+                    className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2.5 py-1 text-xs font-medium text-amber-600 dark:text-amber-300 hover:bg-amber-500/25"
                   >
                     <Pause className="h-3.5 w-3.5" /> Pause
                   </button>
@@ -212,7 +216,7 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
                 <button
                   type="button"
                   onClick={() => send({ type: 'sdd.board.stop', payload: {} })}
-                  className="inline-flex items-center gap-1 rounded-md bg-red-500/15 px-2.5 py-1 text-xs font-medium text-red-300 hover:bg-red-500/25"
+                  className="inline-flex items-center gap-1 rounded-md bg-red-500/15 px-2.5 py-1 text-xs font-medium text-red-600 dark:text-red-300 hover:bg-red-500/25"
                 >
                   <Square className="h-3.5 w-3.5" /> Stop
                 </button>
@@ -230,24 +234,44 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
             <ProgressRing pct={p.percentComplete} />
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-3 text-xs">
-                <Stat label="done" value={`${p.completed}/${p.total}`} color="text-emerald-300" />
-                {p.inProgress > 0 && <Stat label="running" value={p.inProgress} color="text-amber-300" />}
-                {p.failed > 0 && <Stat label="failed" value={p.failed} color="text-red-300" />}
-                <Stat label="wave" value={snapshot.wave + 1} color="text-violet-300" />
+                <Stat
+                  label="done"
+                  value={`${p.completed}/${p.total}`}
+                  color="text-emerald-600 dark:text-emerald-300"
+                />
+                {p.inProgress > 0 && (
+                  <Stat
+                    label="running"
+                    value={p.inProgress}
+                    color="text-amber-600 dark:text-amber-300"
+                  />
+                )}
+                {p.failed > 0 && (
+                  <Stat label="failed" value={p.failed} color="text-red-600 dark:text-red-300" />
+                )}
+                <Stat
+                  label="wave"
+                  value={snapshot.wave + 1}
+                  color="text-violet-600 dark:text-violet-300"
+                />
                 {active && snapshot.startedAt > 0 && (
-                  <Stat label="elapsed" value={fmtDuration(now - snapshot.startedAt)} color="text-slate-300" />
+                  <Stat
+                    label="elapsed"
+                    value={fmtDuration(now - snapshot.startedAt)}
+                    color="text-foreground"
+                  />
                 )}
               </div>
               {/* Live agent roster */}
               <div className="flex min-h-[24px] items-center gap-1.5">
                 {roster.length === 0 ? (
-                  <span className="text-[11px] text-slate-500">no active workers</span>
+                  <span className="text-[11px] text-muted-foreground">no active workers</span>
                 ) : (
                   roster.map((a, i) => (
                     <span
                       key={a.name}
                       title={`${a.name} → ${a.task}`}
-                      className="flex items-center gap-1 rounded-full bg-white/5 py-0.5 pl-0.5 pr-2"
+                      className="flex items-center gap-1 rounded-full bg-muted py-0.5 pl-0.5 pr-2"
                     >
                       <span
                         className={cn(
@@ -257,7 +281,9 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
                       >
                         {agentInitials(a.name)}
                       </span>
-                      <span className="max-w-[90px] truncate text-[11px] text-slate-200">{a.name}</span>
+                      <span className="max-w-[90px] truncate text-[11px] text-foreground">
+                        {a.name}
+                      </span>
                     </span>
                   ))
                 )}
@@ -269,7 +295,7 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
 
       {/* deadlock banner */}
       {chains.length > 0 && (
-        <div className="flex items-start gap-2 border-b border-rose-500/30 bg-rose-500/5 px-4 py-2 text-xs text-rose-300">
+        <div className="flex items-start gap-2 border-b border-rose-500/30 bg-rose-500/5 px-4 py-2 text-xs text-rose-600 dark:text-rose-300">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
             <div className="font-semibold">Deadlock — tasks blocked by failed work:</div>
@@ -288,28 +314,36 @@ export function SddBoardView({ onClose }: { onClose: () => void }): React.ReactE
           {!snapshot ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
               <Zap className="h-10 w-10 text-violet-500/40" />
-              <p className="text-slate-300">No active SDD run.</p>
-              <p className="max-w-sm text-center text-xs text-slate-500">
-                Start one from the <span className="text-violet-400">New SDD Project</span> wizard, or via{' '}
-                <code className="rounded bg-white/5 px-1">/sdd execute</code> in the CLI — agents appear here live,
-                each working an isolated worktree.
+              <p className="text-foreground">No active SDD run.</p>
+              <p className="max-w-sm text-center text-xs text-muted-foreground">
+                Start one from the <span className="text-violet-400">New SDD Project</span> wizard,
+                or via <code className="rounded bg-muted px-1">/sdd execute</code> in the CLI —
+                agents appear here live, each working an isolated worktree.
               </p>
             </div>
           ) : viewMode === 'graph' ? (
             <>
-              <SddFlowGraph tasks={flowTasks} columns={snapshot.columns} onTaskClick={onTaskClick} />
-              <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/40 px-2 py-0.5 text-[10px] text-slate-400 backdrop-blur">
+              <SddFlowGraph
+                tasks={flowTasks}
+                columns={snapshot.columns}
+                onTaskClick={onTaskClick}
+              />
+              <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/40 px-2 py-0.5 text-[10px] text-muted-foreground backdrop-blur">
                 click a task for details
               </div>
             </>
           ) : (
-            <SddKanbanView tasks={snapshot.tasks} selectedId={selectedTaskId} onTaskClick={onTaskClick} />
+            <SddKanbanView
+              tasks={snapshot.tasks}
+              selectedId={selectedTaskId}
+              onTaskClick={onTaskClick}
+            />
           )}
         </div>
 
         {/* Side panel: task detail when one is selected, else the live activity feed. */}
         {snapshot && (
-          <aside className="w-80 shrink-0 border-l border-white/5 bg-[#0c0f17]">
+          <aside className="w-80 shrink-0 border-l border-border bg-card">
             {selectedTask ? (
               <SddTaskDrawer
                 task={selectedTask}
@@ -340,7 +374,7 @@ function Stat({ label, value, color }: { label: string; value: string | number; 
   return (
     <span className="flex items-baseline gap-1">
       <span className={cn('font-semibold tabular-nums', color)}>{value}</span>
-      <span className="text-[10px] uppercase tracking-wide text-slate-500">{label}</span>
+      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</span>
     </span>
   );
 }

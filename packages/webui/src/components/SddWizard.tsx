@@ -1,14 +1,25 @@
+import {
+  Bot,
+  Check,
+  Loader2,
+  Network,
+  Rocket,
+  Send,
+  SlidersHorizontal,
+  Sparkles,
+  User,
+  X,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useWebSocket } from '@/hooks/useWebSocket';
-import { useSddWizardStore, useUIStore } from '@/stores';
-import { cn } from '@/lib/utils';
-import { Loader2, Rocket, Send, Sparkles, X, Check, Network, Bot, User, SlidersHorizontal } from 'lucide-react';
-import { Button } from './ui/button';
-import { SddFlowGraph, type FlowTask } from './SddFlowGraph';
-import { ModelPicker } from './ModelPicker';
-import { FallbackEditor } from './FallbackEditor';
 import { useProviderModels } from '@/hooks/useProviderModels';
+import { useWebSocket } from '@/hooks/useWebSocket';
 import { priorityStyle } from '@/lib/sdd-theme';
+import { cn } from '@/lib/utils';
+import { useSddWizardStore, useUIStore } from '@/stores';
+import { FallbackEditor } from './FallbackEditor';
+import { ModelPicker } from './ModelPicker';
+import { type FlowTask, SddFlowGraph } from './SddFlowGraph';
+import { Button } from './ui/button';
 
 const PHASE_LABEL: Record<string, string> = {
   idle: 'Start',
@@ -123,7 +134,7 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
 
   return (
     <div className="flex h-full flex-col bg-background">
-      <header className="sdd-sheen flex shrink-0 items-center justify-between border-b border-white/5 px-4 py-2">
+      <header className="sdd-sheen flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
         <div className="flex items-center gap-2">
           <Sparkles className="h-5 w-5 text-violet-400" />
           <div>
@@ -149,8 +160,8 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
                 className={cn(
                   'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium',
                   runModel || runFallbacks.length
-                    ? 'border-violet-500/40 bg-violet-500/10 text-violet-300'
-                    : 'border-white/10 bg-white/5 text-slate-400 hover:text-slate-200',
+                    ? 'border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-300'
+                    : 'border-border bg-muted text-muted-foreground hover:text-foreground',
                 )}
               >
                 <SlidersHorizontal className="h-3.5 w-3.5" />
@@ -159,14 +170,14 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
               <button
                 type="button"
                 onClick={startRun}
-                className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-2.5 py-1 text-xs font-medium text-emerald-400 hover:bg-emerald-500/25"
+                className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-500/25 dark:text-emerald-400"
               >
                 <Rocket className="h-3.5 w-3.5" /> Start Run
               </button>
 
               {runCfgOpen && (
-                <div className="sdd-rise absolute right-0 top-9 z-50 w-72 rounded-lg border border-white/10 bg-[#0e1117] p-3 shadow-xl">
-                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                <div className="sdd-rise absolute right-0 top-9 z-50 w-72 rounded-lg border border-border bg-popover p-3 shadow-xl">
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                     Default worker model
                   </div>
                   <ModelPicker
@@ -188,12 +199,17 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
                         : undefined
                     }
                   />
-                  <div className="mb-1 mt-3 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  <div className="mb-1 mt-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                     Fallback chain
                   </div>
-                  <FallbackEditor value={runFallbacks} candidates={modelCandidates} onChange={setRunFallbacks} />
-                  <p className="mt-2 text-[10px] text-slate-600">
-                    Applies to every task. Override per-task from the live board after the run starts.
+                  <FallbackEditor
+                    value={runFallbacks}
+                    candidates={modelCandidates}
+                    onChange={setRunFallbacks}
+                  />
+                  <p className="mt-2 text-[10px] text-muted-foreground">
+                    Applies to every task. Override per-task from the live board after the run
+                    starts.
                   </p>
                 </div>
               )}
@@ -217,9 +233,9 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
                   className={cn(
                     'rounded-full px-2 py-0.5',
                     active
-                      ? 'bg-violet-500/20 text-violet-300'
+                      ? 'bg-violet-500/20 text-violet-600 dark:text-violet-300'
                       : done
-                        ? 'text-emerald-400'
+                        ? 'text-emerald-600 dark:text-emerald-400'
                         : 'text-muted-foreground',
                   )}
                 >
@@ -261,8 +277,9 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
               <Sparkles className="mr-1.5 h-4 w-4" /> Start Interview
             </Button>
             <p className="mt-3 text-xs text-muted-foreground">
-              An isolated agent interviews you to build a spec, decomposes it into a dependency-ordered
-              task graph, then a real multi-agent fleet executes it — watch live on the board.
+              An isolated agent interviews you to build a spec, decomposes it into a
+              dependency-ordered task graph, then a real multi-agent fleet executes it — watch live
+              on the board.
             </p>
           </div>
         ) : (
@@ -284,7 +301,7 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
 
             <div className="mx-auto max-w-2xl space-y-3">
               {/* ── Interview transcript — full Q&A history ── */}
-              {(snapshot?.answers.length || (agentText && phase === 'questioning') || busy) ? (
+              {snapshot?.answers.length || (agentText && phase === 'questioning') || busy ? (
                 <div className="space-y-2.5">
                   {snapshot?.answers.map((qa, i) => (
                     <div key={i} className="space-y-2.5">
@@ -314,7 +331,12 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
                   <ul className="space-y-0.5 text-xs">
                     {snapshot.spec.requirements.map((r, i) => (
                       <li key={i} className="flex gap-1.5">
-                        <span className={cn('shrink-0 font-mono uppercase', priorityStyle(r.priority).text)}>
+                        <span
+                          className={cn(
+                            'shrink-0 font-mono uppercase',
+                            priorityStyle(r.priority).text,
+                          )}
+                        >
                           {r.priority[0]}
                         </span>
                         <span>{r.description}</span>
@@ -330,7 +352,9 @@ export function SddWizard({ onClose }: { onClose: () => void }): React.ReactElem
               )}
 
               {/* Approve button for review phases */}
-              {(phase === 'spec_review' || phase === 'implementation' || phase === 'task_review') && (
+              {(phase === 'spec_review' ||
+                phase === 'implementation' ||
+                phase === 'task_review') && (
                 <Button variant="secondary" onClick={approve} disabled={busy}>
                   <Check className="mr-1.5 h-4 w-4" />
                   {phase === 'spec_review'
@@ -390,7 +414,9 @@ function ChatBubble({
       <span
         className={cn(
           'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full',
-          isUser ? 'bg-sky-500/20 text-sky-300' : 'bg-violet-500/20 text-violet-300',
+          isUser
+            ? 'bg-sky-500/20 text-sky-600 dark:text-sky-300'
+            : 'bg-violet-500/20 text-violet-600 dark:text-violet-300',
           (live || thinking) && 'sdd-agent-live',
         )}
       >
@@ -398,17 +424,15 @@ function ChatBubble({
       </span>
       <div
         className={cn(
-          'max-w-[80%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed',
-          isUser
-            ? 'rounded-tr-sm bg-sky-500/15 text-sky-50'
-            : 'rounded-tl-sm bg-muted/50 text-slate-200',
+          'max-w-[80%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed text-foreground',
+          isUser ? 'rounded-tr-sm bg-sky-500/15' : 'rounded-tl-sm bg-muted',
         )}
       >
         {thinking ? (
           <span className="flex items-center gap-1 py-0.5">
-            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:-200ms]" />
-            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:-100ms]" />
-            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" />
+            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-200ms]" />
+            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-100ms]" />
+            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
           </span>
         ) : (
           text

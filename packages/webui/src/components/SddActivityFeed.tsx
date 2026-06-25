@@ -1,6 +1,6 @@
 import { Activity } from 'lucide-react';
+import { fmtAgo, SDD_FEED_KIND } from '@/lib/sdd-theme';
 import { cn } from '@/lib/utils';
-import { SDD_FEED_KIND, fmtAgo } from '@/lib/sdd-theme';
 import type { SddBoardFeedEntry } from '@/stores';
 
 /**
@@ -17,13 +17,13 @@ export function SddActivityFeed({
 }): React.ReactElement {
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-1.5 border-b border-white/5 px-3 py-2 text-xs font-semibold text-slate-300">
-        <Activity className="h-3.5 w-3.5 text-orange-400" />
+      <div className="flex items-center gap-1.5 border-b border-border px-3 py-2 text-xs font-semibold text-foreground">
+        <Activity className="h-3.5 w-3.5 text-orange-500 dark:text-orange-400" />
         Activity
       </div>
       <div className="flex-1 space-y-1 overflow-auto p-2">
         {feed.length === 0 ? (
-          <p className="px-1 pt-4 text-center text-[11px] text-slate-500">
+          <p className="px-1 pt-4 text-center text-[11px] text-muted-foreground">
             Nothing yet — events appear here as agents pick up and finish tasks.
           </p>
         ) : (
@@ -35,12 +35,14 @@ export function SddActivityFeed({
                 key={`${e.ts}-${i}`}
                 className={cn(
                   'sdd-rise flex items-start gap-2 rounded-md px-2 py-1.5 text-[11px]',
-                  i === 0 ? 'bg-white/5' : 'hover:bg-white/5',
+                  i === 0 ? 'bg-muted' : 'hover:bg-muted',
                 )}
               >
                 <Icon className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', k.color)} />
-                <span className="flex-1 leading-snug text-slate-300">{e.text}</span>
-                <span className="shrink-0 tabular-nums text-[10px] text-slate-600">{fmtAgo(e.ts, now)}</span>
+                <span className="flex-1 leading-snug text-foreground">{e.text}</span>
+                <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground">
+                  {fmtAgo(e.ts, now)}
+                </span>
               </div>
             );
           })
