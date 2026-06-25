@@ -70,7 +70,10 @@ goes bad:
   completes when that command exits 0 (run in the task's worktree cwd, 180 s
   timeout). Attach one per task from the WebUI board's task drawer, or omit it
   (the default) for a fast run. The same gate runs from both the CLI and the
-  standalone WebUI (shared `makeCommandVerifier`).
+  standalone WebUI (shared `makeCommandVerifier`). With
+  `WRONGSTACK_SDD_VERIFY_FROM_ACCEPTANCE=1` (off by default), task generation
+  also derives a `verificationCommand` from any acceptance criterion that carries
+  a runnable marker (`$ <cmd>`, or a `run:`/`verify:`/`cmd:` prefix).
 - **Mergeable worktrees.** A completed task is only marked done after a clean
   squash-merge of its worktree. An unresolved conflict retries on a fresh base,
   then fails — never a silent "completed". An opt-in heuristic resolver is

@@ -86,7 +86,10 @@ export class TaskFlow {
     }
 
     this.setPhase('generating');
-    const generator = new TaskGenerator({ taskTracker: this.opts.tracker });
+    const generator = new TaskGenerator({
+      taskTracker: this.opts.tracker,
+      verificationFromAcceptance: process.env['WRONGSTACK_SDD_VERIFY_FROM_ACCEPTANCE'] === '1',
+    });
     this.graph = await generator.generateFromSpec(this.spec);
 
     return this.graph;

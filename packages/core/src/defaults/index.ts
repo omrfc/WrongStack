@@ -311,6 +311,7 @@ export { SpecParser } from '../sdd/spec-parser.js';
 export {
   TaskGenerator,
   DefaultTaskStore,
+  extractVerificationCommand,
   type TaskGeneratorOptions,
   type GeneratedTask,
 } from '../sdd/task-generator.js';

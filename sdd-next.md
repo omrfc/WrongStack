@@ -184,9 +184,11 @@ default. Decide explicitly before flipping the fallback. See
 > **P3.1 ✅ DONE (2026-06-25).** `set_task_verification` control plumbed end-to-end
 > (`SddParallelRun.setTaskVerification` → registry → `start-sdd-run` drain → `CONTROL_TYPES` →
 > `webui/types.ts` → `SddTaskDrawer` editor, keyed per task). Board task surfaces
-> `verificationCommand`. Tested (engine unit + drain integration). **P3.2 deferred** — the
-> spec-driven auto-default stays unbuilt on purpose (off-by-default, would risk the per-task
-> slowness the initiative removed); revisit only behind an explicit spec/CLI flag.
+> `verificationCommand`. Tested (engine unit + drain integration). **P3.2 ✅ DONE (2026-06-25):**
+> `TaskGenerator.verificationFromAcceptance` (off by default) derives a task's `verificationCommand`
+> from an acceptance criterion carrying a runnable marker (`$ <cmd>` / `run:` / `verify:` / `cmd:`)
+> via the exported `extractVerificationCommand`; both core construction sites gate it behind
+> `WRONGSTACK_SDD_VERIFY_FROM_ACCEPTANCE=1`, so the fast common case is unchanged.
 
 The gate is **opt-in**: it only runs when a task has `metadata.verificationCommand`. Nothing sets
 that yet (deliberately — auto-running tests per task would reintroduce the slowness/stuck problem

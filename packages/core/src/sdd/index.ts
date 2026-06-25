@@ -5,6 +5,7 @@ export { SpecParser } from './spec-parser.js';
 export {
   TaskGenerator,
   DefaultTaskStore,
+  extractVerificationCommand,
   type TaskGeneratorOptions,
   type GeneratedTask,
 } from './task-generator.js';
